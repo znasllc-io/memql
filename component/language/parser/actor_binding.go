@@ -6,7 +6,7 @@ import (
 )
 
 // The #2621 actor-binding surface: reading the auth envelope is a
-// declared capability. `actor.*` in a query/mutate/logic/automation
+// declared capability. `actor.*` in a query/mutation/logic/automation
 // body without `@actor` in the preamble is a load error (modeled on
 // the logic event-binding rule, memql#1706: used-but-undeclared
 // errors, declared-but-unused is fine). The detector and the codemod
@@ -110,10 +110,10 @@ func stripCommentsAndStrings(source string) string {
 
 // actorConstructHeaderRe matches the declaration line of the four
 // actor-capable construct kinds. Group 1 is the indentation.
-var actorConstructHeaderRe = regexp.MustCompile(`(?m)^([ \t]*)(?:query|mutate|logic|automation)[ \t]+[A-Za-z_]`)
+var actorConstructHeaderRe = regexp.MustCompile(`(?m)^([ \t]*)(?:query|mutation|logic|automation)[ \t]+[A-Za-z_]`)
 
 // RewriteActorBinding inserts a bare `@actor` line above every
-// query/mutate/logic/automation whose body reads the actor envelope
+// query/mutation/logic/automation whose body reads the actor envelope
 // and whose preamble does not already declare it (#2621). Other
 // construct kinds (specs and traits load-reject direct actor reads;
 // shapes use @actor as a kind marker; seeds' @actor("system") is a
@@ -216,7 +216,7 @@ func constructEnd(text string, headerStart int) int {
 }
 
 // ActorUndeclaredRefOffsets returns the byte offset (into src) of every
-// actor-envelope read inside a query/mutate/logic/automation construct
+// actor-envelope read inside a query/mutation/logic/automation construct
 // whose preamble lacks @actor -- the edit-time mirror (#2622) of the
 // load rule, sharing the same header, preamble, and detection
 // internals so the engine error and the editor squiggle cannot drift.

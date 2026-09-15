@@ -9,9 +9,9 @@ import (
 )
 
 // signature_concept.go flags a construct whose signature binds a concept that
-// resolves to nothing -- `mutate/query/shape/seed <Concept> <name>` where
+// resolves to nothing -- `mutation/query/shape/seed <Concept> <name>` where
 // <Concept> exists nowhere the workspace can see. This is the user's symptom 5
-// (`mutate full ...` with no concept `full`). Error severity: a signature
+// (`mutation full ...` with no concept `full`). Error severity: a signature
 // concept with no registry match is a hard boot failure (the strict-boot gate
 // CrashLoops the node), so the editor mirrors a real load error, not a hint.
 //
@@ -39,7 +39,7 @@ func (s *Service) signatureConceptDiagnostics(file *parser.File, source string) 
 			// Registry: present in the global vocabulary boot actually resolves
 			// against (engine + product) -- boot binds it by trailing segment
 			// with NO import. Skipping it here is what stops an unimported engine
-			// concept (e.g. `mutate user ...` over a product bundle) from being
+			// concept (e.g. `mutation user ...` over a product bundle) from being
 			// flagged as missing when it boots clean.
 			continue
 		}
@@ -141,7 +141,7 @@ func localConceptNames(file *parser.File) map[string]bool {
 // the author got no squiggle at all -- the failure surfaced at boot instead.
 //
 // Scope follows the extractor: SignatureConceptRefs is pinned to
-// `query|mutate|shape|seed`, every one of which binds a concept and nothing
+// `query|mutation|shape|seed`, every one of which binds a concept and nothing
 // else. `spec` is deliberately outside it, which is what keeps the
 // shape-XOR-concept binding legal -- flagging a spec that binds a shape would
 // be wrong, and there are live ones in the tree.

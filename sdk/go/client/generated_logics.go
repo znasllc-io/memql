@@ -14,7 +14,7 @@ var (
 	_ = strings.Builder{}
 )
 
-// AccessRequestExpirySweep -- Pure decide for the access-request expiry sweep (#2369, cluster pruneStaleClusterNodes pattern): reads IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS (default 30), computes cutoff = now - window via addDuration with a negative ISO duration, reads `query expiredPendingAccessRequests(createdBefore: cutoff)` and returns its nodes() -- the pending rows past the window, filtered by QUERY PUSHDOWN. The retention policy lives entirely here; the calling automation's forEach is unconditional.
+// AccessRequestExpirySweep -- Pure decide for the access-request expiry sweep (#2369, cluster pruneStaleClusterNodes pattern): reads IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS (default 30), computes cutoff = now - window via addDuration with a negative ISO duration, reads `query expiredPendingAccessRequests(createdBefore: cutoff)` and returns its nodes() -- the pending rows past the window, filtered by QUERY PUSHDOWN. The retention policy lives entirely here; the calling automation's `for` loop is unconditional.
 type AccessRequestExpirySweepArgs struct {
 	Event map[string]any
 }
@@ -34,47 +34,7 @@ func AccessRequestExpirySweepBuild(args AccessRequestExpirySweepArgs) string {
 	return b.String()
 }
 
-// AccountDeletionReminder25Days -- Daily 09:05 UTC sweep that emits an 'identity.deletion.reminder' event for each user 25-26 days into their deletion cooldown -- final notice before accountDeletionSweep performs the hard delete at 30 days. Bracket [P25D, P26D) on deletionScheduledAt fired daily means each user gets exactly one reminder at this milestone.
-type AccountDeletionReminder25DaysArgs struct {
-	Event map[string]any
-}
-
-// AccountDeletionReminder25Days calls the engine logic accountDeletionReminder25Days.
-func (qc *QueryClient) AccountDeletionReminder25Days(ctx context.Context, args AccountDeletionReminder25DaysArgs) (*Result, error) {
-	call := AccountDeletionReminder25DaysBuild(args)
-	return qc.executeNamed(ctx, "accountDeletionReminder25Days", call)
-}
-
-func AccountDeletionReminder25DaysBuild(args AccountDeletionReminder25DaysArgs) string {
-	var b strings.Builder
-	b.WriteString("logic accountDeletionReminder25Days(")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString(")")
-	return b.String()
-}
-
-// AccountDeletionReminder7Days -- Daily 09:00 UTC sweep that emits an 'identity.deletion.reminder' event for each user 7-8 days into their deletion cooldown so they can cancel before the cooldown elapses. Bracket [P7D, P8D) on deletionScheduledAt fired daily means exactly one reminder per user at this milestone. Email delivery is consumed by the component/server subscriber.
-type AccountDeletionReminder7DaysArgs struct {
-	Event map[string]any
-}
-
-// AccountDeletionReminder7Days calls the engine logic accountDeletionReminder7Days.
-func (qc *QueryClient) AccountDeletionReminder7Days(ctx context.Context, args AccountDeletionReminder7DaysArgs) (*Result, error) {
-	call := AccountDeletionReminder7DaysBuild(args)
-	return qc.executeNamed(ctx, "accountDeletionReminder7Days", call)
-}
-
-func AccountDeletionReminder7DaysBuild(args AccountDeletionReminder7DaysArgs) string {
-	var b strings.Builder
-	b.WriteString("logic accountDeletionReminder7Days(")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString(")")
-	return b.String()
-}
-
-// AccountDeletionSweep -- Pure decide for the account-deletion sweep (#2369, cluster pattern): reads MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS (default 30), computes cutoff = now - cooldown via addDuration with a negative ISO duration, reads `query usersScheduledForDeletion(scheduledBefore: cutoff)` and returns its nodes() -- users whose cooldown has elapsed, filtered by QUERY PUSHDOWN; the automation's forEach hard-deletes each unconditionally. Audit-event rows, invitations the user issued, and access-request rows are intentionally retained for the trail.
+// AccountDeletionSweep -- Pure decide for the account-deletion sweep (#2369, cluster pattern): reads MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS (default 30), computes cutoff = now - cooldown via addDuration with a negative ISO duration, reads `query usersScheduledForDeletion(scheduledBefore: cutoff)` and returns its nodes() -- users whose cooldown has elapsed, filtered by QUERY PUSHDOWN; the automation's `for` loop hard-deletes each unconditionally. Audit-event rows, invitations the user issued, and access-request rows are intentionally retained for the trail.
 type AccountDeletionSweepArgs struct {
 	Event map[string]any
 }
@@ -94,27 +54,7 @@ func AccountDeletionSweepBuild(args AccountDeletionSweepArgs) string {
 	return b.String()
 }
 
-// AuditEventRetentionSweep -- Daily 02:00 UTC sweep over v1:identity:auditEvent rows older than MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS. Observation-only today: emits an 'identity.audit.retention.observed' event with the candidate count -- MemQL has no delete() mutation and AuditEvent's append-only semantics forbid soft-delete via active=false. Per-row delete lands when one of those gaps closes.
-type AuditEventRetentionSweepArgs struct {
-	Event map[string]any
-}
-
-// AuditEventRetentionSweep calls the engine logic auditEventRetentionSweep.
-func (qc *QueryClient) AuditEventRetentionSweep(ctx context.Context, args AuditEventRetentionSweepArgs) (*Result, error) {
-	call := AuditEventRetentionSweepBuild(args)
-	return qc.executeNamed(ctx, "auditEventRetentionSweep", call)
-}
-
-func AuditEventRetentionSweepBuild(args AuditEventRetentionSweepArgs) string {
-	var b strings.Builder
-	b.WriteString("logic auditEventRetentionSweep(")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString(")")
-	return b.String()
-}
-
-// BootstrapCluster -- Decides whether to create the cluster row on first startup (ADR S2.1 pure logic, #2235). Reads existingCluster() and returns the boolean `create` -- true only when no cluster row exists yet AND this node is the bff (both idempotency guards). The calling automation gates the v1:cluster:cluster create on `steps.decide.result == true`; the database and identity-provider creates are gated on clusterInfraRefresh instead (memql#4766), the idp create additionally requiring an identityProvider block in the startup envelope.
+// BootstrapCluster -- Decides whether to create the cluster row on first startup (ADR S2.1 pure logic, #2235). Reads existingCluster() and returns one boolean -- true only when no cluster row exists yet AND this node is the bff (both idempotency guards). The calling automation gates the v1:cluster:cluster create on `decide == true`; the database and identity-provider creates are gated on clusterInfraRefresh instead (memql#4766), the idp create additionally requiring an identityProvider block in the startup envelope.
 type BootstrapClusterArgs struct {
 	Event map[string]any
 }
@@ -157,27 +97,7 @@ func ClusterInfraRefreshBuild(args ClusterInfraRefreshArgs) string {
 	return b.String()
 }
 
-// ConflictDetection -- Triggered on new v1:data:record creation with a non-empty naturalKeyValue. Queries confirmed records for matching natural key + record type; if any exist, emits 'data.conflicts.detected' event for the UI's ConflictResolutionPanel. Never auto-resolves -- always requires human approval.
-type ConflictDetectionArgs struct {
-	Event map[string]any
-}
-
-// ConflictDetection calls the engine logic conflictDetection.
-func (qc *QueryClient) ConflictDetection(ctx context.Context, args ConflictDetectionArgs) (*Result, error) {
-	call := ConflictDetectionBuild(args)
-	return qc.executeNamed(ctx, "conflictDetection", call)
-}
-
-func ConflictDetectionBuild(args ConflictDetectionArgs) string {
-	var b strings.Builder
-	b.WriteString("logic conflictDetection(")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString(")")
-	return b.String()
-}
-
-// ConsolidateMemory -- Entry point for the daily memory-consolidation automation (#586). Per #586 the precise per-owner loop -- similarity clustering of the since-watermark episode batch, the blocking LLM distill per cluster, similarTo dedup, the confidence bump / decay arithmetic, and the max(createdAt) watermark advance -- runs in the Go harness consolidation handler (the same DSL-entry / Go-loop split the knowledge refresh-cron made), because the MemQL parser has neither arithmetic on number/datetime fields nor an in-DSL clustering primitive. This body is the scheduled trigger surface; the file header documents the full Go-handler contract it drives. Returns a sentinel until the handler is wired (mirrors the Go in-process poller pattern in integrations/planner/refresh_cron.go).
+// ConsolidateMemory -- Entry point for the daily memory-consolidation automation (#586). Per #586 the precise per-owner loop -- similarity clustering of the since-watermark episode batch, the blocking LLM distill per cluster, similarTo dedup, the confidence bump / decay arithmetic, and the max(createdAt) watermark advance -- runs in the Go harness consolidation handler (the same DSL-entry / Go-loop split the knowledge refresh-cron made), because the MemQL body language has no clustering primitive. This body is the scheduled trigger surface; the file header documents the full Go-handler contract it drives. Returns a sentinel until the handler is wired (mirrors the Go in-process poller pattern in integrations/planner/refresh_cron.go).
 type ConsolidateMemoryArgs struct {
 	Event map[string]any
 }
@@ -197,7 +117,7 @@ func ConsolidateMemoryBuild(args ConsolidateMemoryArgs) string {
 	return b.String()
 }
 
-// DeployGateGreen -- Pure gate check: did the deploy gate pass? Reads the runDeployGate action's structured result object. Fails closed: false when the result or its `passed` flag is absent. The deploy automation (I10) branches success/rollback on this decision.
+// DeployGateGreen -- Pure gate check: did the deploy gate pass? Reads the runDeployGate action's structured result object. Fails closed: false when the result or its `passed` flag is absent.
 type DeployGateGreenArgs struct {
 	Gate map[string]any
 }
@@ -217,7 +137,7 @@ func DeployGateGreenBuild(args DeployGateGreenArgs) string {
 	return b.String()
 }
 
-// DeployOutcomeLabel -- Map the deploy-gate result to the terminal deployment status label: "succeeded" when the gate passed, else "failed" (fail-closed, mirroring deployGateGreen). The deploy automation's finalize step switches on this.
+// DeployOutcomeLabel -- Map the deploy-gate result to the terminal deployment status label: "succeeded" when the gate passed, else "failed" (fail-closed, mirroring deployGateGreen). The deploy automation's finishing `switch` is on this label.
 type DeployOutcomeLabelArgs struct {
 	Passed any
 }
@@ -428,27 +348,7 @@ func NextDeploymentVersionBuild(args NextDeploymentVersionArgs) string {
 	return b.String()
 }
 
-// OnDelegationCreated -- Emits a 'delegation.created' event when a new v1:identity:delegation row lands. Carries the delegation id + identity / agent / role / scope fields for audit logging and downstream event processing.
-type OnDelegationCreatedArgs struct {
-	Event map[string]any
-}
-
-// OnDelegationCreated calls the engine logic onDelegationCreated.
-func (qc *QueryClient) OnDelegationCreated(ctx context.Context, args OnDelegationCreatedArgs) (*Result, error) {
-	call := OnDelegationCreatedBuild(args)
-	return qc.executeNamed(ctx, "onDelegationCreated", call)
-}
-
-func OnDelegationCreatedBuild(args OnDelegationCreatedArgs) string {
-	var b strings.Builder
-	b.WriteString("logic onDelegationCreated(")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString(")")
-	return b.String()
-}
-
-// PruneStaleClusterNodes -- Decides which departed cluster nodes to retire (ADR S2.1 pure logic, #2235). Reads MEMQL_NODE_STALE_PRUNE_MINUTES (default 30), computes cutoff = now - window via addDuration with a negative ISO duration, and returns staleClusterNodes(olderThan: cutoff).nodes() -- the LATEST non-stopped rows whose lastSeen is past the window (the olderThan arg pushes a `row.lastSeen < args.olderThan` predicate onto the query, #1642). The calling automation appends the terminal health='stopped' row per returned node via a forEach updateNodeHealth step.
+// PruneStaleClusterNodes -- Decides which departed cluster nodes to retire (ADR S2.1 pure logic, #2235). Reads MEMQL_NODE_STALE_PRUNE_MINUTES (default 30), computes cutoff = now - window via addDuration with a negative ISO duration, and returns the rows of `query staleClusterNodes(olderThan: cutoff)` -- the LATEST non-stopped rows whose lastSeen is past the window (the olderThan arg pushes a `row.lastSeen < args.olderThan` predicate onto the query, #1642). The calling automation's `for` loop appends the terminal health='stopped' row per returned node through updateNodeHealth.
 type PruneStaleClusterNodesArgs struct {
 	Event map[string]any
 }
@@ -468,47 +368,7 @@ func PruneStaleClusterNodesBuild(args PruneStaleClusterNodesArgs) string {
 	return b.String()
 }
 
-// PurgeExpiredOutputScreenings -- Daily sweep over v1:safety:outputScreening rows past MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS (default 90). Currently observation-only: emits a 'safety.outputScreening.retention.observed' event with the candidate count. Per-row delete lands when the engine grows a delete() mutation -- mirrors purgeExpiredSafetyClassifications.
-type PurgeExpiredOutputScreeningsArgs struct {
-	Event map[string]any
-}
-
-// PurgeExpiredOutputScreenings calls the engine logic purgeExpiredOutputScreenings.
-func (qc *QueryClient) PurgeExpiredOutputScreenings(ctx context.Context, args PurgeExpiredOutputScreeningsArgs) (*Result, error) {
-	call := PurgeExpiredOutputScreeningsBuild(args)
-	return qc.executeNamed(ctx, "purgeExpiredOutputScreenings", call)
-}
-
-func PurgeExpiredOutputScreeningsBuild(args PurgeExpiredOutputScreeningsArgs) string {
-	var b strings.Builder
-	b.WriteString("logic purgeExpiredOutputScreenings(")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString(")")
-	return b.String()
-}
-
-// PurgeExpiredSafetyClassifications -- Daily sweep over v1:safety:classification rows past MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS (default 90). Currently observation-only: emits a 'safety.classification.retention.observed' event with the candidate count. Per-row delete lands when the engine grows a delete() mutation -- the same gap auditEventRetentionSweep documents.
-type PurgeExpiredSafetyClassificationsArgs struct {
-	Event map[string]any
-}
-
-// PurgeExpiredSafetyClassifications calls the engine logic purgeExpiredSafetyClassifications.
-func (qc *QueryClient) PurgeExpiredSafetyClassifications(ctx context.Context, args PurgeExpiredSafetyClassificationsArgs) (*Result, error) {
-	call := PurgeExpiredSafetyClassificationsBuild(args)
-	return qc.executeNamed(ctx, "purgeExpiredSafetyClassifications", call)
-}
-
-func PurgeExpiredSafetyClassificationsBuild(args PurgeExpiredSafetyClassificationsArgs) string {
-	var b strings.Builder
-	b.WriteString("logic purgeExpiredSafetyClassifications(")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString(")")
-	return b.String()
-}
-
-// ReleaseWorkspaceOnRunTerminal -- Pure decide for the workspace-release sweep: returns every v1:workbench:workspace for the updated run. The terminal-status gate, the per-row release write (provisioned workspaces only), and the unconditional on-disk teardown all live in the releaseWorkspaceOnRunTerminal automation's steps (#2235).
+// ReleaseWorkspaceOnRunTerminal -- Pure decide for the workspace-release sweep: returns every v1:workbench:workspace for the updated run. The terminal-status gate, the per-row release write (provisioned workspaces only), and the unconditional on-disk teardown all live in the releaseWorkspaceOnRunTerminal automation's statements (#2235).
 type ReleaseWorkspaceOnRunTerminalArgs struct {
 	Event map[string]any
 }
@@ -575,7 +435,7 @@ func RequestRouteStatusBuild(args RequestRouteStatusArgs) string {
 }
 
 // RevokeExpiredDelegations -- Find every expired active delegation. PURE READ -- returns the rows; it revokes nothing.
-// The revoke is a separate step: expireDelegations.apply forEaches these rows into `revokeDelegation`. An earlier version of this comment claimed this logic "soft-revokes each one" and "returns the count processed", and memql#2869 inherited that error and built a caching decision on it -- so the wording matters (memql#2869 review).
+// The revoke is a separate statement: expireDelegations' `for` loop over these rows calls `revokeDelegation`. An earlier version of this comment claimed this logic "soft-revokes each one" and "returns the count processed", and memql#2869 inherited that error and built a caching decision on it -- so the wording matters (memql#2869 review).
 type RevokeExpiredDelegationsArgs struct {
 	AsOf string
 }
@@ -595,7 +455,7 @@ func RevokeExpiredDelegationsBuild(args RevokeExpiredDelegationsArgs) string {
 	return b.String()
 }
 
-// RunIsTerminal -- PURE terminal-status decision table for v1:work:run (#2370): returns true when the status is one of the terminal set, false otherwise. THE single owner of that vocabulary -- the releaseWorkspaceOnRunTerminal automation gates its release + teardown steps on this scalar instead of restating the ||-chain inline.
+// RunIsTerminal -- PURE terminal-status decision table for v1:work:run (#2370): returns true when the status is one of the terminal set, false otherwise. THE single owner of that vocabulary -- the releaseWorkspaceOnRunTerminal automation gates its release + teardown statements on this scalar instead of restating the ||-chain inline.
 // FOUR values, not the Plan's three: `abandoned` is terminal for a run (the node stopped answering) and has no Plan equivalent. A workspace whose run was abandoned is exactly the one nobody is left to clean up by hand.
 type RunIsTerminalArgs struct {
 	Status any
@@ -665,7 +525,35 @@ func TransitionEventKindBuild(args TransitionEventKindArgs) string {
 	return b.String()
 }
 
-// WorkerInvocationRetentionSweep -- Pure decide for the worker-invocation retention sweep (#2369, cluster pruneStaleClusterNodes pattern): reads WORKER_INVOCATION_RETENTION_DAYS (default 90), computes cutoff = now - window via addDuration with a negative ISO duration, reads `query expiredWorkerInvocations(createdBefore: cutoff)` and returns its nodes() -- rows past retention, filtered by QUERY PUSHDOWN. The retention policy lives entirely here; the calling automation's forEach soft-deletes each unconditionally.
+// UsersDueDeletionReminder -- The users between `from` and `to` into their deletion cooldown: the ones a daily reminder sweep mails at that milestone. A daily sweep over a one-day window reaches each user once.
+type UsersDueDeletionReminderArgs struct {
+	// How far into the cooldown the window opens, an ISO-8601 duration (P7D).
+	From string
+	// How far into the cooldown the window closes (P8D).
+	To string
+}
+
+// UsersDueDeletionReminder calls the engine logic usersDueDeletionReminder.
+func (qc *QueryClient) UsersDueDeletionReminder(ctx context.Context, args UsersDueDeletionReminderArgs) (*Result, error) {
+	call := UsersDueDeletionReminderBuild(args)
+	return qc.executeNamed(ctx, "usersDueDeletionReminder", call)
+}
+
+func UsersDueDeletionReminderBuild(args UsersDueDeletionReminderArgs) string {
+	var b strings.Builder
+	b.WriteString("logic usersDueDeletionReminder(")
+	b.WriteString("from: ")
+	b.WriteString(quoteMemQL(args.From))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("to: ")
+	b.WriteString(quoteMemQL(args.To))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkerInvocationRetentionSweep -- Pure decide for the worker-invocation retention sweep (#2369, cluster pruneStaleClusterNodes pattern): reads WORKER_INVOCATION_RETENTION_DAYS (default 90), computes cutoff = now - window via addDuration with a negative ISO duration, reads `query expiredWorkerInvocations(createdBefore: cutoff)` and returns its nodes() -- rows past retention, filtered by QUERY PUSHDOWN. The retention policy lives entirely here; the calling automation's `for` loop soft-deletes each unconditionally.
 type WorkerInvocationRetentionSweepArgs struct {
 	Event map[string]any
 }

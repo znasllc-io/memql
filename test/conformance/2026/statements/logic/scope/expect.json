@@ -1,0 +1,40 @@
+{
+  "cases": [
+    {
+      "file": "absent-when-not-run.memql",
+      "verdict": "evaluate",
+      "call": "absentWhenNotRun",
+      "args": {
+        "n": 1
+      },
+      "expect": false,
+      "note": "a name whose statement did not run is absent"
+    },
+    {
+      "file": "forward-reference.memql",
+      "verdict": "refuse_load",
+      "code": "body_forward_reference",
+      "message": "`x` reads `y`, which is bound on line 3, after it: move line 3 above line 2"
+    },
+    {
+      "file": "event-in-a-logic.memql",
+      "verdict": "refuse_load",
+      "code": "body_unknown_name",
+      "message": "a logic has no trigger of its own: declare `event` in its args and read args.event, which its caller passes"
+    },
+    {
+      "file": "trace-is-not-a-root.memql",
+      "verdict": "refuse_load",
+      "code": "body_unknown_name",
+      "message": "`trace` is reserved, and no run binds it a value",
+      "note": "trace is reserved and bound by no run, so a body may not read it"
+    },
+    {
+      "file": "config-key-not-allowed.memql",
+      "verdict": "refuse_load",
+      "code": "body_config_unknown",
+      "message": "`config.definitelyNotExposed` names no key of the config allow-list",
+      "note": "a key outside the allow-list reads absent at run time, so the corpus-level gate refuses it at load"
+    }
+  ]
+}

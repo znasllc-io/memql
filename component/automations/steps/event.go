@@ -70,19 +70,6 @@ func (e *EventExecutor) Execute(ctx context.Context, step *automations.Step, ste
 		}
 	}
 
-	// Include result from a previous step if requested
-	if eventCfg.IncludeResult {
-		resultFrom := eventCfg.ResultFrom
-		if resultFrom == "" {
-			// Include all step results
-			payload["stepResults"] = stepCtx.Execution.Steps
-		} else {
-			if stepResult, ok := stepCtx.Execution.Steps[resultFrom]; ok {
-				payload["stepResult"] = stepResult.Result
-			}
-		}
-	}
-
 	// Determine event kind
 	kind := events.KindMessage
 	if k := strings.TrimSpace(eventCfg.Kind); k != "" {

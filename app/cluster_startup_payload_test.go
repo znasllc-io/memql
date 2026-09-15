@@ -75,7 +75,7 @@ func declaredArgTypes(t *testing.T, path, mutation string) map[string]string {
 	}
 
 	block := regexp.MustCompile(
-		`(?s)mutate\s+\w+\s+` + regexp.QuoteMeta(mutation) + `\s*\{.*?args\s*\{(.*?)\n  \}`,
+		`(?s)mutation\s+\w+\s+` + regexp.QuoteMeta(mutation) + `\s*\{.*?args\s*\{(.*?)\n  \}`,
 	).FindStringSubmatch(string(body))
 	if block == nil {
 		t.Fatalf("%s: no args block found for %q -- the mutation was renamed or reshaped, "+

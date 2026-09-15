@@ -1,0 +1,557 @@
+{
+  "automation": "deployment/automations.memql installInstance",
+  "runs": {
+    "event agent | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "acceptKinds": "s-acceptKinds",
+            "acmeEmail": "s-acmeEmail",
+            "agentId": "agent-1",
+            "clusterName": "s-clusterName",
+            "createdBySubject": "subject-0",
+            "dryRun": true,
+            "esoClientId": "s-esoClientId",
+            "fromRevision": "s-fromRevision",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "instanceId": "s-instanceId",
+            "keyVaultName": "s-keyVaultName",
+            "namespace": "s-namespace",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "overlayPath": "s-overlayPath",
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "repoProject": "s-repoProject",
+            "repoRoot": "s-repoRoot",
+            "repoTokenFile": "s-repoTokenFile",
+            "repoTransport": "s-repoTransport",
+            "repoUrl": "s-repoUrl",
+            "requireRenderDiff": true,
+            "resourceGroup": "s-resourceGroup",
+            "revision": "s-revision",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded",
+            "subscriptionId": "s-subscriptionId",
+            "tenantId": "s-tenantId"
+          },
+          "topic": "instance.installRequested"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "acceptKinds": "s-acceptKinds",
+              "fromRef": "s-fromRevision",
+              "overlayPath": "s-overlayPath",
+              "toRef": "s-revision"
+            },
+            "kind": "action",
+            "name": "renderDiff"
+          },
+          {
+            "args": {
+              "acmeEmail": "s-acmeEmail",
+              "clusterName": "s-clusterName",
+              "dryRun": true,
+              "repoRoot": "s-repoRoot",
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "installClusterOperators"
+          },
+          {
+            "args": {
+              "dryRun": true,
+              "keyVaultName": "s-keyVaultName",
+              "namespace": "s-namespace",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "seedInstanceSecrets"
+          },
+          {
+            "args": {
+              "dryRun": true,
+              "esoClientId": "s-esoClientId",
+              "keyVaultName": "s-keyVaultName",
+              "namespace": "s-namespace",
+              "repoRoot": "s-repoRoot",
+              "tenantId": "s-tenantId"
+            },
+            "kind": "action",
+            "name": "wireExternalSecrets"
+          },
+          {
+            "args": {
+              "dryRun": true,
+              "project": "s-repoProject",
+              "repoUrl": "s-repoUrl",
+              "tokenFile": "s-repoTokenFile",
+              "transport": "s-repoTransport"
+            },
+            "kind": "action",
+            "name": "registerGitOpsRepo"
+          },
+          {
+            "args": {
+              "app": "memql",
+              "dryRun": true,
+              "revision": "s-revision"
+            },
+            "kind": "action",
+            "name": "argoSync"
+          },
+          {
+            "args": {
+              "app": "memql",
+              "dryRun": true,
+              "namespace": "s-namespace"
+            },
+            "kind": "action",
+            "name": "settleAfterSync"
+          },
+          {
+            "args": {
+              "namespace": "s-namespace"
+            },
+            "kind": "action",
+            "name": "verifyInstallDependencies"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event agent | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "acceptKinds": "s-acceptKinds",
+            "acmeEmail": "s-acmeEmail",
+            "agentId": "agent-1",
+            "clusterName": "s-clusterName",
+            "createdBySubject": "subject-0",
+            "dryRun": true,
+            "esoClientId": "s-esoClientId",
+            "fromRevision": "s-fromRevision",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "instanceId": "s-instanceId",
+            "keyVaultName": "s-keyVaultName",
+            "namespace": "s-namespace",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "overlayPath": "s-overlayPath",
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "repoProject": "s-repoProject",
+            "repoRoot": "s-repoRoot",
+            "repoTokenFile": "s-repoTokenFile",
+            "repoTransport": "s-repoTransport",
+            "repoUrl": "s-repoUrl",
+            "requireRenderDiff": true,
+            "resourceGroup": "s-resourceGroup",
+            "revision": "s-revision",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded",
+            "subscriptionId": "s-subscriptionId",
+            "tenantId": "s-tenantId"
+          },
+          "topic": "instance.installRequested"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "acceptKinds": "s-acceptKinds",
+              "fromRef": "s-fromRevision",
+              "overlayPath": "s-overlayPath",
+              "toRef": "s-revision"
+            },
+            "kind": "action",
+            "name": "renderDiff"
+          },
+          {
+            "args": {
+              "acmeEmail": "s-acmeEmail",
+              "clusterName": "s-clusterName",
+              "dryRun": true,
+              "repoRoot": "s-repoRoot",
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "installClusterOperators"
+          },
+          {
+            "args": {
+              "dryRun": true,
+              "keyVaultName": "s-keyVaultName",
+              "namespace": "s-namespace",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "seedInstanceSecrets"
+          },
+          {
+            "args": {
+              "dryRun": true,
+              "esoClientId": "s-esoClientId",
+              "keyVaultName": "s-keyVaultName",
+              "namespace": "s-namespace",
+              "repoRoot": "s-repoRoot",
+              "tenantId": "s-tenantId"
+            },
+            "kind": "action",
+            "name": "wireExternalSecrets"
+          },
+          {
+            "args": {
+              "dryRun": true,
+              "project": "s-repoProject",
+              "repoUrl": "s-repoUrl",
+              "tokenFile": "s-repoTokenFile",
+              "transport": "s-repoTransport"
+            },
+            "kind": "action",
+            "name": "registerGitOpsRepo"
+          },
+          {
+            "args": {
+              "app": "memql",
+              "dryRun": true,
+              "revision": "s-revision"
+            },
+            "kind": "action",
+            "name": "argoSync"
+          },
+          {
+            "args": {
+              "app": "memql",
+              "dryRun": true,
+              "namespace": "s-namespace"
+            },
+            "kind": "action",
+            "name": "settleAfterSync"
+          },
+          {
+            "args": {
+              "namespace": "s-namespace"
+            },
+            "kind": "action",
+            "name": "verifyInstallDependencies"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "acceptKinds": "s-acceptKinds",
+            "acmeEmail": "s-acmeEmail",
+            "agentId": "agent-1",
+            "clusterName": "s-clusterName",
+            "createdBySubject": "subject-0",
+            "dryRun": true,
+            "esoClientId": "s-esoClientId",
+            "fromRevision": "s-fromRevision",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "instanceId": "s-instanceId",
+            "keyVaultName": "s-keyVaultName",
+            "namespace": "s-namespace",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "overlayPath": "s-overlayPath",
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "repoProject": "s-repoProject",
+            "repoRoot": "s-repoRoot",
+            "repoTokenFile": "s-repoTokenFile",
+            "repoTransport": "s-repoTransport",
+            "repoUrl": "s-repoUrl",
+            "requireRenderDiff": true,
+            "resourceGroup": "s-resourceGroup",
+            "revision": "s-revision",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded",
+            "subscriptionId": "s-subscriptionId",
+            "tenantId": "s-tenantId"
+          },
+          "topic": "instance.installRequested"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "acceptKinds": "s-acceptKinds",
+              "fromRef": "s-fromRevision",
+              "overlayPath": "s-overlayPath",
+              "toRef": "s-revision"
+            },
+            "kind": "action",
+            "name": "renderDiff"
+          },
+          {
+            "args": {
+              "acmeEmail": "s-acmeEmail",
+              "clusterName": "s-clusterName",
+              "dryRun": true,
+              "repoRoot": "s-repoRoot",
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "installClusterOperators"
+          },
+          {
+            "args": {
+              "dryRun": true,
+              "keyVaultName": "s-keyVaultName",
+              "namespace": "s-namespace",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "seedInstanceSecrets"
+          },
+          {
+            "args": {
+              "dryRun": true,
+              "esoClientId": "s-esoClientId",
+              "keyVaultName": "s-keyVaultName",
+              "namespace": "s-namespace",
+              "repoRoot": "s-repoRoot",
+              "tenantId": "s-tenantId"
+            },
+            "kind": "action",
+            "name": "wireExternalSecrets"
+          },
+          {
+            "args": {
+              "dryRun": true,
+              "project": "s-repoProject",
+              "repoUrl": "s-repoUrl",
+              "tokenFile": "s-repoTokenFile",
+              "transport": "s-repoTransport"
+            },
+            "kind": "action",
+            "name": "registerGitOpsRepo"
+          },
+          {
+            "args": {
+              "app": "memql",
+              "dryRun": true,
+              "revision": "s-revision"
+            },
+            "kind": "action",
+            "name": "argoSync"
+          },
+          {
+            "args": {
+              "app": "memql",
+              "dryRun": true,
+              "namespace": "s-namespace"
+            },
+            "kind": "action",
+            "name": "settleAfterSync"
+          },
+          {
+            "args": {
+              "namespace": "s-namespace"
+            },
+            "kind": "action",
+            "name": "verifyInstallDependencies"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "acceptKinds": "s-acceptKinds",
+            "acmeEmail": "s-acmeEmail",
+            "agentId": "agent-1",
+            "clusterName": "s-clusterName",
+            "createdBySubject": "subject-0",
+            "dryRun": true,
+            "esoClientId": "s-esoClientId",
+            "fromRevision": "s-fromRevision",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "instanceId": "s-instanceId",
+            "keyVaultName": "s-keyVaultName",
+            "namespace": "s-namespace",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "overlayPath": "s-overlayPath",
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "repoProject": "s-repoProject",
+            "repoRoot": "s-repoRoot",
+            "repoTokenFile": "s-repoTokenFile",
+            "repoTransport": "s-repoTransport",
+            "repoUrl": "s-repoUrl",
+            "requireRenderDiff": true,
+            "resourceGroup": "s-resourceGroup",
+            "revision": "s-revision",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded",
+            "subscriptionId": "s-subscriptionId",
+            "tenantId": "s-tenantId"
+          },
+          "topic": "instance.installRequested"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "acceptKinds": "s-acceptKinds",
+              "fromRef": "s-fromRevision",
+              "overlayPath": "s-overlayPath",
+              "toRef": "s-revision"
+            },
+            "kind": "action",
+            "name": "renderDiff"
+          },
+          {
+            "args": {
+              "acmeEmail": "s-acmeEmail",
+              "clusterName": "s-clusterName",
+              "dryRun": true,
+              "repoRoot": "s-repoRoot",
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "installClusterOperators"
+          },
+          {
+            "args": {
+              "dryRun": true,
+              "keyVaultName": "s-keyVaultName",
+              "namespace": "s-namespace",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "seedInstanceSecrets"
+          },
+          {
+            "args": {
+              "dryRun": true,
+              "esoClientId": "s-esoClientId",
+              "keyVaultName": "s-keyVaultName",
+              "namespace": "s-namespace",
+              "repoRoot": "s-repoRoot",
+              "tenantId": "s-tenantId"
+            },
+            "kind": "action",
+            "name": "wireExternalSecrets"
+          },
+          {
+            "args": {
+              "dryRun": true,
+              "project": "s-repoProject",
+              "repoUrl": "s-repoUrl",
+              "tokenFile": "s-repoTokenFile",
+              "transport": "s-repoTransport"
+            },
+            "kind": "action",
+            "name": "registerGitOpsRepo"
+          },
+          {
+            "args": {
+              "app": "memql",
+              "dryRun": true,
+              "revision": "s-revision"
+            },
+            "kind": "action",
+            "name": "argoSync"
+          },
+          {
+            "args": {
+              "app": "memql",
+              "dryRun": true,
+              "namespace": "s-namespace"
+            },
+            "kind": "action",
+            "name": "settleAfterSync"
+          },
+          {
+            "args": {
+              "namespace": "s-namespace"
+            },
+            "kind": "action",
+            "name": "verifyInstallDependencies"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

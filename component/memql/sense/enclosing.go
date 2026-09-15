@@ -15,7 +15,7 @@ import (
 // leaving the per-receiver filter dead.
 //
 // Lexer asymmetry the detector must respect: the lowercase construct
-// keywords (query/mutate/logic/automation/shape/...) lex as plain
+// keywords (query/mutation/logic/automation/shape/...) lex as plain
 // IDENTIFIERS -- only `concept` and `use` are keyword tokens -- so
 // header matching compares identifier literals against the dslspec
 // construct set (dslSpec.ConstructByKeyword), never token types.
@@ -23,7 +23,7 @@ import (
 // EnclosingConstruct describes the construct the cursor sits inside
 // (or, for a top-level annotation, the construct it precedes).
 type EnclosingConstruct struct {
-	// Keyword is the author-facing construct keyword (query, mutate,
+	// Keyword is the author-facing construct keyword (query, mutation,
 	// logic, automation, concept, shape, ...).
 	Keyword string
 	// Receiver is the annotations-registry receiver key for that

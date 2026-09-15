@@ -40,7 +40,7 @@ import (
 // WHY THIS GATE READS TOKENS AND NOT A REGEX. The first version of this file
 // matched declarations with
 //
-//	^(query|mutate|logic|spec|trait|seed)[ \t]+(?:[A-Za-z_]\w*[ \t]+)?([A-Za-z_]\w*)[ \t]*\{
+//	^(query|mutation|logic|spec|trait|seed)[ \t]+(?:[A-Za-z_]\w*[ \t]+)?([A-Za-z_]\w*)[ \t]*\{
 //
 // and review found it was narrower than the grammar in four separate ways --
 // the same class of defect the gate exists to prevent, in the gate itself:
@@ -74,9 +74,9 @@ import (
 //     `automation X @trigger(...) => logic X` -- and 10 of the tree's 31
 //     automations use it. Anchoring on `{` had simply been carried over from
 //     the regex without asking whether a declaration must have a body.
-//  6. `mutate` was mapped to the single prefix `mutation`, so `mutateArchiveUser`
-//     -- the keyword's own name -- passed. A keyword can forbid more than one
-//     prefix.
+//  6. The mutation keyword was mapped to a single prefix, so `mutateArchiveUser`
+//     -- the keyword's other spelling -- passed. A keyword can forbid more than
+//     one prefix.
 //  7. The word boundary was an ASCII byte range and camelCase only, so a
 //     kebab-case prefix (`seed-workbench-baseline`, the spelling 160 of the 185
 //     seeds actually use) and a non-ASCII uppercase letter both evaded.
@@ -132,9 +132,9 @@ var rewriterLoweredKeywords = languageParser.StructFormKeywords
 // struct forms from parser.StructFormKeywords (its rewrite chain). Adding a
 // construct kind to either extends this gate automatically.
 //
-// `mutate` carries TWO forbidden prefixes. `mutation` was the documented one,
-// but the keyword itself is `mutate`, so `mutateArchiveUser` is the same
-// mistake and a map of one prefix per keyword let it through. Every other
+// `mutation` carries TWO forbidden prefixes: itself, and `mutate`, the verb it
+// was spelled with before edition 2026 (D13) -- `mutateArchiveUser` is the same
+// mistake, and a map of one prefix per keyword let it through. Every other
 // keyword forbids only itself.
 var declKeywordPrefixes = func() map[string][]string {
 	m := map[string][]string{}
@@ -144,7 +144,7 @@ var declKeywordPrefixes = func() map[string][]string {
 	for _, kw := range rewriterLoweredKeywords {
 		m[kw] = []string{kw}
 	}
-	m["mutate"] = []string{"mutate", "mutation"}
+	m["mutation"] = []string{"mutation", "mutate"}
 	return m
 }()
 
@@ -158,10 +158,10 @@ var declKeywordPrefixes = func() map[string][]string {
 // would leave the published count and the docs drifting unchallenged; pinning
 // alone is what round 3 caught (a hand-copy masquerading as a source). A rename
 // is the case a count alone misses -- `mutation` -> `mutate` actually happened
-// (#2036), and would move no total.
+// (#2036), and back again (D13, epic memql#5370), and would move no total.
 var declKeywordsPinned = []string{
 	"action", "automation", "builtin", "capability", "concept", "logic",
-	"mutate", "policy", "prompt", "provider", "query", "rule", "seed",
+	"mutation", "policy", "prompt", "provider", "query", "rule", "seed",
 	"shape", "spec", "tool", "trait",
 }
 
@@ -268,7 +268,7 @@ func checkNoKindPrefixInConstructNames(t *testing.T, c corpus) {
 	// the ones a brace-anchored scan loses, and it loses them without a sound.
 	// Measured when the floors were set: 32 traits, 7 specs, 529 queries and
 	// 418 mutations.
-	for kw, floor := range map[string]int{"trait": 25, "spec": 5, "query": 400, "mutate": 300} {
+	for kw, floor := range map[string]int{"trait": 25, "spec": 5, "query": 400, "mutation": 300} {
 		if perKeyword[kw] < floor {
 			t.Errorf("scanned %d %s declarations -- the scan has stopped reaching them", perKeyword[kw], kw)
 		}
@@ -300,7 +300,7 @@ func TestNoKindPrefixGateIsLive(t *testing.T) {
 		},
 		{
 			name:    "indented prefixed mutation -- regex version anchored at column 0",
-			src:     "  mutate user mutationArchiveUser {\n  update { id: args.id }\n}\n",
+			src:     "  mutation user mutationArchiveUser {\n  update { id: args.id }\n}\n",
 			want:    "mutationArchiveUser",
 			wantHit: true,
 		},
@@ -323,8 +323,8 @@ func TestNoKindPrefixGateIsLive(t *testing.T) {
 			wantHit: true,
 		},
 		{
-			name:    "the keyword itself as prefix -- `mutate`, not just the documented `mutation`",
-			src:     "mutate user mutateArchiveUser {\n  update { id: args.id }\n}\n",
+			name:    "the keyword's retired spelling as prefix -- `mutate`, not just `mutation`",
+			src:     "mutation user mutateArchiveUser {\n  update { id: args.id }\n}\n",
 			want:    "mutateArchiveUser",
 			wantHit: true,
 		},
@@ -346,7 +346,7 @@ func TestNoKindPrefixGateIsLive(t *testing.T) {
 		},
 		{
 			name:    "commented-out example must not be reported",
-			src:     "// query user queryFooBar {\n/// mutate user mutationFooBar {\nquery user userById {\n  filter row => row.id == args.id\n}\n",
+			src:     "// query user queryFooBar {\n/// mutation user mutationFooBar {\nquery user userById {\n  filter row => row.id == args.id\n}\n",
 			wantHit: false,
 		},
 		{
@@ -767,7 +767,7 @@ func TestNamingDocGateIsLive(t *testing.T) {
 		{"prefixed query declaration in a fence",
 			"```memql\nquery user queryUserById {\n  filter row => row.id == args.id\n}\n```", true},
 		{"prefixed logic declaration in a fence",
-			"```memql\nlogic logicBootstrapSession {\n  body { return true }\n}\n```", true},
+			"```memql\nlogic logicBootstrapSession {\n  return true\n}\n```", true},
 		{"prefixed spec declaration in a fence",
 			"```memql\nspec participant specIsGuest = row => row.isGuest == true\n```", true},
 		{"prefixed trait declaration in a fence",

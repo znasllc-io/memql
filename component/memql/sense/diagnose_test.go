@@ -194,10 +194,8 @@ func TestDiagnose_InjectedErrors(t *testing.T) {
 				"  args {\n" + //                                3
 				"    x: { type: \"string\", required: true }\n" + // 4  <- offending line
 				"  }\n" + //                                      5
-				"  body {\n" + //                                6
-				"    return x\n" + //                            7
-				"  }\n" + //                                      8
-				"}\n", //                                         9
+				"  return args.x\n" + //                         6
+				"}\n", //                                         7
 			wantLine: 4,
 			exactCol: 6,
 			wantCode: "parse-error",
@@ -224,18 +222,19 @@ func TestDiagnose_InjectedErrors(t *testing.T) {
 			wantCode: "parse-error",
 		},
 		{
-			// Logic missing its mandatory body { } block -> a LOWERING error
-			// (no line/col of its own); the diagnostic anchors on the named
-			// construct's authored header line.
-			name: "missing-logic-body",
-			src: "@description(\"no body\")\n" + //  1
-				"logic doThing {\n" + //            2  <- construct header
-				"  args {\n" + //                   3
-				"    x string @required\n" + //     4
-				"  }\n" + //                         5
-				"}\n", //                            6
+			// A logic with no statement at all: its statements follow its args
+			// block (epic memql#5370), and the load gate refuses it for not
+			// ending with a return. The diagnostic lands on its header.
+			name: "logic-without-a-statement",
+			src: "@description(\"no statement\")\n" + // 1
+				"logic doThing {\n" + //                2  <- construct header
+				"  args {\n" + //                       3
+				"    x string @required\n" + //         4
+				"  }\n" + //                             5
+				"}\n", //                                6
 			wantLine: 2,
-			wantCode: "rewrite-error",
+			exactCol: 1,
+			wantCode: "body_logic_return",
 		},
 	}
 
@@ -292,18 +291,18 @@ func TestDiagnose_RetiredFormCarriesItsRule(t *testing.T) {
 	// each carries memqlmigrate:keep for the Go-fixture migration.
 	for _, tc := range []struct{ name, src, want string }{
 		{"query filter", "query thing things {\n  filter  status == args.status\n}\n", "retired_filter_without_lambda"}, // memqlmigrate:keep
-		{"trigger filter", "@trigger(event=\"node.updated\", concept=\"v1:x:thing\", partition=\"*\")\n@filter(payload.status == \"archived\")\n" + // memqlmigrate:keep
-			"automation onArchived {\n  step s {\n    logic doIt ( event )\n  }\n}\n", "retired_filter_annotation"}, // memqlmigrate:keep
-		{"spec body", "spec thing isOpen {\n  return status == \"open\"\n}\n", "retired_spec_return_body"},                                          // memqlmigrate:keep
-		{"trait body", "trait isOpen {\n  return status == \"open\"\n}\n", "retired_trait_return_body"},                                             // memqlmigrate:keep
-		{"cond call", "logic doIt {\n  args {\n    x string\n  }\n  body {\n    return cond(args.x == \"a\", 1, 2)\n  }\n}\n", "retired_cond_call"}, // memqlmigrate:keep
-		{"null", "logic doIt {\n  args {\n    x string\n  }\n  body {\n    return args.x == null\n  }\n}\n", "retired_null"},                        // memqlmigrate:keep
+		{"trigger filter", "@trigger(event=\"node.updated\", concept=\"v1:x:thing\")\n@filter(payload.status == \"archived\")\n" + // memqlmigrate:keep
+			"automation onArchived {\n  s := logic doIt(event: event)\n}\n", "retired_filter_annotation"},
+		{"spec body", "spec thing isOpen {\n  return status == \"open\"\n}\n", "retired_spec_return_body"},                         // memqlmigrate:keep
+		{"trait body", "trait isOpen {\n  return status == \"open\"\n}\n", "retired_trait_return_body"},                            // memqlmigrate:keep
+		{"cond call", "logic doIt {\n  args {\n    x string\n  }\n  return cond(args.x == \"a\", 1, 2)\n}\n", "retired_cond_call"}, // memqlmigrate:keep
+		{"null", "logic doIt {\n  args {\n    x string\n  }\n  return args.x == null\n}\n", "retired_null"},                        // memqlmigrate:keep
 		// The legacy object literal's key-less entry is a retired form: its
 		// refusal writes the entry out, the fix the codemod makes.
-		{"key-less map entry", "logic doIt {\n  args {\n    x object\n  }\n  body {\n    return { a: 1, args.x.y }\n  }\n}\n", "retired_keyless_map_entry"}, // memqlmigrate:keep
+		{"key-less map entry", "logic doIt {\n  args {\n    x object\n  }\n  return { a: 1, args.x.y }\n}\n", "retired_keyless_map_entry"}, // memqlmigrate:keep
 		// Not a retired form: the plain code stays. A dotted KEY is refused
 		// with "nest a map", which no rewrite performs.
-		{"dotted map key", "logic doIt {\n  args {\n    x object\n  }\n  body {\n    return { a.b: 1 }\n  }\n}\n", "parse-error"}, // memqlmigrate:keep
+		{"dotted map key", "logic doIt {\n  args {\n    x object\n  }\n  return { a.b: 1 }\n}\n", "parse-error"}, // memqlmigrate:keep
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			errs := errorDiags(svc.Diagnose(tc.src, "test.memql"))

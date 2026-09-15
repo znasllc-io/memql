@@ -1,0 +1,3 @@
+logic readsEvent {
+  return event.topic
+}

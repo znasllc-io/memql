@@ -1,0 +1,11 @@
+@trigger(schedule="0 0 * * * *")
+automation labelTwice {
+  switch now {
+    case "a" {
+      builtin one()
+    }
+    case "b", "a" {
+      builtin two()
+    }
+  }
+}

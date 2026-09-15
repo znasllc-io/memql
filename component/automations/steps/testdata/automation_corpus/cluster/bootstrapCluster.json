@@ -1,0 +1,256 @@
+{
+  "automation": "cluster/automations.memql bootstrapCluster",
+  "runs": {
+    "event agent | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "database": "s-database",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identityProvider": "s-identityProvider",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "partitionId": "space-1",
+            "provider": "s-provider",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded"
+          },
+          "topic": "system.startup"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "existingCluster"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event agent | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "database": "s-database",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identityProvider": "s-identityProvider",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "partitionId": "space-1",
+            "provider": "s-provider",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded"
+          },
+          "topic": "system.startup"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "existingCluster"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "database": "s-database",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identityProvider": "s-identityProvider",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "partitionId": "space-1",
+            "provider": "s-provider",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded"
+          },
+          "topic": "system.startup"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "existingCluster"
+          },
+          {
+            "args": {
+              "clusterId": "v1:cluster:cluster:self",
+              "databaseId": "v1:cluster:database:primary",
+              "dbName": "memql",
+              "engineVersion": "",
+              "extensionVersions": {},
+              "extensions": [],
+              "host": "localhost",
+              "port": 5432,
+              "sslMode": "disable"
+            },
+            "kind": "mutation",
+            "name": "createDatabase"
+          },
+          {
+            "args": {
+              "acceptedAudiences": [],
+              "clientIdPrefix": "",
+              "clusterId": "v1:cluster:cluster:self",
+              "identityProviderId": "v1:cluster:identityProvider:primary",
+              "issuerUrl": "",
+              "jwksUrl": "",
+              "name": "memql-identity",
+              "redirectUrl": ""
+            },
+            "kind": "mutation",
+            "name": "createIdentityProvider"
+          },
+          {
+            "args": {
+              "clusterId": "v1:cluster:cluster:self",
+              "databaseId": "v1:cluster:database:primary",
+              "identityProviderId": "v1:cluster:identityProvider:primary",
+              "name": "memql",
+              "provider": "s-provider",
+              "region": "local",
+              "version": ""
+            },
+            "kind": "mutation",
+            "name": "createCluster"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "database": "s-database",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identityProvider": "s-identityProvider",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "partitionId": "space-1",
+            "provider": "s-provider",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded"
+          },
+          "topic": "system.startup"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "existingCluster"
+          },
+          {
+            "args": {
+              "clusterId": "v1:cluster:cluster:self",
+              "databaseId": "v1:cluster:database:primary",
+              "dbName": "memql",
+              "engineVersion": "",
+              "extensionVersions": {},
+              "extensions": [],
+              "host": "localhost",
+              "port": 5432,
+              "sslMode": "disable"
+            },
+            "kind": "mutation",
+            "name": "createDatabase"
+          },
+          {
+            "args": {
+              "acceptedAudiences": [],
+              "clientIdPrefix": "",
+              "clusterId": "v1:cluster:cluster:self",
+              "identityProviderId": "v1:cluster:identityProvider:primary",
+              "issuerUrl": "",
+              "jwksUrl": "",
+              "name": "memql-identity",
+              "redirectUrl": ""
+            },
+            "kind": "mutation",
+            "name": "createIdentityProvider"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

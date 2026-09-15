@@ -10,8 +10,8 @@ import (
 //
 // The rule: `automation <name>( ... )` names an automation, and a name that
 // resolves to nothing is a LOAD problem rather than a mid-run one. These tests
-// pin the rule, the three declaration forms it must recognise, and the two
-// mistakes that would make it either useless or an outage.
+// pin the rule, the declaration forms it must recognise, and the two mistakes
+// that would make it either useless or an outage.
 
 // subGateOn runs the sub-automation gate over an in-memory corpus. Paths are
 // sorted before the scan, matching every real caller (both entry points source
@@ -30,14 +30,32 @@ func subGateOn(t *testing.T, files map[string]string) []Violation {
 	return scanSubAutomationCalls(corpus)
 }
 
+// A call nested in a statement body's block, and bound to a name, is read off
+// the parsed body: no line of it opens with `automation`, which is all the
+// text pattern can see (epic memql#5370).
+func TestUnresolvedSubAutomationInABlockIsReported(t *testing.T) {
+	got := subGateOn(t, map[string]string{
+		"deployment/automations.memql": `automation blockCaller {
+  args {
+    go  boolean
+  }
+  if args.go {
+    started := automation missingInABlock(x: 1)
+  }
+}
+`,
+	})
+	if len(got) != 1 || got[0].Construct != "blockCaller" || got[0].Line != 6 || !strings.Contains(got[0].Detail, "missingInABlock") {
+		t.Fatalf("violations = %+v, want the one call to missingInABlock, in blockCaller, on line 6", got)
+	}
+}
+
 // TestUnresolvedSubAutomationIsReported is the rule, in the exact shape the
 // issue reported: a call whose callee is declared nowhere.
 func TestUnresolvedSubAutomationIsReported(t *testing.T) {
 	got := subGateOn(t, map[string]string{
 		"deployment/automations.memql": `automation deliberatelyBroken {
-  step s {
-    automation thisAutomationDoesNotExist( foo: 1 )
-  }
+  s := automation thisAutomationDoesNotExist(foo: 1)
 }
 `,
 	})
@@ -57,8 +75,8 @@ func TestUnresolvedSubAutomationIsReported(t *testing.T) {
 		t.Errorf("kind = %q, want \"automation\"; recordContractGateProblems defaults an empty "+
 			"Kind to \"filter\", which would file this under the wrong construct", v.Kind)
 	}
-	if v.Line != 3 {
-		t.Errorf("line = %d, want 3 (the call site)", v.Line)
+	if v.Line != 2 {
+		t.Errorf("line = %d, want 2 (the call site)", v.Line)
 	}
 	if !strings.Contains(v.Detail, "thisAutomationDoesNotExist") {
 		t.Errorf("detail does not name the unresolved callee: %q", v.Detail)
@@ -75,18 +93,14 @@ func TestUnresolvedSubAutomationIsReported(t *testing.T) {
 func TestResolvedSubAutomationIsSilent(t *testing.T) {
 	got := subGateOn(t, map[string]string{
 		"deployment/automations.memql": `automation provisionInstance {
-  step p {
-    action provisionAzureInfrastructure( dryRun: true )
-  }
+  p := action provisionAzureInfrastructure(dryRun: true)
 }
 
 automation bringUpInstance {
-  step substrate {
-    automation provisionInstance(
-      instanceId,
-      dryRun
-    )
-  }
+  substrate := automation provisionInstance(
+    instanceId: instanceId,
+    dryRun: dryRun
+  )
 }
 `,
 	})
@@ -100,8 +114,8 @@ automation bringUpInstance {
 // file, neither half is a violation and neither half is resolvable.
 func TestSubAutomationResolvesAcrossFiles(t *testing.T) {
 	got := subGateOn(t, map[string]string{
-		"cognition/automations.memql":  "automation childVerb {\n  step s {\n    logic noop( x: 1 )\n  }\n}\n",
-		"deployment/automations.memql": "automation parentVerb {\n  step s {\n    automation childVerb( note: \"x\" )\n  }\n}\n",
+		"cognition/automations.memql":  "automation childVerb {\n  s := logic noop(x: 1)\n}\n",
+		"deployment/automations.memql": "automation parentVerb {\n  s := automation childVerb(note: \"x\")\n}\n",
 	})
 	if len(got) != 0 {
 		t.Fatalf("violations = %v, want none: childVerb is declared in another file, and "+
@@ -109,27 +123,27 @@ func TestSubAutomationResolvesAcrossFiles(t *testing.T) {
 	}
 }
 
-// TestEveryDeclarationFormIsRecognised. Three forms are live in the tree, and a
-// declaration index that knows only `automation NAME {` produces a CONFIDENT
-// FALSE POSITIVE on the other two -- a refused boot naming an automation that
-// is right there in the file.
+// TestEveryDeclarationFormIsRecognised. Two forms parse, and a declaration
+// index that knows only `automation NAME {` produces a CONFIDENT FALSE
+// POSITIVE on the other -- a refused boot naming an automation that is right
+// there in the file. (The terse `automation NAME @trigger(...) => logic X` is
+// retired: the parser refuses it, body_terse_retired.)
 func TestEveryDeclarationFormIsRecognised(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		decl string
 	}{
-		{"strict", "automation calleeVerb {\n  step s {\n    logic noop( x: 1 )\n  }\n}\n"},
-		{"loose brace on the next line", "automation calleeVerb\n{\n  step s {\n    logic noop( x: 1 )\n  }\n}\n"},
-		{"terse", "automation calleeVerb @trigger(event=\"a.b\") => logic noop\n"},
+		{"strict", "automation calleeVerb {\n  s := logic noop(x: 1)\n}\n"},
+		{"loose brace on the next line", "automation calleeVerb\n{\n  s := logic noop(x: 1)\n}\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := subGateOn(t, map[string]string{
 				"a/automations.memql": tc.decl,
-				"b/automations.memql": "automation caller {\n  step s {\n    automation calleeVerb( x: 1 )\n  }\n}\n",
+				"b/automations.memql": "automation caller {\n  s := automation calleeVerb(x: 1)\n}\n",
 			})
 			if len(got) != 0 {
-				t.Fatalf("violations = %v, want none -- the %s declaration form is live in the "+
-					"tree, and not recognising it refuses a boot over correct DSL", got, tc.name)
+				t.Fatalf("violations = %v, want none -- the %s declaration form parses, "+
+					"and not recognising it refuses a boot over correct DSL", got, tc.name)
 			}
 		})
 	}
@@ -140,10 +154,8 @@ func TestEveryDeclarationFormIsRecognised(t *testing.T) {
 func TestACommentedOutCallIsNotAViolation(t *testing.T) {
 	got := subGateOn(t, map[string]string{
 		"a/automations.memql": `automation caller {
-  step s {
-    // automation notYetWritten( x: 1 )
-    logic noop( x: 1 )
-  }
+  // automation notYetWritten( x: 1 )
+  s := logic noop(x: 1)
 }
 `,
 	})
@@ -158,7 +170,7 @@ func TestACommentedOutCallIsNotAViolation(t *testing.T) {
 // harness -- where ScanTree can reach them -- is a gate nobody can trust.
 func TestReferenceSkeletonsAreNotScanned(t *testing.T) {
 	got := subGateOn(t, map[string]string{
-		"_reference/_automation.memql": "automation demo {\n  step s {\n    automation someOtherAutomation( x: 1 )\n  }\n}\n",
+		"_reference/_automation.memql": "automation demo {\n  s := automation someOtherAutomation(x: 1)\n}\n",
 	})
 	if len(got) != 0 {
 		t.Fatalf("violations = %v, want none: _reference is a soft-disabled directory the "+
@@ -171,17 +183,16 @@ func TestReferenceSkeletonsAreNotScanned(t *testing.T) {
 func TestTheCallerIsNamedEvenAcrossSeveralAutomations(t *testing.T) {
 	got := subGateOn(t, map[string]string{
 		"a/automations.memql": `automation first {
-  step s {
-    logic noop( x: 1 )
-  }
+  s := logic noop(x: 1)
 }
 
-automation second @trigger(event="a.b") => logic noop
+@trigger(event="a.b")
+automation second {
+  logic noop(event: event)
+}
 
 automation third {
-  step s {
-    automation missingVerb( x: 1 )
-  }
+  s := automation missingVerb(x: 1)
 }
 `,
 	})
@@ -189,7 +200,7 @@ automation third {
 		t.Fatalf("violations = %v, want 1", got)
 	}
 	if got[0].Construct != "third" {
-		t.Errorf("construct = %q, want \"third\" -- the terse declaration between them must not "+
+		t.Errorf("construct = %q, want \"third\" -- the declarations between them must not "+
 			"be skipped when the enclosing automation is resolved", got[0].Construct)
 	}
 }

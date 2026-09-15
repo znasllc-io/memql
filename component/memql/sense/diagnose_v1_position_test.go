@@ -25,9 +25,9 @@ func senseAuthoredAt(t *testing.T, src, needle string) Position {
 
 // TestDiagnose_V1RefusalLandsOnTheAuthorsToken: at every predicate position
 // the rewriter moves (a filter into the synthesized return, refine after
-// paginate, a terse automation's @filter onto a line of its own) or shifts
-// (whatever sits below a lowered construct), the diagnostic's range is exactly
-// the offending token, and its message prints that token's position.
+// paginate) or shifts (whatever sits below a lowered construct), the
+// diagnostic's range is exactly the offending token, and its message prints
+// that token's position.
 func TestDiagnose_V1RefusalLandsOnTheAuthorsToken(t *testing.T) {
 	firstQuery := `use probe.concepts.{ thing }
 
@@ -85,13 +85,8 @@ query thing second {
 @filter(row => row.b == null)
 @trigger(event="node.created", concept="v1:probe:thing")
 automation probe {
-  step first {
-    logic other(x: 1)
-  }
+  first := logic other(x: 1)
 }
-`, "null"},
-		{"a terse automation's @filter", `/// Note a thing when it is created.
-automation onThing @trigger(event="node.created", concept="v1:probe:thing") @filter(row => row.b == null) => logic noteThing
 `, "null"},
 		{"a spec below a query", firstQuery + `
 spec thing isB = row => row.b == null

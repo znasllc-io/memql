@@ -4,7 +4,5 @@ logic ticketEventStatusEventField {
   args {
     event  object!
   }
-  body {
-    return args.event.payload.status
-  }
+  return args.event.payload.status
 }

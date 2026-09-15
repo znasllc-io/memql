@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "MemQL",
   "scopeName": "source.memql",
-  "comment": "Generated from dslspec by 'memql-lsp gen-grammar'. Do not edit by hand. GrammarVersion: 2026.09-dsl-v1-loop-protection-930e046b",
+  "comment": "Generated from dslspec by 'memql-lsp gen-grammar'. Do not edit by hand. GrammarVersion: 2026.09-dsl-v1-loop-protection-cf139af9",
   "patterns": [
     {
       "include": "#comments"
@@ -94,11 +94,11 @@
     },
     "construct-keywords": {
       "name": "storage.type.memql",
-      "match": "\\b(?:action|automation|builtin|capability|concept|logic|mutate|policy|prompt|provider|query|rule|seed|shape|spec|tool|trait|use)\\b"
+      "match": "\\b(?:action|automation|builtin|capability|concept|logic|mutation|policy|prompt|provider|query|rule|seed|shape|spec|tool|trait|use)\\b"
     },
     "control-keywords": {
       "name": "keyword.control.memql",
-      "match": "\\b(?:accept|args|asOf|auth|body|count|else|filter|for|if|in|insert|paginate|params|precondition|range|refine|return|shape|sort|stamp|startsWith|step|update|when)\\b"
+      "match": "\\b(?:accept|args|asOf|auth|branch|case|count|default|else|filter|for|if|in|insert|on|paginate|parallel|params|precondition|publish|refine|retry|return|shape|sort|stamp|startsWith|switch|update|wait)\\b"
     },
     "function-calls": {
       "match": "\\b(addDuration|aliasOf|canonicalId|childOf|contains|createdBy|daysBetween|equals|error|hash|ids|lower|owns|parentOf|references|secret|shortId|systemSecret|systemVar|toString|trim|upper|var)\\s*(\\()",

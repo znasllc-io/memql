@@ -1,0 +1,5 @@
+/// Every hour, open a ticket to review the queue.
+@trigger(schedule="0 0 * * * *")
+automation hourlyReviewTrigger {
+  raise := mutation raiseTicketTrigger(title: "Review the queue")
+}

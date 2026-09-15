@@ -10,8 +10,6 @@ import (
 	"testing"
 )
 
-const probeTrigger = "@trigger(event=\"node.created\", concept=\"v1:probe:thing\")\n"
-
 // rewriteRefusalCases is one input per refusal the rewriter makes of authored
 // text: needle (its nth occurrence, 1-based) is where the refusal must land,
 // and want is in its message.
@@ -37,34 +35,24 @@ var rewriteRefusalCases = []struct {
 	{"an unclosed query", "query thing q {\n  filter row => row.a == 1\n", "{", 1, "missing closing brace"},
 
 	// Mutation blocks and fields.
-	{"two write blocks", "mutate thing m {\n  args {\n    id string @required\n  }\n  insert {\n    id: args.id\n  }\n  update {\n    id: args.id\n  }\n}\n", "update", 1, "exactly one write block"},
-	{"a write block restating its concept", "mutate thing m {\n  args {\n    id string @required\n  }\n  insert thing {\n    id: args.id\n  }\n}\n", "insert", 1, "is retired -- drop the restated concept"},
-	{"an unknown block", "mutate thing m {\n  args {\n    id string @required\n  }\n  insert {\n    id: args.id\n  }\n  extra {\n    a: 1\n  }\n}\n", "extra", 1, "unexpected `extra { ... }` block"},
-	{"a field outside the write block", "mutate thing m {\n  args {\n    id string @required\n  }\n  status: \"x\"\n  insert {\n    id: args.id\n  }\n}\n", "status: \"x\"", 1, "unexpected field"},
-	{"a second nested accept", "mutate thing m {\n  args {\n    id string @required\n    name string\n  }\n  insert {\n    accept { id }\n    accept { name }\n  }\n}\n", "accept", 2, "more than one nested `accept"},
-	{"a field beside a nested accept", "mutate thing m {\n  args {\n    id string @required\n  }\n  insert {\n    accept { id }\n    status: \"x\"\n  }\n}\n", "status: \"x\"", 1, "carries the field"},
-	{"an accept entry that is a key: value", "mutate thing m {\n  args {\n    id string @required\n  }\n  accept { id, status: \"active\" }\n}\n", "status: \"active\"", 1, "looks like a `key: value` pair"},
-	{"an accepted field with no arg", "mutate thing m {\n  args {\n    id string @required\n  }\n  accept { id, name }\n}\n", "name", 1, "has no matching arg"},
-	{"an empty accept", "mutate thing m {\n  args {\n    id string @required\n  }\n  accept { }\n}\n", "accept", 1, "block is empty"},
-	{"a top-level accept beside an insert", "mutate thing m {\n  args {\n    id string @required\n  }\n  accept { id }\n  insert {\n    id: args.id\n  }\n}\n", "accept", 1, "cannot mix the accept/stamp form with an explicit"},
-	{"a second id", "mutate thing m {\n  args {\n    id string @required\n  }\n  insert {\n    id: args.id\n    id: args.id\n  }\n}\n", "id:", 2, "duplicate `id:` line"},
-	{"a bare mirror of a path", "mutate thing m {\n  args {\n    id string @required\n    user object\n  }\n  insert {\n    id: args.id\n    args.user.id\n  }\n}\n", "args.user.id", 1, "has no key"},
-	{"an update with no id", "mutate thing m {\n  args {\n    name string\n  }\n  update {\n    name: args.name\n  }\n}\n", "update", 1, "update block requires an `id: <expr>` line"},
-	{"a body block in a mutation", "mutate thing m {\n  body {\n    return 1\n  }\n}\n", "body", 1, "must not declare a `body { }` block"},
+	{"two write blocks", "mutation thing m {\n  args {\n    id string @required\n  }\n  insert {\n    id: args.id\n  }\n  update {\n    id: args.id\n  }\n}\n", "update", 1, "exactly one write block"},
+	{"a write block restating its concept", "mutation thing m {\n  args {\n    id string @required\n  }\n  insert thing {\n    id: args.id\n  }\n}\n", "insert", 1, "is retired -- drop the restated concept"},
+	{"an unknown block", "mutation thing m {\n  args {\n    id string @required\n  }\n  insert {\n    id: args.id\n  }\n  extra {\n    a: 1\n  }\n}\n", "extra", 1, "unexpected `extra { ... }` block"},
+	{"a field outside the write block", "mutation thing m {\n  args {\n    id string @required\n  }\n  status: \"x\"\n  insert {\n    id: args.id\n  }\n}\n", "status: \"x\"", 1, "unexpected field"},
+	{"a second nested accept", "mutation thing m {\n  args {\n    id string @required\n    name string\n  }\n  insert {\n    accept { id }\n    accept { name }\n  }\n}\n", "accept", 2, "more than one nested `accept"},
+	{"a field beside a nested accept", "mutation thing m {\n  args {\n    id string @required\n  }\n  insert {\n    accept { id }\n    status: \"x\"\n  }\n}\n", "status: \"x\"", 1, "carries the field"},
+	{"an accept entry that is a key: value", "mutation thing m {\n  args {\n    id string @required\n  }\n  accept { id, status: \"active\" }\n}\n", "status: \"active\"", 1, "looks like a `key: value` pair"},
+	{"an accepted field with no arg", "mutation thing m {\n  args {\n    id string @required\n  }\n  accept { id, name }\n}\n", "name", 1, "has no matching arg"},
+	{"an empty accept", "mutation thing m {\n  args {\n    id string @required\n  }\n  accept { }\n}\n", "accept", 1, "block is empty"},
+	{"a top-level accept beside an insert", "mutation thing m {\n  args {\n    id string @required\n  }\n  accept { id }\n  insert {\n    id: args.id\n  }\n}\n", "accept", 1, "cannot mix the accept/stamp form with an explicit"},
+	{"a second id", "mutation thing m {\n  args {\n    id string @required\n  }\n  insert {\n    id: args.id\n    id: args.id\n  }\n}\n", "id:", 2, "duplicate `id:` line"},
+	{"a bare mirror of a path", "mutation thing m {\n  args {\n    id string @required\n    user object\n  }\n  insert {\n    id: args.id\n    args.user.id\n  }\n}\n", "args.user.id", 1, "has no key"},
+	{"an update with no id", "mutation thing m {\n  args {\n    name string\n  }\n  update {\n    name: args.name\n  }\n}\n", "update", 1, "update block requires an `id: <expr>` line"},
+	{"a body block in a mutation", "mutation thing m {\n  body {\n    return 1\n  }\n}\n", "body", 1, "must not declare a `body { }` block"},
 
-	// Logic.
-	{"a logic with no body block", "logic noBody {\n  args {\n    a string\n  }\n}\n", "noBody", 1, "must wrap its procedural code in a `body { }` block"},
-	{"a logic body with no return", "logic noReturn {\n  args {\n    a string\n  }\n  body {\n    x := f(a: args.a)\n  }\n}\n", "x :=", 1, "must end with a `return <expr>` terminator"},
-
-	// Automation steps.
-	{"an empty step", probeTrigger + "automation a {\n  step first {\n  }\n}\n", "step", 1, "body is empty"},
-	{"a forEach with no in", probeTrigger + "automation a {\n  step loop {\n    forEach t of event.payload.items {\n      logic touch(x: t)\n    }\n  }\n}\n", "forEach", 1, "expected `in`"},
-	{"a conditional step with no body", probeTrigger + "automation a {\n  step s {\n    if event.payload.a == 1\n  }\n}\n", "if", 1, "expected `{` after the if condition"},
-	{"an automation with no steps", probeTrigger + "automation noSteps {\n  args {\n    x string\n  }\n}\n", "noSteps", 1, "at least one `step` is required"},
-	{"a body block in an automation", probeTrigger + "automation a {\n  body {\n    x := 1\n  }\n}\n", "body", 1, "must not declare a `body { }` block"},
-
-	// A terse automation.
-	{"an args block before a terse automation", "args {\n  x string\n}\nautomation onThing @trigger(event=\"node.created\", concept=\"v1:probe:thing\") => logic noteThing\n", "args", 1, "must not be preceded by an `args { ... }` block"},
+	// A logic and an automation are not the rewriter's: the statement parser
+	// reads them as written, and their refusals are its own
+	// (v1BodyRefusalCases) and the compiler's (epic memql#5370).
 
 	// Text the stages before moved: a spec StripNonProceduralBlocks folds to
 	// one line, and a query the query stage lowers to fewer lines.
@@ -145,9 +133,8 @@ func TestRewriteRefusalsNameTheAuthorsPosition(t *testing.T) {
 // text it names, so a squiggle is that keyword or field and nothing past it.
 func TestRewriteRefusalCoversItsText(t *testing.T) {
 	// Where the text covered is shorter than the needle that finds it: a
-	// second `id:` field is named at its key, and a body that ends without a
-	// return at its last statement's first word.
-	covers := map[string]string{"a second id": "id", "a logic body with no return": "x"}
+	// second `id:` field is named at its key.
+	covers := map[string]string{"a second id": "id"}
 	for _, c := range rewriteRefusalCases {
 		t.Run(c.name, func(t *testing.T) {
 			var pe *ParseError

@@ -31,7 +31,7 @@ func TestPatchPreconditionShapeParity(t *testing.T) {
 	// on both types.
 	pp := healing.PatchPrecondition{
 		ID:          "g",
-		Check:       "exists(event.payload.x)",
+		Check:       "event.payload.x != nil",
 		Literal:     "x",
 		Description: "guard x",
 	}

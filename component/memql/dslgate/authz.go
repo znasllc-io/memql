@@ -24,14 +24,14 @@ import (
 
 // construct is one row-accessing declaration located in a file's source.
 type construct struct {
-	Kind     string // query / mutate / seed
+	Kind     string // query / mutation / seed
 	Name     string
 	Line     int // 1-based line of the header
 	Preamble string
 	Body     string
 }
 
-// forEachConstruct walks every `query` / `mutate` / `seed` declaration in src
+// forEachConstruct walks every `query` / `mutation` / `seed` declaration in src
 // and calls fn with its header line, annotation preamble and body.
 //
 // The preamble walk goes UPWARD from the header over contiguous `@`- and

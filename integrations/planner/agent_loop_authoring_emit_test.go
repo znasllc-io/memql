@@ -339,7 +339,7 @@ func (realSandbox) CompileBundle(constructs []memql.SandboxConstruct) memql.Sand
 // concept registry).
 func TestEmitAndRepair_RealGate1_RepairsToClean(t *testing.T) {
 	auto := memql.SandboxConstruct{Kind: "logic", Name: "logicDigest",
-		Source: "logic logicDigest {\n  args { userId string @required }\n  body { return args.userId }\n}"}
+		Source: "logic logicDigest {\n  args { userId string @required }\n  return args.userId\n}"}
 	// An `active` field predicate is a data/state predicate -> a `trait`
 	// (deliberately UNBOUND, reading payload fields by bare name under epic
 	// #2281). The unknown annotation @bogus is the genuine Gate-1 break the

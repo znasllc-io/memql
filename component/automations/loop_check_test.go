@@ -36,14 +36,12 @@ func loopTree(src string) fstest.MapFS {
 }
 
 // selfUpdating advances the request it fires on, with no filter.
-const selfUpdating = `@trigger(event="node.updated", concept="v1:forge:request", partition="*")
+const selfUpdating = `@trigger(event="node.updated", concept="v1:forge:request")
 automation reAdvance {
   args {
     id any
   }
-  step advance {
-    mutation advanceRequest(requestId: id, status: "queued")
-  }
+  advance := mutation advanceRequest(requestId: args.id, status: "queued")
 }
 `
 
@@ -125,9 +123,7 @@ automation settle {
   args {
     id any
   }
-  step advance {
-    mutation advanceRequest(requestId: id, status: "queued")
-  }
+  advance := mutation advanceRequest(requestId: args.id, status: "queued")
 }`))
 	g, problems := l.checkLoops([]*Automation{a})
 	l.logLoopCheck(g, problems)
@@ -200,14 +196,12 @@ func TestAuthoredActivate_RefusesACandidateThatClosesACycle(t *testing.T) {
 	// A candidate that closes a cycle THROUGH a shipped automation: it fires
 	// on the requestEvent routeRequest records, and advances the request
 	// routeRequest fires on.
-	err = s.Activate(authoredLoopConstruct("reRoute", `@trigger(event="node.created", concept="v1:forge:requestEvent", partition="*")
+	err = s.Activate(authoredLoopConstruct("reRoute", `@trigger(event="node.created", concept="v1:forge:requestEvent")
 automation reRoute {
   args {
     requestId any
   }
-  step advance {
-    mutation advanceRequest(requestId: requestId, status: "queued")
-  }
+  advance := mutation advanceRequest(requestId: args.requestId, status: "queued")
 }
 `))
 	if err == nil || !strings.Contains(err.Error(), "[loop_cycle]") || !strings.Contains(err.Error(), "routeRequest") {
@@ -217,16 +211,14 @@ automation reRoute {
 
 func TestAuthoredActivate_AdmitsACandidateBesideAShippedCycle(t *testing.T) {
 	s := authoredForgeScheduler(t, nil, true)
-	err := s.Activate(authoredLoopConstruct("routeOnce", `@trigger(event="node.created", concept="v1:forge:request", partition="*")
+	err := s.Activate(authoredLoopConstruct("routeOnce", `@trigger(event="node.created", concept="v1:forge:request")
 @filter(row => args.firstVersion == true)
 automation routeOnce {
   args {
     firstVersion bool
     id           any
   }
-  step advance {
-    mutation advanceRequest(requestId: id, status: "queued")
-  }
+  advance := mutation advanceRequest(requestId: args.id, status: "queued")
 }
 `))
 	if err != nil {

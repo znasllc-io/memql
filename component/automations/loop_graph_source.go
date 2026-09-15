@@ -230,24 +230,33 @@ func fieldValueOf(v any) work.FieldValue {
 	return work.FieldValue{}
 }
 
-// constructCallKinds are the call prefixes that run a construct the call
-// graph holds. automation, action and capability calls have their own step
-// types and are not construct calls of the function registry.
-var constructCallKinds = map[string]bool{"query": true, "mutation": true, "logic": true, "builtin": true}
-
-// logicCalls is the names a logic's body calls, sorted: the call its return
-// makes (fn.Expr) and its statements' calls (fn.LogicSteps). Epic 3 replaces
-// both halves in Task 13 of the loop protection plan, when a logic body is
-// statements rather than a step list.
+// logicCalls is the names a logic's statements call, sorted: every call
+// statement in its compiled body (fn.LogicBody), through its loops, its
+// parallel branches and the blocks an if or a switch compiles to. A construct
+// call is always a statement of its own, so no expression holds one; a
+// catalog function is not a call statement and contributes nothing.
 func logicCalls(fn *memql.Function) []string {
 	set := map[string]bool{}
-	add := func(name string) {
-		if name = strings.TrimSpace(name); name != "" {
-			set[name] = true
+	var walk func(steps []map[string]any)
+	walk = func(steps []map[string]any) {
+		for _, st := range steps {
+			if f, ok := st["function"].(map[string]any); ok {
+				if name, _ := f["name"].(string); strings.TrimSpace(name) != "" {
+					set[strings.TrimSpace(name)] = true
+				}
+			}
+			if fe, ok := st["forEach"].(map[string]any); ok {
+				walk(stepMaps(fe["do"]))
+			}
+			if p, ok := st["parallel"].(map[string]any); ok {
+				walk(stepMaps(p["branches"]))
+			}
+			if b, ok := st["block"].(map[string]any); ok {
+				walk(stepMaps(b["steps"]))
+			}
 		}
 	}
-	logicReturnCalls(fn.Expr, add)
-	legacyLogicStepCalls(fn.LogicSteps, add)
+	walk(fn.LogicBody)
 	if len(set) == 0 {
 		return nil
 	}
@@ -259,87 +268,20 @@ func logicCalls(fn *memql.Function) []string {
 	return out
 }
 
-// logicReturnCalls reads a logic's fn.Expr: a construct call its return makes
-// (convertLogicReturnV1), and any construct call inside a returned
-// expression.
-func logicReturnCalls(n memql.ExpressionNode, add func(string)) {
-	switch e := n.(type) {
-	case *memql.FunctionCallExpression:
-		if e == nil {
-			return
-		}
-		add(e.Name)
-		for _, v := range e.Args {
-			if pc, ok := v.(*memql.PlanConstExpression); ok && pc != nil {
-				constructCallsIn(pc.Expr, add)
+// stepMaps reads a compiled step list, which the compiler builds as
+// []map[string]any and a JSON round trip leaves as []any.
+func stepMaps(v any) []map[string]any {
+	switch l := v.(type) {
+	case []map[string]any:
+		return l
+	case []any:
+		out := make([]map[string]any, 0, len(l))
+		for _, x := range l {
+			if m, ok := x.(map[string]any); ok {
+				out = append(out, m)
 			}
 		}
-	case *memql.PlanConstExpression:
-		if e != nil {
-			constructCallsIn(e.Expr, add)
-		}
+		return out
 	}
-}
-
-// constructCallsIn adds every construct call a v1 expression holds.
-func constructCallsIn(n ast.ExpressionNode, add func(string)) {
-	ast.WalkV1(n, func(x ast.ExpressionNode) bool {
-		if call, ok := x.(*ast.CallExpr); ok && call != nil && call.Receiver == nil && constructCallKinds[call.Kind] {
-			add(call.Name)
-		}
-		return true
-	})
-}
-
-// legacyLogicStepCalls reads the statements of a logic body the LogicRunner
-// runs (fn.LogicSteps): each call statement's name, and the construct a
-// statement's expression calls (a `_return` of `query x(...)`), walking
-// loops, parallel branches and switch cases. A catalog function or a helper
-// (publishEvent) named here is not in the registry and contributes nothing.
-// Deleted with LogicSteps by Task 13 of the loop protection plan.
-func legacyLogicStepCalls(def *languageParser.AutomationDef, add func(string)) {
-	if def == nil {
-		return
-	}
-	var walk func(steps []languageParser.StepDef)
-	walk = func(steps []languageParser.StepDef) {
-		for i := range steps {
-			switch cfg := steps[i].Config.(type) {
-			case *languageParser.FunctionStepConfig:
-				if cfg != nil {
-					add(cfg.Name)
-				}
-			case *languageParser.QueryStepConfig:
-				if cfg != nil && cfg.Query != nil {
-					constructCallsIn(cfg.Query, add)
-				}
-			case *languageParser.ForEachStepConfig:
-				if cfg != nil {
-					walk(cfg.Do)
-				}
-			case *languageParser.ParallelStepConfig:
-				if cfg != nil {
-					walk(cfg.Branches)
-				}
-			case *languageParser.SwitchStepConfig:
-				if cfg == nil {
-					continue
-				}
-				for _, label := range sortedKeys(cfg.Cases) {
-					if c := cfg.Cases[label]; c != nil {
-						walk(c.Steps)
-					}
-				}
-				if cfg.Default != nil {
-					walk(cfg.Default.Steps)
-				}
-			}
-		}
-	}
-	walk(def.Steps)
-	for _, hook := range []*languageParser.StepDef{def.OnComplete, def.OnError} {
-		if hook != nil {
-			walk([]languageParser.StepDef{*hook})
-		}
-	}
+	return nil
 }

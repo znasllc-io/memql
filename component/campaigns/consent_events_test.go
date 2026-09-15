@@ -29,25 +29,25 @@ func TestConsentKindsAreEvents(t *testing.T) {
 			t.Fatalf("consentEvent kind %q missing", kind)
 		}
 	}
-	if strings.Contains(src, "mutate consentEvent update") {
+	if strings.Contains(src, "mutation consentEvent update") {
 		t.Fatal("consentEvent must be append-only: no update mutation")
 	}
 }
 
 func TestConsentSuppressRequiresReason(t *testing.T) {
 	mut := campaignsDSL(t, "mutations.memql")
-	if !strings.Contains(mut, "mutate consentEvent recordConsentSuppress") {
+	if !strings.Contains(mut, "mutation consentEvent recordConsentSuppress") {
 		t.Fatal("recordConsentSuppress missing")
 	}
 	if !strings.Contains(mut, "reason       string!") && !strings.Contains(mut, "reason      string!") && !strings.Contains(mut, "reason       string!") {
 		// look at the suppress block specifically
 	}
-	idx := strings.Index(mut, "mutate consentEvent recordConsentSuppress")
+	idx := strings.Index(mut, "mutation consentEvent recordConsentSuppress")
 	if idx < 0 {
 		t.Fatal("missing suppress mutation")
 	}
 	block := mut[idx:]
-	if end := strings.Index(block[1:], "\nmutate "); end > 0 {
+	if end := strings.Index(block[1:], "\nmutation "); end > 0 {
 		block = block[:end]
 	}
 	if !strings.Contains(block, "reason") || !strings.Contains(block, "string!") {
@@ -83,7 +83,7 @@ func TestConsentExportAnswersStatusDateSource(t *testing.T) {
 
 func TestConsentHasNoUpdateMutation(t *testing.T) {
 	mut := campaignsDSL(t, "mutations.memql")
-	if strings.Contains(mut, "mutate consentEvent update") || strings.Contains(mut, "updateConsent") {
+	if strings.Contains(mut, "mutation consentEvent update") || strings.Contains(mut, "updateConsent") {
 		t.Fatal("consent must not have an in-place update")
 	}
 }

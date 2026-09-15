@@ -53,6 +53,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/znasllc-io/memql/component/language/ast"
 )
 
 // GateUnresolvedSubAutomation is the rule id. Declared here rather than in
@@ -60,20 +62,21 @@ import (
 // set.
 const GateUnresolvedSubAutomation Gate = "unresolved-sub-automation"
 
-// THE THREE DECLARATION FORMS. All three are live in the tree, and a
-// declaration index that knows only the first produces confident false
-// positives on the other two -- a refused boot naming an automation that is
-// right there in the file.
+// THE THREE DECLARATION SHAPES the loaders slice. A declaration index that
+// knows only the first produces confident false positives on the others -- a
+// refused boot naming an automation that is right there in the file.
 //
 //  1. strict:  `automation NAME {`
 //  2. loose:   `automation NAME` with the brace on the following line
-//  3. terse:   `automation NAME @trigger(...) => logic X`
+//  3. terse:   `automation NAME @trigger(...) => logic X`, the retired
+//     one-line form: the loaders slice it so the parser refuses it by name
+//     (body_terse_retired), and indexing it here keeps a call to it from
+//     reporting as unresolved beside that refusal.
 //
-// These mirror automationStructHeader / automationLooseHeader
-// (component/automations/unified_loader.go) and terseAutomationHeader
-// (component/language/parser/rewriter.go). They are copied rather than imported
-// because dslgate must not depend on the loader or the parser -- but they must
-// stay in step, which is what TestDeclarationFormsCoverTheLoaders asserts.
+// These mirror automationStructHeader / automationLooseHeader /
+// automationTerseHeader (component/automations/unified_loader.go). They are
+// copied rather than imported because dslgate must not depend on the loader,
+// so they are kept in step by hand.
 var (
 	automationDeclStrict = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
 	automationDeclLoose  = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*$`)
@@ -113,14 +116,19 @@ func enclosingAutomation(code string, offset int) string {
 
 // scanSubAutomationCalls is the corpus-level gate. Pass 1 indexes every
 // declaration; pass 2 walks every call site and reports the ones that resolve
-// to nothing.
+// to nothing: the text's, and a statement body's, read off its parsed body
+// (epic memql#5370) -- there a call is a statement of its own wherever it
+// sits, named (`x := automation y(...)`), inside a block or on a one-line
+// `if`, which no line pattern can follow.
 func scanSubAutomationCalls(files []SourceFile) []Violation {
 	code := make(map[string]string, len(files))
 	paths := make([]string, 0, len(files))
+	var scanned []SourceFile
 	for _, f := range files {
 		if skipForAutomationScan(f.Path) {
 			continue
 		}
+		scanned = append(scanned, f)
 		paths = append(paths, f.Path)
 		// Strings first, then comments -- the same order imports.go uses, and
 		// for the same reason: blanking comments first lets a `//` inside a
@@ -139,6 +147,26 @@ func scanSubAutomationCalls(files []SourceFile) []Violation {
 	}
 
 	var out []Violation
+	reported := map[string]bool{} // "<path>:<line>:<callee>"
+	report := func(path string, line int, caller, callee string) {
+		key := fmt.Sprintf("%s:%d:%s", path, line, callee)
+		if reported[key] {
+			return
+		}
+		reported[key] = true
+		out = append(out, Violation{
+			Gate:      GateUnresolvedSubAutomation,
+			File:      path,
+			Line:      line,
+			Kind:      "automation",
+			Construct: caller,
+			Detail: fmt.Sprintf(
+				"step calls `automation %s( ... )`, and no automation named %q is declared anywhere in the loaded corpus -- "+
+					"check the spelling, or add the domain it lives in to the tree this node loads (MEMQL_DSL_PATH for a product bundle). "+
+					"Left unresolved this loads clean and fails at RUN time, after every earlier step of %s has already taken effect (memql#4471)",
+				callee, callee, describeCaller(caller)),
+		})
+	}
 	for _, p := range paths {
 		src := code[p]
 		for _, m := range automationCall.FindAllStringSubmatchIndex(src, -1) {
@@ -146,22 +174,41 @@ func scanSubAutomationCalls(files []SourceFile) []Violation {
 			if _, ok := declared[callee]; ok {
 				continue
 			}
-			caller := enclosingAutomation(src, m[0])
-			out = append(out, Violation{
-				Gate:      GateUnresolvedSubAutomation,
-				File:      p,
-				Line:      strings.Count(src[:m[0]], "\n") + 1,
-				Kind:      "automation",
-				Construct: caller,
-				Detail: fmt.Sprintf(
-					"step calls `automation %s( ... )`, and no automation named %q is declared anywhere in the loaded corpus -- "+
-						"check the spelling, or add the domain it lives in to the tree this node loads (MEMQL_DSL_PATH for a product bundle). "+
-						"Left unresolved this loads clean and fails at RUN time, after every earlier step of %s has already taken effect (memql#4471)",
-					callee, callee, describeCaller(caller)),
-			})
+			report(p, strings.Count(src[:m[0]], "\n")+1, enclosingAutomation(src, m[0]), callee)
 		}
 	}
+	eachStatementBody(scanned, func(f SourceFile, kind, name string, startLine int, body *ast.Body) {
+		ast.WalkBody(body.Statements, func(st ast.BodyStatement) bool {
+			call := statementConstructCall(st)
+			if call == nil || call.Kind != "automation" {
+				return true
+			}
+			if _, ok := declared[call.Name]; ok {
+				return true
+			}
+			at := call.Span
+			if at.IsZero() {
+				at = st.StatementSpan()
+			}
+			report(f.Path, startLine+at.Line-1, name, call.Name)
+			return true
+		})
+	})
 	return out
+}
+
+// statementConstructCall is the construct call a statement makes itself, or
+// nil: a call, an assignment of one, or a return of one.
+func statementConstructCall(st ast.BodyStatement) *ast.ConstructCall {
+	switch s := st.(type) {
+	case *ast.CallStatement:
+		return s.Call
+	case *ast.AssignStatement:
+		return s.Call
+	case *ast.ReturnStatement:
+		return s.Call
+	}
+	return nil
 }
 
 func describeCaller(caller string) string {

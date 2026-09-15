@@ -2305,7 +2305,7 @@ export interface CreateIdentityProviderArgs {
   issuerUrl: string;
   clientIdPrefix?: string;
   redirectUrl?: string;
-  /** Both already computed by app/cluster.go's parseIdentityProviderInfo and dropped on the floor by the automation step, which forwarded four fields out of six (memql#4766). */
+  /** Both already computed by app/cluster.go's parseIdentityProviderInfo and dropped on the floor by the automation's call, which forwarded four fields out of six (memql#4766). */
   acceptedAudiences?: string[];
   jwksUrl?: string;
   clusterId?: string;

@@ -1,0 +1,201 @@
+{
+  "automation": "platform/automations.memql dispatchInboundToConnector",
+  "runs": {
+    "event agent | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "node_created",
+          "payload": {
+            "agentId": "agent-1",
+            "body": "s-body",
+            "createdBySubject": "subject-0",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "source": "s-source",
+            "status": "succeeded"
+          },
+          "topic": "graph.node.created.v1:platform:inboundRequest"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "body": "s-body",
+              "inboundRequestId": "v1:probe:thing:1",
+              "source": "s-source"
+            },
+            "kind": "builtin",
+            "name": "datasyncDispatchInbound"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event agent | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "node_created",
+          "payload": {
+            "agentId": "agent-1",
+            "body": "s-body",
+            "createdBySubject": "subject-0",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "source": "s-source",
+            "status": "succeeded"
+          },
+          "topic": "graph.node.created.v1:platform:inboundRequest"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "body": "s-body",
+              "inboundRequestId": "v1:probe:thing:1",
+              "source": "s-source"
+            },
+            "kind": "builtin",
+            "name": "datasyncDispatchInbound"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "node_created",
+          "payload": {
+            "agentId": "agent-1",
+            "body": "s-body",
+            "createdBySubject": "subject-0",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "source": "s-source",
+            "status": "succeeded"
+          },
+          "topic": "graph.node.created.v1:platform:inboundRequest"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "body": "s-body",
+              "inboundRequestId": "v1:probe:thing:1",
+              "source": "s-source"
+            },
+            "kind": "builtin",
+            "name": "datasyncDispatchInbound"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "node_created",
+          "payload": {
+            "agentId": "agent-1",
+            "body": "s-body",
+            "createdBySubject": "subject-0",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "source": "s-source",
+            "status": "succeeded"
+          },
+          "topic": "graph.node.created.v1:platform:inboundRequest"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "body": "s-body",
+              "inboundRequestId": "v1:probe:thing:1",
+              "source": "s-source"
+            },
+            "kind": "builtin",
+            "name": "datasyncDispatchInbound"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

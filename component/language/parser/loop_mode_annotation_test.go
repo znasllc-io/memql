@@ -15,9 +15,7 @@ func loopModeProbe(head string) string {
 	return `@trigger(event="node.created", concept="v1:probe:ticket")
 ` + head + `
 automation probe {
-  step first {
-    logic other(x: 1)
-  }
+  first := logic other(x: 1)
 }`
 }
 
@@ -144,22 +142,5 @@ func TestLoopUntilFormIsPlacedOnTheValue(t *testing.T) {
 	wantLine, wantCol := authoredAt(t, src, `"done"`, 1)
 	if line, col := pe.Position(); line != wantLine || col != wantCol {
 		t.Errorf("the refusal is at %d:%d, want %d:%d (the value after until=): %v", line, col, wantLine, wantCol, err)
-	}
-}
-
-// TestLoopOnATerseAutomation: the terse header's arrow is the last top-level
-// `=>`, so until's lambda, inside @loop's parentheses, does not end the
-// header early.
-func TestLoopOnATerseAutomation(t *testing.T) {
-	src := `automation probe @trigger(event="node.created", concept="v1:probe:ticket") @filter(row => row.status != "done") @loop(maxDepth=3, until=row => row.status == "done") @mode(queued) => logic probe`
-	auto := automationBody(t, mustParseV1Authored(t, src))
-	if auto.Loop == nil || auto.Loop.MaxDepth != 3 || ast.FormatExpr(auto.Loop.Until) != `row => row.status == "done"` {
-		t.Fatalf("Loop = %+v", auto.Loop)
-	}
-	if auto.Mode == nil || !reflect.DeepEqual(auto.Mode.Flags, []string{"queued"}) {
-		t.Fatalf("Mode = %+v", auto.Mode)
-	}
-	if auto.Trigger == nil || auto.Trigger.Filter != `row => row.status != "done"` {
-		t.Fatalf("Trigger = %+v", auto.Trigger)
 	}
 }

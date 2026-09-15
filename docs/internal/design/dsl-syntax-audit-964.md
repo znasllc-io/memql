@@ -34,7 +34,7 @@ backed by a file:line in the source tree at the time of writing.
 in the signature and then named again in the body:
 
 ```
-mutate participant addAgentToSpace {             // concept bound here
+mutation participant addAgentToSpace {             // concept bound here
   ...
   insert participant { ... }                     // and restated here (redundant)
 }
@@ -290,7 +290,7 @@ trait traitIsChecked {
 
 ### 5. mutation
 
-Options. Signature `mutate <Concept> <name>`. Annotations: `@enabled`/
+Options. Signature `mutation <Concept> <name>`. Annotations: `@enabled`/
 `@disabled`, `@description`, `@public`/`@internal` (authz markers). `args { <name>
 <type> [@required] [@enum(...)] [@default(...)] [@description] }`. Exactly ONE
 body: `insert <Concept> { ... }` OR `update <Concept> { ... }` (concept currently
@@ -308,7 +308,7 @@ use crm.concepts.{ lead }
 @enabled
 @description("Create a lead.")
 @public                                        // authz marker (owned|granted|admin|public)
-mutate lead mutationCreateLead {
+mutation lead mutationCreateLead {
   args {
     name    string @required @description("Full name")
     email   string @required
@@ -327,7 +327,7 @@ mutate lead mutationCreateLead {
 }
 
 @description("Bump a timestamp (partial update).")
-mutate lead mutationTouchLead {
+mutation lead mutationTouchLead {
   args { leadId string @required }
   update lead { id: args.leadId; lastTouchedAt: timestamp() }
 }

@@ -1,0 +1,21 @@
+{
+  "cases": [
+    {
+      "file": "wait-any.memql",
+      "verdict": "load_ok",
+      "note": "wait all is the default and is not written"
+    },
+    {
+      "file": "wait-some.memql",
+      "verdict": "refuse_parse",
+      "code": "body_wait_value",
+      "message": "`wait` takes `any` (`wait all` is the default and is not written)"
+    },
+    {
+      "file": "wait-all.memql",
+      "verdict": "refuse_parse",
+      "code": "body_default_clause",
+      "message": "`wait all` is the default: delete it"
+    }
+  ]
+}

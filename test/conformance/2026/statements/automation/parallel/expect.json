@@ -1,0 +1,15 @@
+{
+  "cases": [
+    {
+      "file": "parallel.memql",
+      "verdict": "load_ok",
+      "note": "each branch is a list of its own; a name bound in one exists in that branch only"
+    },
+    {
+      "file": "return-in-a-parallel-branch.memql",
+      "verdict": "refuse_load",
+      "code": "body_return_in_parallel",
+      "message": "a parallel branch cannot return: bind a name and return after the parallel"
+    }
+  ]
+}

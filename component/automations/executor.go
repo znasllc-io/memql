@@ -13,7 +13,6 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/provenance"
 	"github.com/znasllc-io/memql/core/common"
-	"github.com/znasllc-io/memql/core/id"
 )
 
 // systemActorPrefix is the prefix for system-generated actor identifiers.
@@ -188,9 +187,10 @@ type StepContext struct {
 	AutomationTrigger AutomationTrigger
 	TriggeringEvent   *events.Event // The event that triggered this automation (if any)
 
-	// PreviousChainHead is the chain state before this step executes.
-	// For child steps in forEach/parallel, this links to the parent's chain position
-	// (parallel) or the previous sibling's chain head (forEach sequential).
+	// PreviousChainHead is the chain state before this step executes. The
+	// chain advances over the top-level statements only: a statement in a
+	// `for` body or a parallel branch carries the chain position of the
+	// statement that holds it.
 	PreviousChainHead string
 
 	// ChainTrackingEnabled indicates whether chain tracking is active.
@@ -213,11 +213,8 @@ type ExecutorOptions struct {
 	// straight to the engine, never through the interception layer, so a
 	// "dry-run" left durable, RESUMABLE rows in the live graph.
 	//
-	// It is not the only write that escapes -- sandbox_registry intercepts
-	// mutation / webhook / mutating-function steps and forwards everything else
-	// to the production executors, and executeInput bypasses the step registry
-	// entirely -- so dryrun.go's "zero rows land in the live graph" remains
-	// overstated after this change (tracked separately). The journal is the
+	// Since memql#2943 the sandbox registry refuses every step type it has not
+	// classified, so the journal was the last write that escaped, and it is the
 	// one that matters for #2890 / #2908, because it is the only escaping write
 	// that is a RESUMABLE TOKEN.
 	//
@@ -515,7 +512,8 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	evaluator := NewEvaluator()
 	bindActorEnvelope(ctx, evaluator)
 
-	// Wire variable resolver for $var.X expressions
+	// The resolvers the catalog's var(), systemVar(), secret() and
+	// systemSecret() read.
 	evaluator.SetVariableResolver(e.createVariableResolver())
 	evaluator.SetSystemVariableResolver(e.createSystemVariableResolver())
 	evaluator.SetSecretResolver(e.createSecretResolver())
@@ -523,22 +521,15 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	evaluator.SetCanonicalIdResolver(e.createCanonicalIdResolver())
 	evaluator.SetLogger(e.logger)
 
-	// Make timestamp available to the evaluator
-	evaluator.SetCustom("timestamp", time.Now().UTC().Format(time.RFC3339))
+	// The run's one clock, which `now` reads (runClock).
+	evaluator.SetCustom("now", time.Now().UTC().Format(time.RFC3339))
 
-	// Make triggering event data available to the evaluator under the
-	// `event` root AND the ctx envelope; the two share the same backing
-	// map.
+	// The triggering event, under the `event` root.
 	eventEnvelope := buildEventEnvelope(triggeringEvent, triggeredBy, trigger)
 	if adopt != nil && adopt.Journal != nil && adopt.Journal.GoalId == "" && adopt.Journal.TriggerEvent != nil {
 		eventEnvelope = adopt.Journal.TriggerEvent
 	}
 	evaluator.SetCustom("event", eventEnvelope)
-	evaluator.SetCustom("ctx", map[string]any{
-		"input":  eventEnvelope,
-		"output": nil,
-		"error":  "",
-	})
 
 	// Fire-time args validation (event-payload-binding ADR Decision 2,
 	// memql#2363). This is the universal entry gate for every trigger mode:
@@ -547,9 +538,8 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	// http-trigger (TriggerAutomationWithEvent) paths reach here directly.
 	// Re-validating is idempotent for the event path and is the single point
 	// of enforcement for the others. A violation REFUSES the run -- no steps
-	// execute -- and the validated map is exposed to the step evaluator as
-	// `args` (bodies in G1 may read `args.X`). Automations without an args
-	// block bind nothing and behave exactly as before.
+	// execute -- and the validated map is exposed to the statements as
+	// `args`. An automation without an args block binds nothing.
 	boundArgs, extraArgs, argErr := bindEventArgs(automation, triggeringEvent)
 	if argErr != nil {
 		topic := trigger
@@ -572,9 +562,6 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	}
 	if boundArgs != nil {
 		evaluator.SetCustom("args", boundArgs)
-		// G2 (memql#2364): the declared-field set lets a declared-but-absent
-		// optional field resolve bare to nil instead of the literal fallback.
-		evaluator.SetCustom("argsDeclared", declaredArgsSet(automation))
 	}
 	bindRunAmbient(ctx, e.engine, evaluator)
 
@@ -593,30 +580,6 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 		"executionId":    exec.ID,
 		"triggeredBy":    triggeredBy,
 	})
-
-	// Execute input query if defined
-	if automation.Input != nil && automation.Input.Query != "" {
-		// #2800: the input block reaches the engine exactly like a step, so
-		// it gets the same trust rule -- stamped only when the automation's
-		// SOURCE came from the registered tree.
-		// exec.SourceTrusted, not automation.Trusted (memql#2888 review): the
-		// `input:` block kept the OLD rule, so the caller-payload downgrade
-		// never reached it and the two origin decisions could drift.
-		//
-		// UNTESTED, deliberately stated: executeInput returns early without an
-		// engine and nothing populates Automation.Input today, so a mutation
-		// here stays green. The alignment is for the drift, not for a
-		// reachable exploit -- if `input:` ever becomes live, it inherits the
-		// right rule instead of the one that was already wrong.
-		inputResult, err := e.executeInput(originForSource(ctx, exec.SourceTrusted), automation.Input)
-		if err != nil {
-			exec.Fail(fmt.Errorf("input query failed: %w", err))
-			e.handleAutomationError(ctx, automation, exec, triggeringEvent, err)
-			return exec, err
-		}
-		exec.Input = inputResult
-		evaluator.SetInput(inputResult)
-	}
 
 	// First-class precondition gate (Epic 4 / memql#2139). Evaluate every
 	// precondition deterministically (no LLM) BEFORE any step runs. A miss
@@ -734,6 +697,9 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	} else {
 		journal.openRun(ctx, automation, exec, triggeringEvent, parentCause)
 	}
+	// A logic a step calls journals its statements where this run's rows go
+	// (logic_statements.go) -- nowhere, when the run is not journaled.
+	ctx = withRunJournal(ctx, exec.ID, journal)
 
 	// Execute steps
 	stepCtx := &StepContext{
@@ -747,235 +713,10 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 		ChainTrackingEnabled: e.chainTrackingEnabled,
 	}
 
-	// The graph-level stop. See cancel.go: the zero value asks at the FIRST
-	// boundary, so a run cancelled while it was queued runs no step at all.
-	cancelPoll := newCancelPoller(e.cancelPollInterval)
-
-	for stepIndex, step := range automation.Steps {
-		// Replay/fork needs the executed order even without chain hashing.
-		exec.StepOrder = append(exec.StepOrder, step.ID)
-
-		// Check for cancellation
-		select {
-		case <-ctx.Done():
-			exec.Cancel()
-			journal.closeRun(ctx, exec, chainHead)
-			return exec, ctx.Err()
-		default:
-		}
-
-		// ...and the OTHER cancellation, which is not the same question
-		// (memql#5066). `ctx.Done()` is this process losing interest -- a
-		// shutdown, a deadline, a caller that went away. `cancelRequested` is
-		// somebody DECIDING the work should stop, recorded on the run row so it
-		// survives the ask reaching a different replica from the one executing.
-		// A cluster is the normal topology here, so a stop that only travelled
-		// in a context would be honoured on a coin flip.
-		if cancelPoll.due(time.Now()) {
-			if asked, by := journal.cancelRequested(ctx, exec.ID); asked {
-				if e.logger != nil {
-					e.logger.Info("run cancelled at a step boundary",
-						"component", ComponentName,
-						"automation", automation.Name,
-						"runId", exec.ID,
-						"beforeStep", step.ID,
-						"cancelledBy", by,
-					)
-				}
-				journal.cancelStop(ctx, exec, chainHead, by)
-				// nil, not an error: nothing failed. A cancelled run is a
-				// terminal outcome somebody chose, and returning an error here
-				// would file it under the defects an operator scans.
-				return exec, nil
-			}
-		}
-
-		// Evaluate step condition if present
-		if step.Condition != "" {
-			if e.logger != nil {
-				e.logger.Debug("evaluating step condition",
-					"step", step.ID,
-					"condition", step.Condition,
-				)
-			}
-			shouldRun, err := evaluator.StepCondition(ctx, step)
-			if err != nil {
-				if e.logger != nil {
-					e.logger.Warn("step condition evaluation failed",
-						"step", step.ID,
-						"condition", step.Condition,
-						"error", err,
-					)
-				}
-				shouldRun = false
-			}
-			if e.logger != nil {
-				e.logger.Debug("step condition evaluated",
-					"step", step.ID,
-					"condition", step.Condition,
-					"result", shouldRun,
-				)
-			}
-			if !shouldRun {
-				// Record skipped step
-				skipResult := &StepResult{
-					StepId:      step.ID,
-					Status:      "skipped",
-					StartedAt:   time.Now(),
-					CompletedAt: time.Now(),
-				}
-				if e.logger != nil {
-					e.logger.Debug("step skipped due to condition",
-						"step", step.ID,
-						"condition", step.Condition,
-					)
-				}
-				exec.AddStepResult(skipResult)
-				// Make skipped steps visible to later step conditions (steps.<id>.status).
-				evaluator.SetStepResult(step.ID, skipResult)
-				// A skipped step is a first-class trace entry: "this step did
-				// not run, and here is the condition that decided that" is
-				// most of what a caller wants from a run that did nothing.
-				notifyStepObserver(ctx, skipResult)
-				journal.stepSkipped(ctx, exec, step, stepIndex)
-				continue
-			}
-		}
-
-		// Set current chain head in context for child steps (forEach/parallel)
-		if e.chainTrackingEnabled {
-			stepCtx.PreviousChainHead = chainHead
-		}
-
-		// Execute the step. The intent row goes first: a step is written at
-		// `running` BEFORE its body so a crash mid-step leaves evidence the
-		// step was reached, which is what resume uses as its resume point.
-		journal.stepRunning(ctx, exec, step, stepIndex, 1)
-		result, err := e.executeJournaledStep(ctx, journal, step, stepCtx)
-		if result != nil {
-			// Compute chain linkage if tracking enabled
-			if e.chainTrackingEnabled {
-				result.PreviousChainHead = chainHead
-				result.ContentId = StepDeterministicFingerprint(step, result)
-				// Advance chain head
-				chainHead = string(fingerprintEngine.Combine(
-					id.ID(chainHead),
-					id.ID(result.ContentId),
-				))
-			}
-
-			exec.AddStepResult(result)
-			evaluator.SetStepResult(step.ID, result)
-			notifyStepObserver(ctx, result)
-			journal.stepFinished(ctx, exec, step, result, chainHead)
-		}
-
-		if err != nil {
-			// Handle error based on strategy
-			switch step.OnError {
-			case ErrorStrategyContinue:
-				if e.logger != nil {
-					e.logger.Warn("step failed, continuing",
-						"component", ComponentName,
-						"step", step.ID,
-						"error", err,
-					)
-				}
-				continue
-			case ErrorStrategyRetry:
-				// Retry logic
-				retried := false
-				for attempt := 1; attempt <= step.RetryCount && !retried; attempt++ {
-					if e.logger != nil {
-						e.logger.Info("retrying step",
-							"component", ComponentName,
-							"step", step.ID,
-							"attempt", attempt,
-						)
-					}
-					journal.stepRunning(ctx, exec, step, stepIndex, attempt+1)
-					result, err = e.executeJournaledStep(ctx, journal, step, stepCtx)
-					if err == nil {
-						// Compute chain linkage if tracking enabled
-						if e.chainTrackingEnabled && result != nil {
-							result.PreviousChainHead = chainHead
-							result.ContentId = StepDeterministicFingerprint(step, result)
-							chainHead = string(fingerprintEngine.Combine(
-								id.ID(chainHead),
-								id.ID(result.ContentId),
-							))
-						}
-						exec.AddStepResult(result)
-						evaluator.SetStepResult(step.ID, result)
-						notifyStepObserver(ctx, result)
-						journal.stepFinished(ctx, exec, step, result, chainHead)
-						retried = true
-					}
-				}
-				if !retried {
-					// Every attempt was spent: the initial one plus RetryCount
-					// retries. The symptom table's stall rule keys on exactly
-					// this, and it sits above every transient matcher so a
-					// repeated action escalates instead of retrying forever.
-					exec.RecordFailedStep(step, step.RetryCount+1)
-					exec.Fail(err)
-					// The last attempt's receipt, so the row does not sit at
-					// `running` forever when every retry was spent.
-					journal.stepFinished(ctx, exec, step, result, chainHead)
-					journal.closeRun(ctx, exec, chainHead)
-					e.handleAutomationError(ctx, automation, exec, triggeringEvent, err)
-					return exec, err
-				}
-			default: // ErrorStrategyStop
-				exec.RecordFailedStep(step, 1)
-				exec.Fail(err)
-				journal.closeRun(ctx, exec, chainHead)
-				e.handleAutomationError(ctx, automation, exec, triggeringEvent, err)
-				return exec, err
-			}
-		}
-	}
-
-	// Execute onComplete hook if defined
-	if automation.OnComplete != nil {
-		_, err := e.executeStep(ctx, automation.OnComplete, stepCtx)
-		if err != nil && e.logger != nil {
-			e.logger.Warn("onComplete hook failed",
-				"component", ComponentName,
-				"error", err,
-			)
-		}
-	}
-
-	exec.Complete()
-	journal.closeRun(ctx, exec, chainHead)
-
-	// Finalize chain tracking
-	if e.chainTrackingEnabled {
-		exec.ChainHead = chainHead
-
-		// Register execution for dedup
-		if e.dedup != nil {
-			e.dedup.register(automation.Name, exec.InitialChainHead, exec.ID)
-		}
-	}
-
-	// Publish automation completed event
-	completedPayload := map[string]any{
-		"automationName": automation.Name,
-		"executionId":    exec.ID,
-		"duration":       exec.Duration.Milliseconds(),
-		"stepCount":      len(exec.Steps),
-	}
-	if e.chainTrackingEnabled && exec.ChainHead != "" {
-		completedPayload["chainHead"] = exec.ChainHead
-	}
-	e.publishEvent(ctx, events.TopicAutomationCompleted, events.KindAutomationCompleted, completedPayload)
-
-	return exec, nil
+	// The statements run through runSequence (sequence.go), the one loop.
+	return e.runStatementAutomation(ctx, automation, exec, triggeringEvent, journal, stepCtx, chainHead, nil)
 }
 
-// executeInput runs the input query.
 // originForSource applies the #2800 trust rule: an automation body reaches the
 // engine with INTERNAL origin only when its source came from the registered
 // tree. Caller-submitted source (a bundle dry-run, an inline automation) stays
@@ -983,8 +724,8 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 // construct.
 //
 // This is a named function rather than an inline `if` because the inline form
-// was DELETABLE WITH A GREEN SUITE: the only end-to-end tests drive automations
-// with no `input:` block, so the branch was never entered. The Executor holds a
+// was DELETABLE WITH A GREEN SUITE: no end-to-end test entered the untrusted
+// branch. The Executor holds a
 // concrete *memql.MemQLEngine rather than an interface, so there is no seam to
 // inject a capturing engine through -- extracting the decision is what makes it
 // assertable at all. See TestOriginForSource.
@@ -1002,29 +743,6 @@ func originForSource(ctx context.Context, trusted bool) context.Context {
 		return auth.ContextWithInternalOrigin(ctx)
 	}
 	return auth.ContextWithClientOrigin(ctx)
-}
-
-func (e *Executor) executeInput(ctx context.Context, input *AutomationInput) (any, error) {
-	if e.engine == nil {
-		return nil, fmt.Errorf("MemQL engine not configured")
-	}
-
-	query := input.Query
-	if input.Limit > 0 {
-		query = fmt.Sprintf("paginate(%s, %d)", query, input.Limit)
-	}
-
-	// #2800: same trust rule as executeStep -- an inline automation's
-	// `input:` block is caller-supplied source too, so it cannot be stamped
-	// unconditionally. The automation record is not threaded into this frame,
-	// so the stamp is applied by ExecuteWithEvent (which has it) before
-	// calling here; this frame deliberately does NOT stamp.
-	result, err := e.engine.Execute(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-
-	return result, nil
 }
 
 // executeStep runs a single step using the registry.
@@ -1054,11 +772,11 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 	// unconditional stamp; two earlier attempts were wrong in opposite
 	// directions and the reasoning for each looked sound at the time:
 	//
-	//   1. Stamped the `input:` block only. No step goes through that path --
-	//      every step type dispatches via stepRegistry.Execute -- so the kill
-	//      switch was refused as a client call and silently suspended
-	//      nothing. Closed-looking but open, exactly as the issue's park
-	//      comment predicted.
+	//   1. Stamped the automation's input evaluation only. No step went
+	//      through that path -- every step type dispatches via
+	//      stepRegistry.Execute -- so the kill switch was refused as a client
+	//      call and silently suspended nothing. Closed-looking but open,
+	//      exactly as the issue's park comment predicted.
 	//
 	//   2. Stamped HERE unconditionally, justified by "executeStep is
 	//      reachable only from automation execution and resume". That is
@@ -1077,9 +795,9 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 	// client-callable `logic foo(...)` path, so stamping there would let a
 	// caller launder client origin by wrapping a @serverOnly read in a logic.
 	//
-	// Routed through originForSource so the step and input: paths cannot
-	// drift, and so the untrusted branch stamps CLIENT rather than inheriting
-	// whatever the parent carried -- see that function's comment.
+	// Routed through originForSource so the untrusted branch stamps CLIENT
+	// rather than inheriting whatever the parent carried -- see that
+	// function's comment.
 	trusted := stepCtx != nil && stepCtx.Execution != nil && stepCtx.Execution.SourceTrusted
 	stepExecCtx := e.withRunContext(originForSource(ctx, trusted), stepCtx, step)
 	result, err := e.stepRegistry.Execute(stepExecCtx, step, stepCtx)
@@ -1130,16 +848,18 @@ func (e *Executor) withRunContext(ctx context.Context, stepCtx *StepContext, ste
 	// Keep inherited lineage and replay policy, but identify the current
 	// step when this executor owns that run. Nested executions keep their
 	// parent's association rather than attributing a call to another run.
+	// A step in a statement body's nested list is keyed by its list's path
+	// (stepKeyIn, sequence.go); every other step's key is its id.
 	if run, ok := common.RunFromContext(ctx); ok {
 		if memql.BareShortId(run.RunId) == memql.BareShortId(stepCtx.Execution.ID) {
-			run.StepKey = step.ID
+			run.StepKey = stepKeyIn(ctx, step.ID)
 			return common.ContextWithRun(ctx, run)
 		}
 		return ctx
 	}
 	return common.ContextWithRun(ctx, common.RunContext{
 		RunId:   stepCtx.Execution.ID,
-		StepKey: step.ID,
+		StepKey: stepKeyIn(ctx, step.ID),
 		Mode:    common.RunModeLive,
 		// No owner: an automation's run is the DEPLOYMENT's, which is what
 		// journalContext's Synthetic actor already makes true of its run and
@@ -1162,55 +882,8 @@ func (e *Executor) withRunContext(ctx context.Context, stepCtx *StepContext, ste
 // originForSource was extracted in #2800: a decision you cannot reach is a
 // decision you cannot defend.
 // This enables resuming the automation from the failed step later.
-// handleAutomationError runs the onError hook and publishes failure event.
+// handleAutomationError logs a failed run and publishes the failure event.
 func (e *Executor) handleAutomationError(ctx context.Context, automation *Automation, exec *AutomationExecution, triggeringEvent *events.Event, err error) {
-	// Execute onError hook if defined
-	if automation.OnError != nil {
-		evaluator := NewEvaluator()
-		bindActorEnvelope(ctx, evaluator)
-		evaluator.SetCustom("error", err.Error())
-		evaluator.SetCustom("timestamp", time.Now().UTC().Format(time.RFC3339))
-		if triggeringEvent != nil {
-			eventMap := buildEventEnvelope(triggeringEvent, "", "")
-			evaluator.SetCustom("event", eventMap)
-			evaluator.SetCustom("ctx", map[string]any{
-				"input":  eventMap,
-				"output": nil,
-				"error":  err.Error(),
-			})
-		} else {
-			evaluator.SetCustom("ctx", map[string]any{
-				"input":  map[string]any{},
-				"output": nil,
-				"error":  err.Error(),
-			})
-		}
-		evaluator.SetVariableResolver(e.createVariableResolver())
-		evaluator.SetSystemVariableResolver(e.createSystemVariableResolver())
-		evaluator.SetSecretResolver(e.createSecretResolver())
-		evaluator.SetSystemSecretResolver(e.createSystemSecretResolver())
-		evaluator.SetCanonicalIdResolver(e.createCanonicalIdResolver())
-		evaluator.SetLogger(e.logger)
-		bindRunAmbient(ctx, e.engine, evaluator)
-		bindOnErrorRun(evaluator, automation, exec, triggeringEvent)
-
-		stepCtx := &StepContext{
-			Logger:    e.logger,
-			Engine:    e.engine,
-			EventBus:  e.eventBus,
-			Evaluator: evaluator,
-			Execution: exec,
-		}
-
-		_, hookErr := e.executeStep(ctx, automation.OnError, stepCtx)
-		if hookErr != nil && e.logger != nil {
-			e.logger.Warn("onError hook failed",
-				"component", ComponentName,
-				"error", hookErr,
-			)
-		}
-	}
-
 	if e.logger != nil {
 		e.logger.Error("automation execution failed",
 			"component", ComponentName,

@@ -2,9 +2,9 @@ package automations
 
 import "testing"
 
-// A sub-automation step is authored `automation <name>( ... )` -- the same
-// kind-prefixed invocation shape as `logic <name>( ... )`, and `automation` has
-// been a legal kind prefix in the rewriter all along.
+// A sub-automation call is authored `automation <name>( ... )` -- the same
+// kind-prefixed invocation shape as `logic <name>( ... )`. Written as an
+// unnamed statement, its line opens with the word a declaration opens with.
 //
 // THE DEFECT THIS GUARDS (epic memql#4463). automationLooseHeader existed to
 // find a real declaration whose `{` sits on the next line, so that an
@@ -27,9 +27,7 @@ automation childVerb {
   args {
     note string!
   }
-  step act {
-    action notifyDeploy(status: "succeeded", deploymentId: note, dryRun: false)
-  }
+  act := action notifyDeploy(status: "succeeded", deploymentId: args.note, dryRun: false)
 }
 
 @trigger(event="parent.requested")
@@ -37,14 +35,10 @@ automation parentVerb {
   args {
     note string!
   }
-  step delegate {
-    automation childVerb( note: note )
-  }
-  step delegateMultiline {
-    automation childVerb(
-      note
-    )
-  }
+  automation childVerb(note: args.note)
+  automation childVerb(
+    note: args.note
+  )
 }
 `
 
@@ -76,9 +70,7 @@ func TestLooseHeaderStillReportsBraceOnNextLine(t *testing.T) {
 @trigger(event="x.y")
 automation braceOnNextLine
 {
-  step s {
-    action notifyDeploy(status: "succeeded", deploymentId: "d", dryRun: false)
-  }
+  action notifyDeploy(status: "succeeded", deploymentId: "d", dryRun: false)
 }
 `
 

@@ -12,21 +12,18 @@
 //
 // WHY THE DECISION LIVES IN A BUILTIN, NOT INLINE LOGIC. The rule is
 // RELATIONAL: it compares actor.rank vs target.rank. The DSL spec grammar can
-// read only actor.* (context-spec) OR only payload.* (row-spec), never an
-// (actor, target) pair; and the logic-body expression grammar does not support
-// the numeric ">" comparison the rank rule needs in a `return`. So the
-// security-critical rank arithmetic lives in Go
+// read only the actor (context-spec) OR only the row (row-spec), never an
+// (actor, target) pair. The security-critical rank arithmetic lives in Go
 // (component/auth/rbac_governance.go: GovernPrincipal / CanCreatePrincipal),
 // exposed to the DSL as the `rbacGovernPrincipal` / `rbacCanCreatePrincipal`
 // builtins (dsl/rbac/builtins.memql -> integration.rbac.*).
 //
 // These logic functions are the DSL-reachable, named entry points the E1.6
-// (memql#2074) enforcement path calls. They do the part the DSL CAN do --
-// resolve the actor + target ranks from the role catalog (roleBySlug, a plain
-// call) -- and hand the resolved ranks + ids + verb to the Go core, which does
-// the comparison the grammar can't. The actor side is the resolved auth
-// envelope (actor.userId / actor.role / actor.isClusterOwner); the target side
-// is passed as args.
+// (memql#2074) enforcement path calls. They resolve the actor + target ranks
+// from the role catalog (`query roleBySlug`) and hand the resolved ranks + ids
+// + verb to the Go core, which does the comparison. The actor side is the
+// resolved auth envelope (actor.userId / actor.role / actor.isClusterOwner);
+// the target side is passed as args.
 
 /// Relational governance entry point: may the actor apply `verb` (update/delete) to the target
 /// principal? Resolves the actor + target ranks from the role catalog (roleBySlug) and hands them
@@ -41,11 +38,9 @@ logic governanceCanManagePrincipal {
     targetRoleSlug string!
     verb           string!
   }
-  body {
-    actorRole  := query roleBySlug( slug: actor.role )
-    targetRole := query roleBySlug( slug: args.targetRoleSlug )
-    return builtin rbacGovernPrincipal( actorUserId: actor.userId, actorRank: actorRole.first().payload.rank, actorIsOwner: actor.isClusterOwner, targetUserId: args.targetUserId, targetRank: targetRole.first().payload.rank, targetRoleSlug: args.targetRoleSlug, verb: args.verb )
-  }
+  actorRole := query roleBySlug(slug: actor.role)
+  targetRole := query roleBySlug(slug: args.targetRoleSlug)
+  return builtin rbacGovernPrincipal(actorUserId: actor.userId, actorRank: actorRole.first().rank, actorIsOwner: actor.isClusterOwner, targetUserId: args.targetUserId, targetRank: targetRole.first().rank, targetRoleSlug: args.targetRoleSlug, verb: args.verb)
 }
 
 /// Relational governance entry point for the create != edit split: may the actor CREATE a principal
@@ -58,9 +53,7 @@ logic governanceCanCreatePrincipal {
   args {
     newRoleSlug string!
   }
-  body {
-    actorRole := query roleBySlug( slug: actor.role )
-    newRole   := query roleBySlug( slug: args.newRoleSlug )
-    return builtin rbacCanCreatePrincipal( actorRank: actorRole.first().payload.rank, actorIsOwner: actor.isClusterOwner, newRank: newRole.first().payload.rank )
-  }
+  actorRole := query roleBySlug(slug: actor.role)
+  newRole := query roleBySlug(slug: args.newRoleSlug)
+  return builtin rbacCanCreatePrincipal(actorRank: actorRole.first().rank, actorIsOwner: actor.isClusterOwner, newRank: newRole.first().rank)
 }

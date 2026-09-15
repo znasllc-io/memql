@@ -10,22 +10,20 @@ type flatOutputer interface {
 }
 
 // UnwrapStepResult peels the Bundle-wrapped engine envelope off a stored step
-// result so a downstream step reads the FLAT value the construct returned.
+// result so what a later statement reads is the FLAT value the construct
+// returned.
 //
-// A `logic` / `query` step stores its raw engine result (a
-// *memql.ExecuteResult) as the step Result. An object-literal `return { ... }`
-// or a scalar return lands its value in the envelope's flat output payload;
-// reading it off the envelope -- `decide.result.x` / `field(decide.result,
-// "x")` / the scalar `decide.result` -- resolved to nil at real-DB runtime,
-// which blocked the decide->persist pattern (the two cognition logics in #2235;
-// the engine-level root cause in #2271).
+// A `logic` or `query` call stores its raw engine result (a
+// *memql.ExecuteResult) as the step Result. An object-literal
+// `return { ... }` or a scalar return lands its value in the envelope's flat
+// output payload; left on the envelope, `decide.x` resolved to nil at real-DB
+// runtime, which blocked the decide->persist pattern (the two cognition logics
+// in #2235; the engine-level root cause in #2271).
 //
-// ONLY a flat-output result is unwrapped. A Bundle-backed result (a query /
-// node-list step) is returned UNCHANGED so the existing envelope-aware access
-// path keeps working (e.g. `decide.result.Bundle.nodes`,
-// `getGA.result.Bundle.nodes.0.id`). Non-envelope values (a scalar bool from
-// `return true`, a plain map) are also returned unchanged, so the existing
-// scalar-comparison gate (`steps.decide.result == true`) is unaffected.
+// ONLY a flat-output result is unwrapped. A Bundle-backed result (a query's
+// rows) is returned UNCHANGED: the run reads it as rows. Non-envelope values
+// (a scalar bool from `return true`, a plain map) are also returned
+// unchanged.
 func UnwrapStepResult(v any) any {
 	if fo, ok := v.(flatOutputer); ok {
 		if out, has := fo.FlatOutput(); has {

@@ -16,6 +16,7 @@ import (
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/language/ast"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 func (e *MemQLEngine) executeMutation(ctx context.Context, mutation MutationNode) (*ExecuteResult, error) {
@@ -1515,6 +1516,11 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	if len(result.Payload) > 0 {
 		meta.finalPayloadJSON = string(result.Payload)
 	}
+
+	// Tell a caller watching for writes that one committed (a directly
+	// called logic opens its journal run at its first write, epic
+	// memql#5370). The single write path is the single report.
+	common.NotifyWrite(ctx, conceptMeta.Name, apiNode.Id)
 
 	return newExecuteResult(bundle), meta, nil
 }

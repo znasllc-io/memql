@@ -1,0 +1,4 @@
+logic surfaceInALogic {
+  action deployRun(target: "cluster") on surface("ops")
+  return 1
+}

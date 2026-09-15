@@ -1,0 +1,9 @@
+logic forRange {
+  args {
+    items any
+  }
+  for item := range args.items {
+    return item
+  }
+  return 0
+}

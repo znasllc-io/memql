@@ -139,7 +139,6 @@ func (r *mcpAutomationRunner) RunAutomation(ctx context.Context, owner, name str
 			AutomationName:   auto.Name,
 			AutomationSource: src,
 			TriggerEvent:     &memql.DryRunTriggerEvent{Topic: "mcp.run." + auto.Name, Kind: "manual", Payload: input},
-			Mode:             memql.DryRunModeIsolated,
 		}
 		report, err := memql.RunBundleDryRun(ctx, r.engine, req)
 		if err != nil {
@@ -179,8 +178,8 @@ func (r *mcpAutomationRunner) RunAutomation(ctx context.Context, owner, name str
 // as on-disk automations, against the loader's registry read-only -- nothing is
 // registered), then RunBundleDryRun runs the compiled action chain through the
 // manual Executor under the engine's Gate-2 ISOLATED sandbox: reads are real,
-// mutations are isolated to an ephemeral sandbox partition, and webhooks are
-// recorded-and-blocked. There is no durable-write code path here at all, so the
+// mutations are isolated to an ephemeral sandbox partition, and a publish, an
+// action or a sub-automation is recorded and never run. There is no durable-write code path here at all, so the
 // run can never touch the live store.
 func (r *mcpAutomationRunner) RunInlineAutomation(ctx context.Context, owner, source string, input map[string]any) (map[string]any, error) {
 	if strings.TrimSpace(source) == "" {
@@ -204,7 +203,6 @@ func (r *mcpAutomationRunner) RunInlineAutomation(ctx context.Context, owner, so
 		AutomationName:   auto.Name,
 		AutomationSource: source,
 		TriggerEvent:     &memql.DryRunTriggerEvent{Topic: "mcp.inline." + auto.Name, Kind: "manual", Payload: input},
-		Mode:             memql.DryRunModeIsolated,
 	}
 	report, err := memql.RunBundleDryRun(r.ownerEnvelope(ctx, owner), r.engine, req)
 	if err != nil {

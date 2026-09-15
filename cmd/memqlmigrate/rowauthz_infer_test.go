@@ -365,7 +365,7 @@ func TestAMutationNeitherVotesNorBlocks(t *testing.T) {
   shape   noteFull
 }
 `,
-		"notes/mutations.memql": `mutate note updateNote {
+		"notes/mutations.memql": `mutation note updateNote {
   args {
     noteId  string!
   }
@@ -395,8 +395,8 @@ func TestClassifyConstructVerdicts(t *testing.T) {
 		body     string
 		want     verdictKind
 	}{
-		{"mutation stamping the actor", "mutate", "", "{\n  insert {\n    ownerUserId: actor.userId\n  }\n}", verdictExempt},
-		{"mutation updating by arg", "mutate", "", "{\n  update {\n    id: args.noteId\n  }\n}", verdictExempt},
+		{"mutation stamping the actor", "mutation", "", "{\n  insert {\n    ownerUserId: actor.userId\n  }\n}", verdictExempt},
+		{"mutation updating by arg", "mutation", "", "{\n  update {\n    id: args.noteId\n  }\n}", verdictExempt},
 		{"serverOnly query", "query", "@serverOnly\n", "{\n  filter  row => row.id == args.id\n}", verdictExempt},
 		{"public query", "query", "@public\n", "{\n  filter  row => row.active == true\n}", verdictBlocks},
 		{"query with no filter", "query", "", "{\n  shape noteFull\n}", verdictBlocks},
@@ -781,7 +781,7 @@ query flag flagsOn {
 }
 `,
 	"notes/concepts.memql": "concept note {\n  authorUserId string\n}\n",
-	"notes/mutations.memql": `mutate note createNote {
+	"notes/mutations.memql": `mutation note createNote {
   args {
     id  string!
   }

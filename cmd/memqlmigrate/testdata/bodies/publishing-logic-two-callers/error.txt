@@ -1,0 +1,1 @@
+logic demoPublisher publishes, which a logic may not (D14), and it is reached from 2 place(s)

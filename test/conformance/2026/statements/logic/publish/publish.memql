@@ -1,0 +1,4 @@
+logic announce {
+  publish "things.happened" { at: now }
+  return 1
+}

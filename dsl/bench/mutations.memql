@@ -27,7 +27,7 @@
 /// TestPublishedClaimsRestOnAScorecardNumber, so a client-reachable write is a
 /// primitive for forging them.
 @serverOnly
-mutate run createBenchRun {
+mutation run createBenchRun {
   args {
     benchRunId         string!
     tier               string!
@@ -57,7 +57,7 @@ mutate run createBenchRun {
 /// the row a published claim is checked against, so a forged one is a forged
 /// claim.
 @serverOnly
-mutate sample createBenchSample {
+mutation sample createBenchSample {
   args {
     benchSampleId  string!
     benchRunId     string!

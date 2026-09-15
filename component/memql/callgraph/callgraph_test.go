@@ -22,23 +22,37 @@ func has(fs []Finding, rule string) bool {
 	return false
 }
 
-// I2 acceptance: a logic with a write (mutation call) produces a finding.
-func TestLogicCallingMutationIsFlagged(t *testing.T) {
+// D14: a logic reads and writes through queries and mutations, so a logic
+// calling both is clean.
+func TestLogicCallingMutationIsClean(t *testing.T) {
 	src := `use cluster.mutations.{ createNode }
 use cluster.queries.{ existingCluster }
-logic registerBad {
+logic register {
   args { event object @required }
-  body {
-    existing := query existingCluster()
-    node := mutation createNode(id: args.event.payload.id)
-    return node
-  }
+  existing := query existingCluster()
+  node := mutation createNode(id: args.event.payload.id)
+  return node
+}`
+	if fs := CheckFile("dsl/cluster/logic.memql", src, nil); len(fs) != 0 {
+		t.Fatalf("a logic may call a query and a mutation (D14); got %v", rules(fs))
+	}
+}
+
+// A logic never touches the world: an action call produces a finding, and
+// the query beside it none.
+func TestLogicCallingActionIsFlagged(t *testing.T) {
+	src := `use deployment.actions.{ cloneRepo }
+use cluster.queries.{ existingCluster }
+logic touchBad {
+  args { ref string @required }
+  existing := query existingCluster()
+  cloned := action cloneRepo(ref: args.ref)
+  return cloned
 }`
 	fs := CheckFile("dsl/cluster/logic.memql", src, nil)
 	if !has(fs, "logic-purity") {
-		t.Fatalf("expected logic-purity finding (logic calls a mutation); got %v", rules(fs))
+		t.Fatalf("expected logic-purity finding (logic calls an action); got %v", rules(fs))
 	}
-	// Calling a query is fine -- no finding for existingCluster.
 	for _, f := range fs {
 		if strings.Contains(f.Message, "existingCluster") {
 			t.Fatalf("calling a query must not be flagged: %s", f.Message)
@@ -49,7 +63,7 @@ logic registerBad {
 // I2 acceptance: a mutation with two writes produces a finding.
 func TestMutationWithTwoWritesIsFlagged(t *testing.T) {
 	src := `use cluster.concepts.{ node }
-mutate node twoWrites {
+mutation node twoWrites {
   args { id string @required }
   insert { id: args.id }
   update { id: args.id, health: "up" }
@@ -64,7 +78,7 @@ mutate node twoWrites {
 func TestMutationCallingMutationIsFlagged(t *testing.T) {
 	src := `use cluster.concepts.{ node }
 use cluster.mutations.{ createSpawnEvent }
-mutate node createNodeBad {
+mutation node createNodeBad {
   args { id string @required }
   insert { id: args.id, ev: mutation createSpawnEvent(nodeId: args.id) }
 }`
@@ -78,7 +92,7 @@ mutate node createNodeBad {
 func TestTriggeredLogicIsFlagged(t *testing.T) {
 	src := `@trigger(event="system.startup")
 logic onStartupBad {
-  body { return true }
+  return true
 }`
 	fs := CheckFile("dsl/cluster/logic.memql", src, nil)
 	if !has(fs, "trigger-monopoly") {
@@ -89,6 +103,9 @@ logic onStartupBad {
 // I2 acceptance: a side-effecting builtin in a query produces a finding (the
 // classifier is what I7 will source from sideEffectClass; here it is injected).
 func TestSideEffectingBuiltinInQueryIsFlagged(t *testing.T) {
+	// A query has no statements, so no spelling of a builtin call in one is
+	// valid; the rule reads the construct's text.
+	// memqlmigrate:keep
 	src := `use cluster.builtins.{ tagRelease }
 query node q {
   args { x string }
@@ -112,11 +129,9 @@ func TestCompliantLogicIsClean(t *testing.T) {
 use common.builtins.{ serviceVersion }
 logic decide {
   args { event object @required }
-  body {
-    existing := query existingCluster()
-    v := builtin serviceVersion()
-    return existing.first() ?? v
-  }
+  existing := query existingCluster()
+  v := builtin serviceVersion()
+  return existing.first() ?? v
 }`
 	if fs := CheckFile("dsl/cluster/logic.memql", src, nil); len(fs) != 0 {
 		t.Fatalf("compliant logic must be clean; got %v", rules(fs))
@@ -130,8 +145,11 @@ func TestAutomationIsUnrestricted(t *testing.T) {
 use cluster.logic.{ decide }
 @trigger(event="deploy.requested", concept="v1:cluster:deployment")
 automation deploy {
-  step decide { logic decide { event: event } }
-  step record { mutation createDeployment { deploymentId: event.payload.id } }
+  args {
+    id any
+  }
+  decide := logic decide(event: event)
+  record := mutation createDeployment(deploymentId: args.id)
 }`
 	if fs := CheckFile("dsl/cluster/automations.memql", src, nil); len(fs) != 0 {
 		t.Fatalf("automations are unrestricted; got %v", rules(fs))
@@ -140,12 +158,13 @@ automation deploy {
 
 // Multiple constructs in one file are split and judged independently.
 func TestSplitsMultipleConstructs(t *testing.T) {
-	src := `use cluster.mutations.{ createNode }
+	src := `use deployment.actions.{ cloneRepo }
 logic clean {
-  body { return 1 }
+  return 1
 }
 logic dirty {
-  body { return mutation createNode(id: "x") }
+  cloned := action cloneRepo(ref: "x")
+  return cloned
 }`
 	fs := CheckFile("dsl/cluster/logic.memql", src, nil)
 	if len(fs) != 1 || fs[0].Construct != "dirty" {

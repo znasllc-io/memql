@@ -35,13 +35,11 @@ logic instanceCommand {
   args {
     status string
   }
-  body {
-    s := args.status ?? ""
-    teardown := s == "tearing_down" ? "teardown" : ""
-    resume := s == "resuming" ? "resume" : teardown
-    suspend := s == "suspending" ? "suspend" : resume
-    return s == "provisioning" ? "provision" : suspend
-  }
+  s := args.status ?? ""
+  teardown := s == "tearing_down" ? "teardown" : ""
+  resume := s == "resuming" ? "resume" : teardown
+  suspend := s == "suspending" ? "suspend" : resume
+  return s == "provisioning" ? "provision" : suspend
 }
 
 /// Whether a subscription's status entitles its owner to a RUNNING instance. Mirrors spec
@@ -53,11 +51,9 @@ logic subscriptionIsServiceable {
   args {
     status string
   }
-  body {
-    s := args.status ?? ""
-    active := s == "active" ? true : s == "past_due" ? true : false
-    return s == "trialing" ? true : active
-  }
+  s := args.status ?? ""
+  active := s == "active" ? true : s == "past_due" ? true : false
+  return s == "trialing" ? true : active
 }
 
 /// The confirmation phrase tenant-teardown.sh demands, composed for one tenant. The phrase includes
@@ -70,9 +66,7 @@ logic teardownConfirmationPhrase {
   args {
     tenant string!
   }
-  body {
-    return "teardown " + args.tenant
-  }
+  return "teardown " + args.tenant
 }
 
 /// Whether an instance is up and serving, from a payload status rather than from a row filter.
@@ -82,26 +76,24 @@ logic instanceIsRunning {
   args {
     status string
   }
-  body {
-    return (args.status ?? "") == "running"
-  }
+  return (args.status ?? "") == "running"
 }
 
 // =============================================================================
 //   Sweep candidate selection (task memql#3856)
 // =============================================================================
 //
-// Each of these is a scheduled sweep's DECIDE half: read the candidate set,
-// window it per row, return the rows the automation should act on. Pure -- they
-// read and return, and the automation does every write.
+// Each of these is a scheduled sweep's DECIDE half: read the candidate set and
+// return it; the automation's `for` loop windows it per row and acts on the
+// rows its bracket keeps. Pure -- they read and return, and the automation does
+// every write.
 //
-// THE WINDOWING IS INSIDE THE LOOP because a filter cannot call `addDuration`.
-// That is a parser limitation, not a preference, and identity's deletion
-// reminders carry the same construction for the same reason. The consequence
-// worth knowing: the candidate query returns EVERY row in the status, and the
-// bracket narrows it in memory -- so these read more rows than they act on, by
-// design, and the `@unbounded` reason on each query is what keeps that from
-// being truncated to a first page.
+// THE WINDOWING IS IN THE LOOP'S `if` CLAUSE, so one candidate query serves
+// every sweep over the same status. The consequence worth knowing: the
+// candidate query returns EVERY row in the status, and the bracket narrows it
+// in memory -- so these read more rows than they act on, by design, and the
+// `@unbounded` reason on each query is what keeps that from being truncated to
+// a first page.
 //
 // THE BRACKETS ARE ONE DAY WIDE and the sweeps fire daily. That is what makes a
 // nudge fire exactly once per instance: a wider bracket sends duplicates, a
@@ -109,9 +101,9 @@ logic instanceIsRunning {
 
 
 /// Every RUNNING instance -- the candidate set for the trial nudges, the trial expiry, and the
-/// hibernation sweep. Deliberately unwindowed: a filter cannot call `addDuration`, so each sweep
-/// applies its own bracket in its `forEach ... where` clause, and one candidate query serves all
-/// four rather than four near-identical ones drifting apart.
+/// hibernation sweep. Deliberately unwindowed: each sweep applies its own bracket in its
+/// `for ... if` clause, and one candidate query serves all four rather than four near-identical
+/// ones drifting apart.
 ///
 /// The consequence to know: this reads every running instance in the fleet and the sweeps act on a
 /// few. That is what the `@unbounded` reason on the query is for -- without it the pagination gate
@@ -121,10 +113,8 @@ logic runningInstances {
   args {
     event object!
   }
-  body {
-    running := query instancesByStatus( status: "running" )
-    return running.nodes()
-  }
+  running := query instancesByStatus(status: "running")
+  return running.nodes()
 }
 
 /// Every SUSPENDED instance -- the candidate set for the grace-expiry teardown. Same unwindowed
@@ -133,10 +123,8 @@ logic suspendedInstances {
   args {
     event object!
   }
-  body {
-    suspended := query instancesByStatus( status: "suspended" )
-    return suspended.nodes()
-  }
+  suspended := query instancesByStatus(status: "suspended")
+  return suspended.nodes()
 }
 
 /// Every subscription still in its trial -- the candidate set for the billing side of day 14.
@@ -144,8 +132,6 @@ logic trialingSubscriptions {
   args {
     event object!
   }
-  body {
-    trialing := query subscriptionsByStatus( status: "trialing" )
-    return trialing.nodes()
-  }
+  trialing := query subscriptionsByStatus(status: "trialing")
+  return trialing.nodes()
 }

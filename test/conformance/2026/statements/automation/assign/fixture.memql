@@ -1,0 +1,20 @@
+/// A size the assign cell records.
+concept measure {
+  size  string
+}
+
+mutation measure recordSize {
+  args {
+    size  string  @required
+  }
+  insert {
+    size: args.size
+  }
+}
+
+logic triple {
+  args {
+    n  any
+  }
+  return (args.n ?? 0) * 3
+}

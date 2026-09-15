@@ -1,0 +1,26 @@
+{
+  "description": "The campaigns engine's event emails: the shipped generator turns a rule into an authored automation, which fires on its trigger concept's rows under the rule author's envelope and stages one outbound email per recipient.",
+  "scenarios": [
+    {
+      "name": "cluster-role-rule-stages-one-email-per-owner",
+      "description": "An active rule on new forge requests, for the cluster's owners, fires on a new request: it stages an email to the owner and records the firing. The same event delivered again is claimed already and sends nothing more.",
+      "seed": [
+        { "mutation": "createUser", "args": { "userId": { "$id": "owner" }, "displayName": "Scenario Owner", "primaryEmail": { "$id": "owner-{tag}@scenario.invalid" }, "role": "owner" } },
+        { "mutation": "createTemplate", "as": { "userId": "user-scenario-author", "role": "writer" }, "args": { "templateId": { "$id": "tpl" }, "name": "A request arrived", "subject": "A request arrived", "textBody": "A new request is waiting for you." } },
+        { "mutation": "createEmailRule", "as": { "userId": "user-scenario-author", "role": "writer" }, "args": { "emailRuleId": { "$id": "rule" }, "name": "New requests", "triggerConcept": "v1:forge:request", "eventKind": "created", "templateId": { "$id": "tpl" }, "recipientMode": "cluster_roles", "recipientRoles": ["owner"] } },
+        { "mutation": "setEmailRuleStatus", "as": { "userId": "user-scenario-author", "role": "writer" }, "args": { "emailRuleId": { "$id": "rule" }, "status": "active" } },
+        { "mutation": "createRequest", "args": { "requestId": { "$id": "req" }, "projectId": "project-scenario", "title": "A scenario request", "body": "Mailed to the owners." } }
+      ],
+      "fire": [
+        { "emailRule": { "$id": "rule" }, "as": { "userId": "user-scenario-author" }, "event": { "action": "created", "concept": "v1:forge:request", "id": { "$id": "req" } } },
+        { "emailRule": { "$id": "rule" }, "as": { "userId": "user-scenario-author" }, "redeliver": true }
+      ],
+      "expect": {
+        "rows": [
+          { "concept": "v1:platform:outboundRequest", "where": { "target": { "$id": "owner-{tag}@scenario.invalid" }, "subject": "A request arrived" }, "payload": { "medium": "email", "body": "A new request is waiting for you.", "status": "pending" } },
+          { "concept": "v1:campaigns:emailRule", "id": { "$id": "rule" }, "payload": { "firedCount": 1 } }
+        ]
+      }
+    }
+  ]
+}

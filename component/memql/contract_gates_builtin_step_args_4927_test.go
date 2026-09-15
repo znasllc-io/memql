@@ -22,13 +22,13 @@ import (
 // The probe drives the REAL registry, so the builtins named below are ones the
 // embedded tree actually declares. A hand-written fixture builtin would have to
 // be loaded into a registry first, and a gate answered by a registry built for
-// the test is a gate answered by the test.
+// the test is a gate answered by the test. The call is written as the tree
+// writes it, a statement bound to a name, which opens no line with `builtin`:
+// the gate reads it off the parsed body (epic memql#5370).
 const gate4927RealCall = `
 @trigger(schedule="0 */2 * * * *")
 automation probeScheduled {
-  step sweep {
-    builtin %s ()
-  }
+  sweep := builtin %s()
 }
 `
 

@@ -16,7 +16,7 @@
 /// (component/memql/agent_kind_actor_validation.go, memql#403); the mutation surface itself stays
 /// permissive on `kind` so the seed + planner paths can keep writing their values with the
 /// rejection one layer up.
-mutate agent createAgent {
+mutation agent createAgent {
   args {
     agentId          string
     ownerUserId      string
@@ -66,7 +66,7 @@ mutate agent createAgent {
 /// Grant a standing authorization for an agent to trigger a plan kind without per-Plan approval.
 /// The granting user is the CALLER -- userId is stamped from actor.userId and is not an argument.
 @actor
-mutate agentAuthorization createAgentAuthorization {
+mutation agentAuthorization createAgentAuthorization {
   args {
     authId            string
     agentId           string!
@@ -90,7 +90,7 @@ mutate agentAuthorization createAgentAuthorization {
 /// Soft-delete an agent (active:false, deleted:true). Read-merges the existing row so the caller
 /// only passes the agent id; every other required field (kind, name, ...) inherits from the
 /// persisted row instead of being re-supplied (memql#1628).
-mutate agent deleteAgent {
+mutation agent deleteAgent {
   args {
     agentId  string!
   }
@@ -115,7 +115,7 @@ mutate agent deleteAgent {
 /// engine refuses a write onto anyone else's row under the concept's declared owner tier.
 /// Read-merges the existing row so the caller only passes the auth id;
 /// agentId/userId/planKind/spaceScope inherit from the persisted row (memql#1628).
-mutate agentAuthorization revokeAgentAuthorization {
+mutation agentAuthorization revokeAgentAuthorization {
   args {
     authId  string!
   }
@@ -127,7 +127,7 @@ mutate agentAuthorization revokeAgentAuthorization {
 
 /// Partial update of a v1:agents:agent row. Only the fields you pass are changed; other fields
 /// inherit from the prior row.
-mutate agent updateAgent {
+mutation agent updateAgent {
   args {
     agentId  string!
     payload  object!
@@ -169,7 +169,7 @@ mutate agent updateAgent {
 /// refuses the write outright when the target row's userId is not the caller's (the concept's
 /// declared owner tier -- memql#3177).
 @actor
-mutate agentAuthorization updateAgentAuthorization {
+mutation agentAuthorization updateAgentAuthorization {
   args {
     authId   string!
     payload  object!
@@ -188,7 +188,7 @@ mutate agentAuthorization updateAgentAuthorization {
 /// allowed for system-driven attaches (the migration tool writes events with
 /// actorUserId='system:migration:phase2'). The caller is responsible for providing
 /// skillChangeEventId -- mint via the standard NewShortId / MustFromMap helpers caller-side.
-mutate skillChangeEvent createSkillChangeEvent {
+mutation skillChangeEvent createSkillChangeEvent {
   args {
     skillChangeEventId  string!
     targetAgentId       string!
@@ -222,7 +222,7 @@ mutate skillChangeEvent createSkillChangeEvent {
 /// lockedLiveKnowledge fields into the five skill-id fields the role catalog now carries plus a
 /// maxSkills cap. The mutation is partition-agnostic for global-scoped concepts -- the engine
 /// stamps every v1:agents:agentRole insert into the _system slot regardless of the envelope.
-mutate agentRole createAgentRole {
+mutation agentRole createAgentRole {
   args {
     agentRoleId             string
     slug                    string!

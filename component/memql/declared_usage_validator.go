@@ -200,20 +200,65 @@ func sortedDeclaredArgsNames(set map[string]bool) []string {
 	return out
 }
 
-// extractFunctionBody returns the contents between the first
-// `func (Receiver) name(...) {` opening brace and its matching closing
-// brace. Returns the empty string when no body is found.
+// extractFunctionBody returns the text of a construct's body, or the empty
+// string when it finds none -- which every caller (declared-usage,
+// actor-binding, logic event-field and event-binding validators) reads as
+// "no body" and skips its check on. So a header it does not know is four
+// validators failing open at once, and there are exactly two headers:
 //
-// There is exactly ONE header form to find, the parser-emitted
-// `func (Query|Mutation|Automation|Logic) name(...) { ... }`. The
-// snapshot every caller feeds this (`rawSourceForUsage` in
-// function_loader.go) is taken AFTER NormaliseAll, so the
-// author-facing struct-form headers (`query NAME {` / `mutate NAME {`
-// / `logic NAME {` / `automation NAME {`) have already been rewritten
-// into that shape and cannot reach here -- the same reasoning
-// precededByBodyOpener records below, corrected here to match
-// (memql#3194 fixed the neighbour; this doc still named the struct
-// forms). The body lives inside the first top-level `{ ... }`.
+//   - the receiver form the rewriter emits for every construct it rewrites,
+//     `func (Receiver) name(...) { ... }` (extractReceiverBody);
+//   - a statement-body logic, `logic <name> { ... }`, which the rewriter
+//     leaves as written for the statement parser (epic memql#5370;
+//     extractStatementLogicBody). Before the statement parser every logic
+//     reached here in the receiver form, and a statement body found no
+//     header at all: a logic that read the actor without `@actor`, an
+//     undeclared `args.x` or an event field outside its `@eventField` loaded.
+func extractFunctionBody(source string) string {
+	if body := extractReceiverBody(source); body != "" {
+		return body
+	}
+	return extractStatementLogicBody(source)
+}
+
+// statementLogicHeader is a statement-body logic's header line, and
+// statementArgsBlock the `args { ... }` block that opens its body.
+var (
+	statementLogicHeader = regexp.MustCompile(`(?m)^[ \t]*logic[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`)
+	statementArgsBlock   = regexp.MustCompile(`\A\s*args[ \t]*\{`)
+)
+
+// extractStatementLogicBody returns a statement-body logic's statements: the
+// text inside `logic <name> { ... }` after its `args { }` block, which
+// declares what the body reads and is not itself a read. Braces are matched
+// on a copy with comments and strings blanked (parser.BlankCommentsAndStrings,
+// which keeps every offset), and the body is cut from the original.
+func extractStatementLogicBody(source string) string {
+	view := languageParser.BlankCommentsAndStrings(source)
+	loc := statementLogicHeader.FindStringIndex(view)
+	if loc == nil {
+		return ""
+	}
+	open := loc[1] - 1
+	end := findMatchingCloseBraceRune(view, open)
+	if end < 0 {
+		return ""
+	}
+	start := open + 1
+	if m := statementArgsBlock.FindStringIndex(view[start:end]); m != nil {
+		argsEnd := findMatchingCloseBraceRune(view, start+m[1]-1)
+		if argsEnd < 0 || argsEnd > end {
+			return ""
+		}
+		start = argsEnd + 1
+	}
+	return source[start:end]
+}
+
+// extractReceiverBody returns the contents between the first
+// `func (Receiver) name(...) {` opening brace and its matching closing
+// brace, the receiver form the rewriter emits. Returns the empty string
+// when there is none. The body lives inside the first top-level `{ ... }`.
 //
 // # String state is TRACKED, not inferred from the preceding byte
 //
@@ -245,7 +290,7 @@ func sortedDeclaredArgsNames(set map[string]bool) []string {
 // them. memql#3190 enumerated and converted all nine; the gate in
 // core/baseparser (TestNoOneByteLookbackQuoteScan) is what stops a
 // tenth.
-func extractFunctionBody(source string) string {
+func extractReceiverBody(source string) string {
 	open := -1
 	depth := 0
 	inString := false
@@ -301,23 +346,24 @@ func extractFunctionBody(source string) string {
 // precededByBodyOpener reports whether the text immediately preceding
 // position p is the header line of a function definition.
 //
-// There is exactly ONE recognised header -- the parser-emitted form
+// There is exactly ONE recognised header here -- the parser-emitted form
 // after the struct rewriters run:
 //
 //   - `func (Receiver) name(<args>) <returns> {`
 //
-// The author-facing struct-form headers (`query NAME {` /
-// `mutate NAME {` / `logic NAME {` / `automation NAME {` --
-// parser.StructFormKeywords) cannot reach here: the snapshot every
-// caller of extractFunctionBody is fed (`rawSourceForUsage` in
-// function_loader.go) is taken AFTER NormaliseAll, which has already
-// rewritten each of those keywords into the `func (Receiver)` shape
-// above. The native keywords the rewriter leaves alone (`spec` /
-// `trait` / `action`) parse to SpecDef / ActionDef, never a
-// *FunctionDef, so they never reach this validator either. A
-// struct-form keyword arm here would be dead by construction, and a
-// stale one silently invited a fail-open (a header miss makes
-// extractFunctionBody return "" and every caller skip its check), so
+// The author-facing struct-form headers of the constructs the rewriter
+// rewrites (`query NAME {` / `mutation NAME {` -- parser.StructFormKeywords)
+// cannot reach here: the snapshot every caller of extractFunctionBody is fed
+// (`rawSourceForUsage` in function_loader.go) is taken AFTER NormaliseAll,
+// which has already rewritten each of those keywords into the
+// `func (Receiver)` shape above. A statement-body logic is the one struct
+// form NormaliseAll leaves as written (the statement parser reads it, epic
+// memql#5370), and extractStatementLogicBody finds it, not this arm. The
+// native keywords the rewriter leaves alone (`spec` / `trait` / `action`)
+// parse to SpecDef / ActionDef, never a *FunctionDef, so they never reach
+// this validator either. A struct-form keyword arm here would be dead by
+// construction, and a stale one silently invited a fail-open (a header miss
+// makes extractFunctionBody return "" and every caller skip its check), so
 // it is deliberately absent -- memql#3194.
 //
 // The check looks at the last logical line ending at `prefix`; the

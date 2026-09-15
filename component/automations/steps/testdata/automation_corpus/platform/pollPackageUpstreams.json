@@ -1,0 +1,39 @@
+{
+  "automation": "platform/automations.memql pollPackageUpstreams",
+  "runs": {
+    "no event | 0 rows": {
+      "input": {
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "packagePollUpstream"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "no event | 2 rows": {
+      "input": {
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "packagePollUpstream"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

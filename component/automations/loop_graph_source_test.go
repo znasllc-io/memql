@@ -146,7 +146,7 @@ func TestFunctionSource_AMutationIsItsWrite(t *testing.T) {
 
 func TestFunctionSource_NewRowsAndSplats(t *testing.T) {
 	const src = `/// A new row, field by field.
-mutate thing createPlainThing {
+mutation thing createPlainThing {
   args {
     name string!
   }
@@ -160,7 +160,7 @@ mutate thing createPlainThing {
 
 /// A new row whose payload is the caller's object.
 @actor
-mutate thing createSplatThing {
+mutation thing createSplatThing {
   args {
     payload object!
   }
@@ -209,16 +209,14 @@ logic advanceAll {
   args {
     ids []string!
   }
-  body {
-    rows := query findThings(ids: args.ids)
-    for item := range rows.nodes() {
-      moved := mutation advanceThing(id: item.id, s: "open")
-    }
-    noted := if rows.count() > 0 {
-      mutation recordThing(count: rows.count())
-    }
-    return logic summarize(count: rows.count())
+  rows := query findThings(ids: args.ids)
+  for item in rows.nodes() {
+    moved := mutation advanceThing(id: item.id, s: "open")
   }
+  if rows.count() > 0 {
+    noted := mutation recordThing(count: rows.count())
+  }
+  return logic summarize(count: rows.count())
 }
 `
 	reg = NewFunctionSource(functionsFromSource(t, "unified:things/logic.memql", src, "advanceAll")).Registry()
@@ -264,7 +262,7 @@ func TestFunctionSource_FieldsTheEngineRewrites(t *testing.T) {
 	const src = `/// Read-merge annotations on an update.
 @noUnset("note", "label", "marker")
 @appendFields("tags")
-mutate thing updateNoted {
+mutation thing updateNoted {
   args {
     id    string!
     label string
@@ -282,7 +280,7 @@ mutate thing updateNoted {
 
 /// The same annotation on a new row, which no read-merge touches.
 @noUnset("note")
-mutate thing createNoted {
+mutation thing createNoted {
   insert {
     note: ""
   }
@@ -290,7 +288,7 @@ mutate thing createNoted {
 
 /// A scrub, whose PII fields the concept names.
 @scrubPii
-mutate thing scrubThing {
+mutation thing scrubThing {
   args {
     id string!
   }

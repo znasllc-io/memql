@@ -1,8 +1,6 @@
 /// When a node joins the cluster, open a ticket. Switched off: not loaded while @disabled stays.
-@trigger(event="node.created", concept="v1:cluster:node", partition="*")
+@trigger(event="node.created", concept="v1:cluster:node")
 @disabled
 automation welcomeNodeDisabled {
-  step raise {
-    mutation raiseTicketDisabled (title: "A node joined the cluster")
-  }
+  raise := mutation raiseTicketDisabled(title: "A node joined the cluster")
 }

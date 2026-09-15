@@ -160,7 +160,7 @@ func TestMutationTemplate_MergeFieldsAnnotationPlumbing(t *testing.T) {
 	src := `@enabled
 @mergeFields("preferences")
 @description("Set User.preferences.computerUseEnabled.")
-mutate user toggleComputerUseEnabled {
+mutation user toggleComputerUseEnabled {
   args {
     userId   string  @required
     enabled  bool    @required
@@ -204,7 +204,7 @@ func TestMutationTemplate_MergeFieldsRejectedOnInsert(t *testing.T) {
 
 	src := `@enabled
 @mergeFields("preferences")
-mutate user mutationCreateUserBad {
+mutation user mutationCreateUserBad {
   args {
     userId  string  @required
   }

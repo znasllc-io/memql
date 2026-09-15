@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // FunctionExecutor invokes MemQL functions.
@@ -112,4 +113,26 @@ func (e *FunctionExecutor) Execute(ctx context.Context, step *automations.Step, 
 	}
 
 	return result, nil
+}
+
+// extractItemCount is the number of rows an engine result carries, 0 when it
+// carries none.
+func extractItemCount(execResult any) int {
+	if execResult == nil {
+		return 0
+	}
+	if er, ok := execResult.(*memql.ExecuteResult); ok {
+		if er == nil || er.Bundle == nil {
+			return 0
+		}
+		return len(er.Bundle.GetNodes())
+	}
+	if v, ok := execResult.(map[string]any); ok {
+		if bundle, ok := v["Bundle"].(map[string]any); ok {
+			if nodes, ok := bundle["nodes"].([]any); ok {
+				return len(nodes)
+			}
+		}
+	}
+	return 0
 }

@@ -1,0 +1,6 @@
+@trigger(schedule="0 0 * * * *")
+automation stepBlock {
+  step run {
+    builtin one()
+  }
+}

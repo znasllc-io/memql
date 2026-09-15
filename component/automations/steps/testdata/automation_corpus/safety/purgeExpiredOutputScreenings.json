@@ -1,0 +1,71 @@
+{
+  "automation": "safety/automations.memql purgeExpiredOutputScreenings",
+  "runs": {
+    "no event | 0 rows": {
+      "input": {
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "allOutputScreenings"
+          },
+          {
+            "args": {
+              "name": "MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "candidateCount": 0,
+              "retentionDays": "90",
+              "timestamp": "<ts>"
+            },
+            "kind": "event",
+            "name": "safety.outputScreening.retention.observed"
+          }
+        ],
+        "result": {
+          "output": 0,
+          "status": "completed"
+        }
+      }
+    },
+    "no event | 2 rows": {
+      "input": {
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "allOutputScreenings"
+          },
+          {
+            "args": {
+              "name": "MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "candidateCount": 2,
+              "retentionDays": "7",
+              "timestamp": "<ts>"
+            },
+            "kind": "event",
+            "name": "safety.outputScreening.retention.observed"
+          }
+        ],
+        "result": {
+          "output": 2,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

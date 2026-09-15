@@ -6,7 +6,5 @@ automation raiseRequestedTicketTemplate {
     title  string!
   }
 
-  step raise {
-    mutation raiseTicketTemplate (title: args.title)
-  }
+  raise := mutation raiseTicketTemplate(title: args.title)
 }

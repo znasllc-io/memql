@@ -39,8 +39,8 @@ import (
 // list, so the two sides cannot drift into agreement with a stale copy.
 
 var (
-	// `mutate <concept> <name> {` followed by its `args { ... }` block.
-	mutationArgsRe = regexp.MustCompile(`(?s)mutate\s+\w+\s+(createDatabase|createIdentityProvider|createCluster)\s*\{.*?args\s*\{(.*?)\n  \}`)
+	// `mutation <concept> <name> {` followed by its `args { ... }` block.
+	mutationArgsRe = regexp.MustCompile(`(?s)mutation\s+\w+\s+(createDatabase|createIdentityProvider|createCluster)\s*\{.*?args\s*\{(.*?)\n  \}`)
 	// One declared field: leading name at two-space indent, ignoring `///` docs.
 	argNameRe = regexp.MustCompile(`(?m)^\s{4}([a-zA-Z][a-zA-Z0-9]*)\s+\S`)
 	// `mutation <name> (` ... `)` inside the automation.

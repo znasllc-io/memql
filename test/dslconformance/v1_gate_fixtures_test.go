@@ -171,7 +171,7 @@ func TestConstructHeadStopsAtABraceLessDeclaration(t *testing.T) {
 // TestRowIdMirrorGateOnV1Fixtures: a v1 filter reads the self-mirror as
 // `row.deploymentId`, which the gate's bare-name read cannot see.
 func TestRowIdMirrorGateOnV1Fixtures(t *testing.T) {
-	mutations := "/// Fixture.\nmutate deployment createDeploymentFixture {\n  args {\n    deploymentId  string\n  }\n" +
+	mutations := "/// Fixture.\nmutation deployment createDeploymentFixture {\n  args {\n    deploymentId  string\n  }\n" +
 		"  insert {\n    id:           args.deploymentId\n    deploymentId: args.deploymentId\n  }\n}\n"
 	query := func(name, filter string) string {
 		return "/// Fixture.\nquery deployment " + name + " {\n  args {\n    deploymentId  string\n  }\n  filter  " +

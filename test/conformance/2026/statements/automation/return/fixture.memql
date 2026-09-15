@@ -1,0 +1,8 @@
+/// A user the return cell counts.
+concept member {
+  active  bool
+}
+
+query member activeMembers {
+  filter row => row.active == true
+}

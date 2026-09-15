@@ -46,9 +46,7 @@ func TestCrossNamespaceReferenceNeedsAnImport(t *testing.T) {
 	got := gateOn(t, map[string]string{
 		"common/builtins.memql": "builtin trackPresence {\n  x string\n}\n",
 		"cognition/automations.memql": `automation a {
-  step s {
-    builtin trackPresence(x: "1")
-  }
+  s := builtin trackPresence(x: "1")
 }
 `,
 	})
@@ -65,6 +63,36 @@ func TestCrossNamespaceReferenceNeedsAnImport(t *testing.T) {
 // TestImportedCrossNamespaceReferenceIsFine is the other direction, and the one
 // that keeps the gate from being a corpus-wide migration: the tree was already
 // 113/114 compliant by habit before this rule existed.
+// TestCrossNamespaceHintNamesTheDeclaringFile: the import the violation spells
+// is the file that declares the name. A query lives in queries.memql and a
+// logic in logic.memql, so a hint built from the kind ("querys", "logics")
+// names a file that does not exist.
+func TestCrossNamespaceHintNamesTheDeclaringFile(t *testing.T) {
+	got := gateOn(t, map[string]string{
+		"identity/queries.memql": "query user userById {\n  args {\n    userId string\n  }\n  filter row => row.id == args.userId\n}\n",
+		"cluster/logic.memql":    "logic nodeLabel {\n  return \"n\"\n}\n",
+		"probe/logic.memql": `logic probe {
+  user := query userById(userId: "u")
+  label := logic nodeLabel()
+  return label
+}
+`,
+	})
+	want := map[string]bool{"use identity.queries.{ userById }": false, "use cluster.logic.{ nodeLabel }": false}
+	for _, v := range got {
+		for hint := range want {
+			if strings.Contains(v.Detail, hint) {
+				want[hint] = true
+			}
+		}
+	}
+	for hint, found := range want {
+		if !found {
+			t.Errorf("no violation spells %q, the file that declares the name:\n%v", hint, got)
+		}
+	}
+}
+
 func TestImportedCrossNamespaceReferenceIsFine(t *testing.T) {
 	got := gateOn(t, map[string]string{
 		"common/traits.memql": "trait isActiveRecord = row => row.active == true\n",
@@ -245,13 +273,11 @@ func coreIs(domains ...string) Options {
 }
 
 const lateBoundCaller = `logic onSecondActiveHuman {
-  body {
-    return mutation mutationCreateCanvasState(stateId: "voice-migrated", space: "s1")
-  }
+  return mutation mutationCreateCanvasState(stateId: "voice-migrated", space: "s1")
 }
 `
 
-const lateBoundDeclaration = `mutate canvasState mutationCreateCanvasState {
+const lateBoundDeclaration = `mutation canvasState mutationCreateCanvasState {
   args {
     stateId  string
     space    string
@@ -318,9 +344,7 @@ func TestCoreReferenceToAnotherCoreNamespaceStillNeedsAnImport(t *testing.T) {
 	got := gateOnWith(t, map[string]string{
 		"common/builtins.memql": "builtin trackPresence {\n  x string\n}\n",
 		"cognition/automations.memql": `automation a {
-  step s {
-    builtin trackPresence(x: "1")
-  }
+  s := builtin trackPresence(x: "1")
 }
 `,
 	}, coreIs("common", "cognition"))

@@ -1,0 +1,8 @@
+logic waitSome {
+  parallel {
+    branch one {
+      logic other()
+    }
+  } wait some
+  return 0
+}

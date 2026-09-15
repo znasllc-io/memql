@@ -126,11 +126,12 @@ func TestServerOnlyIsIndependentOfDisabled(t *testing.T) {
 	}
 }
 
-// TestAllDispatchPointsAreGated covers the FOUR entry points, because the
-// review found two of them had no test at all: both @serverOnly guards in
-// engine.go could be deleted with the whole suite still green, while the
-// commit message claimed "enforced at all three dispatch points" and "each
-// test fails when its guard is reverted".
+// TestAllDispatchPointsAreGated covers every entry point, because the review
+// found two of them had no test at all: both @serverOnly guards in engine.go
+// could be deleted with the whole suite still green, while the commit message
+// claimed "enforced at all three dispatch points" and "each test fails when
+// its guard is reverted". (A fourth, the F.6 mutation-leaf hoist, went with
+// the single-return logic path it served.)
 //
 // A construct reachable through an ungated point is fully reachable, so
 // per-point coverage is the only kind that means anything here.
@@ -191,31 +192,6 @@ func TestAllDispatchPointsAreGated(t *testing.T) {
 			&FunctionCallExpression{Name: "secret"}, reg)
 		if err != nil && strings.Contains(err.Error(), "server-only") {
 			t.Errorf("internal origin was refused by the logic gate: %v", err)
-		}
-	})
-
-	t.Run("F.6 mutation-leaf hoist", func(t *testing.T) {
-		fns := mk("logic")
-		fns["secret"].Expr = &ComparisonExpression{Field: FieldReference{Raw: "id", Parts: []string{"id"}}, Operator: "==", Value: "x"}
-		v := newFunctionValidatorWithOrigin(fns, nil, auth.OriginClient)
-		_, err := v.expandFunctionCallAllowMutationLeaf(&FunctionCallExpression{Name: "secret"})
-		if err == nil || !strings.Contains(err.Error(), "server-only") {
-			t.Errorf("the F.6 hoist did not refuse: %v -- it reaches a construct "+
-				"without going through expandFunctionCall, so it needs its own gate", err)
-		}
-	})
-
-	// The same hoist also leaked @disabled, which is a pre-existing hole the
-	// server-only work surfaced.
-	t.Run("F.6 hoist honours disabled", func(t *testing.T) {
-		fns := mk("logic")
-		fns["secret"].ServerOnly = false
-		fns["secret"].Enabled = false
-		fns["secret"].Expr = &ComparisonExpression{Field: FieldReference{Raw: "id", Parts: []string{"id"}}, Operator: "==", Value: "x"}
-		v := newFunctionValidatorWithOrigin(fns, nil, auth.OriginInternal)
-		_, err := v.expandFunctionCallAllowMutationLeaf(&FunctionCallExpression{Name: "secret"})
-		if err == nil || !strings.Contains(err.Error(), "disabled") {
-			t.Errorf("a @disabled logic hoisted through the F.6 path: %v", err)
 		}
 	})
 }

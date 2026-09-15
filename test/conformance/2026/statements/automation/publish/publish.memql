@@ -1,0 +1,7 @@
+@trigger(schedule="0 0 * * * *")
+automation publishStatement {
+  args {
+    count any
+  }
+  publish "things.counted" { count: args.count ?? 0 }
+}

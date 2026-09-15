@@ -204,9 +204,7 @@ const argTypeFixture = `logic parityFixture {
     g integer
     h blob
   }
-  body {
-    return { a: args.a, b: args.b, c: args.c, d: args.d, e: args.e, f: args.f, g: args.g, h: args.h }
-  }
+  return { a: args.a, b: args.b, c: args.c, d: args.d, e: args.e, f: args.f, g: args.g, h: args.h }
 }`
 
 // jsonName returns a struct field's JSON name, ignoring options.

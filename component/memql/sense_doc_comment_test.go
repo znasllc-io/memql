@@ -17,9 +17,7 @@ func TestSenseAdapter_DocCommentDescription(t *testing.T) {
 		"  args {",
 		"    a string @required",
 		"  }",
-		"  body {",
-		"    return args.a ?? \"\"",
-		"  }",
+		"  return args.a ?? \"\"",
 		"}",
 	}, "\n")
 	fn, err := tryParseNewFunctionSyntax("senseDocProbe", "logic", src, "common.logic.memql", dotAccessLoadRegistry())

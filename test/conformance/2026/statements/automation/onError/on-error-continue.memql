@@ -1,0 +1,6 @@
+@trigger(schedule="0 0 * * * *")
+automation onErrorClause {
+  mutation notifyOwner(note: "first") on error continue
+  alerts := query openAlerts()
+  return alerts.count()
+}

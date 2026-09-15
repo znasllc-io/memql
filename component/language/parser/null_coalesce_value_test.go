@@ -18,9 +18,10 @@ import (
 //     `insert { id: ... }` field becomes
 //   - positional args of the same calls
 //
-// These tests drive the AUTHORED struct form through NormaliseAll first,
-// exactly as the loader does, so they pin the author-facing contract
-// rather than the internal procedural shape.
+// These tests drive the AUTHORED form through NormaliseAll first, exactly as
+// the loader does, so they pin the author-facing contract rather than the
+// internal procedural shape. A construct call's named argument is a
+// statement's now (epic memql#5370), parsed as an edition-2026 expression.
 
 func parseAuthored(t *testing.T, src string) error {
 	t.Helper()
@@ -43,23 +44,23 @@ func TestNullCoalesce_StepCallNamedArg(t *testing.T) {
 	cases := []struct{ name, src string }{
 		{
 			name: "query step named arg",
-			src: "logic probe {\n  args {\n    event object!\n  }\n  body {\n" +
-				"    return query workspaceForRun( runId: args.event.node.id ?? \"\" )\n  }\n}\n",
+			src: "logic probe {\n  args {\n    event object!\n  }\n" +
+				"  return query workspaceForRun( runId: args.event.node.id ?? \"\" )\n}\n",
 		},
 		{
 			name: "builtin step named arg, second of two",
-			src: "logic probe {\n  args {\n    current string!\n    bump string\n  }\n  body {\n" +
-				"    return builtin suggestNextVersion( current: args.current, bump: args.bump ?? \"patch\" )\n  }\n}\n",
+			src: "logic probe {\n  args {\n    current string!\n    bump string\n  }\n" +
+				"  return builtin suggestNextVersion( current: args.current, bump: args.bump ?? \"patch\" )\n}\n",
 		},
 		{
 			name: "named arg with a chain",
-			src: "logic probe {\n  args {\n    a string\n    b string\n  }\n  body {\n" +
-				"    return query q( x: args.a ?? args.b ?? \"\" )\n  }\n}\n",
+			src: "logic probe {\n  args {\n    a string\n    b string\n  }\n" +
+				"  return query q( x: args.a ?? args.b ?? \"\" )\n}\n",
 		},
 		{
 			name: "brace-literal fallback in a named arg",
-			src: "logic probe {\n  args {\n    labels object\n  }\n  body {\n" +
-				"    return query q( labels: args.labels ?? {} )\n  }\n}\n",
+			src: "logic probe {\n  args {\n    labels object\n  }\n" +
+				"  return query q( labels: args.labels ?? {} )\n}\n",
 		},
 	}
 	for _, tc := range cases {
@@ -78,17 +79,17 @@ func TestNullCoalesce_WriteBlockIdSlot(t *testing.T) {
 	cases := []struct{ name, src string }{
 		{
 			name: "id falls back to another arg",
-			src: "mutate role probe {\n  args {\n    roleId string\n    slug string!\n  }\n" +
+			src: "mutation role probe {\n  args {\n    roleId string\n    slug string!\n  }\n" +
 				"  insert {\n    id: args.roleId ?? args.slug\n  }\n}\n",
 		},
 		{
 			name: "id falls back to a call",
-			src: "mutate node probe {\n  args {\n    id string\n    nodeType string!\n  }\n" +
+			src: "mutation node probe {\n  args {\n    id string\n    nodeType string!\n  }\n" +
 				"  insert {\n    id: args.id ?? hash(\"node-\" + args.nodeType)\n  }\n}\n",
 		},
 		{
 			name: "sibling payload fields still parse alongside",
-			src: "mutate role probe {\n  args {\n    roleId string\n    slug string!\n    active bool\n  }\n" +
+			src: "mutation role probe {\n  args {\n    roleId string\n    slug string!\n    active bool\n  }\n" +
 				"  insert {\n    id: args.roleId ?? args.slug\n    active: args.active ?? true\n  }\n}\n",
 		},
 	}

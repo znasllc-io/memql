@@ -365,10 +365,10 @@ func TestEngineSiteStoreUsesItsOwnSyntheticIdentityNotEdgeGos(t *testing.T) {
 	}
 }
 
-// The invocation keyword must be "mutation" (call position), never "mutate"
-// (the declaration verb) -- the parser rejects the latter in call position
-// rather than silently dropping it (memql#2358), so getting this wrong would
-// fail LOUD, but the point is to get it right, not just to fail loud.
+// The invocation keyword must be "mutation", never the retired verb "mutate"
+// -- the parser rejects the latter in call position rather than silently
+// dropping it (memql#2358), so getting this wrong would fail LOUD, but the
+// point is to get it right, not just to fail loud.
 func TestEngineSiteStoreCallsUpdateSiteBundleAsAMutation(t *testing.T) {
 	fe := &fakeEngine{}
 	s := NewEngineSiteStore(fe)

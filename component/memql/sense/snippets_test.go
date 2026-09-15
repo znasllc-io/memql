@@ -107,10 +107,10 @@ func TestAllSnippetItemsWellFormed(t *testing.T) {
 	sources := []string{
 		"qu", "mu", "lo", "au", "co",
 		"query todo todos {\n  ",
-		"mutate todo createTodo {\n  ",
+		"mutation todo createTodo {\n  ",
 		"logic compute {\n  ",
 		"@trigger(event=\"x.y\")\nautomation onThing {\n  ",
-		"mutate ",
+		"mutation ",
 	}
 	for _, src := range sources {
 		lines := strings.Split(src, "\n")
@@ -133,31 +133,49 @@ func TestAllSnippetItemsWellFormed(t *testing.T) {
 	}
 }
 
-// TestNamedBlocksCompleteWithTheirName: `step` and `precondition` carry a
-// name (`step <name> { ... }`), and a nameless block is refused -- so the
-// keyword completion inserts the keyword and a space, never `step {`, and the
-// snippet puts the name first (memql#5359).
+// TestNamedBlocksCompleteWithTheirName: `precondition` carries a name
+// (`precondition <name> { ... }`), and a nameless block is refused -- so the
+// keyword completion inserts the keyword and a space, never
+// `precondition {`, and the snippet puts the name first (memql#5359). `step`
+// is retired (edition 2026, epic memql#5370): it is never offered, not even
+// in a body still holding a step block.
 func TestNamedBlocksCompleteWithTheirName(t *testing.T) {
 	s := New(&fakeRegistry{})
-	src := "@trigger(event=\"x.y\")\nautomation onThing {\n  "
-	lines := strings.Split(src, "\n")
-	items := s.Complete(src, len(lines), len(lines[len(lines)-1])+1, "probe.memql")
-	for _, block := range []string{"step", "precondition"} {
-		var keyword, snippet *CompletionItem
-		for _, it := range items {
-			it := it
-			switch {
-			case it.Kind == "keyword" && it.Label == block:
-				keyword = &it
-			case it.Kind == "snippet" && strings.HasPrefix(it.Label, block+" "):
-				snippet = &it
+	const trigger = "@trigger(event=\"x.y\")\n"
+	cases := []struct {
+		name, src     string
+		blocks, never []string
+	}{
+		{"a statement body", trigger + "automation onThing {\n  ", []string{"precondition"}, []string{"step"}},
+		// memqlmigrate:keep -- the retired step block is the case.
+		{"a body holding a retired step block", trigger + "automation onThing {\n  step first {\n    mutation m(a: 1)\n  }\n  ", []string{"precondition"}, []string{"step"}},
+	}
+	for _, c := range cases {
+		lines := strings.Split(c.src, "\n")
+		items := s.Complete(c.src, len(lines), len(lines[len(lines)-1])+1, "probe.memql")
+		for _, block := range append(append([]string(nil), c.blocks...), c.never...) {
+			var keyword, snippet *CompletionItem
+			for _, it := range items {
+				it := it
+				switch {
+				case it.Kind == "keyword" && it.Label == block:
+					keyword = &it
+				case it.Kind == "snippet" && strings.HasPrefix(it.Label, block+" "):
+					snippet = &it
+				}
 			}
-		}
-		if keyword == nil || keyword.InsertText != block+" " {
-			t.Errorf("%s: the keyword completion must insert %q, got %+v", block, block+" ", keyword)
-		}
-		if snippet == nil || snippet.InsertText != block+" ${1:name} {\n\t$0\n}" {
-			t.Errorf("%s: the snippet must put the name first, got %+v", block, snippet)
+			if containsString(c.never, block) {
+				if keyword != nil || snippet != nil {
+					t.Errorf("%s: %s is offered, and it is retired there", c.name, block)
+				}
+				continue
+			}
+			if keyword == nil || keyword.InsertText != block+" " {
+				t.Errorf("%s: %s: the keyword completion must insert %q, got %+v", c.name, block, block+" ", keyword)
+			}
+			if snippet == nil || snippet.InsertText != block+" ${1:name} {\n\t$0\n}" {
+				t.Errorf("%s: %s: the snippet must put the name first, got %+v", c.name, block, snippet)
+			}
 		}
 	}
 }

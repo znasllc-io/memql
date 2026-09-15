@@ -31,9 +31,7 @@ package memql
 // reason recorded there: spec / trait / prompt / seed / concept / shape /
 // provider / builtin each need an execution semantic decided (which row does a
 // spec evaluate against; who pays for a prompt's provider call) that the design
-// defers. A client reads this field rather than re-deriving from `kind`, which
-// also spares it the keyword-vs-kind mismatch: the authored keyword is `mutate`
-// and the kind reported here is `mutation`.
+// defers. A client reads this field rather than re-deriving from `kind`.
 //
 // `args` comes from Sense, over the construct's authored source, via the same
 // AnalyzeRunnable the language server serves `memql/runnableConstructs` from.
@@ -48,7 +46,6 @@ import (
 	"sort"
 	"strings"
 
-	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/baseloader"
 	"github.com/znasllc-io/memql/component/memql/sense"
 	memqldsl "github.com/znasllc-io/memql/dsl"
@@ -116,7 +113,7 @@ var ConstructOriginVocabulary = []string{
 }
 
 // runnableConstructKinds is the five-kind runnable set, keyed by the kind this
-// catalog reports (so `mutation`, not the authored keyword `mutate`).
+// catalog reports.
 var runnableConstructKinds = map[string]bool{
 	ConstructKindQuery:      true,
 	ConstructKindMutation:   true,
@@ -126,11 +123,12 @@ var runnableConstructKinds = map[string]bool{
 }
 
 // constructKeyword maps a reported kind to the keyword it is AUTHORED under, so
-// the source index slices on the right token. Only `mutation` differs.
+// the source index slices on the right token. Since edition 2026 declares a
+// mutation `mutation` (D13), every kind is authored under its own name.
 var constructKeyword = map[string]string{
 	ConstructKindConcept:    "concept",
 	ConstructKindQuery:      "query",
-	ConstructKindMutation:   "mutate",
+	ConstructKindMutation:   "mutation",
 	ConstructKindLogic:      "logic",
 	ConstructKindTool:       "tool",
 	ConstructKindAutomation: "automation",
@@ -146,8 +144,7 @@ var constructKeyword = map[string]string{
 }
 
 // kindForConstructKeyword inverts constructKeyword once, at init. The map is
-// injective -- `mutation`/`mutate` is the only pair whose two halves differ at
-// all -- so the inverse is total and unambiguous.
+// injective, so the inverse is total and unambiguous.
 var kindForConstructKeyword = func() map[string]string {
 	out := make(map[string]string, len(constructKeyword))
 	for kind, keyword := range constructKeyword {
@@ -162,12 +159,10 @@ var kindForConstructKeyword = func() map[string]string {
 //
 // Exported for the language server, which holds the other half of drift
 // detection (memql#3759): the document side of that comparison sees the keyword
-// an author wrote (`mutate`) while the catalog side sees the kind the registries
-// key on (`mutation`), so one of the two has to be translated before anything
-// can be matched at all. Reading the same map both sides are built from is the
-// only way that translation cannot rot -- a kind added to constructKeyword
-// extends the language server for free, where a hand-written "map the one name
-// that differs" in the client would silently mis-key the next one.
+// an author wrote while the catalog side sees the kind the registries key on,
+// so the two are joined through this map. Reading the same map both sides are
+// built from is the only way that join cannot rot -- a kind added to
+// constructKeyword extends the language server for free.
 //
 // THE FALSE RETURN IS LOAD-BEARING, and it is not an error case. `action` and
 // `capability` are authored kinds this catalog deliberately does not carry (see
@@ -935,22 +930,12 @@ func forEachConstructSource(content string, fn func(kind, name, source string)) 
 		// constructDeclarationSlices, not the brace slicer alone: an
 		// edition-2026 spec or trait has no brace, and without its own
 		// extent rule it was catalogued with an empty source hash and no
-		// origin path (epic memql#5363) -- the terse-automation defect
-		// below, for another brace-less form.
+		// origin path (epic memql#5363) -- a construct that reads as
+		// `drifted` forever, because no edit can make an empty hash match a
+		// real one (memql#3758).
 		for _, slice := range constructDeclarationSlices(content, keyword) {
 			fn(kind, slice.Name, slice.Source)
 		}
-	}
-
-	// The terse single-step automation form has no braces, so the header
-	// regexp above -- which is anchored on the declaration's opening `{` --
-	// cannot see it. Ten automations in the tree are authored that way, and
-	// without this they were catalogued with an EMPTY source hash while the
-	// language server computed a real one for the same line: a construct
-	// that reads as `drifted` forever, because no edit can make an empty
-	// hash match a real one (memql#3758, caught by the corpus parity gate).
-	for _, slice := range languageParser.ExtractTerseAutomationSlices(content) {
-		fn(ConstructKindAutomation, slice.Name, slice.Source)
 	}
 }
 

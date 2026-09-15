@@ -44,9 +44,7 @@ func TestSandboxAutomation_ValidScheduledCompiles(t *testing.T) {
 @trigger(schedule="0 0 4 * * *")
 @description("Daily sandbox sweep")
 automation sandboxScheduledSweep {
-  step run {
-    logic sandboxNoopLogic { event: event }
-  }
+  run := logic sandboxNoopLogic(event: event)
 }`,
 		},
 	})
@@ -73,9 +71,7 @@ func TestSandboxAutomation_StructuredTriggerCompiles(t *testing.T) {
 @trigger(event="node.created", concept="v1:identity:user")
 @description("Sandbox: react to user creation")
 automation sandboxOnUserCreate {
-  step run {
-    logic sandboxNoopLogic { event: event }
-  }
+  run := logic sandboxNoopLogic(event: event)
 }`,
 		},
 	})
@@ -127,9 +123,7 @@ func TestSandboxAutomation_StructuredTriggerMissingConceptFails(t *testing.T) {
 			Name: "sandboxBadTrigger",
 			Source: `@trigger(event="node.created")
 automation sandboxBadTrigger {
-  step run {
-    logic sandboxNoopLogic { event: event }
-  }
+  run := logic sandboxNoopLogic(event: event)
 }`,
 		},
 	})
@@ -154,9 +148,7 @@ func TestSandboxAutomation_NameMismatchFails(t *testing.T) {
 			Name: "claimedName",
 			Source: `@trigger(schedule="0 0 4 * * *")
 automation actualAutomationName {
-  step run {
-    logic sandboxNoopLogic { event: event }
-  }
+  run := logic sandboxNoopLogic(event: event)
 }`,
 		},
 	})
@@ -182,9 +174,7 @@ func TestSandboxAutomation_NoMutationOfConceptRegistry(t *testing.T) {
 			Name: "sandboxScheduledSweep",
 			Source: `@trigger(schedule="0 0 4 * * *")
 automation sandboxScheduledSweep {
-  step run {
-    logic sandboxNoopLogic { event: event }
-  }
+  run := logic sandboxNoopLogic(event: event)
 }`,
 		},
 	})

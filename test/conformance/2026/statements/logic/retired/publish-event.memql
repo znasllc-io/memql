@@ -1,0 +1,4 @@
+logic publishEventCall {
+  x := publishEvent(topic: "things.happened", payload: { at: now })
+  return 1
+}

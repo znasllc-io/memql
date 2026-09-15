@@ -1,0 +1,8 @@
+logic sizeOf {
+  args {
+    n any
+  }
+  doubled := args.n * 2
+  size := doubled > 10 ? "large" : "small"
+  return size
+}

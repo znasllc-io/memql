@@ -2,7 +2,8 @@ package authoring
 
 // authoring_dryrun_test.go -- engine-backed integration coverage for the Gate-2
 // behavioral dry-run sandbox (issue #958), increment 1: ephemeral sandbox
-// partition + mutation isolation + webhook record-and-block + behavioral trace.
+// partition + mutation isolation + side effects recorded, never run +
+// behavioral trace.
 //
 // External test package so it can link component/automations/steps (whose
 // init() registers the dry-run hook) alongside component/memql -- mirroring how
@@ -56,16 +57,14 @@ const dryRunMutationAutomation = `@enabled
 @trigger(event="node.created", concept="v1:authoring:bundle")
 @description("Sandbox: record a construct when a bundle is created")
 automation sandboxRecordConstruct {
-  step record {
-    createAuthoringConstruct(
-      constructId: "c-dryrun-1",
-      bundleId: "b-dryrun-1",
-      kind: "automation",
-      name: "someAutomation",
-      targetNamespace: "cognition",
-      source: "automation someAutomation { }"
-    )
-  }
+  record := mutation createAuthoringConstruct(
+    constructId: "c-dryrun-1",
+    bundleId: "b-dryrun-1",
+    kind: "automation",
+    name: "someAutomation",
+    targetNamespace: "cognition",
+    source: "automation someAutomation { }"
+  )
 }`
 
 // TestDryRun_MutationIsolatedToSandboxPartition: a dry-run of an automation that
@@ -92,9 +91,6 @@ func TestDryRun_MutationIsolatedToSandboxPartition(t *testing.T) {
 	}
 	if !strings.HasPrefix(report.SandboxPartition, "sandbox:dryrun:") {
 		t.Errorf("expected an ephemeral sandbox partition, got %q", report.SandboxPartition)
-	}
-	if report.Mode != memql.DryRunModeIsolated {
-		t.Errorf("expected isolated mode, got %q", report.Mode)
 	}
 
 	// The mutation must be recorded -- isolated, never persisted.
@@ -126,31 +122,24 @@ func TestDryRun_MutationIsolatedToSandboxPartition(t *testing.T) {
 	}
 }
 
-// dryRunWebhookAutomation calls a webhook step -- an external POST the sandbox
-// must record-and-block.
-const dryRunWebhookAutomation = `@enabled
+// dryRunPublishAutomation publishes an event -- a side effect on the live bus
+// the sandbox must record and never perform.
+const dryRunPublishAutomation = `@enabled
 @trigger(event="node.created", concept="v1:authoring:bundle")
-@description("Sandbox: POST to an external sink")
-automation sandboxWebhook {
-  step notify {
-    webhook(
-      url: "https://example.com/hook",
-      method: "POST",
-      body: { hello: "world" }
-    )
-  }
+@description("Sandbox: announce a bundle")
+automation sandboxPublish {
+  publish "sandbox.bundle.seen" { hello: "world" }
 }`
 
-// TestDryRun_WebhookRecordedAndBlocked: a dry-run of an automation with a
-// webhook step records the request as a blocked external POST and dispatches
-// nothing.
-func TestDryRun_WebhookRecordedAndBlocked(t *testing.T) {
+// TestDryRun_PublishRecordedNotRun: a dry-run of an automation that publishes
+// records the publish in the manifest and publishes nothing.
+func TestDryRun_PublishRecordedNotRun(t *testing.T) {
 	eng := newDryRunEngine(t)
 
 	report, err := memql.RunBundleDryRun(context.Background(), eng, memql.DryRunRequest{
 		BundleId:         "b-dryrun-2",
-		AutomationName:   "sandboxWebhook",
-		AutomationSource: dryRunWebhookAutomation,
+		AutomationName:   "sandboxPublish",
+		AutomationSource: dryRunPublishAutomation,
 		TriggerEvent:     &memql.DryRunTriggerEvent{Topic: "graph.node.created.default.v1:authoring:bundle"},
 	})
 	if err != nil {
@@ -160,28 +149,16 @@ func TestDryRun_WebhookRecordedAndBlocked(t *testing.T) {
 		t.Fatalf("expected dry-run OK, got failure: %s", report.FailureReason)
 	}
 
-	blocked := report.SideEffectManifest.BlockedWebhooks
-	if len(blocked) != 1 {
-		t.Fatalf("expected exactly 1 blocked webhook, got %d: %+v", len(blocked), blocked)
-	}
-	wh := blocked[0]
-	if wh.Method != "POST" || !strings.Contains(wh.Url, "example.com/hook") {
-		t.Errorf("unexpected blocked webhook: %+v", wh)
-	}
-	if wh.Body["hello"] != "world" {
-		t.Errorf("expected captured webhook body hello=world, got %+v", wh.Body)
-	}
-
-	// No mutations on this run.
-	if n := len(report.SideEffectManifest.Mutations); n != 0 {
-		t.Errorf("expected no mutations, got %d", n)
+	recorded := report.SideEffectManifest.Mutations
+	if len(recorded) != 1 || recorded[0].Concept != "event" || recorded[0].Partition != report.SandboxPartition {
+		t.Fatalf("expected the publish recorded once under the sandbox partition, got %+v", recorded)
 	}
 
 	if len(report.Trace) != 1 || !report.Trace[0].Intercepted {
 		t.Fatalf("expected 1 intercepted trace step, got %+v", report.Trace)
 	}
-	if !strings.Contains(report.Trace[0].Note, "blocked") {
-		t.Errorf("expected block note on trace step, got %q", report.Trace[0].Note)
+	if !strings.Contains(report.Trace[0].Note, "not performed") {
+		t.Errorf("expected a recorded-not-performed note on the trace step, got %q", report.Trace[0].Note)
 	}
 }
 
@@ -192,8 +169,8 @@ func TestDryRun_WebhookRecordedAndBlocked(t *testing.T) {
 func TestDryRun_RunnerRegistered(t *testing.T) {
 	eng := newDryRunEngine(t)
 	_, err := memql.RunBundleDryRun(context.Background(), eng, memql.DryRunRequest{
-		AutomationName:   "sandboxWebhook",
-		AutomationSource: dryRunWebhookAutomation,
+		AutomationName:   "sandboxPublish",
+		AutomationSource: dryRunPublishAutomation,
 	})
 	if err != nil {
 		t.Fatalf("with the bridge linked, dry-run must be available; got %v", err)

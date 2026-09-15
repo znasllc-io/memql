@@ -46,7 +46,7 @@ concept authCode {
 
 const secretCodeSource = `use identity.concepts.{ authCode }
 @description("Store an auth code.")
-mutate authCode storeAuthCode {
+mutation authCode storeAuthCode {
 	args {
 		code   int  @required
 		label  int
@@ -278,7 +278,7 @@ concept plainCode {
 
 	src := `use identity.concepts.{ plainCode }
 @description("Store a plain code.")
-mutate plainCode storePlainCode {
+mutation plainCode storePlainCode {
 	args {
 		code  int  @required
 	}

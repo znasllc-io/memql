@@ -13,7 +13,7 @@
 /// only ever create their own to-dos. sourceResponsibilityId is optional -- responsibilities pass
 /// it to attribute app-generated tasks; user-created to-dos leave it empty.
 @actor
-mutate todo createTodo {
+mutation todo createTodo {
   args {
     todoId                  string!
     title                   string!
@@ -36,7 +36,7 @@ mutate todo createTodo {
 /// can never transfer the row. The caller threads the full updated payload (with done flipped); the
 /// complete tool builds it from the current row + done=true.
 @actor
-mutate todo completeTodo {
+mutation todo completeTodo {
   args {
     todoId   string!
     payload  object!
@@ -53,7 +53,7 @@ mutate todo completeTodo {
 /// caller threads the full merged payload; the update tool builds it from the current row plus the
 /// changed fields.
 @actor
-mutate todo updateTodo {
+mutation todo updateTodo {
   args {
     todoId   string!
     payload  object!

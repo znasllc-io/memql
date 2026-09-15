@@ -44,10 +44,9 @@ func (r *originCapturingRegistry) Execute(ctx context.Context, step *Step, stepC
 // TestStepDispatchCarriesInternalOrigin pins the fix for the regression that
 // made memql#2800's first attempt ship a broken kill switch.
 //
-// The internal stamp was originally applied to executeInput -- the automation's
-// `input:` block. No STEP goes through that path: every step type dispatches
-// via stepRegistry.Execute, which received an unstamped context and therefore
-// OriginClient. killSwitchSuspendsRunningPlans reads runningPlansForUser
+// The internal stamp was originally applied to a path no STEP goes through:
+// every step type dispatches via stepRegistry.Execute, which received an
+// unstamped context and therefore OriginClient. killSwitchSuspendsRunningPlans reads runningPlansForUser
 // (@serverOnly) from a step, so the decide step was refused as a client call
 // and no plan was suspended when a user tripped the computer-use kill switch.
 //
@@ -191,7 +190,7 @@ func TestTreeLoadedAutomationReachesDispatchTrusted(t *testing.T) {
 	//
 	// This used to take all[0] -- whatever the tree walk happened to yield
 	// first. That pins an arbitrary fixture: adding a domain that sorts
-	// earlier, or giving that automation an input: block or a required arg,
+	// earlier, or giving that automation a required arg,
 	// breaks this test for reasons unrelated to origin.
 	//
 	// It then named killSwitchSuspendsRunningPlans, because that was the one
@@ -295,24 +294,23 @@ func TestResumedAutomationReachesDispatchTrusted(t *testing.T) {
 	}
 }
 
-// TestOriginForSource covers the automation `input:` block's trust decision --
-// the fourth #2800 production line that was deletable with a green suite.
-//
-// Both end-to-end tests drive automations with NO input: block, so the branch
-// was never entered and collapsing it to an unconditional `ctx` left
-// ./component/automations/... and ./component/memql/... entirely green.
+// TestOriginForSource covers the trust decision every step's dispatch makes
+// (executeStep) -- the fourth #2800 production line that was deletable with a
+// green suite, and extracted so it can be asserted: the Executor holds a
+// concrete engine, so there is no seam to capture the origin a step reaches it
+// with.
 //
 // Direction matters in both ways here, so both are asserted: stamping an
 // UNTRUSTED body is the round-2 bypass (a caller wraps a @serverOnly read in a
-// submitted bundle's input block), and failing to stamp a TRUSTED one is the
+// submitted bundle's statement), and failing to stamp a TRUSTED one is the
 // original defect (a tree automation silently loses the ability to read).
 func TestOriginForSource(t *testing.T) {
 	if got := auth.OriginFromContext(originForSource(context.Background(), true)); !got.IsInternal() {
-		t.Errorf("a TRUSTED automation's input block got origin %v, want internal -- "+
+		t.Errorf("a TRUSTED automation's step got origin %v, want internal -- "+
 			"a tree automation would silently lose access to @serverOnly constructs", got)
 	}
 	if got := auth.OriginFromContext(originForSource(context.Background(), false)); got.IsInternal() {
-		t.Errorf("an UNTRUSTED automation's input block got origin %v, want client -- "+
+		t.Errorf("an UNTRUSTED automation's step got origin %v, want client -- "+
 			"that is the bypass: caller-submitted source reaching a @serverOnly construct", got)
 	}
 	// An inherited internal mark must not survive an untrusted body. Without
@@ -334,9 +332,7 @@ func TestCompiledSourceAutomationIsUntrustedEndToEnd(t *testing.T) {
 
 	src := `@trigger(event="node.created", concept="v1:identity:user")
 automation zzAttackerSubmitted {
-  step steal {
-    query userByIdSystem(userId: "v1:identity:user:victim")
-  }
+  steal := query userByIdSystem(userId: "v1:identity:user:victim")
 }`
 	a, err := loader.CompileSource(src, "attacker:inline")
 	if err != nil {

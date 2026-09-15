@@ -33,7 +33,7 @@ query participant spaceParticipants {
 }
 
 @description("Create a cognition space")
-mutate space mutationCreateSpace {
+mutation space mutationCreateSpace {
   args {
     spaceId  string  @required
     name     string  @required
@@ -52,9 +52,7 @@ logic logicProvisionDailySpace {
   args {
     event object @required
   }
-  body {
-    return ensureDailySpaceForUser(userId: args.event.payload.id)
-  }
+  return builtin ensureDailySpaceForUser(userId: args.event.payload.id)
 }
 
 @enabled
@@ -67,21 +65,17 @@ tool searchUsers {
 }
 
 /// Auto-creates a session when a participant joins a space.
-@trigger(event="node.created", concept="v1:cognition:participant", partition="*")
+@trigger(event="node.created", concept="v1:cognition:participant")
 automation bootstrapSession {
   args {
     id any
   }
-  step decide {
-    logic bootstrapSession ( event )
-  }
+  decide := logic bootstrapSession(event: event)
 }
 
 @trigger(schedule="0 */10 * * * *")
 automation sweepStalePlans {
-  step decide {
-    logic sweepStalePlans ( event )
-  }
+  decide := logic sweepStalePlans(event: event)
 }
 
 @enabled
@@ -154,7 +148,7 @@ func TestRunnableConstructs_FindsEveryRunnableKind(t *testing.T) {
 
 	want := []string{
 		"query spaceParticipants",
-		"mutate mutationCreateSpace",
+		"mutation mutationCreateSpace",
 		"logic logicProvisionDailySpace",
 		"tool searchUsers",
 		"automation bootstrapSession",
@@ -185,7 +179,7 @@ func TestRunnableConstructs_SignatureRanges(t *testing.T) {
 	got := newRunnableService().RunnableConstructs(runnableFixture)
 	for _, tc := range []struct{ name, signature string }{
 		{"spaceParticipants", "query participant spaceParticipants"},
-		{"mutationCreateSpace", "mutate space mutationCreateSpace"},
+		{"mutationCreateSpace", "mutation space mutationCreateSpace"},
 		{"logicProvisionDailySpace", "logic logicProvisionDailySpace"},
 		{"searchUsers", "tool searchUsers"},
 		{"bootstrapSession", "automation bootstrapSession"},
@@ -205,7 +199,7 @@ func TestRunnableConstructs_SignatureConcept(t *testing.T) {
 		t.Errorf("query concept = %q; want %q", c, "participant")
 	}
 	if c := byName(t, got, "mutationCreateSpace").Concept; c != "space" {
-		t.Errorf("mutate concept = %q; want %q", c, "space")
+		t.Errorf("mutation concept = %q; want %q", c, "space")
 	}
 	// logic / tool / automation signatures carry no concept binding.
 	for _, name := range []string{"logicProvisionDailySpace", "searchUsers", "bootstrapSession"} {
@@ -244,7 +238,7 @@ func TestRunnableConstructs_ToolFieldsAreTheSchema(t *testing.T) {
 func TestRunnableConstructs_MutationArgsAreRequired(t *testing.T) {
 	rc := byName(t, newRunnableService().RunnableConstructs(runnableFixture), "mutationCreateSpace")
 	if len(rc.Args) != 2 {
-		t.Fatalf("mutate args = %+v; want 2", rc.Args)
+		t.Fatalf("mutation args = %+v; want 2", rc.Args)
 	}
 	for _, a := range rc.Args {
 		if !a.Required {
@@ -406,15 +400,17 @@ query participant healthyQuery {
   shape   participantFull
 }
 
-@description("Broken -- logic without its mandatory body block")
+@description("Broken -- a binding with no value")
 logic brokenLogic {
   args {
     event object @required
   }
+  x :=
+  return 1
 }
 
 @description("Also healthy")
-mutate space healthyMutation {
+mutation space healthyMutation {
   args {
     spaceId  string  @required
   }
@@ -425,7 +421,7 @@ mutate space healthyMutation {
 }
 `
 	got := newRunnableService().RunnableConstructs(src)
-	want := []string{"query healthyQuery", "mutate healthyMutation"}
+	want := []string{"query healthyQuery", "mutation healthyMutation"}
 	if !reflect.DeepEqual(names(got), want) {
 		t.Errorf("constructs = %v; want %v (the broken logic is dropped, the rest survive)", names(got), want)
 	}
@@ -436,7 +432,7 @@ mutate space healthyMutation {
 // by ONE, not by its UTF-8 byte width. Getting this wrong puts the CodeLens
 // anchor past the end of the line.
 //
-// The fixture uses a tool because the struct-form lowering that query / mutate
+// The fixture uses a tool because the struct-form lowering that query / mutation
 // / logic / automation go through matches ASCII-only name patterns, so a
 // non-ASCII name is only reachable on the natively-parsed declaration kinds.
 func TestRunnableConstructs_SignatureColumnsCountRunes(t *testing.T) {
@@ -477,7 +473,7 @@ query participant firstQuery {
 }
 
 @description("Créer un espace")
-mutate space secondMutation {
+mutation space secondMutation {
   args {
     spaceId  string  @required
   }
@@ -492,13 +488,11 @@ logic thirdLogic {
   args {
     event object @required
   }
-  body {
-    return ensureDailySpaceForUser(userId: args.event.payload.id)
-  }
+  return builtin ensureDailySpaceForUser(userId: args.event.payload.id)
 }
 `
 	got := newRunnableService().RunnableConstructs(src)
-	want := []string{"query firstQuery", "mutate secondMutation", "logic thirdLogic"}
+	want := []string{"query firstQuery", "mutation secondMutation", "logic thirdLogic"}
 	if !reflect.DeepEqual(names(got), want) {
 		t.Fatalf("constructs = %v; want %v (rune-offset slicing)", names(got), want)
 	}
@@ -526,15 +520,11 @@ spec participant isGuestParticipant = row => row.isGuest == true
 
 @trigger(event="node.deleted", concept="v1:cognition:participant")
 automation onParticipantRemoved {
-  step decide {
-    logic onParticipantRemoved ( event )
-  }
+  decide := logic onParticipantRemoved(event: event)
 }
 
 automation noPreamble {
-  step decide {
-    logic noPreamble ( event )
-  }
+  decide := logic noPreamble(event: event)
 }
 `
 	got := newRunnableService().RunnableConstructs(src)
@@ -551,67 +541,6 @@ automation noPreamble {
 	}
 }
 
-// The terse single-step automation form declares no body at all:
-//
-//	automation NAME @trigger(...) => logic targetLogic
-//
-// Ten of them live in dsl/. They are runnable automations, and -- because
-// their `@trigger` sits at depth 0 with no body to close -- failing to
-// recognise one also strands its annotation as a preamble that swallows the
-// NEXT declaration. Both halves are asserted here.
-func TestRunnableConstructs_TerseAutomationForm(t *testing.T) {
-	const src = `use identity.concepts.{ user }
-
-/// Soft-revoke expired delegations every 5 minutes.
-automation expireDelegations @trigger(schedule="0 */5 * * * *") => logic revokeExpiredDelegations
-
-/// React to a new delegation row.
-automation onDelegationCreated @trigger(event="node.created", concept="v1:identity:delegation", partition="*") => logic onDelegationCreated
-
-@description("A block-form automation immediately after two terse ones")
-@trigger(event="node.updated", concept="v1:identity:user")
-automation onUserUpdated {
-  step decide {
-    logic onUserUpdated ( event )
-  }
-}
-`
-	got := newRunnableService().RunnableConstructs(src)
-	want := []string{
-		"automation expireDelegations",
-		"automation onDelegationCreated",
-		"automation onUserUpdated",
-	}
-	if !reflect.DeepEqual(names(got), want) {
-		t.Fatalf("constructs = %v; want %v", names(got), want)
-	}
-
-	terse := byName(t, got, "expireDelegations")
-	if terse.SignatureRange != wantSignatureRange(t, src, "automation expireDelegations") {
-		t.Errorf("terse signature range = %+v; want the `automation NAME` span", terse.SignatureRange)
-	}
-	if w := (&RunnableTrigger{Schedule: "0 */5 * * * *"}); !reflect.DeepEqual(terse.Trigger, w) {
-		t.Errorf("terse trigger = %+v; want %+v", terse.Trigger, w)
-	}
-	if len(terse.Args) != 0 {
-		t.Errorf("terse automation args = %+v; want empty", terse.Args)
-	}
-
-	evented := byName(t, got, "onDelegationCreated")
-	wantTrigger := &RunnableTrigger{Event: "node.created", Concept: "v1:identity:delegation"}
-	if !reflect.DeepEqual(evented.Trigger, wantTrigger) {
-		t.Errorf("terse event trigger = %+v; want %+v", evented.Trigger, wantTrigger)
-	}
-
-	// The block automation after them must keep its OWN trigger, proving the
-	// terse declarations did not strand a preamble that ran into it.
-	block := byName(t, got, "onUserUpdated")
-	wantBlock := &RunnableTrigger{Event: "node.updated", Concept: "v1:identity:user"}
-	if !reflect.DeepEqual(block.Trigger, wantBlock) {
-		t.Errorf("block automation trigger = %+v; want %+v", block.Trigger, wantBlock)
-	}
-}
-
 // A corpus sweep: every construct the live dsl/ tree declares with a runnable
 // keyword must come back from the scan. The oracle is a deliberately dumb
 // header regex -- it exists only to enumerate what SHOULD be found, never to
@@ -624,7 +553,7 @@ func TestRunnableConstructs_CoversTheLiveCorpus(t *testing.T) {
 		t.Skipf("dsl tree not reachable from here: %v", err)
 	}
 	headerRe := regexp.MustCompile(
-		`(?m)^(query|mutate|logic|tool|automation)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*[{@]`)
+		`(?m)^(query|mutation|logic|tool|automation)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*[{@]`)
 
 	svc := newRunnableService()
 	scanned, missing := 0, []string{}
@@ -694,11 +623,9 @@ query space disabledSpaceLookup {
 }
 
 @disabled
-@trigger(event="node.created", concept="v1:cognition:participant", partition="*")
+@trigger(event="node.created", concept="v1:cognition:participant")
 automation disabledBootstrap {
-  step decide {
-    logic bootstrapSession ( event )
-  }
+  decide := logic bootstrapSession(event: event)
 }
 
 @enabled
@@ -707,9 +634,7 @@ logic enabledLogic {
   args {
     event object @required
   }
-  body {
-    return ensureDailySpaceForUser(userId: args.event.payload.id)
-  }
+  return builtin ensureDailySpaceForUser(userId: args.event.payload.id)
 }
 `
 
@@ -732,7 +657,7 @@ func TestRunnableConstructs_ToolAutoInjectedFieldsAreFlagged(t *testing.T) {
 	}
 }
 
-// query / mutate / logic args have no @autoInjected annotation at all, so the
+// query / mutation / logic args have no @autoInjected annotation at all, so the
 // flag must never come back true for them -- a client that marks an ordinary
 // arg as engine-supplied tells the developer their value is ignored when it is
 // not.

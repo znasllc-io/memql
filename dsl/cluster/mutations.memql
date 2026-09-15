@@ -4,7 +4,7 @@
 // files cover the other construct kinds.
 
 /// Create the cluster record
-mutate cluster createCluster {
+mutation cluster createCluster {
   args {
     /// The singleton row id. Deterministic on purpose -- see the note above.
     clusterId           string!
@@ -32,7 +32,7 @@ mutate cluster createCluster {
 // Register the cluster's database in the graph.
 
 /// Register the cluster's database in the graph
-mutate database createDatabase {
+mutation database createDatabase {
   args {
     /// The singleton row id. Deterministic on purpose -- see the note above.
     databaseId        string!
@@ -63,7 +63,7 @@ mutate database createDatabase {
 // Register the cluster's identity provider in the graph.
 
 /// Register the cluster's identity provider in the graph
-mutate identityProvider createIdentityProvider {
+mutation identityProvider createIdentityProvider {
   args {
     /// The singleton row id. Deterministic on purpose -- see the note above.
     identityProviderId  string!
@@ -72,7 +72,7 @@ mutate identityProvider createIdentityProvider {
     clientIdPrefix      string
     redirectUrl         string
     /// Both already computed by app/cluster.go's parseIdentityProviderInfo and dropped on the floor
-    /// by the automation step, which forwarded four fields out of six (memql#4766).
+    /// by the automation's call, which forwarded four fields out of six (memql#4766).
     acceptedAudiences   []string
     jwksUrl             string
     clusterId           string
@@ -94,7 +94,7 @@ mutate identityProvider createIdentityProvider {
 // concept row per real node, not one per observer.
 
 /// Register a node in the cluster
-mutate node createNode {
+mutation node createNode {
   args {
     id            string
     nodeType      string!
@@ -133,7 +133,7 @@ mutate node createNode {
 // Record a node lifecycle event (spawned, stopped, failed).
 
 /// Record a node lifecycle event
-mutate spawnEvent createSpawnEvent {
+mutation spawnEvent createSpawnEvent {
   args {
     nodeId       string!
     nodeType     string!
@@ -165,7 +165,7 @@ mutate spawnEvent createSpawnEvent {
 /// nodeType/address/parentId/capabilities/labels inherit from the persisted row instead of being
 /// wiped when a caller omits them (memql#1628 -- previously the insert form re-stamped address to
 /// "" and reset capabilities/labels on every transition).
-mutate node updateNodeHealth {
+mutation node updateNodeHealth {
   args {
     id        string!
     health    string!
@@ -200,7 +200,7 @@ mutate node updateNodeHealth {
 /// and only the Go caller knows that. The owner gate itself lives in the builtin
 /// (integrations/release), because builtins are outside the query/mutation row-authz buckets.
 @serverOnly
-mutate releaseCut createReleaseCut {
+mutation releaseCut createReleaseCut {
   args {
     version           string!
     bump              enum("major", "minor", "patch")!
@@ -241,7 +241,7 @@ mutate releaseCut createReleaseCut {
 /// Minimal arguments on purpose: `update{}` is a read-merge (memql#1628), so re-supplying the
 /// unchanged fields would be dead weight that an undeclared-argument discard hides.
 @serverOnly
-mutate releaseCut updateReleaseCutStatus {
+mutation releaseCut updateReleaseCutStatus {
   args {
     version    string!
     status     enum("dispatched", "tag_created_release_failed", "images_available", "failed")!

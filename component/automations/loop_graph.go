@@ -228,18 +228,9 @@ type graphCall struct {
 	args map[string]any
 }
 
-// graphPublish is one event step.
+// graphPublish is one publish statement.
 type graphPublish struct {
 	topic   string // "" when the topic is an expression
-	payload map[string]any
-	extra   bool // the payload carries a step's result too (includeResult)
-}
-
-// graphInlineWrite is one inline mutation step: an insert.
-type graphInlineWrite struct {
-	step    string
-	concept string
-	newRow  bool
 	payload map[string]any
 }
 
@@ -248,13 +239,13 @@ type stepFacts struct {
 	calls     []graphCall
 	subs      []string
 	publishes []graphPublish
-	inline    []graphInlineWrite
-	opaque    []string // actions, webhooks, concept cards
+	opaque    []string // actions
 }
 
-// collectStepFacts walks an automation's steps -- nested forEach bodies,
-// parallel branches, switch cases, and its onComplete and onError hooks --
-// in the order they are written.
+// collectStepFacts walks an automation's statements -- the bodies of its
+// `for` loops, its parallel branches, and the blocks an if or a switch
+// compiles to -- in the order they are written. A construct call is always a
+// statement of its own (a function step); an expression or a return is pure.
 func collectStepFacts(a *Automation) stepFacts {
 	var f stepFacts
 	var walk func(steps []*Step)
@@ -265,28 +256,18 @@ func collectStepFacts(a *Automation) stepFacts {
 		switch {
 		case s.Function != nil:
 			f.calls = append(f.calls, graphCall{name: s.Function.Name, args: s.Function.Args})
-		case s.Query != nil:
-			if call := queryStepConstructCall(s); call != nil {
-				f.calls = append(f.calls, graphCall{name: call.Name, args: namedCallArgs(call)})
-			}
 		case s.Automation != nil:
 			f.subs = append(f.subs, s.Automation.Name)
 		case s.Event != nil:
 			f.publishes = append(f.publishes, eventPublishOf(s))
-		case s.Mutation != nil:
-			f.inline = append(f.inline, inlineWriteOf(s))
 		case s.Action != nil:
 			f.opaque = append(f.opaque, "action "+s.Action.Ref)
-		case s.Webhook != nil:
-			f.opaque = append(f.opaque, "webhook")
-		case s.EmitConceptCard != nil:
-			f.opaque = append(f.opaque, "emitConceptCard")
 		case s.ForEach != nil:
 			walk(s.ForEach.Do)
 		case s.Parallel != nil:
 			walk(s.Parallel.Branches)
-		case s.Switch != nil:
-			walk(legacySwitchSteps(s))
+		case s.Block != nil:
+			walk(s.Block.Steps)
 		}
 	}
 	walk = func(steps []*Step) {
@@ -295,74 +276,13 @@ func collectStepFacts(a *Automation) stepFacts {
 		}
 	}
 	walk(a.Steps)
-	visit(a.OnComplete)
-	visit(a.OnError)
 	return f
-}
-
-// legacySwitchSteps is a switch step's cases and default, cases in label
-// order. The edition-2026 body has no switch step; Task 13 of the loop
-// protection plan deletes this with it.
-func legacySwitchSteps(s *Step) []*Step {
-	var out []*Step
-	add := func(steps []*Step, single *Step) {
-		out = append(out, steps...)
-		if single != nil {
-			out = append(out, single)
-		}
-	}
-	for _, label := range sortedKeys(s.Switch.Cases) {
-		if c := s.Switch.Cases[label]; c != nil {
-			add(c.Steps, c.Step)
-		}
-	}
-	if d := s.Switch.Default; d != nil {
-		add(d.Steps, d.Step)
-	}
-	return out
-}
-
-// queryStepConstructCall is the construct a query step calls: its expression
-// when that is a construct call, which the query executor runs on the engine.
-// Any other expression is evaluated in process, where no construct runs.
-func queryStepConstructCall(s *Step) *ast.CallExpr {
-	var n ast.ExpressionNode
-	if s.Exprs != nil {
-		n = s.Exprs.Query
-	}
-	if n == nil && s.Query != nil {
-		if parsed, err := languageParser.ParseV1Expression(s.Query.Query); err == nil {
-			n = parsed
-		}
-	}
-	call, ok := ast.Unparen(n).(*ast.CallExpr)
-	if !ok || call == nil || call.Receiver != nil || !constructCallKinds[call.Kind] {
-		return nil
-	}
-	return call
-}
-
-// namedCallArgs is a construct call's arguments as a step's: a literal its
-// value, anything else an expression leaf.
-func namedCallArgs(call *ast.CallExpr) map[string]any {
-	out := make(map[string]any, len(call.Named))
-	for _, na := range call.Named {
-		switch v := ast.Unparen(na.Value).(type) {
-		case *ast.LiteralExpr:
-			out[na.Name] = normalizeLoopValue(v.Value)
-		case *ast.NilExpr:
-			out[na.Name] = nil
-		default:
-			out[na.Name] = &ExprLeaf{Src: ast.FormatExpr(na.Value), Node: na.Value}
-		}
-	}
-	return out
 }
 
 // eventPublishOf reads an event step: its topic when it is a literal, and
 // its payload.
 func eventPublishOf(s *Step) graphPublish {
-	p := graphPublish{payload: s.Event.Payload, extra: s.Event.IncludeResult}
+	p := graphPublish{payload: s.Event.Payload}
 	switch {
 	case s.Exprs != nil && s.Exprs.Topic != nil:
 		if lit, ok := ast.Unparen(s.Exprs.Topic).(*ast.LiteralExpr); ok {
@@ -374,14 +294,6 @@ func eventPublishOf(s *Step) graphPublish {
 		p.topic = s.Event.Topic
 	}
 	return p
-}
-
-// inlineWriteOf reads an inline mutation step, which the mutation executor
-// runs as an insert: of a new row when it names no id.
-func inlineWriteOf(s *Step) graphInlineWrite {
-	m := s.Mutation
-	named := strings.TrimSpace(m.ID) != "" || m.leaves["id"] != nil || (s.Exprs != nil && s.Exprs.ID != nil)
-	return graphInlineWrite{step: s.ID, concept: m.Concept, newRow: !named, payload: m.Payload}
 }
 
 // production is one topic an automation's work publishes, with what the row
@@ -444,11 +356,6 @@ func (b *graphBuilder) ownProductions(i int, prefix []string) []production {
 		for _, w := range work.UnionWrites([]string{c.name}, b.reg) {
 			out = append(out, writeProductions(w, c.args, with(w.Path))...)
 		}
-	}
-	for _, iw := range f.inline {
-		w := work.Write{Concept: iw.concept, Mutation: "step " + iw.step, Path: []string{"step " + iw.step},
-			Spec: work.WriteSpec{Kind: string(ast.MutationKindInsert), NewRow: iw.newRow, Fields: payloadFields(iw.payload)}}
-		out = append(out, writeProductions(w, nil, with(w.Path))...)
 	}
 	for _, p := range f.publishes {
 		out = append(out, publishProduction(p, prefix))
@@ -640,7 +547,7 @@ func literalArg(v any) (any, bool) {
 // read as the row a trigger filter on that topic binds: a non-graph event's
 // row is its payload, with no columns but an empty concept.
 func publishProduction(p graphPublish, via []string) production {
-	row := knownRow{Fields: map[string]any{}, Unknown: map[string]bool{}, OthersKnown: !p.extra, FirstVersion: triUnknown}
+	row := knownRow{Fields: map[string]any{}, Unknown: map[string]bool{}, OthersKnown: true, FirstVersion: triUnknown}
 	why := map[string]string{}
 	for _, k := range sortedKeys(p.payload) {
 		if lit, ok := literalArg(p.payload[k]); ok {
@@ -656,9 +563,6 @@ func publishProduction(p graphPublish, via []string) production {
 	row.explain = func(field string) string {
 		if s, ok := why[field]; ok {
 			return s
-		}
-		if p.extra {
-			return "the event carries a step's result, which the load cannot read"
 		}
 		return fmt.Sprintf("the event's %s is known only at run time", field)
 	}
@@ -692,9 +596,6 @@ func (b *graphBuilder) node(i int, a *Automation, cov *GraphCoverage) GraphAutom
 					cov.Resolved++
 				}
 			}
-		}
-		for _, iw := range f.inline {
-			writes = append(writes, iw.concept)
 		}
 		for _, p := range f.publishes {
 			if p.topic == "" {

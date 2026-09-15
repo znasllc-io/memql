@@ -47,13 +47,11 @@ automation invokeAgent {
     scopeId  string
   }
 
-  step turn {
-    builtin runAgentTurn (
-      agentId: args.agentId,
-      prompt: args.prompt,
-      scopeId: args.scopeId ?? ""
-    )
-  }
+  turn := builtin runAgentTurn(
+    agentId: args.agentId,
+    prompt: args.prompt,
+    scopeId: args.scopeId ?? ""
+  )
 }
 
 /// Produce a deliverable and land it in the Library. Backs the `produceArtifact` TOOL a model can
@@ -75,19 +73,17 @@ automation produceArtifact {
     filename  string
   }
 
-  step produce {
-    builtin runAgentTurn (
-      agentId: args.agentId,
-      requireFile: true,
-      prompt: (
-        "Produce the following deliverable and save it to the Library. Do not reply with the " +
-        "content itself -- write it to a file and confirm what you saved.\n\nDeliverable: " +
-        args.goal +
-        "\nFormat: " +
-        (args.format ?? "markdown") +
-        "\nFilename: " +
-        (args.filename ?? "(choose a sensible one)")
-      )
+  produce := builtin runAgentTurn(
+    agentId: args.agentId,
+    requireFile: true,
+    prompt: (
+      "Produce the following deliverable and save it to the Library. Do not reply with the " +
+      "content itself -- write it to a file and confirm what you saved.\n\nDeliverable: " +
+      args.goal +
+      "\nFormat: " +
+      (args.format ?? "markdown") +
+      "\nFilename: " +
+      (args.filename ?? "(choose a sensible one)")
     )
-  }
+  )
 }

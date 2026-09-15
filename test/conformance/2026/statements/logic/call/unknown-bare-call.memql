@@ -1,0 +1,6 @@
+logic callsNothingKnown {
+  args {
+    id string
+  }
+  return lookupUser(id: args.id).name
+}

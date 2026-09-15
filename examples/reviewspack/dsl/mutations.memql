@@ -7,7 +7,7 @@
 
 /// Create a storefront review. Owned: ownerUserId is stamped from actor.userId.
 @actor
-mutate review createReview {
+mutation review createReview {
   args {
     reviewId            string!
     productHandle       string!
@@ -31,7 +31,7 @@ mutate review createReview {
 /// principalKind is accepted only as the literal "client" by the closed
 /// concept enum; a Provider operator is refused by the Go write path.
 @actor
-mutate moderationAction recordModerationAction {
+mutation moderationAction recordModerationAction {
   args {
     actionId       string!
     reviewId       string!
@@ -50,7 +50,7 @@ mutate moderationAction recordModerationAction {
 
 /// Create or flip the public display toggle. Data, not source -- no rebuild.
 @actor
-mutate reviewSettings setReviewDisplay {
+mutation reviewSettings setReviewDisplay {
   args {
     settingsId     string!
     publicDisplay  bool!

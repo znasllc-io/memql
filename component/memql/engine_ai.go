@@ -546,6 +546,37 @@ func (e *MemQLEngine) ExecuteToolByName(ctx context.Context, name string, args m
 	return string(b), nil
 }
 
+// ToolCallee answers how a call to the named tool is written as a statement:
+// the kind and name of the construct its function handler calls (epic
+// memql#5370). A tool is agent-only, so no statement calls one; a statement
+// reaches what the tool ran through its handler. ok is false for a tool this
+// engine does not have, and for a query or webhook handler: those substitute
+// the tool's arguments into MemQL text or a request, so the tool's arguments
+// are not the arguments of any one call.
+func (e *MemQLEngine) ToolCallee(name string) (kind, callee string, ok bool) {
+	if e == nil || e.tools == nil || e.functions == nil {
+		return "", "", false
+	}
+	tool, err := e.tools.Get(strings.TrimSpace(name))
+	if err != nil || tool == nil || tool.Handler == nil || tool.Handler.Type != "function" {
+		return "", "", false
+	}
+	callee = strings.TrimSpace(tool.Handler.FunctionName)
+	fn, err := e.functions.Get(callee)
+	if err != nil || fn == nil {
+		return "", "", false
+	}
+	switch {
+	case fn.IsBuiltin():
+		return "builtin", callee, true
+	case fn.FunctionKind == "mutation", fn.FunctionKind == "logic":
+		return fn.FunctionKind, callee, true
+	case fn.FunctionKind == "", fn.FunctionKind == "query":
+		return "query", callee, true
+	}
+	return "", "", false
+}
+
 // RenderPrompt renders a prompt template with the given data and returns the
 // rendered text. Used by integrations that need to construct prompts for
 // streaming calls where the standard InvokeAI path isn't used.

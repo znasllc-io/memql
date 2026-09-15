@@ -1,0 +1,6 @@
+@trigger(schedule="0 0 * * * *")
+automation forRange {
+  for item := range args.items {
+    builtin touch(item: item)
+  }
+}

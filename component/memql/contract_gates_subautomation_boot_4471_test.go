@@ -26,14 +26,12 @@ func unresolvedSubAutomationCorpus() []baseloader.RawFile {
 	return []baseloader.RawFile{
 		{
 			Path:    "cognition/automations.memql",
-			Content: "automation childVerb {\n  step s {\n    logic noop( x: 1 )\n  }\n}\n",
+			Content: "automation childVerb {\n  s := logic noop(x: 1)\n}\n",
 		},
 		{
 			Path: "deployment/automations.memql",
 			Content: `automation parentVerb {
-  step s {
-    automation childVerbTypo( note: "x" )
-  }
+  s := automation childVerbTypo(note: "x")
 }
 `,
 		},

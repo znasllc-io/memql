@@ -93,9 +93,7 @@ automation a {
   args {
     id any
   }
-  step advance {
-    mutation advanceThing(id: id, s: "open")
-  }
+  advance := mutation advanceThing(id: args.id, s: "open")
 }`)
 	g := BuildLoopGraph(as, fakeSource{thingReg()}, 0)
 	e := graphEdge(g, "a", "a")
@@ -130,18 +128,14 @@ func TestLoopGraph_RefutedByKind(t *testing.T) {
 	as := graphAutomations(t,
 		`@trigger(schedule="0 */5 * * * *")
 automation a {
-  step create {
-    mutation createThing()
-  }
+  create := mutation createThing()
 }`,
 		`@trigger(event="node.updated", concept="v1:t:thing")
 automation b {
   args {
     id any
   }
-  step record {
-    mutation recordOther(id: id)
-  }
+  record := mutation recordOther(id: args.id)
 }`)
 	g := BuildLoopGraph(as, fakeSource{thingReg()}, 0)
 	if e := graphEdge(g, "a", "b"); e != nil {
@@ -159,9 +153,7 @@ automation a {
   args {
     id any
   }
-  step finish {
-    mutation finishThing(id: id)
-  }
+  finish := mutation finishThing(id: args.id)
 }`,
 		`@trigger(event="node.created", concept="v1:t:thing")
 @filter(row => row.status == "open")
@@ -169,9 +161,7 @@ automation b {
   args {
     id any
   }
-  step record {
-    mutation recordOther(id: id)
-  }
+  record := mutation recordOther(id: args.id)
 }`)
 	g := BuildLoopGraph(as, fakeSource{thingReg()}, 0)
 	if e := graphEdge(g, "a", "b"); e != nil {
@@ -199,9 +189,7 @@ automation b {
   args {
     id any
   }
-  step record {
-    mutation recordOther(id: id)
-  }
+  record := mutation recordOther(id: args.id)
 }`)
 }
 
@@ -244,18 +232,14 @@ automation b {
     firstVersion bool
     id           any
   }
-  step record {
-    mutation recordOther(id: id)
-  }
+  record := mutation recordOther(id: args.id)
 }`
 	updater := `@trigger(event="tick.a")
 automation a {
   args {
     id any
   }
-  step advance {
-    mutation advanceThing(id: id, s: "open")
-  }
+  advance := mutation advanceThing(id: args.id, s: "open")
 }`
 	g := BuildLoopGraph(graphAutomations(t, updater, reader), fakeSource{thingReg()}, 0)
 	if e := graphEdge(g, "a", "b"); e != nil {
@@ -264,9 +248,7 @@ automation a {
 	// The control: an insert of a new row is one.
 	creator := `@trigger(event="tick.c")
 automation c {
-  step create {
-    mutation createThing()
-  }
+  create := mutation createThing()
 }`
 	g = BuildLoopGraph(graphAutomations(t, creator, reader), fakeSource{thingReg()}, 0)
 	if e := graphEdge(g, "c", "b"); e == nil || !e.Decided {
@@ -283,9 +265,7 @@ automation c {
 func TestLoopGraph_UndeclaredArgsReadAbsent(t *testing.T) {
 	finisher := `@trigger(event="tick.a")
 automation a {
-  step finish {
-    mutation finishThing()
-  }
+  finish := mutation finishThing()
 }`
 	reader := func(args string) string {
 		return `@trigger(event="node.created", concept="v1:t:thing")
@@ -313,9 +293,7 @@ automation b {
 
 	creator := `@trigger(event="tick.c")
 automation c {
-  step create {
-    mutation createThing()
-  }
+  create := mutation createThing()
 }`
 	firstOnly := `@trigger(event="node.created", concept="v1:t:thing")
 @filter(row => args.firstVersion == true)
@@ -323,9 +301,7 @@ automation f {
   args {
     id any
   }
-  step record {
-    mutation recordOther(id: id)
-  }
+  record := mutation recordOther(id: args.id)
 }`
 	g = BuildLoopGraph(graphAutomations(t, creator, firstOnly), fakeSource{thingReg()}, 0)
 	if e := graphEdge(g, "c", "f"); e != nil {
@@ -373,9 +349,7 @@ automation archiveArtifactOnFileArchive {
   args {
     artifactId any
   }
-  step archiveIndex {
-    mutation archiveArtifact(artifactId: artifactId)
-  }
+  archiveIndex := mutation archiveArtifact(artifactId: args.artifactId)
 }`)
 	if len(g.Problems) != 1 || g.Problems[0].Code != "loop_cycle" {
 		t.Fatalf("problems = %+v, want the one loop_cycle", g.Problems)
@@ -397,9 +371,7 @@ automation a {
     id any
     x  any
   }
-  step advance {
-    mutation advanceThing(id: id, s: x)
-  }
+  advance := mutation advanceThing(id: args.id, s: args.x)
 }`
 
 func withLoop(a *Automation) *Automation {
@@ -440,9 +412,7 @@ automation a {
     id any
     x  any
   }
-  step toTwo {
-    mutation updateTwo(id: id, s: x)
-  }
+  toTwo := mutation updateTwo(id: args.id, s: args.x)
 }`,
 		`@trigger(event="node.created", concept="v1:t:two")
 automation b {
@@ -450,12 +420,8 @@ automation b {
     id any
     x  any
   }
-  step toOne {
-    mutation updateOne(id: id, s: x)
-  }
-  step toThree {
-    mutation updateThree(id: id, s: x)
-  }
+  toOne := mutation updateOne(id: args.id, s: args.x)
+  toThree := mutation updateThree(id: args.id, s: args.x)
 }`,
 		`@trigger(event="node.created", concept="v1:t:three")
 @filter(row => row.status != "done")
@@ -464,9 +430,7 @@ automation c {
     id any
     x  any
   }
-  step toTwo {
-    mutation updateTwo(id: id, s: x)
-  }
+  toTwo := mutation updateTwo(id: args.id, s: args.x)
 }`)
 	return as, reg
 }
@@ -503,9 +467,7 @@ func TestLoopGraph_Strata(t *testing.T) {
 	}
 	source := `@trigger(event="tick.a")
 automation a {
-  step s {
-    mutation createOne()
-  }
+  s := mutation createOne()
 }`
 	reader := func(name, on, writes string) string {
 		return `@trigger(event="node.created", concept="v1:t:` + on + `")
@@ -531,9 +493,7 @@ func TestLoopGraph_TopicEdges(t *testing.T) {
 	as := graphAutomations(t,
 		`@trigger(event="node.created", concept="v1:t:source")
 automation p {
-  step s {
-    publishEvent(topic: "x.y", payload: {a: 1})
-  }
+  publish "x.y" {a: 1}
 }`,
 		`@trigger(event="node.created", concept="v1:t:source2")
 automation r {
@@ -546,28 +506,20 @@ automation r {
 }`,
 		`@trigger(event="x.y")
 automation q {
-  step s {
-    mutation recordOther()
-  }
+  s := mutation recordOther()
 }`,
 		`@trigger(event="system.startup")
 automation s {
-  step s {
-    mutation recordOther()
-  }
+  s := mutation recordOther()
 }`,
 		`@trigger(event="x.z")
 @filter(row => row.a == 2)
 automation v {
-  step s {
-    mutation recordOther()
-  }
+  s := mutation recordOther()
 }`,
 		`@trigger(event="node.created", concept="v1:t:thing")
 automation u {
-  step s {
-    mutation recordOther()
-  }
+  s := mutation recordOther()
 }`)
 	g := BuildLoopGraph(as, fakeSource{thingReg()}, 0)
 	if e := graphEdge(g, "p", "q"); e == nil || !e.Decided || e.Topic != "x.y" {
@@ -599,34 +551,24 @@ automation a {
   args {
     id any
   }
-  step s {
-    automation subAdvance(id: id)
-  }
+  s := automation subAdvance(id: args.id)
 }`,
 		`automation subAdvance {
   args {
     id any
   }
-  step advance {
-    mutation advanceThing(id: id, s: "open")
-  }
-  step recurse {
-    automation subBack(id: id)
-  }
+  advance := mutation advanceThing(id: args.id, s: "open")
+  recurse := automation subBack(id: args.id)
 }`,
 		`automation subBack {
   args {
     id any
   }
-  step again {
-    automation subAdvance(id: id)
-  }
+  again := automation subAdvance(id: args.id)
 }`,
 		`@trigger(event="node.updated", concept="v1:t:thing")
 automation b {
-  step s {
-    mutation recordOther()
-  }
+  s := mutation recordOther()
 }`)
 	g := BuildLoopGraph(as, fakeSource{thingReg()}, 0)
 	if w := graphNode(t, g, "a").Writes; strings.Join(w, ",") != thingConcept {
@@ -651,38 +593,20 @@ automation a {
   args {
     id any
   }
-  step find {
-    query findThing(id: id)
-  }
-  step advance {
-    mutation advanceThing(id: id, s: "open")
-  }
-  step decide {
-    logic decideThing(id: id)
-  }
-  step send {
-    builtin sendThing(id: id)
-  }
-  step act {
-    action doThing(id: id)
-  }
-  step lost {
-    mutation noSuchThing(id: id)
-  }
-  step sub {
-    automation subX(id: id)
-  }
-  step missing {
-    automation noSuchAutomation(id: id)
-  }
+  find := query findThing(id: args.id)
+  advance := mutation advanceThing(id: args.id, s: "open")
+  decide := logic decideThing(id: args.id)
+  send := builtin sendThing(id: args.id)
+  act := action doThing(id: args.id)
+  lost := mutation noSuchThing(id: args.id)
+  sub := automation subX(id: args.id)
+  missing := automation noSuchAutomation(id: args.id)
 }`,
 		`automation subX {
   args {
     id any
   }
-  step find {
-    query findThing(id: id)
-  }
+  find := query findThing(id: args.id)
 }`)
 	g := BuildLoopGraph(as, fakeSource{thingReg()}, 0)
 	want := GraphCoverage{Automations: 2, Resolved: 5, Unresolved: 2, Opaque: 2}
@@ -711,12 +635,8 @@ automation routeRequest {
   args {
     id any
   }
-  step advance {
-    mutation advanceRequest(requestId: id, status: "queued")
-  }
-  step persistRouted {
-    mutation recordRequestEvent(requestId: id, kind: "routed", fromStatus: "submitted", note: "routed by submitter role")
-  }
+  advance := mutation advanceRequest(requestId: args.id, status: "queued")
+  persistRouted := mutation recordRequestEvent(requestId: args.id, kind: "routed", fromStatus: "submitted", note: "routed by submitter role")
 }`
 
 // The refusal as the plan writes it, over routeRequest as it was before its
@@ -746,9 +666,7 @@ automation routeSubmitted {
     id     any
     status any
   }
-  step advance {
-    mutation advanceRequest(requestId: id, status: status)
-  }
+  advance := mutation advanceRequest(requestId: args.id, status: args.status)
 }`)
 	g = BuildLoopGraph(as, fakeSource{reg}, 0)
 	if len(g.Problems) != 1 {
@@ -839,9 +757,7 @@ func TestLoopGraph_ProblemThrough(t *testing.T) {
 	// A bystander: an automation in no cycle beside a refused one.
 	bystander := graphAutomation(t, `@trigger(event="tick.z")
 automation z {
-  step s {
-    mutation recordOther()
-  }
+  s := mutation recordOther()
 }`)
 	g = BuildLoopGraph([]*Automation{graphAutomation(t, loopSelfCycle), bystander}, fakeSource{thingReg()}, 0)
 	if p, ok := g.problemThrough("test:z"); ok {
@@ -879,9 +795,7 @@ func TestLoopGraph_Deterministic(t *testing.T) {
 	as, reg := twoCycles(t)
 	extra := graphAutomations(t, strings.Replace(loopSelfCycle, "automation a {", "automation d {", 1), `@trigger(event="tick.z")
 automation z {
-  step s {
-    publishEvent(topic: "x.y", payload: {})
-  }
+  publish "x.y" {}
 }`)
 	all := append(as, extra...)
 	for k, v := range thingReg() {

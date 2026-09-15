@@ -11,7 +11,6 @@ import (
 	"github.com/znasllc-io/memql/component/automations"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
-	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/memql"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -33,14 +32,14 @@ import (
 //
 //  1. the event-derived values appear in the resolved nested-step args
 //     (the event threaded all the way into step scope), and
-//  2. no unresolved `$args.event` / `args.event.payload.` reference TEXT
-//     leaks through (no dropped-to-nil / literal-passthrough).
+//  2. no unresolved `args.event.payload.` reference TEXT leaks through (no
+//     dropped-to-nil / literal-passthrough).
 //
-// It is DB-free: the LogicRunner dispatches steps through the step registry,
-// so a capturing registry renders each engine call exactly as the real
-// Function/Query executors do (ResolveV1Map + renderV1CallArgs /
-// v1ConstructCallText) without ever calling engine.Execute. An in-process
-// expression step runs on the real query executor.
+// It is DB-free: the LogicRunner dispatches each construct call through the
+// step registry, so a capturing registry renders each engine call exactly as
+// the real function executor does (ResolveV1Map + renderV1CallArgs) without
+// ever calling engine.Execute. An expression statement never reaches it: the
+// sequence runner evaluates it in process.
 
 // capturingRegistry renders each step's outbound call exactly like the real
 // executors and records it, returning a canned two-row result so
@@ -66,15 +65,6 @@ func (r *capturingRegistry) Execute(ctx context.Context, step *automations.Step,
 			return nil, fmt.Errorf("resolve %s: %w", step.ID, err)
 		}
 		q = step.Function.Name + "(" + renderV1CallArgs(resolved) + ")"
-	case step.Query != nil && step.Exprs != nil:
-		call, isCall := ast.Unparen(step.Exprs.Query).(*ast.CallExpr)
-		if !isCall || call.Kind == "" {
-			return (&QueryExecutor{}).Execute(ctx, step, sc) // evaluated in process
-		}
-		var err error
-		if q, err = v1ConstructCallText(ctx, sc.Evaluator, call); err != nil {
-			return nil, fmt.Errorf("resolve %s: %w", step.ID, err)
-		}
 	default:
 		q = fmt.Sprintf("<%s/%s>", step.Type, step.ID)
 	}
@@ -108,13 +98,16 @@ func TestEventContextThreadsIntoNestedSteps(t *testing.T) {
 		wantValues []string
 	}{
 		{
-			logic: "conflictDetection",
-			event: map[string]any{"topic": "node.created", "kind": "node.created", "payload": map[string]any{
-				"id": "rec-1", "partitionId": "space-1", "recordType": "contact",
-				"naturalKeyField": "email", "naturalKeyValue": "a@b.io",
+			logic: "releaseWorkspaceOnRunTerminal",
+			event: map[string]any{"topic": "node.updated", "kind": "node.updated", "payload": map[string]any{
+				"id": "run-7f3a", "status": "completed",
 			}},
-			wantValues: []string{"space-1", "contact", "a@b.io"},
+			wantValues: []string{"run-7f3a"},
 		},
+		// (conflictDetection, this suite's first fixture, published, so the
+		// flip moved its statements into the automation that called it and
+		// deleted the logic (D14, memql#5373). The automation reads its bound
+		// args, not an event envelope.)
 		// (generateResponse -- the cognition.response.requested fixture --
 		// went with the cognition namespace in epic memql#4988. logicAutoJoinAI
 		// moved to the product pack in B2 (#2038) alongside the `space`
@@ -131,14 +124,14 @@ func TestEventContextThreadsIntoNestedSteps(t *testing.T) {
 			if err != nil || fn == nil {
 				t.Fatalf("Functions().Get(%s): %v", tc.logic, err)
 			}
-			if fn.LogicSteps == nil {
-				t.Fatalf("%s has no multi-step LogicSteps body", tc.logic)
+			if fn.LogicBody == nil {
+				t.Fatalf("%s has no statement body", tc.logic)
 			}
 
 			reg := &capturingRegistry{}
 			runner := automations.NewLogicRunner(eng, reg, eng.Logger)
-			if _, err := runner.RunLogic(context.Background(), tc.logic, fn.LogicSteps, map[string]any{"event": tc.event}); err != nil {
-				t.Fatalf("RunLogic(%s): %v", tc.logic, err)
+			if _, err := runner.RunLogicBody(context.Background(), tc.logic, fn.LogicBody, map[string]any{"event": tc.event}); err != nil {
+				t.Fatalf("RunLogicBody(%s): %v", tc.logic, err)
 			}
 
 			if len(reg.resolved) == 0 {
@@ -156,7 +149,7 @@ func TestEventContextThreadsIntoNestedSteps(t *testing.T) {
 			}
 
 			// (2) No unresolved event-reference TEXT may leak into a step's args.
-			for _, leak := range []string{"$args.event", "args.event.payload", "$event.payload"} {
+			for _, leak := range []string{"args.event.payload", "event.payload"} {
 				if strings.Contains(joined, leak) {
 					t.Errorf("%s: unresolved event reference %q leaked into a nested step's args (must resolve to a value, never pass through as text):\n%s",
 						tc.logic, leak, joined)

@@ -3,7 +3,9 @@ package sense
 import "testing"
 
 // G2 (memql#2364): inside an automation body that declares args { }, Complete
-// offers the declared field names.
+// offers the declared field names. A bare args read is the retired body
+// grammar's; a statement body reads `args.x` (epic memql#5370).
+// memqlmigrate:keep
 const argsAutomationSrc = `@trigger(event="deploy.requested", concept="v1:cluster:deployment")
 automation deployEngineCluster {
   args {
@@ -32,7 +34,7 @@ func TestComplete_OffersAutomationArgsFields(t *testing.T) {
 
 func TestComplete_NoArgsFieldsOutsideAutomation(t *testing.T) {
 	s := New(nil)
-	src := "logic plain {\n  body {\n    return 1\n  }\n}"
+	src := "logic plain {\n  return 1\n}"
 	for _, it := range s.Complete(src, 3, 5, "x/logic.memql") {
 		if it.Detail == "args field" {
 			t.Fatalf("args-field completion leaked outside an automation: %+v", it)

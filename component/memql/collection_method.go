@@ -18,8 +18,8 @@ import (
 //
 //	args.members.where(m => m.role == "admin" && m.active).count()
 //
-// It is available in logic bodies (single-statement `return <chain>`) and
-// automation forEach; specs and query filters reject it at load (the
+// It is available in a logic's or an automation's statements; specs and
+// query filters reject it at load (the
 // ASTConverter only admits these nodes when constructed via
 // NewASTConverter(WithCollectionMethods())). Lambda bodies must be pure --
 // a mutation/action call inside a lambda is a load error (enforced in the

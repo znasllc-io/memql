@@ -13,6 +13,8 @@
 package config
 
 import (
+	"fmt"
+	"sort"
 	"strings"
 
 	busv1 "github.com/znasllc-io/memql/component/bus/gen"
@@ -77,6 +79,25 @@ func ConfigKeySet() map[string]struct{} {
 		out[strings.ToLower(strings.TrimSpace(f.Key))] = struct{}{}
 	}
 	return out
+}
+
+// UnknownKey reports whether `config.<key>` names no entry of the
+// allow-list, with the sentence a load-time refusal of the read prints:
+// what the keys are and where one is added. A key is matched exactly as
+// the allow-list spells it -- the config envelope is keyed by it, so
+// another casing reads absent too (FieldByKey's case-insensitive match
+// answers a different question).
+func UnknownKey(key string) (string, bool) {
+	keys := make([]string, 0, len(PolicyExposableConfig))
+	for _, f := range PolicyExposableConfig {
+		if f.Key == key {
+			return "", false
+		}
+		keys = append(keys, f.Key)
+	}
+	sort.Strings(keys)
+	return fmt.Sprintf("`config.%s` names no key of the config allow-list (%s), so it reads absent at run time: "+
+		"read one of those, or add the key to component/config's PolicyExposableConfig", key, strings.Join(keys, ", ")), true
 }
 
 // FieldByKey returns the allow-list entry for the named key, or

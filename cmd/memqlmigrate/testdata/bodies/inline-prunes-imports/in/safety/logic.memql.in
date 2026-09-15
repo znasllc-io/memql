@@ -1,0 +1,34 @@
+// logic.memql -- safety namespace.
+
+use platform.queries.{ globalVariable, userDefaults }
+
+/// Observes the classification rows past retention, and says so.
+logic purgeExpiredClassifications {
+  args {
+    event object!
+  }
+  body {
+    allRows := query allSafetyClassifications()
+    retentionDays := query globalVariable( name: "RETENTION_DAYS" )
+
+    emitObservation := publishEvent(
+      topic: "safety.classification.retention.observed",
+      payload: {
+        candidateCount: allRows.count(),
+        retentionDays: retentionDays.first().payload.value ?? "90"
+      }
+    )
+
+    return allRows.count()
+  }
+}
+
+/// The defaults a person sees, which stays a logic: it publishes nothing.
+logic defaultsFor {
+  args {
+    userId string!
+  }
+  body {
+    return query userDefaults( userId: args.userId )
+  }
+}

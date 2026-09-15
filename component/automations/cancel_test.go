@@ -82,9 +82,9 @@ func (r *countingRegistry) Execute(_ context.Context, step *Step, _ *StepContext
 
 func threeStepAutomation() *Automation {
 	return &Automation{Name: "demo", Steps: []*Step{
-		{ID: "a", Type: StepTypeQuery, Query: &QueryStepConfig{Query: "q"}},
-		{ID: "b", Type: StepTypeQuery, Query: &QueryStepConfig{Query: "q"}},
-		{ID: "c", Type: StepTypeQuery, Query: &QueryStepConfig{Query: "q"}},
+		{ID: "a", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "q", Kind: "query"}},
+		{ID: "b", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "q", Kind: "query"}},
+		{ID: "c", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "q", Kind: "query"}},
 	}}
 }
 

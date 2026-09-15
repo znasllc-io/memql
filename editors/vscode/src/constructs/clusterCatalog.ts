@@ -60,7 +60,7 @@ export const CLUSTER_CATALOG_METHOD = "memql/clusterCatalog";
 export interface ClusterCatalogEntry {
   /** A concept's canonical id; the declared name for every other kind. */
   name: string;
-  /** The KIND, not the authored keyword -- `mutation` for a file's `mutate`. */
+  /** The construct's kind (`query`, `mutation`, ...). */
   kind: string;
   /** core | bundle | promoted. Server-derived; never re-derived here. */
   origin: string;

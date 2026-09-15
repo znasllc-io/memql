@@ -65,17 +65,15 @@ shape widget widgetFull {
 }
 `,
 	}
-	// An automation that both declares the automation name AND invokes a
-	// same-named logic as a nested step. The logic itself is a top-level
+	// An automation that both declares the automation name AND calls a
+	// same-named logic in a statement. The logic itself is a top-level
 	// declaration in a separate file.
 	fileC := baseloader.RawFile{
 		Path: "gamma/automations.memql",
 		Content: `
-@trigger(event="node.created", concept="v1:gamma:thing", partition="*")
+@trigger(event="node.created", concept="v1:gamma:thing")
 automation syncThing {
-  step run {
-    logic syncThing { event: event }
-  }
+  run := logic syncThing(event: event)
 }
 `,
 	}
@@ -84,7 +82,7 @@ automation syncThing {
 		Content: `
 logic syncThing {
   args { event object @required }
-  body { return noop({}) }
+  return builtin noop()
 }
 `,
 	}
@@ -149,8 +147,8 @@ shape widget alphaOnly {
 	}
 
 	// The automation `syncThing` and the top-level logic `syncThing` land
-	// in different registries -> not a collision. And the nested `logic
-	// syncThing` step invocation inside the automation body must NOT be
+	// in different registries -> not a collision. And the `logic
+	// syncThing(...)` call inside the automation's statement must NOT be
 	// counted as a second top-level logic declaration.
 	for _, d := range dups {
 		if d.Name == "syncThing" {

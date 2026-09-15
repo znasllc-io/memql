@@ -347,7 +347,7 @@ query space queryArchivedSpaces {
 `)
 	writeFixture(t, core, "mutations/createSpace.memql", `
 @description("Create a space")
-mutate space mutationCreateSpace {
+mutation space mutationCreateSpace {
   args {
     name  string  @required
   }
@@ -375,9 +375,7 @@ logic logicProvisionBoard {
   args {
     event  object  @required
   }
-  body {
-    return builtin provisionBoard(id: args.event.payload.id)
-  }
+  return builtin provisionBoard(id: args.event.payload.id)
 }
 `)
 

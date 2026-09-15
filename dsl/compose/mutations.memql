@@ -40,7 +40,7 @@
 /// beside real ones with nothing to tell them apart.
 @actor
 @serverOnly
-mutate composition createComposition {
+mutation composition createComposition {
   args {
     compositionId  string!
     name           string!
@@ -70,7 +70,7 @@ mutate composition createComposition {
 /// payloads: recovery must execute the request the engine validated before the work run opened.
 @actor
 @serverOnly
-mutate compositionInput createCompositionInput {
+mutation compositionInput createCompositionInput {
   args {
     compositionId string!
     request       object!
@@ -100,7 +100,7 @@ mutate compositionInput createCompositionInput {
 /// (memql#4258). A caller passing only `status` moves only the status.
 @actor
 @serverOnly
-mutate composition updateCompositionState {
+mutation composition updateCompositionState {
   args {
     compositionId       string!
     status              string
@@ -127,7 +127,7 @@ mutate composition updateCompositionState {
 /// FILE -- they are separate rows with separate dispositions, so somebody tidying their Materialized
 /// list has not asked to throw away the document it names.
 @actor
-mutate composition archiveComposition {
+mutation composition archiveComposition {
   args {
     compositionId  string!
   }
@@ -144,7 +144,7 @@ mutate composition archiveComposition {
 /// pair rather than an automation for the reason the Library's own restore is (memql#4784): a
 /// mirrored automation would fire on every update and close a cycle.
 @actor
-mutate composition restoreComposition {
+mutation composition restoreComposition {
   args {
     compositionId  string!
   }
@@ -163,7 +163,7 @@ mutate composition restoreComposition {
 /// template is a binding to a v1:library:file (design D7), so uploading one is an ordinary Library
 /// upload through the one pinned path, and this row is what makes it selectable afterwards.
 @actor
-mutate composeTemplate createComposeTemplate {
+mutation composeTemplate createComposeTemplate {
   args {
     templateId    string!
     name          string!
@@ -187,7 +187,7 @@ mutate composeTemplate createComposeTemplate {
 /// Repointing is deliberately allowed and is how a template is revised -- the alternative, a new
 /// template per revision, would leave every recipe naming the old one.
 @actor
-mutate composeTemplate updateComposeTemplate {
+mutation composeTemplate updateComposeTemplate {
   args {
     templateId    string!
     name          string
@@ -209,7 +209,7 @@ mutate composeTemplate updateComposeTemplate {
 /// Archive a template binding. Owned. It does NOT archive the file it points at: the file is an
 /// ordinary Library row, and retiring a binding is not asking to throw away a document.
 @actor
-mutate composeTemplate archiveComposeTemplate {
+mutation composeTemplate archiveComposeTemplate {
   args {
     templateId  string!
   }
@@ -224,7 +224,7 @@ mutate composeTemplate archiveComposeTemplate {
 
 /// Restore an archived template binding. Owned.
 @actor
-mutate composeTemplate restoreComposeTemplate {
+mutation composeTemplate restoreComposeTemplate {
   args {
     templateId  string!
   }
@@ -243,7 +243,7 @@ mutate composeTemplate restoreComposeTemplate {
 /// the caller's -- resolved under their own actor at every later run -- so a recipe can never widen
 /// what its runner may read.
 @actor
-mutate recipe createComposeRecipe {
+mutation recipe createComposeRecipe {
   args {
     recipeId         string!
     name             string!
@@ -267,7 +267,7 @@ mutate recipe createComposeRecipe {
 
 /// Rename or re-aim a recipe. Owned.
 @actor
-mutate recipe updateComposeRecipe {
+mutation recipe updateComposeRecipe {
   args {
     recipeId         string!
     name             string
@@ -298,7 +298,7 @@ mutate recipe updateComposeRecipe {
 /// Written by the materialize executor, after the composition it counts actually produced a file.
 @actor
 @serverOnly
-mutate recipe recordComposeRecipeRun {
+mutation recipe recordComposeRecipeRun {
   args {
     recipeId   string!
     lastRunAt  datetime!
@@ -316,7 +316,7 @@ mutate recipe recordComposeRecipeRun {
 /// Archive a recipe. Owned. The compositions it produced are untouched -- they are the evidence it
 /// worked, and an archive that took them would destroy the record this whole namespace is for.
 @actor
-mutate recipe archiveComposeRecipe {
+mutation recipe archiveComposeRecipe {
   args {
     recipeId  string!
   }
@@ -331,7 +331,7 @@ mutate recipe archiveComposeRecipe {
 
 /// Restore an archived recipe. Owned.
 @actor
-mutate recipe restoreComposeRecipe {
+mutation recipe restoreComposeRecipe {
   args {
     recipeId  string!
   }

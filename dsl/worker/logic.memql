@@ -17,26 +17,24 @@
 // security signals are not. Operators tune via the
 // WORKER_INVOCATION_RETENTION_DAYS env var.
 //
-// MemQL parser limitations:
-//   - The filter side of expiredWorkerInvocations can't push
-//     the duration math into the query (no `>` operator on
-//     datetime). Per-row gating uses
-//       addDuration(item.createdAt, "P{retention}D") < now
+// The retention cutoff (now minus the window, addDuration with a
+// negative ISO-8601 duration) is computed here and passed to
+// expiredWorkerInvocations as `createdBefore`, so the comparison
+// runs in the query's filter; the calling automation's `for` loop
+// soft-deletes each returned row.
 /// Pure decide for the worker-invocation retention sweep (#2369, cluster pruneStaleClusterNodes
 /// pattern): reads WORKER_INVOCATION_RETENTION_DAYS (default 90), computes cutoff = now - window
 /// via addDuration with a negative ISO duration, reads
 /// `query expiredWorkerInvocations(createdBefore: cutoff)` and returns its nodes() -- rows past
 /// retention, filtered by QUERY PUSHDOWN. The retention policy lives entirely here; the calling
-/// automation's forEach soft-deletes each unconditionally.
+/// automation's `for` loop soft-deletes each unconditionally.
 logic workerInvocationRetentionSweep {
   args {
     event object!
   }
-  body {
-  windowDays := query globalVariable( name: "WORKER_INVOCATION_RETENTION_DAYS" )
-  candidates := query expiredWorkerInvocations( createdBefore: addDuration(now, "P-" + (windowDays.first().payload.value ?? "90") + "D") )
+  windowDays := query globalVariable(name: "WORKER_INVOCATION_RETENTION_DAYS")
+  candidates := query expiredWorkerInvocations(createdBefore: addDuration(now, "P-" + (windowDays.first().value ?? "90") + "D"))
   return candidates.nodes()
-  }
 }
 
 
@@ -76,15 +74,13 @@ logic workerModelPullStaleSweep {
   args {
     event object!
   }
-  body {
-  claimGrace := query globalVariable( name: "MEMQL_MODEL_PULL_CLAIM_GRACE_SECONDS" )
-  stallGrace := query globalVariable( name: "MEMQL_MODEL_PULL_STALL_GRACE_SECONDS" )
+  claimGrace := query globalVariable(name: "MEMQL_MODEL_PULL_CLAIM_GRACE_SECONDS")
+  stallGrace := query globalVariable(name: "MEMQL_MODEL_PULL_STALL_GRACE_SECONDS")
   abandoned := query openModelPulls(
-    requestedBefore: addDuration(now, "PT-" + (claimGrace.first().payload.value ?? "90") + "S"),
-    updatedBefore: addDuration(now, "PT-" + (stallGrace.first().payload.value ?? "420") + "S")
+    requestedBefore: addDuration(now, "PT-" + (claimGrace.first().value ?? "90") + "S"),
+    updatedBefore: addDuration(now, "PT-" + (stallGrace.first().value ?? "420") + "S")
   )
   return abandoned.nodes()
-  }
 }
 
 
@@ -124,13 +120,11 @@ logic workerModelProbeStaleSweep {
   args {
     event object!
   }
-  body {
-  claimGrace := query globalVariable( name: "MEMQL_MODEL_PROBE_CLAIM_GRACE_SECONDS" )
-  stallGrace := query globalVariable( name: "MEMQL_MODEL_PROBE_STALL_GRACE_SECONDS" )
+  claimGrace := query globalVariable(name: "MEMQL_MODEL_PROBE_CLAIM_GRACE_SECONDS")
+  stallGrace := query globalVariable(name: "MEMQL_MODEL_PROBE_STALL_GRACE_SECONDS")
   abandoned := query openModelProbes(
-    requestedBefore: addDuration(now, "PT-" + (claimGrace.first().payload.value ?? "90") + "S"),
-    updatedBefore: addDuration(now, "PT-" + (stallGrace.first().payload.value ?? "900") + "S")
+    requestedBefore: addDuration(now, "PT-" + (claimGrace.first().value ?? "90") + "S"),
+    updatedBefore: addDuration(now, "PT-" + (stallGrace.first().value ?? "900") + "S")
   )
   return abandoned.nodes()
-  }
 }

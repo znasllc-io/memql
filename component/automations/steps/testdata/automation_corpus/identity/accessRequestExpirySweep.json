@@ -1,0 +1,73 @@
+{
+  "automation": "identity/automations.memql accessRequestExpirySweep",
+  "runs": {
+    "no event | 0 rows": {
+      "input": {
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredPendingAccessRequests"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "no event | 2 rows": {
+      "input": {
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredPendingAccessRequests"
+          },
+          {
+            "args": {
+              "requestId": "v1:probe:row:expiredPendingAccessRequests-1"
+            },
+            "kind": "mutation",
+            "name": "expireAccessRequest"
+          },
+          {
+            "args": {
+              "requestId": "v1:probe:row:expiredPendingAccessRequests-2"
+            },
+            "kind": "mutation",
+            "name": "expireAccessRequest"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

@@ -3,29 +3,65 @@
 // purgeExpiredSafetyClassifications
 // =================================
 //
-// Daily 02:35 UTC sweep over v1:safety:classification rows older
-// than MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS (default 90).
+// Daily 02:35 UTC sweep meant to retire v1:safety:classification rows
+// older than MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS (default 90).
 // Mirrors auditEventRetentionSweep: MemQL has no
 // row-removal mutation today, so this cron emits a
 // `safety.classification.retention.observed` event each tick with
-// the candidate count. Flip to per-row delete once the engine
+// the candidate count -- every row, since no retention window is
+// applied yet. Flip to per-row delete once the engine
 // grows a delete() mutation.
 //
 // Schedule chosen as 02:35 UTC, offset from the other retention
 // crons so they don't contend on the same DB window.
-/// Daily 02:35 UTC sweep: identifies safety-classification rows past
-/// MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS (default 90). Observation-only until MemQL gains
-/// row-removal support.
-automation purgeExpiredSafetyClassifications @trigger(schedule="0 35 2 * * *") => logic purgeExpiredSafetyClassifications
+use platform.queries.{ globalVariable }
+
+/// Daily 02:35 UTC sweep over safety-classification rows, for
+/// MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS (default 90) retention. Observation-only until MemQL
+/// gains row-removal support.
+@trigger(schedule="0 35 2 * * *")
+automation purgeExpiredSafetyClassifications {
+  // Daily sweep over v1:safety:classification rows, for MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS
+  // (default 90) retention. Currently observation-only: emits a
+  // 'safety.classification.retention.observed' event with the candidate count. Per-row delete lands
+  // when the engine grows a delete() mutation -- the same gap auditEventRetentionSweep documents.
+  allRows := query allSafetyClassifications()
+  retentionDays := query globalVariable(name: "MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS")
+
+  publish "safety.classification.retention.observed" {
+    candidateCount: allRows.count(),
+    retentionDays: retentionDays.first().value ?? "90",
+    timestamp: now
+  }
+
+  return allRows.count()
+}
 
 // purgeExpiredOutputScreenings (memql#233)
 // =======================================
 //
-// Daily 02:40 UTC sweep over v1:safety:outputScreening rows older
-// than MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS (default 90).
+// Daily 02:40 UTC sweep meant to retire v1:safety:outputScreening rows
+// older than MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS (default 90).
 // Same observation-only pattern as purgeExpiredSafetyClassifications.
 // Offset by 5 minutes so the two safety crons don't contend.
-/// Daily 02:40 UTC sweep: identifies output-screening rows past
-/// MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS (default 90). Observation-only until MemQL gains
-/// row-removal support.
-automation purgeExpiredOutputScreenings @trigger(schedule="0 40 2 * * *") => logic purgeExpiredOutputScreenings
+/// Daily 02:40 UTC sweep over output-screening rows, for
+/// MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS (default 90) retention. Observation-only until MemQL
+/// gains row-removal support.
+@trigger(schedule="0 40 2 * * *")
+automation purgeExpiredOutputScreenings {
+  // Daily sweep over v1:safety:outputScreening rows, for
+  // MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS (default 90) retention. Currently observation-only:
+  // emits a 'safety.outputScreening.retention.observed' event with the candidate count. Per-row
+  // delete lands when the engine grows a delete() mutation -- mirrors
+  // purgeExpiredSafetyClassifications.
+  allRows := query allOutputScreenings()
+  retentionDays := query globalVariable(name: "MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS")
+
+  publish "safety.outputScreening.retention.observed" {
+    candidateCount: allRows.count(),
+    retentionDays: retentionDays.first().value ?? "90",
+    timestamp: now
+  }
+
+  return allRows.count()
+}

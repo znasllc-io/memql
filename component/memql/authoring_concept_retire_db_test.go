@@ -57,7 +57,7 @@ concept demoWidget {
 
 @description("Create a demo widget")
 @actor
-mutate demoWidget createDemoWidget {
+mutation demoWidget createDemoWidget {
   args {
     widgetId  string  @required
     label     string  @required

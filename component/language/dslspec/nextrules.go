@@ -10,7 +10,7 @@ import "strings"
 // "fieldName", "importPath", "operator", "specRef", "shapeRef", plus any
 // concrete literal.
 //
-// The owner's canonical example -- "I typed `mutate`, so suggest a concept;
+// The owner's canonical example -- "I typed `mutation`, so suggest a concept;
 // and if no concept is in file scope, offer to `use`/import one" -- is the
 // AfterMutationKeyword / AfterQueryKeyword rules with
 // SuggestImportWhenMissing set.
@@ -28,7 +28,7 @@ func nextRules() []NextRule {
 		{
 			Context:                  "afterMutationKeyword",
 			Expect:                   []string{"concept"},
-			Doc:                      "After `mutate`: the bound concept name (`mutate <Concept> <name>`). Suggest concepts in file scope.",
+			Doc:                      "After `mutation`: the bound concept name (`mutation <Concept> <name>`). Suggest concepts in file scope.",
 			SuggestImportWhenMissing: true,
 		},
 		{
@@ -87,7 +87,7 @@ func nextRules() []NextRule {
 		{
 			Context: "inFunctionBody",
 			Expect:  []string{"keyword", "builtin", "operator"},
-			Doc:     "Inside a logic/automation body: control-flow keywords, builtin calls, and expressions. Query-level directives (sort/paginate/asOf/select/withDepth/shape) are rejected here.",
+			Doc:     "Inside a logic/automation body: one statement per line -- `<name> := <expr or call>`, a construct call by its kind (`query`, `mutation`, `logic`, `builtin`; in an automation also `automation` and `action`), `if`/`else`, `for <x> in <source> [if <cond>]`, `switch`, `parallel { branch ... }`, `publish` (automation only) or `return`, with the trailing clauses `on surface(...)`, `retry(n)`, `on error continue` in that order. Query-level directives (sort/paginate/asOf/select/withDepth/shape) are rejected here.",
 		},
 		{
 			Context: "afterAtSign",

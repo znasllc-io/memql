@@ -13,14 +13,12 @@
 
 import type { RunnableKind } from "../constructs/runnable.js";
 
-// The CALL KEYWORD is not the construct keyword. The DSL declares a mutation
-// with `mutate`, and the engine's named-call parser accepts `mutation`
-// (component/memql/authoring_session.go and the generated Go builders both use
-// it). Getting this mapping wrong produces a parse failure at the engine with
-// no hint about which side is confused, so it lives here as one table.
+// The CALL KEYWORD of each kind a named call can reach: the word the construct
+// is declared with too (a mutation is declared and called `mutation`, D13).
+// A kind with no entry is not called by name.
 const CALL_KEYWORD: Readonly<Record<string, string>> = {
   query: "query",
-  mutate: "mutation",
+  mutation: "mutation",
   logic: "logic",
 };
 

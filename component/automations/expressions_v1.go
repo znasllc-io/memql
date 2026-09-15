@@ -3,28 +3,24 @@ package automations
 // expressions_v1.go -- an automation's expressions, parsed once at load
 // (epic memql#5363, memql#5367).
 //
-// THE COMPILED SHAPE. Every automation is compiled from the edition-2026
-// grammar, and within its JSON there are two encodings, every position using
-// exactly one:
+// THE COMPILED SHAPE. Every automation is compiled from its statements
+// (component/language/compiler/body_compile.go), and within its JSON there
+// are two encodings, every position using exactly one:
 //
 //   - an EXPRESSION FIELD -- a position that is always an expression -- holds
 //     canonical v1 source (ast.FormatExpr) as a bare string: a step
-//     `condition`, `forEach.source`, `forEach.filter`, `switch.expression`,
-//     `shape.source`, `detectLeadSignal.source`, a `query.query`, a
-//     precondition `check`, the `trigger.filter` lambda and a logic's
-//     `_return`;
+//     `condition`, `forEach.source`, `forEach.filter`, an `expression`, a
+//     `return.value`, a precondition `check` and the `trigger.filter`
+//     lambda;
 //   - a VALUE LEAF -- a position that holds a value -- is plain JSON when it
 //     is a literal and `{"$expr": "<canonical v1 source>"}` when it is an
 //     expression (compiler.EncodeValueLeaf; a map or list literal is walked,
 //     so a leaf inside one is encoded by the same rule). Every entry of a
-//     value map is one -- function / action / automation `args`, mutation and
-//     event `payload`, webhook `body`, concept-card `data` -- and so is every
-//     string-typed field that holds a value: `event.topic`, `webhook.url` and
-//     each `webhook.headers` value, `mutation.id` / `parent` / `aliasOf`, and
-//     the concept card's `cardType` / `partitionId` / `conceptRef`. A Go
-//     string field cannot hold the object form, so those configs lift it on
-//     decode (value_leaves.go). `$expr` is not an identifier, so no authored
-//     map key collides with the marker.
+//     value map is one -- function / action / automation `args`, an event's
+//     `payload` -- and so is `event.topic`, the one string-typed field that
+//     holds a value. A Go string field cannot hold the object form, so its
+//     config lifts it on decode (value_leaves.go). `$expr` is not an
+//     identifier, so no authored map key collides with the marker.
 //
 // PrepareExpressions parses each of those once, refuses the automation on a
 // parse error or when an expression's static cost estimate exceeds
@@ -44,7 +40,6 @@ import (
 	"sync"
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
-	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/language/ast"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/language/tiers"
@@ -59,24 +54,15 @@ const exprLeafKey = "$expr"
 type StepExprs struct {
 	// Condition gates the step.
 	Condition ast.ExpressionNode
-	// Query is a query step's expression: a construct call the executor
-	// renders and runs, or any other expression, whose value is the result.
-	Query ast.ExpressionNode
-	// Source is a forEach / shape / detectLeadSignal step's source.
+	// Source is a forEach step's source.
 	Source ast.ExpressionNode
 	// Filter is a forEach step's per-item filter.
 	Filter ast.ExpressionNode
-	// Subject is a switch step's expression.
-	Subject ast.ExpressionNode
-	// ID, Parent and AliasOf are a mutation step's string-typed expressions.
-	ID, Parent, AliasOf ast.ExpressionNode
-	// URL is a webhook step's; Headers its header values.
-	URL     ast.ExpressionNode
-	Headers map[string]ast.ExpressionNode
 	// Topic is an event step's.
 	Topic ast.ExpressionNode
-	// CardType, PartitionID and ConceptRef are a concept-card step's.
-	CardType, PartitionID, ConceptRef ast.ExpressionNode
+	// Value is an expression step's expression, or a return step's value
+	// (nil for a bare return).
+	Value ast.ExpressionNode
 }
 
 // ExprLeaf is a value-map leaf that is an expression: `{"$expr": src}` in the
@@ -94,9 +80,9 @@ func (l *ExprLeaf) MarshalJSON() ([]byte, error) {
 
 // PrepareExpressions parses every expression of an automation once and
 // caches the nodes (see the file comment for where). Every path that turns
-// compiled JSON into an executable Automation calls it -- the tree loader,
-// CompileSource and the LogicRunner's body compile -- and the executor
-// prepares an automation built in Go before its first run (ensurePrepared).
+// compiled JSON into an executable Automation calls it -- the tree loader and
+// the LogicRunner's statement logic -- and the executor prepares an
+// automation built in Go before its first run (ensurePrepared).
 //
 // An error names the step and the position: a parse error, or an expression
 // whose static cost estimate exceeds tiers.MaxStaticCost.
@@ -132,13 +118,6 @@ func prepareExpressions(a *Automation, concepts memoryNodes.Registry) error {
 	}
 	if err := p.steps(a.Steps); err != nil {
 		return err
-	}
-	for _, hook := range []*Step{a.OnComplete, a.OnError} {
-		if hook != nil {
-			if err := p.step(hook); err != nil {
-				return err
-			}
-		}
 	}
 	a.exprsPrepared = true
 	return nil
@@ -252,27 +231,6 @@ func bindRunAmbient(ctx context.Context, engine *memql.MemQLEngine, evaluator *E
 	}
 }
 
-// bindOnErrorRun gives an onError hook the run it is handling: the
-// automation's bound `args` and the steps the run recorded, so `args.x`,
-// `steps.s.error` and `automation.errors` read the failed run.
-func bindOnErrorRun(evaluator *Evaluator, a *Automation, exec *AutomationExecution, triggeringEvent *events.Event) {
-	if evaluator == nil {
-		return
-	}
-	if boundArgs, _, err := bindEventArgs(a, triggeringEvent); err == nil && boundArgs != nil {
-		evaluator.SetCustom("args", boundArgs)
-		evaluator.SetCustom("argsDeclared", declaredArgsSet(a))
-	}
-	if exec == nil {
-		return
-	}
-	for id, sr := range exec.Steps {
-		if sr != nil {
-			evaluator.SetStepResult(id, sr)
-		}
-	}
-}
-
 // exprPreparer carries the automation's name into every refusal.
 type exprPreparer struct {
 	automation string
@@ -336,58 +294,6 @@ func (p *exprPreparer) step(s *Step) error {
 		return err
 	}
 	switch {
-	case s.Query != nil:
-		if x.Query, err = p.parse(at("query"), s.Query.Query); err != nil {
-			return err
-		}
-	case s.Mutation != nil:
-		m := s.Mutation
-		if x.ID, err = p.leaf(at("mutation id"), m.ID, m.leaves["id"]); err != nil {
-			return err
-		}
-		if x.Parent, err = p.leaf(at("mutation parent"), m.Parent, m.leaves["parent"]); err != nil {
-			return err
-		}
-		if x.AliasOf, err = p.leaf(at("mutation aliasOf"), m.AliasOf, m.leaves["aliasOf"]); err != nil {
-			return err
-		}
-		if m.Payload, err = p.valueMap(at("mutation payload"), m.Payload); err != nil {
-			return err
-		}
-	case s.Webhook != nil:
-		w := s.Webhook
-		if x.URL, err = p.leaf(at("webhook url"), w.URL, w.leaves["url"]); err != nil {
-			return err
-		}
-		if x.URL == nil {
-			return fmt.Errorf("automation %q: %s is empty", p.automation, at("webhook url"))
-		}
-		names := map[string]bool{}
-		for k := range w.Headers {
-			names[k] = true
-		}
-		for key := range w.leaves {
-			if name, isHeader := strings.CutPrefix(key, "headers."); isHeader {
-				names[name] = true
-			}
-		}
-		if len(names) > 0 {
-			x.Headers = make(map[string]ast.ExpressionNode, len(names))
-			for _, k := range sortedKeys(names) {
-				node, err := p.leaf(at("webhook header "+k), w.Headers[k], w.leaves["headers."+k])
-				if err != nil {
-					return err
-				}
-				if node == nil {
-					// An empty header value is the empty string, as it was.
-					node = &ast.LiteralExpr{Value: ""}
-				}
-				x.Headers[k] = node
-			}
-		}
-		if w.Body, err = p.valueMap(at("webhook body"), w.Body); err != nil {
-			return err
-		}
 	case s.Event != nil:
 		ev := s.Event
 		if x.Topic, err = p.leaf(at("event topic"), ev.Topic, ev.leaves["topic"]); err != nil {
@@ -425,38 +331,16 @@ func (p *exprPreparer) step(s *Step) error {
 		if err := p.steps(s.Parallel.Branches); err != nil {
 			return err
 		}
-	case s.Switch != nil:
-		if x.Subject, err = p.parse(at("switch expression"), s.Switch.Expression); err != nil {
+	case s.Type == StepTypeExpression:
+		if x.Value, err = p.parse(at("expression"), s.Expression); err != nil {
 			return err
 		}
-		for _, k := range sortedCaseKeys(s.Switch.Cases) {
-			if err := p.steps(caseSteps(s.Switch.Cases[k])); err != nil {
-				return err
-			}
-		}
-		if err := p.steps(caseSteps(s.Switch.Default)); err != nil {
+	case s.Return != nil:
+		if x.Value, err = p.parseOptional(at("return value"), s.Return.Value); err != nil {
 			return err
 		}
-	case s.Shape != nil:
-		if x.Source, err = p.parse(at("shape source"), s.Shape.Source); err != nil {
-			return err
-		}
-	case s.DetectLeadSignal != nil:
-		if x.Source, err = p.parse(at("detectLeadSignal source"), s.DetectLeadSignal.Source); err != nil {
-			return err
-		}
-	case s.EmitConceptCard != nil:
-		c := s.EmitConceptCard
-		if x.CardType, err = p.leaf(at("concept card cardType"), c.CardType, c.leaves["cardType"]); err != nil {
-			return err
-		}
-		if x.PartitionID, err = p.leaf(at("concept card partitionId"), c.PartitionId, c.leaves["partitionId"]); err != nil {
-			return err
-		}
-		if x.ConceptRef, err = p.leaf(at("concept card conceptRef"), c.ConceptRef, c.leaves["conceptRef"]); err != nil {
-			return err
-		}
-		if c.Data, err = p.valueMap(at("concept card data"), c.Data); err != nil {
+	case s.Block != nil:
+		if err := p.steps(s.Block.Steps); err != nil {
 			return err
 		}
 	}
@@ -555,8 +439,4 @@ func sortedKeys[V any](m map[string]V) []string {
 	}
 	sort.Strings(keys)
 	return keys
-}
-
-func sortedCaseKeys(m map[string]*SwitchCase) []string {
-	return sortedKeys(m)
 }

@@ -102,7 +102,7 @@ var flatKinds = map[string]bool{
 // declared nowhere -- after which pass 1 has no namespace for them and every
 // cross-namespace use of one is silently passed over. A predicate's USE is a
 // call, `isX(row)`, which callRe reads.
-var declLineRe = regexp.MustCompile(`(?m)^(query|mutate|mutation|logic|spec|trait|shape|tool|prompt|provider|builtin|policy|rule|seed|concept|automation|action|capability)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s+([A-Za-z_][A-Za-z0-9_]*))?\s*[{(=]`)
+var declLineRe = regexp.MustCompile(`(?m)^(query|mutation|logic|spec|trait|shape|tool|prompt|provider|builtin|policy|rule|seed|concept|automation|action|capability)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s+([A-Za-z_][A-Za-z0-9_]*))?\s*[{(=]`)
 
 var useLineRe = regexp.MustCompile(`(?m)^\s*use\s+([a-zA-Z0-9_.]+)\.\{([^}]*)\}`)
 
@@ -150,6 +150,15 @@ type declaredAt struct {
 	file      string
 }
 
+// useFor is the import that brings name into scope: the dotted path of the
+// file that declares it, which is what a `use` path names. A kind is not a
+// file name -- queries live in queries.memql and logic in logic.memql -- so
+// the file is read, not derived.
+func useFor(d declaredAt, name string) string {
+	stem := strings.TrimSuffix(path.Base(d.file), ".memql")
+	return fmt.Sprintf("use %s.%s.{ %s }", strings.ReplaceAll(d.namespace, "/", "."), stem, name)
+}
+
 // scanCrossNamespaceImports is a CORPUS-level gate: whether a reference crosses
 // a namespace boundary cannot be answered from one file, because it depends on
 // where the referenced name is declared.
@@ -188,9 +197,6 @@ func scanCrossNamespaceImports(files []SourceFile, opts Options) []Violation {
 	for _, p := range paths {
 		for _, m := range declLineRe.FindAllStringSubmatch(code[p], -1) {
 			kind := m[1]
-			if kind == "mutate" {
-				kind = "mutation"
-			}
 			name := m[2]
 			if m[3] != "" {
 				name = m[3] // two-identifier signature: `query <Concept> <name>`
@@ -260,8 +266,8 @@ func scanCrossNamespaceImports(files []SourceFile, opts Options) []Violation {
 				Gate: GateCrossNamespaceImport,
 				File: p,
 				Kind: d.kind,
-				Detail: fmt.Sprintf("references %s %q, which namespace %q declares, with no import naming it -- add `use %s.%ss.{ %s }` (memql#3803)",
-					d.kind, name, d.namespace, strings.ReplaceAll(d.namespace, "/", "."), d.kind, name),
+				Detail: fmt.Sprintf("references %s %q, which namespace %q declares, with no import naming it -- add `%s` (memql#3803)",
+					d.kind, name, d.namespace, useFor(d, name)),
 			})
 		}
 

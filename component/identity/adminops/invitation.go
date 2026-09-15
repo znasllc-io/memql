@@ -8,7 +8,7 @@ package adminops
 // login page has REDEEMED one the whole time -- stage needs_invite posts
 // form=invite and the value reaches the magic-link issuer. Nothing ever ISSUED
 // one. The only writer of invitation rows was the guest-space flow, no
-// `mutate invitation ...` existed in any DSL file, and IdentityAdminMsg carried
+// `mutation invitation ...` existed in any DSL file, and IdentityAdminMsg carried
 // profile / role / suspend / tokens / settings / enrolment / recovery-key and
 // no invite.
 //

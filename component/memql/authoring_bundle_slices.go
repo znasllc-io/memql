@@ -119,7 +119,7 @@ var splitterHandledKeywords = map[string]bool{
 	// Sliced construct kinds.
 	"concept":    true,
 	"query":      true,
-	"mutate":     true,
+	"mutation":   true,
 	"logic":      true,
 	"spec":       true,
 	"trait":      true,

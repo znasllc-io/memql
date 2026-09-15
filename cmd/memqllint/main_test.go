@@ -492,7 +492,7 @@ query item queryItems {
 
 @enabled
 @description("Writes an undeclared field.")
-mutate item createItem {
+mutation item createItem {
   args {
     itemId  string  @required
   }
@@ -513,9 +513,7 @@ logic decideThing {
   args {
     event object @required
   }
-  body {
-    return true
-  }
+  return true
 }`,
 				"demo/automations.memql": `use demo.logic.{ decideThing }
 
@@ -523,9 +521,7 @@ logic decideThing {
 @trigger(event="graph.node.created.v1:demo:item")
 @description("Step call renamed away from the import.")
 automation onItemCreated {
-  step decide {
-    logic decideThingX ( event: event )
-  }
+  decide := logic decideThingX(event: event)
 }`,
 			},
 		},
@@ -591,7 +587,7 @@ concept widget {
 
 @enabled
 @description("Create a widget; declares an arg the body never references.")
-mutate widget createWidget {
+mutation widget createWidget {
   args {
     widgetId   string  @required
     label      string  @required
@@ -625,7 +621,7 @@ concept gizmo {
 
 @enabled
 @description("Create a gizmo.")
-mutate gizmo createGizmo {
+mutation gizmo createGizmo {
   args {
     gizmoId  string  @required
     label    string  @required
@@ -915,34 +911,25 @@ var lintRewriteRefusalCases = []struct {
 	{"an unclosed query", "query thing q {\n  filter row => row.a == 1\n", "{", 1, "missing closing brace"},
 
 	// Mutation blocks and fields.
-	{"two write blocks", "mutate thing m {\n  args {\n    id string @required\n  }\n  insert {\n    id: args.id\n  }\n  update {\n    id: args.id\n  }\n}\n", "update", 1, "exactly one write block"},
-	{"a write block restating its concept", "mutate thing m {\n  args {\n    id string @required\n  }\n  insert thing {\n    id: args.id\n  }\n}\n", "insert", 1, "is retired -- drop the restated concept"},
-	{"an unknown block", "mutate thing m {\n  args {\n    id string @required\n  }\n  insert {\n    id: args.id\n  }\n  extra {\n    a: 1\n  }\n}\n", "extra", 1, "unexpected `extra { ... }` block"},
-	{"a field outside the write block", "mutate thing m {\n  args {\n    id string @required\n  }\n  status: \"x\"\n  insert {\n    id: args.id\n  }\n}\n", "status: \"x\"", 1, "unexpected field"},
-	{"a second nested accept", "mutate thing m {\n  args {\n    id string @required\n    name string\n  }\n  insert {\n    accept { id }\n    accept { name }\n  }\n}\n", "accept", 2, "more than one nested `accept"},
-	{"a field beside a nested accept", "mutate thing m {\n  args {\n    id string @required\n  }\n  insert {\n    accept { id }\n    status: \"x\"\n  }\n}\n", "status: \"x\"", 1, "carries the field"},
-	{"an accept entry that is a key: value", "mutate thing m {\n  args {\n    id string @required\n  }\n  accept { id, status: \"active\" }\n}\n", "status: \"active\"", 1, "looks like a `key: value` pair"},
-	{"an accepted field with no arg", "mutate thing m {\n  args {\n    id string @required\n  }\n  accept { id, name }\n}\n", "name", 1, "has no matching arg"},
-	{"an empty accept", "mutate thing m {\n  args {\n    id string @required\n  }\n  accept { }\n}\n", "accept", 1, "block is empty"},
-	{"a top-level accept beside an insert", "mutate thing m {\n  args {\n    id string @required\n  }\n  accept { id }\n  insert {\n    id: args.id\n  }\n}\n", "accept", 1, "cannot mix the accept/stamp form with an explicit"},
-	{"a second id", "mutate thing m {\n  args {\n    id string @required\n  }\n  insert {\n    id: args.id\n    id: args.id\n  }\n}\n", "id:", 2, "duplicate `id:` line"},
-	{"a bare mirror of a path", "mutate thing m {\n  args {\n    id string @required\n    user object\n  }\n  insert {\n    id: args.id\n    args.user.id\n  }\n}\n", "args.user.id", 1, "has no key"},
-	{"an update with no id", "mutate thing m {\n  args {\n    name string\n  }\n  update {\n    name: args.name\n  }\n}\n", "update", 1, "update block requires an `id: <expr>` line"},
-	{"a body block in a mutation", "mutate thing m {\n  body {\n    return 1\n  }\n}\n", "body", 1, "must not declare a `body { }` block"},
+	{"two write blocks", "mutation thing m {\n  args {\n    id string @required\n  }\n  insert {\n    id: args.id\n  }\n  update {\n    id: args.id\n  }\n}\n", "update", 1, "exactly one write block"},
+	{"a write block restating its concept", "mutation thing m {\n  args {\n    id string @required\n  }\n  insert thing {\n    id: args.id\n  }\n}\n", "insert", 1, "is retired -- drop the restated concept"},
+	{"an unknown block", "mutation thing m {\n  args {\n    id string @required\n  }\n  insert {\n    id: args.id\n  }\n  extra {\n    a: 1\n  }\n}\n", "extra", 1, "unexpected `extra { ... }` block"},
+	{"a field outside the write block", "mutation thing m {\n  args {\n    id string @required\n  }\n  status: \"x\"\n  insert {\n    id: args.id\n  }\n}\n", "status: \"x\"", 1, "unexpected field"},
+	{"a second nested accept", "mutation thing m {\n  args {\n    id string @required\n    name string\n  }\n  insert {\n    accept { id }\n    accept { name }\n  }\n}\n", "accept", 2, "more than one nested `accept"},
+	{"a field beside a nested accept", "mutation thing m {\n  args {\n    id string @required\n  }\n  insert {\n    accept { id }\n    status: \"x\"\n  }\n}\n", "status: \"x\"", 1, "carries the field"},
+	{"an accept entry that is a key: value", "mutation thing m {\n  args {\n    id string @required\n  }\n  accept { id, status: \"active\" }\n}\n", "status: \"active\"", 1, "looks like a `key: value` pair"},
+	{"an accepted field with no arg", "mutation thing m {\n  args {\n    id string @required\n  }\n  accept { id, name }\n}\n", "name", 1, "has no matching arg"},
+	{"an empty accept", "mutation thing m {\n  args {\n    id string @required\n  }\n  accept { }\n}\n", "accept", 1, "block is empty"},
+	{"a top-level accept beside an insert", "mutation thing m {\n  args {\n    id string @required\n  }\n  accept { id }\n  insert {\n    id: args.id\n  }\n}\n", "accept", 1, "cannot mix the accept/stamp form with an explicit"},
+	{"a second id", "mutation thing m {\n  args {\n    id string @required\n  }\n  insert {\n    id: args.id\n    id: args.id\n  }\n}\n", "id:", 2, "duplicate `id:` line"},
+	{"a bare mirror of a path", "mutation thing m {\n  args {\n    id string @required\n    user object\n  }\n  insert {\n    id: args.id\n    args.user.id\n  }\n}\n", "args.user.id", 1, "has no key"},
+	{"an update with no id", "mutation thing m {\n  args {\n    name string\n  }\n  update {\n    name: args.name\n  }\n}\n", "update", 1, "update block requires an `id: <expr>` line"},
+	{"a body block in a mutation", "mutation thing m {\n  body {\n    return 1\n  }\n}\n", "body", 1, "must not declare a `body { }` block"},
 
-	// Logic.
-	{"a logic with no body block", "logic noBody {\n  args {\n    a string\n  }\n}\n", "noBody", 1, "must wrap its procedural code in a `body { }` block"},
-	{"a logic body with no return", "logic noReturn {\n  args {\n    a string\n  }\n  body {\n    x := f(a: args.a)\n  }\n}\n", "x :=", 1, "must end with a `return <expr>` terminator"},
-
-	// Automation steps.
-	{"an empty step", lintProbeTrigger + "automation a {\n  step first {\n  }\n}\n", "step", 1, "body is empty"},
-	{"a forEach with no in", lintProbeTrigger + "automation a {\n  step loop {\n    forEach t of event.payload.items {\n      logic touch(x: t)\n    }\n  }\n}\n", "forEach", 1, "expected `in`"},
-	{"a conditional step with no body", lintProbeTrigger + "automation a {\n  step s {\n    if event.payload.a == 1\n  }\n}\n", "if", 1, "expected `{` after the if condition"},
-	{"an automation with no steps", lintProbeTrigger + "automation noSteps {\n  args {\n    x string\n  }\n}\n", "noSteps", 1, "at least one `step` is required"},
-	{"a body block in an automation", lintProbeTrigger + "automation a {\n  body {\n    x := 1\n  }\n}\n", "body", 1, "must not declare a `body { }` block"},
-
-	// A terse automation.
-	{"an args block before a terse automation", "args {\n  x string\n}\nautomation onThing @trigger(event=\"node.created\", concept=\"v1:probe:thing\") => logic noteThing\n", "args", 1, "must not be preceded by an `args { ... }` block"},
+	// A logic and an automation are written in statements: their refusals
+	// are the statement parser's and the load gate's rather than the
+	// rewriter's (epic memql#5370), in
+	// TestRun_StatementRefusalNamesTheAuthorsLineAndColumn.
 
 	// Text the stages before moved: a spec StripNonProceduralBlocks folds to
 	// one line, and a query the query stage lowers to fewer lines.
@@ -969,8 +956,8 @@ query thing second {
 // TestRun_RewriteRefusalNamesTheAuthorsLineAndColumn: memqllint reports each
 // refusal the struct-form rewriter makes of authored text at the file's line
 // and column of that text -- `refine` without `paginate` at the refine clause,
-// a second write block at its keyword, an empty step at its `step` -- where it
-// used to print no position at all (memql#5364). Every case is its own file,
+// a second write block at its keyword -- where it used to print no position at
+// all (memql#5364). Every case is its own file,
 // since a file's rewrite stops at its first refusal; the table is the parser's
 // (component/language/parser/rewrite_errors_test.go).
 func TestRun_RewriteRefusalNamesTheAuthorsLineAndColumn(t *testing.T) {
@@ -1029,6 +1016,39 @@ concept thing {
 	}
 	if parity == 0 {
 		t.Error("no case reached the engine-parity pass: the assertion on its positions checked nothing")
+	}
+	if t.Failed() {
+		t.Logf("output:\n%s", out)
+	}
+}
+
+// TestRun_StatementRefusalNamesTheAuthorsLineAndColumn: a refusal of a body
+// written in statements (epic memql#5370) -- the statement parser's, and the
+// load gate's (compiler.CheckBody) -- is reported at the line and column the
+// author wrote, with its code. These are the inputs the rewriter refused
+// before a logic and an automation were written in statements.
+func TestRun_StatementRefusalNamesTheAuthorsLineAndColumn(t *testing.T) {
+	files := map[string]string{
+		"probe/emptyAutomation.memql": lintProbeTrigger + "automation noSteps {\n  args {\n    x string\n  }\n}\n",
+		"probe/bodyBlock.memql":       lintProbeTrigger + "automation bodyBlock {\n  body {\n    x := 1\n  }\n}\n",
+		"probe/emptyLogic.memql":      "logic noStatement {\n}\n",
+	}
+	code, out := captureRun(t, []string{writeTree(t, files)})
+	if code != 1 {
+		t.Fatalf("run() = %d, want 1; output:\n%s", code, out)
+	}
+	for _, c := range []struct{ file, at, code string }{
+		{"probe/emptyAutomation.memql: ", "line 6, column 1", "[body_empty]"},
+		{"probe/bodyBlock.memql: ", "line 3, column 3", "[body_block_retired]"},
+		{"probe/emptyLogic.memql: ", "line 1:1", "[body_logic_return]"},
+	} {
+		found := false
+		for _, l := range strings.Split(out, "\n") {
+			found = found || (strings.Contains(l, c.file) && strings.Contains(l, c.at) && strings.HasSuffix(strings.TrimSpace(l), c.code))
+		}
+		if !found {
+			t.Errorf("the report has no line for %s at %s ending in %s", c.file, c.at, c.code)
+		}
 	}
 	if t.Failed() {
 		t.Logf("output:\n%s", out)

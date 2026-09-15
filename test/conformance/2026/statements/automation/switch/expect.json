@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "file": "switch.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "label-not-a-literal.memql",
+      "verdict": "refuse_parse",
+      "code": "body_case_label",
+      "message": "a case label is a literal written once: `args.when`"
+    },
+    {
+      "file": "label-twice.memql",
+      "verdict": "refuse_parse",
+      "code": "body_case_label",
+      "message": "a case label is a literal written once: `\"a\"`"
+    }
+  ]
+}

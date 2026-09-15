@@ -44,11 +44,11 @@
 //   The windowing lives in the loop, not in the filter
 // =============================================================================
 //
-// A filter cannot call `addDuration`, so "trialEndsAt is between 7 and 8 days
-// away" is computed per row inside the `forEach`. The bracket is one day wide
-// and the sweep fires daily, which is what makes each nudge fire EXACTLY ONCE
-// per instance -- no duplicates from a wide bracket, no gaps from a narrow one.
-// Identity's deletion reminders use the same construction for the same reason.
+// "trialEndsAt is between 7 and 8 days away" is computed per row in the `for`
+// loop's `if` clause, over the candidate rows runningInstances returns. The
+// bracket is one day wide and the sweep fires daily, which is what makes each
+// nudge fire EXACTLY ONCE per instance -- no duplicates from a wide bracket, no
+// gaps from a narrow one.
 //
 // =============================================================================
 //   What a trial costs, and what bounds it
@@ -80,20 +80,16 @@ use platform.mutations.{ stageOutboundRequest }
 /// shared key would mean the day-12 message silently never sent.
 @trigger(schedule="0 0 9 * * *")
 automation trialNudgeDay7 {
-  step decide {
-    logic runningInstances ( event )
-  }
-  step notify {
-    forEach item in decide.result where item.payload.tier == "trial" && item.payload.trialEndsAt > addDuration(now, "P7D") && item.payload.trialEndsAt <= addDuration(now, "P8D") {
-      stageOutboundRequest {
-        requestId:   "fleet-trial-nudge-7-" + item.id,
-        medium:      "email",
-        target:      item.payload.notifyEmail,
-        subject:     "One week left on your MemQL Cloud trial",
-        body:        "Your trial instance at https://" + item.payload.domain + " has a week to run. Add a plan in Orbit to keep it -- nothing is lost if you decide later, but the instance pauses when the trial ends.",
-        requestedBy: "fleet.trialNudgeDay7"
-      }
-    }
+  decide := logic runningInstances(event: event)
+  for item in decide if item.tier == "trial" && item.trialEndsAt > addDuration(now, "P7D") && item.trialEndsAt <= addDuration(now, "P8D") {
+    mutation stageOutboundRequest(
+      requestId:   "fleet-trial-nudge-7-" + item.id,
+      medium:      "email",
+      target:      item.notifyEmail,
+      subject:     "One week left on your MemQL Cloud trial",
+      body:        "Your trial instance at https://" + item.domain + " has a week to run. Add a plan in Orbit to keep it -- nothing is lost if you decide later, but the instance pauses when the trial ends.",
+      requestedBy: "fleet.trialNudgeDay7"
+    )
   }
 }
 
@@ -102,20 +98,16 @@ automation trialNudgeDay7 {
 /// repeating the invitation.
 @trigger(schedule="0 0 9 * * *")
 automation trialNudgeDay12 {
-  step decide {
-    logic runningInstances ( event )
-  }
-  step notify {
-    forEach item in decide.result where item.payload.tier == "trial" && item.payload.trialEndsAt > addDuration(now, "P2D") && item.payload.trialEndsAt <= addDuration(now, "P3D") {
-      stageOutboundRequest {
-        requestId:   "fleet-trial-nudge-12-" + item.id,
-        medium:      "email",
-        target:      item.payload.notifyEmail,
-        subject:     "Your MemQL Cloud trial ends in two days",
-        body:        "Your trial instance at https://" + item.payload.domain + " pauses in two days. Your data stays exactly where it is for 14 days after that, and adding a plan in Orbit brings it straight back.",
-        requestedBy: "fleet.trialNudgeDay12"
-      }
-    }
+  decide := logic runningInstances(event: event)
+  for item in decide if item.tier == "trial" && item.trialEndsAt > addDuration(now, "P2D") && item.trialEndsAt <= addDuration(now, "P3D") {
+    mutation stageOutboundRequest(
+      requestId:   "fleet-trial-nudge-12-" + item.id,
+      medium:      "email",
+      target:      item.notifyEmail,
+      subject:     "Your MemQL Cloud trial ends in two days",
+      body:        "Your trial instance at https://" + item.domain + " pauses in two days. Your data stays exactly where it is for 14 days after that, and adding a plan in Orbit brings it straight back.",
+      requestedBy: "fleet.trialNudgeDay12"
+    )
   }
 }
 
@@ -133,15 +125,9 @@ automation trialNudgeDay12 {
 /// service they are not paying for, which is the intended state either way.
 @trigger(schedule="0 0 2 * * *")
 automation trialExpirySuspend {
-  step decide {
-    logic runningInstances ( event )
-  }
-  step suspend {
-    forEach item in decide.result where item.payload.tier == "trial" && item.payload.trialEndsAt != nil && item.payload.trialEndsAt < now {
-      requestInstanceSuspend {
-        instanceId: item.id
-      }
-    }
+  decide := logic runningInstances(event: event)
+  for item in decide if item.tier == "trial" && item.trialEndsAt != nil && item.trialEndsAt < now {
+    mutation requestInstanceSuspend(instanceId: item.id)
   }
 }
 
@@ -153,17 +139,13 @@ automation trialExpirySuspend {
 /// is the right word in every message that follows.
 @trigger(schedule="0 0 2 * * *")
 automation trialExpiryClose {
-  step decide {
-    logic trialingSubscriptions ( event )
-  }
-  step close {
-    forEach item in decide.result where item.payload.trialEndsAt != nil && item.payload.trialEndsAt < now {
-      endSubscription {
-        subscriptionId: item.id,
-        status:         "paused",
-        graceEndsAt:    addDuration(now, "P14D")
-      }
-    }
+  decide := logic trialingSubscriptions(event: event)
+  for item in decide if item.trialEndsAt != nil && item.trialEndsAt < now {
+    mutation endSubscription(
+      subscriptionId: item.id,
+      status:         "paused",
+      graceEndsAt:    addDuration(now, "P14D")
+    )
   }
 }
 
@@ -185,15 +167,9 @@ automation trialExpiryClose {
 /// the one that surprises a customer.
 @trigger(schedule="0 0 3 * * *")
 automation hibernateIdleInstances {
-  step decide {
-    logic runningInstances ( event )
-  }
-  step suspend {
-    forEach item in decide.result where item.payload.lastActivityAt != nil && addDuration(item.payload.lastActivityAt, "P14D") < now {
-      requestInstanceSuspend {
-        instanceId: item.id
-      }
-    }
+  decide := logic runningInstances(event: event)
+  for item in decide if item.lastActivityAt != nil && addDuration(item.lastActivityAt, "P14D") < now {
+    mutation requestInstanceSuspend(instanceId: item.id)
   }
 }
 
@@ -217,14 +193,8 @@ automation hibernateIdleInstances {
 /// measures how long the data has actually been cold, which is the thing the grace period is about.
 @trigger(schedule="0 0 4 * * *")
 automation teardownAfterGrace {
-  step decide {
-    logic suspendedInstances ( event )
-  }
-  step destroy {
-    forEach item in decide.result where item.payload.suspendedAt != nil && addDuration(item.payload.suspendedAt, "P14D") < now {
-      requestInstanceTeardown {
-        instanceId: item.id
-      }
-    }
+  decide := logic suspendedInstances(event: event)
+  for item in decide if item.suspendedAt != nil && addDuration(item.suspendedAt, "P14D") < now {
+    mutation requestInstanceTeardown(instanceId: item.id)
   }
 }

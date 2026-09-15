@@ -1,0 +1,6 @@
+logic forOverACall {
+  for item in query things() {
+    return item
+  }
+  return 0
+}

@@ -16,9 +16,7 @@ automation advanceProbe {
   args {
     id any
   }
-  step advance {
-    mutation advanceTicket (id: id, status: "done")
-  }
+  advance := mutation advanceTicket(id: args.id, status: "done")
 }`
 }
 

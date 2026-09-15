@@ -6,7 +6,5 @@ automation raiseYearlyReviewTicket {
     dueAt  datetime!
   }
 
-  step raise {
-    mutation raiseTicketFromStep (title: year(args.dueAt))
-  }
+  raise := mutation raiseTicketFromStep(title: year(args.dueAt))
 }

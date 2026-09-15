@@ -29,8 +29,9 @@ const (
 	PositionSpecBody Position = "specBody"
 	// PositionRowAuthzArgument is an argument of a concept's @rowAuthz.
 	PositionRowAuthzArgument Position = "rowAuthzArgument"
-	// PositionAutomationCondition is an automation condition: an `if` step,
-	// a precondition, a forEach `where`.
+	// PositionAutomationCondition is an automation condition: an `if` or
+	// `else if` condition, a `for` filter, a `switch` subject, a
+	// precondition.
 	PositionAutomationCondition Position = "automationCondition"
 	// PositionTriggerFilter is an automation's @filter(...) over the
 	// triggering event.
@@ -39,8 +40,8 @@ const (
 	PositionLogicBody Position = "logicBody"
 	// PositionMutationValue is a value in a mutation's insert or update block.
 	PositionMutationValue Position = "mutationValue"
-	// PositionStepArgument is an argument passed to a call from an automation
-	// step.
+	// PositionStepArgument is an argument of a call statement in an
+	// automation.
 	PositionStepArgument Position = "stepArgument"
 	// PositionToolDefault is a tool field's @default value.
 	PositionToolDefault Position = "toolDefault"

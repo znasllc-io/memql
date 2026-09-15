@@ -1,0 +1,88 @@
+// automations.memql
+//
+// Event-driven orchestration for the `forge` namespace.
+//
+// routeRequest -- fires on v1:forge:request node.created and routes the new
+// request to its next pipeline state by submitter role, then records a 'routed'
+// audit event. recordTransition -- fires on node.updated and appends one
+// v1:forge:requestEvent per recognised status transition.
+//
+// P1 (#2368, epic #2353): both automations are DECIDE -> SWITCH -> PERSIST --
+// the deployment-bundle reference shape. The role/status POLICY lives in the
+// two pure logics (dsl/forge/logic.memql: requestRouteStatus /
+// transitionEventKind); each automation's decide step calls its logic with
+// typed event args (G5 bare fields, punned) and a switch on decide.result
+// dispatches the single persist. The former shape -- one if-gated persist step
+// per role/status value, policy inline in orchestration -- predated the
+// decide->persist read fixes (#2271 / #2274) and is retired; the callgraph
+// condition-vocabulary rule (P4, #2371) keeps it from coming back.
+//
+// Loop safety: routeRequest's advanceRequest is an update on the SAME
+// v1:forge:request, which fires node.updated -- consumed only by recordTransition,
+// which writes v1:forge:requestEvent (a DIFFERENT concept) and so never re-fires
+// node.updated on v1:forge:request. No cycle.
+
+/// On submission of a v1:forge:request, route it to its next approval-pipeline state by the
+/// submitter's role (owner fast-track -> queued / developer -> needs_approval / non-developer ->
+/// needs_validation) and record a 'routed' audit event. Decide -> switch -> persist: the
+/// role->status policy lives in logic requestRouteStatus; approvedByUserId is stamped ONLY in the
+/// queued (owner fast-track) case. P1 #2368.
+@trigger(event="node.created", concept="v1:forge:request")
+automation routeRequest {
+  args {
+    id any
+    submitterRole any
+    submitterUserId any
+  }
+
+  decide := logic requestRouteStatus(submitterRole: args.submitterRole)
+  switch decide {
+    case "queued" {
+      mutation advanceRequest(
+        requestId: args.id,
+        status: "queued",
+        approvedByUserId: args.submitterUserId
+      )
+    }
+    default {
+      mutation advanceRequest(
+        requestId: args.id,
+        status: decide
+      )
+    }
+  }
+  persistRouted := mutation recordRequestEvent(
+    requestId: args.id,
+    kind: "routed",
+    fromStatus: "submitted",
+    note: "routed by submitter role"
+  )
+}
+
+/// On every v1:forge:request status transition (validate / approve / changes-requested / reject),
+/// append exactly one v1:forge:requestEvent with the derived kind, fromStatus, and toStatus. The
+/// status->kind vocabulary lives in logic transitionEventKind, which returns empty -- record
+/// NOTHING -- for an unrecognised status and for updates that do not change status (the oldStatus
+/// == status skip the former shape claimed but never checked). No loop risk: the recorder writes a
+/// requestEvent (a different concept) so it cannot re-fire this automation. P1 #2368.
+@trigger(event="node.updated", concept="v1:forge:request")
+automation recordTransition {
+  args {
+    id any
+    oldStatus any
+    status any
+  }
+
+  decide := logic transitionEventKind(status: args.status, oldStatus: args.oldStatus)
+  switch decide {
+    case "" { }
+    default {
+      mutation recordRequestEvent(
+        requestId: args.id,
+        kind: decide,
+        fromStatus: args.oldStatus,
+        toStatus: args.status
+      )
+    }
+  }
+}

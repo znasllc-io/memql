@@ -35,10 +35,9 @@ func evalActorCond(t *testing.T, e *Evaluator, src string) bool {
 // An UNSEEDED RunScope therefore binds the DENYING actor -- the envelope a
 // request with no auth context gets (auth.ActorEnvelopeMap(nil)) -- never an
 // absent or empty one. No production path reaches an unseeded RunScope:
-// every evaluator the runtime builds (the executor's run and onError
-// evaluators, resume, the scheduler's trigger filter, the LogicRunner)
-// binds the actor through bindActorEnvelope / bindNoCallerActorEnvelope,
-// and Clone carries it. The guard is kept anyway, as the second line: an
+// every evaluator the runtime builds (the executor's run, resume, the
+// scheduler's trigger filter, the LogicRunner) binds the actor through
+// bindActorEnvelope / bindNoCallerActorEnvelope, and Clone carries it. The guard is kept anyway, as the second line: an
 // evaluator built by hand, or a new site that forgets the binder, denies
 // rather than opening the admin gate.
 func TestRunScope_UnseededActorDenies(t *testing.T) {

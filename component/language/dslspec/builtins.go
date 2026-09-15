@@ -33,10 +33,10 @@ import (
 //     projected verbatim. The drift test pins the projection to the catalog, and
 //     the catalog to the parser's callable tables.
 //   - CategoryBuiltinAccessor: a context accessor the parser recognises
-//     (parser.CallableAccessors) that is not a catalog function -- item / event /
-//     step / input / field / actor, plus index (special-cased). var and error
-//     are accessors to the parser as well, but a v1 expression calls them as
-//     the catalog functions they are, so the catalog's entry is their only one.
+//     (parser.CallableAccessors) that is not a catalog function -- event /
+//     field / actor. var and error are accessors to the parser as well, but a
+//     v1 expression calls them as the catalog functions they are, so the
+//     catalog's entry is their only one.
 //   - CategoryBuiltinRegistry: a builtin resolved at runtime from the
 //     integration / builtin registry, NOT special-cased by the parser (it falls
 //     through parseFunctionCall to a generic FunctionCallExpr): ai / node /
@@ -53,7 +53,7 @@ const (
 	// (component/language/functions), projected from it.
 	CategoryBuiltinExpr BuiltinCategory = "expr"
 	// CategoryBuiltinAccessor is a parser-recognised context accessor
-	// (parser.CallableAccessors, + index) that is not a catalog function.
+	// (parser.CallableAccessors) that is not a catalog function.
 	CategoryBuiltinAccessor BuiltinCategory = "accessor"
 	// CategoryBuiltinRegistry is a runtime-registry builtin not special-cased
 	// by the parser grammar.
@@ -123,8 +123,8 @@ type Builtin struct {
 	Signature string `json:"signature"`
 	// Doc is the prose documentation for hover.
 	Doc string `json:"doc"`
-	// Params lists the parameters for signature help. Empty for nullary
-	// accessors (now() / item() / event() / input() / index()).
+	// Params lists the parameters for signature help. Empty for the nullary
+	// accessors (event() / actor()).
 	Params []BuiltinParam `json:"params,omitempty"`
 	// Dependency is the ambient-vs-imported classification (see
 	// BuiltinDependency). Zero value (DependencyAmbient) means ambient -- the
@@ -191,7 +191,7 @@ func catalogBuiltins() []Builtin {
 func handAuthoredBuiltins() []Builtin {
 	return []Builtin{
 		// ============================================================
-		// Context accessors (parser.CallableAccessors, + index).
+		// Context accessors (parser.CallableAccessors).
 		// actor / partition / config / trace are ALSO reserved keywords
 		// (keywords()); they are listed here too because they are callable
 		// like functions and Sense offers them in call completion.
@@ -200,31 +200,6 @@ func handAuthoredBuiltins() []Builtin {
 		// (a keyword, see keywords()), and the now() / timestamp() call-forms
 		// are retired (epic #2298 / #2301 -- CallableRetired in the parser).
 		// ============================================================
-		{
-			Name:      "step",
-			Category:  CategoryBuiltinAccessor,
-			Signature: `step(name string)`,
-			Doc:       "Reference the result of a previous automation step.",
-			Params:    []BuiltinParam{{Name: "name", Doc: "Step identifier."}},
-		},
-		{
-			Name:      "input",
-			Category:  CategoryBuiltinAccessor,
-			Signature: `input()`,
-			Doc:       "Access the automation's input data.",
-		},
-		{
-			Name:      "item",
-			Category:  CategoryBuiltinAccessor,
-			Signature: `item()`,
-			Doc:       "Access the current item in a forEach loop.",
-		},
-		{
-			Name:      "index",
-			Category:  CategoryBuiltinAccessor,
-			Signature: `index()`,
-			Doc:       "Access the current index in a forEach loop. (The no-arg form is the loop accessor; index(arr, i) reads an array element.)",
-		},
 		{
 			Name:      "event",
 			Category:  CategoryBuiltinAccessor,

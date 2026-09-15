@@ -3,7 +3,5 @@ logic ticketIsClosed {
   args {
     status  string!
   }
-  body {
-    return args.status == "closed"
-  }
+  return args.status == "closed"
 }

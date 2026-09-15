@@ -49,7 +49,7 @@ This document covers two things and how they relate:
 truth for the MemQL DSL authoring surface:
 
 - the **top-level constructs** an author may write (`concept`, `query`,
-  `mutate`, `logic`, `automation`, `action`, `capability`, `spec`,
+  `mutation`, `logic`, `automation`, `action`, `capability`, `spec`,
   `trait`, `shape`, `tool`, `prompt`, `provider`, `builtin`, `policy`,
   `rule`, `seed`, `use`), each tagged with its category, its body
   sub-blocks, and whether its signature names a bound concept;
@@ -146,7 +146,7 @@ the spec once (`dslspec.Build()`) and projects it into the lookup
 shapes completion needs:
 
 - **Top-level construct completion** is the spec's construct list. Typing
-  `mut` at the file top now offers `mutate`; the full struct-form set
+  `mut` at the file top now offers `mutation`; the full struct-form set
   (`logic` / `trait` / `policy` / `seed`) is present because the spec
   carries it. This replaced the stale hand-coded `func / use / concept`
   set.
@@ -164,7 +164,7 @@ the spec's `ConceptInSignature` flag and `SuggestImportWhenMissing`
 legal-next rule:
 
 - **Concept-after-construct.** Concept-binding constructs name their
-  bound concept in the signature: `mutate <Concept> <name>`,
+  bound concept in the signature: `mutation <Concept> <name>`,
   `query <Concept> <name>`, `seed <Concept> <name>`, and the `@row`
   form of `shape <Concept> <name>`. Right after the keyword, completion
   suggests a concept (filtered by the partial prefix), with
@@ -231,9 +231,9 @@ while an author types.
 | `rowAuthzArgument` | an argument of `@rowAuthz(...)` |
 | `toolDefault` | a tool field's `@default(...)` |
 | `promptInput` | a prompt field's `@default(...)` |
-| `automationCondition` | an `if`, `else if`, `for`, `forEach ... where` or `switch` head, or a precondition's `check:` |
+| `automationCondition` | an `if`, `else if`, `for` or `switch` head in an automation, or a precondition's `check:` |
 | `stepArgument` | the arguments of a kind-prefixed call in an automation (`mutation createTodo(title: ...)`), or a `name := ...` statement there |
-| `logicBody` | a statement in a logic's `body { }` |
+| `logicBody` | a statement in a logic body |
 | `mutationValue` | a `key: <value>` line in a mutation's `insert`, `update` or `stamp` block |
 
 A line continues a clause when a bracket opened above is still open, when it
@@ -266,9 +266,9 @@ since each takes a literal. Everywhere else the list is:
   (`rows := query activeUsers(status: "active")`), whose detail is `local`.
 - The reserved roots the position evaluates with: `args`, `actor`, `now` and
   `config` in a query filter, a refine clause, a logic body and a mutation
-  value; `now` in a spec body; the run's `event`, `steps`, `item`, `index`
-  and `input` as well in an automation condition and a step argument. In a
-  trigger filter `args` is the automation's declared args, bound from the
+  value; `now` in a spec body; the run's `event` as well in an automation's
+  conditions and call arguments (`compiler.IsBodyRoot` is the list a body
+  binds). In a trigger filter `args` is the automation's declared args, bound from the
   triggering event's payload before the filter runs, and `args.` completes the
   args of the automation the annotation decorates -- declared below the
   cursor.
@@ -279,10 +279,17 @@ since each takes a literal. Everywhere else the list is:
 - Specs and traits, applied to the receiver they read: `isActiveRecord(row)`,
   `requiresOwner(actor)`. A row spec bound to a different concept than the
   position's is not offered.
-- `nil`, `true` and `false`; the construct-call verbs (`query`, `mutation`,
-  `logic`) only in a logic body and a step argument; the statement keywords
-  (`if`, `for`, `return`, ...) only at the start of a statement in a logic
-  body.
+- `nil`, `true` and `false`; the construct-call kinds only where a
+  statement's whole value starts (`x := `, `return `), since a call nested in
+  an expression is refused. Where a statement starts, the completer for
+  statements answers instead: the words that open one (`if`, `for`,
+  `switch`, `parallel`, `return`, and `publish` in an automation), each
+  construct the body may call inserted with its kind, and, before the first
+  statement, the construct's `args` block and an automation's
+  `precondition`s. After a statement on its line it offers what may follow
+  it: `else` after an if's block, `wait any` after a parallel's, and
+  `on surface(...)`, `retry(n)` and `on error continue` after the statements
+  that take them.
 
 After a dot, completion offers members. `row.` offers the bound concept's
 fields, each with its type, then the row intrinsics (`id`, `createdAt`, ...);
@@ -337,8 +344,8 @@ evaluator does, so a spec never takes a function's card.
 
 Operator cards come from the one operator table, `functions.Operators()`. The
 same glyphs outside an expression keep their own meaning and get no operator
-card: `in` in a `forEach` head is the loop keyword, the terse automation's `=>`
-is not a lambda, and a map key's `:` is not the conditional's.
+card: `in` in a `for` head is the loop keyword, and a map key's `:` is not
+the conditional's.
 
 A retired spelling's card reads the parser's own refusal table,
 `parser.V1RetiredForms()`, by its stable rule ids, so the hover and the load
@@ -407,11 +414,11 @@ editors and agents can key on them:
 | Code | Severity | Rule |
 |---|---|---|
 | `actor-unknown-property` | Error | `actor.<member>` names something outside the closed envelope (#2625) -- same tables as the load-time gate, pinned by a conformance test. |
-| `actor-undeclared` | Error | A query/mutate/logic/automation body reads `actor.*` without `@actor` in the preamble -- the edit-time mirror of the engine's load rule (#2621), sharing the loader's own detection so squiggle and boot error cannot drift. |
+| `actor-undeclared` | Error | A query/mutation/logic/automation body reads `actor.*` without `@actor` in the preamble -- the edit-time mirror of the engine's load rule (#2621), sharing the loader's own detection so squiggle and boot error cannot drift. |
 | `unknown-import-module` | Warning | A Form-B import `use <ns>.<kind>.{ ... }` whose kind segment names no module in a workspace-owned namespace (`use fylo.concept.{...}` where the module is `concepts`). Resolved against the workspace graph (#2730). |
 | `unknown-import-symbol` | Warning | An imported id that the resolved module does not declare (`use fylo.concepts.{ oder }`). |
-| `signature-binds-wrong-kind` | Error | A `query`/`mutate`/`shape`/`seed` signature binds a name that IS declared, just not as a concept -- `shape todos ...` where `todos` is a query (#2762). The sibling rule below only asks whether the name exists at all, so a wrong-kind binding sailed through and surfaced as a boot failure instead. An explicit import does NOT suppress it: importing the query is exactly how the author got here. A name the workspace has never seen is left to `unknown-signature-concept`, since it may arrive at runtime via `MEMQL_DSL_PATH`. `spec` is out of scope by construction -- it binds a shape XOR concept, and the extractor covers only the four concept-binding keywords. Measured over `dsl/`: 680 signature bindings, zero flagged |
-| `unknown-signature-concept` | Error | A `query`/`mutate`/`shape`/`seed <Concept> <name>` whose bound concept exists nowhere and is not imported (`mutate full ...` with no concept `full`). Error, because boot itself CrashLoops on an unresolvable signature concept. Extracted with the boot-pinned regex (`dslimports.SignatureConceptRefs`) and resolved with the load side's own `missingIsProvable` conservatism, so an external or unimported-but-global concept is never flagged (#2731). |
+| `signature-binds-wrong-kind` | Error | A `query`/`mutation`/`shape`/`seed` signature binds a name that IS declared, just not as a concept -- `shape todos ...` where `todos` is a query (#2762). The sibling rule below only asks whether the name exists at all, so a wrong-kind binding sailed through and surfaced as a boot failure instead. An explicit import does NOT suppress it: importing the query is exactly how the author got here. A name the workspace has never seen is left to `unknown-signature-concept`, since it may arrive at runtime via `MEMQL_DSL_PATH`. `spec` is out of scope by construction -- it binds a shape XOR concept, and the extractor covers only the four concept-binding keywords. Measured over `dsl/`: 680 signature bindings, zero flagged |
+| `unknown-signature-concept` | Error | A `query`/`mutation`/`shape`/`seed <Concept> <name>` whose bound concept exists nowhere and is not imported (`mutation full ...` with no concept `full`). Error, because boot itself CrashLoops on an unresolvable signature concept. Extracted with the boot-pinned regex (`dslimports.SignatureConceptRefs`) and resolved with the load side's own `missingIsProvable` conservatism, so an external or unimported-but-global concept is never flagged (#2731). |
 | `bare-row-intrinsic` | Warning | A filter names a row intrinsic bare instead of through its parameter -- `id` on a continuation line of `filter row => row.a == 1`, where `row.id` was meant (#2779). The engine refuses the load for it (`id` is not defined here), and `test/dslconformance/conformance_test.go` fails CI on it; this rule is the edit-time half, which lands on the token and names `row.id`. A filter with no lambda header never reaches it: the parser refuses that first, and the rule runs only on a file that parses. Detection is the same `sense.ScanBareRowIntrinsics` the tree-wide gate calls, so squiggle and CI cannot disagree; it reads clause TEXT rather than parsed predicate structure, so `\|\|`-joined and parenthesized predicates are covered, and string-literal contents are excluded. |
 | `bare-row-intrinsic-sort-key` | Warning | A sort key names a row intrinsic bare (`sort "createdAt", "desc"`) instead of through the `row.` namespace (#2786) -- the ordering half of the rule above, with the same ambiguity (`sort "id"` can name the row id or a payload property called `id`). The engine refuses it in an authored file at load, where both `row.` namespace gates run (memql#3629); the runtime and SDK sort surfaces still accept a bare key from a caller. Detection is the same `sense.ScanBareRowIntrinsicSortKeys` the tree-wide `TestSortKeysUseRowNamespace` calls. It is a SIBLING of the filter scanner, not a branch inside it: a filter names fields as code (so that scanner blanks string literals) while a sort names them as string literals, so this one reads literal contents. It opens a clause only on `sort` followed by a string literal, which keeps a construct field of the form `sort string @enum("createdAt", ...)` from being read as a sort clause; the whitespace skip is unicode-aware so it agrees with the rewriter's `TrimSpace`. It does NOT separate a provider `params` entry spelled `sort "createdAt"` from a directionless sort clause -- the two are byte-identical, and telling them apart needs enclosing-construct state the scanner does not carry. |
 | `redundant-enabled` | Hint | `@enabled` restates the default (#2610). |
@@ -436,7 +443,7 @@ What ships as a snippet:
 |---|---|
 | `args { ... }`, `insert { ... }`, ... | Inside a construct body -- opens the block with the cursor inside, offered beside the plain block keyword. |
 | `filter row => row.field == "value"` | Inside a query body. A v1 filter is a clause whose value is a lambda over the row, not a block, so its snippet writes the header. |
-| `query` / `spec` / `trait` / `mutate` / `logic` / `automation` / `concept` skeletons | Top level -- full declarations with tabstops at the names, sorted BELOW the bare construct keyword so they never displace it. The `spec` and `trait` skeletons are `spec <Concept> <name> = row => ...` and `trait <name> = row => ...`. |
+| `query` / `spec` / `trait` / `mutation` / `logic` / `automation` / `concept` skeletons | Top level -- full declarations with tabstops at the names, sorted BELOW the bare construct keyword so they never displace it. The `spec` and `trait` skeletons are `spec <Concept> <name> = row => ...` and `trait <name> = row => ...`. |
 | `@filter(...)` | Where the construct takes `@filter` -- inserts `@filter(row => row.field == "value")`, a lambda over the triggering row. |
 | The `use <domain>.concepts.{ X }` import | Now places the cursor after the bound name (it was multi-line plain text before -- correct, just cursor-less). |
 
@@ -486,10 +493,11 @@ in the two places it matters:
   construct is legal for that receiver, so the never-offer-what-the-
   engine-rejects contract survives future registry edits.
 - **Body blocks and statements.** A body offers ITS construct's
-  `BodyBlocks` from the spec (query: args/filter/shape; mutate:
-  args/insert/update; logic and automation: args/body) and only its own
-  invocation verbs -- a logic body never offers `filter`, a shape body
-  never offers `insert`.
+  `BodyBlocks` from the spec (query: args/filter/shape; mutation:
+  args/insert/update; logic: args; automation: args and precondition)
+  and, in a logic or an automation, the statement starts described under
+  [Completion](#completion) -- a logic body never offers `filter` or
+  `publish`, a shape body never offers `insert`.
 
 ### The context model
 
@@ -499,7 +507,7 @@ brace with the header that opened it, and the innermost frame whose
 label is a dslspec construct keyword is the enclosure. It yields the
 construct keyword, its annotations-registry receiver, the declared
 name, and the chain of enclosing named blocks (`args`, `insert/stamp`,
-`step`, `body`, ...). A top-level `@` is the one inverted case -- it
+`precondition`, an `if` or `for` block, ...). A top-level `@` is the one inverted case -- it
 PRECEDES its construct, so the receiver comes from the next header
 below the cursor, and at EOF there is none (the completer falls back
 to the union of every receiver's annotations).

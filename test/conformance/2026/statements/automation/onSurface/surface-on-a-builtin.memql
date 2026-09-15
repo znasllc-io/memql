@@ -1,0 +1,4 @@
+@trigger(schedule="0 0 * * * *")
+automation surfaceOnBuiltin {
+  builtin one() on surface("ops")
+}

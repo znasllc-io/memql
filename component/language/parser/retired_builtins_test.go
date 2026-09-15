@@ -45,15 +45,14 @@ func TestRetiredExprBuiltinsRejectWithHint(t *testing.T) {
 }
 
 // TestRetiredExprBuiltinsRejectedInConditionPositions pins the second gate:
-// a condition never reaches the legacy callable dispatch -- the legacy
-// grammar canonicalised it to a raw string (parseConditionExpression), and
-// edition 2026 parses it with the v1 call parser (parseV1FunctionCall) -- so
-// without a gate at each a retired builtin in an if-condition would be
-// load-green and silently constant-false at evaluation, the exact class the
-// retirement must not reintroduce.
+// an if-condition is parsed by the v1 call parser (parseV1FunctionCall), not
+// the callable dispatch the first gate sits in, so without a gate there a
+// retired builtin in an if-condition would be load-green and silently
+// constant-false at evaluation, the exact class the retirement must not
+// reintroduce.
 func TestRetiredExprBuiltinsRejectedInConditionPositions(t *testing.T) {
 	body := func(cond string) string {
-		return "logic probe {\n  args {\n    a string @required\n  }\n  body {\n    x := args.a ?? \"\"\n    if " + cond + " {\n      y := x + \"!\"\n    }\n    return x\n  }\n}\n"
+		return "logic probe {\n  args {\n    a string!\n  }\n  x := args.a ?? \"\"\n  if " + cond + " {\n    y := x + \"!\"\n  }\n  return x\n}\n"
 	}
 	src := body("year(args.a) == 2026")
 	normalised, err := NormaliseAll(src)
@@ -81,14 +80,14 @@ func TestRetiredExprBuiltinsRejectedInConditionPositions(t *testing.T) {
 // read as a call to a function nothing defines.
 func TestRetiredCallsRefusedAtEveryV1Position(t *testing.T) {
 	logic := func(stmt string) string {
-		return "logic probe {\n  args {\n    a string\n  }\n  body {\n    " + stmt + "\n  }\n}\n"
+		return "logic probe {\n  args {\n    a string\n  }\n  " + stmt + "\n}\n"
 	}
 	for _, tc := range []struct{ name, src, want string }{
 		{"a #2707 builtin in a logic return", logic("return month(args.a)"), "#2707"},
-		{"caller() in a logic statement", logic("x := caller()\n    return x"), "caller.X is retired"},
+		{"caller() in a logic statement", logic("x := caller()\n  return x"), "caller.X is retired"},
 		{"asOf in a logic return", logic("return asOf(things, latest)"), "query-only clause and cannot appear in a logic body"},
-		{"a #2707 builtin in a mutation value", "mutate thing probe {\n  args {\n    a string\n  }\n  insert {\n    id: args.a\n    n: memqlVersion()\n  }\n}\n", "#2707"},
-		{"a #2707 builtin in a step argument", "@trigger(event=\"node.created\", concept=\"v1:probe:thing\")\nautomation probe {\n  step run {\n    logic f(x: quarter(event.payload.at))\n  }\n}\n", "#2707"},
+		{"a #2707 builtin in a mutation value", "mutation thing probe {\n  args {\n    a string\n  }\n  insert {\n    id: args.a\n    n: memqlVersion()\n  }\n}\n", "#2707"},
+		{"a #2707 builtin in a call argument", "@trigger(event=\"node.created\", concept=\"v1:probe:thing\")\nautomation probe {\n  args {\n    at any\n  }\n  run := logic f(x: quarter(args.at))\n}\n", "#2707"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := parseV1Authored(t, tc.src)

@@ -295,15 +295,15 @@ func (d filterDecider) member(e *ast.MemberExpr) pval {
 	return v
 }
 
-// rowIntrinsics are the row's columns (memql's intrinsic fields), which a
+// filterRowIntrinsics are the row's columns (memql's intrinsic fields), which a
 // payload field of the same name never shadows. Matched case-insensitively,
 // as the engine resolves them.
-var rowIntrinsics = map[string]bool{"concept": true, "id": true, "type": true, "createdat": true, "createdby": true, "provenance": true}
+var filterRowIntrinsics = map[string]bool{"concept": true, "id": true, "type": true, "createdat": true, "createdby": true, "provenance": true}
 
 // rowField reads the row: its concept is the write's concept, its other
 // columns are the run's, and every other name is a payload field.
 func (d filterDecider) rowField(f string) pval {
-	if lower := strings.ToLower(f); rowIntrinsics[lower] {
+	if lower := strings.ToLower(f); filterRowIntrinsics[lower] {
 		if lower == "concept" {
 			return knownP(d.row.Concept)
 		}

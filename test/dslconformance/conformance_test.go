@@ -742,7 +742,7 @@ func TestRelationshipTargetsUseImports(t *testing.T) {
 	}
 }
 
-// TestPerRowAuthzClassification scans every query / mutate / seed in
+// TestPerRowAuthzClassification scans every query / mutation / seed in
 // the tree and classifies it into one of SIX reported states. Four are
 // the authorization buckets the audit doc defines; `srvOnly` and
 // `other` are not buckets. `granted` IS a bucket in the doc but has no

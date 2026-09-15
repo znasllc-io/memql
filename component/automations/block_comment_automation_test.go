@@ -47,9 +47,7 @@ const liveAutomation = `@enabled
 @description("control")
 @trigger(event="node.created", concept="v1:cluster:node")
 automation blockCommentControl {
-  step persist {
-    mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
-  }
+  persist := mutation createSpawnEvent(nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
 }
 `
 
@@ -121,9 +119,7 @@ func TestBlockCommentedAutomationIsAbsent(t *testing.T) {
 	src := `/*
 @trigger(event="node.created", concept="v1:cluster:node")
 automation commentedOutAutomation {
-  step persist {
-    mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
-  }
+  persist := mutation createSpawnEvent(nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
 }
 */
 
@@ -153,9 +149,7 @@ func TestBlockCommentedAutomationBraceOnNextLineDoesNotRefuseBoot(t *testing.T) 
 @trigger(event="node.created", concept="v1:cluster:node")
 automation commentedNextLineBrace
 {
-  step persist {
-    mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
-  }
+  persist := mutation createSpawnEvent(nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
 }
 */
 
@@ -184,9 +178,7 @@ func TestBraceInsideBlockCommentDoesNotTruncateSlice(t *testing.T) {
 @trigger(event="node.created", concept="v1:cluster:node")
 automation braceInBlockComment {
   /* this comment closes a brace } and opens one { on purpose */
-  step persist {
-    mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
-  }
+  persist := mutation createSpawnEvent(nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
 }
 `
 
@@ -208,9 +200,7 @@ func TestBlockCommentMarkerInsideStringIsNotAComment(t *testing.T) {
 @description("a string carrying comment markers")
 @trigger(event="node.created", concept="v1:cluster:node")
 automation commentMarkerInString {
-  step persist {
-    mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "/* not a comment */")
-  }
+  persist := mutation createSpawnEvent(nodeId: "a", nodeType: "b", action: "stopped", reason: "/* not a comment */")
 }
 `
 
@@ -236,9 +226,7 @@ func TestBlockCommentDoesNotNest(t *testing.T) {
 @description("live again after the first close")
 @trigger(event="node.created", concept="v1:cluster:node")
 automation afterFirstClose {
-  step persist {
-    mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
-  }
+  persist := mutation createSpawnEvent(nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
 }
 `
 
@@ -259,9 +247,7 @@ func TestUnterminatedBlockCommentRunsToEOF(t *testing.T) {
 /* unterminated -- everything past here is comment
 @trigger(event="node.created", concept="v1:cluster:node")
 automation neverClosed {
-  step persist {
-    mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
-  }
+  persist := mutation createSpawnEvent(nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
 }
 `
 
@@ -303,7 +289,7 @@ func TestBlockCommentedAutomationIsNotReportedUnextractable(t *testing.T) {
 	src := `/*
 automation phantomHeader
 {
-  step s { mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "r") }
+  s := mutation createSpawnEvent(nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
 }
 */
 
@@ -321,24 +307,25 @@ automation phantomHeader
 	}
 }
 
-// TestBlockCommentedTerseAutomationIsAbsent covers the TERSE spelling
-// (memql#2215) -- `automation NAME @trigger(...) => logic X`, trigger inline.
+// TestBlockCommentedTerseAutomationIsAbsent covers the retired TERSE header,
+// `automation NAME @trigger(...) => logic X`, trigger inline. The slicer finds
+// it by a regexp of its own (automationTerseHeader) so the parser can refuse
+// it by name; that regexp runs on the comment-blanked view like the others,
+// so a commented-out one is absent.
 //
-// This matters because terse lowering runs over RAW source BEFORE extraction,
-// and measured, it DOES rewrite text inside a block comment (lowering it to
-// longhand in place). The comment survives the rewrite, so the blanked
-// extractor is what decides -- and it must decide "absent".
-//
-// The subtest asserting the fixture really is terse is deliberate: an earlier
-// version of this test put @trigger on its own line, which is not the terse
-// form at all, so it silently duplicated the loose-header case and passed for
-// the wrong reason (#2861 review D4).
+// The check that the uncommented fixture is refused is deliberate: it is what
+// shows the fixture is the terse form the slicer looks for, so the test
+// cannot pass by covering something else (#2861 review D4).
 func TestBlockCommentedTerseAutomationIsAbsent(t *testing.T) {
+	// memqlmigrate:keep -- the retired terse form is the case.
 	const terse = `automation terseCommented @trigger(event="node.created", concept="v1:cluster:node") => logic logicNoSuchThing`
 
-	if !languageParser.LooksLikeTerseAutomation(terse) {
-		t.Fatalf("fixture is not a terse automation, so this test would silently cover something else: %q", terse)
+	if _, err := loadFixtureDomain(t, "s2861fixtureterselive", terse+"\n\n"+liveAutomation); err == nil || !strings.Contains(err.Error(), "body_terse_retired") {
+		t.Fatalf("the fixture uncommented must be refused as the terse form, so this test would silently cover something else; got %v", err)
 	}
+	// The refused domain stays mounted until the test ends; unmount it now, or
+	// the load below reads its refusal too.
+	memqldsl.UnregisterTree("s2861fixtureterselive")
 
 	src := "/*\n" + terse + "\n*/\n\n" + liveAutomation
 
@@ -348,36 +335,6 @@ func TestBlockCommentedTerseAutomationIsAbsent(t *testing.T) {
 	}
 	if contains(names, "terseCommented") {
 		t.Error("a commented-out TERSE automation must not load (#2861)")
-	}
-	if !contains(names, "blockCommentControl") {
-		t.Error("the live control automation must still load")
-	}
-}
-
-// TestBlockCommentedTerseArgsBlockDoesNotRefuseBoot is memql#2861 review D3.
-//
-// rejectTerseAutomationArgsBlock (component/language/parser/rewriter.go) scans
-// RAW source and runs BEFORE extraction, so a commented-out args block plus
-// terse automation raised an authoring violation and REFUSED THE BOOT -- with
-// nothing outside the comment live. That is this issue's headline shape
-// ("commenting out an automation took the node down") surviving in the lane
-// the extraction fix does not reach.
-func TestBlockCommentedTerseArgsBlockDoesNotRefuseBoot(t *testing.T) {
-	src := `/*
-args {
-  x string @required
-}
-automation terseWithArgs @trigger(event="node.created", concept="v1:cluster:node") => logic logicNoSuchThing
-*/
-
-` + liveAutomation
-
-	names, err := loadFixtureDomain(t, "s2861fixtureterseargs", src)
-	if err != nil {
-		t.Fatalf("a commented-out args block + terse automation must not refuse the boot; got: %v", err)
-	}
-	if contains(names, "terseWithArgs") {
-		t.Error("the commented-out terse automation must not load")
 	}
 	if !contains(names, "blockCommentControl") {
 		t.Error("the live control automation must still load")
@@ -394,9 +351,7 @@ func TestUnterminatedBlockCommentWarns(t *testing.T) {
 /* unterminated -- everything past here is comment
 @trigger(event="node.created", concept="v1:cluster:node")
 automation swallowed {
-  step persist {
-    mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
-  }
+  persist := mutation createSpawnEvent(nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
 }
 `
 
@@ -410,9 +365,9 @@ automation swallowed {
 	if !strings.Contains(logs, "unterminated block comment") {
 		t.Errorf("silently swallowing every automation below a typo'd /* is exactly what #2830 outlawed -- expected a WARN, got logs:\n%s", logs)
 	}
-	// liveAutomation is 8 lines + trailing newline, then a blank line, so the
-	// unterminated opener sits on line 10.
-	if !strings.Contains(logs, "line=10") {
+	// liveAutomation is 6 lines + trailing newline, then a blank line, so the
+	// unterminated opener sits on line 8.
+	if !strings.Contains(logs, "line=8") {
 		t.Errorf("the WARN must name the line the comment opens on so the operator can find it, got logs:\n%s", logs)
 	}
 }
@@ -448,21 +403,19 @@ func TestUnterminatedBlockCommentLineIgnoresNonOpeners(t *testing.T) {
 //
 // Two rejected attempts at the memql#2872 preamble defect made the walk step
 // OVER comment lines, which pulled the comment body INTO the emitted slice.
-// compileMemQL then ran its raw-text gates over commented-out text, so an
-// ordinary explanatory comment could refuse the node's boot. These cases are
-// all valid MemQL (memqllint-clean) and must load cleanly; each one refused
-// the boot under those attempts.
+// compileMemQL then scanned commented-out text, so an ordinary explanatory
+// comment could refuse the node's boot. These cases are all valid MemQL
+// (memqllint-clean) and must load cleanly.
 func TestBlockCommentAboveAutomationDoesNotDisturbTheLoad(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		comment string
 	}{
-		{"mentions $steps.", "/* the old form used $steps.foo -- do not reintroduce */"},
+		{"mentions an event.payload read", "/* before #2367 this read event.payload.status -- do not reintroduce */"},
 		{"contains an annotation", "/*\n@public\n*/"},
 		{"contains a retired annotation", "/*\n@useConcept(node)\n*/"},
-		{"contains a direct mutation call", "/*\n  x := mutation(concept: \"v1:cluster:node\")\n*/"},
 		{"has two blank lines", "/* para one\n\n\npara two\n*/"},
-		{"is a parked copy of the automation", "/*\n@enabled\n@trigger(event=\"node.created\", concept=\"v1:cluster:node\")\nautomation parkedCopy {\n  step s { logic x { v: $steps.prev.result } }\n}\n*/"},
+		{"is a parked copy of the automation", "/*\n@enabled\n@trigger(event=\"node.created\", concept=\"v1:cluster:node\")\nautomation parkedCopy {\n  s := logic x(v: 1)\n}\n*/"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src := tc.comment + "\n" + liveAutomation
@@ -493,18 +446,14 @@ func TestAnnotationGateStillSeesTheLiveAutomation(t *testing.T) {
 @enabled
 @trigger(event="node.created", concept="v1:cluster:node")
 automation parkedOne {
-  step persist {
-    mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
-  }
+  persist := mutation createSpawnEvent(nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
 }
 */
 @public
 @enabled
 @trigger(event="node.created", concept="v1:cluster:node")
 automation gatedAutomation {
-  step persist {
-    mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
-  }
+  persist := mutation createSpawnEvent(nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
 }
 `
 	_, err := loadFixtureDomain(t, "s2861fixturegate", src)

@@ -12,20 +12,29 @@ import (
 // #2235 forEach sweeps evaluate; in the string evaluator they were
 // constant-false (date windows) or over-fired (`!= ""`). They are written the
 // edition-2026 way and evaluated through EvalCondition over the run, as a
-// forEach filter is.
+// `for` filter is: the loop's variable is a stored row, whose payload fields
+// read directly (`row.deletionScheduledAt`).
 //
 // Multi-node note: no node-local state is read; the triggering row travels
 // with the event, so the behaviour is identical across the 2-replica mesh.
 
-// evalItemCond evaluates `cond` with `item` bound as the forEach loop item and
-// a fixed run clock (the seeded `timestamp`, which `now` reads), mirroring the
-// sweep's per-row gate.
+// loopRow binds `row` to a stored row carrying payload, in a loop's frame, with
+// a fixed run clock (the seeded `now`), mirroring the sweep's per-row gate.
+func loopRow(payload map[string]any, now string) *Evaluator {
+	e := NewEvaluator()
+	e.SetCustom("now", now)
+	e.enterStatements()
+	loop := e.ChildFrame()
+	loop.Bind("row", map[string]any{"id": "v1:probe:row:1", "payload": payload})
+	return loop
+}
+
+// evalItemCond evaluates `cond` over a row carrying item's payload (see
+// loopRow).
 func evalItemCond(t *testing.T, item map[string]any, now, cond string) bool {
 	t.Helper()
-	e := NewEvaluator()
-	e.SetItem(item, "item")
-	e.SetCustom("timestamp", now)
-	got, err := evalV1Cond(t, e, cond)
+	payload, _ := item["payload"].(map[string]any)
+	got, err := evalV1Cond(t, loopRow(payload, now), cond)
 	if err != nil {
 		t.Fatalf("%s: %v", cond, err)
 	}
@@ -38,7 +47,7 @@ func evalItemCond(t *testing.T, item map[string]any, now, cond string) bool {
 // crons never ran.
 func TestCondition_DateWindow_Past_Fires(t *testing.T) {
 	item := map[string]any{"payload": map[string]any{"deletionScheduledAt": "2020-01-01T00:00:00Z"}}
-	cond := `addDuration(item.payload.deletionScheduledAt, "P30D") < now`
+	cond := `addDuration(row.deletionScheduledAt, "P30D") < now`
 	if !evalItemCond(t, item, "2026-06-27T00:00:00Z", cond) {
 		t.Errorf("%s = false for a row 5y past its cooldown, want true (#2254)", cond)
 	}
@@ -47,7 +56,7 @@ func TestCondition_DateWindow_Past_Fires(t *testing.T) {
 // The same gate must NOT fire when the window has not yet elapsed.
 func TestCondition_DateWindow_Future_DoesNotFire(t *testing.T) {
 	item := map[string]any{"payload": map[string]any{"deletionScheduledAt": "2026-06-20T00:00:00Z"}}
-	cond := `addDuration(item.payload.deletionScheduledAt, "P30D") < now`
+	cond := `addDuration(row.deletionScheduledAt, "P30D") < now`
 	// 2026-06-20 + 30d = 2026-07-20, which is AFTER now (2026-06-27).
 	if evalItemCond(t, item, "2026-06-27T00:00:00Z", cond) {
 		t.Errorf("%s = true before the window elapsed, want false (#2254)", cond)
@@ -58,12 +67,12 @@ func TestCondition_DateWindow_Future_DoesNotFire(t *testing.T) {
 // coerce both sides to 0. Pre-fix `<` returned false for any RFC3339 operand.
 func TestCondition_BareTimestampCompare(t *testing.T) {
 	item := map[string]any{"payload": map[string]any{"scheduledAt": "2020-01-01T00:00:00Z"}}
-	if !evalItemCond(t, item, "2026-06-27T00:00:00Z", "item.payload.scheduledAt < now") {
-		t.Errorf("item.payload.scheduledAt < now = false for a 2020 date, want true (#2254)")
+	if !evalItemCond(t, item, "2026-06-27T00:00:00Z", "row.scheduledAt < now") {
+		t.Errorf("row.scheduledAt < now = false for a 2020 date, want true (#2254)")
 	}
 	itemFuture := map[string]any{"payload": map[string]any{"scheduledAt": "2030-01-01T00:00:00Z"}}
-	if evalItemCond(t, itemFuture, "2026-06-27T00:00:00Z", "item.payload.scheduledAt < now") {
-		t.Errorf("item.payload.scheduledAt < now = true for a 2030 date, want false (#2254)")
+	if evalItemCond(t, itemFuture, "2026-06-27T00:00:00Z", "row.scheduledAt < now") {
+		t.Errorf("row.scheduledAt < now = true for a 2030 date, want false (#2254)")
 	}
 }
 
@@ -75,7 +84,7 @@ func TestCondition_DateWindow_ConcatCoalesceCooldown(t *testing.T) {
 		"deletionScheduledAt": "2026-06-01T00:00:00Z",
 		"cooldownDays":        "15",
 	}}
-	cond := `addDuration(item.payload.deletionScheduledAt, "P" + (item.payload.cooldownDays ?? "30") + "D") < now`
+	cond := `addDuration(row.deletionScheduledAt, "P" + (row.cooldownDays ?? "30") + "D") < now`
 	if !evalItemCond(t, item, "2026-06-27T00:00:00Z", cond) {
 		t.Errorf("compound P15D window = false, want true (#2254/#2256)")
 	}
@@ -94,7 +103,7 @@ func TestCondition_NotEmptyString_GatesCorrectly(t *testing.T) {
 	empty := map[string]any{"payload": map[string]any{"computerUseScope": ""}}
 	missing := map[string]any{"payload": map[string]any{}}
 
-	cond := `item.payload.computerUseScope != ""`
+	cond := `row.computerUseScope != ""`
 	if !evalItemCond(t, scoped, "2026-06-27T00:00:00Z", cond) {
 		t.Errorf("%s = false for a scoped row, want true", cond)
 	}
@@ -112,7 +121,7 @@ func TestCondition_EqualsEmptyString_GatesCorrectly(t *testing.T) {
 	empty := map[string]any{"payload": map[string]any{"computerUseScope": ""}}
 	missing := map[string]any{"payload": map[string]any{}}
 
-	cond := `item.payload.computerUseScope == ""`
+	cond := `row.computerUseScope == ""`
 	if evalItemCond(t, scoped, "2026-06-27T00:00:00Z", cond) {
 		t.Errorf("%s = true for a scoped row, want false", cond)
 	}
@@ -128,7 +137,7 @@ func TestCondition_EqualsEmptyString_GatesCorrectly(t *testing.T) {
 // (#2257): suspend only when the user disabled compute-use AND the plan has a
 // real scope. Empty / missing scope must not suspend.
 func TestCondition_KillSwitchCompound(t *testing.T) {
-	cond := `item.payload.computerUseScope != "" && item.payload.enabled == false`
+	cond := `row.computerUseScope != "" && row.enabled == false`
 	scoped := map[string]any{"payload": map[string]any{"computerUseScope": "full", "enabled": false}}
 	empty := map[string]any{"payload": map[string]any{"computerUseScope": "", "enabled": false}}
 	if !evalItemCond(t, scoped, "2026-06-27T00:00:00Z", cond) {
@@ -142,7 +151,7 @@ func TestCondition_KillSwitchCompound(t *testing.T) {
 // daysBetween as a comparison operand: the streak gate "today is exactly one
 // day after the last activity".
 func TestCondition_DaysBetweenOperand(t *testing.T) {
-	cond := `daysBetween(item.payload.lastActiveAt, now) == 1`
+	cond := `daysBetween(row.lastActiveAt, now) == 1`
 	item := map[string]any{"payload": map[string]any{"lastActiveAt": "2026-07-13T09:00:00Z"}}
 	if !evalItemCond(t, item, "2026-07-14T09:00:00Z", cond) {
 		t.Errorf("%s = false for a row exactly one day old, want true (#2541)", cond)
@@ -164,15 +173,13 @@ func TestCondition_RetiredCalendarBuiltinsDoNotResolve(t *testing.T) {
 	}}
 	cases := []string{
 		`quarter(now) == 3`,
-		`isAnniversary(item.payload.startedAt, now) == true`,
+		`isAnniversary(row.startedAt, now) == true`,
 		`year(now) == 2026`,
 	}
 	for _, cond := range cases {
 		cond := cond
 		t.Run(cond, func(t *testing.T) {
-			e := NewEvaluator()
-			e.SetItem(item, "item")
-			e.SetCustom("timestamp", "2026-07-14T09:00:00Z")
+			e := loopRow(item["payload"].(map[string]any), "2026-07-14T09:00:00Z")
 			n, err := languageParser.ParseV1Expression(cond)
 			if err != nil {
 				return // refused at parse

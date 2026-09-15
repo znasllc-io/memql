@@ -10,8 +10,8 @@ package memql
 // side-effect interception layer:
 //
 //   - reads execute REAL + METERED: ai(), similarTo, webSearch, fetchUrl
-//   - writes are ISOLATED: mutations land in the sandbox partition; webhooks /
-//     external POSTs are RECORDED-AND-BLOCKED.
+//   - writes are ISOLATED: a mutation lands in the sandbox partition; a
+//     publish, an action or a sub-automation is RECORDED and never run.
 //
 // The run is driven by a synthetic or replayed trigger event, and captures a
 // full trace + a side-effect manifest + a cost estimate as the Gate-3 approval
@@ -44,21 +44,6 @@ import (
 	"github.com/znasllc-io/memql/core/num"
 )
 
-// DryRunMode selects the side-effect tier the sandbox runs under.
-type DryRunMode string
-
-const (
-	// DryRunModeIsolated is the default Gate-2 tier: reads are real + metered,
-	// mutations are isolated to the sandbox partition, and webhooks / external
-	// POSTs are recorded-and-blocked. Zero production side effects.
-	DryRunModeIsolated DryRunMode = "isolated"
-
-	// DryRunModeFullSandboxLive is the optional final staging tier (gated
-	// SEPARATELY): everything runs real IN THE SANDBOX, with webhooks routed to
-	// a capture sink instead of being blocked. Increment 3 (memql#958).
-	DryRunModeFullSandboxLive DryRunMode = "fullSandboxLive"
-)
-
 // DryRunRequest drives one behavioral dry-run of a single authored automation.
 type DryRunRequest struct {
 	// BundleId is the bundle the automation belongs to (recorded on the report
@@ -79,22 +64,6 @@ type DryRunRequest struct {
 	// exactly how a real graph-CDC event would be seen. Nil drives the run as a
 	// schedule-/manual-style invocation (synthetic event envelope).
 	TriggerEvent *DryRunTriggerEvent `json:"triggerEvent,omitempty"`
-
-	// Mode selects the side-effect tier. Empty defaults to DryRunModeIsolated.
-	Mode DryRunMode `json:"mode,omitempty"`
-
-	// FullLiveApproved is the SEPARATE gate for DryRunModeFullSandboxLive. The
-	// full-sandbox-live tier (webhooks delivered to a capture sink instead of
-	// blocked) is a riskier final staging pass; RunBundleDryRun refuses to run
-	// it unless this is explicitly set, so a caller can never fall into live
-	// webhook delivery by default. Ignored for the isolated tier.
-	FullLiveApproved bool `json:"fullLiveApproved,omitempty"`
-
-	// CaptureSinkUrl is where webhooks are delivered under the full-sandbox-live
-	// tier. When empty, full-live webhooks are recorded to the manifest with the
-	// configured default sink marker but not dispatched (the sandbox never POSTs
-	// to the automation's real webhook target -- only to the capture sink).
-	CaptureSinkUrl string `json:"captureSinkUrl,omitempty"`
 }
 
 // DryRunTriggerEvent is the synthetic / replayed event that drives a dry-run.
@@ -107,20 +76,21 @@ type DryRunTriggerEvent struct {
 }
 
 // DryRunStep is one captured step of the behavioral trace. It records the step
-// id + type, status, duration, and -- for an isolated mutation or a blocked
-// webhook -- a note of what the side-effect layer did. The trace is faithful to
-// the order the executor ran the steps.
+// id + type, status, duration, and -- for an isolated mutation or a recorded
+// side effect -- a note of what the side-effect layer did. The trace is
+// faithful to the order the executor ran the steps.
 type DryRunStep struct {
 	StepId     string `json:"stepId"`
 	StepType   string `json:"stepType"`
 	Status     string `json:"status"`
 	DurationMs int64  `json:"durationMs"`
-	// Intercepted is true when the side-effect layer rewrote / blocked this step
-	// (a mutation isolated to the sandbox partition, or a webhook recorded and
-	// blocked). False for reads that ran for real and pure compute steps.
+	// Intercepted is true when the side-effect layer rewrote / recorded this
+	// step instead of running it (a mutation isolated to the sandbox partition,
+	// or a publish, an action or a sub-automation recorded). False for reads
+	// that ran for real and pure compute steps.
 	Intercepted bool `json:"intercepted,omitempty"`
 	// Note carries the side-effect layer's annotation (e.g. "isolated to sandbox
-	// partition" / "webhook recorded and blocked") or a step error message.
+	// partition") or a step error message.
 	Note string `json:"note,omitempty"`
 }
 
@@ -156,29 +126,12 @@ type RecordedWebCall struct {
 	Target   string `json:"target,omitempty"`
 }
 
-// BlockedWebhook is one external POST (a webhook step) the side-effect layer
-// captured. The request (method + url + body) is recorded so the approver sees
-// exactly what would be sent. Under the isolated tier it is RECORDED-AND-BLOCKED
-// (Sink empty). Under the full-sandbox-live tier it is delivered to a capture
-// sink instead of the automation's real target, and Sink records where -- the
-// automation's real webhook target is NEVER POSTed to.
-type BlockedWebhook struct {
-	StepId string         `json:"stepId"`
-	Method string         `json:"method"`
-	Url    string         `json:"url"`
-	Body   map[string]any `json:"body,omitempty"`
-	// Sink is set when the webhook was delivered to a capture sink under the
-	// full-sandbox-live tier; empty means recorded-and-blocked (isolated tier).
-	Sink string `json:"sink,omitempty"`
-}
-
 // SideEffectManifest is the tiered catalog of everything the automation did.
 // It matches the v1:authoring:bundle.dryRunReport.sideEffectManifest shape.
 type SideEffectManifest struct {
-	Mutations       []RecordedMutation `json:"mutations"`
-	AiCalls         []RecordedAiCall   `json:"aiCalls"`
-	WebCalls        []RecordedWebCall  `json:"webCalls"`
-	BlockedWebhooks []BlockedWebhook   `json:"blockedWebhooks"`
+	Mutations []RecordedMutation `json:"mutations"`
+	AiCalls   []RecordedAiCall   `json:"aiCalls"`
+	WebCalls  []RecordedWebCall  `json:"webCalls"`
 }
 
 // CostEstimate is the aggregate metered cost of the run's real reads. It matches
@@ -194,12 +147,9 @@ type CostEstimate struct {
 // costEstimate}.
 type BundleDryRunReport struct {
 	// OK is true when the automation ran to completion without a hard step
-	// failure. A blocked webhook or isolated mutation does NOT fail the run --
-	// that is the expected, correct behaviour under the isolated tier.
+	// failure. An isolated mutation or a recorded side effect does NOT fail
+	// the run -- that is the expected, correct behaviour.
 	OK bool `json:"ok"`
-
-	// Mode echoes the tier the run executed under.
-	Mode DryRunMode `json:"mode"`
 
 	// SandboxPartition is the ephemeral partition graph writes were isolated to.
 	// Unique per run; nothing under it touches the live graph.
@@ -211,8 +161,7 @@ type BundleDryRunReport struct {
 	// Trace is the ordered behavioral trace of every step the executor ran.
 	Trace []DryRunStep `json:"trace"`
 
-	// SideEffectManifest is the tiered catalog of mutations / reads / blocked
-	// webhooks.
+	// SideEffectManifest is the tiered catalog of writes and metered reads.
 	SideEffectManifest SideEffectManifest `json:"sideEffectManifest"`
 
 	// CostEstimate is the aggregate metered cost of the run's real reads.
@@ -226,8 +175,8 @@ type BundleDryRunReport struct {
 // SandboxDryRunner executes one authored automation behaviorally under the
 // tiered side-effect interception layer and returns the captured report. It
 // must not touch live graph state beyond the run's ephemeral sandbox partition
-// and must never dispatch a real webhook under the isolated tier. Satisfied by
-// the bridge in component/automations.
+// and must never run a side effect for real. Satisfied by the bridge in
+// component/automations.
 type SandboxDryRunner func(ctx context.Context, engine *MemQLEngine, req DryRunRequest) (BundleDryRunReport, error)
 
 var (
@@ -265,16 +214,6 @@ func RunBundleDryRun(ctx context.Context, engine *MemQLEngine, req DryRunRequest
 	run := sandboxDryRunner()
 	if run == nil {
 		return BundleDryRunReport{}, fmt.Errorf("behavioral dry-run is unavailable: no dry-run runner is registered in this binary (link component/automations)")
-	}
-	if req.Mode == "" {
-		req.Mode = DryRunModeIsolated
-	}
-	// Full-sandbox-live is gated SEPARATELY: it delivers webhooks to a capture
-	// sink (real, in-sandbox) rather than blocking them, so it must be opted into
-	// explicitly. Refuse it without FullLiveApproved so a caller never falls into
-	// live webhook delivery by defaulting the mode.
-	if req.Mode == DryRunModeFullSandboxLive && !req.FullLiveApproved {
-		return BundleDryRunReport{}, fmt.Errorf("full-sandbox-live dry-run is gated separately: set DryRunRequest.FullLiveApproved to run it (it delivers webhooks to a capture sink instead of blocking them)")
 	}
 	return run(ctx, engine, req)
 }

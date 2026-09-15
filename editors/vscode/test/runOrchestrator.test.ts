@@ -197,7 +197,7 @@ test("run -- the invoke carries the rendered named call", async () => {
 
 test("run -- a mutation renders the `mutation` keyword", async () => {
   const h = harness();
-  await h.orchestrator.run(target({ kind: "mutate", name: "createSpace", args: [] }), {});
+  await h.orchestrator.run(target({ kind: "mutation", name: "createSpace", args: [] }), {});
   const invoke = h.engine.calls.at(-1);
   assert.equal(invoke?.op === "executeNamed" ? invoke.call : "", "mutation createSpace()");
 });
@@ -316,7 +316,7 @@ test("run -- refuses when disconnected, naming the cluster", async () => {
 test("run -- a mutation against a NON-LOCAL cluster prompts once, naming both", async () => {
   const h = harness();
   h.setCluster({ name: "staging", label: "MemQL Staging", local: false });
-  const mutation = target({ kind: "mutate", name: "createSpace", args: [] });
+  const mutation = target({ kind: "mutation", name: "createSpace", args: [] });
 
   await h.orchestrator.run(mutation, {});
   assert.equal(h.confirmations.length, 1);
@@ -329,7 +329,7 @@ test("run -- a mutation against a NON-LOCAL cluster prompts once, naming both", 
 
 test("run -- a mutation against a LOCAL cluster never prompts", async () => {
   const h = harness();
-  await h.orchestrator.run(target({ kind: "mutate", name: "createSpace", args: [] }), {});
+  await h.orchestrator.run(target({ kind: "mutation", name: "createSpace", args: [] }), {});
   assert.deepEqual(h.confirmations, []);
 });
 
@@ -344,7 +344,7 @@ test("run -- declining the confirmation stops before touching the engine", async
   const h = harness();
   h.setCluster({ name: "staging", label: "staging", local: false });
   h.setConfirmAnswer(false);
-  const outcome = await h.orchestrator.run(target({ kind: "mutate", name: "createSpace", args: [] }), {});
+  const outcome = await h.orchestrator.run(target({ kind: "mutation", name: "createSpace", args: [] }), {});
   assert.equal(outcome.status, "declined");
   assert.deepEqual(h.engine.ops(), []);
 });
@@ -353,7 +353,7 @@ test("run -- a declined confirmation is NOT remembered as an acknowledgement", a
   const h = harness();
   h.setCluster({ name: "staging", label: "staging", local: false });
   h.setConfirmAnswer(false);
-  const mutation = target({ kind: "mutate", name: "createSpace", args: [] });
+  const mutation = target({ kind: "mutation", name: "createSpace", args: [] });
   await h.orchestrator.run(mutation, {});
   await h.orchestrator.run(mutation, {});
   assert.equal(h.confirmations.length, 2, "saying no must not pre-authorise the next attempt");

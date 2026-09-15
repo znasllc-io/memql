@@ -1,0 +1,51 @@
+{
+  "automation": "identity/automations.memql accountDeletionReminder7Days",
+  "runs": {
+    "no event | 0 rows": {
+      "input": {
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "result": {
+          "output": 0,
+          "status": "completed"
+        }
+      }
+    },
+    "no event | 2 rows": {
+      "input": {
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          },
+          {
+            "args": {
+              "deletionScheduledAt": "<ts>",
+              "email": "person1@example.test",
+              "milestoneDays": 7,
+              "subject": "Your <BRAND_NAME> account will be permanently deleted soon",
+              "timestamp": "<ts>",
+              "userId": "v1:probe:row:usersInDeletionCooldown-1"
+            },
+            "kind": "event",
+            "name": "identity.deletion.reminder"
+          }
+        ],
+        "result": {
+          "output": 1,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

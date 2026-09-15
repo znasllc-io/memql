@@ -141,7 +141,7 @@ query space queryOddProbe {
 
 func TestRewriteDocComments_EscapedQuotesUnescaped(t *testing.T) {
 	src := `@description("Marks the row \"done\" and clears the backslash \\ escape.")
-mutate candidate mutateDoneProbe {
+mutation candidate mutateDoneProbe {
   args {
     id string!
   }
@@ -276,9 +276,7 @@ logic orphanProbe {
   args {
     a string @required
   }
-  body {
-    return args.a ?? ""
-  }
+  return args.a ?? ""
 }
 `
 	got := rewriteDoc(t, src)
@@ -318,9 +316,7 @@ logic absentProbe {
   args {
     a string @required
   }
-  body {
-    return args.a ?? ""
-  }
+  return args.a ?? ""
 }
 `
 	got := rewriteDoc(t, src)

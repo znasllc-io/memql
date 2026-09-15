@@ -4,7 +4,5 @@ automation saObjectLiteralCall {
   args {
     id  string
   }
-  step note {
-    mutation saNoteGoal({ goalId: args.id })
-  }
+  mutation saNoteGoal({ goalId: args.id })
 }

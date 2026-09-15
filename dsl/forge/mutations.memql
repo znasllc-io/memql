@@ -19,7 +19,7 @@
 // ---------------------------------------------------------------------------
 /// Register a v1:forge:project. createdByUserId is stamped from actor.userId.
 @actor
-mutate project createProject {
+mutation project createProject {
   args {
     projectId    string
     slug         string!
@@ -48,7 +48,7 @@ mutate project createProject {
 /// Submit a v1:forge:request. submitterUserId + submitterRole are stamped server-side from actor
 /// (no spoofing). status lands 'submitted'; the routeRequest automation routes it by role.
 @actor
-mutate request createRequest {
+mutation request createRequest {
   args {
     requestId      string
     projectId      string!
@@ -81,7 +81,7 @@ mutate request createRequest {
 // ---------------------------------------------------------------------------
 /// Transition a v1:forge:request to a new status (the approval pipeline edges). update read-merges
 /// the prior row. The role guard belongs in an engine pre-insert hook (follow-up).
-mutate request advanceRequest {
+mutation request advanceRequest {
   args {
     requestId          string!
     status             string!
@@ -102,14 +102,14 @@ mutate request advanceRequest {
 // Purpose-built transitions -- stamp the acting user from the auth context so
 // the tool surface (one handler per tool) can't be spoofed. Each is an update
 // (read-merges the prior row). The matching requestEvent is recorded
-// separately (see the follow-up note: a node.updated -> recordTransition
-// automation will append the audit event automatically).
+// separately: the recordTransition automation, fired by node.updated,
+// appends the audit event.
 // ---------------------------------------------------------------------------
 
 /// Validate a v1:forge:request (developer action): set status 'needs_approval' and stamp
 /// validatedByUserId from actor.userId.
 @actor
-mutate request validateRequest {
+mutation request validateRequest {
   args {
     requestId  string!
   }
@@ -124,7 +124,7 @@ mutate request validateRequest {
 /// Approve a v1:forge:request (owner action): set status 'queued' (ready to implement) and stamp
 /// approvedByUserId from actor.userId.
 @actor
-mutate request approveRequest {
+mutation request approveRequest {
   args {
     requestId  string!
   }
@@ -137,7 +137,7 @@ mutate request approveRequest {
 }
 
 /// Send a v1:forge:request back for changes: set status 'changes_requested' with a reason.
-mutate request requestChanges {
+mutation request requestChanges {
   args {
     requestId  string!
     resolution string!
@@ -166,7 +166,7 @@ mutate request requestChanges {
 /// clobbering of existing attachments). Backed by @appendFields -- the update executor appends to
 /// the stored array. update read-merges all other request fields.
 @appendFields("attachmentIds")
-mutate request attachToRequest {
+mutation request attachToRequest {
   args {
     requestId     string!
     attachmentId  string!
@@ -185,7 +185,7 @@ mutate request attachToRequest {
 // requestId is normalized to the SHORT id form via shortId() (#1859). The two
 // caller paths feed two id shapes:
 //   - automation path (routeRequest / recordTransition) passes
-//     args.event.payload.id, which is the CANONICAL node id
+//     args.id, the trigger payload's id, which is the CANONICAL node id
 //     (v1:forge:request:r-...) of the created/updated request row;
 //   - tool path (recordMentoredEvent) passes the SHORT tool arg (r-...).
 // Without normalization the audit trail splits across both forms and
@@ -207,7 +207,7 @@ mutate request attachToRequest {
 /// consistently whether the caller passes a canonical node id (automation path) or a bare short id
 /// (tool path) -- #1859.
 @actor
-mutate requestEvent recordRequestEvent {
+mutation requestEvent recordRequestEvent {
   args {
     eventId     string
     requestId   string!
@@ -247,7 +247,7 @@ mutate requestEvent recordRequestEvent {
 /// actorRole stamped from actor; requestId normalized to short form (shortId(), #1859). The
 /// forgeRecordMentoring tool's direct single writer (replaces the recordMentoring logic -- #2235).
 @actor
-mutate requestEvent recordMentoredEvent {
+mutation requestEvent recordMentoredEvent {
   args {
     eventId    string
     requestId  string!

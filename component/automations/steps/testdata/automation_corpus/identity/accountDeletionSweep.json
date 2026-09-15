@@ -1,0 +1,73 @@
+{
+  "automation": "identity/automations.memql accountDeletionSweep",
+  "runs": {
+    "no event | 0 rows": {
+      "input": {
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "scheduledBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "usersScheduledForDeletion"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "no event | 2 rows": {
+      "input": {
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "scheduledBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "usersScheduledForDeletion"
+          },
+          {
+            "args": {
+              "userId": "v1:probe:row:usersScheduledForDeletion-1"
+            },
+            "kind": "mutation",
+            "name": "deleteUserHard"
+          },
+          {
+            "args": {
+              "userId": "v1:probe:row:usersScheduledForDeletion-2"
+            },
+            "kind": "mutation",
+            "name": "deleteUserHard"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

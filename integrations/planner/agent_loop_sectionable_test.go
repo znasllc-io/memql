@@ -10,9 +10,9 @@ import (
 // --- pure synthesis -------------------------------------------------------
 
 // TestSynthesizeSectionableBundle_EmitsParallelLayer: a sectionable deliverable
-// with N independent sections synthesizes ONE layer-0 `parallel` block fanning
-// out a production sub-automation per section, plus an assemble step gated on
-// that layer succeeding (memql#1394 over the #1368 grammar).
+// with N independent sections synthesizes ONE layer-0 `parallel` statement
+// with a branch per section's production sub-automation, plus the assemble
+// call after it (memql#1394 over the #1368 grammar).
 func TestSynthesizeSectionableBundle_EmitsParallelLayer(t *testing.T) {
 	dec := sectionableDecision{
 		Sectionable: true,
@@ -33,21 +33,17 @@ func TestSynthesizeSectionableBundle_EmitsParallelLayer(t *testing.T) {
 	}
 	headline := lastConstruct(t, bundle, bundle.AutomationName)
 	src := headline.Source
-	if !strings.Contains(src, "parallel {") || !strings.Contains(src, "branches: [") {
-		t.Fatalf("headline must fan the sections out in a parallel block:\n%s", src)
+	if !strings.Contains(src, "  parallel {\n") || strings.Count(src, "    branch ") != 3 {
+		t.Fatalf("headline must fan the three sections out in one parallel statement:\n%s", src)
 	}
-	if !strings.Contains(src, `wait: "all"`) || !strings.Contains(src, "failFast: true") {
-		t.Errorf("the section layer must carry wait:\"all\" + failFast:true:\n%s", src)
-	}
-	// The assemble step runs AFTER the parallel layer, gated on it succeeding.
+	// The assemble call runs AFTER the parallel layer: statements run in
+	// order and a failed branch fails the parallel, which ends the run.
 	assemble := assembleAutomationName(bundle.AutomationName)
-	if !strings.Contains(src, "automation "+assemble+" { }") {
-		t.Errorf("headline must invoke the assemble sub-automation:\n%s", src)
+	at := strings.Index(src, "  automation "+assemble+"()\n")
+	if at < 0 {
+		t.Errorf("headline must call the assemble sub-automation:\n%s", src)
 	}
-	if !strings.Contains(src, `if steps.layer0.status == "success"`) {
-		t.Errorf("assemble must be gated on the parallel layer succeeding:\n%s", src)
-	}
-	if strings.Index(src, "step "+assemble) < strings.Index(src, "step layer0") {
+	if at < strings.Index(src, "  parallel {") {
 		t.Errorf("assemble must come after the parallel section layer:\n%s", src)
 	}
 }
@@ -72,7 +68,7 @@ func TestSynthesizeSectionableBundle_RealGate1Compiles(t *testing.T) {
 	bundle = withSectionableLogic(bundle)
 
 	if !strings.Contains(lastConstruct(t, bundle, bundle.AutomationName).Source, "parallel {") {
-		t.Fatalf("headline must emit a parallel step (memql#1368)")
+		t.Fatalf("headline must emit a parallel statement (memql#1368)")
 	}
 
 	report := memql.SandboxCompileBundle(bundle.Constructs)
@@ -200,9 +196,9 @@ func TestParseSectionableDecision_MissingFieldsAreNonSectionable(t *testing.T) {
 // no Plans.
 //
 // The pure half above is what work_compile.go still reaches: the parser
-// (parseSectionableDecision), the section shaping (usableSections,
-// sanitizeIdent) and the bundle synthesis (synthesizeSectionableBundle,
-// including its real Gate-1 compile).
+// (parseSectionableDecision) and the section shaping (usableSections,
+// sanitizeIdent). The bundle synthesis (synthesizeSectionableBundle) has no
+// caller outside these tests.
 
 // lastConstruct returns the construct in the bundle with the given name.
 func lastConstruct(t *testing.T, bundle authoringBundle, name string) memql.SandboxConstruct {

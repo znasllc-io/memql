@@ -681,15 +681,7 @@ func evaluateTriggerFilter(a *Automation, event *events.Event, bound map[string]
 	// validation has already run by the time we get here.
 	if bound != nil {
 		evaluator.SetCustom("args", bound)
-		// G2 (memql#2364): see executor.go -- declared set enables
-		// bare nil-resolution for absent optional fields in @filter.
-		evaluator.SetCustom("argsDeclared", declaredArgsSet(a))
 	}
-	evaluator.SetCustom("ctx", map[string]any{
-		"input":  eventMap,
-		"output": nil,
-		"error":  "",
-	})
 
 	// The filter is a lambda over the triggering ROW (`@filter(row =>
 	// row.status == "archived")`), parsed at load -- or, for an automation

@@ -10,7 +10,7 @@
 /// distilled from. confidence/reinforceCount/lastReinforced seed the decay clock. content is the
 /// embedding source for similarTo dedup + recall (#585).
 @actor
-mutate belief createMemoryBelief {
+mutation belief createMemoryBelief {
   args {
     memoryId        string
     kind            enum("fact", "preference", "outcome")!
@@ -38,7 +38,7 @@ mutate belief createMemoryBelief {
 /// merged/deduped provenance. No new belief row -- this is why re-running over the same episodes
 /// does not duplicate. ownerUserId re-stamped from actor.userId (owned tier).
 @actor
-mutate belief reinforceMemoryBelief {
+mutation belief reinforceMemoryBelief {
   args {
     memoryId        string!
     confidence      float!
@@ -61,7 +61,7 @@ mutate belief reinforceMemoryBelief {
 /// reinforcement). ownerUserId re-stamped from actor.userId (owned tier). A belief that decays
 /// below the prune floor is then retired via pruneMemoryBelief.
 @actor
-mutate belief decayMemoryBelief {
+mutation belief decayMemoryBelief {
   args {
     memoryId    string!
     confidence  float!
@@ -79,7 +79,7 @@ mutate belief decayMemoryBelief {
 /// pruned belief drops out of both while staying in the audit trail. ownerUserId re-stamped from
 /// actor.userId (owned tier).
 @actor
-mutate belief pruneMemoryBelief {
+mutation belief pruneMemoryBelief {
   args {
     memoryId  string!
   }
@@ -97,7 +97,7 @@ mutate belief pruneMemoryBelief {
 /// first run and advances it thereafter. episodesSeen takes the engine-computed running total.
 /// ownerUserId stamped from actor.userId (owned tier).
 @actor
-mutate consolidationCursor advanceMemoryConsolidationCursor {
+mutation consolidationCursor advanceMemoryConsolidationCursor {
   args {
     cursorId      string
     watermark     datetime!

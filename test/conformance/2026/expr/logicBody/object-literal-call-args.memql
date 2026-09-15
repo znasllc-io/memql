@@ -3,8 +3,6 @@ logic lbObjectLiteralCall {
   args {
     status  string
   }
-  body {
-    rows := query lbTickets({ status: args.status })
-    return rows.count()
-  }
+  rows := query lbTickets({ status: args.status })
+  return rows.count()
 }

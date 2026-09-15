@@ -1,0 +1,9 @@
+logic firstAbove {
+  args {
+    items any
+  }
+  for item in args.items if item > 2 {
+    return item
+  }
+  return -1
+}

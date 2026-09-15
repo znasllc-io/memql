@@ -75,7 +75,7 @@
 @actor
 @createOnly("name", "domain", "primaryContactName", "primaryContactEmail", "notes", "status")
 @requiresRank("admin")
-mutate account createClientAccount {
+mutation account createClientAccount {
   args {
     accountId            string!
     name                 string!  @maxLength(200)
@@ -120,7 +120,7 @@ mutate account createClientAccount {
 /// `status` is deliberately NOT here. Archiving is its own write below,
 /// because it is its own decision and it asks its own confirm.
 @requiresRank("admin")
-mutate account updateClientAccount {
+mutation account updateClientAccount {
   args {
     accountId            string!
     name                 string   @maxLength(200)
@@ -168,7 +168,7 @@ mutate account updateClientAccount {
 /// answers the same question for the Bin (memql#4784), and inventing a second
 /// half-answer here would be the thing to undo when it lands.
 @requiresRank("admin")
-mutate account archiveClientAccount {
+mutation account archiveClientAccount {
   args {
     accountId  string!
   }
@@ -195,7 +195,7 @@ mutate account archiveClientAccount {
 /// scope to. The account rows themselves stay on their composite owner tier,
 /// which is what decides who can READ what this writes.
 @serverOnly
-mutate account recordAccountDomainCheck {
+mutation account recordAccountDomainCheck {
   args {
     accountId            string!
     domainToken          string

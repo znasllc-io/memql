@@ -4,7 +4,5 @@ logic ticketEventPriority {
   args {
     event  object!
   }
-  body {
-    return args.event.payload.priority
-  }
+  return args.event.payload.priority
 }

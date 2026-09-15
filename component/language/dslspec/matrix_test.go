@@ -65,7 +65,7 @@ func TestMatrixFormWordsCoverEveryForm(t *testing.T) {
 // author types, and a field receiver by the kind of field.
 func TestReceiverNameIsTheConstructKeyword(t *testing.T) {
 	for r, want := range map[annotations.Receiver]string{
-		annotations.Mutation:    "mutate",
+		annotations.Mutation:    "mutation",
 		annotations.Spec:        "spec and trait",
 		annotations.ConceptBody: "concept",
 		annotations.Concept:     "concept",

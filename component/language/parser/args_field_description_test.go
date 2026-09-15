@@ -69,10 +69,10 @@ query participant spaceParticipants {
 }`,
 		},
 		{
-			name: "mutate",
+			name: "mutation",
 			src: `use cognition.concepts.{ space }
 @description("create a space")
-mutate space createSpace {
+mutation space createSpace {
   args {
     spaceId string @required @description("the space id")
   }
@@ -89,9 +89,7 @@ logic decideThing {
   args {
     x string @required @description("the input")
   }
-  body {
-    return x
-  }
+  return x
 }`,
 		},
 		{
@@ -124,16 +122,14 @@ capability shell.script {
 		},
 		{
 			name: "automation",
-			src: `@trigger(event="node.created", concept="v1:cognition:participant", partition="*")
+			src: `@trigger(event="node.created", concept="v1:cognition:participant")
 @description("bootstrap a session")
 automation bootstrapSession {
   args {
     id any @description("the participant id")
   }
 
-  step decide {
-    logic bootstrapSession ( event )
-  }
+  decide := logic bootstrapSession(event: event)
 }`,
 		},
 	}

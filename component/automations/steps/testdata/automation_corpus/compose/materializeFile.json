@@ -1,0 +1,59 @@
+{
+  "automation": "compose/automations.memql materializeFile",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "compositionId": "s-compositionId"
+          },
+          "topic": "automation.invocation.materializeFile"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "compositionId": "s-compositionId"
+            },
+            "kind": "builtin",
+            "name": "composeExecute"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "compositionId": "s-compositionId"
+          },
+          "topic": "automation.invocation.materializeFile"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "compositionId": "s-compositionId"
+            },
+            "kind": "builtin",
+            "name": "composeExecute"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

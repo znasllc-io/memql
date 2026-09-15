@@ -81,8 +81,8 @@ func TestJournal_DB_RowsWrittenAndResumed(t *testing.T) {
 	defer e.Close()
 	name := fmt.Sprintf("journalProbe%d", time.Now().UnixNano())
 	auto := &Automation{Name: name, Steps: []*Step{
-		{ID: "a", Type: StepTypeQuery, Query: &QueryStepConfig{Query: "q"}},
-		{ID: "b", Type: StepTypeQuery, Query: &QueryStepConfig{Query: "q"}, OnError: ErrorStrategyStop},
+		{ID: "a", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "q", Kind: "query"}},
+		{ID: "b", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "q", Kind: "query"}, OnError: ErrorStrategyStop},
 	}}
 
 	exec, _ := e.Execute(context.Background(), auto, "test")
@@ -147,7 +147,7 @@ func TestJournal_DB_AnUnfinishedStepIsResumable(t *testing.T) {
 	engine := openTestEngine(t)
 	runId := fmt.Sprintf("crashprobe%d", time.Now().UnixNano())
 	j := newWorkJournal(engine, nil)
-	auto := &Automation{Name: "crashProbe", Steps: []*Step{{ID: "a", Type: StepTypeQuery, Query: &QueryStepConfig{Query: "q"}}}}
+	auto := &Automation{Name: "crashProbe", Steps: []*Step{{ID: "a", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "q", Kind: "query"}}}}
 	exec := NewExecution(auto.Name, "test")
 	exec.ID = runId
 
@@ -172,7 +172,7 @@ func TestJournal_DB_SandboxWritesNothing(t *testing.T) {
 	engine := openTestEngine(t)
 	e := NewExecutor(ExecutorOptions{Engine: engine, StepRegistry: journalProbeRegistry{}, SandboxRun: true})
 	defer e.Close()
-	auto := &Automation{Name: fmt.Sprintf("sandboxProbe%d", time.Now().UnixNano()), Steps: []*Step{{ID: "a", Type: StepTypeQuery, Query: &QueryStepConfig{Query: "q"}}}}
+	auto := &Automation{Name: fmt.Sprintf("sandboxProbe%d", time.Now().UnixNano()), Steps: []*Step{{ID: "a", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "q", Kind: "query"}}}}
 	exec, _ := e.Execute(context.Background(), auto, "test")
 	if _, err := LoadRunJournal(context.Background(), engine, exec.ID); !errors.Is(err, ErrRunNotFound) {
 		t.Fatalf("a sandboxed run must leave no row; got %v", err)

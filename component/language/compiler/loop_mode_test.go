@@ -16,9 +16,7 @@ func TestLoopAndModeCompile(t *testing.T) {
 		res, err := CompileSource(`@trigger(event="system.startup")
 ` + head + `
 automation probeLoopMode {
-  step run {
-    mutation createThing (id: "x")
-  }
+  mutation createThing(id: "x")
 }`)
 		if err != nil {
 			t.Fatalf("CompileSource(%s): %v", head, err)

@@ -20,7 +20,7 @@
 /// server-side on the owner's behalf. Idempotent -- the id is derived from sourceConceptRef so
 /// re-promoting the same source versions the same row. Not a user-facing tool; the Library is
 /// populated automatically.
-mutate artifact createArtifact {
+mutation artifact createArtifact {
   args {
     sourceConceptRef  string!
     ownerUserId       string!
@@ -72,11 +72,6 @@ mutate artifact createArtifact {
     args.producedByWorkerId
     args.producedByWorkerName
     validationStatus: args.validationStatus ?? "none"
-    // now, NOT bare `now`: this mutation is invoked from the index
-    // automations (indexGeneratedOutput et al.), and the automation step
-    // resolver only evaluates the function-call forms now/now -- a
-    // bare `now` passes through as the literal string "now" and fails the
-    // artifact's updatedAt date-time format. (memql#980)
     updatedAt: now
   }
 }
@@ -88,7 +83,7 @@ mutate artifact createArtifact {
 /// producing user. indexGeneratedOutput folds the new row into the Library index automatically.
 /// body carries inline text outputs; attachmentId references file bytes for file-backed outputs.
 @actor
-mutate generatedOutput createGeneratedOutput {
+mutation generatedOutput createGeneratedOutput {
   args {
     outputId          string!
     title             string!
@@ -118,7 +113,7 @@ mutate generatedOutput createGeneratedOutput {
 /// actor.userId, so a memory can only ever be created for the acting user (or their delegated
 /// agent's bound user). indexMemory folds it into the Library Records lens automatically.
 @actor
-mutate memory createMemory {
+mutation memory createMemory {
   args {
     memoryId           string!
     title              string!
@@ -161,7 +156,7 @@ mutate memory createMemory {
 /// versionNumber + versionId are computed server-side from the current
 /// latest. Append-only: every call inserts a new immutable row; nothing is overwritten.
 @actor
-mutate documentVersion appendDocumentVersion {
+mutation documentVersion appendDocumentVersion {
   args {
     versionId        string!
     documentId       string!
@@ -188,10 +183,8 @@ mutate documentVersion appendDocumentVersion {
     args.parentVersionId
     args.producedByRunId
     args.partitionId
-    // now, NOT bare `now`: this mutation is invoked from the Go
-    // edit/restore handlers; the hypertable time dimension + history
-    // ordering key must be a real RFC3339 timestamp (same gotcha as
-    // createArtifact.updatedAt, memql#980).
+    // createdAt is the hypertable time dimension and the history's ordering
+    // key, stamped from `now` rather than taken from a caller.
     createdAt: now
   }
 }
@@ -202,7 +195,7 @@ mutate documentVersion appendDocumentVersion {
 /// integration.library.editDocument / restoreDocumentVersion; ownerUserId is stamped from
 /// actor.userId, and both handlers run the write under the existing row's owner.
 @actor
-mutate generatedOutput updateGeneratedOutputContent {
+mutation generatedOutput updateGeneratedOutputContent {
   args {
     outputId      string!
     title         string!
@@ -254,7 +247,7 @@ mutate generatedOutput updateGeneratedOutputContent {
 /// labels -- a caller-supplied status would let a later write re-enter that state.
 /// indexFileOnCreate folds the new row into the Library index automatically.
 @actor
-mutate file createLibraryFile {
+mutation file createLibraryFile {
   args {
     producedByRunId string
     producedByStepKey string
@@ -290,8 +283,7 @@ mutate file createLibraryFile {
       // number would let an upload claim to be version 40 of a file with no
       // history, and versionUploadedAt is the field the history reads as
       // "uploaded", which must be the moment the engine saw the bytes rather
-      // than a moment a client chose. now() rather than a bare `now` for the
-      // memql#980 reason the artifact index records.
+      // than a moment a client chose.
       versionNumber: 1
       versionUploadedAt: now
     }
@@ -303,7 +295,7 @@ mutate file createLibraryFile {
 /// field but the status is optional and an absent one is NOT written, so a later transition cannot
 /// blank a summary an earlier one recorded. Handler-invoked by the analysis pass, which runs under
 /// the file owner's actor; the read-merge preserves ownerUserId and every byte fact.
-mutate file setLibraryFileStatus {
+mutation file setLibraryFileStatus {
   args {
     fileId           string!
     status           enum("stored", "analyzing", "ready", "failed")!
@@ -330,7 +322,7 @@ mutate file setLibraryFileStatus {
 /// member would clobber whatever another agent added concurrently -- the same reason the artifact
 /// label capabilities merge in Go and write back. libraryTrainFile reads the current list, adds the
 /// domain if it is not already there, and calls this; adding a domain twice writes nothing new.
-mutate file appendLibraryFileTrainedDomain {
+mutation file appendLibraryFileTrainedDomain {
   args {
     fileId                string!
     trainedIntoDomainIds  []string!
@@ -345,7 +337,7 @@ mutate file appendLibraryFileTrainedDomain {
 /// default list; the row, its provenance and its bytes all survive, and the append-only history
 /// keeps every earlier version. Called directly by the owner, and by archiveFileOnArtifactArchive
 /// when the owner archives the artifact the file backs, so the two rows never disagree.
-mutate file archiveLibraryFile {
+mutation file archiveLibraryFile {
   args {
     fileId  string!
   }
@@ -362,7 +354,7 @@ mutate file archiveLibraryFile {
 /// v1:library:file is archived alongside it by archiveFileOnArtifactArchive rather than here --
 /// a mutation body writes one row, and which second row to touch is a decision that depends on the
 /// kind.
-mutate artifact archiveArtifact {
+mutation artifact archiveArtifact {
   args {
     artifactId  string!
   }
@@ -388,7 +380,7 @@ mutate artifact archiveArtifact {
 /// the events). So restore is a CLIENT-DRIVEN PAIR, exactly as the recursive archive walk is: the
 /// Bin calls this and restoreLibraryFile together, and a re-run of an interrupted restore simply
 /// finds the half that already landed absent from its next plan.
-mutate artifact restoreArtifact {
+mutation artifact restoreArtifact {
   args {
     artifactId  string!
   }
@@ -404,7 +396,7 @@ mutate artifact restoreArtifact {
 /// never went anywhere: an archive is an append-only re-version carrying archived=true, so this
 /// write is a re-version carrying false and the blobUrl, the provenance and every earlier version
 /// are exactly where they were.
-mutate file restoreLibraryFile {
+mutation file restoreLibraryFile {
   args {
     fileId  string!
   }
@@ -425,7 +417,7 @@ mutate file restoreLibraryFile {
 /// disposition is unreachable from every surface -- the Bin's own read carries isNotDeleted -- so
 /// nothing can name a deleted folder to restore it, and a write that cleared the field anyway
 /// would resurrect exactly the empty-folder noise that write exists to avoid.
-mutate folder restoreLibraryFolder {
+mutation folder restoreLibraryFolder {
   args {
     folderId  string!
   }
@@ -446,7 +438,7 @@ mutate folder restoreLibraryFolder {
 ///
 /// Deliberately NOT a data-origins mirror (memql#4378). A mirror reconciles deletions and a
 /// connector owns its concept; this retains and flags, and Library files stay native.
-mutate file setLibraryFileLinkState {
+mutation file setLibraryFileLinkState {
   args {
     fileId     string!
     linkState  enum("synced", "stale", "origin_gone")!
@@ -464,7 +456,7 @@ mutate file setLibraryFileLinkState {
 /// libraryArtifactBySourceConceptRef so a similarity hit folds up to the Library row with no second
 /// read.
 @actor
-mutate fileChunk createLibraryFileChunk {
+mutation fileChunk createLibraryFileChunk {
   args {
     chunkId     string!
     fileId      string!
@@ -507,7 +499,7 @@ mutate fileChunk createLibraryFileChunk {
 /// the tree fold tolerates violations defensively either way. archived is stamped false explicitly
 /// so every row states its own answer -- the same reasoning createArtifact records.
 @actor
-mutate folder createLibraryFolder {
+mutation folder createLibraryFolder {
   args {
     folderId        string!
     name            string!
@@ -526,7 +518,7 @@ mutate folder createLibraryFolder {
 /// Rename a folder. One field on one row: names are display labels, not namespaces (design D3), so
 /// nothing else is touched, no uniqueness is checked, and every artifact filed under the folder is
 /// oblivious -- they point at the id, and the id does not change.
-mutate folder renameLibraryFolder {
+mutation folder renameLibraryFolder {
   args {
     folderId  string!
     name      string!
@@ -544,7 +536,7 @@ mutate folder renameLibraryFolder {
 /// has no ancestor walk to refuse one with -- and the tree fold renders a folder whose ancestor
 /// chain revisits itself at root with a marker, so a race between two movers degrades the picture
 /// rather than losing anybody's rows.
-mutate folder moveLibraryFolder {
+mutation folder moveLibraryFolder {
   args {
     folderId        string!
     parentFolderId  string
@@ -563,7 +555,7 @@ mutate folder moveLibraryFolder {
 /// archives the remainder idempotently. Artifacts still pointing here render at root with an
 /// orphan marker rather than vanishing: the fold is tolerant, and a row is never lost to a
 /// dangling pointer.
-mutate folder archiveLibraryFolder {
+mutation folder archiveLibraryFolder {
   args {
     folderId  string!
   }
@@ -591,7 +583,7 @@ mutate folder archiveLibraryFolder {
 /// There is deliberately NO inverse. restoreLibraryFolder clears `archived` and never touches
 /// `deleted`, because a row every read excludes is a row nothing can ask to have back -- and
 /// resurrecting an empty folder would restore the noise this write exists to avoid.
-mutate folder deleteLibraryFolder {
+mutation folder deleteLibraryFolder {
   args {
     folderId  string!
   }
@@ -610,7 +602,7 @@ mutate folder deleteLibraryFolder {
 /// content kind (file, document, generated_output); the backing row's own folderId copy is the
 /// initial filing only and is deliberately not chased (the index is authoritative after
 /// promotion).
-mutate artifact moveArtifactToFolder {
+mutation artifact moveArtifactToFolder {
   args {
     artifactId  string!
     folderId    string
@@ -640,7 +632,7 @@ mutate artifact moveArtifactToFolder {
 /// Ids are not validated against the registry: an account has no read effect, and a list filtered
 /// against the caller's own visible accounts would quietly DROP a label somebody else's account put
 /// there. The Files browse filter reads an unresolvable id as a tie to something not visible.
-mutate artifact setArtifactAccounts {
+mutation artifact setArtifactAccounts {
   args {
     artifactId  string!
     accountIds  []string
@@ -664,7 +656,7 @@ mutate artifact setArtifactAccounts {
 /// provenance checks BEFORE calling this, so a session row's existence implies both passed.
 @actor
 @serverOnly
-mutate uploadSession createUploadSession {
+mutation uploadSession createUploadSession {
   args {
     uploadId  string!
     name      string!
@@ -699,7 +691,7 @@ mutate uploadSession createUploadSession {
 /// the storage truth it summarises. A read-merge: every init-time fact survives for the audit
 /// trail.
 @serverOnly
-mutate uploadSession completeUploadSession {
+mutation uploadSession completeUploadSession {
   args {
     uploadId  string!
   }
@@ -743,7 +735,7 @@ mutate uploadSession completeUploadSession {
 /// object and GET /artifacts/{id}/content?version={n} would stream it back.
 @actor
 @serverOnly
-mutate fileVersion createLibraryFileVersion {
+mutation fileVersion createLibraryFileVersion {
   args {
     versionId      string!
     fileId         string!
@@ -801,7 +793,7 @@ mutate fileVersion createLibraryFileVersion {
 /// whose bare insert{} promotion would wipe the artifact's labels and re-file it at the file row's
 /// stale initial folder. Both gates would become optional the moment this were client-reachable.
 @serverOnly
-mutate file supersedeLibraryFileHead {
+mutation file supersedeLibraryFileHead {
   args {
     fileId         string!
     versionNumber  int!
@@ -864,7 +856,7 @@ mutate file supersedeLibraryFileHead {
 /// preference, a watch naming a machine the caller does not own is read by no cockpit, and the push
 /// it would attempt is refused at the upload by a check that CAN see the caller's fleet.
 @actor
-mutate watchedFolder createLibraryWatchedFolder {
+mutation watchedFolder createLibraryWatchedFolder {
   args {
     watchId        string!
     workerId       string!
@@ -902,7 +894,7 @@ mutate watchedFolder createLibraryWatchedFolder {
 /// Re-pointing folderId moves NOTHING that already arrived. Files carry their own folderId and the
 /// engine has no cascade; this decides where the next push lands. The app says exactly that at the
 /// moment of the change, because a person re-pointing a backup reasonably expects otherwise.
-mutate watchedFolder updateLibraryWatchedFolder {
+mutation watchedFolder updateLibraryWatchedFolder {
   args {
     watchId        string!
     folderId       string
@@ -920,7 +912,7 @@ mutate watchedFolder updateLibraryWatchedFolder {
 /// Pause or resume a watch. One field on one row, and deliberately not the archive: pausing keeps
 /// the arrangement in the list and in the cockpit's local record, so resuming picks up where it
 /// left off instead of re-pushing a folder from scratch.
-mutate watchedFolder setLibraryWatchedFolderStatus {
+mutation watchedFolder setLibraryWatchedFolderStatus {
   args {
     watchId  string!
     status   enum("active", "paused")!
@@ -935,7 +927,7 @@ mutate watchedFolder setLibraryWatchedFolderStatus {
 /// ARE UNTOUCHED -- they are ordinary Library files owned by the same person, and the one-way
 /// invariant (design E, D12) does not stop applying because the arrangement ended. Nothing here
 /// reaches the origin either: archiving a watch does not delete anything on the machine.
-mutate watchedFolder archiveLibraryWatchedFolder {
+mutation watchedFolder archiveLibraryWatchedFolder {
   args {
     watchId  string!
   }
@@ -948,7 +940,7 @@ mutate watchedFolder archiveLibraryWatchedFolder {
 /// Put an archived watch back. The plain inverse of the archive, one field on one row -- which is
 /// what lets somebody undo a stop without re-typing a path (memql#4784's restore reasoning, applied
 /// to the arrangement rather than to a file).
-mutate watchedFolder restoreLibraryWatchedFolder {
+mutation watchedFolder restoreLibraryWatchedFolder {
   args {
     watchId  string!
   }
@@ -973,7 +965,7 @@ mutate watchedFolder restoreLibraryWatchedFolder {
 /// rather than leaving a fixed problem on screen forever. The counts are stamped through the same
 /// coalesce, where `0` survives it (?? keeps 0 and false; it falls through on blanks), so "the
 /// folder is there and empty" and "nothing has reported" stay different answers.
-mutate watchedFolder reportLibraryWatchedFolderSweep {
+mutation watchedFolder reportLibraryWatchedFolderSweep {
   args {
     watchId         string!
     originState     enum("ok", "missing", "unreadable", "refused_by_policy")!

@@ -61,9 +61,9 @@ func TestBuildPhaseLayers_CycleTerminates(t *testing.T) {
 }
 
 // TestSynthesizeParallelHeadline_EmitsParallelStep: a layer with 2+
-// independent phases emits ONE `parallel { branches: [...] }` step so they
-// run concurrently (memql#1164, restored on the authored grammar in
-// memql#1368); the dependent phase is gated on that layer step succeeding.
+// independent phases is ONE `parallel` statement with a branch per phase, so
+// they run concurrently (memql#1164, memql#1368); the dependent phase is the
+// statement after it, which runs only once every branch finished.
 func TestSynthesizeParallelHeadline_EmitsParallelStep(t *testing.T) {
 	phases := []phaseNode{
 		{Name: "fetchA"},
@@ -72,27 +72,22 @@ func TestSynthesizeParallelHeadline_EmitsParallelStep(t *testing.T) {
 	}
 	c := synthesizePhasedHeadline("gather", "Gather then merge.", phases)
 	src := c.Source
-	if !strings.Contains(src, "parallel {") || !strings.Contains(src, "branches: [") {
-		t.Fatalf("independent phases must emit a parallel step:\n%s", src)
+	if !strings.Contains(src, "  parallel {\n") {
+		t.Fatalf("independent phases must emit a parallel statement:\n%s", src)
 	}
-	if !strings.Contains(src, "step fetchA { automation fetchA { } }") ||
-		!strings.Contains(src, "step fetchB { automation fetchB { } }") {
-		t.Errorf("parallel branches must invoke both independent phases:\n%s", src)
+	for _, name := range []string{"fetchA", "fetchB"} {
+		if !strings.Contains(src, "    branch "+name+" {\n      automation "+name+"()\n    }\n") {
+			t.Errorf("the parallel must carry a branch calling %s:\n%s", name, src)
+		}
 	}
-	// The fan-out layer waits for every branch and fails on any branch
-	// failure, so the downstream success gate is meaningful.
-	if !strings.Contains(src, `wait: "all"`) || !strings.Contains(src, "failFast: true") {
-		t.Errorf("the parallel layer must carry wait:\"all\" + failFast:true:\n%s", src)
+	// The default `wait all` is not written; nothing else configures it.
+	if strings.Contains(src, "wait") || strings.Contains(src, "failFast") {
+		t.Errorf("the parallel waits for every branch by default and writes no configuration:\n%s", src)
 	}
-	// merge runs in a later step gated on the parallel layer's success.
-	if !strings.Contains(src, "automation merge { }") ||
-		!strings.Contains(src, `if steps.layer0.status == "success"`) {
-		t.Errorf("dependent phase must be gated on the parallel layer succeeding:\n%s", src)
-	}
-	// Ordering: the parallel layer must precede merge (the executor runs
-	// steps sequentially in list order; layering IS the order).
-	if strings.Index(src, "step merge") < strings.Index(src, "step layer0") {
-		t.Errorf("dependent phase must come after its dependency layer:\n%s", src)
+	// Ordering: merge is the statement after the parallel (statements run
+	// in source order; layering IS the order).
+	if at := strings.Index(src, "  automation merge()\n"); at < 0 || at < strings.Index(src, "  parallel {") {
+		t.Errorf("dependent phase must be the statement after its dependency layer:\n%s", src)
 	}
 }
 
@@ -102,11 +97,11 @@ func TestSynthesizeParallelHeadline_EmitsParallelStep(t *testing.T) {
 func TestSynthesizeParallelHeadline_RealGate1Compiles(t *testing.T) {
 	mk := func(name string) memql.SandboxConstruct {
 		return memql.SandboxConstruct{Kind: "automation", Name: name,
-			Source: "@description(\"" + name + "\")\nautomation " + name + " {\n  step run {\n    logic " + name + "Body { }\n  }\n}"}
+			Source: "@description(\"" + name + "\")\nautomation " + name + " {\n  run := logic " + name + "Body()\n}"}
 	}
 	mkLogic := func(name string) memql.SandboxConstruct {
 		return memql.SandboxConstruct{Kind: "logic", Name: name + "Body",
-			Source: "logic " + name + "Body {\n  body { return now }\n}"}
+			Source: "logic " + name + "Body {\n  return now\n}"}
 	}
 	phases := []phaseNode{
 		{Name: "fetchA"},
@@ -122,7 +117,7 @@ func TestSynthesizeParallelHeadline_RealGate1Compiles(t *testing.T) {
 		headline,
 	}
 	if !strings.Contains(headline.Source, "parallel {") {
-		t.Fatalf("the multi-phase layer must emit a parallel step (memql#1368); headline:\n%s", headline.Source)
+		t.Fatalf("the multi-phase layer must emit a parallel statement (memql#1368); headline:\n%s", headline.Source)
 	}
 	report := memql.SandboxCompileBundle(bundle)
 	requireAutomationsActuallyCompiled(t, report) // anti-vacuity (memql#1366)
@@ -174,14 +169,14 @@ func TestRunDesignPass_ResolvesPhaseDependsOn(t *testing.T) {
 
 // TestSynthesizeHeadline_NoDeps_StillSequential: the #1163 back-compat wrapper
 // (no dependsOn) must still produce a strict one-per-layer sequential chain --
-// each phase gated on the prior phase's success.
+// one call statement per phase, in order.
 func TestSynthesizeHeadline_NoDeps_StillSequential(t *testing.T) {
 	c := synthesizeHeadlineAutomation("seq", "Sequential.", []string{"seqPhase0", "seqPhase1", "seqPhase2"})
 	if strings.Contains(c.Source, "parallel {") {
-		t.Fatalf("a no-dependsOn chain must stay sequential (no parallel step):\n%s", c.Source)
+		t.Fatalf("a no-dependsOn chain must stay sequential (no parallel statement):\n%s", c.Source)
 	}
-	if !strings.Contains(c.Source, `if steps.seqPhase0.status == "success"`) ||
-		!strings.Contains(c.Source, `if steps.seqPhase1.status == "success"`) {
-		t.Errorf("sequential chain must gate each phase on the prior phase succeeding:\n%s", c.Source)
+	want := "automation seq {\n  automation seqPhase0()\n  automation seqPhase1()\n  automation seqPhase2()\n}\n"
+	if !strings.Contains(c.Source, want) {
+		t.Errorf("sequential chain must call each phase in order:\n%s", c.Source)
 	}
 }

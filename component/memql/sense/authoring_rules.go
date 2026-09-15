@@ -487,7 +487,7 @@ func BlankBlockComments(src string) string {
 }
 
 // actorUndeclaredRule mirrors the engine's actor-binding load rule
-// (#2621) as an edit-time Error (#2622): a query/mutate/logic/
+// (#2621) as an edit-time Error (#2622): a query/mutation/logic/
 // automation body reading `actor.*` without `@actor` in its preamble.
 // The detection is parser.ActorUndeclaredRefOffsets -- the SAME
 // header/preamble/reference internals the loader validator and the
