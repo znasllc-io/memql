@@ -120,12 +120,9 @@ query cluster existingCluster {
 //   - it reflects the node's CURRENT state, so a node that recovered
 //     (latest row healthy again) is re-evaluated on its fresh lastSeen.
 //
-// The staleness comparison (lastSeen + window < now) is NOT done here:
-// the MemQL query planner rejects function-call literals (addDuration /
-// timestamp) inside filter comparisons, and addDuration accepts only
-// positive ISO-8601 durations. So the windowing math lives on the
-// per-row side in pruneStaleClusterNodes, mirroring
-// accessRequestExpirySweep / logicPurgeExpiredArchivedSpaces.
+// The staleness cutoff is computed in the pruneStaleClusterNodes logic
+// (now minus the window, addDuration with a negative ISO-8601 duration)
+// and passed in as `olderThan`, so the comparison runs here (#1642).
 
 /// Latest-per-id cluster node rows whose health is not already 'stopped'. When olderThan is
 /// supplied, restricts to rows whose lastSeen is strictly before it (RFC3339 cutoff). Drives the

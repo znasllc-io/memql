@@ -7,7 +7,7 @@
 /// Pure decide for the workspace-release sweep: returns every v1:workbench:workspace for the
 /// updated run. The terminal-status gate, the per-row release write (provisioned workspaces only),
 /// and the unconditional on-disk teardown all live in the releaseWorkspaceOnRunTerminal
-/// automation's steps (#2235).
+/// automation's statements (#2235).
 logic releaseWorkspaceOnRunTerminal {
   args {
     event object!
@@ -17,7 +17,7 @@ logic releaseWorkspaceOnRunTerminal {
 
 /// PURE terminal-status decision table for v1:work:run (#2370): returns true when the status is one
 /// of the terminal set, false otherwise. THE single owner of that vocabulary -- the
-/// releaseWorkspaceOnRunTerminal automation gates its release + teardown steps on this scalar
+/// releaseWorkspaceOnRunTerminal automation gates its release + teardown statements on this scalar
 /// instead of restating the ||-chain inline.
 ///
 /// FOUR values, not the Plan's three: `abandoned` is terminal for a run (the node stopped

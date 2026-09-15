@@ -31,10 +31,10 @@
 // break.
 
 /// Nightly: fold the week's router calls into evidence, and open a review where it carries a
-/// demotion. One step, because the whole fold is one Go capability -- the counting, the threshold,
-/// the rule rendering and the approval are decisions that belong together, and splitting them
-/// across DSL steps would put the artifact hash on one side of a step boundary from the text it
-/// covers.
+/// demotion. One statement, because the whole fold is one Go capability -- the counting, the
+/// threshold, the rule rendering and the approval are decisions that belong together, and splitting
+/// them across statements would put the artifact hash on one side of a step boundary from the text
+/// it covers.
 @trigger(schedule="0 30 3 * * *")
 automation routingEvidenceFold {
   fold := builtin routingEvidenceFold()

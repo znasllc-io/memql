@@ -1012,14 +1012,12 @@ query delegation expiredActiveDelegations {
 
 // ---- queries/v1/identity/expiredAuditEvents.memql ----
 
-// expiredAuditEvents - All audit events (the retention sweep iterates)
-// =====================================================================
+// expiredAuditEvents - All audit events (the retention sweep counts them)
+// ========================================================================
 //
 // Returns every audit-event row. The auditEventRetentionSweep cron
-// iterates the result and per-row tests
-// `addDuration(item.auditEvent.occurredAt, "P{N}D") < now` to
-// decide whether the row is past
-// MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS. NOTE (#2369): the old claim
+// counts the result; it applies no MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS
+// window yet. NOTE (#2369): the old claim
 // that "per-row windowing in the automation is the only path" is
 // FALSE -- the filter restriction is on function calls, not arg-cutoff
 // comparisons, and addDuration takes negative ISO durations (the
@@ -1038,8 +1036,7 @@ query delegation expiredActiveDelegations {
 //   Zero or more audit-event rows in auditEventFull shape.
 //
 
-/// All audit events; the retention sweep iterates and per-row checks occurredAt + retention-days <
-/// now.
+/// All audit events; the retention sweep counts them.
 ///
 /// It reads under `actor.isClusterOwner==true` because its only caller is the
 /// auditEventRetentionSweep cron running under the cluster's MAINTENANCE PRINCIPAL
@@ -1105,11 +1102,9 @@ query authCode expiredConsumedAuthCodes {
 // cron decides what to do with them (a consumed-then-expired row
 // is identical to an expired row from the consume handler's POV).
 //
-// The `now` cutoff is passed in as an arg (rather than referencing the
-// clock inline) for the same reason as expiredActiveDelegations: the MemQL
-// query planner rejects the timestamp call-form AST node in filter
-// comparisons. The automation supplies it from the bare reserved `now`
-// identifier at the call site.
+// The cutoff is the `asOf` argument rather than the clock read inline,
+// as in expiredActiveDelegations; the magicLinkExpirySweep logic
+// supplies it from the bare reserved `now` identifier at the call site.
 //
 // Arguments:
 //   now (string) - cutoff timestamp (ISO 8601 / RFC 3339)
@@ -1133,30 +1128,24 @@ query magicLinkRequest expiredMagicLinkRequests {
 // expiredPendingAccessRequests - Pending access requests
 // ========================================================
 //
-// Returns every access-request row whose status is "pending". Used
-// by the accessRequestExpirySweep cron (daily 04:00 UTC): the cron
-// iterates the result and per-row tests whether the row is older
-// than IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS by comparing
-// `addDuration(item.createdAt, "P{N}D") < now` before
-// calling expireAccessRequest.
+// Returns every access-request row whose status is "pending", and
+// created before `createdBefore` when it is supplied. Used by the
+// accessRequestExpirySweep cron (daily 04:00 UTC): its logic
+// computes the cutoff, now minus IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS,
+// and the cron's `for` loop calls expireAccessRequest for each row.
 //
-// MemQL parser limitation: filter expressions don't accept inline
-// addDuration() calls, and addDuration accepts only positive
-// ISO-8601 durations. Pushing "createdAt < now - N days" into the
-// query is therefore impossible today -- the math has to live on
-// the per-row side ("createdAt + N days < now"). The query stays
-// simple and the automation does the windowing.
+// The logic computes the cutoff with a negative ISO-8601 duration and
+// passes it in, and the comparison runs here (#2369).
 //
 // The pending-status table is small (admin queue is typically <100
-// rows even in busy clusters), so iterating all of it once a day
-// is cheap.
+// rows even in busy clusters), so reading it once a day is cheap.
 //
 // Returns:
 //   Zero or more access-request rows in accessRequestFull shape.
 //
 
-/// Pending access requests; the expiry sweep iterates these and per-row checks createdAt +
-/// expiry-days < now.
+/// Pending access requests, created before createdBefore when it is supplied; the expiry sweep
+/// expires each one it returns.
 @unbounded("expired pending access-request sweep -- an internal sweep that must see all")
 query accessRequest expiredPendingAccessRequests {
   args {
@@ -1822,11 +1811,13 @@ query user userCount {
 // Returns active users whose deletionScheduledAt is non-empty. Used by:
 //
 //   1. The accountDeletionReminder7Days / accountDeletionReminder25Days
-//      crons -- they iterate the result and per-row check whether
-//      (now - deletionScheduledAt) is roughly 7 or 25 days,
-//      sending one reminder email per match. Per-row math uses
-//      `addDuration(item.user.deletionScheduledAt, "P7D")` /
-//      `"P8D"` to bracket a 24-hour window.
+//      crons, through logic usersDueDeletionReminder: its `where`
+//      keeps the users whose (now - deletionScheduledAt) is roughly 7
+//      or 25 days, and the cron publishes one reminder event per
+//      match. The per-row math,
+//      `addDuration(u.deletionScheduledAt, args.from) < now` and
+//      `addDuration(u.deletionScheduledAt, args.to) >= now` (P7D /
+//      P8D), brackets a 24-hour window.
 //   2. A future settings-page handler -- "do I have a pending deletion?".
 //      The handler will branch on whether the matched row's
 //      deletionScheduledAt + cooldown is still in the future.
@@ -1851,8 +1842,9 @@ query user userCount {
 /// there is no actor at all when it runs, and its purpose is precisely to see every OTHER user in
 /// the cooldown window -- which is what its `@unbounded` reason already records. An actor.userId
 /// filter would return at most the sweeping actor's own row and silently stop the reminder emails.
-/// Its only callers are the accountDeletionReminder7Days / accountDeletionReminder25Days logics,
-/// which run as automation steps and therefore reach it with OriginInternal stamped by executeStep.
+/// Its only caller is logic usersDueDeletionReminder, which the accountDeletionReminder7Days /
+/// accountDeletionReminder25Days automations call, so it runs as an automation step and reaches it
+/// with OriginInternal stamped by executeStep.
 @serverOnly
 @unbounded("deletion-cooldown sweep -- an internal sweep that must see all")
 query user usersInDeletionCooldown {
@@ -1865,24 +1857,18 @@ query user usersInDeletionCooldown {
 // usersScheduledForDeletion - Users whose deletionScheduledAt is set
 // ====================================================================
 //
-// Returns active users whose deletionScheduledAt is non-empty. The
-// accountDeletionSweep cron iterates the result and per-row checks
-// whether the cooldown has elapsed
-// (deletionScheduledAt + MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS < now)
-// before calling deleteUserHard.
+// Returns active users whose deletionScheduledAt is non-empty, and
+// before `scheduledBefore` when it is supplied. The
+// accountDeletionSweep logic supplies the cutoff
+// (now - MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS), and the cron's `for`
+// loop calls deleteUserHard for each row.
 //
 // Active-only: a user already hard-deleted (active=false, PII
 // scrubbed) is filtered out so a re-run of the sweep doesn't churn
 // audit log entries against tombstoned rows.
 //
-// MemQL parser limitation: filter expressions don't accept inline
-// addDuration() calls (the planner rejects function-call literals
-// in filter comparisons), so we cannot push the cooldown math down
-// to the query. The automation does it per-row via
-// `if addDuration(item.user.deletionScheduledAt, "P{N}D") < now`.
-// `addDuration` only accepts positive ISO-8601 durations -- there
-// is no negative-duration literal -- so the math has to live on the
-// "deadline-vs-now" side of the comparison, not "now-minus-cooldown".
+// The logic computes the cutoff with a negative ISO-8601 duration and
+// passes it in, and the comparison runs here (#2369).
 //
 // Returns:
 //   Zero or more user rows in userFull shape.

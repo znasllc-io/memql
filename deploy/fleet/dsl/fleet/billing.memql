@@ -85,12 +85,11 @@ use platform.mutations.{ stageOutboundRequest, updateInboundRequestStatus }
 /// A verified inbound delivery arrived. If it came from Stripe, mark it as one nothing can handle
 /// yet, with the reason on the row.
 ///
-/// FIRES ON EVERY INBOUND ROW rather than filtering to `stripe` in the trigger, because a trigger
-/// filters on the CONCEPT and the source is a payload field. The `switch` below is the filter, and
-/// a delivery from any other source falls through its default having done nothing -- which is a
-/// no-op rather than an error, because the set of sources a deployment admits is configuration and
-/// is not knowable from here. `ingestCampaignFeedback` in the campaigns domain has the same shape
-/// for the same reason.
+/// FIRES ON EVERY INBOUND ROW rather than filtering to `stripe` on the trigger. The `switch` below is
+/// the filter, and a delivery from any other source falls through its default having done nothing
+/// -- which is a no-op rather than an error, because the set of sources a deployment admits is
+/// configuration and is not knowable from here. `ingestCampaignFeedback` in the campaigns domain
+/// has the same shape for the same reason.
 ///
 /// WHAT IT DELIBERATELY DOES NOT DO is act on the event. It stamps `failed` with a reason and stops.
 ///

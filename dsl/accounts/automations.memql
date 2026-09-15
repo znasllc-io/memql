@@ -63,7 +63,7 @@ automation seedSelfAccount {
   // owner to publish a TXT record proving they own it would be the cluster
   // asking itself for evidence it already is.
   //
-  // A SECOND STEP rather than arguments on createClientAccount, because
+  // A SECOND STATEMENT rather than arguments on createClientAccount, because
   // that mutation is client-reachable and @requiresRank("admin"): letting a
   // caller pass domainStatus would let any admin declare any client's domain
   // verified, which is the one thing the walk exists to decide.

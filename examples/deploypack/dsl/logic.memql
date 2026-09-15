@@ -8,18 +8,6 @@
 // (behavioral-constructs ADR section 2.1). Rewritten for #2400 after strict
 // boot (#2357) surfaced that the original bodies never parsed.
 //
-// Grammar note (#2400, updated #2407/#2410). These bodies were written for
-// the legacy logic-step grammar, where every `:=` step RHS had to be a CALL,
-// an `if cond { call }`, or a collection chain. The original bodies used bare
-// scalar/boolean expression assignments and were silently skipped at load
-// for their entire life, so the rewrite built branching values with
-// cond(...) calls, one infix comparison per predicate, and pulled every
-// collection-chain read (result.First().payload.x) into its own coalesce()
-// step first. Edition 2026 takes an expression on the right of `:=` and
-// evaluates it in process, so the migration turned those steps into the
-// `? :` and `??` forms below; the one-value-per-step layout is the legacy
-// grammar's, kept as the codemod wrote it.
-//
 // No environment is read off the event (epic memql#3943). The pack drives ONE
 // installation, so there is no environment to map and no promote to aim: the
 // forward-deploy effect this logic used to fire (deployRunPromote) pinned one

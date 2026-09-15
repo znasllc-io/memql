@@ -3333,7 +3333,7 @@ func ExpiredActiveDelegationsBuild(args ExpiredActiveDelegationsArgs) string {
 	return b.String()
 }
 
-// ExpiredAuditEvents -- All audit events; the retention sweep iterates and per-row checks occurredAt + retention-days < now.
+// ExpiredAuditEvents -- All audit events; the retention sweep counts them.
 // It reads under `actor.isClusterOwner==true` because its only caller is the auditEventRetentionSweep cron running under the cluster's MAINTENANCE PRINCIPAL (component/auth/maintenance_actor.go, memql#4366). Stating the conjunct rather than leaning on the tier's injection makes the arrangement legible here, at the read -- and makes the failure mode loud rather than silent. This sweep is OBSERVATION-ONLY today: it publishes a candidate COUNT, so an unauthorized read does not fail, it reports zero, and a retention window nobody is enforcing looks exactly like a retention window with nothing to do.
 //
 // Bound concept: v1:identity:auditEvent (machine-readable: BoundConcepts["expiredAuditEvents"] in generated_concepts.go).
@@ -3395,7 +3395,7 @@ func ExpiredMagicLinkRequestsBuild(args ExpiredMagicLinkRequestsArgs) string {
 	return b.String()
 }
 
-// ExpiredPendingAccessRequests -- Pending access requests; the expiry sweep iterates these and per-row checks createdAt + expiry-days < now.
+// ExpiredPendingAccessRequests -- Pending access requests, created before createdBefore when it is supplied; the expiry sweep expires each one it returns.
 //
 // Bound concept: v1:identity:accessRequest (machine-readable: BoundConcepts["expiredPendingAccessRequests"] in generated_concepts.go).
 type ExpiredPendingAccessRequestsArgs struct {
@@ -3780,7 +3780,7 @@ func InboundRequestByDedupeKeyBuild(args InboundRequestByDedupeKeyArgs) string {
 	return b.String()
 }
 
-// InboundRequestById -- One staged inbound request by its row id. The read a product's handler does when an automation hands it `event.payload.id` and it needs the body, the source and the verification bit (memql#3461 -- the campaign feedback ingestion reads all three before it will act on a payload). A by-id read returns at most one row, so it is not a list and declares no pagination.
+// InboundRequestById -- One staged inbound request by its row id. The read a product's handler does when an automation hands it the staged row's id (`args.id`) and it needs the body, the source and the verification bit (memql#3461 -- the campaign feedback ingestion reads all three before it will act on a payload). A by-id read returns at most one row, so it is not a list and declares no pagination.
 //
 // Bound concept: v1:platform:inboundRequest (machine-readable: BoundConcepts["inboundRequestById"] in generated_concepts.go).
 type InboundRequestByIdArgs struct {

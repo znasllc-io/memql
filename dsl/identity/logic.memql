@@ -8,18 +8,15 @@
 //
 // Daily sweep at 04:00 UTC that ages out pending access requests
 // older than IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS by flipping
-// status="expired". Same shape as expireGuestInvitations:
+// status="expired":
 //
-//   1. Query every pending access request.
-//   2. For each, compute (createdAt + N days) and check whether
-//      it's in the past relative to now -- if so, expire it.
+//   1. Compute the cutoff, now minus N days (addDuration with a
+//      negative ISO-8601 duration).
+//   2. Query the pending access requests created before it. The
+//      cutoff is the query's `createdBefore` argument, so the
+//      comparison runs in its filter.
 //
-// MemQL parser limitation: filter expressions don't accept inline
-// addDuration() calls (the planner rejects function-call literals
-// in filter comparisons), and addDuration accepts only positive
-// ISO-8601 durations. So the windowing math has to live on the
-// per-row side ("createdAt + N days < now"), which is what the
-// `if` guard inside the loop does.
+// The calling automation's `for` loop expires each returned row.
 //
 // IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS is read from the global
 // variable registry. The default of 30 days is materialised at
@@ -27,7 +24,7 @@
 // cron tick.
 //
 // The pending-access-request table is small (admin queue), so
-// iterating all of it daily is cheap.
+// the daily read is cheap.
 use platform.queries.{ globalVariable }
 
 /// Pure decide for the access-request expiry sweep (#2369, cluster pruneStaleClusterNodes pattern):
@@ -35,7 +32,7 @@ use platform.queries.{ globalVariable }
 /// addDuration with a negative ISO duration, reads
 /// `query expiredPendingAccessRequests(createdBefore: cutoff)` and returns its nodes() -- the
 /// pending rows past the window, filtered by QUERY PUSHDOWN. The retention policy lives entirely
-/// here; the calling automation's forEach is unconditional.
+/// here; the calling automation's `for` loop is unconditional.
 logic accessRequestExpirySweep {
   args {
     event object!
@@ -54,7 +51,8 @@ logic accessRequestExpirySweep {
 //
 //   1. Soft-delete the user row + scrub PII (deleteUserHard).
 //   2. Revoke every active auth session for the user's JWT subject so
-//      any in-flight tokens stop authorizing.
+//      any in-flight tokens stop authorizing -- NOT done yet: see the
+//      revocation gap in the body below.
 //
 // What this cron does NOT touch (intentional gaps):
 //
@@ -75,20 +73,17 @@ logic accessRequestExpirySweep {
 //     concept-side @scrub annotation would risk leaving stale
 //     credential data on disk. Tracked as a follow-up.
 //
-// MemQL parser limitations:
-//
-//   - The filter side of usersScheduledForDeletion can't push
-//     the cooldown math into the query (see that file's header).
-//     Per-row gating uses
-//       addDuration(item.payload.deletionScheduledAt, "P{cooldown}D") < now
-//   - There's no batch-update path; we revoke sessions one row at a
-//     time inside the loop.
+// The cooldown cutoff (now minus the cooldown, addDuration with a
+// negative ISO-8601 duration) is computed here and passed to
+// usersScheduledForDeletion as `scheduledBefore`, so the comparison
+// runs in the query's filter. There's no batch-update path; the
+// calling automation's `for` loop deletes one user at a time.
 /// Pure decide for the account-deletion sweep (#2369, cluster pattern): reads
 /// MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS (default 30), computes cutoff = now - cooldown via
 /// addDuration with a negative ISO duration, reads
 /// `query usersScheduledForDeletion(scheduledBefore: cutoff)` and returns its nodes() -- users
-/// whose cooldown has elapsed, filtered by QUERY PUSHDOWN; the automation's forEach hard-deletes
-/// each unconditionally.
+/// whose cooldown has elapsed, filtered by QUERY PUSHDOWN; the automation's `for` loop
+/// hard-deletes each unconditionally.
 /// Audit-event rows, invitations the user issued, and access-request rows are intentionally
 /// retained for the trail.
 logic accountDeletionSweep {
@@ -109,7 +104,7 @@ logic accountDeletionSweep {
   // continues to authenticate until its JWT expires.
   //
   // When a queryAuthSessionsForUser (or an "expand identities for
-  // user" helper) lands, add a second forEach apply step in the
+  // user" helper) lands, add a second `for` loop to the
   // accountDeletionSweep automation that revokes each session via
   // revokeAuthSession.
   return candidates.nodes()
@@ -122,9 +117,9 @@ logic accountDeletionSweep {
 // users a fixed span into their deletion cooldown; which users those are is a
 // matter of date math, and date math is POLICY (P4, memql#2371): an automation
 // orchestrates and does not decide, so the window lives here and the sweeps
-// publish for whatever it returns. The sweeps used to be one publishing logic
-// each; a logic may not publish (D14, epic memql#5370), so their publishing
-// moved into the automations and their decision into this one logic.
+// publish for whatever it returns. A logic may not publish (D14, epic
+// memql#5370), so the publishing is the automations' and the decision is
+// this one logic's.
 /// The users between `from` and `to` into their deletion cooldown: the ones a daily reminder
 /// sweep mails at that milestone. A daily sweep over a one-day window reaches each user once.
 logic usersDueDeletionReminder {
@@ -164,9 +159,8 @@ logic usersDueDeletionReminder {
 // own expiresAt check makes the sweep's tightness irrelevant. If
 // the operator wants tighter cleanup, bump the cadence here.
 //
-// The `now` cutoff is passed in as an arg (rather than referencing the clock inline)
-// because the MemQL query planner rejects function-call literals
-// in filter comparisons.
+// The `now` cutoff is passed to expiredMagicLinkRequests as its
+// `asOf` argument rather than read inside the query's filter.
 /// Hourly sweep that stamps consumedAt + consumedFromIP='system:expiry' on v1:identity:magiclink
 /// rows whose expiresAt is in the past, so the row reads as 'spent' in audit queries and any
 /// subsequent click is idempotently rejected by the consume handler's own expiresAt guard.
@@ -182,18 +176,17 @@ logic magicLinkExpirySweep {
 // revokeExpiredDelegations
 // =============================
 //
-// Queries every active delegation whose expiresAt is in the past, then
-// soft-revokes each one with `system:expiry` as the revoker. Returns the
-// number of rows processed so the caller can surface a count.
+// Queries every active delegation whose expiresAt is in the past and
+// returns the rows. It revokes nothing: the expireDelegations
+// automation's `for` loop calls revokeDelegation for each, with
+// `system:expiry` as the revoker.
 //
-// `now` is passed by the caller (the automation step computes
-// `now` so the query receives a plain RFC3339 string) because
-// the MemQL query planner doesn't accept function-call literals in
-// comparison expressions yet.
+// `asOf` is passed by the caller: the automation passes `now`, so
+// the query receives a plain RFC3339 string.
 
 /// Find every expired active delegation. PURE READ -- returns the rows; it revokes nothing.
 ///
-/// The revoke is a separate step: expireDelegations.apply forEaches these rows into
+/// The revoke is a separate statement: expireDelegations' `for` loop over these rows calls
 /// `revokeDelegation`. An earlier version of this comment claimed this logic "soft-revokes each
 /// one" and "returns the count processed", and memql#2869 inherited that error and built a
 /// caching decision on it -- so the wording matters (memql#2869 review).

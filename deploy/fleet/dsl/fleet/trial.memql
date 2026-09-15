@@ -44,11 +44,11 @@
 //   The windowing lives in the loop, not in the filter
 // =============================================================================
 //
-// A filter cannot call `addDuration`, so "trialEndsAt is between 7 and 8 days
-// away" is computed per row inside the `forEach`. The bracket is one day wide
-// and the sweep fires daily, which is what makes each nudge fire EXACTLY ONCE
-// per instance -- no duplicates from a wide bracket, no gaps from a narrow one.
-// Identity's deletion reminders use the same construction for the same reason.
+// "trialEndsAt is between 7 and 8 days away" is computed per row in the `for`
+// loop's `if` clause, over the candidate rows runningInstances returns. The
+// bracket is one day wide and the sweep fires daily, which is what makes each
+// nudge fire EXACTLY ONCE per instance -- no duplicates from a wide bracket, no
+// gaps from a narrow one.
 //
 // =============================================================================
 //   What a trial costs, and what bounds it
