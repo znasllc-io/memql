@@ -118,30 +118,6 @@ func headerRE(kind string) *regexp.Regexp {
 	return headerREs[kind]
 }
 
-// bodilessHeaderREs matches the BODILESS one-line delegating declaration a kind
-// permits, whose text ends at the newline rather than at a matching brace.
-//
-// Only automations have one:
-//
-//	automation <name> @trigger(...) => logic <name>
-//
-// Reaching it is not a completeness nicety, it is where the rules actually
-// bite. Adding "automation" to restrictedKinds alone leaves this form
-// invisible, because headerREs anchors on `{` -- and on the tree measured at
-// memql#3093 land time, 10 of 31 walked automations use this form and TWO of
-// the tree's THREE live @filter conditions sit on it (dsl/data conflictDetection,
-// dsl/cognition voiceMigrationOnSecondHuman). @filter is one of the three
-// condition surfaces the memql#2371 rules inspect, so a splitter that only sees
-// braced bodies would report the automation arm "reachable" while skipping the
-// majority of the conditions in the tree -- memql#3043's failure mode
-// (rules running against a population that does not include the real cases)
-// reproduced inside the fix for it.
-//
-// The `=>` is required, so this can never double-match a braced header.
-var bodilessHeaderREs = map[string]*regexp.Regexp{
-	"automation": regexp.MustCompile(`(?m)^automation[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+[^\n]*=>[^\n]*$`),
-}
-
 // matchingBrace returns the index of the `}` that closes the `{` at openIdx,
 // honoring nesting and skipping double-quoted strings (so a brace inside a
 // string literal is not mistaken for structure). Returns -1 if unbalanced.
@@ -183,16 +159,9 @@ type construct struct {
 }
 
 // splitConstructs slices a single-kind file into its individual constructs,
-// each carrying the annotations that immediately precede its header.
-//
-// Two declaration shapes are recognised: the braced body (every restricted
-// kind) and the bodiless one-line delegation (automations only, see
-// bodilessHeaderREs). Both are collected and then walked in SOURCE ORDER,
-// because the preamble each construct carries is "everything since the previous
-// construct ended" -- interleaving the two shapes in a file (which
-// dsl/identity/automations.memql does) would otherwise hand a braced construct
-// a preamble containing an earlier bodiless declaration's annotations, and
-// attribute that declaration's @filter to the wrong construct.
+// each carrying the annotations that immediately precede its header: the
+// preamble each construct carries is "everything since the previous construct
+// ended".
 func splitConstructs(kind, source string) []construct {
 	type header struct {
 		start, end int    // full extent of the declaration, [start,end)
@@ -208,12 +177,6 @@ func splitConstructs(kind, source string) []construct {
 				continue
 			}
 			headers = append(headers, header{start: loc[0], end: closeIdx + 1, name: source[loc[2]:loc[3]]})
-		}
-	}
-	if re := bodilessHeaderREs[kind]; re != nil {
-		for _, loc := range re.FindAllStringSubmatchIndex(source, -1) {
-			// The match already ends at the newline: `$` under (?m).
-			headers = append(headers, header{start: loc[0], end: loc[1], name: source[loc[2]:loc[3]]})
 		}
 	}
 	sort.Slice(headers, func(i, j int) bool { return headers[i].start < headers[j].start })

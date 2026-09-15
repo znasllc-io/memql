@@ -604,10 +604,10 @@ var positionRoots = map[tiers.Position][]string{
 	tiers.PositionQueryRefine:         {"args", "actor", "now", "config"},
 	tiers.PositionSpecBody:            {"now"},
 	tiers.PositionTriggerFilter:       {"args", "now", "config"},
-	tiers.PositionAutomationCondition: {"args", "actor", "now", "config", "event", "steps", "item", "index", "input"},
+	tiers.PositionAutomationCondition: {"args", "actor", "now", "config", "event"},
 	tiers.PositionLogicBody:           {"args", "actor", "now", "config"},
 	tiers.PositionMutationValue:       {"args", "actor", "now", "config"},
-	tiers.PositionStepArgument:        {"args", "actor", "now", "config", "event", "steps", "item", "index", "input"},
+	tiers.PositionStepArgument:        {"args", "actor", "now", "config", "event"},
 	tiers.PositionPromptInput:         {"args", "now", "config"},
 }
 

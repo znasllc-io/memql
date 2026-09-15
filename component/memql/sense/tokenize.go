@@ -92,12 +92,6 @@ func classifyConstructPositions(tokens []parser.Token) (keywordPos, conceptPos m
 			keywordPos[i] = true
 			continue
 		}
-		// The automation arrow names its target by kind:
-		// `automation x @trigger(...) => logic handleX`.
-		if i > 0 && tokens[i-1].Type == parser.TokenOperator && tokens[i-1].Literal == "=>" {
-			keywordPos[i] = true
-			continue
-		}
 		// Past that, only a line-leading token can introduce anything.
 		// A word sharing its line with a preceding token is an ordinary
 		// identifier -- the bound concept of a signature, an annotation

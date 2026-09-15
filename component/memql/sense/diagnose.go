@@ -34,11 +34,10 @@ func (s *Service) Diagnose(source string, filePath string) []Diagnostic {
 	}
 
 	// Lower struct-form constructs to the procedural form the parser
-	// understands. A failure here is a LOWERING error (e.g. a logic without
-	// its mandatory `body { }` block, an unbalanced brace, `refine` without
-	// `paginate`); it names the author's text it refuses, placed in the
-	// authored source (parser.PositionRewriteError), and falls back to the
-	// named construct.
+	// understands. A failure here is a LOWERING error (e.g. an unbalanced
+	// brace, `refine` without `paginate`); it names the author's text it
+	// refuses, placed in the authored source (parser.PositionRewriteError),
+	// and falls back to the named construct.
 	rewritten, rewriteErr := applyRewriteChain(source)
 	if rewriteErr != nil {
 		return []Diagnostic{rewriteErrorDiagnostic(parser.PositionRewriteError(source, rewriteErr), source)}

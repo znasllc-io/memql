@@ -799,15 +799,6 @@ var ambientEnvelopeRoots = map[string]struct{}{
 	"now":       {},
 }
 
-// reservedUnsuppliedRoots is the complement: reserved top-level names that no
-// envelope supplies. A comparison rooted here can never resolve, so it is
-// refused at load (validateLogicCondBareIdentifierPredicate) rather than
-// folded to nil -- a loud boot error instead of a gate that is open or closed
-// by accident.
-var reservedUnsuppliedRoots = map[string]struct{}{
-	"trace": {},
-}
-
 // isAmbientRoot reports whether name is a reserved top-level identifier the
 // ambient envelope carries, and can therefore be RESOLVED during expansion
 // (memql#3024). None of these can be a lambda local or a payload field, which
@@ -818,13 +809,6 @@ var reservedUnsuppliedRoots = map[string]struct{}{
 // which is not the same as "has a value". See ambientEnvelopeRoots.
 func isAmbientRoot(name string) bool {
 	_, ok := ambientEnvelopeRoots[strings.TrimSpace(name)]
-	return ok
-}
-
-// isReservedUnsuppliedRoot reports whether name is reserved but carried by no
-// envelope, so a comparison rooted at it cannot resolve on any path.
-func isReservedUnsuppliedRoot(name string) bool {
-	_, ok := reservedUnsuppliedRoots[strings.TrimSpace(name)]
 	return ok
 }
 
