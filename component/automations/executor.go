@@ -607,7 +607,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	// hundreds of times a minute and drive unbounded plan/LLM churn. Checked
 	// here (after the concurrency slot, before any step work) so a skipped
 	// run is cheap; the deferred concurrency-slot release still fires.
-	if allowed, reason, alert := sharedAutomationBudget.admitRow(automation.Name, budgetRowId(triggeringEvent)); !allowed {
+	if allowed, reason, alert := sharedAutomationBudget.admitRow(automationModeIdentity(automation), budgetRowId(triggeringEvent)); !allowed {
 		if alert && e.logger != nil {
 			e.logger.Error("automation execution budget exceeded -- SKIPPING executions to stop a storm (memql#1142)",
 				"component", ComponentName,

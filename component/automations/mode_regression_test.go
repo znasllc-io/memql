@@ -242,3 +242,23 @@ func TestModeRestartDepthRefusalKeepsTheActiveRun(t *testing.T) {
 		t.Fatal(firstRun.Status)
 	}
 }
+
+func TestModeAuthoredRowBudgetsUseOrigin(t *testing.T) {
+	original := sharedAutomationBudget
+	defer func() { sharedAutomationBudget = original }()
+	now := time.Now()
+	budget := newTestBudget(0, 0, time.Minute, &now)
+	budget.perRowMax = 1
+	sharedAutomationBudget = budget
+	executor := NewExecutor(ExecutorOptions{StepRegistry: &causeProbeRegistry{}})
+	defer executor.Close()
+	event := events.NewEvent("graph.node.created.v1:test:shared", events.KindNodeCreated, map[string]any{"id": "shared-row"})
+	for _, origin := range []string{"authored:authorA:same", "authored:authorB:same", "unified:pack/automations.memql:same"} {
+		a := causeProbeAutomation("same")
+		a.Origin = origin
+		run, err := executor.ExecuteWithEvent(context.Background(), a, event.Topic, &event)
+		if err != nil || run.Status != "completed" {
+			t.Fatalf("row budget crossed identities for %s: %+v %v", origin, run, err)
+		}
+	}
+}
