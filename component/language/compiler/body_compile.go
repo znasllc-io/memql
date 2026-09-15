@@ -63,6 +63,11 @@ func CompileBody(kind, name string, args []string, body *ast.Body) ([]map[string
 // definition, all of them at once.
 func compileStatementSteps(def *ast.FunctionDef, automation *ast.AutomationDef) ([]map[string]any, error) {
 	kind := "automation"
+	if def.Type == ast.FunctionTypeAutomation {
+		if err := checkAutomationBindings(def, automation.Body); err != nil {
+			return nil, err
+		}
+	}
 	if def.Type == ast.FunctionTypeLogic {
 		kind = "logic"
 	}
