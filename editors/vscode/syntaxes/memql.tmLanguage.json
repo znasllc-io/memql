@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "MemQL",
   "scopeName": "source.memql",
-  "comment": "Generated from dslspec by 'memql-lsp gen-grammar'. Do not edit by hand. GrammarVersion: 2026.09-dsl-v1-bodies-8fef9e94",
+  "comment": "Generated from dslspec by 'memql-lsp gen-grammar'. Do not edit by hand. GrammarVersion: 2026.09-retire-error-accessor-78765bad",
   "patterns": [
     {
       "include": "#comments"

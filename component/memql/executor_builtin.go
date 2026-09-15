@@ -49,9 +49,6 @@ func (e *MemQLEngine) initBuiltinExecutorHandlers() error {
 		BuiltinExecutorServiceVersion: func(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateServiceVersionExpression(ctx)
 		},
-		BuiltinExecutorError: func(_ context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-			return nil, builtinErrorFromArgs(args)
-		},
 		BuiltinExecutorDataOrigins: func(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateDataOriginsExpression(ctx)
 		},
@@ -215,21 +212,6 @@ func (e *MemQLEngine) evaluateServiceVersionExpression(ctx context.Context) ([]m
 	}
 
 	return []memorynodes.MemoryNode{node}, nil
-}
-
-func builtinErrorFromArgs(args map[string]any) error {
-	if args == nil {
-		return fmt.Errorf("%w: error() requires a message", ErrInvalidArgument)
-	}
-	raw, ok := args["message"]
-	if !ok {
-		return fmt.Errorf("%w: error() requires a message", ErrInvalidArgument)
-	}
-	message, ok := raw.(string)
-	if !ok || strings.TrimSpace(message) == "" {
-		return fmt.Errorf("error() message must be a non-empty string")
-	}
-	return fmt.Errorf("%s", message)
 }
 
 // evaluateDocsExpression returns embedded MemQL documentation as queryable nodes.
