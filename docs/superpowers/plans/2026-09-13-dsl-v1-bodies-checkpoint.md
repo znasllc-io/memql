@@ -4,6 +4,77 @@ Where epic memql#5370 (tasks #5371-#5374) stands, for the session that picks it
 up. It sits beside the plan (`2026-09-13-dsl-v1-bodies.md`) and is deleted with
 it in the epic's merge (plan Task 16 step 3). Update it each time you stop.
 
+## Resume here (latest, 2026-09-14 evening) -- read this section first
+
+The sections below it are the earlier history and are superseded where they
+disagree with this one.
+
+- **Branch:** `epic/dsl-v1-bodies`, PUSHED to origin. It now carries the
+  whole flip (the `tmp/dsl-v1-bodies-flip2` work was merged into it); work on
+  it directly in `/home/znas/memql-projects/epic-dsl-v1-bodies`
+  (`git -C ... pull` first). No PR is open yet.
+- **Done:** flip steps F1-F7, all of them, plus:
+  - the step bodies' accessors `step("x")`, `input()`, `item()`, `index()`
+    are refused by name (`body_accessor_retired`, parser + corpus + docs);
+    GrammarVersion is `2026.09-dsl-v1-bodies-8fef9e94`;
+  - F6: `mutation` is the declaration keyword, `mutate` refused
+    (`construct_unknown` -- a deviation from the plan's
+    `mutate_keyword_retired`, worth one line in the PR body);
+  - F7: `editors/vscode/package.json` pins the new GrammarVersion, the 0.4.0
+    CHANGELOG names it and has a "Writing a logic or an automation" section,
+    the TextMate grammar is regenerated (EditorRelease stays 0.4.0: unpublished);
+  - the DSL comment sweep merged; stale citations fixed; the last
+    `// memqlmigrate:` marker in dsl/ replaced; attribute matrix, the
+    where-each-expression-runs table and the architecture model regenerated;
+    `sdk-gen --check` reports no drift.
+- **Verified green (DB-free) at this point:** `go test -count=1 .` (root
+  gates); `component/language/...`; `component/memql/sense/...`;
+  `test/conformance/...` (DB-free cases); `cmd/memql-lsp/...`; the extension's
+  `npx tsc --noEmit -p .`, `-p tsconfig.host.json`, `npm test` (2403 pass) and
+  the real-editor host lane (20 pass, 12 skipped by design; needs
+  `go build -o editors/vscode/bin/linux-x64/memql-lsp ./cmd/memql-lsp` first).
+- **NOT yet run on this tip:** the full DB-free suite
+  (`MEMQL_DATABASE_DSN='postgres://unused:unused@127.0.0.1:1/unused?sslmode=disable' go test github.com/znasllc-io/memql/...`);
+  the db-gated trees (`scripts/ci/db-gated-packages.sh --trees`, plus
+  `./test/conformance/...`) against `memql-dslv1-bodies-pg` on 55434 with
+  `-p 1` and `MEMQL_REQUIRE_DB=1`; the seven node-tag builds and vets;
+  `go run ./cmd/memqllint dsl/`; `go test -count=1 ./scripts/...`;
+  `bash scripts/dev/proto-gen.sh --only=component/grpc --check`;
+  `make sdk-ts-typecheck`; `make frontdoor-paths-check`;
+  `scripts/ci/module-boundaries.sh`; a dead-code sweep.
+- **Was being considered when stopped (optional, nothing edited):** retiring
+  `error()` with NO arguments the same way (it read the current error inside
+  the old onError handlers, which no longer exist; `error("msg")` is the live
+  catalog function and stays). Its legacy node is `ErrorRefExpr` /
+  `ErrorRefExpression` (parser.go parseErrorAccessor, compiler
+  automation_generator.go, memql ast_converter.go / executor.go /
+  expression_helpers.go, tests in parser_test.go, compiler_test.go,
+  literal_value_node_test.go). Found on the way: a probe logic calling
+  `error("x is required")` trips the cross-namespace-import gate asking for
+  `use common.builtins.{ error }`, because `dsl/common/builtins.memql`
+  declares a builtin named `error` beside the catalog function -- file it.
+- **To finish:** (1) the verification above, reading every output; (2) delete
+  the plan and this checkpoint (plan Task 16 step 3); (3) open the PR from
+  `epic/dsl-v1-bodies` with the body drafted in plan Task 16, adding the `mutation`
+  keyword, the accessor refusal and the `construct_unknown` code, and one
+  `Closes #n` line per issue #5370-#5374; (4) wait for `ci-required`, then
+  `scripts/dev/merge-as-owner.sh --pr=<n> --check` and merge; verify main;
+  close any of #5370-#5374 the merge did not; (5) message peer `memql-6f` the
+  merge SHA (it waits on it); (6) delete the local branches `tmp/dsl-v1-bodies-*`
+  and the scratch worktrees (`git worktree prune`).
+- **Follow-up issues to file after the merge:** healing patches still write
+  `$config.X` / `$event.payload.X` / `$steps.a.result` (component/healing
+  patch.go, repair_loop.go), which the statement runtime does not resolve -- a
+  real defect; the dry-run sandbox runs `builtin` calls for real; a parallel's
+  branch names are unreadable after it, so the work draft's sections run in
+  sequence (latency) -- the owner may want `wait all` branches to bind; the
+  compiler's legacy serializer `isRuntimeReference` still honours `$steps.` /
+  `$item.` / `$input.` prefixes; the executor's `error()` message cites
+  "automation onError handlers"; automations are not held to @actor binding or
+  memql#3626 undeclared args at load; `@trigger(on=...)`; stale Go comments
+  citing `harness_step_validation.go` / `harness_consolidation.go`
+  (memory_consolidation.go, forge_request_validation.go, predating this epic).
+
 ## Resume here
 
 - **Worktree:** `/home/znas/memql-projects/epic-dsl-v1-bodies`, branch
