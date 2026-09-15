@@ -36,32 +36,25 @@ import (
 
 // sandboxStepRegistry intercepts side-effecting steps and delegates reads.
 type sandboxStepRegistry struct {
-	real        *Registry
-	engine      *memql.MemQLEngine
-	partition   string
-	mode        memql.DryRunMode
-	captureSink string
+	real      *Registry
+	engine    *memql.MemQLEngine
+	partition string
 
-	mu              sync.Mutex
-	mutations       []memql.RecordedMutation
-	blockedWebhooks []memql.BlockedWebhook
-	aiCalls         []memql.RecordedAiCall
-	webCalls        []memql.RecordedWebCall
+	mu        sync.Mutex
+	mutations []memql.RecordedMutation
+	aiCalls   []memql.RecordedAiCall
+	webCalls  []memql.RecordedWebCall
 	// intercepted records, per step id, the side-effect-layer annotation so the
 	// trace can mark which steps were rewritten/blocked vs ran for real.
 	intercepted map[string]string
 }
 
 // newSandboxStepRegistry builds a sandbox registry wrapping the real one.
-// captureSink is the full-sandbox-live webhook capture sink URL (ignored under
-// the isolated tier).
-func newSandboxStepRegistry(real *Registry, engine *memql.MemQLEngine, partition string, mode memql.DryRunMode, captureSink string) *sandboxStepRegistry {
+func newSandboxStepRegistry(real *Registry, engine *memql.MemQLEngine, partition string) *sandboxStepRegistry {
 	return &sandboxStepRegistry{
 		real:        real,
 		engine:      engine,
 		partition:   partition,
-		mode:        mode,
-		captureSink: captureSink,
 		intercepted: map[string]string{},
 	}
 }
@@ -452,10 +445,9 @@ func (s *sandboxStepRegistry) manifest() memql.SideEffectManifest {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	m := memql.SideEffectManifest{
-		Mutations:       s.mutations,
-		AiCalls:         s.aiCalls,
-		WebCalls:        s.webCalls,
-		BlockedWebhooks: s.blockedWebhooks,
+		Mutations: s.mutations,
+		AiCalls:   s.aiCalls,
+		WebCalls:  s.webCalls,
 	}
 	if m.Mutations == nil {
 		m.Mutations = []memql.RecordedMutation{}
@@ -465,9 +457,6 @@ func (s *sandboxStepRegistry) manifest() memql.SideEffectManifest {
 	}
 	if m.WebCalls == nil {
 		m.WebCalls = []memql.RecordedWebCall{}
-	}
-	if m.BlockedWebhooks == nil {
-		m.BlockedWebhooks = []memql.BlockedWebhook{}
 	}
 	return m
 }

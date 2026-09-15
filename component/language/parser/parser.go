@@ -28,16 +28,6 @@ type Parser struct {
 	transparentLines  map[int]bool
 	argsBlockOpenLine int
 
-	// forEachOrdinal counts the forEach loops parsed within the CURRENT
-	// top-level construct, and is the discriminator in a synthetic
-	// forEach step id (#2659). It replaces the loop's character offset +
-	// line, which churned on any edit above the loop -- a comment reflow
-	// renamed the step, and step ids are persisted in automation
-	// checkpoints (component/automations/checkpoint.go keys step results
-	// by id), so unrelated edits silently broke resume. Reset per
-	// construct in parseDefinition.
-	forEachOrdinal int
-
 	// pendingArgs holds a file-top `args { ... }` block parsed
 	// immediately before the next definition. parseFile attaches it
 	// to the resulting FunctionDef and clears the field.
@@ -631,11 +621,6 @@ var TopLevelDeclKeywords = func() []string {
 // parseDefinition parses a single definition (function).
 // Supports @attribute Python-style decorators before func declarations.
 func (p *Parser) parseDefinition() (Node, error) {
-	// Each top-level construct numbers its forEach loops from zero, so a
-	// loop's id depends only on its ORDER within its own construct --
-	// not on anything above it in the file (#2659).
-	p.forEachOrdinal = 0
-
 	// Parse any leading attributes (@name, @name(value), @name(key=value), @name({...}))
 	var attributes []*Attribute
 	var attributeToks []Token

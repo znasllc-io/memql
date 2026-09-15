@@ -926,20 +926,10 @@ var lintRewriteRefusalCases = []struct {
 	{"an update with no id", "mutate thing m {\n  args {\n    name string\n  }\n  update {\n    name: args.name\n  }\n}\n", "update", 1, "update block requires an `id: <expr>` line"},
 	{"a body block in a mutation", "mutate thing m {\n  body {\n    return 1\n  }\n}\n", "body", 1, "must not declare a `body { }` block"},
 
-	// Logic. A logic with no `body { }` block is written in statements, and
-	// its refusals are the statement parser's and the load gate's rather than
-	// the rewriter's (epic memql#5370):
+	// A logic and an automation are written in statements: their refusals
+	// are the statement parser's and the load gate's rather than the
+	// rewriter's (epic memql#5370), in
 	// TestRun_StatementRefusalNamesTheAuthorsLineAndColumn.
-	{"a logic body with no return", "logic noReturn {\n  args {\n    a string\n  }\n  body {\n    x := f(a: args.a)\n  }\n}\n", "x :=", 1, "must end with a `return <expr>` terminator"},
-
-	// Automation steps. An automation with no step block is written in
-	// statements too, and so is out of this table the same way.
-	{"an empty step", lintProbeTrigger + "automation a {\n  step first {\n  }\n}\n", "step", 1, "body is empty"},
-	{"a forEach with no in", lintProbeTrigger + "automation a {\n  step loop {\n    forEach t of event.payload.items {\n      logic touch(x: t)\n    }\n  }\n}\n", "forEach", 1, "expected `in`"},
-	{"a conditional step with no body", lintProbeTrigger + "automation a {\n  step s {\n    if event.payload.a == 1\n  }\n}\n", "if", 1, "expected `{` after the if condition"},
-
-	// A terse automation.
-	{"an args block before a terse automation", "args {\n  x string\n}\nautomation onThing @trigger(event=\"node.created\", concept=\"v1:probe:thing\") => logic noteThing\n", "args", 1, "must not be preceded by an `args { ... }` block"},
 
 	// Text the stages before moved: a spec StripNonProceduralBlocks folds to
 	// one line, and a query the query stage lowers to fewer lines.
@@ -966,8 +956,8 @@ query thing second {
 // TestRun_RewriteRefusalNamesTheAuthorsLineAndColumn: memqllint reports each
 // refusal the struct-form rewriter makes of authored text at the file's line
 // and column of that text -- `refine` without `paginate` at the refine clause,
-// a second write block at its keyword, an empty step at its `step` -- where it
-// used to print no position at all (memql#5364). Every case is its own file,
+// a second write block at its keyword -- where it used to print no position at
+// all (memql#5364). Every case is its own file,
 // since a file's rewrite stops at its first refusal; the table is the parser's
 // (component/language/parser/rewrite_errors_test.go).
 func TestRun_RewriteRefusalNamesTheAuthorsLineAndColumn(t *testing.T) {

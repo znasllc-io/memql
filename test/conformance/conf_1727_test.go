@@ -150,7 +150,6 @@ func runEventDryRunBinding(t *testing.T, e *Env) {
 			AutomationName:   auto.Name,
 			AutomationSource: src,
 			TriggerEvent:     &memql.DryRunTriggerEvent{Topic: "mcp.run." + auto.Name, Kind: "manual", Payload: c.event},
-			Mode:             memql.DryRunModeIsolated,
 		})
 		if drErr != nil {
 			t.Fatalf("#1727: RunBundleDryRun(%q) returned a hard error: %v", c.logic, drErr)

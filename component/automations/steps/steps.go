@@ -24,7 +24,7 @@ func formatDuration(d time.Duration) string {
 type StepRecordData struct {
 	RunId          string  // Execution ID of the parent automation run
 	StepId         string  // Step identifier from the automation definition
-	StepType       string  // Type of step (query, event, webhook, etc.)
+	StepType       string  // Type of step (function, event, action, etc.)
 	Sequence       int     // Execution order
 	Status         string  // success, failed, skipped
 	Query          string  // The resolved query that was executed (for query steps)
@@ -35,8 +35,6 @@ type StepRecordData struct {
 	ParentStepId   string  // For nested steps, the parent step record ID
 	IterationIndex int     // For forEach iterations, the index
 	Topic          string  // For event steps
-	URL            string  // For webhook steps
-	StatusCode     int     // For webhook steps
 	FunctionName   string  // For function steps
 }
 
@@ -82,12 +80,6 @@ func RecordStepExecution(ctx context.Context, engine *memql.MemQLEngine, data St
 	if data.Topic != "" {
 		payloadParts = append(payloadParts, fmt.Sprintf(`topic: %s`, jsonString(data.Topic)))
 	}
-	if data.URL != "" {
-		payloadParts = append(payloadParts, fmt.Sprintf(`url: %s`, jsonString(data.URL)))
-	}
-	if data.StatusCode > 0 {
-		payloadParts = append(payloadParts, fmt.Sprintf(`statusCode: %d`, data.StatusCode))
-	}
 	if data.FunctionName != "" {
 		payloadParts = append(payloadParts, fmt.Sprintf(`functionName: %s`, jsonString(data.FunctionName)))
 	}
@@ -125,32 +117,6 @@ func RecordStepExecution(ctx context.Context, engine *memql.MemQLEngine, data St
 // reaches a browser.
 func jsonString(s string) string {
 	return langparser.QuoteString(s)
-}
-
-// BuildResultQuery constructs a query to retrieve the result of a step.
-// For queries, it returns the original query.
-// For mutations, it builds a query to retrieve the inserted record.
-func BuildResultQuery(stepType, query string, result any) string {
-	// For query steps, the result query is just the original query
-	if stepType == "query" && !strings.HasPrefix(strings.TrimSpace(query), "insert(") {
-		return query
-	}
-
-	// For mutations (inserts), try to extract concept and id from the result
-	if er, ok := result.(*memql.ExecuteResult); ok && er != nil && er.Bundle != nil {
-		nodes := er.Bundle.GetNodes()
-		if len(nodes) > 0 {
-			node := nodes[0]
-			concept := node.GetConcept()
-			id := node.GetId()
-			if concept != "" && id != "" {
-				return fmt.Sprintf(`concept==%s;id==%s`, concept, jsonString(id))
-			}
-		}
-	}
-
-	// Fallback: return the original query
-	return query
 }
 
 // Context is an alias for automations.StepContext for convenience.

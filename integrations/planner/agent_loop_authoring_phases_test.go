@@ -8,46 +8,35 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 )
 
-// TestSynthesizeHeadline_ChainsPhasesInOrder: the synthesized headline names
-// every phase automation, runs phase 0 unconditionally, and gates each later
-// phase on the prior step's result (the inter-step reference that forces
-// sequential ordering).
+// TestSynthesizeHeadline_ChainsPhasesInOrder: the synthesized headline calls
+// every phase automation, one statement per phase, in chain order. No gate:
+// a failed statement ends the run, so a phase never runs after its
+// predecessor failed.
 func TestSynthesizeHeadline_ChainsPhasesInOrder(t *testing.T) {
 	c := synthesizeHeadlineAutomation("doTheThing", "Do the thing in phases.", []string{"doTheThingPhase0", "doTheThingPhase1", "doTheThingPhase2"})
 	if c.Kind != "automation" || c.Name != "doTheThing" {
 		t.Fatalf("headline should be automation doTheThing, got %s/%s", c.Kind, c.Name)
 	}
 	src := c.Source
+	last := -1
 	for _, name := range []string{"doTheThingPhase0", "doTheThingPhase1", "doTheThingPhase2"} {
-		if !strings.Contains(src, "automation "+name+" {") {
-			t.Errorf("headline must chain %s; source:\n%s", name, src)
+		at := strings.Index(src, "  automation "+name+"()\n")
+		if at < 0 || at < last {
+			t.Errorf("headline must call %s after the phase before it; source:\n%s", name, src)
 		}
+		last = at
 	}
-	// Sequential chain: phase 0 unconditional; each later phase gated on the
-	// prior phase's success (steps are named after their phases, memql#1366).
-	if !strings.Contains(src, `if steps.doTheThingPhase0.status == "success"`) {
-		t.Errorf("phase 1 must be gated on phase 0 succeeding:\n%s", src)
-	}
-	if !strings.Contains(src, `if steps.doTheThingPhase1.status == "success"`) {
-		t.Errorf("phase 2 must be gated on phase 1 succeeding:\n%s", src)
-	}
-	if strings.Contains(src, "parallel {") {
-		t.Errorf("a no-dependsOn chain must be sequential (no parallel):\n%s", src)
-	}
-	// Phase steps must appear in chain order.
-	p0 := strings.Index(src, "step doTheThingPhase0")
-	p1 := strings.Index(src, "step doTheThingPhase1")
-	if p0 < 0 || p1 < 0 || p0 > p1 {
-		t.Errorf("phase steps must appear in chain order:\n%s", src)
+	if strings.Contains(src, "parallel {") || strings.Contains(src, "if ") {
+		t.Errorf("a no-dependsOn chain is plain statements, no parallel and no gate:\n%s", src)
 	}
 }
 
 // TestSynthesizeHeadline_RealGate1Compiles is the load-bearing test: a
 // multi-phase bundle (two trigger-less phase sub-automations + the
 // Go-synthesized headline that chains them) must COMPILE through the real
-// Gate-1 sandbox. Proves the `step { if steps.X.status == "success" {
-// automation Y { } } }` grammar the synthesizer emits is real + bindable
-// (the hook is linked by agent_loop_authoring_gate1_hook_test.go, and
+// Gate-1 sandbox. Proves the `automation <phase>()` statements the
+// synthesizer emits are real + bindable (the hook is linked by
+// agent_loop_authoring_gate1_hook_test.go, and
 // requireAutomationsActuallyCompiled rejects a vacuous skipped pass;
 // memql#1366).
 func TestSynthesizeHeadline_RealGate1Compiles(t *testing.T) {
@@ -137,8 +126,8 @@ func TestEmitBundle_MultiPhase(t *testing.T) {
 	if !ok {
 		t.Fatal("bundleAutomationSource should resolve the headline")
 	}
-	if !strings.Contains(src, "step weeklyReportPhase0") || !strings.Contains(src, "step weeklyReportPhase1") {
-		t.Errorf("headline source should chain the two phase steps:\n%s", src)
+	if !strings.Contains(src, "automation weeklyReportPhase0()") || !strings.Contains(src, "automation weeklyReportPhase1()") {
+		t.Errorf("headline source should call the two phases:\n%s", src)
 	}
 }
 

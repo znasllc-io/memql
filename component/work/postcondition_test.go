@@ -21,7 +21,7 @@ func TestDerivePostcondition_MutationAndQueryGetOneFree(t *testing.T) {
 }
 
 func TestDerivePostcondition_ReasoningStepsGetNoneForFree(t *testing.T) {
-	if _, ok := DerivePostcondition("function", "sendMail", fpReg()); ok {
+	if _, ok := DerivePostcondition("builtin", "sendMail", fpReg()); ok {
 		// sendMail is a builtin with external effects: nothing about it
 		// says what its result should look like.
 		t.Fatal("a builtin's postcondition cannot be derived; the template must declare one")

@@ -494,7 +494,7 @@ func (r *scenarioRig) dryRun(t *testing.T, sc scenarioCase) {
 	if !ok {
 		t.Fatalf("dryRun: the tree holds no source for automation %s", f.Automation)
 	}
-	req := memql.DryRunRequest{AutomationName: f.Automation, AutomationSource: src, Mode: memql.DryRunModeIsolated}
+	req := memql.DryRunRequest{AutomationName: f.Automation, AutomationSource: src}
 	if f.Event != nil {
 		ev := v.event(f.Event)
 		req.TriggerEvent = &memql.DryRunTriggerEvent{Topic: ev.Topic, Kind: ev.Kind.String(), Payload: ev.Payload}

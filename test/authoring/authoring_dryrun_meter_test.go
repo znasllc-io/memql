@@ -80,15 +80,13 @@ func TestDryRun_MetersWebReads(t *testing.T) {
 func TestBuildDryRunMutationCall_Passed(t *testing.T) {
 	report := memql.BundleDryRunReport{
 		OK:               true,
-		Mode:             memql.DryRunModeIsolated,
 		SandboxPartition: "sandbox:dryrun:abc",
 		AutomationName:   "sandboxRecordConstruct",
 		Trace:            []memql.DryRunStep{{StepId: "record", StepType: "function", Status: "success", Intercepted: true}},
 		SideEffectManifest: memql.SideEffectManifest{
-			Mutations:       []memql.RecordedMutation{{StepId: "record", Concept: "v1:authoring:construct", Partition: "sandbox:dryrun:abc"}},
-			AiCalls:         []memql.RecordedAiCall{},
-			WebCalls:        []memql.RecordedWebCall{},
-			BlockedWebhooks: []memql.BlockedWebhook{},
+			Mutations: []memql.RecordedMutation{{StepId: "record", Concept: "v1:authoring:construct", Partition: "sandbox:dryrun:abc"}},
+			AiCalls:   []memql.RecordedAiCall{},
+			WebCalls:  []memql.RecordedWebCall{},
 		},
 		CostEstimate: memql.CostEstimate{Tokens: 0, Usd: 0},
 	}
@@ -119,11 +117,10 @@ func TestBuildDryRunMutationCall_Passed(t *testing.T) {
 func TestBuildDryRunMutationCall_Failed(t *testing.T) {
 	report := memql.BundleDryRunReport{
 		OK:            false,
-		Mode:          memql.DryRunModeIsolated,
 		FailureReason: "step run failed: boom",
 		SideEffectManifest: memql.SideEffectManifest{
 			Mutations: []memql.RecordedMutation{}, AiCalls: []memql.RecordedAiCall{},
-			WebCalls: []memql.RecordedWebCall{}, BlockedWebhooks: []memql.BlockedWebhook{},
+			WebCalls: []memql.RecordedWebCall{},
 		},
 	}
 	call, err := memql.BuildDryRunMutationCall("b-2", report)

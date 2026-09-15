@@ -77,7 +77,7 @@ func TestReasoningDraftUsesNativeMaterializerOnlyAtFinalDelivery(t *testing.T) {
 			if got := strings.Count(source, "builtin composeMaterialize("); got != want {
 				t.Fatalf("sectionable=%v requiresFile=%v: native materialization count=%d, want %d:\n%s", sectionable, requiresFile, got, want, source)
 			}
-			if sectionable && requiresFile && strings.Index(source, "builtin composeMaterialize(") < strings.Index(source, "step assemble") {
+			if sectionable && requiresFile && strings.Index(source, "builtin composeMaterialize(") < strings.Index(source, "assemble := ") {
 				t.Fatal("independent section materialized a file before assembly")
 			}
 			if requiresFile && !sectionable && strings.Contains(source, "runAgentTurn") {

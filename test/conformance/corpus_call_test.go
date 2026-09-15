@@ -65,9 +65,7 @@ func corpusStepRegistry(calls *corpusLogicCalls) *steps.Registry {
 	reg := steps.NewRegistry()
 	reg.Register(automations.StepTypeFunction, calls)
 	for _, t := range []automations.StepType{
-		automations.StepTypeQuery, automations.StepTypeMutation, automations.StepTypeWebhook,
 		automations.StepTypeEvent, automations.StepTypeAction, automations.StepTypeAutomation,
-		automations.StepTypeShape, automations.StepTypeDetectLeadSignal, automations.StepTypeEmitConceptCard,
 	} {
 		reg.Register(t, corpusRefused{})
 	}
