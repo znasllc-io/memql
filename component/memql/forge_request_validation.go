@@ -15,9 +15,7 @@ import (
 // forge_request_validation.go enforces the v1:forge:request status state
 // machine at the engine pre-insert boundary. The append-only DSL cannot
 // express "only an owner may set status=approved" on its own, so the
-// role guard lives here -- mirroring the harness step-transition guard
-// (harness_step_validation.go) and the feedback-intake guard
-// (planner_feedback_validation.go).
+// role guard lives here.
 //
 // Two independent rules run on every write to v1:forge:request:
 //
@@ -35,7 +33,7 @@ import (
 //       the DSL already gates those via traits)
 //
 // Both rules are pure, table-testable functions so the full matrix can be
-// unit-tested without a database, like stepTransitionAllowed.
+// unit-tested without a database in forge_request_validation_test.go.
 
 // conceptForgeRequest is the canonical concept id for v1:forge:request.
 // Defined here (not in concept_ids.go) because forge is a product DSL
