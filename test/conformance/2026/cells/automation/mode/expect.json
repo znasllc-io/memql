@@ -1,0 +1,43 @@
+{
+  "cases": [
+    {
+      "file": "single.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "queued-with-a-max.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "two-modes.memql",
+      "verdict": "refuse_load",
+      "code": "mode_flags",
+      "message": "@mode names 2 modes, single and queued"
+    },
+    {
+      "file": "a-max-on-single.memql",
+      "verdict": "refuse_load",
+      "code": "mode_max_not_allowed",
+      "message": "@mode(single, max=2) -- single admits no second run for max to bound"
+    },
+    {
+      "file": "a-mode-that-is-not-one.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_key",
+      "message": "@mode on an automation has no key serial"
+    },
+    {
+      "file": "a-max-of-zero.memql",
+      "verdict": "refuse_parse",
+      "code": "mode_max_range",
+      "message": "@mode's max= takes a whole number of at least 1",
+      "note": "Refused where it is written: in the compiled form a max of 0 reads as the default, so nothing after the parser could tell a written 0 from an absent max."
+    },
+    {
+      "file": "with-a-positional-value.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@mode on an automation takes keyword arguments"
+    }
+  ]
+}

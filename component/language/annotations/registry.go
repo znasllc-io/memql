@@ -160,11 +160,23 @@ const (
 // Keyword key sets, shared by the placement and its docs.
 var (
 	triggerKeys = []ArgSpec{
+		{Name: "before", Type: "string", Doc: "Adjust the incoming row before create, update, or write; requires concept."},
 		{Name: "event", Type: "string", Doc: "Event pattern, e.g. \"node.created\" (with concept=) or a raw topic such as \"system.startup\"."},
 		{Name: "concept", Type: "string", Doc: "Concept id the triggering event targets; required by the structured node.* event kinds."},
 		{Name: "schedule", Type: "string", Doc: "Cron schedule with a leading seconds field, e.g. \"0 0 * * * *\"."},
 		{Name: "filter", Type: "expression", Doc: "The trigger filter as a keyword: a lambda of one parameter over the triggering row, filter=row => <predicate>. The standalone @filter(...) annotation is the usual spelling and sets the same filter."},
 		{Name: "on", Type: "string", Doc: "A synonym for event=: on=<concept>.<created|updated|deleted>, with the concept named through the file's `use` import, folds to the same graph.node.<action>.<concept> pattern event= names (resolved by the automation loader and the concept resolver). A later epic retires the synonyms (D15/D17)."},
+	}
+	loopKeys = []ArgSpec{
+		{Name: "maxDepth", Type: "int", Doc: "The most runs of this automation one causal chain may hold. An integer from 1 to the depth cap (MEMQL_AUTOMATION_MAX_CHAIN_DEPTH, default 16)."},
+		{Name: "until", Type: "expression", Doc: "The convergence predicate: a lambda of one parameter over the triggering row, until=row => row.status == \"done\". The automation's @filter must hold its negation as a top-level conjunct, which is what stops the loop."},
+	}
+	modeKeys = []ArgSpec{
+		{Name: "single", Type: "flag", Doc: "One run at a time in this process; a fire while one runs is refused with a warning."},
+		{Name: "queued", Type: "flag", Doc: "Fires wait their turn in order; more than max waiting are refused."},
+		{Name: "restart", Type: "flag", Doc: "A fire cancels the run in flight and starts again."},
+		{Name: "parallel", Type: "flag", Doc: "Runs concurrently; more than max at once are refused. The default when no @mode is written, with no max."},
+		{Name: "max", Type: "int", Doc: "With queued, the most fires that may wait (default 10); with parallel, the most runs at once."},
 	}
 	handlerKeys = []ArgSpec{
 		{Name: "type", Type: "string", Doc: "Handler type: \"function\", \"query\", \"webhook\" or \"delegate\". Required."},
@@ -275,7 +287,9 @@ var placementTable = concat(
 	[]Placement{
 		{Receiver: Automation, Name: "actor", Forms: FormFlag, Example: "@actor", Doc: docActorOnFunction},
 		{Receiver: Automation, Name: "filter", Forms: FormExpression, Example: `@filter(row => row.status == "open")`},
+		{Receiver: Automation, Name: "loop", Forms: FormKeywords, Keys: loopKeys, Example: `@loop(maxDepth=4, until=row => row.status == "done")`},
 		{Receiver: Automation, Name: "mcp", Forms: FormFlag, Example: "@mcp"},
+		{Receiver: Automation, Name: "mode", Forms: FormKeywords, Keys: modeKeys, Example: `@mode(queued, max=10)`},
 		{Receiver: Automation, Name: "template", Forms: FormFlag, Example: "@template"},
 		{Receiver: Automation, Name: "trigger", Forms: FormKeywords, Keys: triggerKeys, Example: `@trigger(event="node.created", concept="v1:cluster:node")`},
 	},
@@ -471,6 +485,8 @@ var Docs = map[string]string{
 	"trigger":  "Event trigger for automations. Format: @trigger(event=\"graph.node.created.*.v1:ns:concept\") or @trigger(schedule=\"0 0 * * * *\").",
 	"filter":   "Filter for automation triggers: a lambda of one parameter over the triggering row, as in @filter(row => row.status == \"open\").",
 	"template": "On an automation: this is a work-spine TEMPLATE, invoked by a v1:work:run that named it rather than fired by the graph (memql#5048). It is the third way an automation can be reachable, alongside an event trigger and a schedule. A @template automation must carry no @trigger -- the load-time gate refuses the combination, so \"called\" and \"triggered\" stay distinct.",
+	"loop":     "On an automation that closes a deliberate cycle: permits the cycle the load would otherwise refuse, bounds it to maxDepth runs of this automation per causal chain, and names the predicate that ends it. The @filter must exclude the rows where until holds.",
+	"mode":     "How concurrent fires of this automation behave in one process: single, queued, restart or parallel, with max for queued and parallel. Without it an automation runs every fire in parallel.",
 	// Capability (memql#2218, behavioral-constructs ADR §2.3).
 	"sideEffect": "On a capability: the coarse risk class @sideEffect(\"read\"|\"write\"|\"exec\"). It is the authoritative side-effect class: it lives on the capability, not on the action that calls it, and must equal the class of the Go capability the declaration names, so an authored or generated action cannot claim a lower one.",
 	// Pagination opt-out (epic 5, memql#1965).

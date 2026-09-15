@@ -230,6 +230,26 @@ package parser
 // the trailing `retry(n)`, `on error continue` and `on surface(...)`
 // clauses. A name bound in an if or switch block is readable after it.
 // `mutation` opens a mutation's declaration.
+//
+// # 2026.09-dsl-v1-loop-protection (memql#5381)
+//
+// A WIDENING: an automation takes two annotations it refused before as
+// annotation_unknown. `@loop(maxDepth=N, until=row => P)` permits a
+// deliberate cycle, bounds it to N runs of the automation per causal chain,
+// and names the predicate that ends it; `@mode(single | queued | restart |
+// parallel[, max=N])` says how concurrent fires of one automation behave. The
+// registry holds their keys (annotations.Placements); until= parses the
+// one-parameter lambda @trigger's filter= parses.
+//
+// The parser refuses a value its source alone shows is wrong -- an until that
+// is not a lambda of one parameter (loop_until_form), a maxDepth that is not
+// a whole number or is left out (loop_max_depth_range), a max below 1
+// (mode_max_range) -- and none of those spellings parsed before either, since
+// the annotation did not. The load refuses the rest (component/automations,
+// loop_prepare.go): maxDepth past the depth cap, an until the @filter does not
+// exclude, a @loop on an automation no event triggers, and a @mode naming no
+// mode or two. Nothing previously valid stopped being valid, so no rewrite
+// mode is owed.
 
 import (
 	"crypto/sha256"
@@ -244,11 +264,11 @@ import (
 // The digest suffix is not decoration: TestGrammarVersionCarriesTheSurfaceDigest
 // recomputes it and requires this string to end with it, which is what makes a
 // grammar move impossible to land without editing this line (memql#3089).
-// # 2026.09-retire-error-accessor (memql#5446)
+// # 2026.09-before-write-error-accessor (memql#5383, memql#5446)
 //
-// Retire the no-argument onError accessor; error("message") remains live.
-// No rewrite exists because statement bodies have no onError context to read.
-const GrammarVersion = "2026.09-retire-error-accessor-78765bad"
+// Before-write field statements and trigger timing coexist with the retirement
+// of error(). error("message") remains live; no statement has an onError context.
+const GrammarVersion = "2026.09-before-write-error-accessor-77cda60c"
 
 // GrammarFingerprint is a drift detector over the author-facing keyword
 // surface: when the invocation-kind keyword set changes, the pinned test

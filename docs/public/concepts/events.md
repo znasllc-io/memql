@@ -633,3 +633,18 @@ The event system requires no external infrastructure (Redis, NATS, etc.). All ev
 - Subscriptions are automatically cleaned up when a session ends
 - The event bus properly shuts down all subscriptions when the server stops
 
+
+## Automation causation
+
+Automation events carry `causationId` (the run that published them),
+`correlationId` (the root chain), `depth`, and the ordered automation/run chain.
+These fields travel on the event envelope and across the node event mesh.
+The first automation runs at depth 1; the default depth limit is 16.
+
+The engine's write publishers and automation publish statements retain this
+cause. Journal bookkeeping starts a new root so terminal-run cleanup can still
+execute after a run reaches the limit. Durable run delivery and Go-side event
+subscribers that issue their own writes currently start new roots too; external
+round trips may do the same. The per-row execution budget provides a separate
+process-local backstop for those boundaries. See
+[loop protection](../language/memql.md#loop-protection).

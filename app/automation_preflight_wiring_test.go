@@ -32,6 +32,9 @@ func TestAutomationPreflightIsWiredIntoBoot(t *testing.T) {
 		t.Fatalf("read engine.go: %v", err)
 	}
 	body := string(src)
+	if !strings.Contains(body, "Functions: a.engine.Functions()") {
+		t.Fatal("automation preflight requires the function registry for static loop analysis")
+	}
 
 	const preflight = "a.automationLoader.LoadAll()"
 	preflightIdx := strings.Index(body, preflight)

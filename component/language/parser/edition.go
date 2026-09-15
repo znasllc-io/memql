@@ -58,7 +58,7 @@ const Edition = "2026"
 // `version` and the `memql.grammarVersion` pin in editors/vscode/package.json
 // move in the same change -- cmd/memql-lsp/editorparity_test.go refuses the
 // change otherwise, and its failure names each edit.
-const EditorRelease = "0.4.0"
+const EditorRelease = "0.5.1"
 
 // FrontEnd is how one edition's source reaches the core parser.
 type FrontEnd struct {

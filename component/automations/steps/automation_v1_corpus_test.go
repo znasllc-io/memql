@@ -235,7 +235,7 @@ func newAutomationArm(t *testing.T, name string, pick func(*corpusSource) string
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	loaded, err := automations.NewLoader(automations.LoaderOptions{Logger: logger}).LoadFromTree(armTree(t, sources, pick))
+	loaded, err := automations.NewLoader(automations.LoaderOptions{Logger: logger, Functions: eng.Functions()}).LoadFromTree(armTree(t, sources, pick))
 	require.NoErrorf(t, err, "%s arm: the tree's automations do not load", name)
 	byName := make(map[string]*automations.Automation, len(loaded))
 	for _, a := range loaded {
@@ -275,6 +275,12 @@ func (arm automationArm) run(fx automationFixture, now time.Time) logicRecord {
 		e := *fx.Event
 		e.Payload = cloneMap(fx.Event.Payload)
 		event = &e
+	}
+	if a.BeforeWrite != nil {
+		row := cloneMap(probeEvent("bff")["payload"].(map[string]any))
+		hooks := automations.BuildBeforeWriteHooks(arm.reg.engine, []*automations.Automation{a}, arm.reg, nil)
+		err := hooks[a.BeforeWrite.Concept][0].Apply(context.Background(), row)
+		return logicRecord{Refused: err != nil, Calls: probe.calls, Result: canonicalJSON(row)}
 	}
 	exec, err := arm.exec.ExecuteWithEvent(context.Background(), a, "corpus", event)
 	rec := logicRecord{Refused: err != nil, Calls: probe.calls}

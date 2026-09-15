@@ -963,15 +963,24 @@ func corpusAutomationProblems(t *testing.T, tree fs.FS) []string {
 	if _, err := memql.LoadUnifiedConcepts(corpusQuiet); err != nil {
 		return []string{"loading concepts for the automations pass: " + err.Error()}
 	}
-	loader := automations.NewLoader(automations.LoaderOptions{Logger: corpusQuiet, Registry: memoryNodes.DefaultRegistry()})
+	eng, initErr := automations.NewOfflineEngine(corpusQuiet, memoryNodes.DefaultRegistry())
+	if initErr != nil {
+		return []string{"loading functions for loop analysis: " + initErr.Error()}
+	}
+	loader := automations.NewLoader(automations.LoaderOptions{Logger: corpusQuiet, Registry: memoryNodes.DefaultRegistry(), Functions: eng.Functions()})
 	_, err := loader.LoadAll()
 	if err == nil {
 		return nil
 	}
 	var lines []string
 	for _, l := range strings.Split(err.Error(), "\n") {
-		if l = strings.TrimSpace(l); strings.HasPrefix(l, "- ") {
+		l = strings.TrimSpace(l)
+		if strings.HasPrefix(l, "- ") {
 			lines = append(lines, strings.TrimPrefix(l, "- "))
+		} else if l != "" && len(lines) > 0 {
+			// Loop refusals include the cycle, origins and remedy on separate
+			// lines. Keep their trailing rule code with the same diagnostic.
+			lines[len(lines)-1] += "\n" + l
 		}
 	}
 	if len(lines) == 0 {

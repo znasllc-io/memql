@@ -55,6 +55,9 @@ func CompileBody(kind, name string, args []string, body *ast.Body) ([]map[string
 	if body == nil {
 		return []map[string]any{}, nil
 	}
+	if kind == "beforeWrite" || body.BeforeWrite {
+		return compileBeforeWriteStatements(body.Statements), nil
+	}
 	return compileStatementList(body.Statements), nil
 }
 
@@ -63,6 +66,9 @@ func CompileBody(kind, name string, args []string, body *ast.Body) ([]map[string
 // definition, all of them at once.
 func compileStatementSteps(def *ast.FunctionDef, automation *ast.AutomationDef) ([]map[string]any, error) {
 	kind := "automation"
+	if automation.Trigger != nil && automation.Trigger.Before != "" {
+		kind = "beforeWrite"
+	}
 	if def.Type == ast.FunctionTypeAutomation {
 		if err := checkAutomationBindings(def, automation.Body); err != nil {
 			return nil, err
@@ -256,6 +262,8 @@ func stepIDBase(s ast.BodyStatement) string {
 // compileStatement lowers one statement that flattening left standing.
 func compileStatement(s ast.BodyStatement) map[string]any {
 	switch t := s.(type) {
+	case *ast.FieldWriteStatement:
+		return map[string]any{"type": "fieldWrite", "fieldWrite": map[string]any{"field": t.Field, "value": EncodeValueLeaf(t.Value)}}
 	case *ast.AssignStatement:
 		if t.Call != nil {
 			step := callStep(t.Call, t.Mods)
@@ -373,6 +381,59 @@ func encodeNamedArgs(args []ast.NamedArg) map[string]any {
 	out := make(map[string]any, len(args))
 	for _, a := range args {
 		out[a.Name] = EncodeValueLeaf(a.Value)
+	}
+	return out
+}
+
+// Before-write branch conditions are captured when their branch is reached:
+// a field assignment inside an arm must not change which later statements
+// belong to that same arm.
+func compileBeforeWriteStatements(stmts []ast.BodyStatement) []map[string]any {
+	used := map[string]bool{}
+	ast.WalkBody(stmts, func(s ast.BodyStatement) bool {
+		if a, ok := s.(*ast.AssignStatement); ok {
+			used[a.Name] = true
+		}
+		return true
+	})
+	var flat []flatStatement
+	serial := 0
+	var walk func([]ast.BodyStatement, []ast.ExpressionNode)
+	walk = func(list []ast.BodyStatement, conds []ast.ExpressionNode) {
+		for _, s := range list {
+			if branch, ok := s.(*ast.IfStatement); ok {
+				var earlier []ast.ExpressionNode
+				for _, b := range branch.Branches {
+					gate := withConds(conds, negations(earlier)...)
+					if b.Cond != nil {
+						name := ""
+						for name == "" || used[name] {
+							serial++
+							name = fmt.Sprintf("__beforeCondition%d", serial)
+						}
+						used[name] = true
+						flat = append(flat, flatStatement{stmt: &ast.AssignStatement{Name: name, Value: b.Cond}, conds: gate})
+						ref := &ast.IdentExpr{Name: name}
+						gate = append(gate, ref)
+						earlier = append(earlier, ref)
+					}
+					walk(b.Body, gate)
+				}
+			} else {
+				flat = append(flat, flatStatement{stmt: s, conds: conds})
+			}
+		}
+	}
+	walk(stmts, nil)
+	ids := assignStepIDs(flat)
+	out := make([]map[string]any, 0, len(flat))
+	for i, f := range flat {
+		step := compileStatement(f.stmt)
+		step["id"] = ids[i]
+		if c := conjunction(f.conds); c != nil {
+			step["condition"] = ast.FormatExpr(c)
+		}
+		out = append(out, step)
 	}
 	return out
 }

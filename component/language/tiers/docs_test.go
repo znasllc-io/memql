@@ -52,6 +52,7 @@ var writtenAs = map[Position]string{
 	PositionTriggerFilter:       "`@filter(row => ...)` over the triggering row",
 	PositionLogicBody:           "a statement or a `return` in a logic body",
 	PositionMutationValue:       "`key: <value>` in `insert`, `update` or `stamp`",
+	PositionBeforeWriteValue:    "a row.<field> = <expression> value in a before-write automation",
 	PositionStepArgument:        "an argument of a call statement in an automation",
 	PositionToolDefault:         "a tool field's `@default(\"...\")`",
 	PositionPromptInput:         "a value bound into a prompt's input",

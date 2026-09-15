@@ -1,0 +1,13 @@
+use loopcell.concepts.{ ticket }
+
+/// Move an open ticket to done -- the filter lets a done ticket through, so nothing ends the cycle.
+@trigger(event="node.created", concept="v1:loopcell:ticket")
+@filter(row => row.status == "open")
+@loop(maxDepth=4, until=row => row.status == "done")
+automation advanceTicketLoopCell {
+  args {
+    id     any
+    status any
+  }
+  advance := mutation advanceTicketLoopCell(id: args.id, status: "done")
+}

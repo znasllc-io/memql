@@ -230,6 +230,7 @@ var manifest = map[Position]positionRule{
 	PositionTriggerFilter:       {tier: TierM, kinds: inProcessKinds, functions: allFunctions, predicates: Admitted},
 	PositionLogicBody:           {tier: TierM, kinds: bodyKinds, functions: allFunctions, predicates: Admitted},
 	PositionMutationValue:       {tier: TierM, kinds: inProcessKinds, functions: allFunctions, predicates: Admitted},
+	PositionBeforeWriteValue:    {tier: TierM, kinds: inProcessKinds, functions: allFunctions, predicates: Admitted},
 	PositionStepArgument:        {tier: TierM, kinds: bodyKinds, functions: allFunctions, predicates: Admitted},
 	PositionToolDefault:         {tier: TierM, kinds: literalKinds, functions: noFunctions, predicates: Refused},
 	PositionPromptInput:         {tier: TierM, kinds: inProcessKinds, functions: allFunctions, predicates: Refused},

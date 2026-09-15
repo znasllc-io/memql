@@ -557,3 +557,17 @@ cd component/automations && go test ./... -run TestEvaluatorSeesArgs
 *For engine architecture, see [`component/memql/arch.md`](../memql/arch.md)*
 *For functions architecture, see [`docs/public/language/functions.md`](../../docs/public/language/functions.md)*
 *For system-wide architecture, see [`docs/public/concepts/architecture.md`](../../docs/public/concepts/architecture.md)*
+
+## Loop protection
+
+`loop_graph.go` builds the static write-to-trigger graph. Strict loading,
+authored activation, directory lint, corpus loading, the architecture model and
+the OS graph all use this analysis. Disabled shipped automations are excluded;
+active authored definitions are checked together under an activation lock.
+
+The executor admits a chain-scoped in-flight dedup claim, checks the mode before
+acquiring an executor slot, and enforces global, per-automation and per-row
+budgets. Events retain their run cause across the mesh. Journal writes strip it
+so terminal cleanup starts a root. Depth refusals record a failed run and chain.
+`before_write.go` installs in-process row adjustments with no separate run row.
+Modes and budgets are process-local; cluster claims remain cross-replica.

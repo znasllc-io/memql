@@ -249,7 +249,10 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 	}
 
 	// Trigger (event-based)
-	if automation.Trigger != nil {
+	if automation.Trigger != nil && automation.Trigger.Before != "" {
+		output["beforeWrite"] = map[string]any{"on": automation.Trigger.Before, "concept": automation.Trigger.Concept, "filter": automation.Trigger.Filter}
+	}
+	if automation.Trigger != nil && automation.Trigger.Before == "" {
 		trigger := map[string]any{
 			"event": automation.Trigger.Event,
 		}
@@ -257,6 +260,29 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 			trigger["filter"] = automation.Trigger.Filter
 		}
 		output["trigger"] = trigger
+	}
+
+	// @loop and @mode (epic memql#5380). The load judges both
+	// (component/automations, loop_prepare.go), so each is carried as it
+	// was written: until as canonical v1 source, like the trigger filter;
+	// every mode flag, joined, so a second one is refused by name; and max
+	// only when it was written, since a compiled 0 reads as the default.
+	if loop := automation.Loop; loop != nil {
+		out := map[string]any{}
+		if loop.MaxDepthSet {
+			out["maxDepth"] = loop.MaxDepth
+		}
+		if loop.Until != nil {
+			out["until"] = ast.FormatExpr(loop.Until)
+		}
+		output["loop"] = out
+	}
+	if mode := automation.Mode; mode != nil {
+		out := map[string]any{"kind": strings.Join(mode.Flags, ",")}
+		if mode.MaxSet {
+			out["max"] = mode.Max
+		}
+		output["mode"] = out
 	}
 
 	// Args contract (event-payload-binding ADR Decision 1, memql#2363): the

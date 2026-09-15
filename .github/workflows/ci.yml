@@ -285,6 +285,9 @@ jobs:
               - 'scripts/secrets/manifest.yaml'
               - 'component/envregistry/manifest.yaml'
               - 'component/architecture/embedded/**'
+              - 'dsl/**/automations.memql'
+              - 'dsl/**/mutations.memql'
+              - 'dsl/**/logic.memql'
               - 'scripts/**'
               # every path embed_inventory_test.go pins -- see above
               - 'VERSION'
@@ -1392,8 +1395,11 @@ jobs:
           CREATE EXTENSION IF NOT EXISTS "pgcrypto";
           CREATE EXTENSION IF NOT EXISTS vector;
           SQL
+      # The loop corpus adds strict graph boots and database scenarios. On the
+      # hosted runner TestCorpusVerdicts alone takes ~264s; the former 300s
+      # package budget expired during otherwise-progressing loop scenarios.
       - name: mcp conformance suite (regression gate, seeded test DB)
-        run: go test -count=1 -timeout=300s -v ./test/conformance/...
+        run: go test -count=1 -timeout=600s -v ./test/conformance/...
 
   # DB-seeded suite for the `*_db_test.go` packages (memql#2342). These
   # tests are NeedsDB: they self-skip when no Postgres is reachable, so they

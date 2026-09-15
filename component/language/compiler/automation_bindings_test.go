@@ -7,6 +7,9 @@ import (
 
 func TestAutomationBindingsAtCompile(t *testing.T) {
 	for _, tc := range []struct{ name, source, want string }{
+		{"before-write actor missing", "@trigger(before=\"write\", concept=\"v1:probe:ticket\")\nautomation probe { row.owner = actor.userId }", "does not declare @actor"},
+		{"before-write actor declared", "@actor\n@trigger(before=\"write\", concept=\"v1:probe:ticket\")\nautomation probe { row.owner = actor.userId }", ""},
+		{"before-write argument missing", "@trigger(before=\"write\", concept=\"v1:probe:ticket\")\nautomation probe { row.title = args.title }", "body reads args.title"},
 		{"actor missing", "automation probe { return actor.userId }", "does not declare @actor"},
 		{"actor declared", "@actor\nautomation probe { return actor.userId }", ""},
 		{"argument missing", "automation probe { return args.path }", "body reads args.path"},

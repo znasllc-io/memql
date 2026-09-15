@@ -981,6 +981,12 @@ const (
 	AttrFilter   = "filter"
 	AttrSchedule = "schedule"
 
+	// Loop protection (automation only, epic memql#5380). @loop(maxDepth=N,
+	// until=row => P) permits a deliberate cycle and bounds it; @mode(<kind>
+	// [, max=N]) says how concurrent fires of one automation behave.
+	AttrLoop = "loop"
+	AttrMode = "mode"
+
 	// Tool-specific attributes
 	AttrHandler              = "handler"
 	AttrDestructive          = "destructive"
@@ -1150,14 +1156,48 @@ type AutomationDef struct {
 	// automation runtime (audited in #2712) and are load-rejected on
 	// automations by the #2712 gate; the dead fields were removed in #2724.
 	Enabled bool // from @enabled
+
+	// Loop is @loop(maxDepth=N, until=row => P), nil when absent (epic
+	// memql#5380).
+	Loop *LoopDef
+	// Mode is @mode(<kind>[, max=N]), nil when absent.
+	Mode *ModeDef
 }
 
 func (*AutomationDef) node() {}
 
+// LoopDef is @loop as the parser read it. The parser refuses what it can
+// decide from the source alone -- until not a one-parameter lambda, a
+// maxDepth that is not a whole number, either key left out -- and the load
+// decides the rest: maxDepth against the depth cap, which is an env value,
+// and until against the automation's @filter.
+type LoopDef struct {
+	// MaxDepth is the most runs of this automation one causal chain may
+	// hold; MaxDepthSet reports that maxDepth= was written.
+	MaxDepth    int
+	MaxDepthSet bool
+	// Until is the convergence predicate over the triggering row. The
+	// automation's @filter must hold its negation as a top-level conjunct.
+	Until *LambdaExpr
+}
+
+// ModeDef is @mode as the parser read it: the flags in the order written
+// (exactly one of single, queued, restart and parallel is legal, which the
+// load decides, naming what was written), and max= when it was written.
+// MaxSet keeps a written bound apart from an absent one, which the compiled
+// form cannot: there, a max of 0 reads as the default.
+type ModeDef struct {
+	Flags  []string
+	Max    int
+	MaxSet bool
+}
+
 // TriggerDef defines event-based triggers for an automation.
 type TriggerDef struct {
-	Event  string
-	Filter string
+	Before  string
+	Concept string
+	Event   string
+	Filter  string
 	// FilterLambda is the trigger filter, `@filter(row => ...)`
 	// (memql#5364): `row` is the triggering row. Filter holds its canonical
 	// source (ast.FormatExpr). Nil when the automation has no filter.

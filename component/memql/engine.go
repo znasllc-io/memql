@@ -24,6 +24,9 @@ import (
 
 // MemQLEngine is the default implementation of the MemQLEngine interface.
 type MemQLEngine struct {
+	beforeWriteMu      sync.RWMutex
+	beforeWriteHooks   map[string][]BeforeWriteHook
+	beforeWriteSources map[string]map[string][]BeforeWriteHook
 	*component.Component
 	// relationships + schemaIdx are DERIVED from concepts (see
 	// deriveConceptRegistryState) and are guarded by conceptStateMu. Read them
@@ -214,6 +217,18 @@ type MemQLEngine struct {
 	// no registry for; component/automations wires itself in here at bootstrap.
 	// Nil on a binary with no scheduler, which then reports no automations.
 	automationCataloger AutomationCataloger
+	// automationGraphSource supplies the static loop graph over the
+	// automations this node's scheduler registered, for the automationGraph
+	// builtin (automation_graph_read.go, memql#5384). Wired at bootstrap via
+	// SetAutomationGraphSource; nil on a binary with no scheduler, where the
+	// builtin REFUSES rather than answering an empty graph.
+	automationGraphSource AutomationGraphSource
+	// loopStopRows reads the runs the loop protection stopped. Nil means the
+	// production read, workRunsStoppedByLoops under the engine's own cluster
+	// actor (readLoopStopRows). A seam, not a configuration knob: nothing
+	// sets it outside a test, and it exists so the capability gate and the
+	// projection can be exercised without a database.
+	loopStopRows func(context.Context) ([]map[string]any, error)
 	// authoredAudit is the sink authored-lifecycle audit events emitted from
 	// INSIDE the engine reach v1:identity:auditEvent through -- currently the
 	// breaking concept schema-change override (memql#3757). Wired at bootstrap
@@ -536,18 +551,31 @@ func (e *MemQLEngine) publishEvent(topic string, kind events.Kind, payload map[s
 	e.eventBus.Publish(event)
 }
 
-// publishEventWithActor is publishEvent plus the acting identity stamped on
+// publishGraphWriteEvent is publishEvent plus the acting identity stamped on
 // the event envelope's Metadata (G4, memql#2366 / event-payload-binding ADR
-// Decision 4). Automations read it as `event.actor.id`; emitters no longer
-// need to hand-stamp a `triggeredBy` field into payloads for the envelope's
-// benefit. Empty actorId degrades to a plain publishEvent.
-func (e *MemQLEngine) publishEventWithActor(topic string, kind events.Kind, payload map[string]any, actorId string) {
+// Decision 4), plus the run's cause when ctx carries one (component/events/
+// cause.go, epic memql#5380). Automations read the actor as `event.actor.id`;
+// emitters no longer need to hand-stamp a `triggeredBy` field into payloads
+// for the envelope's benefit. Empty actorId degrades to a plain publishEvent.
+//
+// executeWrite / executeUpdate are the two callers -- every graph.node.created
+// / .updated a write produces -- so a write made by an automation step always
+// carries the run's cause forward onto what it caused, which is how a later
+// automation triggered by that write can be judged against the same chain.
+// ctx.Value has no branch here to get wrong either way: CauseFromContext
+// answers ok=false for a plain context exactly as it does today, so a
+// non-automation write (a person's, a Go-side publish with no run behind it)
+// still publishes a root event.
+func (e *MemQLEngine) publishGraphWriteEvent(ctx context.Context, topic string, kind events.Kind, payload map[string]any, actorId string) {
 	if e.eventBus == nil {
 		return
 	}
 	event := events.NewEvent(topic, kind, payload)
 	if actorId != "" {
 		event = event.WithMetadata("actor", actorId)
+	}
+	if cause, ok := events.CauseFromContext(ctx); ok {
+		event = event.WithCause(cause)
 	}
 	e.eventBus.Publish(event)
 }

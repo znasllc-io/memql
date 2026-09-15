@@ -126,7 +126,7 @@ func (ps BodyProblems) Error() string {
 // steps is readable as a root somewhere; steps is the retired step-result
 // namespace, which the parser refuses to read.
 var bodyReservedNames = map[string]bool{
-	"args": true, "actor": true, "event": true, "now": true,
+	"row": true, "args": true, "actor": true, "event": true, "now": true,
 	"config": true, "partition": true, "trace": true, "steps": true,
 }
 
@@ -141,6 +141,8 @@ func IsBodyRoot(kind, name string) bool { return isRoot(kind, name) }
 // be absent every time: it is not a root.
 func isRoot(kind, name string) bool {
 	switch name {
+	case "row":
+		return kind == "beforeWrite"
 	case "args", "actor", "now", "config", "partition":
 		return true
 	case "event":
@@ -153,10 +155,23 @@ func isRoot(kind, name string) bool {
 // body. kind is "logic" or "automation"; args are the declared args field
 // names, which only shape a message. It returns every problem, in source order.
 func CheckBody(kind, name string, args []string, body *ast.Body) []BodyProblem {
+	if body != nil && body.BeforeWrite {
+		kind = "beforeWrite"
+	}
 	w := newScopeWalk(kind, name)
 	var stmts []ast.BodyStatement
 	if body != nil {
 		stmts = body.Statements
+	}
+	if kind == "beforeWrite" {
+		ast.WalkBody(stmts, func(s ast.BodyStatement) bool {
+			switch s.(type) {
+			case *ast.ForStatement, *ast.SwitchStatement, *ast.ParallelStatement, *ast.PublishStatement:
+				sp := s.StatementSpan()
+				w.problem("before_write_writes", sp.Line, sp.Col, "%s is not permitted in a before-write body", ast.StatementKind(s))
+			}
+			return true
+		})
 	}
 	w.statements(stmts, w.root, nil, nil, false)
 	declared := map[string]bool{}
@@ -354,6 +369,11 @@ func (w *scopeWalk) statement(s ast.BodyStatement, sc *bodyScope, path []onceSte
 		}
 	}
 	switch t := s.(type) {
+	case *ast.FieldWriteStatement:
+		if w.kind != "beforeWrite" {
+			w.problem("before_write_outside", t.Span.Line, t.Span.Col, "a row field write requires @trigger(before=..., concept=...)")
+		}
+		read(t.Value, sc, path)
 	case *ast.AssignStatement:
 		readCall(t.Call)
 		read(t.Value, sc, path)
@@ -421,6 +441,10 @@ func LogicMayCall(kind string) bool {
 
 // callRule refuses, in a logic, the call kinds LogicMayCall does not admit.
 func (w *scopeWalk) callRule(c *ast.ConstructCall) {
+	if w.kind == "beforeWrite" && c.Kind != "logic" && c.Kind != "query" {
+		w.problem("before_write_writes", c.Span.Line, c.Span.Col, "before-write body cannot call %s %s", c.Kind, c.Name)
+		return
+	}
 	if w.kind != "logic" || LogicMayCall(c.Kind) {
 		return
 	}

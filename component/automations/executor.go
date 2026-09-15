@@ -11,6 +11,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/metrics"
 	"github.com/znasllc-io/memql/component/provenance"
 	"github.com/znasllc-io/memql/core/common"
 )
@@ -421,10 +422,138 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	if automation == nil {
 		return nil, fmt.Errorf("automation is nil")
 	}
+	if automation.BeforeWrite != nil {
+		return nil, fmt.Errorf("automation %s is a before-write hook and can run only inside its original write [before_write_outside]", automation.Name)
+	}
 	if err := ensurePrepared(automation); err != nil {
 		return nil, err
 	}
 
+	exec := NewExecution(automation.Name, triggeredBy)
+	if adopt != nil {
+		exec.ID = adopt.RunId
+	}
+	// Internal origin requires a trusted SOURCE and a trigger payload the
+	// caller did not supply. See ExecuteWithClientEvent for why the source
+	// alone is not enough (memql#2888).
+	exec.SourceTrusted = automation.Trusted && !callerSuppliedPayload
+	exec.CallerSuppliedPayload = callerSuppliedPayload
+
+	// The run's place in its causal chain (epic memql#5380): its parent -- the
+	// triggering event's cause, else the calling run's for a sub-automation --
+	// and its own, one deeper. The loop bound is decided here and acted on
+	// after the dedup gates below; until then the fire runs under the cause
+	// contextWithRunCause picks. See loop_runtime.go.
+	parentCause, cause := runCause(ctx, automation, exec.ID, triggeringEvent)
+	loopRefusal := loopBound(automation, cause, maxChainDepth())
+	ctx = contextWithRunCause(ctx, parentCause, cause, loopRefusal)
+
+	// Reserve the event before acquiring a mode: a redelivery must not
+	// cancel a valid in-flight restart run. Every later refusal releases it.
+	// Chain tracking initialization (when enabled)
+	var chainHead string
+	if e.chainTrackingEnabled {
+		// Initialize step order tracking
+		exec.StepOrder = make([]string, 0, len(automation.Steps))
+
+		// Build event data for fingerprinting
+		eventData := chainEventData(triggeringEvent, automation, cause.CorrelationId)
+
+		// Fingerprint input if present
+		if exec.Input != nil {
+			exec.InputFingerprint = FingerprintInput(exec.Input)
+		}
+
+		// Compute initial chain head
+		exec.InitialChainHead = ComputeInitialChainHead(
+			automationModeIdentity(automation),
+			triggeredBy,
+			eventData,
+			exec.InputFingerprint,
+		)
+		chainHead = exec.InitialChainHead
+
+		// Check for duplicate execution (only when dedup is explicitly enabled)
+		// Dedup should only be used for event-triggered automations where
+		// idempotency matters. Scheduled/manual runs should NOT use dedup.
+		// AN ADOPTED RUN IS EXEMPT FROM BOTH DEDUP GATES, and this is not an
+		// optimisation. Both key on the initial chain head, which is a hash of
+		// (automation, triggeredBy, event, input) -- so two DIFFERENT goals
+		// that compile to the same template with the same input produce the
+		// SAME key. The per-process gate would skip the second as a duplicate
+		// and the cluster guard's once-ever claim would skip every later one
+		// cluster-wide, leaving those goals' runs at `running` with no
+		// heartbeat until the abandoned sweep closed them. Two people asking
+		// for the same thing is not a double-fire. An adopted run's identity
+		// is its run id, and its claim is held by the caller (the work
+		// integration's Postgres-backed ClusterExecutionGuard, keyed on that
+		// id), which is both stronger and the right grain.
+		duplicate, echo := false, false
+		if adopt == nil && e.dedupEnabled && e.dedup != nil {
+			identity := cause.CorrelationId
+			if !parentCause.IsZero() {
+				identity = rootCorrelation(triggeringEvent)
+			}
+			duplicate, echo = e.dedup.claimOrDuplicate(automation.Name, exec.InitialChainHead, identity, exec.ID)
+			if !duplicate {
+				defer func() {
+					if exec.Status != "completed" {
+						e.dedup.release(automation.Name, exec.InitialChainHead, exec.ID)
+					}
+				}()
+			}
+		}
+		if duplicate {
+			if echo {
+				metrics.AutomationLoopStopped(automation.Name, metrics.LoopStopEcho)
+			}
+			if e.logger != nil {
+				e.logger.Info("skipping duplicate execution",
+					"component", ComponentName,
+					"automation", automation.Name,
+					"initialChainHead", exec.InitialChainHead,
+				)
+			}
+			exec.Status = "skipped"
+			exec.Error = "duplicate execution detected"
+			exec.CompletedAt = time.Now()
+			exec.Duration = exec.CompletedAt.Sub(exec.StartedAt)
+			return exec, nil
+		}
+
+	}
+
+	// A fire already refused by its chain must not cancel a healthy restart
+	// run or wait for an ancestor's concurrency slot. Claim its terminal record
+	// before journaling, just as on the ordinary event admission path.
+	if loopRefusal != nil {
+		if e.chainTrackingEnabled && adopt == nil && e.clusterGuard != nil && exec.InitialChainHead != "" && !e.clusterGuard.Claim(ctx, automation.Name, exec.InitialChainHead) {
+			exec.Status = "skipped"
+			exec.Error = "duplicate execution (cluster guard -- claimed by another replica)"
+			exec.CompletedAt = time.Now()
+			exec.Duration = exec.CompletedAt.Sub(exec.StartedAt)
+			return exec, nil
+		}
+		return e.stopLoop(ctx, automation, exec, triggeringEvent, parentCause, loopRefusal, adopt != nil)
+	}
+
+	modeCtx, releaseMode, modeErr := sharedModeGate.acquire(ctx, automation, exec.ID)
+	if modeErr != nil {
+		if refusal, ok := modeErr.(*ModeRefusal); ok {
+			if e.logger != nil {
+				e.logger.Warn("automation mode refused fire", "automation", automation.Name, "error", refusal)
+			}
+			metrics.AutomationLoopStopped(automation.Name, metrics.LoopStopMode)
+			exec.Status = "skipped"
+			exec.Error = refusal.Error()
+			exec.CompletedAt = time.Now()
+			exec.Duration = exec.CompletedAt.Sub(exec.StartedAt)
+			return exec, nil
+		}
+		return nil, modeErr
+	}
+	ctx = modeCtx
+	defer releaseMode()
 	// Acquire concurrency slot (blocks if limit reached)
 	// This prevents database connection exhaustion during event storms
 	select {
@@ -463,13 +592,6 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	}
 	ctx = provenance.ContextWithProvenance(ctx, provenance.Automation(automation.Name, trigger))
 
-	exec := NewExecution(automation.Name, triggeredBy)
-	// Internal origin requires a trusted SOURCE and a trigger payload the
-	// caller did not supply. See ExecuteWithClientEvent for why the source
-	// alone is not enough (memql#2888).
-	exec.SourceTrusted = automation.Trusted && !callerSuppliedPayload
-	exec.CallerSuppliedPayload = callerSuppliedPayload
-
 	// THE EXECUTION *IS* THE EXISTING RUN (memql#5054). Taking the id here,
 	// before anything reads exec.ID, is what makes every downstream write --
 	// the journal's step rows, its heartbeats, its terminal close -- land on
@@ -485,8 +607,8 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	// hundreds of times a minute and drive unbounded plan/LLM churn. Checked
 	// here (after the concurrency slot, before any step work) so a skipped
 	// run is cheap; the deferred concurrency-slot release still fires.
-	if allowed, reason := sharedAutomationBudget.admit(automation.Name); !allowed {
-		if reason != "" && e.logger != nil {
+	if allowed, reason, alert := sharedAutomationBudget.admitRow(automationModeIdentity(automation), budgetRowId(triggeringEvent)); !allowed {
+		if alert && e.logger != nil {
 			e.logger.Error("automation execution budget exceeded -- SKIPPING executions to stop a storm (memql#1142)",
 				"component", ComponentName,
 				"automation", automation.Name,
@@ -495,6 +617,10 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 		}
 		exec.Status = "skipped"
 		exec.Error = "automation execution budget exceeded (memql#1142)"
+		if reason == "per-row" {
+			metrics.AutomationLoopStopped(automation.Name, metrics.LoopStopRowBudget)
+			exec.Error = "automation execution budget exceeded for this row (per-row, memql#5382)"
+		}
 		exec.CompletedAt = time.Now()
 		exec.Duration = exec.CompletedAt.Sub(exec.StartedAt)
 		return exec, nil
@@ -566,7 +692,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	}
 
 	// Publish automation started event
-	e.publishEvent(events.TopicAutomationStarted, events.KindAutomationStarted, map[string]any{
+	e.publishEvent(ctx, events.TopicAutomationStarted, events.KindAutomationStarted, map[string]any{
 		"automationName": automation.Name,
 		"executionId":    exec.ID,
 		"triggeredBy":    triggeredBy,
@@ -580,7 +706,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	// cross-machine portability signal: a literal asserted here that does
 	// not hold on this machine is a precondition that misses here.
 	if missed, isMiss := EvaluatePreconditions(automation.Preconditions, evaluator); isMiss {
-		e.emitPreconditionMiss(automation, exec, triggeringEvent, missed)
+		e.emitPreconditionMiss(ctx, automation, exec, triggeringEvent, missed)
 		exec.Status = "skipped"
 		exec.Error = fmt.Sprintf("precondition %q missed", missed.ID)
 		exec.CompletedAt = time.Now()
@@ -596,59 +722,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 		return exec, nil
 	}
 
-	// Chain tracking initialization (when enabled)
-	var chainHead string
 	if e.chainTrackingEnabled {
-		// Initialize step order tracking
-		exec.StepOrder = make([]string, 0, len(automation.Steps))
-
-		// Build event data for fingerprinting
-		eventData := eventFingerprintData(triggeringEvent)
-
-		// Fingerprint input if present
-		if exec.Input != nil {
-			exec.InputFingerprint = FingerprintInput(exec.Input)
-		}
-
-		// Compute initial chain head
-		exec.InitialChainHead = ComputeInitialChainHead(
-			automation.Name,
-			triggeredBy,
-			eventData,
-			exec.InputFingerprint,
-		)
-		chainHead = exec.InitialChainHead
-
-		// Check for duplicate execution (only when dedup is explicitly enabled)
-		// Dedup should only be used for event-triggered automations where
-		// idempotency matters. Scheduled/manual runs should NOT use dedup.
-		// AN ADOPTED RUN IS EXEMPT FROM BOTH DEDUP GATES, and this is not an
-		// optimisation. Both key on the initial chain head, which is a hash of
-		// (automation, triggeredBy, event, input) -- so two DIFFERENT goals
-		// that compile to the same template with the same input produce the
-		// SAME key. The per-process gate would skip the second as a duplicate
-		// and the cluster guard's once-ever claim would skip every later one
-		// cluster-wide, leaving those goals' runs at `running` with no
-		// heartbeat until the abandoned sweep closed them. Two people asking
-		// for the same thing is not a double-fire. An adopted run's identity
-		// is its run id, and its claim is held by the caller (the work
-		// integration's Postgres-backed ClusterExecutionGuard, keyed on that
-		// id), which is both stronger and the right grain.
-		if adopt == nil && e.dedupEnabled && e.dedup != nil && e.dedup.isDuplicate(automation.Name, exec.InitialChainHead) {
-			if e.logger != nil {
-				e.logger.Info("skipping duplicate execution",
-					"component", ComponentName,
-					"automation", automation.Name,
-					"initialChainHead", exec.InitialChainHead,
-				)
-			}
-			exec.Status = "skipped"
-			exec.Error = "duplicate execution detected"
-			exec.CompletedAt = time.Now()
-			exec.Duration = exec.CompletedAt.Sub(exec.StartedAt)
-			return exec, nil
-		}
-
 		// Cross-replica dedup (#561): the per-process check above only covers
 		// THIS pod. When a node-type runs >=2 replicas an event can reach more
 		// than one; the cluster guard claims the (automation, chain-head) in
@@ -680,7 +754,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	if adopt != nil {
 		journal.adoptRun(ctx, automation, exec)
 	} else {
-		journal.openRun(ctx, automation, exec, triggeringEvent)
+		journal.openRun(ctx, automation, exec, triggeringEvent, parentCause)
 	}
 	// A logic a step calls journals its statements where this run's rows go
 	// (logic_statements.go) -- nowhere, when the run is not journaled.
@@ -737,7 +811,7 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 	}
 
 	// Publish step started event
-	e.publishEvent(events.TopicAutomationStepStarted, events.KindAutomationStepStarted, map[string]any{
+	e.publishEvent(ctx, events.TopicAutomationStepStarted, events.KindAutomationStepStarted, map[string]any{
 		"automationName": stepCtx.Execution.AutomationName,
 		"executionId":    stepCtx.Execution.ID,
 		"stepId":         step.ID,
@@ -787,6 +861,12 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 	stepExecCtx := e.withRunContext(originForSource(ctx, trusted), stepCtx, step)
 	result, err := e.stepRegistry.Execute(stepExecCtx, step, stepCtx)
 
+	// A cancelled executor may return no result. Lifecycle reporting must not
+	// turn cooperative cancellation into a nil-pointer panic.
+	var stepDuration time.Duration
+	if result != nil {
+		stepDuration = result.Duration
+	}
 	// Publish step completed/failed event
 	var stepTopic string
 	var stepKind events.Kind
@@ -797,12 +877,12 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 		stepTopic = events.TopicAutomationStepCompleted
 		stepKind = events.KindAutomationStepCompleted
 	}
-	e.publishEvent(stepTopic, stepKind, map[string]any{
+	e.publishEvent(ctx, stepTopic, stepKind, map[string]any{
 		"automationName": stepCtx.Execution.AutomationName,
 		"executionId":    stepCtx.Execution.ID,
 		"stepId":         step.ID,
 		"stepType":       string(step.Type),
-		"duration":       result.Duration.Milliseconds(),
+		"duration":       stepDuration.Milliseconds(),
 	})
 
 	return result, err
@@ -879,7 +959,7 @@ func (e *Executor) handleAutomationError(ctx context.Context, automation *Automa
 	}
 
 	// Publish automation failed event
-	e.publishEvent(events.TopicAutomationFailed, events.KindAutomationFailed, map[string]any{
+	e.publishEvent(ctx, events.TopicAutomationFailed, events.KindAutomationFailed, map[string]any{
 		"automationName": automation.Name,
 		"executionId":    exec.ID,
 		"error":          err.Error(),
@@ -887,12 +967,21 @@ func (e *Executor) handleAutomationError(ctx context.Context, automation *Automa
 	})
 }
 
-// publishEvent publishes an automation event to the event bus.
-func (e *Executor) publishEvent(topic string, kind events.Kind, payload map[string]any) {
+// publishEvent publishes an automation event to the event bus, stamping the
+// run's cause (component/events/cause.go, epic memql#5380) onto it when ctx
+// carries one. These are the executor's own lifecycle events
+// (automation.started/completed/failed, the per-step started/completed/failed
+// pair) and the precondition-missed signal -- every one of them a downstream
+// consequence of the run in ctx, so they belong on its chain exactly as a
+// step's own writes and publishes do.
+func (e *Executor) publishEvent(ctx context.Context, topic string, kind events.Kind, payload map[string]any) {
 	if e.eventBus == nil {
 		return
 	}
 	event := events.NewEvent(topic, kind, payload)
+	if cause, ok := events.CauseFromContext(ctx); ok {
+		event = event.WithCause(cause)
+	}
 	e.eventBus.Publish(event)
 }
 
@@ -908,7 +997,7 @@ func (e *Executor) publishEvent(topic string, kind events.Kind, payload map[stri
 // the deterministic check that failed, the asserted machine-specific
 // literal, and the triggering event payload (the concrete value that did
 // not satisfy the check on THIS machine).
-func (e *Executor) emitPreconditionMiss(automation *Automation, exec *AutomationExecution, triggeringEvent *events.Event, missed *Precondition) {
+func (e *Executor) emitPreconditionMiss(ctx context.Context, automation *Automation, exec *AutomationExecution, triggeringEvent *events.Event, missed *Precondition) {
 	if missed == nil {
 		return
 	}
@@ -935,7 +1024,7 @@ func (e *Executor) emitPreconditionMiss(automation *Automation, exec *Automation
 			payload["partition"] = triggeringEvent.Partition
 		}
 	}
-	e.publishEvent(events.TopicPreconditionMissed, events.KindPreconditionMissed, payload)
+	e.publishEvent(ctx, events.TopicPreconditionMissed, events.KindPreconditionMissed, payload)
 }
 
 // navigatePath navigates a dot-separated path in a value.

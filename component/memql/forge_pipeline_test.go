@@ -115,16 +115,16 @@ func TestForgeRoutingContractMatchesDSL(t *testing.T) {
 			t.Errorf("requestRouteStatus logic missing routed status %q (for role %s)", target, role)
 		}
 	}
-	// The automation stamps the approver ONLY in the owner fast-track case:
-	// between `case "queued"` and the switch's default.
+	// The before-write body stamps the approver only in the owner fast-track
+	// branch, before the request's first persisted version.
 	autoSrc := readForgeAutomations(t)
-	queued := strings.Index(autoSrc, `case "queued"`)
+	queued := strings.Index(autoSrc, `if decide == "queued" {`)
 	end := -1
 	if queued >= 0 {
-		end = strings.Index(autoSrc[queued:], "default")
+		end = strings.Index(autoSrc[queued:], "}")
 	}
-	if queued < 0 || end < 0 || !strings.Contains(autoSrc[queued:queued+end], "approvedByUserId: args.submitterUserId") {
-		t.Error("routeRequest automation must stamp approvedByUserId in the queued (owner) switch case")
+	if queued < 0 || end < 0 || !strings.Contains(autoSrc[queued:queued+end], "row.approvedByUserId = row.submitterUserId") {
+		t.Error("routeRequest must stamp approvedByUserId in the queued (owner) before-write branch")
 	}
 }
 

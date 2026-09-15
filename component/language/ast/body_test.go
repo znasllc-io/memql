@@ -83,7 +83,8 @@ func statementSamples() map[string]struct {
 		want []string
 	}
 	return map[string]sample{
-		"assign": {&AssignStatement{Name: "a", Value: id("assignValue")}, []string{"assignValue"}},
+		"fieldWrite": {&FieldWriteStatement{Field: "status", Value: id("fieldWriteValue")}, []string{"fieldWriteValue"}},
+		"assign":     {&AssignStatement{Name: "a", Value: id("assignValue")}, []string{"assignValue"}},
 		"assignCall": {&AssignStatement{Name: "a", Call: ccall("query", "q", NamedArg{Name: "k", Value: id("assignCallArg")})},
 			[]string{"assignCallArg"}},
 		"call": {&CallStatement{Call: ccall("mutation", "m", NamedArg{Name: "k", Value: id("callArg")})}, []string{"callArg"}},

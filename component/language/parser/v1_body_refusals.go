@@ -71,7 +71,7 @@ func BodyRefusalCodes() []string {
 // directories.
 func BodyStatementForms() []string {
 	return []string{
-		"assign", "call", "if", "else", "for", "switch", "parallel", "publish", "return",
+		"fieldWrite", "assign", "call", "if", "else", "for", "switch", "parallel", "publish", "return",
 		"retry", "onError", "onSurface", "wait",
 	}
 }

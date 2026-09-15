@@ -3489,6 +3489,51 @@
       }
     },
     {
+      "concept": "v1:platform:automationLoopStop",
+      "file": "platform/concepts.memql",
+      "fields": [
+        "automationName",
+        "cap",
+        "chain",
+        "correlationId",
+        "depth",
+        "finishedAt",
+        "reason",
+        "runId"
+      ],
+      "required": [
+        "automationName",
+        "runId"
+      ]
+    },
+    {
+      "concept": "v1:platform:automationNode",
+      "file": "platform/concepts.memql",
+      "fields": [
+        "cycle",
+        "edgesOut",
+        "loop",
+        "mode",
+        "name",
+        "opaque",
+        "origin",
+        "problem",
+        "publishes",
+        "schedule",
+        "stratum",
+        "template",
+        "trigger",
+        "triggerConcept",
+        "triggerFilter",
+        "triggerKind",
+        "writes"
+      ],
+      "required": [
+        "name",
+        "stratum"
+      ]
+    },
+    {
       "concept": "v1:platform:customDomain",
       "file": "platform/concepts.memql",
       "fields": [

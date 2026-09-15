@@ -218,6 +218,7 @@ type adapterRootSet struct{ args, actor bool }
 // reads its parameter and the clock; a trigger filter its row and the clock;
 // a prompt input has no actor. The literal positions read nothing.
 var adapterRoots = map[tiers.Position]adapterRootSet{
+	tiers.PositionBeforeWriteValue:    {args: true, actor: true},
 	tiers.PositionQueryFilter:         {args: true, actor: true},
 	tiers.PositionQueryRefine:         {args: true, actor: true},
 	tiers.PositionAutomationCondition: {args: true, actor: true},
@@ -232,6 +233,9 @@ var adapterRoots = map[tiers.Position]adapterRootSet{
 // still has an args root).
 func adapterScope(position tiers.Position, env ExprEnv) memql.MapScope {
 	scope := memql.MapScope{}
+	if position == tiers.PositionBeforeWriteValue {
+		scope["row"] = adapterMap(env.Row)
+	}
 	roots := adapterRoots[position]
 	if roots.args {
 		scope["args"] = adapterMap(env.Args)

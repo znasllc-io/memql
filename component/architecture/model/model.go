@@ -27,14 +27,15 @@ const SchemaVersion = "1.0"
 type Kind string
 
 const (
-	KindCluster   Kind = "cluster"
-	KindService   Kind = "service"
-	KindPackage   Kind = "package"
-	KindType      Kind = "type"      // struct (concrete)
-	KindInterface Kind = "interface" // interface type
-	KindFunc      Kind = "func"      // top-level function
-	KindMethod    Kind = "method"    // method with receiver
-	KindField     Kind = "field"     // struct field
+	KindAutomation Kind = "automation" // DSL automation in the static trigger graph
+	KindCluster    Kind = "cluster"
+	KindService    Kind = "service"
+	KindPackage    Kind = "package"
+	KindType       Kind = "type"      // struct (concrete)
+	KindInterface  Kind = "interface" // interface type
+	KindFunc       Kind = "func"      // top-level function
+	KindMethod     Kind = "method"    // method with receiver
+	KindField      Kind = "field"     // struct field
 )
 
 // EdgeKind names the relationship stored on an Edge. Direction is
@@ -50,6 +51,9 @@ const (
 	// contains type, type contains method/field. Used by the
 	// drill-down navigator to decide what zoom-in lands you on.
 	EdgeContains EdgeKind = "contains"
+
+	// EdgeTriggers joins automations whose writes can fire the target.
+	EdgeTriggers EdgeKind = "triggers"
 
 	// EdgeImports is package -> package: a Go import. Edge weight in
 	// Attrs["count"] is the number of imported symbols if computed.

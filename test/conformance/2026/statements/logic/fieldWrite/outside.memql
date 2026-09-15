@@ -1,0 +1,4 @@
+logic bwLogicOutside {
+ row.title = "ready"
+ return row.title
+}

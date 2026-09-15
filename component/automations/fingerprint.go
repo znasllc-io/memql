@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/znasllc-io/memql/component/events"
 	"sort"
+	"strings"
 
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -184,6 +185,33 @@ func eventFingerprintData(triggeringEvent *events.Event) map[string]any {
 	}
 }
 
+// chainEventData removes only the graph version clock and keeps the proven read projection.
+func chainEventData(ev *events.Event, a *Automation, correlation string) map[string]any {
+	data := eventFingerprintData(ev)
+	if data == nil {
+		return nil
+	}
+	payload := ev.Payload
+	if a.Reads != nil {
+		payload = map[string]any{}
+		for _, key := range a.Reads {
+			if value, ok := ev.Payload[key]; ok {
+				payload[key] = value
+			}
+		}
+	} else if strings.HasPrefix(ev.Topic, "graph.node.") {
+		payload = map[string]any{}
+		for key, value := range ev.Payload {
+			if key != "createdAt" {
+				payload[key] = value
+			}
+		}
+	}
+	data["payload"] = payload
+	data["correlation"] = correlation
+	return data
+}
+
 // ComputeInitialChainHead creates the starting chain state for an execution.
 //
 // Feeds execution dedup and the cross-replica cluster guard, so it must be a
@@ -197,6 +225,9 @@ func ComputeInitialChainHead(automationName, triggeredBy string, triggeringEvent
 	}
 
 	if triggeringEvent != nil {
+		if correlation, ok := triggeringEvent["correlation"]; ok {
+			fp["correlation"] = correlation
+		}
 		if topic, ok := triggeringEvent["topic"]; ok {
 			fp["eventTopic"] = topic
 		}

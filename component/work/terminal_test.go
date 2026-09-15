@@ -84,3 +84,31 @@ func TestTerminalReasonAnswersForEveryCode(t *testing.T) {
 		t.Fatal("an unknown code still needs a sentence; the field is read by a person either way")
 	}
 }
+
+// A chain of automations that passed its depth bound is over: another attempt
+// runs the same chain into the same bound (epic memql#5380, D-C). The code
+// arrives WRAPPED on the run that matters most -- a parent whose sub-automation
+// step was refused reports "automation \"child\" execution failed: <the
+// child's refusal>" -- so the contains match has to find it there, or the
+// parent parks on a retry that loops again.
+func TestALoopDepthRefusalIsTerminal(t *testing.T) {
+	msg := `automation "child" execution failed: loop_depth_exceeded: child would run at depth 17, past the cap of 16; chain: a (run-1) -> b (run-2) [loop_depth_exceeded]`
+	code, terminal := TerminalFailureCode(msg)
+	if !terminal || code != TerminalLoopDepthExceeded {
+		t.Fatalf("code = %q terminal = %v, want %q: a loop is terminal by construction", code, terminal, TerminalLoopDepthExceeded)
+	}
+	const want = "A chain of automations passed its depth bound. Another attempt runs the same chain into the same bound: the fix is in the automations, a converging @filter or an @loop, and the chain on this run names them."
+	if got := TerminalReason(TerminalLoopDepthExceeded); got != want {
+		t.Fatalf("TerminalReason = %q, want %q", got, want)
+	}
+}
+
+// terminalFailureCodes is matched in order, so a code must never follow a
+// longer one that contains it.
+func TestTerminalFailureCodesAreLongestFirst(t *testing.T) {
+	for i := 1; i < len(terminalFailureCodes); i++ {
+		if len(terminalFailureCodes[i]) > len(terminalFailureCodes[i-1]) {
+			t.Errorf("%q (%d) follows the shorter %q (%d)", terminalFailureCodes[i], len(terminalFailureCodes[i]), terminalFailureCodes[i-1], len(terminalFailureCodes[i-1]))
+		}
+	}
+}

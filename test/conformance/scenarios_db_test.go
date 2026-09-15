@@ -188,6 +188,10 @@ func loadScenarioSuites(t *testing.T) map[string]scenarioSuite {
 		if !d.IsDir() {
 			continue // README.md
 		}
+		// Loop fixtures have nested shapes and their own load/live runner.
+		if d.Name() == "loops" {
+			continue
+		}
 		dir := filepath.Join(scenarioRoot, d.Name())
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -243,7 +247,9 @@ var (
 func shippedAutomations(t *testing.T) map[string]*automations.Automation {
 	t.Helper()
 	loaded, err := automations.NewLoader(automations.LoaderOptions{
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Registry:  scenarioEnv.Registry,
+		Functions: scenarioEnv.Eng.Functions(),
 	}).LoadFromUnifiedTree()
 	if err != nil {
 		t.Fatalf("load the shipped automations: %v", err)
@@ -400,6 +406,7 @@ type scenarioRig struct {
 
 func newScenarioRig(t *testing.T, env *Env, autos map[string]*automations.Automation) *scenarioRig {
 	t.Helper()
+	installForgeBeforeWrite(t, env)
 	r := &scenarioRig{
 		env:   env,
 		autos: autos,

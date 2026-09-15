@@ -7,6 +7,7 @@ go 1.26.1
 toolchain go1.27.1
 
 require (
+	github.com/prometheus/client_golang v1.24.1
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/stretchr/testify v1.12.1
 	github.com/uptrace/bun v1.2.18
@@ -25,6 +26,7 @@ require (
 	github.com/znasllc-io/memql/component/language/ast v0.0.0
 	github.com/znasllc-io/memql/component/language/dslclause v0.0.0
 	github.com/znasllc-io/memql/component/memql v0.0.0
+	github.com/znasllc-io/memql/component/metrics v0.0.0
 	github.com/znasllc-io/memql/component/provenance v0.0.0
 	github.com/znasllc-io/memql/component/work v0.0.0
 	github.com/znasllc-io/memql/core v0.0.0
@@ -49,7 +51,6 @@ require (
 	github.com/openai/openai-go/v3 v3.56.0 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/prometheus/client_golang v1.24.1 // indirect
 	github.com/prometheus/client_model v0.6.3 // indirect
 	github.com/prometheus/common v0.70.1 // indirect
 	github.com/prometheus/procfs v0.21.1 // indirect
@@ -69,7 +70,6 @@ require (
 	github.com/znasllc-io/memql/component/frontdoor v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/identity v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language/annotations v0.0.0 // indirect
-	github.com/znasllc-io/memql/component/metrics v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/safety v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/secret v0.0.0 // indirect
 	github.com/znasllc-io/memql/docs v0.0.0 // indirect

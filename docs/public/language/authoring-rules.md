@@ -3280,3 +3280,13 @@ read its deliveries, and a child with no `accountId` of its own stays
 owner-only — which reads as a permissions bug in a screen that half works. The
 four campaigns children gained a stamped-from-parent `accountId` for exactly
 that reason, with no backfill for the rows written before it.
+
+## Automation loops
+
+An automation that writes what it triggers on needs a filter the write cannot
+satisfy, or a converging `@loop` annotation whose `until` predicate is negated in
+the filter. Directory-mode `memqllint` rejects uncovered cycles. Prefer a
+before-write automation for adjusting fields on the triggering row: it changes
+the incoming version without issuing another write. See
+[loop protection](memql.md#loop-protection) and
+[before-write adjustments](memql.md#before-write-adjustments).

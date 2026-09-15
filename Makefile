@@ -492,7 +492,7 @@ ARCH_MODEL_OUT ?= component/architecture/embedded/topology.model.json
 ## in practice. --reproducible blanks generated_at and the absolute workspace
 ## path so the output depends only on the code.
 arch-model:
-	$(GO) run ./cmd/memql-arch --root . --types --calls --cluster memql \
+	$(GO) run ./cmd/memql-arch --root . --types --calls --automations --cluster memql \
 		--reproducible --out $(ARCH_MODEL_OUT)
 
 ## CI gate: regenerate the architecture model and diff against the checked-in

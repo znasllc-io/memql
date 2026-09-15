@@ -82,6 +82,15 @@ var grammarSurfaceCorpus = []struct {
 	src    string
 }{
 	// ---- currently legal forms -------------------------------------------
+	{"before write create", true, `@trigger(before="create", concept="v1:probe:ticket")
+automation adjust { row.status = "queued" }`},
+	{"before write update", true, `@trigger(before="update", concept="v1:probe:ticket")
+automation adjust { row.status = row.label }`},
+	{"before write both", true, `@trigger(before="write", concept="v1:probe:ticket")
+automation adjust { row.status = row.label }`},
+	{"before write excludes event", false, `@trigger(before="write", event="probe", concept="v1:probe:ticket")
+automation adjust { row.status = row.label }`},
+
 	{"concept decl", true, `concept probe {
   a string
 }`},
@@ -583,6 +592,40 @@ automation probe {
     n := index()
   }
   return 0
+}`},
+
+	// ---- loop protection (epic memql#5380, memql#5381) --------------------
+	// @loop and @mode are new automation annotations, a WIDENING: before
+	// them each was annotation_unknown. The parser refuses what a value's
+	// source alone shows is wrong, and those forms never parsed either --
+	// the rest (the depth cap, until against the @filter, the mode's flags)
+	// is refused at load, which this path does not reach.
+	{"automation: @loop and @mode (memql#5381)", true, `@trigger(event="node.created", concept="v1:probe:thing")
+@filter(row => row.status != "done")
+@loop(maxDepth=4, until=row => row.status == "done")
+@mode(queued, max=10)
+automation probe {
+  logic probe(x: 1)
+}`},
+	{"automation: @loop until= a string (loop_until_form)", false, `@trigger(event="node.created", concept="v1:probe:thing")
+@loop(maxDepth=4, until="done")
+automation probe {
+  logic probe(x: 1)
+}`},
+	{"automation: @loop with no maxDepth= (loop_max_depth_range)", false, `@trigger(event="node.created", concept="v1:probe:thing")
+@loop(until=row => row.status == "done")
+automation probe {
+  logic probe(x: 1)
+}`},
+	{"automation: @mode max=0 (mode_max_range)", false, `@trigger(event="node.created", concept="v1:probe:thing")
+@mode(queued, max=0)
+automation probe {
+  logic probe(x: 1)
+}`},
+	{"automation: a @mode flag that is no mode (annotation_key)", false, `@trigger(event="node.created", concept="v1:probe:thing")
+@mode(serial)
+automation probe {
+  logic probe(x: 1)
 }`},
 
 	// NOT in this corpus: the retired procedural `func (Query) name(ctx any)`

@@ -76,6 +76,8 @@ each one's replacement, are the table in `parser/v1_refusals.go`
 string the rewriter emits is the engine's internal query form -- also what an
 SDK sends to `Execute` -- and its grammar (`ParseExpression`) does not change.
 
+**Before-write automation bodies** use `@trigger(before="create"|"update"|"write", concept="...")` and field writes `row.<field> = <expression>`. `ast.FieldWriteStatement` is a statement kind and `tiers.PositionBeforeWriteValue` its expression position. The compiler captures branch conditions so earlier field writes cannot change the chosen arm. The engine runs the body after read-merge and before schema validation; only read-only query/logic calls are admitted transitively.
+
 **A body written in statements is not rewritten** (edition 2026, epic
 memql#5370). The parser reads a `logic` or an `automation` in statements
 natively (`parser/v1_body.go`, `parseV1Definition`) into an `ast.Body`, whose

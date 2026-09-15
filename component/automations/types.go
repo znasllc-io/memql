@@ -52,6 +52,7 @@ func loggerLevelKeys() []string {
 
 // Automation represents a complete automation definition.
 type Automation struct {
+	BeforeWrite *BeforeWriteConfig `json:"beforeWrite,omitempty"`
 	// Trusted reports that this automation's SOURCE came from the registered
 	// DSL tree rather than from a caller (memql#2800).
 	//
@@ -132,6 +133,21 @@ type Automation struct {
 	// a trigger, so the two classes cannot blur into one.
 	Template bool `json:"template,omitempty"`
 
+	// Loop is @loop(maxDepth=N, until=row => P): this automation closes a
+	// deliberate cycle the load would otherwise refuse, and bounds it (D18,
+	// epic memql#5380). Nil when the annotation is absent.
+	Loop *LoopConfig `json:"loop,omitempty"`
+
+	// Mode is @mode(<kind>[, max=N]): how concurrent fires of this
+	// automation behave in one process (D19). Nil runs every fire in
+	// parallel, unbounded -- the behaviour before the annotation existed.
+	Mode *ModeConfig `json:"mode,omitempty"`
+
+	// Reads are the payload fields the dedup key keeps for this automation
+	// (loop_reads.go): the fields it can read, when everything it reaches
+	// reads nothing else. Nil keeps the whole payload but its version clock.
+	Reads []string `json:"-"`
+
 	// Origin tracks where this automation was loaded from (file path).
 	Origin string `json:"-"`
 
@@ -156,6 +172,32 @@ type TriggerConfig struct {
 	// `row => <condition>` lambda whose parameter binds the triggering row.
 	FilterLambda *ast.LambdaExpr `json:"-"`
 }
+
+// LoopConfig is @loop(maxDepth=N, until=row => P) (D18; D-H of the loop
+// protection plan). The automation closes a deliberate cycle, stops when P
+// holds on its triggering row -- which its @filter must say, by holding P's
+// negation -- and runs at most MaxDepth times in one causal chain.
+type LoopConfig struct {
+	MaxDepth    int             `json:"maxDepth"`
+	Until       string          `json:"until"`
+	UntilLambda *ast.LambdaExpr `json:"-"`
+}
+
+// ModeConfig is @mode(<kind>[, max=N]) (D19; D-G of the loop protection
+// plan). Max applies to queued (the most fires that may wait) and parallel
+// (the most runs at once); 0 takes the default.
+type ModeConfig struct {
+	Kind string `json:"kind"`
+	Max  int    `json:"max,omitempty"`
+}
+
+// The four modes.
+const (
+	ModeSingle   = "single"
+	ModeQueued   = "queued"
+	ModeRestart  = "restart"
+	ModeParallel = "parallel"
+)
 
 // ArgsSchema is an automation's declared input contract -- the `args { }`
 // block lowered by the compiler (event-payload-binding ADR Decision 1). It
@@ -375,6 +417,7 @@ const (
 
 // Step represents a single operation in an automation.
 type Step struct {
+	FieldWrite *FieldWriteConfig `json:"fieldWrite,omitempty"`
 	// ID identifies this step within its list: the key its result and its
 	// journal record carry. A statement's value is read by the name it binds
 	// (Binds), never by its id.

@@ -119,6 +119,7 @@ func journalContext(ctx context.Context) context.Context {
 	// run opens at the logic's first write (logic_statements.go), and the
 	// journal writes that open it must not count as another (release).
 	ctx = common.ContextWithoutWriteObserver(ctx)
+	ctx = events.ContextWithCause(ctx, events.Cause{})
 	claims := map[string]any{"sub": workJournalActor, "role": "system"}
 	ctx = auth.ContextWithToken(ctx, &auth.TokenInfo{Subject: workJournalActor, Claims: claims})
 	ctx = auth.ContextWithAccess(ctx, &auth.AccessContext{
@@ -396,16 +397,23 @@ func rfc3339(t time.Time) string {
 
 // openRun writes the run row. Called after the executor's own refusal
 // gates (args validation, dedup, the cluster guard) so a refused fire
-// leaves no row.
-func (j *workJournal) openRun(ctx context.Context, automation *Automation, exec *AutomationExecution, triggeringEvent *events.Event) {
+// leaves no row -- the loop protection's refusal excepted, which is a run
+// failure and records one (journal_loop.go).
+//
+// parent is the run's parent cause (loop_runtime.go's runCause), recorded on
+// triggerEvent as `cause` whenever the run is in a chain, so a resume or a
+// recovery that adopts the row runs at the depth this attempt did (epic
+// memql#5380). A root's is zero, and the run re-derives its correlation from
+// the event it records.
+func (j *workJournal) openRun(ctx context.Context, automation *Automation, exec *AutomationExecution, triggeringEvent *events.Event, parent events.Cause) {
 	if j == nil || automation == nil || exec == nil {
 		return
 	}
-	j.call(ctx, "createWorkRun", j.openRunArgs(automation, exec, triggeringEvent))
+	j.call(ctx, "createWorkRun", j.openRunArgs(automation, exec, triggeringEvent, parent))
 }
 
-// openRunArgs is the run row openRun writes.
-func (j *workJournal) openRunArgs(automation *Automation, exec *AutomationExecution, triggeringEvent *events.Event) map[string]any {
+// openRunArgs is the run row openRun writes; parent is openRun's.
+func (j *workJournal) openRunArgs(automation *Automation, exec *AutomationExecution, triggeringEvent *events.Event, parent events.Cause) map[string]any {
 	args := map[string]any{
 		"runId":                 exec.ID,
 		"automationName":        automation.Name,
@@ -421,11 +429,15 @@ func (j *workJournal) openRunArgs(automation *Automation, exec *AutomationExecut
 		"startedAt":             rfc3339(exec.StartedAt),
 	}
 	if triggeringEvent != nil {
-		args["triggerEvent"] = map[string]any{
+		trigger := map[string]any{
 			"topic":   triggeringEvent.Topic,
 			"kind":    triggeringEvent.Kind.String(),
 			"payload": triggeringEvent.Payload,
 		}
+		if !parent.IsZero() {
+			trigger["cause"] = parent
+		}
+		args["triggerEvent"] = trigger
 	}
 	return args
 }

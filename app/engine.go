@@ -131,6 +131,9 @@ func (a *App) engineAndBus() {
 	a.automationLoader = automations.NewLoader(automations.LoaderOptions{
 		Logger:   nil,
 		Registry: a.registry,
+		// The static loop check reads what each automation writes from the
+		// engine's function registry, loaded by Init above (memql#5381).
+		Functions: a.engine.Functions(),
 	})
 
 	// Strict automation boot (memql#2830). The scheduler loads automations
@@ -140,7 +143,8 @@ func (a *App) engineAndBus() {
 	// boot. This is the automation-tree half of the same strict-boot
 	// contract engine.Init enforces for every other construct kind;
 	// MEMQL_DSL_ALLOW_SKIPS is the shared operator break-glass.
-	if _, err := a.automationLoader.LoadAll(); err != nil {
+	loadedAutomations, err := a.automationLoader.LoadAll()
+	if err != nil {
 		a.fatal("automation tree failed to load", "error", err, "component", automations.ComponentName)
 	}
 
@@ -300,6 +304,7 @@ func (a *App) engineAndBus() {
 	// the engine keeps its "no LogicRunner wired" error path and
 	// single-step Logic dispatch continues to work unchanged.
 	a.engine.SetLogicRunner(automations.NewLogicRunner(a.engine, a.stepRegistry, a.Logger))
+	automations.InstallBeforeWriteHooks(a.engine, loadedAutomations, a.stepRegistry, a.Logger)
 
 	// Automations are the one runnable construct kind the engine holds no
 	// registry for -- the scheduler owns them -- so the construct catalog
@@ -307,6 +312,13 @@ func (a *App) engineAndBus() {
 	// scheduler leaves it unwired and reports no automations, which for that
 	// node is the truth rather than a gap.
 	a.engine.SetAutomationCataloger(a.automationScheduler)
+
+	// The same seam, for the automation graph MemQL OS's Cluster >
+	// Automations section draws (memql#5384): the static loop graph over the
+	// automations this scheduler registered, built once per registered set.
+	// Unwired, the automationGraph builtin refuses rather than answering an
+	// empty graph.
+	a.engine.SetAutomationGraphSource(a.automationScheduler)
 
 	a.Dependencies = append(a.Dependencies, a.engine)
 	a.Dependencies = append(a.Dependencies, a.automationScheduler)

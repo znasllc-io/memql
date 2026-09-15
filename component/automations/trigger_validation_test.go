@@ -432,7 +432,7 @@ func TestShippedTree_EveryAutomationIsWiredToSomething(t *testing.T) {
 		// The mirror rule is the loader's: a template carrying a trigger is
 		// REFUSED there, so by the time an automation reaches this loop a
 		// template has no trigger and nothing else is reachable by naming.
-		if a.IsTemplate() {
+		if a.IsTemplate() || a.BeforeWrite != nil {
 			continue
 		}
 		if !a.IsEventTriggered() && !a.IsScheduled() {

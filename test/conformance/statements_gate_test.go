@@ -33,8 +33,9 @@ const statementCells = "2026/statements"
 // code its refusal carries: the cell holds that refusal and no run.
 var statementRefusedForms = map[string]map[string]string{
 	"logic": {
-		"publish":   "body_publish_in_logic",  // D14: a logic may not publish
-		"onSurface": "body_call_not_in_logic", // a surface names where an action runs, and a logic calls no action
+		"fieldWrite": "before_write_outside",
+		"publish":    "body_publish_in_logic",  // D14: a logic may not publish
+		"onSurface":  "body_call_not_in_logic", // a surface names where an action runs, and a logic calls no action
 	},
 }
 

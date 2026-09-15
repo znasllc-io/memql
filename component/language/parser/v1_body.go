@@ -174,6 +174,13 @@ func (p *Parser) parseV1Definition(attrs []*Attribute, attrToks []Token) (*Funct
 	}
 
 	body := &ast.Body{Statements: stmts, Span: joinV1Span(v1TokenSpan(kindTok), v1TokenSpan(closeTok))}
+	for _, a := range attrs {
+		if a.Name == AttrTrigger {
+			if _, ok := a.Args["before"]; ok {
+				body.BeforeWrite = true
+			}
+		}
+	}
 	auto := &AutomationDef{Name: name, Enabled: true, Body: body}
 	def := &FunctionDef{
 		Name:       name,
@@ -204,6 +211,18 @@ func checkV1TriggerAttributes(attrs []*Attribute, toks []Token) error {
 		case AttrSchedule:
 			return bodyRetired(tok, codeTriggerScheduleRetired, "`@schedule(cron=...)`", "write `@trigger(schedule=...)`")
 		case AttrTrigger:
+			if value, ok := a.Args["before"]; ok {
+				before, valid := value.(string)
+				if !valid {
+					continue
+				} // The annotation registry owns wrong keyword value types.
+				_, event := a.Args["event"]
+				_, schedule := a.Args["schedule"]
+				concept, _ := a.Args["concept"].(string)
+				if (before != "create" && before != "update" && before != "write") || event || schedule || concept == "" {
+					return bodyRefuse(tok, "before_write_trigger", "before requires create, update, or write and concept, and excludes event and schedule")
+				}
+			}
 			if _, ok := a.Args["partition"]; ok {
 				return bodyRetired(tok, codeTriggerPartitionRetired, "`partition=` on @trigger", "delete it")
 			}
@@ -367,6 +386,8 @@ func (p *Parser) parseV1WordStatement(kind, construct string) (ast.BodyStatement
 		return nil, v1Errorf(tok, "the args block of %s comes first, before any statement", construct)
 	case word == "precondition":
 		return nil, v1Errorf(tok, "a precondition block comes before the first statement of %s", construct)
+	case strings.HasPrefix(word, "row.") || word == "row" && next.Literal == ".":
+		return p.parseBeforeWriteField()
 	case next.Type == TokenDefine:
 		return p.parseV1Assign()
 	}
@@ -1027,4 +1048,22 @@ func (p *Parser) parseV1Return() (ast.BodyStatement, error) {
 	}
 	stmt.Span = p.spanFrom(retTok)
 	return stmt, nil
+}
+
+func (p *Parser) parseBeforeWriteField() (ast.BodyStatement, error) {
+	start := p.v1Take()
+	field := strings.TrimPrefix(start.Literal, "row.")
+	if start.Literal == "row" {
+		p.v1Take()
+		field = p.v1Take().Literal
+	}
+	if field == "" || strings.Contains(field, ".") || p.current.Literal != "=" {
+		return nil, bodyRefuse(start, "before_write_field", "write one declared payload field as row.<field> = <expression>")
+	}
+	p.v1Take()
+	value, err := p.parseV1BodyExpression()
+	if err != nil {
+		return nil, err
+	}
+	return &ast.FieldWriteStatement{Field: field, Value: value, Span: p.spanFrom(start)}, nil
 }

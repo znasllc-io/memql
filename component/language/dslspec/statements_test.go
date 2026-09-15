@@ -16,7 +16,7 @@ import (
 // is written with; "" for a form written with no keyword of its own (a name
 // bound with :=, a call by its construct's kind).
 var statementKeyword = map[string]string{
-	"assign": "", "call": "",
+	"fieldWrite": "", "assign": "", "call": "",
 	"if": "if", "else": "else", "for": "for", "switch": "switch", "parallel": "parallel",
 	"publish": "publish", "return": "return",
 	"retry": "retry", "wait": "wait", "onError": "on", "onSurface": "on",

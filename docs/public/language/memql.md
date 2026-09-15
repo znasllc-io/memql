@@ -640,6 +640,7 @@ names the position by the name in its first column.
 
 | Position | Written as | Runs | Takes | Applies a spec or trait |
 |---|---|---|---|---|
+| `beforeWriteValue` | a row.<field> = <expression> value in a before-write automation | In process | Every expression except a construct call | Yes |
 | `queryFilter` | `filter row => ...` in a query, and the query a tool's `@handler(query=...)` runs | Pushed down to SQL | Every expression except a construct call; unary `-`, arithmetic, `??`, a map literal and an in-process function only on values that do not read the row | Yes |
 | `sort` | `sort "row.createdAt", "desc"` | Pushed down to SQL | A literal, and nothing else | No |
 | `specBody` | `spec c name = row => ...`, `trait name = row => ...` | Pushed down to SQL | Every expression except a construct call; unary `-`, arithmetic, `??`, a map literal and an in-process function only on values that do not read the row | Yes |
@@ -2038,6 +2039,75 @@ automation conflictDetection {
 ```
 
 A trigger filter is written in the same expression language as a query filter, but it runs in process, against the one row that fired: every in-process function is available, and `args` holds the automation's declared args, bound from the event payload and validated before the filter runs.
+
+### Loop protection
+
+At load, MemQL builds a directed graph: an edge joins an automation to another
+when its writes can fire the other's trigger. A trigger filter removes an edge
+only when the written values prove that the filter cannot match. Unknown values
+keep the edge. The graph includes mutation and publish calls through logic and
+sub-automations; opaque builtins and actions are reported as coverage limits.
+An uncovered cycle refuses the load with `[loop_cycle]`. `memqllint` applies the
+same check in directory mode. Each graph stratum is the longest-path layer of
+its condensed graph; members of a cycle share a layer.
+
+Use a filter that excludes the state your own write produces. For a deliberate
+converging cycle, declare `@loop(maxDepth=4, until=row => row.status == "done")`
+and include `row.status != "done"` as a top-level conjunct of `@filter`.
+Every cycle must pass through an annotated automation. The bound counts that
+automation's runs within the chain and cannot exceed the global depth cap.
+Reaching the converged state stops through the filter without recording an error.
+
+Each event carries its causation, correlation and chain depth across the mesh.
+A root starts at depth zero; its first automation runs at depth one. The default
+cap is 16. A run beyond the cap is recorded as failed with
+`loop_depth_exceeded` and its chain. Within a correlation, identical reads
+suppress an in-flight echo; a new root cause can execute the same row state again.
+For event-pure bodies, deduplication uses the declared and referenced payload
+fields. Other bodies use the payload with the graph version clock removed.
+A per-process budget also limits each (automation, row) to 30 executions per
+60-second budget window, covering chains that cross an untracked boundary.
+
+### Execution modes
+
+Modes apply per automation, per process, including sub-automation calls.
+Without `@mode`, execution is unbounded parallel subject to the executor's
+existing concurrency and budget limits.
+
+| Annotation | While another run is active |
+|---|---|
+| `@mode(single)` | Skip the new fire. |
+| `@mode(queued, max=10)` | Wait in FIFO order; skip when ten fires already wait. Waiting holds no executor slot. |
+| `@mode(restart)` | Cancel the previous run and start the new fire. |
+| `@mode(parallel, max=3)` | Allow three concurrent runs; skip excess fires. |
+
+`@mode(queued)` uses `MEMQL_AUTOMATION_QUEUED_MODE_DEFAULT_MAX` (10).
+`max` is invalid on `single` and `restart`. A synchronous sub-automation call
+cannot queue behind its own active ancestor and is skipped. Authored automations
+with the same name have separate execution modes and deduplication per owner.
+
+### Before-write adjustments
+
+Use `@trigger(before="create", concept="v1:forge:request")` to adjust the incoming
+row before its first version is stored. `before="update"` selects later versions;
+`before="write"` selects both. The optional filter sees the merged incoming row.
+Bodies run in automation-name order after read-merge and before validation.
+
+Assignments such as `row.status = "queued"` modify a declared field directly.
+The body may bind expressions, call read-only logic or queries, use `if`/`else`,
+and `return`. It cannot mutate another row, publish, invoke an action, builtin,
+or sub-automation, or assign an intrinsic or nested field. These restrictions
+are checked through transitive calls. The adjusted row produces one stored
+version and the normal write events, with no separate automation run row.
+
+An activated authored before-write automation applies only to its author's own
+writes. It runs with client authority and may adjust public payload fields;
+server-set, ownership, account-scope and relationship fields are protected.
+Activation and deactivation take effect without restarting the writing engine.
+
+The **Cluster → Automations** section in MemQL OS shows loaded platform automations, their graph, filters,
+bounds, execution modes and recent depth-related stops. Operators can inspect
+the stopped chain to find the write that re-fired the automation.
 
 ### Parallel branches
 

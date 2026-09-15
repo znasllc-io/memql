@@ -27,6 +27,44 @@ QueryClient.prototype.artifactProbe = function (this: QueryClient, args: Artifac
   return this.executeNamed("artifactProbe", buildArtifactProbe(args), opts);
 };
 
+/** The static loop graph over the automations this node registered, one v1:platform:automationNode row per automation: its trigger, filter, writes, the calls the graph cannot see into, its @loop and @mode, the automations it starts and why, its stratum, and the cycle it lies on. Built once per registered set and never persisted. Carries no run and no payload. */
+export interface AutomationGraphArgs {
+}
+
+export function buildAutomationGraph(args: AutomationGraphArgs): string {
+  void args;
+  return "builtin automationGraph()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    automationGraph(args?: AutomationGraphArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.automationGraph = function (this: QueryClient, args: AutomationGraphArgs = {} as AutomationGraphArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("automationGraph", buildAutomationGraph(args), opts);
+};
+
+/** The latest 50 runs the loop protection stopped, newest first, one v1:platform:automationLoopStop row each: the chain of automation names and run ids that led to the stop, the bound it passed, and when. Read by the engine under its own cluster actor and projected without payloads -- no input, variables or triggering event reaches the reply. */
+export interface AutomationLoopStopsArgs {
+}
+
+export function buildAutomationLoopStops(args: AutomationLoopStopsArgs): string {
+  void args;
+  return "builtin automationLoopStops()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    automationLoopStops(args?: AutomationLoopStopsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.automationLoopStops = function (this: QueryClient, args: AutomationLoopStopsArgs = {} as AutomationLoopStopsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("automationLoopStops", buildAutomationLoopStops(args), opts);
+};
+
 /** Generate an event-email rule's automation construct and arm it (memql#4829). The generator is a DETERMINISTIC template over the rule's form -- the LLM authoring path stays off, because a rule that mails strangers is not a place for a model to improvise and a deterministic generator is one a person can read the output of. The generated .memql goes through the ordinary authoring pipeline: bundle, validate, activate. Activation takes effect IMMEDIATELY rather than at next boot. The rule row records the bundle and construct it produced; on refusal it records the engine's own sentence on lastError and the rule goes to 'failed' rather than silently staying draft. */
 export interface CampaignActivateEmailRuleArgs {
   /** The rule to generate and arm. The caller must own it: the generated construct runs under the AUTHOR's envelope, so who armed it decides what it can read. */

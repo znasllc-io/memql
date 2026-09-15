@@ -532,6 +532,6 @@ func (e *Executor) runStatementAutomation(ctx context.Context, automation *Autom
 	if e.chainTrackingEnabled && exec.ChainHead != "" {
 		completedPayload["chainHead"] = exec.ChainHead
 	}
-	e.publishEvent(events.TopicAutomationCompleted, events.KindAutomationCompleted, completedPayload)
+	e.publishEvent(ctx, events.TopicAutomationCompleted, events.KindAutomationCompleted, completedPayload)
 	return exec, nil
 }

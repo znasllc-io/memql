@@ -1,48 +1,13 @@
 package conformance
 
-// conf_1847_test.go -- the automation-step multi-step-logic dispatch dimension
-// (#1847, reopened).
-//
-// The staging-confirmed root cause: when a `logic` function with a MULTI-STEP
-// body is invoked as an AUTOMATION STEP (`step run { logic routeRequest {
-// event: event } }`), only its `return` expression is evaluated -- the
-// intermediate side-effecting steps (the guarded `advanceRequest`
-// transitions + the `recordRequestEvent` audit write) are SKIPPED. The
-// SAME logic invoked via the TOOL path (engine.Execute / RunLogic) runs every
-// step. On staging the routeRequest automation fired + "completed" but logged
-// only `step=_return`, so a fresh owner submission stayed `submitted` with an
-// empty history.
-//
-// The #1840 dimension (conf_1840_test.go) drove routeRequest DIRECTLY via
-// `e.Eng.Execute("routeRequest(...)")` -- the tool/engine path -- which is
-// exactly why the bug slipped through 3x: nothing exercised the node.created ->
-// automation -> multi-step-logic dispatch end to end. This dimension closes
-// that gap by running the REAL `routeRequest` automation (loaded from the
-// embedded DSL) through a REAL automation Executor with a REAL node.created
-// triggering event, then asserting the side effects PERSISTED:
-//
-//   - the request advanced submitted -> queued (the owner fast-track
-//     advanceRequest step), and
-//   - a `routed` v1:forge:requestEvent was written (the recordRequestEvent
-//     step).
-//
-// Neither side effect is referenced by routeRequest's `return
-// args.event.payload.id`, so a dispatch that only evaluates the return drops
-// both. It FAILS on pre-fix main (the staging shape) and PASSES once the
-// automation-step logic invocation runs the full body.
-//
-// #2235 update (logic-purity burn-down): routeRequest + recordTransition no
-// longer use a `logic` at all -- they are EVENT-BOUND automation steps that bind
-// their mutation args directly from event.payload (the proven cluster
-// registerNode/deregisterNode pattern; a logic step's Bundle-wrapped result made
-// field(decide.result, ...) resolve to nil). This dimension's contract is
-// unchanged and still the right end-to-end check: driving the REAL automation
-// must still PERSIST the side effects (advanceRequest -> queued; the 'routed' /
-// 'approved' requestEvents). It would FAIL if an event-bound step were dropped,
-// mis-bound, or the condition mis-evaluated.
+// The forge regression exercises the full before-write routing body, then
+// the event-bound audit body. Routing changes the initial row; recording an
+// audit remains a real automation execution with a separate persisted effect.
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
 	automationSteps "github.com/znasllc-io/memql/component/automations/steps"
@@ -59,10 +24,19 @@ func automationLogicFullBodyCheck() check {
 }
 
 func runAutomationLogicFullBody(t *testing.T, e *Env) {
+	installForgeBeforeWrite(t, e)
 	suffix := uniqueSuffix("1847")
 
 	// --- A. routeRequest (node.created -> routeRequest, owner fast-track) ---
 	routeRequestId := "req-route-" + suffix
+	captured := make(chan events.Event, 16)
+	unsubscribe := e.Eng.EventBus().Subscribe("graph.node.#", func(ev events.Event) {
+		id, _ := ev.Payload["id"].(string)
+		if id == routeRequestId || strings.HasSuffix(id, ":"+routeRequestId) {
+			captured <- ev
+		}
+	})
+	defer unsubscribe()
 	e.runMutation(t, "createRequest", map[string]any{
 		"requestId": routeRequestId,
 		"projectId": "proj-" + suffix,
@@ -70,32 +44,27 @@ func runAutomationLogicFullBody(t *testing.T, e *Env) {
 		"body":      "Owner submission must auto-route to queued + record a 'routed' event.",
 	})
 
-	// Read the row back as the shaped request (carrying the canonical `id` the
-	// graph.node.created event payload would). The automation's
-	// `advanceRequest({ requestId: args.event.payload.id })` targets that
-	// id, and `requestById` filters on it.
-	beforeRoute := requestRow(t, e, routeRequestId)
-	if got := asStr(beforeRoute["status"]); got != "submitted" {
-		t.Fatalf("#1847 precondition: new request should be 'submitted', got %v", beforeRoute["status"])
-	}
-	canonicalRouteId := asStr(beforeRoute["id"])
-
-	// Drive the REAL routeRequest automation with the REAL node.created event,
-	// exactly as the scheduler does on a v1:forge:request insert. The event
-	// payload IS the request row (the graph.node.created envelope carries the
-	// created node's payload + canonical id), so submitterRole == "owner" is what
-	// routeRequest branches on.
-	fireForgeAutomation(t, e, "routeRequest", "node.created", events.KindNodeCreated, cloneStringMap(beforeRoute))
-
-	// The owner fast-track transition (advanceRequest -> "queued") is a
-	// step whose result the `return args.event.payload.id` never references. If
-	// the automation-step dispatch only evaluated the return, this stays
-	// "submitted" -- the staging failure.
-	afterRoute := requestRow(t, e, canonicalRouteId)
+	// The hook must have routed in the original write, before any event run.
+	afterRoute := requestRow(t, e, routeRequestId)
 	if got := asStr(afterRoute["status"]); got != "queued" {
-		t.Fatalf("#1847: routeRequest did not advance the owner request to 'queued' "+
-			"(the automation's advanceRequest persist step was skipped); status=%v", afterRoute["status"])
+		t.Fatalf("#1847: before-write routing left owner request at %v", afterRoute["status"])
 	}
+	select {
+	case ev := <-captured:
+		if ev.Kind != events.KindNodeCreated || ev.Payload["status"] != "queued" || ev.Payload["firstVersion"] != true {
+			t.Fatalf("before-write must publish the initial routed row: %+v", ev)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("missing initial request event")
+	}
+	select {
+	case ev := <-captured:
+		t.Fatalf("before-write emitted a second request event: %+v", ev)
+	case <-time.After(200 * time.Millisecond):
+	}
+	payload := cloneStringMap(afterRoute)
+	payload["firstVersion"] = true
+	fireForgeAutomation(t, e, "recordRouted", "node.created", events.KindNodeCreated, payload)
 
 	// The 'routed' audit event (recordRequestEvent) is the other
 	// unreferenced side-effecting step. The audit event is keyed by the SHORT
@@ -152,7 +121,7 @@ func runAutomationLogicFullBody(t *testing.T, e *Env) {
 func fireForgeAutomation(t *testing.T, e *Env, automationName, topic string, kind events.Kind, payload map[string]any) {
 	t.Helper()
 
-	loader := automations.NewLoader(automations.LoaderOptions{Logger: e.Eng.Logger})
+	loader := automations.NewLoader(automations.LoaderOptions{Logger: e.Eng.Logger, Registry: e.Registry, Functions: e.Eng.Functions()})
 	automation, err := loader.LoadByName(automationName)
 	if err != nil {
 		t.Fatalf("#1847: load automation %q from DSL: %v", automationName, err)
@@ -200,4 +169,17 @@ func cloneStringMap(m map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+// Install only for tests which exercise the new write contract; each Env is
+// shared by the conformance dimensions, so restore its hook set afterwards.
+func installForgeBeforeWrite(t *testing.T, e *Env) {
+	t.Helper()
+	loader := automations.NewLoader(automations.LoaderOptions{Logger: e.Eng.Logger, Registry: e.Registry, Functions: e.Eng.Functions()})
+	a, err := loader.LoadByName("routeRequest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	automations.InstallBeforeWriteHooks(e.Eng, []*automations.Automation{a}, automationSteps.NewRegistry(), e.Eng.Logger)
+	t.Cleanup(func() { e.Eng.SetBeforeWriteHooks(nil) })
 }

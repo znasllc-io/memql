@@ -72,6 +72,7 @@ func (a *App) wireAuthoredRuntime() {
 	})
 
 	scheduler, err := automations.NewAuthoredScheduler(automations.AuthoredSchedulerOptions{
+		BeforeWriteEngine: a.engine, BeforeWriteRegistry: a.stepRegistry,
 		Logger:   a.Logger,
 		Loader:   a.automationLoader,
 		EventBus: a.eventBus,

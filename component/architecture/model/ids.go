@@ -50,3 +50,6 @@ func MethodID(pkgPath, recvType, methodName string) ID {
 func FieldID(pkgPath, typeName, fieldName string) ID {
 	return ID(fmt.Sprintf("field:%s.%s.%s", pkgPath, typeName, fieldName))
 }
+
+// AutomationID identifies a DSL automation by its registered name.
+func AutomationID(name string) ID { return ID("automation:" + name) }

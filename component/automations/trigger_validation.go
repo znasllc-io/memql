@@ -53,7 +53,7 @@ var plainSecondsField = regexp.MustCompile(`^\d+$`)
 // Returns an error for the two structural failures; emits a WARN for the
 // sub-minute cron, which is legal and occasionally intended.
 func (l *Loader) validateTriggerWiring(automation *Automation) error {
-	if automation == nil {
+	if automation == nil || automation.BeforeWrite != nil {
 		return nil
 	}
 

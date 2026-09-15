@@ -13,8 +13,9 @@ package ast
 
 // Body is the statements of a logic or an automation, in source order.
 type Body struct {
-	Statements []BodyStatement
-	Span       Span
+	BeforeWrite bool
+	Statements  []BodyStatement
+	Span        Span
 }
 
 // BodyStatement is one statement of a body. The concrete types below are the
@@ -180,12 +181,14 @@ func (s *ReturnStatement) StatementSpan() Span   { return s.Span }
 // BodyStatementKinds lists the statement kinds, in the words StatementKind
 // returns. It is the closed set every exhaustive walker is tested against.
 func BodyStatementKinds() []string {
-	return []string{"assign", "call", "if", "for", "switch", "parallel", "publish", "return"}
+	return []string{"fieldWrite", "assign", "call", "if", "for", "switch", "parallel", "publish", "return"}
 }
 
 // StatementKind names a statement's kind: one of BodyStatementKinds.
 func StatementKind(s BodyStatement) string {
 	switch s.(type) {
+	case *FieldWriteStatement:
+		return "fieldWrite"
 	case *AssignStatement:
 		return "assign"
 	case *CallStatement:
@@ -264,6 +267,8 @@ func StatementExpressions(s BodyStatement) []ExpressionNode {
 		}
 	}
 	switch t := s.(type) {
+	case *FieldWriteStatement:
+		add(t.Value)
 	case *AssignStatement:
 		addCall(t.Call)
 		add(t.Value)
@@ -293,3 +298,14 @@ func StatementExpressions(s BodyStatement) []ExpressionNode {
 	}
 	return out
 }
+
+// FieldWriteStatement adjusts one declared payload field before persistence.
+type FieldWriteStatement struct {
+	Field string
+	Value ExpressionNode
+	Span  Span
+}
+
+func (*FieldWriteStatement) node()                 {}
+func (*FieldWriteStatement) bodyStatement()        {}
+func (s *FieldWriteStatement) StatementSpan() Span { return s.Span }

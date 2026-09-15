@@ -205,7 +205,8 @@ func (e *MemQLEngine) executeUpdate(ctx context.Context, mutation MutationNode) 
 		if updateActor != "" {
 			eventPayload["actor"] = updateActor
 		}
-		e.publishEventWithActor(
+		e.publishGraphWriteEvent(
+			ctx,
 			events.BuildTopicWithConcept(events.TopicGraphNodeUpdated, meta.conceptName),
 			events.KindNodeUpdated,
 			eventPayload,
@@ -892,6 +893,11 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		return nil, meta, fmt.Errorf("update(): no existing row for concept %q id %q (use insert() to create)", conceptName, id)
 	}
 
+	beforeWriteIncomingStatus := payload["status"]
+	if err := e.applyBeforeWrite(ctx, conceptName, id, meta.priorExisted, payload); err != nil {
+		return nil, meta, err
+	}
+
 	// ROW-AUTHZ OWNER STAMP for writes that bypassed the mutation
 	// template (memql#3175, carrying memql#3059). The other half of
 	// #3174's guard above: that one refuses a write onto a row the caller
@@ -1223,7 +1229,17 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// DSL cannot gate a transition on actor.role, so the rule lives here.
 	// See forge_request_validation.go.
 	if conceptMeta.Name == conceptForgeRequest {
-		if err := e.validateForgeRequestTransition(ctx, payload, mutation.ID, actor); err != nil {
+		// The caller still must submit the initial state. A before-write hook
+		// routes that accepted submission inside the same persisted version.
+		validationPayload := payload
+		if !meta.priorExisted {
+			validationPayload = make(map[string]any, len(payload))
+			for k, v := range payload {
+				validationPayload[k] = v
+			}
+			validationPayload["status"] = beforeWriteIncomingStatus
+		}
+		if err := e.validateForgeRequestTransition(ctx, validationPayload, mutation.ID, actor); err != nil {
 			return nil, meta, err
 		}
 	}
@@ -1455,7 +1471,8 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		// closes that with a claim (the email-rule fire path does).
 		eventPayload["firstVersion"] = !meta.priorExisted
 
-		e.publishEventWithActor(
+		e.publishGraphWriteEvent(
+			ctx,
 			events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptMeta.Name),
 			events.KindNodeCreated,
 			eventPayload,

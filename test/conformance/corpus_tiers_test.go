@@ -401,6 +401,14 @@ func corpusExpressionsAt(pos tiers.Position, file *ast.File) (nodes []ast.Expres
 		switch d := def.(type) {
 		case *ast.FunctionDef:
 			if auto, ok := d.Body.(*ast.AutomationDef); ok && auto != nil {
+				if pos == tiers.PositionBeforeWriteValue && auto.Body != nil {
+					ast.WalkBody(auto.Body.Statements, func(s ast.BodyStatement) bool {
+						if f, ok := s.(*ast.FieldWriteStatement); ok {
+							nodes = append(nodes, f.Value)
+						}
+						return true
+					})
+				}
 				if pos == tiers.PositionTriggerFilter && auto.Trigger != nil && auto.Trigger.FilterLambda != nil {
 					nodes = append(nodes, auto.Trigger.FilterLambda)
 				}
@@ -483,7 +491,7 @@ func corpusExpressionsAt(pos tiers.Position, file *ast.File) (nodes []ast.Expres
 		}
 	}
 	switch pos {
-	case tiers.PositionQueryFilter, tiers.PositionQueryRefine, tiers.PositionSort, tiers.PositionSpecBody,
+	case tiers.PositionBeforeWriteValue, tiers.PositionQueryFilter, tiers.PositionQueryRefine, tiers.PositionSort, tiers.PositionSpecBody,
 		tiers.PositionTriggerFilter, tiers.PositionRowAuthzArgument, tiers.PositionToolDefault:
 		return nodes, true
 	}

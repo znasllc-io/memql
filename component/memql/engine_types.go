@@ -469,6 +469,15 @@ const (
 	// declaration from the live registry (epic memql#4378). Virtual: no
 	// row is persisted. See data_origins_read.go.
 	BuiltinExecutorDataOrigins = "dataOrigins"
+	// BuiltinExecutorAutomationGraph projects the static loop graph over the
+	// automations this node's scheduler registered, one row per automation
+	// (epic memql#5380). Virtual: no row is persisted. See
+	// automation_graph_read.go.
+	BuiltinExecutorAutomationGraph = "automationGraph"
+	// BuiltinExecutorAutomationLoopStops projects the latest runs the loop
+	// protection stopped, with no payload, read under the engine's own
+	// cluster actor. See automation_graph_read.go.
+	BuiltinExecutorAutomationLoopStops = "automationLoopStops"
 	// BuiltinExecutorSiteHostnameCheck answers whether the caller could
 	// create a site at a hostname right now -- the write guard's own shape
 	// and uniqueness rules, asked before the write (2026-09-05 design, D7).

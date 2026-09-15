@@ -92,6 +92,8 @@ type (
 	FunctionArg           = ast.FunctionArg
 	AutomationDef         = ast.AutomationDef
 	TriggerDef            = ast.TriggerDef
+	LoopDef               = ast.LoopDef
+	ModeDef               = ast.ModeDef
 	ArgsSchema            = ast.ArgsSchema
 	ArgsField             = ast.ArgsField
 	UseDeclaration        = ast.UseDeclaration
@@ -139,7 +141,9 @@ var (
 	AttrExecutor             = ast.AttrExecutor
 	AttrFilter               = ast.AttrFilter
 	AttrHandler              = ast.AttrHandler
+	AttrLoop                 = ast.AttrLoop
 	AttrMergeFields          = ast.AttrMergeFields
+	AttrMode                 = ast.AttrMode
 	AttrAppendFields         = ast.AttrAppendFields
 	AttrAddToSet             = ast.AttrAddToSet
 	AttrRemoveFromSet        = ast.AttrRemoveFromSet

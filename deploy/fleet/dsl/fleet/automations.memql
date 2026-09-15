@@ -14,7 +14,7 @@
 //      caller-scoped query from inside one would return nothing while looking
 //      entirely correct.
 //
-//   2. NO LOOPS, BY CONSTRUCTION. The COMMAND vocabulary is the transient
+//   2. LOOPS EXCLUDED BY TRIGGER FILTERS. The COMMAND vocabulary is the transient
 //      statuses (`provisioning`, `suspending`, `resuming`, `tearing_down`).
 //      Every action automation fires only on one of those and ends by writing a
 //      SETTLED status (`running`, `suspended`, `torn_down`, `failed`) that no
@@ -63,6 +63,7 @@ use platform.mutations.{ stageOutboundRequest }
 /// `pending` state exists for a row written ahead of any intent to act on it, and is not what
 /// createInstance stamps.
 @trigger(event="node.created", concept="v1:fleet:instance")
+@filter(row => row.status == "provisioning")
 automation provisionInstanceOnCreate {
   args {
     id              any
@@ -100,6 +101,7 @@ automation provisionInstanceOnCreate {
 /// tier-change path, and the day it needs to differ -- draining connections before a downgrade, say
 /// -- it is already its own construct rather than a branch inside a shared one.
 @trigger(event="node.updated", concept="v1:fleet:instance")
+@filter(row => row.status == "provisioning")
 automation reRenderInstanceOnShapeChange {
   args {
     id              any
@@ -140,6 +142,7 @@ automation reRenderInstanceOnShapeChange {
 /// but adds resume latency and takes the tenant's backups offline while it is down; task memql#3856
 /// measures which one hibernation should default to.
 @trigger(event="node.updated", concept="v1:fleet:instance")
+@filter(row => row.status == "suspending")
 automation suspendInstanceOnRequest {
   args {
     id     any
@@ -171,6 +174,7 @@ automation suspendInstanceOnRequest {
 /// status, so nothing can move a torn-down row to `resuming` without going through a mutation that
 /// would have to say so. That is why the two are different statuses rather than a flag on one.
 @trigger(event="node.updated", concept="v1:fleet:instance")
+@filter(row => row.status == "resuming")
 automation resumeInstanceOnRequest {
   args {
     id     any
@@ -209,6 +213,7 @@ automation resumeInstanceOnRequest {
 /// `tearing_down` rather than settled -- a state that says what was being attempted, which is what
 /// an operator needs and what a row that looked finished would deny them.
 @trigger(event="node.updated", concept="v1:fleet:instance")
+@filter(row => row.status == "tearing_down")
 automation tearDownInstanceOnRequest {
   args {
     id     any
@@ -249,6 +254,7 @@ automation tearDownInstanceOnRequest {
 /// resume is a mildly redundant email; a missed one is a customer who does not know their instance
 /// exists. Task memql#3855 revisits it when Orbit owns the onboarding sequence.
 @trigger(event="node.updated", concept="v1:fleet:instance")
+@filter(row => row.status == "running")
 automation welcomeOnInstanceRunning {
   args {
     id          any

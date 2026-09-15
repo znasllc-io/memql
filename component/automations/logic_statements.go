@@ -89,6 +89,9 @@ func (r *LogicRunner) statementLogic(fnName string, body []map[string]any) (*Aut
 
 // RunLogicBody implements memql.LogicRunner (see the file comment).
 func (r *LogicRunner) RunLogicBody(ctx context.Context, fnName string, body []map[string]any, args map[string]any) (any, error) {
+	if memql.InBeforeWrite(ctx) {
+		r = r.WithoutJournal()
+	}
 	if r.stepRegistry == nil {
 		return nil, fmt.Errorf("logic runner has no step registry wired")
 	}
@@ -136,7 +139,7 @@ func (r *LogicRunner) RunLogicBody(ctx context.Context, fnName string, body []ma
 		exec.Input, exec.CallerSuppliedPayload = args, true
 		openCtx := ctx
 		held.hold = &heldWrites{open: func() {
-			held.write(openCtx, "createWorkRun", held.openRunArgs(a, exec, nil))
+			held.write(openCtx, "createWorkRun", held.openRunArgs(a, exec, nil, events.Cause{}))
 		}}
 		run.journal, run.orders = held, true
 		ctx = common.ContextWithWriteObserver(ctx, func(string, string) { held.release() })

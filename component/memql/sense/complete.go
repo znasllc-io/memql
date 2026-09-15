@@ -149,14 +149,20 @@ func (s *Service) completeAnnotationArgs(ctx CursorContext) []CompletionItem {
 	var items []CompletionItem
 
 	// Keyword-argument annotations: suggest each accepted keyword from the
-	// registry.
+	// registry, in the shape its check requires -- a flag key bare
+	// (`@mode(queued)`, `@rowAuthz(..., clusterOwner)`), every other key with
+	// its `=`. A flag inserted as `queued=` is refused as annotation_key.
 	for i, spec := range annotations.KeywordArgsFor(ctx.AnnotationName) {
 		if ctx.Prefix != "" && !strings.HasPrefix(spec.Name, ctx.Prefix) {
 			continue
 		}
+		insert := spec.Name + "="
+		if spec.Type == "flag" {
+			insert = spec.Name
+		}
 		items = append(items, CompletionItem{
 			Label: spec.Name, Kind: "field", Detail: spec.Type,
-			Documentation: spec.Doc, InsertText: spec.Name + "=",
+			Documentation: spec.Doc, InsertText: insert,
 			SortPriority: i + 1,
 		})
 	}

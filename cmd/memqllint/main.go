@@ -60,8 +60,10 @@ package main
 
 import (
 	"encoding/json"
+
 	"errors"
 	"fmt"
+	"github.com/znasllc-io/memql/component/automations"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -201,6 +203,15 @@ func run(args []string) int {
 	var paritySkipped []string
 	if target == "" {
 		parityDiags, skipped, perr := memql.LintUnifiedTree(nil, root)
+		// Loop analysis requires a complete function registry. Report the
+		// original parse/load refusal once before attempting that graph.
+		if perr == nil && len(parityDiags) == 0 && len(loadDiags) == 0 {
+			loopDiags, loopErr := automations.LintLoopTree(nil, root)
+			parityDiags = append(parityDiags, loopDiags...)
+			if loopErr != nil {
+				integrityErrs = append(integrityErrs, fmt.Errorf("automation loop lint: %w", loopErr))
+			}
+		}
 		paritySkipped = skipped
 		if perr != nil {
 			integrityErrs = append(integrityErrs, fmt.Errorf("engine-parity lint: %w", perr))

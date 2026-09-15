@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/language/ast"
@@ -19,12 +20,20 @@ import (
 type Loader struct {
 	logger   *slog.Logger
 	registry memoryNodes.Registry
+	// functions is what the static loop check walks (loop_check.go), and
+	// loopLogOnce keeps its log to the loader's first load.
+	functions   *memql.FunctionRegistry
+	loopLogOnce sync.Once
 }
 
 // LoaderOptions configures the automation loader.
 type LoaderOptions struct {
 	Logger   *slog.Logger
 	Registry memoryNodes.Registry
+	// Functions is the engine's function registry, from which the static
+	// loop check reads what each automation writes (memql#5381). Without it
+	// the check does not run, and the load logs that it did not.
+	Functions *memql.FunctionRegistry
 }
 
 // NewLoader creates a new automation loader using embedded files.
@@ -37,8 +46,9 @@ func NewLoader(opts LoaderOptions) *Loader {
 	}
 
 	return &Loader{
-		logger:   logger,
-		registry: opts.Registry,
+		logger:    logger,
+		registry:  opts.Registry,
+		functions: opts.Functions,
 	}
 }
 
@@ -268,6 +278,10 @@ func (l *Loader) compileMemQLFrom(authored, source, path string) (*Automation, e
 		automation.Preconditions = preconditions
 	}
 
+	if err := l.prepareBeforeWrite(&automation); err != nil {
+		return nil, err
+	}
+
 	// Validate steps
 	if err := l.validateSteps(automation.Steps); err != nil {
 		return nil, fmt.Errorf("invalid steps: %w", err)
@@ -278,6 +292,12 @@ func (l *Loader) compileMemQLFrom(authored, source, path string) (*Automation, e
 	// static cost limit refuses the automation at load rather than at its
 	// first run. Before the name check, which reads the parsed nodes.
 	if err := prepareExpressions(&automation, l.registry); err != nil {
+		return nil, err
+	}
+	// @loop and @mode (epic memql#5380), judged against the trigger filter
+	// prepareExpressions just parsed (loop_prepare.go).
+	automation.Reads = computeReads(&automation, newFunctionSource(l.functions, l.registry))
+	if err := prepareLoopAndMode(&automation); err != nil {
 		return nil, err
 	}
 
@@ -615,6 +635,9 @@ func normalizeStructuredTriggers(file *languageParser.File, registry memoryNodes
 			if attr.Name != languageParser.AttrTrigger {
 				continue
 			}
+			if _, before := attr.Args["before"]; before {
+				continue
+			}
 			eventVal, hasEvent := attr.Args["event"]
 			if !hasEvent {
 				// schedule-only trigger, or a trigger with no wiring at all.
@@ -753,6 +776,10 @@ func (l *Loader) parseJSON(data []byte, path string) (*Automation, error) {
 		return nil, fmt.Errorf("automation must have at least one step")
 	}
 
+	if err := l.prepareBeforeWrite(&automation); err != nil {
+		return nil, err
+	}
+
 	// Validate steps
 	if err := l.validateSteps(automation.Steps); err != nil {
 		return nil, fmt.Errorf("invalid steps: %w", err)
@@ -762,6 +789,11 @@ func (l *Loader) parseJSON(data []byte, path string) (*Automation, error) {
 	if err := prepareExpressions(&automation, l.registry); err != nil {
 		return nil, err
 	}
+
+	if err := prepareLoopAndMode(&automation); err != nil {
+		return nil, err
+	}
+	automation.Reads = computeReads(&automation, newFunctionSource(l.functions, l.registry))
 
 	// Validate trigger for potential misconfigurations
 	l.validateTrigger(&automation)
@@ -812,6 +844,10 @@ func (l *Loader) validateSteps(steps []*Step) error {
 
 		// Validate type-specific configuration
 		switch step.Type {
+		case StepTypeFieldWrite:
+			if step.FieldWrite == nil {
+				return fmt.Errorf("step %q: fieldWrite configuration required", step.ID)
+			}
 		case StepTypeEvent:
 			if step.Event == nil {
 				return fmt.Errorf("step %q: event configuration required for type 'event'", step.ID)

@@ -1,0 +1,6 @@
+/// When a node joins the cluster, open a ticket -- a mode the language does not have.
+@trigger(event="node.created", concept="v1:cluster:node")
+@mode(serial)
+automation welcomeNodeMode {
+  raise := mutation raiseTicketMode(title: "A node joined the cluster")
+}

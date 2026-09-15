@@ -194,6 +194,9 @@ func TestV1BodyRefusalCodesAreEachReached(t *testing.T) {
 // form the cases use is listed.
 func TestBodyStatementFormsMatchTheParser(t *testing.T) {
 	seen := map[string]bool{}
+	fieldDef := parseV1BodyFile(t, `@trigger(before="write", concept="v1:probe:ticket")
+automation fieldProbe { row.status = "ready" }`)
+	ast.WalkBody(v1Body(t, fieldDef).Statements, func(s ast.BodyStatement) bool { seen[ast.StatementKind(s)] = true; return true })
 	for _, c := range v1BodyCases {
 		fn := parseV1BodyFile(t, c.src)
 		ast.WalkBody(v1Body(t, fn).Statements, func(s ast.BodyStatement) bool {

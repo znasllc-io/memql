@@ -220,6 +220,11 @@ message EventPublish {
   map<string, string> event_metadata = 5;
   string origin_node_id = 6;
   string partition = 7;
+  // The event's causal lineage (component/events.Cause, epic memql#5380).
+  // Additive and optional: an old node in a mixed-version rollout sends no
+  // cause, which the receiver reads as the zero cause -- a root event, never
+  // a refusal.
+  EventCause cause = 8;
 }
 
 message EventSubscribe {
@@ -235,6 +240,26 @@ message EventUnsubscribe {
 message EventNotify {
   string subscription_id = 1;
   EventPublish event = 2;
+}
+
+// EventCause carries an event's causal lineage across the component-bus
+// channel hop (component/events.Cause, epic memql#5380): the automation run
+// that caused it, the chain of runs it belongs to, and how deep that chain
+// is. Structurally identical to component/node/node.proto's message of the
+// same name, and deliberately duplicated rather than shared -- the two
+// protos are independent wire contracts for independent hops (the in-process
+// channel bus vs. the mesh), and node.proto is not imported here.
+message EventCause {
+  string causation_id = 1;
+  string correlation_id = 2;
+  int32 depth = 3;
+  repeated EventCauseLink chain = 4;
+}
+
+// EventCauseLink is one automation run in a Cause's chain, oldest first.
+message EventCauseLink {
+  string automation = 1;
+  string run_id = 2;
 }
 
 // ---------------------------------------------------------------------------

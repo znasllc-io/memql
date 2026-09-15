@@ -72,6 +72,11 @@ type Target struct {
 	// Effects is what a builtin declares with @effects. Meaningless on a
 	// query or a mutation, whose effects are structural.
 	Effects Footprint
+	// Write is what a mutation writes, as far as its source says at load
+	// (footprint.go). Nil on every other kind, and on a mutation built with
+	// no template -- which UnionWrites reports as a write it knows nothing
+	// about.
+	Write *WriteSpec
 }
 
 // Registry is the closed lookup the derivation walks. A name that is

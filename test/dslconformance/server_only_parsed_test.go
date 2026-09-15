@@ -1114,6 +1114,13 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// tier's cluster-owner escape; WHO may resume is decided by the
 		// caller's handler before LoadRunJournal runs.
 		//
+		// workRunsStoppedByLoops (memql#5384) is the same rows for the same
+		// reason -- a refused run is a system run, owner present and empty --
+		// plus one: a stop is a fact about the cluster's wiring, not about a
+		// person, so there is nobody to scope it to. The automationLoopStops
+		// builtin checks the caller's capability and then reads it as the
+		// engine, projecting no payload into its reply.
+		//
 		// The person-facing reads of the same rows are NOT here, and that
 		// is the check on this block: workGoalsForOwner and
 		// workApprovalsForOwner are @actor and caller-scoped, because a
@@ -1124,6 +1131,7 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "work/queries.memql", Name: "workModelCallsForRun"}:    true,
 		{Path: "work/queries.memql", Name: "workObservationsForRun"}:  true,
 		{Path: "work/queries.memql", Name: "workApprovalById"}:        true,
+		{Path: "work/queries.memql", Name: "workRunsStoppedByLoops"}:  true,
 		{Path: "work/mutations.memql", Name: "createWorkRun"}:         true,
 		{Path: "work/mutations.memql", Name: "updateWorkRun"}:         true,
 		{Path: "work/mutations.memql", Name: "createWorkStep"}:        true,

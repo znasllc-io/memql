@@ -1,0 +1,2 @@
+@trigger(before="write", concept="v1:forge:request")
+automation nested { row.nested.title = "untitled" }
