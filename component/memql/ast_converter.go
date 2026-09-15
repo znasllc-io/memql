@@ -170,8 +170,6 @@ func (c *ASTConverter) ConvertExpression(expr languageParser.ExpressionNode) (Ex
 		return c.convertAIExpr(node)
 	case *languageParser.LiteralExpr:
 		return c.convertLiteralExpr(node)
-	case *languageParser.ErrorRefExpr:
-		return c.convertErrorRefExpr(node)
 	case *languageParser.ErrorExpr:
 		return c.convertErrorExpr(node)
 	// Typed expression-builtin nodes -- the parser produces these
@@ -1062,11 +1060,6 @@ func (c *ASTConverter) convertLiteralContainer(v any) (any, error) {
 	default:
 		return v, nil
 	}
-}
-
-// convertErrorRefExpr converts languageParser.ErrorRefExpr to memql.ErrorRefExpression.
-func (c *ASTConverter) convertErrorRefExpr(_ *languageParser.ErrorRefExpr) (*ErrorRefExpression, error) {
-	return &ErrorRefExpression{}, nil
 }
 
 // convertErrorExpr converts languageParser.ErrorExpr to memql.ErrorExpression.

@@ -12,7 +12,7 @@ import (
 // callable.go is the introspectable, table-driven source of truth for every
 // bare-function name the expression grammar recognises in parseFunctionCall:
 // the editor-callable expression builtins (concat / coalesce / hash / ...),
-// the accessor functions (event / field / var / actor / error), the
+// the accessor functions (event / field / var / actor), the
 // keyword-functions (case / default),
 // the query directives (paginate / sort / select / asOf / withDepth / shape /
 // count), and the relationship wrapper functions (parentOf / childOf / ...).
@@ -43,8 +43,8 @@ const (
 	// the names dslspec.Builtins models and Sense offers in completion.
 	CallableBuiltin CallableKind = iota
 	// CallableAccessor is a context accessor whose name is a reserved engine
-	// identifier or an automation accessor (event / field / var / actor /
-	// error). The reserved ones (actor / ...) are modelled by dslspec's
+	// identifier or an automation accessor (event / field / var / actor).
+	// The reserved ones (actor / ...) are modelled by dslspec's
 	// keywords(). Either way they are NOT expression builtins.
 	CallableAccessor
 	// CallableKeywordFunc is a keyword-function: case() / default(). These read
@@ -97,7 +97,6 @@ func buildCallableParsers() map[string]callableEntry {
 		"field": {CallableAccessor, (*Parser).parseFieldAccessor},
 		"event": {CallableAccessor, (*Parser).parseEventAccessor},
 		"actor": {CallableAccessor, (*Parser).parseActorAccessor},
-		"error": {CallableAccessor, (*Parser).parseErrorAccessor},
 
 		// --- Retired (recognised only to emit a migration hint) ---
 		"caller": {CallableRetired, (*Parser).parseCallerRetired},
@@ -130,6 +129,7 @@ func buildCallableParsers() map[string]callableEntry {
 		"subtracttimestamps":  {CallableRetired, parseRetiredExprBuiltin("subtractTimestamps")},
 
 		// --- Editor-callable expression builtins ---
+		"error":       {CallableBuiltin, (*Parser).parseErrorFunction},
 		"concat":      {CallableBuiltin, (*Parser).parseConcatFunction},
 		"coalesce":    {CallableBuiltin, (*Parser).parseCoalesceFunction},
 		"cond":        {CallableBuiltin, (*Parser).parseCondFunction},
@@ -250,6 +250,7 @@ func parseRetiredExprBuiltin(name string) func(p *Parser) (ExpressionNode, error
 // the code body_accessor_retired. memqlmigrate has no rewrite for them -- no
 // tree wrote one in a statement body.
 var retiredBodyAccessors = map[string]string{
+	"error": "use error(\"message\") to raise an error; onError accessors are gone",
 	"step":  "a statement's name is its value: `x := <call>`, then read `x`",
 	"input": "an automation declares its arguments in `args { }` and reads `args.<name>`",
 	"item":  "a loop names its element, `for x in <source>`, and reads `x`",

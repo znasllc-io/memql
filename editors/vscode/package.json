@@ -15,7 +15,7 @@
   },
   "memql": {
     "edition": "2026",
-    "grammarVersion": "2026.09-dsl-v1-before-write-23c6a289"
+    "grammarVersion": "2026.09-before-write-error-accessor-77cda60c"
   },
   "categories": [
     "Programming Languages"

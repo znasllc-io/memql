@@ -264,7 +264,11 @@ import (
 // The digest suffix is not decoration: TestGrammarVersionCarriesTheSurfaceDigest
 // recomputes it and requires this string to end with it, which is what makes a
 // grammar move impossible to land without editing this line (memql#3089).
-const GrammarVersion = "2026.09-dsl-v1-before-write-23c6a289"
+// # 2026.09-before-write-error-accessor (memql#5383, memql#5446)
+//
+// Before-write field statements and trigger timing coexist with the retirement
+// of error(). error("message") remains live; no statement has an onError context.
+const GrammarVersion = "2026.09-before-write-error-accessor-77cda60c"
 
 // GrammarFingerprint is a drift detector over the author-facing keyword
 // surface: when the invocation-kind keyword set changes, the pinned test

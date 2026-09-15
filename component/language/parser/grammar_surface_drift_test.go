@@ -571,6 +571,8 @@ automation probe {
   first := query activeThings(status: "active")
   return step("first")
 }`},
+	{"logic: the error() accessor (body_accessor_retired)", false, `logic probe { return error() }`},
+	{"logic: error with a message remains a catalog function", true, `logic probe { return error("failed") }`},
 	{"automation: the input() accessor (body_accessor_retired)", false, `automation probe {
   mutation touchThing(id: input())
 }`},

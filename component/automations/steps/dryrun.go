@@ -17,14 +17,17 @@ package steps
 // core uses -- but with the side-effect interception layer wired in via a
 // SANDBOX STEP REGISTRY (sandbox_registry.go) that wraps the real registry:
 //
-//   - reads (queries, ai(), similarTo, webSearch, fetchUrl) DELEGATE to the
-//     real executors -> real engine.Execute -> real + metered.
+//   - queries and classified read/pure builtins delegate to the real
+//     executors and are metered. Integration web builtins remain unclassified.
 //   - WRITE-BEARING statements are ISOLATED: the would-be write is evaluated +
 //     recorded into the manifest under the run's ephemeral sandbox partition,
 //     and never reaches engine.Execute, so zero rows land in the live graph.
 //     That covers a `mutation` call, a `logic` call (its statements run
 //     through the same sandbox), a publish, an action and a sub-automation.
 //   - a step type with NO classification is REFUSED, not forwarded.
+//   - builtin executors must be classified as side-effect free. Others are
+//     refused, including calls nested inside queries. A refused call makes
+//     the preview incomplete instead of fabricating a successful result.
 //
 // That last point is load-bearing, and was not true until memql#2943. This
 // comment claimed "zero rows land in the live graph" while the sandbox

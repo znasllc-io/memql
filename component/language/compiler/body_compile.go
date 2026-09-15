@@ -69,6 +69,11 @@ func compileStatementSteps(def *ast.FunctionDef, automation *ast.AutomationDef) 
 	if automation.Trigger != nil && automation.Trigger.Before != "" {
 		kind = "beforeWrite"
 	}
+	if def.Type == ast.FunctionTypeAutomation {
+		if err := checkAutomationBindings(def, automation.Body); err != nil {
+			return nil, err
+		}
+	}
 	if def.Type == ast.FunctionTypeLogic {
 		kind = "logic"
 	}

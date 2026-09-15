@@ -465,7 +465,6 @@ const (
 	BuiltinExecutorContentId      = "contentId"
 	BuiltinExecutorPreviewInsert  = "previewInsert"
 	BuiltinExecutorServiceVersion = "serviceVersion"
-	BuiltinExecutorError          = "error"
 	// BuiltinExecutorDataOrigins projects every concept's data-origins
 	// declaration from the live registry (epic memql#4378). Virtual: no
 	// row is persisted. See data_origins_read.go.
@@ -686,13 +685,6 @@ type ShapeExpression struct {
 }
 
 func (*ShapeExpression) isExpressionNode() {}
-
-// ErrorRefExpression references the current error in onError context: error()
-// This is a compile-time AST node for round-trip fidelity; runtime evaluation
-// happens via string-based $error substitution in the automations.Evaluator.
-type ErrorRefExpression struct{}
-
-func (*ErrorRefExpression) isExpressionNode() {}
 
 // ErrorExpression creates an error with a message: error("message")
 // This is a compile-time AST node for round-trip fidelity; runtime evaluation

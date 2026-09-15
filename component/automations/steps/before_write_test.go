@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
+	"strings"
 	"testing"
 
 	"github.com/uptrace/bun"
@@ -41,6 +42,20 @@ automation probeBeforeWrite {
 	}
 	if row["status"] != "queued" || row["approvedByUserId"] != "owner-id" {
 		t.Fatal(row)
+	}
+	// A query's static kind is read-only, but an embedded builtin must still
+	// satisfy the handler-level read-only classification before dispatch.
+	if err := engine.Functions().Upsert(&memql.Function{Name: "beforeWriteNestedEffect", Enabled: true, FunctionKind: "query", Origin: "unified:probe/queries.memql", Expr: &memql.BuiltinFunctionExpression{Name: "nestedEffect", Executor: "unknown.effectful.executor"}}); err != nil {
+		t.Fatal(err)
+	}
+	guarded, err := automations.NewLoader(automations.LoaderOptions{Functions: engine.Functions()}).CompileSource(`@trigger(before="write", concept="v1:forge:request")
+automation guardedBeforeWrite { query beforeWriteNestedEffect() }`, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	guardedHook := automations.BuildBeforeWriteHooks(engine, []*automations.Automation{guarded}, registry, engine.Logger)[guarded.BeforeWrite.Concept][0]
+	if err := guardedHook.Apply(context.Background(), row); err == nil || !strings.Contains(err.Error(), "dry-run refused builtin executor") {
+		t.Fatalf("nested builtin escaped read-only classification: %v", err)
 	}
 	if query := RecordStepExecution(memql.ContextWithBeforeWrite(context.Background()), engine, StepRecordData{StepId: "read"}); query != "" {
 		t.Fatal("hook produced journal query", query)

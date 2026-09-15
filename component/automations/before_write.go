@@ -129,7 +129,7 @@ func BuildBeforeWriteHooks(engine *memql.MemQLEngine, autos []*Automation, regis
 		}
 		a := a
 		hooks[a.BeforeWrite.Concept] = append(hooks[a.BeforeWrite.Concept], memql.BeforeWriteHook{Name: a.Name, On: a.BeforeWrite.On, Apply: func(ctx context.Context, row map[string]any) error {
-			ctx = memql.ContextWithBeforeWrite(ctx)
+			ctx = memql.WithBuiltinPreview(memql.ContextWithBeforeWrite(ctx))
 			runner := NewLogicRunner(engine, registry, logger)
 			evaluator := runner.newEvaluatorForLogic(ctx, row)
 			rowValue := memql.ExprRow{ID: memql.BeforeWriteRowID(ctx), Concept: a.BeforeWrite.Concept, Payload: row}

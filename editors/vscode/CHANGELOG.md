@@ -2,7 +2,7 @@
 
 ## 0.5.1
 
-- Support edition 2026 before-write triggers and `row.<field> = <expression>` statements. Grammar: `2026.09-dsl-v1-before-write-23c6a289`.
+- Support edition 2026 before-write triggers and `row.<field> = <expression>` statements. Retire the no-argument `error()` accessor while retaining `error("message")`. Grammar: `2026.09-before-write-error-accessor-77cda60c`.
 
 
 The Marketplace renders this file on the extension's page, so it is written for
@@ -38,7 +38,7 @@ someone deciding whether to install rather than for someone reading the repo.
 
 **The MemQL it speaks, and the cluster's**
 - This release speaks MemQL edition 2026, grammar
-  `2026.09-dsl-v1-bodies-8fef9e94`: its
+  `2026.09-retire-error-accessor-78765bad`: its
   highlighting, completion and diagnostics are that grammar's.
 - When you connect to a cluster, the extension compares the cluster's MemQL
   with its own. A cluster on a newer grammar raises a notice naming the release
@@ -51,6 +51,8 @@ someone deciding whether to install rather than for someone reading the repo.
   the extension says nothing about it.
 
 **Writing MemQL**
+- The retired `error()` accessor is refused with a replacement hint.
+  `error("message")` remains the catalog function and needs no builtin import.
 - **The language line.** Each domain declares the language it is written in, in
   a `memql.toml` beside its `.memql` files. A domain without one is flagged on
   its files with a quick fix that writes it. Until then the workspace does not

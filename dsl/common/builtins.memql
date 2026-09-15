@@ -115,20 +115,6 @@ builtin ensureKnowledgeBridge {
   domainIds  array!
 }
 
-// ---- queries/v1/common/builtin/builtinError.memql ----
-
-// builtinError - Construct Error
-// ================================
-//
-// Constructs and returns an error from a message string.
-
-@executor("error")
-@args(profile="stringOrObject", stringKey="message")
-@description("Constructs and returns an error from a message string.")
-builtin error {
-  message  string!
-}
-
 // ---- queries/v1/common/builtin/builtinFilesExtractText.memql ----
 
 // builtinFilesExtractText - File Text Extraction
