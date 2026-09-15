@@ -121,7 +121,7 @@ func (s *AuthoredScheduler) refuseCandidateCycle(automation *Automation, origin 
 	candidate := *automation
 	candidate.Origin = origin
 	candidate.Enabled = nil // Authored activation wires even @disabled sources.
-	all := append(append(make([]*Automation, 0, len(shipped)+1), shipped...), &candidate)
+	all := append(append([]*Automation(nil), shipped...), &candidate)
 	s.mu.Lock()
 	for _, entry := range s.entries {
 		active := *entry.automation

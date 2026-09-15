@@ -62,8 +62,7 @@ func (c Cause) Clone() Cause {
 // Next is the cause a run carries: the parent's chain plus this run, one
 // deeper, with this run as the causation of everything it publishes.
 func (c Cause) Next(automation, runId, correlationId string) Cause {
-	chain := make([]Link, 0, len(c.Chain)+1)
-	chain = append(chain, c.Chain...)
+	chain := append([]Link(nil), c.Chain...)
 	chain = append(chain, Link{Automation: automation, RunId: runId})
 	return Cause{CausationId: runId, CorrelationId: correlationId, Depth: c.Depth + 1, Chain: chain}
 }

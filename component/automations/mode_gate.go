@@ -50,8 +50,7 @@ type modeAncestor struct{ identity, runID string }
 // their publisher returns, so causal ancestry must not reject those fires.
 func modeRunContext(ctx context.Context, identity, runID string) context.Context {
 	prior, _ := ctx.Value(modeAncestryKey{}).([]modeAncestor)
-	chain := make([]modeAncestor, len(prior), len(prior)+1)
-	copy(chain, prior)
+	chain := append([]modeAncestor(nil), prior...)
 	return context.WithValue(ctx, modeAncestryKey{}, append(chain, modeAncestor{identity, runID}))
 }
 
