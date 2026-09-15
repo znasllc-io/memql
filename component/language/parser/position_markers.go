@@ -454,7 +454,7 @@ func lcsPairs(n, m int, eq func(a, b int) bool) ([]lcsPair, bool) {
 	}
 	rows, cols := hiA-lo, hiB-lo
 	if rows > 0 && cols > 0 {
-		if rows*cols > positionLCSMaxCells {
+		if rows > positionLCSMaxCells || cols > positionLCSMaxCells || rows > positionLCSMaxCells/cols {
 			return nil, false
 		}
 		// dp[i][j] = LCS length of the middles' suffixes from i and j.

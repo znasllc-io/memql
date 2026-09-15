@@ -3,6 +3,7 @@ package memql
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -862,6 +863,10 @@ func levenshtein(a, b string) int {
 		return 0
 	}
 	ar, br := []rune(a), []rune(b)
+	// The extra boundary cell and distance increments must fit in int.
+	if len(ar) >= math.MaxInt || len(br) >= math.MaxInt {
+		return math.MaxInt
+	}
 	prev := make([]int, len(br)+1)
 	curr := make([]int, len(br)+1)
 	for j := range prev {

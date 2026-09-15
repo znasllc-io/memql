@@ -146,7 +146,7 @@ func withAmbientDefaults(bindings map[string]any) map[string]any {
 	if !missing {
 		return bindings
 	}
-	out := make(map[string]any, len(bindings)+len(planConstantAmbientRoots))
+	out := make(map[string]any, len(bindings))
 	for k, v := range bindings {
 		out[k] = v
 	}

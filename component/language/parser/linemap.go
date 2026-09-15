@@ -86,7 +86,7 @@ func NewLineMap(authored, rewritten string) *LineMap {
 	// Degenerate / oversized inputs: clamped identity. Never produces a
 	// line outside the authored range, so it is never worse than emitting
 	// no position at all.
-	if len(aLines) == 0 || len(aLines)*len(rLines) > lcsMaxCells {
+	if len(aLines) == 0 || len(rLines) == 0 || len(aLines) > lcsMaxCells/len(rLines) {
 		for i := range rLines {
 			lm.authored[i] = clampLine(i+1, len(aLines))
 			lm.exact[i] = false
@@ -171,6 +171,11 @@ type linePair struct{ a, r int }
 // dynamic programming; the caller caps n*m via lcsMaxCells.
 func lcsLinePairs(a, b []string) []linePair {
 	n, m := len(a), len(b)
+	// Bound each dimension before adding the sentinel row/column, and
+	// divide instead of multiplying dimensions so the limit cannot wrap.
+	if n == 0 || m == 0 || n > lcsMaxCells || m > lcsMaxCells || n > lcsMaxCells/m {
+		return nil
+	}
 	// dp[i][j] = LCS length of a[i:] and b[j:].
 	dp := make([][]int32, n+1)
 	for i := range dp {
