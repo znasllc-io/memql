@@ -234,3 +234,12 @@ func TestRowBudgetExecutorCountsEveryRefusal(t *testing.T) {
 		}
 	}
 }
+
+func TestBeforeWriteCannotExecuteAsIndependentRun(t *testing.T) {
+	e := NewExecutor(ExecutorOptions{})
+	defer e.Close()
+	a := &Automation{Name: "hook", BeforeWrite: &BeforeWriteConfig{}}
+	if run, err := e.Execute(context.Background(), a, "manual"); run != nil || err == nil {
+		t.Fatalf("before-write created independent run: %+v %v", run, err)
+	}
+}

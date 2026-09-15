@@ -228,7 +228,8 @@ automation indexFileOnCreate {
 /// belongs. sourceConceptRef is the canonical 'v1:library:file:<id>' the promotion wrote, which is
 /// the id archiveLibraryFile targets. ONE DIRECTION ONLY, deliberately: artifact -> file. The
 /// mirror automation (file -> artifact) would close a cycle, since each write publishes an event
-/// the other subscribes to, and both writes being idempotent does not stop the events. Archiving
+/// the other subscribes to, and both writes being idempotent does not stop the events. The static
+/// graph refuses that mirror unless a filter disproves an edge or @loop covers convergence. Archiving
 /// through the artifact is the portal's path; archiveLibraryFile is the file-level operation.
 /// Idempotent: archiving an already-archived file writes the same value. memql#4340.
 @trigger(event="node.updated", concept="v1:library:artifact")

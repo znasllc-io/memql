@@ -95,9 +95,10 @@ type AuthoredScheduler struct {
 	ownerGate  func(ownerUserId string) bool
 	globalGate func() bool
 
-	mu      sync.Mutex
-	cron    *cron.Cron
-	entries map[string]*authoredEntry // keyed by authoredEntryKey(owner, name)
+	activationMu sync.Mutex // Serialize graph check and subscription installation.
+	mu           sync.Mutex
+	cron         *cron.Cron
+	entries      map[string]*authoredEntry // keyed by authoredEntryKey(owner, name)
 
 	// shipped caches the tree's automations the static loop check judges a
 	// candidate beside (loop_check.go), loaded on the first activation.
@@ -170,6 +171,8 @@ func authoredEntryKey(owner, name string) string {
 // ownerUserId is the authz envelope the runs execute under. Re-activating the
 // same (owner, name) replaces the prior subscription in place (a version bump).
 func (s *AuthoredScheduler) Activate(construct *memql.AuthoredConstruct) error {
+	s.activationMu.Lock()
+	defer s.activationMu.Unlock()
 	if construct == nil {
 		return fmt.Errorf("authored scheduler: construct is nil")
 	}

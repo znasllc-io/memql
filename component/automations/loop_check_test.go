@@ -55,19 +55,19 @@ func TestCheckLoops_AProblemOnTheAutomationsFile(t *testing.T) {
 	logger, logs := captureLogger()
 	l := NewLoader(LoaderOptions{Logger: logger, Functions: forgeFunctions(t)})
 	loaded, err := l.LoadFromTree(loopTree(selfUpdating))
-	// REPORT-ONLY: the load is not refused for the cycle yet, and says so.
-	if err != nil {
-		t.Fatalf("the loop check is report-only, yet the load was refused: %v", err)
+	// Uncovered cycles refuse the load.
+	if err == nil || !strings.Contains(err.Error(), "[loop_cycle]") {
+		t.Fatalf("want loop_cycle refusal, got %v", err)
 	}
 	if len(loaded) != 1 {
 		t.Fatalf("loaded %d automations, want 1", len(loaded))
 	}
-	if !strings.Contains(logs.String(), "static loop analysis: problem (report-only") || !strings.Contains(logs.String(), "[loop_cycle]") {
+	if !strings.Contains(logs.String(), "static loop analysis: problem") || !strings.Contains(logs.String(), "[loop_cycle]") {
 		t.Errorf("the problem was not logged:\n%s", logs.String())
 	}
 	// The node's loader re-walks the tree on every LoadByName; the check is
 	// logged by its first load only.
-	if _, err := l.LoadFromTree(loopTree(selfUpdating)); err != nil {
+	if _, err := l.LoadFromTree(loopTree(selfUpdating)); err == nil {
 		t.Fatalf("second load: %v", err)
 	}
 	if n := strings.Count(logs.String(), "static loop analysis: problem"); n != 1 {

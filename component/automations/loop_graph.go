@@ -127,7 +127,7 @@ func BuildLoopGraph(automations []*Automation, src FunctionSource, depthCap int)
 	}
 	b := &graphBuilder{reg: reg, byName: map[string]int{}}
 	for _, a := range automations {
-		if a != nil {
+		if a != nil && a.IsEnabled() {
 			b.nodes = append(b.nodes, a)
 		}
 	}
@@ -138,7 +138,7 @@ func BuildLoopGraph(automations []*Automation, src FunctionSource, depthCap int)
 		return b.nodes[i].Origin < b.nodes[j].Origin
 	})
 	for i, a := range b.nodes {
-		if _, dup := b.byName[a.Name]; !dup {
+		if prior, dup := b.byName[a.Name]; !dup || (strings.HasPrefix(b.nodes[prior].Origin, "authored:") && !strings.HasPrefix(a.Origin, "authored:")) {
 			b.byName[a.Name] = i
 		}
 	}
@@ -312,6 +312,9 @@ const kindPublish = "publish"
 // through each sub-automation it calls (transitively, each entered once),
 // that one's -- with the sub-automations prepended to the path.
 func (b *graphBuilder) productions(i int) []production {
+	if b.nodes[i].BeforeWrite != nil {
+		return nil
+	}
 	out := b.ownProductions(i, nil)
 	seen := map[int]bool{i: true}
 	var walk func(j int, path []string)

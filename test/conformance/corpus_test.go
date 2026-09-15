@@ -963,7 +963,11 @@ func corpusAutomationProblems(t *testing.T, tree fs.FS) []string {
 	if _, err := memql.LoadUnifiedConcepts(corpusQuiet); err != nil {
 		return []string{"loading concepts for the automations pass: " + err.Error()}
 	}
-	loader := automations.NewLoader(automations.LoaderOptions{Logger: corpusQuiet, Registry: memoryNodes.DefaultRegistry()})
+	eng, initErr := automations.NewOfflineEngine(corpusQuiet, memoryNodes.DefaultRegistry())
+	if initErr != nil {
+		return []string{"loading functions for loop analysis: " + initErr.Error()}
+	}
+	loader := automations.NewLoader(automations.LoaderOptions{Logger: corpusQuiet, Registry: memoryNodes.DefaultRegistry(), Functions: eng.Functions()})
 	_, err := loader.LoadAll()
 	if err == nil {
 		return nil

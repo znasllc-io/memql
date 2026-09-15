@@ -41,6 +41,13 @@
       "verdict": "refuse_parse",
       "code": "annotation_form",
       "message": "@loop on an automation takes keyword arguments"
+    },
+    {
+      "file": "an-uncovered-self-cycle.memql",
+      "verdict": "refuse_load",
+      "code": "loop_cycle",
+      "message": "automation cycle not covered by @loop",
+      "note": "A publish on the triggering topic must refuse strict loading."
     }
   ]
 }

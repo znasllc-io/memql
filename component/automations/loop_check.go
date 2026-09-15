@@ -42,10 +42,6 @@ func (l *Loader) checkLoops(loaded []*Automation) (*LoopGraph, []automationLoadP
 // bounds the automation at run time -- but is worth a look. A nil graph is a
 // check that did not run, and says so.
 //
-// REPORT-ONLY. The problems are logged here instead of joining the load's
-// problem list until the tree's own cycles are fixed; then they join it and
-// strict boot refuses them.
-//
 // ONCE PER LOADER. The node's one loader also serves LoadByName at run time
 // (run_automation, a work template's dispatch), which re-walks the tree every
 // call; the tree does not change after boot, and neither does what the check
@@ -59,7 +55,7 @@ func (l *Loader) logLoopCheck(g *LoopGraph, problems []automationLoadProblem) {
 
 func (l *Loader) logLoopCheckNow(g *LoopGraph, problems []automationLoadProblem) {
 	if g == nil {
-		l.logger.Info("static loop analysis not run: the loader has no function registry", "component", ComponentName)
+		l.logger.Warn("static loop analysis not run: the loader has no function registry", "component", ComponentName)
 		return
 	}
 	l.logger.Info("static loop analysis",
@@ -72,7 +68,7 @@ func (l *Loader) logLoopCheckNow(g *LoopGraph, problems []automationLoadProblem)
 		"cycles", len(g.Cycles),
 		"problems", len(problems))
 	for _, p := range problems {
-		l.logger.Warn("static loop analysis: problem (report-only, the load is not refused for it yet)",
+		l.logger.Warn("static loop analysis: problem",
 			"component", ComponentName, "path", p.Path, "automation", p.Name, "problem", p.Err)
 	}
 	for _, a := range g.Automations {
@@ -124,7 +120,19 @@ func (s *AuthoredScheduler) refuseCandidateCycle(automation *Automation, origin 
 	shipped := s.shippedAutomations()
 	candidate := *automation
 	candidate.Origin = origin
+	candidate.Enabled = nil // Authored activation wires even @disabled sources.
 	all := append(append(make([]*Automation, 0, len(shipped)+1), shipped...), &candidate)
+	s.mu.Lock()
+	for _, entry := range s.entries {
+		active := *entry.automation
+		active.Origin = fmt.Sprintf("authored:%s:%s", entry.owner, active.Name)
+		if active.Origin == origin {
+			continue // The candidate replaces this version.
+		}
+		active.Enabled = nil
+		all = append(all, &active)
+	}
+	s.mu.Unlock()
 	g := BuildLoopGraph(all, newFunctionSource(s.loader.functions, s.loader.registry), 0)
 	if p, refused := g.problemThrough(origin); refused {
 		return fmt.Errorf("authored scheduler: %s: %s", origin, p.Message)

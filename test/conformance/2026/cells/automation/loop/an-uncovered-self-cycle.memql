@@ -1,0 +1,4 @@
+@trigger(event="loop.uncovered")
+automation uncoveredCycle {
+  publish "loop.uncovered" { value: 1 }
+}

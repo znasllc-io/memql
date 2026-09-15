@@ -422,6 +422,9 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	if automation == nil {
 		return nil, fmt.Errorf("automation is nil")
 	}
+	if automation.BeforeWrite != nil {
+		return nil, fmt.Errorf("automation %s is a before-write hook and can run only inside its original write [before_write_outside]", automation.Name)
+	}
 	if err := ensurePrepared(automation); err != nil {
 		return nil, err
 	}

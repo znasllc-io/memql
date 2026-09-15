@@ -39,12 +39,13 @@ import (
 
 func main() {
 	var (
-		root      = flag.String("root", ".", "workspace root (directory containing go.work or go.mod)")
-		out       = flag.String("out", "", "output path (default: <root>/"+model.CanonicalFilename+")")
-		cluster   = flag.String("cluster", "", "cluster name (default: workspace folder name)")
-		withType  = flag.Bool("types", true, "include the L4 type pass (structs, interfaces, methods)")
-		withCalls = flag.Bool("calls", false, "include the CHA call-graph pass (requires --types)")
-		repro     = flag.Bool("reproducible", false, "blank generated_at and workspace so the output depends only on the code (used by `make arch-model`)")
+		root            = flag.String("root", ".", "workspace root (directory containing go.work or go.mod)")
+		out             = flag.String("out", "", "output path (default: <root>/"+model.CanonicalFilename+")")
+		cluster         = flag.String("cluster", "", "cluster name (default: workspace folder name)")
+		withAutomations = flag.Bool("automations", false, "include the DSL automation trigger graph")
+		withType        = flag.Bool("types", true, "include the L4 type pass (structs, interfaces, methods)")
+		withCalls       = flag.Bool("calls", false, "include the CHA call-graph pass (requires --types)")
+		repro           = flag.Bool("reproducible", false, "blank generated_at and workspace so the output depends only on the code (used by `make arch-model`)")
 	)
 	flag.Parse()
 
@@ -60,6 +61,12 @@ func main() {
 	})
 	if err != nil {
 		fail("%v", err)
+	}
+
+	if *withAutomations {
+		if err := addAutomations(m); err != nil {
+			fail("%v", err)
+		}
 	}
 
 	// --reproducible strips the two fields that make the output depend on WHO

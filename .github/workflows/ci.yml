@@ -285,6 +285,9 @@ jobs:
               - 'scripts/secrets/manifest.yaml'
               - 'component/envregistry/manifest.yaml'
               - 'component/architecture/embedded/**'
+              - 'dsl/**/automations.memql'
+              - 'dsl/**/mutations.memql'
+              - 'dsl/**/logic.memql'
               - 'scripts/**'
               # every path embed_inventory_test.go pins -- see above
               - 'VERSION'

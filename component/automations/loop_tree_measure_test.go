@@ -196,6 +196,9 @@ func logMeasurement(t *testing.T, label string, m loopMeasurement, seen map[stri
 		t.Logf("  PROBLEM %s:%s [%s]\n%s", p.Path, p.Name, p.Phase, indent(p.Err))
 	}
 	t.Logf("  %d problem(s) (%d new to this tree)", len(m.problems), fresh)
+	if len(m.problems) != 0 {
+		t.Errorf("%s: shipped tree contains uncovered cycles", label)
+	}
 }
 
 func countDecided(edges []GraphEdge) int {

@@ -276,11 +276,11 @@ func (l *Loader) LoadFromTree(tree fs.FS) ([]*Automation, error) {
 	}
 
 	// The static loop check (memql#5381) over every automation the walk
-	// loaded. REPORT-ONLY for now: its problems are logged, not appended,
-	// until the tree's own cycles are fixed.
+	// loaded. Uncovered cycles join the strict load problem list.
 	if l.functions != nil {
 		g, loopProblems := l.checkLoops(out)
 		l.logLoopCheck(g, loopProblems)
+		problems = append(problems, loopProblems...)
 	} else {
 		l.logLoopCheck(nil, nil)
 	}
@@ -297,7 +297,7 @@ func (l *Loader) LoadFromTree(tree fs.FS) ([]*Automation, error) {
 			// "load refused", not "boot refused": this error also surfaces at
 			// runtime through LoadByName -> MCP run_automation, where the
 			// process is already up and "boot" would be the wrong noun.
-			return out, fmt.Errorf("strict automation load refused: %d automation load problem(s) in the unified DSL tree; set %s=1 to load anyway (operator break-glass -- a node with problems will boot with those automations missing).\n%s",
+			return out, fmt.Errorf("strict automation load refused: %d automation load problem(s) in the unified DSL tree; set %s=1 to load anyway (operator break-glass -- compile failures omit automations; uncovered cycles remain enabled).\n%s",
 				len(problems), memql.AllowSkipsEnvVar, formatAutomationProblems(problems))
 		}
 		if l.logger != nil {

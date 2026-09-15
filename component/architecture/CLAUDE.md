@@ -58,6 +58,7 @@ C4 + UML, mapped 1:1 onto Kind / EdgeKind in `model/model.go`:
 | **Class diagram (C4-L4)** | `KindType` + `KindInterface` + `EdgeHasField`, `EdgeEmbeds`, `EdgeImplements`, `EdgeContains` (method children) |
 | **Sequence diagram** | Walk forward from an entrypoint over `EdgeCalls` |
 | **Call graph / dependency graph** | `EdgeCalls` directly |
+| **Automation trigger graph** | `KindAutomation` + `EdgeTriggers`, with strata, filters and loop bounds |
 | **Activity diagram / flowchart (CFG)** | (Planned) `golang.org/x/tools/go/cfg` per-function |
 | **State diagram** | (Planned) annotation-driven, via doc-comment hints |
 | **ERD** | (Planned) parse the `.memql` concept tree |
@@ -232,4 +233,4 @@ The extractor stamps `observe_level: "verbose"` and `redact_args: "password"` on
 
 - **Rendering.** The model is the IR. Cockpit's `cli/cluster/architecture.go` is one renderer; future exporters (PlantUML, D2, Mermaid) live elsewhere.
 - **Runtime instrumentation.** That's `component/observe`. The bridge is the ID format.
-- **DSL concepts and SQL migrations.** The model is pure Go; concepts and hypertable schemas for the observability side live in `dsl/observability/` and `component/database/memory-nodes/migrations/`.
+- **DSL concepts and SQL migrations.** The model includes Go and the DSL automation trigger graph; concepts and hypertable schemas for the observability side live in `dsl/observability/` and `component/database/memory-nodes/migrations/`.
