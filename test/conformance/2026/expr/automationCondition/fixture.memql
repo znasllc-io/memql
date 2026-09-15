@@ -16,7 +16,7 @@ concept goalNote {
 trait acIsHigh = row => row.priority > 3
 
 /// Raise a ticket with a title.
-mutate ticket raiseAgentTicket {
+mutation ticket raiseAgentTicket {
   args {
     title  string!
   }

@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "file": "a-string.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-an-unquoted-value.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@vendor on a provider takes one string"
+    },
+    {
+      "file": "no-vendor.memql",
+      "verdict": "refuse_load",
+      "message": "@vendor is required",
+      "note": "A provider needs a vendor unless it is a @base or extends one that has it."
+    }
+  ]
+}

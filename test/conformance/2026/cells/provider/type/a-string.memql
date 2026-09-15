@@ -1,6 +1,0 @@
-/// OpenAI text-embedding-3-small under a bundle's own name: the embedding client, not the chat one.
-@extends("openai")
-@type("OpenAIEmbedding")
-@model("text-embedding-3-small")
-@modality("embedding")
-provider bundleEmbeddingType { }

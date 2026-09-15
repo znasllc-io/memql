@@ -1,4 +1,4 @@
-mutate ticket probe {
+mutation ticket probe {
   args {
     id  string!
   }

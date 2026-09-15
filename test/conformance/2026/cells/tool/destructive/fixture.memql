@@ -6,7 +6,7 @@ concept ticket {
 }
 
 /// Close a ticket.
-mutate ticket closeTicketDestructive {
+mutation ticket closeTicketDestructive {
   args {
     ticketId  string!
   }

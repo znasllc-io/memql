@@ -1,6 +1,6 @@
 /// Reopen a ticket, with a create-only field on a write that never creates.
 @createOnly("status")
-mutate ticket reopenTicketCreateOnly {
+mutation ticket reopenTicketCreateOnly {
   args {
     ticketId  string!
   }

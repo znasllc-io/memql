@@ -6,7 +6,7 @@ concept ticket {
 }
 
 /// Raise a ticket with a title.
-mutate ticket raiseTicketTemplate {
+mutation ticket raiseTicketTemplate {
   args {
     title  string!
   }

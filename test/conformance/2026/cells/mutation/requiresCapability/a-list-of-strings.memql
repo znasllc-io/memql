@@ -1,6 +1,6 @@
 /// Retitle one ticket, for a caller holding execute on app:deployables/publish.
 @requiresCapability("execute", "app:deployables/publish")
-mutate ticket retitleTicketRequiresCapability {
+mutation ticket retitleTicketRequiresCapability {
   args {
     ticketId  string!
     title     string!

@@ -167,7 +167,7 @@ func TestRun_AMistypedKeywordIsOneRefusal(t *testing.T) {
 			name:    "a typo'd construct keyword",
 			queries: strings.Replace(testQueries, "query item queryItems", "qurey item queryItems", 1),
 			want: []string{
-				"demo/queries.memql:", "line 5: qurey is not a construct keyword: did you mean query?",
+				"demo/queries.memql:", "line 4: qurey is not a construct keyword: did you mean query?",
 				"The constructs are: " + strings.Join(langparser.ConstructKeywords(), ", ") + " [construct_unknown]",
 			},
 		},
@@ -220,7 +220,7 @@ func TestRun_AMistypedKeywordIsOneRefusal(t *testing.T) {
 // the parity pass, whose query loader parses one construct at a time -- so the
 // parity copy counts its line from the top of that construct ("line 3" here),
 // and the rewriter that lowers the first query moves the parser's own count a
-// line down. memqllint prints the refusal once, naming line 12, the line of
+// line down. memqllint prints the refusal once, naming line 11, the line of
 // the file the author wrote it on.
 func TestRun_ARefusalBothPassesMakeNamesTheFileLine(t *testing.T) {
 	queries := testQueries + `
@@ -233,8 +233,8 @@ query item queryByStatus {
   }
   filter  row => row.status == args.status
 }`
-	if got := strings.Split(queries, "\n")[11]; got != "@bogus" {
-		t.Fatalf("the fixture's line 12 is %q, want @bogus", got)
+	if got := strings.Split(queries, "\n")[10]; got != "@bogus" {
+		t.Fatalf("the fixture's line 11 is %q, want @bogus", got)
 	}
 	code, report, out := jsonReport(t, writeTree(t, map[string]string{
 		"demo/concepts.memql": testConcepts,
@@ -244,7 +244,7 @@ query item queryByStatus {
 		t.Fatalf("one refused annotation: run() = %d, want 1 with exactly one error:\n%s", code, out)
 	}
 	msg := report.Errors[0].Message
-	for _, want := range []string{"demo/queries.memql:", "at line 12, column 1:", `query "queryByStatus": unknown annotation @bogus`, "[annotation_unknown]"} {
+	for _, want := range []string{"demo/queries.memql:", "at line 11, column 1:", `query "queryByStatus": unknown annotation @bogus`, "[annotation_unknown]"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("the refusal must carry %q, got %q", want, msg)
 		}

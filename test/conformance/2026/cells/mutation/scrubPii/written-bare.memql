@@ -1,6 +1,6 @@
 /// Forget who reported a ticket: every field the concept marks @pii is zeroed.
 @scrubPii
-mutate ticket forgetTicketReporterScrubPii {
+mutation ticket forgetTicketReporterScrubPii {
   args {
     ticketId  string!
   }

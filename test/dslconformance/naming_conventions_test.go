@@ -273,7 +273,7 @@ func checkNoKindPrefixInConstructNames(t *testing.T, c corpus) {
 	// the ones a brace-anchored scan loses, and it loses them without a sound.
 	// Measured when the floors were set: 32 traits, 7 specs, 529 queries and
 	// 418 mutations.
-	for kw, floor := range map[string]int{"trait": 25, "spec": 5, "query": 400, "mutate": 300} {
+	for kw, floor := range map[string]int{"trait": 25, "spec": 5, "query": 400, "mutation": 300} {
 		if perKeyword[kw] < floor {
 			t.Errorf("scanned %d %s declarations -- the scan has stopped reaching them", perKeyword[kw], kw)
 		}

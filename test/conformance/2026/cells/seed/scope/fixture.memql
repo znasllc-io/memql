@@ -5,7 +5,7 @@ concept personalQueue {
 }
 
 /// The mutation the seed materializer writes this concept's rows through: create<Concept>.
-mutate personalQueue createPersonalQueue {
+mutation personalQueue createPersonalQueue {
   args {
     personalQueueId  string!
     ownerUserId      string!

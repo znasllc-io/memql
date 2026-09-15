@@ -1,5 +1,0 @@
-/// The canned thank-you reply every cluster starts with. @enabled restates the default.
-@enabled
-seed cannedReply thanksReply {
-  text: "Thanks for reaching out -- we are on it."
-}

@@ -4,7 +4,7 @@ concept ticketCategory {
 }
 
 /// The mutation the seed materializer writes this concept's rows through: create<Concept>.
-mutate ticketCategory createTicketCategory {
+mutation ticketCategory createTicketCategory {
   args {
     ticketCategoryId  string!
     name              string!

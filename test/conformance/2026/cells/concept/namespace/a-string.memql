@@ -1,7 +1,0 @@
-/// A support ticket raised by a customer.
-@namespace("support")
-concept ticket {
-  ownerUserId  string
-  title        string
-  status       string
-}

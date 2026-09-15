@@ -1,7 +1,0 @@
-/// Every hour, open a ticket to review the queue -- the cron missing its seconds field.
-@schedule(cron="0 * * * *")
-automation hourlyReviewFiveFields {
-  step raise {
-    mutation raiseTicketSchedule (title: "Review the queue")
-  }
-}

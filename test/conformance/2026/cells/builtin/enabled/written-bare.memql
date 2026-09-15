@@ -1,7 +1,0 @@
-/// Today's date key in a timezone, for naming a daily ticket. @enabled restates the default.
-@executor("integration.timeutil.dateKeyInTimezone")
-@enabled
-builtin ticketDateKeyEnabled {
-  timezone  string  @description("An IANA timezone; UTC when empty.")
-  now       string  @description("The instant to key, RFC3339.")
-}

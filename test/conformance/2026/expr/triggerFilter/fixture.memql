@@ -18,7 +18,7 @@ concept goalNote {
 }
 
 /// Write a note about a goal.
-mutate goalNote tfNoteGoal {
+mutation goalNote tfNoteGoal {
   args {
     goalId  string  @required
     note    string
@@ -34,7 +34,7 @@ mutate goalNote tfNoteGoal {
 trait tfIsArchived = row => row.status == "archived"
 
 /// Raise a ticket with a title.
-mutate ticket raiseFilteredTicket {
+mutation ticket raiseFilteredTicket {
   args {
     title  string!
   }

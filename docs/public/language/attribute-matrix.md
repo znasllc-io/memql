@@ -114,7 +114,7 @@ One table per family of constructs, and one for the fields a construct declares.
 | Annotation | concept field | args field | tool field | prompt field | builtin field |
 |---|---|---|---|---|---|
 | [`@autoInjected`](#autoinjected) |  |  | flag |  |  |
-| [`@default`](#default) |  |  | string | string or number | string or number |
+| [`@default`](#default) |  |  | string | string or number |  |
 | [`@description`](#description) | string |  | string | string | string |
 | [`@enum`](#enum) |  | strings | strings | strings | strings |
 | [`@internal`](#internal) | flag |  |  |  |  |
@@ -170,6 +170,8 @@ The fields of its `args` block take the annotations under [args field](#args-fie
 | [`@requiresRank`](#requiresrank) | one string | `@requiresRank("admin")` |
 | [`@scrubPii`](#scrubpii) | no arguments | `@scrubPii` |
 | [`@serverOnly`](#serveronly) | no arguments | `@serverOnly` |
+
+The fields of its `args` block take the annotations under [args field](#args-field).
 
 ### logic
 
@@ -356,7 +358,7 @@ Written after a field's type in the body of a `concept`.
 
 ### args field
 
-Written after a field's type in the `args` block of a `query`, `logic`, `automation`, `action` or `capability`.
+Written after a field's type in the `args` block of a `query`, `mutation`, `logic`, `automation`, `action` or `capability`.
 
 | Annotation | Written as | Example |
 |---|---|---|
@@ -396,7 +398,6 @@ Written after a field's type in the body of a `builtin`.
 
 | Annotation | Written as | Example |
 |---|---|---|
-| [`@default`](#default) | one string or one number | `@default("10")` |
 | [`@description`](#description) | one string | `@description("The campaign to send.")` |
 | [`@enum`](#enum) | one or more strings | `@enum("patch", "minor")` |
 | [`@required`](#required) | no arguments | `@required` |
@@ -533,12 +534,10 @@ On an insert (create-or-upsert) mutation: write the named payload fields ONLY wh
 | [provider](#provider) | no arguments | `@default` |
 | [tool field](#tool-field) | one string | `@default("5")` |
 | [prompt field](#prompt-field) | one string or one number | `@default("en")` |
-| [builtin field](#builtin-field) | one string or one number | `@default("10")` |
 
 - On a provider: Mark this provider as the default for its modality.
 - On a tool field: The default the tool's input schema advertises to the model.
 - On a prompt field: The default the prompt's input schema declares for the field.
-- On a builtin field: The default the builtin's input schema declares for the field.
 
 ### @defaultProvider
 

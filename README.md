@@ -385,7 +385,6 @@ query activeHumanParticipants(partitionId: "space_123")
 
 ### Example Automation
 ```memql
-@enabled
 @trigger(event="node.created", concept="v1:cognition:space", partition="*")
 @description("On space creation, auto-join the creator's assistant")
 automation autoJoinSI {

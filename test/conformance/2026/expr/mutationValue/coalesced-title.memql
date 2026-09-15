@@ -1,5 +1,5 @@
 /// Retitle a ticket, keeping a title when none is given.
-mutate ticket mvRetitle {
+mutation ticket mvRetitle {
   args {
     ticketId  string  @required
     title     string

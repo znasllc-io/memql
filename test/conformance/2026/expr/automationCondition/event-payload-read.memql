@@ -1,5 +1,5 @@
 /// Write a note about a goal, from the event it changed in.
-mutate goalNote acNoteGoalFromEvent {
+mutation goalNote acNoteGoalFromEvent {
   args {
     goalId  string  @required
     note    string

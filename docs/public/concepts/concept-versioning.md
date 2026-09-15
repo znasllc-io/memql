@@ -63,7 +63,6 @@ Add it to `AllFilesystemConcepts()` so startup validation covers it.
 Add v2-specific event handlers to `dsl/library/automations.memql`:
 
 ```memql
-@enabled
 @trigger(event="node.created", concept="v2:library:artifact", partition="*")
 @description("Handle v2 artifact creation")
 automation handleV2Artifact {
