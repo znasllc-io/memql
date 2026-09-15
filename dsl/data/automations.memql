@@ -15,11 +15,10 @@ automation conflictDetection {
     partitionId any
     recordType any
   }
-  // memqlmigrate: the statements of logic conflictDetection, which published and so could not stay a logic (D14) (memql#5373)
   // Triggered on new v1:data:record creation with a non-empty naturalKeyValue. Queries confirmed
   // records for matching natural key + record type; if any exist, emits 'data.conflicts.detected'
   // event for the UI's ConflictResolutionPanel. Never auto-resolves -- always requires human
-  // approval.
+  // approval. The publishing is here because a logic may not publish (D14).
   // Query confirmed records with matching natural key + record type
   matchingConfirmed := query detectConflicts(partitionId: args.partitionId, recordType: args.recordType, naturalKeyValue: args.naturalKeyValue)
 
