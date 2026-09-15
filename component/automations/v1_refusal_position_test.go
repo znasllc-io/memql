@@ -48,6 +48,7 @@ automation second {
 // TestTerseHeaderRefusalNamesTheFileLine: the retired terse header is sliced
 // as its line of the file, and the parser's refusal of it names that line.
 func TestTerseHeaderRefusalNamesTheFileLine(t *testing.T) {
+	// memqlmigrate:keep -- the retired terse header is the case.
 	file := `/// The first automation.
 @trigger(event="node.created", concept="v1:probe:thing")
 automation first {

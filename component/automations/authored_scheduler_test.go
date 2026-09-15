@@ -162,15 +162,15 @@ automation aliceOnUserCreate {
 
 // TestAuthoredScheduler_EventTrigger_HonoursItsFilter: the @filter decides
 // whether an event fires an authored automation, as it does a core one -- a
-// v1 lambda over the triggering row and a legacy condition alike, with the
-// args contract an email rule's generated construct declares. The authored
+// method call and an equality over the triggering row alike, with the args
+// contract an email rule's generated construct declares. The authored
 // subscriber used to skip the filter, so a rule's "only when" condition
 // changed nothing: every event of the kind fired it.
 func TestAuthoredScheduler_EventTrigger_HonoursItsFilter(t *testing.T) {
 	loadConceptsForAuthored(t)
 	for _, c := range []struct{ name, filter string }{
 		{"v1 lambda over the row", `@filter(row => row.primaryEmail.includes("@acme.com"))`},
-		{"legacy condition", `@filter(row => row.primaryEmail == "eve@acme.com")`},
+		{"an equality over the row", `@filter(row => row.primaryEmail == "eve@acme.com")`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			bus := events.NewBus()
@@ -184,7 +184,7 @@ func TestAuthoredScheduler_EventTrigger_HonoursItsFilter(t *testing.T) {
 				c.filter + "\n" +
 				"automation aliceOnAcmeUser {\n" +
 				"  args {\n    id any\n  }\n" +
-				"  step run {\n    logic sandboxNoopLogic { event: event }\n  }\n" +
+				"  run := logic sandboxNoopLogic(event: event)\n" +
 				"}"
 			if err := s.Activate(authoredAutomationConstruct(owner, "aliceOnAcmeUser", src)); err != nil {
 				t.Fatalf("Activate: %v", err)
@@ -321,9 +321,8 @@ func TestAuthoredScheduler_CompileErrorSurfaces(t *testing.T) {
 	// Missing closing brace.
 	src := `@trigger(schedule="* * * * * *")
 automation broken {
-  step run {
-    logic sandboxNoopLogic { event: event }
-}`
+  run := logic sandboxNoopLogic(event: event)
+`
 	if err := s.Activate(authoredAutomationConstruct("user-a", "broken", src)); err == nil {
 		t.Fatal("expected Activate to surface a compile error")
 	}

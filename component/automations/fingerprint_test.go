@@ -5,7 +5,7 @@ import (
 )
 
 func TestStepDeterministicFingerprint_Deterministic(t *testing.T) {
-	step := &Step{ID: "test", Type: StepTypeQuery}
+	step := &Step{ID: "test", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "q", Kind: "query"}}
 	result := &StepResult{
 		StepId: "test",
 		Status: "success",
@@ -28,7 +28,7 @@ func TestStepDeterministicFingerprint_Deterministic(t *testing.T) {
 }
 
 func TestStepDeterministicFingerprint_OrderIndependent(t *testing.T) {
-	step := &Step{ID: "test", Type: StepTypeQuery}
+	step := &Step{ID: "test", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "q", Kind: "query"}}
 
 	// Same nodes, different order
 	result1 := &StepResult{
@@ -57,7 +57,7 @@ func TestStepDeterministicFingerprint_OrderIndependent(t *testing.T) {
 }
 
 func TestStepDeterministicFingerprint_DifferentResults(t *testing.T) {
-	step := &Step{ID: "test", Type: StepTypeQuery}
+	step := &Step{ID: "test", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "q", Kind: "query"}}
 
 	result1 := &StepResult{
 		StepId: "test",
@@ -83,7 +83,7 @@ func TestStepDeterministicFingerprint_DifferentResults(t *testing.T) {
 }
 
 func TestStepDeterministicFingerprint_DifferentStatus(t *testing.T) {
-	step := &Step{ID: "test", Type: StepTypeQuery}
+	step := &Step{ID: "test", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "q", Kind: "query"}}
 
 	result1 := &StepResult{
 		StepId: "test",
@@ -103,7 +103,7 @@ func TestStepDeterministicFingerprint_DifferentStatus(t *testing.T) {
 }
 
 func TestStepDeterministicFingerprint_MutationResult(t *testing.T) {
-	step := &Step{ID: "mutation", Type: StepTypeMutation}
+	step := &Step{ID: "mutation", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "m", Kind: "mutation"}}
 	result := &StepResult{
 		StepId: "mutation",
 		Status: "success",
@@ -121,20 +121,26 @@ func TestStepDeterministicFingerprint_MutationResult(t *testing.T) {
 	}
 }
 
-func TestStepDeterministicFingerprint_WebhookResult(t *testing.T) {
-	step := &Step{ID: "webhook", Type: StepTypeWebhook}
-	result := &StepResult{
-		StepId: "webhook",
-		Status: "success",
-		Result: map[string]any{
-			"statusCode": 200,
-			"body":       "response varies", // should be ignored
-		},
+func TestStepDeterministicFingerprint_EventResultIsItsTopic(t *testing.T) {
+	step := &Step{ID: "publish", Type: StepTypeEvent}
+	publish := func(topic, body string) *StepResult {
+		return &StepResult{
+			StepId: "publish",
+			Status: "success",
+			Result: map[string]any{
+				"topic":   topic,
+				"payload": map[string]any{"body": body}, // should be ignored
+			},
+		}
 	}
 
-	fp := StepDeterministicFingerprint(step, result)
-	if fp == "" {
-		t.Error("webhook fingerprint should not be empty")
+	fp1 := StepDeterministicFingerprint(step, publish("deployed", "first"))
+	fp2 := StepDeterministicFingerprint(step, publish("deployed", "second"))
+	if fp1 == "" || fp1 != fp2 {
+		t.Errorf("an event fingerprint is its topic, not its payload: got %s and %s", fp1, fp2)
+	}
+	if fp3 := StepDeterministicFingerprint(step, publish("retired", "first")); fp3 == fp1 {
+		t.Error("fingerprints should differ for different topics")
 	}
 }
 
@@ -203,7 +209,7 @@ func TestStepDeterministicFingerprint_NilInputs(t *testing.T) {
 		t.Errorf("nil inputs should return empty fingerprint, got %s", fp)
 	}
 
-	step := &Step{ID: "test", Type: StepTypeQuery}
+	step := &Step{ID: "test", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "q", Kind: "query"}}
 	if fp := StepDeterministicFingerprint(step, nil); fp != "" {
 		t.Errorf("nil result should return empty fingerprint, got %s", fp)
 	}
@@ -286,61 +292,6 @@ func TestFingerprintInput_OrderIndependent(t *testing.T) {
 
 	if fp1 != fp2 {
 		t.Errorf("input fingerprint should be order-independent: got %s and %s", fp1, fp2)
-	}
-}
-
-func TestComputeChildFingerprint_Deterministic(t *testing.T) {
-	result := &StepResult{
-		StepId: "forEach[0]",
-		Status: "success",
-		Result: map[string]any{"key": "value"},
-	}
-
-	fp1 := ComputeChildFingerprint("forEach", 0, result)
-	fp2 := ComputeChildFingerprint("forEach", 0, result)
-
-	if fp1 != fp2 {
-		t.Errorf("child fingerprint should be deterministic: got %s and %s", fp1, fp2)
-	}
-
-	if fp1 == "" {
-		t.Error("child fingerprint should not be empty")
-	}
-}
-
-func TestComputeChildFingerprint_DifferentIndex(t *testing.T) {
-	result := &StepResult{
-		StepId: "forEach[0]",
-		Status: "success",
-		Result: map[string]any{"key": "value"},
-	}
-
-	fp1 := ComputeChildFingerprint("forEach", 0, result)
-	fp2 := ComputeChildFingerprint("forEach", 1, result)
-
-	if fp1 == fp2 {
-		t.Error("child fingerprints should differ for different indices")
-	}
-}
-
-func TestComputeChildFingerprint_DifferentParent(t *testing.T) {
-	result := &StepResult{
-		StepId: "child",
-		Status: "success",
-	}
-
-	fp1 := ComputeChildFingerprint("forEach1", 0, result)
-	fp2 := ComputeChildFingerprint("forEach2", 0, result)
-
-	if fp1 == fp2 {
-		t.Error("child fingerprints should differ for different parent steps")
-	}
-}
-
-func TestComputeChildFingerprint_NilResult(t *testing.T) {
-	fp := ComputeChildFingerprint("forEach", 0, nil)
-	if fp != "" {
-		t.Errorf("nil result should return empty fingerprint, got %s", fp)
 	}
 }
 

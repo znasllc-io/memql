@@ -205,11 +205,8 @@ func enclosingFuncName(file *ast.File, pos token.Pos) string {
 var evaluatorSetters = map[string]bool{
 	"SetCanonicalIdResolver":    true,
 	"SetCustom":                 true,
-	"SetInput":                  true,
-	"SetItem":                   true,
 	"SetLogger":                 true,
 	"SetSecretResolver":         true,
-	"SetStepResult":             true,
 	"SetSystemSecretResolver":   true,
 	"SetSystemVariableResolver": true,
 	"SetVariableResolver":       true,

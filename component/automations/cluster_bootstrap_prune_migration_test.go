@@ -247,7 +247,8 @@ func TestPruneStaleClusterNodes_CompilesToDecideThenForEachWrite(t *testing.T) {
 //
 //	return existing.empty() && args.event.payload.node.type == "bff"
 //
-// -- over the run, as a logic body's return is evaluated. It once fell through
+// -- over the run, as a logic body's return is evaluated, `existing` bound to
+// the rows its query statement read. It once fell through
 // to engine.Execute, whose converter refused the `existing.empty()`
 // collection-method operand with the ADR 2.2 gate; it must resolve to the
 // correct `create` boolean. (The sibling TestBootstrapCluster_GateSemantics
@@ -258,15 +259,12 @@ func TestBootstrapCluster_LogicReturnResolvesCreate(t *testing.T) {
 
 	mkEval := func(clusterExists bool, nodeType string) *Evaluator {
 		e := NewEvaluator()
-		nodes := []any{}
+		var rows []map[string]any
 		if clusterExists {
-			nodes = []any{map[string]any{"id": "v1:cluster:cluster:development"}}
+			rows = append(rows, map[string]any{"id": "v1:cluster:cluster:development", "payload": map[string]any{}})
 		}
-		e.SetStepResult("existing", &StepResult{
-			StepId: "existing",
-			Status: "success",
-			Result: map[string]any{"Bundle": map[string]any{"nodes": nodes}},
-		})
+		e.enterStatements()
+		e.Bind("existing", functionStatementValue("query", rowsResult(rows...)))
 		e.SetCustom("args", map[string]any{
 			"event": map[string]any{
 				"payload": map[string]any{

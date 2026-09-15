@@ -116,13 +116,11 @@ var snippetBodies = map[string]struct {
 		"stamp":  {"mutate thing probe {\n  args {\n    name string!\n  }\n  accept { name }\n  %s\n}", "createdAt: now"},
 	}},
 	"logic": {"logic probe {\n  ", map[string][2]string{
-		"args": {"logic probe {\n  %s\n  body {\n    return args.x\n  }\n}", "x string"},
-		"body": {"logic probe {\n  %s\n}", "return 1"},
+		"args": {"logic probe {\n  %s\n  return args.x\n}", "x string"},
 	}},
 	"automation": {"@trigger(event=\"x.y\")\nautomation probe {\n  ", map[string][2]string{
-		"args":         {"automation probe {\n  %s\n  step run {\n    mutation createThing (id: \"x\")\n  }\n}", "x any"},
-		"step":         {"automation probe {\n  %s\n}", `mutation createThing (id: "x")`},
-		"precondition": {"automation probe {\n  %s\n  step run {\n    mutation createThing (id: \"x\")\n  }\n}", "check: 1 == 1"},
+		"args":         {"automation probe {\n  %s\n  run := mutation createThing(id: \"x\")\n}", "x any"},
+		"precondition": {"automation probe {\n  %s\n  run := mutation createThing(id: \"x\")\n}", "check: 1 == 1"},
 	}},
 	"action": {"action probe {\n  ", map[string][2]string{
 		"args": {"action probe {\n  %s\n  capability script(script: args.x)\n}", "x string"},

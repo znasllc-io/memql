@@ -1,9 +1,9 @@
 package steps
 
-// v1_test.go -- the step executors' v1 halves (memql#5367): the forEach clone
-// as a caller of the run's data model, the query executor's in-process
-// expressions, the event and switch executors, the literal renderer, and the
-// two behaviour fixes v1 exists to make -- each driven through the REAL
+// v1_test.go -- the step executors over the statement runtime (memql#5367,
+// epic memql#5370): a `for` as a caller of the run's data model, the event
+// executor, a switch selecting its case, the literal renderer, and the two
+// behaviour fixes v1 exists to make -- each driven through the REAL
 // executors, with only the engine-bound function executor replaced.
 
 import (
@@ -19,7 +19,6 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/events"
-	"github.com/znasllc-io/memql/component/language/ast"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -39,7 +38,7 @@ func prepareV1(t *testing.T, js string) *automations.Automation {
 }
 
 // recordingFunctions stands in for the engine-bound function executor: it
-// evaluates a v1 step's arguments exactly as FunctionExecutor's v1 half does
+// evaluates a call's arguments exactly as FunctionExecutor does
 // (ResolveV1Map), records them, and answers with a canned result by name.
 type recordingFunctions struct {
 	mu      sync.Mutex
@@ -89,7 +88,7 @@ func (f *recordingFunctions) named(name string) []recordedCall {
 }
 
 // recordingEvents wraps the REAL event executor -- so topic and payload are
-// evaluated by its v1 half -- and records what it published.
+// evaluated by it -- and records what it published.
 type recordingEvents struct {
 	mu        sync.Mutex
 	published []map[string]any
@@ -126,85 +125,52 @@ func v1Registry(funcs *recordingFunctions, evs *recordingEvents) *Registry {
 	return r
 }
 
-// parseV1Logic parses a logic source and returns its body.
-func parseV1Logic(t *testing.T, src string) *langparser.AutomationDef {
+// runV1Automation runs a statement automation compiled from src through the
+// real executor over the real registry (function executor replaced), on an
+// event carrying payload and a bus the event executor publishes to.
+func runV1Automation(t *testing.T, src string, funcs *recordingFunctions, payload map[string]any) (*recordingEvents, *automations.AutomationExecution) {
 	t.Helper()
-	normalised, err := langparser.NormaliseAll(src)
+	a, err := automations.NewLoader(automations.LoaderOptions{}).CompileSource(src, "test.memql")
 	if err != nil {
-		t.Fatalf("NormaliseAll: %v", err)
+		t.Fatalf("compile: %v", err)
 	}
-	f, err := langparser.ParseFile(normalised)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	for _, d := range f.Definitions {
-		if fn, ok := d.(*langparser.FunctionDef); ok {
-			if body, ok := fn.Body.(*langparser.AutomationDef); ok {
-				return body
-			}
-		}
-	}
-	t.Fatal("no logic body in the source")
-	return nil
-}
-
-// runV1Logic runs a v1 logic body through the LogicRunner over the real
-// registry (function executor replaced), with an event bus for publishEvent.
-func runV1Logic(t *testing.T, name, src string, funcs *recordingFunctions, args map[string]any) (any, *recordingEvents, error) {
-	t.Helper()
 	bus := events.NewBus()
 	t.Cleanup(bus.Close)
-	eng := &memql.MemQLEngine{}
-	eng.SetEventBus(bus)
 	evs := &recordingEvents{}
-	runner := automations.NewLogicRunner(eng, v1Registry(funcs, evs), nil)
-	out, err := runner.RunLogic(context.Background(), name, parseV1Logic(t, src), args)
-	return out, evs, err
+	ev := events.NewEvent("probe.fired", events.KindMessage, payload)
+	exec, err := automations.NewExecutor(automations.ExecutorOptions{EventBus: bus, StepRegistry: v1Registry(funcs, evs)}).ExecuteWithEvent(context.Background(), a, "test", &ev)
+	if err != nil {
+		t.Fatalf("run: %v (%s)", err, exec.Error)
+	}
+	return evs, exec
 }
 
-// bundle is a query step's result as the step registry records it: the
-// engine envelope whose Bundle carries node maps.
-func bundle(nodes ...map[string]any) map[string]any {
+// rows is a query's result as the engine answers it: its rows.
+func rows(nodes ...map[string]any) *memql.ExecuteResult {
 	list := make([]any, len(nodes))
 	for i, n := range nodes {
 		list[i] = n
 	}
-	return map[string]any{"Bundle": map[string]any{"nodes": list}}
+	return memql.NewResultWithOutput(list)
 }
 
 // ---------------------------------------------------------------------------
 // the behaviour fixes
 // ---------------------------------------------------------------------------
 
-// reminderLogic is dsl/identity/logic.memql's accountDeletionReminder25Days in
-// the edition-2026 grammar: the [P25D, P26D) window is decided per row by a
-// date comparison against `now`.
-const reminderLogic = `logic accountDeletionReminder25Days {
+// reminderLogic is dsl/identity/logic.memql's usersDueDeletionReminder: the
+// [from, to) window is decided per row by a date comparison against `now`.
+const reminderLogic = `logic usersDueDeletionReminder {
   args {
-    event object!
+    from string!
+    to string!
   }
-  body {
-    candidates := query usersInDeletionCooldown()
-
-    for item := range candidates.nodes() {
-      emitReminder := if addDuration(item.payload.deletionScheduledAt, "P25D") < now && addDuration(item.payload.deletionScheduledAt, "P26D") >= now {
-        publishEvent(
-          topic: "identity.deletion.reminder",
-          payload: {
-            userId: item.id,
-            deletionScheduledAt: item.payload.deletionScheduledAt,
-            milestoneDays: 25
-          }
-        )
-      }
-    }
-
-    return candidates.count()
-  }
+  candidates := query usersInDeletionCooldown()
+  return candidates.nodes().where(u => addDuration(u.deletionScheduledAt, args.from) < now && addDuration(u.deletionScheduledAt, args.to) >= now)
 }`
 
-// TestV1ReminderGateIsTrueOnADueItem: the identity reminder gate
-// `addDuration(item.payload.deletionScheduledAt, "P25D") < now &&
+// TestV1ReminderGateIsTrueOnADueItem: the identity reminder window
+// `addDuration(u.deletionScheduledAt, "P25D") < now &&
 // addDuration(..., "P26D") >= now` is TRUE for a user 25.5 days into the
 // cooldown, and false either side of the window -- so exactly the due user is
 // reminded.
@@ -212,44 +178,35 @@ func TestV1ReminderGateIsTrueOnADueItem(t *testing.T) {
 	at := func(daysAgo float64) string {
 		return time.Now().UTC().Add(-time.Duration(daysAgo * 24 * float64(time.Hour))).Format(time.RFC3339)
 	}
+	due := map[string]any{"id": "u-due", "concept": "v1:identity:user", "payload": map[string]any{"deletionScheduledAt": at(25.5)}}
 	funcs := &recordingFunctions{results: map[string]any{
-		"usersInDeletionCooldown": bundle(
-			map[string]any{"id": "u-due", "concept": "v1:identity:user", "payload": map[string]any{"deletionScheduledAt": at(25.5)}},
+		"usersInDeletionCooldown": rows(
+			due,
 			map[string]any{"id": "u-early", "concept": "v1:identity:user", "payload": map[string]any{"deletionScheduledAt": at(10)}},
 			map[string]any{"id": "u-late", "concept": "v1:identity:user", "payload": map[string]any{"deletionScheduledAt": at(27)}},
 		),
 	}}
-	out, evs, err := runV1Logic(t, "accountDeletionReminder25Days", reminderLogic, funcs, map[string]any{"event": map[string]any{}})
+	body := compiledLogicForSteps(t, reminderLogic)
+	runner := automations.NewLogicRunner(&memql.MemQLEngine{}, v1Registry(funcs, &recordingEvents{}), nil)
+	out, err := runner.RunLogicBody(context.Background(), "usersDueDeletionReminder", body, map[string]any{"from": "P25D", "to": "P26D"})
 	if err != nil {
-		t.Fatalf("RunLogic: %v", err)
+		t.Fatalf("RunLogicBody: %v", err)
 	}
-	if out != int64(3) {
-		t.Fatalf("return candidates.count() = %#v, want 3", out)
-	}
-	evs.mu.Lock()
-	defer evs.mu.Unlock()
-	if len(evs.published) != 1 {
-		t.Fatalf("published %d reminders (%v), want exactly the due user's", len(evs.published), evs.published)
-	}
-	payload, _ := evs.published[0]["payload"].(map[string]any)
-	if evs.published[0]["topic"] != "identity.deletion.reminder" || payload["userId"] != "u-due" {
-		t.Fatalf("published %#v, want the reminder for u-due", evs.published[0])
-	}
-	if payload["milestoneDays"] != float64(25) {
-		t.Fatalf("milestoneDays = %#v (%T), want the literal 25", payload["milestoneDays"], payload["milestoneDays"])
+	if !reflect.DeepEqual(out, []any{due}) {
+		t.Fatalf("the window returned %#v, want exactly the due user's row", out)
 	}
 }
 
-// conflictLogic is dsl/data/logic.memql's conflictDetection in the
-// edition-2026 grammar.
-const conflictLogic = `logic conflictDetection {
+// conflictAutomation is dsl/data/automations.memql's conflictDetection.
+const conflictAutomation = `@trigger(event="probe.fired")
+automation conflictDetection {
   args {
-    event object!
+    partitionId any
+    recordType any
   }
-  body {
-    matchingConfirmed := query detectConflicts( partitionId: args.event.payload.partitionId, recordType: args.event.payload.recordType )
-    emitConflicts := if !matchingConfirmed.empty() { publishEvent( topic: "data.conflicts.detected", payload: { partitionId: args.event.payload.partitionId, matchCount: matchingConfirmed.count(), matches: matchingConfirmed.nodes(), requiresHumanApproval: true } ) }
-    return emitConflicts
+  matchingConfirmed := query detectConflicts(partitionId: args.partitionId, recordType: args.recordType)
+  if !matchingConfirmed.empty() {
+    publish "data.conflicts.detected" { partitionId: args.partitionId, matchCount: matchingConfirmed.count(), matches: matchingConfirmed.nodes(), requiresHumanApproval: true }
   }
 }`
 
@@ -257,18 +214,15 @@ const conflictLogic = `logic conflictDetection {
 // TRUE when the query matched rows -- the conflict event is published with
 // the rows and their count -- and false when it matched none.
 func TestV1NotEmptyIsTrueWhenThereAreMatches(t *testing.T) {
-	event := map[string]any{"payload": map[string]any{"partitionId": "p-1", "recordType": "invoice"}}
+	payload := map[string]any{"partitionId": "p-1", "recordType": "invoice"}
 
 	funcs := &recordingFunctions{results: map[string]any{
-		"detectConflicts": bundle(
+		"detectConflicts": rows(
 			map[string]any{"id": "r-1", "payload": map[string]any{"naturalKeyValue": "k"}},
 			map[string]any{"id": "r-2", "payload": map[string]any{"naturalKeyValue": "k"}},
 		),
 	}}
-	_, evs, err := runV1Logic(t, "conflictDetection", conflictLogic, funcs, map[string]any{"event": event})
-	if err != nil {
-		t.Fatalf("RunLogic: %v", err)
-	}
+	evs, _ := runV1Automation(t, conflictAutomation, funcs, payload)
 	// The query's arguments were evaluated values, not reference text.
 	calls := funcs.named("detectConflicts")
 	if len(calls) != 1 || !reflect.DeepEqual(calls[0].args, map[string]any{"partitionId": "p-1", "recordType": "invoice"}) {
@@ -277,87 +231,75 @@ func TestV1NotEmptyIsTrueWhenThereAreMatches(t *testing.T) {
 	if got := evs.topics(); len(got) != 1 || got[0] != "data.conflicts.detected" {
 		t.Fatalf("published %v, want the conflict event", got)
 	}
-	payload, _ := evs.published[0]["payload"].(map[string]any)
-	if payload["matchCount"] != int64(2) || payload["partitionId"] != "p-1" || payload["requiresHumanApproval"] != true {
-		t.Fatalf("conflict payload = %#v", payload)
+	published, _ := evs.published[0]["payload"].(map[string]any)
+	if published["matchCount"] != int64(2) || published["partitionId"] != "p-1" || published["requiresHumanApproval"] != true {
+		t.Fatalf("conflict payload = %#v", published)
 	}
-	if matches, _ := payload["matches"].([]any); len(matches) != 2 {
-		t.Fatalf("matches = %#v, want the two rows", payload["matches"])
+	if matches, _ := published["matches"].([]any); len(matches) != 2 {
+		t.Fatalf("matches = %#v, want the two rows", published["matches"])
 	}
 
 	// Control: no matches, no event.
-	none := &recordingFunctions{results: map[string]any{"detectConflicts": bundle()}}
-	_, evs, err = runV1Logic(t, "conflictDetection", conflictLogic, none, map[string]any{"event": event})
-	if err != nil {
-		t.Fatalf("RunLogic (no matches): %v", err)
-	}
+	none := &recordingFunctions{results: map[string]any{"detectConflicts": rows()}}
+	evs, _ = runV1Automation(t, conflictAutomation, none, payload)
 	if got := evs.topics(); len(got) != 0 {
 		t.Fatalf("published %v with no matches", got)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// the forEach clone as a caller
+// the `for` as a caller
 // ---------------------------------------------------------------------------
 
-// TestV1ForEachDataModel: inside a forEach body -- the clone of the run's
-// evaluator -- a v1 step reads its loop variable under its own name, `index`,
-// the event, the args, earlier steps, the actor and the clock; the filter and
-// the nested condition are v1 conditions over the same clone.
+// TestV1ForEachDataModel: inside a `for` -- a frame of its own inside the
+// run's -- a call reads its loop variable under its own name, the event, the
+// args, a name an earlier statement bound, the actor and the clock; the filter
+// and the nested condition are conditions over the same frame.
 func TestV1ForEachDataModel(t *testing.T) {
 	a := prepareV1(t, `{
 		"name": "forEachDataModel",
-		"steps": [{"id": "loop", "type": "forEach", "forEach": {
-			"source": "args.items",
-			"filter": "it.keep == true",
-			"as": "it",
-			"do": [{"id": "visit", "type": "function",
-				"condition": "index >= 0 && it.name != \"skipme\"",
-				"function": {"name": "visit", "args": {
-					"name":  {"$expr": "it.name"},
-					"idx":   {"$expr": "index"},
-					"ep":    {"$expr": "event.payload.x"},
-					"ax":    {"$expr": "args.x"},
-					"prior": {"$expr": "steps.s.result.y"},
-					"user":  {"$expr": "actor.userId"},
-					"clock": {"$expr": "now"}
-				}}}]
-		}}]
+		"args": {"fields": [{"name": "x", "type": "any", "optional": true}, {"name": "items", "type": "any", "optional": true}]},
+		"steps": [
+			{"id": "s", "type": "function", "binds": "s", "function": {"name": "seed", "kind": "builtin"}},
+			{"id": "loop", "type": "forEach", "forEach": {
+				"source": "args.items",
+				"filter": "it.keep == true",
+				"as": "it",
+				"do": [{"id": "visit", "type": "function",
+					"condition": "it.name != \"skipme\"",
+					"function": {"name": "visit", "kind": "builtin", "args": {
+						"name":  {"$expr": "it.name"},
+						"ep":    {"$expr": "event.payload.x"},
+						"ax":    {"$expr": "args.x"},
+						"prior": {"$expr": "s.y"},
+						"user":  {"$expr": "actor.userId"},
+						"clock": {"$expr": "now"}
+					}}}]
+			}}
+		]
 	}`)
-	ev := automations.NewEvaluator()
-	ev.SetCustom("event", map[string]any{"topic": "t", "payload": map[string]any{"x": "hello"}})
-	ev.SetCustom("args", map[string]any{"x": "ex", "items": []any{
+	funcs := &recordingFunctions{results: map[string]any{"seed": map[string]any{"y": "Y"}}}
+	ctx := auth.ContextWithUserActor(context.Background(), "user-7")
+	ev := events.NewEvent("probe.fired", events.KindMessage, map[string]any{"x": "ex", "items": []any{
 		map[string]any{"name": "a", "keep": true},
 		map[string]any{"name": "b", "keep": false},
 		map[string]any{"name": "skipme", "keep": true},
 		map[string]any{"name": "c", "keep": true},
 	}})
-	ev.SetCustom("actor", auth.ActorEnvelopeMap(&auth.AccessContext{UserId: "user-7"}))
-	ev.SetCustom("timestamp", time.Now().UTC().Format(time.RFC3339))
-	ev.SetStepResult("s", &automations.StepResult{StepId: "s", Status: "success", Result: map[string]any{"y": "Y"}})
-
-	funcs := &recordingFunctions{}
-	reg := v1Registry(funcs, &recordingEvents{})
-	res, err := (&ForEachExecutor{Registry: reg}).Execute(context.Background(), a.Steps[0], &Context{Evaluator: ev})
+	exec, err := automations.NewExecutor(automations.ExecutorOptions{StepRegistry: v1Registry(funcs, &recordingEvents{})}).ExecuteWithEvent(ctx, a, "test", &ev)
 	if err != nil {
-		t.Fatalf("forEach: %v", err)
-	}
-	if res.Status != "success" {
-		t.Fatalf("forEach status %q: %s", res.Status, res.Error)
+		t.Fatalf("run: %v (%s)", err, exec.Error)
 	}
 	visits := funcs.named("visit")
 	if len(visits) != 2 {
 		t.Fatalf("visited %d items (%#v), want a and c (b filtered out, skipme skipped by the condition)", len(visits), visits)
 	}
-	for i, want := range []struct {
-		name string
-		idx  int
-	}{{"a", 0}, {"c", 2}} {
+	for i, want := range []string{"a", "c"} {
 		got := visits[i].args
-		if got["name"] != want.name || got["idx"] != want.idx {
-			t.Errorf("visit %d = %#v, want name %q index %d", i, got, want.name, want.idx)
+		if got["name"] != want {
+			t.Errorf("visit %d = %#v, want name %q", i, got, want)
 		}
-		for k, v := range map[string]any{"ep": "hello", "ax": "ex", "prior": "Y", "user": "user-7"} {
+		for k, v := range map[string]any{"ep": "ex", "ax": "ex", "prior": "Y", "user": "user-7"} {
 			if got[k] != v {
 				t.Errorf("visit %d: %s = %#v, want %#v", i, k, got[k], v)
 			}
@@ -369,28 +311,8 @@ func TestV1ForEachDataModel(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// the executors' v1 halves
+// the executors
 // ---------------------------------------------------------------------------
-
-// TestV1QueryStepEvaluatesInProcess: a query step whose expression is not a
-// construct call is evaluated in process -- no engine is configured here, and
-// none is needed -- and its value is the step's result.
-func TestV1QueryStepEvaluatesInProcess(t *testing.T) {
-	a := prepareV1(t, `{"name":"q","steps":[
-		{"id":"total","type":"query","query":{"query":"args.a + args.b * 2"}},
-		{"id":"absent","type":"query","query":{"query":"args.missing"}}]}`)
-	ev := automations.NewEvaluator()
-	ev.SetCustom("args", map[string]any{"a": float64(1), "b": float64(3)})
-	for i, want := range []any{float64(7), nil} {
-		res, err := (&QueryExecutor{}).Execute(context.Background(), a.Steps[i], &Context{Evaluator: ev})
-		if err != nil {
-			t.Fatalf("step %s: %v", a.Steps[i].ID, err)
-		}
-		if res.Status != "success" || !reflect.DeepEqual(res.Result, want) {
-			t.Fatalf("step %s = %#v (%s), want %#v", a.Steps[i].ID, res.Result, res.Status, want)
-		}
-	}
-}
 
 // TestV1EventStepEvaluatesTopicAndPayload: the event executor's topic is a
 // v1 expression (a literal written as one, or a reference) and its payload
@@ -416,29 +338,40 @@ func TestV1EventStepEvaluatesTopicAndPayload(t *testing.T) {
 	}
 }
 
-// TestV1SwitchSubject: a v1 switch subject selects its case by value.
+// TestV1SwitchSubject: a switch statement's subject selects its case by
+// value, and only that case's statements run.
 func TestV1SwitchSubject(t *testing.T) {
-	a := prepareV1(t, `{"name":"sw","steps":[
-		{"id":"route","type":"switch","switch":{"expression":"args.n > 1 ? \"many\" : \"one\"",
-			"cases":{"many":{"steps":[{"id":"m","type":"function","function":{"name":"many"}}]},
-			         "one":{"steps":[{"id":"o","type":"function","function":{"name":"one"}}]}}}}]}`)
-	ev := automations.NewEvaluator()
-	ev.SetCustom("args", map[string]any{"n": float64(3)})
-	funcs := &recordingFunctions{}
-	res, err := (&SwitchExecutor{Registry: v1Registry(funcs, &recordingEvents{})}).Execute(context.Background(), a.Steps[0], &Context{Evaluator: ev})
-	if err != nil {
-		t.Fatalf("switch: %v", err)
-	}
-	if res.Metadata["matchedCase"] != "many" || len(funcs.named("many")) != 1 || len(funcs.named("one")) != 0 {
-		t.Fatalf("switch matched %v (calls %#v), want case many", res.Metadata["matchedCase"], funcs.calls)
+	for _, c := range []struct {
+		n    float64
+		want string
+	}{{3, "many"}, {1, "one"}} {
+		funcs := &recordingFunctions{}
+		runV1Automation(t, `@trigger(event="probe.fired")
+automation route {
+  args {
+    n any
+  }
+  switch args.n > 1 ? "many" : "one" {
+    case "many" {
+      builtin many()
+    }
+    case "one" {
+      builtin one()
+    }
+  }
+}`, funcs, map[string]any{"n": c.n})
+		other := map[string]string{"many": "one", "one": "many"}[c.want]
+		if len(funcs.named(c.want)) != 1 || len(funcs.named(other)) != 0 {
+			t.Fatalf("n=%v: calls %#v, want only case %s", c.n, funcs.calls, c.want)
+		}
 	}
 }
 
 // TestRenderMemQLDataQuotesReferenceText: an evaluated value is DATA. A
-// string that reads like a reference is quoted -- the legacy renderer passed
-// it through bare, and the engine re-read it as a reference.
+// string that reads like a reference is quoted -- passed through bare, the
+// engine would re-read it as a reference.
 func TestRenderMemQLDataQuotesReferenceText(t *testing.T) {
-	for _, s := range []string{"event.payload.x", "steps.a.result", "$args.x", "item", "concat(a, b)"} {
+	for _, s := range []string{"event.payload.x", "args.x", "row.id", "item", "a + b"} {
 		if got := renderMemQLData(s); got != langparser.QuoteString(s) {
 			t.Errorf("renderMemQLData(%q) = %s, want it quoted", s, got)
 		}
@@ -453,32 +386,5 @@ func TestRenderMemQLDataQuotesReferenceText(t *testing.T) {
 	}
 	if got := renderMemQLData(nil); got != "null" {
 		t.Errorf("renderMemQLData(nil) = %s", got)
-	}
-}
-
-// TestV1ConstructCallText: a construct call renders as `name(k: <literal>)`
-// with its arguments evaluated -- sorted, an absent one omitted, an explicit
-// nil passed as null -- and refuses positional arguments.
-func TestV1ConstructCallText(t *testing.T) {
-	ev := automations.NewEvaluator()
-	ev.SetCustom("args", map[string]any{"id": "event.payload.x"})
-	node, err := langparser.ParseV1Expression(`query rowsFor(id: args.id, gone: args.missing, none: nil, n: 1 + 1)`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	call, ok := node.(*ast.CallExpr)
-	if !ok || call.Kind != "query" {
-		t.Fatalf("parsed %T %+v, want a query construct call", node, node)
-	}
-	got, err := v1ConstructCallText(context.Background(), ev, call)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := `rowsFor(id: "event.payload.x", n: 2, none: null)`; got != want {
-		t.Fatalf("call text = %s, want %s", got, want)
-	}
-	positional := &ast.CallExpr{Kind: "query", Name: "rowsFor", Args: []ast.ExpressionNode{&ast.LiteralExpr{Value: "x"}}}
-	if _, err := v1ConstructCallText(context.Background(), ev, positional); err == nil {
-		t.Fatal("a positional construct-call argument was accepted")
 	}
 }

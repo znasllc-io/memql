@@ -102,16 +102,12 @@ func (p *stmtProbe) argsOf(t *testing.T, callee string, nth int) map[string]any 
 	return nil
 }
 
-// statementAutomation compiles src with the tree's loader and requires a
-// statement body.
+// statementAutomation compiles src with the tree's loader.
 func statementAutomation(t *testing.T, src string) *Automation {
 	t.Helper()
 	a, err := NewLoader(LoaderOptions{}).CompileSource(src, "test.memql")
 	if err != nil {
 		t.Fatalf("compile: %v", err)
-	}
-	if !a.IsStatementBody() {
-		t.Fatalf("%s did not load as a statement body (body %q)", a.Name, a.Body)
 	}
 	return a
 }

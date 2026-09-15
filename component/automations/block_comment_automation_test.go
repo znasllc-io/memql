@@ -317,11 +317,15 @@ automation phantomHeader
 // shows the fixture is the terse form the slicer looks for, so the test
 // cannot pass by covering something else (#2861 review D4).
 func TestBlockCommentedTerseAutomationIsAbsent(t *testing.T) {
+	// memqlmigrate:keep -- the retired terse form is the case.
 	const terse = `automation terseCommented @trigger(event="node.created", concept="v1:cluster:node") => logic logicNoSuchThing`
 
 	if _, err := loadFixtureDomain(t, "s2861fixtureterselive", terse+"\n\n"+liveAutomation); err == nil || !strings.Contains(err.Error(), "body_terse_retired") {
 		t.Fatalf("the fixture uncommented must be refused as the terse form, so this test would silently cover something else; got %v", err)
 	}
+	// The refused domain stays mounted until the test ends; unmount it now, or
+	// the load below reads its refusal too.
+	memqldsl.UnregisterTree("s2861fixtureterselive")
 
 	src := "/*\n" + terse + "\n*/\n\n" + liveAutomation
 
@@ -399,19 +403,17 @@ func TestUnterminatedBlockCommentLineIgnoresNonOpeners(t *testing.T) {
 //
 // Two rejected attempts at the memql#2872 preamble defect made the walk step
 // OVER comment lines, which pulled the comment body INTO the emitted slice.
-// compileMemQL then ran its raw-text gates over commented-out text, so an
-// ordinary explanatory comment could refuse the node's boot. These cases are
-// all valid MemQL (memqllint-clean) and must load cleanly; each one refused
-// the boot under those attempts.
+// compileMemQL then scanned commented-out text, so an ordinary explanatory
+// comment could refuse the node's boot. These cases are all valid MemQL
+// (memqllint-clean) and must load cleanly.
 func TestBlockCommentAboveAutomationDoesNotDisturbTheLoad(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		comment string
 	}{
-		{"mentions $steps.", "/* the old form used $steps.foo -- do not reintroduce */"},
+		{"mentions an event.payload read", "/* before #2367 this read event.payload.status -- do not reintroduce */"},
 		{"contains an annotation", "/*\n@public\n*/"},
 		{"contains a retired annotation", "/*\n@useConcept(node)\n*/"},
-		{"contains a direct mutation call", "/*\n  x := mutation(concept: \"v1:cluster:node\")\n*/"},
 		{"has two blank lines", "/* para one\n\n\npara two\n*/"},
 		{"is a parked copy of the automation", "/*\n@enabled\n@trigger(event=\"node.created\", concept=\"v1:cluster:node\")\nautomation parkedCopy {\n  s := logic x(v: 1)\n}\n*/"},
 	} {

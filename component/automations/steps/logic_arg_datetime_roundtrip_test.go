@@ -1,11 +1,10 @@
 package steps
 
 // logic_arg_datetime_roundtrip_test.go -- the memql#2543 end-to-end
-// regression: an automation step passes a query/step-result collection into
-// a logic arg (`logic dayRollup(rows: steps.getRows.result)`); the
-// FunctionExecutor evaluates the argument to live Go values, renders them
-// into query text, and engine.Execute re-parses that text before
-// dispatching the logic. A row's createdAt (a live time.Time) rendered in
+// regression: an automation statement passes a query's rows into a logic arg
+// (`rollup := logic dayRollup(rows: getRows)`); the FunctionExecutor
+// evaluates the argument to live Go values, renders them into query text,
+// and engine.Execute re-parses that text before dispatching the logic. A row's createdAt (a live time.Time) rendered in
 // Go's default format and the re-parse rejected it with `expected '}', got
 // "-07"` -- a runtime crash memqllint could not see.
 //
@@ -74,18 +73,12 @@ func compiledLogicForSteps(t *testing.T, src string) []map[string]any {
 }
 
 // nullStepRegistry satisfies the LogicRunner's registry dependency for
-// bodies whose steps all evaluate in process (collection chains, literal
-// returns): a query step that is not a construct call runs on the real query
-// executor, which evaluates it with no engine round trip. Any other step
-// that reaches it succeeds with an empty result.
+// bodies whose statements all evaluate in process (collection chains, literal
+// returns), which never reach it. Any construct call that does succeeds with
+// an empty result.
 type nullStepRegistry struct{}
 
-func (r *nullStepRegistry) Execute(ctx context.Context, step *automations.Step, sc *automations.StepContext) (*automations.StepResult, error) {
-	if sc != nil && sc.Evaluator != nil {
-		if _, inProcess, _ := sc.Evaluator.InProcessQuery(ctx, step); inProcess {
-			return (&QueryExecutor{}).Execute(ctx, step, sc)
-		}
-	}
+func (r *nullStepRegistry) Execute(_ context.Context, step *automations.Step, _ *automations.StepContext) (*automations.StepResult, error) {
 	now := time.Now()
 	return &automations.StepResult{StepId: step.ID, Status: "success", StartedAt: now, CompletedAt: now}, nil
 }
@@ -118,27 +111,23 @@ logic logicDayRollupProbe {
 		t.Fatalf("register probe logic: %v", err)
 	}
 
-	// STAGE 1 -- serialize. Seed the sending automation's evaluator with a
-	// step result whose rows carry a live time.Time createdAt (the DB-model
-	// representation, memory-nodes/models.go), then evaluate + render the
-	// compiled `logic dayRollupProbe(rows: steps.getRows.result, day: ...)`
+	// STAGE 1 -- serialize. Bind `getRows` in the sending automation's
+	// statement frame to rows that carry a live time.Time createdAt (the
+	// DB-model representation, memory-nodes/models.go), then evaluate +
+	// render the compiled `logic logicDayRollupProbe(rows: getRows, day: ...)`
 	// args exactly as FunctionExecutor.Execute does.
 	cet := time.FixedZone("CET", 3600)
-	evaluator := automations.NewEvaluator()
-	evaluator.SetStepResult("getRows", &automations.StepResult{
-		StepId: "getRows",
-		Status: "success",
-		Result: []map[string]any{
-			{"id": "v1:ship:scan:1", "createdAt": time.Date(2026, 7, 14, 9, 30, 0, 0, cet), "count": 3},
-			{"id": "v1:ship:scan:2", "createdAt": time.Date(2026, 7, 13, 9, 30, 0, 0, cet), "count": 30},
-		},
+	evaluator := automations.NewEvaluator().ChildFrame()
+	evaluator.Bind("getRows", []map[string]any{
+		{"id": "v1:ship:scan:1", "createdAt": time.Date(2026, 7, 14, 9, 30, 0, 0, cet), "count": 3},
+		{"id": "v1:ship:scan:2", "createdAt": time.Date(2026, 7, 13, 9, 30, 0, 0, cet), "count": 30},
 	})
-	rowsRef, err := langparser.ParseV1Expression("steps.getRows.result")
+	rowsRef, err := langparser.ParseV1Expression("getRows")
 	if err != nil {
 		t.Fatal(err)
 	}
 	compiledArgs := map[string]any{
-		"rows": &automations.ExprLeaf{Src: "steps.getRows.result", Node: rowsRef},
+		"rows": &automations.ExprLeaf{Src: "getRows", Node: rowsRef},
 		"day":  "2026-07-14",
 	}
 	resolved, err := evaluator.ResolveV1Map(context.Background(), compiledArgs)

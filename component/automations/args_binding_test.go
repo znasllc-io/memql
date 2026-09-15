@@ -90,15 +90,15 @@ automation badDefault {
 	}
 }
 
-// An automation with NO args block still compiles and carries a nil Args --
-// the backward-compatible untyped-event path (zero regression).
+// An automation with NO args block compiles and carries a nil Args: it binds
+// no args, and reads its trigger through `event`.
 func TestCompileMemQL_NoArgsBlock_NilArgs(t *testing.T) {
 	loader := NewLoader(LoaderOptions{})
 	src := `@trigger(event="node.created", concept="v1:cognition:space")
-automation legacyUntyped {
+automation untyped {
   publish "demo.greeted" {}
 }`
-	auto, err := loader.compileMemQL(src, "test:legacyUntyped")
+	auto, err := loader.compileMemQL(src, "test:untyped")
 	if err != nil {
 		t.Fatalf("compileMemQL: %v", err)
 	}

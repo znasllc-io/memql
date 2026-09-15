@@ -4,9 +4,9 @@ package steps
 // dry-run sandbox's forwarded-logic-call arg resolver (memql#1727).
 //
 // The regression: an authored wrapper forwards the triggering event as
-// `logic autoJoinAI ( event: event )`. The pre-#1727 sandbox resolved that
+// `logic autoJoinAI(event: event)`. The pre-#1727 sandbox resolved that
 // through the mutation-style evaluator, which treated bare `event` as a
-// literal string -- so RunLogic received args["event"] = "event" and every
+// literal string -- so the logic received args["event"] = "event" and every
 // nested `args.event.payload.X` navigated into a string. stepCallArgs must
 // resolve the argument to the seeded envelope, exactly like the live
 // FunctionExecutor.

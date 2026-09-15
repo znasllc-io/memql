@@ -83,9 +83,6 @@ func runStatementBody(t *testing.T, src string, probe *callProbe) (*automations.
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
-	if !a.IsStatementBody() {
-		t.Fatalf("%s is not a statement body", a.Name)
-	}
 	reg := NewRegistry()
 	reg.Register(automations.StepTypeFunction, probe)
 	ev := events.NewEvent("probe.fired", events.KindMessage, nil)
@@ -313,7 +310,7 @@ automation gated {
   gate := action cloneRepoAtVersion(workdir: "w", ref: "r")
   builtin report(passed: gate.passed, version: gate.version)
 }`, "test.memql")
-	if err != nil || !a.IsStatementBody() {
+	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
 	probe := &callProbe{answers: map[string]any{}}
