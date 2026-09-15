@@ -9,10 +9,14 @@ it in the epic's merge (plan Task 16 step 3). Update it each time you stop.
 The sections below it are the earlier history and are superseded where they
 disagree with this one.
 
-- **Branch:** `epic/dsl-v1-bodies`, PUSHED to origin. It now carries the
-  whole flip (the `tmp/dsl-v1-bodies-flip2` work was merged into it); work on
-  it directly in `/home/znas/memql-projects/epic-dsl-v1-bodies`
-  (`git -C ... pull` first). No PR is open yet.
+- **Where it landed:** at the owner's instruction (2026-09-14) the work so
+  far merges to main NOW, through a PR from `epic/dsl-v1-bodies` that REFERS
+  to #5370-#5374 without closing them; each issue carries a comment naming the
+  PR, its merge commit and what is left. So this plan and checkpoint are on
+  main until the epic finishes. Continue on a NEW branch off `origin/main`
+  (for example `epic/dsl-v1-bodies-finish`), do the "To finish" list below,
+  delete this plan and checkpoint in that PR, and close the five issues when
+  it merges.
 - **Done:** flip steps F1-F7, all of them, plus:
   - the step bodies' accessors `step("x")`, `input()`, `item()`, `index()`
     are refused by name (`body_accessor_retired`, parser + corpus + docs);
@@ -53,15 +57,16 @@ disagree with this one.
   `error("x is required")` trips the cross-namespace-import gate asking for
   `use common.builtins.{ error }`, because `dsl/common/builtins.memql`
   declares a builtin named `error` beside the catalog function -- file it.
-- **To finish:** (1) the verification above, reading every output; (2) delete
-  the plan and this checkpoint (plan Task 16 step 3); (3) open the PR from
-  `epic/dsl-v1-bodies` with the body drafted in plan Task 16, adding the `mutation`
-  keyword, the accessor refusal and the `construct_unknown` code, and one
-  `Closes #n` line per issue #5370-#5374; (4) wait for `ci-required`, then
-  `scripts/dev/merge-as-owner.sh --pr=<n> --check` and merge; verify main;
-  close any of #5370-#5374 the merge did not; (5) message peer `memql-6f` the
-  merge SHA (it waits on it); (6) delete the local branches `tmp/dsl-v1-bodies-*`
-  and the scratch worktrees (`git worktree prune`).
+- **To finish:** (1) the verification above, reading every output, on a
+  branch off main -- CI's `ci-required` covers most of it, but not
+  memqllint's whole-tree run or a dead-code sweep; (2) decide `error()`
+  (above); (3) delete this plan and checkpoint (plan Task 16 step 3); (4) open
+  the finishing PR with one `Closes #n` line per issue #5370-#5374, wait for
+  `ci-required`, `scripts/dev/merge-as-owner.sh --pr=<n> --check`, merge,
+  verify main, and close any issue the merge did not; (5) message peer
+  `memql-6f` the merge SHA of whichever PR it is waiting on; (6) delete the
+  local branches `tmp/dsl-v1-bodies-*` and the scratch worktrees
+  (`git worktree prune`); (7) file the follow-up issues below.
 - **Follow-up issues to file after the merge:** healing patches still write
   `$config.X` / `$event.payload.X` / `$steps.a.result` (component/healing
   patch.go, repair_loop.go), which the statement runtime does not resolve -- a
