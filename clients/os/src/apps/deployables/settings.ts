@@ -38,7 +38,7 @@ import { TRAFFIC_WINDOWS, type TrafficWindow } from "./traffic";
  * as a broken app rather than as a stale preference.
  */
 export const DEPLOYABLES_SECTIONS: OsAppSection[] = [
-  { id: "map", name: "Map" },
+  { id: "map", name: "Overview" },
   { id: "deployables", name: "Deployables" },
   // The app's slice of the cluster's logs (epic memql#4895): the lines it
   // tagged and the lines about the things it owns. Admin-floored because
@@ -97,14 +97,10 @@ export interface DeployablesSettings {
    * this field exists to stop.
    */
   trafficWindow: TrafficWindow;
-  /**
-   * The source groups a person has opened, by group id.
-   *
-   * THE OPEN SET RATHER THAN THE CLOSED ONE, because closed is the default: a
-   * list of what is shut would have to name every source that has ever
-   * existed, and a source added tomorrow would arrive open.
-   */
+  /** Legacy expanded-source preference, retained for document compatibility. */
   expandedSources: string[];
+  /** Composition shows relationships by default; explicit collapses persist. */
+  collapsedSources?: string[];
 }
 
 export const DEPLOYABLES_SETTINGS_KEY = "memql-os-deployables-v1";
@@ -121,9 +117,7 @@ export const DEFAULT_DEPLOYABLES_SETTINGS: DeployablesSettings = {
   // measuring it. The day and the week stay one click away, and a click is
   // remembered.
   trafficWindow: "hour",
-  // Nothing open. With sources in their own section, a closed group is one
-  // line naming the source and how many apps it carries, which is the shape
-  // the list is for.
+  // Composition shows source branches until explicitly collapsed.
   expandedSources: [],
 };
 
@@ -167,7 +161,8 @@ export function sanitizeDeployablesSettings(raw: unknown): DeployablesSettings {
     ? (doc.expandedSources as unknown[]).filter((v): v is string => typeof v === "string")
     : [...DEFAULT_DEPLOYABLES_SETTINGS.expandedSources];
 
-  return { version: 1, defaultSection, density, trafficWindow, expandedSources };
+  return { version: 1, defaultSection, density, trafficWindow, expandedSources,
+    ...(Array.isArray(doc.collapsedSources) ? { collapsedSources: doc.collapsedSources.filter((v): v is string => typeof v === "string") } : {}) };
 }
 
 export interface DeployablesSettingsStore {

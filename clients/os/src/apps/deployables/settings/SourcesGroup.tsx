@@ -223,8 +223,7 @@ export function SourcesGroup({
     <fieldset className="os-field-group">
       <legend>Sources</legend>
       <Caption>
-        Where your deployables fetch their code. A GitHub connection lets you pick a repository from a list; a
-        pasted token is the fallback for a host or an organization that will not take the app.
+        Connect GitHub to choose repositories, or add a stored access token.
       </Caption>
 
       {/* THE ANSWER FROM GITHUB, ON THE SURFACE THAT ASKED. A successful
@@ -296,17 +295,16 @@ export function SourcesGroup({
 
           A SECTION, LIKE THE CARD ABOVE IT, and that is what carries the
           level. A legend and a Subhead are ONE declaration in this shell --
-          13px, 600, ink -- so `Sources`, `GitHub` and `Tokens you pasted` are
+          13px, 600, ink -- so `Sources`, `GitHub` and `Access tokens` are
           typographically identical and the only thing that can say which
           contains which is the space around them. Measured as a bare Subhead
           this heading sat 0px under the caption above it and read as a third
           sibling of `Sources`; as a section it is a part inside it
           (styles/index.css, `.os-field-group .os-field-group`). */}
-      <section className="os-field-group" aria-label="Tokens you pasted">
-        <Subhead>Tokens you pasted</Subhead>
+      <section className="os-field-group" aria-label="Access tokens">
+        <Subhead>Access tokens</Subhead>
         <Caption>
-          A credential lets this cluster fetch a private repository. The value is sealed here and read only at fetch
-          time -- nothing, including this page, can show it again.
+          Access tokens let the cluster fetch private repositories. Token values are not shown after saving.
         </Caption>
 
         <LiveList<CredentialRow>
@@ -328,7 +326,7 @@ export function SourcesGroup({
         ) : (
           <div className="os-form-row">
             <Button onClick={() => setAdding(true)}>Add a credential</Button>
-            <Caption>Only {SOURCE_HOST} today.</Caption>
+            <Caption>Supported host: {SOURCE_HOST}.</Caption>
           </div>
         )}
       </section>
@@ -340,10 +338,9 @@ export function SourcesGroup({
           on the feed, and this surface only says whose they are. */}
       {isClusterOwner && othersCount > 0 ? (
         <section className="os-field-group" aria-label="Other people's connections">
-          <Subhead>Other people's connections (owner view)</Subhead>
+          <Subhead>Other people's connections</Subhead>
           <Caption>
-            Credentials other people hold, as their owner sees them: a name and a fingerprint, never a value.
-            Auto-deploy fetches under these, so a credential whose person has left is still yours to revoke.
+            Review shared repository access. Revoke a credential when it should no longer be used.
           </Caption>
           <LiveList<CredentialRow>
             source={others}

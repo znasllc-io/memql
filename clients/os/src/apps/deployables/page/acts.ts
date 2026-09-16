@@ -295,16 +295,17 @@ function fromSource(site: SiteRow, pkg: PackageRow | null): boolean {
 
 function reading(input: ActsInput): BarReading {
   const { site, pkg, run } = input;
+  if (site.status === "") return { state: "Unknown", detail: "This cluster did not report a recognized serving state.", tone: "none", acts: [] };
 
   // A SYSTEM-OWNED ROW GETS NO ACTS AT ALL -- not disabled ones. The seeded
-  // portal and OS sites are exempt from the lifecycle entirely and the server
+  // MemQL OS sites are exempt from the lifecycle entirely and the server
   // refuses those writes whoever asks; the bar states what it is and offers
   // nothing, which is the courtesy on top of the guard.
   if (site.systemOwned) {
     return {
-      state: "Live",
-      detail: "a cluster surface -- re-seeded live at every boot, so it has no lifecycle to change",
-      tone: "live",
+      state: siteStateWord(site),
+      detail: siteStateDetail(siteStateWord(site), site.hostname),
+      tone: siteStateWord(site) === "Live" ? "live" : siteStateWord(site) === "Unavailable" ? "paused" : "none",
       acts: [],
     };
   }
@@ -387,9 +388,9 @@ function reading(input: ActsInput): BarReading {
       return {
         state: word,
         detail: lastRunBroke
-          ? "serving the version before the last attempt, which did not finish"
+          ? `${siteStateDetail(word, site.hostname)}; the latest attempt did not replace the published version`
           : siteStateDetail(word, site.hostname),
-        tone: "live",
+        tone: word === "Live" ? "live" : word === "Unavailable" ? "paused" : "none",
         acts: [spec("Take offline"), spec(lastRunBroke ? "Retry the deploy" : nextDeployName(pkg), "primary")],
       };
     case "disabled":

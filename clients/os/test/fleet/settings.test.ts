@@ -33,7 +33,7 @@ describe("fleet settings", () => {
     expect(new LocalFleetSettingsStore(new MemoryStorage(), "k").load()).toEqual(
       DEFAULT_FLEET_SETTINGS,
     );
-    expect(DEFAULT_FLEET_SETTINGS.defaultSection).toBe("machines");
+    expect(DEFAULT_FLEET_SETTINGS.defaultSection).toBe("overview");
     expect(DEFAULT_FLEET_SETTINGS.showRevoked).toBe(false);
   });
 
@@ -42,7 +42,7 @@ describe("fleet settings", () => {
     // choice: they are unrelated preferences that happen to share a document.
     expect(sanitizeFleetSettings({ version: 1, defaultSection: 42, showRevoked: true })).toEqual({
       version: 1,
-      defaultSection: "machines",
+      defaultSection: "overview",
       showRevoked: true,
     });
     expect(sanitizeFleetSettings({ version: 1, defaultSection: "routing", showRevoked: "yes" })).toEqual(
@@ -52,7 +52,7 @@ describe("fleet settings", () => {
 
   it("repairs a section this app no longer declares", () => {
     expect(sanitizeFleetSettings({ version: 1, defaultSection: "gone", showRevoked: false })
-      .defaultSection).toBe("machines");
+      .defaultSection).toBe("overview");
     // ...and accepts every one it does, so the picker and the manifest agree.
     for (const id of FLEET_SECTION_IDS) {
       expect(sanitizeFleetSettings({ version: 1, defaultSection: id, showRevoked: false })

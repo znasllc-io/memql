@@ -316,3 +316,20 @@ func TestTheRecordHappensAfterTheResponse(t *testing.T) {
 type recorderFunc func(RequestRecord)
 
 func (f recorderFunc) Record(r RequestRecord) { f(r) }
+
+func TestHealthProbesDoNotInflateVisitorTraffic(t *testing.T) {
+	log := &captureRecorder{}
+	h := NewHandler(Options{Resolver: staticResolver{site: &Site{ID: "shop", Status: "live", Kind: "spa", BundleRef: "file:///site"}}, Opener: mapOpener(map[string]string{"index.html": "hello"}), RequestLog: log})
+	for _, ua := range []string{"MemQL-Site-Health/1.0", "ordinary visitor"} {
+		req := httptest.NewRequest(http.MethodGet, "https://shop.example.com/", nil)
+		req.Header.Set("User-Agent", ua)
+		response := httptest.NewRecorder()
+		h.ServeHTTP(response, req)
+		if response.Code != 200 {
+			t.Fatalf("probe and visitor must see the same response, got %d", response.Code)
+		}
+	}
+	if len(log.records) != 1 {
+		t.Fatalf("want only the visitor, got %d traffic records", len(log.records))
+	}
+}

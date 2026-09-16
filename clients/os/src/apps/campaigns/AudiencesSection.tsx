@@ -1,6 +1,7 @@
+import { AddButton } from "../../kit/AddButton";
 import { useMemo, useRef, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
-import { Plus, Users } from "lucide-react";
+import { Users } from "lucide-react";
 
 import { AccountChip, AccountPicker } from "../accounts/AccountPicker";
 import { accountNameFrom } from "../accounts/rows";
@@ -83,9 +84,7 @@ export function AudiencesSection({
   return (
     <div className="os-app-stack">
       <Head title="Audiences">
-        <Button onClick={() => setAdding((v) => !v)}>
-          <Plus size={14} aria-hidden /> New audience
-        </Button>
+        <AddButton onClick={() => setAdding((v) => !v)} label="New audience" />
       </Head>
 
       {feeds.audiences.snapshot.error ? (

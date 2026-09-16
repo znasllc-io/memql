@@ -1,5 +1,4 @@
 import { useCallback, useMemo, useState } from "react";
-import { ArrowLeft } from "lucide-react";
 import type { Module, ModuleDetail as ModuleDetailWire, ModulesClient } from "@znasllc-io/memql-sdk-core/client";
 
 import { ActionBar, type Act, type ActionBarTone } from "../../../kit/ActionBar";
@@ -120,11 +119,7 @@ export function ModuleDetail({
         <Panel label={`Module ${module.name}`}>
           {/* ONE Head, and its only control goes BACK. Every act that changes
               the module's state is on the bar (rule 12). */}
-          <Head title={module.name} meta={`${module.kind} -- ${module.scope || "unscoped"}`}>
-            <Button tone="quiet" onClick={onBack}>
-              <ArrowLeft size={13} aria-hidden /> Modules
-            </Button>
-          </Head>
+          <Head title={module.name} meta={`${module.kind} -- ${module.scope || "unscoped"}`} back={{ label: "Modules", onSelect: onBack }} />
 
           <Facts>
             <Fact label="State" value={module.state || "unstated"} mono />

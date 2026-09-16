@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft } from "lucide-react";
 
-import { Mark } from "../../../chrome/Mark";
 import { Button, Caption, Head, Notice, Panel, useLiveView } from "../../../kit";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
 import { SELF_ACCOUNT_ID } from "../../accounts/rows";
@@ -47,8 +45,12 @@ import {
   accountOrSelf,
 } from "./compose";
 import { everyOtherAppSkipped } from "../packages/calls";
+import { ComposeJourney } from "./ComposeJourney";
+import { BuildStop } from "./stops/Build";
+import { CiHandoff } from "./stops/compose/CiHandoff";
 import { Rail } from "./RailView";
-import { headActionFor, type ComposeInput, type HeadAction, type RailProblem, type RailStage } from "./rail";
+import "../composition.css";
+import { headActionFor, railFor, type ComposeInput, type HeadAction, type RailProblem, type RailStage } from "./rail";
 import type { PartsHeld } from "../parts";
 import { ManifestPreview } from "./stops/compose/ManifestPreview";
 import { ComposeSourceStop } from "./stops/compose/Source";
@@ -118,6 +120,7 @@ export interface ComposePageProps {
   credentials: readonly CredentialRow[];
   /** The quiet Back: the list is what this replaced. */
   onBack: () => void;
+  backLabel?: string;
   onAsk?: (tag: string) => void;
   /** A parked run and its source, when a "will serve" row reopened the reading. */
   parked?: { pkg: PackageRow; run: DeploymentRow };
@@ -155,7 +158,7 @@ export interface ComposePageProps {
 }
 
 export function ComposePage(props: ComposePageProps) {
-  const { clusterDomain, can, isClusterOwner, credentials, onBack, onAsk, parked, placed, only, source, packages } = props;
+  const { clusterDomain, can, isClusterOwner, credentials, onBack, backLabel = "Deployables", parked, placed, only, source, packages } = props;
 
   const [draft, setDraft] = useState<ComposeDraft>(EMPTY_DRAFT);
   const [addresses, setAddresses] = useState<Record<string, AddressDraft>>({});
@@ -172,11 +175,13 @@ export function ComposePage(props: ComposePageProps) {
   // later; neither inserts a row locally.
   const [activated, setActivated] = useState(false);
   const [wentLive, setWentLive] = useState(false);
+  const [liveIds, setLiveIds] = useState<string[]>([]);
   // "USE A TOKEN INSTEAD", HELD HERE, which is `ZipPicker`'s arrangement on
   // the standing Source stop and holds for the same reason: a fold whose
   // state lived in the stop would close under somebody every time a probe
   // answered or a credential arrived on its own feed.
   const [tokenFormOpen, setTokenFormOpen] = useState(false);
+  const [journeyChoice, setJourneyChoice] = useState<{ key: string; stop: StopId } | null>(null);
 
   const probe = useSourceProbe();
   const zipProbe = useArtifactProbe();
@@ -246,6 +251,8 @@ export function ComposePage(props: ComposePageProps) {
     // and the Live stop is what waits.
     published: draft.choice === "ci" ? created.siteId !== "" : publishedZip,
   });
+  const journeyKey = `${phase}:${run?.id ?? ""}:${inactive}`;
+
 
   const placedKey = (placed ?? []).join("|");
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -332,14 +339,14 @@ export function ComposePage(props: ComposePageProps) {
   // -------------------------------------------------------------------------
 
   async function analyze(): Promise<void> {
-    if (source !== undefined) {
+    if (source !== undefined || created.packageId !== "") {
       // AN APP OF A SOURCE THAT EXISTS: no package to create. The analysis
       // is SCOPED on the wire (memql#4953): the engine derives a run's
       // `scopedTo` from its placements' skips, so an unscoped call would park
       // a gate about the whole source that every sibling reads as its own.
-      await pkgActions.deploy(source.id, {
+      await pkgActions.deploy(source?.id ?? created.packageId, {
         confirm: false,
-        ...(scoped ? { placements: everyOtherAppSkipped(source.declares, only) } : {}),
+        ...(scoped ? { placements: everyOtherAppSkipped(source?.declares ?? [], only) } : {}),
       });
       reseed();
       return;
@@ -369,7 +376,7 @@ export function ComposePage(props: ComposePageProps) {
 
     const address = addresses[""] ?? EMPTY_ADDRESS;
     const siteId = await createSite.create(
-      { slug: address.slug, kind: draft.kind, title: draft.name.trim(), storeDomain: "", storefrontTokenRef: "" },
+      { slug: address.slug, kind: draft.kind, title: draft.name.trim(), storeDomain: draft.storeDomain ?? "", storefrontTokenRef: draft.storefrontTokenRef ?? "" },
       clusterDomain,
     );
     if (siteId === "") return;
@@ -392,8 +399,7 @@ export function ComposePage(props: ComposePageProps) {
    */
   async function activate(): Promise<void> {
     if (source === undefined || !scoped) return;
-    await pkgActions.enableDeployables(source.id, [only]);
-    if (pkgActions.refusal !== null) return;
+    if (!await pkgActions.enableDeployables(source.id, [only])) return;
     setActivated(true);
     await analyze();
   }
@@ -417,7 +423,7 @@ export function ComposePage(props: ComposePageProps) {
       .map(([app]) => app);
     // The names, not the resulting list (memql#4951): a membership change has
     // nothing to read, and `parked` is absent on the first-deploy path.
-    await pkgActions.disableDeployables(packageId, declined);
+    if (!await pkgActions.disableDeployables(packageId, declined)) return;
     // THE PARKED RUN IS WHAT THIS CONFIRMS (memql#4954). Compose is where a
     // person reads the report and answers it, so the answer has to land on the
     // run that asked -- otherwise the gate they just passed stays open and the
@@ -452,9 +458,11 @@ export function ComposePage(props: ComposePageProps) {
     const ids = path === "handmade" ? [created.siteId] : outcomes.map((o) => o.siteId ?? "").filter((id) => id !== "");
     if (ids.length === 0) return;
     for (const id of ids) {
-      await lifecycle.setStatus(id, "live");
+      if (liveIds.includes(id)) continue;
+      if (!await lifecycle.setStatus(id, "live")) return;
+      setLiveIds(held => [...held, id]);
     }
-    if (lifecycle.refusal === null) setWentLive(true);
+    setWentLive(true);
   }
 
   function act() {
@@ -496,6 +504,13 @@ export function ComposePage(props: ComposePageProps) {
       ...liveAnswer(phase, path, draft, siteHostname, outcomes, wentLive),
     },
   };
+
+  const defaultStop: StopId = phase === "composing" ? source || parked ? "whatItIs" : "source"
+    : phase === "analyzing" || phase === "awaiting_confirm" && path === "package" ? "whatItIs"
+    : phase === "stopped" ? (railFor(input).stages.find(s => s.state === "stopped")?.id as StopId ?? "whatItIs")
+    : phase === "deploying" || phase === "awaiting_confirm" && path === "handmade" ? "build" : "live";
+  const journeyStop = journeyChoice?.key === journeyKey ? journeyChoice.stop : defaultStop;
+  const chooseStop = (stop: StopId) => setJourneyChoice({ key: journeyKey, stop });
 
   const stopBody = (stage: RailStage) => {
     switch (stage.id) {
@@ -579,6 +594,19 @@ export function ComposePage(props: ComposePageProps) {
             verdicts={verdicts}
           />
         );
+      case "build":
+        return <>
+          <BuildStop run={run} app={only ?? ""} refusal={run?.error ?? null} />
+          {run ? <Rail input={{ mode: "deploy", deployment: run }} /> : null}
+        </>;
+      case "live":
+        return <>
+          {draft.choice === "ci" && created.siteId ? <CiHandoff siteId={created.siteId} name={draft.name} clusterDomain={clusterDomain} /> : null}
+          {outcomes.length || created.siteId ? <ComposeWhereItLivesStop apps={apps} sourceName={sourceName} addresses={addresses}
+            onAddress={() => {}} accounts={accounts} canBindDomain={can.domains} clusterDomain={clusterDomain}
+            outcomes={outcomes} locked checks={checks} verdicts={verdicts} /> : null}
+          {run?.error ? <ProblemNotice problem={run.error} tone="error" /> : null}
+        </>;
       default:
         return null;
     }
@@ -607,35 +635,23 @@ export function ComposePage(props: ComposePageProps) {
   const held = inactive || archivedSource;
   const finished = phase === "published" && !held;
   const canGoLive = finished && !wentLive && can.publish && (path !== "handmade" || draft.choice !== "ci");
+  const journeyActs: Act[] = !held && !finished && (
+    journeyStop === "source" && path === "handmade" && sourceDone && phase === "composing"
+      ? [{ label: "Continue", tone: "primary", onAct: () => chooseStop("whatItIs") }]
+      : journeyStop === "whatItIs" && (phase === "awaiting_confirm" && path === "package" || phase === "composing" && path === "handmade")
+        ? [{ label: "Choose addresses", tone: "primary", onAct: () => chooseStop("whereItLives") }]
+        : false
+  ) || barActs;
 
   return (
-    <div className="os-deploy-pane">
+    <div className="os-deploy-pane deployable-journey" data-os-page-context={JSON.stringify({ page: title, packageId: (parked?.pkg ?? source)?.id, app: only, mode: "compose", step: journeyStop })}>
       <div className="os-deploy-scroll">
         {/* THE TITLE SAYS WHAT THIS IS. "New deployable" is true only when
             there is no source yet: opened for one app of a source added days
             ago, it read as though the whole source were being added again --
             which is exactly what the report beside it appeared to confirm. */}
         <Panel label={title}>
-          <Head title={title}>
-            <Button tone="quiet" onClick={onBack}>
-              <ArrowLeft size={13} aria-hidden /> Deployables
-            </Button>
-            {onAsk ? (
-              <Button
-                tone="quiet"
-                onClick={() =>
-                  onAsk(
-                    parked ?? source
-                      ? `app:deployables package:${(parked?.pkg ?? source)?.name || (parked?.pkg ?? source)?.id}`
-                      : "app:deployables compose",
-                  )
-                }
-                ariaLabel="Ask about this deployable"
-              >
-                <Mark size={13} aria-hidden /> Ask
-              </Button>
-            ) : null}
-          </Head>
+          <Head title={title} breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label: title }]} back={{ label: backLabel, onSelect: onBack }} />
 
           {/* THE NOTICE AT THE TOP (D5): an inactive app says so before
               anything else on the page, and says what Activate does. */}
@@ -692,17 +708,18 @@ export function ComposePage(props: ComposePageProps) {
             />
           )}
           {lifecycle.refusal ? <ProblemNotice problem={{ ...lifecycle.refusal, fatal: true }} tone="error" /> : null}
+          {liveIds.length > 0 && !wentLive ? <Notice tone="warn" sentence={`${liveIds.length} app${liveIds.length === 1 ? " is" : "s are"} live.`} next="Go live again to finish the remaining apps." /> : null}
 
-          <Rail input={input} stopBody={stopBody} />
+          <ComposeJourney awaitingLive={finished && !wentLive} input={input} selected={journeyStop} onSelect={chooseStop} stopBody={stopBody} />
 
           {can.deploy ? null : (
-            <Caption>Composing a deployable takes the deploy part of Deployables, which this cluster has not granted you.</Caption>
+            <Caption>You do not have permission to create deployables.</Caption>
           )}
         </Panel>
       </div>
 
       <ActionBar
-        state={composePhaseWord(phase, { inactive, archivedSource, declared: source !== undefined, wentLive })}
+        state={finished && draft.choice === "ci" ? "Waiting for CI" : composePhaseWord(phase, { inactive, archivedSource, declared: source !== undefined, wentLive })}
         detail={
           finished
             ? finishedSentence(path, draft, outcomes, siteHostname, wentLive)
@@ -719,7 +736,7 @@ export function ComposePage(props: ComposePageProps) {
                 ...(canGoLive ? [{ label: "Go live", tone: "primary" as const, busy, onAct: () => void goLive() }] : []),
                 { label: "Done", tone: canGoLive ? ("quiet" as const) : ("primary" as const), onAct: onBack },
               ]
-            : barActs
+            : journeyActs
         }
       >
         {/* CANCEL IS ALWAYS REACHABLE WHILE THERE IS SOMETHING TO CANCEL, on

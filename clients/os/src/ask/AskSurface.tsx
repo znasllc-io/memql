@@ -1,4 +1,6 @@
+import { SemanticActivityProvider } from "../kit/SemanticActivity";
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { PolicyEditor, type PolicyDraft } from "../apps/fleet/PolicyEditor";
 import { ArrowUp, Mic } from "lucide-react";
 
 import type { AskHandle, AskTransport } from "./askController";
@@ -27,6 +29,7 @@ import { DEFAULT_ASK_SETTINGS, type AskSettings } from "../apps/settings/askSett
 // instead, from a rAF loop that only runs while the mic is live.
 
 interface Exchange {
+  policyProposal?: PolicyDraft;
   id: number;
   prompt: string;
   answer: string;
@@ -82,6 +85,7 @@ export function AskSurface({
   voicePorts = null,
   settings = DEFAULT_ASK_SETTINGS,
   context = null,
+  contextLabel,
   variant,
   autoFocus = false,
   makeGoal = null,
@@ -99,6 +103,7 @@ export function AskSurface({
   voicePorts?: VoicePorts | null;
   settings?: AskSettings;
   context?: string | null;
+  contextLabel?: string;
   variant: "sheet" | "widget";
   autoFocus?: boolean;
   /**
@@ -112,6 +117,7 @@ export function AskSurface({
   makeGoal?: MakeGoalState | null;
 }) {
   const [localDraft, setLocalDraft] = useState("");
+  const [composePolicy, setComposePolicy] = useState(false);
   const draft = providedDraft ?? localDraft;
   const setDraft = onDraftChange ?? setLocalDraft;
   const [exchanges, setExchanges] = useState<Exchange[]>([]);
@@ -240,7 +246,8 @@ export function AskSurface({
     activeRef.current = active;
     setExchanges((prev) => [...prev, { id, prompt, answer: "", state: "streaming" }]);
     try {
-      active.handle = transport.ask(prompt, context, {
+      active.handle = transport.ask(prompt, composePolicy ? `${context ?? ""} action:routing-policy` : context, {
+        policyProposal: proposal => { if (!terminal) patch({ policyProposal: proposal }); },
         delta: (text) => { if (!terminal) { answer += text; patch({ answer }); } },
         done: () => finish(answer.trim() ? undefined : "The cluster finished without an answer. Try again."),
         error: (message) => finish(message || "The cluster did not answer. Try again."),
@@ -270,7 +277,7 @@ export function AskSurface({
 
   return (
     <div className="os-ask" data-os-ask={variant}>
-      {context ? <span className="os-ask-context">{context}</span> : null}
+      {context ? <span className="os-ask-context">{contextLabel || context}</span> : null}
       <div className="os-ask-log" ref={logRef} aria-live="polite">
         {exchanges.length === 0 ? (
           <p className="os-caption os-ask-hint">
@@ -287,6 +294,7 @@ export function AskSurface({
                 <button type="button" className="os-link" onClick={() => activeRef.current?.stop("Stopped. You can retry when you are ready.")}>Stop reply</button>
               </p>
             ) : null}
+            {e.policyProposal ? <SemanticActivityProvider value={[{ id: `policy-${e.id}`, target: "fleet:policy:draft", phase: "proposed", label: "Review this draft before saving" }]}><PolicyEditor seed={e.policyProposal} existing={e.policyProposal.existing || e.policyProposal.action === "reset"} /></SemanticActivityProvider> : null}
             {e.state === "error" ? (
               <div className="os-ask-error">
                 <p role="alert">{askErrorSummary(e.error ?? "The cluster did not answer.")}</p>
@@ -323,6 +331,7 @@ export function AskSurface({
       ) : null}
       {/* Quiet readiness: Send stays disabled; the dock dot + hover tooltip
           carry yellow/blue/red. No bouncing "Open Fleet" / Check again banners. */}
+      <label className="os-caption os-ask-policy-mode"><input type="checkbox" checked={composePolicy} onChange={event => setComposePolicy(event.target.checked)} disabled={busy} /> Compose a routing policy</label>
       <form className="os-ask-input" onSubmit={onSubmit}>
         <button
           ref={micRef}

@@ -324,7 +324,7 @@ describe("DESIGN.md rule 11 -- a list and its detail never share a scroll column
     fireEvent.click(await screen.findByText(BILLING_NAME));
     await screen.findByLabelText("Credentials");
 
-    fireEvent.click(screen.getByRole("button", { name: /Billing accounts/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to Billing accounts" }));
 
     expect(await screen.findByLabelText("Billing accounts")).toBeTruthy();
     expect(screen.queryByLabelText("Credentials")).toBeNull();

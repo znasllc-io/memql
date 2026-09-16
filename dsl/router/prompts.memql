@@ -53,3 +53,11 @@ prompt classifyRequest {
   levels       []string! @description("The closed level vocabulary, with what each one is for.")
   ruledOut     []string  @description("Optional: levels the deterministic table has already excluded, with why. The classifier must not choose one of these.")
 }
+
+/// Compose a routing-policy draft for a person to review. Does not change routing.
+@level("strong")
+@templateFile("prompts/composeRoutingPolicy.tmpl")
+prompt composeRoutingPolicy {
+  sentence string!
+  catalog string!
+}

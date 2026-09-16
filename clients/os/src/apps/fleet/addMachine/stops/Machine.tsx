@@ -1,4 +1,6 @@
-import { Caption, Check, ChoiceStack, Field, Input, Notice, type ChoiceOption } from "../../../../kit";
+import type { LocalCockpitInstall } from "../localInstall";
+import { Caption, Switch, ChoiceStack, Field, Input, Notice, type ChoiceOption } from "../../../../kit";
+import { InfoDetail } from "../../../../kit/InfoDetail";
 import type { Draft } from "../flow";
 import { INSTALL_PLATFORMS, INSTALL_PLATFORM_LABEL, type InstallPlatform } from "../install";
 
@@ -16,12 +18,14 @@ const PLATFORMS: readonly (ChoiceOption & { value: InstallPlatform })[] = INSTAL
 
 export function MachineStop({
   draft,
+  localTest: configuredTest = null,
   onDraft,
   connected,
   mintError,
   onMint,
 }: {
   draft: Draft;
+  localTest?: LocalCockpitInstall | null;
   onDraft: (patch: Partial<Draft>) => void;
   connected: boolean;
   /** The server's refusal, verbatim, or "". */
@@ -30,32 +34,29 @@ export function MachineStop({
    *  this only asks. */
   onMint: () => void;
 }) {
+  const localTest = draft.platform === "mac" ? configuredTest : null;
   return (
     <div className="os-stop-body os-fleet-addstop">
       {mintError === "" ? null : (
         <Notice
           tone="error"
-          sentence="The token was not minted."
-          next="Nothing was created; mint again."
+          sentence="The connection token could not be created."
+          next="Try creating the token again."
           detail={mintError}
         />
       )}
 
-      <Field label="What is this machine called">
+      {localTest ? <Notice sentence={`Local Cockpit test · ${localTest.version}`} next="Installs the tested macOS app for your account with computer use enabled. Run this command on this Mac; the download is served locally." /> : null}
+      <Field label="Machine name">
         <Input
           id="fleet-add-name"
-          label="What is this machine called"
+          label="Machine name"
           value={draft.name}
           placeholder={draft.platform === "linux" ? "pop-os-desktop" : "studio-mac-mini"}
           onChange={(name) => onDraft({ name })}
           onEnter={onMint}
         />
       </Field>
-      <Caption>
-        Yours, for the credential and for the list. The machine reports its own hostname when
-        it connects; this name is put on it the moment it does.
-      </Caption>
-
       <ChoiceStack
         name="fleet-add-platform"
         label="Operating system"
@@ -65,26 +66,19 @@ export function MachineStop({
         options={PLATFORMS}
       />
 
-      <Check checked={draft.userLocal ?? false} onChange={(userLocal) => onDraft({ userLocal })}>
-        Install for my account only, without a password, in ~/.memql/bin. Leave this off to
-        install a protected system command in /usr/local/bin using your account password.
-      </Check>
-
-      <Check checked={draft.computerUse} onChange={(computerUse) => onDraft({ computerUse })}>
-        Install the computer-use build (mouse, keyboard, screenshots).{" "}
-        {draft.platform === "mac"
-          ? "macOS asks for Accessibility and Screen Recording the first time it runs."
-          : "Mouse and keyboard control require an X11 desktop session. Local models and other tools also work on Wayland."}
-      </Check>
-
-      <Check checked={draft.inference} onChange={(inference) => onDraft({ inference })}>
-        This machine will run local models. After installation, run a second command to check
-        the hardware, approve the runtime setup and download the recommended models. Allow
-        several gigabytes of disk space and time for the download.
-      </Check>
+      <div className="fleet-install-options">
+        <div><Switch disabled={localTest !== null} checked={draft.userLocal ?? false} onChange={(userLocal) => onDraft({ userLocal })}>Install for my account only</Switch>
+          <p>No password needed. Otherwise, installation uses your account password.</p>
+          <InfoDetail title="Installation location"><p>Account-only installs in ~/.memql/bin. System installation places a protected command in /usr/local/bin. Both connect this computer to your cluster.</p></InfoDetail></div>
+        <div><Switch disabled={localTest !== null} checked={draft.computerUse} onChange={(computerUse) => onDraft({ computerUse })}>Computer use</Switch>
+          <p>{draft.platform === "mac" ? "Mouse, keyboard and screenshots. Requires Accessibility and Screen Recording permission." : "Mouse, keyboard and screenshots require an X11 desktop. Other tools also work on Wayland."}</p></div>
+        <div><Switch checked={draft.inference} onChange={(inference) => onDraft({ inference })}>Run local models</Switch>
+          <p>Downloads models after installation. Allow several gigabytes of disk space.</p>
+          <InfoDetail title="Local model setup"><p>A second command checks your hardware and asks you to approve the runtime setup before downloading recommended models. Downloads may take time; progress and readiness stay visible here.</p></InfoDetail></div>
+      </div>
 
       {connected ? null : (
-        <Caption>A token can only be minted over a live connection to the cluster.</Caption>
+        <Caption>Reconnect to the cluster to create a connection token.</Caption>
       )}
     </div>
   );

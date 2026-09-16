@@ -395,7 +395,7 @@ weaker consent tier for app runs, because an app run does exactly what a shell
 command does: edits files and runs commands on the user's computer.
 
 **Per-user delegation policy** (`v1:worker:delegationPolicy`, edited at
-`/machines` in the portal) decides *when*. An absent row means never delegate.
+Fleet in MemQL OS) decides *when*. An absent row means never delegate.
 If no machine with an allowed, signed-in app is online, the task runs
 in-process — a plan never waits for a laptop to wake up.
 
@@ -405,7 +405,7 @@ in-process — a plan never waits for a laptop to wake up.
 
 Epic memql#4349. Everything here is **per-user**: a machine belongs to exactly
 one `v1:identity:user`, and only agents acting in that user's sessions can
-dispatch to it. The operator surface is `/fleet/machines` in the MemQL Portal
+dispatch to it. The operator surface is MemQL OS → Fleet → Machines
 (see [memql-os.md](memql-os.md)).
 
 ### 5.1 Two label fields, and why they are not one
@@ -742,10 +742,9 @@ Superseded policy rows are deactivated rather than deleted, precisely because
 Two reads back the activity list: `invocationsForWorker` (self-scoped, the
 caller's own machines) and `invocationsForWorkerAsOperator` (cluster-owner).
 The pair exists because `v1:worker:invocation` declares no row tier, so the
-caller scope has to live in the FILTER and one filter cannot be both. **The
-portal currently calls the self-scoped one only**, so a cluster owner inspecting
-somebody else's machine sees an empty activity list on a machine it can
-otherwise fully describe.
+caller scope has to live in the FILTER and one filter cannot be both. **MemQL OS Fleet uses the self-scoped read**, matching its caller-owned
+Machines list. The operator query exists in the engine, but that does not make
+this UI a cluster-wide machine activity browser.
 
 ---
 
@@ -769,7 +768,7 @@ clarity. The registering user is reachable via the
 
 ### Revoke a worker
 
-UI: `/fleet/machines` in the portal -> Revoke, per machine. The owner can
+UI: MemQL OS → Fleet → Machines -> Revoke, per machine. The owner can
 also rename it (`displayName`) and edit its `operatorLabels` from the same
 card; see section 5.
 

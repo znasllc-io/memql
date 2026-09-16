@@ -24,6 +24,7 @@ import {
 export interface AskSheetState {
   open: boolean;
   context: string | null;
+  contextLabel?: string;
 }
 
 interface AskContextValue {
@@ -35,7 +36,7 @@ interface AskContextValue {
   sheet: AskSheetState;
   sheetDraft: string;
   setSheetDraft: (draft: string) => void;
-  openAsk: (context?: string | null) => void;
+  openAsk: (context?: string | null, contextLabel?: string) => void;
   closeAsk: () => void;
 }
 
@@ -66,7 +67,7 @@ export function AskProvider({
   const [sheet, setSheet] = useState<AskSheetState>({ open: false, context: null });
   const [settings, setSettings] = useState<AskSettings>(() => storeRef.current!.load());
 
-  const openAsk = useCallback((context: string | null = null) => setSheet({ open: true, context }), []);
+  const openAsk = useCallback((context: string | null = null, contextLabel?: string) => setSheet({ open: true, context, contextLabel }), []);
   const closeAsk = useCallback(() => setSheet((s) => ({ ...s, open: false })), []);
   const updateSettings = useCallback((patch: Partial<AskSettings>) => {
     setSettings((prev) => {

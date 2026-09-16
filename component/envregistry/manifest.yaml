@@ -218,7 +218,7 @@ secrets:
     scope: global
     kind: integration
     optional: true
-    description: "Fine-grained GitHub token the owner-only release-cut button uses to tag main and publish the GitHub Release that starts the image-build cascade. Wants Contents: read/write on the ONE repository named by MEMQL_RELEASE_REPO, and nothing else -- Pull requests: read/write is needed only for the optional VS Code pin-bump follow-on, whose failure is recorded as a note and never fails a cut. Absent means the portal's Releases card renders a setup step instead of a button; every refusal about it names THIS VARIABLE and never the value. Bound the blast radius further with a GitHub tag-protection rule for v*. See docs/public/operate/release-cutting.md."
+    description: "Fine-grained GitHub token the owner-only release-cut button uses to tag main and publish the GitHub Release that starts the image-build cascade. Wants Contents: read/write on the ONE repository named by MEMQL_RELEASE_REPO, and nothing else -- Pull requests: read/write is needed only for the optional VS Code pin-bump follow-on, whose failure is recorded as a note and never fails a cut. Absent means the release interface renders a setup step instead of a button; every refusal about it names THIS VARIABLE and never the value. Bound the blast radius further with a GitHub tag-protection rule for v*. See docs/public/operate/release-cutting.md."
 
 variables:
 
@@ -958,19 +958,6 @@ variables:
     optional: true
     description: "slog level for the process-level service logger (debug / info / warn / error). The deprecated MEMQL_SERVICE_LOGGER_LEVEL and MEMQL_SERVICE_LOG_LEVEL spellings are accepted after it, in that order. Legacy alias: SERVICE_CAPABILITIES_LOGGING_LOG_LEVEL (memql#3892)."
 
-  # --- portal ---
-  #
-  # MEMQL_PORTAL_DIST / MEMQL_PORTAL_OAUTH_CLIENT_ID / MEMQL_PORTAL_IDENTITY_URL /
-  # MEMQL_PORTAL_IDENTITY_API_BASE_URL used to live here, read by
-  # component/portal/config.go. That package is retired (memql#3711 -- the
-  # portal is site #1, served by the generic component/edge, which must not
-  # carry portal-specific config-serving logic). The portal's bundle location
-  # is now the seeded site row's bundleRef (dsl/platform/seeds.memql), not an
-  # env var. KNOWN GAP: nothing yet replaces the identity-discovery document
-  # (runtime-config.json) these variables used to configure -- see
-  # the runtime-config document each bundle reads at boot (the portal's
-  # cluster/config.ts documented this until epic memql#4984).
-
   # --- public reads ---
 
   - name: MEMQL_PUBLIC_READS_ENABLED
@@ -989,12 +976,24 @@ variables:
     default: "64"
     description: "In-memory size cap, in MB, for the edge's LRU over blob:// bundle bytes (memql#4545). Before it, every blob-backed asset was a fresh storage download per request per file, for bytes that are immutable by construction. Keyed by (content-addressed version prefix, path), so NO invalidation exists or is needed: a republish lands under a new prefix and old entries age out. The file:// path is deliberately uncached -- local disk is not the cost being avoided. 0 or an unparseable value DISABLES the cache rather than meaning unlimited: the worst outcome of off is the pre-memql#4545 behaviour, and the worst outcome of unlimited is an OOM-killed replica."
 
+  - name: MEMQL_SITE_HEALTH_DIAL_ADDRESS
+    component: engine
+    scope: node
+    optional: true
+    description: "Optional trusted ingress host:port for health checks of this cluster's own domain. Preserves the website Host and TLS name. Local loopback domains use their ingress service; public deployments normally use DNS. Never supplied by a site row."
+
+  - name: MEMQL_SITE_HEALTH_CA_FILE
+    component: engine
+    scope: node
+    optional: true
+    description: "Optional additional public website CA PEM for availability checks, added to system roots and the internal CA. Local mkcert front doors need their mkcert CA, which differs from the internal service CA. TLS verification stays enabled."
+
   - name: MEMQL_EDGE_SITE_CACHE_TTL_SECONDS
     component: edge
     scope: node
     optional: true
     default: "30"
-    description: "How long the edge node caches a request Host -> v1:platform:site resolution (a miss is cached too) before re-querying the engine. Bounds staleness after a site row changes on another node -- the write lands wherever the portal/an admin surface writes it, and this cache lives on every edge replica -- until the change-feed invalidation (memql#3710 Task 9) lands as the primary mechanism."
+    description: "How long the edge node caches a request Host -> v1:platform:site resolution (a miss is cached too) before re-querying the engine. Bounds staleness after a site row changes on another node -- the write lands wherever MemQL OS or an admin surface writes it, and this cache lives on every edge replica -- until the change-feed invalidation (memql#3710 Task 9) lands as the primary mechanism."
 
   # --- custom domains (epic memql#4805) ---
   #
@@ -1800,7 +1799,7 @@ variables:
     component: identity
     scope: node
     optional: true
-    description: "Comma-separated Origin values identity allows on credentialed cross-origin refresh-token requests. The BOOTSTRAP half of the allowlist, not the whole of it (memql#3716): it carries the origins every deployment has -- identity itself, the portal, the app -- and an owner/admin grants any further origin on a v1:identity:oauthClient row over IdentityAdminMsg, which takes effect without an identity restart. Only this env half needs a redeploy, so a customer's website is a grant rather than a deploy. A '*' entry is refused on the credentialed path; list the origins."
+    description: "Comma-separated Origin values identity allows on credentialed cross-origin refresh-token requests. The BOOTSTRAP half of the allowlist, not the whole of it (memql#3716): it carries the origins every deployment has -- identity itself, MemQL OS, the app -- and an owner/admin grants any further origin on a v1:identity:oauthClient row over IdentityAdminMsg, which takes effect without an identity restart. Only this env half needs a redeploy, so a customer's website is a grant rather than a deploy. A '*' entry is refused on the credentialed path; list the origins."
 
   - name: MEMQL_IDENTITY_DATA_EXPORT_RATE_LIMIT_HOURS
     component: identity
@@ -2252,7 +2251,7 @@ variables:
     scope: node
     default: "false"
     optional: true
-    description: "Break-glass for the log-only refusal (memql#4477). With no mail credentials the email lane used to select a LogSender that wrote the message to the pod log and returned nil, so the wizard, the audit row and the portal all reported the message as sent -- a failure that reports SUCCESS, which nobody investigates. It is now refused at boot on any install whose MEMQL_DOMAIN is not a local name (a `.localhost` TLD, a loopback literal, or the `*.local.<domain>` dev wildcard). Set this true to state that log-only is deliberate here, which is the case `make up DOMAIN=lab.example.com` creates: a genuinely local parity cluster on a name that looks like production. Never set it on an install real people sign in to -- their sign-in links go to the pod log."
+    description: "Break-glass for the log-only refusal (memql#4477). With no mail credentials the email lane used to select a LogSender that wrote the message to the pod log and returned nil, so the wizard, the audit row and the console all reported the message as sent -- a failure that reports SUCCESS, which nobody investigates. It is now refused at boot on any install whose MEMQL_DOMAIN is not a local name (a `.localhost` TLD, a loopback literal, or the `*.local.<domain>` dev wildcard). Set this true to state that log-only is deliberate here, which is the case `make up DOMAIN=lab.example.com` creates: a genuinely local parity cluster on a name that looks like production. Never set it on an install real people sign in to -- their sign-in links go to the pod log."
 
   # --- storage ---
 

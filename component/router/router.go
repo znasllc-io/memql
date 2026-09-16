@@ -331,6 +331,15 @@ func (r *Router) resolveChain(ctx context.Context, req ResolveRequest, mod provi
 	if err := ctx.Err(); err != nil {
 		return nil, Resolved{}, err
 	}
+	var policies *memql.PolicyRegistry
+	var rules *memql.RuleRegistry
+	if r != nil && r.policies != nil {
+		var err error
+		policies, rules, err = configuredRouting(ctx, r.policies, r.rules)
+		if err != nil {
+			return nil, Resolved{}, err
+		}
+	}
 	report := &doorReporter{}
 
 	// NO RULES MEANS NO ROUTING. See New: the only alternative to refusing is
@@ -389,7 +398,7 @@ func (r *Router) resolveChain(ctx context.Context, req ResolveRequest, mod provi
 
 		levelReq := req
 		levelReq.Level = level
-		rule := r.MatchRule(levelReq)
+		rule := matchRuleFrom(rules, levelReq)
 		if rule == nil {
 			report.note("(rules)", "no rule matched this call and no default rule is registered")
 			break
@@ -401,7 +410,7 @@ func (r *Router) resolveChain(ctx context.Context, req ResolveRequest, mod provi
 		effective := rule.EffectiveLevel(level)
 		served = effective
 
-		chain, removed, ok := r.chainFor(rule, report)
+		chain, removed, ok := chainForPolicies(policies, rule, report)
 		if !ok {
 			break
 		}
@@ -504,11 +513,15 @@ func degradeFloorReason(level airoute.Level) string {
 // they excluded every entry -- falling back to the unexcluded chain would
 // quietly undo the exclusion they wrote.
 func (r *Router) chainFor(rule *memql.RuleConfig, report *doorReporter) (chain, removed []string, ok bool) {
-	if r.policies == nil {
+	return chainForPolicies(r.policies, rule, report)
+}
+
+func chainForPolicies(policies *memql.PolicyRegistry, rule *memql.RuleConfig, report *doorReporter) (chain, removed []string, ok bool) {
+	if policies == nil {
 		report.note("(policy "+rule.Policy+")", "no policy registry is wired into this router")
 		return nil, nil, false
 	}
-	policy, found := r.policies.Lookup(rule.Policy)
+	policy, found := policies.Lookup(rule.Policy)
 	if !found {
 		report.note("(policy "+rule.Policy+")", "rule "+rule.Name+" names a policy that is not registered")
 		return nil, nil, false
@@ -1013,7 +1026,11 @@ func (r *Router) consentedCloudFallback(ctx context.Context, req ResolveRequest,
 	if r == nil || r.providers == nil {
 		return nil, Resolved{}, false
 	}
-	for _, name := range r.consentedCloudChain() {
+	policies, _, err := configuredRouting(ctx, r.policies, r.rules)
+	if err != nil {
+		return nil, Resolved{}, false
+	}
+	for _, name := range r.consentedCloudChainFrom(policies) {
 		if _, isFleet := memql.IsFleetReference(name); isFleet {
 			// Consenting to cloud cannot resolve to a local model: the fleet
 			// entry is exactly the one that was unavailable when the consent
@@ -1028,9 +1045,11 @@ func (r *Router) consentedCloudFallback(ctx context.Context, req ResolveRequest,
 }
 
 // consentedCloudChain is the order a consent tries federated providers in.
-func (r *Router) consentedCloudChain() []string {
-	if r.policies != nil {
-		if policy, ok := r.policies.Lookup(consentedCloudPolicy); ok {
+func (r *Router) consentedCloudChain() []string { return r.consentedCloudChainFrom(r.policies) }
+
+func (r *Router) consentedCloudChainFrom(policies *memql.PolicyRegistry) []string {
+	if policies != nil {
+		if policy, ok := policies.Lookup(consentedCloudPolicy); ok {
 			var chain []string
 			for _, name := range policy.ProviderChain() {
 				if n := strings.TrimSpace(name); n != "" {
@@ -1098,4 +1117,15 @@ func (r *Router) ceilingReached(ctx context.Context) (string, bool) {
 		return "", false
 	}
 	return r.ceilingCheck(ctx)
+}
+
+// Optional structural seam keeps this leaf module compatible with the
+// published engine module while app/workspace builds install durable routing.
+func configuredRouting(ctx context.Context, policies *memql.PolicyRegistry, rules *memql.RuleRegistry) (*memql.PolicyRegistry, *memql.RuleRegistry, error) {
+	if source, ok := any(policies).(interface {
+		SnapshotRouting(context.Context, *memql.RuleRegistry) (*memql.PolicyRegistry, *memql.RuleRegistry, error)
+	}); ok && policies != nil {
+		return source.SnapshotRouting(ctx, rules)
+	}
+	return policies, rules, nil
 }

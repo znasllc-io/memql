@@ -171,11 +171,26 @@ message PlatformInfo {
   string hostname = 3;
 }
 
+// Explicit measured state. UNKNOWN must never be presented as granted or denied.
+enum PermissionDecision {
+  PERMISSION_DECISION_UNKNOWN = 0;
+  PERMISSION_DECISION_GRANTED = 1;
+  PERMISSION_DECISION_DENIED = 2;
+}
+
 message PermissionStatus {
   bool accessibility = 1;
   bool screen_recording = 2;
   bool x11_display = 3;
   string detail = 4;
+  // Legacy bools above remain for older consumers. New consumers use these
+  // states whenever checked_at or probe_context identifies a measured report.
+  PermissionDecision accessibility_state = 5;
+  PermissionDecision screen_recording_state = 6;
+  PermissionDecision x11_display_state = 7;
+  google.protobuf.Timestamp checked_at = 8;
+  // Evidence must belong to the process performing the checks, not its installer.
+  string probe_context = 9;
 }
 
 // HardwareInventory is what the machine IS, as its cockpit reports it
@@ -287,6 +302,9 @@ message Heartbeat {
   // and needed for the same reason: a beat that says nothing must leave the
   // stored inventory alone rather than clearing it.
   bool hardware_present = 7;
+  // A full passive permission snapshot from the running worker. Absence leaves
+  // the previous report alone; an explicit UNKNOWN clears earlier certainty.
+  PermissionStatus permissions = 8;
 }
 
 // Ping is the CLUSTER's half of liveness (epic memql#5218, D11). A heartbeat

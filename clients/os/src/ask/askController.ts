@@ -2,7 +2,10 @@
 // binds sdk-core ai chat behind this exact interface, so the surface
 // component never changes when the transport becomes real.
 
+import type { PolicyDraft } from "../apps/fleet/PolicyEditor";
+
 export interface AskCallbacks {
+  policyProposal?: (proposal: PolicyDraft) => void;
   delta: (text: string) => void;
   done: () => void;
   error: (message: string) => void;

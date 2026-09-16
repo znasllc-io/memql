@@ -12,6 +12,7 @@ import {
   isNarrowed,
   lineCount,
   subjectIntentOf,
+  logViewIntentOf,
   toTailArgs,
   windowBounds,
   windowLabel,
@@ -60,14 +61,18 @@ export function SearchSection({
     levelFloor: settings.levelFloor,
     window: "24h",
   }));
+  const [scope, setScope] = useState<LogScope>(WHOLE_STORE);
   const [selectedId, setSelectedId] = useState("");
   const [generation, setGeneration] = useState(0);
   const patch = useCallback((next: Partial<LogFilters>) => setFilters((held) => ({ ...held, ...next })), []);
 
   useEffect(() => {
     if (!intent) return;
+    const view = logViewIntentOf(intent.payload);
+    if (view) { setScope(view.scope); setFilters(view.filters); setSelectedId(""); consumeIntent?.(intent.id); return; }
     const narrowed = subjectIntentOf(intent.payload);
     if (narrowed === null) return;
+    setScope(WHOLE_STORE);
     setFilters((held) => ({ ...held, subject: narrowed.subject, subjectConcept: narrowed.subjectConcept }));
     setSelectedId("");
     consumeIntent?.(intent.id);
@@ -90,9 +95,9 @@ export function SearchSection({
         : {
             windowStart: bounds.start.toISOString(),
             windowEnd: bounds.end.toISOString(),
-            ...toTailArgs(WHOLE_STORE, { ...filters, text }),
+            ...toTailArgs(scope, { ...filters, text }),
           },
-    [bounds, filters, text],
+    [bounds, filters, text, scope],
   );
   const viewKey = args === null ? "" : buildLogsSearch(args);
   const search = useLogSearch(args, viewKey);
@@ -113,6 +118,7 @@ export function SearchSection({
 
   return (
     <div className="os-app-stack os-logs" data-density={settings.density}>
+      {scope.apps?.length || scope.subjectConcepts?.length ? <div className="os-head-actions"><span className="os-caption">App scope: {scope.apps?.join(", ")} and its related subjects</span><Button onClick={() => setScope(WHOLE_STORE)}>Clear app scope</Button></div> : null}
       <Head title="Search" meta={`${windowLabel(filters.window)} · ${lineCount(search.rows.length)}`}>
         <Refine
           search={filters.text}

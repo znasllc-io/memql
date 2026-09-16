@@ -256,10 +256,11 @@ A refusal names which gate refused it.
 
 ## Delegation is a preference with a fallback
 
-`v1:worker:delegationPolicy`, one row per user. **No console surface edits it
-today** -- the portal's Local apps page did, and epic memql#4984 retired the
-portal without moving that editor into MemQL OS; the gap is filed. Fleet ->
-Machines still lists each machine's local apps.
+`v1:worker:delegationPolicy`, one row per user. **MemQL OS → Fleet → Apps**
+edits the caller's delegation preferences and shows app sessions. It reads
+the policy on demand, reports when it was read, and saves the complete form.
+Opening the editor does not enable delegation. Fleet → Machines also shows
+apps reported by a machine.
 
 | Field | Meaning |
 |---|---|

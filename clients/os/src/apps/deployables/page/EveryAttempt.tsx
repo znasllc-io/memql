@@ -1,13 +1,13 @@
 import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 import { RotateCcw, Undo2 } from "lucide-react";
 
-import { Button, Caption, Chip, LiveList } from "../../../kit";
+import { Button, Caption, Chip, LiveList, EmptyState } from "../../../kit";
 import { formatMoment } from "../../../kit/format";
 import { OpenLogsButton } from "../../../logs/OpenLogs";
 import type { LiveView } from "../../../live/liveView";
 import { usePackageActions } from "../packages/actions";
 import { BuildLog, ProblemNotice } from "../packages/ReportView";
-import { deploymentFingerprint, shortVersion, type DeploymentRow, type PackageRow } from "../packages/rows";
+import { deploymentFingerprint, runIsScopedToApp, shortVersion, type DeploymentRow, type PackageRow } from "../packages/rows";
 import type { PartsHeld } from "../parts";
 import { Rail } from "./RailView";
 
@@ -35,6 +35,7 @@ export function EveryAttempt({
   deployments,
   can,
   reseed,
+  scopedApp,
 }: {
   pkg: PackageRow | null;
   /** The page's timeline view, newest first; null before the connection exists. */
@@ -42,17 +43,17 @@ export function EveryAttempt({
   /** Rolling back to an attempt is `publish`; retrying a lost one is `deploy`. */
   can: PartsHeld;
   reseed: () => void;
+  scopedApp?: string;
 }) {
   // Its own write hook: a rollback refused here renders here.
   const actions = usePackageActions();
   const latest = deployments?.snapshot.rows[0] ?? null;
 
   return (
-    <section className="os-report-part">
-      <h4 className="os-report-heading">Every attempt</h4>
+    <section className="os-report-part deployable-history">
       {pkg === null ? (
         <Caption>
-          A hand-made deployable has no attempts: what it served, and when, is the version list on the Live stop.
+          Open Version history on the app to see its published files.
         </Caption>
       ) : (
         <>
@@ -62,6 +63,7 @@ export function EveryAttempt({
             fingerprint={deploymentFingerprint}
             label={`Deployments of ${pkg.name}`}
             emptyText="Nothing has been deployed yet. The first deploy shows you what it would do before it does it."
+            emptyContent={<EmptyState title="No deployment attempts">Deploy an app from this source to see its history here.</EmptyState>}
             renderRow={(d) => (
               <article className="os-attempt" data-status={d.status}>
                 <header className="os-attempt-head">
@@ -92,12 +94,12 @@ export function EveryAttempt({
                       run's full log rather than the bounded tail the row
                       keeps. It moved here from PackageDetail, whose timeline
                       this replaced. */}
-                  <OpenLogsButton
+                  <OpenLogsButton iconOnly
                     subject={d.id}
                     subjectConcept={Concepts.PLATFORM_PACKAGE_DEPLOYMENT}
                     ariaLabel={`Logs of the ${d.sourceVersion === "" ? "unversioned" : shortVersion(d.sourceVersion)} deploy`}
                   />
-                  {can.publish && d.status === "succeeded" && d.id !== latest?.id ? (
+                  {!scopedApp && can.publish && d.status === "succeeded" && d.id !== latest?.id ? (
                     <Button
                       onClick={() => void actions.rollback(pkg.id, d.id).then(reseed)}
                       busy={actions.busy}
@@ -106,7 +108,7 @@ export function EveryAttempt({
                       <Undo2 size={12} aria-hidden /> Roll back to this
                     </Button>
                   ) : null}
-                  {can.deploy && d.status === "abandoned" ? (
+                  {can.deploy && d.status === "abandoned" && (!scopedApp || runIsScopedToApp(d, scopedApp)) ? (
                     /* RETRY, not Redeploy, and the two are different
                        promises (memql#4900). This one starts the run that
                        was LOST again, from the bytes it had already fetched,
@@ -124,6 +126,7 @@ export function EveryAttempt({
                     </Button>
                   ) : null}
                 </header>
+                <details className="deployable-attempt-detail"><summary>Build steps and output</summary>
                 <Rail input={{ mode: "deploy", deployment: d }} />
                 {d.error ? <ProblemNotice problem={d.error} tone="error" /> : null}
                 <BuildLog tail={d.buildLogTail} />
@@ -139,6 +142,7 @@ export function EveryAttempt({
                     ))}
                   </ul>
                 ) : null}
+                </details>
               </article>
             )}
           />

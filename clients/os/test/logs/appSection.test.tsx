@@ -139,7 +139,7 @@ describe("the two empty answers", () => {
     h.connection = fakeConnection({ tail: [] });
     await renderAppLogs({ app: "files" });
     expect(screen.getByText("Nothing recorded for this app in the last hour.")).toBeTruthy();
-    expect(screen.getByText(/this view follows/)).toBeTruthy();
+    expect(screen.getByText(/New events appear here automatically/)).toBeTruthy();
   });
 
   it("says no lines match once a facet narrows it", async () => {

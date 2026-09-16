@@ -121,6 +121,7 @@ function fakeSubscriptions(): FakeSubscriptions {
 
 export interface FakeSeed {
   sites?: Row[];
+  sitesError?: string;
   artifacts?: Row[];
   /** v1:platform:customDomain rows the domains feed seeds with. */
   domains?: Row[];
@@ -138,6 +139,9 @@ export interface FakeSeed {
   archiveError?: string;
   /** Fails the next `packageDeactivateDeployable` with this server message. */
   deactivateError?: string;
+  enableDeployablesError?: string;
+  disableDeployablesError?: string;
+  siteStatusErrors?: Record<string, string>;
   /**
    * Hostnames `siteHostnameCheck` / `customDomainCheck` answer TAKEN for
    * (2026-09-05, D7). Everything else answers available -- the fake mirrors
@@ -284,7 +288,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
     executeNamed: vi.fn(async (_name: string, call: string) => {
       calls.push(call);
 
-      if (call === "query sitesAll()") return rowsResult(sites);
+      if (call === "query sitesAll()") { if (seed.sitesError) throw new Error(seed.sitesError); return rowsResult(sites); }
       if (call.startsWith("query searchUsers(")) {
         if (seed.peopleError !== undefined) throw new Error(seed.peopleError);
         return rowsResult(seed.people ?? []);
@@ -431,7 +435,11 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         return rowsResult([]);
       }
 
+      if (call.startsWith("mutation enablePackageDeployables(") && seed.enableDeployablesError) throw new Error(seed.enableDeployablesError);
+      if (call.startsWith("mutation disablePackageDeployables(") && seed.disableDeployablesError) throw new Error(seed.disableDeployablesError);
       if (call.startsWith("mutation updateSiteStatus(")) {
+        const siteId = /siteId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        if (seed.siteStatusErrors?.[siteId]) throw new Error(seed.siteStatusErrors[siteId]);
         if (seed.siteStatusError !== undefined) throw new Error(seed.siteStatusError);
         return rowsResult([]);
       }

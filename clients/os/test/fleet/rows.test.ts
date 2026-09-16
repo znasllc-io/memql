@@ -126,7 +126,7 @@ describe("machineFromRow", () => {
     expect(apps[2]).toMatchObject({
       label: "some-other-app",
       runnable: false,
-      why: "this engine does not drive it",
+      why: "Not supported by MemQL",
     });
   });
 

@@ -109,11 +109,11 @@ export interface StopDef {
 }
 
 const WEB_STOPS: readonly StopDef[] = [
-  { id: "source", label: "Source", blurb: "Where it comes from: a repository, a zip in Files, or your CI" },
-  { id: "whatItIs", label: "What it is", blurb: "What deploying this source would do, read from the tree" },
-  { id: "whereItLives", label: "Where it lives", blurb: "The address it answers at, and the client it is for" },
-  { id: "build", label: "Build", blurb: "Turn the source into the files that get served" },
-  { id: "live", label: "Live", blurb: "Point the address at the new files and serve them" },
+  { id: "source", label: "Source", blurb: "Choose a repository, a ZIP file or your CI pipeline" },
+  { id: "whatItIs", label: "What it is", blurb: "Review the apps, build steps and required changes" },
+  { id: "whereItLives", label: "Where it lives", blurb: "Choose the app address and client" },
+  { id: "build", label: "Build", blurb: "Build and upload the app files" },
+  { id: "live", label: "Live", blurb: "Make the app available to visitors" },
 ];
 
 // ---------------------------------------------------------------------------

@@ -489,7 +489,7 @@ describe("the section's shape", () => {
     expect(document.querySelectorAll(".os-head")).toHaveLength(1);
     // The list is gone, not scrolled past.
     expect(screen.queryByRole("heading", { name: "Stores" })).toBeNull();
-    expect(screen.getByRole("button", { name: /Stores/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Back to Stores" })).toBeTruthy();
   });
 
   it("carries one action bar, on the surfaces that have a lifecycle", async () => {

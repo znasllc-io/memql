@@ -28,7 +28,9 @@ import type { OsAppSection } from "../../system/registry";
  *  manifest and the settings picker must offer the same set: a preference
  *  naming a section that no longer exists is what `sanitize` repairs. */
 export const FLEET_SECTIONS: OsAppSection[] = [
+  { id: "overview", name: "Overview" },
   { id: "machines", name: "Machines" },
+  { id: "policies", name: "Policies" },
   // What the fleet can actually SERVE, in the order the router picks from
   // (epic memql#5096). It follows Machines because the two read as one
   // progression -- the hardware, then what runs on it -- and precedes Routing
@@ -40,9 +42,8 @@ export const FLEET_SECTIONS: OsAppSection[] = [
   // shared-inference set, and `inferenceStatus` answers one question about
   // this caller. There is nothing here a signed-in person may not see about
   // their own fleet.
-  { id: "models", name: "Models" },
-  { id: "routing", name: "Routing" },
-  { id: "workbenches", name: "Workbenches", needs: ["workbench"] },
+  { id: "models", name: "Model library" },
+  { id: "routing", name: "Machine routing" },
   // When work is handed to a local app on one of the caller's own machines,
   // and what happened when it was (epic memql#5009). It follows Workbenches
   // because the three read as one progression -- the cluster's own sandbox,
@@ -54,7 +55,8 @@ export const FLEET_SECTIONS: OsAppSection[] = [
   // person has a policy and runs of their own and the engine decides how far
   // the read reaches -- exactly the reasoning that leaves Machines, Routing
   // and Workbenches ungated.
-  { id: "apps", name: "Apps", needs: ["localApps"] },
+  { id: "apps", name: "Activity", needs: ["localApps"] },
+  { id: "workbenches", name: "Workspaces", needs: ["workbench"] },
   // The app's slice of the cluster's logs (epic memql#4895): the lines it
   // tagged and the lines about the things it owns. Admin-floored because
   // every read on the log store is (spec L3), and this is the ONE section
@@ -84,7 +86,7 @@ export const DEFAULT_FLEET_SETTINGS: FleetSettings = {
   // Machines first, per the manifest. Named here as well because this value
   // is what a corrupt or absent document falls back to, and falling back to
   // "whatever is first in an array" would move with an unrelated edit.
-  defaultSection: "machines",
+  defaultSection: "overview",
   showRevoked: false,
 };
 

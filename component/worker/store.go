@@ -901,3 +901,23 @@ func (g *workerFieldGetter) appDescriptors(key string) []AppDescriptor {
 	sort.Slice(out, func(i, j int) bool { return out[i].Id < out[j].Id })
 	return out
 }
+
+// UpdatePermissions persists a full explicit snapshot. UNKNOWN intentionally
+// replaces a previous GRANTED state; absent heartbeat reports never call this.
+func (s *EngineStore) UpdatePermissions(ctx context.Context, registrationId, ownerUserId string, permissions map[string]any) error {
+	if s == nil || s.Engine == nil {
+		return fmt.Errorf("worker.store: engine not configured")
+	}
+	writeCtx, err := ownerActor(ctx, ownerUserId)
+	if err != nil {
+		return err
+	}
+	query, err := langparser.RenderCall("updateWorkerPermissions", map[string]any{"registrationId": registrationId, "permissions": permissions})
+	if err != nil {
+		return fmt.Errorf("worker.store: render permissions: %w", err)
+	}
+	if _, err := s.Engine.Execute(writeCtx, query); err != nil {
+		return fmt.Errorf("worker.store: update permissions: %w", err)
+	}
+	return nil
+}

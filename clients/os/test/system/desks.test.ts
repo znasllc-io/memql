@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   activeDesk,
+  toggleFullscreen,
+  focusWindow,
   addDesk,
   closeWindow,
   consumeIntent,
@@ -220,5 +222,72 @@ describe("open intents (epic memql#4842, #4845)", () => {
     const { state, effect } = openApp(base, "files", "browse", intent("i-1"));
     expect(effect.kind).toBe("spilled");
     expect(windowForApp(state, "files")?.intent?.id).toBe("i-1");
+  });
+});
+
+
+describe("dedicated desktop maximize and contextual navigation", () => {
+  it("moves the same window to an exclusive desk and restores its original slot and intent", () => {
+    let state = openMany(initialShell(), "files", "fleet");
+    const fleet = windowForApp(state, "fleet")!;
+    const origin = state.activeDeskId;
+    state = setWindowSection(state, fleet.id, "routing");
+    state = toggleFullscreen(state, fleet.id);
+    expect(activeDesk(state).windows).toEqual([fleet.id]);
+    expect(state.activeDeskId).not.toBe(origin);
+    expect(state.windows[fleet.id]?.sectionId).toBe("routing");
+    const opened = openApp(state, "logs").state;
+    expect(opened.activeDeskId).not.toBe(state.activeDeskId);
+    state = toggleFullscreen(state, fleet.id);
+    expect(state.activeDeskId).toBe(origin);
+    expect(activeDesk(state).windows[1]).toBe(fleet.id);
+    expect(state.windows[fleet.id]?.mode).toBe("normal");
+    expect(state.desks).toHaveLength(1);
+  });
+  it("restores maximized mode from minimize and never displaces a filled origin", () => {
+    let state = openMany(initialShell(), "files", "fleet");
+    const fleet = windowForApp(state, "fleet")!;
+    const origin = state.activeDeskId;
+    state = toggleFullscreen(state, fleet.id);
+    const dedicated = state.activeDeskId;
+    state = setWindowMode(state, fleet.id, "minimized");
+    state = focusWindow(state, fleet.id);
+    expect(state.windows[fleet.id]?.mode).toBe("fullscreen");
+    state = switchDesk(state, origin);
+    state = openApp(state, "logs").state;
+    state = toggleFullscreen(state, fleet.id);
+    expect(state.activeDeskId).toBe(dedicated);
+    expect(state.windows[fleet.id]?.mode).toBe("normal");
+    expect(deskById(state, origin)?.windows).toHaveLength(2);
+  });
+  it("preserves a dedicated desk with surface content when restoring", () => {
+    let state = openMany(initialShell(), "fleet");
+    const id = windowForApp(state, "fleet")!.id;
+    state = toggleFullscreen(state, id);
+    const dedicated = state.activeDeskId;
+    state = toggleFullscreen(state, id, deskId => deskId === dedicated);
+    expect(deskById(state, dedicated)).toBeTruthy();
+  });
+  it("a breadcrumb can return across multiple sections without leaving a stale trail", () => {
+    let state = openApp(initialShell(), "fleet", "overview").state;
+    const id = windowForApp(state, "fleet")!.id;
+    state = setWindowSection(state, id, "machines", "content");
+    state = setWindowSection(state, id, "apps", "content");
+    state = setWindowSection(state, id, "overview", "back");
+    expect(state.windows[id]?.sectionTrail).toEqual([]);
+    expect(state.windows[id]?.sectionId).toBe("overview");
+  });
+  it("content links retain origins; a direct tab click clears them even on the same tab", () => {
+    let state = openApp(initialShell(), "fleet", "machines").state;
+    const id = windowForApp(state, "fleet")!.id;
+    state = setWindowSection(state, id, "apps", "content");
+    expect(state.windows[id]?.sectionTrail).toEqual(["machines"]);
+    state = setWindowSection(state, id, "machines", "back");
+    expect(state.windows[id]?.sectionTrail).toEqual([]);
+    state = setWindowSection(state, id, "apps", "content");
+    const revision = state.windows[id]!.sectionNavigation!.revision;
+    state = setWindowSection(state, id, "apps", "peer");
+    expect(state.windows[id]?.sectionTrail).toEqual([]);
+    expect(state.windows[id]?.sectionNavigation).toEqual({ origin: "peer", revision: revision + 1 });
   });
 });

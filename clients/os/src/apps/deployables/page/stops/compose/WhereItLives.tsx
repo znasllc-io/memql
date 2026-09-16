@@ -314,7 +314,7 @@ function AppAddress({
               three Go guards; rendering the field is the presentation half. */}
           {canBindDomain ? (
             <>
-              <Field label="Their own domain">
+              <Field label="Custom domain">
                 <Input
                   id={`os-compose-domain-${key}`}
                   label={`A domain of the client's own for ${heading || "this deployable"}`}
@@ -325,9 +325,7 @@ function AppAddress({
               </Field>
               {ownDomain === "" ? null : <DomainVerdictLine hostname={ownDomain} verdict={verdicts.ownDomain} />}
               <Caption>
-                Optional, and the deploy never waits on it: the deployable goes live at its cluster address, and the
-                domain stays waiting on your DNS records until both check out. The two records to create are on this
-                stop once it exists.
+                Optional. After creating the app, add the DNS records shown in its domain settings. DNS verification does not block the build.
               </Caption>
             </>
           ) : null}
@@ -354,7 +352,7 @@ function VerdictLine({
   verdict: AddressVerdict | undefined;
   clusterDomain: string;
 }) {
-  if (slug === "") return <Caption>One label under {clusterDomain || "this cluster's domain"}.</Caption>;
+  if (slug === "") return <Caption>Choose a name under {clusterDomain || "this cluster's domain"}.</Caption>;
   if (complaint !== "") {
     return (
       <p className="os-stop-verdict" data-tone="warn" role="status">
@@ -425,18 +423,8 @@ function PlacedApp({
   const tied = accountNameFrom(accounts, outcome.accountId ?? "");
   return (
     <section className="os-report-part" aria-label={`Where ${outcome.name || "it"} lives`}>
-      {/* SAID ONCE (rule 7). With ONE app the rail's own note is the address,
-          directly above this body, so repeating it here is a stutter. With
-          several the note joins them and each needs naming under its own
-          heading, which is the only reading the note cannot give. */}
-      {many ? (
-        <>
-          <Subhead>{outcome.name}</Subhead>
-          <p className="os-stop-address">
-            <code className="os-mono">{outcome.hostname || "--"}</code>
-          </p>
-        </>
-      ) : null}
+      {many ? <Subhead>{outcome.name}</Subhead> : null}
+      <p className="os-stop-address"><code className="os-mono">{outcome.hostname || "Address unavailable"}</code></p>
       {tied === "" ? null : <Caption>For {tied}.</Caption>}
       {outcome.ownDomain ? <Caption>Bound to {outcome.ownDomain}, once its DNS records check out.</Caption> : null}
       {outcome.accountRefusal ? <ProblemNotice problem={outcome.accountRefusal} tone="warn" /> : null}

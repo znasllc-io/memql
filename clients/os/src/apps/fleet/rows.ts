@@ -108,7 +108,7 @@ export interface MachineRow {
    *  is not agreement to run other people's work on somebody's laptop. */
   inferenceServe: string;
   /** The TCC / X11 snapshot the cockpit took at register time and refreshes
-   *  on every reconnect. `present` false means the cockpit predates the
+   *  on measured heartbeats. `present` false means the cockpit predates the
    *  report -- NOT a machine that was refused everything. */
   permissions: MachinePermissions;
   /** The cluster's own round trip to this machine (design record
@@ -130,11 +130,17 @@ export interface MachineRow {
  * snapshot has said nothing -- reading that silence as "denied" would send a
  * person to System Settings to grant something that was never asked about.
  */
+export type PermissionDecision = "granted" | "denied" | "unknown";
 export interface MachinePermissions {
   present: boolean;
   accessibility: boolean;
   screenRecording: boolean;
   x11Display: boolean;
+  accessibilityState?: PermissionDecision;
+  screenRecordingState?: PermissionDecision;
+  x11DisplayState?: PermissionDecision;
+  checkedAt?: string;
+  probeContext?: string;
   detail: string;
 }
 
@@ -146,19 +152,24 @@ const NO_PERMISSIONS: MachinePermissions = {
   detail: "",
 };
 
+export function permissionDecision(p: MachinePermissions, key: "accessibility" | "screenRecording" | "x11Display"): PermissionDecision {
+  return p[`${key}State`] ?? (!p.present ? "unknown" : p[key] ? "granted" : "denied");
+}
+
 export function permissionsFrom(raw: unknown): MachinePermissions {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return NO_PERMISSIONS;
   const obj = raw as Record<string, unknown>;
-  const has = (key: string) => typeof obj[key] === "boolean";
-  const present = has("accessibility") || has("screen_recording") || has("x11_display") || typeof obj["detail"] === "string" && (obj["detail"] as string).trim() !== "";
-  if (!present) return NO_PERMISSIONS;
-  return {
-    present: true,
-    accessibility: obj["accessibility"] === true,
-    screenRecording: obj["screen_recording"] === true,
-    x11Display: obj["x11_display"] === true,
-    detail: typeof obj["detail"] === "string" ? obj["detail"] : "",
+  const detail = typeof obj.detail === "string" ? obj.detail : "";
+  const stub = detail.toLowerCase().includes("not yet implemented");
+  const decision = (key: string): PermissionDecision => {
+    if (stub) return "unknown";
+    if (`${key}_state` in obj) return obj[`${key}_state`] === "granted" ? "granted" : obj[`${key}_state`] === "denied" ? "denied" : "unknown";
+    return typeof obj[key] === "boolean" ? obj[key] ? "granted" : "denied" : "unknown";
   };
+  const a = decision("accessibility"), screen = decision("screen_recording"), x = decision("x11_display");
+  const present = ["accessibility", "screen_recording", "x11_display"].some(k => typeof obj[k] === "boolean" || `${k}_state` in obj) || detail.trim() !== "";
+  if (!present) return NO_PERMISSIONS;
+  return { present, accessibility: a === "granted", screenRecording: screen === "granted", x11Display: x === "granted", accessibilityState: a, screenRecordingState: screen, x11DisplayState: x, detail, checkedAt: typeof obj.checked_at === "string" ? obj.checked_at : "", probeContext: typeof obj.probe_context === "string" ? obj.probe_context : "" };
 }
 
 /** Read the desktop facts together: a computer-use binary can run on
@@ -190,21 +201,15 @@ export function computerUseStatus(machine: MachineRow): {
   }
   const permissions = machine.permissions;
   if (display === "quartz" || machine.os === "darwin") {
-    if (!permissions.present) {
-      return { state: "unknown", answer: "macOS permissions not reported. Computer-use availability is unknown." };
-    }
-    const missing = [
-      ...(permissions.accessibility ? [] : ["Accessibility"]),
-      ...(permissions.screenRecording ? [] : ["Screen Recording"]),
-    ];
-    if (missing.length > 0) {
-      return { state: "unavailable", answer: `Unavailable — ${missing.join(" and ")} not granted. Allow access in macOS Privacy & Security.` };
-    }
+    const states = [{ name: "Accessibility", state: permissionDecision(permissions,"accessibility") }, { name: "Screen Recording", state: permissionDecision(permissions,"screenRecording") }];
+    const denied = states.filter(s => s.state === "denied").map(s => s.name);
+    if (denied.length) return { state: "unavailable", answer: `Unavailable — ${denied.join(" and ")} not granted to the running worker. Allow that process in macOS Privacy & Security.` };
+    if (states.some(s => s.state === "unknown")) return { state: "unknown", answer: "macOS permissions are not fully verified by the running worker. Terminal setup success does not verify its LaunchAgent." };
     return { state: "available", answer: "Available — Accessibility and Screen Recording granted." };
   }
-  if (permissions.present && !permissions.x11Display) {
-    return { state: "unavailable", answer: "Unavailable — The X11 display is not available to the worker." };
-  }
+  const x11 = permissionDecision(permissions,"x11Display");
+  if (x11 === "unknown") return { state: "unknown", answer: "The running worker has not verified access to its X11 display." };
+  if (x11 === "denied") return { state: "unavailable", answer: "Unavailable — The X11 display is not available to the worker." };
   return { state: "available", answer: "Available — X11 desktop reported." };
 }
 
@@ -268,9 +273,9 @@ function appsFrom(row: Row): MachineApp[] {
         why: runnable
           ? ""
           : !known
-            ? "this engine does not drive it"
+            ? "Not supported by MemQL"
             : !allowed
-              ? "not in the machine's apps.allow"
+              ? "Not allowed by Cockpit"
               : "not signed in",
       };
     })

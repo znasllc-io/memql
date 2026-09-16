@@ -159,9 +159,9 @@ export interface PackageActions extends WriteState {
    * (memql#4951). The caller now says what CHANGED, which is what makes two
    * windows toggling two different apps both land.
    */
-  disableDeployables: (packageId: string, names: readonly string[]) => Promise<void>;
+  disableDeployables: (packageId: string, names: readonly string[]) => Promise<boolean>;
   /** Turn declared deployables back on, by name. The exact inverse. */
-  enableDeployables: (packageId: string, names: readonly string[]) => Promise<void>;
+  enableDeployables: (packageId: string, names: readonly string[]) => Promise<boolean>;
   rollback: (packageId: string, deploymentId: string) => Promise<void>;
   /** Archive the source and deactivate every app it produced (D3). */
   archive: (packageId: string, confirmName: string) => Promise<void>;
@@ -204,10 +204,10 @@ export function usePackageActions(): PackageActions {
       await run((query) => setPackageAutoDeploy(query, packageId, autoDeploy));
     },
     disableDeployables: async (packageId, names) => {
-      await run((query) => disableDeployables(query, packageId, names));
+      return await run(async (query) => { await disableDeployables(query, packageId, names); return true; }) === true;
     },
     enableDeployables: async (packageId, names) => {
-      await run((query) => enableDeployables(query, packageId, names));
+      return await run(async (query) => { await enableDeployables(query, packageId, names); return true; }) === true;
     },
     rollback: async (packageId, deploymentId) => {
       await run((query) => rollbackPackage(query, packageId, deploymentId));
@@ -285,8 +285,8 @@ export function useNewPackage(): NewPackageActions {
 // ---------------------------------------------------------------------------
 
 export interface SiteLifecycleActions extends WriteState {
-  setStatus: (siteId: string, status: "live" | "disabled" | "draft") => Promise<void>;
-  archive: (siteId: string, confirmHostname: string) => Promise<void>;
+  setStatus: (siteId: string, status: "live" | "disabled" | "draft") => Promise<boolean>;
+  archive: (siteId: string, confirmHostname: string) => Promise<boolean>;
   restore: (siteId: string) => Promise<void>;
   rollTo: (siteId: string, bundleRef: string) => Promise<void>;
   /**
@@ -304,10 +304,10 @@ export function useSiteLifecycle(): SiteLifecycleActions {
     refusal,
     clear,
     setStatus: async (siteId, status) => {
-      await run((query) => setSiteLive(query, siteId, status));
+      return await run(async (query) => { await setSiteLive(query, siteId, status); return true; }) === true;
     },
     archive: async (siteId, confirmHostname) => {
-      await run((query) => archiveSite(query, siteId, confirmHostname));
+      return await run(async (query) => { await archiveSite(query, siteId, confirmHostname); return true; }) === true;
     },
     restore: async (siteId) => {
       await run((query) => restoreSite(query, siteId));

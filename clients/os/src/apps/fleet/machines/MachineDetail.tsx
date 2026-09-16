@@ -1,9 +1,13 @@
+import { Terminal } from "lucide-react";
+import { useSession } from "../../../chrome/access";
+import { localCockpitInstall } from "../addMachine/localInstall";
+import { InfoDetail } from "../../../kit/InfoDetail";
 import { useEffect, useState } from "react";
 
 import { CallHistory } from "../routing/CallHistory";
-import { Button, Caption, Chip, Chips, ChoiceStack, CopyField, Fact, Facts, Notice, Panel, Subhead } from "../../../kit";
+import { Button, EmptyState, Caption, Chip, Chips, ChoiceStack, CopyField, Fact, Facts, Notice, Panel, Subhead, Switch } from "../../../kit";
 import { formatFreshness, formatMoment } from "../../../kit/format";
-import { uninstallCommand, type InstallPlatform } from "../addMachine/install";
+import { uninstallCommand, workerClusterUrl, type InstallPlatform } from "../addMachine/install";
 import { roundTripFigure } from "../addMachine/flow";
 import { isWorkerOnline } from "../online";
 import { computerUseStatus, hasRoundTrip, machineName, type MachineRow } from "../rows";
@@ -21,10 +25,12 @@ export function MachineDetail({
   machine,
   writes,
   now,
+  view = "all",
 }: {
   machine: MachineRow;
   writes: MachineWrites;
   now: Date;
+  view?: "all" | "details" | "models" | "apps" | "sharing" | "activity";
 }) {
   const label = machineName(machine);
   const busy = writes.busyId === machine.id;
@@ -37,8 +43,10 @@ export function MachineDetail({
 
   return (
     <Panel label={`${label} detail`}>
+      {view === "all" || view === "details" ? <>
       <RenameField machine={machine} busy={busy} rename={writes.rename} />
 
+      <details className="fleet-machine-facts"><summary>Connection, permissions & registration</summary>
       <Facts>
         <Fact label="Reported name" value={machine.name} mono />
         <Fact label="Hostname" value={machine.hostname} mono />
@@ -75,6 +83,7 @@ export function MachineDetail({
         Calls in flight is as of the last heartbeat, so it can trail a call that started since.
       </p>
 
+      </details>
       {/* HARDWARE FIRST, because what a machine IS precedes what it can be
           asked to do -- and because the machine class it computes is what the
           Models group's recommendation rests on. A reader who meets the
@@ -88,23 +97,24 @@ export function MachineDetail({
       />
 
       <LabelGroups machine={machine} busy={busy} writes={writes} />
+      </> : null}
 
-      <AppsGroup machine={machine} />
+      {view === "all" || view === "apps" ? <AppsGroup machine={machine} standalone={view === "apps"} /> : null}
 
       {/* Below Apps, because the two answer the same shape of question about
           this machine -- what it can be asked to do -- and a person scanning
           for either reads them together. */}
-      <ModelsGroup machine={machine} />
+      {view === "all" || view === "models" ? <ModelsGroup machine={machine} standalone={view === "models"} /> : null}
 
       {/* SHARING AFTER MODELS, because the question it asks -- will you lend
           this machine to everybody -- only means something once a reader knows
           what the machine can serve. Offering it above an empty Models group
           would be asking somebody to volunteer a machine that runs nothing. */}
-      <SharingGroup machine={machine} writes={writes} ledger={inference.ledger} />
+      {view === "all" || view === "sharing" ? <SharingGroup machine={machine} writes={writes} ledger={inference.ledger} standalone={view === "sharing"} /> : null}
 
-      <CallHistory workerId={machine.id} machineLabel={label} />
+      {view === "all" || view === "activity" ? <CallHistory standalone={view === "activity"} workerId={machine.id} machineLabel={label} /> : null}
 
-      <RemoveControl machine={machine} busy={busy} revoke={writes.revoke} />
+      {view === "all" || view === "details" ? <RemoveControl machine={machine} busy={busy} revoke={writes.revoke} /> : null}
 
       {writes.actionError ? (
         <Notice
@@ -183,17 +193,12 @@ function LabelGroups({
 
   return (
     <div className="os-fleet-labels">
-      <div className="os-fleet-labelgroup">
-        <Subhead>Reported by the machine</Subhead>
+      <details className="fleet-machine-facts">
+        <summary>Reported by the machine</summary>
         {/* The caveat is UI copy rather than a comment, because the person
             who needs it is the one about to look for an edit control here
             and not find one. */}
-        <p className="os-caption">
-          The cockpit sends these on every connection and REPLACES the whole set each time, so
-          they cannot be edited from here -- a value written into them would vanish at the
-          machine's next restart, leaving a routing rule that still reads correctly against a
-          machine that quietly stopped matching it.
-        </p>
+        <InfoDetail title="Reported labels"><p>Read-only labels are replaced whenever Cockpit connects. Set operator labels below to override them in routing.</p></InfoDetail>
         <Chips label="Reported labels">
           {reportedKeys.length === 0 ? (
             <span className="os-caption">None reported.</span>
@@ -213,13 +218,12 @@ function LabelGroups({
             })
           )}
         </Chips>
-      </div>
+      </details>
 
       <div className="os-fleet-labelgroup">
         <Subhead>Set by you</Subhead>
         <p className="os-caption">
-          Yours, and the only editable set. The router matches on both maps merged with these
-          winning.
+          Use labels to influence routing. Your labels override matching labels reported by the machine.
         </p>
         <LabelEditor
           operatorLabels={machine.operatorLabels}
@@ -231,37 +235,27 @@ function LabelGroups({
   );
 }
 
-function AppsGroup({ machine }: { machine: MachineRow }) {
+export function MachineAppsHelp() {
+  return <InfoDetail title="Apps on this machine"><p>Apps installed on this machine that Cockpit reports to MemQL. Ready apps are supported, allowed by Cockpit and signed in. Subscription status comes from the app.</p></InfoDetail>;
+}
+
+function AppsGroup({ machine, standalone }: { machine: MachineRow; standalone: boolean }) {
   return (
     <div className="os-fleet-apps">
-      <Subhead>Local apps</Subhead>
+      {!standalone ? <div className="fleet-bank-heading"><Subhead>Apps on this machine</Subhead><MachineAppsHelp /></div> : null}
       {machine.apps.length === 0 ? (
-        <p className="os-caption">
-          None reported. A cockpit reports the apps it found on the machine; an older one reports
-          none at all, which is not the same as a machine that has none.
-        </p>
+        <EmptyState icon={Terminal} title="No apps reported">Install and sign in to a supported app on this machine. It will appear here when Cockpit reports it.</EmptyState>
       ) : (
         <ul className="os-fleet-applist">
           {machine.apps.map((app) => (
-            <li key={app.id} className="os-fleet-app" data-runnable={app.runnable || undefined}>
-              <span className="os-fleet-app-name">{app.label}</span>
-              {app.version ? <span className="os-caption os-mono">{app.version}</span> : null}
-              <span className="os-caption">
-                {app.subscription === "unknown"
-                  ? "subscription unknown"
-                  : `subscription ${app.subscription}`}
-              </span>
-              <span className="os-fleet-app-state">
-                {app.runnable ? "runnable" : `not runnable -- ${app.why}`}
-              </span>
+            <li key={app.id}>
+              <details className="fleet-record" data-runnable={app.runnable || undefined}><summary><span className="fleet-record-identity"><strong>{app.label}</strong><small>{app.version || "Version not reported"}</small></span><span className="fleet-record-status">{app.runnable ? "Ready" : "Needs attention"}</span></summary>
+                <div className="fleet-record-detail"><Facts><Fact label="Subscription" value={app.subscription || "Unknown"} /><Fact label="Availability" value={app.runnable ? "Allowed and signed in" : app.why || "Not available to run"} /></Facts></div>
+              </details>
             </li>
           ))}
         </ul>
       )}
-      <p className="os-caption">
-        Runnable means all three: an app this engine drives, allowed by the machine's own
-        apps.allow, and signed in. Subscription is reported by the app and never inferred.
-      </p>
     </div>
   );
 }
@@ -292,18 +286,21 @@ function RemoveControl({
   busy: boolean;
   revoke: MachineWrites["revoke"];
 }) {
+  const { config } = useSession();
+  const localTest = platformOf(machine) === "mac" ? localCockpitInstall(config.domain) : null;
   const [confirming, setConfirming] = useState(false);
   const [reason, setReason] = useState("");
   const [userLocal, setUserLocal] = useState(false);
-  useEffect(() => setUserLocal(false), [machine.id]);
+  const [purge, setPurge] = useState(false);
+  useEffect(() => { setUserLocal(false); setPurge(false); }, [machine.id]);
   const label = machineName(machine);
-  const uninstall = uninstallCommand(platformOf(machine), { userLocal });
+  const uninstall = uninstallCommand(platformOf(machine), { userLocal, localTest, purge: localTest !== null && purge, clusterUrl: workerClusterUrl(config.domain) });
   // The registration does not report its installation path. Ask rather than
   // inferring it from the version or the machine's operating system.
   const uninstallControls = (
     <>
-      <Caption>Choose where Cockpit was installed on this machine, then run the matching command on it:</Caption>
-      <ChoiceStack
+      <Caption>{localTest ? "Run this command on the machine to uninstall its connection to this cluster:" : "Choose where Cockpit was installed on this machine, then run the matching command on it:"}</Caption>
+      {localTest ? <Caption>Uses the matching local test uninstaller for your account.</Caption> : <ChoiceStack
         name={`fleet-uninstall-location-${machine.id}`}
         label="Cockpit installation location"
         voice="prose"
@@ -314,11 +311,16 @@ function RemoveControl({
           { value: "user", label: "My account only", description: "Installed without a password in ~/.memql/bin." },
         ]}
       />
+      }
+      {localTest ? <>
+        <Switch checked={purge} onChange={setPurge}>Remove saved worker data</Switch>
+        <Caption>Also removes worker policy, state and MemQL-managed model data. Refused if another cluster connection still uses them.</Caption>
+      </> : null}
       <CopyField value={uninstall} label="the uninstall command" />
       <Caption>
-        It stops the service, removes the binary and the token file, and keeps the logs; add
-        --purge to remove those too.
+        {localTest ? "Other cluster connections keep running. After the last connection is removed, the app and services are removed and MemQL’s Accessibility and Screen Recording authorizations are reset. macOS may retain a row in Settings." : "Stops the service and removes Cockpit and its connection token. Logs and settings remain; add --purge to remove retained data too."}
       </Caption>
+      {localTest ? <Caption>CLI credentials, cluster settings, certificates and rollback backups are retained in either mode.</Caption> : null}
     </>
   );
 

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -34,13 +34,13 @@ function memStore() {
   });
 }
 
-function mount(connection: FakeConnection | null, opts: { role?: string } = {}) {
+function mount(connection: FakeConnection | null, opts: { role?: string; navigate?: (section: string, options?: { fromContent?: boolean }) => void } = {}) {
   h.connection = connection;
   return render(
     withSession(
       <DeployablesApp
         sectionId="map"
-        navigate={vi.fn()}
+        navigate={opts.navigate ?? vi.fn()}
         askContext={vi.fn()}
         store={memStore()}
       />,
@@ -68,7 +68,7 @@ describe("what the map draws", () => {
 
     expect(await screen.findByLabelText("Host shop.memql.example.com")).toBeTruthy();
     expect(
-      screen.getByLabelText("Deployable shop.memql.example.com, live, shopify_storefront"),
+      screen.getByLabelText("Deployable shop.memql.example.com, unknown, shopify_storefront"),
     ).toBeTruthy();
     expect(screen.getByLabelText(/^Bundle uploaded bundle: blob:\/\/sites\/site-shop\/v1\//)).toBeTruthy();
     expect(screen.getByLabelText("Library artifact artifact-zip")).toBeTruthy();
@@ -97,65 +97,60 @@ describe("what the map draws", () => {
   });
 });
 
-// THE MAP POINTS; THE PAGE LIVES ELSEWHERE (epic memql#4937, DESIGN.md rule
-// 11). Selecting a node used to render the WHOLE DeployablePage beneath the
-// picture -- 5,000px of rail, settings, domains and history under a drawing
-// whose job is to answer "which host, which site, which bundle" at a glance.
-// It shows a CARD now, with the way in.
-describe("selection", () => {
-  it("shows a card for the chosen deployable, with the way into its page", async () => {
-    const connection = fakeConnection({ sites: [SHOP] });
-    mount(connection);
+describe("overview selection", () => {
+  it("opens the chosen deployable directly without a repeated detail card", async () => {
+    const navigate = vi.fn();
+    mount(fakeConnection({ sites: [SHOP] }), { navigate });
     await click(await screen.findByLabelText(/^Deployable shop.memql.example.com/));
-
-    // The card answers what the map raised -- which host, what state -- and
-    // offers the way to the page rather than being one.
-    expect(await screen.findByText("live")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Open this deployable" })).toBeTruthy();
-  });
-
-  it("opens it from the keyboard too", async () => {
-    const connection = fakeConnection({ sites: [SHOP] });
-    mount(connection);
-    const node = await screen.findByLabelText("Host shop.memql.example.com");
-    fireEvent.keyDown(node, { key: "Enter" });
-    expect(await screen.findByRole("button", { name: "Open this deployable" })).toBeTruthy();
-  });
-
-  it("marks the selected cluster so the picture says what is open", async () => {
-    const connection = fakeConnection({ sites: [SHOP, APEX] });
-    mount(connection);
-    await click(await screen.findByLabelText(/^Deployable shop.memql.example.com/));
-
-    expect(document.querySelectorAll("[data-selected]").length).toBeGreaterThan(0);
-    // The whole story of that deployable lights up -- host, site, bundle,
-    // artifact -- not just the box that was clicked.
-    expect(document.querySelectorAll("[data-in-cluster]").length).toBeGreaterThanOrEqual(3);
-  });
-
-  it("OFFERS THE CHOICE when a node serves more than one deployable", async () => {
-    // There is no one detail to open, and picking one would be arbitrary.
-    const connection = fakeConnection({ sites: [DOCS, MIRROR] });
-    mount(connection);
-    await click(await screen.findByLabelText(/Bundle baked site, serving 2 deployables/));
-
-    expect(screen.getByText(/serves more than one deployable/)).toBeTruthy();
-    await click(screen.getByRole("button", { name: "docs.memql.example.com" }));
-    expect(await screen.findByRole("button", { name: "Open this deployable" })).toBeTruthy();
-  });
-
-  it("closes on a second activation of the same node", async () => {
-    const connection = fakeConnection({ sites: [SHOP] });
-    mount(connection);
-    const node = await screen.findByLabelText(/^Deployable shop.memql.example.com/);
-    await click(node);
-    expect(screen.getByRole("button", { name: "Open this deployable" })).toBeTruthy();
-    await click(node);
+    expect(navigate).toHaveBeenCalledWith("deployables", { fromContent: true });
     expect(screen.queryByRole("button", { name: "Open this deployable" })).toBeNull();
+    expect(document.querySelector(".os-map-card")).toBeNull();
+  });
+
+  it("opens from the keyboard too", async () => {
+    const navigate = vi.fn();
+    mount(fakeConnection({ sites: [SHOP] }), { navigate });
+    fireEvent.keyDown(await screen.findByLabelText("Host shop.memql.example.com"), { key: "Enter" });
+    expect(navigate).toHaveBeenCalledWith("deployables", { fromContent: true });
+  });
+
+  it("highlights related sites for a shared source without duplicating their list", async () => {
+    const navigate = vi.fn();
+    mount(fakeConnection({ sites: [DOCS, MIRROR] }), { navigate });
+    await click(await screen.findByLabelText(/Bundle baked site, serving 2 deployables/));
+    expect(navigate).not.toHaveBeenCalled();
+    expect(document.querySelectorAll("[data-in-cluster]").length).toBeGreaterThanOrEqual(3);
+    expect(document.querySelector(".os-map-card")).toBeNull();
+    expect(screen.queryByText(/Pick the one to open/)).toBeNull();
+  });
+
+  it("offers map help beside its heading instead of standing instructions", async () => {
+    mount(fakeConnection({ sites: [SHOP] }));
+    await screen.findByRole("button", { name: "About Deployment map" });
+    expect(document.querySelector(".os-deploy-map > .os-caption")).toBeNull();
   });
 });
 
 describe("steering", () => {
+  it("leaves clicks targeted at nodes and captures only an established drag", async () => {
+    mount(fakeConnection({ sites: [SHOP] }));
+    const node = await screen.findByLabelText(/^Deployable shop.memql.example.com/);
+    const capture = vi.fn();
+    Object.defineProperty(canvas(), "setPointerCapture", { value: capture, configurable: true });
+    fireEvent.pointerDown(node, { pointerId: 1, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(canvas(), { pointerId: 1, clientX: 101, clientY: 101 });
+    expect(capture).not.toHaveBeenCalled();
+    fireEvent.pointerUp(node, { pointerId: 1, clientX: 101, clientY: 101 });
+    await click(node);
+    expect(document.querySelector(".os-deploy-node[data-selected]")).not.toBeNull();
+    fireEvent.pointerDown(node, { pointerId: 2, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(canvas(), { pointerId: 2, clientX: 130, clientY: 100 });
+    expect(capture).toHaveBeenCalledWith(2);
+    fireEvent.pointerUp(canvas(), { pointerId: 2, clientX: 130, clientY: 100 });
+    await click(node);
+    expect(document.querySelector(".os-deploy-node[data-selected]")).not.toBeNull();
+  });
+
   it("pans with the arrow keys", async () => {
     const connection = fakeConnection({ sites: [SHOP] });
     mount(connection);
@@ -186,17 +181,76 @@ describe("steering", () => {
     expect(viewTransform()).toBe("translate(0 0) scale(1)");
   });
 
-  it("zooms on the wheel, toward the pointer", async () => {
-    const connection = fakeConnection({ sites: [SHOP] });
-    mount(connection);
+  it("leaves wheel scrolling to the app without moving or zooming the map", async () => {
+    mount(fakeConnection({ sites: [SHOP] }));
     await screen.findByLabelText("Host shop.memql.example.com");
+    const before = viewTransform();
+    const bubbled = vi.fn();
+    canvas().parentElement!.addEventListener("wheel", bubbled);
+    for (const deltaY of [-120, 120, -1, 1]) {
+      const event = new WheelEvent("wheel", { deltaY, bubbles: true, cancelable: true });
+      fireEvent(canvas(), event);
+      expect(event.defaultPrevented).toBe(false);
+      expect(viewTransform()).toBe(before);
+    }
+    expect(bubbled).toHaveBeenCalledTimes(4);
+  });
 
-    fireEvent.wheel(canvas(), { deltaY: -120, clientX: 200, clientY: 100 });
-    const after = viewTransform();
-    expect(after).toContain("scale(1.2)");
-    // Zooming about (200, 100) moves the origin: a zoom that only changed the
-    // scale would drag the point under the cursor away from it.
-    expect(after).not.toContain("translate(0 0)");
+  it("refits when a second window narrows the frame, while preserving an intentional pan", async () => {
+    let frameWidth = 1000;
+    let resize: (() => void) | undefined;
+    const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(() => new DOMRect(0, 0, frameWidth, 400));
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(private callback: () => void) {}
+      observe(node: Element) { if (node.classList.contains("os-map-frame")) resize = this.callback; }
+      unobserve() {}
+      disconnect() {}
+    });
+    try {
+      mount(fakeConnection({ sites: [SHOP] }));
+      await screen.findByLabelText("Host shop.memql.example.com");
+      const wide = viewTransform();
+      expect(resize).toBeTypeOf("function");
+      frameWidth = 500;
+      act(() => resize?.());
+      expect(viewTransform()).not.toBe(wide);
+      fireEvent.keyDown(canvas(), { key: "ArrowRight" });
+      const steered = viewTransform();
+      frameWidth = 800;
+      act(() => resize?.());
+      expect(viewTransform()).toBe(steered);
+      await click(screen.getByRole("button", { name: "Reset zoom and position" }));
+      const reset = viewTransform();
+      frameWidth = 600;
+      act(() => resize?.());
+      expect(viewTransform()).not.toBe(reset);
+    } finally { rect.mockRestore(); vi.unstubAllGlobals(); }
+  });
+
+  it("offers controlled zoom and resets both zoom and drag to the fitted view", async () => {
+    const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, right: 800, bottom: 400, width: 800, height: 400, toJSON() {},
+    });
+    try {
+      mount(fakeConnection({ sites: [SHOP] }));
+      await screen.findByLabelText("Host shop.memql.example.com");
+      const initial = viewTransform();
+      expect(initial).not.toBe("translate(0 0) scale(1)");
+      await click(screen.getByRole("button", { name: "Zoom in" }));
+      expect(viewTransform()).not.toBe(initial);
+      await click(screen.getByRole("button", { name: "Zoom out" }));
+      expect(viewTransform()).toBe(initial);
+      await click(screen.getByRole("button", { name: "Zoom in" }));
+      fireEvent.pointerDown(canvas(), { pointerId: 1, clientX: 100, clientY: 100 });
+      fireEvent.pointerMove(canvas(), { pointerId: 1, clientX: 180, clientY: 140 });
+      fireEvent.pointerUp(canvas(), { pointerId: 1, clientX: 180, clientY: 140 });
+      expect(viewTransform()).not.toBe(initial);
+      await click(screen.getByRole("button", { name: "Reset zoom and position" }));
+      expect(viewTransform()).toBe(initial);
+      fireEvent.keyDown(canvas(), { key: "ArrowRight" });
+      fireEvent.keyDown(canvas(), { key: "0" });
+      expect(viewTransform()).toBe(initial);
+    } finally { rect.mockRestore(); }
   });
 
   it("PANS FROM A NODE without opening it -- a drag is steering, not choosing", async () => {
@@ -226,7 +280,7 @@ describe("steering", () => {
     fireEvent.pointerUp(canvas(), { pointerId: 1, clientX: 101, clientY: 101 });
     await click(node);
 
-    expect(screen.getByRole("button", { name: "Open this deployable" })).toBeTruthy();
+    expect(document.querySelector(".os-deploy-node[data-selected]")).not.toBeNull();
   });
 
   it("never suppresses the KEYBOARD path, however far the map was dragged", async () => {
@@ -239,7 +293,7 @@ describe("steering", () => {
     fireEvent.pointerUp(canvas(), { pointerId: 1, clientX: 300, clientY: 300 });
     fireEvent.keyDown(node, { key: "Enter" });
 
-    expect(await screen.findByRole("button", { name: "Open this deployable" })).toBeTruthy();
+    expect(document.querySelector(".os-deploy-node[data-selected]")).not.toBeNull();
   });
 
   it("PINCHES, and does not jump on the frame the second finger lands", async () => {
@@ -466,7 +520,7 @@ describe("the hooks the stylesheet paints through", () => {
     const statuses = [...document.querySelectorAll(".os-deploy-node-dot")].map((el) =>
       el.getAttribute("data-status"),
     );
-    expect(statuses.sort()).toEqual(["draft", "live"]);
+    expect(statuses.sort()).toEqual(["draft", "unknown"]);
   });
 
   it("marks a changed node with the arrival kind, which is what the pulse rule selects", async () => {
@@ -477,5 +531,30 @@ describe("the hooks the stylesheet paints through", () => {
     await waitFor(() =>
       expect(document.querySelector(".os-deploy-node[data-arrival='updated']")).not.toBeNull(),
     );
+  });
+});
+
+
+describe("map content navigation", () => {
+  it("marks opening the selected deployable as contextual navigation", async () => {
+    const navigate = vi.fn();
+    mount(fakeConnection({sites:[SHOP]}),{navigate});
+    await click(await screen.findByLabelText(/^Deployable shop.memql.example.com/));
+    expect(navigate).toHaveBeenCalledWith("deployables",{fromContent:true});
+  });
+});
+
+
+describe("overview statistics", () => {
+  it("counts measured availability rather than equating configured live with healthy", async () => {
+    const connection = fakeConnection({ sites: [SHOP, DOCS] });
+    mount(connection);
+    await screen.findByLabelText("Host shop.memql.example.com");
+    const value = (label: string) => document.querySelector(`[data-overview-metric="${label}"] dd`)?.textContent;
+    expect(value("Deployables")).toBe("2");
+    expect(value("Live")).toBe("0");
+    expect(value("Unknown")).toBe("1");
+    await emit(connection, SITE_CONCEPT, { ...SHOP, status: "disabled" });
+    await waitFor(() => expect(value("Unknown")).toBe("0"));
   });
 });

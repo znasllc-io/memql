@@ -103,7 +103,7 @@ describe("the deployable's Logs action", () => {
   it("opens the Logs app on Search carrying the site as the subject", async () => {
     mount(fakeConnection({ sites: [SHOP] }), "deployables");
     await click((await screen.findByText("shop.memql.example.com")).closest("button"));
-    await click(screen.getByRole("button", { name: "Logs for shop.memql.example.com" }));
+    await click(screen.getByRole("button", { name: `Logs for ${SHOP.title || SHOP.hostname}` }));
 
     const opened = windows();
     expect(opened).toHaveLength(1);
@@ -114,8 +114,8 @@ describe("the deployable's Logs action", () => {
   it("focuses an already-open Logs window rather than opening a second", async () => {
     mount(fakeConnection({ sites: [SHOP] }), "deployables");
     await click((await screen.findByText("shop.memql.example.com")).closest("button"));
-    await click(screen.getByRole("button", { name: "Logs for shop.memql.example.com" }));
-    await click(screen.getByRole("button", { name: "Logs for shop.memql.example.com" }));
+    await click(screen.getByRole("button", { name: `Logs for ${SHOP.title || SHOP.hostname}` }));
+    await click(screen.getByRole("button", { name: `Logs for ${SHOP.title || SHOP.hostname}` }));
     expect(windows().filter((w) => w.appId === "logs")).toHaveLength(1);
   });
 
@@ -135,10 +135,6 @@ describe("the deployment's Logs action", () => {
     // memql#4937): they are read by packageId, so a two-app source used to
     // draw the identical 2,600px wall on both of its apps' pages.
     const page = await screen.findByRole("region", { name: /^Deployable / });
-    const line = within(page)
-      .getAllByRole("button")
-      .find((b) => b.classList.contains("os-rail-line") && (b.textContent ?? "").startsWith("Source"));
-    if (line !== undefined && line.getAttribute("aria-expanded") !== "true") await click(line);
     await click(within(page).getByRole("button", { name: /^Open / }));
     const source = await screen.findByRole("region", { name: /^Source / });
     await click(within(source).getByRole("button", { name: /^History/ }));

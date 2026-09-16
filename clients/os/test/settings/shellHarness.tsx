@@ -69,6 +69,8 @@ export function openFromLauncher(name: string) {
 
 /** Click a section button in a window's own nav. */
 export function gotoSection(app: string, section: string) {
+  if (section === "Logs") { fireEvent.click(screen.getByRole("button", { name: `${app} logs` })); return; }
+  if (section === "Settings") { fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${app} settings`) })); return; }
   const nav = screen.getByRole("navigation", { name: `${app} sections` });
   fireEvent.click(within(nav).getByRole("button", { name: section }));
 }

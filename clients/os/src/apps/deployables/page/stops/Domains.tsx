@@ -86,8 +86,8 @@ export function DomainsContent({ site, domain }: { site: SiteRow; domain: string
     <section className="os-report-part" aria-label={`Domains for ${site.hostname || site.id}`}>
       <Subhead>Domains</Subhead>
       <Caption>
-        A client's own domain, served by this deployable. Its own hostname{" "}
-        <code className="os-mono">{site.hostname || "--"}</code> keeps working either way.
+        Use your own domain for this app. Its cluster address{" "}
+        <code className="os-mono">{site.hostname || "--"}</code> remains available.
       </Caption>
       {/* WHO THIS IS FOR, SAID ONCE. The concept is clusterOwner tier, so on a
           cluster where admin and cluster owner are different people an admin
@@ -96,10 +96,6 @@ export function DomainsContent({ site, domain }: { site: SiteRow; domain: string
           an empty one. The panel deliberately does not detect which reader it
           has: it says what is true for both, and anyone who tries anyway gets
           the server's own sentence beside the control they used. */}
-      <Caption>
-        Binding a domain is a cluster owner's job in this version -- a certificate is a
-        cluster-level resource with real rate limits.
-      </Caption>
 
       {/* WHAT THE DOMAIN'S OWN STATUS DOES NOT SAY. A binding reaches `live`
           when ITS setup is finished -- both DNS records check out and the
@@ -117,7 +113,7 @@ export function DomainsContent({ site, domain }: { site: SiteRow; domain: string
         <Notice
           tone="warn"
           sentence={`This deployable is ${site.status || "not live"}, so nothing is served at any of its domains.`}
-          next="A domain below marked serving has finished its own setup -- both DNS records check out and its certificate is issued. What a visitor actually gets is decided by the deployable's status, above."
+          next="Go live to serve this app at its verified domains."
         />
       )}
 
@@ -130,7 +126,7 @@ export function DomainsContent({ site, domain }: { site: SiteRow; domain: string
         key={`domains:${site.id}`}
         source={view}
         label={`Domains bound to ${site.hostname || site.id}`}
-        emptyText="No domains here. Add one above and this cluster will tell you which records to create."
+        emptyText="No custom domains. Add a hostname to get its DNS records."
         rowId={(d) => d.id}
         fingerprint={domainFingerprint}
         renderRow={(d) => <DomainCard key={d.id} domain={d} clusterDomain={domain} />}
@@ -191,7 +187,7 @@ function AddDomain({ siteId }: { siteId: string }) {
         <Notice
           tone="info"
           sentence={`${outcome.hostname} is bound and waiting for its DNS records.`}
-          next="Create the two records shown on its card below. This cluster checks every couple of minutes and will say which one is still missing."
+          next="Add the DNS records below at your domain provider. Verification runs automatically."
         />
       )}
 
@@ -199,7 +195,7 @@ function AddDomain({ siteId }: { siteId: string }) {
         <Notice
           tone="error"
           sentence="That domain was not bound."
-          next="The cluster decides which hostnames can be bound here -- including whether one is already taken, which this window cannot know."
+          next="Check the hostname and the error below, then try again."
           detail={error}
         />
       )}

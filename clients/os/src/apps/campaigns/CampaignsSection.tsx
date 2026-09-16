@@ -1,6 +1,7 @@
+import { AddButton } from "../../kit/AddButton";
 import { useEffect, useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
-import { Plus, Send } from "lucide-react";
+import { Send } from "lucide-react";
 
 import { AccountChip, AccountPicker } from "../accounts/AccountPicker";
 import { useAccountOptions } from "../accounts/tie";
@@ -90,9 +91,7 @@ export function CampaignsSection({
   return (
     <div className="os-app-stack">
       <Head title="Campaigns">
-        <Button onClick={() => setAdding((v) => !v)}>
-          <Plus size={14} aria-hidden /> New campaign
-        </Button>
+        <AddButton onClick={() => setAdding((v) => !v)} label="New campaign" />
       </Head>
 
       {feeds.campaigns.snapshot.error ? (

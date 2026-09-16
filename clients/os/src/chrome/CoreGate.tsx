@@ -10,6 +10,7 @@ import { PASSKEY_STOP, drawnState, type SetupStop } from "../apps/setup/stops";
 import type { ModuleId } from "../system/modules";
 import { useSession } from "./access";
 import { useOs } from "./state";
+import { Mark } from "./Mark";
 
 // THE CORE GATE (design record 2026-09-07-core-gate-and-honest-install, D1,
 // D2 and D6).
@@ -144,7 +145,9 @@ export function CoreGate({ onSignOut, children }: { onSignOut: () => void; child
   return (
     <div className="os-core-gate" data-os-core-gate="held">
       <div className="os-core-gate-column">
-        <span className="os-core-gate-mark" aria-hidden />
+        <span className="os-core-gate-mark" aria-hidden>
+          <Mark className="os-ask-mark" />
+        </span>
         <h1 className="os-core-gate-head">Set up this cluster</h1>
         <p className="os-core-gate-body">
           MemQL needs a way to reach a model before anyone can use it. The other steps can wait
@@ -219,7 +222,9 @@ function ToldVariant({ onSignOut }: { onSignOut: () => void }) {
   return (
     <div className="os-core-gate" data-os-core-gate="told">
       <div className="os-core-gate-column">
-        <span className="os-core-gate-mark" aria-hidden />
+        <span className="os-core-gate-mark" aria-hidden>
+          <Mark className="os-ask-mark" />
+        </span>
         <h1 className="os-core-gate-head">MemQL is not set up yet</h1>
         <p className="os-core-gate-body">
           An owner or developer has to set up inference before anyone can use it.

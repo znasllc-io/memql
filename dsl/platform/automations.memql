@@ -121,3 +121,10 @@ automation pollPackageUpstreams {
 automation sweepAbandonedPackageDeployments {
   sweep := builtin packageSweepAbandoned()
 }
+
+/// Probe due published websites once per cluster through the elected cron leader.
+/// No observation means unknown; a saved live state never establishes health.
+@trigger(schedule="0 */2 * * * *")
+automation checkDeployableHealth {
+  sweep := builtin siteHealthSweep()
+}

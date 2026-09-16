@@ -1,3 +1,4 @@
+import { AddButton } from "../../kit/AddButton";
 import { useMemo, useState } from "react";
 import { Shield } from "lucide-react";
 
@@ -88,9 +89,7 @@ export function RolesSection({
             roleCreate checks, and a New role button for somebody who does not
             hold it is a form whose every submission is refused. */}
         {mayCreate ? (
-          <Button tone="primary" onClick={() => setView({ kind: "new" })}>
-            New role
-          </Button>
+          <AddButton onClick={() => setView({ kind: "new" })} label="New role" />
         ) : null}
       </Head>
 

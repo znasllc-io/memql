@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // The connection seam, mocked at the MODULE so the real reading hooks run
@@ -27,16 +27,21 @@ async function click(el: Element) {
   });
 }
 
+let delegation = false;
 function mount(connection: Conn) {
   h.connection = connection;
-  return render(withSession(<AppsSection />));
+  const view = render(withSession(<AppsSection />));
+  if (delegation) fireEvent.click(screen.getByRole("button", { name: "Delegation" }));
+  return view;
 }
 
 beforeEach(() => {
   h.connection = null;
+  delegation = false;
 });
 
 describe("the delegation policy editor", () => {
+  beforeEach(() => { delegation = true; });
   it("STATES that delegation is off when there is no row, and writes nothing", async () => {
     const connection = fakeConnection({ delegationPolicyForUser: [] });
     mount(connection);
@@ -46,8 +51,8 @@ describe("the delegation policy editor", () => {
     // the default IS off.
     expect(await screen.findByText(/Delegation is off/)).toBeTruthy();
     const note = screen.getByText(/Delegation is off/).closest(".os-notice") as HTMLElement;
-    expect(note.textContent).toContain("every task runs in the cluster");
-    expect(note.textContent).toContain("Nothing is written until you save");
+    expect(note.textContent).toContain("Tasks stay in the cluster");
+    expect(note.textContent).toContain("until you save a policy");
 
     // Opening the section is a READ. Nothing was written.
     expect(connection.query.delegationPolicyForUser).toHaveBeenCalled();
@@ -62,15 +67,15 @@ describe("the delegation policy editor", () => {
     expect(master).toBeTruthy();
     // A PREFERENCE WITH A FALLBACK. The whole risk of this form is somebody
     // believing they have switched work off.
-    expect(screen.getByText(/otherwise it runs in the cluster exactly as before/)).toBeTruthy();
-    expect(screen.getByText(/A plan never waits for a laptop to wake up/)).toBeTruthy();
+    expect(screen.getByText(/Otherwise, tasks continue in the cluster/)).toBeTruthy();
+    expect(screen.getByText(/when an allowed machine is online/)).toBeTruthy();
   });
 
   it("says that the app list is a PRIORITY and shows the order back", async () => {
     mount(fakeConnection({ delegationPolicyForUser: [] }));
     await screen.findByText(/Delegation is off/);
 
-    expect(screen.getByText(/the FIRST app on this list that a machine actually has wins/)).toBeTruthy();
+    expect(screen.getByText(/MemQL tries selected apps in the order shown below/)).toBeTruthy();
     expect(screen.getByText(/No app listed, so nothing can be selected/)).toBeTruthy();
 
     await click(screen.getByLabelText("Codex"));
@@ -87,8 +92,8 @@ describe("the delegation policy editor", () => {
 
     await click(screen.getByLabelText("Delegate eligible tasks to my local apps"));
     await click(screen.getByLabelText("Claude Code"));
-    await click(screen.getByLabelText("runCommand"));
-    await click(screen.getByLabelText("persistResult"));
+    await click(screen.getByLabelText("Run commands"));
+    await click(screen.getByLabelText("Save results"));
     fireEvent.change(screen.getByLabelText("Workspace root on the machine"), {
       target: { value: "/Users/ana/work" },
     });
@@ -126,7 +131,7 @@ describe("the delegation policy editor", () => {
     expect(screen.queryByText(/Delegation is off/)).toBeNull();
     expect((screen.getByLabelText("Claude Code") as HTMLInputElement).checked).toBe(true);
     expect((screen.getByLabelText("Codex") as HTMLInputElement).checked).toBe(false);
-    expect((screen.getByLabelText("runCommand") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText("Run commands") as HTMLInputElement).checked).toBe(true);
 
     await click(screen.getByRole("button", { name: "Save delegation policy" }));
     expect(connection.query.setDelegationPolicy).toHaveBeenCalledTimes(1);
@@ -159,7 +164,7 @@ describe("the delegation policy editor", () => {
 });
 
 describe("the delegated runs list", () => {
-  it("renders an UNREPORTED usage as an em dash and never as 0", async () => {
+  it("omits unreported usage from the summary and never presents it as zero", async () => {
     mount(
       fakeConnection({
         appSessionsForUser: [appSessionRow({ id: "v1:worker:appSession:a" })],
@@ -168,12 +173,8 @@ describe("the delegated runs list", () => {
     );
 
     const row = await screen.findByRole("button", { name: /Claude Code/ });
-    // An app that reported nothing did not report zero. The dash is the
-    // shell's spelling for "no answer" and carries the reason on hover.
-    const tokens = row.querySelector(".os-fleet-session-tokens") as HTMLElement;
-    expect(tokens.textContent).toBe("—");
-    expect(tokens.textContent).not.toContain("0");
-    expect(within(tokens).getByTitle(/Nothing has reported this yet/)).toBeTruthy();
+    expect(row.querySelector(".os-fleet-session-tokens")).toBeNull();
+    expect(row.textContent).not.toContain("0 tokens");
   });
 
   it("adds input and output when the app DID report", async () => {
@@ -223,7 +224,7 @@ describe("the delegated runs list", () => {
 
   it("says an empty list is empty rather than leaving a blank", async () => {
     mount(fakeConnection({ appSessionsForUser: [], delegationPolicyForUser: [] }));
-    expect(await screen.findByText(/No app session has run yet/)).toBeTruthy();
+    expect(await screen.findByText(/No app sessions yet/)).toBeTruthy();
   });
 });
 
@@ -260,8 +261,8 @@ describe("one run's transcript", () => {
     // is the quiet control on this one.
     expect(screen.getAllByRole("heading", { level: 3 })).toHaveLength(1);
     expect(screen.getByRole("heading", { level: 3 }).textContent).toContain("Claude Code");
-    expect(screen.getByRole("button", { name: /Apps/ })).toBeTruthy();
-    expect(screen.queryByLabelText("Delegated runs")).toBeNull();
+    expect(screen.getByRole("button", { name: "Back to Activity" })).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Delegated runs" })).toBeNull();
   });
 
   it("renders the transcript VERBATIM in a pre and states the byte count", async () => {
@@ -283,9 +284,9 @@ describe("one run's transcript", () => {
     );
     // A transcript that simply stopped would read as a run that stopped.
     expect(
-      screen.getByText(/reached the size the row keeps, so what is below stops short of the end/),
+      screen.getByText(/This is a shortened transcript/),
     ).toBeTruthy();
-    expect(screen.getByText(/pushed to your Library at the end of the run/)).toBeTruthy();
+    expect(screen.getByText(/complete transcript is in your Library/)).toBeTruthy();
     expect(screen.getByText("v1:library:artifact:full-transcript")).toBeTruthy();
   });
 
@@ -304,8 +305,8 @@ describe("one run's transcript", () => {
         vi.advanceTimersByTime(30_000);
       });
       expect(connection.query.appSessionById).toHaveBeenCalledTimes(1);
-      expect(screen.getByText(/A finished run does not change, so this is not polled/)).toBeTruthy();
-      expect(screen.getByRole("button", { name: "Re-read" })).toBeTruthy();
+      expect(screen.getByText(/Last updated/)).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Refresh app session" })).toBeTruthy();
     } finally {
       vi.useRealTimers();
     }

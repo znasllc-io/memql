@@ -16,6 +16,15 @@ import (
 
 func (e *MemQLEngine) initBuiltinExecutorHandlers() error {
 	handlers := map[string]builtinExecutorHandler{
+		"routingPolicyDescribe": e.policyDescribeBuiltin,
+		"routingRuleDescribe":   e.routingRuleDescribeBuiltin,
+		"routingRules":          e.routingRulesBuiltin,
+		"routingRuleValidate":   e.routingRuleValidateBuiltin,
+		"routingRuleSave":       e.routingRuleSaveBuiltin,
+		"routingRuleRemove":     e.routingRuleRemoveBuiltin,
+		"routingPolicyCatalog":  e.policyCatalogBuiltin,
+		"routingPolicySave":     e.policySaveBuiltin,
+		"routingPolicyReset":    e.policyResetBuiltin,
 		BuiltinExecutorConcepts: func(ctx context.Context, args map[string]any, target int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateConceptsExpression(ctx, target, args)
 		},

@@ -1,11 +1,11 @@
+import { localCockpitInstall } from "./localInstall";
 import { useEffect, useState } from "react";
-import { ArrowLeft } from "lucide-react";
 
 import { useSession } from "../../../chrome/access";
-import { Button, Caption, CopyField, Head, Panel, Rail, stopIsReachable, type Stop } from "../../../kit";
+import { Caption, CopyField, Head, Panel, stopIsReachable, type Stop } from "../../../kit";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
 import { openStopFor, waitedLong, type ActId, type StopId } from "./flow";
-import { uninstallCommand } from "./install";
+import { uninstallCommand, workerClusterUrl } from "./install";
 import { ChecksStop } from "./stops/Checks";
 import { ConnectStop } from "./stops/Connect";
 import { InstallStop } from "./stops/Install";
@@ -85,24 +85,23 @@ export function AddMachinePage({
   }));
 
   return (
-    <div className="os-deploy-pane os-fleet-addpage">
+    <div className="os-deploy-pane os-fleet-addpage" data-os-page-context={JSON.stringify({ page: "Add a machine", phase, step: openStop })}>
       <div className="os-deploy-scroll">
         <Panel label="Add a machine">
-          <Head title="Add a machine">
-            {/* Until registration, Back asks the same credential question as
-                Cancel. A connected machine has completed that step, so Back
-                finishes the flow and returns to the list. */}
-            <Button tone="quiet" onClick={() => phase === "connected" ? run("done") : flow.cancel()} ariaLabel="Back to Machines">
-              <ArrowLeft size={13} aria-hidden /> Machines
-            </Button>
-          </Head>
+          {/* Keep credential cancellation and successful completion on the same back action. */}
+          <Head title="Add a machine" back={{ label: "Machines", onSelect: () => phase === "connected" ? run("done") : flow.cancel() }} />
 
-          <Rail
-            stops={drawn}
-            label="Adding a machine"
-            openStop={openStop}
-            onOpenStop={(id) => setOverride(id === "" ? null : id)}
-          />
+          <ol className="fleet-install-trail" aria-label="Adding a machine">
+            {drawn.map((stop, index) => <li key={stop.id} data-state={stop.state}>
+              <button type="button" disabled={!stop.openable} aria-current={stop.id === openStop ? "step" : undefined} aria-expanded={stop.id === openStop} onClick={() => setOverride(stop.id)}>
+                <span className="fleet-step-number" aria-hidden>{(stop.state === "done" || stop.state === "complete") ? "✓" : index + 1}</span>
+                <span><strong>{stop.name}</strong><small>{stop.state === "ahead" ? "Not reached" : (stop.state === "done" || stop.state === "complete") ? "Complete" : stop.state === "current" ? "Listening" : stop.state === "open" ? "Waiting on you" : stop.answer}</small></span>
+              </button>
+            </li>)}
+          </ol>
+          {phase === "waiting" || phase === "connected" ? <p className="fleet-install-status" role="status">{stops.find(stop => stop.id === "connect")?.answer || stops.find(stop => stop.id === "connect")?.sentence}</p> : null}
+          <div className="fleet-install-current">{drawn.find(stop => stop.id === openStop)?.body}</div>
+
         </Panel>
       </div>
 
@@ -115,7 +114,7 @@ export function AddMachinePage({
                 about to be revoked; a registration that never happens has no
                 machine page to get the line from. */}
             <Caption>If you already ran the install on the machine, this removes it again:</Caption>
-            <CopyField value={uninstallCommand(flow.draft.platform, { userLocal: flow.draft.userLocal })} label="the uninstall command" />
+            <CopyField value={uninstallCommand(flow.draft.platform, { userLocal: flow.draft.userLocal, localTest: localCockpitInstall(config.domain), clusterUrl: workerClusterUrl(config.domain) })} label="the uninstall command" />
           </div>
         )}
       </ActionBar>
@@ -162,6 +161,7 @@ export function AddMachinePage({
         return (
           <MachineStop
             draft={flow.draft}
+          localTest={localCockpitInstall(config.domain)}
             onDraft={flow.setDraft}
             connected={facts.connected}
             mintError={facts.mintError}
@@ -194,6 +194,7 @@ export function AddMachinePage({
             pulling={flow.pulling}
             pullError={flow.pullError}
             onPullRecommended={() => void flow.pullRecommended()}
+            onRetryResponse={flow.retryResponse}
           />
         );
     }

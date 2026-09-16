@@ -103,8 +103,9 @@ describe("windows and desks (spec K bullets 2-3)", () => {
   it("minimizes to the dock and restores from it", () => {
     renderShell();
     openFromLauncher("Files");
+    const original = document.querySelector("[data-os-window='files']");
     fireEvent.click(screen.getByRole("button", { name: "Minimize Files" }));
-    expect(document.querySelector("[data-os-window='files']")).toBeNull();
+    expect(original?.hasAttribute("hidden")).toBe(true);
 
     const dock = document.querySelector("[data-os-dock]") as HTMLElement;
     fireEvent.click(within(dock).getByRole("button", { name: "Files (running)" }));
@@ -114,7 +115,7 @@ describe("windows and desks (spec K bullets 2-3)", () => {
   it("full-screens and closes", () => {
     renderShell();
     openFromLauncher("Files");
-    fireEvent.click(screen.getByRole("button", { name: "Full screen Files" }));
+    fireEvent.click(screen.getByRole("button", { name: "Maximize Files on its own desktop" }));
     expect(document.querySelector("[data-os-window='files']")?.hasAttribute("data-fullscreen")).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Close Files" }));
     expect(document.querySelector("[data-os-window='files']")).toBeNull();
@@ -189,7 +190,7 @@ describe("Ask (spec K bullet 5)", () => {
     openFromLauncher("Files");
     fireEvent.click(screen.getByRole("button", { name: "Ask about Files" }));
     const sheet2 = screen.getByRole("dialog", { name: "Ask" });
-    expect(within(sheet2).getByText(/app:files/)).toBeTruthy();
+    expect(within(sheet2).getByText(/Files \/ /)).toBeTruthy();
 
     const widget = document.querySelector("[data-os-widget='ask']") as HTMLElement;
     expect(within(widget).getByRole("textbox", { name: "Ask" })).toBeTruthy();
@@ -340,4 +341,30 @@ describe("right-click (the shell owns it)", () => {
     input.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(false);
   });
+});
+
+
+it("switches through registry apps without remounting the prior window or losing its section", () => {
+  renderShell();
+  openFromLauncher("Fleet");
+  fireEvent.click(screen.getByRole("button", { name: "Model library" }));
+  const original = document.querySelector("[data-os-window='fleet']");
+  fireEvent.click(screen.getByRole("button", { name: "Maximize Fleet on its own desktop" }));
+  expect(document.querySelector("[data-os-window='fleet']")).toBe(original);
+  fireEvent.change(screen.getByRole("combobox", { name: "Switch app from Fleet" }), { target: { value: "files" } });
+  expect(original?.hasAttribute("hidden")).toBe(true);
+  fireEvent.change(screen.getByRole("combobox", { name: "Switch app from Files" }), { target: { value: "fleet" } });
+  expect(document.querySelector("[data-os-window='fleet']")).toBe(original);
+  expect(original?.hasAttribute("hidden")).toBe(false);
+  expect(original?.hasAttribute("data-fullscreen")).toBe(true);
+  expect(within(original as HTMLElement).getByRole("button", { name: "Model library" }).getAttribute("aria-current")).toBe("page");
+});
+
+it('the Fleet window search focuses machine search without a duplicate app trigger',async()=>{
+ renderShell();openFromLauncher('Fleet');
+ const fleet=within(screen.getByRole('dialog',{name:'Fleet'}));
+ expect(fleet.queryByRole('button',{name:'Find machines'})).toBeNull();
+ fireEvent.click(fleet.getByRole('button',{name:'Search Fleet'}));
+ expect(await fleet.findByPlaceholderText('Search machines')).toBe(document.activeElement);
+ expect(fleet.queryByRole('dialog',{name:'Search Fleet destinations'})).toBeNull();
 });

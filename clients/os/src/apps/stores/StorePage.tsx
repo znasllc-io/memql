@@ -1,8 +1,7 @@
 import { useMemo } from "react";
 import { Concepts } from "@znasllc-io/memql-sdk-core/client";
-import { ArrowLeft, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 
-import { Mark } from "../../chrome/Mark";
 import { Button, Caption, Chips, Fact, Facts, Head, Notice, Panel, Subhead } from "../../kit";
 import { ActionBar, type Act } from "../../kit/ActionBar";
 import { Measure } from "../../kit/MeasureView";
@@ -57,7 +56,6 @@ export function StorePage({
   onBack,
   onReread,
   onOpenSettings,
-  onAsk,
 }: {
   store: StoreHealth;
   writes: StoreWrites;
@@ -84,16 +82,14 @@ export function StorePage({
   }));
 
   return (
-    <div className="os-stores-pane">
+    <div className="os-stores-pane" data-os-page-context={JSON.stringify({ page: "Store", storeId: store.storeId, name })}>
       <div className="os-stores-scroll">
         <Panel label={`Store ${name}`}>
           {/* ONE HEAD, and no primary action in it: every act that changes
               this store's state is on the bar (rule 12). What stays is the
               way back, the way to look again, and the lines. */}
-          <Head title={name}>
-            <Button tone="quiet" onClick={onBack}>
-              <ArrowLeft size={13} aria-hidden /> Stores
-            </Button>
+          <Head title={name} back={{ label: "Stores", onSelect: onBack }}>
+
             <Button tone="quiet" onClick={onReread} ariaLabel={`Re-read ${name}`}>
               <RefreshCw size={13} aria-hidden /> Re-read
             </Button>
@@ -102,15 +98,6 @@ export function StorePage({
               subjectConcept={Concepts.SHOPIFY_STORE}
               ariaLabel={`Logs for ${name}`}
             />
-            {onAsk ? (
-              <Button
-                tone="quiet"
-                onClick={() => onAsk(`app:stores store:${store.storeId}`)}
-                ariaLabel={`Ask about ${name}`}
-              >
-                <Mark size={13} aria-hidden /> Ask
-              </Button>
-            ) : null}
           </Head>
 
           <Caption>

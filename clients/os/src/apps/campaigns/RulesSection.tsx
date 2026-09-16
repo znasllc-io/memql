@@ -1,6 +1,7 @@
+import { AddButton } from "../../kit/AddButton";
 import { Fragment, useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
-import { Plus, Zap } from "lucide-react";
+import { Zap } from "lucide-react";
 
 import { AccountChip, AccountPicker } from "../accounts/AccountPicker";
 import { accountNameFrom } from "../accounts/rows";
@@ -111,9 +112,7 @@ export function RulesSection({
   return (
     <div className="os-app-stack">
       <Head title="Rules">
-        <Button onClick={() => setAdding((v) => !v)}>
-          <Plus size={14} aria-hidden /> New rule
-        </Button>
+        <AddButton onClick={() => setAdding((v) => !v)} label="New rule" />
       </Head>
 
       <AuthoredAutomationsBanner authored={authored} />

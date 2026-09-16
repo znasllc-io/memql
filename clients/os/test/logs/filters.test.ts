@@ -157,3 +157,15 @@ describe("the subject intent", () => {
     expect(subjectIntentOf({ subject: "  " })).toBeNull();
   });
 });
+
+
+it("preserves the full app OR subject scope and filters in a Logs handoff", async () => {
+  const { logViewIntentOf, DEFAULT_FILTERS, toTailArgs } = await import("../../src/logs/filters");
+  const scope = { apps: ["fleet"], subjectConcepts: ["v1:worker:registration"] };
+  const filters = { ...DEFAULT_FILTERS, text: "failure", subject: "worker-a", levelFloor: "error" as const, window: "6h" as const };
+  const result = logViewIntentOf({ logView: { scope, filters } });
+  expect(result).toEqual({ scope, filters });
+  expect(toTailArgs(result!.scope, result!.filters)).toEqual(toTailArgs(scope, filters));
+  expect(logViewIntentOf({ logView: { scope, filters: { ...filters, levelFloor: "bogus" } } })).toBeNull();
+  expect(logViewIntentOf({ logView: { scope: { apps: [42] }, filters } })).toBeNull();
+});

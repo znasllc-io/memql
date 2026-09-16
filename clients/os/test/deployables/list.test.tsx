@@ -248,27 +248,14 @@ describe("the list", () => {
     expect(within(shop).getByText("shop.memql.example.com")).toBeTruthy();
   });
 
-  it("gives every row the five-stop rail the page draws in full", async () => {
+  it("shows an unmeasured state and keeps the full build steps on demand", async () => {
     mount(fakeConnection(WITH_PACKAGE));
-    const store = (await screen.findByText("storefront")).closest(".os-row") as HTMLElement;
-    const rail = within(store).getByRole("list", { name: "storefront stops" });
-    // EVERY STOP DONE, because this app is live and serving a published
-    // bundle. This assertion used to read done/ahead/done/ahead/done and was
-    // WRITTEN THAT WAY TO MATCH THE BUG: the list hands the rail only the
-    // PARKED run, a finished run is not parked, and What-it-is and Build both
-    // derived their state from that run's report -- so they reported "not
-    // reached" for work whose output the same row was serving. The stops read
-    // the row's own standing facts now (its kind, its bundle), which is what a
-    // settled deployable actually knows about itself.
-    expect([...rail.querySelectorAll(":scope > li")].map((li) => li.getAttribute("data-state"))).toEqual([
-      "done",
-      "done",
-      "done",
-      "done",
-      "done",
-    ]);
-    // Five dots with no name are five dots: each mark says which stop it is.
-    expect(within(rail).getByRole("img", { name: "Live, finished" })).toBeTruthy();
+    const row = (await screen.findByText("storefront")).closest(".os-row") as HTMLElement;
+    expect(within(row).getByText("Unknown")).toBeTruthy();
+    expect(within(row).queryByRole("list")).toBeNull();
+    await click(row);
+    expect(await screen.findByRole("region", { name: "Deployable store.memql.example.com" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Build settings" })).toBeTruthy();
   });
 
   it("names the two sections, so a source and a standalone site never interleave", async () => {
@@ -280,7 +267,7 @@ describe("the list", () => {
     expect(heads).toEqual(["From a source", "Standalone"]);
   });
 
-  it("starts a source group COLLAPSED, and opening it is remembered", async () => {
+  it("shows source relationships by default, and lets a person collapse them", async () => {
     // The default the seeded store in this file deliberately overrides, tested
     // here where it belongs: a fresh document has no open groups.
     const store = new LocalDeployablesSettingsStore({ getItem: () => null, setItem: () => {} });
@@ -294,13 +281,15 @@ describe("the list", () => {
     const source = await screen.findByText("acme/storefront at main");
     // The source line is there; its apps are NOT RENDERED AT ALL -- not hidden
     // with CSS, which is what makes the app count on the row an honest summary.
-    expect(screen.queryByText("storefront")).toBeNull();
-    expect(screen.queryByText("admin")).toBeNull();
+    expect(screen.getByText("storefront")).toBeTruthy();
+    expect(screen.getByText("admin")).toBeTruthy();
 
     const group = source.closest(".os-deploy-group") as HTMLElement;
-    const disclose = within(group).getByRole("button", { name: /Expand acme\/storefront at main/ });
-    expect(disclose.getAttribute("aria-expanded")).toBe("false");
+    const disclose = within(group).getByRole("button", { name: /Collapse acme\/storefront at main/ });
+    expect(disclose.getAttribute("aria-expanded")).toBe("true");
 
+    await click(disclose);
+    expect(screen.queryByText("storefront")).toBeNull();
     await click(disclose);
     expect(await screen.findByText("storefront")).toBeTruthy();
   });
@@ -336,6 +325,7 @@ describe("the list", () => {
     // them, so each handler sees fresh state and the stale-closure write can
     // never happen. This test passed against the bug until it fired them
     // together.
+    await act(async () => { for (const b of screen.getAllByRole("button", { name: /^Collapse / })) b.click(); });
     const buttons = screen.getAllByRole("button", { name: /^Expand / });
     expect(buttons).toHaveLength(2);
     await act(async () => {
@@ -404,7 +394,7 @@ describe("the list", () => {
     const web = await screen.findByText("web");
     // It is there to be found, and says it is inactive -- the one word every
     // surface uses for it.
-    expect(web.closest(".os-row")?.textContent).toContain("inactive");
+    expect(web.closest(".os-row")?.textContent).toContain("Inactive");
 
     await click(web.closest("button"));
     const region = await screen.findByRole("region", { name: "Deploy web from acme" });
@@ -446,7 +436,21 @@ describe("the list", () => {
 
   it("says what to do when there is nothing yet", async () => {
     mount(fakeConnection({ sites: [], packages: [] }));
-    expect(await screen.findByText("No deployables yet. New deployable is where one starts.")).toBeTruthy();
+    expect(await screen.findByRole("region", { name: "No deployables yet" })).toBeTruthy();
+  });
+
+  it("distinguishes a failed read from an empty list and recovers with Reload", async () => {
+    const seed: FakeSeed = { sites: [SHOP], sitesError: "Connection unavailable" };
+    const connection = fakeConnection(seed);
+    mount(connection);
+    expect(await screen.findByText("Deployables could not be loaded.")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "No deployables yet" })).toBeNull();
+    expect(document.querySelector(".os-head-meta")).toBeNull();
+    seed.sitesError = undefined;
+    await click(screen.getByRole("button", { name: "Reload deployables" }));
+    expect(await screen.findByText("Storefront")).toBeTruthy();
+    expect(screen.queryByText("Deployables could not be loaded.")).toBeNull();
+    expect(connection.callsNamed("sitesAll")).toHaveLength(2);
   });
 
   it("reads each feed ONCE on mount, and no timeline until a row is opened", async () => {
@@ -484,28 +488,22 @@ describe("the list", () => {
 // ---------------------------------------------------------------------------
 
 describe("a deploy waiting for you", () => {
-  it("marks the SOURCE once, and adds the app that has no site yet", async () => {
+  it("marks the pending app once and keeps the source relationship", async () => {
     mount(fakeConnection({ ...WITH_PACKAGE, awaitingConfirm: [parkedRun()] }));
     await screen.findByText("storefront");
 
-    // ONE parked run belongs to ONE source, so the mark is said once, on the
-    // source line beside the update chip -- not repeated down every row the
-    // source produced (DESIGN.md rule 7).
-    expect(screen.getAllByText("a deploy is waiting for you")).toHaveLength(1);
+    expect(screen.getAllByText("Review needed")).toHaveLength(1);
     const group = screen.getByText("acme/storefront at main").closest(".os-deploy-group") as HTMLElement;
-    // The source line is a REAL ROW now (epic memql#4937), so the mark sits on
-    // the row rather than on a caption div -- still exactly once, still on the
-    // source rather than repeated down every app it produced.
-    const sourceLine = screen.getByText("acme/storefront at main").closest(".os-row") as HTMLElement;
-    expect(within(sourceLine).getByText("a deploy is waiting for you")).toBeTruthy();
+    const pending = screen.getByText("reports").closest(".os-row") as HTMLElement;
+    expect(within(pending).getByText("Review needed")).toBeTruthy();
     expect(group).toBeTruthy();
     const storefront = screen.getByText("storefront").closest(".os-row") as HTMLElement;
-    expect(within(storefront).queryByText("a deploy is waiting for you")).toBeNull();
+    expect(within(storefront).queryByText("Review needed")).toBeNull();
 
     const reports = screen.getByText("reports").closest(".os-row") as HTMLElement;
-    expect(within(reports).getByText("no address yet")).toBeTruthy();
+    expect(within(reports).getByText("No address yet")).toBeTruthy();
     const shop = screen.getByText("Storefront").closest(".os-row") as HTMLElement;
-    expect(within(shop).queryByText("a deploy is waiting for you")).toBeNull();
+    expect(within(shop).queryByText("Review needed")).toBeNull();
   });
 
   it("keeps the mark ON the row when the row IS the scope: a hand-made deployable", async () => {
@@ -521,19 +519,14 @@ describe("a deploy waiting for you", () => {
     await screen.findByText("Storefront");
     // The reachable positive: with no parked run there is no mark anywhere,
     // so the absence below is about the fold rather than about the query.
-    expect(screen.queryByText("a deploy is waiting for you")).toBeNull();
+    expect(screen.queryByText("Review needed")).toBeNull();
   });
 
-  it("keeps the compact rail out of the address, in the row's trailing state cluster", async () => {
-    // `store.memql.example.com` followed flush by five dots read as one
-    // string, the marks as punctuation after the host. The rail belongs on
-    // the trailing edge with the chips, never beside the address.
+  it("separates the address from availability", async () => {
     mount(fakeConnection(WITH_PACKAGE));
-    const store = (await screen.findByText("storefront")).closest(".os-row") as HTMLElement;
-    const rail = within(store).getByRole("list", { name: "storefront stops" });
-    expect(rail.closest(".os-row-state"), "the compact rail is not in the row's state cluster").not.toBeNull();
-    const address = within(store).getByText("store.memql.example.com");
-    expect(address.closest(".os-row-state"), "the address is in the state cluster").toBeNull();
+    const row = (await screen.findByText("storefront")).closest(".os-row") as HTMLElement;
+    expect(within(row).getByText("store.memql.example.com").closest(".deployable-list-identity")).not.toBeNull();
+    expect(within(row).getByText("Unknown").closest(".deployable-list-state")).not.toBeNull();
   });
 
   it("clears the mark when the run moves on, on its own event", async () => {
@@ -542,7 +535,7 @@ describe("a deploy waiting for you", () => {
     await screen.findByText("reports");
 
     await emit(connection, DEPLOYMENT_CONCEPT, parkedRun({ status: "succeeded" }));
-    await waitFor(() => expect(screen.queryByText("a deploy is waiting for you")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Review needed")).toBeNull());
     // ...and the row that only existed because the run was parked goes with it.
     expect(screen.queryByText("reports")).toBeNull();
   });
@@ -553,7 +546,7 @@ describe("a deploy waiting for you", () => {
     await screen.findByText("reports");
 
     await emit(connection, DEPLOYMENT_CONCEPT, parkedRun({ status: "refused" }));
-    await waitFor(() => expect(screen.queryByText("a deploy is waiting for you")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Review needed")).toBeNull());
   });
 });
 
@@ -596,7 +589,7 @@ describe("Refine", () => {
     const { type: typeInto } = await import("./harness");
     await typeInto(search, "nothing like this");
 
-    expect(await screen.findByText(/Clear the search or a facet in Refine/)).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Clear filters" })).toBeTruthy();
   });
 
   it("REVEALS rows without announcing them: a filter change is not the cluster sending anything", async () => {
@@ -639,7 +632,7 @@ describe("show archived", () => {
     expect(await screen.findByText("retired.memql.example.com")).toBeTruthy();
     // An archive is a PLACE: the active list is the one that is now hidden.
     expect(screen.queryByText("storefront")).toBeNull();
-    expect(screen.getByText(/Archived deployables are kept, not deleted/)).toBeTruthy();
+    expect(screen.getByText(/Restored apps return offline/)).toBeTruthy();
 
     await click(screen.getByRole("button", { name: "Show active deployables" }));
     expect(await screen.findByText("storefront")).toBeTruthy();
@@ -669,7 +662,7 @@ describe("New deployable", () => {
     expect(screen.queryByText("storefront")).toBeNull();
 
     // The rail is the form: Source is the open stop and carries the caption.
-    const rail = within(compose).getByRole("list", { name: "Deployable stops" });
+    const rail = within(compose).getByRole("list", { name: "Deployable setup progress" });
     expect([...rail.querySelectorAll(":scope > li")].map((li) => li.getAttribute("data-state"))).toEqual([
       "open",
       "pending",
@@ -690,7 +683,7 @@ describe("New deployable", () => {
     expect(within(bar).queryByRole("button", { name: "Analyze" })).toBeNull();
     expect(within(bar).getByRole("button", { name: "Cancel" })).toBeTruthy();
 
-    await click(within(compose).getByRole("button", { name: "Deployables" }));
+    await click(within(compose).getByRole("button", { name: "Back to Deployables" }));
     expect(await screen.findByText("storefront")).toBeTruthy();
   });
 
@@ -725,7 +718,7 @@ describe("New deployable", () => {
     // NAMED AFTER THE SOURCE, because this is not a new deployable: the source
     // was added already and this reopens its gate.
     const compose = await screen.findByRole("region", { name: "Deploy acme" });
-    const rail = within(compose).getByRole("list", { name: "Deployable stops" });
+    const rail = within(compose).getByRole("list", { name: "Deployable setup progress" });
     // A run parked at the confirm gate has ANSWERED What it is -- its report
     // is what parked it -- so the open stop is Where it lives, which is what
     // the Deploy beneath is waiting for.
@@ -741,6 +734,7 @@ describe("New deployable", () => {
     // The report the run parked with, at the What-it-is stop: the app and its
     // path, as the report names them.
     expect(within(compose).getByText("clients/reports")).toBeTruthy();
+    await click(screen.getByRole("button", { name: "Choose addresses" }));
     // Deploy, on the BAR and REACHABLE (rule 12): the one app with no site yet
     // arrived with a GENERATED address (2026-09-05) that the cluster then
     // checked, so there is nothing left to answer -- once the check answers.

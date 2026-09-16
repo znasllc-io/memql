@@ -4,6 +4,9 @@
 // question carries its scope without the surface changing shape.
 
 import { aiChatStream, type AiChatMessage } from "@znasllc-io/memql-sdk-core/ai";
+import { QueryClient } from "@znasllc-io/memql-sdk-core/client";
+import { flatten } from "../kit/rows";
+import type { PolicyDraft } from "../apps/fleet/PolicyEditor";
 import type { Dispatcher } from "@znasllc-io/memql-sdk-core/client";
 
 import type { AskCallbacks, AskHandle, AskTransport } from "./askController";
@@ -29,6 +32,21 @@ export class SdkAskTransport implements AskTransport {
     }
 
     const abort = new AbortController();
+    if (isPolicyAuthoringRequest(prompt, context)) {
+      void new QueryClient(dispatcher).routingPolicyDescribe({ sentence: prompt }, { signal: abort.signal }).then(result => {
+        if (abort.signal.aborted) return;
+        const first = [...result.rows()][0];
+        if (!first) throw new Error("The cluster returned no policy proposal.");
+        const row = flatten(first as Record<string, unknown>);
+        if (typeof row.name !== "string" || typeof row.revision !== "number" || (row.action !== "save" && row.action !== "reset")) throw new Error("The cluster returned an incomplete policy proposal.");
+        const proposal: PolicyDraft = { name: row.name, action: row.action, existing: row.existing === true, revision: row.revision, description: typeof row.description === "string" ? row.description : "", primary: typeof row.primary === "string" ? row.primary : "", fallbacks: Array.isArray(row.fallbacks) ? row.fallbacks as string[] : [], explanation: typeof row.explanation === "string" ? row.explanation : "" };
+        on.policyProposal?.(proposal);
+        on.delta("Review the proposed policy below. Nothing has been saved yet.");
+        on.done();
+      }).catch(error => { if (!abort.signal.aborted) on.error(error instanceof Error ? error.message : String(error)); });
+      return { cancel: () => abort.abort() };
+    }
+
     const messages: AiChatMessage[] = [
       ...(context ? [{ role: "system", content: `Context: ${context}` }] : []),
       { role: "user", content: prompt },
@@ -74,4 +92,10 @@ export class SdkAskTransport implements AskTransport {
 
     return { cancel: () => abort.abort() };
   }
+}
+
+/** Explicit composition context accepts any wording. Outside it, only an
+ * explicit policy-authoring request enters the draft-only compiler. */
+export function isPolicyAuthoringRequest(prompt: string, context: string | null): boolean {
+  return context?.includes("action:routing-policy") === true || (/\bpolic(?:y|ies)\b/i.test(prompt) && /\b(create|define|edit|change|customize|restore|reset|make|configure)\b/i.test(prompt));
 }

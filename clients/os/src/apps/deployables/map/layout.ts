@@ -1,3 +1,4 @@
+import { siteStateWord } from "../words";
 import { bundleForm, bundleFormLabel, domainOf, siteName, type SiteRow } from "../rows";
 
 // The deploy map's arithmetic: rows in, positioned nodes and edges out.
@@ -241,7 +242,7 @@ export function layout(sites: readonly SiteRow[]): MapLayout {
         h: NODE_H,
         group: domain,
         siteIds: [site.id],
-        status: site.status,
+        status: site.status === "live" ? siteStateWord(site).toLowerCase() : site.status,
         siteKind: site.kind,
       });
 

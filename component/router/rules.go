@@ -31,7 +31,14 @@ func (r *Router) MatchRule(req ResolveRequest) *memql.RuleConfig {
 	if r == nil || r.rules == nil {
 		return nil
 	}
-	for _, rule := range r.rules.Ordered() {
+	return matchRuleFrom(r.rules, req)
+}
+
+func matchRuleFrom(registry *memql.RuleRegistry, req ResolveRequest) *memql.RuleConfig {
+	if registry == nil {
+		return nil
+	}
+	for _, rule := range registry.Ordered() {
 		if ruleMatches(rule, req) {
 			return rule
 		}

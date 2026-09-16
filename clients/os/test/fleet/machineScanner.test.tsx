@@ -215,8 +215,8 @@ describe("the Sharing group", () => {
         { userId: OWNER },
       ),
     );
-    expect(screen.getByText(/Its owner has not shared it/)).toBeTruthy();
-    expect(screen.getByText(/cockpit is willing to serve the cluster/)).toBeTruthy();
+    expect(screen.getByText(/Owner sharing is off/)).toBeTruthy();
+    expect(screen.getByText(/Cockpit allows cluster inference/)).toBeTruthy();
   });
 
   it("says the machine serves the cluster only when both consents are given", () => {

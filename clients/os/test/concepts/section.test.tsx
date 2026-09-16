@@ -125,7 +125,7 @@ describe("one concept", () => {
     // ONE Head. Two in one scroller is the tell that neither rule-11 shape
     // was taken, so the list must be gone.
     expect(screen.queryByText("v1:shopify:order")).toBeNull();
-    expect(screen.getByRole("button", { name: /Concepts/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Back to Concepts" })).toBeTruthy();
   });
 
   it("says out loud that a mirror refuses writes", async () => {

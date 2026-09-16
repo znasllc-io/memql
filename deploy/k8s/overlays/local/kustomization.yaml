@@ -76,6 +76,10 @@ resources:
 # Remove cloud-only resources
 # ---------------------------------------------------------------------------
 patches:
+  - path: patches/site-health-local.yaml
+    target:
+      kind: Deployment
+      name: "^(identity|bff|agent|planner|workbench|mcp|edge)$"
 
   # Front door backend wiring: identity serves TLS in-cluster (internal CA),
   # so traefik must proxy https and skip verification (ServersTransport in

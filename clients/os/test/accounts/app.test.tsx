@@ -160,7 +160,7 @@ describe("the first-run card (D7)", () => {
     mount(conn);
     expect(await screen.findByText("This instance is yours.")).toBeTruthy();
     // The ordinary surface is NOT rendered underneath it.
-    expect(screen.queryByText("Add a client")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add a client" })).toBeNull();
   });
 
   it("does not render while the feed is still seeding", async () => {
@@ -316,7 +316,7 @@ describe("writes", () => {
   it("adds a client and inserts NOTHING locally", async () => {
     const conn = fakeConnection({ clientAccountsAll: [] });
     mount(conn);
-    fireEvent.click(await screen.findByText("Add a client"));
+    fireEvent.click(await screen.findByRole("button", { name: "Add a client" }));
     fireEvent.change(screen.getByLabelText("Client name"), { target: { value: "Newcomer" } });
     fireEvent.click(screen.getByText("Add client"));
 
@@ -334,7 +334,7 @@ describe("writes", () => {
   it("omits blank fields rather than writing empty strings over stored values", async () => {
     const conn = fakeConnection({ clientAccountsAll: [] });
     mount(conn);
-    fireEvent.click(await screen.findByText("Add a client"));
+    fireEvent.click(await screen.findByRole("button", { name: "Add a client" }));
     fireEvent.change(screen.getByLabelText("Client name"), { target: { value: "Newcomer" } });
     fireEvent.click(screen.getByText("Add client"));
 
@@ -350,7 +350,7 @@ describe("writes", () => {
       throw new Error("a client named Newcomer already exists");
     });
     mount(conn);
-    fireEvent.click(await screen.findByText("Add a client"));
+    fireEvent.click(await screen.findByRole("button", { name: "Add a client" }));
     fireEvent.change(screen.getByLabelText("Client name"), { target: { value: "Newcomer" } });
     fireEvent.click(screen.getByText("Add client"));
 

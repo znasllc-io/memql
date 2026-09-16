@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ArrowLeft, Landmark } from "lucide-react";
+import { Landmark } from "lucide-react";
 
 import {
   Button,
@@ -262,11 +262,7 @@ function BillingAccountPage({
   const archived = billingAccountIsArchived(account);
   return (
     <div className="os-app-stack">
-      <Head title={name}>
-        <Button tone="quiet" onClick={onBack}>
-          <ArrowLeft size={13} aria-hidden /> Billing accounts
-        </Button>
-      </Head>
+      <Head title={name} back={{ label: "Billing accounts", onSelect: onBack }} />
 
       <Panel label={`About ${name}`}>
         <Facts>

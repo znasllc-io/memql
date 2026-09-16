@@ -1223,3 +1223,16 @@ mutation registration setWorkerSharing {
     }
   }
 }
+
+/// Record passive permission evidence from the running worker. A full snapshot
+/// replaces the prior one so revoked or unknown checks cannot retain a grant.
+mutation registration updateWorkerPermissions {
+  args {
+    registrationId string!
+    permissions object!
+  }
+  update {
+    accept { permissions }
+    stamp { id: args.registrationId }
+  }
+}

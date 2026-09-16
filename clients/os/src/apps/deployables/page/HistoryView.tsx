@@ -1,8 +1,8 @@
-import { ArrowLeft } from "lucide-react";
 
-import { Caption, Head, Panel, useLiveView } from "../../../kit";
+import { Button, Caption, Head, Panel, useLiveView } from "../../../kit";
 import { ActionBar } from "../../../kit/ActionBar";
-import { deploymentFromRow, sourceLabel, type DeploymentRow, type PackageRow } from "../packages/rows";
+import { deploymentFromRow, runCoversApp, sourceLabel, type DeploymentRow, type PackageRow } from "../packages/rows";
+import { siteName, type SiteRow } from "../rows";
 import type { PartsHeld } from "../parts";
 import { usePackageDeployments } from "../packages/usePackages";
 import { EveryAttempt } from "./EveryAttempt";
@@ -32,33 +32,34 @@ export function HistoryView({
   pkg,
   can,
   onBack,
+  backLabel,
+  app,
+  onOpenSourceHistory,
 }: {
   pkg: PackageRow;
   /** The parts this session holds (epic memql#5289). */
   can: PartsHeld;
   onBack: () => void;
+  backLabel?: string;
+  app?: SiteRow;
+  onOpenSourceHistory?: () => void;
 }) {
   const { source: timeline, reseed } = usePackageDeployments(pkg.id);
-  const deployments = useLiveView(timeline, `history:${pkg.id}`, (rows) =>
-    newestFirst(rows.map(deploymentFromRow).filter((d) => d.id !== "")),
+  const deployments = useLiveView(timeline, `history:${pkg.id}:${app?.id ?? "source"}`, (rows) =>
+    newestFirst(rows.map(deploymentFromRow).filter((d) => d.id !== "" && (!app || runCoversApp(d, app.packageDeployableName)))),
   );
-  const count = deployments?.snapshot.rows.length ?? 0;
+  const count = deployments?.snapshot.state === "live" ? deployments.snapshot.rows.length : undefined;
 
   return (
-    <div className="os-deploy-pane">
+    <div className="os-deploy-pane deployable-source-view" data-os-page-context={JSON.stringify({ page: "History", packageId: pkg.id, siteId: app?.id, source: sourceLabel(pkg) })}>
       <div className="os-deploy-scroll">
         <Panel label={`History of ${sourceLabel(pkg)}`}>
-          <Head title="History" meta={count}>
-            <button type="button" className="os-button" data-tone="quiet" onClick={onBack}>
-              <ArrowLeft size={13} aria-hidden /> {sourceLabel(pkg)}
-            </button>
-          </Head>
+          <Head title="History" meta={count} breadcrumbs={[{ label: backLabel || sourceLabel(pkg), onSelect: onBack }, { label: "History" }]} back={{ label: backLabel || (app ? app.title || app.packageDeployableName || siteName(app) : sourceLabel(pkg)), onSelect: onBack }} />
           <Caption>
-            Every attempt against this source, newest first. A deployment row is append-only past a terminal status, so
-            this is the literal record of what was tried -- it cannot be rewritten by the next attempt to look like it
-            always went well.
+            {app ? "Attempts that include this app, newest first." : "Every attempt for this source, newest first."}
           </Caption>
-          <EveryAttempt pkg={pkg} deployments={deployments} can={can} reseed={reseed} />
+          {app && onOpenSourceHistory ? <Button tone="quiet" onClick={onOpenSourceHistory}>All source attempts</Button> : null}
+          <EveryAttempt pkg={pkg} deployments={deployments} can={can} reseed={reseed} scopedApp={app?.packageDeployableName} />
         </Panel>
       </div>
 
@@ -66,7 +67,7 @@ export function HistoryView({
           and saying so beats an empty band of chrome. */}
       <ActionBar
         state=""
-        detail="A record. The only Retry here deploys the bytes a lost or cancelled run had already fetched -- a different promise from Deploy."
+        detail="Deployment history"
         tone="none"
       />
     </div>

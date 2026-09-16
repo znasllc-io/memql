@@ -48,6 +48,8 @@ export interface ComposeDraft {
   name: string;
   /** The kind a HAND-MADE deployable takes. A package's kinds come from its manifest. */
   kind: string;
+  storeDomain?: string;
+  storefrontTokenRef?: string;
 }
 
 export const EMPTY_DRAFT: ComposeDraft = {
@@ -148,15 +150,16 @@ export function sourceReady(
   probeParked: boolean,
   duplicate: PackageRow | null = null,
 ): boolean {
+  const bindingReady = draft.kind !== "shopify_storefront" || Boolean(draft.storeDomain?.trim() && draft.storefrontTokenRef?.trim());
   switch (draft.choice) {
     case "repo":
       return draft.repoUrl.trim() !== "" && draft.name.trim() !== "" && !probeParked && duplicate === null;
     case "zip":
       if (zip === "package") return draft.name.trim() !== "";
-      if (zip === "built_site") return draft.name.trim() !== "" && draft.kind.trim() !== "";
+      if (zip === "built_site") return draft.name.trim() !== "" && draft.kind.trim() !== "" && bindingReady;
       return false;
     case "ci":
-      return draft.name.trim() !== "" && draft.kind.trim() !== "";
+      return draft.name.trim() !== "" && draft.kind.trim() !== "" && bindingReady;
     default:
       return false;
   }
@@ -466,6 +469,8 @@ export function phaseOf(input: {
       return "published";
     case "refused":
     case "failed":
+    case "abandoned":
+    case "cancelled":
       return "stopped";
     default:
       return DEPLOYING_STATUSES.includes(input.runStatus) ? "deploying" : "composing";

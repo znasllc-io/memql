@@ -1,3 +1,4 @@
+import { localCockpitInstall } from "../localInstall";
 import { Caption, CopyField, Notice, Subhead } from "../../../../kit";
 import { installSteps, type Draft } from "../flow";
 import {
@@ -55,6 +56,7 @@ export function InstallStop({
     computerUse: draft.computerUse,
     inference: draft.inference,
     userLocal: draft.userLocal,
+    localTest: localCockpitInstall(domain),
   });
 
   return (
@@ -71,11 +73,8 @@ export function InstallStop({
 
       <Subhead>Run this on {INSTALL_PLATFORM_LABEL[draft.platform]}</Subhead>
       <CopyField value={command} label="the install command" id="fleet-add-command" />
-      <Caption>
-        Adds this cluster as one home under ~/.memql/workers.yaml. If the machine
-        already serves another cluster, that home stays; one LaunchAgent (or Linux
-        systemd unit) covers every home.
-      </Caption>
+      {draft.platform === "mac" && localCockpitInstall(domain) ? <Caption>Local test build {localCockpitInstall(domain)?.version}. The installer opens the native permission guide on this Mac.</Caption> : null}
+      <Caption>Connects this computer to your cluster and keeps any existing cluster connections.</Caption>
 
       {clusterUrl === "" ? (
         <Caption>

@@ -201,7 +201,7 @@ export function RulesSection() {
                   onKeep={() => setConfirming("")}
                   onRemove={() => {
                     setConfirming("");
-                    void actions.retire(rule.name);
+                    void actions.retire(rule.name, rule.revision);
                   }}
                 />
               ))}

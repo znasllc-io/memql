@@ -1,6 +1,7 @@
+import { AddButton } from "../../kit/AddButton";
 import { useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
-import { Building2, Plus } from "lucide-react";
+import { Building2, } from "lucide-react";
 
 import { Button, Caption, Chip, Head, Input, LiveList, Notice, Panel, Row as ListRow } from "../../kit";
 import { useLiveView } from "../../live/liveView";
@@ -62,9 +63,7 @@ export function AccountsSection({
   return (
     <div className="os-app-stack">
       <Head title="Accounts">
-        <Button onClick={() => setAdding((v) => !v)}>
-          <Plus size={14} aria-hidden /> Add a client
-        </Button>
+        <AddButton onClick={() => setAdding((v) => !v)} label="Add a client" />
       </Head>
 
       {snapshot.error ? (

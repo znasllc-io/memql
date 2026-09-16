@@ -106,6 +106,9 @@ type Service struct {
 // Implementations live in component/worker/store.go (the production
 // adapter) and the integration test layer.
 type Store interface {
+	// UpdatePermissions records passive checks from the running worker, independently of installation.
+	UpdatePermissions(context.Context, string, string, map[string]any) error
+
 	CreateRegistration(ctx context.Context, row RegistrationRow) error
 	// RefreshRegistration re-stamps the registration-authoritative
 	// fields (name, capabilities, capabilityDescriptor, labels,

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { buildLogsTail } from "@znasllc-io/memql-sdk-core/client";
 
-import { Head, Notice, Refine, useNow, type RefineChip } from "../kit";
+import { useOsIfPresent } from "../chrome/state";
+import { accessAdmits } from "../system/registry";
+import { Button, EmptyState, Head, Notice, Refine, useNow, type RefineChip } from "../kit";
 import { useOsConnection } from "../live/connection";
 import type { OsAppProps } from "../system/registry";
 import { LevelFloorChoice, WindowChoice } from "./facets";
@@ -56,6 +58,7 @@ const DENSITY = "comfortable";
 
 export function AppLogsSection({ app, subjectConcepts = [], intent, consumeIntent }: AppLogsSectionProps) {
   const connection = useOsConnection();
+  const os = useOsIfPresent();
   // One clock for every elapsed time in the section, and for the window
   // fold, so a line ages out of "the last hour" on the clock rather than on
   // the next arrival.
@@ -106,6 +109,7 @@ export function AppLogsSection({ app, subjectConcepts = [], intent, consumeInten
       {/* The Head names the window and the count of what is SHOWN (rule 7:
           the scope is said once), and the facets sit behind Refine (rule 2). */}
       <Head title="Logs" meta={`${windowLabel(filters.window)} · ${lineCount(visible.length)}`}>
+        {os && accessAdmits("app:logs") ? <Button onClick={() => os.actions.openApp("logs", "search", { logView: { scope, filters } })}>Open in full Logs</Button> : null}
         <Refine
           search={filters.text}
           onSearch={(next) => patch({ text: next })}
@@ -134,7 +138,8 @@ export function AppLogsSection({ app, subjectConcepts = [], intent, consumeInten
           id={`os-logs-${app}`}
           narrowed={isNarrowed(filters)}
           emptySentence={`Nothing recorded for this app ${windowPhrase(filters.window)}.`}
-          emptyHint="Lines arrive as the app and the engine write them; this view follows."
+          emptyHint="New events appear here automatically."
+          emptyContent={["fleet", "deployables"].includes(app) && tail.state !== "error" ? <EmptyState title={isNarrowed(filters) ? "No matching events" : `No ${app === "fleet" ? "Fleet" : "Deployables"} events yet`} action={isNarrowed(filters) ? <Button onClick={() => setFilters(DEFAULT_FILTERS)}>Clear filters</Button> : undefined}>{isNarrowed(filters) ? "Clear the filters or choose a longer time window." : app === "fleet" ? "Machine connections, routing changes and app activity appear here as they happen." : "Deployments, source changes and domain activity appear here as they happen."}</EmptyState> : undefined}
         />
       )}
     </div>

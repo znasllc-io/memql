@@ -78,7 +78,7 @@ describe("the machines directory", () => {
     { name: "unusable X11 display", server: "x11", caps: ["HEADLESS", "COMPUTERUSE"], build: true, os: "linux", permissions: { x11_display: false }, answer: /X11 display.*not available/i },
     { name: "macOS Accessibility denied", server: "quartz", caps: ["HEADLESS", "COMPUTERUSE"], build: true, os: "darwin", permissions: { accessibility: false, screen_recording: true }, answer: /Accessibility.*not granted/i },
     { name: "macOS Screen Recording denied", server: "quartz", caps: ["HEADLESS", "COMPUTERUSE"], build: true, os: "darwin", permissions: { accessibility: true, screen_recording: false }, answer: /Screen Recording.*not granted/i },
-    { name: "macOS permissions unknown", server: "quartz", caps: ["HEADLESS", "COMPUTERUSE"], build: true, os: "darwin", permissions: {}, answer: /permissions.*not reported/i },
+    { name: "macOS permissions unknown", server: "quartz", caps: ["HEADLESS", "COMPUTERUSE"], build: true, os: "darwin", permissions: {}, answer: /permissions.*not fully verified/i },
     { name: "macOS permissions granted", server: "quartz", caps: ["HEADLESS", "COMPUTERUSE"], build: true, os: "darwin", permissions: { accessibility: true, screen_recording: true }, answer: /^Available.*Accessibility.*Screen Recording/ },
   ])("reports usable computer use for $name", async ({ server, caps, build, os, permissions, answer }) => {
     mount(fakeConnection({ myWorkersWithStatus: [machineRow({
@@ -257,8 +257,8 @@ describe("the machines directory", () => {
     mount(connection);
     await click(await screen.findByText("Apps box"));
 
-    expect(screen.getByText("runnable")).toBeTruthy();
-    expect(screen.getByText("not runnable -- not in the machine's apps.allow")).toBeTruthy();
+    expect(screen.getByText("Ready")).toBeTruthy();
+    expect(screen.getByText("Not allowed by Cockpit")).toBeTruthy();
   });
 
   it("folds a live update into the list without losing the projection", async () => {

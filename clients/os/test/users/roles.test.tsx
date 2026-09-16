@@ -278,7 +278,7 @@ describe("proposing a slot on the ladder", () => {
   it("says a rank at developer and above is staff", async () => {
     const view = mount(seed());
     await click(await screen.findByRole("button", { name: "New role" }));
-    await screen.findByText("New role");
+    await screen.findByRole("heading", { name: "New role" });
     const { fireEvent } = await import("@testing-library/react");
     await act(async () => {
       fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Field engineer" } });

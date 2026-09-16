@@ -1,6 +1,9 @@
 import { useCallback, useMemo } from "react";
 import type { LiveState } from "@znasllc-io/memql-sdk-core/client";
 
+import { MapHeading } from "../../../kit/MapHeading";
+import { MapControls } from "../../../kit/MapControls";
+
 import { Caption } from "../../../kit";
 import type { ArrivalKind, ArrivalTick } from "../../../live/arrival";
 import type { SiteRow } from "../rows";
@@ -67,10 +70,12 @@ export function DeployMap({
   // epic memql#4785: pointer, touch, wheel and keyboard over one viewport,
   // with the pointer-capture, pinch-baseline and drag-threshold rules that
   // each took a bug to get right. Nothing about it is specific to this map.
-  const { view, frameRef, handlers, steering } = usePanZoom({
+  const { view, frameRef, handlers, steering, zoomIn, zoomOut, reset } = usePanZoom({
     width: model.width,
     height: model.height,
     ready: model.nodes.length > 0,
+    wheelZoom: false,
+    resetToFit: true,
   });
 
   /**
@@ -103,65 +108,65 @@ export function DeployMap({
   }
 
   return (
-    <div className="os-deploy-map" ref={frameRef} data-behind={behind || undefined}>
-      <svg
-        className="os-deploy-map-canvas"
-        role="application"
-        aria-label="Deploy map"
-        tabIndex={0}
-        {...handlers}
-      >
-        <g data-os-map-view transform={transformOf(view)}>
-          {model.groups.map((group) => (
-            <g key={group.id} className="os-deploy-group">
-              <rect
-                className="os-deploy-group-box"
-                x={group.x - 8}
-                y={group.y}
-                width={group.w + 16}
-                height={group.h}
-                rx={10}
-              />
-              <text className="os-deploy-group-label" x={group.x} y={group.y + 18}>
-                {group.label}
-              </text>
-            </g>
-          ))}
+    <div className="os-deploy-map" data-behind={behind || undefined}>
+      <MapHeading title="Deployment map"><p>Choose a deployable to open its details. Shared sources highlight the deployables connected to them.</p></MapHeading>
+      <div className="os-map-frame" ref={frameRef}>
+        <svg
+          className="os-deploy-map-canvas"
+          role="application"
+          aria-label="Deploy map"
+          tabIndex={0}
+          {...handlers}
+        >
+          <g data-os-map-view transform={transformOf(view)}>
+            {model.groups.map((group) => (
+              <g key={group.id} className="os-deploy-group">
+                <rect
+                  className="os-deploy-group-box"
+                  x={group.x - 8}
+                  y={group.y}
+                  width={group.w + 16}
+                  height={group.h}
+                  rx={10}
+                />
+                <text className="os-deploy-group-label" x={group.x} y={group.y + 18}>
+                  {group.label}
+                </text>
+              </g>
+            ))}
 
-          {model.edges.map((edge) => {
-            const from = nodeById.get(edge.from);
-            const to = nodeById.get(edge.to);
-            if (!from || !to) return null;
-            const a = nodeCentre(from);
-            const b = nodeCentre(to);
-            return (
-              <path
-                key={edge.id}
-                className="os-deploy-edge"
-                data-selected={selectedSites.includes(edge.siteId) || undefined}
-                d={`M ${from.x + from.w} ${a.y} C ${from.x + from.w + 24} ${a.y}, ${to.x - 24} ${b.y}, ${to.x} ${b.y}`}
-              />
-            );
-          })}
+            {model.edges.map((edge) => {
+              const from = nodeById.get(edge.from);
+              const to = nodeById.get(edge.to);
+              if (!from || !to) return null;
+              const a = nodeCentre(from);
+              const b = nodeCentre(to);
+              return (
+                <path
+                  key={edge.id}
+                  className="os-deploy-edge"
+                  data-selected={selectedSites.includes(edge.siteId) || undefined}
+                  d={`M ${from.x + from.w} ${a.y} C ${from.x + from.w + 24} ${a.y}, ${to.x - 24} ${b.y}, ${to.x} ${b.y}`}
+                />
+              );
+            })}
 
-          {model.nodes.map((node) => (
-            <MapNodeShape
-              key={node.id}
-              node={node}
-              tick={tickFor(node, ticks)}
-              selected={selectedNodeId === node.id}
-              inSelectedCluster={node.siteIds.some((id) => selectedSites.includes(id))}
-              onActivate={() => activate(node)}
-              onKeyActivate={() => onSelect(node)}
-            />
-          ))}
-        </g>
-      </svg>
-      <Caption>
-        {behind
-          ? "Live updates are behind -- this is the last shape the cluster sent, not the shape it has."
-          : "Drag to pan, scroll to zoom. Arrow keys pan, + and - zoom, 0 resets; Tab walks the map."}
-      </Caption>
+            {model.nodes.map((node) => (
+              <MapNodeShape
+                key={node.id}
+                node={node}
+                tick={tickFor(node, ticks)}
+                selected={selectedNodeId === node.id}
+                inSelectedCluster={node.siteIds.some((id) => selectedSites.includes(id))}
+                onActivate={() => activate(node)}
+                onKeyActivate={() => onSelect(node)}
+              />
+            ))}
+          </g>
+        </svg>
+        <MapControls zoomIn={zoomIn} zoomOut={zoomOut} reset={reset} />
+      </div>
+      {behind ? <Caption>Live updates are interrupted. Showing the last reported map.</Caption> : null}
     </div>
   );
 }

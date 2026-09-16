@@ -35,6 +35,7 @@ export function LiveList<T>({
   renderRow,
   label,
   emptyText,
+  emptyContent,
 }: {
   /** Null renders the disconnected caption -- never a fake empty list. */
   source: LiveListSource<T> | null;
@@ -44,6 +45,7 @@ export function LiveList<T>({
   renderRow: (row: T, tick: ArrivalKind | null) => React.ReactNode;
   label: string;
   emptyText: string;
+  emptyContent?: React.ReactNode;
 }) {
   const snapshot = useSyncExternalStore(
     useMemo(() => (source ? source.subscribe.bind(source) : () => () => {}), [source]),
@@ -79,7 +81,7 @@ export function LiveList<T>({
         })}
       </ul>
       {snapshot.rows.length === 0 && snapshot.state === "live" ? (
-        <Caption>{emptyText}</Caption>
+        emptyContent ?? <Caption>{emptyText}</Caption>
       ) : null}
       {stateLine ? <Caption>{stateLine}</Caption> : null}
       {snapshot.error ? <p className="os-ask-error">{snapshot.error}</p> : null}

@@ -217,7 +217,7 @@ describe("Settings -> Sources: whose credentials", () => {
     expect(within(mine).queryByText("ada's token")).toBeNull();
 
     const others = await screen.findByRole("region", { name: "Other people's connections" });
-    expect(within(others).getByText("Other people's connections (owner view)")).toBeTruthy();
+    expect(within(others).getByText("Other people's connections")).toBeTruthy();
     const list = within(others).getByRole("list", { name: "Other people's source credentials" });
     expect(within(list).getByText("ada's token")).toBeTruthy();
     await waitFor(() => {

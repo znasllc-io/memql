@@ -1,4 +1,5 @@
-import { Chip, Chips, Fact, Facts, Subhead } from "../../../kit";
+import { Monitor } from "lucide-react";
+import { EmptyState, Chip, Chips, Fact, Facts, Subhead } from "../../../kit";
 import { formatBytes, formatFreshness } from "../../../kit/format";
 import {
   acceleratorSentence,
@@ -58,7 +59,7 @@ export function HardwareGroup({
     return (
       <div className="os-fleet-hardware">
         <Subhead>Hardware</Subhead>
-        <p className="os-caption">{NOT_REPORTED}</p>
+        <EmptyState icon={Monitor} title="Hardware not reported">{NOT_REPORTED}</EmptyState>
       </div>
     );
   }

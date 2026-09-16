@@ -37,6 +37,9 @@ export function accessAdmits(resource?: AccessResource): boolean {
 export interface OsAppSection {
   id: string;
   name: string;
+  /** A drill-down reached from its parent workspace, not a second rail item.
+   * The section keeps its own access and readiness checks. */
+  parent?: string;
   /**
    * The resource this section is gated on, when it is gated ABOVE its app's
    * door. Absent, the section is reached through the app and is not a
@@ -62,8 +65,10 @@ export interface OsAppSection {
 export interface OsAppProps {
   /** Current section id ("" when the app declares no sections). */
   sectionId: string;
+  windowVisible?: boolean;
+  navigation?: { origin: "peer" | "content" | "back"; revision: number };
   /** Navigate the window to another of the app's sections. */
-  navigate: (sectionId: string) => void;
+  navigate: (sectionId: string, options?: { fromContent?: boolean }) => void;
   /** Augment the window's Ask context ("app:<id>" is always present). */
   askContext: (tag: string) => void;
   /**
@@ -80,6 +85,8 @@ export interface OsAppProps {
 }
 
 export interface OsAppManifest {
+  /** Landing section for record search when a nested page has no search field. */
+  searchSection?: string;
   id: string;
   name: string;
   /** Lucide icon component (kept as a plain component type -- no coupling). */

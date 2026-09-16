@@ -1,7 +1,8 @@
+import { Switch } from "../../../../kit/Switch";
 import { useState } from "react";
 import { Archive, ArrowUpCircle, GitBranch, KeyRound, RotateCcw, Zap } from "lucide-react";
 
-import { Button, Caption, Check, Chip, Chips, Fact, Facts, FormRow, Input } from "../../../../kit";
+import { Button, Caption, Chip, Chips, Fact, Facts, FormRow, Input } from "../../../../kit";
 import { formatMoment } from "../../../../kit/format";
 import { usePackageActions } from "../../packages/actions";
 import { ProblemNotice } from "../../packages/ReportView";
@@ -137,10 +138,7 @@ function PackageSource({
  * any one run: it answers "when this source moves, then what", which is the
  * same question the version facts above it answer for the past.
  *
- * A CHECKBOX IS CORRECT HERE, and it is the case DESIGN.md rule 10 leaves
- * open: it states a CHOICE in a form, which is what a checkbox is for,
- * rather than filtering content in front of a list, which is what the rule
- * forbids.
+ * This binary setting writes immediately through the shared Switch.
  *
  * The caption carries the whole promise, because the switch is worthless
  * without it -- somebody arming this needs to know the confirm gate is still
@@ -153,19 +151,19 @@ export function AutoDeploySwitch({ pkg }: { pkg: PackageRow }) {
   return (
     <section className="os-report-part">
       <h4 className="os-report-heading">
-        <Zap size={12} aria-hidden /> When this source moves
+        <Zap size={12} aria-hidden /> Automatic updates
       </h4>
-      <Check
+      <Switch
         checked={pkg.autoDeploy}
         disabled={actions.busy}
         onChange={(on) => void actions.setAutoDeploy(pkg.id, on)}
       >
-        Deploy the update by itself when the plan is unchanged
-      </Check>
+        Automatically deploy updates with an unchanged plan
+      </Switch>
       <Caption>
         {pkg.autoDeploy
-          ? "A push that plans exactly what the last deploy planned goes live without a click. Anything new -- an app, some MemQL, a changed build command, a problem -- still waits for you here."
-          : "A push lights the update chip and waits for you. Turn this on and one that changes nothing about the plan deploys itself."}
+          ? "Updates with the same build plan deploy automatically. New apps, changed commands and problems still require review."
+          : "Updates wait for your review before deploying."}
       </Caption>
       {actions.refusal ? <ProblemNotice problem={{ ...actions.refusal, fatal: true }} tone="error" /> : null}
     </section>
@@ -237,7 +235,7 @@ export function SwitchCredential({ pkg, credentials }: { pkg: PackageRow; creden
  * can put it right -- but a grant is `disconnected` rather than `revoked`,
  * which is the word the act that ended it used.
  */
-function CredentialChip({ pkg, credentials }: { pkg: PackageRow; credentials: readonly CredentialRow[] }) {
+export function CredentialChip({ pkg, credentials }: { pkg: PackageRow; credentials: readonly CredentialRow[] }) {
   // A zip has nothing to fetch, so it has no credential to name.
   if (pkg.sourceKind !== "repo") return null;
   const id = pkg.credentialId.trim();

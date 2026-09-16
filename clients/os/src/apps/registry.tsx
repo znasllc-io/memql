@@ -199,6 +199,7 @@ const files: OsAppManifest = {
 const deployables: OsAppManifest = {
   id: "deployables",
   name: "Deployables",
+  searchSection: "deployables",
   icon: Rocket,
   requires: "app:deployables",
   sections: DEPLOYABLES_SECTIONS,
@@ -221,6 +222,7 @@ const deployables: OsAppManifest = {
 const fleet: OsAppManifest = {
   id: "fleet",
   name: "Fleet",
+  searchSection: "machines",
   icon: MonitorSmartphone,
   requires: "app:fleet",
   sections: FLEET_SECTIONS,

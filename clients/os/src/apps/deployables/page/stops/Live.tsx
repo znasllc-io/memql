@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { healthExplanation } from "../../health";
+import { siteStateWord } from "../../words";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { History, Undo2 } from "lucide-react";
 
-import { Button, Caption, Chip, Fact, Facts } from "../../../../kit";
+import { Button, Caption, Chip, Fact, Facts, Notice } from "../../../../kit";
 import { formatMoment } from "../../../../kit/format";
 import { useOsConnection } from "../../../../live/connection";
 import type { SiteLifecycleActions } from "../../packages/actions";
@@ -19,7 +21,7 @@ import { isPublished, type RailProblem } from "../rail";
 // ===========================================================================
 // SYSTEM-OWNED ROWS RENDER NO CONTROLS AT ALL
 // ===========================================================================
-// Not disabled controls -- NONE. The seeded portal and OS sites are exempt
+// Not disabled controls -- NONE. The seeded MemQL OS site is exempt
 // from the lifecycle entirely, and the server refuses a status write on them
 // whoever asks. A row of greyed-out buttons would be six controls a person has
 // to read past to learn they are not for them, which is the same rule the
@@ -70,6 +72,7 @@ export function LiveStop({
   canPublish,
   lifecycle,
   refusal,
+  includeConfiguration = true,
 }: {
   site: SiteRow;
   /** The `publish` part: rolling back to a version and changing what the app reads at load. */
@@ -82,35 +85,46 @@ export function LiveStop({
   lifecycle: SiteLifecycleActions;
   /** The newest run's refusal, when publishing is where it stopped. */
   refusal: RailProblem | null;
+  includeConfiguration?: boolean;
 }) {
   const connection = useOsConnection();
+  const generation = useRef(0);
   const [versions, setVersions] = useState<SiteVersion[] | null>(null);
   const [loadingVersions, setLoadingVersions] = useState(false);
+  const [versionError, setVersionError] = useState("");
 
   const loadVersions = useCallback(async () => {
-    if (connection === null) return;
+    if (connection === null) { setVersionError("Not connected to the cluster."); return; }
+    const request = ++generation.current;
     setLoadingVersions(true);
+    setVersionError("");
     try {
-      setVersions(await fetchSiteVersions(connection.query, site.id));
-    } catch {
-      // A history that could not be read is an absent history, not a broken
-      // stop: the rest of this surface still works and the walk can be
-      // retried. The write path reports its own refusals, verbatim.
-      setVersions([]);
+      const rows = await fetchSiteVersions(connection.query, site.id);
+      if (request === generation.current) setVersions(rows);
+    } catch (error) {
+      if (request === generation.current) setVersionError(error instanceof Error ? error.message : String(error));
     } finally {
-      setLoadingVersions(false);
+      if (request === generation.current) setLoadingVersions(false);
     }
   }, [connection, site.id]);
 
   // Re-close the history when the selection changes, so a list loaded for one
   // deployable is never shown under another.
   useEffect(() => {
+    generation.current++;
+    setLoadingVersions(false);
     setVersions(null);
-  }, [site.id]);
+    setVersionError("");
+    return () => { generation.current++; };
+  }, [site.id, site.bundleRef]);
 
   if (site.systemOwned) {
     return (
       <div className="os-stop-body">
+        <Facts>
+          <Fact label="Availability" value={siteStateWord(site)} />
+          <Fact label="Last website check" value={healthExplanation(site)} />
+        </Facts>
         <Caption>{SYSTEM_OWNED_NOTE}</Caption>
       </div>
     );
@@ -135,37 +149,39 @@ export function LiveStop({
 
       {live ? (
         <Facts>
-          <Fact label="Live since" value={formatMoment(site.createdAt)} />
+          <Fact label="Availability" value={siteStateWord(site)} />
+          <Fact label="Last website check" value={healthExplanation(site)} />
         </Facts>
       ) : null}
 
       {/* IS ANYBODY USING IT, AND IS IT HEALTHY (epic memql#4906) -- above the
           history and the acts that change it, because it is what somebody
           opening a live deployable came to find out. */}
-      <TrafficPanel site={site} />
+      {includeConfiguration ? <TrafficPanel site={site} /> : null}
 
       {canPublish && serving && isPublished(site) ? (
         <section className="os-report-part">
           <h4 className="os-report-heading">
             <History size={12} aria-hidden /> Versions
           </h4>
+          {versionError ? <Notice tone="error" sentence="Version history could not be read." detail={versionError} /> : null}
           {versions === null ? (
             <>
-              <Caption>Each version is a point in this deployable's own history. Loading them is a few reads.</Caption>
+              <Caption>View earlier versions or restore one.</Caption>
               <Button onClick={() => void loadVersions()} busy={loadingVersions} busyLabel="Reading history">
                 <History size={12} aria-hidden /> Show the last {MAX_HISTORY_VERSIONS}
               </Button>
             </>
           ) : versions.length === 0 ? (
-            <Caption>No earlier versions. This deployable has been published once.</Caption>
+            <Caption>No earlier versions are available.</Caption>
           ) : (
             <ul className="os-versions">
               {versions.map((v, i) => (
                 <li key={`${v.createdAt}-${v.bundleRef}`} className="os-version" data-current={i === 0 ? "true" : "false"}>
                   <span className="os-version-when">{formatMoment(v.createdAt)}</span>
                   <span className="os-version-ref os-mono">{versionLabel(v.bundleRef)}</span>
-                  {i === 0 ? (
-                    <Chip tone="accent">serving now</Chip>
+                  {v.bundleRef === site.bundleRef ? (
+                    <Chip tone={live ? "accent" : "muted"}>{live ? "published version" : "stored version"}</Chip>
                   ) : (
                     <Button
                       onClick={() => void lifecycle.rollTo(site.id, v.bundleRef)}
@@ -185,7 +201,7 @@ export function LiveStop({
       {/* What the app reads at load. Beneath the history because it is
           configuration rather than status, and above Availability because it
           is a smaller act than pausing. */}
-      <RuntimeSettingsPanel site={site} canEdit={canPublish} />
+      {includeConfiguration ? <RuntimeSettingsPanel site={site} canEdit={canPublish} /> : null}
 
       {/* THE LIFECYCLE ACTS ARE NOT HERE ANY MORE (epic memql#4937, DESIGN.md
           rule 12). Pause, Resume, Archive and Restore moved to the ACTION BAR,

@@ -105,14 +105,14 @@ describe("actsFor -- acts follow the state, in one place", () => {
     expect(reading.acts).toEqual([]);
     // ...and it says why, rather than leaving an absence with no account of
     // itself. Six greyed-out buttons are six controls to read past.
-    expect(reading.detail).toContain("re-seeded live at every boot");
+    expect(reading.detail).toContain("availability has not been verified");
   });
 
   it("a reader sees the state and no acts", () => {
     for (const status of ["live", "disabled", "archived", "draft"]) {
       expect(names({ site: site({ status }), can: NO_PARTS })).toEqual([]);
     }
-    expect(actsFor({ ...BASE, can: NO_PARTS }).state).toBe("Live");
+    expect(actsFor({ ...BASE, can: NO_PARTS }).state).toBe("Unknown");
   });
 
   // ---- the run in flight ---------------------------------------------------
@@ -148,7 +148,7 @@ describe("actsFor -- acts follow the state, in one place", () => {
     for (const status of ["refused", "failed"]) {
       const reading = actsFor({ ...BASE, pkg: pkg(), run: run(status) });
       expect(reading.acts.map((a) => a.name)).toEqual(["Take offline", "Retry the deploy"]);
-      expect(reading.detail).toContain("did not finish");
+      expect(reading.detail).toContain("did not replace the published version");
     }
   });
 
@@ -197,7 +197,7 @@ describe("actsFor -- acts follow the state, in one place", () => {
   });
 
   it("reads the state word and its clause from the one vocabulary", () => {
-    expect(actsFor({ ...BASE }).detail).toBe("serving at shop.example.com");
+    expect(actsFor({ ...BASE }).detail).toBe("published; availability has not been verified recently");
     const built = actsFor({ ...BASE, site: site({ status: "draft" }) });
     expect(built.state).toBe("Built");
     expect(built.detail).toContain("not live yet");
@@ -278,7 +278,7 @@ describe("a source's gate, on a deployable that has its own state", () => {
 
   it("leaves a live deployable live, with its own acts", () => {
     const reading = actsFor({ ...BASE, pkg: pkg(), run: gate });
-    expect(reading.state).toBe("Live");
+    expect(reading.state).toBe("Unknown");
     expect(reading.acts.map((a) => a.name)).toEqual(["Take offline", "Redeploy"]);
   });
 

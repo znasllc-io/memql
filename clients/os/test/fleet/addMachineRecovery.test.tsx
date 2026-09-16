@@ -39,26 +39,6 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-function checks(labels: Record<string, string>) {
-  return render(<ChecksStop machine={machineFromRow(machine(labels))}
-    checks={[{ id: "models", name: "Models", state: "done", answer: "Models available", act: "askIt" }]}
-    pulling={false} pullError="" onPullRecommended={vi.fn()} />);
-}
-
-it("checks chat with a text model even when an embedding model sorts first", async () => {
-  checks({ "model:a-embed": "embeddings=1", "model:z-chat": "tools=1" });
-  fireEvent.click(screen.getByRole("button", { name: "Ask it something" }));
-  await waitFor(() => expect(h.chat).toHaveBeenCalled());
-  expect(h.chat.mock.calls[0]?.[2]).toMatchObject({ provider: "fleet:z-chat", fleetRegistrationId: "recovery-machine" });
-});
-
-it("explains why an embedding-only machine has no chat check", () => {
-  checks({ "model:a-embed": "embeddings=1" });
-  expect(screen.queryByRole("button", { name: "Ask it something" })).toBeNull();
-  expect(screen.getByText(/embedding.*chat/i)).toBeTruthy();
-  expect(h.chat).not.toHaveBeenCalled();
-});
-
 it("shows a partial-start refusal while another recommended model is downloading", () => {
   render(<ChecksStop machine={machineFromRow(machine())}
     checks={[{ id: "models", name: "Models", state: "current", answer: "Pulling a-embed" }]}

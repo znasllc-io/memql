@@ -1,7 +1,5 @@
 import { Button, Caption, CopyField, Notice, Rail, type Stop } from "../../../../kit";
-import { machineModelsFrom } from "../../machines/models";
 import { machineName, type MachineRow } from "../../rows";
-import { AskIt } from "../AskIt";
 import type { Check } from "../flow";
 
 // CHECKS: online, steady, and what you asked for (design record D4, D5, D13,
@@ -27,6 +25,7 @@ export function ChecksStop({
   pulling,
   pullError,
   onPullRecommended,
+  onRetryResponse,
 }: {
   checks: readonly Check[];
   machine: MachineRow;
@@ -35,9 +34,9 @@ export function ChecksStop({
   /** The cluster's refusal of the pull, verbatim, or "". */
   pullError: string;
   onPullRecommended: () => void;
+  onRetryResponse?: () => void;
 }) {
   const label = machineName(machine);
-  const chatModel = machineModelsFrom(machine.reportedLabels).find((model) => !model.embeddings)?.modelId ?? "";
 
   const stops: Stop[] = checks.map((check) => ({
     id: check.id,
@@ -57,9 +56,10 @@ export function ChecksStop({
     const hasRepair = check.repair !== undefined;
     const hasAct = check.act !== undefined;
     const hasPullError = check.id === "models" && pullError !== "";
-    if (!hasRepair && !hasAct && !hasPullError) return undefined;
+    if (!hasRepair && !hasAct && !hasPullError && !check.details) return undefined;
     return (
       <div className="os-stop-body os-fleet-repair">
+        {check.details ? <Rail label="Permission results" stops={check.details.map(d => ({ id: d.name, name: d.name, state: d.state, sentence: d.answer }))} /> : null}
         {check.act === "pullRecommended" ? (
           <div className="os-fleet-repair-act">
             <Button tone="primary" busy={pulling} busyLabel="Asking the machine..." onClick={onPullRecommended}>
@@ -80,11 +80,7 @@ export function ChecksStop({
         {check.command === undefined ? null : (
           <CopyField value={check.command} label={`the ${check.name.toLowerCase()} command`} />
         )}
-        {check.act === "askIt" ? (
-          chatModel !== "" ? <AskIt modelId={chatModel} machineLabel={label} registrationId={machine.id} /> : (
-            <Caption>Only embedding models are available. Add a text model to try the chat check.</Caption>
-          )
-        ) : null}
+        {check.act === "retryResponse" ? <Button onClick={onRetryResponse}>Retry check</Button> : null}
       </div>
     );
   }

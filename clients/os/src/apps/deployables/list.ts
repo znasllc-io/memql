@@ -36,7 +36,7 @@ export const ACCOUNT_NONE = "none";
 
 /**
  * The three ways a source arrives, as a person chose them (design D6). A
- * bundle baked into the edge image -- the seeded portal, a baked site -- is
+ * bundle baked into the edge image -- MemQL OS, a baked site -- is
  * none of the three, and answers "" rather than being described as something
  * it is not: it matches no source facet and shows under "Any source".
  */

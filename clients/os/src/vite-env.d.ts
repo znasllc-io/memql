@@ -9,3 +9,5 @@ declare module "*?raw" {
 // vite.config.ts). A global rather than a module export because `define` is a
 // compile-time text substitution: there is no module to import it from.
 declare const __OS_BUILD__: string;
+
+declare const __OS_LOCAL_COCKPIT__: unknown;

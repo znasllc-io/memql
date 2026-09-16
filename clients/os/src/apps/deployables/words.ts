@@ -1,3 +1,4 @@
+import { measuredAvailability } from "./health";
 import { bundleForm, type SiteRow } from "./rows";
 
 // words.ts -- THE ONE VOCABULARY for what a deployable is (2026-09-05 design,
@@ -33,7 +34,7 @@ import { bundleForm, type SiteRow } from "./rows";
 // as the Library's `sitePublishFromArtifact` capability name, which is the
 // engine's and not a word on a surface.
 
-export type SiteStateWord = "Not deployed" | "Built" | "Live" | "Offline" | "Archived" | "Deleting" | "Inactive";
+export type SiteStateWord = "Unknown" | "Unavailable" | "Not deployed" | "Built" | "Live" | "Offline" | "Archived" | "Deleting" | "Inactive";
 
 /**
  * The placeholder a new deployable starts with -- `blob://sites/<id>/pending/`
@@ -51,11 +52,11 @@ export function siteIsBuilt(site: Pick<SiteRow, "bundleRef">): boolean {
 }
 
 /** What a deployable that has a site row IS, in one word. */
-export function siteStateWord(site: Pick<SiteRow, "status" | "bundleRef">, deleting = false): SiteStateWord {
+export function siteStateWord(site: Pick<SiteRow, "status" | "bundleRef" | "health"> & { hostname?: string }, deleting = false): SiteStateWord {
   if (deleting) return "Deleting";
   switch (site.status) {
     case "live":
-      return "Live";
+      return measuredAvailability(site);
     case "disabled":
       return "Offline";
     case "archived":
@@ -78,7 +79,11 @@ export function siteStateDetail(word: SiteStateWord, host: string): string {
   const at = host.trim() === "" ? "its address" : host;
   switch (word) {
     case "Live":
-      return `serving at ${at}`;
+      return `recently verified at ${at}`;
+    case "Unavailable":
+      return `the latest check could not reach ${at}`;
+    case "Unknown":
+      return "published; availability has not been verified recently";
     case "Built":
       return `in place at ${at}, not live yet`;
     case "Offline":
@@ -109,10 +114,14 @@ export function statusFacetLabel(status: string): string {
 }
 
 /** The Live stop's note, in the same words. */
-export function liveStopNote(site: Pick<SiteRow, "status" | "bundleRef" | "hostname">): string {
+export function liveStopNote(site: Pick<SiteRow, "status" | "bundleRef" | "hostname" | "health">): string {
   switch (siteStateWord(site)) {
     case "Live":
-      return `Live at ${site.hostname}.`;
+      return `Recently verified at ${site.hostname}.`;
+    case "Unavailable":
+      return `The latest check of ${site.hostname} failed.`;
+    case "Unknown":
+      return "Published. Waiting for a recent website health check.";
     case "Built":
       return `Built. In place at ${site.hostname}, not live yet.`;
     case "Offline":

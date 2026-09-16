@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -160,13 +160,7 @@ async function openRefusedStop(): Promise<HTMLElement> {
   );
   await click((await screen.findByText("store.memql.example.com")).closest("button"));
   const page = await screen.findByRole("region", { name: "Deployable store.memql.example.com" });
-  const line = within(page)
-    .getAllByRole("button")
-    .find((b) => b.classList.contains("os-rail-line") && (b.textContent ?? "").startsWith("What it is"));
-  if (line === undefined) throw new Error("no rail stop named What it is");
-  // EXACTLY ONE STOP IS OPEN, and the rail opens the stopped one by itself --
-  // so an unconditional click CLOSES the stop this test came to read.
-  if (line.getAttribute("aria-expanded") !== "true") await click(line);
+  await click(page.querySelector(".deployable-piece-chip"));
   return page;
 }
 
@@ -210,9 +204,7 @@ describe("a refusal never widens the deployable pane", () => {
     // Scoped to the STOPPED stage: every stop has an answer, and the first on
     // the page is Source's hostname, which was never the one holding the pane
     // open.
-    const answer = page.querySelector('.os-rail-stage[data-state="stopped"] .os-rail-answer');
-    expect(answer?.textContent).toBe(MSG);
-    expect(answer?.closest(".os-rail-line")).not.toBeNull();
+    expect(page.querySelector(".deployable-dialog[open]")).not.toBeNull();
 
     // And the detail is inside the stop body, which is the grid track the
     // line was holding open -- that adjacency is the whole bug.

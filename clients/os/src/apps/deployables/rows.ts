@@ -1,3 +1,5 @@
+import type { SiteHealth } from "./health";
+import { measuredAvailability } from "./health";
 import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { boolOr, flatten } from "../../kit/rows";
@@ -71,8 +73,9 @@ export function isSiteStatus(value: string): value is SiteStatus {
 }
 
 export interface SiteRow {
+  health?: SiteHealth;
   id: string;
-  /** EMPTY means CLUSTER-OWNED -- the seeded portal row is the case. */
+  /** EMPTY means CLUSTER-OWNED -- the seeded MemQL OS row is the case. */
   ownerUserId: string;
   hostname: string;
   /** spa | static | shopify_storefront, or "" on a row the fold has not filled. */
@@ -84,7 +87,7 @@ export interface SiteRow {
   title: string;
   notes: string;
   apiProxy: boolean;
-  /** Blocks deletion. The portal row only; it does NOT branch the serving path. */
+  /** Blocks deletion. The MemQL OS row; it does NOT branch the serving path. */
   systemOwned: boolean;
   deleted: boolean;
   binding: Record<string, unknown>;
@@ -177,7 +180,7 @@ export function siteIsCurrent(site: SiteRow): boolean {
 export type StatusTone = "ok" | "muted" | "warn";
 
 export function statusTone(site: SiteRow): StatusTone {
-  if (site.status === "live") return "ok";
+  if (site.status === "live") return measuredAvailability(site) === "Live" ? "ok" : measuredAvailability(site) === "Unavailable" ? "warn" : "muted";
   if (site.status === "disabled") return "warn";
   // draft and archived are both "not serving", and they read the same here
   // deliberately: the difference between them is HISTORY, which the archived
@@ -205,7 +208,7 @@ export function statusTone(site: SiteRow): StatusTone {
  *                beside it is the whole statement.
  */
 export function statusDotTone(site: SiteRow): "reachable" | "unreachable" | "unknown" {
-  if (site.status === "live") return "reachable";
+  if (site.status === "live") return measuredAvailability(site) === "Live" ? "reachable" : measuredAvailability(site) === "Unavailable" ? "unreachable" : "unknown";
   if (site.status === "disabled") return "unreachable";
   // draft and archived both get NO dot, which is what `unknown` renders. An
   // archived site is not "unreachable" in the sense the amber dot means --
@@ -213,7 +216,7 @@ export function statusDotTone(site: SiteRow): "reachable" | "unreachable" | "unk
   return "unknown";
 }
 
-/** Cluster-owned rows carry no owner (the seeded portal is the one shipped). */
+/** Cluster-owned rows carry no owner (MemQL OS is the seeded site). */
 export function siteIsClusterOwned(site: SiteRow): boolean {
   return site.ownerUserId.trim() === "";
 }

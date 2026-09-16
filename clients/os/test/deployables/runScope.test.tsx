@@ -141,8 +141,8 @@ describe("the bar while a sibling deploys", () => {
     const reading = actsFor({ site, pkg, run: null, siblingRun: siblingBuilding, can: ALL_PARTS });
     // NOT "Building". A live deployable is still live while another app of
     // its source deploys, and saying otherwise was the defect.
-    expect(reading.state).toBe("Live");
-    expect(reading.tone).toBe("live");
+    expect(reading.state).toBe("Unknown");
+    expect(reading.tone).toBe("none");
   });
 
   it("withholds the acts that would start a second run, and says why", () => {

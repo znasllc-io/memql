@@ -1,6 +1,7 @@
+import { AddButton } from "../../kit/AddButton";
 import { useMemo, useRef, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
-import { FileText, Plus } from "lucide-react";
+import { FileText, } from "lucide-react";
 
 import { AccountChip, AccountPicker } from "../accounts/AccountPicker";
 import { accountNameFrom } from "../accounts/rows";
@@ -80,9 +81,7 @@ export function TemplatesSection({
   return (
     <div className="os-app-stack">
       <Head title="Templates">
-        <Button onClick={() => setAdding((v) => !v)}>
-          <Plus size={14} aria-hidden /> New template
-        </Button>
+        <AddButton onClick={() => setAdding((v) => !v)} label="New template" />
       </Head>
 
       {feeds.templates.snapshot.error ? (

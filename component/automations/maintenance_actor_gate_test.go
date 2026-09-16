@@ -87,6 +87,7 @@ func TestMaintenanceAutomationsAreArgued(t *testing.T) {
 	// skip a delete, it destroys the evidence it was there to preserve.
 	want := []string{
 		"auditEventRetentionSweep",
+		"checkDeployableHealth",
 		"logsRetentionSweep",
 		// routingEvidenceFold (epic memql#5146) is the one entry here whose
 		// read spans owners because the QUESTION does. It asks how a model

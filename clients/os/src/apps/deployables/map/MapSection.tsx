@@ -1,157 +1,47 @@
 import type { LiveSnapshot } from "@znasllc-io/memql-sdk-core/client";
-
-import { Button, Caption, Head, Notice } from "../../../kit";
+import { Button, Notice, EmptyState, RefreshButton } from "../../../kit";
+import { Overview, OverviewBreakdown, type OverviewSegment } from "../../../kit/Overview";
+import { absent, figureOf } from "../../../kit/measure";
 import type { ArrivalTick } from "../../../live/arrival";
-import { sourceLabel, type PackageRow } from "../packages/rows";
-import { liveUrlFor, siteName, statusTone, type SiteRow } from "../rows";
+import type { SiteRow } from "../rows";
+import { siteStateWord } from "../words";
 import { DeployMap } from "./DeployMap";
 import type { MapNode } from "./layout";
 
-// The Map section: the picture, and whatever it is pointing at.
-//
-// The map and the Deployables list are two readings of ONE feed and share ONE
-// selection, so walking a cluster on the map and then switching to the list
-// lands on the same deployable. A second selection would let the two disagree
-// about what is being looked at -- in an app whose whole subject is a thing
-// being in more than one place at once.
-
-export interface MapSelection {
-  /** The node, for highlighting. "" when nothing is selected. */
-  nodeId: string;
-  /**
-   * The deployables that node is part of, captured when it was chosen.
-   *
-   * IDS RATHER THAN THE NODE: the layout re-derives on every event, so a held
-   * node object would be a snapshot of a shape that has since moved. An id
-   * survives, and the row it names is looked up in the CURRENT rows -- so a
-   * deployable that has since gone simply resolves to nothing rather than
-   * rendering a page for a row that is no longer there.
-   */
-  siteIds: string[];
-}
-
+export interface MapSelection { nodeId: string; siteIds: string[] }
 export const NO_SELECTION: MapSelection = { nodeId: "", siteIds: [] };
 
-export function MapSection({
-  sites,
-  snapshot,
-  ticks,
-  selection,
-  onSelectNode,
-  onSelectSite,
-  onOpenDeployable,
-  packages,
-  onReseed,
-}: {
+/** Overview reads the same measured rows as the list; it never repeats the list. */
+export function MapSection({ sites, snapshot, ticks, selection, onSelectNode, onOpenDeployable, onReseed, onBrowse }: {
   sites: readonly SiteRow[];
   snapshot: LiveSnapshot<SiteRow>;
   ticks: Map<string, ArrivalTick>;
   selection: MapSelection;
   onSelectNode: (node: MapNode) => void;
-  onSelectSite: (siteId: string) => void;
-  /**
-   * Opens a deployable's own page, in the Deployables section.
-   *
-   * The map no longer renders one itself (rule 11): it points, and the page
-   * lives where the page lives. Everything the old inline page needed --
-   * credentials, the cluster domain, the write gate -- went with it.
-   */
   onOpenDeployable: (siteId: string) => void;
-  packages: readonly PackageRow[];
   onReseed: () => void;
+  onBrowse?: () => void;
 }) {
-  const chosen = sites.filter((s) => selection.siteIds.includes(s.id));
-  const only = chosen.length === 1 ? (chosen[0] ?? null) : null;
-  const pkg = only === null || only.packageId === "" ? null : (packages.find((p) => p.id === only.packageId) ?? null);
-
-  return (
-    <div className="os-app-stack">
-      <Head title="Deploy map" />
-
-      {snapshot.error ? (
-        <Notice
-          tone="error"
-          sentence="This cluster did not return its deployables, so there is nothing to draw."
-          next="An empty canvas would be a claim rather than a drawing, so the map says this instead."
-        >
-          <Button onClick={onReseed}>Try again</Button>
-        </Notice>
-      ) : null}
-
-      <DeployMap
-        sites={sites}
-        ticks={ticks}
-        state={snapshot.state}
-        selectedNodeId={selection.nodeId}
-        onSelect={onSelectNode}
-      />
-
-      {only ? (
-        /* THE MAP POINTS; THE PAGE IS ELSEWHERE (DESIGN.md rule 11, epic
-           memql#4937). This used to render the WHOLE DeployablePage beneath
-           the picture -- 5,000px of rail, settings, domains and history under
-           a drawing whose whole job is to answer "which host, which site,
-           which bundle" at a glance. The same fault the list had, in the same
-           app.
-
-           A card answers what the map raised, and Open takes you to the one
-           page that owns the deployable. */
-        <div className="os-panel os-map-card">
-          <div className="os-map-card-head">
-            <span className="os-map-card-name">{siteName(only)}</span>
-            <span className="os-mono os-map-card-host">{only.hostname}</span>
-            <span className="os-map-card-state" data-tone={statusTone(only)}>
-              {mapStatusWord(only.status)}
-            </span>
-          </div>
-          {pkg === null ? null : <Caption>From {sourceLabel(pkg)}</Caption>}
-          <div className="os-form-row">
-            <Button tone="primary" onClick={() => onOpenDeployable(only.id)}>
-              Open this deployable
-            </Button>
-            {liveUrlFor(only.hostname) === "" ? null : (
-              <a
-                className="os-button"
-                data-tone="quiet"
-                href={liveUrlFor(only.hostname)}
-                target="_blank"
-                rel="noreferrer noopener"
-              >
-                Visit
-              </a>
-            )}
-          </div>
-        </div>
-      ) : chosen.length > 1 ? (
-        /* A bundle serving several deployables. There is no ONE page to
-           open, so the choice is offered rather than made arbitrarily -- and
-           the fact itself, that one bundle is serving all of these, is the
-           thing the map was drawn to show. */
-        <div className="os-panel">
-          <Caption>That node serves more than one deployable. Pick the one to open.</Caption>
-          <div className="os-form-row">
-            {chosen.map((site) => (
-              <Button key={site.id} onClick={() => onSelectSite(site.id)}>
-                {siteName(site)}
-              </Button>
-            ))}
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-/** The map's own status word, in the bar's vocabulary (2026-09-05, D1). */
-function mapStatusWord(status: string): string {
-  switch (status) {
-    case "live":
-      return "live";
-    case "disabled":
-      return "offline";
-    case "archived":
-      return "archived";
-    default:
-      return "not live yet";
-  }
+  const current = sites.filter(site => site.status !== "archived");
+  const fresh = snapshot.state === "live" && !snapshot.error;
+  const count = (value: number) => fresh ? figureOf(value) : absent(snapshot.error ? "failed" : "unread");
+  const states = new Map<string, number>();
+  for (const site of current) { const word = siteStateWord(site); states.set(word, (states.get(word) ?? 0) + 1); }
+  const segments: OverviewSegment[] = [...states].map(([label, value]) => ({ label, count: value, tone: label === "Live" ? "good" : label === "Unavailable" ? "warn" : "quiet" }));
+  return <Overview metrics={[
+    { label: "Deployables", figure: count(current.length) },
+    { label: "Live", figure: count(states.get("Live") ?? 0) },
+    { label: "Unavailable", figure: count(states.get("Unavailable") ?? 0) },
+    { label: "Unknown", figure: count(states.get("Unknown") ?? 0) },
+  ]} actions={<RefreshButton label="Refresh overview" onClick={onReseed} />}>
+    {snapshot.error ? <Notice tone="error" sentence="Deployables could not be read." next="Reconnect or refresh to update this overview." /> : null}
+    {current.length === 0 && fresh ? <EmptyState title="No deployables to map yet" action={onBrowse ? <Button onClick={onBrowse}>Open deployables</Button> : undefined}>Add an app to see its address and source here.</EmptyState> : <DeployMap
+      sites={current} ticks={ticks} state={snapshot.state} selectedNodeId={selection.nodeId}
+      onSelect={node => {
+        onSelectNode(node);
+        if (node.siteIds.length === 1) onOpenDeployable(node.siteIds[0]!);
+      }}
+    />}
+    {fresh ? <OverviewBreakdown title="Deployment status" segments={segments} /> : null}
+  </Overview>;
 }

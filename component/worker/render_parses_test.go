@@ -169,6 +169,9 @@ func writeDrivers() []driver {
 		{"RefreshRegistration", func(ctx context.Context, s *EngineStore) error {
 			return s.RefreshRegistration(ctx, reg)
 		}},
+		{"UpdatePermissions", func(ctx context.Context, s *EngineStore) error {
+			return s.UpdatePermissions(ctx, reg.ID, testOwner, map[string]any{"accessibility_state": "unknown", "detail": awkwardText, "probe_context": "worker-process"})
+		}},
 		{"UpdateLastSeen", func(ctx context.Context, s *EngineStore) error {
 			return s.UpdateLastSeen(ctx, reg.ID, testOwner, at, "203.0.113.7", "agent-1", 2, nil, 0, time.Time{})
 		}},

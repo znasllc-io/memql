@@ -32,11 +32,8 @@
 #   kubectl port-forward -n memql svc/bff 50051:50051
 # (the `mcp` node is the MCP-protocol head; it also serves gRPC on :50051.)
 #
-# The MemQL Portal -- the Cockpit's graphical sibling -- is served BY the bff
-# and reached through the same front door, at
-# https://api.memql.localhost/portal/ (memql#3314). Its bundle is baked into
-# the bff image by the Dockerfile's portal stage, so `make dev NODE=bff`
-# rebuilds it like any other change to that node.
+# MemQL OS is served by the edge node at https://os.memql.localhost/.
+# Its bundle is baked into the edge image; `make dev NODE=edge` rebuilds it.
 #
 # This is a CAPABILITY SCRIPT: non-interactive, structured params in, a single
 # JSON result envelope on stdout, human logs on stderr, honest exit codes.

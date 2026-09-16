@@ -86,6 +86,7 @@ const maintenanceUserIdPrefix = "system:maintenance:"
 // maintenanceAutomations maps each automation that runs under the cluster's
 // maintenance principal to WHY it needs one.
 var maintenanceAutomations = map[string]string{
+	"checkDeployableHealth": "engine-owned scheduled availability checks across every owner's published sites; without a cluster maintenance principal an unobserved site would remain indistinguishable from a healthy one",
 	"workerInvocationRetentionSweep": "retention sweep over v1:worker:invocation, whose composite owner tier " +
 		"(memql#4406) would otherwise hide every row from it -- silently, because a sweep that retires " +
 		"nothing looks exactly like a sweep with nothing to retire",

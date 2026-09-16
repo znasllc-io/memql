@@ -437,3 +437,16 @@ builtin readinessRecompute { }
 @executor("integration.customDomain.reconcileAccountDomains")
 @description("Run one pass of the ACCOUNT domain walk (epic memql#5165, section F): mint an ownership token for a client's domain that has none, check the TXT record at _memql-verify.<domain>, and on success stamp the verification and the reserved MemQL name. Distinct from customDomainReconcile, which walks v1:platform:customDomain bindings toward a certificate -- an account's domain stops at `verified`, because nothing is served from it yet. Returns {checked, minted, verified, failed, reserved}.")
 builtin accountDomainReconcile { }
+
+// Observations are separate from desired deployment state and visitor traffic.
+@sdk
+@executor("integration.siteHealth.read")
+@args(profile="object")
+@description("Read current HTTP observations for sites the caller may read. Never triggers a probe; absent or expired observations mean unknown availability.")
+builtin siteHealthRead {
+  siteIds []string!
+}
+
+@executor("integration.siteHealth.sweep")
+@description("Check due published websites under the engine maintenance principal. Bounded concurrency, no per-check success log, one current observation per site.")
+builtin siteHealthSweep { }
