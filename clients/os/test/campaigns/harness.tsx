@@ -1,3 +1,5 @@
+import { readiness, verdict } from "../setup/harness";
+import type { Readiness } from "../../src/live/readiness";
 import type { ReactNode } from "react";
 import { vi } from "vitest";
 import { Result, type Row } from "@znasllc-io/memql-sdk-core/client";
@@ -178,7 +180,7 @@ export function fakeConnection(seed: FakeSeed = {}) {
 
 export type FakeConnection = ReturnType<typeof fakeConnection>;
 
-export function withSession(children: ReactNode, overrides: { role?: string } = {}) {
+export function withSession(children: ReactNode, overrides: { role?: string; readiness?: Readiness } = {}) {
   const config: OsRuntimeConfig = { ...UNKNOWN_RUNTIME_CONFIG, domain: "memql.example.com" };
   return (
     <SessionProvider
@@ -191,6 +193,7 @@ export function withSession(children: ReactNode, overrides: { role?: string } = 
           rank: 0,
         },
         config,
+        readiness: overrides.readiness ?? readiness(true, [verdict("email", "configured"), verdict("campaigns", "configured", false)]),
       }}
     >
       {children}

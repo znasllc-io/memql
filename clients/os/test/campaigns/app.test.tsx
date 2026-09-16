@@ -1,3 +1,4 @@
+import { readiness, verdict } from "../setup/harness";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -384,7 +385,7 @@ describe("audiences", () => {
     fireEvent.click(await screen.findByText("Newsletter"));
     // The difference between these two IS the suppression rate.
     expect(await screen.findByText("On the list")).toBeTruthy();
-    expect(screen.getByText("A send would reach")).toBeTruthy();
+    expect(screen.getByText("Subscribed recipients")).toBeTruthy();
     expect(screen.getByText(/1 of these cannot be mailed/)).toBeTruthy();
   });
 
@@ -658,7 +659,7 @@ describe("the rules builder", () => {
     expect(within(line).getByText('row.role == "admin"').tagName).toBe("CODE");
 
     fireEvent.click(screen.getByText("Tell the owner about new admins"));
-    // The list line and the detail's headline quote it as code; the Only when
+    // The detail replaces the list and quotes it as code; the Only when
     // fact carries it in the data voice. Nowhere is it reworded.
     await waitFor(() =>
       expect(
@@ -666,7 +667,7 @@ describe("the rules builder", () => {
           .getAllByText('row.role == "admin"')
           .map((node) => node.tagName)
           .sort(),
-      ).toEqual(["CODE", "CODE", "DD"]),
+      ).toEqual(["CODE", "DD"]),
     );
   });
 
@@ -995,4 +996,69 @@ describe("the app's settings", () => {
       await screen.findByText(/changing this never reaches one that already exists/),
     ).toBeTruthy();
   });
+});
+
+describe("guided campaign preparation", () => {
+  it("keeps review fields and content edits across steps, and only saves a draft", async () => {
+    const conn = fakeConnection({
+      audiences: [audienceRow({ id: "a1" })],
+      templates: [templateRow({ id: "t1" })],
+      recipientsForAudience: [recipientRow({ id: "r1" })],
+    });
+    mount(conn);
+    fireEvent.click(screen.getByRole("button", { name: "New campaign" }));
+    await screen.findByText("Sending settings are configured.");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    chooseOption(screen.getByLabelText("Campaign audience"), "Newsletter");
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    chooseOption(screen.getByLabelText("Campaign content"), "August copy (ready)");
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Keep my unsaved message" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.change(screen.getByLabelText("Campaign name"), { target: { value: "September newsletter" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Count who opens it" }));
+    fireEvent.click(screen.getByRole("button", { name: /Content/ }));
+    expect((screen.getByLabelText("Message") as HTMLTextAreaElement).value).toBe("Keep my unsaved message");
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect((screen.getByLabelText("Campaign name") as HTMLInputElement).value).toBe("September newsletter");
+    expect((screen.getByRole("checkbox", { name: "Count who opens it" }) as HTMLInputElement).checked).toBe(false);
+    expect(conn.query.createCampaign).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Create campaign" }));
+    await waitFor(() => expect(conn.query.createCampaign).toHaveBeenCalledWith(expect.objectContaining({ name: "September newsletter", audienceId: "a1", templateId: "t1", trackOpens: false })));
+    expect(conn.query.campaignStartSend).not.toHaveBeenCalled();
+    expect(conn.query.campaignScheduleSend).not.toHaveBeenCalled();
+    expect(conn.query.campaignTestSend).not.toHaveBeenCalled();
+    expect(conn.query.updateTemplate).not.toHaveBeenCalled();
+  });
+
+  it("does not confirm setup when the email status read fails", async () => {
+    mount(fakeConnection({ integrationStatus: new Error("Email report unavailable") }));
+    fireEvent.click(screen.getByRole("button", { name: "New campaign" }));
+    await screen.findByText("Email report unavailable");
+    expect(screen.queryByText("Sending settings are configured.")).toBeNull();
+    expect(screen.getByRole("button", { name: "Continue with draft" })).toBeTruthy();
+  });
+
+  it("replaces resource lists with their detail and restores the list with one back control", async () => {
+    mount(fakeConnection({ audiences: [audienceRow({ id: "a1" })] }), "audiences");
+    fireEvent.click(await screen.findByText("Newsletter"));
+    expect(screen.queryByRole("list", { name: "Your audiences" })).toBeNull();
+    expect(screen.getAllByRole("navigation", { name: "Breadcrumbs" })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Back to Audiences" }));
+    expect(await screen.findByText("Newsletter")).toBeTruthy();
+  });
+});
+
+it("keeps test, send and scheduling unavailable until provider and unsubscribe setup is confirmed", async () => {
+  const conn = fakeConnection({ campaigns: [campaignRow({ id: "c1" })] });
+  h.connection = conn;
+  render(withSession(<CampaignsApp sectionId="campaigns" navigate={() => {}} askContext={() => {}} store={memoryStore()} uploads={fakeUploads()} />, { readiness: readiness(true, [verdict("email", "partial"), verdict("campaigns", "configured")]) }));
+  fireEvent.click(await screen.findByText("August update"));
+  expect(screen.queryByRole("button", { name: "Send now" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Schedule" })).toBeNull();
+  expect((screen.getByRole("button", { name: "Send test" }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText("Test recipient address"), { target: { value: "me@example.com" } });
+  fireEvent.keyDown(screen.getByLabelText("Test recipient address"), { key: "Enter" });
+  expect(conn.query.campaignTestSend).not.toHaveBeenCalled();
 });

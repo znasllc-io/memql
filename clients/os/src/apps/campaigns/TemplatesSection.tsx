@@ -1,13 +1,14 @@
 import { AddButton } from "../../kit/AddButton";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
-import { FileText, } from "lucide-react";
+import { FileText } from "lucide-react";
 
 import { AccountChip, AccountPicker } from "../accounts/AccountPicker";
 import { accountNameFrom } from "../accounts/rows";
 import { useAccountOptions } from "../accounts/tie";
 import {
   Button,
+  EmptyState,
   Caption,
   Check,
   Chip,
@@ -78,6 +79,49 @@ export function TemplatesSection({
     [source, source?.snapshot, openId],
   );
 
+  if (adding)
+    return (
+      <div className="os-app-stack">
+        <Head
+          title="New template"
+          back={{ label: "Templates", onSelect: () => setAdding(false) }}
+        />
+        <TemplateEditor
+          audiences={audiences}
+          campaigns={campaigns}
+          writes={writes}
+          onDone={(id) => {
+            setAdding(false);
+            if (id !== "") setOpenId(id);
+          }}
+        />
+      </div>
+    );
+  if (open)
+    return (
+      <div
+        className="os-app-stack"
+        data-os-page-context={JSON.stringify({
+          page: "Templates",
+          name: templateName(open),
+          id: open.id,
+        })}
+      >
+        <Head
+          title={templateName(open)}
+          back={{ label: "Templates", onSelect: () => setOpenId("") }}
+        />
+        <TemplateEditor
+          key={open.id}
+          template={open}
+          audiences={audiences}
+          campaigns={campaigns}
+          writes={writes}
+          onDone={() => setOpenId("")}
+        />
+      </div>
+    );
+
   return (
     <div className="os-app-stack">
       <Head title="Templates">
@@ -94,19 +138,6 @@ export function TemplatesSection({
         </Notice>
       ) : null}
 
-      {adding ? (
-        <TemplateEditor
-          audiences={audiences}
-          campaigns={campaigns}
-          writes={writes}
-          onDone={(id) => {
-            setAdding(false);
-            if (id !== "") setOpenId(id);
-          }}
-        />
-      ) : null}
-
-
       <LiveList<TemplateRow>
         key={`templates:${showFiled}`}
         source={source}
@@ -117,6 +148,11 @@ export function TemplatesSection({
         fingerprint={templateFingerprint}
         label="Your templates"
         emptyText="No templates yet. Write one above -- a campaign needs one before it can go out."
+        emptyContent={
+          <EmptyState icon={FileText} title="No templates yet">
+            Write your subject and message before preparing a campaign.
+          </EmptyState>
+        }
         renderRow={(template, tick) => (
           <TemplateLine
             template={template}
@@ -126,17 +162,6 @@ export function TemplatesSection({
           />
         )}
       />
-
-      {open === null ? null : (
-        <TemplateEditor
-          key={open.id}
-          template={open}
-          audiences={audiences}
-          campaigns={campaigns}
-          writes={writes}
-          onDone={() => setOpenId("")}
-        />
-      )}
     </div>
   );
 }
@@ -170,9 +195,7 @@ function TemplateLine({
         </>
       }
     >
-      {template.subject === "" ? null : (
-        <span className="os-caption">{template.subject}</span>
-      )}
+      {template.subject === "" ? null : <span className="os-caption">{template.subject}</span>}
     </ListRow>
   );
 }
@@ -193,18 +216,20 @@ function TemplateLine({
  * that unblocks a send, and it says so rather than being an unexplained status
  * field.
  */
-function TemplateEditor({
+export function TemplateEditor({
   template,
   audiences,
   campaigns,
   writes,
   onDone,
+  onDirtyChange,
 }: {
   template?: TemplateRow;
   audiences: ReturnType<typeof audienceProjection>;
   campaigns: CampaignRow[];
   writes: CampaignWrites;
   onDone: (createdId: string) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const accounts = useAccountOptions();
   const editing = template !== undefined;
@@ -219,7 +244,22 @@ function TemplateEditor({
     accountId: template?.accountId ?? "",
   }));
 
-  const ready = draft.name.trim() !== "" && draft.subject.trim() !== "";
+  useEffect(() => {
+    if (!template) return;
+    onDirtyChange?.(
+      draft.name !== template.name ||
+        draft.subject !== template.subject ||
+        draft.textBody !== template.textBody ||
+        draft.htmlBody !== template.htmlBody ||
+        draft.status !== template.status ||
+        draft.accountId !== template.accountId,
+    );
+  }, [draft, template, onDirtyChange]);
+
+  const ready =
+    draft.name.trim() !== "" &&
+    draft.subject.trim() !== "" &&
+    (draft.status !== "ready" || draft.textBody.trim() !== "" || draft.htmlBody.trim() !== "");
 
   async function submit() {
     if (editing && template) {
@@ -349,7 +389,13 @@ function TemplateEditor({
       )}
 
       <div className="os-campaign-actions">
-        <Button tone="primary" busy={write.busy} busyLabel="Saving" onClick={submit} disabled={!ready}>
+        <Button
+          tone="primary"
+          busy={write.busy}
+          busyLabel="Saving"
+          onClick={submit}
+          disabled={!ready}
+        >
           {editing ? "Save" : "Create template"}
         </Button>
         <Button
@@ -361,7 +407,9 @@ function TemplateEditor({
           {editing ? "Close" : "Cancel"}
         </Button>
       </div>
-      {ready ? null : <Caption>A name and a subject line are needed before this can be saved.</Caption>}
+      {ready ? null : (
+        <Caption>A name and a subject line are needed before this can be saved.</Caption>
+      )}
 
       {editing && template ? (
         <TemplateTestSend template={template} campaigns={campaigns} writes={writes} />
@@ -453,8 +501,8 @@ function MergeTags({
 
       {sampleFrom === "" ? (
         <Caption>
-          Choose an audience to see what each tag turns into -- and to find the{" "}
-          {"{{fields.*}}"} tags an import brought with it.
+          Choose an audience to see what each tag turns into -- and to find the {"{{fields.*}}"}{" "}
+          tags an import brought with it.
         </Caption>
       ) : recipient === null ? (
         <Caption>
@@ -563,9 +611,7 @@ function TemplateTestSend({
         campaignId={chosen}
         testSend={writes.testSend}
         label={
-          using.length === 1
-            ? `Send a test through ${campaignName(using[0]!)}`
-            : "Send a test"
+          using.length === 1 ? `Send a test through ${campaignName(using[0]!)}` : "Send a test"
         }
       />
     </>

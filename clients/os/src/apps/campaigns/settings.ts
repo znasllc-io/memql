@@ -16,16 +16,16 @@ import type { OsAppSection } from "../../system/registry";
  * section the manifest does not declare leaves the window on the first
  * section with the nav highlighting nothing.
  *
- * CAMPAIGNS IS FIRST and is therefore the section a window opens on: a
- * campaign is what this app is for, and the other four are the things a
- * campaign is made of. Somebody who lives in Templates says so in Settings.
+ * Overview opens with the current state and setup direction. Resource
+ * lists and guided authoring keep their own destinations.
  */
 export const CAMPAIGNS_SECTIONS: OsAppSection[] = [
+  { id: "overview", name: "Overview" },
   { id: "campaigns", name: "Campaigns" },
   { id: "audiences", name: "Audiences" },
   { id: "templates", name: "Templates" },
   { id: "senders", name: "Senders" },
-  { id: "rules", name: "Rules" },
+  { id: "rules", name: "Rules", needs: ["email", "campaigns"] },
   // The app's slice of the cluster's logs (epic memql#4895): the lines it
   // tagged and the lines about the things it owns. Admin-floored because
   // every read on the log store is (spec L3), and this is the ONE section
@@ -76,7 +76,7 @@ export const DEFAULT_CAMPAIGNS_SETTINGS: CampaignsSettings = {
   // Named here as well as in the section list, because this value is what a
   // corrupt or absent document falls back to -- and falling back to "whatever
   // is first in an array" would move with an unrelated edit.
-  defaultSection: "campaigns",
+  defaultSection: "overview",
   showFiled: false,
   trackByDefault: true,
 };
@@ -150,16 +150,7 @@ export class LocalCampaignsSettingsStore implements CampaignsSettingsStore {
   }
 }
 
-/**
- * The readiness modules this app needs (design record
- * 2026-09-06-configuration-readiness, section 5.1).
- *
- * Sending needs a mailbox and the unsubscribe pair, and authoring waits on
- * them too: a campaign nobody can send is a draft with a button that refuses.
- *
- * Exported so the manifest and the Set up group read ONE list: a second
- * literal is one that can disagree, and the disagreement is an app that gates
- * on a module its own Settings never offers to set up.
- */
-export const CAMPAIGNS_REQUIRES: readonly ModuleId[] = ["email", "campaigns"];
-export const CAMPAIGNS_WANTS: readonly ModuleId[] = [];
+/** Draft preparation and setup remain available before email is configured.
+ * Actual send controls separately require fresh affirmative readiness. */
+export const CAMPAIGNS_REQUIRES: readonly ModuleId[] = [];
+export const CAMPAIGNS_WANTS: readonly ModuleId[] = ["email", "campaigns"];
