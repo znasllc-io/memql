@@ -229,7 +229,7 @@ pipeline:
       on: [push]
       steps:
         - name: verify-rollout
-          run: memql-verify --target=https://api.znas.io --version=$MEMQL_VERSION
+          run: memql-verify --target=https://api.<domain> --version=$MEMQL_VERSION
     - name: notify
       on: [push]
       channel: znas-instance
