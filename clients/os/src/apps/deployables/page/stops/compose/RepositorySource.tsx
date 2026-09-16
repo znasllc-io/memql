@@ -1,8 +1,9 @@
+import { GitBranch } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 
 import { useSession } from "../../../../../chrome/access";
 import { bare } from "../../../people";
-import { Button, Caption, Field, Select, Subhead } from "../../../../../kit";
+import { Button, Caption, EmptyState, Field, Notice, RefreshButton, Select, Subhead } from "../../../../../kit";
 import { toneFor } from "../../../packages/refusals";
 import { ProblemNotice } from "../../../packages/ReportView";
 import { shortRepo } from "../../../packages/rows";
@@ -10,7 +11,7 @@ import { ConnectGitHub } from "../../../sources/ConnectGitHub";
 import { RepositoryPicker } from "../../../sources/RepositoryPicker";
 import { returnPathFor } from "../../../sources/connectReturn";
 import type { RepositoryRow } from "../../../sources/repositories";
-import { credentialIsRevoked, githubGrantOf, type CredentialRow } from "../../../sources/rows";
+import { credentialIsRevoked, githubGrantOf, type CredentialFeedStatus, type CredentialRow } from "../../../sources/rows";
 import { useGithubConnect, useSourceRepositories } from "../../../sources/useGithubConnect";
 import type { SourceProbeHandle } from "../../../sources/useProbes";
 import { suggestName, type ComposeDraft } from "../../compose";
@@ -58,14 +59,14 @@ import { TokenSourceForm } from "./TokenSourceForm";
 // side, is two answers to one question -- and in markup it is two inputs with
 // the same accessible name, which is the version a screen reader gets.
 
-/** The section a connect from this stop comes back to: the list, which is
- *  where New deployable is. */
+/** The section that resumes this repository step after OAuth. */
 const COMPOSE_SECTION = "deployables";
 
 interface RepositorySourceProps {
   draft: ComposeDraft;
   onDraft: (patch: Partial<ComposeDraft>) => void;
   credentials: readonly CredentialRow[];
+  credentialFeed?: CredentialFeedStatus;
   probe: SourceProbeHandle;
   /** The fold's state, held by the page so it survives a stop re-render. */
   tokenFormOpen: boolean;
@@ -80,8 +81,17 @@ export function RepositorySource(props: RepositorySourceProps) {
   const grant = githubGrantOf(personal);
   // A different viewer or grant gets fresh reads, errors and installation
   // help. An earlier request cannot land in the next person's picker.
-  return <PersonalRepositorySource {...props} credentials={personal}
-    key={`${viewer}:${grant?.id ?? ""}:${grant?.status ?? ""}`} />;
+  const feed = props.credentialFeed;
+  const waiting = feed && (feed.state !== "live" || feed.error !== "");
+  return <>
+    {feed?.error ? <Notice tone="error" sentence="Your source connections could not be read." detail={feed.error} /> : null}
+    {!grant && waiting ? <EmptyState icon={GitBranch}
+      title={feed.state === "seeding" ? "Loading your source connections" : "Source connections are unavailable"}
+      action={feed.state === "seeding" ? undefined : <RefreshButton label="Read source connections again" onClick={feed.retry} />}>
+      {feed.state === "seeding" ? "Checking your saved GitHub connection." : "Reconnect to the cluster or read your connections again."}
+    </EmptyState> : <PersonalRepositorySource {...props} credentials={personal}
+      key={`${viewer}:${grant?.id ?? ""}:${grant?.status ?? ""}`} />}
+  </>;
 }
 
 function PersonalRepositorySource({

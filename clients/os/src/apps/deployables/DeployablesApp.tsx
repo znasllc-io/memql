@@ -117,7 +117,7 @@ export function DeployablesApp({
   // source credentials, read once here as CARDS and passed down so the
   // Source stop's chip and, later, the Sources settings group are two
   // readings of one feed rather than two subscriptions free to disagree.
-  const { source: credentialCollection } = useSourceCredentials();
+  const { source: credentialCollection, snapshot: credentialSnapshot, reseed: reseedCredentials } = useSourceCredentials();
   // A FOURTH FEED, and the ONE recorded exception to clients/os/README.md's
   // rule that a package's deployment timeline is retained by the page and
   // never by the root (that rule guards against subscribing a window to
@@ -303,6 +303,7 @@ export function DeployablesApp({
           active={sectionId === "deployables"}
           navigation={navigation}
           openRequest={openRequest}
+          connectResult={connectResult?.section === "deployables" ? connectResult : null}
           sites={measuredSource}
           packages={packages}
           parked={parked}
@@ -315,6 +316,7 @@ export function DeployablesApp({
           isClusterOwner={isClusterOwner}
           clusterDomain={config.domain}
           credentials={credentialRows}
+          credentialFeed={{ state: credentialSnapshot.state, error: credentialSnapshot.error, retry: reseedCredentials }}
           onAsk={askContext}
           onReseed={reseedAll}
         />

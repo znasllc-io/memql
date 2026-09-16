@@ -1,3 +1,4 @@
+import type { ConnectReturn } from "./sources/connectReturn";
 import { healthExplanation } from "./health";
 import { AddButton } from "../../kit/AddButton";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -53,7 +54,7 @@ import { SITE_STATUSES, type SiteRow } from "./rows";
 import type { ListDensity } from "./settings";
 import { LIST_TRAFFIC_WINDOW, type TrafficSummary } from "./traffic";
 import { useSiteTraffic } from "./useSiteTraffic";
-import type { CredentialRow } from "./sources/rows";
+import type { CredentialFeedStatus, CredentialRow } from "./sources/rows";
 import { DEPLOYABLE_KINDS, kindLabel } from "./targets";
 
 // The Deployables section (epic memql#4937, design section A): FOUR SIBLING
@@ -99,13 +100,13 @@ type DeployablesView =
   | { kind: "deployable"; siteId: string; from?: string }
   | { kind: "source"; packageId: string; fromSite?: string }
   | { kind: "history"; packageId: string; siteId?: string; returnTo?: DeployablesView }
-  | { kind: "compose"; parkedPackageId?: string; only?: string; fromSource?: string };
+  | { kind: "compose"; parkedPackageId?: string; only?: string; fromSource?: string; connectResult?: ConnectReturn };
 
 /** What the list says about the row that just left it. */
 type Gone = { name: string; what: "deleted" | "deactivated" } | null;
 
 export function DeployablesSection({
-  active = true, navigation, openRequest,
+  active = true, navigation, openRequest, connectResult,
   sites,
   packages,
   parked,
@@ -118,12 +119,14 @@ export function DeployablesSection({
   isClusterOwner,
   clusterDomain,
   credentials,
+  credentialFeed,
   onAsk,
   onReseed,
 }: {
   active?: boolean;
   navigation?: OsAppProps["navigation"];
   openRequest?: { siteId: string; revision: number };
+  connectResult?: ConnectReturn | null;
   sites: LiveView<SiteRow> | null;
   packages: LiveView<PackageRow> | null;
   parked: LiveView<DeploymentRow> | null;
@@ -137,6 +140,7 @@ export function DeployablesSection({
   isClusterOwner: boolean;
   clusterDomain: string;
   credentials: readonly CredentialRow[];
+  credentialFeed?: CredentialFeedStatus;
   onAsk?: (tag: string) => void;
   onReseed: () => void;
 }) {
@@ -167,6 +171,11 @@ export function DeployablesSection({
       setLanding(navigation.origin === "peer");
     }
   }, [active, navigation?.revision, navigation?.origin, openRequest?.revision, openRequest?.siteId]);
+  // OAuth is a full-page return. Resume the repository step once; the
+  // live credential feed decides whether this account actually connected.
+  useLayoutEffect(() => {
+    if (connectResult && can.deploy) setView({ kind: "compose", connectResult });
+  }, [connectResult, can.deploy]);
   // WHAT WAS JUST DELETED, so the list can say what happened to it. The name
   // is free the instant the row is stamped; the domains come down on the
   // reconciliation sweep's own schedule, and this says so rather than implying
@@ -258,10 +267,12 @@ export function DeployablesSection({
       return (
         <ComposePage
           clusterDomain={clusterDomain}
+          connectResult={view.connectResult}
           can={can}
           isClusterOwner={isClusterOwner}
           viewerUserId={viewerUserId}
           credentials={credentials}
+          credentialFeed={credentialFeed}
           backLabel={view.fromSource ? "Source" : "Deployables"}
           onBack={() => view.fromSource ? setView({ kind: "source", packageId: view.fromSource }) : backToList()}
           onAsk={onAsk}

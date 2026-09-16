@@ -1,4 +1,4 @@
-import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { rowString, type LiveState, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { flatten, stringsOf } from "../../../kit/rows";
 
@@ -41,6 +41,13 @@ export const SOURCE_CREDENTIAL_CONCEPT = "v1:platform:sourceCredential";
  */
 export const GITHUB_APP_KIND = "github_app";
 export const TOKEN_KIND = "token";
+
+/** State of the app's one credential feed, distinct from an empty result. */
+export interface CredentialFeedStatus {
+  state: LiveState;
+  error: string;
+  retry: () => void;
+}
 
 export interface CredentialRow {
   id: string;

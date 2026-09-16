@@ -1,3 +1,5 @@
+import type { ConnectReturn } from "../sources/connectReturn";
+import { ConnectReturnNotice } from "../sources/ConnectReturnNotice";
 import { useEffect, useMemo, useState } from "react";
 
 import { Button, Caption, Head, Notice, Panel, useLiveView } from "../../../kit";
@@ -19,7 +21,7 @@ import {
 } from "../packages/rows";
 import { usePackageDeployments } from "../packages/usePackages";
 import { probeNote, probeParks, zipVerdict } from "../sources/probe";
-import type { CredentialRow } from "../sources/rows";
+import type { CredentialFeedStatus, CredentialRow } from "../sources/rows";
 import { useAddressChecks, useArtifactProbe, useSourceProbe } from "../sources/useProbes";
 import { kindLabel, type StopId } from "../targets";
 import { siteStateDetail } from "../words";
@@ -110,6 +112,7 @@ import { ComposeWhereItLivesStop } from "./stops/compose/WhereItLives";
 // parked run IS the state.
 
 export interface ComposePageProps {
+  connectResult?: ConnectReturn;
   clusterDomain: string;
   /** The parts this session holds (epic memql#5289); the app reads them once. */
   can: PartsHeld;
@@ -118,6 +121,7 @@ export interface ComposePageProps {
   viewerUserId: string;
   /** The caller's credential cards, from the root feed, for the Source stop's picker. */
   credentials: readonly CredentialRow[];
+  credentialFeed?: CredentialFeedStatus;
   /** The quiet Back: the list is what this replaced. */
   onBack: () => void;
   backLabel?: string;
@@ -160,7 +164,7 @@ export interface ComposePageProps {
 export function ComposePage(props: ComposePageProps) {
   const { clusterDomain, can, isClusterOwner, credentials, onBack, backLabel = "Deployables", parked, placed, only, source, packages } = props;
 
-  const [draft, setDraft] = useState<ComposeDraft>(EMPTY_DRAFT);
+  const [draft, setDraft] = useState<ComposeDraft>(() => props.connectResult ? { ...EMPTY_DRAFT, choice: "repo" } : EMPTY_DRAFT);
   const [addresses, setAddresses] = useState<Record<string, AddressDraft>>({});
   // What this flow has CREATED. Held rather than derived, because it is the
   // one thing about the flow that is not a reading of a row this browser
@@ -520,6 +524,7 @@ export function ComposePage(props: ComposePageProps) {
             draft={draft}
             onDraft={(patch) => setDraft((held) => ({ ...held, ...patch }))}
             credentials={credentials}
+            credentialFeed={props.credentialFeed}
             isClusterOwner={isClusterOwner}
             probe={probe}
             zipProbe={zipProbe}
@@ -710,6 +715,7 @@ export function ComposePage(props: ComposePageProps) {
           {lifecycle.refusal ? <ProblemNotice problem={{ ...lifecycle.refusal, fatal: true }} tone="error" /> : null}
           {liveIds.length > 0 && !wentLive ? <Notice tone="warn" sentence={`${liveIds.length} app${liveIds.length === 1 ? " is" : "s are"} live.`} next="Go live again to finish the remaining apps." /> : null}
 
+          <ConnectReturnNotice result={props.connectResult} />
           <ComposeJourney awaitingLive={finished && !wentLive} input={input} selected={journeyStop} onSelect={chooseStop} stopBody={stopBody} />
 
           {can.deploy ? null : (

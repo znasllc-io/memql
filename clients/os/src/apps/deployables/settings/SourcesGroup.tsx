@@ -9,8 +9,9 @@ import { ProblemNotice } from "../packages/ReportView";
 import { sourceLabel, type PackageRow } from "../packages/rows";
 import { AddCredential, cardName } from "../sources/CredentialField";
 import { ConnectedAccountCard } from "../sources/ConnectedAccountCard";
+import { ConnectReturnNotice } from "../sources/ConnectReturnNotice";
 import { ConnectGitHub } from "../sources/ConnectGitHub";
-import { connectSucceeded, returnPathFor, type ConnectReturn } from "../sources/connectReturn";
+import { returnPathFor, type ConnectReturn } from "../sources/connectReturn";
 import { SOURCE_HOST } from "../sources/probe";
 import { bare, usePeopleNames } from "../people";
 import {
@@ -230,15 +231,7 @@ export function SourcesGroup({
           connection says NOTHING here: the card arrives on the credential
           feed's own broadcast with the standard arrival ring, and this shell
           has no toasts. Only a refusal has something to add. */}
-      {connectResult !== null && !connectSucceeded(connectResult) ? (
-        <ProblemNotice
-          problem={{
-            code: connectResult.reason,
-            message: "GitHub sent you back without completing the connection.",
-          }}
-          tone={toneFor(connectResult.reason)}
-        />
-      ) : null}
+      <ConnectReturnNotice result={connectResult} />
 
       {grant === null ? (
         <ConnectGitHub

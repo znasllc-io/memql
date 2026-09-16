@@ -30,8 +30,8 @@
 // every other parameter exactly as they were. A blanket
 // `replaceState({}, "", "/")` here would eat a sign-in mid-flight.
 
-/** The callback's own marker: `ok`, or the refusal code it stopped on. */
-export const CONNECT_RESULT_PARAM = "github_connect";
+/** Wire contract: component/identity/http/github_callback.go. */
+export const CONNECT_RESULT_PARAM = "github";
 
 /** The section hint THIS OS put in the return path, so the answer lands
  *  where the question was asked. A courtesy rather than a contract: a
@@ -44,7 +44,7 @@ export const CONNECT_SECTION_PARAM = "connect";
 export const DEFAULT_CONNECT_SECTION = "settings";
 
 export interface ConnectReturn {
-  /** `ok`, or a refusal code the copy table names. */
+  /** connected, reconnected, installed (no grant yet), or a refusal code. */
   reason: string;
   /** The Deployables section to open. */
   section: string;
@@ -77,13 +77,13 @@ export function readConnectReturn(search: string): ConnectReturn | null {
   const section = (params.get(CONNECT_SECTION_PARAM) ?? "").trim();
   return {
     reason: (params.get(CONNECT_RESULT_PARAM) ?? "").trim(),
-    section: section === "" ? DEFAULT_CONNECT_SECTION : section,
+    section: section === "deployables" ? section : DEFAULT_CONNECT_SECTION,
   };
 }
 
 /** Whether a return says the connection was made. */
 export function connectSucceeded(result: ConnectReturn): boolean {
-  return result.reason === "ok";
+  return result.reason === "connected" || result.reason === "reconnected";
 }
 
 /** The same query with this epic's two parameters removed, leading `?`

@@ -14,7 +14,7 @@ import { flatten } from "../../../../../kit/rows";
 import { zipUnusableNote, type ZipVerdict } from "../../../sources/probe";
 import type { ArtifactProbeHandle, SourceProbeHandle } from "../../../sources/useProbes";
 import { PICKER_PAGE_SIZE, useZipArtifacts } from "../../../sources/useZipArtifacts";
-import type { CredentialRow } from "../../../sources/rows";
+import type { CredentialFeedStatus, CredentialRow } from "../../../sources/rows";
 import type { PackageRow } from "../../../packages/rows";
 import { sourceLabel } from "../../../packages/rows";
 import { suggestName, type ComposeDraft } from "../../compose";
@@ -60,6 +60,7 @@ export function ComposeSourceStop({
   draft,
   onDraft,
   credentials,
+  credentialFeed,
   isClusterOwner,
   probe,
   zipProbe,
@@ -74,6 +75,7 @@ export function ComposeSourceStop({
   draft: ComposeDraft;
   onDraft: (patch: Partial<ComposeDraft>) => void;
   credentials: readonly CredentialRow[];
+  credentialFeed?: CredentialFeedStatus;
   /** A CI-pushed source is a cluster owner's act (design section C). */
   isClusterOwner: boolean;
   probe: SourceProbeHandle;
@@ -141,6 +143,7 @@ export function ComposeSourceStop({
             draft={draft}
             onDraft={onDraft}
             credentials={credentials}
+            credentialFeed={credentialFeed}
             probe={probe}
             tokenFormOpen={tokenFormOpen}
             onTokenFormOpenChange={onTokenFormOpenChange}
