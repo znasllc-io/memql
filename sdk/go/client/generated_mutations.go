@@ -14,6 +14,34 @@ var (
 	_ = strings.Builder{}
 )
 
+// AcknowledgeAttention -- Acknowledge exactly the change revision the caller viewed. Ownership and row identity are derived by the server; one person cannot dismiss another's.
+//
+// Bound concept: v1:os:attentionReceipt (machine-readable: BoundConcepts["acknowledgeAttention"] in generated_concepts.go).
+type AcknowledgeAttentionArgs struct {
+	ChangeId string
+	Revision string
+}
+
+// AcknowledgeAttention calls the engine mutation acknowledgeAttention.
+func (qc *QueryClient) AcknowledgeAttention(ctx context.Context, args AcknowledgeAttentionArgs) (*Result, error) {
+	call := AcknowledgeAttentionBuild(args)
+	return qc.executeNamed(ctx, "acknowledgeAttention", call)
+}
+
+func AcknowledgeAttentionBuild(args AcknowledgeAttentionArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation acknowledgeAttention(")
+	b.WriteString("changeId: ")
+	b.WriteString(quoteMemQL(args.ChangeId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("revision: ")
+	b.WriteString(quoteMemQL(args.Revision))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ActivateAuthoringBundle -- Activate a bundle after Gate 3 approval: status -> active and activatedAt stamped. The authored-construct runtime (#959) registers the bundle's constructs on this transition; member constructs are flipped to active via setConstructStatus.
 //
 // Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["activateAuthoringBundle"] in generated_concepts.go).
@@ -5052,11 +5080,13 @@ type CreatePackageArgs struct {
 	PackageId string
 	Name      string
 	// Enum: repo | artifact
-	SourceKind   string
-	RepoUrl      string
-	RepoRef      string
-	CredentialId string
-	ArtifactId   string
+	SourceKind    string
+	RepoUrl       string
+	RepoRef       string
+	CredentialId  string
+	ArtifactId    string
+	AutoDeploy    bool
+	AutoDeploySet bool // set true to send autoDeploy; required because zero-value bool is ambiguous
 	// The v1:accounts:account this package is for. Absent means untied.
 	AccountId string
 }
@@ -5109,6 +5139,13 @@ func CreatePackageBuild(args CreatePackageArgs) string {
 		}
 		b.WriteString("artifactId: ")
 		b.WriteString(quoteMemQL(args.ArtifactId))
+	}
+	if args.AutoDeploySet {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("autoDeploy: ")
+		b.WriteString(fmt.Sprintf("%v", args.AutoDeploy))
 	}
 	if args.AccountId != "" {
 		if b.Len() > 23 {

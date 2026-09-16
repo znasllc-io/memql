@@ -511,6 +511,15 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 	// begins, never inside one, which is what makes "nothing was published" a
 	// property of the shape rather than of the timing.
 	checkCancelled := func() error {
+		if req.Automatic {
+			current, err := d.Store.packageById(ctx, req.PackageId)
+			if err != nil {
+				return err
+			}
+			if current == nil || !rowBool(current, "autoDeploy") || rowString(current, "status") != "active" {
+				return refuse(CodeDeploymentCancelled, "automatic deployment was disabled before the publish/roll boundary; the serving version is unchanged")
+			}
+		}
 		if cancelled != nil && cancelled.Load() {
 			return refuse(CodeDeploymentCancelled,
 				"this run was stopped before it %s. Nothing was published, and every site is still serving what it was serving.",
@@ -688,7 +697,10 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 		return perr
 	}
 
-	if verr := d.Store.recordDeployedVersion(ctx, req.PackageId, snapshot.Version, false); verr != nil {
+	// A newer head may have arrived during the build; keep that update pending.
+	latest, latestErr := d.Store.packageById(ctx, req.PackageId)
+	pending := latestErr != nil || (rowString(latest, "latestKnownVersion") != "" && rowString(latest, "latestKnownVersion") != snapshot.Version)
+	if verr := d.Store.recordDeployedVersion(ctx, req.PackageId, snapshot.Version, pending); verr != nil {
 		d.log().Warn("packages: could not record the deployed version",
 			"component", "packages.pipeline", logger.Subject(packageDeploymentConcept, out.DeploymentId),
 			"deployment", out.DeploymentId, "err", verr)

@@ -2,6 +2,7 @@ package packages
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"sort"
 	"strings"
@@ -172,7 +173,7 @@ type RoleResolver func(ctx context.Context, userId string) (auth.Role, error)
 func (d *Deps) startAutoRun(ctx context.Context, pkg map[string]any, version string) (started bool, err error) {
 	packageId := rowString(pkg, "id")
 	owner := rowString(pkg, "ownerUserId")
-	if packageId == "" || !rowBool(pkg, "autoDeploy") {
+	if packageId == "" || !rowBool(pkg, "autoDeploy") || rowString(pkg, "status") != "active" {
 		return false, nil
 	}
 	if owner == "" {
@@ -223,7 +224,7 @@ func (d *Deps) startAutoRun(ctx context.Context, pkg map[string]any, version str
 		// rather than two. The second call finds a row at that id and the
 		// append-only guard refuses to reopen it, which is a refusal that
 		// means "already handled".
-		DeploymentId: autoDeploymentId(packageId, version),
+		DeploymentId: policyDeploymentId(pkg, version),
 		Actor:        Actor{UserId: owner, MayDeployDsl: mayDeployDsl},
 		Automatic:    true,
 	})
@@ -265,4 +266,15 @@ func safeVersion(version string) string {
 		return "unknown"
 	}
 	return b.String()
+}
+
+// An explicit policy change starts a new idempotency epoch. Re-enabling
+// Automatic can retry a revision cancelled or refused under the old policy.
+func policyDeploymentId(pkg map[string]any, version string) string {
+	id := autoDeploymentId(rowString(pkg, "id"), version)
+	if epoch := rowString(pkg, "autoDeployChangedAt"); epoch != "" {
+		sum := sha256.Sum256([]byte(epoch))
+		id += fmt.Sprintf("-%x", sum[:6])
+	}
+	return id
 }

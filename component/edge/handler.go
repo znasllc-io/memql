@@ -2,6 +2,7 @@
 package edge
 
 import (
+	"bytes"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -233,31 +234,21 @@ func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request, fsys fs.FS, 
 	// ZERO downloads. Opening first would make every 304 cost exactly what
 	// a 200 costs, which is most of what this was worth.
 	//
-	// The file:// path has no content hash and falls back to a Stat -- size
-	// and mtime, which the filesystem already knows. A Stat on local disk is
-	// not the cost anyone is avoiding.
+	// The file:// path hashes content because build timestamps can be preserved.
 	etag, hasETag := assetETagFor(fsys, name, bundleRef)
 
-	// index.html is NEVER cached: it is how a deploy reaches a returning
-	// visitor. Everything else is content-addressed by the build, so it may
-	// be cached hard.
-	//
-	// The headers are set BEFORE the 304 branch because a 304 must repeat
-	// them: a conditional response that omitted Cache-Control would leave
-	// the client's freshness policy to a default, which for the immutable
-	// assets is the difference between one request a year and one per load.
-	if name == "index.html" || strings.HasSuffix(name, "/index.html") {
-		noCache(w)
-	} else {
+	// Every mutable URL must reach this handler again after a release. Only
+	// a filename digest VERIFIED against its bytes earns immutable caching.
+	noCache(w)
+	if contentAddressedAsset(fsys, name) {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		w.Header().Del("Pragma")
+		w.Header().Del("Expires")
 	}
 	if hasETag {
 		w.Header().Set("ETag", etag)
-		// index.html carries a validator TOO, and that is where 304 pays
-		// daily. `no-cache` does not mean "do not store" -- it means
-		// "revalidate before use" -- so a returning visitor asks every time,
-		// and before this the answer was always the whole document again.
-		if etagMatches(r.Header.Get("If-None-Match"), etag) {
+		// Repeat the current freshness policy on conditional responses too.
+		if (r.Method == http.MethodGet || r.Method == http.MethodHead) && etagMatches(r.Header.Get("If-None-Match"), etag) {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
@@ -279,9 +270,10 @@ func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request, fsys fs.FS, 
 		Read([]byte) (int, error)
 		Seek(int64, int) (int64, error)
 	}); ok {
-		info, _ := fs.Stat(fsys, name)
-		var modTime = info.ModTime()
-		http.ServeContent(w, r, path.Base(name), modTime, rs)
+		// HTTP dates have one-second precision and archive mtimes often
+		// survive a release unchanged. Use the content/version ETag alone;
+		// an old If-Modified-Since must never suppress a changed release.
+		http.ServeContent(w, r, path.Base(name), time.Time{}, rs)
 		return
 	}
 	data, err := fs.ReadFile(fsys, name)
@@ -290,7 +282,7 @@ func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request, fsys fs.FS, 
 		http.NotFound(w, r)
 		return
 	}
-	_, _ = w.Write(data)
+	http.ServeContent(w, r, path.Base(name), time.Time{}, bytes.NewReader(data))
 }
 
 func noCache(w http.ResponseWriter) {

@@ -1,3 +1,4 @@
+import { AttentionMarker } from "../attention/Attention";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Palette } from "lucide-react";
 
@@ -142,7 +143,7 @@ export function LauncherOverlay({
                   className="os-tile"
                   onClick={() => launch(app.id)}
                 >
-                  <Icon size={26} aria-hidden />
+                  <span className="os-attention-anchor"><Icon size={26} aria-hidden /><AttentionMarker appId={app.id} /></span>
                   <span>{app.name}</span>
                 </button>
               );

@@ -318,15 +318,15 @@ func TestCSPOmitsTheIdentityOriginWhenUnconfigured(t *testing.T) {
 
 // index.html must never be cached: it is how a deploy reaches a returning
 // visitor. Fingerprinted assets may be cached hard.
-func TestIndexIsNotCachedButAssetsAre(t *testing.T) {
+func TestMutableEntryDocumentsAndAssetsAreNotCached(t *testing.T) {
 	files := map[string]string{"index.html": "ROOT", "assets/app.js": "JS"}
 	live := &Site{ID: "s1", Hostname: "shop.example.com", Status: "live", Kind: "spa"}
 
 	if cc := serve(t, live, files, "/").Header().Get("Cache-Control"); !isNoCache(cc) {
 		t.Errorf("index.html Cache-Control = %q, want no-cache", cc)
 	}
-	if cc := serve(t, live, files, "/assets/app.js").Header().Get("Cache-Control"); isNoCache(cc) {
-		t.Errorf("asset Cache-Control = %q, want a cacheable policy", cc)
+	if cc := serve(t, live, files, "/assets/app.js").Header().Get("Cache-Control"); !isNoCache(cc) {
+		t.Errorf("asset Cache-Control = %q, want a revalidation policy", cc)
 	}
 }
 

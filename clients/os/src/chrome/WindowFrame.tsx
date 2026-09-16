@@ -1,3 +1,4 @@
+import { AttentionMarker, AttentionDestination } from "../attention/Attention";
 import { visiblePageContext, visiblePageLabel } from "../kit/pageContext";
 import { PageNavigationProvider } from "../kit/pageNavigation";
 import { WindowSearchContext, useWindowSearchHost } from "../kit/windowSearch";
@@ -159,7 +160,7 @@ export function WindowFrame({
           onContextMenu={event => { event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY }); }}
           onKeyDown={event => { if (event.key === "F10" && event.shiftKey) { event.preventDefault(); const box = event.currentTarget.getBoundingClientRect(); setMenu({ x: box.left, y: box.bottom }); } else listeners?.onKeyDown?.(event); }}
         >
-          <Icon size={14} aria-hidden />
+          <Icon size={14} aria-hidden /><AttentionMarker appId={manifest.id} />
 
         </button>
         <select className="os-window-app-selector" aria-label={`Switch app from ${manifest.name}`} value={manifest.id} onChange={event => {
@@ -197,11 +198,11 @@ export function WindowFrame({
               title={`${manifest.name} settings`}
               onClick={() => actions.navigateSection(win.id, manifest.settingsSection!)}
             >
-              <Settings2 size={14} aria-hidden />
+              <Settings2 size={14} aria-hidden /><AttentionMarker appId={manifest.id} sectionId={manifest.settingsSection} />
               {settingsTone ? <ProvenanceDot tone={settingsTone} /> : null}
             </button>
           ) : null}
-          {logs ? <button type="button" className="os-icon-button" aria-label={`${manifest.name} logs`} title={`${manifest.name} logs`} onClick={() => actions.navigateSection(win.id, logs.id)}><ListFilter size={14} aria-hidden /></button> : null}
+          {logs ? <button type="button" className="os-icon-button" aria-label={`${manifest.name} logs`} title={`${manifest.name} logs`} onClick={() => actions.navigateSection(win.id, logs.id)}><ListFilter size={14} aria-hidden /><AttentionMarker appId={manifest.id} sectionId={logs.id} /></button> : null}
           </div><div className="os-window-control-group">
           <button
             type="button"
@@ -230,7 +231,7 @@ export function WindowFrame({
       <dialog ref={searchDialog} className="os-window-search" aria-label={`Search ${manifest.name} destinations`}>
         <header><strong>{manifest.name} destinations</strong><button type="button" className="os-icon-button" aria-label="Close destination search" onClick={() => searchDialog.current?.close()}><X size={14} aria-hidden /></button></header>
         <input autoFocus className="os-input" aria-label="Find a destination" placeholder="Find a destination…" value={searchQuery} onChange={event => setSearchQuery(event.target.value)} />
-        <nav aria-label="Matching destinations">{sections.filter(section => section.name.toLowerCase().includes(searchQuery.toLowerCase())).map(section => <button type="button" className="os-window-nav-item" key={section.id} onClick={() => { searchDialog.current?.close(); actions.navigateSection(win.id, section.id, "content"); }}>{section.name}</button>)}</nav>
+        <nav aria-label="Matching destinations">{sections.filter(section => section.name.toLowerCase().includes(searchQuery.toLowerCase())).map(section => <button type="button" className="os-window-nav-item" key={section.id} onClick={() => { searchDialog.current?.close(); actions.navigateSection(win.id, section.id, "content"); }}>{section.name}<AttentionMarker appId={manifest.id} sectionId={section.id} /></button>)}</nav>
         {!sections.some(section => section.name.toLowerCase().includes(searchQuery.toLowerCase())) ? <p>No destinations match.</p> : null}
       </dialog>
       <div className="os-window-body">
@@ -252,7 +253,7 @@ export function WindowFrame({
                 aria-current={section.id === (current?.parent ?? current?.id) ? "page" : undefined}
                 onClick={() => actions.navigateSection(win.id, section.id)}
               >
-                {section.name}
+                {section.name}<AttentionMarker appId={manifest.id} sectionId={section.id} />
                 {settingsTone && section.id === manifest.settingsSection ? (
                   <ProvenanceDot tone={settingsTone} />
                 ) : null}
@@ -302,7 +303,7 @@ export function WindowFrame({
                focused-window guess does not. Keyed by window so one window's
                fault never carries into another's. */
             <WindowErrorBoundary key={win.id} app={manifest.id} section={current?.id ?? ""}>
-              <WindowSearchContext.Provider value={searchHost}><PageNavigationProvider root={content} trail={(win.sectionTrail ?? []).map(id => ({ label: sections.find(section => section.id === id)?.name ?? id, onSelect: () => actions.navigateSection(win.id, id, "back") }))}><Body
+              <WindowSearchContext.Provider value={searchHost}><PageNavigationProvider root={content} trail={(win.sectionTrail ?? []).map(id => ({ label: sections.find(section => section.id === id)?.name ?? id, onSelect: () => actions.navigateSection(win.id, id, "back") }))}><AttentionDestination appId={manifest.id} sectionId={current?.id ?? ""} visible={!hidden}><Body
                 sectionId={current?.id ?? ""}
                 navigation={win.sectionNavigation}
                 windowVisible={!hidden}
@@ -310,7 +311,7 @@ export function WindowFrame({
                 askContext={(tag) => openAsk(tag)}
                 intent={win.intent}
                 consumeIntent={(intentId) => actions.consumeWindowIntent(win.id, intentId)}
-              /></PageNavigationProvider></WindowSearchContext.Provider>
+              /></AttentionDestination></PageNavigationProvider></WindowSearchContext.Provider>
             </WindowErrorBoundary>
           )}
         </div>

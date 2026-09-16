@@ -1,3 +1,4 @@
+import { AttentionMarker, AttentionDestination } from "../attention/Attention";
 import { useState } from "react";
 import { ArrowLeft, LayoutGrid } from "lucide-react";
 
@@ -76,7 +77,7 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
         ) : (
           <Mark className="os-phone-mark" />
         )}
-        <span className="os-phone-title">{current ? current.name : "MemQL OS"}</span>
+        <span className="os-phone-title">{current ? current.name : "MemQL OS"}{current ? <AttentionMarker appId={current.id} /> : null}</span>
         <button type="button" className="os-link" onClick={onSignOut}>
           Sign out
         </button>
@@ -101,7 +102,7 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
                   aria-current={section.id === (activeSection?.parent ?? activeSection?.id) ? "page" : undefined}
                   onClick={() => setSectionId(section.id)}
                 >
-                  {section.name}
+                  {section.name}<AttentionMarker appId={current.id} sectionId={section.id} />
                   {settingsTone && section.id === current.settingsSection ? (
                     <ProvenanceDot tone={settingsTone} />
                   ) : null}
@@ -119,11 +120,11 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
             />
           ) : (
             <WindowErrorBoundary key={current.id} app={current.id} section={activeSection?.id ?? ""}>
-              <current.component
+              <AttentionDestination appId={current.id} sectionId={activeSection?.id ?? ""}><current.component
                 sectionId={activeSection?.id ?? ""}
                 navigate={setSectionId}
                 askContext={(tag) => openAsk(tag)}
-              />
+              /></AttentionDestination>
             </WindowErrorBoundary>
           )}
         </main>
@@ -133,7 +134,7 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
             const Icon = app.icon;
             return (
               <button key={app.id} type="button" className="os-tile" onClick={() => open(app.id)}>
-                <Icon size={26} aria-hidden />
+                <span className="os-attention-anchor"><Icon size={26} aria-hidden /><AttentionMarker appId={app.id} /></span>
                 <span>{app.name}</span>
               </button>
             );

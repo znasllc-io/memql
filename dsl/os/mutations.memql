@@ -50,3 +50,20 @@ mutation desktop saveMyDesktop {
     }
   }
 }
+
+/// Acknowledge exactly the change revision the caller viewed. Ownership and
+/// row identity are derived by the server; one person cannot dismiss another's.
+@actor
+mutation attentionReceipt acknowledgeAttention {
+  args {
+    changeId string! @maxLength(300)
+    revision string! @maxLength(300)
+  }
+  insert {
+    accept { changeId, revision }
+    stamp {
+      id: hash(actor.userId + ":" + hash(args.changeId) + ":" + hash(args.revision))
+      ownerUserId: actor.userId
+    }
+  }
+}

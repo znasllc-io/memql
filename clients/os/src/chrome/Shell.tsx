@@ -1,3 +1,6 @@
+import { AttentionProvider } from "../attention/Attention";
+import { SharedPackagesProvider } from "../apps/deployables/packages/usePackages";
+import { DeployablesAttentionFeed } from "../apps/deployables/attention";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type { ChromeLayout } from "../app/layout";
@@ -270,6 +273,7 @@ function ShellRoster({
           memql#4915). Renders nothing, and does nothing at all on a browser
           that did not arrive from a callback -- which is every other one. It
           sits INSIDE OsProvider because opening an app is a shell act. */}
+      <AttentionProvider apps={OS_REGISTRY.apps}><SharedPackagesProvider><DeployablesAttentionFeed />
       <ConnectReturnDispatcher />
       <SetupReturnDispatcher />
       {/* Whether the setup widget is on the active desk at all -- derived from
@@ -287,6 +291,7 @@ function ShellRoster({
           section, read from this provider's state at capture time. */}
       <CaptureContextInstaller />
       {children}
+      </SharedPackagesProvider></AttentionProvider>
     </OsProvider>
   );
 }

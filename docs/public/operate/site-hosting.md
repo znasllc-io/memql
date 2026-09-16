@@ -525,10 +525,11 @@ happens when nothing else matched. The full order
    **`static`**: `404` -- a mistyped path in a multi-page site should be
    visible, not silently rendered as the home page.
 
-`index.html` is never cached (`Cache-Control: no-cache`) so a deploy
-reaches a returning visitor; everything else is served
-`immutable, max-age=31536000` because it is content-addressed by the
-build.
+HTML and mutable asset URLs are served with `no-cache, no-store,
+must-revalidate` so ordinary navigation reaches the current deployment.
+Only assets with a verified SHA-256 filename component (12–64 hexadecimal
+characters) receive `public, max-age=31536000, immutable`. Other bundler
+fingerprint formats use the safe revalidation policy.
 
 ---
 
@@ -802,15 +803,22 @@ answers a different question.
 
 | Response | `Cache-Control` | Validator |
 |---|---|---|
-| Hashed assets (`assets/app.abc123.js`) | `public, max-age=31536000, immutable` | strong `ETag` |
-| `index.html` and any `.html` fallback | `no-cache, no-store, must-revalidate` | strong `ETag` |
+| Assets with a verified SHA-256 filename component (12–64 hex characters) | `public, max-age=31536000, immutable` | strong `ETag` |
+| All HTML, route fallbacks, and other mutable assets (JS, CSS, service workers, JSON) | `no-cache, no-store, must-revalidate` | strong `ETag` |
 | `runtime-config.json` | `no-store` | none |
 | A 404 | `no-cache, no-store, must-revalidate` | none |
 
-`no-cache` does not mean "do not store" -- it means "revalidate before
-use". So a returning visitor asks about `index.html` on every load, and the
-`ETag` is what turns that from a full re-transfer into a 304. That single
-request is the most common one a live site serves.
+Mutable responses include `no-store`; browsers must fetch them again on
+ordinary navigation. Conditional requests with a current `ETag` can receive
+a 304. Blob validators include the immutable bundle version and path; local
+file validators hash actual bytes. Date-only validators are ignored because
+archive timestamps can survive a release unchanged.
+
+These headers apply to static/SPA bundle responses. Dynamic and proxy
+responses keep their own policies. An already open tab is not forcibly
+reloaded, and an application-owned service worker can independently control
+its cache. Responses previously cached as immutable cannot be revoked by new
+headers; those clients need expiry, a changed asset URL, or a one-time refresh.
 
 ### 2. The edge's own memory
 
@@ -836,14 +844,13 @@ Two caches, deliberately separate:
 **Fronting the edge with a CDN is safe, and needs no purge integration.**
 That is a property of the layout rather than a promise:
 
-- Every cacheable asset is **immutable and content-addressed**. A build
-  emits `app.abc123.js`; a rebuild emits a different name. A CDN holding
-  the old one forever is correct, because the old one is still the correct
-  answer for the old name.
-- The three mutable things are **never cacheable**: `index.html` and any
-  `.html` fallback are `no-cache`, `runtime-config.json` is `no-store`, and
-  site resolution happens inside the edge on every request. So there is
-  nothing a CDN can hold that a deploy needs it to forget.
+- Long-lived assets have a filename digest verified against their bytes. A
+  changed body must use a different verified filename to retain that policy.
+- HTML, route fallbacks, and unverified assets use `no-cache, no-store,
+  must-revalidate`; `runtime-config.json` uses `no-store`. Site resolution
+  uses change-feed invalidation with a short TTL backstop.
+- This applies once the new policy reaches clients. A CDN containing an older
+  response marked immutable may need a one-time purge during migration.
 
 **Key on the request URI as usual, and add nothing.** The edge sets no
 `Vary`, and that is a decision rather than an omission: the two things that

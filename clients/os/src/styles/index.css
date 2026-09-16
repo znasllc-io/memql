@@ -14078,3 +14078,15 @@ a.os-button {
   .os-step-number { width: 22px; height: 22px; }
 }
 @media (pointer: coarse) { .os-journey-trail button { min-height: 44px; } }
+
+/* Unseen changes are blue. Health, setup warnings and Ask keep their own marks. */
+.os-attention-dot { position: absolute; top: 3px; right: 3px; width: 7px; height: 7px; border-radius: 50%; background: var(--os-attention-color); box-shadow: 0 0 0 2px var(--os-plate); pointer-events: none; }
+.os-attention-anchor, .os-window-grip, .os-dock-app, .os-phone-section, .os-phone-title, .deployable-list-row { position: relative; }
+.os-attention-map-dot { fill: var(--os-attention-color); stroke: var(--os-plate); stroke-width: 2px; }
+
+.deployable-mode-fieldset { border: 0; padding: 0; margin: 0; }
+.os-window-nav-item { position: relative; }
+.deployable-version-picker { margin-block: 8px; }
+
+.os-icon-button:has(> .os-attention-dot) { position: relative; }
+.os-icon-button[data-os-setup]:has(> .os-attention-dot) .os-dot { right: auto; left: 3px; }

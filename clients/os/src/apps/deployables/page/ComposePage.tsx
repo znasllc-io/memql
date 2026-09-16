@@ -361,6 +361,7 @@ export function ComposePage(props: ComposePageProps) {
         sourceKind: draft.choice === "zip" ? "artifact" : "repo",
         repoUrl: draft.choice === "repo" ? draft.repoUrl.trim() : "",
         repoRef: draft.choice === "repo" ? draft.repoRef.trim() : "",
+        autoDeploy: draft.choice === "repo" && draft.autoDeploy === true,
         credentialId: draft.choice === "repo" ? draft.credentialId.trim() : "",
         artifactId: draft.choice === "zip" ? draft.artifactId : "",
         // THE SOURCE IS THE CLUSTER'S OWN (memql#5303, D12). It is registered

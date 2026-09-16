@@ -3,6 +3,8 @@ package edge
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -102,12 +104,13 @@ func get(t *testing.T, h *Handler, path string, headers map[string]string) *http
 // back. A 304 costing zero storage reads is the thing that makes the edge
 // affordable in front of a busy site.
 func TestConditionalRequestAnswers304WithZeroDownloads(t *testing.T) {
+	name := fmt.Sprintf("assets/app.%x.js", sha256.Sum256([]byte("console.log(1)")))
 	client := newCountingBlobClient(map[string][]byte{
-		testBundlePrefix + "assets/app.abc123.js": []byte("console.log(1)"),
+		testBundlePrefix + name: []byte("console.log(1)"),
 	})
 	h := blobSiteHandler(t, client)
 
-	first := get(t, h, "/assets/app.abc123.js", nil)
+	first := get(t, h, "/"+name, nil)
 	if first.Code != http.StatusOK {
 		t.Fatalf("first request: status %d, want 200", first.Code)
 	}
@@ -120,7 +123,7 @@ func TestConditionalRequestAnswers304WithZeroDownloads(t *testing.T) {
 	}
 	downloadsAfterFirst := client.totalGets()
 
-	second := get(t, h, "/assets/app.abc123.js", map[string]string{"If-None-Match": etag})
+	second := get(t, h, "/"+name, map[string]string{"If-None-Match": etag})
 	if second.Code != http.StatusNotModified {
 		t.Fatalf("conditional request: status %d, want 304", second.Code)
 	}

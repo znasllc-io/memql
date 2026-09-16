@@ -30,6 +30,7 @@ export interface NewPackageInput {
   sourceKind: "repo" | "artifact";
   repoUrl: string;
   repoRef: string;
+  autoDeploy?: boolean;
   /** A v1:platform:sourceCredential id. This surface never handles a token value. */
   credentialId: string;
   artifactId: string;
@@ -49,6 +50,7 @@ export async function createPackage(query: QueryClient, input: NewPackageInput):
     `name: ${renderMemQLValue(input.name)}`,
     `sourceKind: ${renderMemQLValue(input.sourceKind)}`,
   ];
+  parts.push(`autoDeploy: ${input.sourceKind === "repo" && input.autoDeploy === true}`);
   if (input.repoUrl !== "") parts.push(`repoUrl: ${renderMemQLValue(input.repoUrl)}`);
   if (input.repoRef !== "") parts.push(`repoRef: ${renderMemQLValue(input.repoRef)}`);
   if (input.credentialId !== "") parts.push(`credentialId: ${renderMemQLValue(input.credentialId)}`);

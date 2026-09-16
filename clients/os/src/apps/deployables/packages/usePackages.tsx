@@ -1,3 +1,6 @@
+import { createContext, useContext, type ReactNode } from "react";
+import { useSession } from "../../../chrome/access";
+import { accessAdmits } from "../../../system/registry";
 import { getRowByConceptAndId, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useLiveCollection, type LiveCollectionHandle } from "../../../live/useLiveCollection";
@@ -28,8 +31,19 @@ import { DEPLOYMENT_CONCEPT, PACKAGE_CONCEPT } from "./rows";
  * restart the collection from empty the moment access resolved, unmounting
  * whatever was open.
  */
+const PackagesContext = createContext<LiveCollectionHandle<Row> | null>(null);
+export function SharedPackagesProvider({ children }: { children: ReactNode }) {
+  useSession(); // Re-evaluate visibility when capability grants change.
+  const feed = usePackageFeed(accessAdmits("app:deployables"));
+  return <PackagesContext.Provider value={feed}>{children}</PackagesContext.Provider>;
+}
 export function usePackages(): LiveCollectionHandle<Row> {
-  return useLiveCollection<Row>("deployables:packages", (connection) => ({
+  const shared = useContext(PackagesContext);
+  const own = usePackageFeed(shared === null);
+  return shared ?? own;
+}
+function usePackageFeed(enabled: boolean): LiveCollectionHandle<Row> {
+  return useLiveCollection<Row>(enabled ? "deployables:packages" : null, (connection) => ({
     concept: PACKAGE_CONCEPT,
     seed: async (_cursor, signal) => {
       const result = await connection.query.packagesAll({}, { signal });

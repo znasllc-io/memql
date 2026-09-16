@@ -262,6 +262,7 @@ shape package packageFull {
   latestKnownVersion
   updateAvailable
   autoDeploy
+  autoDeployChangedAt
   declares
   disabledDeployables
   status

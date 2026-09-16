@@ -338,7 +338,8 @@ export function DeployablePage({
             <ProblemNotice problem={{ ...headActions.refusal, fatal: true }} tone="error" />
           ) : null}
 
-          <DeployableWorkspace
+          <DeployableWorkspace key={site.id}
+            canSources={can.sources} onUpdate={reading.acts.some(a => a.name === "Deploy the update") && !headActions.busy ? () => act("Deploy the update") : undefined}
             site={site} pkg={pkg} run={run} accounts={accounts} canDomains={can.domains}
             timelineState={deployments?.snapshot.state ?? "disconnected"}
             timelineError={deployments?.snapshot.error ?? ""} onRetryRead={reseed}

@@ -1,3 +1,8 @@
+import { usePaneActive } from "../paneActivity";
+import { AttentionDestination, AttentionMarker } from "../../../attention/Attention";
+import { updateTarget } from "../attention";
+import { AutoDeploySwitch } from "./stops/Source";
+import { useState } from "react";
 import { healthExplanation } from "../health";
 import { IconButton } from "../../../kit/IconButton";
 import type { ReactNode } from "react";
@@ -15,11 +20,15 @@ import { railFor, type RailInput } from "./rail";
 
 export type WorkspaceDetail = "source" | "whatItIs" | "whereItLives" | "build" | "live" | "runtime" | "traffic";
 
-export function DeployableWorkspace({ site, pkg, run, accounts, canDomains, timelineState, timelineError, onRetryRead, onInspect, onOpenSource, onHistory }: {
+export function DeployableWorkspace({ site, pkg, run, accounts, canDomains, timelineState, timelineError, onRetryRead, onInspect, onOpenSource, onHistory, canSources = false, onUpdate }: {
+  canSources?: boolean; onUpdate?: () => void;
   site: SiteRow; pkg: PackageRow | null; run: DeploymentRow | null; accounts: AccountRow[];
   canDomains: boolean; timelineState: string; timelineError: string; onRetryRead: () => void;
   onInspect: (detail: WorkspaceDetail) => void; onOpenSource: () => void; onHistory: () => void;
 }) {
+  const paneActive = usePaneActive();
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const [modeOpen, setModeOpen] = useState(false);
   const built = siteIsBuilt(site);
   const state = site.status === "" ? "Unknown" : siteStateWord(site);
   const binding = site.kind === "shopify_storefront" ? storefrontBinding(site) : null;
@@ -45,6 +54,7 @@ export function DeployableWorkspace({ site, pkg, run, accounts, canDomains, time
         <div className="deployable-object-title">{site.kind === "shopify_storefront" ? <ShoppingBag size={17} aria-hidden /> : <AppWindow size={17} aria-hidden />}<span>App configuration</span></div>
         <button type="button" className="deployable-piece-chip" onClick={() => onInspect("whatItIs")}><Shapes size={14} aria-hidden />Build settings</button>
         {binding ? <button type="button" className="deployable-piece-chip" onClick={() => onInspect("whatItIs")}><Link size={14} aria-hidden />{binding.storeDomain || "Shopify binding"}</button> : null}
+        {pkg?.sourceKind === "repo" && !site.systemOwned ? <button type="button" className="deployable-piece-chip" onClick={() => setModeOpen(open => !open)} aria-expanded={modeOpen}><GitBranch size={14} aria-hidden />{pkg.autoDeploy ? "Automatic" : "Manual"} deployment</button> : null}
         {!site.systemOwned ? <button type="button" className="deployable-piece-chip" onClick={() => onInspect("runtime")}><SlidersHorizontal size={14} aria-hidden />App values <span>{Object.keys(site.settings).length}</span></button> : null}
       </ActivityTarget>
       <div className="deployable-connections">
@@ -53,8 +63,18 @@ export function DeployableWorkspace({ site, pkg, run, accounts, canDomains, time
         <ActivityTarget target={`deployables:${site.id}:client`}><Piece icon={<Building2 size={18} aria-hidden />} label="Client" detail={accountNameFrom(accounts, site.accountId) || (site.accountId ? "Client name unavailable" : "The cluster")} onClick={() => onInspect("whereItLives")} /></ActivityTarget>
       </div>
     </section>
+    {modeOpen && pkg?.sourceKind === "repo" ? canSources ? <AutoDeploySwitch pkg={pkg} /> : <Caption>{pkg.autoDeploy ? "Automatic" : "Manual"} deployment. Only someone with source access can change this mode.</Caption> : null}
     <section className="deployable-versions" aria-label="Serving version and latest attempt">
       <header><h3>Versions</h3><IconButton label={pkg ? "Deployment history" : "Version history"} onClick={onHistory}><History size={16} aria-hidden /></IconButton></header>
+      {pkg?.sourceKind === "repo" ? <div className="deployable-version-picker">
+        <button type="button" className="deployable-piece-chip os-attention-anchor" aria-expanded={versionsOpen} onClick={() => setVersionsOpen(open => !open)}>
+          <GitBranch size={14} aria-hidden />Available version{pkg.updateAvailable ? ` · ${shortVersion(pkg.latestKnownVersion)}` : ""}
+          <AttentionMarker appId="deployables" target={updateTarget(pkg.id)} />
+        </button>
+        {versionsOpen ? <AttentionDestination appId="deployables" sectionId="deployables" target={updateTarget(pkg.id)} visible={paneActive}>
+          <div className="deployable-version-row"><span>Upstream</span><div><strong className="os-mono">{shortVersion(pkg.latestKnownVersion) || "Not checked yet"}</strong><small>{pkg.updateAvailable ? pkg.autoDeploy ? "Automatic deployment is enabled" : "Ready when you choose to deploy" : "No newer version detected"}</small></div>{pkg.updateAvailable && onUpdate ? <Button onClick={onUpdate}>Review update</Button> : null}</div>
+        </AttentionDestination> : null}
+      </div> : null}
       <div className="deployable-version-row"><span><Radio size={14} aria-hidden />{site.status === "live" ? state : "Stored version"}</span><div><strong className="os-mono">{built ? versionOf(site.bundleRef) : "No bundle yet"}</strong><small>{site.status === "live" ? healthExplanation(site) : built ? "Not published" : "Waiting for built files"}</small></div><IconButton label="Stored version details" onClick={() => onInspect("live")}><Info size={16} aria-hidden /></IconButton></div>
       {pkg ? <div className="deployable-version-row"><span><Hammer size={14} aria-hidden />Latest attempt</span><div><strong>{run ? attemptWord(run.status) : knownTimeline ? "No attempt yet" : "History unavailable"}</strong><small>{run ? [shortVersion(run.sourceVersion), build?.reason].filter(Boolean).join(" · ") : timelineState === "loading" || timelineState === "seeding" ? "Reading deployment history…" : "Deploy an update to start a new attempt"}</small></div>{run ? <IconButton label="Latest attempt details" onClick={() => onInspect(run.status === "awaiting_confirm" ? "whatItIs" : "build")}><Info size={16} aria-hidden /></IconButton> : null}</div> : null}
       {failed && site.status === "live" ? <Caption>The latest attempt did not replace the published version.</Caption> : null}
