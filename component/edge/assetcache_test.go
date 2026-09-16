@@ -348,7 +348,13 @@ func TestAMissDoesNotInheritTheImmutablePolicy(t *testing.T) {
 // ---- the LRU itself ----------------------------------------------------
 
 func TestBundleCacheEvictsLeastRecentlyUsed(t *testing.T) {
-	c := newBundleCache(30)
+	// The cap counts each entry's key and a fixed per-entry overhead as well
+	// as its value (entryCost), so a 10-byte value costs ~75. The cap here is
+	// three of those exactly -- the assertions below are unchanged; only the
+	// arithmetic moved when the accounting stopped ignoring what an entry
+	// really costs.
+	const threeEntries = 3 * (1 + 10 + cacheEntryOverhead)
+	c := newBundleCache(threeEntries)
 	c.Put("a", make([]byte, 10))
 	c.Put("b", make([]byte, 10))
 	c.Put("c", make([]byte, 10))
@@ -367,8 +373,8 @@ func TestBundleCacheEvictsLeastRecentlyUsed(t *testing.T) {
 			t.Errorf("%s was evicted", k)
 		}
 	}
-	if _, used := c.stats(); used > 30 {
-		t.Errorf("cache holds %d bytes, over its %d cap", used, 30)
+	if _, used := c.stats(); used > threeEntries {
+		t.Errorf("cache holds %d bytes, over its %d cap", used, threeEntries)
 	}
 }
 
@@ -376,7 +382,9 @@ func TestBundleCacheEvictsLeastRecentlyUsed(t *testing.T) {
 // Admitting it would flush every other entry to hold one item that the next
 // request for anything else immediately evicts.
 func TestBundleCacheRefusesAnOversizedEntryWithoutFlushing(t *testing.T) {
-	c := newBundleCache(20)
+	// Sized so "small" fits and "huge" cannot, under the same entryCost
+	// accounting (see the comment on the LRU test above).
+	c := newBundleCache(int64(len("small") + 10 + cacheEntryOverhead + 1))
 	c.Put("small", make([]byte, 10))
 	c.Put("huge", make([]byte, 100))
 

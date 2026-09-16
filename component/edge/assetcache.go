@@ -173,6 +173,32 @@ type cacheEntry struct {
 	data []byte
 }
 
+// cacheEntryOverhead is what an entry costs BESIDES its value: the key
+// string's own bytes are added separately, this covers the map slot, the
+// list node and the two headers.
+//
+// It is a flat estimate rather than a measurement, and being approximate is
+// fine -- the job is to stop the budget from ignoring the cost entirely.
+//
+// A CACHE'S BYTE BUDGET MUST BOUND ITS MEMORY, and the value length alone
+// does not. Ignoring the rest was harmless while every value here was a whole
+// bundle file, where the key and the node round to nothing beside the bytes.
+// It stops being harmless the moment anything caches SHORT values: at a
+// 4MB cap, 500,000 one-byte entries were accounted as 488KB while occupying
+// roughly 54MB, so eviction never fired and the map grew for the life of the
+// process. A zero-length value -- a perfectly reasonable "the answer is
+// nothing, do not recompute it" entry -- was free forever.
+//
+// This is the cache's own contract rather than any one caller's problem, so
+// it is fixed here: every entry now charges its key plus this overhead, and
+// the cap means what it says for any value size.
+const cacheEntryOverhead = 64
+
+// entryCost is what an entry charges against the cap.
+func entryCost(key string, data []byte) int64 {
+	return int64(len(key)) + int64(len(data)) + cacheEntryOverhead
+}
+
 func newBundleCache(maxBytes int64) *bundleCache {
 	return &bundleCache{
 		maxBytes: maxBytes,
@@ -208,19 +234,20 @@ func (c *bundleCache) Get(key string) ([]byte, bool) {
 // anything: admitting it would flush every other entry to hold one item
 // that the next request for anything else immediately evicts.
 func (c *bundleCache) Put(key string, data []byte) {
-	if c == nil || c.maxBytes <= 0 || int64(len(data)) > c.maxBytes {
+	if c == nil || c.maxBytes <= 0 || entryCost(key, data) > c.maxBytes {
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if el, ok := c.items[key]; ok {
-		c.used -= int64(len(el.Value.(*cacheEntry).data))
+		prev := el.Value.(*cacheEntry)
+		c.used -= entryCost(prev.key, prev.data)
 		c.order.Remove(el)
 		delete(c.items, key)
 	}
 	el := c.order.PushFront(&cacheEntry{key: key, data: data})
 	c.items[key] = el
-	c.used += int64(len(data))
+	c.used += entryCost(key, data)
 	for c.used > c.maxBytes {
 		oldest := c.order.Back()
 		if oldest == nil {
@@ -229,7 +256,7 @@ func (c *bundleCache) Put(key string, data []byte) {
 		entry := oldest.Value.(*cacheEntry)
 		c.order.Remove(oldest)
 		delete(c.items, entry.key)
-		c.used -= int64(len(entry.data))
+		c.used -= entryCost(entry.key, entry.data)
 	}
 }
 
