@@ -100,7 +100,7 @@ export function CampaignJourney({
     step === 1 ? feeds.senders : step === 2 ? feeds.audiences : step === 3 ? feeds.templates : null;
   return (
     <div
-      className="os-deploy-pane"
+      className="os-deploy-pane os-campaign-journey"
       data-os-page-context={JSON.stringify({
         page: "New campaign",
         view: STEPS[step],
