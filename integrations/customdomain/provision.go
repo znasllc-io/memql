@@ -147,13 +147,10 @@ const fieldManager = "memql-custom-domain"
 // the rule and the tls entry both have to name it.
 func IngressObject(req BindRequest) map[string]any {
 	name := objectName(req.DomainID)
+	// The explicit Certificate owns issuance and renewal. An issuer annotation
+	// would make ingress-shim create a second Certificate named after the TLS
+	// Secret, competing with the one this reconciler checks for readiness.
 	annotations := map[string]any{}
-	if strings.TrimSpace(req.Issuer) != "" {
-		// The issuer annotation is what makes cert-manager pick the Ingress up
-		// at all on the ingress-shim path; the standalone Certificate below is
-		// the belt to its braces, and the two converge on the same Secret.
-		annotations["cert-manager.io/cluster-issuer"] = strings.TrimSpace(req.Issuer)
-	}
 	obj := map[string]any{
 		"apiVersion": "networking.k8s.io/v1",
 		"kind":       "Ingress",

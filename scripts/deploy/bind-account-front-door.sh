@@ -314,7 +314,6 @@ YAML
     render_labels
     cat <<YAML
   annotations:
-    cert-manager.io/cluster-issuer: "${ISSUER}"
 YAML
     local extra
     for extra in "$@"; do
@@ -361,7 +360,6 @@ YAML
     render_labels
     cat <<YAML
   annotations:
-    cert-manager.io/cluster-issuer: "${ISSUER}"
     nginx.ingress.kubernetes.io/proxy-body-size: "${PROXY_BODY_SIZE}"
 spec:
   ingressClassName: ${INGRESS_CLASS}
@@ -417,7 +415,6 @@ YAML
     render_labels
     cat <<YAML
   annotations:
-    cert-manager.io/cluster-issuer: "${ISSUER}"
     nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
 spec:
   ingressClassName: ${INGRESS_CLASS}
