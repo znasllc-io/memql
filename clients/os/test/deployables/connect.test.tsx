@@ -1,4 +1,9 @@
-import { useState } from "react";
+import { StrictMode, useState } from "react";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { useOs } from "../../src/chrome/state";
+import { ConnectReturnDispatcher } from "../../src/apps/deployables/sources/ConnectReturnDispatcher";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -21,6 +26,7 @@ import { useSourceRepositories } from "../../src/apps/deployables/sources/useGit
 import {
   captureConnectReturn,
   clearParkedConnectReturn,
+  connectSucceeded,
   readConnectReturn,
   returnPathFor,
   scrubbedSearch,
@@ -252,10 +258,140 @@ describe("telling a grant from a pasted token", () => {
 // The return from GitHub
 // ---------------------------------------------------------------------------
 
+function ReturnedWindow() {
+  const { state, actions } = useOs();
+  return <><output data-testid="window-count">{Object.keys(state.shell.windows).length}</output>
+    {Object.values(state.shell.windows).map(win => win.appId === "deployables" ?
+      <DeployablesApp key={win.id} sectionId={win.sectionId} navigate={() => {}} askContext={() => {}}
+        intent={win.intent} consumeIntent={id => actions.consumeWindowIntent(win.id, id)} /> : null)}
+  </>;
+}
+
 describe("the return from GitHub", () => {
   afterEach(() => {
+    h.connection = null;
     clearParkedConnectReturn();
     history.replaceState({}, "", "/");
+  });
+
+  it("accepts the identity callback's actual wire marker and outcomes", () => {
+    // Read the producer's constants so this contract cannot quietly drift
+    // back to a frontend-only fixture such as github_connect=ok.
+    const callback = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../../../component/identity/http/github_callback.go"), "utf8");
+    const value = (name: string) => {
+      const match = callback.match(new RegExp(`${name}\\s*=\\s*"([^"\\n]+)"`));
+      expect(match, `identity callback constant ${name}`).not.toBeNull();
+      return match![1]!;
+    };
+    const param = value("githubConnectResultParam");
+    for (const name of ["resultConnected", "resultReconnected", "resultInstalled", "resultStateInvalid", "resultExchangeFailed"]) {
+      const reason = value(name);
+      const result = readConnectReturn(`?connect=deployables&${param}=${reason}`);
+      expect(result).toEqual({ section: "deployables", reason });
+      expect(connectSucceeded(result!)).toBe(["resultConnected", "resultReconnected"].includes(name));
+    }
+  });
+
+  it("reopens Deployables once after the production reconnect redirect", async () => {
+    const userId = "11111111-1111-4111-8111-111111111111";
+    const myGrant = "22222222-2222-4222-8222-222222222222";
+    const connection = fakeConnection({ credentials: [
+      githubGrantRow({ id: "colleague-grant", ownerUserId: "v1:identity:user:colleague", login: "colleague" }),
+      githubGrantRow({ id: myGrant, ownerUserId: `v1:identity:user:${userId}`, login: "owner" }),
+    ], repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "acme/private-site" })] }) });
+    h.connection = connection;
+    history.replaceState({}, "", "/?connect=deployables&github=reconnected");
+    captureConnectReturn(window);
+    render(withSession(<StrictMode><ConnectReturnDispatcher /><ReturnedWindow /></StrictMode>, { userId }));
+    expect(await screen.findByRole("button", { name: /private-site/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Connect GitHub" })).toBeNull();
+    expect(screen.getByTestId("window-count").textContent).toBe("1");
+    expect(window.location.search).toBe("");
+    expect(connection.callsNamed("sourceRepositories").every(call => call.includes(myGrant))).toBe(true);
+    h.connection = null;
+  });
+
+  it.each(["connected", "reconnected"])("waits for the credential feed after %s instead of inventing a grant", async reason => {
+    const connection = fakeConnection({ credentials: [], repositories: repositoriesReply({
+      repositories: [repositoryFixture({ fullName: "acme/private-site" })],
+    }) });
+    h.connection = connection;
+    history.replaceState({}, "", `/?connect=deployables&github=${reason}`);
+    captureConnectReturn(window);
+    render(withSession(<><ConnectReturnDispatcher /><ReturnedWindow /></>));
+    await screen.findByRole("button", { name: "Connect GitHub" });
+    expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
+    await emit(connection, "v1:platform:sourceCredential",
+      githubGrantRow({ id: "my-new-grant", ownerUserId: "v1:identity:user:u-me" }), "NODE_CREATED");
+    expect(await screen.findByRole("button", { name: /private-site/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Connect GitHub" })).toBeNull();
+    expect(connection.callsNamed("sourceRepositories")[0]).toContain("my-new-grant");
+  });
+
+  it("shows a pending credential read, then the connected repositories", async () => {
+    const connection = fakeConnection({ credentials: [GRANT],
+      repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "acme/private-site" })] }) });
+    const execute = vi.mocked(connection.query.executeNamed).getMockImplementation()!;
+    let finishRead!: () => void;
+    const pending = new Promise<void>(resolve => { finishRead = resolve; });
+    vi.spyOn(connection.query, "executeNamed").mockImplementation(async (name, call, options) => {
+      if (name === "sourceCredentialsMine") await pending;
+      return execute(name, call, options);
+    });
+    h.connection = connection;
+    history.replaceState({}, "", "/?connect=deployables&github=reconnected");
+    captureConnectReturn(window);
+    render(withSession(<><ConnectReturnDispatcher /><ReturnedWindow /></>));
+    expect(await screen.findByText("Loading your source connections")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Connect GitHub" })).toBeNull();
+    expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
+    await act(async () => finishRead());
+    expect(await screen.findByRole("button", { name: /private-site/ })).toBeTruthy();
+  });
+
+  it("shows a failed credential read and retries it instead of offering a new connection", async () => {
+    const connection = fakeConnection({ credentials: [GRANT],
+      repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "acme/private-site" })] }) });
+    const execute = vi.mocked(connection.query.executeNamed).getMockImplementation()!;
+    let fail = true;
+    vi.spyOn(connection.query, "executeNamed").mockImplementation((name, call, options) => {
+      if (name === "sourceCredentialsMine" && fail) return Promise.reject(new Error("source connection read unavailable"));
+      return execute(name, call, options);
+    });
+    h.connection = connection;
+    history.replaceState({}, "", "/?connect=deployables&github=reconnected");
+    captureConnectReturn(window);
+    render(withSession(<><ConnectReturnDispatcher /><ReturnedWindow /></>));
+    expect(await screen.findByText("Your source connections could not be read.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Connect GitHub" })).toBeNull();
+    expect(connection.callsNamed("githubConnectBegin")).toHaveLength(0);
+    fail = false;
+    await click(screen.getByRole("button", { name: "Read source connections again" }));
+    expect(await screen.findByRole("button", { name: /private-site/ })).toBeTruthy();
+    expect(screen.queryByText("Your source connections could not be read.")).toBeNull();
+  });
+
+  it.each(["settings", "deployables"])("keeps an installation-only return neutral in %s", async section => {
+    h.connection = fakeConnection({ credentials: [] });
+    history.replaceState({}, "", `/?connect=${section}&github=installed`);
+    captureConnectReturn(window);
+    render(withSession(<><ConnectReturnDispatcher /><ReturnedWindow /></>));
+    expect(await screen.findByText("GitHub installation finished. Connect your account to choose its repositories.")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Connect GitHub" })).toBeTruthy();
+    expect(screen.queryByText("GitHub sent you back without completing the connection.")).toBeNull();
+  });
+
+  it("returns an OAuth failure to the repository step with its repair", async () => {
+    h.connection = fakeConnection({ credentials: [] });
+    history.replaceState({}, "", "/?connect=deployables&github=connect_state_invalid");
+    captureConnectReturn(window);
+    render(withSession(<><ConnectReturnDispatcher /><ReturnedWindow /></>));
+    expect(await screen.findByText("That sign-in link is no longer valid")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Connect GitHub" })).toBeTruthy();
+  });
+
+  it("does not open unrelated sections from a callback parameter", () => {
+    expect(readConnectReturn("?github=installed&connect=unrecognised")).toEqual({ reason: "installed", section: "settings" });
   });
 
   it("builds a return PATH, never a URL", () => {
@@ -265,11 +401,11 @@ describe("the return from GitHub", () => {
   });
 
   it("reads the marker, and answers null when there is none", () => {
-    expect(readConnectReturn("?github_connect=ok&connect=settings")).toEqual({
-      reason: "ok",
+    expect(readConnectReturn("?github=reconnected&connect=settings")).toEqual({
+      reason: "reconnected",
       section: "settings",
     });
-    expect(readConnectReturn("?github_connect=connect_state_invalid")).toEqual({
+    expect(readConnectReturn("?github=connect_state_invalid")).toEqual({
       reason: "connect_state_invalid",
       // The section hint is a courtesy: a callback that rebuilt the URL and
       // dropped it still returns somebody to a sensible place.
@@ -283,14 +419,14 @@ describe("the return from GitHub", () => {
   it("scrubs only its own two parameters", () => {
     // AuthProvider reads `code` and `state` out of the same query, so a
     // blanket scrub here would eat a sign-in mid-flight.
-    expect(scrubbedSearch("?github_connect=ok&connect=settings&code=abc")).toBe("?code=abc");
-    expect(scrubbedSearch("?github_connect=ok")).toBe("");
+    expect(scrubbedSearch("?github=reconnected&connect=settings&code=abc")).toBe("?code=abc");
+    expect(scrubbedSearch("?github=reconnected")).toBe("");
   });
 
   it("takes the marker out of the address bar at boot, keeping the path", () => {
-    history.replaceState({}, "", "/somewhere?github_connect=ok&connect=settings&keep=1#frag");
+    history.replaceState({}, "", "/somewhere?github=reconnected&connect=settings&keep=1#frag");
     const captured = captureConnectReturn(window);
-    expect(captured).toEqual({ reason: "ok", section: "settings" });
+    expect(captured).toEqual({ reason: "reconnected", section: "settings" });
     expect(window.location.pathname).toBe("/somewhere");
     expect(window.location.search).toBe("?keep=1");
     expect(window.location.hash).toBe("#frag");
@@ -299,9 +435,9 @@ describe("the return from GitHub", () => {
   it("hands the parked return over exactly ONCE", () => {
     // The effect that consumes it runs again on a StrictMode remount; a
     // value that survived would open a second window every time.
-    history.replaceState({}, "", "/?github_connect=ok");
+    history.replaceState({}, "", "/?github=reconnected");
     captureConnectReturn(window);
-    expect(takeParkedConnectReturn()).toEqual({ reason: "ok", section: "settings" });
+    expect(takeParkedConnectReturn()).toEqual({ reason: "reconnected", section: "settings" });
     expect(takeParkedConnectReturn()).toBeNull();
   });
 
