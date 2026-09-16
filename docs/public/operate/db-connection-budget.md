@@ -10,23 +10,26 @@ owner: znas
 # Database connection budget & graceful-deploy standard
 
 This is the standard for keeping the cluster's Postgres connection demand under
-the instance's ceiling — across steady state **and** deploys — so a rollout can
-never trigger `SQLSTATE 53300` ("remaining connection slots are reserved …" /
+the instance's ceiling — across steady state **and** deploys — to prevent
+`SQLSTATE 53300` ("remaining connection slots are reserved …" /
 "too many clients already"). It is the deliverable of epic memql#1778.
 
 > **What the Tiger cutover changed, and what it did not** (epic memql#3842 /
 > #3848). The database is now self-hosted CloudNativePG in every environment,
-> so **`max_connections` is ours**: 200 local, 400 in the cloud, set
-> in `deploy/k8s/components/cnpg-db`. Tiger's per-tier ceiling — ~59 usable
+> so **`max_connections` is ours**. Presets and instance overrides under
+> `deploy/k8s/components/cnpg-db` and the instance overlay set the limit;
+> verify the rendered Cluster and the running database agree after a change.
+> Tiger's per-tier ceiling — ~59 usable
 > slots on the managed tier, which is the scarcity this whole standard was
 > written around — is gone, and with it the two scripts that managed it
 > (`conn-surge-watch.sh`, `deployer-pool-reap.sh`, retired) and the leaked
 > managed control-plane `deployer` pool.
 >
-> **The formula below did not change.** A budget you can now afford to exceed
-> comfortably is still a budget: `Σ(replicas × MAX_OPEN_CONNS) + surge` has to
-> fit under `max_connections - reserved`, because every Postgres backend is a
-> process with its own memory and raising the ceiling trades RAM for headroom.
+> **Count every pool and rollout overlap.** The main pool's configured limit
+> does not bound the process's separate direct and startup migration pools.
+> Their combined peak must fit under `max_connections - reserved`, because every
+> Postgres backend is a process with its own memory and raising the ceiling
+> trades RAM for headroom.
 > `scripts/deploy/conn-headroom-check.sh` was **kept** and rewritten for the
 > same reason — it is the one thing standing between a replica-count bump and
 > the storm that caused memql#1817.
@@ -44,9 +47,9 @@ limits.
 ## The budget formula
 
 ```
-peak_connections  =  Σ_over_node_types( replicas × MAX_OPEN_CONNS )
-                  +  rollout_surge            (RollingUpdate maxSurge pods × pool)
-                  +  bluegreen_overlap        (preview color pods × pool, held for scaleDownDelaySeconds)
+per_process       =  main_pool_limit + direct_pool_limit + migration_pool_limit
+peak_connections  =  Σ_over_workloads( peak_concurrent_processes × per_process )
+                  +  separate_jobs_and_monitors + operator_and_backup_headroom
 
 REQUIRE:  peak_connections  ≤  max_connections − reserved_connections
 ```
@@ -55,7 +58,16 @@ REQUIRE:  peak_connections  ≤  max_connections − reserved_connections
   `reserved_connections`); on Tiger Cloud the platform also reserves a few.
 - The dangerous term is **deploy-time overlap**, not steady state: a full-stack
   roll briefly runs old + new pods together. Size the budget for the *peak*, not
-  the average.
+  the average. Include terminating old pods until they close their connections,
+  new replicas, surge, and any blue-green preview/drain overlap. A conservative
+  rolling bound is `2 × replicas + maxSurge` processes per Deployment.
+- Include every engine and product workload sharing the database, plus active
+  Jobs and scheduled monitors. Do not count an in-process startup migration
+  again as a separate Job; count actual independent Jobs separately.
+- With the shipped main pool limit of four, a configured direct pool adds up to
+  four and a startup migration adds one: budget up to nine per process. If no
+  direct DSN is configured, direct calls share the main pool. Any additional
+  independent database pool must be counted too.
 
 ## The knobs (per-pod pool — `component/database/database.go`)
 
@@ -63,15 +75,19 @@ Source of truth is the code; defaults are conservative and overridable per env:
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `MAX_OPEN_CONNS` | 10 | hard cap on concurrent connections per pod (the primary budget lever) |
+| `MAX_OPEN_CONNS` | 10 | hard cap on the configured main pool (the primary budget lever) |
 | `MAX_IDLE_CONNS` | 1 | warm idle connections kept per pod |
 | `CONN_MAX_LIFETIME_MS` | 3600000 (1h) | rotate connections hourly (bounds long-lived leaks) |
 | `CONN_MAX_IDLE_TIME_MS` | 120000 (2m) | close idle connections after 2 min (reclaims slack) |
 
-`MAX_OPEN_CONNS` is a **hard** per-pod cap (database/sql never exceeds it), so a
-single pod cannot leak past it. Right-size it so `peak_connections` (above) fits
-the instance ceiling. To shrink the budget, lower `MAX_OPEN_CONNS` before adding
-replicas or a pooler.
+`MAX_OPEN_CONNS` is a **hard cap on that pool**, not on the whole pod. The
+memory-nodes instance reads the `MEMORY_NODES_DATABASE_` prefix; the shared
+`memql-db-pool` ConfigMap sets its main open/idle limits to four/two. The direct
+pool has a separate fixed limit of four and ignores these knobs; startup SQL
+migrations can use one dedicated connection. Check
+`component/database/database.go` when those implementation bounds change.
+Right-size the combined budget against the actual instance ceiling before
+changing replicas or adding a pooler.
 
 ## Defense in depth (already in code)
 

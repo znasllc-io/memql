@@ -15,28 +15,23 @@
 # (component/database/memory-nodes/database.go: memoryNodesDatabaseEnvPrefix);
 # the bare MAX_OPEN_CONNS / MAX_IDLE_CONNS names are NOT read.
 #
-# CONNECTION BUDGET (measured on Tiger Cloud staging xahn9ru4v6, 2026-06-20)
-#   max_connections                 = 105
-#   superuser_reserved_connections  =  12
-#   reserved_connections            =   5   (the pg_use_reserved_connections
-#                                            pool named in the 53300 error)
-#   reserved total                  =  17
-#   non-mesh overhead (observed)    ~  29   (a leaked `deployer` pool holding
-#                                            21 idle conns + ~3 exporters +
-#                                            ~5 admin/psql headroom)
-#   => usable for the mesh          ~  59
+# CONNECTION BUDGET: calculate from the rendered instance and live database.
+# This ConfigMap caps only the memory-nodes MAIN pool. When DIRECT_DSN is set,
+# component/database/database.go opens a separate pool capped at 4, and startup
+# migrations can open one additional connection per process. With main=4, allow
+# up to 9 connections per process; other independent pools add to that bound.
 #
-#   DB-connecting node types (6): identity, bff, agent, planner, workbench,
-#   mcp -- each replicas=2 => 12 steady DB pods. With the rollout surge
-#   bounded to 0 (see the maxSurge:0 strategy patch on those Deployments)
-#   worst-case pods during a roll stays at ~12 instead of ~18.
-#   One memory-nodes pool per pod.
-#
-#   With MAX_OPEN_CONNS=4 / MAX_IDLE_CONNS=2:
-#     realistic deploy draw (12 pods idle-holding 2, ~1/3 bursting to 4) ~= 32
-#       -> ~27 headroom under the 59 usable slots, EVEN WITH the deployer leak.
-#     absolute worst (all 12 saturate to 4)                             =  48
-#       -> clears the 59 usable slots outright.
+# Count every engine and product workload sharing the database, active Jobs,
+# scheduled monitors, operator/backup headroom, and PostgreSQL reserved slots.
+# During a roll include old pods still terminating, new replicas AND surge;
+# maxSurge alone does not bound connections held by terminating processes.
+# A conservative rolling bound per Deployment is (2 * replicas + surge) * 9.
+# Compare the combined bound with the instance's actual max_connections, not
+# the historical Tiger Cloud ceiling or a different engine preset's settings.
+# The ZNAS instance maintains its evaluated budget and refusal gate in its own
+# docs/database-reliability.md and scripts/dev/database-budget.py
+# (znasllc-io/memql-znas#110).
+# Generic guidance: docs/public/operate/db-connection-budget.md.
 #
 # Idle is held at 2 (not 0/1) so a steadily-busy node keeps a small warm pool
 # without round-tripping a fresh TCP+TLS connect per query, while idle nodes
@@ -44,8 +39,8 @@
 # (ConnMaxLifetime 1h, ConnMaxIdleTime 2min) is set in the engine default and
 # is unchanged here.
 #
-# Per-env override: copy this ConfigMap into an overlay (or patch the values)
-# if prod's instance has a larger max_connections.
+# Per-instance override: patch these values only after checking that instance's
+# full connection budget. Raising max_connections also consumes database memory.
 apiVersion: v1
 kind: ConfigMap
 metadata:
