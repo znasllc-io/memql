@@ -62,6 +62,13 @@ export function reasonSentence(reason: string): string {
   switch (reason) {
     case "github_app_not_configured":
       return "This cluster has no GitHub App configured.";
+    case "credential_not_found":
+      return "Connect your GitHub account to choose its repositories.";
+    case "credential_revoked":
+    case "reconnect_required":
+      return "Reconnect your GitHub account to renew repository access.";
+    case "rate_limited":
+      return "GitHub temporarily limited repository requests. Try again shortly.";
     case "connect_state_invalid":
       return "The cluster could not store the connect state.";
     default:
@@ -143,7 +150,13 @@ export function useSourceRepositories(): SourceRepositoriesActions {
 
   const read = useCallback(
     async (credentialId: string, wanted: number) => {
-      const answered = await run((query) => readSourceRepositories(query, credentialId, wanted));
+      const answered = await run(async (query) => {
+        const result = await readSourceRepositories(query, credentialId, wanted);
+        if (result.reason !== "" && result.reason !== "ok") {
+          throw new Error(`${result.reason}: ${reasonSentence(result.reason)}`);
+        }
+        return result;
+      });
       // A REFUSED READ KEEPS THE LAST GOOD LIST. A refusal is not a zero
       // (clients/os/README.md): blanking the picker would say the grant
       // reaches nothing, which is a different and untrue answer.

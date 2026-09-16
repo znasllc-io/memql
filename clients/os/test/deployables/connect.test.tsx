@@ -81,6 +81,16 @@ describe("reading a sourceRepositories reply", () => {
     nextPage: 2,
   });
 
+  it("reads installation accounts and pending organization names from the engine reply", () => {
+    const page = repositoryPageFrom(repositoriesReply({
+      installations: [{ id: "42", account: "acme", accountType: "Organization", repositorySelection: "selected", suspended: false }],
+      pending: ["beta-corp"],
+    }));
+    expect(page.installations[0]?.login).toBe("acme");
+    expect(page.pending).toEqual([{ login: "beta-corp" }]);
+    expect(groupRepositories(page, "").map(group => group.owner)).toContain("beta-corp");
+  });
+
   it("projects every field a row is drawn from", () => {
     const page = repositoryPageFrom(REPLY);
     expect(page.repositories.map((r) => r.fullName)).toEqual(["acme/widget", "acme/docs"]);
@@ -886,6 +896,44 @@ const WIDGET = repositoryFixture({ fullName: "acme/widget", private: true, visib
 describe("the compose Source stop, with a connection", () => {
   afterEach(() => {
     h.connection = null;
+  });
+
+  it("offers a personal connection when an owner sees only a colleague's grant", async () => {
+    const { connection, region } = await composeSource({
+      credentials: [githubGrantRow({ id: "colleague-grant", ownerUserId: "u-colleague", login: "colleague" })],
+    });
+    expect(within(region).getByRole("button", { name: "Connect GitHub" })).toBeTruthy();
+    expect(connection.callsNamed("sourceRepositories")).toEqual([]);
+    expect(within(region).queryByText("This connection reaches no repositories yet.")).toBeNull();
+    await click(within(region).getByRole("button", { name: "Use a token instead" }));
+    expect(within(region).queryByRole("option", { name: /colleague/ })).toBeNull();
+  });
+
+  it("chooses the current user's grant even when another user's card sorts first", async () => {
+    const { connection, region } = await composeSource({
+      credentials: [
+        githubGrantRow({ id: "colleague-grant", ownerUserId: "u-colleague" }),
+        githubGrantRow({ id: "my-grant", ownerUserId: "v1:identity:user:u-me" }),
+      ],
+      repositories: repositoriesReply({ repositories: [WIDGET] }),
+    });
+    await click(await within(region).findByRole("button", { name: /widget/ }));
+    expect(connection.callsNamed("sourceProbe")[0]).toContain('credentialId: "my-grant"');
+    expect(connection.callsNamed("sourceProbe").join()).not.toContain("colleague-grant");
+  });
+
+  it.each(["credential_not_found", "credential_revoked", "reconnect_required"])("offers reconnect for an answered %s refusal", async reason => {
+    const { region } = await composeSource({
+      credentials: [GRANT], repositories: repositoriesReply({ reason }),
+    });
+    expect(await within(region).findByRole("button", { name: "Reconnect GitHub" })).toBeTruthy();
+    expect(within(region).queryByText("This connection reaches no repositories yet.")).toBeNull();
+  });
+
+  it("offers the GitHub installation page when the personal grant reaches nothing", async () => {
+    const { region } = await composeSource({ credentials: [GRANT], installUrl: "https://github.com/apps/memql/installations/new" });
+    const link = await within(region).findByRole("link", { name: "Install on another organization" });
+    expect(link.getAttribute("href")).toContain("github.com");
   });
 
   it("reads the list on its own, so a connected person opens the stop and picks", async () => {

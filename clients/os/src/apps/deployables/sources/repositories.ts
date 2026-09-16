@@ -189,7 +189,7 @@ export function repositoryPageFrom(raw: Row | undefined | null): RepositoryPage 
     if (id === "") continue;
     installations.push({
       id,
-      login: text(member, "login"),
+      login: text(member, "account") || text(member, "login"),
       accountType: text(member, "accountType"),
       repositorySelection: text(member, "repositorySelection"),
       suspended: flag(member, "suspended"),
@@ -197,7 +197,7 @@ export function repositoryPageFrom(raw: Row | undefined | null): RepositoryPage 
   }
   const pending: PendingInstallation[] = [];
   for (const member of membersOf(row, "pending")) {
-    const login = text(member, "login").trim();
+    const login = (typeof member === "string" ? member : text(member, "login")).trim();
     // A pending entry with no login says only "something is waiting", which
     // names nobody to ask -- the entire content of this state.
     if (login === "") continue;

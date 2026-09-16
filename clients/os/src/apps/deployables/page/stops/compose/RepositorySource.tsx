@@ -1,5 +1,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 
+import { useSession } from "../../../../../chrome/access";
+import { bare } from "../../../people";
 import { Button, Caption, Field, Select, Subhead } from "../../../../../kit";
 import { toneFor } from "../../../packages/refusals";
 import { ProblemNotice } from "../../../packages/ReportView";
@@ -76,16 +78,23 @@ export function RepositorySource({
   tokenFormOpen: boolean;
   onTokenFormOpenChange: (open: boolean) => void;
 }) {
+  const { access } = useSession();
+  // The feed includes other people’s cards for cluster-owner oversight.
+  // Only this person’s credentials can authorize a new source.
+  const viewer = bare(access?.userId ?? "");
+  const personal = credentials.filter(c => viewer !== "" && bare(c.ownerUserId) === viewer);
   const connect = useGithubConnect();
+  const install = useGithubConnect();
   const repositories = useSourceRepositories();
 
-  const grant = githubGrantOf(credentials);
+  const grant = githubGrantOf(personal);
   // A LAPSED GRANT IS NOT A CONNECTION. It cannot read a repository list, so
   // the picker would answer an empty invitation to somebody whose repair is
   // one click; the Connect control below says "Reconnect" for them instead.
   const connected = grant !== null && !credentialIsRevoked(grant);
   const grantId = connected ? grant.id : "";
   const returnPath = returnPathFor(COMPOSE_SECTION);
+  const reconnect = ["credential_not_found", "credential_revoked", "reconnect_required"].includes(repositories.refusal?.code ?? "");
 
   // THE CLUSTER HAS NO GITHUB APP, and only a refused begin can say so.
   // The control is not rendered at all in this reading: a disabled Connect
@@ -106,6 +115,18 @@ export function RepositorySource({
     readFor.current = grantId;
     void read("", 1);
   }, [grantId, read]);
+
+  const learnedFor = useRef("");
+  const learning = useRef(false);
+  const learn = install.learn;
+  useEffect(() => {
+    if (!grantId || grantId === learnedFor.current || learning.current) return;
+    learning.current = true;
+    void learn(returnPath).then(answered => {
+      learning.current = false;
+      if (answered) learnedFor.current = grantId;
+    });
+  }, [grantId, learn, returnPath]);
 
   /**
    * Choosing a repository answers three fields at once.
@@ -138,21 +159,21 @@ export function RepositorySource({
             next step, and the fault colour would say they broke it
             (`toneFor`). */}
         <ProblemNotice problem={noApp} tone={toneFor(noApp.code)} />
-        <TokenSourceForm draft={draft} onDraft={onDraft} credentials={credentials} probe={probe} />
+        <TokenSourceForm draft={draft} onDraft={onDraft} credentials={personal} probe={probe} />
       </>
     );
   }
 
   return (
     <>
-      {connected ? (
+      {connected && !reconnect ? (
         <>
           <RepositoryPicker
             page={repositories.page}
             readAt={repositories.readAt}
             busy={repositories.busy}
             refusal={repositories.refusal}
-            installUrl={connect.installUrl}
+            installUrl={install.installUrl}
             /* The chosen row is derived from the URL the draft holds rather
                than from a second field: `shortRepo` is the same reading the
                rail's own Source answer uses, so the mark and the note can
@@ -176,16 +197,16 @@ export function RepositorySource({
           caption={
             grant === null
               ? "Pick repositories from a list instead of pasting a URL and a token."
-              : "This connection was disconnected. Reconnecting puts the picker back."
+              : "Reconnect your GitHub account to choose its repositories."
           }
           busy={connect.busy}
-          refusal={connect.refusal}
+          refusal={connect.refusal ?? repositories.refusal}
           onConnect={() => void connect.connect(returnPath)}
         />
       )}
 
       <TokenFold open={tokenFormOpen} onOpenChange={onTokenFormOpenChange}>
-        <TokenSourceForm draft={draft} onDraft={onDraft} credentials={credentials} probe={probe} />
+        <TokenSourceForm draft={draft} onDraft={onDraft} credentials={personal} probe={probe} />
       </TokenFold>
     </>
   );
