@@ -10,6 +10,14 @@ a single global version number — repos version independently
 (see [VERSIONING.md](VERSIONING.md)) and coherence is maintained by
 explicit pins rather than lockstep.
 
+## Fleet permission evidence (September 2026)
+
+MemQL engine **0.22.0** and Cockpit **0.15.0** are the coordinated release for
+native macOS app onboarding. Cockpit measures permissions in its running worker
+and reports fresh tri-state evidence on registration and heartbeats. Fleet waits
+for that evidence and a real inference response before marking onboarding ready.
+Deploy the engine before offering the new Cockpit installation from Fleet.
+
 ## The repo shape
 
 Every product built on MemQL follows the same constellation (see
