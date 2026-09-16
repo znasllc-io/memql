@@ -558,6 +558,9 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 		Logger:        d.Logger,
 	})
 	out.Report = rep
+	if rep != nil {
+		rep.UpstreamBaseline = snapshot.UpstreamBaseline
+	}
 
 	snapshotArtifactId := d.storeSnapshot(ctx, req, out.DeploymentId, snapshot)
 	if rerr := d.Store.recordReport(ctx, out.DeploymentId, rep, snapshotArtifactId); rerr != nil {
@@ -697,9 +700,12 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 		return perr
 	}
 
-	// A newer head may have arrived during the build; keep that update pending.
+	// Compare with the observation at the ORIGINAL fetch, including across
+	// confirmation and retry. A poll can lag a fresh fetch; a new observation
+	// after that fetch must remain pending. Unknown old reports stay conservative.
 	latest, latestErr := d.Store.packageById(ctx, req.PackageId)
-	pending := latestErr != nil || (rowString(latest, "latestKnownVersion") != "" && rowString(latest, "latestKnownVersion") != snapshot.Version)
+	knownNow := rowString(latest, "latestKnownVersion")
+	pending := latestErr != nil || (knownNow != "" && knownNow != snapshot.Version && (snapshot.UpstreamBaseline == nil || knownNow != *snapshot.UpstreamBaseline))
 	if verr := d.Store.recordDeployedVersion(ctx, req.PackageId, snapshot.Version, pending); verr != nil {
 		d.log().Warn("packages: could not record the deployed version",
 			"component", "packages.pipeline", logger.Subject(packageDeploymentConcept, out.DeploymentId),
@@ -843,7 +849,12 @@ func scopeFrom(declared []string, placements map[string]Placement) []string {
 func (d *Deps) fetchFor(ctx context.Context, req DeployRequest, pkg map[string]any) (*SourceSnapshot, error) {
 	from := strings.TrimSpace(req.FromDeploymentId)
 	if from == "" || rowString(pkg, "sourceKind") != "repo" {
-		return d.fetch(ctx, pkg)
+		baseline := rowString(pkg, "latestKnownVersion")
+		snapshot, err := d.fetch(ctx, pkg)
+		if err == nil && snapshot != nil {
+			snapshot.UpstreamBaseline = &baseline
+		}
+		return snapshot, err
 	}
 	prior, err := d.Store.deploymentById(ctx, from)
 	if err != nil {
@@ -875,8 +886,13 @@ func (d *Deps) fetchFor(ctx context.Context, req DeployRequest, pkg map[string]a
 		cleanup()
 		return nil, xerr
 	}
+	var baseline *string
+	if report := reportFromRow(prior); report != nil {
+		baseline = report.UpstreamBaseline
+	}
 	return &SourceSnapshot{
-		Tree: os.DirFS(root),
+		UpstreamBaseline: baseline,
+		Tree:             os.DirFS(root),
 		// The VERSION the earlier run recorded, not one derived from the
 		// bytes: it is the same source, so it is the same version, and
 		// deriving it again would risk two spellings of one commit.

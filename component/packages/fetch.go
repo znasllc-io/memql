@@ -25,6 +25,9 @@ type SourceSnapshot struct {
 	Tree fs.FS
 	// Version is the commit SHA (repo) or content hash (zip) this snapshot is.
 	Version string
+	// UpstreamBaseline is the feed observation before the ORIGINAL fetch.
+	// It travels with retained snapshots; nil means the observation is unknown.
+	UpstreamBaseline *string
 	// Bytes is the archive as fetched, for storing as the content-addressed
 	// Library snapshot (D8). Nil when the source WAS a stored artifact --
 	// re-storing bytes the Library already holds would give one snapshot two

@@ -239,7 +239,7 @@ func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request, fsys fs.FS, 
 
 	// Every mutable URL must reach this handler again after a release. Only
 	// a filename digest VERIFIED against its bytes earns immutable caching.
-	noCache(w)
+	w.Header().Set("Cache-Control", "public, no-cache, must-revalidate")
 	if contentAddressedAsset(fsys, name) {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		w.Header().Del("Pragma")

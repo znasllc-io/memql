@@ -124,11 +124,88 @@ func TestSwitchToManualDuringBuildPreventsPublishing(t *testing.T) {
 	pkg := autoPackage()
 	h := newHarness(t, spaOnlyPackage(), pkg)
 	h.deps.Builder = policyChangingBuilder{base: h.builder, change: func() { pkg["autoDeploy"] = false }}
-	out, err := Deploy(context.Background(), h.deps, DeployRequest{PackageId: rowString(pkg, "id"), Automatic: true, Confirmed: true, Actor: Actor{UserId: rowString(pkg, "ownerUserId")}})
+	out, err := Deploy(context.Background(), h.deps, DeployRequest{PackageId: rowString(pkg, "id"), Automatic: true, Confirmed: true, Placements: firstDeployPlacements(), Actor: Actor{UserId: rowString(pkg, "ownerUserId")}})
 	if err == nil || out.Status != StatusCancelled {
 		t.Fatalf("expected cancelled automatic run, got %+v %v", out, err)
 	}
 	if len(h.publisher.published) != 0 {
 		t.Fatal("policy disabled during build but new files were published")
 	}
+}
+
+func TestSuccessfulDeploymentDoesNotAdvertiseAnOlderPolledHead(t *testing.T) {
+	for _, changedDuringBuild := range []bool{false, true} {
+		t.Run(map[bool]string{false: "poll lags manual deploy", true: "newer head during build"}[changedDuringBuild], func(t *testing.T) {
+			pkg := ownerPackage()
+			pkg["latestKnownVersion"], pkg["updateAvailable"] = "older-polled-head", true
+			h := newHarness(t, spaOnlyPackage(), pkg) // fetch returns sha-abc123
+			if changedDuringBuild {
+				h.deps.Builder = policyChangingBuilder{base: h.builder, change: func() { pkg["latestKnownVersion"] = "newer-during-build" }}
+			}
+			out, err := Deploy(context.Background(), h.deps, DeployRequest{PackageId: rowString(pkg, "id"), Confirmed: true, Placements: firstDeployPlacements(), Actor: Actor{UserId: rowString(pkg, "ownerUserId")}})
+			if err != nil || out.Status != StatusSucceeded {
+				t.Fatalf("deploy: %+v %v", out, err)
+			}
+			want := "updateAvailable: false"
+			if changedDuringBuild {
+				want = "updateAvailable: true"
+			}
+			for _, q := range h.engine.statements() {
+				if strings.HasPrefix(q, "mutation recordPackageDeployedVersion") {
+					if !strings.Contains(q, want) || !strings.Contains(q, `deployedVersion: "sha-abc123"`) {
+						t.Fatalf("wrong completion: %s", q)
+					}
+					return
+				}
+			}
+			t.Fatal("deployment version was not recorded")
+		})
+	}
+}
+
+func TestRetainedSnapshotKeepsTheAlreadyKnownNewerHeadPending(t *testing.T) {
+	for _, newerAfterAnalyze := range []bool{false, true} {
+		for _, confirm := range []bool{false, true} {
+			t.Run(map[bool]string{false: "retry", true: "confirm"}[confirm], func(t *testing.T) {
+				pkg := ownerPackage()
+				pkg["latestKnownVersion"] = "older-polled-head"
+				h := newHarness(t, spaOnlyPackage(), pkg)
+				first, err := Deploy(context.Background(), h.deps, DeployRequest{PackageId: rowString(pkg, "id"), Actor: plainUser()})
+				if err != nil || first.Status != StatusAwaitingConfirm {
+					t.Fatalf("park: %+v %v", first, err)
+				}
+				if newerAfterAnalyze {
+					pkg["latestKnownVersion"], pkg["updateAvailable"] = "newer-polled-head", true
+				}
+				h.engine.rows["query packageDeploymentById"] = []map[string]any{{"id": first.DeploymentId, "packageId": rowString(pkg, "id"), "status": StatusAwaitingConfirm, "sourceVersion": "sha-abc123", "snapshotArtifactId": "blob://packages/snapshots/snap.tar.gz", "report": reportMap(t, first.Report)}}
+				req := DeployRequest{PackageId: rowString(pkg, "id"), Actor: plainUser(), Confirmed: true, Placements: firstDeployPlacements()}
+				if confirm {
+					req.DeploymentId = first.DeploymentId
+				} else {
+					req.FromDeploymentId = first.DeploymentId
+				}
+				out, err := Deploy(context.Background(), h.deps, req)
+				if err != nil || out.Status != StatusSucceeded {
+					t.Fatalf("retained deploy: %+v %v", out, err)
+				}
+				if h.fetcher.repoFetches != 1 {
+					t.Fatal("retained snapshot unexpectedly refetched the repository")
+				}
+				for _, q := range h.engine.statements() {
+					if strings.HasPrefix(q, "mutation recordPackageDeployedVersion") {
+						want := "updateAvailable: false"
+						if newerAfterAnalyze {
+							want = "updateAvailable: true"
+						}
+						if !strings.Contains(q, want) || !strings.Contains(q, `deployedVersion: "sha-abc123"`) {
+							t.Fatalf("lost known newer head: %s", q)
+						}
+						return
+					}
+				}
+				t.Fatal("retained version was not recorded")
+			})
+		}
+	}
+
 }

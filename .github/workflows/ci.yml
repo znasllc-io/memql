@@ -573,6 +573,13 @@ jobs:
             # trigger set would make an unrelated customer-site change re-run
             # os-checks for no reason. component/edge's own Go test suite
             # covers it instead.
+            # Advisory only: these paths cannot tell us whether a change is meaningful.
+            osattention:
+              - 'clients/os/src/apps/**'
+              - 'clients/os/src/chrome/**'
+              - 'clients/os/src/attention/**'
+              - 'clients/os/src/system/**'
+              - 'clients/os/src/kit/**'
             osclient:
               - 'clients/**'
               - 'sdk/ts/**'
@@ -678,6 +685,17 @@ jobs:
               - 'app/**'
               - 'cmd/**'
               - 'main.go'
+
+      - name: Consider OS change attention (advisory)
+        if: ${{ github.event_name == 'pull_request' && steps.filter.outputs.osattention == 'true' }}
+        continue-on-error: true
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'NOTE'
+          ### OS attention review reminder
+          This PR changes OS UI code. Author and reviewer: does it introduce or materially change a capability that people should discover? If so, declare a stable `attentionChanges` ID/revision and test a reachable acknowledgment destination. Refactors, minor fixes and styling may need no marker. This is advisory: no required decision, manifest or marker is inferred from the diff.
+
+          See [author/agent examples and review guidance](https://github.com/znasllc-io/memql/blob/main/clients/os/README.md#unseen-changes-shared-attention-markers). Ordinary attention tests validate declared metadata and behavior; semantic importance remains a human/agent judgment.
+          NOTE
 
   # Routing guard -- the ONE lane in this workflow with no `if:` and no
   # `needs:` (memql#3451).

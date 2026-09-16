@@ -1,3 +1,4 @@
+import { AvailableVersion } from "./AvailableVersion";
 import { GitBranch, History } from "lucide-react";
 
 import { Caption, Chip, Fact, Facts, Head, Panel } from "../../../kit";
@@ -131,6 +132,8 @@ export function SourceView({
             <Fact label="Added" value={formatMoment(pkg.createdAt)} />
             {deployedBy === "" ? null : <Fact label="Deployed by" value={deployedBy} />}
           </Facts>
+
+          <AvailableVersion key={pkg.id} pkg={pkg} />
 
           {/* WHAT IT DECLARES, not only what it deployed.
               A site row is written only for an app that actually deployed, so

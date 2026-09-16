@@ -2267,6 +2267,15 @@ launcher entries, dock apps, window icons and section navigation aggregate
 unseen descendants. Section `parent` relationships aggregate automatically;
 `ancestors` can name another view of the same destination (such as a map).
 
+For authors and coding agents: decide whether the change gives a person a
+new capability or materially changes how they use an existing one. If it is
+worth directing their attention to that destination, declare it. Routine
+fixes, refactors, restyling, tests and rebuilds usually need no declaration;
+never manufacture a revision just because source files changed. Keep the
+existing ID for the same capability and advance its revision only for a new
+meaningful change. Namespace IDs by app (`fleet:policy-editor`) because
+receipt IDs are shared across the OS.
+
 For a meaningful UI/functionality change, add `attentionChanges` to the app's
 `OsAppManifest`. For example:
 
@@ -2285,6 +2294,32 @@ it. An ancestor marker never acknowledges descendants. Retained hidden panes
 must pass `visible={false}`; window visibility is inherited automatically.
 Do not use commit IDs, rebuild times or incidental source diffs as feature
 revisions. Declare only changes worth directing a person to their destination.
+
+A deeper destination uses the same explicit target in declaration, marker and
+acknowledgment wrapper:
+
+```tsx
+// Manifest entry: { id: "fleet:policy-editor", revision: "policy-editor-v2",
+//   sectionId: "routing", target: "policy-editor", label: "Policy editor improved" }
+<AttentionMarker appId="fleet" sectionId="routing" target="policy-editor" />
+{editorOpen && <AttentionDestination appId="fleet" sectionId="routing" target="policy-editor">
+  <PolicyEditor />
+</AttentionDestination>}
+```
+
+Reviewers should check that the revision represents a meaningful change,
+that an eligible person can reach the exact destination (including empty or
+undeployed states), and that opening ancestors cannot dismiss it. Add a
+focused rendering test proving that route and acknowledgment behavior; also
+cover hidden panes, another user, and a later revision when changing the
+shared mechanism. `npm test -- test/attention` checks declared IDs, known
+sections and receipt behavior. It does not infer semantic importance or prove
+arbitrary dynamic destinations reachable. Those remain author/reviewer
+judgments; there is no mandatory PR attention decision or source-diff gate. CI adds a
+non-blocking review reminder to its job summary when app, shell, registry,
+shared-control or attention code changes. It stays quiet for documentation,
+tests, asset-only edits and unrelated backend changes; it never decides
+whether a marker is needed.
 
 Runtime sources use `usePublishAttention(sourceId, changes)` with `kind:
 "runtime"` and the actual discovered revision. Keep the producer at shell
@@ -2323,7 +2358,8 @@ cluster. Detection continues, and the serving version stays available.
 
 Manual pending versions publish attention under the package's revision.
 Markers lead through Overview/map, source group and deployable row to
-**Available version** in the deployable's Versions area. Opening the app,
+**Available version** in the deployable's Versions area or the source page
+(including sources that have not deployed yet). Opening the app,
 source or deployable does not acknowledge it. Expanding Available version
 does, without deploying or removing the available update. Successful
 automatic updates do not create this manual-update attention item.

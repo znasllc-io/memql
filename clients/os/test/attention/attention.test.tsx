@@ -1,3 +1,4 @@
+import { attentionDeclarationErrors } from "../../src/attention/declarations";
 import { useState } from "react";
 import { fireEvent, render, screen, waitFor, cleanup } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -10,6 +11,7 @@ import { packageFromRow } from "../../src/apps/deployables/packages/rows";
 import { OS_REGISTRY } from "../../src/apps/registry";
 import { rowsResult, withSession } from "../deployables/harness";
 import type { AttentionChange } from "../../src/attention/model";
+import { SourceView } from "../../src/apps/deployables/page/SourceView";
 
 const change: AttentionChange = { id: "update:p", revision: "one", appId: "deployables", sectionId: "deployables", ancestors: ["map"], target: "version:p", label: "New version", kind: "runtime" };
 function Surface({ revision = "one", visible = true }: { revision?: string; visible?: boolean }) {
@@ -42,6 +44,30 @@ const wrap = (node: React.ReactNode, userId = "alice") => withSession(<Attention
 afterEach(cleanup);
 
 describe("shared attention", () => {
+  it("keeps declared feature metadata tied to known app sections and unique stable IDs", () => {
+    expect(attentionDeclarationErrors(OS_REGISTRY.apps)).toEqual([]);
+    const base = { id: "fleet", sections: [{ id: "routing" }] };
+    const valid = { id: "fleet:policy-editor", revision: "v2", sectionId: "routing", label: "Policy editor improved" };
+    expect(attentionDeclarationErrors([{ ...base, attentionChanges: [valid] }])).toEqual([]);
+    expect(attentionDeclarationErrors([{ ...base, attentionChanges: [{ ...valid, id: "other:unrelated", revision: "", sectionId: "typo", target: "" }, valid, valid] }]).join("\n"))
+      .toMatch(/prefixed with fleet:[\s\S]*meaningful revision[\s\S]*unknown section typo[\s\S]*exact destination target[\s\S]*duplicate attention ID/);
+  });
+
+  it("lets an undeployed source acknowledge its version without deploying", async () => {
+    const fake = setup();
+    const pkg = packageFromRow({ id: "never-deployed", name: "New source", status: "active", sourceKind: "repo", latestKnownVersion: "new-head", updateAvailable: true });
+    function UndeployedSource() {
+      usePublishAttention("source", packageAttention(pkg));
+      return <><AttentionMarker appId="deployables" /><SourceView pkg={pkg} apps={[]} credentials={[]} can={{ deploy: false, sources: false, retire: false, domains: false, publish: false }} onBack={() => {}} onOpenHistory={() => {}} onOpenApp={() => {}} onOpenDeclared={() => {}} attempts={0} deployedBy="" /></>;
+    }
+    render(wrap(<UndeployedSource />));
+    await screen.findAllByRole("img", { name: "Unseen change" });
+    expect(fake.executeNamed.mock.calls.some(([name]) => name === "acknowledgeAttention")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: /Available version/ }));
+    await waitFor(() => expect(screen.queryAllByRole("img", { name: "Unseen change" })).toHaveLength(0));
+    expect(pkg.updateAvailable).toBe(true);
+    expect(fake.executeNamed.mock.calls.filter(([name]) => name !== "myAttentionReceipts").map(([name]) => name)).toEqual(["acknowledgeAttention"]);
+  });
   it("acknowledges only the viewed leaf; retains other ancestors, persists, and scopes receipts to the user", async () => {
     const fake = setup();
     const view = render(wrap(<Surface />));

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -34,6 +35,9 @@ func TestNewBundleAtSameURLCannotReturnStale304(t *testing.T) {
 					t.Fatalf("first %s: %d %q %v", url, r.Code, r.Body.String(), r.Header())
 				}
 				tags[url] = r.Header().Get("ETag")
+				if strings.Contains(r.Header().Get("Cache-Control"), "no-store") {
+					t.Fatalf("%s cannot retain bytes for ordinary browser revalidation", url)
+				}
 			}
 			site.BundleRef = "blob://release-two/"
 			for url, oldTag := range tags {

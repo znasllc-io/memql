@@ -160,7 +160,7 @@ func TestIndexHtmlCarriesAValidatorToo(t *testing.T) {
 	if etag == "" {
 		t.Fatal("index.html carries no ETag -- the no-cache document re-transfers in full on every load, which is every returning visitor")
 	}
-	if got := first.Header().Get("Cache-Control"); got != "no-cache, no-store, must-revalidate" {
+	if got := first.Header().Get("Cache-Control"); got != "public, no-cache, must-revalidate" {
 		t.Errorf("index.html Cache-Control = %q; the no-cache policy must not change", got)
 	}
 
@@ -172,7 +172,7 @@ func TestIndexHtmlCarriesAValidatorToo(t *testing.T) {
 	if got := client.totalGets(); got != before {
 		t.Errorf("the index.html 304 cost %d extra storage read(s), want 0", got-before)
 	}
-	if got := second.Header().Get("Cache-Control"); got != "no-cache, no-store, must-revalidate" {
+	if got := second.Header().Get("Cache-Control"); got != "public, no-cache, must-revalidate" {
 		t.Errorf("304 Cache-Control = %q, want the no-cache policy repeated", got)
 	}
 }

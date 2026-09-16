@@ -525,7 +525,7 @@ happens when nothing else matched. The full order
    **`static`**: `404` -- a mistyped path in a multi-page site should be
    visible, not silently rendered as the home page.
 
-HTML and mutable asset URLs are served with `no-cache, no-store,
+HTML and mutable asset URLs are served with `public, no-cache,
 must-revalidate` so ordinary navigation reaches the current deployment.
 Only assets with a verified SHA-256 filename component (12–64 hexadecimal
 characters) receive `public, max-age=31536000, immutable`. Other bundler
@@ -804,13 +804,13 @@ answers a different question.
 | Response | `Cache-Control` | Validator |
 |---|---|---|
 | Assets with a verified SHA-256 filename component (12–64 hex characters) | `public, max-age=31536000, immutable` | strong `ETag` |
-| All HTML, route fallbacks, and other mutable assets (JS, CSS, service workers, JSON) | `no-cache, no-store, must-revalidate` | strong `ETag` |
+| All HTML, route fallbacks, and other mutable assets (JS, CSS, service workers, JSON) | `public, no-cache, must-revalidate` | strong `ETag` |
 | `runtime-config.json` | `no-store` | none |
 | A 404 | `no-cache, no-store, must-revalidate` | none |
 
-Mutable responses include `no-store`; browsers must fetch them again on
-ordinary navigation. Conditional requests with a current `ETag` can receive
-a 304. Blob validators include the immutable bundle version and path; local
+Mutable responses may be stored, but require validation on every reuse.
+On ordinary navigation browsers send the stored `ETag`; unchanged content
+receives a 304 without transferring the body again. Blob validators include the immutable bundle version and path; local
 file validators hash actual bytes. Date-only validators are ignored because
 archive timestamps can survive a release unchanged.
 
@@ -846,7 +846,7 @@ That is a property of the layout rather than a promise:
 
 - Long-lived assets have a filename digest verified against their bytes. A
   changed body must use a different verified filename to retain that policy.
-- HTML, route fallbacks, and unverified assets use `no-cache, no-store,
+- HTML, route fallbacks, and unverified assets use `public, no-cache,
   must-revalidate`; `runtime-config.json` uses `no-store`. Site resolution
   uses change-feed invalidation with a short TTL backstop.
 - This applies once the new policy reaches clients. A CDN containing an older
