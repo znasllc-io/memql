@@ -5,6 +5,30 @@ import { QueryClient, type QueryCallOptions } from "./query.js";
 import type { Result } from "./types.js";
 import { renderMemQLValue } from "./memqlValue.js";
 
+/** Acknowledge exactly the change revision the caller viewed. Ownership and row identity are derived by the server; one person cannot dismiss another's. */
+// Bound concept: v1:os:attentionReceipt (machine-readable: BoundConcepts["acknowledgeAttention"] in generated_concepts.ts).
+export interface AcknowledgeAttentionArgs {
+  changeId: string;
+  revision: string;
+}
+
+export function buildAcknowledgeAttention(args: AcknowledgeAttentionArgs): string {
+  const parts: string[] = [];
+  parts.push("changeId: " + renderMemQLValue(args.changeId));
+  parts.push("revision: " + renderMemQLValue(args.revision));
+  return "mutation acknowledgeAttention(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    acknowledgeAttention(args: AcknowledgeAttentionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.acknowledgeAttention = function (this: QueryClient, args: AcknowledgeAttentionArgs = {} as AcknowledgeAttentionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("acknowledgeAttention", buildAcknowledgeAttention(args), opts);
+};
+
 /** Activate a bundle after Gate 3 approval: status -> active and activatedAt stamped. The authored-construct runtime (#959) registers the bundle's constructs on this transition; member constructs are flipped to active via setConstructStatus. */
 // Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["activateAuthoringBundle"] in generated_concepts.ts).
 export interface ActivateAuthoringBundleArgs {
@@ -2769,6 +2793,7 @@ export interface CreatePackageArgs {
   repoRef?: string;
   credentialId?: string;
   artifactId?: string;
+  autoDeploy?: boolean;
   /** The v1:accounts:account this package is for. Absent means untied. */
   accountId?: string;
 }
@@ -2782,6 +2807,7 @@ export function buildCreatePackage(args: CreatePackageArgs): string {
   if (args.repoRef !== undefined) parts.push("repoRef: " + renderMemQLValue(args.repoRef));
   if (args.credentialId !== undefined) parts.push("credentialId: " + renderMemQLValue(args.credentialId));
   if (args.artifactId !== undefined) parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  if (args.autoDeploy !== undefined) parts.push("autoDeploy: " + renderMemQLValue(args.autoDeploy));
   if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
   return "mutation createPackage(" + parts.join(", ") + ")";
 }

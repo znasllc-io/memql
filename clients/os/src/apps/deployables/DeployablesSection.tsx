@@ -1,3 +1,5 @@
+import { AttentionMarker } from "../../attention/Attention";
+import { updateTarget } from "./attention";
 import type { ConnectReturn } from "./sources/connectReturn";
 import { healthExplanation } from "./health";
 import { AddButton } from "../../kit/AddButton";
@@ -638,9 +640,9 @@ function GroupLine({
     {heading}
     <div className="os-deploy-group" data-archived={pkg.status === "archived" || undefined}>
       <div className="os-deploy-grouphead">
-        <button type="button" className="deployable-source-heading" onClick={() => onOpenSource(pkg.id)} aria-label={`Open ${sourceLabel(pkg)}`}>
+        <button type="button" className="deployable-source-heading os-attention-anchor" onClick={() => onOpenSource(pkg.id)} aria-label={`Open ${sourceLabel(pkg)}`}>
           <GitBranch size={14} aria-hidden />
-          <span className="os-row-name">{sourceLabel(pkg)}</span>
+          <span className="os-row-name">{sourceLabel(pkg)}</span><AttentionMarker appId="deployables" target={updateTarget(pkg.id)} />
           {pkg.updateAvailable ? <span className="deployable-status" data-tone="accent"><ArrowUpCircle size={12} aria-hidden /> Update available</span> : null}
           {pkg.status === "archived" ? <span className="deployable-status">Archived</span> : null}
         </button>
@@ -696,6 +698,7 @@ function DeployableLine({
       {waiting && state !== "Review needed" ? <span className="os-deploy-waiting">Review needed</span> : null}
       {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
     </span>
+    {row.pkg ? <AttentionMarker appId="deployables" target={updateTarget(row.pkg.id)} /> : null}
     <ChevronRight size={14} aria-hidden className="deployable-list-chevron" />
   </button>;
 }

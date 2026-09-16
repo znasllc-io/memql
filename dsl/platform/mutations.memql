@@ -1342,11 +1342,12 @@ mutation package createPackage {
     repoRef       string   @maxLength(200)
     credentialId  string
     artifactId    string
+    autoDeploy    boolean
     /// The v1:accounts:account this package is for. Absent means untied.
     accountId     string
   }
   insert {
-    accept { name, repoUrl, repoRef, credentialId, artifactId, accountId }
+    accept { name, repoUrl, repoRef, credentialId, artifactId, accountId, autoDeploy }
     stamp {
       id:              args.packageId
       ownerUserId:     actor.userId
@@ -1440,6 +1441,7 @@ mutation package setPackageAutoDeploy {
   update {
     id:         args.packageId
     autoDeploy: args.autoDeploy
+    autoDeployChangedAt: now
   }
 }
 

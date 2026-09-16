@@ -17,3 +17,11 @@ query desktop myDesktop {
   filter  row => row.ownerUserId == actor.userId
   shape   desktopDocument
 }
+
+/// The caller's seen UI revisions, shared across their OS windows and machines.
+@actor
+@unbounded("per-user attention receipts; one small row per acknowledged meaningful change revision")
+query attentionReceipt myAttentionReceipts {
+  filter row => row.ownerUserId == actor.userId
+  shape attentionReceiptDetail
+}

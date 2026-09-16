@@ -25,6 +25,9 @@
 [data-os-sheet] {
   color-scheme: light dark;
 
+  /* Unseen meaningful changes, independent of health and warnings. */
+  --os-attention-color: #4285ef;
+
   --os-font: "InterVariable", "Inter", ui-sans-serif, system-ui, sans-serif;
   --os-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
   --os-font-display: "Squada One", "InterVariable", "Inter", ui-sans-serif, sans-serif;

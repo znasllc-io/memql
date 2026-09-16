@@ -3,6 +3,8 @@ package edge
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -102,12 +104,13 @@ func get(t *testing.T, h *Handler, path string, headers map[string]string) *http
 // back. A 304 costing zero storage reads is the thing that makes the edge
 // affordable in front of a busy site.
 func TestConditionalRequestAnswers304WithZeroDownloads(t *testing.T) {
+	name := fmt.Sprintf("assets/app.%x.js", sha256.Sum256([]byte("console.log(1)")))
 	client := newCountingBlobClient(map[string][]byte{
-		testBundlePrefix + "assets/app.abc123.js": []byte("console.log(1)"),
+		testBundlePrefix + name: []byte("console.log(1)"),
 	})
 	h := blobSiteHandler(t, client)
 
-	first := get(t, h, "/assets/app.abc123.js", nil)
+	first := get(t, h, "/"+name, nil)
 	if first.Code != http.StatusOK {
 		t.Fatalf("first request: status %d, want 200", first.Code)
 	}
@@ -120,7 +123,7 @@ func TestConditionalRequestAnswers304WithZeroDownloads(t *testing.T) {
 	}
 	downloadsAfterFirst := client.totalGets()
 
-	second := get(t, h, "/assets/app.abc123.js", map[string]string{"If-None-Match": etag})
+	second := get(t, h, "/"+name, map[string]string{"If-None-Match": etag})
 	if second.Code != http.StatusNotModified {
 		t.Fatalf("conditional request: status %d, want 304", second.Code)
 	}
@@ -157,7 +160,7 @@ func TestIndexHtmlCarriesAValidatorToo(t *testing.T) {
 	if etag == "" {
 		t.Fatal("index.html carries no ETag -- the no-cache document re-transfers in full on every load, which is every returning visitor")
 	}
-	if got := first.Header().Get("Cache-Control"); got != "no-cache, no-store, must-revalidate" {
+	if got := first.Header().Get("Cache-Control"); got != "public, no-cache, must-revalidate" {
 		t.Errorf("index.html Cache-Control = %q; the no-cache policy must not change", got)
 	}
 
@@ -169,7 +172,7 @@ func TestIndexHtmlCarriesAValidatorToo(t *testing.T) {
 	if got := client.totalGets(); got != before {
 		t.Errorf("the index.html 304 cost %d extra storage read(s), want 0", got-before)
 	}
-	if got := second.Header().Get("Cache-Control"); got != "no-cache, no-store, must-revalidate" {
+	if got := second.Header().Get("Cache-Control"); got != "public, no-cache, must-revalidate" {
 		t.Errorf("304 Cache-Control = %q, want the no-cache policy repeated", got)
 	}
 }

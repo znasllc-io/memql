@@ -5,6 +5,7 @@ import (
 	"container/list"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
 	"io/fs"
 	"os"
 	"strconv"
@@ -14,9 +15,8 @@ import (
 
 // ASSET VALIDATORS AND THE BUNDLE BYTE CACHE (memql#4545).
 //
-// The edge's header policy was already right -- index.html no-cache,
-// hashed assets immutable -- and the machinery under it was missing
-// entirely:
+// The byte cache and validators complement the browser freshness policy
+// in freshness.go. They originally addressed two missing mechanisms:
 //
 //   - Every blob:// asset was a FRESH download per request per file. A busy
 //     site was a per-visitor blob storm for bytes that are immutable by
@@ -38,9 +38,8 @@ import (
 //
 // The file:// path has no content hash: it is the tree the image shipped,
 // or a working directory during the dev inner loop. There the validator
-// includes the file's size and modification time, which the filesystem
-// already knows and a Stat already returns. That is a strong validator for
-// this purpose -- a rebuild moves mtime -- and it costs no read.
+// hashes the actual content. Archives and reproducible builds can preserve
+// both size and modification time across different bytes.
 //
 // # No invalidation, by construction
 //
@@ -111,22 +110,19 @@ func strongETag(parts ...string) string {
 	return `"` + hex.EncodeToString(h.Sum(nil))[:32] + `"`
 }
 
-// statETag builds a validator from what a Stat already returned. Used for
-// the file:// path, which has no content-addressed prefix.
-func statETag(bundleRef, name string, info fs.FileInfo) (string, bool) {
-	if info == nil {
+// contentETag avoids stale validators when archives preserve size and mtime.
+// Blob bundles use their immutable version prefix and do not reach this path.
+func contentETag(fsys fs.FS, name string) (string, bool) {
+	f, err := fsys.Open(name)
+	if err != nil {
 		return "", false
 	}
-	mod := info.ModTime()
-	if mod.IsZero() {
-		// A zero ModTime carries no information, so the validator would say
-		// "these bytes are the same" for two different builds at the same
-		// path and size. Refusing to emit one is the honest answer -- the
-		// response is then simply un-validated, exactly as before.
+	defer f.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, f); err != nil {
 		return "", false
 	}
-	return strongETag(bundleRef, name, strconv.FormatInt(info.Size(), 10),
-		strconv.FormatInt(mod.UTC().UnixNano(), 10)), true
+	return `"` + hex.EncodeToString(hash.Sum(nil)) + `"`, true
 }
 
 // etagMatches reports whether an If-None-Match header selects the given
@@ -262,9 +258,5 @@ func assetETagFor(fsys fs.FS, name, bundleRef string) (string, bool) {
 	if v, ok := fsys.(assetValidator); ok {
 		return v.ETagFor(name)
 	}
-	info, err := fs.Stat(fsys, name)
-	if err != nil {
-		return "", false
-	}
-	return statETag(bundleRef, name, info)
+	return contentETag(fsys, name)
 }

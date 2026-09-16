@@ -148,6 +148,12 @@ export function ComposeSourceStop({
             tokenFormOpen={tokenFormOpen}
             onTokenFormOpenChange={onTokenFormOpenChange}
           />
+          <ChoiceStack name="compose-deployment-mode" label="Deployment mode" voice="prose"
+            value={draft.autoDeploy ? "automatic" : "manual"} onChange={mode => onDraft({ autoDeploy: mode === "automatic" })}
+            options={[
+              { value: "manual", label: "Manual", description: "Check for new versions automatically. Keep serving the current version until you deploy." },
+              { value: "automatic", label: "Automatic", description: "Check and deploy new versions automatically. Changed build plans still require review." },
+            ]} />
           {/* ONE SOURCE, ONCE (2026-09-05, D8). The engine refuses a second
               registration of a repository at a ref; this says so here, while
               the URL is still being chosen, and names the source that has it

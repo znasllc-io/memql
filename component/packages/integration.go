@@ -870,6 +870,16 @@ func (i *Integration) handleSetAutoDeploy(ctx context.Context, args map[string]a
 	if packageId == "" {
 		return nil, refuse(CodeSourceUnreadable, "packageId is required")
 	}
+	// Builtin args carry bare IDs. Read under the caller and use the stored
+	// canonical ID for the nested mutation's write target.
+	pkg, err := deps.Store.packageById(ctx, packageId)
+	if err != nil {
+		return nil, err
+	}
+	if pkg == nil {
+		return nil, refuse(CodeSourceUnreadable, "no readable source %q", packageId)
+	}
+	packageId = rowString(pkg, "id")
 	on := boolArg(args, "autoDeploy")
 	if err := deps.Store.setAutoDeploy(ctx, packageId, on); err != nil {
 		return nil, err

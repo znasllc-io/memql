@@ -85,6 +85,8 @@ export interface OsAppProps {
 }
 
 export interface OsAppManifest {
+  /** Meaningful UI revisions, acknowledged only at their declared destination. */
+  attentionChanges?: readonly import("../attention/model").FeatureChange[];
   /** Landing section for record search when a nested page has no search field. */
   searchSection?: string;
   id: string;

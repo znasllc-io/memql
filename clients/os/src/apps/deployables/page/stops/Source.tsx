@@ -1,8 +1,7 @@
-import { Switch } from "../../../../kit/Switch";
 import { useState } from "react";
 import { Archive, ArrowUpCircle, GitBranch, KeyRound, RotateCcw, Zap } from "lucide-react";
 
-import { Button, Caption, Chip, Chips, Fact, Facts, FormRow, Input } from "../../../../kit";
+import { Button, Caption, ChoiceStack, Chip, Chips, Fact, Facts, FormRow, Input } from "../../../../kit";
 import { formatMoment } from "../../../../kit/format";
 import { usePackageActions } from "../../packages/actions";
 import { ProblemNotice } from "../../packages/ReportView";
@@ -151,20 +150,15 @@ export function AutoDeploySwitch({ pkg }: { pkg: PackageRow }) {
   return (
     <section className="os-report-part">
       <h4 className="os-report-heading">
-        <Zap size={12} aria-hidden /> Automatic updates
+        <Zap size={12} aria-hidden /> Deployment mode
       </h4>
-      <Switch
-        checked={pkg.autoDeploy}
-        disabled={actions.busy}
-        onChange={(on) => void actions.setAutoDeploy(pkg.id, on)}
-      >
-        Automatically deploy updates with an unchanged plan
-      </Switch>
-      <Caption>
-        {pkg.autoDeploy
-          ? "Updates with the same build plan deploy automatically. New apps, changed commands and problems still require review."
-          : "Updates wait for your review before deploying."}
-      </Caption>
+      <fieldset disabled={actions.busy} className="deployable-mode-fieldset">
+        <ChoiceStack name={`deployment-mode-${pkg.id}`} label="Deployment mode" voice="prose"
+          value={pkg.autoDeploy ? "automatic" : "manual"} onChange={mode => void actions.setAutoDeploy(pkg.id, mode === "automatic")}
+          options={[{ value: "manual", label: "Manual", description: "Check automatically; deploy when you choose." },
+            { value: "automatic", label: "Automatic", description: "Check and deploy automatically when the build plan is unchanged." }]} />
+      </fieldset>
+      <Caption>Applies to every app from this source. Automatic includes a waiting update on the next upstream check (within ten minutes). New apps and changed build plans still require review. Manual stops automatic work before publishing starts; publishing already underway finishes.</Caption>
       {actions.refusal ? <ProblemNotice problem={{ ...actions.refusal, fatal: true }} tone="error" /> : null}
     </section>
   );

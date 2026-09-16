@@ -28,7 +28,7 @@ func feedHarness(t *testing.T, pkgs ...map[string]any) (*Integration, *recording
 	return i, engine
 }
 
-const pushBody = `{"ref":"refs/heads/main","after":"newsha0000000000","repository":{"html_url":"https://github.com/acme/widget"}}`
+const pushBody = `{"ref":"refs/heads/main","after":"newsha0000000000","repository":{"html_url":"https://github.com/acme/widget","default_branch":"main"}}`
 
 func trackedPackage(deployed, known string, available bool) map[string]any {
 	return map[string]any{
@@ -177,7 +177,7 @@ func TestABodyThisClusterCannotReadIsSkippedRatherThanFailed(t *testing.T) {
 	i, _ := feedHarness(t, trackedPackage("oldsha0000000000", "", false))
 	for _, body := range []string{
 		`not json`,
-		`{"repository":{"html_url":"https://github.com/acme/widget"}}`, // no version
+		`{"repository":{"html_url":"https://github.com/acme/widget","default_branch":"main"}}`, // no version
 		`{"after":"abc"}`, // no repository
 	} {
 		if _, err := i.handleNoteUpstreamFromWebhook(context.Background(), map[string]any{
@@ -192,7 +192,7 @@ func TestAReleaseIsIdentifiedByItsTag(t *testing.T) {
 	// The version has to MIRROR what sourceVersion records, or the comparison
 	// that lights the cue is between two different kinds of string and
 	// updateAvailable is permanently true.
-	ev, err := parseGitHubPush(`{"release":{"tag_name":"v1.4.0"},"after":"abc123","repository":{"html_url":"https://github.com/acme/widget"}}`)
+	ev, err := parseGitHubPush(`{"release":{"tag_name":"v1.4.0"},"after":"abc123","repository":{"html_url":"https://github.com/acme/widget","default_branch":"main"}}`)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}

@@ -2253,3 +2253,113 @@ other app carries.
   node reads at its NEXT BOOT rather than what a running node has loaded.
   An `integration` or `node-type` gets a sentence explaining why there is no
   switch instead of a disabled one (rule 12).
+
+## Unseen changes: shared attention markers
+
+`src/attention` is the OS-wide attention service. A small blue circle means a
+meaningful change has not been viewed by this person. It is independent of the
+short-lived arrival animation, green Live health, amber setup warnings, red
+errors and Ask activity. It is not a notification feed. Users configure none
+of these markers.
+
+All registered apps participate through the shared desktop and phone shell:
+launcher entries, dock apps, window icons and section navigation aggregate
+unseen descendants. Section `parent` relationships aggregate automatically;
+`ancestors` can name another view of the same destination (such as a map).
+
+For authors and coding agents: decide whether the change gives a person a
+new capability or materially changes how they use an existing one. If it is
+worth directing their attention to that destination, declare it. Routine
+fixes, refactors, restyling, tests and rebuilds usually need no declaration;
+never manufacture a revision just because source files changed. Keep the
+existing ID for the same capability and advance its revision only for a new
+meaningful change. Namespace IDs by app (`fleet:policy-editor`) because
+receipt IDs are shared across the OS.
+
+For a meaningful UI/functionality change, add `attentionChanges` to the app's
+`OsAppManifest`. For example:
+
+```tsx
+attentionChanges: [{
+  id: "fleet:policy-editor", revision: "policy-editor-v2",
+  sectionId: "routing", label: "Policy editor improved",
+}]
+```
+
+A section destination is acknowledged by the common shell only when that
+section is visible. For a deeper destination, add a stable `target` and wrap
+its actual visible content in `AttentionDestination` with the same `appId`,
+`sectionId` and `target`. Render `AttentionMarker` on the control that opens
+it. An ancestor marker never acknowledges descendants. Retained hidden panes
+must pass `visible={false}`; window visibility is inherited automatically.
+Do not use commit IDs, rebuild times or incidental source diffs as feature
+revisions. Declare only changes worth directing a person to their destination.
+
+A deeper destination uses the same explicit target in declaration, marker and
+acknowledgment wrapper:
+
+```tsx
+// Manifest entry: { id: "fleet:policy-editor", revision: "policy-editor-v2",
+//   sectionId: "routing", target: "policy-editor", label: "Policy editor improved" }
+<AttentionMarker appId="fleet" sectionId="routing" target="policy-editor" />
+{editorOpen && <AttentionDestination appId="fleet" sectionId="routing" target="policy-editor">
+  <PolicyEditor />
+</AttentionDestination>}
+```
+
+Reviewers should check that the revision represents a meaningful change,
+that an eligible person can reach the exact destination (including empty or
+undeployed states), and that opening ancestors cannot dismiss it. Add a
+focused rendering test proving that route and acknowledgment behavior; also
+cover hidden panes, another user, and a later revision when changing the
+shared mechanism. `npm test -- test/attention` checks declared IDs, known
+sections and receipt behavior. It does not infer semantic importance or prove
+arbitrary dynamic destinations reachable. Those remain author/reviewer
+judgments; there is no mandatory PR attention decision or source-diff gate. CI adds a
+non-blocking review reminder to its job summary when app, shell, registry,
+shared-control or attention code changes. It stays quiet for documentation,
+tests, asset-only edits and unrelated backend changes; it never decides
+whether a marker is needed.
+
+Runtime sources use `usePublishAttention(sourceId, changes)` with `kind:
+"runtime"` and the actual discovered revision. Keep the producer at shell
+lifetime if the app should be marked while closed. Deployables does this via
+one shared package collection, so its map, list and closed-app marker cannot
+hold different package feeds. A source retracts an item when it no longer
+applies; viewing an item does not change its underlying availability.
+
+Acknowledgments are `v1:os:attentionReceipt` rows, keyed by server-derived
+(user, change ID, revision), owner-scoped and broadcast between nodes. The UI
+clears marks only after a successful write, preserves them on failure, and
+offers an in-surface retry. An old revision cannot acknowledge a newer one,
+and one person's receipts cannot dismiss another's changes.
+
+### Branch deployment policy
+
+Repository sources use the existing backend `autoDeploy` policy. Creation
+and deployable details offer Manual and Automatic. Existing missing/false
+values remain Manual; existing true values remain Automatic. Policy is
+source-wide, applying to every app built from that source.
+
+Both modes detect versions using the verified webhook and ten-minute poll.
+Webhook revisions match the tracked branch/tag; a webhook without enough
+information to resolve the default branch waits for the poll. The poll
+updates only the source whose head it resolved. Automatic reconciles pending
+updates even when detection did not change, so changing Manual to Automatic
+includes a waiting revision on the next check. Explicit policy changes start
+a new automatic-attempt epoch, permitting a previously stopped revision to
+run while deduplicating webhook/poll attempts within that epoch.
+
+Automatic keeps the existing build-plan confirmation gate: new apps, changed
+commands or other plan changes still require review. Switching to Manual
+stops automatic work at safe boundaries before staging/rolling/publishing.
+Work already across that boundary finishes to avoid a partially rolled
+cluster. Detection continues, and the serving version stays available.
+
+Manual pending versions publish attention under the package's revision.
+Markers lead through Overview/map, source group and deployable row to
+**Available version** in the deployable's Versions area or the source page
+(including sources that have not deployed yet). Opening the app,
+source or deployable does not acknowledge it. Expanding Available version
+does, without deploying or removing the available update. Successful
+automatic updates do not create this manual-update attention item.

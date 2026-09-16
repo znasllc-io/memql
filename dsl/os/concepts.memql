@@ -46,3 +46,14 @@ concept desktop {
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }
+
+/// A person's acknowledgment of one meaningful UI or runtime change. Receipts
+/// are immutable per revision, so viewing an older revision cannot hide a new one.
+// @no-displayCard: internal per-user navigation state, rendered at its destination.
+@rowAuthz(owner="ownerUserId")
+concept attentionReceipt {
+  ownerUserId string! @serverSet
+  changeId string! @description("Stable app/surface change identifier declared by the UI.")
+  revision string! @description("The specific revision the person viewed.")
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+}

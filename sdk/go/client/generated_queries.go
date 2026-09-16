@@ -4897,6 +4897,23 @@ func ModuleReadinessAllBuild(args ModuleReadinessAllArgs) string {
 	return "query moduleReadinessAll()"
 }
 
+// MyAttentionReceipts -- The caller's seen UI revisions, shared across their OS windows and machines.
+//
+// Bound concept: v1:os:attentionReceipt (machine-readable: BoundConcepts["myAttentionReceipts"] in generated_concepts.go).
+type MyAttentionReceiptsArgs struct {
+}
+
+// MyAttentionReceipts calls the engine query myAttentionReceipts.
+func (qc *QueryClient) MyAttentionReceipts(ctx context.Context, args MyAttentionReceiptsArgs) (*Result, error) {
+	call := MyAttentionReceiptsBuild(args)
+	return qc.executeNamed(ctx, "myAttentionReceipts", call)
+}
+
+func MyAttentionReceiptsBuild(args MyAttentionReceiptsArgs) string {
+	_ = args
+	return "query myAttentionReceipts()"
+}
+
 // MyDesktop -- The caller's own desktop document, or nothing when they have never saved one. The MemQL OS shell reads this once on connect and again on every graph.node.created event for the concept.
 // Caller-scoped with no argument at all: there is one desktop per person and it is the person asking. An ownerUserId argument would be a caller-supplied id standing in for a caller check the read already has, which is the reasoning myWorkersWithStatus and routingPolicyForOwner both record. It also means there is nothing here to enumerate.
 // Nothing empty comes back for a person with no row, and that is a STATE rather than an error: the shell's local document is uploaded on the first save, and until then absent is exactly right.

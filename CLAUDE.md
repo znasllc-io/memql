@@ -137,6 +137,8 @@ without one is normal.
 | `sdk/go/` | Go SDK -- the public client surface | [→](sdk/go/CLAUDE.md) |
 | `docs/` | Documentation | [→](docs/CLAUDE.md) |
 
+**OS attention (humans and coding agents):** when adding or meaningfully changing a user-facing capability, consider whether people need to discover it. Declare a stable `attentionChanges` ID and meaningful revision on that app's manifest when they do; wire a reachable acknowledgment destination and test it. Refactors, routine fixes, styling and rebuilds do not automatically warrant a marker. Read [Unseen changes](clients/os/README.md#unseen-changes-shared-attention-markers) before implementing or reviewing this behavior. Ancestor navigation must never acknowledge an unseen child; user/revision receipts are shared infrastructure, not a per-app local-storage flag.
+
 ---
 
 ## Documentation

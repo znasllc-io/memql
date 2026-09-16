@@ -12,12 +12,8 @@ import (
 
 // feeds.go is D11: two feeds, one effect.
 //
-// Both write EXACTLY latestKnownVersion + updateAvailable, through the one
-// mutation that can write them, and neither ever starts a deployment. That
-// narrowness is the design rather than an implementation detail: a feed able
-// to write anything else would be deciding to deploy somebody's code, and
-// deploying an update is a person's click starting a new run through analyze
-// and confirm again.
+// Both detect upstream revisions regardless of deployment policy. Automatic
+// sources reconcile pending revisions through the same guarded deploy pipeline.
 
 // WebhookSourceEnv names the inbound source segment GitHub deliveries arrive
 // on. A cluster whose allowlist calls it something else sets this; unset means
@@ -58,7 +54,7 @@ func (i *Integration) handleNoteUpstreamFromWebhook(ctx context.Context, args ma
 		return resultNode(map[string]any{"skipped": perr.Error()}), nil
 	}
 
-	matched, uerr := noteUpstream(ctx, deps, ev.RepoUrl, ev.Version)
+	matched, uerr := noteUpstreamEvent(ctx, deps, ev)
 	if uerr != nil {
 		return nil, uerr
 	}
@@ -71,8 +67,10 @@ func (i *Integration) handleNoteUpstreamFromWebhook(ctx context.Context, args ma
 
 // upstreamEvent is what either feed learned about a repository.
 type upstreamEvent struct {
-	RepoUrl string
-	Version string
+	RepoUrl       string
+	Version       string
+	Ref           string
+	DefaultBranch string
 }
 
 // parseGitHubPush reads the two facts a push or release carries.
@@ -84,10 +82,12 @@ type upstreamEvent struct {
 func parseGitHubPush(body string) (upstreamEvent, error) {
 	var payload struct {
 		Ref        string `json:"ref"`
+		Deleted    bool   `json:"deleted"`
 		After      string `json:"after"`
 		Repository struct {
-			HTMLURL  string `json:"html_url"`
-			CloneURL string `json:"clone_url"`
+			HTMLURL       string `json:"html_url"`
+			DefaultBranch string `json:"default_branch"`
+			CloneURL      string `json:"clone_url"`
 		} `json:"repository"`
 		Release struct {
 			TagName string `json:"tag_name"`
@@ -107,10 +107,14 @@ func parseGitHubPush(body string) (upstreamEvent, error) {
 	if version == "" {
 		version = strings.TrimSpace(payload.After)
 	}
-	if version == "" {
+	if version == "" || payload.Deleted || strings.Trim(version, "0") == "" {
 		return upstreamEvent{}, fmt.Errorf("the delivery names no version")
 	}
-	return upstreamEvent{RepoUrl: repo, Version: version}, nil
+	ref := payload.Ref
+	if ref == "" && payload.Release.TagName != "" {
+		ref = "refs/tags/" + payload.Release.TagName
+	}
+	return upstreamEvent{RepoUrl: repo, Version: version, Ref: ref, DefaultBranch: payload.Repository.DefaultBranch}, nil
 }
 
 // noteUpstream writes the two feed-owned fields on every package tracking a
@@ -121,66 +125,56 @@ func parseGitHubPush(body string) (upstreamEvent, error) {
 // Comparing against the last thing a feed saw would leave the flag true
 // forever after one deploy.
 func noteUpstream(ctx context.Context, d *Deps, repoUrl, version string) (int, error) {
-	packages, err := d.Store.packagesByRepoUrl(ctx, normalizeRepoUrl(repoUrl))
+	return noteUpstreamEvent(ctx, d, upstreamEvent{RepoUrl: repoUrl, Version: version})
+}
+
+func noteUpstreamEvent(ctx context.Context, d *Deps, ev upstreamEvent) (int, error) {
+	packages, err := d.Store.packagesByRepoUrl(ctx, normalizeRepoUrl(ev.RepoUrl))
 	if err != nil {
 		return 0, err
 	}
 	matched := 0
 	for _, pkg := range packages {
-		id := rowString(pkg, "id")
-		if id == "" {
-			continue
-		}
-		// AN ARCHIVED SOURCE IS NOT FED (memql#5293). The read above excludes
-		// archived packages, as packagesTrackingRepos always did; this is the
-		// feed declining to write what it was handed regardless, because the
-		// two feed-owned fields on an archived source are a cue nobody can
-		// act on, and an armed one would auto-deploy a source somebody
-		// archived. The second check is what makes the read's exclusion a
-		// property of the feed rather than of one query's filter.
-		if rowString(pkg, "status") != "active" {
-			continue
-		}
-		deployed := rowString(pkg, "deployedVersion")
-		known := rowString(pkg, "latestKnownVersion")
-		available := version != "" && version != deployed
-		if known == version && rowBool(pkg, "updateAvailable") == available {
-			// NOTHING CHANGED, so nothing is written. A write here would
-			// broadcast a row change to every subscriber and re-fire the OS
-			// arrival cue on a heartbeat -- the exact "a heartbeat is not
-			// news" failure clients/os/README.md names.
-			continue
-		}
-		if err := d.Store.recordUpstreamVersion(ctx, id, version, available); err != nil {
-			return matched, err
-		}
-		matched++
-
-		// AND THEN, ONLY IF THE SOURCE ASKED FOR IT (epic memql#4900, task
-		// memql#4903), the deploy this feed has never been allowed to start.
-		//
-		// The rule the header states -- "neither ever starts a deployment" --
-		// held for one reason: deploying somebody's code is a decision, and a
-		// feed had no way to know it had been made. The switch is that
-		// decision, taken once, in advance, by the person who owns the
-		// source. So the feed still decides nothing; it acts on a decision
-		// that is already on the row.
-		//
-		// Only when there is genuinely something newer than what is live: a
-		// re-announcement of the version already deployed must not start a
-		// run, or a repository with a chatty webhook would redeploy itself
-		// forever.
-		if available {
-			if _, aerr := d.startAutoRun(ctx, pkg, version); aerr != nil {
-				// One package's auto-run must not stop the sweep: the feed's
-				// own job -- recording what moved -- is already done for this
-				// row, and every other package still deserves its cue.
-				d.log().Warn("packages: an auto-deploy could not be started",
-					"component", "packages.autodeploy", "package", id, "err", aerr)
+		if ev.Ref != "" {
+			ref := rowString(pkg, "repoRef")
+			if ref == "" {
+				ref = ev.DefaultBranch
 			}
+			// An absent default branch is ambiguous; the poll resolves it safely.
+			if ref == "" || (ev.Ref != ref && ev.Ref != "refs/heads/"+ref && ev.Ref != "refs/tags/"+ref) {
+				continue
+			}
+		}
+		n, err := notePackageUpstream(ctx, d, pkg, ev.Version)
+		matched += n
+		if err != nil {
+			return matched, err
 		}
 	}
 	return matched, nil
+}
+
+// Detection is independent of deployment policy. Reconcile even an unchanged
+// pending revision: a previous run may have been busy, or Manual was just armed.
+func notePackageUpstream(ctx context.Context, d *Deps, pkg map[string]any, version string) (int, error) {
+	id := rowString(pkg, "id")
+	if id == "" || rowString(pkg, "status") != "active" {
+		return 0, nil
+	}
+	available := version != "" && version != rowString(pkg, "deployedVersion")
+	changed := 0
+	if rowString(pkg, "latestKnownVersion") != version || rowBool(pkg, "updateAvailable") != available {
+		if err := d.Store.recordUpstreamVersion(ctx, id, version, available); err != nil {
+			return 0, err
+		}
+		changed = 1
+	}
+	if available {
+		if _, err := d.startAutoRun(ctx, pkg, version); err != nil {
+			d.log().Warn("packages: an auto-deploy could not be started", "component", "packages.autodeploy", "package", id, "err", err)
+		}
+	}
+	return changed, nil
 }
 
 // normalizeRepoUrl makes the webhook's spelling and the stored spelling the
@@ -220,7 +214,7 @@ func (i *Integration) handlePollUpstream(ctx context.Context, _ map[string]any, 
 				"component", "packages.feeds", "package", rowString(pkg, "id"), "err", herr)
 			continue
 		}
-		n, uerr := noteUpstream(ctx, deps, repoUrl, head)
+		n, uerr := notePackageUpstream(ctx, deps, pkg, head)
 		if uerr != nil {
 			return nil, uerr
 		}

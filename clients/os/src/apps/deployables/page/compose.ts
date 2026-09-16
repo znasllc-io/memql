@@ -40,6 +40,7 @@ export interface ComposeDraft {
   repoUrl: string;
   /** A branch or tag; empty follows the default branch, resolved at fetch time. */
   repoRef: string;
+  autoDeploy?: boolean;
   /** One of the caller's own credentials, or "" to fetch anonymously. */
   credentialId: string;
   /** A Library zip's artifact id. */
@@ -56,6 +57,7 @@ export const EMPTY_DRAFT: ComposeDraft = {
   choice: "",
   repoUrl: "",
   repoRef: "",
+  autoDeploy: false,
   credentialId: "",
   artifactId: "",
   name: "",

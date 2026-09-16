@@ -14,3 +14,11 @@ shape desktop desktopDocument {
   document
   row.createdAt
 }
+
+/// Internal acknowledgment state for the calling person's OS.
+@row
+shape attentionReceipt attentionReceiptDetail {
+  row.id
+  changeId
+  revision
+}

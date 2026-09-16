@@ -511,6 +511,15 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 	// begins, never inside one, which is what makes "nothing was published" a
 	// property of the shape rather than of the timing.
 	checkCancelled := func() error {
+		if req.Automatic {
+			current, err := d.Store.packageById(ctx, req.PackageId)
+			if err != nil {
+				return err
+			}
+			if current == nil || !rowBool(current, "autoDeploy") || rowString(current, "status") != "active" {
+				return refuse(CodeDeploymentCancelled, "automatic deployment was disabled before the publish/roll boundary; the serving version is unchanged")
+			}
+		}
 		if cancelled != nil && cancelled.Load() {
 			return refuse(CodeDeploymentCancelled,
 				"this run was stopped before it %s. Nothing was published, and every site is still serving what it was serving.",
@@ -549,6 +558,9 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 		Logger:        d.Logger,
 	})
 	out.Report = rep
+	if rep != nil {
+		rep.UpstreamBaseline = snapshot.UpstreamBaseline
+	}
 
 	snapshotArtifactId := d.storeSnapshot(ctx, req, out.DeploymentId, snapshot)
 	if rerr := d.Store.recordReport(ctx, out.DeploymentId, rep, snapshotArtifactId); rerr != nil {
@@ -688,7 +700,13 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 		return perr
 	}
 
-	if verr := d.Store.recordDeployedVersion(ctx, req.PackageId, snapshot.Version, false); verr != nil {
+	// Compare with the observation at the ORIGINAL fetch, including across
+	// confirmation and retry. A poll can lag a fresh fetch; a new observation
+	// after that fetch must remain pending. Unknown old reports stay conservative.
+	latest, latestErr := d.Store.packageById(ctx, req.PackageId)
+	knownNow := rowString(latest, "latestKnownVersion")
+	pending := latestErr != nil || (knownNow != "" && knownNow != snapshot.Version && (snapshot.UpstreamBaseline == nil || knownNow != *snapshot.UpstreamBaseline))
+	if verr := d.Store.recordDeployedVersion(ctx, req.PackageId, snapshot.Version, pending); verr != nil {
 		d.log().Warn("packages: could not record the deployed version",
 			"component", "packages.pipeline", logger.Subject(packageDeploymentConcept, out.DeploymentId),
 			"deployment", out.DeploymentId, "err", verr)
@@ -831,7 +849,12 @@ func scopeFrom(declared []string, placements map[string]Placement) []string {
 func (d *Deps) fetchFor(ctx context.Context, req DeployRequest, pkg map[string]any) (*SourceSnapshot, error) {
 	from := strings.TrimSpace(req.FromDeploymentId)
 	if from == "" || rowString(pkg, "sourceKind") != "repo" {
-		return d.fetch(ctx, pkg)
+		baseline := rowString(pkg, "latestKnownVersion")
+		snapshot, err := d.fetch(ctx, pkg)
+		if err == nil && snapshot != nil {
+			snapshot.UpstreamBaseline = &baseline
+		}
+		return snapshot, err
 	}
 	prior, err := d.Store.deploymentById(ctx, from)
 	if err != nil {
@@ -863,8 +886,13 @@ func (d *Deps) fetchFor(ctx context.Context, req DeployRequest, pkg map[string]a
 		cleanup()
 		return nil, xerr
 	}
+	var baseline *string
+	if report := reportFromRow(prior); report != nil {
+		baseline = report.UpstreamBaseline
+	}
 	return &SourceSnapshot{
-		Tree: os.DirFS(root),
+		UpstreamBaseline: baseline,
+		Tree:             os.DirFS(root),
 		// The VERSION the earlier run recorded, not one derived from the
 		// bytes: it is the same source, so it is the same version, and
 		// deriving it again would risk two spellings of one commit.

@@ -336,7 +336,7 @@ describe("the seams the surface calls", () => {
     const page = await openPackage(connection);
 
     const source = await openSourceView(page);
-    await click(within(source).getByRole("switch", { name: /Automatically deploy updates/ }));
+    await click(within(source).getByRole("radio", { name: /Automatic Check and deploy/ }));
 
     const calls = connection.callsNamed("packageSetAutoDeploy");
     expect(calls.length, `no switch call reached the wire: ${connection.calls.join(" | ")}`).toBe(1);
@@ -350,7 +350,7 @@ describe("the seams the surface calls", () => {
     // The promise is the whole value of the control: without it somebody
     // either will not arm it or will arm it believing something untrue.
     const source = await openSourceView(page);
-    expect(within(source).getByText(/Updates wait for your review/)).toBeTruthy();
+    expect(within(source).getByText(/Check automatically; deploy when you choose/)).toBeTruthy();
   });
 
   it("marks a run nobody clicked", async () => {

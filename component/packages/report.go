@@ -23,6 +23,10 @@ type Report struct {
 	FormatVersion int `json:"formatVersion,omitempty"`
 	// SourceVersion is the commit SHA or content hash this snapshot is.
 	SourceVersion string `json:"sourceVersion,omitempty"`
+	// UpstreamBaseline preserves the observation associated with this fetch,
+	// so later confirmation/retry can distinguish an old poll from a new head.
+	// Pointer distinguishes an observed empty baseline from an old report with none.
+	UpstreamBaseline *string `json:"upstreamBaseline,omitempty"`
 
 	// Deployables is every declared web surface and what deploying it would
 	// do. Present even for a deployable that carries a problem, because

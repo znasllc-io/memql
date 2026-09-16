@@ -3387,6 +3387,20 @@
       }
     },
     {
+      "concept": "v1:os:attentionReceipt",
+      "file": "os/concepts.memql",
+      "fields": [
+        "changeId",
+        "ownerUserId",
+        "revision"
+      ],
+      "required": [
+        "changeId",
+        "ownerUserId",
+        "revision"
+      ]
+    },
+    {
       "concept": "v1:os:desktop",
       "file": "os/concepts.memql",
       "fields": [
@@ -3989,6 +4003,7 @@
         "accountId",
         "artifactId",
         "autoDeploy",
+        "autoDeployChangedAt",
         "credentialId",
         "declares",
         "deployedVersion",

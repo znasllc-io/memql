@@ -338,6 +338,7 @@ func defaultRoutingRules() []RoutingRule {
 		// person -- a drag lands as one save because the client debounces
 		// before it writes.
 		{Pattern: "graph.node.created.v1:os:desktop", TargetType: ""},
+		{Pattern: "graph.node.created.v1:os:attentionReceipt", TargetType: ""},
 		// Site edge cache invalidation (memql#3714, Task 9). The site row
 		// (v1:platform:site) is written wherever an admin surface writes it
 		// -- typically the bff -- and read on EVERY edge replica's own

@@ -1,3 +1,5 @@
+import { useAttention } from "../../../attention/Attention";
+import { updateTarget } from "../attention";
 import { useCallback, useMemo } from "react";
 import type { LiveState } from "@znasllc-io/memql-sdk-core/client";
 
@@ -48,6 +50,9 @@ export function DeployMap({
   selectedNodeId: string;
   onSelect: (node: MapNode) => void;
 }) {
+  const { unseen } = useAttention({ appId: "deployables" });
+  const targets = new Set(unseen.map(item => item.target));
+  const markedSites = new Set(sites.filter(site => targets.has(updateTarget(site.packageId))).map(site => site.id));
   const model: MapLayout = useMemo(() => (sites.length === 0 ? EMPTY_LAYOUT : layout(sites)), [sites]);
 
   // A DEGRADED FEED MUST NOT READ AS A HEALTHY FLEET. A map is a picture of
@@ -155,6 +160,7 @@ export function DeployMap({
               <MapNodeShape
                 key={node.id}
                 node={node}
+                attention={node.siteIds.some(id => markedSites.has(id))}
                 tick={tickFor(node, ticks)}
                 selected={selectedNodeId === node.id}
                 inSelectedCluster={node.siteIds.some((id) => selectedSites.includes(id))}
@@ -192,6 +198,7 @@ function tickFor(node: MapNode, ticks: Map<string, ArrivalTick>): ArrivalKind | 
 
 function MapNodeShape({
   node,
+  attention,
   tick,
   selected,
   inSelectedCluster,
@@ -199,6 +206,7 @@ function MapNodeShape({
   onKeyActivate,
 }: {
   node: MapNode;
+  attention: boolean;
   tick: ArrivalKind | null;
   selected: boolean;
   inSelectedCluster: boolean;
@@ -237,6 +245,7 @@ function MapNodeShape({
       {node.kind === "site" ? (
         <circle className="os-deploy-node-dot" data-status={node.status || "draft"} cx={14} cy={14} r={4} />
       ) : null}
+      {attention ? <circle className="os-attention-map-dot" cx={node.w - 2} cy={2} r={4} aria-label="Unseen change" /> : null}
       {glyph ? (
         <text className="os-deploy-node-glyph" x={node.w - 10} y={18} textAnchor="end">
           {glyph}
