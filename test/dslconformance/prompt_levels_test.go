@@ -101,6 +101,10 @@ var promptLevels = map[string]string{
 	// it needs; the rule says whose hardware -- and reasoning would have made
 	// those two fight, since reasoningParks routes to federationStrongest.
 	"compileRule": "strong",
+	// composeRoutingPolicy proposes an owner-reviewed draft, like compileRule.
+	// Strong is sufficient because the person reviews it before routing changes;
+	// policyCompilerLocalOnly keeps the authoring request on the fleet.
+	"composeRoutingPolicy": "strong",
 	// classifyRequest: one word plus a confidence, over a request the
 	// deterministic table already declined to settle. Short, bounded, and cheap
 	// to redo -- the fast band's shape exactly, and it must stay there: this is

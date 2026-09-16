@@ -26,7 +26,7 @@
     "here obliges both -- and strands every already-released editor, so treat it as frozen."
   ],
   "clientId": "memql-vscode",
-  "clientName": "MemQL for Visual Studio Code and Cursor",
+  "clientName": "MemQL for VS Code",
   "redirectURI": "http://127.0.0.1/callback",
   "minRole": "developer",
   "acceptedCallbacks": [
