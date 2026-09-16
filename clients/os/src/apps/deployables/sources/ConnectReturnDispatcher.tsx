@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 
 import { useOs } from "../../../chrome/state";
+import { canOpen } from "../../../system/registry";
 import { takeParkedConnectReturn } from "./connectReturn";
 
 // Hands a parked GitHub-connect return to the surface that asked for it
@@ -26,14 +27,18 @@ import { takeParkedConnectReturn } from "./connectReturn";
 // sign-in rather than being lost to it.
 
 export function ConnectReturnDispatcher() {
-  const { actions } = useOs();
+  const { actions, registry, accessEpoch } = useOs();
   useEffect(() => {
+    // The shell mounts before effective capabilities arrive. Keep the return
+    // parked until the same gate as openApp admits it; the access epoch
+    // retries this effect when the asynchronous permission read completes.
+    if (!canOpen(registry, "deployables")) return;
     // TAKE, not read: the parked value is consumed here and this effect is
     // free to run again -- a StrictMode remount does, and so does any change
     // in `actions` identity -- and every later run correctly finds nothing.
     const result = takeParkedConnectReturn();
     if (result === null) return;
     actions.openApp("deployables", result.section, { connect: result });
-  }, [actions]);
+  }, [actions, registry, accessEpoch]);
   return null;
 }
