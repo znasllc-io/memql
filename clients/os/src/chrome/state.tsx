@@ -356,7 +356,8 @@ function stateFromDocument(doc: DesktopDocument): OsState {
  *   WINDOWS, because a window is session state that this document has never
  *   carried (spec D11) -- the arriving desktop is not a statement about them
  *   and cannot be read as one. A window whose desk no longer exists goes,
- *   since there is nowhere to draw it.
+ *   since there is nowhere to draw it. Initial hydration is the exception:
+ *   occupied provisional desks remain until a later remote edit removes them.
  *
  *   THE DESK ON SCREEN, when it still exists, because it is where the person
  *   is looking. Following another machine's paging would move the view under
@@ -364,13 +365,23 @@ function stateFromDocument(doc: DesktopDocument): OsState {
  *   local desk ids are another machine's -- the document's own choice is
  *   taken, which is what lands a new browser where you left off.
  */
-export function adoptDocument(s: OsState, doc: DesktopDocument): OsState {
+export function adoptDocument(s: OsState, doc: DesktopDocument, origin: "hydrate" | "remote" = "remote"): OsState {
   const desks = doc.desks.map((d) => ({
     ...d,
     windows: (s.shell.desks.find((local) => local.id === d.id)?.windows ?? []).filter(
       (id) => !!s.shell.windows[id],
     ),
   }));
+  // The first graph read may finish AFTER a callback or user action opened
+  // an app on the provisional local desktop. Those windows did not come
+  // from persistence and must survive hydration, with their component state
+  // and intent intact. Keep only occupied provisional desks; empty ones and
+  // all their cached items still give way to the arriving document. A later
+  // remote edit retains the usual deleted-desk semantics.
+  const retained = origin === "hydrate"
+    ? s.shell.desks.filter(d => !desks.some(remote => remote.id === d.id) && d.windows.some(id => !!s.shell.windows[id]))
+    : [];
+  desks.push(...retained.map(d => ({ ...d, windows: d.windows.filter(id => !!s.shell.windows[id]) })));
   const kept = new Set(desks.flatMap((d) => d.windows));
   const windows = Object.fromEntries(
     Object.entries(s.shell.windows).filter(([id]) => kept.has(id)),
@@ -387,7 +398,7 @@ export function adoptDocument(s: OsState, doc: DesktopDocument): OsState {
       windows,
       focusedWindowId,
     },
-    surfaces: doc.surfaces,
+    surfaces: { ...doc.surfaces, ...Object.fromEntries(retained.map(d => [d.id, emptySurface()])) },
     dock: doc.dock,
     themePack: doc.themePack,
     installedPacks: doc.installedPacks,
@@ -504,7 +515,7 @@ export function OsProvider({
         setNotice({ kind: "stale" });
         return;
       }
-      setState((s) => adoptDocument(s, event.document));
+      setState((s) => adoptDocument(s, event.document, event.origin));
       // `hydrate` is the desktop resolving for the first time, which is not
       // news -- it is what the person expected to see. Only a document that
       // arrived AFTER that means somebody else's machine saved.

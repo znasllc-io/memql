@@ -117,6 +117,34 @@ describe("adoptDocument", () => {
     expect(after.shell.focusedWindowId).toBeNull();
   });
 
+  it("retains occupied provisional desks only during hydration, without duplicating or persisting windows", () => {
+    const before = runningState();
+    const windowId = before.shell.focusedWindowId!;
+    const localDesk = before.shell.activeDeskId;
+    const remote = remoteDocument();
+    const after = adoptDocument(before, remote, "hydrate");
+    expect(after.shell.windows[windowId]).toBe(before.shell.windows[windowId]);
+    expect(after.shell.focusedWindowId).toBe(windowId);
+    expect(after.shell.activeDeskId).toBe(localDesk);
+    expect(after.shell.desks.map(d => d.id)).toEqual(["desk-70", "desk-71", localDesk]);
+    // Provisional desktop items never overwrite the authoritative document.
+    expect(after.surfaces[localDesk]).toEqual({ items: {}, positions: {} });
+    expect(after.surfaces["desk-70"]).toEqual(remote.surfaces["desk-70"]);
+    expect(after.dock).toEqual(remote.dock);
+    const again = adoptDocument(after, remote, "hydrate");
+    expect(again).toEqual(after);
+    const laterRemote = adoptDocument(after, remote, "remote");
+    expect(laterRemote.shell.windows).toEqual({});
+    expect(laterRemote.shell.desks).toHaveLength(2);
+  });
+
+  it("discards empty provisional desks on first hydration", () => {
+    const before = seedDocument(OS_REGISTRY, GRID);
+    const after = adoptDocument(before, remoteDocument(), "hydrate");
+    expect(after.shell.desks.map(d => d.id)).toEqual(["desk-70", "desk-71"]);
+    expect(after.shell.activeDeskId).toBe("desk-71");
+  });
+
   it("keeps the desk on screen when the document still has it", () => {
     const before = runningState();
     const local = before.shell.activeDeskId;
