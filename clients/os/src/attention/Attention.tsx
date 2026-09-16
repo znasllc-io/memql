@@ -20,8 +20,9 @@ const CONCEPT = "v1:os:attentionReceipt";
 
 export function AttentionProvider({ apps, children }: { apps: readonly OsAppManifest[]; children: ReactNode }) {
   const { access, accessEpoch } = useSession();
-  // A different identity remounts every local acknowledgment and feed.
-  return <UserAttention key={access?.userId ?? ""} userId={access?.userId ?? ""} apps={apps} accessEpoch={accessEpoch}>{children}</UserAttention>;
+  // Scope data to the identity without remounting open app/window state when
+  // an initially unresolved identity lands.
+  return <UserAttention userId={access?.userId ?? ""} apps={apps} accessEpoch={accessEpoch}>{children}</UserAttention>;
 }
 function UserAttention({ userId, apps, children }: { userId: string; apps: readonly OsAppManifest[]; children: ReactNode; accessEpoch?: number }) {
   const connection = useOsConnection();
@@ -31,15 +32,15 @@ function UserAttention({ userId, apps, children }: { userId: string; apps: reado
     reread: async (id, signal) => (await getRowByConceptAndId(connection.query, CONCEPT, id, { signal })) as Row | null,
     paged: false,
   }));
-  const [sources, setSources] = useState<Record<string, readonly AttentionChange[]>>({});
-  const [confirmed, setConfirmed] = useState<ReadonlySet<string>>(new Set());
-  const publish = useCallback((source: string, changes: readonly AttentionChange[]) => setSources(held => ({ ...held, [source]: changes })), []);
-  const seen = new Set(confirmed);
+  const [sources, setSources] = useState<Record<string, { userId: string; changes: readonly AttentionChange[] }>>({});
+  const [confirmed, setConfirmed] = useState<Record<string, ReadonlySet<string>>>({});
+  const publish = useCallback((source: string, changes: readonly AttentionChange[]) => setSources(held => ({ ...held, [source]: { userId, changes } })), [userId]);
+  const seen = new Set(confirmed[userId] ?? []);
   for (const raw of snapshot.rows) { const row = flatten(raw); seen.add(receiptKey(rowString(row, "changeId"), rowString(row, "revision"))); }
   const features = apps.filter(app => accessAdmits(app.requires)).flatMap(app => (app.attentionChanges ?? [])
     .filter(change => accessAdmits(app.sections?.find(section => section.id === change.sectionId)?.requires))
     .map(change => ({ ...change, appId: app.id, kind: "feature" as const })));
-  const changes = [...features, ...Object.values(sources).flat()].map(change => {
+  const changes = [...features, ...Object.values(sources).filter(source => source.userId === userId).flatMap(source => source.changes)].map(change => {
     const app = apps.find(app => app.id === change.appId);
     const ancestors = new Set(change.ancestors ?? []);
     let parent = app?.sections?.find(section => section.id === change.sectionId)?.parent;
@@ -53,7 +54,7 @@ function UserAttention({ userId, apps, children }: { userId: string; apps: reado
     if (!connection || !userId) throw new Error("Connect to save viewed changes.");
     // Capture the revisions actually shown, never whatever is newest when the write finishes.
     await Promise.all(items.map(item => connection.query.acknowledgeAttention({ changeId: item.id, revision: item.revision })));
-    setConfirmed(held => new Set([...held, ...items.map(item => receiptKey(item.id, item.revision))]));
+    setConfirmed(held => ({ ...held, [userId]: new Set([...(held[userId] ?? []), ...items.map(item => receiptKey(item.id, item.revision))]) }));
   }, [connection, userId]);
   return <Context.Provider value={{ changes, seen, publish, acknowledge }}>{children}</Context.Provider>;
 }

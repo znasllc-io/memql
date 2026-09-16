@@ -5,13 +5,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient } from "@znasllc-io/memql-sdk-core/client";
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connection }));
-import { AttentionProvider, AttentionMarker, AttentionDestination, usePublishAttention } from "../../src/attention/Attention";
+import { AttentionProvider, AttentionMarker, AttentionDestination, usePublishAttention, useAttention } from "../../src/attention/Attention";
 import { packageAttention } from "../../src/apps/deployables/attention";
 import { packageFromRow } from "../../src/apps/deployables/packages/rows";
 import { OS_REGISTRY } from "../../src/apps/registry";
 import { rowsResult, withSession } from "../deployables/harness";
 import type { AttentionChange } from "../../src/attention/model";
 import { SourceView } from "../../src/apps/deployables/page/SourceView";
+import { SharedPackagesProvider, usePackages } from "../../src/apps/deployables/packages/usePackages";
 
 const change: AttentionChange = { id: "update:p", revision: "one", appId: "deployables", sectionId: "deployables", ancestors: ["map"], target: "version:p", label: "New version", kind: "runtime" };
 function Surface({ revision = "one", visible = true }: { revision?: string; visible?: boolean }) {
@@ -28,6 +29,7 @@ function setup() {
   const receipts = new Map<string, Record<string, string>[]>();
   let user = "alice";
   const executeNamed = vi.fn(async (name: string, call: string) => {
+    if (name === "packagesAll") return rowsResult([{ id: `${user}-source` }]);
     if (name === "myAttentionReceipts") return rowsResult(receipts.get(user) ?? []);
     if (name === "acknowledgeAttention") {
       const changeId = /changeId: "([^"]+)"/.exec(call)![1]!;
@@ -44,6 +46,50 @@ const wrap = (node: React.ReactNode, userId = "alice") => withSession(<Attention
 afterEach(cleanup);
 
 describe("shared attention", () => {
+  it("waits for initial identity before loading packages and resets the feed for another user", async () => {
+    const fake = setup();
+    function Packages() {
+      const { snapshot } = usePackages();
+      return <div>{snapshot.rows.length ? String(snapshot.rows[0]?.id) : "No package rows"}</div>;
+    }
+    const body = <SharedPackagesProvider><Packages /></SharedPackagesProvider>;
+    const view = render(wrap(body, ""));
+    expect(screen.getByText("No package rows")).toBeTruthy();
+    expect(fake.executeNamed.mock.calls.filter(([name]) => name === "packagesAll")).toHaveLength(0);
+    view.rerender(wrap(body, "alice"));
+    await screen.findByText("alice-source");
+    expect(fake.executeNamed.mock.calls.filter(([name]) => name === "packagesAll")).toHaveLength(1);
+    view.rerender(wrap(body, "alice"));
+    expect(screen.getByText("alice-source")).toBeTruthy();
+    expect(fake.executeNamed.mock.calls.filter(([name]) => name === "packagesAll")).toHaveLength(1);
+    fake.user("bob");
+    view.rerender(wrap(body, "bob"));
+    expect(screen.queryByText("alice-source")).toBeNull();
+    await screen.findByText("bob-source");
+  });
+  it("keeps mounted UI state when identity resolves while isolating each user's receipts", async () => {
+    const fake = setup();
+    function Stateful() {
+      const [count, setCount] = useState(0);
+      usePublishAttention("stateful", [change]);
+      const { acknowledge } = useAttention({ appId: "deployables", target: change.target });
+      return <><button onClick={() => setCount(value => value + 1)}>Local state {count}</button><button onClick={() => void acknowledge()}>View revision</button><AttentionMarker appId="deployables" /></>;
+    }
+    const view = render(wrap(<Stateful />, ""));
+    fireEvent.click(screen.getByRole("button", { name: "Local state 0" }));
+    view.rerender(wrap(<Stateful />, "alice"));
+    expect(screen.getByRole("button", { name: "Local state 1" })).toBeTruthy();
+    await screen.findByRole("img", { name: "Unseen change" });
+    fireEvent.click(screen.getByRole("button", { name: "View revision" }));
+    await waitFor(() => expect(screen.queryByRole("img", { name: "Unseen change" })).toBeNull());
+    fake.user("bob");
+    view.rerender(wrap(<Stateful />, "bob"));
+    expect(screen.getByRole("button", { name: "Local state 1" })).toBeTruthy();
+    await screen.findByRole("img", { name: "Unseen change" });
+    fireEvent.click(screen.getByRole("button", { name: "View revision" }));
+    await waitFor(() => expect(screen.queryByRole("img", { name: "Unseen change" })).toBeNull());
+    expect(fake.executeNamed.mock.calls.filter(([name]) => name === "acknowledgeAttention")).toHaveLength(2);
+  });
   it("keeps declared feature metadata tied to known app sections and unique stable IDs", () => {
     expect(attentionDeclarationErrors(OS_REGISTRY.apps)).toEqual([]);
     const base = { id: "fleet", sections: [{ id: "routing" }] };

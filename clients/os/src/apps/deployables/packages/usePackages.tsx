@@ -1,5 +1,5 @@
 import { createContext, useContext, type ReactNode } from "react";
-import { useSession } from "../../../chrome/access";
+import { useSession, useSessionIfPresent } from "../../../chrome/access";
 import { accessAdmits } from "../../../system/registry";
 import { getRowByConceptAndId, type Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -24,12 +24,11 @@ import { DEPLOYMENT_CONCEPT, PACKAGE_CONCEPT } from "./rows";
 /**
  * Every package the caller may read, live.
  *
- * NO ARGUMENTS, and a constant KEY. `packagesAll` carries no caller term; the
+ * NO ARGUMENTS. `packagesAll` carries no caller term; the
  * concept's tier decides how far "all" reaches (memql#5303, D4) -- a cluster
  * owner sees every package, everyone else their own plus those tied to an
- * account whose group they are in. Folding an actor id into the key would
- * restart the collection from empty the moment access resolved, unmounting
- * whatever was open.
+ * account whose group they are in. The collection key includes the session
+ * identity so switching users cannot publish a previous person's package rows.
  */
 const PackagesContext = createContext<LiveCollectionHandle<Row> | null>(null);
 export function SharedPackagesProvider({ children }: { children: ReactNode }) {
@@ -43,7 +42,10 @@ export function usePackages(): LiveCollectionHandle<Row> {
   return shared ?? own;
 }
 function usePackageFeed(enabled: boolean): LiveCollectionHandle<Row> {
-  return useLiveCollection<Row>(enabled ? "deployables:packages" : null, (connection) => ({
+  const session = useSessionIfPresent();
+  const userId = session?.access?.userId ?? "";
+  const ready = enabled && (session === null || userId !== "");
+  return useLiveCollection<Row>(ready ? `deployables:packages:${userId}` : null, (connection) => ({
     concept: PACKAGE_CONCEPT,
     seed: async (_cursor, signal) => {
       const result = await connection.query.packagesAll({}, { signal });
