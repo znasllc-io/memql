@@ -272,10 +272,16 @@ func CheckPointing(ctx context.Context, r Resolver, hostname, edgeHost string) C
 	for _, a := range edgeAddrs {
 		want[strings.TrimSpace(a)] = true
 	}
+	// Leaving an old address beside the new one sends some visitors elsewhere.
+	// Every published A/AAAA destination must belong to the current edge.
+	allPointHere := len(addrs) > 0
 	for _, a := range addrs {
-		if want[strings.TrimSpace(a)] {
-			return passed()
+		if !want[strings.TrimSpace(a)] {
+			allPointHere = false
 		}
+	}
+	if allPointHere {
+		return passed()
 	}
 	kind := "an A record pointing at"
 	if !IsApex(host) {

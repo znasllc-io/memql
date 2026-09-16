@@ -80,6 +80,12 @@ func (i *Integration) IntegrationName() string { return "customDomain" }
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
 		{
+			Name:        "dnsGuidance",
+			Description: "Read the configured routing hostname and current IPv4/IPv6 targets for an accessible custom-domain binding.",
+			Handler:     i.handleDNSGuidance,
+			ArgsSchema:  map[string]string{"domainId": "string (required) -- the custom-domain binding to configure."},
+		},
+		{
 			Name: "add",
 			Description: "Bind a client's own domain to one of this cluster's deployables. Mints the " +
 				"ownership token, prefills the account tie, and lands the row pending its DNS records.",

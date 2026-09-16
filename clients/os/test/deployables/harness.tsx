@@ -125,6 +125,7 @@ export interface FakeSeed {
   artifacts?: Row[];
   /** v1:platform:customDomain rows the domains feed seeds with. */
   domains?: Row[];
+  domainDNSError?: string;
   /** Fails the next `customDomainAdd` with this server message. */
   addDomainError?: string;
   /** Fails the next `removeCustomDomain` with this server message. */
@@ -295,6 +296,11 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       }
       if (call === "query libraryArtifacts()") return rowsResult(artifacts);
       if (call === "query customDomainsAll()") return rowsResult(domains);
+
+      if (call.startsWith("builtin customDomainDNSGuidance(")) {
+        if (seed.domainDNSError) throw new Error(seed.domainDNSError);
+        return builtinReply("customDomainDNSGuidance", [{ edgeHost: "routing.example.net", ipv4: ["203.0.113.10"], ipv6: [] }]);
+      }
 
       if (call.startsWith("builtin customDomainAdd(")) {
         if (seed.addDomainError !== undefined) throw new Error(seed.addDomainError);

@@ -804,6 +804,27 @@ func CustomDomainCheckBuild(args CustomDomainCheckArgs) string {
 	return b.String()
 }
 
+// CustomDomainDNSGuidance -- Fresh DNS instructions for an existing binding; resolves the configured routing host.
+type CustomDomainDNSGuidanceArgs struct {
+	// The custom-domain binding to configure.
+	DomainId string
+}
+
+// CustomDomainDNSGuidance calls the engine builtin customDomainDNSGuidance.
+func (qc *QueryClient) CustomDomainDNSGuidance(ctx context.Context, args CustomDomainDNSGuidanceArgs) (*Result, error) {
+	call := CustomDomainDNSGuidanceBuild(args)
+	return qc.executeNamed(ctx, "customDomainDNSGuidance", call)
+}
+
+func CustomDomainDNSGuidanceBuild(args CustomDomainDNSGuidanceArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin customDomainDNSGuidance(")
+	b.WriteString("domainId: ")
+	b.WriteString(quoteMemQL(args.DomainId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // DataOrigins -- List every registered concept with its data state (mirror | origin | native), the system where its changes are made, and the connectors it depends on. Produced from the live concept registry, never persisted. Feeds the portal's Data origins page.
 type DataOriginsArgs struct {
 }
