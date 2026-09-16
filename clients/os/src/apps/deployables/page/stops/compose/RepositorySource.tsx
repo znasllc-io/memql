@@ -62,14 +62,7 @@ import { TokenSourceForm } from "./TokenSourceForm";
  *  where New deployable is. */
 const COMPOSE_SECTION = "deployables";
 
-export function RepositorySource({
-  draft,
-  onDraft,
-  credentials,
-  probe,
-  tokenFormOpen,
-  onTokenFormOpenChange,
-}: {
+interface RepositorySourceProps {
   draft: ComposeDraft;
   onDraft: (patch: Partial<ComposeDraft>) => void;
   credentials: readonly CredentialRow[];
@@ -77,17 +70,28 @@ export function RepositorySource({
   /** The fold's state, held by the page so it survives a stop re-render. */
   tokenFormOpen: boolean;
   onTokenFormOpenChange: (open: boolean) => void;
-}) {
+}
+
+export function RepositorySource(props: RepositorySourceProps) {
   const { access } = useSession();
-  // The feed includes other people’s cards for cluster-owner oversight.
-  // Only this person’s credentials can authorize a new source.
+  // Owner oversight includes colleagues' cards; using a source is personal.
   const viewer = bare(access?.userId ?? "");
-  const personal = credentials.filter(c => viewer !== "" && bare(c.ownerUserId) === viewer);
+  const personal = props.credentials.filter(c => viewer !== "" && bare(c.ownerUserId) === viewer);
+  const grant = githubGrantOf(personal);
+  // A different viewer or grant gets fresh reads, errors and installation
+  // help. An earlier request cannot land in the next person's picker.
+  return <PersonalRepositorySource {...props} credentials={personal}
+    key={`${viewer}:${grant?.id ?? ""}:${grant?.status ?? ""}`} />;
+}
+
+function PersonalRepositorySource({
+  draft, onDraft, credentials, probe, tokenFormOpen, onTokenFormOpenChange,
+}: RepositorySourceProps) {
   const connect = useGithubConnect();
   const install = useGithubConnect();
   const repositories = useSourceRepositories();
 
-  const grant = githubGrantOf(personal);
+  const grant = githubGrantOf(credentials);
   // A LAPSED GRANT IS NOT A CONNECTION. It cannot read a repository list, so
   // the picker would answer an empty invitation to somebody whose repair is
   // one click; the Connect control below says "Reconnect" for them instead.
@@ -112,8 +116,11 @@ export function RepositorySource({
   const read = repositories.read;
   useEffect(() => {
     if (grantId === "" || grantId === readFor.current) return;
-    readFor.current = grantId;
-    void read("", 1);
+    let current = true;
+    void read(grantId, 1).then(answered => {
+      if (current && answered) readFor.current = grantId;
+    });
+    return () => { current = false; };
   }, [grantId, read]);
 
   const learnedFor = useRef("");
@@ -159,7 +166,7 @@ export function RepositorySource({
             next step, and the fault colour would say they broke it
             (`toneFor`). */}
         <ProblemNotice problem={noApp} tone={toneFor(noApp.code)} />
-        <TokenSourceForm draft={draft} onDraft={onDraft} credentials={personal} probe={probe} />
+        <TokenSourceForm draft={draft} onDraft={onDraft} credentials={credentials} probe={probe} />
       </>
     );
   }
@@ -181,8 +188,8 @@ export function RepositorySource({
             chosen={draft.repoUrl === "" ? "" : shortRepo(draft.repoUrl)}
             idPrefix="os-compose-repo"
             onChoose={choose}
-            onLookAgain={() => void repositories.read("", 1)}
-            onReadMore={() => void repositories.read("", repositories.page.nextPage)}
+            onLookAgain={() => void repositories.read(grantId, 1)}
+            onReadMore={() => void repositories.read(grantId, repositories.page.nextPage)}
           />
           {draft.repoUrl !== "" && !tokenFormOpen ? (
             <>
@@ -206,7 +213,7 @@ export function RepositorySource({
       )}
 
       <TokenFold open={tokenFormOpen} onOpenChange={onTokenFormOpenChange}>
-        <TokenSourceForm draft={draft} onDraft={onDraft} credentials={personal} probe={probe} />
+        <TokenSourceForm draft={draft} onDraft={onDraft} credentials={credentials} probe={probe} />
       </TokenFold>
     </>
   );

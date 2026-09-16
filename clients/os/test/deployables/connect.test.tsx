@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -12,6 +12,8 @@ vi.mock("../../src/live/connection", () => ({
 
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { RepositorySource } from "../../src/apps/deployables/page/stops/compose/RepositorySource";
+import { EMPTY_DRAFT } from "../../src/apps/deployables/page/compose";
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import { RepositoryPicker } from "../../src/apps/deployables/sources/RepositoryPicker";
@@ -37,6 +39,7 @@ import {
   pastedCredentials,
 } from "../../src/apps/deployables/sources/rows";
 import {
+  builtinReply,
   FIXTURE_GITHUB_PAT,
   click,
   credentialRow,
@@ -893,6 +896,57 @@ async function composeSource(seed: FakeSeed): Promise<{ connection: FakeConnecti
 
 const WIDGET = repositoryFixture({ fullName: "acme/widget", private: true, visibility: "private" });
 
+function personalSource(credentials: Row[], userId = "u-me") {
+  return withSession(<RepositorySource
+    draft={EMPTY_DRAFT} onDraft={vi.fn()}
+    credentials={credentials.map(credentialFromRow)}
+    probe={{ reply: null, error: "", busy: false, probe: vi.fn(async () => {}), clear: vi.fn() }}
+    tokenFormOpen={false} onTokenFormOpenChange={vi.fn()}
+  />, { userId });
+}
+
+describe("personal repository connection lifecycle", () => {
+  afterEach(() => { h.connection = null; });
+
+  it("reads the grant when the socket becomes available after mount", async () => {
+    h.connection = null;
+    const view = render(personalSource([GRANT]));
+    h.connection = fakeConnection({ repositories: repositoriesReply({ repositories: [WIDGET] }) });
+    view.rerender(personalSource([GRANT]));
+    expect(await screen.findByRole("button", { name: /widget/ })).toBeTruthy();
+  });
+
+  it("drops the old grant's list and ignores its late answer after replacement", async () => {
+    const connection = fakeConnection({
+      repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "new-owner/new-project" })] }),
+    });
+    let finishOld!: (value: ReturnType<typeof builtinReply>) => void;
+    vi.spyOn(connection.query, "sourceRepositories").mockImplementationOnce(() =>
+      new Promise(resolve => { finishOld = resolve; }));
+    h.connection = connection;
+    const view = render(personalSource([GRANT]));
+    view.rerender(personalSource([githubGrantRow({ id: "new-grant" })]));
+    expect(await screen.findByRole("button", { name: /new-project/ })).toBeTruthy();
+    await act(async () => finishOld(builtinReply("sourceRepositories", [repositoriesReply({ repositories: [WIDGET] })])));
+    expect(screen.queryByRole("button", { name: /widget/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /new-project/ })).toBeTruthy();
+  });
+
+  it("removes the previous person's list and installation link on a viewer change", async () => {
+    h.connection = fakeConnection({
+      repositories: repositoriesReply({ repositories: [WIDGET] }),
+      installUrl: "https://github.com/apps/memql/installations/new",
+    });
+    const view = render(personalSource([GRANT]));
+    await screen.findByRole("button", { name: /widget/ });
+    view.rerender(personalSource([GRANT], "other-user"));
+    expect(screen.getByRole("button", { name: "Connect GitHub" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /widget/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Install on another organization" })).toBeNull();
+  });
+});
+
+
 describe("the compose Source stop, with a connection", () => {
   afterEach(() => {
     h.connection = null;
@@ -918,6 +972,7 @@ describe("the compose Source stop, with a connection", () => {
       repositories: repositoriesReply({ repositories: [WIDGET] }),
     });
     await click(await within(region).findByRole("button", { name: /widget/ }));
+    expect(connection.callsNamed("sourceRepositories")[0]).toContain('credentialId: "my-grant"');
     expect(connection.callsNamed("sourceProbe")[0]).toContain('credentialId: "my-grant"');
     expect(connection.callsNamed("sourceProbe").join()).not.toContain("colleague-grant");
   });
@@ -946,7 +1001,7 @@ describe("the compose Source stop, with a connection", () => {
     // is that a connected person never notices it.
     expect(await within(region).findByRole("button", { name: /widget/ })).toBeTruthy();
     expect(connection.callsNamed("sourceRepositories")).toEqual([
-      'builtin sourceRepositories(credentialId: "", page: 1)',
+      'builtin sourceRepositories(credentialId: "cred-grant", page: 1)',
     ]);
     // The token form is under it, closed: one answer on screen at a time.
     expect(within(region).queryByLabelText(URL_FIELD)).toBeNull();
