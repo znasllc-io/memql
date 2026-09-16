@@ -86,7 +86,7 @@ func (b *blobReader) read(ctx context.Context, key string) ([]byte, error) {
 		}
 		b.uploader, b.container = up, container
 	}
-	return b.uploader.Download(ctx, b.container, key)
+	return b.uploader.DownloadWithLimit(ctx, b.container, key, DefaultLimits().MaxSourceBytes)
 }
 
 // zipMimeTypes is the closed set of types a Library file may carry and still
@@ -498,7 +498,10 @@ func (p *enginePublisher) ReadSnapshot(ctx context.Context, ref string) ([]byte,
 	if err := p.resolve(ctx); err != nil {
 		return nil, err
 	}
-	raw, err := p.uploader.Download(ctx, p.container, object)
+	// A repository can pass the package source limit while exceeding the
+	// attachment reader's smaller default. Confirm and retry must read the
+	// complete archive that analysis stored, under the same source budget.
+	raw, err := p.uploader.DownloadWithLimit(ctx, p.container, object, DefaultLimits().MaxSourceBytes)
 	if err != nil {
 		return nil, refuse(CodeSnapshotUnavailable,
 			"the earlier run's snapshot could not be read back: %v", err)

@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net/url"
 	"os"
 	"strings"
@@ -138,11 +139,22 @@ func (u *AzureBlobUploader) EnsureContainer(ctx context.Context, container strin
 	return nil
 }
 
-// Download fetches the blob's bytes (capped at maxDownloadBytes). Used by the
-// attachment download endpoint to stream a stored file back to the caller.
+// Download fetches a complete blob under the attachment download limit.
+// Oversized objects are errors, never successful truncated downloads.
 func (u *AzureBlobUploader) Download(ctx context.Context, container, objectName string) ([]byte, error) {
+	return u.DownloadWithLimit(ctx, container, objectName, maxDownloadBytes)
+}
+
+// DownloadWithLimit reads a complete blob under the caller's byte budget.
+// Package sources use their source limit; attachments retain their smaller
+// default. The extra byte distinguishes a blob exactly at the limit from an
+// oversized one, including responses without a Content-Length header.
+func (u *AzureBlobUploader) DownloadWithLimit(ctx context.Context, container, objectName string, maxBytes int64) ([]byte, error) {
 	if u == nil || u.client == nil {
 		return nil, fmt.Errorf("azure blob uploader not initialized")
+	}
+	if maxBytes <= 0 || maxBytes == math.MaxInt64 {
+		return nil, fmt.Errorf("azure blob download limit must be positive and below %d", int64(math.MaxInt64))
 	}
 	container = strings.TrimSpace(container)
 	objectName = strings.TrimSpace(objectName)
@@ -155,9 +167,18 @@ func (u *AzureBlobUploader) Download(ctx context.Context, container, objectName 
 	}
 	body := resp.Body
 	defer func() { _ = body.Close() }()
-	data, err := io.ReadAll(io.LimitReader(body, maxDownloadBytes))
+	if resp.ContentLength != nil && *resp.ContentLength > maxBytes {
+		return nil, fmt.Errorf("azure blob exceeds download limit of %d bytes", maxBytes)
+	}
+	data, err := io.ReadAll(io.LimitReader(body, maxBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("read azure blob stream: %w", err)
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("azure blob exceeds download limit of %d bytes", maxBytes)
+	}
+	if resp.ContentLength != nil && *resp.ContentLength >= 0 && int64(len(data)) != *resp.ContentLength {
+		return nil, fmt.Errorf("azure blob length mismatch: received %d bytes, expected %d", len(data), *resp.ContentLength)
 	}
 	return data, nil
 }
