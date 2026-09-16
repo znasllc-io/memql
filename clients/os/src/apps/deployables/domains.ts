@@ -68,44 +68,9 @@ export function domainFingerprint(d: DomainRow): string {
 // The walk
 // ---------------------------------------------------------------------------
 
-/**
- * The four stops on the way to serving, in order.
- *
- * A STEPPED RAIL IS HONEST HERE because this genuinely is a sequence: a binding
- * passes through each of these in turn and cannot skip one. `removing` and
- * `removed` are deliberately NOT on it -- they are a different journey that can
- * start from anywhere, and drawing them as "step five" would say a removed
- * domain had got further than a live one.
- */
-export const DOMAIN_STEPS = [
-  {
-    status: "pending_dns",
-    label: "Records",
-    blurb: "Create the two DNS records below at your registrar.",
-  },
-  {
-    status: "verifying",
-    label: "Checking DNS",
-    blurb: "We look every couple of minutes and say which record is still missing.",
-  },
-  {
-    status: "issuing",
-    label: "Certificate",
-    blurb: "Both records check out. Getting a certificate for the domain.",
-  },
-  {
-    status: "live",
-    label: "Serving",
-    blurb: "The domain is serving this deployable over HTTPS.",
-  },
-] as const;
+export const DOMAIN_SETUP_STEPS = ["Ownership", "DNS", "Certificate", "Serving"] as const;
 
 export const TERMINAL_STATUSES = new Set(["removed"]);
-
-/** Where a status sits on the rail; -1 for the removal path. */
-export function stepIndexFor(status: string): number {
-  return DOMAIN_STEPS.findIndex((s) => s.status === status);
-}
 
 export function isRemovalPath(status: string): boolean {
   return status === "removing" || status === "removed";
@@ -166,9 +131,9 @@ export function statusTone(d: DomainRow): DomainTone {
  */
 const FAILURE_SENTENCES: Record<string, string> = {
   dns_token_missing:
-    "The ownership record is not published yet. Create the TXT record below, exactly as shown.",
+    "The ownership record is not published yet. Create the TXT record in the Ownership step, exactly as shown.",
   dns_not_pointing:
-    "The domain does not point at this cluster yet. Create the second record below, then give your DNS provider a few minutes.",
+    "The domain does not point at this cluster yet. Create the DNS record shown in the DNS step, then allow time for propagation.",
   no_acme_issuer:
     "This cluster is not set up to issue certificates, so the domain cannot be served over HTTPS. An operator sets an ACME issuer for the cluster; everything else about this binding is ready.",
   issuance_failed:
@@ -253,7 +218,9 @@ export function edgeHostFor(domain: string): string {
  * domain does not point here yet" often means "wait for propagation". The
  * server's sweep checks them in the same order for the same reason.
  */
-export function recordsFor(d: DomainRow, domain: string): DnsRecord[] {
+export type PointingMethod = "ALIAS" | "CNAME";
+
+export function recordsFor(d: DomainRow, domain: string, method: PointingMethod = isApex(d.hostname) ? "ALIAS" : "CNAME"): DnsRecord[] {
   const host = normalizeHostname(d.hostname);
   const edge = edgeHostFor(domain);
   if (host === "") return [];
@@ -265,23 +232,12 @@ export function recordsFor(d: DomainRow, domain: string): DnsRecord[] {
     purpose: "Proves you control this domain. Nothing is issued until it checks out.",
   };
 
-  // A CNAME IS ILLEGAL AT A ZONE APEX -- RFC 1034 forbids one alongside the SOA
-  // and NS records every apex carries -- so an apex is asked for the ALIAS /
-  // ANAME record most providers offer instead, with the A-record fallback in
-  // the caption rather than as a second row nobody with ALIAS support needs.
-  const pointing: DnsRecord = isApex(host)
-    ? {
-        kind: "ALIAS",
-        name: host,
-        value: edge,
-        purpose: "Sends the domain's traffic here. A CNAME is not legal at a domain's root.",
-      }
-    : {
-        kind: "CNAME",
-        name: host,
-        value: edge,
-        purpose: "Sends the domain's traffic here.",
-      };
+  const pointing: DnsRecord = {
+    kind: method,
+    name: host,
+    value: edge,
+    purpose: "Sends the domain's traffic here.",
+  };
 
   return [ownership, pointing];
 }
@@ -316,4 +272,13 @@ export function sortDomains(rows: DomainRow[]): DomainRow[] {
     const byRank = rank(a) - rank(b);
     return byRank !== 0 ? byRank : a.hostname.localeCompare(b.hostname);
   });
+}
+
+/** Ownership is checked first on every sweep. A pointing failure proves that
+ * ownership passed that same sweep; a generic verifying status does not. */
+export function domainSetupStep(d: DomainRow): number {
+  if (d.status === "live") return 3;
+  if (d.status === "issuing") return 2;
+  if (d.failureReason === "dns_not_pointing") return 1;
+  return 0;
 }

@@ -1,5 +1,5 @@
-import { useEffect, useRef, type ReactNode } from "react";
-import { Check } from "lucide-react";
+import { type ReactNode } from "react";
+import { JourneyTrail } from "../../../kit/JourneyTrail";
 import { Caption } from "../../../kit";
 import { ActivityTarget } from "../../../kit/SemanticActivity";
 import type { StopId } from "../targets";
@@ -13,23 +13,12 @@ export function ComposeJourney({ input, selected, onSelect, stopBody, awaitingLi
   awaitingLive?: boolean;
   input: ComposeInput; selected: StopId; onSelect: (id: StopId) => void; stopBody: (stage: RailStage) => ReactNode;
 }) {
-  const trail = useRef<HTMLOListElement>(null);
-  useEffect(() => {
-    const active = trail.current?.querySelector<HTMLElement>('[aria-current="step"]');
-    active?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
-  }, [selected]);
   const stages = railFor(input).stages.map(stage => stage.id === "live" && awaitingLive ? { ...stage, state: "open" as const } : stage);
   const current = stages.find(s => s.id === selected) ?? stages[0];
   return <>
     {selected !== "source" && input.answers?.source ? <Caption>{input.answers.source}</Caption> : null}
-    <ol ref={trail} className="deployable-journey-trail" aria-label="Deployable setup progress">
-      {stages.map((stage, i) => {
-        const id = stage.id as StopId;
-        const available = stage.state !== "pending" && stage.state !== "ahead" || id === selected;
-        const label = <><span className="deployable-step-number">{(stage.state === "done" || stage.state === "complete") ? <Check size={13} aria-hidden /> : i + 1}</span><span>{LABELS[id]}</span></>;
-        return <li key={id} data-state={stage.state}>{available ? <button type="button" aria-current={id === selected ? "step" : undefined} onClick={() => onSelect(id)}>{label}</button> : <span className="deployable-step-pending">{label}</span>}</li>;
-      })}
-    </ol>
+    <JourneyTrail label="Deployable setup progress" selected={selected} onSelect={id => onSelect(id as StopId)}
+      steps={stages.map(stage => ({ ...stage, label: LABELS[stage.id as StopId], available: stage.state !== "pending" && stage.state !== "ahead" || stage.id === selected }))} />
     {current ? <ActivityTarget target={`deployables:compose:${current.id}`} className="deployable-journey-current">
       <h3>{LABELS[current.id as StopId]}</h3>
       <Caption>{current.reason || current.blurb}</Caption>

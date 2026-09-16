@@ -1,17 +1,17 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, Copy, Globe } from "lucide-react";
 
-import { Button, Caption, FormRow, Input, Notice, Subhead } from "../../../../kit";
+import { Button, Caption, Field, FormRow, Input, Notice, Select, Subhead } from "../../../../kit";
 import { formatFreshness } from "../../../../kit/format";
 import { useNow } from "../../../../kit/useNow";
 import { LiveList } from "../../../../live/LiveList";
 import { useLiveView } from "../../../../live/liveView";
 import { useAddDomain, useRemoveDomain } from "../../domainActions";
 import {
-  DOMAIN_STEPS,
+  domainSetupStep,
+  DOMAIN_SETUP_STEPS,
   domainFingerprint,
   domainFromRow,
-  edgeHostFor,
   failureSentence,
   isApex,
   isKnownFailure,
@@ -22,47 +22,16 @@ import {
   sortDomains,
   statusLabel,
   statusTone,
-  stepIndexFor,
   type DnsRecord,
   type DomainRow,
+  type PointingMethod,
 } from "../../domains";
+import { JourneyTrail } from "../../../../kit/JourneyTrail";
 import { useCustomDomains } from "../../useCustomDomains";
 import type { SiteRow } from "../../rows";
 
-// A client's own domain, bound to this deployable -- the content of what was
-// the Domains panel (memql#4805), mounted as the Where-it-lives stop's body
-// (epic memql#4885): on a redeploy the stop is facts, and each bound domain's
-// stepped rail with its two records and what the sweep last saw is one of
-// them. Nothing below changed in the move; `domains.ts`, `domainActions.ts`
-// and `useCustomDomains.ts` are untouched.
-//
-// ===========================================================================
-// THE SURFACE IS ABOUT TWO RECORDS AND WHAT WE SEE AT THEM
-// ===========================================================================
-// Somebody reading this panel is about to alt-tab to Cloudflare, Route 53 or
-// GoDaddy and type into a form whose fields are called Type, Name and Value. So
-// every record is rendered in exactly those three parts, in that vocabulary,
-// each one copyable on its own -- and directly beneath it, joined by a hairline,
-// is what this cluster actually SAW at that name the last time it looked.
-//
-// That pairing is the whole design. "dns_not_pointing" says which record is
-// wrong; the observation says what is in it. A person fixing a zone file needs
-// both, and neither one alone is worth a panel.
-//
-// ===========================================================================
-// PRESENTATION OVER SERVER LAW
-// ===========================================================================
-// v1:platform:customDomain is clusterOwner tier and the three guards run in Go
-// beside executeWrite. The admin gate here decides what RENDERS and nothing
-// else (design D1) -- showing somebody a button that always fails teaches
-// nobody who can use it.
-//
-// THERE IS NO RE-CHECK BUTTON, anywhere, deliberately (design D5). Retries ride
-// the sweep's own schedule. A button would invite hammering exactly the two
-// things that must not be hammered -- a recursive resolver and an ACME endpoint
-// -- and would make the fastest path to a certificate the one where somebody
-// clicks fastest. The panel says so in as many words, because an absent control
-// with no explanation reads as an omission.
+// Domain setup stays in the Deployables page. Navigation reveals one task at
+// a time; the live reconciliation feed alone determines completion.
 
 export function DomainsContent({ site, domain }: { site: SiteRow; domain: string }) {
   const { source: collection } = useCustomDomains();
@@ -129,7 +98,7 @@ export function DomainsContent({ site, domain }: { site: SiteRow; domain: string
         emptyText="No custom domains. Add a hostname to get its DNS records."
         rowId={(d) => d.id}
         fingerprint={domainFingerprint}
-        renderRow={(d) => <DomainCard key={d.id} domain={d} clusterDomain={domain} />}
+        renderRow={(d) => <DomainCard key={d.id} domain={d} clusterDomain={domain} site={site} />}
       />
     </section>
   );
@@ -207,10 +176,21 @@ function AddDomain({ siteId }: { siteId: string }) {
 // One binding
 // ---------------------------------------------------------------------------
 
-function DomainCard({ domain: d, clusterDomain }: { domain: DomainRow; clusterDomain: string }) {
+function DomainCard({ domain: d, clusterDomain, site }: { domain: DomainRow; clusterDomain: string; site: SiteRow }) {
   const now = useNow(15_000);
-  const tone = statusTone(d);
-  const records = recordsFor(d, clusterDomain);
+  const tone = d.status === "live" && site.status !== "live" ? "muted" : statusTone(d);
+  const [rootDomain, setRootDomain] = useState(isApex(d.hostname));
+  const [method, setMethod] = useState<PointingMethod>(isApex(d.hostname) ? "ALIAS" : "CNAME");
+  const current = domainSetupStep(d);
+  const [selected, setSelected] = useState(current);
+  // Follow real progress, including regressions; inspecting earlier steps
+  // never changes verification or marks a step complete.
+  useEffect(() => setSelected(current), [current]);
+  const records = recordsFor(d, clusterDomain, method);
+  const labels = DOMAIN_SETUP_STEPS;
+  const active = Math.min(selected, current);
+  const serving = d.status === "live" && site.status === "live";
+
   const removalPath = isRemovalPath(d.status);
   const sentence = failureSentence(d.failureReason);
 
@@ -219,7 +199,7 @@ function DomainCard({ domain: d, clusterDomain }: { domain: DomainRow; clusterDo
       <header className="os-domain-head">
         <h5 className="os-domain-host">{d.hostname}</h5>
         <span className="os-domain-status" data-tone={tone}>
-          {statusLabel(d.status)}
+          {d.status === "live" && !serving ? "domain ready" : statusLabel(d.status)}
         </span>
         <RemoveDomain domain={d} />
       </header>
@@ -231,7 +211,8 @@ function DomainCard({ domain: d, clusterDomain }: { domain: DomainRow; clusterDo
             : "Taking the route and certificate away. The domain has already stopped being served."}
         </p>
       ) : (
-        <StatusRail status={d.status} blocked={d.failureReason !== ""} />
+        <JourneyTrail label={`Domain setup for ${d.hostname}`} selected={String(active)} onSelect={id => setSelected(Number(id))}
+          steps={labels.map((label, i) => ({ id: String(i), label, state: i < current ? "done" : i === current ? (d.failureReason ? "stopped" : "current") : "ahead", available: i <= current }))} />
       )}
 
       {sentence === "" ? null : (
@@ -248,21 +229,39 @@ function DomainCard({ domain: d, clusterDomain }: { domain: DomainRow; clusterDo
       )}
 
       {removalPath ? null : (
-        <div className="os-domain-records">
-          {records.map((r) => (
-            <RecordStrip
-              key={r.kind + r.name}
-              record={r}
-              faulty={isRecordAtFault(r, d.failureReason)}
-            />
-          ))}
-          {isApex(d.hostname) ? (
-            <Caption>
-              A domain's root cannot carry a CNAME. Most providers offer ALIAS or ANAME for exactly
-              this; if yours does not, create A records pointing at whatever{" "}
-              <code className="os-mono">{edgeHostFor(clusterDomain)}</code> resolves to.
-            </Caption>
-          ) : null}
+        <div className="deployable-journey-current">
+          <h3>{labels[active]}</h3>
+          {active === 0 ? <>
+            <Caption>Add this TXT record at your domain provider. Verification runs automatically.</Caption>
+            <RecordStrip record={records[0]!} faulty={isRecordAtFault(records[0]!, d.failureReason)} />
+          </> : null}
+          {active === 1 ? <>
+            <Field label="Domain location">
+              <Select id={`domain-location-${d.id}`} label="Domain location" value={rootDomain ? "root" : "subdomain"} onChange={value => {
+                setRootDomain(value === "root"); setMethod(value === "root" ? "ALIAS" : "CNAME");
+              }}>
+                <option value="root">Root domain (example.com)</option>
+                <option value="subdomain">Subdomain (www.example.com)</option>
+              </Select>
+            </Field>
+            <Field label="DNS record type">
+              <Select id={`domain-record-${d.id}`} label="DNS record type" value={method} onChange={value => setMethod(value as PointingMethod)}>
+                <option value="ALIAS">{rootDomain ? "ALIAS / ANAME (recommended)" : "ALIAS / ANAME"}</option>
+                <option value="CNAME">{rootDomain ? "CNAME with flattening" : "CNAME (recommended)"}</option>
+              </Select>
+            </Field>
+            {rootDomain && method === "CNAME" ? <Notice tone="info" sentence="A root-domain CNAME needs your provider’s CNAME flattening support."
+              next="If your provider does not support flattening or ALIAS / ANAME, add a subdomain such as www instead. A standard CNAME cannot be used at the root." /> : null}
+            <Caption>{method === "ALIAS" ? "Choose ALIAS or ANAME at your provider and copy the name and target below." : "Choose CNAME at your provider and copy the name and target below."} Use DNS-only mode during verification.</Caption>
+            <RecordStrip record={records[1]!} faulty={isRecordAtFault(records[1]!, d.failureReason)} />
+            <Caption>{rootDomain ? "Use @ if your provider asks for a relative root name." : "If your provider adds the domain automatically, enter only the subdomain in its Name field."} We check the published target automatically.</Caption>
+          </> : null}
+          {active === 2 ? <Caption>{d.failureReason === "" ? "Ownership and DNS are verified. Waiting for the HTTPS certificate and route to be ready." : "Certificate setup needs attention. The reported problem is shown above."}</Caption> : null}
+          {active === 3 ? <>
+            <Caption>{serving ? "DNS is verified and the HTTPS certificate is ready." : "DNS and HTTPS are ready. This deployable must be live before its domain can serve content."}</Caption>
+            {serving ? <a href={`https://${d.hostname}`} target="_blank" rel="noreferrer noopener">Open {d.hostname}</a> : null}
+          </> : null}
+          {active < current ? <Button tone="quiet" onClick={() => setSelected(current)}>Continue to {labels[current]}</Button> : null}
         </div>
       )}
 
@@ -278,48 +277,10 @@ function DomainCard({ domain: d, clusterDomain }: { domain: DomainRow; clusterDo
             build; a defensive sentence about the button reads as an apology
             for it. This says the thing a person actually wants to know. */}
         {removalPath || d.status === "live" ? null : (
-          <span>We look again every couple of minutes, so there is nothing to press.</span>
+          <span>Checks run automatically every couple of minutes.</span>
         )}
       </footer>
     </article>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// The rail
-// ---------------------------------------------------------------------------
-
-/**
- * The walk, as four stops.
- *
- * A NUMBERED SEQUENCE IS HONEST HERE, which is not usually true of stepped
- * rails: a binding genuinely passes through each of these in turn and cannot
- * skip one, so the order carries information the reader needs -- "the records
- * check out, we are waiting on a certificate" is a different situation from
- * "the records are wrong", and they look different because they are.
- */
-function StatusRail({ status, blocked }: { status: string; blocked: boolean }) {
-  const at = stepIndexFor(status);
-  const here = at >= 0 ? (DOMAIN_STEPS[at] ?? null) : null;
-  return (
-    <div className="os-domain-progress">
-      <ol className="os-domain-rail" aria-label="Progress">
-        {DOMAIN_STEPS.map((step, i) => {
-          const state = i < at ? "done" : i === at ? (blocked ? "blocked" : "current") : "ahead";
-          return (
-            <li key={step.status} className="os-domain-stop" data-state={state}>
-              <span className="os-domain-stop-dot" aria-hidden />
-              {step.label}
-            </li>
-          );
-        })}
-      </ol>
-      {/* ONLY THE CURRENT STOP EXPLAINS ITSELF, and it does so BELOW the rail
-          rather than inside its own item. Four blurbs at once is a paragraph
-          nobody reads; one inside its item makes that stop twice as wide as
-          the others and turns an evenly-spaced sequence into a ragged one. */}
-      {here === null ? null : <p className="os-domain-stop-blurb">{here.blurb}</p>}
-    </div>
   );
 }
 

@@ -42,17 +42,19 @@ function mount(sectionId = "deployables") {
 }
 
 describe("shared shell navigation", () => {
-  it("suspends a native detail dialog with its window and reopens its retained contents", async () => {
+  it("keeps address setup inside the app and retains its form when the window is hidden", async () => {
     const { setVisible } = mount("map");
     await click(await screen.findByLabelText(/^Deployable shop.memql.example.com/));
     await click(await screen.findByRole("button", { name: /^Cluster address/ }));
-    const dialog = screen.getByRole("dialog", { name: "Addresses and client" });
-    expect(dialog.hasAttribute("open")).toBe(true);
+    expect(screen.queryByRole("dialog", { name: "Addresses and client" })).toBeNull();
+    const input = screen.getByRole("textbox", { name: "Domain to bind" });
+    fireEvent.change(input, { target: { value: "www.acme.com" } });
     setVisible(false);
-    expect(dialog.hasAttribute("open")).toBe(false);
     setVisible(true);
-    expect(screen.getByRole("dialog", { name: "Addresses and client" })).toBe(dialog);
-    expect(dialog.hasAttribute("open")).toBe(true);
+    expect(screen.getByRole("textbox", { name: "Domain to bind" })).toBe(input);
+    expect((input as HTMLInputElement).value).toBe("www.acme.com");
+    await click(screen.getByRole("button", { name: "Back to Storefront" }));
+    expect(screen.getByRole("region", { name: "Deployable shop.memql.example.com" })).toBeTruthy();
   });
 
   it("shows the landing with no Back on an explicit same-tab click", async () => {

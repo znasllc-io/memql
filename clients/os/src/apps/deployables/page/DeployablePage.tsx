@@ -290,6 +290,17 @@ export function DeployablePage({
     }
   };
 
+  if (detail === "whereItLives") {
+    const stage = railFor(rail).stages.find(stage => stage.id === "whereItLives");
+    return <div className="os-deploy-pane deployable-workspace" data-os-page-context={JSON.stringify({ page: "Deployable", siteId: site.id, hostname: site.hostname, name, view: "Addresses and client" })}><div className="os-deploy-scroll">
+      <Panel label={`Addresses for ${siteName(site)}`}>
+        <Head title="Addresses and client" breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label: name, onSelect: () => setDetail(null) }, { label: "Addresses and client" }]}
+          back={{ label: name, onSelect: () => setDetail(null) }} />
+        {stage ? stopBody(stage) : null}
+      </Panel>
+    </div></div>;
+  }
+
   return (
     <div className="os-deploy-pane deployable-workspace" data-os-page-context={JSON.stringify({ page: "Deployable", siteId: site.id, hostname: site.hostname, name, status: site.status, packageId: pkg?.id, view: detail ? detailTitle(detail) : "Overview" })}>
       <div className="os-deploy-scroll">

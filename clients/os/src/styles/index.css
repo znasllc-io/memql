@@ -5130,74 +5130,6 @@ a.os-button {
   margin-left: auto;
 }
 
-/* ---- the rail ----
- *
- * Four stops, in order, because the walk IS ordered: a binding passes through
- * each in turn and cannot skip one, so the sequence carries information the
- * reader needs. `removing` / `removed` are deliberately not on it -- they are a
- * different journey that can start anywhere, and drawing them as a fifth stop
- * would say a removed domain had got further than a live one.
- */
-.os-domain-progress {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.os-domain-rail {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 14px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.os-domain-stop {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--os-text-xs);
-  color: var(--os-muted);
-}
-
-.os-domain-stop-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--os-line);
-}
-
-.os-domain-stop[data-state="done"] .os-domain-stop-dot {
-  background: var(--os-accent);
-}
-
-.os-domain-stop[data-state="current"] .os-domain-stop-dot {
-  background: var(--os-accent);
-  box-shadow: 0 0 0 3px var(--os-accent-soft);
-}
-
-.os-domain-stop[data-state="blocked"] .os-domain-stop-dot {
-  background: var(--os-error);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--os-error) 22%, transparent);
-}
-
-.os-domain-stop[data-state="current"] .os-domain-stop-label,
-.os-domain-stop[data-state="blocked"] .os-domain-stop-label {
-  color: var(--os-ink);
-}
-
-/* Only the CURRENT stop explains itself, and it does so UNDER the rail. Four
- * blurbs at once is a paragraph nobody reads; one inside its own stop makes
- * that stop twice as wide as the others and turns an evenly-spaced sequence
- * into a ragged one. */
-.os-domain-stop-blurb {
-  margin: 0;
-  font-size: var(--os-text-xs);
-  color: var(--os-muted);
-}
-
 /* The Type value: read, not copied, so it is not a control. It keeps the
  * boxed monospace treatment because it is still a literal somebody has to
  * match in a dropdown. */
@@ -14127,3 +14059,22 @@ a.os-button {
 .os-map-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .os-map-heading h4 { margin: 0; font-size: var(--os-text-base); font-weight: 600; }
 .os-map-heading .os-info-detail { position: static; }
+
+/* Shared wizard trail: content determines step count; narrow windows scroll. */
+.os-journey-trail { list-style: none; padding: 0; margin: 24px 0 28px; display: flex; overflow-x: auto; gap: 12px; }
+.os-journey-trail li { min-width: 0; flex: 1 0 auto; }
+.os-journey-trail button, .os-journey-trail .os-step-pending { display: flex; gap: 9px; align-items: center; text-align: left; border: 0; background: transparent; color: var(--os-muted); padding: 8px 0; font: inherit; }
+.os-journey-trail button { cursor: pointer; color: var(--os-ink); }
+.os-step-number { width: 26px; height: 26px; border: 1px solid var(--os-line); border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; font-size: var(--os-text-sm); }
+.os-journey-trail [aria-current="step"] .os-step-number { color: var(--os-accent-fg); background: var(--os-accent); border-color: var(--os-accent); }
+.os-journey-trail button:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }
+
+.os-domain .deployable-journey-current { width: 100%; min-width: 0; }
+.os-domain .os-form-field + .os-form-field { margin-top: 12px; }
+@container (max-width: 600px) {
+  .os-journey-trail { gap: 12px; padding-bottom: 6px; margin-block: 16px; }
+  .os-journey-trail li { flex: 0 0 auto; }
+  .os-journey-trail button, .os-journey-trail .os-step-pending { white-space: nowrap; font-size: var(--os-text-sm); }
+  .os-step-number { width: 22px; height: 22px; }
+}
+@media (pointer: coarse) { .os-journey-trail button { min-height: 44px; } }

@@ -186,7 +186,8 @@ describe("what the domain's status does not say", () => {
     await findCard("www.acme.com");
     // The domain's own status is unchanged -- it IS live, and saying otherwise
     // would be a different lie.
-    expect(within(card("www.acme.com")).getByText("serving")).toBeTruthy();
+    expect(within(card("www.acme.com")).getByText("domain ready")).toBeTruthy();
+    expect(within(card("www.acme.com")).queryByRole("link", { name: /Open/ })).toBeNull();
     // And the panel says what that does and does not mean.
     expect(screen.getByText(/This deployable is draft, so nothing is served/i)).toBeTruthy();
   });
@@ -251,41 +252,67 @@ describe("what the domain's status does not say", () => {
 // ===========================================================================
 
 describe("the records to create", () => {
-  it("shows both records in the registrar's own vocabulary, each copyable", async () => {
-    const connection = fakeConnection({
-      sites: [SHOP],
-      domains: [domainRow({ id: "cd-1", hostname: "www.acme.com", token: "tok-xyz" })],
-    });
+  it("guides ownership before DNS, with copyable values and no modal", async () => {
+    const connection = fakeConnection({ sites: [SHOP], domains: [domainRow({ id: "cd-1", hostname: "www.acme.com", token: "tok-xyz" })] });
     await openShop(connection);
-
     const c = await findCard("www.acme.com");
-    // The registrar's three field names.
-    expect(within(c).getAllByText("Type").length).toBe(2);
-    expect(within(c).getAllByText("Name").length).toBe(2);
-    expect(within(c).getAllByText("Value").length).toBe(2);
-    // The ownership record, with the row's own minted token.
-    expect(within(c).getByText("_memql-verify.www.acme.com")).toBeTruthy();
-    expect(within(c).getByText("tok-xyz")).toBeTruthy();
-    // The pointing record: a CNAME, because this is a subdomain.
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Addresses and client" })).toBeTruthy();
+    expect(within(c).getByLabelText("Copy value: tok-xyz")).toBeTruthy();
+    expect(within(c).getByLabelText("Copy name: _memql-verify.www.acme.com")).toBeTruthy();
+    expect(within(c).queryByRole("button", { name: /DNS$/ })).toBeNull();
+    await emit(connection, CUSTOM_DOMAIN_CONCEPT, domainRow({ id: "cd-1", hostname: "www.acme.com", token: "tok-xyz", status: "verifying", failureReason: "dns_not_pointing" }));
+    await waitFor(() => expect(within(c).getByRole("heading", { name: "DNS" })).toBeTruthy());
     expect(within(c).getByText("CNAME")).toBeTruthy();
-    expect(within(c).getByText("os.memql.example.com")).toBeTruthy();
-    // Each part is its own copy control, because the task is three fields in
-    // another application.
-    expect(screen.getByLabelText("Copy value: tok-xyz")).toBeTruthy();
-    expect(screen.getByLabelText("Copy name: _memql-verify.www.acme.com")).toBeTruthy();
+    expect(within(c).getByLabelText("Copy value: os.memql.example.com")).toBeTruthy();
+    await click(within(c).getByRole("button", { name: /Ownership$/ }));
+    expect(within(c).getByLabelText("Copy value: tok-xyz")).toBeTruthy();
+    await click(within(c).getByRole("button", { name: "Continue to DNS" }));
+    expect(within(c).getByRole("heading", { name: "DNS" })).toBeTruthy();
   });
 
-  it("asks an apex for an ALIAS rather than a CNAME", async () => {
-    const connection = fakeConnection({
-      sites: [SHOP],
-      domains: [domainRow({ id: "cd-1", hostname: "acme.com" })],
-    });
+  it("lets an apex switch from ALIAS to a copyable flattened CNAME without advancing verification", async () => {
+    const connection = fakeConnection({ sites: [SHOP], domains: [domainRow({ id: "cd-1", hostname: "acme.com", status: "verifying", failureReason: "dns_not_pointing" })] });
     await openShop(connection);
-
     const c = await findCard("acme.com");
     expect(within(c).getByText("ALIAS")).toBeTruthy();
-    expect(within(c).queryByText("CNAME")).toBeNull();
+    await click(within(c).getByRole("combobox", { name: "DNS record type" }));
+    await click(screen.getByRole("option", { name: "CNAME with flattening" }));
+    expect(within(c).getByText("CNAME")).toBeTruthy();
+    expect(within(c).getByLabelText("Copy name: acme.com")).toBeTruthy();
+    expect(within(c).getByLabelText("Copy value: os.memql.example.com")).toBeTruthy();
+    expect(within(c).getByText(/root-domain CNAME needs/)).toBeTruthy();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const previousClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    try {
+      await click(within(c).getByLabelText("Copy name: acme.com"));
+      await click(within(c).getByLabelText("Copy value: os.memql.example.com"));
+      expect(writeText.mock.calls).toEqual([["acme.com"], ["os.memql.example.com"]]);
+    } finally {
+      if (previousClipboard) Object.defineProperty(navigator, "clipboard", previousClipboard);
+      else Reflect.deleteProperty(navigator, "clipboard");
+    }
+
+    expect(within(c).queryByRole("button", { name: /Certificate$/ })).toBeNull();
+    expect(connection.calls.some(call => call.startsWith("mutation"))).toBe(false);
   });
+
+  it("advances through certificate readiness only on live server updates and returns to ownership after a failed check", async () => {
+    const connection = fakeConnection({ sites: [SHOP], domains: [domainRow({ id: "cd-1", status: "verifying", failureReason: "dns_not_pointing" })] });
+    await openShop(connection);
+    const c = await findCard("www.acme.com");
+    await emit(connection, CUSTOM_DOMAIN_CONCEPT, domainRow({ id: "cd-1", status: "issuing", failureReason: "issuance_failed", failureDetail: "Certificate pending" }));
+    await waitFor(() => expect(within(c).getByRole("heading", { name: "Certificate" })).toBeTruthy());
+    expect(within(c).getByText("Certificate pending")).toBeTruthy();
+    expect(within(c).queryByRole("link", { name: /Open/ })).toBeNull();
+    await emit(connection, CUSTOM_DOMAIN_CONCEPT, domainRow({ id: "cd-1", status: "live" }));
+    await waitFor(() => expect(within(c).getByRole("link", { name: "Open www.acme.com" })).toBeTruthy());
+    await emit(connection, CUSTOM_DOMAIN_CONCEPT, domainRow({ id: "cd-1", status: "verifying", failureReason: "dns_token_missing" }));
+    await waitFor(() => expect(within(c).getByRole("heading", { name: "Ownership" })).toBeTruthy());
+    expect(within(c).queryByRole("link", { name: /Open/ })).toBeNull();
+  });
+
 });
 
 // ===========================================================================
@@ -345,7 +372,7 @@ describe("a typed failure", () => {
     }
     // And it says WHY the control is absent, so it does not read as an
     // omission.
-    expect(screen.getByText(/every couple of minutes, so there is nothing to press/i)).toBeTruthy();
+    expect(screen.getByText(/Checks run automatically every couple of minutes/i)).toBeTruthy();
   });
 });
 
