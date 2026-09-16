@@ -177,7 +177,7 @@ function claim_key() {
         # seeded the owner details has its owner row, and its key, before this
         # runs. The key is minted once an owner exists, so this branch is what
         # remains for a cluster that was never given those details.
-        if printf '%s' "$_RK_STDERR" | grep -qF "$CLAIM_NO_OWNER_MSG"; then
+        if grep -qF "$CLAIM_NO_OWNER_MSG" <<< "$_RK_STDERR"; then
             _RK_NO_OWNER=1
             return 0
         fi
@@ -186,7 +186,7 @@ function claim_key() {
         # same cluster -- which is what repair and upgrade are -- and it means
         # the credential exists and its owner holds it. See the RESULT note for
         # why that is a success and why re-claiming here would be worse.
-        if printf '%s' "$_RK_STDERR" | grep -qF "$CLAIM_ALREADY_CLAIMED_MSG"; then
+        if grep -qF "$CLAIM_ALREADY_CLAIMED_MSG" <<< "$_RK_STDERR"; then
             _RK_ALREADY_CLAIMED=1
             return 0
         fi

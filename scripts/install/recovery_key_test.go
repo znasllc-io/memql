@@ -178,6 +178,32 @@ func TestRecoveryKeyOnAnAlreadyClaimedKeyIsASuccess(t *testing.T) {
 	}
 }
 
+// Shutdown logs can follow the refusal by more than a pipe buffer. Classification
+// must not turn a successful match into a failure when grep exits before the
+// producer finishes writing under pipefail.
+func TestRecoveryKeyClassifiesRefusalsWithLargeTrailingLogs(t *testing.T) {
+	for _, tc := range []struct {
+		name, message, state string
+		code                 int
+	}{
+		{"alreadyClaimed", rkStderrAlreadyClaimed, "alreadyClaimed", 0},
+		{"awaitingOwner", rkStderrNoOwner, "awaitingOwner", 0},
+		{"databaseFailure", rkStderrRealFailure, "", 5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logs := tc.message + "\n" + strings.Repeat("component shutdown diagnostic\n", 3000)
+			stdout, code := rkRun(t, []string{"FAKE_EXIT=1", "FAKE_STDERR=" + logs}, rkArgs()...)
+			if code != tc.code {
+				t.Fatalf("exit %d, want %d", code, tc.code)
+			}
+			envelope, result := rkParse(t, stdout)
+			if envelope.OK != (tc.code == 0) || envelope.Changed || result.RecoveryKey != "" || result.RecoveryKeyState != tc.state {
+				t.Fatalf("incorrect refusal classification: envelope=%+v result=%+v", envelope, result)
+			}
+		})
+	}
+}
+
 // An operator reading this outcome needs to know it is not a dead end, and the
 // way out is a DELIBERATE rotation rather than a retry.
 func TestRecoveryKeyOnAnAlreadyClaimedKeySaysHowToRotate(t *testing.T) {

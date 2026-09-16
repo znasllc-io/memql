@@ -101,7 +101,7 @@ func expandOne(registry *PolicyRegistry, name string, stack []string, depth int)
 	}
 
 	stack = append(stack, name)
-	out := make([]string, 0, len(cfg.Fallbacks)+1)
+	out := make([]string, 0, len(cfg.Fallbacks))
 	for _, entry := range cfg.ProviderChain() {
 		inner, isPolicy := languageParser.IsPolicyEntry(entry)
 		if !isPolicy {

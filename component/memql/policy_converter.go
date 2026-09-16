@@ -26,7 +26,7 @@ type PolicyConfig struct {
 // ProviderChain returns primary followed by fallbacks, which is the
 // order the Router attempts providers in.
 func (p PolicyConfig) ProviderChain() []string {
-	chain := make([]string, 0, len(p.Fallbacks)+1)
+	chain := make([]string, 0, len(p.Fallbacks))
 	if strings.TrimSpace(p.Primary) != "" {
 		chain = append(chain, p.Primary)
 	}
