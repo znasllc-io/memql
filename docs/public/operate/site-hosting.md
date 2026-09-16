@@ -794,6 +794,88 @@ or the reverse.
 
 ---
 
+## The Content-Security-Policy, and inline scripts
+
+Every hosted site is served an **enforcing** Content-Security-Policy built
+per site (`component/edge/csp.go`). The directive that matters most to a
+bundle is `script-src`, and it admits two things: same-origin script
+**files**, and the **specific inline scripts your own bundle ships**, each
+named by a SHA-256 hash of its body.
+
+`'unsafe-inline'` is never emitted, under any condition. It is not a
+stricter-is-better preference: `'unsafe-inline'` cannot distinguish a
+script your build wrote from one an attacker injected, which is the whole
+of what `script-src` defends against. Hashes can, so they are strictly
+stronger -- injected script has a different body and still fails.
+
+**Why this exists.** A Vite build (MemQL OS is one) emits only external
+script files and is happy under `script-src 'self'` alone. A **Next.js
+static export is not**: it ships its React hydration payload in inline
+`<script>` tags, so without hashes every one is blocked, the RSC stream
+never completes, and the page renders but nothing on it works -- no event
+handlers, no client-side routing, no scroll effects. It looks like a
+styling bug and is a policy one.
+
+The hashes are computed at serve time from the document itself and cached
+per bundle version, so there is nothing to configure and nothing to
+regenerate on deploy. A bundle with no inline scripts gets exactly the
+policy it always got.
+
+### When a page is too big to name
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `MEMQL_EDGE_CSP_HASH_MAX_BYTES` | `3072` | Most hash-list bytes one policy may carry |
+
+A page with very many inline scripts would need a response header block
+larger than the ingress will carry. Over the cap the edge emits **no hashes
+for that page** and logs a warning naming the site, the path, the script
+count and the byte size. That one page renders without hydrating; every
+other page on the site is unaffected, and the security posture does not
+change. It fails closed and tells you which page to look at.
+
+**The default is set by the ingress, not by taste.** The cloud overlays
+route through ingress-nginx, which this repo leaves at its default
+`proxy-buffer-size: 4k` -- and that bounds the whole upstream *response
+header block*, not just this one header. Measured by serving through the
+real handler, the block is the hash bytes plus about 700. So 3072 lands the
+whole thing near 3.8KB, leaving roughly 300 bytes of margin for the longer
+hostnames a real cluster carries in `connect-src`.
+
+**Raising this alone is not enough.** A larger value needs
+`proxy-buffer-size` raised on the ingress controller to match, or the very
+page you raised it for answers **502** instead of rendering -- which is
+worse than the un-hydrated page the cap was protecting you from.
+
+For scale: a typical page needs ~500 bytes of hashes. The largest real
+document measured -- a generated API reference with 56 distinct inline
+scripts -- needs 3023 bytes, which fits with little room to spare. Identical
+scripts are deduplicated, so a page that repeats one script many times costs
+one hash, not many.
+
+**Setting this to `0`, a negative number, or anything unparseable disables
+hashing entirely** rather than meaning "unlimited". That is deliberate.
+Disabling costs hydration on sites that need it: visible, logged, and
+recoverable. "Unlimited" would cost an oversized header that the ingress
+rejects, which presents as a 502 on one page with nothing obviously wrong
+anywhere else.
+
+### If a site's scripts are being blocked
+
+Open the browser console on the page. A CSP refusal names the directive
+(`script-src-elem`) and its disposition (`enforce`). Then check the edge's
+logs for `dropping inline script hashes` -- if it is there, the page is
+over the cap. If it is not, the blocked script is one the bundle does not
+actually ship: something injected at runtime by a third-party tag or a
+browser extension, which this policy is working correctly by refusing.
+
+Note that a page in this state **works on a first visit and fails on
+later ones** if anything upstream strips the policy from a `304`
+revalidation response, because a 304's headers replace the stored ones. The
+edge repeats the full policy on every 304 for exactly this reason.
+
+---
+
 ## Caching: what the edge does, and putting a CDN in front of it
 
 Three layers cache a hosted site's bytes, and they compose because each one

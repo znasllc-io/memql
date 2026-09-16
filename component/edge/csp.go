@@ -57,17 +57,36 @@ import (
 //     (docs/public/operate/environment-parity.md), so r.TLS is nil on this
 //     process even for a genuine https visitor. Keying the scheme off it
 //     would silently downgrade every hosted site's policy to http://.
-func policyForSite(r *http.Request, site *Site, env func(string) string) string {
+//
+// scriptHashes is the `'sha256-...'` source list for the inline scripts of
+// the DOCUMENT being served, or "" for every other response -- an asset, a
+// 404, or a document with no inline scripts at all. See scripthash.go for
+// why inline scripts need naming and why a hash rather than
+// 'unsafe-inline'.
+//
+// An empty list reproduces this function's previous output byte for byte,
+// which is what makes this change invisible to every bundle that has no
+// inline scripts, MemQL OS included
+// (TestPolicyForSiteWithNoHashesIsUnchanged). 'unsafe-inline' is never
+// added under any condition: a browser IGNORES it whenever a hash is
+// present, so it would be inert here and a silent hole on the overflow
+// path, which deliberately falls back to NO hashes rather than to a weaker
+// policy.
+func policyForSite(r *http.Request, site *Site, env func(string) string, scriptHashes string) string {
 	origin := siteOriginOf(site)
 	connectSrc := "connect-src 'self' " + origin + " " + wsOriginOf(origin)
 	if identity := identityOriginForSite(site, env); identity != "" {
 		connectSrc += " " + identity
 	}
+	scriptSrc := "script-src 'self'"
+	if scriptHashes != "" {
+		scriptSrc += " " + scriptHashes
+	}
 	return "default-src 'self'; " +
 		connectSrc + "; " +
 		"img-src 'self' data: blob:; " +
 		"style-src 'self' 'unsafe-inline'; " +
-		"script-src 'self'; " +
+		scriptSrc + "; " +
 		"frame-ancestors 'none'; " +
 		"base-uri 'self'; " +
 		"form-action 'self'"
