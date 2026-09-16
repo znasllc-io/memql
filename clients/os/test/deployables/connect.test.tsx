@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -12,6 +12,8 @@ vi.mock("../../src/live/connection", () => ({
 
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { RepositorySource } from "../../src/apps/deployables/page/stops/compose/RepositorySource";
+import { EMPTY_DRAFT } from "../../src/apps/deployables/page/compose";
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import { RepositoryPicker } from "../../src/apps/deployables/sources/RepositoryPicker";
@@ -37,6 +39,7 @@ import {
   pastedCredentials,
 } from "../../src/apps/deployables/sources/rows";
 import {
+  builtinReply,
   FIXTURE_GITHUB_PAT,
   click,
   credentialRow,
@@ -79,6 +82,16 @@ describe("reading a sourceRepositories reply", () => {
     installations: [{ id: "i-acme", login: "acme", accountType: "Organization", repositorySelection: "all", suspended: false }],
     pending: [{ login: "beta-corp" }],
     nextPage: 2,
+  });
+
+  it("reads installation accounts and pending organization names from the engine reply", () => {
+    const page = repositoryPageFrom(repositoriesReply({
+      installations: [{ id: "42", account: "acme", accountType: "Organization", repositorySelection: "selected", suspended: false }],
+      pending: ["beta-corp"],
+    }));
+    expect(page.installations[0]?.login).toBe("acme");
+    expect(page.pending).toEqual([{ login: "beta-corp" }]);
+    expect(groupRepositories(page, "").map(group => group.owner)).toContain("beta-corp");
   });
 
   it("projects every field a row is drawn from", () => {
@@ -883,9 +896,99 @@ async function composeSource(seed: FakeSeed): Promise<{ connection: FakeConnecti
 
 const WIDGET = repositoryFixture({ fullName: "acme/widget", private: true, visibility: "private" });
 
+function personalSource(credentials: Row[], userId = "u-me") {
+  return withSession(<RepositorySource
+    draft={EMPTY_DRAFT} onDraft={vi.fn()}
+    credentials={credentials.map(credentialFromRow)}
+    probe={{ reply: null, error: "", busy: false, probe: vi.fn(async () => {}), clear: vi.fn() }}
+    tokenFormOpen={false} onTokenFormOpenChange={vi.fn()}
+  />, { userId });
+}
+
+describe("personal repository connection lifecycle", () => {
+  afterEach(() => { h.connection = null; });
+
+  it("reads the grant when the socket becomes available after mount", async () => {
+    h.connection = null;
+    const view = render(personalSource([GRANT]));
+    h.connection = fakeConnection({ repositories: repositoriesReply({ repositories: [WIDGET] }) });
+    view.rerender(personalSource([GRANT]));
+    expect(await screen.findByRole("button", { name: /widget/ })).toBeTruthy();
+  });
+
+  it("drops the old grant's list and ignores its late answer after replacement", async () => {
+    const connection = fakeConnection({
+      repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "new-owner/new-project" })] }),
+    });
+    let finishOld!: (value: ReturnType<typeof builtinReply>) => void;
+    vi.spyOn(connection.query, "sourceRepositories").mockImplementationOnce(() =>
+      new Promise(resolve => { finishOld = resolve; }));
+    h.connection = connection;
+    const view = render(personalSource([GRANT]));
+    view.rerender(personalSource([githubGrantRow({ id: "new-grant" })]));
+    expect(await screen.findByRole("button", { name: /new-project/ })).toBeTruthy();
+    await act(async () => finishOld(builtinReply("sourceRepositories", [repositoriesReply({ repositories: [WIDGET] })])));
+    expect(screen.queryByRole("button", { name: /widget/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /new-project/ })).toBeTruthy();
+  });
+
+  it("removes the previous person's list and installation link on a viewer change", async () => {
+    h.connection = fakeConnection({
+      repositories: repositoriesReply({ repositories: [WIDGET] }),
+      installUrl: "https://github.com/apps/memql/installations/new",
+    });
+    const view = render(personalSource([GRANT]));
+    await screen.findByRole("button", { name: /widget/ });
+    view.rerender(personalSource([GRANT], "other-user"));
+    expect(screen.getByRole("button", { name: "Connect GitHub" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /widget/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Install on another organization" })).toBeNull();
+  });
+});
+
+
 describe("the compose Source stop, with a connection", () => {
   afterEach(() => {
     h.connection = null;
+  });
+
+  it("offers a personal connection when an owner sees only a colleague's grant", async () => {
+    const { connection, region } = await composeSource({
+      credentials: [githubGrantRow({ id: "colleague-grant", ownerUserId: "u-colleague", login: "colleague" })],
+    });
+    expect(within(region).getByRole("button", { name: "Connect GitHub" })).toBeTruthy();
+    expect(connection.callsNamed("sourceRepositories")).toEqual([]);
+    expect(within(region).queryByText("This connection reaches no repositories yet.")).toBeNull();
+    await click(within(region).getByRole("button", { name: "Use a token instead" }));
+    expect(within(region).queryByRole("option", { name: /colleague/ })).toBeNull();
+  });
+
+  it("chooses the current user's grant even when another user's card sorts first", async () => {
+    const { connection, region } = await composeSource({
+      credentials: [
+        githubGrantRow({ id: "colleague-grant", ownerUserId: "u-colleague" }),
+        githubGrantRow({ id: "my-grant", ownerUserId: "v1:identity:user:u-me" }),
+      ],
+      repositories: repositoriesReply({ repositories: [WIDGET] }),
+    });
+    await click(await within(region).findByRole("button", { name: /widget/ }));
+    expect(connection.callsNamed("sourceRepositories")[0]).toContain('credentialId: "my-grant"');
+    expect(connection.callsNamed("sourceProbe")[0]).toContain('credentialId: "my-grant"');
+    expect(connection.callsNamed("sourceProbe").join()).not.toContain("colleague-grant");
+  });
+
+  it.each(["credential_not_found", "credential_revoked", "reconnect_required"])("offers reconnect for an answered %s refusal", async reason => {
+    const { region } = await composeSource({
+      credentials: [GRANT], repositories: repositoriesReply({ reason }),
+    });
+    expect(await within(region).findByRole("button", { name: "Reconnect GitHub" })).toBeTruthy();
+    expect(within(region).queryByText("This connection reaches no repositories yet.")).toBeNull();
+  });
+
+  it("offers the GitHub installation page when the personal grant reaches nothing", async () => {
+    const { region } = await composeSource({ credentials: [GRANT], installUrl: "https://github.com/apps/memql/installations/new" });
+    const link = await within(region).findByRole("link", { name: "Install on another organization" });
+    expect(link.getAttribute("href")).toContain("github.com");
   });
 
   it("reads the list on its own, so a connected person opens the stop and picks", async () => {
@@ -898,7 +1001,7 @@ describe("the compose Source stop, with a connection", () => {
     // is that a connected person never notices it.
     expect(await within(region).findByRole("button", { name: /widget/ })).toBeTruthy();
     expect(connection.callsNamed("sourceRepositories")).toEqual([
-      'builtin sourceRepositories(credentialId: "", page: 1)',
+      'builtin sourceRepositories(credentialId: "cred-grant", page: 1)',
     ]);
     // The token form is under it, closed: one answer on screen at a time.
     expect(within(region).queryByLabelText(URL_FIELD)).toBeNull();

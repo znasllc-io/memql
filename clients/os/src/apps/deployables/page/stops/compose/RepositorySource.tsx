@@ -1,5 +1,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 
+import { useSession } from "../../../../../chrome/access";
+import { bare } from "../../../people";
 import { Button, Caption, Field, Select, Subhead } from "../../../../../kit";
 import { toneFor } from "../../../packages/refusals";
 import { ProblemNotice } from "../../../packages/ReportView";
@@ -60,14 +62,7 @@ import { TokenSourceForm } from "./TokenSourceForm";
  *  where New deployable is. */
 const COMPOSE_SECTION = "deployables";
 
-export function RepositorySource({
-  draft,
-  onDraft,
-  credentials,
-  probe,
-  tokenFormOpen,
-  onTokenFormOpenChange,
-}: {
+interface RepositorySourceProps {
   draft: ComposeDraft;
   onDraft: (patch: Partial<ComposeDraft>) => void;
   credentials: readonly CredentialRow[];
@@ -75,8 +70,25 @@ export function RepositorySource({
   /** The fold's state, held by the page so it survives a stop re-render. */
   tokenFormOpen: boolean;
   onTokenFormOpenChange: (open: boolean) => void;
-}) {
+}
+
+export function RepositorySource(props: RepositorySourceProps) {
+  const { access } = useSession();
+  // Owner oversight includes colleagues' cards; using a source is personal.
+  const viewer = bare(access?.userId ?? "");
+  const personal = props.credentials.filter(c => viewer !== "" && bare(c.ownerUserId) === viewer);
+  const grant = githubGrantOf(personal);
+  // A different viewer or grant gets fresh reads, errors and installation
+  // help. An earlier request cannot land in the next person's picker.
+  return <PersonalRepositorySource {...props} credentials={personal}
+    key={`${viewer}:${grant?.id ?? ""}:${grant?.status ?? ""}`} />;
+}
+
+function PersonalRepositorySource({
+  draft, onDraft, credentials, probe, tokenFormOpen, onTokenFormOpenChange,
+}: RepositorySourceProps) {
   const connect = useGithubConnect();
+  const install = useGithubConnect();
   const repositories = useSourceRepositories();
 
   const grant = githubGrantOf(credentials);
@@ -86,6 +98,7 @@ export function RepositorySource({
   const connected = grant !== null && !credentialIsRevoked(grant);
   const grantId = connected ? grant.id : "";
   const returnPath = returnPathFor(COMPOSE_SECTION);
+  const reconnect = ["credential_not_found", "credential_revoked", "reconnect_required"].includes(repositories.refusal?.code ?? "");
 
   // THE CLUSTER HAS NO GITHUB APP, and only a refused begin can say so.
   // The control is not rendered at all in this reading: a disabled Connect
@@ -103,9 +116,24 @@ export function RepositorySource({
   const read = repositories.read;
   useEffect(() => {
     if (grantId === "" || grantId === readFor.current) return;
-    readFor.current = grantId;
-    void read("", 1);
+    let current = true;
+    void read(grantId, 1).then(answered => {
+      if (current && answered) readFor.current = grantId;
+    });
+    return () => { current = false; };
   }, [grantId, read]);
+
+  const learnedFor = useRef("");
+  const learning = useRef(false);
+  const learn = install.learn;
+  useEffect(() => {
+    if (!grantId || grantId === learnedFor.current || learning.current) return;
+    learning.current = true;
+    void learn(returnPath).then(answered => {
+      learning.current = false;
+      if (answered) learnedFor.current = grantId;
+    });
+  }, [grantId, learn, returnPath]);
 
   /**
    * Choosing a repository answers three fields at once.
@@ -145,14 +173,14 @@ export function RepositorySource({
 
   return (
     <>
-      {connected ? (
+      {connected && !reconnect ? (
         <>
           <RepositoryPicker
             page={repositories.page}
             readAt={repositories.readAt}
             busy={repositories.busy}
             refusal={repositories.refusal}
-            installUrl={connect.installUrl}
+            installUrl={install.installUrl}
             /* The chosen row is derived from the URL the draft holds rather
                than from a second field: `shortRepo` is the same reading the
                rail's own Source answer uses, so the mark and the note can
@@ -160,8 +188,8 @@ export function RepositorySource({
             chosen={draft.repoUrl === "" ? "" : shortRepo(draft.repoUrl)}
             idPrefix="os-compose-repo"
             onChoose={choose}
-            onLookAgain={() => void repositories.read("", 1)}
-            onReadMore={() => void repositories.read("", repositories.page.nextPage)}
+            onLookAgain={() => void repositories.read(grantId, 1)}
+            onReadMore={() => void repositories.read(grantId, repositories.page.nextPage)}
           />
           {draft.repoUrl !== "" && !tokenFormOpen ? (
             <>
@@ -176,10 +204,10 @@ export function RepositorySource({
           caption={
             grant === null
               ? "Pick repositories from a list instead of pasting a URL and a token."
-              : "This connection was disconnected. Reconnecting puts the picker back."
+              : "Reconnect your GitHub account to choose its repositories."
           }
           busy={connect.busy}
-          refusal={connect.refusal}
+          refusal={connect.refusal ?? repositories.refusal}
           onConnect={() => void connect.connect(returnPath)}
         />
       )}

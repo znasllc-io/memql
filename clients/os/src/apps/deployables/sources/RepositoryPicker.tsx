@@ -92,7 +92,7 @@ export function RepositoryPicker({
         </div>
       ) : null}
 
-      {groups.length === 0 ? (
+      {groups.length === 0 && refusal ? null : groups.length === 0 ? (
         <EmptyPicker total={total} searching={search.trim() !== ""} installUrl={installUrl} />
       ) : (
         groups.map((group) => (

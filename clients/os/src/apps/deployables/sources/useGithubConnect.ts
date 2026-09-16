@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import { useWrite, type WriteState } from "../packages/actions";
 import { githubConnectBegin, readSourceRepositories, revokeSourceCredential } from "./calls";
@@ -62,6 +62,13 @@ export function reasonSentence(reason: string): string {
   switch (reason) {
     case "github_app_not_configured":
       return "This cluster has no GitHub App configured.";
+    case "credential_not_found":
+      return "Connect your GitHub account to choose its repositories.";
+    case "credential_revoked":
+    case "reconnect_required":
+      return "Reconnect your GitHub account to renew repository access.";
+    case "rate_limited":
+      return "GitHub temporarily limited repository requests. Try again shortly.";
     case "connect_state_invalid":
       return "The cluster could not store the connect state.";
     default:
@@ -133,21 +140,35 @@ export interface SourceRepositoriesActions extends WriteState {
    * the same question over, and reading more is continuing a walk. Appending
    * on a re-read would show every repository twice.
    */
-  read: (credentialId: string, page: number) => Promise<void>;
+  read: (credentialId: string, page: number) => Promise<boolean>;
 }
 
 export function useSourceRepositories(): SourceRepositoriesActions {
   const { busy, refusal, clear, run } = useWrite();
   const [page, setPage] = useState<RepositoryPage>(EMPTY_PAGE);
   const [readAt, setReadAt] = useState("");
+  const latestRead = useRef(0);
 
   const read = useCallback(
     async (credentialId: string, wanted: number) => {
-      const answered = await run((query) => readSourceRepositories(query, credentialId, wanted));
+      const request = ++latestRead.current;
+      const answered = await run(async (query) => {
+        try {
+          const result = await readSourceRepositories(query, credentialId, wanted);
+          if (request !== latestRead.current) return null;
+          if (result.reason !== "" && result.reason !== "ok") {
+            throw new Error(`${result.reason}: ${reasonSentence(result.reason)}`);
+          }
+          return result;
+        } catch (error) {
+          if (request !== latestRead.current) return null;
+          throw error;
+        }
+      });
       // A REFUSED READ KEEPS THE LAST GOOD LIST. A refusal is not a zero
       // (clients/os/README.md): blanking the picker would say the grant
       // reaches nothing, which is a different and untrue answer.
-      if (answered === null) return;
+      if (answered === null || request !== latestRead.current) return false;
       setPage((held) =>
         wanted > 1
           ? {
@@ -161,6 +182,7 @@ export function useSourceRepositories(): SourceRepositoriesActions {
           : answered,
       );
       setReadAt(new Date().toISOString());
+      return true;
     },
     [run],
   );
