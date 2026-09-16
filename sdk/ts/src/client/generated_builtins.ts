@@ -632,6 +632,28 @@ QueryClient.prototype.customDomainCheck = function (this: QueryClient, args: Cus
   return this.executeNamed("customDomainCheck", buildCustomDomainCheck(args), opts);
 };
 
+/** Fresh DNS instructions for an existing binding; resolves the configured routing host. */
+export interface CustomDomainDNSGuidanceArgs {
+  /** The custom-domain binding to configure. */
+  domainId: string;
+}
+
+export function buildCustomDomainDNSGuidance(args: CustomDomainDNSGuidanceArgs): string {
+  const parts: string[] = [];
+  parts.push("domainId: " + renderMemQLValue(args.domainId));
+  return "builtin customDomainDNSGuidance(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    customDomainDNSGuidance(args: CustomDomainDNSGuidanceArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.customDomainDNSGuidance = function (this: QueryClient, args: CustomDomainDNSGuidanceArgs = {} as CustomDomainDNSGuidanceArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("customDomainDNSGuidance", buildCustomDomainDNSGuidance(args), opts);
+};
+
 /** List every registered concept with its data state (mirror | origin | native), the system where its changes are made, and the connectors it depends on. Produced from the live concept registry, never persisted. Feeds the portal's Data origins page. */
 export interface DataOriginsArgs {
 }

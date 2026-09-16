@@ -252,6 +252,19 @@ describe("what the domain's status does not say", () => {
 // ===========================================================================
 
 describe("the records to create", () => {
+  it("withholds targets on a failed read and loads them on retry", async () => {
+    const seed = { sites: [SHOP], domains: [domainRow({ id: "cd-1", hostname: "acme.com", status: "verifying", failureReason: "dns_not_pointing" })], domainDNSError: "Routing address lookup failed" };
+    const connection = fakeConnection(seed);
+    await openShop(connection);
+    const c = await findCard("acme.com");
+    await waitFor(() => expect(within(c).getByText("DNS targets could not be loaded.")).toBeTruthy());
+    expect(within(c).queryByLabelText("Copy value: 203.0.113.10")).toBeNull();
+    seed.domainDNSError = "";
+    await click(within(c).getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(within(c).getByLabelText("Copy value: 203.0.113.10")).toBeTruthy());
+    expect(connection.calls.some(call => call.startsWith("mutation"))).toBe(false);
+  });
+
   it("guides ownership before DNS, with copyable values and no modal", async () => {
     const connection = fakeConnection({ sites: [SHOP], domains: [domainRow({ id: "cd-1", hostname: "www.acme.com", token: "tok-xyz" })] });
     await openShop(connection);
@@ -263,32 +276,34 @@ describe("the records to create", () => {
     expect(within(c).queryByRole("button", { name: /DNS$/ })).toBeNull();
     await emit(connection, CUSTOM_DOMAIN_CONCEPT, domainRow({ id: "cd-1", hostname: "www.acme.com", token: "tok-xyz", status: "verifying", failureReason: "dns_not_pointing" }));
     await waitFor(() => expect(within(c).getByRole("heading", { name: "DNS" })).toBeTruthy());
-    expect(within(c).getByText("CNAME")).toBeTruthy();
-    expect(within(c).getByLabelText("Copy value: os.memql.example.com")).toBeTruthy();
+    await waitFor(() => expect(within(c).getByLabelText("Copy value: 203.0.113.10")).toBeTruthy());
+    expect(within(c).getByText("A")).toBeTruthy();
     await click(within(c).getByRole("button", { name: /Ownership$/ }));
     expect(within(c).getByLabelText("Copy value: tok-xyz")).toBeTruthy();
     await click(within(c).getByRole("button", { name: "Continue to DNS" }));
     expect(within(c).getByRole("heading", { name: "DNS" })).toBeTruthy();
   });
 
-  it("lets an apex switch from ALIAS to a copyable flattened CNAME without advancing verification", async () => {
+  it("offers a GoDaddy-compatible A record and keeps alternate choices read-only", async () => {
     const connection = fakeConnection({ sites: [SHOP], domains: [domainRow({ id: "cd-1", hostname: "acme.com", status: "verifying", failureReason: "dns_not_pointing" })] });
     await openShop(connection);
     const c = await findCard("acme.com");
-    expect(within(c).getByText("ALIAS")).toBeTruthy();
+    await waitFor(() => expect(within(c).getByLabelText("Copy value: 203.0.113.10")).toBeTruthy());
+    expect(within(c).getByText("A")).toBeTruthy();
+    expect(within(c).queryByRole("combobox", { name: "Domain location" })).toBeNull();
     await click(within(c).getByRole("combobox", { name: "DNS record type" }));
-    await click(screen.getByRole("option", { name: "CNAME with flattening" }));
+    await click(screen.getByRole("option", { name: "CNAME — subdomain or provider flattening" }));
     expect(within(c).getByText("CNAME")).toBeTruthy();
-    expect(within(c).getByLabelText("Copy name: acme.com")).toBeTruthy();
-    expect(within(c).getByLabelText("Copy value: os.memql.example.com")).toBeTruthy();
-    expect(within(c).getByText(/root-domain CNAME needs/)).toBeTruthy();
+    expect(within(c).getByLabelText("Copy name: @")).toBeTruthy();
+    expect(within(c).getByLabelText("Copy value: routing.example.net")).toBeTruthy();
+    expect(within(c).getByText(/GoDaddy does not support root CNAME/)).toBeTruthy();
     const writeText = vi.fn().mockResolvedValue(undefined);
     const previousClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
     try {
-      await click(within(c).getByLabelText("Copy name: acme.com"));
-      await click(within(c).getByLabelText("Copy value: os.memql.example.com"));
-      expect(writeText.mock.calls).toEqual([["acme.com"], ["os.memql.example.com"]]);
+      await click(within(c).getByLabelText("Copy name: @"));
+      await click(within(c).getByLabelText("Copy value: routing.example.net"));
+      expect(writeText.mock.calls).toEqual([["@"], ["routing.example.net"]]);
     } finally {
       if (previousClipboard) Object.defineProperty(navigator, "clipboard", previousClipboard);
       else Reflect.deleteProperty(navigator, "clipboard");

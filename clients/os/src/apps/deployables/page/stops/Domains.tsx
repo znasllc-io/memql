@@ -27,13 +27,15 @@ import {
   type PointingMethod,
 } from "../../domains";
 import { JourneyTrail } from "../../../../kit/JourneyTrail";
+import { useDomainDNSGuidance } from "../../useDomainDNSGuidance";
+import { InfoDetail } from "../../../../kit/InfoDetail";
 import { useCustomDomains } from "../../useCustomDomains";
 import type { SiteRow } from "../../rows";
 
 // Domain setup stays in the Deployables page. Navigation reveals one task at
 // a time; the live reconciliation feed alone determines completion.
 
-export function DomainsContent({ site, domain }: { site: SiteRow; domain: string }) {
+export function DomainsContent({ site }: { site: SiteRow; domain: string }) {
   const { source: collection } = useCustomDomains();
 
   // PROJECT, THEN NARROW, in one pass -- the collection holds RAW wire rows,
@@ -98,7 +100,7 @@ export function DomainsContent({ site, domain }: { site: SiteRow; domain: string
         emptyText="No custom domains. Add a hostname to get its DNS records."
         rowId={(d) => d.id}
         fingerprint={domainFingerprint}
-        renderRow={(d) => <DomainCard key={d.id} domain={d} clusterDomain={domain} site={site} />}
+        renderRow={(d) => <DomainCard key={d.id} domain={d} site={site} />}
       />
     </section>
   );
@@ -176,19 +178,19 @@ function AddDomain({ siteId }: { siteId: string }) {
 // One binding
 // ---------------------------------------------------------------------------
 
-function DomainCard({ domain: d, clusterDomain, site }: { domain: DomainRow; clusterDomain: string; site: SiteRow }) {
+function DomainCard({ domain: d, site }: { domain: DomainRow; site: SiteRow }) {
   const now = useNow(15_000);
   const tone = d.status === "live" && site.status !== "live" ? "muted" : statusTone(d);
-  const [rootDomain, setRootDomain] = useState(isApex(d.hostname));
-  const [method, setMethod] = useState<PointingMethod>(isApex(d.hostname) ? "ALIAS" : "CNAME");
+  const [method, setMethod] = useState<PointingMethod>("ADDRESS");
   const current = domainSetupStep(d);
   const [selected, setSelected] = useState(current);
   // Follow real progress, including regressions; inspecting earlier steps
   // never changes verification or marks a step complete.
   useEffect(() => setSelected(current), [current]);
-  const records = recordsFor(d, clusterDomain, method);
   const labels = DOMAIN_SETUP_STEPS;
   const active = Math.min(selected, current);
+  const guidance = useDomainDNSGuidance(d.id, active === 1 && !isRemovalPath(d.status));
+  const records = recordsFor(d, guidance.value, method);
   const serving = d.status === "live" && site.status === "live";
 
   const removalPath = isRemovalPath(d.status);
@@ -230,31 +232,31 @@ function DomainCard({ domain: d, clusterDomain, site }: { domain: DomainRow; clu
 
       {removalPath ? null : (
         <div className="deployable-journey-current">
-          <h3>{labels[active]}</h3>
+          <div className="os-domain-head"><h3>{labels[active]}</h3>
+            {active === 1 ? <InfoDetail title="How domain routing works"><p>DNS sends visitors to the cluster. The binding for {d.hostname} selects this website, and the visitor keeps your domain in the address bar. Use the displayed current addresses; update these records if the cluster’s public addresses change.</p></InfoDetail> : null}
+          </div>
           {active === 0 ? <>
             <Caption>Add this TXT record at your domain provider. Verification runs automatically.</Caption>
             <RecordStrip record={records[0]!} faulty={isRecordAtFault(records[0]!, d.failureReason)} />
           </> : null}
           {active === 1 ? <>
-            <Field label="Domain location">
-              <Select id={`domain-location-${d.id}`} label="Domain location" value={rootDomain ? "root" : "subdomain"} onChange={value => {
-                setRootDomain(value === "root"); setMethod(value === "root" ? "ALIAS" : "CNAME");
-              }}>
-                <option value="root">Root domain (example.com)</option>
-                <option value="subdomain">Subdomain (www.example.com)</option>
-              </Select>
-            </Field>
             <Field label="DNS record type">
               <Select id={`domain-record-${d.id}`} label="DNS record type" value={method} onChange={value => setMethod(value as PointingMethod)}>
-                <option value="ALIAS">{rootDomain ? "ALIAS / ANAME (recommended)" : "ALIAS / ANAME"}</option>
-                <option value="CNAME">{rootDomain ? "CNAME with flattening" : "CNAME (recommended)"}</option>
+                <option value="ADDRESS">A / AAAA — standard DNS</option>
+                <option value="CNAME">CNAME — subdomain or provider flattening</option>
+                <option value="ALIAS">ALIAS / ANAME — if supported</option>
               </Select>
             </Field>
-            {rootDomain && method === "CNAME" ? <Notice tone="info" sentence="A root-domain CNAME needs your provider’s CNAME flattening support."
-              next="If your provider does not support flattening or ALIAS / ANAME, add a subdomain such as www instead. A standard CNAME cannot be used at the root." /> : null}
-            <Caption>{method === "ALIAS" ? "Choose ALIAS or ANAME at your provider and copy the name and target below." : "Choose CNAME at your provider and copy the name and target below."} Use DNS-only mode during verification.</Caption>
-            <RecordStrip record={records[1]!} faulty={isRecordAtFault(records[1]!, d.failureReason)} />
-            <Caption>{rootDomain ? "Use @ if your provider asks for a relative root name." : "If your provider adds the domain automatically, enter only the subdomain in its Name field."} We check the published target automatically.</Caption>
+            {method === "CNAME" ? <Notice tone="info" sentence="A root domain needs provider support for CNAME flattening."
+              next="GoDaddy does not support root CNAME records. Choose A / AAAA for a root domain there. For a subdomain, bind its full name, such as www.example.com." /> : null}
+            {method === "ALIAS" ? <Caption>Use this only when your provider offers ALIAS or ANAME. Otherwise choose A / AAAA.</Caption> : null}
+            {guidance.error ? <Notice tone="error" sentence="DNS targets could not be loaded." detail={guidance.error}><Button onClick={guidance.retry}>Try again</Button></Notice>
+              : !guidance.value ? <Caption>Reading this cluster’s DNS targets…</Caption>
+              : <>
+                <Caption>{method === "ADDRESS" ? "Add the address records below at your DNS provider. Replace previous website addresses for this same name; keep your email and ownership records." : "Copy the name and target below into your DNS provider."}</Caption>
+                {records.slice(1).map(record => <RecordStrip key={`${record.kind}:${record.value}`} record={record} faulty={isRecordAtFault(record, d.failureReason)} />)}
+              </>}
+            <Caption>{isApex(d.hostname) ? "@ means your root domain." : "If your provider adds the domain automatically, enter only the subdomain in its Name field."} The hostname stays {d.hostname}.</Caption>
           </> : null}
           {active === 2 ? <Caption>{d.failureReason === "" ? "Ownership and DNS are verified. Waiting for the HTTPS certificate and route to be ready." : "Certificate setup needs attention. The reported problem is shown above."}</Caption> : null}
           {active === 3 ? <>

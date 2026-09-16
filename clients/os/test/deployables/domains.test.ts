@@ -6,7 +6,6 @@ import {
   domainSetupStep,
   domainFingerprint,
   domainFromRow,
-  edgeHostFor,
   failureSentence,
   isApex,
   isKnownFailure,
@@ -88,44 +87,46 @@ describe("the arrival cue's fingerprint", () => {
 // The records
 // ===========================================================================
 
+const guidance = { edgeHost: "routing.example.net", ipv4: ["203.0.113.10"], ipv6: [] };
+
 describe("the DNS records a client has to create", () => {
   it("asks for the ownership TXT record first", () => {
-    const records = recordsFor(domain(), "memql.example.com");
+    const records = recordsFor(domain(), guidance);
     expect(records[0]?.kind).toBe("TXT");
     expect(records[0]?.name).toBe("_memql-verify.www.acme.com");
     expect(records[0]?.value).toBe("tok-abcdef0123456789");
   });
 
   it("asks a subdomain for a CNAME to this cluster's edge host", () => {
-    const records = recordsFor(domain({ hostname: "www.acme.com" }), "memql.example.com");
+    const records = recordsFor(domain({ hostname: "www.acme.com" }), guidance, "CNAME");
     const pointing = records[1];
     expect(pointing?.kind).toBe("CNAME");
     expect(pointing?.name).toBe("www.acme.com");
-    expect(pointing?.value).toBe("os.memql.example.com");
+    expect(pointing?.value).toBe("routing.example.net");
   });
 
   // A CNAME IS ILLEGAL AT A ZONE APEX -- RFC 1034 forbids one alongside the
-  // SOA and NS records every apex carries -- so an apex is asked for ALIAS.
-  it("asks an apex for an ALIAS rather than a CNAME", () => {
-    const records = recordsFor(domain({ hostname: "acme.com" }), "memql.example.com");
-    expect(records[1]?.kind).toBe("ALIAS");
-    expect(records[1]?.name).toBe("acme.com");
+  // SOA and NS records every apex carries -- so an apex is asked for address records.
+  it("offers a root A record with a provider-relative name", () => {
+    const records = recordsFor(domain({ hostname: "acme.com" }), guidance);
+    expect(records[1]?.kind).toBe("A");
+    expect(records[1]?.name).toBe("@");
   });
 
   it("normalises the hostname it renders", () => {
-    const records = recordsFor(domain({ hostname: "WWW.Acme.com." }), "memql.example.com");
+    const records = recordsFor(domain({ hostname: "WWW.Acme.com." }), guidance);
     expect(records[0]?.name).toBe("_memql-verify.www.acme.com");
     expect(records[1]?.name).toBe("www.acme.com");
   });
 
   it("renders nothing rather than half a record when the hostname is blank", () => {
-    expect(recordsFor(domain({ hostname: "" }), "memql.example.com")).toEqual([]);
+    expect(recordsFor(domain({ hostname: "" }), guidance)).toEqual([]);
   });
 
   // The typed reason says which record it is about, so the panel can point at
   // the one that is still wrong rather than making somebody read both.
   it("marks the record a typed reason is about, and only that one", () => {
-    const [txt, pointing] = recordsFor(domain(), "memql.example.com");
+    const [txt, pointing] = recordsFor(domain(), guidance);
     expect(isRecordAtFault(txt!, "dns_token_missing")).toBe(true);
     expect(isRecordAtFault(pointing!, "dns_token_missing")).toBe(false);
     expect(isRecordAtFault(txt!, "dns_not_pointing")).toBe(false);
@@ -136,7 +137,14 @@ describe("the DNS records a client has to create", () => {
   });
 
   it("composes nothing when the cluster did not say which domain it serves", () => {
-    expect(edgeHostFor("")).toBe("");
+    expect(recordsFor(domain(), null)).toHaveLength(1);
+  });
+});
+
+describe("address families", () => {
+  it("renders IPv6 as AAAA and does not invent IPv4", () => {
+    const records = recordsFor(domain({ hostname: "acme.com" }), { edgeHost: "route.example", ipv4: [], ipv6: ["2001:db8::1"] });
+    expect(records.slice(1).map(r => [r.kind, r.name, r.value])).toEqual([["AAAA", "@", "2001:db8::1"]]);
   });
 });
 

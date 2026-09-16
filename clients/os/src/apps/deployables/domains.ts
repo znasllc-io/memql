@@ -179,50 +179,24 @@ export function normalizeHostname(h: string): string {
   return h.trim().toLowerCase().replace(/\.$/, "");
 }
 
-/**
- * Whether a hostname is a zone apex rather than a subdomain.
- *
- * A LABEL COUNT, mirroring the server's own approximation and for the same
- * stated reason: what it decides is only which record the guidance asks for,
- * and the rule that actually governs it -- a CNAME is illegal at a zone apex --
- * depends on where the client's zone starts, which no string can tell you.
- * Two labels is right for acme.com and wrong for acme.co.uk, and being wrong
- * that way means suggesting an ALIAS where a CNAME would also have worked.
- */
+/** A conservative hint for the provider-relative name. Two-label roots use
+ * @; other names remain fully qualified, which providers can normalize.
+ * This never determines which DNS record types or addresses are supported. */
 export function isApex(hostname: string): boolean {
   const h = normalizeHostname(hostname);
   return h !== "" && (h.match(/\./g) ?? []).length <= 1;
 }
 
-/**
- * The host a client points their own domain AT.
- *
- * MIRRORED FROM THE SERVER, NOT AUTHORITATIVE -- the same relationship
- * hostname.ts has with the site slug rules. `component/frontdoor.OsHost` is the
- * derivation, and an operator may override it with
- * MEMQL_CUSTOM_DOMAIN_EDGE_HOST for a cluster fronted by a CDN. The panel
- * cannot see that override, so the failure detail is what corrects it: a
- * `dns_not_pointing` miss names the host and the addresses the cluster
- * actually wanted, verbatim, and that sentence outranks this one.
- */
-export function edgeHostFor(domain: string): string {
-  const d = normalizeHostname(domain);
-  return d === "" ? "" : `os.${d}`;
+export interface DomainDNSGuidance {
+  edgeHost: string;
+  ipv4: string[];
+  ipv6: string[];
 }
 
-/**
- * The two records, in the order somebody should create them.
- *
- * OWNERSHIP FIRST, because it is the one whose failure a person can act on
- * immediately: "publish this TXT record" is a complete instruction, while "your
- * domain does not point here yet" often means "wait for propagation". The
- * server's sweep checks them in the same order for the same reason.
- */
-export type PointingMethod = "ALIAS" | "CNAME";
+export type PointingMethod = "ADDRESS" | "ALIAS" | "CNAME";
 
-export function recordsFor(d: DomainRow, domain: string, method: PointingMethod = isApex(d.hostname) ? "ALIAS" : "CNAME"): DnsRecord[] {
+export function recordsFor(d: DomainRow, guidance: DomainDNSGuidance | null, method: PointingMethod = "ADDRESS"): DnsRecord[] {
   const host = normalizeHostname(d.hostname);
-  const edge = edgeHostFor(domain);
   if (host === "") return [];
 
   const ownership: DnsRecord = {
@@ -232,14 +206,14 @@ export function recordsFor(d: DomainRow, domain: string, method: PointingMethod 
     purpose: "Proves you control this domain. Nothing is issued until it checks out.",
   };
 
-  const pointing: DnsRecord = {
-    kind: method,
-    name: host,
-    value: edge,
-    purpose: "Sends the domain's traffic here.",
-  };
-
-  return [ownership, pointing];
+  if (!guidance) return [ownership];
+  const name = isApex(host) ? "@" : host;
+  if (method === "ADDRESS") {
+    return [ownership, ...guidance.ipv4.map(value => ({ kind: "A", name, value, purpose: "Routes visitors to this cluster; your domain binding selects this website." })),
+      ...guidance.ipv6.map(value => ({ kind: "AAAA", name, value, purpose: "Routes IPv6 visitors to this cluster." }))];
+  }
+  return [ownership, { kind: method, name, value: guidance.edgeHost,
+    purpose: "Routes visitors to this cluster; your domain binding selects this website." }];
 }
 
 /**

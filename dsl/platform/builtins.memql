@@ -56,6 +56,16 @@ builtin customDomainAdd {
   hostname  string!  @description("The client's own fully qualified host, e.g. www.acme.com or acme.com.")
 }
 
+/// Fresh DNS instructions for an existing binding; resolves the configured routing host.
+@sdk
+@executor("integration.customDomain.dnsGuidance")
+@args(profile="object")
+@requiresCapability("execute", "app:deployables/domains")
+@description("Read DNS setup targets for a custom-domain binding visible to the caller. Returns hostname, edgeHost, ipv4 and ipv6. Does not change DNS, verification or deployment state.")
+builtin customDomainDNSGuidance {
+  domainId string! @description("The custom-domain binding to configure.")
+}
+
 /// One reconciliation pass over every non-terminal binding. The scheduled automation's whole body.
 ///
 /// It does the DNS half itself and dispatches the Kubernetes half through the capability-script
