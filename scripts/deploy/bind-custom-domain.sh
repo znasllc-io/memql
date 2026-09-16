@@ -150,8 +150,6 @@ metadata:
     app.kubernetes.io/name: custom-domain
     memql/custom-domain-id: "${DOMAIN_ID}"
     memql/custom-domain-siteId: "${SITE_ID}"
-  annotations:
-    cert-manager.io/cluster-issuer: "${ISSUER}"
 spec:
   ingressClassName: ${INGRESS_CLASS}
   tls:

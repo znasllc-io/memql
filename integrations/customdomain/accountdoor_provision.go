@@ -199,9 +199,8 @@ func doorIngressWithPaths(req DoorBindRequest, b doorBackend, paths []string) ma
 // should be the place that produces the list.
 func doorIngressWithRoutes(req DoorBindRequest, b doorBackend, routes []doorRoute) map[string]any {
 	annotations := map[string]any{}
-	if strings.TrimSpace(req.Issuer) != "" {
-		annotations["cert-manager.io/cluster-issuer"] = req.Issuer
-	}
+	// The explicit multi-host Certificate owns this shared TLS Secret.
+	// Enabling ingress-shim here would create a competing certificate.
 	for k, v := range b.annotations {
 		annotations[k] = v
 	}
