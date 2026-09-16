@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { FIXTURE_TOKEN } from "./harness";
 import {
-  DOMAIN_STEPS,
+  DOMAIN_SETUP_STEPS,
+  domainSetupStep,
   domainFingerprint,
   domainFromRow,
   edgeHostFor,
@@ -14,7 +15,6 @@ import {
   sortDomains,
   statusLabel,
   statusTone,
-  stepIndexFor,
   type DomainRow,
 } from "../../src/apps/deployables/domains";
 
@@ -201,22 +201,14 @@ describe("tone", () => {
   });
 });
 
-describe("the rail", () => {
-  it("places each step in order", () => {
-    expect(DOMAIN_STEPS.map((s) => s.status)).toEqual([
-      "pending_dns",
-      "verifying",
-      "issuing",
-      "live",
-    ]);
-  });
-
-  // `removing` / `removed` are a DIFFERENT JOURNEY that can start from
-  // anywhere. Drawing them as a fifth stop would say a removed domain had got
-  // further than a live one.
-  it("keeps the removal path off the rail", () => {
-    expect(stepIndexFor("removing")).toBe(-1);
-    expect(stepIndexFor("removed")).toBe(-1);
+describe("the domain setup journey", () => {
+  it("advances only on evidence from the server", () => {
+    expect(DOMAIN_SETUP_STEPS).toEqual(["Ownership", "DNS", "Certificate", "Serving"]);
+    expect(domainSetupStep(domain({ status: "verifying" }))).toBe(0);
+    expect(domainSetupStep(domain({ status: "verifying", failureReason: "dns_token_missing" }))).toBe(0);
+    expect(domainSetupStep(domain({ status: "verifying", failureReason: "dns_not_pointing" }))).toBe(1);
+    expect(domainSetupStep(domain({ status: "issuing", failureReason: "issuance_failed" }))).toBe(2);
+    expect(domainSetupStep(domain({ status: "live" }))).toBe(3);
   });
 });
 

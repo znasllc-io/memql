@@ -45,12 +45,6 @@
 .deployable-dialog-body { font-size: var(--os-text-base); }
 .deployable-dialog .os-stop-body { margin: 0; padding: 0; }
 .deployable-dialog .os-fact, .deployable-dialog code { overflow-wrap: anywhere; }
-.deployable-journey-trail { list-style: none; padding: 0; margin: 24px 0 28px; display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 12px; }
-.deployable-journey-trail li { min-width: 0; }
-.deployable-journey-trail button, .deployable-journey-trail .deployable-step-pending { display: flex; gap: 9px; align-items: center; text-align: left; border: 0; background: transparent; color: var(--os-muted); padding: 8px 0; font: inherit; }
-.deployable-journey-trail button { cursor: pointer; color: var(--os-ink); }
-.deployable-step-number { width: 26px; height: 26px; border: 1px solid var(--os-line); border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; font-size: var(--os-text-sm); }
-.deployable-journey-trail [aria-current="step"] .deployable-step-number { color: var(--os-accent-fg); background: var(--os-accent); border-color: var(--os-accent); }
 .deployable-journey-current { max-width: 710px; margin-inline: auto; }
 .deployable-journey-current h3 { font-size: var(--os-text-lg); font-weight: 500; margin: 0 0 12px; }
 .deployable-journey-current .os-stop-body { padding: 0; margin: 0; }
@@ -74,9 +68,8 @@
   .deployable-slot { flex-wrap: nowrap; }
   .deployable-version-row { grid-template-columns: 1fr auto; gap: 10px; }
   .deployable-version-row > span { grid-column: 1/-1; }
-  .deployable-journey-trail { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px 16px; }
 }
-@media (pointer: coarse) { .deployable-source-piece, .deployable-slot, .deployable-piece-chip, .deployable-journey-trail button { min-height: 44px; } }
+@media (pointer: coarse) { .deployable-source-piece, .deployable-slot, .deployable-piece-chip { min-height: 44px; } }
 
 @container (max-width: 480px) {
   .deployable-workspace .os-head, .deployable-journey .os-head { flex-wrap: wrap; }
@@ -139,10 +132,6 @@
   .deployable-source-heading .deployable-status { display: none; }
   .deployable-composition { gap: 16px; }
   .deployable-source-piece::after, .deployable-connections::before { display: none; }
-  .deployable-journey-trail { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 6px; margin-block: 16px; }
-  .deployable-journey-trail li { flex: 0 0 auto; }
-  .deployable-journey-trail button, .deployable-journey-trail .deployable-step-pending { white-space: nowrap; font-size: var(--os-text-sm); }
-  .deployable-step-number { width: 22px; height: 22px; }
 }
 
 .deployable-overview .os-deploy-disclose { flex: 0 0 auto; width: auto; display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 6px; min-height: 36px; }

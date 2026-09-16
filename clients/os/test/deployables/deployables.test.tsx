@@ -880,7 +880,7 @@ describe("Where it lives", () => {
     const tied = siteRow({ ...STORE, id: "site-store", accountId: "acct-1" });
     const { connection, page } = await mountAndOpen({ ...WITH_PACKAGE, sites: [tied, ADMIN] }, "store.memql.example.com");
     await openStop(page, "Where it lives");
-    expect(within(screen.getByRole("dialog")).getByText("acct-1")).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: "Addresses for store.memql.example.com" })).getByText("acct-1")).toBeTruthy();
     await click(within(page).getByLabelText("The client this deployable is for"));
     await click(await screen.findByRole("option", { name: "No client" }));
     await waitFor(() => expect(connection.callsNamed("updateSiteAccount")).toHaveLength(1));
