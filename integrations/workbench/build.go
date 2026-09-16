@@ -258,7 +258,7 @@ type buildForwarder interface {
 // tarball is too large to ride inline.
 type buildBlobStore interface {
 	Upload(ctx context.Context, container, objectName string, data []byte, contentType string) (string, error)
-	Download(ctx context.Context, container, objectName string) ([]byte, error)
+	DownloadWithLimit(ctx context.Context, container, objectName string, maxBytes int64) ([]byte, error)
 }
 
 // SetBuildForwarder installs the hop the build entry forwards over. The
@@ -313,7 +313,7 @@ func (i *Integration) RunBuild(ctx context.Context, req BuildRequest, pinnedNode
 				if err != nil {
 					return buildRefusal(BuildCodeForwardFailed, "workbench build: the hop to the workbench node failed: "+err.Error())
 				}
-				return i.inlineOutput(ctx, res)
+				return i.inlineOutput(ctx, res, req.Limits.normalized().MaxOutputBytes)
 			}
 		}
 		if !i.localFallback {
@@ -324,7 +324,7 @@ func (i *Integration) RunBuild(ctx context.Context, req BuildRequest, pinnedNode
 				slog.String("deployment", req.DeploymentId), slog.String("deployable", req.DeployableName))
 		}
 	}
-	return i.inlineOutput(ctx, i.runBuildLocal(ctx, req))
+	return i.inlineOutput(ctx, i.runBuildLocal(ctx, req), req.Limits.normalized().MaxOutputBytes)
 }
 
 // stageSourceForForward puts a source past the inline cap into object storage
@@ -353,11 +353,11 @@ func (i *Integration) stageSourceForForward(ctx context.Context, req BuildReques
 // sees the built bytes in one place. The packages pack reads Output.Inline and
 // nothing else, and a result it cannot read is a failed build, not a success
 // with an empty bundle.
-func (i *Integration) inlineOutput(ctx context.Context, res BuildResult) BuildResult {
+func (i *Integration) inlineOutput(ctx context.Context, res BuildResult, maxBytes int64) BuildResult {
 	if !res.OK || len(res.Output.Inline) > 0 || strings.TrimSpace(res.Output.Ref) == "" {
 		return res
 	}
-	data, err := i.buildBytes(ctx, res.Output)
+	data, err := i.buildBytes(ctx, res.Output, maxBytes)
 	if err != nil {
 		res.OK = false
 		res.ErrorCode = BuildCodeForwardFailed
@@ -604,7 +604,7 @@ func (i *Integration) runBuildLocal(ctx context.Context, req BuildRequest) Build
 	// leaves exactly as much behind as one that succeeded: nothing.
 	defer func() { _ = wsRoot.RemoveAll(key) }()
 
-	src, err := i.buildBytes(ctx, req.Source)
+	src, err := i.buildBytes(ctx, req.Source, limits.MaxSourceBytes)
 	if err != nil {
 		return finish(buildRefusal(BuildCodeSourceUnreadable, "workbench build: the source snapshot could not be read: "+err.Error()))
 	}
@@ -853,7 +853,7 @@ func buildSubjectAttrs(req BuildRequest, extra ...slog.Attr) []slog.Attr {
 
 const blobRefPrefix = "blob://"
 
-func (i *Integration) buildBytes(ctx context.Context, b BuildBytes) ([]byte, error) {
+func (i *Integration) buildBytes(ctx context.Context, b BuildBytes, maxBytes int64) ([]byte, error) {
 	if len(b.Inline) > 0 {
 		return b.Inline, nil
 	}
@@ -865,7 +865,7 @@ func (i *Integration) buildBytes(ctx context.Context, b BuildBytes) ([]byte, err
 	if err != nil {
 		return nil, err
 	}
-	return store.Download(ctx, container, object)
+	return store.DownloadWithLimit(ctx, container, object, maxBytes)
 }
 
 func (i *Integration) buildBlobPut(ctx context.Context, object string, data []byte) (string, error) {

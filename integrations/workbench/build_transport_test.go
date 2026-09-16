@@ -28,12 +28,15 @@ func (s *mapBlobStore) Upload(_ context.Context, container, object string, data 
 	return "https://blob.test/" + container + "/" + object, nil
 }
 
-func (s *mapBlobStore) Download(_ context.Context, container, object string) ([]byte, error) {
+func (s *mapBlobStore) DownloadWithLimit(_ context.Context, container, object string, maxBytes int64) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	data, ok := s.objects[container+"/"+object]
 	if !ok {
 		return nil, fmt.Errorf("no object %s/%s", container, object)
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("blob exceeds limit of %d bytes", maxBytes)
 	}
 	return append([]byte(nil), data...), nil
 }
@@ -130,6 +133,33 @@ func TestAnOversizedSourceWithNoObjectStoreIsRefusedBeforeItIsSent(t *testing.T)
 	for _, want := range []string{"MEMQL_AZURE_BLOB_CONTAINER", "64"} {
 		if !strings.Contains(res.ErrorMessage, want) {
 			t.Errorf("the refusal must name %s: %q", want, res.ErrorMessage)
+		}
+	}
+}
+
+// Both directions of the blob transport use the build's own budget, not the
+// unrelated attachment ceiling. An oversized output cannot be a partial success.
+func TestBuildBlobTransportUsesSourceAndOutputBudgets(t *testing.T) {
+	store := newMapBlobStore()
+	_, _ = store.Upload(context.Background(), "memql", "source", []byte("12345"), "")
+	i := NewIntegration(buildLogger())
+	i.SetBuildBlobStore(store, "memql")
+	for _, limit := range []int64{4, 5, 6} {
+		got, err := i.buildBytes(context.Background(), BuildBytes{Ref: "blob://source"}, limit)
+		if limit < 5 {
+			if err == nil || got != nil {
+				t.Fatal("source budget allowed partial success")
+			}
+		} else if err != nil || string(got) != "12345" {
+			t.Fatalf("source: %q, %v", got, err)
+		}
+		res := i.inlineOutput(context.Background(), BuildResult{OK: true, Output: BuildBytes{Ref: "blob://source"}}, limit)
+		if limit < 5 {
+			if res.OK || len(res.Output.Inline) != 0 || res.ErrorCode != BuildCodeForwardFailed {
+				t.Fatalf("oversized output reported success: %+v", res)
+			}
+		} else if !res.OK || string(res.Output.Inline) != "12345" {
+			t.Fatalf("output read failed: %+v", res)
 		}
 	}
 }
