@@ -36,7 +36,9 @@ export function SharingGroup({
   machine,
   writes,
   ledger,
+  standalone = false,
 }: {
+  standalone?: boolean;
   machine: MachineRow;
   writes: MachineWrites;
   /** The week's counts, already folded by the engine: calls, people, and
@@ -53,7 +55,7 @@ export function SharingGroup({
 
   return (
     <div className="os-fleet-sharing">
-      <Subhead>Sharing</Subhead>
+      {!standalone ? <Subhead>Sharing</Subhead> : null}
 
       <p className="os-fleet-sharing-state" data-serving={serving || undefined}>
         {serving
@@ -69,15 +71,13 @@ export function SharingGroup({
               ? `Shared by its owner ${formatMoment(machine.sharedAt)}.`
               : "Shared by its owner."
           }
-          missing_text="Its owner has not shared it. That is the act below."
+          missing_text="Owner sharing is off."
         />
         <Consent
           given={cockpitWilling}
-          given_text="Its cockpit is willing to serve the cluster."
+          given_text="Cockpit allows cluster inference."
           missing_text={
-            "Its cockpit is not willing to serve the cluster. Set inference.serve to cluster in " +
-            "that machine's policy.yaml -- it is a decision about where the machine is, and only " +
-            "the machine can make it."
+            "Cockpit has not allowed cluster inference. Set inference.serve to cluster in this machine’s policy.yaml to allow it."
           }
         />
       </ul>
@@ -160,7 +160,7 @@ function ShareControl({
 
       <p className="os-caption">
         {shared
-          ? `Stopping takes effect on the next call. One already running on ${label} finishes -- stopping it mid-answer would lose work somebody is waiting for and change nothing about the prompt already sent.`
+          ? `Stopping takes effect on the next call. Calls already running on ${label} are allowed to finish.`
           : "You see how many calls ran and for how many people. You never see what anybody asked or what the model answered."}
       </p>
 

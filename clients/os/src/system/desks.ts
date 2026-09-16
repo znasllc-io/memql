@@ -121,8 +121,8 @@ function replaceDesk(state: ShellState, desk: Desk): ShellState {
   return { ...state, desks: state.desks.map((d) => (d.id === desk.id ? desk : d)) };
 }
 
-function deskHasVacancy(desk: Desk): boolean {
-  return desk.windows.length < DESK_CAP;
+function deskHasVacancy(desk: Desk, state?: ShellState): boolean {
+  return desk.windows.length < DESK_CAP && !desk.windows.some(id => state?.windows[id]?.fullscreenReturn);
 }
 
 /**
@@ -149,7 +149,7 @@ export function openApp(
     if (!desk) throw new Error("shell invariant: window without a desk");
     const restored: OsWindow = {
       ...existing,
-      ...(existing.mode === "minimized" ? { mode: "normal" as const } : {}),
+      ...(existing.mode === "minimized" ? { mode: existing.minimizedFrom ?? "normal", minimizedFrom: undefined } : {}),
       ...(intent ? { intent, ...(sectionId !== "" ? { sectionId } : {}) } : {}),
     };
     const next: ShellState = {
@@ -163,7 +163,7 @@ export function openApp(
 
   const win = newWindow(nextId("win"), appId, sectionId, intent);
   const current = activeDesk(state);
-  if (deskHasVacancy(current)) {
+  if (deskHasVacancy(current, state)) {
     const next = replaceDesk(
       { ...state, windows: { ...state.windows, [win.id]: win }, focusedWindowId: win.id },
       { ...current, windows: [...current.windows, win.id] },
@@ -207,7 +207,7 @@ export function closeWindow(state: ShellState, windowId: WindowId): ShellResult 
 export function setWindowMode(state: ShellState, windowId: WindowId, mode: OsWindow["mode"]): ShellState {
   const win = state.windows[windowId];
   if (!win || win.mode === mode) return state;
-  let next: ShellState = { ...state, windows: { ...state.windows, [windowId]: { ...win, mode } } };
+  let next: ShellState = { ...state, windows: { ...state.windows, [windowId]: { ...win, mode, minimizedFrom: mode === "minimized" ? (win.mode === "fullscreen" ? "fullscreen" : "normal") : undefined } } };
   if (mode === "minimized" && state.focusedWindowId === windowId) {
     const desk = deskOfWindow(state, windowId);
     const sibling = desk?.windows.find((id) => {
@@ -226,7 +226,7 @@ export function focusWindow(state: ShellState, windowId: WindowId): ShellState {
   const desk = deskOfWindow(state, windowId);
   const win = state.windows[windowId];
   if (!desk || !win) return state;
-  const restored: OsWindow = win.mode === "minimized" ? { ...win, mode: "normal" } : win;
+  const restored: OsWindow = win.mode === "minimized" ? { ...win, mode: win.minimizedFrom ?? "normal", minimizedFrom: undefined } : win;
   return {
     ...state,
     windows: { ...state.windows, [windowId]: restored },
@@ -247,10 +247,40 @@ export function consumeIntent(state: ShellState, windowId: WindowId, intentId: s
   return { ...state, windows: { ...state.windows, [windowId]: rest } };
 }
 
-export function setWindowSection(state: ShellState, windowId: WindowId, sectionId: string): ShellState {
+export function setWindowSection(state: ShellState, windowId: WindowId, sectionId: string, origin: "peer" | "content" | "back" = "peer"): ShellState {
   const win = state.windows[windowId];
-  if (!win || win.sectionId === sectionId) return state;
-  return { ...state, windows: { ...state.windows, [windowId]: { ...win, sectionId } } };
+  if (!win) return state;
+  const previous = win.sectionTrail ?? [];
+  const returnIndex = previous.lastIndexOf(sectionId);
+  const sectionTrail = origin === "back" ? previous.slice(0, returnIndex >= 0 ? returnIndex : -1) : origin === "content" && win.sectionId !== sectionId ? [...(win.sectionTrail ?? []), win.sectionId] : origin === "peer" ? [] : win.sectionTrail;
+  return { ...state, windows: { ...state.windows, [windowId]: { ...win, sectionId, sectionTrail, sectionNavigation: { origin, revision: (win.sectionNavigation?.revision ?? 0) + 1 } } } };
+}
+
+/** Maximize onto a dedicated MemQL desk. Keep the window id and return slot. */
+export function toggleFullscreen(state: ShellState, windowId: WindowId, deskHasSurfaceContent?: (deskId: DeskId) => boolean): ShellState {
+  const win = state.windows[windowId];
+  const from = deskOfWindow(state, windowId);
+  if (!win || !from) return state;
+  if (win.mode === "fullscreen" || win.fullscreenReturn) {
+    const target = win.fullscreenReturn && deskById(state, win.fullscreenReturn.deskId);
+    const { fullscreenReturn, minimizedFrom: _minimized, ...rest } = win;
+    let next: ShellState = { ...state, windows: { ...state.windows, [windowId]: { ...rest, mode: "normal" } }, focusedWindowId: windowId, activeDeskId: from.id };
+    if (target && target.id !== from.id && deskHasVacancy(target, state)) {
+      const ids = [...target.windows];
+      ids.splice(Math.min(fullscreenReturn!.index, ids.length), 0, windowId);
+      next = replaceDesk(next, { ...from, windows: from.windows.filter(id => id !== windowId) });
+      next = replaceDesk(next, { ...target, windows: ids });
+      next.activeDeskId = target.id;
+    }
+    // A filled return desk leaves this app on its current desk, without
+    // displacing another window or losing the current app's state.
+    return gcAutoDesks(next, deskHasSurfaceContent);
+  }
+  const dedicated: Desk = { id: nextDeskId(state), createdBy: "auto", windows: [windowId] };
+  const at = state.desks.findIndex(d => d.id === from.id) + 1;
+  const desks = state.desks.map(d => d.id === from.id ? { ...d, windows: d.windows.filter(id => id !== windowId) } : d);
+  desks.splice(at, 0, dedicated);
+  return { ...state, desks, activeDeskId: dedicated.id, focusedWindowId: windowId, windows: { ...state.windows, [windowId]: { ...win, mode: "fullscreen", fullscreenReturn: { deskId: from.id, index: from.windows.indexOf(windowId) } } } };
 }
 
 /** Swap the two windows of a desk (left <-> right). No-op on a solo desk. */
@@ -278,7 +308,7 @@ export function throwToDesk(state: ShellState, windowId: WindowId, target: DeskI
   } else {
     const found = deskById(state, target);
     if (!found || found.id === from.id) return { state, effect: { kind: "none" } };
-    if (!deskHasVacancy(found)) return { state, effect: { kind: "refused-full", deskId: found.id } };
+    if (!deskHasVacancy(found, state)) return { state, effect: { kind: "refused-full", deskId: found.id } };
     targetDesk = found;
   }
 
@@ -287,6 +317,11 @@ export function throwToDesk(state: ShellState, windowId: WindowId, target: DeskI
   if (!landed) throw new Error("shell invariant: throw target vanished");
   next = replaceDesk(next, { ...landed, windows: [...landed.windows, windowId] });
   next = { ...next, activeDeskId: landed.id, focusedWindowId: windowId };
+  const moved = next.windows[windowId];
+  if (moved?.fullscreenReturn) {
+    const { fullscreenReturn: _return, minimizedFrom: _minimized, ...rest } = moved;
+    next = { ...next, windows: { ...next.windows, [windowId]: { ...rest, mode: "normal" } } };
+  }
   return { state: gcAutoDesks(next), effect: { kind: "placed", deskId: landed.id, windowId } };
 }
 
@@ -330,6 +365,7 @@ export function gcAutoDesks(
       d.id === state.activeDeskId ||
       d.createdBy === "user" ||
       d.windows.length > 0 ||
+      Object.values(state.windows).some(w => w.fullscreenReturn?.deskId === d.id) ||
       (deskHasSurfaceContent?.(d.id) ?? false),
   );
   if (keep.length === state.desks.length) return state;

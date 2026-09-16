@@ -67,7 +67,7 @@ async function openInvite(connection: Conn, role = "owner") {
     ),
   );
   await click(await screen.findByRole("button", { name: "Invite" }));
-  await screen.findByText("Invite somebody");
+  await screen.findByRole("heading", { name: "Invite somebody" });
   return view;
 }
 

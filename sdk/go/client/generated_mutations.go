@@ -15296,6 +15296,34 @@ func UpdateWorkerLastSeenBuild(args UpdateWorkerLastSeenArgs) string {
 	return b.String()
 }
 
+// UpdateWorkerPermissions -- Record passive permission evidence from the running worker. A full snapshot replaces the prior one so revoked or unknown checks cannot retain a grant.
+//
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["updateWorkerPermissions"] in generated_concepts.go).
+type UpdateWorkerPermissionsArgs struct {
+	RegistrationId string
+	Permissions    map[string]any
+}
+
+// UpdateWorkerPermissions calls the engine mutation updateWorkerPermissions.
+func (qc *QueryClient) UpdateWorkerPermissions(ctx context.Context, args UpdateWorkerPermissionsArgs) (*Result, error) {
+	call := UpdateWorkerPermissionsBuild(args)
+	return qc.executeNamed(ctx, "updateWorkerPermissions", call)
+}
+
+func UpdateWorkerPermissionsBuild(args UpdateWorkerPermissionsArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateWorkerPermissions(")
+	b.WriteString("registrationId: ")
+	b.WriteString(quoteMemQL(args.RegistrationId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("permissions: ")
+	b.WriteString(renderMemQLValue(args.Permissions))
+	b.WriteString(")")
+	return b.String()
+}
+
 // UpsertApprovalChain -- Define or update an approval chain.
 //
 // Bound concept: v1:commerce:approvalChain (machine-readable: BoundConcepts["upsertApprovalChain"] in generated_concepts.go).

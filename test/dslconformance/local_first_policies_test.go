@@ -56,14 +56,15 @@ var shippedPolicies = []string{
 // The pair is spelled out rather than derived so that changing one without the
 // other is a failure rather than a silent re-route.
 var shippedRules = map[string]string{
-	"default":              "localFirst",
-	"fastLane":             "fastLocalFirst",
-	"backgroundLane":       "localFirst",
-	"backgroundEscalation": "localFirst",
-	"operatorReasoning":    "localFirst",
-	"reasoningParks":       "federationStrongest",
-	"embeddingsBound":      "embeddingsBinding",
-	"compilerLocalOnly":    "localOnly",
+	"default":                 "localFirst",
+	"fastLane":                "fastLocalFirst",
+	"backgroundLane":          "localFirst",
+	"backgroundEscalation":    "localFirst",
+	"operatorReasoning":       "localFirst",
+	"reasoningParks":          "federationStrongest",
+	"embeddingsBound":         "embeddingsBinding",
+	"compilerLocalOnly":       "localOnly",
+	"policyCompilerLocalOnly": "localOnly",
 }
 
 // retiredPolicies were deleted by memql#5127. A policy nothing can name is a

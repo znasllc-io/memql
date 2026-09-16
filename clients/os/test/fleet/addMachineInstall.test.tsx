@@ -13,7 +13,7 @@ describe("Linux installation choices", () => {
   it("offers an explicit passwordless location and explains Linux computer use", () => {
     const onDraft = vi.fn();
     render(<MachineStop draft={{ ...EMPTY_DRAFT, platform: "linux" }} onDraft={onDraft} connected mintError="" onMint={() => {}} />);
-    fireEvent.click(screen.getByRole("checkbox", { name: /Install for my account only/ }));
+    fireEvent.click(screen.getByRole("switch", { name: /Install for my account only/ }));
     expect(onDraft).toHaveBeenCalledWith({ userLocal: true });
     expect(screen.queryByText(/Screen Recording/)).toBeNull();
     expect(screen.getByText(/X11/)).toBeTruthy();

@@ -75,7 +75,7 @@ describe("the tail", () => {
     h.connection = connection;
     render(withSession(<AppLogsSection app="fleet" />));
     await flush();
-    expect(screen.getByText("Nothing recorded for this app in the last hour.")).toBeTruthy();
+    expect(screen.getByText("No Fleet events yet")).toBeTruthy();
     await elapse(2_000);
     expect(connection.callsNamed("logsTail")[1]).toBe('builtin logsTail(apps: ["fleet"])');
     await elapse(2_000);

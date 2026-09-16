@@ -142,6 +142,24 @@ func TestBindDoorRoutesEveryPathItIsGiven(t *testing.T) {
 	}
 }
 
+// A large valid render must not be rejected because quiet grep closes a pipe
+// before its writer finishes under pipefail.
+func TestBindDoorLargeDryRunPreservesEveryPath(t *testing.T) {
+	paths := make([]string, 512)
+	for i := range paths {
+		paths[i] = fmt.Sprintf("/path%d", i)
+	}
+	env, code := envelopeFrom(t, bindDoorScript,
+		"--accountId="+testAccountID, "--reservedName="+testReservedName,
+		"--issuer=letsencrypt-prod", "--apiPaths="+strings.Join(paths, ","), "--dryRun=true")
+	if code != 0 || !env.OK {
+		t.Fatalf("large valid render: exit %d, error=%+v", code, env.Error)
+	}
+	if got := fmt.Sprint(resultOf(t, env)["apiPathCount"]); got != "512" {
+		t.Fatalf("apiPathCount = %s, want 512", got)
+	}
+}
+
 // No paths at all must still produce a front door -- three hosts, four
 // documents, no api HTTP Ingress. An Ingress whose rule carries a zero-length
 // paths list is rejected by the API server, and emitting one would take down

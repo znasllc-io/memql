@@ -35,7 +35,6 @@ func TestHostsEntriesSkipsWhenAlreadyResolving(t *testing.T) {
 		"api.lab.example.com":      "127.0.0.1\n",
 		"identity.lab.example.com": "127.0.0.1\n",
 		"mcp.lab.example.com":      "127.0.0.1\n",
-		"portal.lab.example.com":   "127.0.0.1\n",
 		"os.lab.example.com":       "127.0.0.1\n",
 		"lab.example.com":          "127.0.0.1\n",
 	})
@@ -120,7 +119,10 @@ func TestHostsEntriesWritesWhenNothingResolves(t *testing.T) {
 		t.Errorf("result.skipped = %v, want false", env.Result["skipped"])
 	}
 	body := hostsRead(t, hostsFile)
-	for _, want := range []string{"api.memql.localhost", "identity.memql.localhost", "os.memql.localhost", "memql.localhost"} {
+	if strings.Contains(body, "portal.memql.localhost") {
+		t.Fatal("hosts file must not recreate the retired platform host")
+	}
+	for _, want := range []string{"api.memql.localhost", "identity.memql.localhost", "mcp.memql.localhost", "os.memql.localhost", "memql.localhost"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("hosts file missing %q:\n%s", want, body)
 		}

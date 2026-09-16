@@ -83,10 +83,7 @@ async function openShop(connection: FakeConnection, opts: { role?: string } = {}
  */
 async function openWhereItLives(): Promise<void> {
   const page = await screen.findByRole("region", { name: /^Deployable / });
-  const line = within(page)
-    .getAllByRole("button")
-    .find((b) => b.classList.contains("os-rail-line") && (b.textContent ?? "").startsWith("Where it lives"));
-  if (line !== undefined && line.getAttribute("aria-expanded") !== "true") await click(line);
+  await click(within(page).getByRole("button", { name: /^Cluster address/ }));
 }
 
 /**

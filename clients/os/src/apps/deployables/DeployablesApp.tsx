@@ -9,6 +9,7 @@ import { useArrivals } from "../../live/useArrivals";
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import { accessAdmits, type OsAppProps } from "../../system/registry";
 import { DeployablesSection } from "./DeployablesSection";
+import { ActivePane } from "./paneActivity";
 import { MapSection, NO_SELECTION, type MapSelection } from "./map/MapSection";
 import type { MapNode } from "./map/layout";
 import { deploymentFromRow, packageFromRow, type DeploymentRow, type PackageRow } from "./packages/rows";
@@ -20,7 +21,6 @@ import type { ConnectReturn } from "./sources/connectReturn";
 import { credentialFromRow, type CredentialRow } from "./sources/rows";
 import { useSourceCredentials } from "./sources/useSourceCredentials";
 import {
-  DEFAULT_DEPLOYABLES_SETTINGS,
   DEPLOYABLES_SECTIONS,
   LIST_DENSITIES,
   LocalDeployablesSettingsStore,
@@ -28,6 +28,8 @@ import {
   type DeployablesSettingsStore,
   type ListDensity, DEPLOYABLES_REQUIRES, DEPLOYABLES_WANTS } from "./settings";
 import { DeployablesSettingsProvider } from "./settingsContext";
+import { useSiteHealth } from "./useSiteHealth";
+import { siteStateWord } from "./words";
 import { useSites } from "./useSites";
 
 // Deployables: the things this cluster serves, the map of what serves where,
@@ -70,6 +72,8 @@ const DEPLOYABLES_LOG_CONCEPTS = [
 
 export function DeployablesApp({
   sectionId,
+  navigation,
+  windowVisible = true,
   navigate,
   askContext,
   intent,
@@ -137,7 +141,15 @@ export function DeployablesApp({
   const sites = useLiveView<Row, SiteRow>(collection, "sites", (rows) =>
     rows.map(siteFromRow).filter((s) => s.id !== "" && !s.deleted),
   );
-  const snapshot = sites?.snapshot ?? EMPTY_SNAPSHOT<SiteRow>();
+  const baseSnapshot = sites?.snapshot ?? EMPTY_SNAPSHOT<SiteRow>();
+  const measuredSites = useSiteHealth(baseSnapshot.rows, windowVisible);
+  const healthById = new Map(measuredSites.map(site => [site.id, site.health]));
+  // The live list and its nested pages consume a source, while the map consumes
+  // rows. Project observations into that source too. The key also expires an
+  // observation without requiring a site mutation or a new monitor response.
+  const healthKey = JSON.stringify(measuredSites.map(site => [site.id, site.health, siteStateWord(site)]));
+  const measuredSource = useLiveView(sites, healthKey, rows => rows.map(site => ({...site, health:healthById.get(site.id)})));
+  const snapshot = measuredSource?.snapshot ?? EMPTY_SNAPSHOT<SiteRow>();
 
   // The arrival cue, ONCE, for the whole app. The list renders it through
   // LiveList and the map draws it on its nodes; both read the same reducer over
@@ -162,6 +174,7 @@ export function DeployablesApp({
   );
   const parkedSnapshot = parked?.snapshot ?? EMPTY_SNAPSHOT<DeploymentRow>();
 
+  const [openRequest, setOpenRequest] = useState<{ siteId: string; revision: number } | undefined>();
   const [selection, setSelection] = useState<MapSelection>(NO_SELECTION);
   const selectedSiteId = selection.siteIds.length === 1 ? (selection.siteIds[0] ?? "") : "";
 
@@ -205,7 +218,8 @@ export function DeployablesApp({
       const open = held.expandedSources.includes(id)
         ? held.expandedSources.filter((s) => s !== id)
         : [...held.expandedSources, id];
-      const next = { ...held, expandedSources: open, version: 1 as const };
+      const collapsed = held.collapsedSources ?? [];
+      const next = { ...held, expandedSources: open, collapsedSources: collapsed.includes(id) ? collapsed.filter(s => s !== id) : [...collapsed, id], version: 1 as const };
       settingsStore.save(next);
       return next;
     });
@@ -254,8 +268,7 @@ export function DeployablesApp({
     // would drag somebody back to their default the moment they navigated away.
   }, []);
 
-  if (sectionId === "settings") {
-    return (
+  const settingsContent = (
       <DeployablesSettingsSection
         settings={settings}
         update={update}
@@ -266,14 +279,12 @@ export function DeployablesApp({
         connectResult={connectResult}
       />
     );
-  }
   // The app's slice of the cluster's logs (epic memql#4895). It survived the
   // compose restructure while Sites, Packages and Actions did not, and the
   // difference is whose section it is: those three were this app's own reading
   // of its subject and became one, and this is a shell convention every app
   // carries at the log store's own admin floor.
-  if (sectionId === "logs") {
-    return (
+  const logsContent = (
       <AppLogsSection
         app="deployables"
         subjectConcepts={DEPLOYABLES_LOG_CONCEPTS}
@@ -281,9 +292,7 @@ export function DeployablesApp({
         consumeIntent={consumeIntent}
       />
     );
-  }
-  if (sectionId === "deployables") {
-    return (
+  const deployablesContent = (
       // THE ONE BRANCH THAT NEEDS IT. The traffic window is read four levels
       // down (Live stop -> traffic panel) and the open-source set is read by
       // the list itself; both are written here. The settings section takes
@@ -291,7 +300,10 @@ export function DeployablesApp({
       // map has neither.
       <DeployablesSettingsProvider value={{ settings, update, toggleSource }}>
         <DeployablesSection
-          sites={sites}
+          active={sectionId === "deployables"}
+          navigation={navigation}
+          openRequest={openRequest}
+          sites={measuredSource}
           packages={packages}
           parked={parked}
           feedError={snapshot.error || packageSnapshot.error || parkedSnapshot.error}
@@ -308,27 +320,39 @@ export function DeployablesApp({
         />
       </DeployablesSettingsProvider>
     );
-  }
-  return (
+  const mapContent = (
     <MapSection
       sites={snapshot.rows}
       snapshot={snapshot}
       ticks={ticks}
       selection={selection}
       onSelectNode={selectNode}
-      onSelectSite={selectSite}
       // THE MAP POINTS, THE SECTION OWNS THE PAGE (rule 11). Choosing a
       // deployable on the map selects it -- the two surfaces share ONE
       // selection -- and navigates to the section that owns its page, which
       // opens on that selection.
       onOpenDeployable={(siteId) => {
         selectSite(siteId);
-        navigate("deployables");
+        setOpenRequest(held => ({ siteId, revision: (held?.revision ?? 0) + 1 }));
+        navigate("deployables", { fromContent: true });
       }}
-      packages={packageSnapshot.rows}
       onReseed={reseed}
+      onBrowse={() => navigate("deployables", { fromContent: true })}
     />
   );
+  return <ActivePane active={windowVisible}>
+    <RetainedSection active={sectionId === "settings"}>{settingsContent}</RetainedSection>
+    <RetainedSection active={sectionId === "logs"}>{logsContent}</RetainedSection>
+    <RetainedSection active={sectionId === "deployables"}>{deployablesContent}</RetainedSection>
+    <RetainedSection active={!["settings", "logs", "deployables"].includes(sectionId)}>{mapContent}</RetainedSection>
+  </ActivePane>;
+}
+
+/** Keep visited panes alive across tabs; hidden panes have no keyboard targets. */
+function RetainedSection({ active, children }: { active: boolean; children: React.ReactNode }) {
+  const [visited, setVisited] = useState(active);
+  useEffect(() => { if (active) setVisited(true); }, [active]);
+  return active || visited ? <ActivePane active={active}><div hidden={!active} inert={!active} style={{ display: active ? "contents" : "none" }}>{children}</div></ActivePane> : null;
 }
 
 function DeployablesSettingsSection({
@@ -362,7 +386,7 @@ function DeployablesSettingsSection({
   const offered = DEPLOYABLES_SECTIONS.filter((s) => accessAdmits(s.requires));
 
   return (
-    <div className="os-settings">
+    <div className="os-settings deployable-settings">
       <Head title="Deployables settings" />
       {/* THE SET UP GROUP sits above the preferences on purpose: it is the
           reason a person was sent here from an unconfigured surface, and the
@@ -392,9 +416,7 @@ function DeployablesSettingsSection({
             ))}
           </div>
           <p className="os-caption">
-            The map is the default because "what serves where" is a shape rather than a table.
-            Applies the next time a Deployables window opens; it does not move the window you are
-            looking at.
+            Applies the next time you open Deployables.
           </p>
         </fieldset>
 
@@ -415,8 +437,7 @@ function DeployablesSettingsSection({
             ))}
           </div>
           <p className="os-caption">
-            A view setting, not a filter: it changes how tightly the Deployables list packs and
-            nothing about which deployables are read or shown.
+            Choose the spacing between app rows.
           </p>
         </fieldset>
 
@@ -430,12 +451,7 @@ function DeployablesSettingsSection({
           viewerUserId={viewerUserId}
           isClusterOwner={isClusterOwner} credentials={credentials} packages={packages} connectResult={connectResult} />
 
-        <p className="os-caption">
-          These are kept in this browser, separately from your desktop, so an app learning a
-          preference can never cost you your desks. The defaults are{" "}
-          {DEFAULT_DEPLOYABLES_SETTINGS.defaultSection} at{" "}
-          {DEFAULT_DEPLOYABLES_SETTINGS.density} density.
-        </p>
+        <p className="os-caption">Preferences are saved in this browser.</p>
       </Panel>
     </div>
   );

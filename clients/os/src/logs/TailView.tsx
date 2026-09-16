@@ -37,6 +37,7 @@ export function TailView({
   narrowed,
   emptySentence,
   emptyHint,
+  emptyContent,
 }: {
   tail: LogTail;
   /** The rows to show: the tail's, folded to the window. */
@@ -59,6 +60,7 @@ export function TailView({
   /** What to say when nothing narrows the reading and nothing arrived. */
   emptySentence: string;
   emptyHint: string;
+  emptyContent?: React.ReactNode;
 }) {
   const selected = selectedId === "" ? undefined : rows.find((row) => row.id === selectedId);
   const pending = tail.newSinceScrolled;
@@ -90,12 +92,12 @@ export function TailView({
       ) : null}
 
       {rows.length === 0 ? (
-        tail.state === "seeding" ? (
+        tail.state === "error" ? null : tail.state === "seeding" ? (
           <Caption>Reading from the cluster.</Caption>
         ) : (
           /* Empty and filtered-to-empty are DIFFERENT answers: one is about
              the store, the other about the question just asked of it. */
-          <div className="os-logs-empty">
+          emptyContent ?? <div className="os-logs-empty">
             <p className="os-logs-empty-line">{narrowed ? "No lines match." : emptySentence}</p>
             <Caption>{narrowed ? "Clear a facet or widen the window to see more." : emptyHint}</Caption>
           </div>

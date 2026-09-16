@@ -1,6 +1,8 @@
 import { useState } from "react";
 
 import { Button, Caption, Check, Field, Input, Notice, Panel, Select, Subhead } from "../../kit";
+import type { TaskPolicy } from "../fleet/taskPolicies";
+import { PolicyChain } from "../fleet/PolicyChain";
 import { LEVELS } from "./routingFacts";
 import {
   RULE_WHEN_KEYS,
@@ -47,12 +49,14 @@ const ON_UNAVAILABLE = ["degrade", "park"] as const;
 
 export function RuleFieldsPanel({
   actions,
+  policies,
   seed,
   existing,
   onActivated,
   onCancel,
 }: {
   actions: RuleActions;
+  policies?: readonly TaskPolicy[];
   /** A rule to open on -- from the compiler, or an existing custom rule. */
   seed: RuleRow | null;
   /** Every rule, for the precedence-collision check. */
@@ -79,12 +83,13 @@ export function RuleFieldsPanel({
 
   const draft: RuleRow = {
     name,
+    revision: simulation?.revision ?? seed?.revision,
     when: whenObjectFrom(values, used),
     level,
     policy,
     precedence: precedenceValid ? precedenceNumber : 0,
     onUnavailable,
-    excludes: [],
+    excludes: seed?.excludes ?? [],
     locked: false,
     described: seed?.described ?? "",
   };
@@ -101,7 +106,8 @@ export function RuleFieldsPanel({
     invalidate();
   };
 
-  const ready = nameValid && precedenceValid && collision === null && policy.trim() !== "";
+  const nameTaken = name !== seed?.name && existing.some(r => r.name === name);
+  const ready = !nameTaken && nameValid && precedenceValid && collision === null && policy.trim() !== "";
 
   return (
     <Panel label="Rule fields">
@@ -113,7 +119,7 @@ export function RuleFieldsPanel({
           ignores it entirely.
         </Caption>
 
-        <form
+        <fieldset disabled={working || actions.state.busy} className="fleet-rule-edit-fields"><form
           className="os-form"
           onSubmit={(e) => {
             e.preventDefault();
@@ -124,6 +130,7 @@ export function RuleFieldsPanel({
               id="rule-field-name"
               label="Name"
               value={name}
+              disabled={working || actions.state.busy || existing.some(r => r.name === seed?.name)}
               placeholder="planningStaysLocal"
               onChange={(next) => {
                 setName(next);
@@ -131,6 +138,7 @@ export function RuleFieldsPanel({
               }}
             />
           </Field>
+          {nameTaken ? <Notice tone="warn" sentence="That rule already exists. Choose a new name, or cancel and edit the existing rule." /> : null}
           {name !== "" && !nameValid ? (
             <Caption>
               A rule name starts with a lower-case letter and carries letters and
@@ -184,16 +192,14 @@ export function RuleFieldsPanel({
               </Select>
             </Field>
             <Field label="Policy">
-              <Input
-                id="rule-field-policy"
-                label="Policy"
-                value={policy}
-                placeholder="localFirst"
-                onChange={(next) => {
-                  setPolicy(next);
-                  invalidate();
-                }}
-              />
+              {policies ? <>
+                <Select id="rule-field-policy" label="Policy" value={policy} onChange={next => { setPolicy(next); invalidate(); }}>
+                  {!policies.some(p => p.name === policy) ? <option value={policy}>{policy} (not reported)</option> : null}
+                  {policies.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+                </Select>
+                {policies.find(p => p.name === policy) ? <PolicyChain policy={policies.find(p => p.name === policy)!} /> : <Caption>This policy is not in the latest cluster reading.</Caption>}
+              </> : <Input id="rule-field-policy" label="Policy" value={policy} placeholder="localFirst" onChange={next => { setPolicy(next); invalidate(); }} />}
+
             </Field>
             <Field label="When nothing there is available">
               <Select
@@ -225,9 +231,8 @@ export function RuleFieldsPanel({
               />
             </Field>
             <Caption>
-              Higher runs first. Shipped rules run before all of these whatever
-              the number, so the way past one is a rule of your own above the
-              rules you already wrote.
+              Higher runs first among custom rules. A matching shipped rule takes
+              priority; the shipped catch-all runs after custom rules.
             </Caption>
             {collision === null ? null : (
               <Notice
@@ -237,7 +242,7 @@ export function RuleFieldsPanel({
               />
             )}
           </fieldset>
-        </form>
+        </form></fieldset>
 
         <div className="os-rule-compiled">
           <p className="os-rule-compiled-label">This is the rule you are writing</p>

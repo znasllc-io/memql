@@ -73,7 +73,7 @@ export function placeWindows(
   }
 
   for (const win of visible) {
-    if (win.mode === "fullscreen") rects[win.id] = area;
+    if (win.mode === "fullscreen") rects[win.id] = { x: 0, y: 0, w: viewport.w, h: Math.max(0, viewport.h - t.dockReserve) };
   }
   return rects;
 }

@@ -639,7 +639,7 @@ describe("Settings > Sources", () => {
     // choice for a host the app does not cover, and calling it advanced
     // would be a judgement about the person. It is named, listed and
     // addable in the same breath as the connection.
-    expect(within(group).getByText("Tokens you pasted")).toBeTruthy();
+    expect(within(group).getByText("Access tokens")).toBeTruthy();
     expect(within(group).getByRole("button", { name: "Add a credential" })).toBeTruthy();
     expect(within(group).getByText(/No credentials yet. A public repository needs none/)).toBeTruthy();
     // No connection means nothing was asked of the cluster.
@@ -974,6 +974,7 @@ describe("the compose Source stop, with a connection", () => {
     });
     await click(await within(region).findByRole("button", { name: /widget/ }));
 
+    await click(await within(region).findByRole("button", { name: /Review$/ }));
     expect(await within(region).findByText("acme-storefront")).toBeTruthy();
     expect(within(region).getByText("web")).toBeTruthy();
     expect(within(region).getByText("clients/web")).toBeTruthy();

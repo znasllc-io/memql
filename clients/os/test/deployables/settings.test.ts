@@ -27,7 +27,7 @@ describe("the manifest", () => {
     expect(deployables?.component.name).toBe("DeployablesApp");
   });
 
-  it("declares exactly Map, Deployables, Logs and Settings, in that order (design D1)", () => {
+  it("declares exactly Overview, Deployables, Logs and Settings, in that order (design D1)", () => {
     // Actions, Sites and Packages retired with the compose epic (memql#4885):
     // one list and one page replaced three sections and two mental models.
     // FOUR, not the three the compose restructure left: Logs is a shell
@@ -35,7 +35,7 @@ describe("the manifest", () => {
     // drop. What retired is this app's own three readings of its subject --
     // Sites, Packages, Actions -- which became one.
     expect(DEPLOYABLES_SECTION_IDS).toEqual(["map", "deployables", "logs", "settings"]);
-    expect(DEPLOYABLES_SECTIONS.map((s) => s.name)).toEqual(["Map", "Deployables", "Logs", "Settings"]);
+    expect(DEPLOYABLES_SECTIONS.map((s) => s.name)).toEqual(["Overview", "Deployables", "Logs", "Settings"]);
     // The gated one is offered to an admin and withheld below, so the window
     // nav genuinely differs by role -- the assertion the three-section version
     // of this file could not make, because it had nothing gated.

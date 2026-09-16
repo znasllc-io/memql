@@ -111,78 +111,94 @@ func TestStreamingIngressPolicyHasOneSource(t *testing.T) {
 
 func TestStreamingIngressPreservesExistingChartConfiguration(t *testing.T) {
 	root := repoRoot(t)
-	for _, existing := range []bool{false, true} {
-		t.Run(map[bool]string{false: "first_overlay", true: "already_referenced"}[existing], func(t *testing.T) {
-			tmp := t.TempDir()
-			fake := `#!/usr/bin/env bash
+	for _, hasContent := range []bool{false, true} {
+		for _, existing := range []bool{false, true} {
+			t.Run(map[bool]string{false: "first_overlay", true: "already_referenced"}[existing], func(t *testing.T) {
+				tmp := t.TempDir()
+				fake := `#!/usr/bin/env bash
 case "$*" in
- *" get helmchartconfig "*) printf '42\n[{"name":"operator-values","keys":["custom.yaml"],"ignoreUpdates":true}]\n%s\n' "$TRAEFIK_OWN_REF" ;;
+ *" get helmchartconfig "*) printf '42\n[{"name":"operator-values","keys":["custom.yaml"],"ignoreUpdates":true}]\n%s\n' "$TRAEFIK_OWN_REF"; printf '%s' "$TRAEFIK_CONTENT" ;;
  *"apply -f -"*) cat > "$TRAEFIK_MANIFEST" ;;
  *" patch helmchartconfig "*) printf '%s' "${@: -1}" > "$TRAEFIK_PATCH" ;;
  *) printf 'unexpected kubectl operation: %s\n' "$*" >&2; exit 99 ;;
 esac
 `
-			if err := os.WriteFile(filepath.Join(tmp, "kubectl"), []byte(fake), 0755); err != nil {
-				t.Fatal(err)
-			}
-			owned := ""
-			if existing {
-				owned = "memql-local-traefik"
-			}
-			cmd := exec.Command("bash", "-c", `source scripts/lib/capability.sh; source scripts/lib/local_traefik.sh; ensure_local_traefik test`)
-			cmd.Dir = root
-			cmd.Env = append(os.Environ(), "PATH="+tmp+":"+os.Getenv("PATH"), "TRAEFIK_OWN_REF="+owned, "TRAEFIK_MANIFEST="+filepath.Join(tmp, "manifest"), "TRAEFIK_PATCH="+filepath.Join(tmp, "patch"))
-			out, err := cmd.CombinedOutput()
-			if err != nil {
-				t.Fatalf("helper: %v\n%s", err, out)
-			}
-			raw, err := os.ReadFile(filepath.Join(tmp, "manifest"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if strings.Contains(string(raw), "kind: HelmChartConfig") {
-				t.Fatal("apply can overwrite existing valuesContent or references")
-			}
-			for _, want := range []string{"kind: Secret", "name: memql-local-traefik", "allowExternalNameServices: true", "readTimeout: 0s"} {
-				if !strings.Contains(string(raw), want) {
-					t.Errorf("missing %q", want)
+				if err := os.WriteFile(filepath.Join(tmp, "kubectl"), []byte(fake), 0755); err != nil {
+					t.Fatal(err)
 				}
-			}
-			raw, err = os.ReadFile(filepath.Join(tmp, "patch"))
-			if existing {
-				if !os.IsNotExist(err) {
-					t.Fatal("already-referenced overlay changed chart")
+				owned := ""
+				if existing {
+					owned = "memql-local-traefik"
 				}
-				return
-			}
-			if err != nil {
-				t.Fatal("no preserving chart patch:", err)
-			}
-			var patch struct {
-				Metadata map[string]any `json:"metadata"`
-				Spec     map[string]any `json:"spec"`
-			}
-			if err = json.Unmarshal(raw, &patch); err != nil {
-				t.Fatal(err)
-			}
-			if patch.Metadata["resourceVersion"] != "42" {
-				t.Fatal("patch may overwrite a concurrent operator update")
-			}
-			if len(patch.Spec) != 1 {
-				t.Fatalf("patch changes unrelated chart configuration: %s", raw)
-			}
-			refs, ok := patch.Spec["valuesSecrets"].([]any)
-			if !ok || len(refs) != 2 {
-				t.Fatalf("lost existing values references: %s", raw)
-			}
-			first := refs[0].(map[string]any)
-			if first["name"] != "operator-values" || first["ignoreUpdates"] != true || first["keys"].([]any)[0] != "custom.yaml" {
-				t.Fatalf("changed operator reference: %s", raw)
-			}
-			own := refs[1].(map[string]any)
-			if own["name"] != "memql-local-traefik" || own["keys"].([]any)[0] != "values.yaml" {
-				t.Fatalf("missing overlay reference: %s", raw)
-			}
-		})
+				cmd := exec.Command("bash", "-c", `source scripts/lib/capability.sh; source scripts/lib/local_traefik.sh; ensure_local_traefik test`)
+				cmd.Dir = root
+				content := ""
+				if hasContent {
+					content = "operator: preserve\nmore: values"
+				}
+				cmd.Env = append(os.Environ(), "TRAEFIK_CONTENT="+content, "PATH="+tmp+":"+os.Getenv("PATH"), "TRAEFIK_OWN_REF="+owned, "TRAEFIK_MANIFEST="+filepath.Join(tmp, "manifest"), "TRAEFIK_PATCH="+filepath.Join(tmp, "patch"))
+				out, err := cmd.CombinedOutput()
+				if err != nil {
+					t.Fatalf("helper: %v\n%s", err, out)
+				}
+				raw, err := os.ReadFile(filepath.Join(tmp, "manifest"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if strings.Contains(string(raw), "kind: HelmChartConfig") {
+					t.Fatal("apply can overwrite existing valuesContent or references")
+				}
+				for _, want := range []string{"kind: Secret", "name: memql-local-traefik", "allowExternalNameServices: true", "readTimeout: 0s"} {
+					if !strings.Contains(string(raw), want) {
+						t.Errorf("missing %q", want)
+					}
+				}
+				raw, err = os.ReadFile(filepath.Join(tmp, "patch"))
+				if existing && hasContent {
+					if !os.IsNotExist(err) {
+						t.Fatal("already-referenced overlay changed chart")
+					}
+					return
+				}
+				if err != nil {
+					t.Fatal("no preserving chart patch:", err)
+				}
+				var patch struct {
+					Metadata map[string]any `json:"metadata"`
+					Spec     map[string]any `json:"spec"`
+				}
+				if err = json.Unmarshal(raw, &patch); err != nil {
+					t.Fatal(err)
+				}
+				if patch.Metadata["resourceVersion"] != "42" {
+					t.Fatal("patch may overwrite a concurrent operator update")
+				}
+				if !hasContent {
+					if patch.Spec["valuesContent"] != "{}" {
+						t.Fatalf("empty inline values must enable the older controller's Secret projection: %s", raw)
+					}
+				} else if _, changed := patch.Spec["valuesContent"]; changed {
+					t.Fatal("overwrote operator valuesContent")
+				}
+				if existing {
+					if _, changed := patch.Spec["valuesSecrets"]; changed {
+						t.Fatal("changed existing Secret references")
+					}
+					return
+				}
+				refs, ok := patch.Spec["valuesSecrets"].([]any)
+				if !ok || len(refs) != 2 {
+					t.Fatalf("lost existing values references: %s", raw)
+				}
+				first := refs[0].(map[string]any)
+				if first["name"] != "operator-values" || first["ignoreUpdates"] != true || first["keys"].([]any)[0] != "custom.yaml" {
+					t.Fatalf("changed operator reference: %s", raw)
+				}
+				own := refs[1].(map[string]any)
+				if own["name"] != "memql-local-traefik" || own["keys"].([]any)[0] != "values.yaml" {
+					t.Fatalf("missing overlay reference: %s", raw)
+				}
+			})
+		}
 	}
 }

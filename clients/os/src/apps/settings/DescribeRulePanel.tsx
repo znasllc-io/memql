@@ -93,7 +93,7 @@ export function DescribeRulePanel({
 
   const activate = async () => {
     if (compiled === null) return;
-    const ok = await actions.activate({ ...compiled, described: sentence });
+    const ok = await actions.activate({ ...compiled, revision: simulation?.revision ?? compiled.revision, described: sentence });
     if (ok) onActivated();
   };
 
@@ -102,9 +102,8 @@ export function DescribeRulePanel({
       <div className="os-rule-describe">
         <Subhead>Describe a rule</Subhead>
         <Caption>
-          Say what you want in your own words. It is compiled here, checked
-          against what your cluster has actually done, and only then does it go
-          anywhere.
+          Describe the routing you want. Review the compiled rule, check its
+          definition, then activate it. This check does not replay past calls.
         </Caption>
 
         <form
@@ -146,8 +145,7 @@ export function DescribeRulePanel({
             <p className="os-rule-compiled-label">This is the rule it becomes</p>
             <p className="os-rule-compiled-said">{ruleSentence(compiled)}</p>
             <Caption>
-              It will sit at precedence {compiled.precedence}, below every
-              shipped rule.
+              It will sit at precedence {compiled.precedence}, after matching shipped rules and before the shipped catch-all.
             </Caption>
           </div>
         )}

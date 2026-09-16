@@ -151,7 +151,8 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // SAYS none was removed, which is exactly the check a diff of a list could
 // not have made.
 // materializeFile adds the Materializer's known execution template.
-const shippedAutomationCount = 59
+// checkDeployableHealth adds the bounded website readiness sweep.
+const shippedAutomationCount = 60
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

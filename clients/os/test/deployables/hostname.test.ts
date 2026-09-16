@@ -48,6 +48,11 @@ describe("validating a name", () => {
     }
   });
 
+  it("reserves the current platform site and protects retired platform names", () => {
+    expect(validateSlug("os", DOMAIN)).toContain("reserved");
+    expect(validateSlug("portal", DOMAIN)).toContain("reserved");
+  });
+
   it("does not refuse a name that merely CONTAINS a reserved label", () => {
     // The reserved set is a set of whole labels: `apiary` is not `api`.
     expect(validateSlug("apiary", DOMAIN)).toBe("");

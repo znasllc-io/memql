@@ -82,7 +82,7 @@ export function WhereItLivesStop({
         <Notice
           tone="error"
           sentence="The client was not changed."
-          next="This deployable is still tied to whatever it was."
+          next="The previous client is still selected. Try again when the issue below is resolved."
           detail={tie.error}
         />
       )}

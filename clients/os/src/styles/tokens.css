@@ -70,6 +70,9 @@
   --os-cell-w: 96px;
   --os-cell-h: 104px;
   --os-dock-h: 64px;
+
+  /* Derived on each themed surface, rather than a separately editable palette color. */
+  --os-hover: color-mix(in srgb, var(--os-ink) 12%, transparent);
 }
 
 /* Window/widget/sheet roots re-inherit every color token so one root can

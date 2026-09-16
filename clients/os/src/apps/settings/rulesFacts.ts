@@ -76,6 +76,7 @@ export const RULE_WHEN_MEANING: Record<RuleWhenKey, string> = {
 
 
 export interface RuleRow {
+  revision?: number;
   name: string;
   /** The conditions, exactly as stored. An absent key is no condition. */
   when: Partial<Record<RuleWhenKey, string>>;
@@ -114,6 +115,7 @@ export function ruleFromRow(raw: Row): RuleRow {
   const precedence = r["precedence"];
   const excludes = r["excludes"];
   return {
+    revision: typeof r["revision"] === "number" ? r["revision"] : undefined,
     name: str(r, "name"),
     when: whenFrom(r["when"]),
     level: str(r, "level"),
@@ -230,8 +232,7 @@ export function ruleSentence(rule: RuleRow): string {
  */
 export const LOCKED_RULE_SENTENCE =
   "Shipped rules come back on every restart and cannot be edited or removed. " +
-  "All but the last of them run before the rules you write, so to get past one, " +
-  "add a rule of your own that matches more narrowly.";
+  "A matching shipped rule takes priority over custom rules. The shipped catch-all runs last.";
 
 /**
  * What the floor is, said on its own row.
@@ -261,6 +262,8 @@ export function isLevelId(value: string): value is LevelId {
 // ===========================================================================
 
 export interface Simulation {
+  validationOnly?: boolean;
+  revision?: number;
   /** Decisions the simulation looked at. */
   considered: number;
   /** Of those, how many this rule would have changed. */
@@ -279,6 +282,7 @@ export interface Simulation {
  */
 export function simulationSentence(sim: Simulation): string {
   if (sim.refusal !== "") return sim.refusal;
+  if (sim.validationOnly) return "The definition is valid against the current configuration. Historical decisions were not replayed.";
   if (sim.considered === 0) {
     return "There are no recorded decisions to check this against yet, so there is nothing to compare. That is not the same as it changing nothing.";
   }
@@ -310,7 +314,7 @@ function builtinOn(
   const q = connection.query as unknown as Record<string, unknown>;
   const fn = q[name];
   return typeof fn === "function"
-    ? (fn as (args: Record<string, unknown>, opts?: unknown) => Promise<{ rows: () => Iterable<Row> }>)
+    ? (fn as (args: Record<string, unknown>, opts?: unknown) => Promise<{ rows: () => Iterable<Row> }>).bind(connection.query)
     : null;
 }
 
@@ -381,7 +385,7 @@ export interface RuleActions {
   describe: (sentence: string) => Promise<{ rule: RuleRow | null; problem: string }>;
   simulate: (rule: RuleRow) => Promise<Simulation>;
   activate: (rule: RuleRow) => Promise<boolean>;
-  retire: (name: string) => Promise<boolean>;
+  retire: (name: string, revision?: number) => Promise<boolean>;
   supported: boolean;
   clear: () => void;
 }
@@ -389,7 +393,7 @@ export interface RuleActions {
 export function useRuleActions(onChanged: () => void): RuleActions {
   const connection = useOsConnection();
   const [state, setState] = useState<RuleActionState>(IDLE_RULE_ACTION);
-  const supported = builtinOn(connection, "routingRuleActivate") !== null;
+  const supported = builtinOn(connection, "routingRuleSave") !== null || builtinOn(connection, "routingRuleActivate") !== null;
 
   const clear = useCallback(() => setState(IDLE_RULE_ACTION), []);
 
@@ -418,13 +422,16 @@ export function useRuleActions(onChanged: () => void): RuleActions {
 
   const simulate = useCallback(
     async (rule: RuleRow): Promise<Simulation> => {
-      const run = builtinOn(connection, "routingRuleSimulate");
+      const validate = builtinOn(connection, "routingRuleValidate");
+      const run = validate ?? builtinOn(connection, "routingRuleSimulate");
       if (run === null) {
         return { considered: 0, changed: 0, refusal: "This cluster cannot simulate a rule yet." };
       }
       try {
         const result = await run({
-          when: rule.when,
+          name: rule.name,
+          ...(validate ? { conditions: rule.when, expectedRevision: rule.revision } : { when: rule.when }),
+          excludes: rule.excludes,
           level: rule.level,
           policy: rule.policy,
           precedence: rule.precedence,
@@ -435,7 +442,7 @@ export function useRuleActions(onChanged: () => void): RuleActions {
         const r = flatten(rows[0] as Record<string, unknown>);
         const considered = typeof r["considered"] === "number" ? (r["considered"] as number) : 0;
         const changed = typeof r["changed"] === "number" ? (r["changed"] as number) : 0;
-        return { considered, changed, refusal: "" };
+        return { considered, changed, refusal: "", validationOnly: r["validationOnly"] === true, revision: typeof r["revision"] === "number" ? r["revision"] : undefined };
       } catch (err: unknown) {
         return {
           considered: 0,
@@ -449,7 +456,8 @@ export function useRuleActions(onChanged: () => void): RuleActions {
 
   const activate = useCallback(
     async (rule: RuleRow): Promise<boolean> => {
-      const write = builtinOn(connection, "routingRuleActivate");
+      const save = builtinOn(connection, "routingRuleSave");
+      const write = save ?? builtinOn(connection, "routingRuleActivate");
       if (write === null) {
         setState({ busy: false, failed: true, message: "This cluster does not take custom rules yet." });
         return false;
@@ -459,12 +467,13 @@ export function useRuleActions(onChanged: () => void): RuleActions {
         await write({
           name: rule.name,
           // The object, not six fields. See this file's header.
-          when: rule.when,
+          ...(save ? { conditions: rule.when, expectedRevision: rule.revision } : { when: rule.when }),
+          excludes: rule.excludes,
           level: rule.level,
           policy: rule.policy,
           precedence: rule.precedence,
           onUnavailable: rule.onUnavailable,
-          described: rule.described,
+          description: rule.described,
         });
         setState({ busy: false, failed: false, message: `${rule.name} is active.` });
         onChanged();
@@ -482,15 +491,17 @@ export function useRuleActions(onChanged: () => void): RuleActions {
   );
 
   const retire = useCallback(
-    async (name: string): Promise<boolean> => {
-      const write = builtinOn(connection, "routingRuleRetire");
+    async (name: string, revision?: number): Promise<boolean> => {
+      const remove = builtinOn(connection, "routingRuleRemove");
+      const write = remove ?? builtinOn(connection, "routingRuleRetire");
       if (write === null) {
         setState({ busy: false, failed: true, message: "This cluster does not take custom rules yet." });
         return false;
       }
       setState({ busy: true, failed: false, message: "" });
       try {
-        await write({ name });
+        if (remove && revision === undefined) throw new Error("Refresh the rules before removing one.");
+        await write({ name, ...(remove ? { expectedRevision: revision } : {}) });
         setState({ busy: false, failed: false, message: `${name} is retired.` });
         onChanged();
         return true;

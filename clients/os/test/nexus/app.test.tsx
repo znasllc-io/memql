@@ -126,7 +126,7 @@ describe("goals, the landing surface", () => {
     fireEvent.click(await screen.findByText("Reconcile the ledger"));
     expect(await screen.findByRole("group", { name: "What you can do with this" })).toBeTruthy();
     // The list is gone rather than scrolled past: its one action is not here.
-    expect(screen.queryByText("New goal")).toBeNull();
+    expect(screen.queryByRole("button", { name: "New goal" })).toBeNull();
     expect(screen.getByRole("button", { name: "Goals" })).toBeTruthy();
   });
 
@@ -177,7 +177,7 @@ describe("a new goal", () => {
   it("sends the statement and says which surface it came from", async () => {
     const conn = fakeConnection({ createReply: { goalId: "g9", runId: "r9" } });
     mount(conn);
-    fireEvent.click(await screen.findByText("New goal"));
+    fireEvent.click(await screen.findByRole("button", { name: "New goal" }));
     fireEvent.change(screen.getByLabelText("The goal, in your own words"), {
       target: { value: "Reconcile the ledger" },
     });
@@ -200,7 +200,7 @@ describe("a new goal", () => {
       accounts: [{ id: "v1:accounts:account:acme", name: "Acme Ltd", status: "active" } as Row],
     });
     mount(conn);
-    fireEvent.click(await screen.findByText("New goal"));
+    fireEvent.click(await screen.findByRole("button", { name: "New goal" }));
     fireEvent.change(screen.getByLabelText("The goal, in your own words"), {
       target: { value: "Reconcile the ledger" },
     });
@@ -218,7 +218,7 @@ describe("a new goal", () => {
     // "Who this work is for" over nothing is a question with no answers.
     const conn = fakeConnection({ createReply: { goalId: "g9", runId: "r9" } });
     mount(conn);
-    fireEvent.click(await screen.findByText("New goal"));
+    fireEvent.click(await screen.findByRole("button", { name: "New goal" }));
     expect(screen.queryByRole("group", { name: "Who this work is for (optional)" })).toBeNull();
     // And not the picker's own empty-state either: an input the person cannot
     // use is worse than no input on the one form in the product.
@@ -228,7 +228,7 @@ describe("a new goal", () => {
   it("refuses an empty statement without a round trip", async () => {
     const conn = fakeConnection();
     mount(conn);
-    fireEvent.click(await screen.findByText("New goal"));
+    fireEvent.click(await screen.findByRole("button", { name: "New goal" }));
     fireEvent.click(screen.getByText("Start work"));
     expect(await screen.findByText("Say what you want done first.")).toBeTruthy();
     expect(conn.query.createGoal).not.toHaveBeenCalled();
@@ -240,7 +240,7 @@ describe("a new goal", () => {
     // would report a goal as accepted that no run exists for.
     const conn = fakeConnection({ writeError: new Error("no executor registered for createGoal") });
     mount(conn);
-    fireEvent.click(await screen.findByText("New goal"));
+    fireEvent.click(await screen.findByRole("button", { name: "New goal" }));
     fireEvent.change(screen.getByLabelText("The goal, in your own words"), {
       target: { value: "Reconcile the ledger" },
     });

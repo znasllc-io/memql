@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft } from "lucide-react";
 
 import {
-  Button,
   Field,
   Head,
   Input,
@@ -285,22 +283,20 @@ export function NewRolePage({
     : [];
 
   return (
-    <div className="os-app-stack">
-      <Head title="New role">
-        <Button tone="quiet" onClick={onBack} ariaLabel="Back to Roles">
-          <ArrowLeft size={13} aria-hidden /> Roles
-        </Button>
-      </Head>
+    <div className="os-action-pane">
+      <div className="os-action-body os-app-stack">
+        <Head title="New role" back={{ label: "Roles", onSelect: onBack }} />
 
-      <Panel label="The new role">
-        {/* NO `openStop`: the compose reading, where the rail IS the form.
-            See kit/Rail.tsx -- a rail with no open stop renders every body,
-            and collapsing the stop being typed into would take the field away
-            at the first keystroke. */}
-        <Rail stops={stops} label="What this role is" />
-        <RefusalLine actions={actions} />
-      </Panel>
+        <Panel label="The new role">
+          {/* NO `openStop`: the compose reading, where the rail IS the form.
+              See kit/Rail.tsx -- a rail with no open stop renders every body,
+              and collapsing the stop being typed into would take the field away
+              at the first keystroke. */}
+          <Rail stops={stops} label="What this role is" />
+          <RefusalLine actions={actions} />
+        </Panel>
 
+      </div>
       <ActionBar
         state={answered ? "Ready to create" : "Not answered yet"}
         detail={answered ? undefined : "A name and a free rank below your own are what a role needs."}

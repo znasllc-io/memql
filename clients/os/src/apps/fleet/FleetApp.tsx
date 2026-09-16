@@ -3,19 +3,21 @@ import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
+import { TaskRouting } from "./TaskRouting";
+import { accessAdmits } from "../../system/registry";
 import { AppsSection } from "./apps/AppsSection";
 import { useAddMachineFlow } from "./addMachine/useAddMachineFlow";
-import { MachinesSection } from "./machines/MachinesSection";
+import { FleetOverview } from "./overview/FleetOverview";
+import { FleetWorkspace, type FleetSelection } from "./FleetWorkspace";
 import { ModelsSection } from "./models/ModelsSection";
 import { RoutingSection } from "./routing/RoutingSection";
 import { WorkbenchesSection } from "./workbenches/WorkbenchesSection";
 import {
-  DEFAULT_FLEET_SETTINGS,
   FLEET_SECTIONS,
   LocalFleetSettingsStore,
   type FleetSettings,
   type FleetSettingsStore, FLEET_REQUIRES, FLEET_WANTS } from "./settings";
-import { Panel, Head, SetupGroup } from "../../kit";
+import { Panel, Head, SetupGroup, Switch } from "../../kit";
 import { useSession } from "../../chrome/access";
 
 // Fleet: the machines you own, how work is routed to them, and the
@@ -44,6 +46,7 @@ const FLEET_LOG_CONCEPTS = [
 
 export function FleetApp({
   sectionId,
+  navigation,
   navigate,
   intent,
   consumeIntent,
@@ -60,6 +63,12 @@ export function FleetApp({
   // clicks Routing while a download runs on their machine and comes back
   // finds the token still on screen and the cluster still listening.
   const addMachine = useAddMachineFlow();
+  const [sessionTarget, setSessionTarget] = useState<{ id: string; revision: number }>();
+  const [selection, select] = useState<FleetSelection>({ machineId: "", view: "equipment" });
+
+  useEffect(() => {
+    if (navigation?.origin === "peer" && sectionId === "machines") select(held => ({ ...held, view: "equipment" }));
+  }, [navigation?.revision]);
 
   function update(patch: Partial<FleetSettings>) {
     const next = { ...settings, ...patch, version: 1 as const };
@@ -98,31 +107,29 @@ export function FleetApp({
     // operator back to their default the moment they navigated away.
   }, []);
 
-  if (sectionId === "settings") {
-    return <FleetSettingsSection settings={settings} update={update} />;
-  }
-  if (sectionId === "logs") {
-    return (
-      <AppLogsSection
-        app="fleet"
-        subjectConcepts={FLEET_LOG_CONCEPTS}
-        intent={intent}
-        consumeIntent={consumeIntent}
-      />
-    );
-  }
-  if (sectionId === "models") return <ModelsSection />;
-  if (sectionId === "routing") return <RoutingSection />;
-  if (sectionId === "workbenches") return <WorkbenchesSection />;
-  if (sectionId === "apps") return <AppsSection />;
-  return (
-    <MachinesSection
-      showRevoked={settings.showRevoked}
-      flow={addMachine}
-      intent={intent}
-      consumeIntent={consumeIntent}
-    />
-  );
+  const [visited, setVisited] = useState<string[]>([sectionId || "overview"]);
+  useEffect(() => { setVisited(held => held.includes(sectionId) ? held : [...held, sectionId]); }, [sectionId]);
+  const panes = Array.from(new Set([...visited, sectionId]));
+  return <div className="fleet-app">
+    {panes.map(id => {
+      const section = FLEET_SECTIONS.find(s => s.id === id);
+      if (!section || !accessAdmits(section.requires)) return null;
+      const active = id === sectionId;
+      return <div className="fleet-page" data-fleet-section={id} key={id} hidden={!active}>
+        {id === "overview" ? <FleetOverview onOpenMachine={machineId => { select({ machineId, view: "equipment" }); navigate("machines", { fromContent: true }); }} />
+          : id === "settings" ? <FleetSettingsSection settings={settings} update={update} />
+          : id === "logs" ? <AppLogsSection app="fleet" subjectConcepts={FLEET_LOG_CONCEPTS} intent={active ? intent : undefined} consumeIntent={consumeIntent} />
+          : id === "policies" ? <TaskRouting />
+          : id === "models" ? <ModelsSection onHome={() => navigate("machines", { fromContent: true })} />
+          : id === "routing" ? <RoutingSection />
+          : id === "workbenches" ? <WorkbenchesSection />
+          : id === "apps" ? <AppsSection sessionTarget={sessionTarget} navigation={active ? navigation : undefined} />
+          : <FleetWorkspace onOpenSession={id => { setSessionTarget(held => ({ id, revision: (held?.revision ?? 0) + 1 })); navigate("apps", { fromContent: true }); }} selection={selection} select={select} navigate={navigate}
+              showRevoked={settings.showRevoked} flow={addMachine}
+              intent={active ? intent : undefined} consumeIntent={consumeIntent} />}
+      </div>;
+    })}
+  </div>;
 }
 
 function FleetSettingsSection({
@@ -171,25 +178,14 @@ function FleetSettingsSection({
 
         <fieldset className="os-field-group">
           <legend>Revoked machines</legend>
-          <label className="os-check">
-            <input
-              type="checkbox"
-              checked={settings.showRevoked}
-              onChange={(e) => update({ showRevoked: e.target.checked })}
-            />
-            <span>List revoked machines</span>
-          </label>
+          <Switch checked={settings.showRevoked} onChange={showRevoked => update({ showRevoked })}>List revoked machines</Switch>
           <p className="os-caption">
-            Off by default. A revoked registration is a credential that no longer works, and the
-            standing question the Machines list answers is which machines do. Revoked entries are
-            marked and never show as online, whatever their last heartbeat says.
+            Include machines you have removed. They remain in your history and cannot accept work.
           </p>
         </fieldset>
 
         <p className="os-caption">
-          These are kept in this browser. They travel with the roaming desktop when epic #4746
-          lands; until then a different browser starts from the defaults ({" "}
-          {DEFAULT_FLEET_SETTINGS.defaultSection}, revoked machines hidden).
+          These preferences apply in this browser. A different browser starts on Machines with revoked machines hidden.
         </p>
       </Panel>
     </div>

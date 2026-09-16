@@ -3,7 +3,6 @@ import { Archive, CornerUpRight, Download, FilePlus2, RotateCcw, X } from "lucid
 
 import { useAuthSource } from "../../auth/context";
 import { useSession } from "../../chrome/access";
-import { Mark } from "../../chrome/Mark";
 import { useOs } from "../../chrome/state";
 import { canOpen } from "../../system/registry";
 import { openInVsCode, VSCODE_NO_ANSWER_MESSAGE } from "../../items/vscode";
@@ -94,7 +93,6 @@ export function Inspector({
   presence,
   confirmBeforeArchive,
   uploads,
-  onAsk,
   onClose,
 }: {
   row: ArtifactRow;
@@ -380,7 +378,7 @@ export function Inspector({
   const filedIn = folderNameOf(row.folderId);
 
   return (
-    <aside className="os-files-inspector" aria-label="File details">
+    <aside className="os-files-inspector" aria-label="File details" data-os-page-context={JSON.stringify({ page: "File details", fileId: row.id, name, kind: row.kind })}>
       <header className="os-files-inspector-head">
         {/* THE KIND IS SAID HERE AND NOWHERE ELSE (DESIGN.md rule 7). The
             glyph is the mark the list row already carries, so the panel that
@@ -393,14 +391,7 @@ export function Inspector({
         <h3 className="os-files-inspector-name" title={name}>
           {name}
         </h3>
-        {/* Ask, the shell's own affordance, where every other detail surface
-            puts it. The tag is unchanged: the Ask surface reads it. */}
-        <Button
-          onClick={() => onAsk(`app:files/browse file:${name}`)}
-          ariaLabel={`Ask about ${name}`}
-        >
-          <Mark size={13} aria-hidden /> Ask
-        </Button>
+
         <Button onClick={onClose} ariaLabel="Close details">
           <X size={14} aria-hidden />
         </Button>

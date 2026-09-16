@@ -203,3 +203,6 @@ docs/public/reference/_generated/*
 
 # Subagent-driven-development scratch workspace (ledger, briefs, review packages)
 .superpowers/
+
+# Local-only Cockpit installer artifact override (never credentials).
+clients/os/local-cockpit-test.json

@@ -1,8 +1,9 @@
+import { Cpu } from "lucide-react";
 import { useMemo, useState, type FormEvent } from "react";
 
 import { useSession } from "../../../chrome/access";
 import { Measure } from "../../../kit/MeasureView";
-import { Button, Notice, Subhead } from "../../../kit";
+import { Button, EmptyState, Notice, Subhead } from "../../../kit";
 import { formatBytes, formatMoment } from "../../../kit/format";
 import { formatContext, formatParams } from "../models/ordering";
 import { machineName, type MachineRow } from "../rows";
@@ -54,7 +55,7 @@ import { useModelPulls } from "./useModelPulls";
 // person where a pull has got to, and it is not parsed into a phase vocabulary
 // this side would have to keep in step with somebody else's release.
 
-export function ModelsGroup({ machine }: { machine: MachineRow }) {
+export function ModelsGroup({ machine, standalone = false }: { machine: MachineRow; standalone?: boolean }) {
   const { access } = useSession();
   const { pulls, live, loading, feedError, start, starting } = useModelPulls(machine.id);
   const inference = useMachineInference(machine.id);
@@ -82,7 +83,7 @@ export function ModelsGroup({ machine }: { machine: MachineRow }) {
 
   return (
     <div className="os-fleet-machinemodels">
-      <Subhead>Models</Subhead>
+      {!standalone ? <Subhead>Models</Subhead> : null}
 
       <RuntimeLine runtimes={runtimes} modelCount={models.length} />
 
@@ -164,19 +165,17 @@ export function ModelsGroup({ machine }: { machine: MachineRow }) {
 function RuntimeLine({ runtimes, modelCount }: { runtimes: string[]; modelCount: number }) {
   if (runtimes.length === 0 && modelCount === 0) {
     return (
-      <p className="os-caption">
-        No model runtime on this machine. Run <code className="os-mono">memql worker setup
-        --inference</code> on it to install one -- or tick "will run local models" when you add a
-        machine and the installer does it in the same terminal.
-      </p>
+      <EmptyState icon={Cpu} title="No model runtime on this machine"> Run <code className="os-mono">memql worker setup
+        --inference</code> on it to install one. The Add machine guide also offers local model setup.
+      </EmptyState>
     );
   }
   if (modelCount === 0) {
     return (
-      <p className="os-caption">
+      <EmptyState icon={Cpu} title="No models installed">
         Running {runtimes.join(", ")} with no models yet. Pull one below and this machine starts
         serving it.
-      </p>
+      </EmptyState>
     );
   }
   return (
@@ -226,13 +225,8 @@ function ModelRow({
   ].filter((c) => c !== "");
 
   return (
-    <li className="os-fleet-machinemodel">
-      <span className="os-fleet-machinemodel-id os-mono">{model.modelId}</span>
+    <li className="os-fleet-machinemodel"><details className="fleet-record"><summary><span className="fleet-record-identity"><strong>{model.modelId}</strong><small>{facts.join(" · ") || "Size not reported"}</small></span><span className="fleet-record-meta">{can.join(", ") || "Capabilities not reported"}</span></summary><div className="fleet-record-detail">
       <span className="os-fleet-machinemodel-readings">
-        <span className="os-fleet-machinemodel-facts">
-          {facts.length > 0 ? facts.join(" \u00b7 ") : "size not reported"}
-        </span>
-        <span>{can.length > 0 ? can.join(" \u00b7 ") : "no capabilities advertised"}</span>
         <MeasuredLine measurement={measurement} />
       </span>
       {isOwner ? (
@@ -257,7 +251,7 @@ function ModelRow({
           detail={refusal}
         />
       ) : null}
-    </li>
+    </div></details></li>
   );
 }
 

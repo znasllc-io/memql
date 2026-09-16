@@ -351,6 +351,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	e.prompts = promptRegistry
 	e.providers = providerRegistry
 	e.policies = policyRegistry
+	policyRegistry.AttachStore(databasePolicyStore{database: e.database})
 	e.rules = ruleRegistry
 	e.aiRuntime = newAIRuntime(e.Logger, promptRegistry, providerRegistry, e.aiCacheConfig)
 	if e.aiRuntime != nil {

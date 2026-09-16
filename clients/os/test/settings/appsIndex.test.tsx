@@ -52,8 +52,7 @@ describe("the apps index", () => {
     // The Fleet window is open AND showing its own settings section -- which
     // is not the section the shell opens an app on by default (that is
     // Machines, sections[0]).
-    const nav = screen.getByRole("navigation", { name: "Fleet sections" });
-    expect(within(nav).getByRole("button", { name: "Settings" }).getAttribute("aria-current")).toBe(
+    expect(screen.getByRole("button", { name: "Fleet settings" }).getAttribute("aria-current")).toBe(
       "page",
     );
   });

@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import { FleetTabs, RefreshButton, useFleetScroll } from "../FleetControls";
+import { InfoDetail } from "../../../kit/InfoDetail";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { LiveList } from "../../../live/LiveList";
@@ -13,7 +15,7 @@ import {
   type WorkbenchNodeRow,
   type WorkspaceRow,
 } from "../rows";
-import { Button, Fact, Facts, Head, Notice, Panel, Subhead } from "../../../kit";
+import { Button, EmptyState, Switch, Fact, Facts, Head, Notice, Panel } from "../../../kit";
 import { useNow } from "../../../kit/useNow";
 import { useWorkbenches } from "./useWorkbenches";
 
@@ -29,6 +31,8 @@ import { useWorkbenches } from "./useWorkbenches";
 
 export function WorkbenchesSection() {
   const state = useWorkbenches();
+  const [tab, setTab] = useState<"workspaces" | "replicas">("workspaces");
+  const root = useFleetScroll(tab);
   const [showReleased, setShowReleased] = useState(false);
   const now = useNow(30_000);
 
@@ -80,16 +84,9 @@ export function WorkbenchesSection() {
   const emptyReplicas = nodes.filter((node) => !occupied.has(node.id));
 
   return (
-    <div className="os-fleet">
-      <Head title="Workbenches">
-        <label className="os-check">
-          <input
-            type="checkbox"
-            checked={showReleased}
-            onChange={(e) => setShowReleased(e.target.checked)}
-          />
-          <span>Show released</span>
-        </label>
+    <div ref={root} className="os-fleet">
+      <div className="fleet-section-header">
+      <Head title="Cluster workspaces">
         {/* OFFERED ONLY WHEN THE FEED IS BEHIND. Both feeds on this screen
             are live, and a refresh control standing next to a live list
             quietly contradicts it -- it says "this may be stale" about rows
@@ -97,27 +94,30 @@ export function WorkbenchesSection() {
             behind, the same control is exactly the right one, and its
             appearance is itself the signal. */}
         {feedIsBehind(state.workspaceState) ? (
-          <Button onClick={state.reseedWorkspaces}>Re-read</Button>
+          <RefreshButton label="Reconnect workspaces" onClick={state.reseedWorkspaces} />
         ) : null}
       </Head>
 
-      <p className="os-caption">
+      <FleetTabs label="Cluster workspace views" value={tab} onChange={setTab} options={[["workspaces", "Workspaces"], ["replicas", "Replicas"]]} />
+      </div>
+      <div className="fleet-section-context"><p>Temporary working folders for tasks running in the cluster.</p><InfoDetail title="Cluster workspaces"><p className="os-caption">
         A workspace is a sandboxed working directory for one plan, on one workbench replica's
         disk. Nothing on your own computer is touched.
-      </p>
+      </p></InfoDetail></div>
 
-      <ReplicaPanel
+      <div hidden={tab !== "replicas"}><ReplicaPanel
         state={state}
         source={nodeView}
         nodes={nodes}
         emptyReplicas={emptyReplicas}
         now={now}
-      />
+      /></div>
+      <div hidden={tab !== "workspaces"}>
 
       {state.workspaceError ? (
         <Notice
           tone="error"
-          sentence="The workspaces feed reported an error."
+          sentence="Workspaces could not be updated."
           detail={state.workspaceError}
         />
       ) : null}
@@ -126,7 +126,7 @@ export function WorkbenchesSection() {
           context and sit in a panel, workspaces are the subject and run full
           width. Both carry a heading, or the per-replica group bars below
           read as belonging to nothing. */}
-      <Subhead>Workspaces</Subhead>
+      <div className="fleet-list-options"><Switch checked={showReleased} onChange={setShowReleased}>Show released</Switch><span className="os-caption">Include folders removed after a run.</span></div>
 
       {/* Keyed on the toggle so revealing released rows re-baselines the
           arrival cues: without it they would flash "new" on the next
@@ -141,11 +141,8 @@ export function WorkbenchesSection() {
         // otherwise flash the row it ran in. Being RELEASED is the news.
         fingerprint={(w) => `${w.status}|${w.releasedAt}|${w.releasedReason}`}
         label="Your workspaces"
-        emptyText={
-          showReleased
-            ? "No workspaces. One is created the first time a plan of yours uses the workbench."
-            : "No live workspaces. Released ones are hidden -- turn on Show released to see directories that have been torn down."
-        }
+        emptyText="No workspaces yet."
+        emptyContent={<EmptyState title={showReleased ? "No workspaces yet" : "No active workspaces"} action={!showReleased ? <Button onClick={() => setShowReleased(true)}>View released workspaces</Button> : <Button onClick={() => setTab("replicas")}>Check replicas</Button>}>MemQL creates a temporary working folder when one of your plans needs the workbench. {showReleased ? "Your workspace history will appear here." : "Finished runs release their folders; you can include that history."}</EmptyState>}
         renderRow={(w, tick) => (
           <WorkspaceLine
             workspace={w}
@@ -155,6 +152,7 @@ export function WorkbenchesSection() {
           />
         )}
       />
+      </div>
     </div>
   );
 }
@@ -175,10 +173,10 @@ function ReplicaPanel({
   return (
     <Panel label="Workbench replicas">
       <div className="os-head">
-        <Subhead>Replicas</Subhead>
+        <span className="os-caption">Cluster workbench capacity</span>
         <div className="os-head-actions">
           {feedIsBehind(state.nodeState) ? (
-            <Button onClick={state.reseedNodes}>Re-read</Button>
+            <RefreshButton label="Reconnect replicas" onClick={state.reseedNodes} />
           ) : null}
         </div>
       </div>
@@ -186,10 +184,10 @@ function ReplicaPanel({
       {state.nodeError ? (
         <Notice
           tone="error"
-          sentence="The workbench replicas feed reported an error."
+          sentence="Replicas could not be updated."
           next={
             nodes.length > 0
-              ? "The replicas below are the last rows it delivered."
+              ? "Showing the last available replicas."
               : "Nothing was loaded."
           }
           detail={state.nodeError}
@@ -209,17 +207,14 @@ function ReplicaPanel({
         // would make the panel strobe. A replica CHANGING HEALTH is news.
         fingerprint={(n) => `${n.health}|${n.address}`}
         label="Workbench replicas"
-        emptyText="No workbench replicas are running in this cluster. Nothing can provision a workspace until one is."
+        emptyText="No workbench replicas are running in this cluster."
+        emptyContent={<EmptyState title="No workbench replicas">A workbench replica provides space for tasks to run. Ask your cluster administrator to start one before running work that needs a workspace.</EmptyState>}
         renderRow={(node, tick) => (
-          <div className="os-fleet-replica">
-            <span className="os-mono">{node.id}</span>
-            <span className="os-caption">{node.health || "health not reported"}</span>
-            <span className="os-caption">{formatFreshness(node.lastSeen, now)}</span>
-            {emptyReplicas.some((one) => one.id === node.id) ? (
-              <span className="os-caption">no workspaces</span>
-            ) : null}
+          <details className="fleet-record fleet-replica-record">
+            <summary><span className="fleet-record-identity"><strong>{node.id}</strong><small>Workbench replica</small></span><span className="fleet-record-status" data-health={node.health}>{node.health || "Health unknown"}</span><span className="fleet-record-meta">Seen {formatFreshness(node.lastSeen, now)}</span></summary>
+            <div className="fleet-record-detail"><Facts><Fact label="Address" value={node.address || "Not reported"} mono /><Fact label="First seen" value={formatMoment(node.createdAt)} /><Fact label="Last seen" value={formatMoment(node.lastSeen)} /><Fact label="Your workspaces" value={emptyReplicas.some(one => one.id === node.id) ? "None in this view" : "Listed in Workspaces"} /></Facts></div>
             {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
-          </div>
+          </details>
         )}
       />
     </Panel>
@@ -248,7 +243,7 @@ function WorkspaceLine({
           {workspace.nodeId === "" ? "replica not recorded" : workspace.nodeId}
         </p>
       ) : null}
-      <div className="os-fleet-workspace-body">
+      <details className="os-fleet-workspace-body"><summary className="fleet-workspace-summary"><span className="fleet-record-identity"><strong>{workspace.runId || workspace.id}</strong><small>Run workspace</small></span><span>{workspace.status}</span><span className="os-caption">{formatFreshness(workspace.lastUsedAt, now)}</span></summary>
         <Facts>
           <Fact label="Run" value={workspace.runId} mono />
           <Fact label="Status" value={workspace.status} mono />
@@ -275,11 +270,11 @@ function WorkspaceLine({
         ) : null}
         {released && !blurb && reason !== "" ? (
           <p className="os-caption">
-            Released for a reason this build does not have copy for: {reason}.
+            Release reason: {reason}.
           </p>
         ) : null}
         {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
-      </div>
+      </details>
     </div>
   );
 }

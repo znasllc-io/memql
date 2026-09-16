@@ -59,6 +59,8 @@ export interface PanZoom {
    */
   steering: () => boolean;
   reset: () => void;
+  zoomIn: () => void;
+  zoomOut: () => void;
 }
 
 export interface FitRequest {
@@ -68,11 +70,16 @@ export interface FitRequest {
   ready: boolean;
   /** How far the first fit may zoom IN. See `fitTo` on why this is per-map. */
   maxFit?: number;
+  /** Leave wheel events to the surrounding page when false. */
+  wheelZoom?: boolean;
+  /** Reset to the initial framing instead of the coordinate origin. */
+  resetToFit?: boolean;
 }
 
 export function usePanZoom(fit: FitRequest): PanZoom {
   const [view, setView] = useState<Viewport>(IDENTITY);
   const frameRef = useRef<HTMLDivElement | null>(null);
+  const { width, height, ready, maxFit = 1, wheelZoom = true, resetToFit = false } = fit;
 
   // Pointer events cover mouse, pen and touch with one code path, which is what
   // makes "works with pointer and touch" a property of the implementation
@@ -107,14 +114,9 @@ export function usePanZoom(fit: FitRequest): PanZoom {
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     pinch.current = null;
     travelled.current = 0;
-    // Capture so a drag that leaves the frame keeps steering. jsdom has no
-    // implementation, and a map that threw on pointerdown under test would be a
-    // map nothing could test -- hence the optional call rather than a branch.
-    try {
-      (e.currentTarget as unknown as Element).setPointerCapture?.(e.pointerId);
-    } catch {
-      // A browser that refuses capture still pans; it just stops at the edge.
-    }
+    // Leave a press on its original node. Capturing on the SVG here retargets
+    // the browser's click to the SVG, so the node never receives it. Capture
+    // only once movement establishes that this gesture is steering.
   }, []);
 
   const onPointerMove = useCallback(
@@ -128,6 +130,8 @@ export function usePanZoom(fit: FitRequest): PanZoom {
       const a = live[0];
       const b = live[1];
       if (a && b) {
+        travelled.current = DRAG_THRESHOLD_PX + 1;
+        captureSteeringPointer(e);
         const distance = Math.hypot(a.x - b.x, a.y - b.y);
         const mid = localPoint((a.x + b.x) / 2, (a.y + b.y) / 2);
         const last = pinch.current;
@@ -144,6 +148,7 @@ export function usePanZoom(fit: FitRequest): PanZoom {
       const dx = e.clientX - previous.x;
       const dy = e.clientY - previous.y;
       travelled.current += Math.abs(dx) + Math.abs(dy);
+      if (travelled.current > DRAG_THRESHOLD_PX) captureSteeringPointer(e);
       setView((v) => panBy(v, dx, dy));
     },
     [localPoint],
@@ -156,6 +161,7 @@ export function usePanZoom(fit: FitRequest): PanZoom {
 
   const onWheel = useCallback(
     (e: WheelEvent<SVGSVGElement>) => {
+      if (!wheelZoom) return;
       touched.current = true;
       // deltaY < 0 is a scroll UP, which is a zoom IN everywhere else in every
       // map anybody has used.
@@ -163,8 +169,20 @@ export function usePanZoom(fit: FitRequest): PanZoom {
       const at = localPoint(e.clientX, e.clientY);
       setView((v) => zoomAt(v, factor, at.x, at.y));
     },
-    [localPoint],
+    [localPoint, wheelZoom],
   );
+
+  const reset = useCallback(() => {
+    const box = frameRef.current?.getBoundingClientRect();
+    if (resetToFit) touched.current = false;
+    setView(resetToFit && box ? fitTo(width, height, box.width, box.height, maxFit) : IDENTITY);
+  }, [width, height, maxFit, resetToFit]);
+
+  const zoom = useCallback((factor: number) => {
+    touched.current = true;
+    const box = frameRef.current?.getBoundingClientRect();
+    setView(v => zoomAt(v, factor, (box?.width ?? 0) / 2, (box?.height ?? 0) / 2));
+  }, []);
 
   const onKeyDown = useCallback((e: KeyboardEvent<SVGSVGElement>) => {
     touched.current = true;
@@ -201,13 +219,13 @@ export function usePanZoom(fit: FitRequest): PanZoom {
         break;
       }
       case "0":
-        setView(IDENTITY);
+        reset();
         break;
       default:
         return;
     }
     e.preventDefault();
-  }, []);
+  }, [reset]);
 
   // ==========================================================================
   // FIT UNTIL SOMEBODY STEERS, THEN NEVER AGAIN
@@ -232,21 +250,28 @@ export function usePanZoom(fit: FitRequest): PanZoom {
   //
   // An empty map resets and forgets the gesture, so the next one that opens
   // starts framed.
-  const { width, height, ready, maxFit = 1 } = fit;
   useEffect(() => {
     if (!ready) {
       touched.current = false;
       setView(IDENTITY);
       return;
     }
-    if (touched.current) return;
-    const box = frameRef.current?.getBoundingClientRect();
-    // An unmeasured frame -- a window mid-open, a hidden desk, jsdom, which
-    // measures everything as zero -- is not a fit of zero; it is no answer yet,
-    // so the attempt is left for a later render rather than being spent on a
-    // viewport nobody has laid out.
-    if (!box || box.width <= 0 || box.height <= 0) return;
-    setView(fitTo(width, height, box.width, box.height, maxFit));
+    const frame = frameRef.current;
+    if (!frame) return;
+    const fitFrame = () => {
+      if (touched.current) return;
+      const box = frame.getBoundingClientRect();
+      // Hidden panes have no size yet. A later resize fits their visible frame.
+      if (box.width <= 0 || box.height <= 0) return;
+      const next = fitTo(width, height, box.width, box.height, maxFit);
+      setView(previous => previous.x === next.x && previous.y === next.y && previous.scale === next.scale ? previous : next);
+    };
+    fitFrame();
+    // Opening a second app or changing text size changes the frame without
+    // changing the graph. Keep an untouched map fitted to its actual window.
+    const observer = new ResizeObserver(fitFrame);
+    observer.observe(frame);
+    return () => observer.disconnect();
   }, [ready, width, height, maxFit]);
 
   return {
@@ -261,6 +286,17 @@ export function usePanZoom(fit: FitRequest): PanZoom {
       onKeyDown,
     },
     steering: () => travelled.current > DRAG_THRESHOLD_PX,
-    reset: () => setView(IDENTITY),
+    reset,
+    zoomIn: () => zoom(KEY_ZOOM_STEP),
+    zoomOut: () => zoom(1 / KEY_ZOOM_STEP),
   };
+}
+
+/** Keep an established drag or pinch steering even outside the frame. */
+function captureSteeringPointer(event: PointerEvent<SVGSVGElement>): void {
+  try {
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  } catch {
+    // Without capture the gesture still works while inside the map.
+  }
 }

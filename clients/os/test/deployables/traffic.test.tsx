@@ -327,7 +327,7 @@ function mount(connection: FakeConnection) {
  * document-wide query for one finds several. Every assertion below reads
  * inside the region the page owns.
  */
-async function openDeployable(seed: FakeSeed, hostname: string): Promise<{ connection: FakeConnection; page: HTMLElement }> {
+async function openDeployable(seed: FakeSeed, hostname: string, detail: "traffic" | "runtime" = "traffic"): Promise<{ connection: FakeConnection; page: HTMLElement }> {
   const connection = fakeConnection(seed);
   mount(connection);
   await waitFor(() =>
@@ -337,7 +337,8 @@ async function openDeployable(seed: FakeSeed, hostname: string): Promise<{ conne
   // row; once it is open the head and the rail do too.
   await click((await screen.findByText(hostname)).closest("button"));
   const page = await screen.findByRole("region", { name: `Deployable ${hostname}` });
-  return { connection, page };
+  await click(within(page).getByRole("button", { name: detail === "traffic" ? "Traffic" : /^App values/ }));
+  return { connection, page: await screen.findByRole("dialog") };
 }
 
 describe("a deployable's readings, rendered", () => {
@@ -463,20 +464,24 @@ describe("a deployable's readings, rendered", () => {
     expect(connection.callsNamed("siteTrafficInWindow").filter((c) => c.includes("site-os"))).toHaveLength(0);
   });
 
-  it("reports a refused read in the server's own words", async () => {
-    const { page } = await openDeployable(
+  it("reports a refused read and retries the same selected period", async () => {
+    const { page, connection } = await openDeployable(
       { sites: [SHOP_LIVE], trafficError: "a traffic read covers at most 200 deployables at once" },
       "shop.memql.example.com",
     );
     await waitFor(() => {
       expect(within(page).getByText(/a traffic read covers at most 200 deployables/)).toBeTruthy();
     });
+    const before = connection.callsNamed("siteTrafficInWindow");
+    await click(within(page).getByRole("button", { name: "Refresh traffic" }));
+    await waitFor(() => expect(connection.callsNamed("siteTrafficInWindow").length).toBe(before.length + 1));
+    expect(connection.callsNamed("siteTrafficInWindow").at(-1)).toBe(before.at(-1));
   });
 
   it("shows the settings a deployable carries, and the sentence about secrets", async () => {
     const { page } = await openDeployable(
       { sites: [siteRow({ ...SHOP_LIVE, id: "site-shop", settings: { apiBase: "https://api.eu.example" } })] },
-      "shop.memql.example.com",
+      "shop.memql.example.com", "runtime",
     );
     await waitFor(() => expect(within(page).getByText(/Not a place for a secret/i)).toBeTruthy());
     expect((within(page).getAllByRole("textbox") as HTMLInputElement[]).some((i) => i.value === "apiBase")).toBe(true);
@@ -486,7 +491,7 @@ describe("a deployable's readings, rendered", () => {
   it("sends the whole map, so removing a setting is expressible", async () => {
     const { connection, page } = await openDeployable(
       { sites: [siteRow({ ...SHOP_LIVE, id: "site-shop", settings: { apiBase: "https://api.eu.example", region: "eu" } })] },
-      "shop.memql.example.com",
+      "shop.memql.example.com", "runtime",
     );
     await waitFor(() => expect(within(page).getAllByRole("button", { name: /^Remove region$/ }).length).toBe(1));
     await click(within(page).getByRole("button", { name: /^Remove region$/ }));
@@ -507,7 +512,7 @@ describe("a deployable's readings, rendered", () => {
         settingsError:
           'v1:platform:site: settings key "apiTokenRef" ends in Ref, and a setting is never a reference',
       },
-      "shop.memql.example.com",
+      "shop.memql.example.com", "runtime",
     );
     const value = (within(page).getAllByRole("textbox") as HTMLInputElement[]).find((i) => i.value === "x")!;
     await typeInto(value, "y");

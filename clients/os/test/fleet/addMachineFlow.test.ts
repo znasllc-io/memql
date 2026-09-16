@@ -176,9 +176,9 @@ describe("the checks", () => {
     });
     const perms = checksFor(MAC_CU, cu, 0, NOW).find((c) => c.id === "permissions")!;
     expect(perms.state).toBe("open");
-    expect(perms.answer).toBe("Screen Recording not granted yet.");
-    expect(perms.repair).toContain("System Settings -> Privacy & Security -> Screen Recording");
-    expect(perms.command).toBe("/usr/local/bin/memql worker setup");
+    expect(perms.answer).toBe("Screen Recording not granted to the running worker.");
+    expect(perms.repair).toContain("System Settings → Privacy & Security → Screen Recording");
+    expect(perms.command).toBeUndefined();
   });
 
   it("settles the permissions once both are granted, and is unknown for a cockpit that never reported", () => {
@@ -209,7 +209,9 @@ describe("the checks", () => {
       capabilities: ["HEADLESS", "COMPUTERUSE"],
       capabilityDescriptor: { platform: "linux", displayServer: "x11", computerUseAvailable: true },
     });
-    expect(checksFor(LINUX_CU, x11, 0, NOW).find((c) => c.id === "display")?.state).toBe("done");
+    expect(checksFor(LINUX_CU, x11, 0, NOW).find((c) => c.id === "display")?.state).toBe("unknown");
+    const verified = { ...x11, permissions: { ...x11.permissions, present: true, x11DisplayState: "granted" as const } };
+    expect(checksFor(LINUX_CU, verified, 0, NOW).find((c) => c.id === "display")?.state).toBe("done");
   });
 
   it("does not mistake a missing display for Wayland or advertise an unregistered desktop", () => {
@@ -267,7 +269,6 @@ describe("the checks", () => {
     expect(checksFor(MAC_INF, serving, 0, NOW).find((c) => c.id === "models")).toMatchObject({
       state: "done",
       answer: "Serving one model: llama3.1:8b.",
-      act: "askIt",
     });
   });
 
@@ -287,6 +288,18 @@ describe("the checks", () => {
     expect(checksSettled(checksFor(MAC, machine(), STEADY_BEATS, NOW))).toBe(true);
     expect(checksSettled(checksFor(MAC, machine(), 0, NOW))).toBe(false);
     expect(checksSettled([])).toBe(false);
+  });
+
+  it("does not call macOS setup ready until both requested permissions are measured granted", () => {
+    const missing = machine({ buildTag: "computeruse", capabilities: ["HEADLESS", "COMPUTERUSE"] });
+    const f = facts({ draft: MAC_CU, mint: MINT, machine: missing, beats: STEADY_BEATS });
+    const pending = checksFor(MAC_CU, missing, STEADY_BEATS, NOW);
+    expect(pending.find(c => c.id === "permissions")?.state).toBe("unknown");
+    expect(checksSettled(pending)).toBe(false);
+    expect(barFor(f, pending).state).not.toBe("Ready");
+    expect(barFor(f, pending).acts.some(a => a.label === "Done")).toBe(false);
+    const granted = { ...missing, permissions: { present: true, accessibility: true, screenRecording: true, x11Display: false, detail: "" } };
+    expect(checksSettled(checksFor(MAC_CU, granted, STEADY_BEATS, NOW))).toBe(true);
   });
 });
 
@@ -413,6 +426,28 @@ describe("the action bar follows the state", () => {
 });
 
 describe("the manual steps", () => {
+  it("requires a model response before Ready, Done, or completed Checks", () => {
+    const m = machine({ labels: { "model:text-model": "tools=1" } });
+    const f = facts({ draft: MAC_INF, mint: MINT, machine: m, beats: STEADY_BEATS });
+    for (const response of [{ state: "waiting" }, { state: "running" }, { state: "failed", error: "No response" }] as const) {
+      const checks = checksFor(MAC_INF, m, STEADY_BEATS, NOW, { live: null }, response);
+      expect(checksSettled(checks)).toBe(false);
+      expect(barFor(f, checks).state).not.toBe("Ready");
+      expect(barFor(f, checks).acts.some(a => a.label === "Done")).toBe(false);
+      expect(stopsFor(f, checks).find(s => s.id === "checks")?.state).not.toBe("done");
+    }
+    const checks = checksFor(MAC_INF, m, STEADY_BEATS, NOW, { live: null }, { state: "passed" });
+    expect(checksSettled(checks)).toBe(true);
+    expect(barFor(f, checks).state).toBe("Ready");
+    expect(barFor(f, checks).acts.some(a => a.label === "Done")).toBe(true);
+  });
+
+  it("cannot complete a chat check from embedding-only inventory", () => {
+    const m = machine({ labels: { "model:embed": "embeddings=1" } });
+    const checks = checksFor(MAC_INF, m, STEADY_BEATS, NOW);
+    expect(checks.find(c => c.id === "response")).toMatchObject({ state: "open", act: "pullRecommended" });
+    expect(checksSettled(checks)).toBe(false);
+  });
   it("are in the order they happen, and grow with what was asked for", () => {
     const plain = installSteps(MAC);
     expect(plain[0]).toMatch(/terminal on the machine/);

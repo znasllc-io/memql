@@ -190,6 +190,7 @@ function site(over: Partial<StandingSite> = {}): StandingSite {
     status: "live",
     bundleRef: "blob://sites/site-1/v1/",
     packageDeployableName: "shop",
+    health: {siteId:"site-1", hostname:"shop.memql.example.com", bundleRef:"blob://sites/site-1/v1/", checkedAt:new Date().toISOString(), state:"reachable", reason:"Website answered successfully", httpStatus:200},
     ...over,
   };
 }
@@ -245,7 +246,7 @@ describe("the standing reading", () => {
   it("a redeploy is one click: a live site with nothing newer has every stop settled", () => {
     const settled = statesOf(standing());
     expect(settled).toEqual({ source: "done", whatItIs: "done", whereItLives: "done", build: "skipped", live: "done" });
-    expect(stageOf(standing(), "live").reason).toBe("Live at shop.memql.example.com.");
+    expect(stageOf(standing(), "live").reason).toBe("Recently verified at shop.memql.example.com.");
     expect(headActionFor({ at: "live", updateAvailable: false })).toEqual({ label: "Redeploy", disabled: false, tone: "quiet", requires: "deploy" });
   });
 
@@ -329,7 +330,7 @@ describe("the standing reading", () => {
   });
 
   it("Live reads the site's status", () => {
-    expect(stageOf(standing({ site: site({ status: "live" }) }), "live")).toMatchObject({ state: "done", reason: "Live at shop.memql.example.com." });
+    expect(stageOf(standing({ site: site({ status: "live" }) }), "live")).toMatchObject({ state: "done", reason: "Recently verified at shop.memql.example.com." });
 
     const paused = stageOf(standing({ site: site({ status: "disabled" }) }), "live");
     expect(paused.state).toBe("stopped");

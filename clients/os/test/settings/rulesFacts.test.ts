@@ -302,9 +302,9 @@ describe("what a simulation is allowed to claim", () => {
 });
 
 describe("what the screen says about a rule it cannot edit", () => {
-  it("names the way past a shipped rule rather than leaving it to a refusal", () => {
+  it("explains that a matching shipped rule takes priority", () => {
     expect(LOCKED_RULE_SENTENCE).toMatch(/cannot be edited or removed/);
-    expect(LOCKED_RULE_SENTENCE).toMatch(/add a rule of your own/);
+    expect(LOCKED_RULE_SENTENCE).toMatch(/matching shipped rule takes priority/);
   });
 
   it("says what the floor is FOR, so its place at the bottom does not read as a sorting bug", () => {

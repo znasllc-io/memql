@@ -32,29 +32,12 @@ async function openInspector(title: string): Promise<HTMLElement> {
 }
 
 describe("the inspector header", () => {
-  it("carries the shell's Ask affordance with the tag the Ask surface reads", async () => {
-    const asked: string[] = [];
-    h.connection = fakeConnection({
-      artifacts: [artifactRow({ id: "a-1", title: "brief.pdf" })],
-    });
-    await renderFiles({ askContext: (tag) => asked.push(tag) });
+  it("declares the selected file for the window Ask without a duplicate icon", async () => {
+    h.connection = fakeConnection({ artifacts: [artifactRow({ id: "a-1", title: "brief.pdf" })] });
+    await renderFiles();
     const inspector = await openInspector("brief\\.pdf");
-
-    // In the HEADER, beside Close -- not a full-width button at the foot of
-    // the panel. The header is where every other detail surface in the shell
-    // puts Ask.
-    const header = inspector.querySelector("header");
-    expect(header).toBeTruthy();
-    const ask = within(header as HTMLElement).getByRole("button", {
-      name: "Ask about brief.pdf",
-    });
-    await click(ask);
-
-    // THE TAG IS A CONTRACT with the Ask surface and is unchanged by this
-    // pass. Asserted as a literal rather than composed from the same pieces
-    // the component composes it from, which would pass against any spelling.
-    expect(asked).toEqual(["app:files/browse file:brief.pdf"]);
-    expect(within(inspector).queryByRole("button", { name: "Ask about this file" })).toBeNull();
+    expect(within(inspector).queryByRole("button", { name: "Ask about brief.pdf" })).toBeNull();
+    expect(JSON.parse(inspector.getAttribute("data-os-page-context")!)).toMatchObject({page:"File details",fileId:"a-1",name:"brief.pdf"});
   });
 
   it("says the kind once, on the glyph, and names it there (DESIGN.md rule 7)", async () => {

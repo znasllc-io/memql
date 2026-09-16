@@ -1,3 +1,4 @@
+import { AddButton } from "../../../kit/AddButton";
 import { useEffect, useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { MonitorSmartphone } from "lucide-react";
@@ -12,7 +13,7 @@ import { useLiveView } from "../../../live/liveView";
 import { formatFreshness } from "../../../kit/format";
 import { isWorkerOnline } from "../online";
 import { isRevoked, machineFromRow, machineName, type MachineRow } from "../rows";
-import { Button, Chip, Chips, Head } from "../../../kit";
+import { Chip, Chips, Head } from "../../../kit";
 import { useNow } from "../../../kit/useNow";
 import { MachineDetail } from "./MachineDetail";
 import { useMachineWrites } from "./useMachineWrites";
@@ -96,9 +97,7 @@ export function MachinesSection({
   return (
     <div className="os-fleet">
       <Head title="Machines">
-        <Button tone="primary" onClick={() => flow.start({})} ariaLabel="Add a machine">
-          Add machine
-        </Button>
+        <AddButton onClick={() => flow.start({})} label="Add a machine" />
       </Head>
 
       {/* Keyed on the filter so flipping the toggle RE-BASELINES the arrival

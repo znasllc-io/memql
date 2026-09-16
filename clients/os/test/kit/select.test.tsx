@@ -270,6 +270,17 @@ describe("the trigger", () => {
 // ---------------------------------------------------------------------------
 
 describe("the open list", () => {
+  it("keeps a modal's listbox inside its top layer and commits a selection", () => {
+    const onChange = vi.fn();
+    render(<dialog open aria-label="Details"><Harness onChange={onChange} /></dialog>);
+    fireEvent.click(screen.getByRole("combobox"));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("listbox").parentElement).toBe(dialog);
+    fireEvent.click(within(dialog).getByRole("option", { name: "Any source" }));
+    expect(onChange).toHaveBeenCalledWith("all");
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
   it("renders into document.body, outside the surface that opened it", () => {
     // THE REGRESSION TEST. Inside `.os-window` the list's `position: fixed`
     // resolves against the window's backdrop-filtered box rather than the

@@ -1,8 +1,10 @@
+import { permissionDecision } from "../rows";
 import type { StopState } from "../../../kit/Rail";
 import { formatFreshness } from "../../../kit/format";
 import { isWorkerOnline, ONLINE_WINDOW_SECONDS } from "../online";
 import { computerUseStatus, hasRoundTrip, isRevoked, machineName, type MachineRow } from "../rows";
 import { machineModelsFrom, type ModelPull } from "../machines/models";
+import type { ModelResponse } from "./useModelResponse";
 import {
   INSTALL_PLATFORM_LABEL,
   setupCommand,
@@ -147,12 +149,13 @@ export function isSteady(machine: MachineRow | null, beats: number, now: Date): 
 export type CheckState = Extract<StopState, "done" | "current" | "open" | "skipped" | "stopped" | "unknown" | "ahead">;
 
 export interface Check {
-  id: "connection" | "build" | "permissions" | "display" | "runtime" | "models";
+  id: "connection" | "build" | "permissions" | "display" | "runtime" | "models" | "response";
   name: string;
   state: CheckState;
   /** The state in words: the answer once settled, what is being waited on
    *  otherwise. */
   answer: string;
+  details?: { name: string; state: "done" | "open" | "unknown"; answer: string }[];
   /** What the PERSON does, when the check is `open`. */
   repair?: string;
   /** The exact command the repair takes, when it takes one. */
@@ -160,7 +163,7 @@ export interface Check {
   /** An act the OS can take on the person's behalf, offered beside the
    *  repair: pull the recommended models onto the machine (D13), or ask the
    *  served model something to prove the whole path (D14). */
-  act?: "pullRecommended" | "askIt";
+  act?: "pullRecommended" | "retryResponse";
 }
 
 const WORKER_LOG = "~/.memql/state/worker.log";
@@ -182,11 +185,25 @@ export function checksFor(
   beats: number,
   now: Date,
   pulls: PullFacts = NO_PULLS,
+  response: ModelResponse = { state: "waiting" },
 ): Check[] {
   const checks: Check[] = [connectionCheck(machine, beats, now), buildCheck(draft, machine)];
   if (draft.computerUse && draft.platform === "mac") checks.push(permissionsCheck(machine, draft));
   if (draft.computerUse && draft.platform === "linux") checks.push(displayCheck(machine));
-  if (draft.inference) checks.push(...inferenceChecks(machine, pulls, draft));
+  if (draft.inference) {
+    checks.push(...inferenceChecks(machine, pulls, draft));
+    const model = machineModelsFrom(machine.reportedLabels).find(model => !model.embeddings);
+    const available = checks.find(check => check.id === "models")?.state === "done";
+    checks.push(!available
+      ? { id: "response", name: "Model response", state: "ahead", answer: "After the models are available." }
+      : !model
+        ? { id: "response", name: "Model response", state: "open", answer: "A text model is needed to verify a response.", repair: "Only embedding models are available. Add a text model to complete this check.", act: "pullRecommended" }
+        : response.state === "passed"
+          ? { id: "response", name: "Model response", state: "done", answer: "Response verified on this machine." }
+          : response.state === "failed"
+            ? { id: "response", name: "Model response", state: "stopped", answer: "The model did not answer.", repair: response.error, act: "retryResponse" }
+            : { id: "response", name: "Model response", state: "current", answer: response.state === "running" ? "Checking the model’s response… The first response can take longer while it loads." : "Waiting to check the model’s response." });
+  }
   return checks;
 }
 
@@ -267,35 +284,22 @@ function buildCheck(draft: Draft, machine: MachineRow): Check {
   return { id: "build", name: "Build", state: "done", answer: `Headless build${version}.` };
 }
 
-function permissionsCheck(machine: MachineRow, draft: Draft): Check {
+function permissionsCheck(machine: MachineRow, _draft: Draft): Check {
   const p = machine.permissions;
-  if (!p.present) {
-    return {
-      id: "permissions",
-      name: "macOS permissions",
-      state: "unknown",
-      answer: "Not reported -- this cockpit predates the permissions report. Nothing is wrong.",
-    };
-  }
-  const missing = [
-    ...(p.accessibility ? [] : ["Accessibility"]),
-    ...(p.screenRecording ? [] : ["Screen Recording"]),
+  const evidence = [
+    { name: "Accessibility", state: permissionDecision(p,"accessibility") },
+    { name: "Screen Recording", state: permissionDecision(p,"screenRecording") },
   ];
-  if (missing.length === 0) {
-    return {
-      id: "permissions",
-      name: "macOS permissions",
-      state: "done",
-      answer: "Accessibility and Screen Recording granted.",
-    };
-  }
+  const denied = evidence.filter(s => s.state === "denied").map(s => s.name);
+  const unknown = evidence.filter(s => s.state === "unknown").map(s => s.name);
+  const details = evidence.map(s => ({ name: s.name, state: s.state === "granted" ? "done" as const : s.state === "denied" ? "open" as const : "unknown" as const, answer: s.state === "granted" ? "Granted to the running worker." : s.state === "denied" ? "The running worker reports access denied." : "Not verified by the running worker." }));
+  if (denied.length === 0 && unknown.length === 0) return { id: "permissions", name: "macOS permissions", state: "done", answer: "Accessibility and Screen Recording granted.", details };
   return {
-    id: "permissions",
-    name: "macOS permissions",
-    state: "open",
-    answer: `${missing.join(" and ")} not granted yet.`,
-    repair: `On the machine, allow memql under System Settings -> Privacy & Security -> ${missing.join(" and ")}, then run this in a terminal so the worker re-checks and re-registers. This waits for it.`,
-    command: setupCommand(draft.userLocal),
+    id: "permissions", name: "macOS permissions", state: denied.length ? "open" : "unknown", details,
+    answer: denied.length ? `${denied.join(" and ")} not granted to the running worker.` : `${unknown.join(" and ")} not verified by the running worker.`,
+    repair: denied.length
+      ? `Allow the worker itself under System Settings → Privacy & Security → ${denied.join(" and ")}. Terminal's grant is separate. These checks refresh from worker heartbeats; macOS may require restarting the worker after a grant.`
+      : "This worker has not supplied a measured result for every permission. Use a worker build that reports its own status. Running setup in Terminal cannot verify a detached LaunchAgent, so repeating it does not complete this check.",
   };
 }
 
@@ -364,7 +368,6 @@ function inferenceChecks(machine: MachineRow, pulls: PullFacts, draft: Draft): C
       name: "Models",
       state: "done",
       answer: `Serving ${models.length === 1 ? "one model" : `${models.length} models`}: ${models.map((m) => m.modelId).join(", ")}.`,
-      act: "askIt",
     };
   } else if (runtime.state !== "done") {
     modelsCheck = { id: "models", name: "Models", state: "ahead", answer: "After the runtime." };
@@ -387,10 +390,10 @@ function inferenceChecks(machine: MachineRow, pulls: PullFacts, draft: Draft): C
   return [runtime, modelsCheck];
 }
 
-/** A check that asks nothing more of anybody. `unknown` is settled: "the
- *  cockpit did not say" is an answer, and a wizard that waited on an older
- *  cockpit to grow a field would wait forever. */
+/** Missing optional diagnostics may settle, but requested macOS permissions
+ * must be measured. An unknown grant cannot make setup ready. */
 export function checkIsSettled(check: Check): boolean {
+  if (check.id === "permissions") return check.state === "done";
   return check.state === "done" || check.state === "skipped" || check.state === "unknown";
 }
 
@@ -627,10 +630,8 @@ export function barFor(facts: FlowFacts, checks: readonly Check[]): FlowBar {
     question: "",
     acts: [
       { id: "open", label: `Open ${shown}`, tone: "quiet" },
-      // Done is legal the moment the machine has registered -- leaving with a
-      // repair outstanding is the person's call, and the machine is theirs
-      // either way -- but it is only PRIMARY once nothing is outstanding.
-      { id: "done", label: "Done", tone: settled ? "primary" : "quiet" },
+      // Leaving remains possible, but only completed checks earn Done.
+      { id: "done", label: settled ? "Done" : "Leave setup", tone: settled ? "primary" : "quiet" },
     ],
   };
 }

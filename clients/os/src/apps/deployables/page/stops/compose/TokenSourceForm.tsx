@@ -1,4 +1,4 @@
-import { Caption, Field, Input, Notice } from "../../../../../kit";
+import { Caption, Field, Input, Notice, RefreshButton } from "../../../../../kit";
 import { CredentialField } from "../../../sources/CredentialField";
 import { SOURCE_HOST, probeNote, probeParks, probeWantsCredential } from "../../../sources/probe";
 import type { SourceProbeHandle } from "../../../sources/useProbes";
@@ -95,9 +95,9 @@ export function TokenSourceForm({
         <Notice
           tone="warn"
           sentence="This cluster could not check the repository just now."
-          next="Nothing is wrong with what you typed. Deploying still works: the fetch asks again, and it is the one that decides."
+          next="Check the repository URL and access token. You can retry the check or continue to analysis."
           detail={probe.error}
-        />
+        ><RefreshButton label="Check repository again" busy={probe.busy} onClick={() => void probe.probe(draft.repoUrl, draft.credentialId)} /></Notice>
       )}
 
       <Field label="Branch or tag">

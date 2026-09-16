@@ -161,3 +161,11 @@ rule embeddingsBound { }
 @onUnavailable("park")
 @locked
 rule compilerLocalOnly { }
+
+/// Policy authoring, like rule authoring, stays local until the person reviews it.
+@when(prompt="composeRoutingPolicy")
+@policy("localOnly")
+@precedence(121)
+@onUnavailable("park")
+@locked
+rule policyCompilerLocalOnly { }

@@ -280,3 +280,22 @@ export function subjectIntentOf(payload: Record<string, unknown>): { subject: st
   const concept = payload.subjectConcept;
   return { subject: subject.trim(), subjectConcept: typeof concept === "string" ? concept.trim() : "" };
 }
+
+/** A complete app-log view handed to full Logs. Reject malformed intents. */
+export function logViewIntentOf(payload: Record<string, unknown>): { scope: LogScope; filters: LogFilters } | null {
+  const view = payload.logView;
+  if (!view || typeof view !== "object" || Array.isArray(view)) return null;
+  const { scope, filters } = view as { scope?: unknown; filters?: unknown };
+  if (!scope || typeof scope !== "object" || !filters || typeof filters !== "object") return null;
+  const s = scope as Record<string, unknown>, f = filters as Record<string, unknown>;
+  const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every(item => typeof item === "string");
+  if (!strings(s.apps) || !strings(s.subjectConcepts) || !strings(f.apps) || !strings(f.nodes) || !strings(f.components)) return null;
+  if (!["subject", "subjectConcept", "text", "from", "to"].every(key => typeof f[key] === "string")) return null;
+  if (!LEVEL_FLOORS.includes(f.levelFloor as LevelFloor) || !WINDOW_PRESETS.includes(f.window as WindowPreset)) return null;
+  return { scope: { apps: [...s.apps], subjectConcepts: [...s.subjectConcepts] }, filters: {
+    levelFloor: f.levelFloor as LevelFloor, window: f.window as WindowPreset,
+    apps: [...f.apps], nodes: [...f.nodes], components: [...f.components],
+    subject: f.subject as string, subjectConcept: f.subjectConcept as string,
+    text: f.text as string, from: f.from as string, to: f.to as string,
+  } };
+}

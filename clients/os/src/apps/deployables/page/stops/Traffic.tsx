@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { Caption, Fact, Facts, useNow } from "../../../../kit";
+import { Caption, Fact, Facts, useNow, RefreshButton, Notice } from "../../../../kit";
 import { formatFreshness, formatMoment } from "../../../../kit/format";
 import { useOsConnection } from "../../../../live/connection";
 import { useDeployablesSettings } from "../../settingsContext";
@@ -113,6 +113,7 @@ export function TrafficPanel({ site }: { site: SiteRow }) {
   const read = useCallback(async () => {
     if (connection === null || siteId === "" || systemOwned || !servedEver) return;
     const mine = ++asked.current;
+    setState("loading");
     try {
       const { reading: next } = await fetchTraffic(connection.query, siteId, window, new Date());
       if (mine !== asked.current) return;
@@ -176,10 +177,9 @@ export function TrafficPanel({ site }: { site: SiteRow }) {
       </div>
 
       {state === "failed" ? (
-        <>
-          <Caption>This cluster did not answer for {windowLabel(window).toLowerCase()}.</Caption>
-          <p className="os-notice-detail os-mono">{failure}</p>
-        </>
+        <Notice tone="error" sentence="Traffic could not be loaded." detail={failure} next="Try refreshing the selected period.">
+          <RefreshButton label="Refresh traffic" onClick={() => void read()} />
+        </Notice>
       ) : reading === null ? (
         <Caption>{state === "loading" ? "Reading the traffic figures." : unmeasuredSentence(window)}</Caption>
       ) : (
@@ -196,9 +196,9 @@ export function TrafficPanel({ site }: { site: SiteRow }) {
             />
           </Facts>
           <Caption>
-            {`Counted from what the edge served, ${windowLabel(window).toLowerCase()}. Read ${
+            {`Requests served ${windowLabel(window).toLowerCase()}. Read ${
               readAt === "" ? "just now" : formatFreshness(readAt, now)
-            }; it refreshes on its own.`}
+            }; updates automatically.`}
           </Caption>
         </>
       )}

@@ -79,7 +79,7 @@ describe("the rail, drawn", () => {
   it("draws the blurb as the note of a stop that has nothing to say yet", () => {
     const compose: RailInput = { mode: "compose", answered: ["source"], open: "whatItIs", probeReason: "", report: null, problem: null };
     render(<Rail input={compose} />);
-    expect(screen.getByText("What deploying this source would do, read from the tree")).toBeTruthy();
+    expect(screen.getByText("Review the apps, build steps and required changes")).toBeTruthy();
     expect(screen.getByText("complete")).toBeTruthy();
     expect(screen.getAllByText("not reachable yet")).toHaveLength(3);
   });

@@ -2206,6 +2206,233 @@ QueryClient.prototype.roleUpdate = function (this: QueryClient, args: RoleUpdate
   return this.executeNamed("roleUpdate", buildRoleUpdate(args), opts);
 };
 
+/** List all routing policies loaded from policies/v1/*.memql. Feeds the frontend's /router/policies page. */
+export interface RouterListPoliciesArgs {
+}
+
+export function buildRouterListPolicies(args: RouterListPoliciesArgs): string {
+  void args;
+  return "builtin routerListPolicies()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    routerListPolicies(args?: RouterListPoliciesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.routerListPolicies = function (this: QueryClient, args: RouterListPoliciesArgs = {} as RouterListPoliciesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("routerListPolicies", buildRouterListPolicies(args), opts);
+};
+
+/** Ask MemQL to compose a validated policy draft. No policy is saved; review it and call routingPolicySave or routingPolicyReset with its revision. Requires inference and owner/developer access. */
+export interface RoutingPolicyDescribeArgs {
+  sentence: string;
+}
+
+export function buildRoutingPolicyDescribe(args: RoutingPolicyDescribeArgs): string {
+  const parts: string[] = [];
+  parts.push("sentence: " + renderMemQLValue(args.sentence));
+  return "builtin routingPolicyDescribe(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    routingPolicyDescribe(args: RoutingPolicyDescribeArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.routingPolicyDescribe = function (this: QueryClient, args: RoutingPolicyDescribeArgs = {} as RoutingPolicyDescribeArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("routingPolicyDescribe", buildRoutingPolicyDescribe(args), opts);
+};
+
+/** Restore a shipped policy's original sources. User-created policies have no shipped default. Owner or developer only; expectedRevision comes from routerListPolicies. */
+export interface RoutingPolicyResetArgs {
+  name: string;
+  expectedRevision: number;
+}
+
+export function buildRoutingPolicyReset(args: RoutingPolicyResetArgs): string {
+  const parts: string[] = [];
+  parts.push("name: " + renderMemQLValue(args.name));
+  parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  return "builtin routingPolicyReset(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    routingPolicyReset(args: RoutingPolicyResetArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.routingPolicyReset = function (this: QueryClient, args: RoutingPolicyResetArgs = {} as RoutingPolicyResetArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("routingPolicyReset", buildRoutingPolicyReset(args), opts);
+};
+
+/** Create or replace a cluster-wide routing policy with a preferred source and ordered fallbacks. Read routerListPolicies first and pass its revision. A stale revision refuses without changes. Owner or developer only. The active embeddings binding cannot acquire another source or fallback. */
+export interface RoutingPolicySaveArgs {
+  name: string;
+  description?: string;
+  primary: string;
+  fallbacks?: string[];
+  expectedRevision: number;
+}
+
+export function buildRoutingPolicySave(args: RoutingPolicySaveArgs): string {
+  const parts: string[] = [];
+  parts.push("name: " + renderMemQLValue(args.name));
+  if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
+  parts.push("primary: " + renderMemQLValue(args.primary));
+  if (args.fallbacks !== undefined) parts.push("fallbacks: " + renderMemQLValue(args.fallbacks));
+  parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  return "builtin routingPolicySave(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    routingPolicySave(args: RoutingPolicySaveArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.routingPolicySave = function (this: QueryClient, args: RoutingPolicySaveArgs = {} as RoutingPolicySaveArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("routingPolicySave", buildRoutingPolicySave(args), opts);
+};
+
+/** Compile a rule draft using local inference. Review and validate before routingRuleSave; no configuration is changed. */
+export interface RoutingRuleDescribeArgs {
+  sentence: string;
+}
+
+export function buildRoutingRuleDescribe(args: RoutingRuleDescribeArgs): string {
+  const parts: string[] = [];
+  parts.push("sentence: " + renderMemQLValue(args.sentence));
+  return "builtin routingRuleDescribe(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    routingRuleDescribe(args: RoutingRuleDescribeArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.routingRuleDescribe = function (this: QueryClient, args: RoutingRuleDescribeArgs = {} as RoutingRuleDescribeArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("routingRuleDescribe", buildRoutingRuleDescribe(args), opts);
+};
+
+/** Remove a custom rule after reading its current revision. Shipped rules cannot be removed. */
+export interface RoutingRuleRemoveArgs {
+  name: string;
+  expectedRevision: number;
+}
+
+export function buildRoutingRuleRemove(args: RoutingRuleRemoveArgs): string {
+  const parts: string[] = [];
+  parts.push("name: " + renderMemQLValue(args.name));
+  parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  return "builtin routingRuleRemove(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    routingRuleRemove(args: RoutingRuleRemoveArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.routingRuleRemove = function (this: QueryClient, args: RoutingRuleRemoveArgs = {} as RoutingRuleRemoveArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("routingRuleRemove", buildRoutingRuleRemove(args), opts);
+};
+
+/** Save a custom cluster rule at the revision returned by validation. Shipped rules cannot be changed. */
+export interface RoutingRuleSaveArgs {
+  conditions?: Record<string, unknown>;
+  name: string;
+  policy: string;
+  precedence: number;
+  expectedRevision: number;
+  description?: string;
+  level?: string;
+  onUnavailable?: string;
+  excludes?: string[];
+}
+
+export function buildRoutingRuleSave(args: RoutingRuleSaveArgs): string {
+  const parts: string[] = [];
+  if (args.conditions !== undefined) parts.push("conditions: " + renderMemQLValue(args.conditions));
+  parts.push("name: " + renderMemQLValue(args.name));
+  parts.push("policy: " + renderMemQLValue(args.policy));
+  parts.push("precedence: " + renderMemQLValue(args.precedence));
+  parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
+  if (args.level !== undefined) parts.push("level: " + renderMemQLValue(args.level));
+  if (args.onUnavailable !== undefined) parts.push("onUnavailable: " + renderMemQLValue(args.onUnavailable));
+  if (args.excludes !== undefined) parts.push("excludes: " + renderMemQLValue(args.excludes));
+  return "builtin routingRuleSave(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    routingRuleSave(args: RoutingRuleSaveArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.routingRuleSave = function (this: QueryClient, args: RoutingRuleSaveArgs = {} as RoutingRuleSaveArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("routingRuleSave", buildRoutingRuleSave(args), opts);
+};
+
+/** Validate a custom rule definition against current policies and locked-rule constraints. This validates the definition; it does not claim a replay of historical decisions. */
+export interface RoutingRuleValidateArgs {
+  expectedRevision?: number;
+  conditions?: Record<string, unknown>;
+  name: string;
+  policy: string;
+  precedence: number;
+  level?: string;
+  onUnavailable?: string;
+  excludes?: string[];
+}
+
+export function buildRoutingRuleValidate(args: RoutingRuleValidateArgs): string {
+  const parts: string[] = [];
+  if (args.expectedRevision !== undefined) parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  if (args.conditions !== undefined) parts.push("conditions: " + renderMemQLValue(args.conditions));
+  parts.push("name: " + renderMemQLValue(args.name));
+  parts.push("policy: " + renderMemQLValue(args.policy));
+  parts.push("precedence: " + renderMemQLValue(args.precedence));
+  if (args.level !== undefined) parts.push("level: " + renderMemQLValue(args.level));
+  if (args.onUnavailable !== undefined) parts.push("onUnavailable: " + renderMemQLValue(args.onUnavailable));
+  if (args.excludes !== undefined) parts.push("excludes: " + renderMemQLValue(args.excludes));
+  return "builtin routingRuleValidate(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    routingRuleValidate(args: RoutingRuleValidateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.routingRuleValidate = function (this: QueryClient, args: RoutingRuleValidateArgs = {} as RoutingRuleValidateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("routingRuleValidate", buildRoutingRuleValidate(args), opts);
+};
+
+/** Read shipped and custom rules in actual evaluation order, with configuration revision. */
+export interface RoutingRulesArgs {
+}
+
+export function buildRoutingRules(args: RoutingRulesArgs): string {
+  void args;
+  return "builtin routingRules()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    routingRules(args?: RoutingRulesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.routingRules = function (this: QueryClient, args: RoutingRulesArgs = {} as RoutingRulesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("routingRules", buildRoutingRules(args), opts);
+};
+
 /** Register every mirrored webhook topic for every ingesting store at the pinned API version, update the ones whose URL, version or includeFields have drifted, and remove ours the allowlist no longer wants. Shopify deletes a subscription after eight consecutive delivery failures, so this is what brings a store back after an outage. Records the outcome on each store's health. */
 export interface ShopifyEnsureSubscriptionsArgs {
 }
@@ -2361,6 +2588,27 @@ declare module "./query.js" {
 
 QueryClient.prototype.siteDelete = function (this: QueryClient, args: SiteDeleteArgs = {} as SiteDeleteArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("siteDelete", buildSiteDelete(args), opts);
+};
+
+/** Read current HTTP observations for sites the caller may read. Never triggers a probe; absent or expired observations mean unknown availability. */
+export interface SiteHealthReadArgs {
+  siteIds: string[];
+}
+
+export function buildSiteHealthRead(args: SiteHealthReadArgs): string {
+  const parts: string[] = [];
+  parts.push("siteIds: " + renderMemQLValue(args.siteIds));
+  return "builtin siteHealthRead(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    siteHealthRead(args: SiteHealthReadArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.siteHealthRead = function (this: QueryClient, args: SiteHealthReadArgs = {} as SiteHealthReadArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("siteHealthRead", buildSiteHealthRead(args), opts);
 };
 
 /** Answer whether THIS caller could create a deployable at a hostname right now: the user-claimable shape (<slug>.<domain>, the slug bounds, the reserved labels -- waived for a cluster owner exactly as the write guard waives it) and cluster-wide uniqueness against every live site. Returns one row {hostname, available, reason, problem}: reason is `ok`, `invalid` (problem carries the policy's own sentence) or `taken` (problem says so and names NOBODY -- the write guard's refusal names the holder, because whoever is refused has to know what to look at; a check asked on every keystroke does not). A check, never a gate: it reserves nothing. */

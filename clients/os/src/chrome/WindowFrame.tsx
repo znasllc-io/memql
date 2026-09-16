@@ -1,5 +1,9 @@
+import { visiblePageContext, visiblePageLabel } from "../kit/pageContext";
+import { PageNavigationProvider } from "../kit/pageNavigation";
+import { WindowSearchContext, useWindowSearchHost } from "../kit/windowSearch";
 import { useDraggable } from "@dnd-kit/core";
-import { Maximize2, Minimize2, Minus, Settings2, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { X, Search, ListFilter, Maximize2, Minimize2, Minus, Settings2 } from "lucide-react";
 
 import { useAsk } from "../ask/AskProvider";
 import { ProvenanceDot } from "../kit";
@@ -15,6 +19,7 @@ import type { Rect } from "../system/placement";
 import {
   allRequirementsFor,
   accessAdmits,
+  appsFor,
   requirementsFor,
   sectionsFor,
   type OsAppManifest,
@@ -24,6 +29,7 @@ import { useSession } from "./access";
 import { Mark } from "./Mark";
 import { useOs } from "./state";
 import { WindowErrorBoundary } from "./WindowErrorBoundary";
+import { ContextMenu } from "./ContextMenu";
 
 // The window (spec A): glass frame on a token-carrying root, computed rect
 // (the desk animates BETWEEN rects; during a drag dnd-kit's transform
@@ -37,14 +43,52 @@ export function WindowFrame({
   rect,
   focused,
   actorRole,
+  hidden = false,
+  deskId,
 }: {
   win: OsWindow;
   manifest: OsAppManifest;
   rect: Rect;
   focused: boolean;
   actorRole: string;
+  hidden?: boolean;
+  deskId?: string;
 }) {
-  const { actions } = useOs();
+  const { actions, state, registry } = useOs();
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const searchDialog = useRef<HTMLDialogElement>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const { host: searchHost, openVisible: openContentSearch } = useWindowSearchHost();
+  const [pendingSearch, setPendingSearch] = useState(false);
+  useEffect(() => {
+    if (!pendingSearch) return;
+    // The app may reveal a retained list in its layout effect after navigation.
+    const frame = requestAnimationFrame(() => {
+      if (!openContentSearch()) { setSearchQuery(""); searchDialog.current?.showModal(); }
+      setPendingSearch(false);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [pendingSearch, win.sectionId, win.sectionNavigation?.revision]);
+  const searchApp = () => {
+    if (openContentSearch()) return;
+    if (manifest.searchSection) {
+      actions.navigateSection(win.id, manifest.searchSection);
+      setPendingSearch(true);
+    } else { setSearchQuery(""); searchDialog.current?.showModal(); }
+  };
+  const content = useRef<HTMLDivElement>(null);
+  const scroll = useRef(new Map<string, number>());
+  useEffect(() => {
+    if (!hidden) return;
+    setMenu(null);
+    if (searchDialog.current?.open) searchDialog.current.close();
+    content.current?.querySelectorAll<HTMLDialogElement>("dialog[open]").forEach(dialog => dialog.close());
+  }, [hidden]);
+  useLayoutEffect(() => {
+    const node = content.current;
+    if (node) node.scrollTop = scroll.current.get(win.sectionId) ?? 0;
+    return () => { if (node) scroll.current.set(win.sectionId, node.scrollTop); };
+  }, [win.sectionId]);
   const { openAsk } = useAsk();
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `window:${win.id}`,
@@ -52,6 +96,9 @@ export function WindowFrame({
 
   const sections = sectionsFor(manifest);
   const current = sections.find((s) => s.id === win.sectionId) ?? sections[0];
+  const destinations = sections.filter(s => !s.parent && s.id !== "settings" && s.id !== "logs");
+  const logs = sections.find(s => s.id === "logs");
+  const ownDesk = state.shell.desks.find(d => d.windows.includes(win.id));
 
   // READINESS (design record 2026-09-06-configuration-readiness, 5.3 to 5.5).
   //
@@ -92,6 +139,8 @@ export function WindowFrame({
       ref={setNodeRef}
       className="os-window"
       data-os-window={manifest.id}
+      data-os-window-desk={deskId}
+      hidden={hidden}
       data-focused={focused || undefined}
       data-fullscreen={win.mode === "fullscreen" || undefined}
       data-dragging={isDragging || undefined}
@@ -104,27 +153,36 @@ export function WindowFrame({
         <button
           type="button"
           className="os-window-grip"
-          aria-label={`Move ${manifest.name} -- drag to swap sides or throw to another desk`}
+          aria-label={`Move ${manifest.name} -- drag or press Shift+F10 for desktop choices`}
           {...listeners}
           {...attributes}
+          onContextMenu={event => { event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY }); }}
+          onKeyDown={event => { if (event.key === "F10" && event.shiftKey) { event.preventDefault(); const box = event.currentTarget.getBoundingClientRect(); setMenu({ x: box.left, y: box.bottom }); } else listeners?.onKeyDown?.(event); }}
         >
           <Icon size={14} aria-hidden />
-          <span className="os-window-title">{manifest.name}</span>
-          {current && sections.length > 1 ? (
-            <span className="os-window-crumb" aria-current="true">
-              {current.name}
-            </span>
-          ) : null}
+
         </button>
+        <select className="os-window-app-selector" aria-label={`Switch app from ${manifest.name}`} value={manifest.id} onChange={event => {
+          const existing = Object.values(state.shell.windows).find(window => window.appId === event.target.value);
+          if (existing) actions.focusWindow(existing.id);
+          else actions.openApp(event.target.value);
+        }}>
+          {appsFor(registry).map(app => <option key={app.id} value={app.id}>{app.name}</option>)}
+        </select>
+        <div className="os-window-drag-space" {...listeners} {...attributes} aria-label={`Drag ${manifest.name}`} />
         <div className="os-window-controls">
+          <div className="os-window-control-group">
           <button
             type="button"
             className="os-icon-button"
             aria-label={`Ask about ${manifest.name}`}
-            onClick={() => openAsk(contextTag)}
+            title={`Ask about ${manifest.name}`}
+            onClick={() => openAsk(visiblePageContext(content.current, contextTag), visiblePageLabel(content.current, `${manifest.name} / ${current?.name ?? ""}`))}
           >
             <Mark size={14} aria-hidden />
           </button>
+          <button type="button" className="os-icon-button" aria-label={`Search ${manifest.name}`} title={`Search ${manifest.name}`} onClick={searchApp}><Search size={14} aria-hidden /></button>
+          </div><div className="os-window-control-group">
           {manifest.settingsSection ? (
             <button
               type="button"
@@ -135,16 +193,21 @@ export function WindowFrame({
                   ? `${manifest.name} settings, ${settingsStatePhrase}`
                   : `${manifest.name} settings`
               }
+              aria-current={current?.id === manifest.settingsSection ? "page" : undefined}
+              title={`${manifest.name} settings`}
               onClick={() => actions.navigateSection(win.id, manifest.settingsSection!)}
             >
               <Settings2 size={14} aria-hidden />
               {settingsTone ? <ProvenanceDot tone={settingsTone} /> : null}
             </button>
           ) : null}
+          {logs ? <button type="button" className="os-icon-button" aria-label={`${manifest.name} logs`} title={`${manifest.name} logs`} onClick={() => actions.navigateSection(win.id, logs.id)}><ListFilter size={14} aria-hidden /></button> : null}
+          </div><div className="os-window-control-group">
           <button
             type="button"
             className="os-icon-button"
             aria-label={`Minimize ${manifest.name}`}
+            title={`Minimize ${manifest.name}`}
             onClick={() => actions.minimizeWindow(win.id)}
           >
             <Minus size={14} aria-hidden />
@@ -153,30 +216,31 @@ export function WindowFrame({
             type="button"
             className="os-icon-button"
             aria-label={
-              win.mode === "fullscreen" ? `Exit full screen` : `Full screen ${manifest.name}`
+              win.mode === "fullscreen" ? `Restore ${manifest.name} to previous desktop` : `Maximize ${manifest.name} on its own desktop`
             }
+            title={win.mode === "fullscreen" ? `Restore ${manifest.name}` : `Maximize ${manifest.name} on its own desktop`}
             onClick={() => actions.toggleFullscreen(win.id)}
           >
             {win.mode === "fullscreen" ? <Minimize2 size={14} aria-hidden /> : <Maximize2 size={14} aria-hidden />}
           </button>
-          <button
-            type="button"
-            className="os-icon-button os-window-close"
-            aria-label={`Close ${manifest.name}`}
-            onClick={() => actions.closeWindow(win.id)}
-          >
-            <X size={14} aria-hidden />
-          </button>
+          <button type="button" className="os-icon-button os-window-close" aria-label={`Close ${manifest.name}`} title={`Close ${manifest.name}`} onClick={() => actions.closeWindow(win.id)}><X size={14} aria-hidden /></button>
+          </div>
         </div>
       </header>
+      <dialog ref={searchDialog} className="os-window-search" aria-label={`Search ${manifest.name} destinations`}>
+        <header><strong>{manifest.name} destinations</strong><button type="button" className="os-icon-button" aria-label="Close destination search" onClick={() => searchDialog.current?.close()}><X size={14} aria-hidden /></button></header>
+        <input autoFocus className="os-input" aria-label="Find a destination" placeholder="Find a destination…" value={searchQuery} onChange={event => setSearchQuery(event.target.value)} />
+        <nav aria-label="Matching destinations">{sections.filter(section => section.name.toLowerCase().includes(searchQuery.toLowerCase())).map(section => <button type="button" className="os-window-nav-item" key={section.id} onClick={() => { searchDialog.current?.close(); actions.navigateSection(win.id, section.id, "content"); }}>{section.name}</button>)}</nav>
+        {!sections.some(section => section.name.toLowerCase().includes(searchQuery.toLowerCase())) ? <p>No destinations match.</p> : null}
+      </dialog>
       <div className="os-window-body">
-        {sections.length > 1 ? (
+        {destinations.length > 1 ? (
           <nav className="os-window-nav" aria-label={`${manifest.name} sections`}>
-            {sections.map((section) => (
+            {destinations.map((section, index) => (
               <button
                 key={section.id}
                 type="button"
-                className="os-window-nav-item"
+                className={`os-window-nav-item${index > 1 ? " os-window-secondary-nav" : ""}`}
                 data-os-setup={
                   settingsTone && section.id === manifest.settingsSection ? "" : undefined
                 }
@@ -185,7 +249,7 @@ export function WindowFrame({
                     ? `${section.name}, ${manifest.name} is ${settingsStatePhrase}`
                     : undefined
                 }
-                aria-current={section.id === current?.id ? "page" : undefined}
+                aria-current={section.id === (current?.parent ?? current?.id) ? "page" : undefined}
                 onClick={() => actions.navigateSection(win.id, section.id)}
               >
                 {section.name}
@@ -194,9 +258,10 @@ export function WindowFrame({
                 ) : null}
               </button>
             ))}
+            {destinations.length > 2 ? <select className="os-window-more-nav" aria-label={`More ${manifest.name} sections`} value={destinations.slice(2).some(s => s.id === (current?.parent ?? current?.id)) ? current?.parent ?? current?.id : ""} onChange={event => { if (event.target.value) actions.navigateSection(win.id, event.target.value); }}><option value="">More…</option>{destinations.slice(2).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select> : null}
           </nav>
         ) : null}
-        <div className="os-window-content" data-os-window-content>
+        <div ref={content} className="os-window-content" data-os-window-content>
           {/* THE REFUSED SURFACE (epic memql#4832, D6).
               A window can be open on an app this actor's rank does not clear,
               two ways that both happen: a desk restored from storage naming an
@@ -237,17 +302,25 @@ export function WindowFrame({
                focused-window guess does not. Keyed by window so one window's
                fault never carries into another's. */
             <WindowErrorBoundary key={win.id} app={manifest.id} section={current?.id ?? ""}>
-              <Body
+              <WindowSearchContext.Provider value={searchHost}><PageNavigationProvider root={content} trail={(win.sectionTrail ?? []).map(id => ({ label: sections.find(section => section.id === id)?.name ?? id, onSelect: () => actions.navigateSection(win.id, id, "back") }))}><Body
                 sectionId={current?.id ?? ""}
-                navigate={(sectionId) => actions.navigateSection(win.id, sectionId)}
+                navigation={win.sectionNavigation}
+                windowVisible={!hidden}
+                navigate={(sectionId, options) => actions.navigateSection(win.id, sectionId, options?.fromContent ? "content" : "peer")}
                 askContext={(tag) => openAsk(tag)}
                 intent={win.intent}
                 consumeIntent={(intentId) => actions.consumeWindowIntent(win.id, intentId)}
-              />
+              /></PageNavigationProvider></WindowSearchContext.Provider>
             </WindowErrorBoundary>
           )}
         </div>
       </div>
+      {menu ? <ContextMenu x={menu.x} y={menu.y} label={`${manifest.name} window actions`} onClose={() => setMenu(null)} entries={[
+        ...(ownDesk && ownDesk.windows.length > 1 ? [{ id: "swap", label: "Swap sides", onSelect: () => actions.swapSides(ownDesk.id) }] : []),
+        ...state.shell.desks.filter(d => d.id !== ownDesk?.id).map((d) => ({ id: `move:${d.id}`, label: `Move to Desk ${state.shell.desks.indexOf(d) + 1}`, disabled: d.windows.length >= 2 || d.windows.some(id => !!state.shell.windows[id]?.fullscreenReturn), onSelect: () => { actions.throwToDesk(win.id, d.id); } })),
+        { id: "new-desk", label: "Move to a new desktop", onSelect: () => { actions.throwToDesk(win.id, "new"); } },
+        ...(logs ? [{ id: "logs", label: "Logs", onSelect: () => actions.navigateSection(win.id, logs.id) }] : []),
+      ]} /> : null}
     </section>
   );
 }

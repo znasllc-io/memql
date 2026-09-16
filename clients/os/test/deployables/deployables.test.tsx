@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -33,6 +33,7 @@ import {
   credentialRow,
   emit,
   fakeConnection,
+  builtinReply,
   siteRow,
   type as typeInto,
   withSession,
@@ -97,7 +98,7 @@ async function open(hostname: string): Promise<HTMLElement> {
   // Before the page opens, the only element carrying the hostname is the
   // list row; once it is open the Head, the rail and the address all do.
   await click((await screen.findByText(hostname)).closest("button"));
-  return screen.findByRole("region", { name: `Deployable ${hostname}` });
+  return (await screen.findByRole("region", { name: `Deployable ${hostname}` })).closest("[data-deployable-view]") as HTMLElement;
 }
 
 /**
@@ -109,11 +110,11 @@ async function open(hostname: string): Promise<HTMLElement> {
  * a person does.
  */
 async function openStop(page: HTMLElement, label: string): Promise<void> {
-  const line = within(page)
-    .getAllByRole("button")
-    .find((b) => b.classList.contains("os-rail-line") && (b.textContent ?? "").startsWith(label));
-  if (line === undefined) throw new Error(`no rail stop named ${label}`);
-  if (line.getAttribute("aria-expanded") !== "true") await click(line);
+  const dialog = screen.queryByRole("dialog");
+  if (dialog) await click(within(dialog).getByRole("button", { name: /^Close / }));
+  const selector = { Source: ".deployable-source-piece", "What it is": ".deployable-piece-chip", "Where it lives": ".deployable-slot", Build: ".deployable-version-row:last-of-type button", Live: ".deployable-version-row button" }[label];
+  if (!selector) throw new Error(`no detail named ${label}`);
+  await click(page.querySelector(selector));
 }
 
 /**
@@ -125,8 +126,7 @@ async function openStop(page: HTMLElement, label: string): Promise<void> {
  * put a control that archives a SIBLING 1,614px above this page's own archive.
  */
 async function openSourceView(page: HTMLElement): Promise<HTMLElement> {
-  await openStop(page, "Source");
-  await click(within(page).getByRole("button", { name: /^Open / }));
+  await click(page.querySelector(".deployable-source-piece"));
   return screen.findByRole("region", { name: /^Source / });
 }
 
@@ -369,7 +369,7 @@ describe("the Head's action, by state", () => {
       "store.memql.example.com",
     );
 
-    expect(barState(page)).toBe("Live");
+    expect(barState(page)).toBe("Unknown");
     // NO CANCEL. It would have killed the other app's run from this page.
     expect(barActs(page)).not.toContain("Cancel");
     // ...and no act that would start a second run of one source either, with
@@ -379,9 +379,8 @@ describe("the Head's action, by state", () => {
       "waiting for admin's deploy to finish",
     );
     // The rail draws THIS app's own state: serving, not "ahead".
-    const rail = within(page).getByRole("list", { name: "Deployable stops" });
-    const states = [...rail.querySelectorAll(":scope > li")].map((li) => li.getAttribute("data-state"));
-    expect(states).not.toContain("ahead");
+    expect(within(page).getAllByText("Unknown").length).toBeGreaterThan(0);
+    expect(within(page).getByText("Finished")).toBeTruthy();
   });
 
   it("a running run: the bar offers Cancel, and the rail is moving", async () => {
@@ -390,9 +389,8 @@ describe("the Head's action, by state", () => {
     // action at all here -- a run could only end by finishing or by dying.
     expect(barState(page)).toBe("Building");
     expect(barActs(page)).toEqual(["Cancel"]);
-    const rail = within(page).getByRole("list", { name: "Deployable stops" });
-    const states = [...rail.querySelectorAll(":scope > li")].map((li) => li.getAttribute("data-state"));
-    expect(states).toEqual(["done", "done", "done", "current", "ahead"]);
+    expect(within(page).getAllByText("Unknown").length).toBeGreaterThan(0);
+    expect(within(page).getAllByText("Building")[0]).toBeTruthy();
   });
 
   it("a parked run: Cancel and Deploy, and Deploy CONFIRMS THAT RUN", async () => {
@@ -462,9 +460,9 @@ describe("the Head's action, by state", () => {
     // The Source stop carries the standing mark and the newer version -- and
     // it is one line now, so reading it means opening it.
     await openStop(page, "Source");
-    expect(within(page).getByText("update")).toBeTruthy();
-    expect(within(page).getByText(/newer version upstream: bbbbbbb\./)).toBeTruthy();
-    await click(update);
+    expect(within(page).getByText(/A newer version is available: bbbbbbb/)).toBeTruthy();
+    await click(within(page).getByRole("button", { name: /^Back to / }));
+    await click(await screen.findByRole("button", { name: /^Deploy the update/ }));
     expect(connection.callsNamed("packageDeploy")).toEqual(['builtin packageDeploy(packageId: "pkg-acme", confirm: false)']);
   });
 
@@ -518,7 +516,7 @@ describe("the Head's action, by state", () => {
     for (const label of [/Pause/, /Resume/, /Archive/, /Restore/, /Show the last/, /Roll back/]) {
       expect(within(page).queryByRole("button", { name: label })).toBeNull();
     }
-    expect(within(page).getByText(/one of the cluster's own surfaces/)).toBeTruthy();
+    expect(document.querySelector(".os-actbar-detail")?.textContent).toContain("availability has not been verified");
   });
 
   it("an archived deployable: the rung that frees its name, and Restore", async () => {
@@ -540,10 +538,11 @@ describe("the Head's action, by state", () => {
     expect(within(page).queryByRole("button", { name: /from a zip/ })).toBeNull();
   });
 
-  it("carries the quiet Ask and Open beside it", async () => {
+  it("keeps Open on the page and leaves Ask to the window", async () => {
     const { page } = await mountAndOpen(WITH_PACKAGE, "store.memql.example.com");
     const head = page.querySelector(".os-head") as HTMLElement;
-    expect(within(head).getByRole("button", { name: "Ask about store.memql.example.com" })).toBeTruthy();
+    expect(within(head).queryByRole("button", { name: "Ask about storefront" })).toBeNull();
+    expect(within(page).getByRole("navigation", { name: "Breadcrumbs" })).toBeTruthy();
     const link = within(head).getByRole("link", { name: /Open/ });
     expect(link.getAttribute("href")).toBe("https://store.memql.example.com/");
     expect(link.getAttribute("rel")).toContain("noopener");
@@ -573,13 +572,12 @@ describe("a first publish", () => {
     const draft = siteRow({ id: "site-docs", hostname: "docs.memql.example.com", kind: "static", status: "draft", bundleRef: "blob://sites/site-docs/v1/" });
     const { page } = await mountAndOpen({ sites: [draft] }, "docs.memql.example.com");
     await openStop(page, "Source");
-    expect(within(page).getByText("Built. In place at docs.memql.example.com, not live yet.")).toBeTruthy();
+    expect(document.querySelector(".os-actbar")?.textContent).toContain("not live yet");
     // EXACTLY ONE, on the bar, reading Go live. The stop offers no second one
     // -- which is the assertion that survived two renames.
     expect(screen.getAllByRole("button", { name: /^Go live/ })).toHaveLength(1);
     // ...and exactly one stop is open (design section C).
-    const rail = within(page).getByRole("list", { name: "Deployable stops" });
-    expect(rail.querySelectorAll('li[data-open="true"]')).toHaveLength(1);
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
   });
 
   it("a placeholder is not a publish: the source is waiting for the first push", async () => {
@@ -592,7 +590,6 @@ describe("a first publish", () => {
     expect(barActs(page)).toEqual(["Discard", "Deploy"]);
     await openStop(page, "Source");
     expect(within(page).getByText("waiting for the first push")).toBeTruthy();
-    expect(within(page).getByText("Nothing deployed here yet.")).toBeTruthy();
     expect(within(page).getByText(/POST \/sites\/site-ci\/bundles/)).toBeTruthy();
   });
 });
@@ -606,14 +603,14 @@ describe("the Source stop", () => {
     const { connection, page } = await mountAndOpen({ sites: [SHOP] }, "shop.memql.example.com");
     await openStop(page, "Source");
     expect(within(page).getByText("blob://sites/site-shop/v1/")).toBeTruthy();
-    expect(within(page).getByText("uploaded bundle")).toBeTruthy();
+    expect(within(screen.getByRole("dialog")).getByText("uploaded bundle")).toBeTruthy();
     expect(within(page).getByText("artifact-zip")).toBeTruthy();
     expect(within(page).getByText("Deployed from the Library.")).toBeTruthy();
     // The storefront's binding is What-it-is, not Source -- and exactly one
     // stop is open at a time, so reading the other means opening it.
     await openStop(page, "What it is");
     // It names the secret and NEVER fetches its value.
-    expect(within(page).getByText("example.myshopify.com")).toBeTruthy();
+    expect(within(screen.getByRole("dialog")).getByText("example.myshopify.com")).toBeTruthy();
     expect(within(page).getByText("shopify-storefront-token")).toBeTruthy();
     expect(connection.calls.some((c) => c.toLowerCase().includes("secret"))).toBe(false);
   });
@@ -629,7 +626,7 @@ describe("the Source stop", () => {
   it("shows a package-produced site's source as facts", async () => {
     const { page } = await mountAndOpen(WITH_PACKAGE, "store.memql.example.com");
     await openStop(page, "Source");
-    expect(within(page).getByText("acme/storefront at main")).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: /^Source / })).getByRole("heading", { name: "acme/storefront at main" })).toBeTruthy();
     expect(within(page).getByText("Tracking")).toBeTruthy();
     expect(within(page).getByText("Deployed")).toBeTruthy();
     expect(within(page).getAllByText("aaaaaaa").length).toBeGreaterThan(0);
@@ -830,7 +827,7 @@ describe("What it is", () => {
     const analyzing = run({ id: "dep-an", status: "analyzing", report: null, deployables: [], finishedAt: "", startedAt: "2026-09-01T14:00:00Z", createdAt: "2026-09-01T14:00:00Z" });
     const { page } = await mountAndOpen({ ...WITH_PACKAGE, deployments: { "pkg-acme": [analyzing, SUCCEEDED] } }, "store.memql.example.com");
     await openStop(page, "What it is");
-    expect(within(page).getByText(/Reading the tree/)).toBeTruthy();
+    expect(within(page).getByText(/Analyzing the source/)).toBeTruthy();
     expect(page.querySelectorAll("[aria-busy='true']")).toHaveLength(0);
   });
 
@@ -838,7 +835,7 @@ describe("What it is", () => {
     const { page } = await mountAndOpen({ sites: [SHOP] }, "shop.memql.example.com");
     await openStop(page, "What it is");
     expect(within(page).queryByText("Web apps")).toBeNull();
-    expect(within(page).getByText("Shopify storefront")).toBeTruthy();
+    expect(within(screen.getByRole("dialog")).getByText("Shopify storefront")).toBeTruthy();
     expect(within(page).queryByText(/index\.html present/)).toBeNull();
   });
 });
@@ -846,20 +843,19 @@ describe("What it is", () => {
 describe("Build", () => {
   it("renders the engine's needs-a-build refusal in place, verbatim, with the build output", async () => {
     const { page } = await mountAndOpen({ ...WITH_PACKAGE, deployments: { "pkg-acme": [REFUSED, SUCCEEDED] } }, "store.memql.example.com");
-    const rail = within(page).getByRole("list", { name: "Deployable stops" });
-    const build = [...rail.querySelectorAll(":scope > li")].find((li) => li.textContent?.includes("Build")) as HTMLElement;
-    expect(build.getAttribute("data-state")).toBe("stopped");
+    expect(within(page).getAllByText("Unknown").length).toBeGreaterThan(0);
+    expect(within(page).getByText("Refused")).toBeTruthy();
+    await openStop(page, "Build");
+    const build = screen.getByRole("dialog");
     expect(within(build).getByText("The build did not finish")).toBeTruthy();
     expect(within(build).getAllByText(/npm run build exited 1 in clients\/web/).length).toBeGreaterThan(0);
     expect(within(build).getByText(/npm ERR! missing script: build/)).toBeTruthy();
-    // ...and the site is still serving what it was serving (design H).
-    const live = [...rail.querySelectorAll(":scope > li")].find((li) => li.textContent?.includes("Live at")) as HTMLElement;
-    expect(live.getAttribute("data-state")).toBe("done");
+    expect(within(page).getByText("The latest attempt did not replace the published version.")).toBeTruthy();
   });
 
   it("a prebuilt app: skipped with the reason", async () => {
     const { page } = await mountAndOpen(WITH_PACKAGE, "store.memql.example.com");
-    expect(within(page).getByText("its built output is in the source")).toBeTruthy();
+    expect(within(page).getByText(/its built output is in the source/)).toBeTruthy();
   });
 });
 
@@ -884,7 +880,7 @@ describe("Where it lives", () => {
     const tied = siteRow({ ...STORE, id: "site-store", accountId: "acct-1" });
     const { connection, page } = await mountAndOpen({ ...WITH_PACKAGE, sites: [tied, ADMIN] }, "store.memql.example.com");
     await openStop(page, "Where it lives");
-    expect(within(page).getByText("acct-1")).toBeTruthy();
+    expect(within(screen.getByRole("dialog")).getByText("acct-1")).toBeTruthy();
     await click(within(page).getByLabelText("The client this deployable is for"));
     await click(await screen.findByRole("option", { name: "No client" }));
     await waitFor(() => expect(connection.callsNamed("updateSiteAccount")).toHaveLength(1));
@@ -904,17 +900,18 @@ describe("Where it lives", () => {
 // ---------------------------------------------------------------------------
 
 describe("the Live stop", () => {
-  it("says since when, walks the versions on demand, and rolls back to one", async () => {
+  it("reports availability, walks the versions on demand, and rolls back to one", async () => {
     const history = [
       { ...STORE, bundleRef: "blob://sites/site-store/v2/", createdAt: "2026-09-01T12:01:00Z" },
       { ...STORE, bundleRef: "blob://sites/site-store/v1/", createdAt: "2026-08-20T12:00:00Z" },
     ];
     const { connection, page } = await mountAndOpen({ ...WITH_PACKAGE, siteHistory: history }, "store.memql.example.com");
-    expect(within(page).getByText("Live since")).toBeTruthy();
+    await openStop(page, "Live");
+    expect(within(page).getByText("Last website check")).toBeTruthy();
     // Loaded on DEMAND: nothing walked until asked.
     expect(connection.callsNamed("siteById")).toHaveLength(0);
     await click(within(page).getByRole("button", { name: /Show the last 6/ }));
-    expect(await within(page).findByText("serving now")).toBeTruthy();
+    expect(await within(page).findByText("published version")).toBeTruthy();
     expect(within(page).getByText("v1")).toBeTruthy();
     expect(connection.calls.filter((c) => c.startsWith("asOf(siteById(")).length).toBeGreaterThan(0);
 
@@ -1133,7 +1130,7 @@ describe("the bundle flip marker", () => {
     // The title is a What-it-is fact, and exactly one stop is open at a time,
     // so reaching it means opening it.
     await openStop(page, "What it is");
-    expect(within(page).getByText("Renamed")).toBeTruthy();
+    expect(within(screen.getByRole("dialog")).getByText("Renamed")).toBeTruthy();
   });
 });
 
@@ -1266,11 +1263,11 @@ describe("redeploying from a zip", () => {
 });
 
 describe("what the page does not do", () => {
-  it("mounts no toast container and no dialog anywhere", async () => {
+  it("opens no modal until a detail is requested", async () => {
     const connection = fakeConnection(WITH_PACKAGE);
     const { container } = mount(connection);
     await open("store.memql.example.com");
-    expect(container.querySelector("[data-toast], .os-toast, dialog, [role='dialog']")).toBeNull();
+    expect(container.querySelector("[data-toast], .os-toast, dialog[open]")).toBeNull();
   });
 });
 
@@ -1482,5 +1479,44 @@ describe("apps it produces", () => {
     const region = await screen.findByRole("region", { name: "Deploy web from acme" });
     expect(within(region).getByText("web is inactive.")).toBeTruthy();
     expect(within(document.querySelector(".os-actbar") as HTMLElement).getByRole("button", { name: "Activate" })).toBeTruthy();
+  });
+});
+
+
+describe("composition history scope", () => {
+  it("starts at this app's history and provides an explicit route to every source attempt", async () => {
+    const sibling=run({id:"dep-admin",sourceVersion:"aaaaaaaaaaaa",scopedTo:["admin"],deployables:[],status:"failed"});
+    const whole=run({id:"dep-whole",sourceVersion:"bbbbbbbbbbbb",status:"abandoned",snapshotArtifactId:"snapshot",scopedTo:[]});
+    const {page}=await mountAndOpen({...WITH_PACKAGE,deployments:{"pkg-acme":[sibling,whole,SUCCEEDED]}},"store.memql.example.com");
+    await click(within(page).getByRole("button",{name:"Deployment history"}));
+    const history=await screen.findByRole("region",{name:/History of/});
+    expect(within(history).queryByText("aaaaaaaaaaaa")).toBeNull();
+    expect(within(history).queryByRole("button",{name:/Retry the run/})).toBeNull();
+    await click(within(history).getByRole("button",{name:"All source attempts"}));
+    expect(await screen.findByRole("button",{name:/Retry the run/})).toBeTruthy();
+  });
+});
+
+
+describe("observed availability reaches every retained view", () => {
+  it.each(["reachable", "unavailable"])("shares a %s observation with the list and detail without a site event", async (state) => {
+    const connection = fakeConnection({sites:[PLATFORM_SITE]});
+    const execute = vi.mocked(connection.query.executeNamed).getMockImplementation()!;
+    let finish: (() => void) | undefined;
+    vi.spyOn(connection.query, "executeNamed").mockImplementation((name, call, opts) => {
+      if (name !== "siteHealthRead") return execute(name, call, opts);
+      return new Promise(resolve => {finish = () => resolve(builtinReply("siteHealth", [{siteId:PLATFORM_SITE.id, hostname:PLATFORM_SITE.hostname, bundleRef:PLATFORM_SITE.bundleRef, checkedAt:new Date().toISOString(), state, httpStatus:state === "reachable" ? 200 : 404, reason:state === "reachable" ? "Website answered successfully" : "Website returned HTTP 404"}]));});
+    });
+    mount(connection);
+    const row = (await screen.findByText(String(PLATFORM_SITE.title))).closest(".os-row") as HTMLElement;
+    expect(within(row).getByText("Unknown")).toBeTruthy();
+    await waitFor(() => expect(finish).toBeTypeOf("function"));
+    await act(async () => finish!());
+    const word = state === "reachable" ? "Live" : "Unavailable";
+    await waitFor(() => expect(within(row).getByText(word)).toBeTruthy());
+    await click(row);
+    const page = await screen.findByRole("region", {name:`Deployable ${PLATFORM_SITE.hostname}`});
+    expect(barState(page)).toBe(word);
+    expect(within(page).getByText(new RegExp(state === "reachable" ? "Website answered successfully" : "Website returned HTTP 404"))).toBeTruthy();
   });
 });

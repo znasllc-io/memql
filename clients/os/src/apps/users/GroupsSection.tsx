@@ -1,3 +1,4 @@
+import { AddButton } from "../../kit/AddButton";
 import { useEffect, useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { Users } from "lucide-react";
@@ -161,9 +162,7 @@ export function GroupsSection({
   return (
     <div className="os-app-stack">
       <Head title="Groups" meta={count === 0 ? undefined : `${count}`}>
-        <Button tone="primary" onClick={() => setView({ kind: "new" })}>
-          New group
-        </Button>
+        <AddButton onClick={() => setView({ kind: "new" })} label="New group" />
       </Head>
 
       {groups.snapshot.error ? (

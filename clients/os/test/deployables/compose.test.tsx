@@ -126,8 +126,18 @@ async function chooseRepository(region: HTMLElement): Promise<void> {
   await click(within(region).getByRole("button", { name: "Use a token instead" }));
 }
 
+/** Follow the wizard to its address step without writing anything. */
+async function openAddresses(): Promise<void> {
+  const continueButton = forwardAct("Continue");
+  if (continueButton) await click(continueButton);
+  const chooseAddresses = forwardAct("Choose addresses");
+  if (chooseAddresses) await click(chooseAddresses);
+  else await click(screen.getByRole("button", { name: /Address$/ }));
+}
+
 /** Type into a field by its accessible name, the way a person would. */
 async function fill(label: string, value: string): Promise<void> {
+  if (!screen.queryByLabelText(label) && label.startsWith("The name ")) await openAddresses();
   const input = screen.getByLabelText(label) as HTMLInputElement;
   await act(async () => {
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
@@ -150,7 +160,7 @@ async function choose(label: string, option: string | RegExp): Promise<void> {
 }
 
 function railStates(region: HTMLElement): (string | null)[] {
-  const rail = within(region).getByRole("list", { name: "Deployable stops" });
+  const rail = within(region).getByRole("list", { name: "Deployable setup progress" });
   return [...rail.querySelectorAll(":scope > li")].map((li) => li.getAttribute("data-state"));
 }
 
@@ -509,9 +519,8 @@ describe("the compose flow: a zip in Files", () => {
 
     expect(await within(region).findByText(/a built site -- index.html at the root/)).toBeTruthy();
     expect(within(region).getByLabelText("What kind of deployable this is")).toBeTruthy();
-    // The one sentence about the three kinds that are NOT offered, said once
-    // in place of three disabled controls.
-    expect(within(region).getByText(/Android, iOS and macOS builds are not deployables/)).toBeTruthy();
+    // The picker offers supported kinds without unrelated platform commentary.
+    expect(within(region).queryByText(/Android, iOS and macOS builds are not deployables/)).toBeNull();
   });
 
   it("creates the draft at Analyze and publishes the zip at Deploy", async () => {
@@ -527,7 +536,10 @@ describe("the compose flow: a zip in Files", () => {
 
     // Build reads SKIPPED before anything runs: a built site IS its output.
     expect(railStates(region)[3]).toBe("skipped");
+    await click(within(region).getByRole("button", { name: /Build$/ }));
     expect(within(region).getByText("its built output is in the source")).toBeTruthy();
+    await click(within(region).getByRole("button", { name: /Source$/ }));
+    await openAddresses();
 
     // A GENERATED ADDRESS, for when it should say nothing about what it
     // serves. It fills the same field rather than replacing it, so it is a
@@ -623,6 +635,8 @@ describe("the compose flow: pushed by your CI", () => {
     // `createSite` has already claimed would change nothing.
     expect(within(region).queryByLabelText("The name Marketing site answers at")).toBeNull();
     expect(within(region).getByText("marketing.memql.example.com")).toBeTruthy();
+    expect(document.querySelector(".os-actbar-word")?.textContent).toBe("Waiting for CI");
+    expect(railStates(region)[4]).toBe("open");
     // Nothing is deployed from here: the Live stop is what waits.
     expect(forwardAct("Deploy")).toBeNull();
     expect(within(region).getByText(/Waiting for the first push from your CI/)).toBeTruthy();
@@ -857,6 +871,7 @@ describe("the compose flow: where each app will live", () => {
 
   it("offers the client to everybody who composes, and their own domain only with the domains part", async () => {
     const { region, view } = await analyzed();
+    await openAddresses();
     expect(within(region).getByLabelText("The client storefront is for")).toBeTruthy();
     expect(within(region).getByLabelText("A domain of the client's own for storefront")).toBeTruthy();
     view.unmount();
@@ -867,6 +882,7 @@ describe("the compose flow: where each app will live", () => {
       {},
       { role: "developer", capabilities: seededAccessWithout("developer", "app:deployables/domains") },
     );
+    await openAddresses();
     expect(within(developer).getByLabelText("The client storefront is for")).toBeTruthy();
     expect(within(developer).queryByLabelText("A domain of the client's own for storefront")).toBeNull();
   });
@@ -1017,6 +1033,7 @@ describe("the compose flow: leaving and coming back", () => {
     expect(within(region).getByText("acme/storefront at main")).toBeTruthy();
     expect(within(region).getByText("clients/web")).toBeTruthy();
     expect(railStates(region)).toEqual(["complete", "complete", "open", "skipped", "pending"]);
+    await openAddresses();
     expect(await forward("Deploy")).toBeTruthy();
   });
 });
@@ -1117,7 +1134,7 @@ describe("a private repository whose build output is committed", () => {
     await waitFor(() =>
       expect((document.querySelector(".os-actbar")?.textContent ?? "")).toContain("in place at shop.memql.example.com"),
     );
-    expect(railStates(region)).toEqual(["complete", "complete", "complete", "skipped", "complete"]);
+    expect(railStates(region)).toEqual(["complete", "complete", "complete", "skipped", "open"]);
     // The addresses are facts now, and the one that landed is the run's own.
     expect(within(region).queryByLabelText("The name storefront answers at")).toBeNull();
     expect(within(region).getAllByText("shop.memql.example.com").length).toBeGreaterThan(0);
@@ -1174,6 +1191,7 @@ describe("a gate opened for one app", () => {
     // never the form: with neither app placed, the stop asked about
     // `storefront` too, with a Deploy/Skip pill on each, and the bar counted
     // "2 of 2 apps".
+    await openAddresses();
     expect(within(region).getByLabelText("The name web answers at")).toBeTruthy();
     expect(within(region).queryByLabelText("The name storefront answers at")).toBeNull();
     expect(within(region).queryByRole("radiogroup", { name: /Deploy or skip/ })).toBeNull();
@@ -1204,6 +1222,7 @@ describe("a gate opened for one app", () => {
 describe("the address, checked as it is typed", () => {
   it("starts as a GENERATED name that the cluster has checked, not the app's own", async () => {
     const { region } = await analyzed();
+    await openAddresses();
     const field = within(region).getByLabelText("The name storefront answers at") as HTMLInputElement;
     // Two ordinary words, never `storefront`: every source declares that
     // name, so the first person on a cluster took it and the second found it
@@ -1242,9 +1261,11 @@ describe("the address, checked as it is typed", () => {
     // lands was checked, which is the assertion: the field never shows a
     // generated name the person cannot have.
     const { region, connection } = await analyzed();
+    await openAddresses();
     const before = connection.callsNamed("siteHostnameCheck").length;
     await click(within(region).getByRole("button", { name: "Generate an address for storefront" }));
     await waitFor(() => expect(connection.callsNamed("siteHostnameCheck").length).toBeGreaterThan(before));
+    await openAddresses();
     const field = within(region).getByLabelText("The name storefront answers at") as HTMLInputElement;
     await waitFor(() => expect(field.value).toMatch(/^[a-z]+-[a-z]+$/));
     await waitFor(() => expect(verdict(region)).toContain(`${field.value}.memql.example.com -- free`));
@@ -1285,5 +1306,62 @@ describe("a source this cluster already tracks", () => {
     await within(region).findByText(/public, default branch main/);
     expect(within(region).queryByText(/already tracked by/)).toBeNull();
     expect(await forward("Analyze")).toBeTruthy();
+  });
+});
+
+
+describe("composition write failures and bindings", () => {
+  it("keeps activation available when enabling the app is refused, without starting analysis", async () => {
+    const connection = fakeConnection({ packages: [{...ACME, declares:[{name:"storefront",kind:"spa"}], disabledDeployables:["storefront"]}], enableDeployablesError:"Activation was refused" });
+    mount(connection);
+    await click((await screen.findByText("storefront")).closest("button"));
+    await click(await forward("Activate"));
+    expect(await screen.findByText("Activation was refused")).toBeTruthy();
+    expect(forwardAct("Activate")).toBeTruthy();
+    expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
+  });
+
+  it("does not confirm a deploy when recording its skipped apps is refused", async () => {
+    const { connection, region } = await analyzed({disableDeployablesError:"Skip was refused"});
+    await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(mintedPackageId(connection), { report: REPORT_TWO }));
+    await fill("The name storefront answers at", "shop");
+    await click(within(region).getByRole("radiogroup", {name:"Deploy or skip web"}).querySelectorAll("[role=radio]")[1]);
+    await click(await forward("Deploy"));
+    expect(await screen.findByText("Skip was refused")).toBeTruthy();
+    expect(connection.callsNamed("packageDeploy").some(c=>c.includes("confirm: true"))).toBe(false);
+  });
+
+  it("keeps a partial Go live honest and retries only the remaining apps", async () => {
+    const errors: Record<string,string> = {"site-web":"Serving was refused"};
+    const {connection} = await analyzed({siteStatusErrors:errors});
+    await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(mintedPackageId(connection), {status:"succeeded", report:REPORT_TWO, deployables:[
+      {name:"storefront",siteId:"site-shop",hostname:"shop.memql.example.com",bundleRef:"blob://sites/site-shop/v1/",created:true},
+      {name:"web",siteId:"site-web",hostname:"web.memql.example.com",bundleRef:"blob://sites/site-web/v1/",created:true}
+    ]}));
+    await click(await forward("Go live"));
+    expect(await screen.findByText("Serving was refused")).toBeTruthy();
+    expect(screen.getByText("1 app is live.")).toBeTruthy();
+    expect(document.querySelector(".os-actbar-word")?.textContent).toBe("Built");
+    delete errors["site-web"];
+    await click(await forward("Go live"));
+    await waitFor(()=>expect(document.querySelector(".os-actbar-word")?.textContent).toBe("Live"));
+    expect(connection.callsNamed("updateSiteStatus").filter(c=>c.includes('siteId: "site-shop"'))).toHaveLength(1);
+    expect(connection.callsNamed("updateSiteStatus").filter(c=>c.includes('siteId: "site-web"'))).toHaveLength(2);
+  });
+
+  it("carries a Shopify binding through CI destination creation", async () => {
+    const connection=fakeConnection();
+    const {region}=await compose(connection);
+    await chooseSource(region,/Pushed by your CI/);
+    await fill(NAME_FIELD,"Storefront");
+    await choose("What kind of deployable this is","Shopify storefront");
+    expect(forwardAct("Continue")).toBeNull();
+    await fill("Shopify store domain","acme.myshopify.com");
+    await fill("Storefront token reference","acme-storefront-token");
+    await fill("The name Storefront answers at","storefront");
+    await click(await forward("Analyze"));
+    const create=connection.callsNamed("createSite")[0] ?? "";
+    expect(create).toContain('storeDomain: "acme.myshopify.com"');
+    expect(create).toContain('storefrontTokenRef: "acme-storefront-token"');
   });
 });

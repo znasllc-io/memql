@@ -2853,6 +2853,326 @@ func RoleUpdateBuild(args RoleUpdateArgs) string {
 	return b.String()
 }
 
+// RouterListPolicies -- List all routing policies loaded from policies/v1/*.memql. Feeds the frontend's /router/policies page.
+type RouterListPoliciesArgs struct {
+}
+
+// RouterListPolicies calls the engine builtin routerListPolicies.
+func (qc *QueryClient) RouterListPolicies(ctx context.Context, args RouterListPoliciesArgs) (*Result, error) {
+	call := RouterListPoliciesBuild(args)
+	return qc.executeNamed(ctx, "routerListPolicies", call)
+}
+
+func RouterListPoliciesBuild(args RouterListPoliciesArgs) string {
+	_ = args
+	return "builtin routerListPolicies()"
+}
+
+// RoutingPolicyDescribe -- Ask MemQL to compose a validated policy draft. No policy is saved; review it and call routingPolicySave or routingPolicyReset with its revision. Requires inference and owner/developer access.
+type RoutingPolicyDescribeArgs struct {
+	Sentence string
+}
+
+// RoutingPolicyDescribe calls the engine builtin routingPolicyDescribe.
+func (qc *QueryClient) RoutingPolicyDescribe(ctx context.Context, args RoutingPolicyDescribeArgs) (*Result, error) {
+	call := RoutingPolicyDescribeBuild(args)
+	return qc.executeNamed(ctx, "routingPolicyDescribe", call)
+}
+
+func RoutingPolicyDescribeBuild(args RoutingPolicyDescribeArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin routingPolicyDescribe(")
+	b.WriteString("sentence: ")
+	b.WriteString(quoteMemQL(args.Sentence))
+	b.WriteString(")")
+	return b.String()
+}
+
+// RoutingPolicyReset -- Restore a shipped policy's original sources. User-created policies have no shipped default. Owner or developer only; expectedRevision comes from routerListPolicies.
+type RoutingPolicyResetArgs struct {
+	Name             string
+	ExpectedRevision int
+}
+
+// RoutingPolicyReset calls the engine builtin routingPolicyReset.
+func (qc *QueryClient) RoutingPolicyReset(ctx context.Context, args RoutingPolicyResetArgs) (*Result, error) {
+	call := RoutingPolicyResetBuild(args)
+	return qc.executeNamed(ctx, "routingPolicyReset", call)
+}
+
+func RoutingPolicyResetBuild(args RoutingPolicyResetArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin routingPolicyReset(")
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedRevision: ")
+	b.WriteString(fmt.Sprintf("%v", args.ExpectedRevision))
+	b.WriteString(")")
+	return b.String()
+}
+
+// RoutingPolicySave -- Create or replace a cluster-wide routing policy with a preferred source and ordered fallbacks. Read routerListPolicies first and pass its revision. A stale revision refuses without changes. Owner or developer only. The active embeddings binding cannot acquire another source or fallback.
+type RoutingPolicySaveArgs struct {
+	Name             string
+	Description      string
+	Primary          string
+	Fallbacks        []string
+	ExpectedRevision int
+}
+
+// RoutingPolicySave calls the engine builtin routingPolicySave.
+func (qc *QueryClient) RoutingPolicySave(ctx context.Context, args RoutingPolicySaveArgs) (*Result, error) {
+	call := RoutingPolicySaveBuild(args)
+	return qc.executeNamed(ctx, "routingPolicySave", call)
+}
+
+func RoutingPolicySaveBuild(args RoutingPolicySaveArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin routingPolicySave(")
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if args.Description != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("description: ")
+		b.WriteString(quoteMemQL(args.Description))
+	}
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("primary: ")
+	b.WriteString(quoteMemQL(args.Primary))
+	if args.Fallbacks != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("fallbacks: ")
+		b.WriteString(renderMemQLValue(args.Fallbacks))
+	}
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedRevision: ")
+	b.WriteString(fmt.Sprintf("%v", args.ExpectedRevision))
+	b.WriteString(")")
+	return b.String()
+}
+
+// RoutingRuleDescribe -- Compile a rule draft using local inference. Review and validate before routingRuleSave; no configuration is changed.
+type RoutingRuleDescribeArgs struct {
+	Sentence string
+}
+
+// RoutingRuleDescribe calls the engine builtin routingRuleDescribe.
+func (qc *QueryClient) RoutingRuleDescribe(ctx context.Context, args RoutingRuleDescribeArgs) (*Result, error) {
+	call := RoutingRuleDescribeBuild(args)
+	return qc.executeNamed(ctx, "routingRuleDescribe", call)
+}
+
+func RoutingRuleDescribeBuild(args RoutingRuleDescribeArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin routingRuleDescribe(")
+	b.WriteString("sentence: ")
+	b.WriteString(quoteMemQL(args.Sentence))
+	b.WriteString(")")
+	return b.String()
+}
+
+// RoutingRuleRemove -- Remove a custom rule after reading its current revision. Shipped rules cannot be removed.
+type RoutingRuleRemoveArgs struct {
+	Name             string
+	ExpectedRevision int
+}
+
+// RoutingRuleRemove calls the engine builtin routingRuleRemove.
+func (qc *QueryClient) RoutingRuleRemove(ctx context.Context, args RoutingRuleRemoveArgs) (*Result, error) {
+	call := RoutingRuleRemoveBuild(args)
+	return qc.executeNamed(ctx, "routingRuleRemove", call)
+}
+
+func RoutingRuleRemoveBuild(args RoutingRuleRemoveArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin routingRuleRemove(")
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedRevision: ")
+	b.WriteString(fmt.Sprintf("%v", args.ExpectedRevision))
+	b.WriteString(")")
+	return b.String()
+}
+
+// RoutingRuleSave -- Save a custom cluster rule at the revision returned by validation. Shipped rules cannot be changed.
+type RoutingRuleSaveArgs struct {
+	Conditions       map[string]any
+	Name             string
+	Policy           string
+	Precedence       int
+	ExpectedRevision int
+	Description      string
+	Level            string
+	OnUnavailable    string
+	Excludes         []string
+}
+
+// RoutingRuleSave calls the engine builtin routingRuleSave.
+func (qc *QueryClient) RoutingRuleSave(ctx context.Context, args RoutingRuleSaveArgs) (*Result, error) {
+	call := RoutingRuleSaveBuild(args)
+	return qc.executeNamed(ctx, "routingRuleSave", call)
+}
+
+func RoutingRuleSaveBuild(args RoutingRuleSaveArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin routingRuleSave(")
+	if args.Conditions != nil {
+		b.WriteString("conditions: ")
+		b.WriteString(renderMemQLValue(args.Conditions))
+	}
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("policy: ")
+	b.WriteString(quoteMemQL(args.Policy))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("precedence: ")
+	b.WriteString(fmt.Sprintf("%v", args.Precedence))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedRevision: ")
+	b.WriteString(fmt.Sprintf("%v", args.ExpectedRevision))
+	if args.Description != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("description: ")
+		b.WriteString(quoteMemQL(args.Description))
+	}
+	if args.Level != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("level: ")
+		b.WriteString(quoteMemQL(args.Level))
+	}
+	if args.OnUnavailable != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("onUnavailable: ")
+		b.WriteString(quoteMemQL(args.OnUnavailable))
+	}
+	if args.Excludes != nil {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("excludes: ")
+		b.WriteString(renderMemQLValue(args.Excludes))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// RoutingRuleValidate -- Validate a custom rule definition against current policies and locked-rule constraints. This validates the definition; it does not claim a replay of historical decisions.
+type RoutingRuleValidateArgs struct {
+	ExpectedRevision int
+	Conditions       map[string]any
+	Name             string
+	Policy           string
+	Precedence       int
+	Level            string
+	OnUnavailable    string
+	Excludes         []string
+}
+
+// RoutingRuleValidate calls the engine builtin routingRuleValidate.
+func (qc *QueryClient) RoutingRuleValidate(ctx context.Context, args RoutingRuleValidateArgs) (*Result, error) {
+	call := RoutingRuleValidateBuild(args)
+	return qc.executeNamed(ctx, "routingRuleValidate", call)
+}
+
+func RoutingRuleValidateBuild(args RoutingRuleValidateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin routingRuleValidate(")
+	if args.ExpectedRevision != 0 {
+		b.WriteString("expectedRevision: ")
+		b.WriteString(fmt.Sprintf("%v", args.ExpectedRevision))
+	}
+	if args.Conditions != nil {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("conditions: ")
+		b.WriteString(renderMemQLValue(args.Conditions))
+	}
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("policy: ")
+	b.WriteString(quoteMemQL(args.Policy))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("precedence: ")
+	b.WriteString(fmt.Sprintf("%v", args.Precedence))
+	if args.Level != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("level: ")
+		b.WriteString(quoteMemQL(args.Level))
+	}
+	if args.OnUnavailable != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("onUnavailable: ")
+		b.WriteString(quoteMemQL(args.OnUnavailable))
+	}
+	if args.Excludes != nil {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("excludes: ")
+		b.WriteString(renderMemQLValue(args.Excludes))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// RoutingRules -- Read shipped and custom rules in actual evaluation order, with configuration revision.
+type RoutingRulesArgs struct {
+}
+
+// RoutingRules calls the engine builtin routingRules.
+func (qc *QueryClient) RoutingRules(ctx context.Context, args RoutingRulesArgs) (*Result, error) {
+	call := RoutingRulesBuild(args)
+	return qc.executeNamed(ctx, "routingRules", call)
+}
+
+func RoutingRulesBuild(args RoutingRulesArgs) string {
+	_ = args
+	return "builtin routingRules()"
+}
+
 // ShopifyEnsureSubscriptions -- Register every mirrored webhook topic for every ingesting store at the pinned API version, update the ones whose URL, version or includeFields have drifted, and remove ours the allowlist no longer wants. Shopify deletes a subscription after eight consecutive delivery failures, so this is what brings a store back after an outage. Records the outcome on each store's health.
 type ShopifyEnsureSubscriptionsArgs struct {
 }
@@ -3025,6 +3345,26 @@ func SiteDeleteBuild(args SiteDeleteArgs) string {
 	}
 	b.WriteString("confirmHostname: ")
 	b.WriteString(quoteMemQL(args.ConfirmHostname))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SiteHealthRead -- Read current HTTP observations for sites the caller may read. Never triggers a probe; absent or expired observations mean unknown availability.
+type SiteHealthReadArgs struct {
+	SiteIds []string
+}
+
+// SiteHealthRead calls the engine builtin siteHealthRead.
+func (qc *QueryClient) SiteHealthRead(ctx context.Context, args SiteHealthReadArgs) (*Result, error) {
+	call := SiteHealthReadBuild(args)
+	return qc.executeNamed(ctx, "siteHealthRead", call)
+}
+
+func SiteHealthReadBuild(args SiteHealthReadArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin siteHealthRead(")
+	b.WriteString("siteIds: ")
+	b.WriteString(renderMemQLValue(args.SiteIds))
 	b.WriteString(")")
 	return b.String()
 }

@@ -108,7 +108,7 @@ export function ComposeSourceStop({
         voice="prose"
         value={draft.choice}
         onChange={(choice) =>
-          onDraft({ choice: choice as ComposeDraft["choice"], name: "", kind: "", artifactId: "", repoUrl: "" })
+          onDraft({ choice: choice as ComposeDraft["choice"], name: "", kind: "", artifactId: "", repoUrl: "", storeDomain: "", storefrontTokenRef: "" })
         }
         options={[
           {

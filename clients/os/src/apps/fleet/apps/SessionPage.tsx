@@ -1,6 +1,6 @@
-import { ArrowLeft } from "lucide-react";
+import { RefreshButton } from "../FleetControls";
 
-import { Button, Chip, Fact, Facts, Head, Notice, Panel, Subhead, formatBytes, formatMoment } from "../../../kit";
+import { EmptyState, Chip, Fact, Facts, Head, Notice, Panel, Subhead, formatBytes, formatMoment } from "../../../kit";
 import { Measure } from "../../../kit/MeasureView";
 import {
   appLabel,
@@ -48,16 +48,13 @@ export function SessionPage({
   const { session, loading, error, polling, readAt, reread } = useAppSessionDetail(sessionId);
 
   return (
-    <div className="os-fleet os-fleet-session">
-      <Head title={session === null ? "Run" : `${appLabel(session.app)} -- ${session.kind}`}>
-        <Button tone="quiet" onClick={onBack}>
-          <ArrowLeft size={13} aria-hidden /> Apps
-        </Button>
+    <div className="os-fleet os-fleet-session" data-os-page-context={JSON.stringify({ page: "App session", sessionId, app: session?.app, status: session?.status })}>
+      <Head title={session === null ? "Run" : `${appLabel(session.app)} -- ${session.kind}`} back={{ label: "Activity", onSelect: onBack }}>
         {/* A FINISHED RUN IS NOT RE-READ ON A TIMER, so the manual re-read is
             the honest control for one. While a run is LIVE the poll is doing
             it, and the word beside the status says so. */}
         {session !== null && !sessionIsLive(session.status) ? (
-          <Button onClick={reread}>Re-read</Button>
+          <RefreshButton label="Refresh app session" busy={loading} onClick={reread} />
         ) : null}
       </Head>
 
@@ -65,7 +62,7 @@ export function SessionPage({
         <Notice
           tone="error"
           sentence="This run could not be read."
-          next={session === null ? "Nothing was loaded." : "What is below is the last read that landed."}
+          next={session === null ? "Nothing was loaded." : "Showing the last available session details."}
           detail={error}
         />
       )}
@@ -73,10 +70,7 @@ export function SessionPage({
       {loading && session === null ? <p className="os-caption">Reading this run.</p> : null}
 
       {!loading && session === null && error === "" ? (
-        <p className="os-caption">
-          There is no run at this id. It may have been swept, or the list may be older than the
-          cluster.
-        </p>
+        <EmptyState title="Session no longer available">It may have been removed since the list was last updated.</EmptyState>
       ) : null}
 
       {session === null ? null : (
@@ -146,8 +140,8 @@ function SessionBody({
           {readAt === null
             ? "Not read yet."
             : live
-              ? `Polling while this run is ${session.status}; last read ${formatMoment(readAt.toISOString())}.`
-              : `Read ${formatMoment(readAt.toISOString())}. A finished run does not change, so this is not polled.`}
+              ? `Updates automatically while ${session.status}. Last updated ${formatMoment(readAt.toISOString())}.`
+              : `Last updated ${formatMoment(readAt.toISOString())}.`}
         </p>
 
         {session.errorMessage === "" ? null : (
@@ -175,11 +169,11 @@ function SessionBody({
       {session.transcriptTruncated ? (
         <Notice
           tone="warn"
-          sentence="This transcript reached the size the row keeps, so what is below stops short of the end."
+          sentence="This is a shortened transcript."
           next={
             session.producedArtifactIds.length > 0
-              ? "The complete transcript was pushed to your Library at the end of the run -- it is among the artifacts listed below."
-              : "The complete transcript is pushed to your Library when the run ends."
+              ? "The complete transcript is in your Library, among the files listed below."
+              : "The complete transcript is saved to your Library when the session ends."
           }
         />
       ) : null}

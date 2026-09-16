@@ -487,6 +487,7 @@ export function hasUncheckableClass(groups: CategoryGroup[]): boolean {
  * different pages.
  */
 export interface CatalogFacets {
+  search?: string;
   /** One of the nine categories. */
   category?: string;
   /** One of the seven runtimes. */
@@ -510,15 +511,17 @@ export interface CatalogFacets {
  * `categorySentence` keeps describing the category rather than the filter.
  */
 export function applyFacets(groups: CategoryGroup[], facets: CatalogFacets): CategoryGroup[] {
+  const search = (facets.search ?? "").trim().toLowerCase();
   const category = (facets.category ?? "").trim();
   const runtime = (facets.runtime ?? "").trim();
   const lackingOnly = facets.lackingOnly === true;
-  if (category === "" && runtime === "" && !lackingOnly) return groups;
+  if (search === "" && category === "" && runtime === "" && !lackingOnly) return groups;
 
   const out: CategoryGroup[] = [];
   for (const group of groups) {
     if (category !== "" && group.category !== category) continue;
     const shown = group.shown.filter((row) => {
+      if (search && !`${row.profile.modelId} ${row.profile.category} ${row.profile.runtime}`.toLowerCase().includes(search)) return false;
       if (runtime !== "" && row.profile.runtime !== runtime) return false;
       if (lackingOnly && row.blocked === null) return false;
       return true;

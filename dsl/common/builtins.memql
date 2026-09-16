@@ -234,7 +234,8 @@ builtin routerListModels { }
 
 // ---- queries/v1/common/builtin/builtinRouterListPolicies.memql ----
 
-@executor("integration.router.listPolicies")
+@sdk
+@executor("routingPolicyCatalog")
 @description("List all routing policies loaded from policies/v1/*.memql. Feeds the frontend's /router/policies page.")
 builtin routerListPolicies { }
 
@@ -794,4 +795,84 @@ builtin fleetModelProbe {
 @description("Fold the week's router calls into per-model, per-level evidence rows, and open a routingReview approval where the evidence carries a demotion. It PROPOSES and never applies: routing is a thing a person is accountable for, and a rule that appeared overnight because a threshold was crossed is an edit nobody made. Above a 0.3 structured-failure rate over at least twenty calls it renders the exclusion rule, hashes the exact text, and puts it to a person; approving arms it through the authoring pipeline and declining is recorded so the same week's evidence does not ask again. Calls that did not say which level they were serving are COUNTED AND EXCLUDED rather than folded under a blank -- a demotion at an unknown level is a demotion at every level, which is far more than the evidence supports.")
 @executor("integration.router.routingEvidenceFold")
 builtin routingEvidenceFold {
+}
+
+
+/// Create or replace a cluster-wide routing policy with a preferred source and ordered fallbacks.
+/// Read routerListPolicies first and pass its revision. A stale revision refuses without changes.
+/// Owner or developer only. The active embeddings binding cannot acquire another source or fallback.
+@sdk
+@executor("routingPolicySave")
+builtin routingPolicySave {
+  name string!
+  description string
+  primary string!
+  fallbacks []string
+  expectedRevision integer!
+}
+
+/// Restore a shipped policy's original sources. User-created policies have no shipped default.
+/// Owner or developer only; expectedRevision comes from routerListPolicies.
+@sdk
+@executor("routingPolicyReset")
+builtin routingPolicyReset {
+  name string!
+  expectedRevision integer!
+}
+
+/// Read shipped and custom rules in actual evaluation order, with configuration revision.
+@sdk
+@executor("routingRules")
+builtin routingRules { }
+
+/// Validate a custom rule definition against current policies and locked-rule constraints.
+/// This validates the definition; it does not claim a replay of historical decisions.
+@sdk
+@executor("routingRuleValidate")
+builtin routingRuleValidate {
+  expectedRevision integer
+  conditions object
+  name string!
+  policy string!
+  precedence integer!
+  level string
+  onUnavailable string
+  excludes []string
+}
+
+/// Save a custom cluster rule at the revision returned by validation. Shipped rules cannot be changed.
+@sdk
+@executor("routingRuleSave")
+builtin routingRuleSave {
+  conditions object
+  name string!
+  policy string!
+  precedence integer!
+  expectedRevision integer!
+  description string
+  level string
+  onUnavailable string
+  excludes []string
+}
+
+/// Remove a custom rule after reading its current revision. Shipped rules cannot be removed.
+@sdk
+@executor("routingRuleRemove")
+builtin routingRuleRemove {
+  name string!
+  expectedRevision integer!
+}
+
+/// Ask MemQL to compose a validated policy draft. No policy is saved; review it and call routingPolicySave or routingPolicyReset with its revision. Requires inference and owner/developer access.
+@sdk
+@executor("routingPolicyDescribe")
+builtin routingPolicyDescribe {
+  sentence string!
+}
+
+/// Compile a rule draft using local inference. Review and validate before routingRuleSave; no configuration is changed.
+@sdk
+@executor("routingRuleDescribe")
+builtin routingRuleDescribe {
+  sentence string!
 }

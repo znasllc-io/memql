@@ -497,13 +497,10 @@ export function Desktop({
               desk={desk}
               index={index}
               active={index === activeIndex}
-              viewport={viewport}
-              placement={placement}
               surface={state.surfaces[desk.id]}
               selectedId={selectedId}
               renamingItemId={renamingItemId}
               noAnswerFor={noAnswerFor}
-              actorRole={actorRole}
               onSelect={actions.selectSurfaceItem}
               onOpenFile={openFile}
               onOpenFolder={openFolderInFiles}
@@ -524,6 +521,18 @@ export function Desktop({
             />
           ))}
         </div>
+        {/* Stable siblings: moving desks or minimizing never remounts an app. */}
+        {Object.values(state.shell.windows).map(win => {
+          const desk = desks.find(d => d.windows.includes(win.id));
+          const manifest = registry.apps.find(a => a.id === win.appId);
+          if (!desk || !manifest) return null;
+          const peers = desk.windows.flatMap(id => state.shell.windows[id] ? [state.shell.windows[id]!] : []);
+          const rect = placeWindows(peers, viewport, placement)[win.id]
+            ?? placeWindows([{ ...win, mode: "normal" }], viewport, placement)[win.id]!;
+          return <WindowFrame key={win.id} win={win} manifest={manifest} rect={rect}
+            hidden={desk.id !== state.shell.activeDeskId || win.mode === "minimized"}
+            deskId={desk.id} focused={state.shell.focusedWindowId === win.id} actorRole={actorRole} />;
+        })}
         <p className="os-sr-only" aria-live="polite">
           Desk {activeIndex + 1} of {desks.length}
         </p>
@@ -567,13 +576,10 @@ function DeskPlate({
   desk,
   index,
   active,
-  viewport,
-  placement,
   surface,
   selectedId,
   renamingItemId,
   noAnswerFor,
-  actorRole,
   onSelect,
   onOpenFile,
   onOpenFolder,
@@ -588,13 +594,10 @@ function DeskPlate({
   desk: Desk;
   index: number;
   active: boolean;
-  viewport: { w: number; h: number };
-  placement: PlacementTokens;
   surface: DeskSurface | undefined;
   selectedId: string | null;
   renamingItemId: string | null;
   noAnswerFor: string | null;
-  actorRole: string;
   onSelect: (id: string | null) => void;
   onOpenFile: (item: Extract<DesktopItem, { kind: "file" }>) => void;
   onOpenFolder: (folderId: string) => void;
@@ -613,10 +616,6 @@ function DeskPlate({
     const win = state.shell.windows[id];
     return win ? [win] : [];
   });
-  const rects = useMemo(
-    () => placeWindows(windows, viewport, placement),
-    [windows, viewport, placement],
-  );
   const items = Object.entries(surface?.items ?? {});
   // A WIDGET THIS ROLE IS NOT ADMITTED TO IS NOT ON THIS PERSON'S DESK. The
   // desk refuses to draw one (SurfaceItem, below), so counting it here would
@@ -679,21 +678,6 @@ function DeskPlate({
           onMenu={(x, y) => onMenu({ x, y, kind: "item", cell: { col: 0, row: 0 }, itemId: id })}
         />
       ))}
-      {windows.map((win) => {
-        const manifest = registry.apps.find((a) => a.id === win.appId);
-        const rect = rects[win.id];
-        if (!manifest || !rect) return null;
-        return (
-          <WindowFrame
-            key={win.id}
-            win={win}
-            manifest={manifest}
-            rect={rect}
-            focused={state.shell.focusedWindowId === win.id}
-            actorRole={actorRole}
-          />
-        );
-      })}
       {empty && active ? (
         <p className="os-desk-hint">Drop a file, or open the Launcher.</p>
       ) : null}

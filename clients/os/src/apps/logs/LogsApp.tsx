@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useSession } from "../../chrome/access";
-import { subjectIntentOf } from "../../logs/filters";
+import { logViewIntentOf, subjectIntentOf } from "../../logs/filters";
 import type { OsAppProps } from "../../system/registry";
 import { SearchSection } from "./SearchSection";
 import {
@@ -72,7 +72,7 @@ export function LogsApp({
   // it was handed, so this covers a sender that named none.
   useEffect(() => {
     if (!intent || sectionId === "search") return;
-    if (subjectIntentOf(intent.payload) !== null) navigate("search");
+    if (subjectIntentOf(intent.payload) !== null || logViewIntentOf(intent.payload) !== null) navigate("search");
   }, [intent, sectionId, navigate]);
 
   if (sectionId === "settings") {

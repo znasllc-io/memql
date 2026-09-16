@@ -1,0 +1,16 @@
+# Reach the actual public ingress while retaining hostname and TLS verification.
+# seed-secrets.sh copies only the existing mkcert public CA into this ConfigMap.
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value: {name: MEMQL_SITE_HEALTH_DIAL_ADDRESS, value: "traefik.kube-system.svc:443"}
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value: {name: MEMQL_SITE_HEALTH_CA_FILE, value: "/etc/memql/front-door-ca/ca.crt"}
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts/-
+  value: {name: front-door-ca, mountPath: /etc/memql/front-door-ca, readOnly: true}
+- op: add
+  path: /spec/template/spec/volumes/-
+  value:
+    name: front-door-ca
+    configMap: {name: memql-front-door-ca, optional: true}

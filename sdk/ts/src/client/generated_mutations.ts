@@ -8805,6 +8805,30 @@ QueryClient.prototype.updateWorkerLastSeen = function (this: QueryClient, args: 
   return this.executeNamed("updateWorkerLastSeen", buildUpdateWorkerLastSeen(args), opts);
 };
 
+/** Record passive permission evidence from the running worker. A full snapshot replaces the prior one so revoked or unknown checks cannot retain a grant. */
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["updateWorkerPermissions"] in generated_concepts.ts).
+export interface UpdateWorkerPermissionsArgs {
+  registrationId: string;
+  permissions: Record<string, unknown>;
+}
+
+export function buildUpdateWorkerPermissions(args: UpdateWorkerPermissionsArgs): string {
+  const parts: string[] = [];
+  parts.push("registrationId: " + renderMemQLValue(args.registrationId));
+  parts.push("permissions: " + renderMemQLValue(args.permissions));
+  return "mutation updateWorkerPermissions(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    updateWorkerPermissions(args: UpdateWorkerPermissionsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.updateWorkerPermissions = function (this: QueryClient, args: UpdateWorkerPermissionsArgs = {} as UpdateWorkerPermissionsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("updateWorkerPermissions", buildUpdateWorkerPermissions(args), opts);
+};
+
 /** Define or update an approval chain. */
 // Bound concept: v1:commerce:approvalChain (machine-readable: BoundConcepts["upsertApprovalChain"] in generated_concepts.ts).
 export interface UpsertApprovalChainArgs {

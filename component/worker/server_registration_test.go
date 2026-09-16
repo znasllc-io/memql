@@ -17,6 +17,9 @@ import (
 // records every persistence call so tests can assert on exactly what
 // the server wrote for new vs. existing registrations.
 type fakeRegistrationStore struct {
+	permissionUpdates []map[string]any
+	permissionErr     error
+
 	existing *RegistrationRow
 	// byUser is scanned for machine-key reclaim when identity lookup misses.
 	byUser []RegistrationRow
@@ -529,4 +532,12 @@ func TestUpsertRegistration_DoesNotReclaimRevokedMachine(t *testing.T) {
 	if row.ID == "reg-1" {
 		t.Fatal("new registration must not reuse the revoked id")
 	}
+}
+
+func (f *fakeRegistrationStore) UpdatePermissions(_ context.Context, _, _ string, p map[string]any) error {
+	if f.permissionErr != nil {
+		return f.permissionErr
+	}
+	f.permissionUpdates = append(f.permissionUpdates, p)
+	return nil
 }

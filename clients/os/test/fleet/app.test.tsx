@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Type-only, so it is erased before the mock factories run.
@@ -76,7 +76,7 @@ beforeEach(() => {
 });
 
 describe("the Fleet manifest", () => {
-  it("declares its sections in order, Machines first, with a settings gear target", () => {
+  it("declares its sections in order, Overview first, with a settings gear target", () => {
     const fleet = appById(OS_REGISTRY, "fleet");
     expect(fleet).toBeTruthy();
     // Models sits between Machines and Routing (epic memql#5096): the
@@ -86,11 +86,13 @@ describe("the Fleet manifest", () => {
     // person's own computer, then the logs about both.
     installSeededAccess("owner");
     expect(sectionsFor(fleet!).map((s) => s.id)).toEqual([
+      "overview",
       "machines",
+      "policies",
       "models",
       "routing",
-      "workbenches",
       "apps",
+      "workbenches",
       "logs",
       "settings",
     ]);
@@ -112,11 +114,13 @@ describe("the Fleet manifest", () => {
     // projections of the reader's own fleet (epic memql#5096).
     installSeededAccess("reader");
     expect(sectionsFor(fleet).map((s) => s.id)).toEqual([
+      "overview",
       "machines",
+      "policies",
       "models",
       "routing",
-      "workbenches",
       "apps",
+      "workbenches",
       "settings",
     ]);
   });
@@ -132,15 +136,15 @@ describe("the Fleet app shell", () => {
     first.view.unmount();
 
     const second = mount(fakeConnection(), "routing", store);
-    expect(await screen.findByRole("heading", { name: "Routing" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Machine routing" })).toBeTruthy();
     second.view.unmount();
 
     const third = mount(fakeConnection(), "workbenches", store);
-    expect(await screen.findByRole("heading", { name: "Workbenches" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Cluster workspaces" })).toBeTruthy();
     third.view.unmount();
 
     const fourth = mount(fakeConnection(), "apps", store);
-    expect(await screen.findByRole("heading", { name: "Apps" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Activity" })).toBeTruthy();
     fourth.view.unmount();
 
     mount(fakeConnection(), "settings", store);
@@ -149,7 +153,7 @@ describe("the Fleet app shell", () => {
 
   it("navigates to the stored default section once, on open", async () => {
     const store = memoryStore({ version: 1, defaultSection: "workbenches", showRevoked: false });
-    const { navigate } = mount(fakeConnection(), "machines", store);
+    const { navigate } = mount(fakeConnection(), "overview", store);
 
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("workbenches"));
     expect(navigate).toHaveBeenCalledTimes(1);
@@ -157,7 +161,7 @@ describe("the Fleet app shell", () => {
 
   it("does not drag an operator back after they navigate away themselves", async () => {
     const store = memoryStore({ version: 1, defaultSection: "workbenches", showRevoked: false });
-    const { view, navigate } = mount(fakeConnection(), "machines", store);
+    const { view, navigate } = mount(fakeConnection(), "overview", store);
     await waitFor(() => expect(navigate).toHaveBeenCalledTimes(1));
 
     // The window navigates; the app component stays mounted and only its
@@ -169,7 +173,7 @@ describe("the Fleet app shell", () => {
         </MachinesProvider>,
       ),
     );
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Routing" })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Machine routing" })).toBeTruthy());
     expect(navigate).toHaveBeenCalledTimes(1);
   });
 
@@ -188,20 +192,51 @@ describe("the Fleet app shell", () => {
     await click(await screen.findByLabelText("List revoked machines"));
     expect(store.saved.at(-1)).toEqual({
       version: 1,
-      defaultSection: "machines",
+      defaultSection: "overview",
       showRevoked: true,
     });
 
     // The same store, a fresh window: the preference is what the list reads.
     view.unmount();
     mount(fakeConnection({ myWorkersWithStatus: [REVOKED] }), "machines", store);
-    expect(await screen.findByText("Old laptop")).toBeTruthy();
+    expect((await screen.findAllByText("Old laptop"))[0]).toBeTruthy();
   });
 
   it("stores the chosen default section", async () => {
     const store = memoryStore(DEFAULT_FLEET_SETTINGS);
     mount(fakeConnection(), "settings", store);
-    await click(await screen.findByRole("radio", { name: "Routing" }));
+    await click(await screen.findByRole("radio", { name: "Machine routing" }));
     expect(store.saved.at(-1)?.defaultSection).toBe("routing");
+  });
+});
+
+
+describe("Fleet overview", () => {
+  it("counts only current registrations and current online activity", async () => {
+    const connection = fakeConnection({ myWorkersWithStatus: [
+      machineRow({ id: "online", displayName: "Studio", activeCount: 3 }),
+      machineRow({ id: "offline", displayName: "Laptop", connectedNodeId: "", activeCount: 8 }),
+      machineRow({ id: "stale", displayName: "Older heartbeat", lastSeenAt: "2000-01-01T00:00:00Z", activeCount: 9 }),
+      REVOKED,
+    ] });
+    const { navigate } = mount(connection, "overview", memoryStore(DEFAULT_FLEET_SETTINGS));
+    await screen.findByRole("button", { name: "Open Studio, online" });
+    const value = (label: string) => document.querySelector(`[data-overview-metric="${label}"] dd`)?.textContent;
+    expect(value("Machines")).toBe("3");
+    expect(value("Online")).toBe("1");
+    expect(value("Active calls")).toBe("3");
+    expect(screen.queryByRole("button", { name: /Old laptop/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Open Studio, online" }));
+    expect(navigate).toHaveBeenCalledWith("machines", { fromContent: true });
+    expect(connection.query.myWorkersWithStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not present loading as an empty or idle fleet", async () => {
+    const connection = fakeConnection();
+    connection.query.myWorkersWithStatus.mockReturnValue(new Promise(() => {}));
+    mount(connection, "overview", memoryStore(DEFAULT_FLEET_SETTINGS));
+    expect(screen.getByRole("heading", { name: "Reading your fleet" })).toBeTruthy();
+    expect(document.querySelector('[data-overview-metric="Machines"] dd')?.textContent).toBe("—");
+    expect(document.querySelector('[data-overview-metric="Active calls"] dd')?.textContent).toBe("—");
   });
 });

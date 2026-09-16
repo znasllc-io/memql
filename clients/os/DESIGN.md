@@ -1,5 +1,9 @@
 # The MemQL OS interface language
 
+[Supervised Visual Composition](SUPERVISED-VISUAL-COMPOSITION.md) extends this
+language for tangible configuration and supervised assistance. Fleet is its
+first approved implementation; broader app refactors require separate approval.
+
 Twelve rules. Ten are owner-set (epic memql#4848); 11 and 12 came out of
 epic memql#4937, and 11 is mostly a RATIFICATION -- Bin, Campaigns, Users,
 Accounts and Training already complied, and Deployables was the violation. They exist because the apps drifted
@@ -96,3 +100,36 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
   rules is rendered screenshots, both modes, empty and populated -- not the
   diff. The audit that produced these rules was visual, and the drift it
   found had survived every code review.
+
+## App overviews
+
+Overview is the shared summary destination. Use `kit/Overview` for the header
+and measured statistics, and `OverviewBreakdown` for a current distribution.
+Each app supplies facts from its existing authorized reads; unavailable values
+use `Figure` absence semantics instead of zero. Only draw activity history when
+a real time series exists. Keep record lists and editors in their own sections.
+
+Maps use `MapHeading` for title-aligned information help, `MapControls` for
+bottom-right zoom and reset actions, and `usePanZoom` with wheel zoom disabled
+and fitted reset enabled. Dragging pans; wheel scrolling belongs to the page.
+Keep routine instructions inside the information control. Errors and stale-data
+notices remain visible.
+
+Fleet and Deployables adopt this composition first. Other apps can reuse these
+components as their overview data is added, without changing their workflows.
+
+### One page navigation trail
+
+The window shell must not draw a second return row beneath its section tabs.
+`PageNavigationProvider` passes section origins to the first visible page `Head`;
+parked panes, secondary headings and other windows do not own that trail.
+Use `Head`'s `breadcrumbs` and `back` props for local drill-downs. The resulting
+breadcrumb trail sits immediately before the title, and the one back icon sits
+with the title's right-hand actions. A local back destination takes precedence;
+the section origin remains reachable in the same breadcrumb trail. Do not add
+an independent back button or breadcrumb block next to a `Head`.
+
+A workspace toolbar above an inspector sets `navigation={false}` so the
+inspector owns the page trail. Section breadcrumb jumps consume the intervening
+history; peer tab navigation starts a fresh path. Existing forms retain their
+own cancellation and completion callbacks through the shared back prop.

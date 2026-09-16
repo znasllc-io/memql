@@ -13,7 +13,10 @@ import {
   type RoutingFallback,
   type RoutingStrategy,
 } from "../rows";
-import { Button, Caption, ChoiceStack, Head, Notice, Panel } from "../../../kit";
+import { Button, Head, Notice, Select } from "../../../kit";
+import { InfoDetail } from "../../../kit/InfoDetail";
+import { RefreshButton } from "../FleetControls";
+import { ActivityTarget } from "../../../kit/SemanticActivity";
 import { useRoutingPolicy, type RoutingPolicyDraft } from "./useRoutingPolicy";
 
 // The routing policy: how the router orders the machines it could send a call
@@ -82,237 +85,44 @@ export function RoutingSection() {
     setDraft((held) => ({ ...held, ...patch }));
   }
 
-  return (
-    <div className="os-fleet">
-      <Head title="Routing">
-        {/* Offered only when the feed is behind -- see the workbenches
-            section for the reasoning. v1:worker:routingPolicy is broadcast,
-            so a policy edited in another tab or in the portal arrives here on
-            its own; a standing refresh button would say otherwise. */}
-        {feedIsBehind(state.liveState) ? (
-          <Button onClick={state.reseed}>Re-read</Button>
-        ) : null}
-      </Head>
-
-      {/* WHAT A MACHINE STRATEGY DECIDES, AND WHAT IT DOES NOT (epic
-          memql#5159, D3). This screen has always been five fields with no
-          sentence saying what a strategy is, and the reading people arrive
-          with is that it chooses the MODEL -- which is a different screen
-          altogether. Both halves have to be said, in that order: the one it
-          does, then the one it is mistaken for. */}
-      <p className="os-caption">
-        A strategy decides which of your machines runs a call, when more than one of them could.
-        It does not decide which model answers or which door a call goes through -- those are
-        Settings -&gt; Rules.
-      </p>
-
-      <Panel label="Routing policy">
-        {state.loading ? <p className="os-caption">Reading your routing policy.</p> : null}
-
-        {state.error ? (
-          <Notice
-            tone="error"
-            sentence="Your routing policy could not be read."
-            next="The controls below show the defaults until it loads."
-            detail={state.error}
-          />
-        ) : null}
-
-        {/* THE ABSENT STATE IS STATED, NOT APOLOGISED FOR. Most people have
-            no policy row, and the router applies these two values to them
-            today. Saying so is the difference between "you have not
-            configured this" and "this is not configured", which are
-            different claims about whether routing is happening. */}
-        {policy === null && !state.loading ? (
-          <Notice tone="info">
-            <p className="os-notice-line">
-              No policy set -- the defaults apply: <strong>{DEFAULT_STRATEGY}</strong> ordering
-              with <strong>{DEFAULT_FALLBACK}</strong> on a refusal. Nothing is written until you
-              save.
-            </p>
-          </Notice>
-        ) : null}
-
-        {diverged ? (
-          <Notice tone="warn">
-            <p className="os-notice-line" role="status">
-              This policy changed somewhere else while you were editing. Your edits are still
-              here; saving will overwrite the newer row.
-            </p>
-          </Notice>
-        ) : null}
-
-        {/* THE FIVE FIELDS, IN ONE GRAMMAR (DESIGN.md rule 8, epic memql#5159).
-            Each one is a name, then the single thing it decides said quietly,
-            then its control. The fieldset/legend SEMANTICS stay -- a legend
-            names its group to assistive tech better than any div -- and the
-            legend dresses as a Subhead, which is what rule 8 asks for.
-
-            They were five differently-shaped blocks before: one legend was a
-            whole sentence, two carried no explanation at all, and one had a
-            caption above its control and a second one below it. Five fields
-            that do not look like five fields is what made this screen read as
-            a page of groups rather than one form. */}
-        <fieldset className="os-field-group os-fleet-routing-field">
-          <legend>Strategy</legend>
-          <Caption>
-            How the machines that are still candidates get ordered, once the labels below have
-            narrowed them.
-          </Caption>
-          <ChoiceStack
-            name="fleet-strategy"
-            label="Routing strategy"
-            value={draft.strategy}
-            onChange={(strategy) => edit({ strategy })}
-            options={ROUTING_STRATEGIES.map((one) => ({
-              value: one,
-              label: one,
-              description: STRATEGY_BLURB[one as RoutingStrategy],
-            }))}
-          />
-        </fieldset>
-
-        {/* The legend here used to BE the question -- "When the chosen machine
-            refuses before the call starts" -- so one of five fields was named
-            with a sentence. Same question, said in the caption; the name lines
-            up with the other four. */}
-        <fieldset className="os-field-group os-fleet-routing-field">
-          <legend>Fallback</legend>
-          <Caption>
-            What to do when the machine the router chose refuses before the call has started.
-          </Caption>
-          <ChoiceStack
-            name="fleet-fallback"
-            label="Routing fallback"
-            value={draft.fallback}
-            onChange={(fallback) => edit({ fallback })}
-            options={ROUTING_FALLBACKS.map((one) => ({
-              value: one,
-              label: one,
-              description: FALLBACK_BLURB[one as RoutingFallback],
-            }))}
-          />
-        </fieldset>
-
-        <fieldset className="os-field-group os-fleet-routing-field">
-          <legend>Required labels</legend>
-          <Caption>
-            A machine must carry all of these to be a candidate at all, on top of whatever the
-            call itself requires. This narrows and never widens -- a policy cannot make a machine
-            eligible for work the agent did not ask to run there. Values match exactly; there is
-            no wildcard.
-          </Caption>
-          <MapEditor
-            value={draft.requireLabels}
-            onChange={(requireLabels) => edit({ requireLabels })}
-            busy={state.saving}
-            label="Required labels"
-            idPrefix="fleet-require"
-            tone="neutral"
-          />
-        </fieldset>
-
-        {/* THE MODEL ORDER, not a label. It answers a different question from
-            the two label editors around it -- those pick a MACHINE, this ranks
-            the models once a machine is picked -- so it is its own field rather
-            than a third map. It is NOT the model DECISION either: which model a
-            call asks for is Settings -> Rules, and this only ranks the fleet's
-            own models after a rule has already sent the call here. */}
-        <fieldset className="os-field-group os-fleet-routing-field">
-          <legend>Preferred models</legend>
-          <Caption>
-            An ordered list of model ids, consulted when a policy names{" "}
-            <span className="os-mono">fleet:*</span>. It ORDERS and does not filter: a model that
-            is not on this list is still eligible, tried after every model that is. Leave it empty
-            and the default applies -- strongest first, by parameters, then context window, then
-            model id, with a model that did not report its size sorting last. Fleet -&gt; Models
-            shows the ranking this produces, and which model each kind of turn would land on.
-          </Caption>
-          {/* A raw textarea, as five other surfaces in this shell do. The kit
-              has no multiline control yet and promoting one here would be a
-              sixth caller's worth of change inside an epic about routing;
-              `os-input` is the same field styling the kit's Input uses, so the
-              control line (rule 5) is the same height and radius. */}
-          <label className="os-sr-only" htmlFor="fleet-model-preference">
-            Preferred model order, one model id per line
-          </label>
-          <textarea
-            id="fleet-model-preference"
-            className="os-input os-fleet-modelorder"
-            rows={4}
-            placeholder={"llama3.3:70b\nqwen2.5:7b"}
-            value={draft.modelPreference.join("\n")}
-            onChange={(e) => edit({ modelPreference: e.target.value.split("\n") })}
-          />
-        </fieldset>
-
-        <fieldset className="os-field-group os-fleet-routing-field">
-          <legend>Preferred labels</legend>
-          <Caption>
-            An ordering hint, not a filter. Under labelMatch, candidates matching more of these
-            sort first; under the other strategies they break ties.
-          </Caption>
-          <MapEditor
-            value={draft.preferLabels}
-            onChange={(preferLabels) => edit({ preferLabels })}
-            busy={state.saving}
-            label="Preferred labels"
-            idPrefix="fleet-prefer"
-            tone="neutral"
-          />
-        </fieldset>
-
-        {state.saveError ? (
-          <Notice
-            tone="error"
-            sentence="The policy was not saved."
-            next="Nothing was written; your edits are still here."
-            detail={state.saveError}
-          />
-        ) : null}
-
-        <div className="os-head-actions">
-          <Button
-            tone="primary"
-            busy={state.saving}
-            busyLabel="Saving..."
-            onClick={() => {
-              void state.save(draft).then((ok) => {
-                // Released ONLY on success, so the row's own echo becomes
-                // authoritative again. Releasing after a REFUSAL would hand
-                // the draft back to the row and discard the operator's edits
-                // in the same beat as an error saying they were kept.
-                // Holding it forever would be the opposite failure: an editor
-                // frozen against every later change from anywhere else.
-                if (ok) setTouched(false);
-              });
-            }}
-          >
-            {policy === null ? "Create policy" : "Save policy"}
-          </Button>
-          <Button
-            disabled={!touched}
-            onClick={() => {
-              setTouched(false);
-              setDraft(fromPolicy(policy));
-            }}
-          >
-            Discard changes
-          </Button>
-        </div>
-
-        <p role="status" className="os-status-line">
-          {state.announcement}
-        </p>
-
-        <p className="os-caption">
-          One active policy per person. Saving an existing one edits it in place rather than
-          adding another, because a call's routing record points at whichever row made the choice
-          -- a second active row would leave every edit made against the older one stranded.
-        </p>
-      </Panel>
+  return <ActivityTarget target="fleet:machine-routing" className="os-fleet fleet-routing">
+    <Head title="Machine routing">
+      <InfoDetail title="Machine routing"><p>Required labels filter candidates. Preferred labels and strategy order them. A refusal may try the next matching machine only before a call starts; a started call is never replayed.</p><p>Source policies choose the inference source. Model order ranks compatible models after a policy sends the call to your fleet.</p></InfoDetail>
+      {feedIsBehind(state.liveState) ? <RefreshButton label="Reconnect machine routing" onClick={state.reseed} /> : null}
+    </Head>
+    {state.loading ? <p className="os-caption">Reading your routing policy.</p> : null}
+    {state.error ? <Notice tone="error" sentence="Your routing policy could not be read." next="The controls show defaults until it loads." detail={state.error} /> : null}
+    {policy === null && !state.loading && !state.error ? <p className="os-caption">Using the default: choose the first eligible machine and try the next match if it refuses. Save to apply your preferences.</p> : null}
+    {diverged ? <Notice tone="warn" sentence="This policy changed somewhere else. Your draft is retained." next="Saving overwrites the newer row; discard your changes to load it first." /> : null}
+    <div className="fleet-routing-stages">
+      <details className="fleet-routing-stage"><summary><small>1 · Eligibility</small><strong>Required labels</strong><span>{chipsFromMap(draft.requireLabels).join(", ") || "Any eligible machine"}</span></summary>
+        <p className="os-caption">Every label must match exactly. This narrows the call’s existing eligibility.</p>
+        <MapEditor value={draft.requireLabels} onChange={requireLabels => edit({ requireLabels })} busy={state.saving} label="Required labels" idPrefix="fleet-require" tone="neutral" />
+      </details>
+      <details className="fleet-routing-stage"><summary><small>2 · Preference</small><strong>Preferred labels</strong><span>{chipsFromMap(draft.preferLabels).join(", ") || "No preference"}</span></summary>
+        <p className="os-caption">Matching labels improve order; they never filter a machine out.</p>
+        <MapEditor value={draft.preferLabels} onChange={preferLabels => edit({ preferLabels })} busy={state.saving} label="Preferred labels" idPrefix="fleet-prefer" tone="neutral" />
+      </details>
+      <details className="fleet-routing-stage"><summary><small>3 · Order</small><strong>Strategy</strong><span>{strategyLabel(draft.strategy)}</span></summary>
+        <Select id="fleet-strategy" label="Routing strategy" value={draft.strategy} onChange={strategy => edit({ strategy })}>{ROUTING_STRATEGIES.map(one => <option key={one} value={one}>{strategyLabel(one)}</option>)}</Select>
+        <p className="os-caption">{STRATEGY_BLURB[draft.strategy as RoutingStrategy]}</p>
+      </details>
+      <details className="fleet-routing-stage"><summary><small>4 · Refusal</small><strong>Fallback</strong><span>{fallbackLabel(draft.fallback)}</span></summary>
+        <Select id="fleet-fallback" label="Routing fallback" value={draft.fallback} onChange={fallback => edit({ fallback })}>{ROUTING_FALLBACKS.map(one => <option key={one} value={one}>{fallbackLabel(one)}</option>)}</Select>
+        <p className="os-caption">{FALLBACK_BLURB[draft.fallback as RoutingFallback]}</p>
+      </details>
     </div>
-  );
+    <section className="fleet-routing-models"><h4>Preferred model order</h4><p className="os-caption">One model per line. Other compatible models remain eligible.</p>
+      <label className="os-sr-only" htmlFor="fleet-model-preference">Preferred model order, one model id per line</label>
+      <textarea id="fleet-model-preference" className="os-input os-fleet-modelorder" rows={4} placeholder={"llama3.3:70b\nqwen2.5:7b"} value={draft.modelPreference.join("\n")} onChange={e => edit({ modelPreference: e.target.value.split("\n") })} />
+    </section>
+    {state.saveError ? <Notice tone="error" sentence="The policy was not saved." next="Nothing was written; your edits are still here." detail={state.saveError} /> : null}
+    <div className="fleet-save-row"><span className="os-caption">{touched ? "Unsaved draft" : "Personal fleet policy"}</span><div className="os-head-actions">
+      <Button disabled={!touched || state.saving} onClick={() => { setTouched(false); setDraft(fromPolicy(policy)); }}>Discard changes</Button>
+      <Button tone="primary" busy={state.saving} busyLabel="Saving…" onClick={() => { void state.save(draft).then(ok => { if (ok) setTouched(false); }); }}>{policy === null ? "Create policy" : "Save policy"}</Button>
+    </div></div>
+    <p role="status" className="os-status-line">{state.announcement}</p>
+  </ActivityTarget>;
 }
 
 function fromPolicy(
@@ -352,3 +162,6 @@ function fromPolicy(
     modelPreference: [...policy.modelPreference],
   };
 }
+
+function strategyLabel(value: string): string { return ({ firstFit: "First eligible", leastLoaded: "Least busy", labelMatch: "Best label match", roundRobin: "Take turns" } as Record<string, string>)[value] ?? value; }
+function fallbackLabel(value: string): string { return ({ nextMatching: "Try the next match", none: "Return the refusal" } as Record<string, string>)[value] ?? value; }

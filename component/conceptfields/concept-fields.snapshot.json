@@ -4242,6 +4242,37 @@
       }
     },
     {
+      "concept": "v1:platform:siteHealth",
+      "file": "platform/concepts.memql",
+      "fields": [
+        "bundleRef",
+        "checkedAt",
+        "durationMs",
+        "hostname",
+        "httpStatus",
+        "reason",
+        "siteId",
+        "state"
+      ],
+      "required": [
+        "bundleRef",
+        "checkedAt",
+        "durationMs",
+        "hostname",
+        "httpStatus",
+        "reason",
+        "siteId",
+        "state"
+      ],
+      "enums": {
+        "state": [
+          "reachable",
+          "unavailable",
+          "unknown"
+        ]
+      }
+    },
+    {
       "concept": "v1:platform:sourceCredential",
       "file": "platform/concepts.memql",
       "fields": [

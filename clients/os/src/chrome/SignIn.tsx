@@ -19,7 +19,7 @@ export function SignIn({
             ? "Update your browser to keep sign-in in sync across tabs. MemQL OS requires Web Locks support."
             : status === "unavailable"
             ? "This cluster has not published a sign-in configuration."
-            : "Sign in with the same passkey or magic link you use for the portal."}
+            : "Sign in to MemQL with your passkey or a magic link."}
         </p>
         {supportedBrowser && status === "signed-out" ? (
           <button type="button" className="os-primary" data-sign-in onClick={onSignIn}>

@@ -50,7 +50,7 @@ describe("one domain", () => {
 
   it("carries the row facts the drawing renders", () => {
     const site = byId(m.nodes, "site:site-shop");
-    expect(site.status).toBe("live");
+    expect(site.status).toBe("unknown");
     expect(site.siteKind).toBe("shopify_storefront");
     expect(byId(m.nodes, "bundle:memql.example.com:blob://sites/site-shop/v1/").label).toBe(
       "uploaded bundle",

@@ -856,6 +856,21 @@ function seed_front_door_tls() {
         --dry-run=client -o yaml | kubectl apply -f - >&2
     SEEDED_COUNT=$((SEEDED_COUNT + 1))
     info "${MEMQL_LOCAL_TLS_SECRET} seeded."
+    # The public ingress and internal services use different CAs. Give the
+    # website monitor the public root only; never copy CA private key material.
+    local health_caroot="$MKCERT_CAROOT"
+    if [ -z "$health_caroot" ]; then
+        health_caroot="$("$MKCERT_BIN" -CAROOT 2>/dev/null || true)"
+    fi
+    if [ -n "$health_caroot" ] && [ -s "$health_caroot/rootCA.pem" ]; then
+        kubectl create configmap memql-front-door-ca \
+            --namespace "${NAMESPACE}" \
+            --from-file="ca.crt=$health_caroot/rootCA.pem" \
+            --dry-run=client -o yaml | kubectl apply -f - >&2
+        SEEDED_COUNT=$((SEEDED_COUNT + 1))
+    else
+        warn "Public ingress CA is unavailable; website health remains Unknown until memql-front-door-ca is seeded."
+    fi
 }
 
 #=============================================================================

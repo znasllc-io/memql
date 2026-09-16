@@ -95,6 +95,7 @@ import (
 	// which on a node type that runs no authored runtime is the permanent and
 	// correct answer.
 	_ "github.com/znasllc-io/memql/component/emailrules"
+	_ "github.com/znasllc-io/memql/component/sitehealth"
 	_ "github.com/znasllc-io/memql/component/sitetraffic"
 	_ "github.com/znasllc-io/memql/integrations/shopify"
 	_ "github.com/znasllc-io/memql/integrations/similarity"

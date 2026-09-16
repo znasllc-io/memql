@@ -14,10 +14,10 @@
 # Callers source capability.sh first (for cap_json_escape).
 function ensure_local_traefik() {
     local cluster="${1:?local cluster name is required}"
-    local state version references owned patch
+    local state version references owned content patch spec
     state="$(kubectl --context "k3d-${cluster}" --request-timeout=30s get helmchartconfig traefik \
         -n kube-system --ignore-not-found \
-        -o jsonpath='{.metadata.resourceVersion}{"\n"}{.spec.valuesSecrets}{"\n"}{.spec.valuesSecrets[?(@.name=="memql-local-traefik")].name}')" || return $?
+        -o jsonpath='{.metadata.resourceVersion}{"\n"}{.spec.valuesSecrets}{"\n"}{.spec.valuesSecrets[?(@.name=="memql-local-traefik")].name}{"\n"}{.spec.valuesContent}')" || return $?
     # The overlay contains no credentials. A Secret is the Helm controller's
     # native values-file mechanism; no host-side YAML parser is required.
     kubectl --context "k3d-${cluster}" --request-timeout=30s apply -f - >&2 <<'VALUES' || return $?
@@ -47,6 +47,7 @@ metadata:
   name: traefik
   namespace: kube-system
 spec:
+  valuesContent: "{}"
   valuesSecrets:
     - name: memql-local-traefik
       keys: [values.yaml]
@@ -57,15 +58,26 @@ CONFIG
         IFS= read -r version
         IFS= read -r references || :
         IFS= read -r owned || :
+        IFS= read -r -d '' content || :
     } <<< "$state"
-    [[ "$owned" == "memql-local-traefik" ]] && return 0
-    # kubectl serializes this array as JSON. Append without decoding or changing
-    # any operator-owned entry; metadata.resourceVersion fences concurrent edits.
-    references="${references:-[]}"
-    references="${references%]}"
-    [[ "$references" == '[' ]] || references+=','
-    references+='{"name":"memql-local-traefik","keys":["values.yaml"]}]'
-    patch="{\"metadata\":{\"resourceVersion\":\"$(cap_json_escape "$version")\"},\"spec\":{\"valuesSecrets\":${references}}}"
+    # helm-controller v0.16.17 only projects Config valuesSecrets inside its
+    # nonempty ValuesContent branch. An empty YAML map enables that branch
+    # without replacing any operator values. Newer controllers accept it too.
+    spec=""
+    if [[ -z "$content" ]]; then
+        spec='"valuesContent":"{}"'
+    fi
+    if [[ "$owned" != "memql-local-traefik" ]]; then
+        references="${references:-[]}"
+        references="${references%]}"
+        [[ "$references" == '[' ]] || references+=','
+        references+='{"name":"memql-local-traefik","keys":["values.yaml"]}]'
+        [[ -z "$spec" ]] || spec+=','
+        spec+="\"valuesSecrets\":${references}"
+    fi
+    [[ -n "$spec" ]] || return 0
+    # Fence concurrent edits, including an operator adding valuesContent.
+    patch="{\"metadata\":{\"resourceVersion\":\"$(cap_json_escape "$version")\"},\"spec\":{${spec}}}"
     kubectl --context "k3d-${cluster}" --request-timeout=30s patch helmchartconfig traefik \
         -n kube-system --type=merge -p "$patch" >&2
 }

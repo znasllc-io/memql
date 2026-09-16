@@ -1,5 +1,5 @@
 import { Caption, Field, Input, Select } from "../../../../../kit";
-import { DEPLOYABLE_KINDS, NOT_OFFERED_SENTENCE } from "../../../targets";
+import { DEPLOYABLE_KINDS } from "../../../targets";
 import type { ComposeDraft } from "../../compose";
 
 // The two fields more than one branch of the Source stop asks for.
@@ -65,7 +65,11 @@ export function KindField({ draft, onDraft }: { draft: ComposeDraft; onDraft: (p
         </Select>
       </Field>
       {chosen ? <Caption>{chosen.blurb}</Caption> : null}
-      <Caption>{NOT_OFFERED_SENTENCE}</Caption>
+      {draft.kind === "shopify_storefront" ? <>
+        <Field label="Shopify store"><Input id="os-compose-store" label="Shopify store domain" value={draft.storeDomain ?? ""} onChange={(storeDomain) => onDraft({ storeDomain })} placeholder="your-store.myshopify.com" /></Field>
+        <Field label="Storefront token reference"><Input id="os-compose-token-ref" label="Storefront token reference" value={draft.storefrontTokenRef ?? ""} onChange={(storefrontTokenRef) => onDraft({ storefrontTokenRef })} placeholder="shopify-storefront-token" /></Field>
+        <Caption>Use the name of a stored secret, not the token itself.</Caption>
+      </> : null}
     </>
   );
 }

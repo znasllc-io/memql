@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, act, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -21,7 +21,12 @@ type Conn = ReturnType<typeof fakeConnection>;
 // aria-checked and the accessible name is what a person -- or a screen reader
 // -- actually perceives, and it survives the control being restyled again.
 function isChosen(name: RegExp): boolean {
-  return screen.getByRole("radio", { name }).getAttribute("aria-checked") === "true";
+  return name.test(screen.getByRole("combobox", { name: "Routing strategy" }).textContent ?? "");
+}
+
+async function chooseStrategy(value: string) {
+  fireEvent.click(screen.getByRole("combobox", { name: "Routing strategy" }));
+  await click(screen.getByRole("option", { name: ({ firstFit: "First eligible", roundRobin: "Take turns", leastLoaded: "Least busy", labelMatch: "Best label match" } as Record<string,string>)[value] }));
 }
 
 async function click(el: Element) {
@@ -32,7 +37,9 @@ async function click(el: Element) {
 
 function mount(connection: Conn) {
   h.connection = connection;
-  return render(withSession(<RoutingSection />));
+  const view = render(withSession(<RoutingSection />));
+  view.container.querySelectorAll("details").forEach(el => { el.open = true; });
+  return view;
 }
 
 beforeEach(() => {
@@ -44,13 +51,13 @@ describe("the routing policy editor", () => {
     const connection = fakeConnection({ myRoutingPolicies: [] });
     mount(connection);
 
-    expect(await screen.findByText(/No policy set/)).toBeTruthy();
+    expect(await screen.findByText(/Using the default/)).toBeTruthy();
     // The defaults are NAMED, because they are what the router applies to
     // this person today -- "not configured" and "configured to the defaults"
     // are different facts and only one of them is true here.
-    const note = screen.getByText(/No policy set/);
-    expect(note.textContent).toContain("firstFit");
-    expect(note.textContent).toContain("nextMatching");
+    const note = screen.getByText(/Using the default/);
+    expect(note.textContent).toContain("first eligible machine");
+    expect(note.textContent).toContain("next match");
 
     // Opening the section is a READ. Nothing was written.
     expect(connection.query.createRoutingPolicy).not.toHaveBeenCalled();
@@ -59,32 +66,24 @@ describe("the routing policy editor", () => {
 
   it("offers exactly the enum values, each with its meaning", async () => {
     mount(fakeConnection({ myRoutingPolicies: [] }));
-    await screen.findByText(/No policy set/);
+    await screen.findByText(/Using the default/);
 
-    const strategies = screen.getByRole("radiogroup", { name: "Routing strategy" });
-    const strategyNames = within(strategies)
-      .getAllByRole("radio")
-      .map((el) => el.querySelector(".os-choice-card-name")?.textContent ?? "");
-    expect(strategyNames).toEqual(["firstFit", "roundRobin", "leastLoaded", "labelMatch"]);
-    expect(within(strategies).getByText(/Registration order/)).toBeTruthy();
-    expect(within(strategies).getByText(/Fewest calls in flight/)).toBeTruthy();
-
-    const fallbacks = screen.getByRole("radiogroup", { name: "Routing fallback" });
-    expect(
-      within(fallbacks)
-        .getAllByRole("radio")
-        .map((el) => el.querySelector(".os-choice-card-name")?.textContent ?? ""),
-    ).toEqual(["none", "nextMatching"]);
-    // The one thing an operator has to know about nextMatching.
-    expect(within(fallbacks).getByText(/never a re-run/)).toBeTruthy();
+    await click(screen.getByRole("combobox", { name: "Routing strategy" }));
+    expect(screen.getAllByRole("option").map(el => el.textContent)).toEqual(["First eligible", "Take turns", "Least busy", "Best label match"]);
+    await click(screen.getByRole("option", { name: "Least busy" }));
+    expect(screen.getByText(/Fewest calls in flight/)).toBeTruthy();
+    await click(screen.getByRole("combobox", { name: "Routing fallback" }));
+    expect(screen.getAllByRole("option").map(el => el.textContent)).toEqual(["Return the refusal", "Try the next match"]);
+    await click(screen.getByRole("option", { name: "Try the next match" }));
+    expect(screen.getByText(/never a re-run/)).toBeTruthy();
   });
 
   it("CREATES on the first save and mints an id for it", async () => {
     const connection = fakeConnection({ myRoutingPolicies: [] });
     mount(connection);
-    await screen.findByText(/No policy set/);
+    await screen.findByText(/Using the default/);
 
-    await click(screen.getByRole("radio", { name: /leastLoaded/ }));
+    await chooseStrategy("leastLoaded");
     await click(screen.getByRole("button", { name: "Create policy" }));
 
     expect(connection.query.updateRoutingPolicy).not.toHaveBeenCalled();
@@ -116,12 +115,12 @@ describe("the routing policy editor", () => {
     });
     mount(connection);
     await waitFor(() =>
-      expect(isChosen(/roundRobin/)).toBe(
+      expect(isChosen(/Take turns/)).toBe(
         true,
       ),
     );
 
-    await click(screen.getByRole("radio", { name: /labelMatch/ }));
+    await chooseStrategy("labelMatch");
     await click(screen.getByRole("button", { name: "Save policy" }));
 
     expect(connection.query.createRoutingPolicy).not.toHaveBeenCalled();
@@ -151,7 +150,7 @@ describe("the routing policy editor", () => {
     });
     mount(connection);
     await waitFor(() =>
-      expect(isChosen(/firstFit/)).toBe(true),
+      expect(isChosen(/First eligible/)).toBe(true),
     );
 
     // Delivered as a FOLDED EVENT, which is how a policy edited in another
@@ -168,7 +167,7 @@ describe("the routing policy editor", () => {
     });
 
     await waitFor(() =>
-      expect(isChosen(/leastLoaded/)).toBe(
+      expect(isChosen(/Least busy/)).toBe(
         true,
       ),
     );
@@ -182,10 +181,10 @@ describe("the routing policy editor", () => {
     });
     mount(connection);
     await waitFor(() =>
-      expect(isChosen(/firstFit/)).toBe(true),
+      expect(isChosen(/First eligible/)).toBe(true),
     );
 
-    await click(screen.getByRole("radio", { name: /labelMatch/ }));
+    await chooseStrategy("labelMatch");
 
     // A draft differs from its row the instant anybody types. Saying "this
     // changed somewhere else" then trains an operator to ignore the one
@@ -201,10 +200,10 @@ describe("the routing policy editor", () => {
     });
     mount(connection);
     await waitFor(() =>
-      expect(isChosen(/firstFit/)).toBe(true),
+      expect(isChosen(/First eligible/)).toBe(true),
     );
 
-    await click(screen.getByRole("radio", { name: /labelMatch/ }));
+    await chooseStrategy("labelMatch");
 
     await act(async () => {
       connection.subscriptions.emit("v1:worker:routingPolicy", {
@@ -218,20 +217,20 @@ describe("the routing policy editor", () => {
     // Silently discarding somebody's typing is worse than either resolution,
     // so the edit stands and the disagreement is shown.
     await waitFor(() => expect(screen.getByText(/changed somewhere else/)).toBeTruthy());
-    expect(isChosen(/labelMatch/)).toBe(true);
+    expect(isChosen(/Best label match/)).toBe(true);
   });
 
   it("renders a refusal in surface, keeping the edits", async () => {
     const connection = fakeConnection({ myRoutingPolicies: [] });
     connection.query.createRoutingPolicy.mockRejectedValue(new Error("policy refused"));
     mount(connection);
-    await screen.findByText(/No policy set/);
+    await screen.findByText(/Using the default/);
 
-    await click(screen.getByRole("radio", { name: /labelMatch/ }));
+    await chooseStrategy("labelMatch");
     await click(screen.getByRole("button", { name: "Create policy" }));
 
     await waitFor(() => expect(screen.getByText("policy refused")).toBeTruthy());
-    expect(isChosen(/labelMatch/)).toBe(true);
+    expect(isChosen(/Best label match/)).toBe(true);
   });
 });
 

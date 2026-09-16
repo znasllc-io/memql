@@ -25,32 +25,23 @@ describe("the Logs section in a window's nav", () => {
   it("an admin's Fleet window offers Logs, right before Settings", () => {
     renderShell({ access: ADMIN });
     openFromLauncher("Fleet");
+    expect(screen.getByRole("button", { name: "Fleet logs" })).toBeTruthy();
     // Apps joined between Workbenches and Logs (epic memql#5009); Logs is
     // still the section immediately before Settings, which is what this
     // pins.
     expect(navNames("Fleet")).toEqual([
-      "Machines",
-      "Models",
-      "Routing",
-      "Workbenches",
-      "Apps",
-      "Logs",
-      "Settings",
+      "Overview", "Machines", "Policies", "Model library", "Machine routing", "Activity", "Workspaces",
     ]);
   });
 
   it("a reader's Fleet window does not", () => {
     renderShell({ access: READER });
     openFromLauncher("Fleet");
+    expect(screen.queryByRole("button", { name: "Fleet logs" })).toBeNull();
     // Apps is NOT admin-floored -- both concepts behind it declare the
     // composite owner tier -- so a reader keeps it and loses only Logs.
     expect(navNames("Fleet")).toEqual([
-      "Machines",
-      "Models",
-      "Routing",
-      "Workbenches",
-      "Apps",
-      "Settings",
+      "Overview", "Machines", "Policies", "Model library", "Machine routing", "Activity", "Workspaces",
     ]);
   });
 
@@ -71,7 +62,7 @@ describe("the Logs app in the launcher", () => {
     renderShell({ access: ADMIN });
     openFromLauncher("Logs");
     expect(document.querySelector("[data-os-window='logs']")).not.toBeNull();
-    expect(navNames("Logs")).toEqual(["Stream", "Search", "Settings"]);
+    expect(navNames("Logs")).toEqual(["Stream", "Search"]);
     expect(screen.getByRole("heading", { name: "Stream" })).toBeTruthy();
   });
 

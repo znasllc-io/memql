@@ -8,11 +8,13 @@ import (
 )
 
 // PolicyRegistry holds the parsed AI Router policies loaded at engine
-// startup. Policies are immutable for the life of the process -- we
+// startup. Shipped defaults are immutable; durable configuration snapshots overlay them. We
 // reload on restart, not at runtime. Keyed by policy name.
 type PolicyRegistry struct {
-	mu     sync.RWMutex
-	byName map[string]*PolicyConfig
+	mu       sync.RWMutex
+	byName   map[string]*PolicyConfig
+	defaults map[string]*PolicyConfig
+	store    PolicyStore
 }
 
 func newPolicyRegistry() *PolicyRegistry {

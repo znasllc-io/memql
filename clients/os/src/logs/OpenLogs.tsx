@@ -3,6 +3,7 @@ import { ScrollText } from "lucide-react";
 
 import { useOs, type OsActions } from "../chrome/state";
 import { Button } from "../kit";
+import { IconButton } from "../kit/IconButton";
 import { canOpen } from "../system/registry";
 
 // The deep link into the Logs app (epic memql#4895, spec H "Deep links"):
@@ -35,9 +36,11 @@ export function OpenLogsButton({
   subject,
   subjectConcept,
   ariaLabel,
+  iconOnly = false,
 }: LogsSubject & {
   /** Names what the logs are OF: "Logs for shop.example.com". */
   ariaLabel: string;
+  iconOnly?: boolean;
 }) {
   const { actions, registry, accessEpoch } = useOs();
   // `accessEpoch` in the deps for the launcher's reason (memql#4857): canOpen
@@ -50,6 +53,7 @@ export function OpenLogsButton({
     [registry, accessEpoch],
   );
   if (!admitted || subject.trim() === "") return null;
+  if (iconOnly) return <IconButton label={ariaLabel} onClick={() => openLogsOn(actions, { subject, subjectConcept })}><ScrollText size={16} aria-hidden /></IconButton>;
   return (
     <Button onClick={() => openLogsOn(actions, { subject, subjectConcept })} ariaLabel={ariaLabel}>
       <ScrollText size={13} aria-hidden /> Logs

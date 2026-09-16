@@ -1,6 +1,7 @@
+import { EmptyState, Button } from "../../../kit";
 import { useMemo } from "react";
 
-import { Caption, Notice, Subhead } from "../../../kit";
+import { Caption, Fact, Facts, Notice, Subhead } from "../../../kit";
 import {
   applyFacets,
   categorySentence,
@@ -92,12 +93,14 @@ function fleetFactsFrom(models: CatalogModel[]): FleetModelFacts[] {
 }
 
 export function CatalogSection({
+  onClearFilters,
   profiles,
   profilesState,
   profilesError,
   fleet,
   facets,
 }: {
+  onClearFilters?: () => void;
   profiles: ModelProfile[];
   profilesState: string;
   profilesError: string;
@@ -134,7 +137,7 @@ export function CatalogSection({
         <Notice
           tone="info"
           sentence="We could not read the model catalog."
-          next="The catalog is seeded with the cluster, so this is a read that failed rather than a catalog that is empty."
+          next="Refresh to try reading the catalog again."
           detail={profilesError}
         />
       </>
@@ -144,15 +147,13 @@ export function CatalogSection({
   // NOTHING IS SHOWN OVER AN EMPTY CATALOG, the same rule the ranked list
   // follows: every sentence below describes a set of recommendations, and
   // printing them above none describes nothing.
-  if (groups.length === 0) return null;
+  if (groups.length === 0) return profilesState === "reading" ? <Caption>Reading the model catalog…</Caption> : <EmptyState title={profiles.length ? "No matching models" : "Model catalog unavailable"} action={profiles.length && onClearFilters ? <Button onClick={onClearFilters}>Clear filters</Button> : undefined}>{profiles.length ? "Choose another category or runtime to see more models." : "This cluster has not provided a model catalog. You can still use models already installed on your machines."}</EmptyState>;
 
   return (
     <>
       <Subhead>What to run</Subhead>
       <Caption>
-        A short list of open-weight models worth running, by what you would use them for. It is a
-        recommendation and gates nothing — a model your machines already serve is used whether or
-        not it is here.
+        Explore models by capability and check which fit your machines. Models you already serve remain available even if they are not in this catalog.
       </Caption>
 
       {machineCount > 0 ? null : (
@@ -161,7 +162,7 @@ export function CatalogSection({
         // the only thing this person can do next -- so it is one sentence above
         // the list, and the groups below it fall silent.
         <Caption>
-          You have no machines paired yet. Pair one in Machines, then pull from this list.
+          Connect a machine from Machines to check compatibility and install models.
         </Caption>
       )}
 
@@ -192,15 +193,15 @@ export function CatalogSection({
         {groups.map((group) => {
           const state = categorySentence(group);
           return (
-          <section className="os-fleet-catgroup" key={group.category}>
-            <h4 className="os-fleet-catname">{group.label}</h4>
+          <details className="os-fleet-catgroup" key={group.category} open={groups.length === 1}>
+            <summary className="os-fleet-catname">{group.label} <span className="os-caption">{group.shown.length} models</span></summary>
             {state === "" ? null : <p className="os-fleet-catstate">{state}</p>}
             <ul className="os-fleet-catrows">
               {group.shown.map((row) => (
                 <CatalogEntry key={`${row.profile.category}:${row.profile.modelId}`} row={row} />
               ))}
             </ul>
-          </section>
+          </details>
           );
         })}
       </div>
@@ -247,8 +248,10 @@ function CatalogEntry({ row }: { row: CatalogRow }) {
       data-served={served || undefined}
       data-blocked={blocked ? blocked.kind : undefined}
     >
-      <span className="os-fleet-catid os-mono">{profile.modelId}</span>
-      <span className="os-fleet-catnote">{note}</span>
+      <details className="fleet-catalog-profile"><summary><span className="os-fleet-catid os-mono">{profile.modelId}</span><span className="os-fleet-catnote">{served ? "Installed" : blocked ? blocked.detail : "Available to install"}</span></summary>
+        <p className="os-caption">{note}</p>
+        <Facts><Fact label="Runtime" value={profile.runtime} /><Fact label="Family" value={profile.family || "Not reported"} /><Fact label="Parameters" value={profile.params || "Not reported"} /><Fact label="Context" value={profile.contextWindow || "Not reported"} /><Fact label="Quantization" value={profile.quant || "Not reported"} /><Fact label="Capabilities" value={profile.flags.join(", ") || "None reported"} /><Fact label="Dimensions" value={profile.dimensions || "Not applicable"} /><Fact label="License" value={profile.license || "Not reported"} /><Fact label="Recommended for" value={profile.recommendedFor.join(", ") || "Not specified"} /><Fact label="Machine class" value={profile.minMachineClass || "Not specified"} /><Fact label="Platforms" value={profile.offeredOn.join(", ") || "Not specified"} /></Facts>
+      </details>
     </li>
   );
 }

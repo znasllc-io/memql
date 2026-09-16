@@ -20,7 +20,7 @@ const { fakeConnection, withSession } = await import("./harness");
 // door opens Fleet at Machines with `{ addMachine: { inference: true } }`, and
 // this is the receiving half: the guided install (design record
 // 2026-09-08-cockpit-install-wizard) is already open when they land, with
-// "will run local models" already ticked.
+// "Run local models" already ticked.
 //
 // LANDING ON THE LIST WITH THE BUTTON STILL TO FIND is what this prevents.
 // The act a person took was "pair a machine that serves a model" -- delivering
@@ -88,13 +88,13 @@ describe("Fleet, opened to add a machine", () => {
   // and nothing anywhere would say so.
   it("pre-selects the local-models box when the intent asks for it", async () => {
     await open({ addMachine: { inference: true } });
-    const box = screen.getByRole("checkbox", { name: /will run local models/i });
+    const box = screen.getByRole("switch", { name: /Run local models/i });
     expect((box as HTMLInputElement).checked).toBe(true);
   });
 
   it("leaves the box unticked for a bare open request", async () => {
     await open({ addMachine: {} });
-    const box = screen.getByRole("checkbox", { name: /will run local models/i });
+    const box = screen.getByRole("switch", { name: /Run local models/i });
     expect((box as HTMLInputElement).checked).toBe(false);
   });
 
@@ -102,7 +102,7 @@ describe("Fleet, opened to add a machine", () => {
   // AN INTENT CONSUMED ONCE MUST NOT RE-ARM
   // ===========================================================================
   // A person who arrived from the wizard's inference door, left the page and
-  // opened it again from the Head must NOT find "will run local models"
+  // opened it again from the Head must NOT find "Run local models"
   // ticked again: a several-gigabyte download pre-selected by an intent that
   // was spent minutes earlier, with nothing on screen explaining why. The
   // hook starts every flow from an empty draft unless the START says
@@ -110,7 +110,7 @@ describe("Fleet, opened to add a machine", () => {
   it("does not re-tick the box when the page is left and re-opened", async () => {
     await open({ addMachine: { inference: true } });
     expect(
-      (screen.getByRole("checkbox", { name: /will run local models/i }) as HTMLInputElement)
+      (screen.getByRole("switch", { name: /Run local models/i }) as HTMLInputElement)
         .checked,
     ).toBe(true);
 
@@ -124,7 +124,7 @@ describe("Fleet, opened to add a machine", () => {
       screen.getByRole("button", { name: "Add a machine" }).click();
     });
     expect(
-      (screen.getByRole("checkbox", { name: /will run local models/i }) as HTMLInputElement)
+      (screen.getByRole("switch", { name: /Run local models/i }) as HTMLInputElement)
         .checked,
     ).toBe(false);
   });

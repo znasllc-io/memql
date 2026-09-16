@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Code2 } from "lucide-react";
+import { Code2 } from "lucide-react";
 import type { Concept } from "@znasllc-io/memql-sdk-core/client";
 
 import { Button, Caption, Chip, Head, Notice } from "../../kit";
@@ -61,11 +61,7 @@ export function ConceptPage({
   if (concept === null) {
     return (
       <div className="os-app-stack os-concept-page">
-        <Head title={conceptId}>
-          <Button tone="quiet" onClick={onBack}>
-            <ArrowLeft size={13} aria-hidden /> Concepts
-          </Button>
-        </Head>
+        <Head title={conceptId} back={{ label: "Concepts", onSelect: onBack }} />
         {registryState === "seeding" ? (
           <Caption>Reading the registry from the cluster.</Caption>
         ) : (
@@ -108,10 +104,8 @@ function ConceptBody({
 
   return (
     <div className="os-app-stack os-concept-page">
-      <Head title={concept.entity} meta={concept.id}>
-        <Button tone="quiet" onClick={onBack}>
-          <ArrowLeft size={13} aria-hidden /> Concepts
-        </Button>
+      <Head title={concept.entity} meta={concept.id} back={{ label: "Concepts", onSelect: onBack }}>
+
         {/* The reverse of the extension's own handoff: it opens the console
             at a concept's rows, and this opens the editor at its
             definition. */}

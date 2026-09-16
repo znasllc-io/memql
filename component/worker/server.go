@@ -803,6 +803,18 @@ func (s *streamSession) handleHeartbeat(hb *memqlv1.Heartbeat, sourceIP string) 
 	}
 	s.worker.TouchLastSeen(at, sourceIP)
 
+	if hb.GetPermissions() != nil {
+		snapshot := permissionStatusToMap(hb.GetPermissions())
+		s.worker.mu.Lock()
+		s.worker.Permissions = snapshot
+		s.worker.mu.Unlock()
+		if s.server.store != nil {
+			if err := s.server.store.UpdatePermissions(s.ctx, s.worker.RegistrationId, s.worker.OwnerUserId, snapshot); err != nil {
+				s.server.logger.Warn("worker: permission snapshot persistence failed; next heartbeat will retry", "registration_id", s.worker.RegistrationId, "error", err)
+			}
+		}
+	}
+
 	// An app inventory on the beat is applied IMMEDIATELY to the
 	// live registry entry (memql#4359): signing into Claude Code
 	// makes the machine selectable on the next beat rather than on
@@ -1254,16 +1266,42 @@ func platformInfoToMap(p *memqlv1.PlatformInfo) map[string]any {
 	}
 }
 
+// permissionStatusToMap preserves explicit UNKNOWN and treats the old MVP
+// stub as unmeasured. No Terminal/setup report is promoted to worker evidence.
 func permissionStatusToMap(p *memqlv1.PermissionStatus) map[string]any {
 	if p == nil {
 		return nil
 	}
-	return map[string]any{
-		"accessibility":    p.GetAccessibility(),
-		"screen_recording": p.GetScreenRecording(),
-		"x11_display":      p.GetX11Display(),
-		"detail":           p.GetDetail(),
+	modern := p.GetCheckedAt() != nil || p.GetProbeContext() != "" || p.GetAccessibilityState() != 0 || p.GetScreenRecordingState() != 0 || p.GetX11DisplayState() != 0
+	stub := strings.Contains(strings.ToLower(p.GetDetail()), "not yet implemented")
+	// An empty proto has no evidence: proto3 cannot distinguish omitted false
+	// flags from measured denials. Modern producers attach probe metadata.
+	empty := !modern && p.GetDetail() == "" && !p.GetAccessibility() && !p.GetScreenRecording() && !p.GetX11Display()
+	state := func(value memqlv1.PermissionDecision, legacy bool) string {
+		if modern {
+			switch value {
+			case memqlv1.PermissionDecision_PERMISSION_DECISION_GRANTED:
+				return "granted"
+			case memqlv1.PermissionDecision_PERMISSION_DECISION_DENIED:
+				return "denied"
+			default:
+				return "unknown"
+			}
+		}
+		if stub || empty {
+			return "unknown"
+		}
+		if legacy {
+			return "granted"
+		}
+		return "denied"
 	}
+	a, screen, x := state(p.GetAccessibilityState(), p.GetAccessibility()), state(p.GetScreenRecordingState(), p.GetScreenRecording()), state(p.GetX11DisplayState(), p.GetX11Display())
+	result := map[string]any{"accessibility": a == "granted", "screen_recording": screen == "granted", "x11_display": x == "granted", "accessibility_state": a, "screen_recording_state": screen, "x11_display_state": x, "detail": p.GetDetail(), "probe_context": p.GetProbeContext()}
+	if at := p.GetCheckedAt(); at != nil && at.IsValid() {
+		result["checked_at"] = at.AsTime().UTC().Format(time.RFC3339Nano)
+	}
+	return result
 }
 
 func platformHostname(p *memqlv1.PlatformInfo) string {

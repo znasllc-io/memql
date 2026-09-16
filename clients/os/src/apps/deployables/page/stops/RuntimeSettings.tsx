@@ -91,7 +91,7 @@ export function RuntimeSettingsPanel({ site, canEdit }: { site: SiteRow; canEdit
         <h4 className="os-report-heading">Settings</h4>
         <Caption>{NOT_A_SECRET}</Caption>
         {stored.length === 0 ? (
-          <Caption>No settings. This app reads nothing from the cluster at load.</Caption>
+          <Caption>No app values have been added.</Caption>
         ) : (
           <Facts>
             {stored.map((row) => (
@@ -135,8 +135,7 @@ export function RuntimeSettingsPanel({ site, canEdit }: { site: SiteRow; canEdit
 
       {draft.length === 0 ? (
         <Caption>
-          No settings yet. Add one to give this app a value it reads at load -- an API base, a region, a feature switch --
-          without rebuilding it.
+          Add a public app value, such as an API URL or region, without rebuilding.
         </Caption>
       ) : (
         <>

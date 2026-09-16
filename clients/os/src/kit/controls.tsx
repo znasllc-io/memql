@@ -1,3 +1,7 @@
+import { Breadcrumbs, type Breadcrumb } from "./Breadcrumbs";
+import { usePageNavigation } from "./pageNavigation";
+import { IconButton } from "./IconButton";
+import { useWindowSearchTarget } from "./windowSearch";
 import {
   Children,
   Fragment,
@@ -13,7 +17,7 @@ import { createPortal } from "react-dom";
 // `Check` is aliased because this module already exports a control by that
 // name -- the checkbox. One of the two has to say which it is, and the glyph
 // is the one that is not part of the kit's vocabulary.
-import { ArrowUpDown, Check as CheckGlyph, ChevronDown, Copy, Search, X } from "lucide-react";
+import { ArrowLeft, ArrowUpDown, Check as CheckGlyph, ChevronDown, Copy, Search, X } from "lucide-react";
 
 // The OS's shared controls.
 //
@@ -699,7 +703,9 @@ export function Select({
                 ))
               )}
             </div>,
-            document.body,
+            // A modal makes the rest of the document inert. Keep its options
+            // in that top layer; ordinary windows still escape to the body.
+            triggerRef.current?.closest("dialog") ?? document.body,
           )
         : null}
     </>
@@ -763,7 +769,9 @@ export function Refine({
   chips = [],
   label,
   children,
+  iconOnly = false,
 }: {
+  iconOnly?: boolean;
   search: string;
   onSearch: (next: string) => void;
   placeholder?: string;
@@ -774,6 +782,8 @@ export function Refine({
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const returnFocus = useRef<HTMLElement | null>(null);
+  const hosted = useWindowSearchTarget(rootRef, () => { returnFocus.current = document.activeElement as HTMLElement; setOpen(true); rootRef.current?.querySelector("input")?.focus(); });
 
   useEffect(() => {
     if (!open) return;
@@ -783,7 +793,7 @@ export function Refine({
       }
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") { setOpen(false); returnFocus.current?.focus(); }
     };
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
@@ -800,7 +810,7 @@ export function Refine({
   }, [open]);
 
   return (
-    <div ref={rootRef} className="os-refine" role="group" aria-label={label}>
+    <div ref={rootRef} className="os-refine" role="group" aria-label={label} data-os-page-context={search || chips.length ? JSON.stringify({ search, filters: chips.map(chip => chip.label) }) : undefined}>
       {chips.map((chip) => (
         <span key={chip.id} className="os-chip os-chip-editable" data-tone="accent">
           {chip.label}
@@ -814,17 +824,19 @@ export function Refine({
           </button>
         </span>
       ))}
-      <button
+      {hosted && search ? <span className="os-chip os-chip-editable" data-tone="accent">{search}<button type="button" className="os-chip-remove" aria-label="Clear search" onClick={() => onSearch("")}><X size={10} aria-hidden /></button></span> : null}
+      {!hosted ? <button
         type="button"
-        className="os-refine-open"
+        className={iconOnly ? "os-refine-open os-refine-icon" : "os-refine-open"}
+        title={label}
         aria-expanded={open}
         aria-label={label}
         data-active={search !== "" || undefined}
         onClick={() => setOpen((v) => !v)}
       >
         <Search size={13} aria-hidden />
-        <span className="os-refine-open-text">{search !== "" ? search : placeholder}</span>
-      </button>
+        {iconOnly ? null : <span className="os-refine-open-text">{search !== "" ? search : placeholder}</span>}
+      </button> : null}
       {open ? (
         <div className="os-refine-panel">
           <Input
@@ -954,23 +966,31 @@ export function Panel({ children, label }: { children: ReactNode; label?: string
   );
 }
 
-export function Head({
-  title,
-  meta,
-  children,
-}: {
+export function Head({ title, meta, children, breadcrumbs, back, navigation = true }: {
   title: string;
   /** A quiet fact beside the title -- a count, a scope note. Muted, tabular. */
   meta?: ReactNode;
   children?: ReactNode;
+  breadcrumbs?: readonly Breadcrumb[];
+  back?: { label: string; onSelect: () => void };
+  /** Secondary headings leave window return navigation with the page heading. */
+  navigation?: boolean;
 }) {
-  return (
-    <div className="os-head">
+  const { root, trail } = usePageNavigation(navigation);
+  const local = breadcrumbs ?? (back ? [back, { label: title }] : trail.length ? [{ label: title }] : []);
+  const items = [...trail, ...local].filter((item, index, all) => index === 0 || item.label !== all[index - 1]?.label);
+  const destination = back ?? trail.at(-1);
+  return <>
+    {items.length ? <Breadcrumbs items={items} /> : null}
+    <div ref={root} className="os-head">
       <h3 className="os-settings-title">{title}</h3>
       {meta !== undefined && meta !== null ? <span className="os-head-meta">{meta}</span> : null}
-      {children ? <div className="os-head-actions">{children}</div> : null}
+      {children || destination?.onSelect ? <div className="os-head-actions">
+        {destination?.onSelect ? <IconButton label={`Back to ${destination.label}`} onClick={destination.onSelect}><ArrowLeft size={16} aria-hidden /></IconButton> : null}
+        {children}
+      </div> : null}
     </div>
-  );
+  </>;
 }
 
 export function Subhead({ children }: { children: ReactNode }) {

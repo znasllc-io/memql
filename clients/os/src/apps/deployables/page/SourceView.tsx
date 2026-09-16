@@ -1,7 +1,6 @@
-import { ArrowLeft, GitBranch, History } from "lucide-react";
+import { GitBranch, History } from "lucide-react";
 
-import { Mark } from "../../../chrome/Mark";
-import { Button, Caption, Chip, Fact, Facts, Head, Panel } from "../../../kit";
+import { Caption, Chip, Fact, Facts, Head, Panel } from "../../../kit";
 import { formatMoment } from "../../../kit/format";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
 import { shortVersion, sourceLabel, type PackageRow } from "../packages/rows";
@@ -9,7 +8,7 @@ import type { PartsHeld } from "../parts";
 import { siteName, type SiteRow } from "../rows";
 import type { CredentialRow } from "../sources/rows";
 import { siteStateWord, stateChip } from "../words";
-import { AutoDeploySwitch, PackageLifecycle, SwitchCredential } from "./stops/Source";
+import { AutoDeploySwitch, CredentialChip, PackageLifecycle, SwitchCredential } from "./stops/Source";
 
 // SourceView -- a source is a THING, with its own page (epic memql#4937, D4).
 //
@@ -49,10 +48,10 @@ export function SourceView({
   credentials,
   can,
   onBack,
+  backLabel = "Deployables",
   onOpenHistory,
   onOpenApp,
   onOpenDeclared,
-  onAsk,
   attempts,
   deployedBy,
 }: {
@@ -63,6 +62,7 @@ export function SourceView({
   /** The parts this session holds: the credential and the switch are `sources`, the cascade is `retire`. */
   can: PartsHeld;
   onBack: () => void;
+  backLabel?: string;
   onOpenHistory: () => void;
   onOpenApp: (siteId: string) => void;
   /** Opens the compose flow for an app the source declares and has not deployed. */
@@ -78,7 +78,7 @@ export function SourceView({
   deployedBy: string;
 }) {
   const label = sourceLabel(pkg);
-  const live = apps.filter((a) => a.status === "live").length;
+  const live = apps.filter((a) => siteStateWord(a) === "Live").length;
   // Declared by the manifest and never deployed -- the difference between what
   // the source SAYS it contains and what it has actually put on the internet.
   const deployedNames = new Set(apps.map((a) => a.packageDeployableName));
@@ -108,27 +108,20 @@ export function SourceView({
   const acts: Act[] = [];
 
   return (
-    <div className="os-deploy-pane">
+    <div className="os-deploy-pane deployable-source-view" data-os-page-context={JSON.stringify({ page: "Source", packageId: pkg.id, source: label })}>
       <div className="os-deploy-scroll">
         <Panel label={`Source ${label}`}>
-          <Head title={label}>
-            <Button tone="quiet" onClick={onBack}>
-              <ArrowLeft size={13} aria-hidden /> Deployables
-            </Button>
-            {onAsk ? (
-              <Button tone="quiet" onClick={() => onAsk(`app:deployables package:${pkg.name || pkg.id}`)}>
-                <Mark size={13} aria-hidden /> Ask
-              </Button>
-            ) : null}
-          </Head>
+          <Head title={label} breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label }]} back={{ label: backLabel, onSelect: onBack }} />
 
           <Caption>
-            What this source is, what it fetches under, and what happens when it moves. These are facts about the
-            source rather than about any one app it produced, which is why they are here and not on each of them.
+            {pkg.sourceKind === "repo" ? "Shared repository source" : "Shared source ZIP"}
           </Caption>
 
+          <div className="deployable-source-access"><CredentialChip pkg={pkg} credentials={credentials} /></div>
+          {pkg.updateAvailable ? <Caption>A newer version is available: {shortVersion(pkg.latestKnownVersion)}. Open an app to review and deploy it.</Caption> : null}
           <Facts>
-            <Fact label="Tracking" value={pkg.repoRef === "" ? "default branch" : pkg.repoRef} />
+            {pkg.sourceKind === "repo" ? <Fact label="Repository" value={pkg.repoUrl} /> : <Fact label="ZIP in Files" value={pkg.artifactId} />}
+            {pkg.sourceKind === "repo" ? <Fact label="Tracking" value={pkg.repoRef === "" ? "default branch" : pkg.repoRef} /> : null}
             <Fact label="Deployed" value={pkg.deployedVersion === "" ? "" : shortVersion(pkg.deployedVersion)} mono />
             <Fact
               label="Latest upstream"
@@ -193,8 +186,7 @@ export function SourceView({
             )}
             {inactive > 0 ? (
               <Caption>
-                An inactive app was skipped when this source was deployed. Open it to activate it -- that asks where
-                it should live and deploys it.
+                Open an inactive app to review its setup and activate it.
               </Caption>
             ) : null}
           </section>
@@ -205,7 +197,7 @@ export function SourceView({
           <button type="button" className="os-deploy-history-line" onClick={onOpenHistory}>
             <History size={12} aria-hidden />
             <span>
-              History &middot; {attempts} attempt{attempts === 1 ? "" : "s"}
+              History {attempts > 0 ? `· ${attempts} waiting for review` : ""}
             </span>
             <span aria-hidden>&#9656;</span>
           </button>

@@ -53,6 +53,7 @@ export function AskSheet() {
           voicePorts={voice}
           settings={settings}
           context={sheet.context}
+          contextLabel={sheet.contextLabel}
           variant="sheet"
           autoFocus
           makeGoal={makeGoal}

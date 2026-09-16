@@ -970,7 +970,7 @@ between an audit trail an operator can read and one they scroll past
 | **Volume** | one row per lifecycle moment | one row per rotation (~every 10.5 minutes per open tab) and one per PAT-authenticated request |
 | **Retention** | `MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS`, default 365. The daily sweep only COUNTS -- MemQL has no `delete()` | `MEMQL_IDENTITY_AUTH_ACTIVITY_RETENTION_DAYS`, default 30, HARD-DELETED daily by a Go job on the identity node |
 | **Who can read it** | the cluster owner (`recentAuditEvents` is `clusterOwner`-tiered) | the cluster owner sees everything (`recentAuthActivity`); **every user sees their own** (`authActivityForSelf`) |
-| **Where it renders** | no console surface today (epic memql#4984 retired the portal's Audit Trail; a replacement is filed) | the concept browser, like any concept |
+| **Where it renders** | MemQL OS → Cluster → Audit trail, subject to its access gate | the concept browser, like any concept |
 
 **Why the reads split that way.** `authActivity` declares
 `@rowAuthz(owner="actorUserId", clusterOwner)` -- the owner, or a cluster owner.

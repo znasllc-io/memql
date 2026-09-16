@@ -350,7 +350,7 @@ describe("Settings -> Rules: the list", () => {
     // works the rest out by meeting a refusal. The affordance is said in words
     // instead, before anybody clicks anything.
     await renderRules();
-    expect(screen.getByText(/add a rule of your own/)).toBeTruthy();
+    expect(screen.getByText(/matching shipped rule takes priority/)).toBeTruthy();
     expect(screen.getByText(/come back on every restart/)).toBeTruthy();
   });
 
@@ -465,7 +465,8 @@ describe("Settings -> Rules: describing one", () => {
       policy: "localOnly",
       precedence: 20,
       onUnavailable: "degrade",
-      described: words,
+      description: words,
+      excludes: [],
     });
   });
 });

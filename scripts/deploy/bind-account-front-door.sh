@@ -538,7 +538,9 @@ function check_render() {
     if [[ "$kinds" != "$DOCUMENT_COUNT" ]]; then
         cap_fail 5 "the rendered objects did not validate: expected ${DOCUMENT_COUNT} documents, found ${kinds}"
     fi
-    printf '%s\n' "$rendered" | grep -q '^kind: Certificate$' \
+    # Quiet grep may close a pipe before printf finishes a large manifest.
+    # Here-strings keep pipefail from turning a valid match into a refusal.
+    grep -q '^kind: Certificate$' <<< "$rendered" \
         || cap_fail 5 "the rendered objects did not validate: no Certificate document"
 
     # EVERY PATH WE WERE GIVEN MUST HAVE A RULE. This exists because its
@@ -564,9 +566,9 @@ function check_render() {
     local host escaped
     for host in "$APP_HOST" "$API_HOST" "$ID_HOST"; do
         escaped="$(printf '%s' "$host" | sed 's/[.[\*^$]/\\&/g')"
-        printf '%s\n' "$rendered" | grep -qE "^    - host: ${escaped}\$" \
+        grep -qE "^    - host: ${escaped}\$" <<< "$rendered" \
             || cap_fail 5 "the rendered objects did not validate: ${host} has no Ingress rule"
-        printf '%s\n' "$rendered" | grep -qE "^    - ${escaped}\$" \
+        grep -qE "^    - ${escaped}\$" <<< "$rendered" \
             || cap_fail 5 "the rendered objects did not validate: ${host} is not a certificate dnsName"
     done
     return 0
@@ -619,7 +621,7 @@ function apply_objects() {
         cap_fail 5 "could not apply the front door for ${RESERVED_NAME}: ${out}"
     fi
     cap_info "$out"
-    if printf '%s' "$out" | grep -qv 'unchanged$'; then
+    if grep -qv 'unchanged$' <<< "$out"; then
         CHANGED_ANY=true
         cap_changed
     fi

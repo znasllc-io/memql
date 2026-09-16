@@ -95,3 +95,24 @@ describe("Select (rule 5: no UA chrome)", () => {
     expect(select.parentElement?.querySelector(".os-select-chevron")).toBeTruthy();
   });
 });
+
+const { WindowSearchContext, useWindowSearchHost } = await import('../../src/kit/windowSearch');
+function SearchWindow({ name }: { name: string }) {
+  const {host,openVisible}=useWindowSearchHost();
+  return <div><button onClick={openVisible}>Search {name}</button><WindowSearchContext.Provider value={host}>
+    <div hidden><Refine search="" onSearch={()=>{}} label={`Hidden ${name}`} placeholder={`Hidden ${name}`}/></div>
+    <Refine search="" onSearch={()=>{}} label={`Refine ${name}`} placeholder={`Find ${name}`}><span>{name} filters</span></Refine>
+  </WindowSearchContext.Provider></div>;
+}
+it('uses one window search, focuses its own content and ignores parked panes',()=>{
+ render(<><SearchWindow name="Fleet"/><SearchWindow name="Deployables"/></>);
+ expect(screen.queryByRole('button',{name:'Refine Fleet'})).toBeNull();
+ expect(screen.queryByRole('button',{name:'Refine Deployables'})).toBeNull();
+ const trigger=screen.getByRole('button',{name:'Search Deployables'});trigger.focus();fireEvent.click(trigger);
+ expect(document.activeElement).toBe(screen.getByPlaceholderText('Find Deployables'));
+ expect(screen.queryByPlaceholderText('Find Fleet')).toBeNull();
+ expect(screen.queryByPlaceholderText('Hidden Deployables')).toBeNull();
+ fireEvent.keyDown(document,{key:'Escape'});expect(document.activeElement).toBe(trigger);
+ fireEvent.click(screen.getByRole('button',{name:'Search Fleet'}));
+ expect(document.activeElement).toBe(screen.getByPlaceholderText('Find Fleet'));
+});

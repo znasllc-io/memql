@@ -343,7 +343,7 @@ const COPY: Record<string, RefusalCopy> = {
     // The person did nothing wrong and cannot fix this, so the copy explains
     // the rule rather than suggesting a repair that does not exist.
     title: "This is one of the cluster's own surfaces",
-    next: "The portal and MemQL OS are re-seeded at every boot and are exempt from the lifecycle -- there is nothing to change here.",
+    next: "MemQL OS is re-seeded at every boot and is exempt from the lifecycle -- there is nothing to change here.",
   },
   deployment_not_cancellable: {
     // Two situations, one code, and the server's sentence says which: a run

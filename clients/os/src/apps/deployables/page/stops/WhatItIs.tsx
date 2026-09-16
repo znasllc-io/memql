@@ -23,7 +23,6 @@ import type { RailProblem } from "../rail";
 
 export function WhatItIsStop({
   site,
-  pkg,
   run,
   refusal,
 }: {
@@ -37,7 +36,7 @@ export function WhatItIsStop({
   // The report renders its own fatal problems as notices, so a refusal the
   // report already carries is not rendered twice on one stop.
   const reportCarries = refusal !== null && (report?.problems ?? []).some((p) => p.fatal && p.code === refusal.code);
-  const storefront = pkg === null && site.kind === STOREFRONT_KIND ? storefrontBinding(site) : null;
+  const storefront = site.kind === STOREFRONT_KIND ? storefrontBinding(site) : null;
   const facts = site.title !== "" || site.notes !== "" || storefront !== null;
 
   if (refusal === null && !analyzing && report === null && !facts) return null;
@@ -46,9 +45,9 @@ export function WhatItIsStop({
     <div className="os-stop-body">
       {refusal && !reportCarries ? <ProblemNotice problem={refusal} tone="error" /> : null}
       {analyzing ? (
-        <Caption>Reading the tree now. The verdict lands here when the analysis is done.</Caption>
+        <Caption>Analyzing the source. The build plan will appear here.</Caption>
       ) : report !== null ? (
-        <ReportView report={report} />
+          <ReportView report={report} only={site.packageDeployableName || undefined} />
       ) : null}
       {facts ? (
         <Facts>

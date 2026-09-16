@@ -414,7 +414,7 @@ const CASES: ActsCase[] = [
       // Mint is ABSENT until there is a name (interface rule 12): the engine
       // refuses a nameless mint, so it is not offered. Typing one is what
       // makes the act appear, and the sweep asserts both halves.
-      await type(screen.getByLabelText("What is this machine called") as HTMLInputElement, "mini");
+      await type(screen.getByLabelText("Machine name") as HTMLInputElement, "mini");
     },
     acts: [
       {
@@ -423,12 +423,12 @@ const CASES: ActsCase[] = [
         note: "the page's own region; the Head's act went with the list it opened over (design record 2026-09-08-cockpit-install-wizard, D1)",
       },
       { name: "Back to Machines", count: 1 },
-      { name: "What is this machine called", count: 1 },
+      { name: "Machine name", count: 1 },
       { name: "Operating system", count: 1 },
       { name: "Mint a token", count: 1 },
       { name: "Cancel", count: 1, note: "always reachable while there is something to cancel (D6)" },
-      { name: /^Install the computer-use build\b/, count: 1 },
-      { name: /^This machine will run local models\b/, count: 1 },
+      { name: /^Computer use$/, count: 1 },
+      { name: /^Run local models$/, count: 1 },
       // The token half is behind a successful mint, and offering any of it
       // before one would be an act with nothing to act on.
       { name: "Copy the worker token", count: 0 },
@@ -443,7 +443,7 @@ const CASES: ActsCase[] = [
       mountMachines(fakeConnection({ myWorkersWithStatus: [MACHINE] }));
       await screen.findByText(MACHINE_LABEL);
       await click(screen.getByLabelText("Add a machine"));
-      await type(screen.getByLabelText("What is this machine called") as HTMLInputElement, "mini");
+      await type(screen.getByLabelText("Machine name") as HTMLInputElement, "mini");
       await click(screen.getByRole("button", { name: "Mint a token" }));
       await settle();
     },
@@ -489,7 +489,7 @@ const CASES: ActsCase[] = [
       { name: `Model to pull onto ${MACHINE_LABEL}`, count: 1 },
       { name: "Pull", count: 1 },
       { name: `Recent calls on ${MACHINE_LABEL}`, count: 1 },
-      { name: "Re-read", count: 1, note: "the call history's own; telemetry is not broadcast" },
+      { name: "Refresh recent calls", count: 1, note: "the call history's own; telemetry is not broadcast" },
       { name: "Remove this machine", count: 1, note: "revoke, then the uninstall line (D12)" },
       { name: "Copy the uninstall command", count: 0, note: "offered inside the confirm, not beside the opener" },
 
@@ -597,8 +597,8 @@ const CASES: ActsCase[] = [
       await settle();
     },
     acts: [
-      { name: "Read again", count: 1 },
-      { name: "Doors", count: 1, note: "the fleet door panel -- D5 names it explicitly" },
+      { name: "Refresh model library", count: 1 },
+      { name: "Inference sources", count: 2, note: "the navigation destination and its named panel" },
       { name: "Your preferred order", count: 1 },
       { name: "Capabilities", count: 1, note: "one per model shown; the fixture has one model" },
     ],
@@ -614,17 +614,11 @@ const CASES: ActsCase[] = [
       await settle();
     },
     acts: [
-      { name: "Routing policy", count: 1 },
+      { name: "About Machine routing", count: 1 },
 
       { name: "Routing strategy", count: 1 },
-      { name: /^firstFit/, count: 1, within: "Routing strategy" },
-      { name: /^roundRobin/, count: 1, within: "Routing strategy" },
-      { name: /^leastLoaded/, count: 1, within: "Routing strategy" },
-      { name: /^labelMatch/, count: 1, within: "Routing strategy" },
 
       { name: "Routing fallback", count: 1 },
-      { name: /^none/, count: 1, within: "Routing fallback" },
-      { name: /^nextMatching/, count: 1, within: "Routing fallback" },
 
       {
         name: "Required labels",
@@ -668,7 +662,7 @@ const CASES: ActsCase[] = [
       await settle();
     },
     acts: [
-      { name: "Re-read", count: 1 },
+      { name: "Reconnect machine routing", count: 1 },
       { name: "Create policy", count: 1, note: "no row read, so the first save creates one" },
       { name: "Save policy", count: 0 },
       { name: "Routing strategy", count: 1 },
@@ -687,18 +681,18 @@ const CASES: ActsCase[] = [
     },
     acts: [
       {
-        name: "Re-read",
+        name: "Refresh app activity",
         count: 1,
         note: "standing here, unlike Routing: neither read on this screen is live",
       },
-      { name: "Delegation", count: 1 },
+      { name: "Delegation", count: 2 },
       { name: "Delegate eligible tasks to my local apps", count: 1 },
       { name: "Claude Code", count: 1 },
       { name: "Codex", count: 1 },
-      { name: "runCommand", count: 1 },
-      { name: "fileProcessor", count: 1 },
-      { name: "callTool", count: 1 },
-      { name: "persistResult", count: 1 },
+      { name: "Run commands", count: 1 },
+      { name: "Process files", count: 1 },
+      { name: "Use tools", count: 1 },
+      { name: "Save results", count: 1 },
       { name: "Most sessions at once", count: 1 },
       { name: "Workspace root on the machine", count: 1 },
       { name: "Save delegation policy", count: 1 },
@@ -718,8 +712,8 @@ const CASES: ActsCase[] = [
       await settle();
     },
     acts: [
-      { name: "Turn delegation on", count: 1 },
-      { name: "Save delegation policy", count: 0 },
+      { name: "Turn delegation on", count: 0 },
+      { name: "Save delegation policy", count: 1 },
       { name: "Discard changes", count: 1 },
     ],
   },
@@ -729,7 +723,7 @@ const CASES: ActsCase[] = [
     open: async () => {
       h.connection = fakeConnection({ myWorkspaces: [WORKSPACE], clusterNodes: [WORKBENCH_NODE] });
       render(withSession(<WorkbenchesSection />));
-      await screen.findByText("v1:work:run:1");
+      await screen.findAllByText("v1:work:run:1");
     },
     acts: [
       { name: "Show released", count: 1 },
@@ -752,7 +746,7 @@ const CASES: ActsCase[] = [
     },
     acts: [
       {
-        name: "Re-read",
+        name: /^Reconnect (workspaces|replicas)$/,
         count: 2,
         note: "one per feed -- workspaces and replicas go behind independently",
       },
@@ -788,10 +782,10 @@ const CASES: ActsCase[] = [
       // app.test.tsx; what is gated here is that each one is still a thing a
       // person can pick.
       { name: "Machines", count: 1, within: "Default section" },
-      { name: "Models", count: 1, within: "Default section" },
-      { name: "Routing", count: 1, within: "Default section" },
-      { name: "Workbenches", count: 1, within: "Default section" },
-      { name: "Apps", count: 1, within: "Default section" },
+      { name: "Model library", count: 1, within: "Default section" },
+      { name: "Machine routing", count: 1, within: "Default section" },
+      { name: "Workspaces", count: 1, within: "Default section" },
+      { name: "Activity", count: 1, within: "Default section" },
       { name: "Logs", count: 1, within: "Default section" },
       { name: "Settings", count: 1, within: "Default section" },
       { name: "List revoked machines", count: 1 },

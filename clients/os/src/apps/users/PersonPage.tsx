@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
-import { ArrowLeft } from "lucide-react";
 
-import { Mark } from "../../chrome/Mark";
 import { ActionBar, type Act } from "../../kit/ActionBar";
 import {
   Button,
@@ -70,7 +68,6 @@ export function PersonPage({
   actions,
   viewerUserId,
   viewerRole,
-  askContext,
   onBack,
 }: {
   userId: string;
@@ -198,9 +195,7 @@ export function PersonPage({
   if (person === null) {
     return (
       <div className="os-app-stack">
-        <Head title="Person">
-          <BackToPeople onBack={onBack} />
-        </Head>
+        <Head title="Person" back={{ label: "People", onSelect: onBack }} />
         <Notice
           tone="warn"
           sentence="This person is not in the list this window holds."
@@ -227,150 +222,147 @@ export function PersonPage({
   }
 
   return (
-    <div className="os-app-stack os-person-page">
-      <Head title={name} meta={person.primaryEmail}>
-        <BackToPeople onBack={onBack} />
-        <Button tone="quiet" onClick={() => askContext(`app:users person:${person.primaryEmail || person.id}`)} ariaLabel={`Ask about ${name}`}>
-          <Mark size={13} aria-hidden /> Ask
-        </Button>
-      </Head>
+    <div className="os-action-pane" data-os-page-context={JSON.stringify({ page: "Person", personId: person.id, name })}>
+      <div className="os-action-body os-app-stack os-person-page">
+        <Head title={name} meta={person.primaryEmail} back={{ label: "People", onSelect: onBack }} />
 
-      {rereadFailed ? (
-        <Notice
-          tone="warn"
-          sentence="These are the values this window already had."
-          next="Re-reading this person did not succeed, so anything changed since the list loaded is not shown here."
-        />
-      ) : null}
+        {rereadFailed ? (
+          <Notice
+            tone="warn"
+            sentence="These are the values this window already had."
+            next="Re-reading this person did not succeed, so anything changed since the list loaded is not shown here."
+          />
+        ) : null}
 
-      {governable ? null : (
-        <PeerRowReadOnly actorRole={viewerRole} ownerRole={person.role} ownerName={name} />
-      )}
+        {governable ? null : (
+          <PeerRowReadOnly actorRole={viewerRole} ownerRole={person.role} ownerName={name} />
+        )}
 
-      {/* ---- role ---- */}
-      <Panel label={`Role for ${name}`}>
-        <Subhead>Role</Subhead>
-        <RoleLadderPicker
-          rungs={ladder}
-          value={person.role}
-          onChange={(slug) => void applyRole(slug)}
-          context={assignContext}
-          actorRole={viewerRole}
-          label={`The cluster's roles, for ${name}`}
-          busy={actions.busyKey === person.id}
-        />
-        {sentence === "" ? null : <p className="os-caption">{sentence}</p>}
-        <RefusalLine actions={actions} />
-      </Panel>
+        {/* ---- role ---- */}
+        <Panel label={`Role for ${name}`}>
+          <Subhead>Role</Subhead>
+          <RoleLadderPicker
+            rungs={ladder}
+            value={person.role}
+            onChange={(slug) => void applyRole(slug)}
+            context={assignContext}
+            actorRole={viewerRole}
+            label={`The cluster's roles, for ${name}`}
+            busy={actions.busyKey === person.id}
+          />
+          {sentence === "" ? null : <p className="os-caption">{sentence}</p>}
+          <RefusalLine actions={actions} />
+        </Panel>
 
-      {/* ---- groups ---- */}
-      <Panel label={`Groups for ${name}`}>
-        <Subhead>Groups</Subhead>
-        {isStaff(person, catalog) ? (
-          // THE STANDING STAFF RULE IS A RULE, NOT ROWS (epic memql#5165, D6).
-          // Developer rank and above are members of every account's group by
-          // rule, and no query returns those memberships -- so a list here
-          // would be either empty (wrong) or invented (worse). One sentence
-          // says the true thing.
-          <p className="os-caption">In every account's group, standing.</p>
-        ) : (
-          <>
-            <LiveList<MembershipRow>
-              source={membershipRows}
-              rowId={(m) => m.id}
-              fingerprint={(m) => `${m.groupId}|${m.status}|${m.origin}`}
-              label={`The groups ${name} is in`}
-              emptyText="In no groups yet. Adding somebody to a group is what lets them reach a client's work."
-              renderRow={(membership) => (
-                <MembershipLine
-                  membership={membership}
-                  groups={groups}
-                  accounts={accounts}
-                  people={people}
-                  onRemove={() => void actions.groupMemberRemove(membership.groupId, person.id)}
-                  busy={actions.busyKey === person.id}
-                  removable={governable}
-                />
-              )}
-            />
-            {governable ? (
-              adding ? (
-                <FormRow>
-                  <GroupPicker
-                    groups={groups.filter(
-                      (g) => !held.some((m) => m.groupId === g.id && m.status === "active"),
-                    )}
-                    selected={[]}
-                    onChange={(next) => {
-                      const groupId = next[0];
-                      if (groupId === undefined) return;
-                      void actions.groupMemberAdd(groupId, person.id).then((ok) => {
-                        if (ok) setAdding(false);
-                      });
-                    }}
-                    label={`Groups to add ${name} to`}
-                    accountNameOf={(accountId) => accountLabel(accounts, accountId)}
-                    single
+        {/* ---- groups ---- */}
+        <Panel label={`Groups for ${name}`}>
+          <Subhead>Groups</Subhead>
+          {isStaff(person, catalog) ? (
+            // THE STANDING STAFF RULE IS A RULE, NOT ROWS (epic memql#5165, D6).
+            // Developer rank and above are members of every account's group by
+            // rule, and no query returns those memberships -- so a list here
+            // would be either empty (wrong) or invented (worse). One sentence
+            // says the true thing.
+            <p className="os-caption">In every account's group, standing.</p>
+          ) : (
+            <>
+              <LiveList<MembershipRow>
+                source={membershipRows}
+                rowId={(m) => m.id}
+                fingerprint={(m) => `${m.groupId}|${m.status}|${m.origin}`}
+                label={`The groups ${name} is in`}
+                emptyText="In no groups yet. Adding somebody to a group is what lets them reach a client's work."
+                renderRow={(membership) => (
+                  <MembershipLine
+                    membership={membership}
+                    groups={groups}
+                    accounts={accounts}
+                    people={people}
+                    onRemove={() => void actions.groupMemberRemove(membership.groupId, person.id)}
+                    busy={actions.busyKey === person.id}
+                    removable={governable}
                   />
-                  <Button onClick={() => setAdding(false)}>Cancel</Button>
-                </FormRow>
-              ) : (
-                // A `FormRow` around it, so the control HUGS its label rather
-                // than stretching the panel's whole width: a Panel is a flex
-                // column, so a bare button in one becomes a full-width bar
-                // that reads as a banner rather than as an act.
-                <FormRow>
-                  <Button onClick={() => setAdding(true)}>Add to a group</Button>
-                </FormRow>
-              )
-            ) : null}
-          </>
-        )}
-      </Panel>
+                )}
+              />
+              {governable ? (
+                adding ? (
+                  <FormRow>
+                    <GroupPicker
+                      groups={groups.filter(
+                        (g) => !held.some((m) => m.groupId === g.id && m.status === "active"),
+                      )}
+                      selected={[]}
+                      onChange={(next) => {
+                        const groupId = next[0];
+                        if (groupId === undefined) return;
+                        void actions.groupMemberAdd(groupId, person.id).then((ok) => {
+                          if (ok) setAdding(false);
+                        });
+                      }}
+                      label={`Groups to add ${name} to`}
+                      accountNameOf={(accountId) => accountLabel(accounts, accountId)}
+                      single
+                    />
+                    <Button onClick={() => setAdding(false)}>Cancel</Button>
+                  </FormRow>
+                ) : (
+                  // A `FormRow` around it, so the control HUGS its label rather
+                  // than stretching the panel's whole width: a Panel is a flex
+                  // column, so a bare button in one becomes a full-width bar
+                  // that reads as a banner rather than as an act.
+                  <FormRow>
+                    <Button onClick={() => setAdding(true)}>Add to a group</Button>
+                  </FormRow>
+                )
+              ) : null}
+            </>
+          )}
+        </Panel>
 
-      {/* ---- sign-in ---- */}
-      <Panel label={`Sign-in for ${name}`}>
-        <Subhead>Sign-in</Subhead>
-        <Facts>
-          <Fact label="Signs in with" value={person.signInPolicy === "passkey_only" ? "A passkey only" : "A link or a passkey"} />
-          <Fact label="Last seen" value={formatFreshness(person.lastSeenAt, now)} title={person.lastSeenAt || undefined} />
-          <Fact label="Joined" value={formatMoment(person.createdAt)} />
-          {person.sharedMailbox ? <Fact label="Mailbox" value={<Chip>shared</Chip>} /> : null}
-        </Facts>
+        {/* ---- sign-in ---- */}
+        <Panel label={`Sign-in for ${name}`}>
+          <Subhead>Sign-in</Subhead>
+          <Facts>
+            <Fact label="Signs in with" value={person.signInPolicy === "passkey_only" ? "A passkey only" : "A link or a passkey"} />
+            <Fact label="Last seen" value={formatFreshness(person.lastSeenAt, now)} title={person.lastSeenAt || undefined} />
+            <Fact label="Joined" value={formatMoment(person.createdAt)} />
+            {person.sharedMailbox ? <Fact label="Mailbox" value={<Chip>shared</Chip>} /> : null}
+          </Facts>
 
-        {sessions.unknown ? (
-          <p className="os-caption">
-            This window could not read this person's sessions, so it is not saying how many are
-            open. That read is owner and admin only.
-          </p>
-        ) : sessions.live.length === 0 ? (
-          <p className="os-caption">No sessions open.</p>
-        ) : (
-          <ul className="os-session-list" aria-label={`Sessions open for ${name}`}>
-            {sessions.live.map((session) => (
-              <li key={session.id} className="os-session-row">
-                <span className="os-session-where">{session.clientLabel || session.source || "A session"}</span>
-                <span className="os-caption">{formatFreshness(session.lastActivityAt, now)}</span>
-                {governable ? (
-                  <Button
-                    onClick={() =>
-                      void actions.endSession(session.id).then((ok) => {
-                        if (ok) sessions.reload();
-                      })
-                    }
-                    busy={actions.busyKey === session.id}
-                    busyLabel="Ending..."
-                    ariaLabel={`End this session for ${name}`}
-                  >
-                    End
-                  </Button>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        )}
-      </Panel>
+          {sessions.unknown ? (
+            <p className="os-caption">
+              This window could not read this person's sessions, so it is not saying how many are
+              open. That read is owner and admin only.
+            </p>
+          ) : sessions.live.length === 0 ? (
+            <p className="os-caption">No sessions open.</p>
+          ) : (
+            <ul className="os-session-list" aria-label={`Sessions open for ${name}`}>
+              {sessions.live.map((session) => (
+                <li key={session.id} className="os-session-row">
+                  <span className="os-session-where">{session.clientLabel || session.source || "A session"}</span>
+                  <span className="os-caption">{formatFreshness(session.lastActivityAt, now)}</span>
+                  {governable ? (
+                    <Button
+                      onClick={() =>
+                        void actions.endSession(session.id).then((ok) => {
+                          if (ok) sessions.reload();
+                        })
+                      }
+                      busy={actions.busyKey === session.id}
+                      busyLabel="Ending..."
+                      ariaLabel={`End this session for ${name}`}
+                    >
+                      End
+                    </Button>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Panel>
 
+      </div>
       <ActionBar
         state={person.active && person.suspendedAt === "" ? "Active" : "Deactivated"}
         detail={
@@ -382,14 +374,6 @@ export function PersonPage({
         acts={acts}
       />
     </div>
-  );
-}
-
-function BackToPeople({ onBack }: { onBack: () => void }) {
-  return (
-    <Button tone="quiet" onClick={onBack} ariaLabel="Back to People">
-      <ArrowLeft size={13} aria-hidden /> People
-    </Button>
   );
 }
 

@@ -85,7 +85,7 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
         <main className="os-phone-app">
           {sections.length > 1 ? (
             <nav className="os-phone-sections" aria-label={`${current.name} sections`}>
-              {sections.map((section) => (
+              {sections.filter((section) => !section.parent).map((section) => (
                 <button
                   key={section.id}
                   type="button"
@@ -98,7 +98,7 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
                       ? `${section.name}, ${current.name} is ${settingsStatePhrase}`
                       : undefined
                   }
-                  aria-current={section.id === activeSection?.id ? "page" : undefined}
+                  aria-current={section.id === (activeSection?.parent ?? activeSection?.id) ? "page" : undefined}
                   onClick={() => setSectionId(section.id)}
                 >
                   {section.name}

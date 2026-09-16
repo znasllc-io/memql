@@ -30,6 +30,12 @@ export interface OsWindow {
   mode: WindowMode;
   /** The app section the window is showing (manifest sections; "" = none). */
   sectionId: string;
+  /** Content-link origins; explicit peer tabs clear this trail. */
+  sectionTrail?: string[];
+  sectionNavigation?: { origin: "peer" | "content" | "back"; revision: number };
+  /** Session-only return location for an app on its dedicated MemQL desktop. */
+  fullscreenReturn?: { deskId: DeskId; index: number };
+  minimizedFrom?: "normal" | "fullscreen";
   /** A standing instruction the app has not yet consumed. */
   intent?: WindowIntent;
 }

@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createWorkerToken, revokeWorkerToken } from "@znasllc-io/memql-sdk-core/identity";
 
+import { useSession } from "../../../chrome/access";
+import { localCockpitInstall } from "./localInstall";
+import { useModelResponse } from "./useModelResponse";
+import { isWorkerOnline } from "../online";
 import { useOsConnection } from "../../../live/connection";
 import { useMachines } from "../../../live/machines";
 import { useNow } from "../../../kit/useNow";
@@ -72,6 +76,7 @@ export interface AddMachineFlow {
   pulling: boolean;
   /** The cluster's refusal of the pull, verbatim, or "". */
   pullError: string;
+  retryResponse: () => void;
   /** Open the page. `inference` pre-selects the local-models choice, which
    *  is the ONLY seam through which the flag arrives pre-set (epic
    *  memql#5106, D4): a pre-ticked download of several gigabytes needs an
@@ -103,6 +108,8 @@ function platformDefault(): Draft["platform"] {
 
 export function useAddMachineFlow(): AddMachineFlow {
   const connection = useOsConnection();
+  const { config } = useSession();
+  const localTest = localCockpitInstall(config.domain) !== null;
   const { collection } = useMachines();
   const writes = useMachineWrites();
   const now = useNow(15_000);
@@ -226,18 +233,20 @@ export function useAddMachineFlow(): AddMachineFlow {
           setDraftState({
             ...EMPTY_DRAFT,
             platform: platformDefault(),
+            computerUse: localTest,
+            userLocal: localTest,
             inference: preset.inference === true,
           });
         }
         return held;
       });
     },
-    [],
+    [localTest],
   );
 
   const setDraft = useCallback((patch: Partial<Draft>) => {
-    setDraftState((held) => ({ ...held, ...patch }));
-  }, []);
+    setDraftState((held) => { const next = { ...held, ...patch }; return localTest && next.platform === "mac" ? { ...next, computerUse: true, userLocal: true } : next; });
+  }, [localTest]);
 
   const mintToken = useCallback(async () => {
     const name = draft.name.trim();
@@ -318,7 +327,7 @@ export function useAddMachineFlow(): AddMachineFlow {
     [draft, connection, minting, mintError, mint, mintedAt, machine, beats, cancelAsked, revokeError, revoking, now],
   );
 
-  const checks = useMemo(
+  const preliminaryChecks = useMemo(
     () => (machine === null ? [] : checksFor(draft, machine, beats, now, {
       live: pulls.live,
       failed: failedPull,
@@ -327,6 +336,16 @@ export function useAddMachineFlow(): AddMachineFlow {
     })),
     [draft, machine, beats, now, pulls.live, failedPull, pulls.feedError, pulls.loading],
   );
+  const chatModel = machineModelsFrom(machine?.reportedLabels ?? {}).find(model => !model.embeddings)?.modelId ?? "";
+  const { response, retry: retryResponse } = useModelResponse(
+    active && draft.inference ? machine?.id ?? "" : "",
+    chatModel,
+    active && draft.inference && machine !== null && isWorkerOnline(machine, now)
+      && preliminaryChecks.find(check => check.id === "models")?.state === "done",
+  );
+  const checks = useMemo(() => machine === null ? [] : checksFor(draft, machine, beats, now, {
+    live: pulls.live, failed: failedPull, feedError: pulls.feedError, loading: pulls.loading,
+  }, response), [draft, machine, beats, now, pulls.live, failedPull, pulls.feedError, pulls.loading, response]);
   const stops = useMemo(() => stopsFor(facts, checks), [facts, checks]);
   const bar = useMemo(() => barFor(facts, checks), [facts, checks]);
 
@@ -342,6 +361,7 @@ export function useAddMachineFlow(): AddMachineFlow {
     pullRecommended,
     pulling,
     pullError,
+    retryResponse,
     start,
     setDraft,
     mint: mintToken,

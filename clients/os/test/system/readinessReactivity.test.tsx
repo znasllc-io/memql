@@ -233,7 +233,7 @@ describe("an unconfigured app gates only once readiness has loaded", () => {
     // one appends to that button's name -- so the button is what has to say it,
     // and the button's name is what a screen reader actually announces.
     const settingsEntry = within(win).getByRole("button", {
-      name: "Settings, Campaigns is not set up",
+      name: "Campaigns settings, not set up",
     });
     expect(within(win).getByRole("button", { name: "Campaigns settings, not set up" })).toBeTruthy();
 
@@ -246,7 +246,7 @@ describe("an unconfigured app gates only once readiness has loaded", () => {
     // And the mark STAYS while they stand in Settings fixing it -- it is
     // computed from the app's requirements, not the current section's.
     expect(
-      within(win).getByRole("button", { name: "Settings, Campaigns is not set up" }),
+      within(win).getByRole("button", { name: "Campaigns settings, not set up" }),
     ).toBeTruthy();
   });
 

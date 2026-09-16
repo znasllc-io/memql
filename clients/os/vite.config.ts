@@ -1,5 +1,6 @@
 /// <reference types="vitest/config" />
 import { defineConfig } from "vite";
+import { existsSync, readFileSync } from "node:fs";
 import react from "@vitejs/plugin-react";
 
 import pkg from "./package.json" with { type: "json" };
@@ -22,6 +23,10 @@ const BASE = "/";
 //
 // Constant per build in every path, so the bundle stays reproducible: no
 // timestamp, no host, no working-directory state.
+// Optional, untracked local test artifact contract. No worker credentials belong here.
+const localCockpitFile = new URL("./local-cockpit-test.json", import.meta.url);
+const localCockpit = existsSync(localCockpitFile) ? JSON.parse(readFileSync(localCockpitFile, "utf8")) : null;
+
 const OS_BUILD = process.env.MEMQL_OS_BUILD?.trim() || pkg.version;
 
 export default defineConfig({
@@ -29,6 +34,7 @@ export default defineConfig({
   plugins: [react()],
   define: {
     __OS_BUILD__: JSON.stringify(OS_BUILD),
+    __OS_LOCAL_COCKPIT__: JSON.stringify(localCockpit),
   },
   build: {
     outDir: "dist",

@@ -116,10 +116,10 @@ async function openPage() {
 
 async function describeAndMint(name = "studio-mac-mini", opts: { computerUse?: boolean; inference?: boolean; linux?: boolean } = {}) {
   await openPage();
-  await type(screen.getByLabelText("What is this machine called") as HTMLInputElement, name);
+  await type(screen.getByLabelText("Machine name") as HTMLInputElement, name);
   if (opts.linux) await click(screen.getByRole("radio", { name: "Linux" }));
-  if (opts.computerUse) await click(screen.getByLabelText(/Install the computer-use build/));
-  if (opts.inference) await click(screen.getByLabelText(/will run local models/));
+  if (opts.computerUse) await click(screen.getByLabelText(/^Computer use$/));
+  if (opts.inference) await click(screen.getByLabelText(/Run local models/));
   await click(screen.getByRole("button", { name: "Mint a token" }));
   await settle();
 }
@@ -198,7 +198,7 @@ describe("the page replaces the list", () => {
     mount(fakeConnection());
     await openPage();
     expect(within(bar()).queryByRole("button", { name: "Mint a token" })).toBeNull();
-    await type(screen.getByLabelText("What is this machine called") as HTMLInputElement, "box");
+    await type(screen.getByLabelText("Machine name") as HTMLInputElement, "box");
     expect(within(bar()).getByRole("button", { name: "Mint a token" })).toBeTruthy();
     await click(within(bar()).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("region", { name: "Add a machine" })).toBeNull();
@@ -281,7 +281,7 @@ describe("minting", () => {
     mount(fakeConnection());
     await describeAndMint();
     await waitFor(() => expect(screen.getByText("this account may not mint worker tokens")).toBeTruthy());
-    expect(screen.getByText("The token was not minted.")).toBeTruthy();
+    expect(screen.getByText("The connection token could not be created.")).toBeTruthy();
     expect(screen.queryByLabelText("the worker token")).toBeNull();
     expect(within(bar()).getByRole("button", { name: "Mint a token" })).toBeTruthy();
   });
@@ -359,7 +359,7 @@ describe("the checks", () => {
     expect(within(bar()).getByRole("button", { name: "Done" }).getAttribute("data-tone")).toBe("primary");
   });
 
-  it("names the missing macOS permission with its repair and settles when the machine re-registers with it", async () => {
+  it("names the missing macOS permission with its repair and settles from a measured heartbeat without rerunning setup", async () => {
     const connection = fakeConnection();
     mount(connection);
     await describeAndMint("mini", { computerUse: true });
@@ -370,17 +370,24 @@ describe("the checks", () => {
     });
     emit(connection, row);
     await settle();
-    expect(screen.getByText("Screen Recording not granted yet.")).toBeTruthy();
-    expect(screen.getByText(/System Settings -> Privacy & Security -> Screen Recording/)).toBeTruthy();
-    expect((screen.getByLabelText("the macos permissions command") as HTMLInputElement).value).toBe("/usr/local/bin/memql worker setup");
+    expect(screen.getByText("Screen Recording not granted to the running worker.")).toBeTruthy();
+    expect(screen.getByText(/System Settings → Privacy & Security → Screen Recording/)).toBeTruthy();
+    expect(screen.queryByLabelText("the macos permissions command")).toBeNull();
+    const permissionResults = screen.getByRole("list", { name: "Permission results" });
+    expect(within(permissionResults).getByText("Accessibility").closest("li")?.getAttribute("data-state")).toBe("done");
+    expect(within(permissionResults).getByText("Screen Recording").closest("li")?.getAttribute("data-state")).toBe("open");
 
     emit(
       connection,
-      { ...row, permissions: { accessibility: true, screen_recording: true, x11_display: false, detail: "" } },
+      { ...row, permissions: { accessibility_state: "granted", screen_recording_state: "granted", x11_display_state: "unknown", checked_at: new Date().toISOString(), probe_context: "worker-process" } },
       "NODE_UPDATED",
     );
     await settle();
     expect(screen.getByText("Accessibility and Screen Recording granted.")).toBeTruthy();
+    emit(connection, { ...row, permissions: { accessibility_state: "granted", screen_recording_state: "unknown", probe_context: "worker-process" } }, "NODE_UPDATED");
+    await settle();
+    expect(screen.queryByText("Accessibility and Screen Recording granted.")).toBeNull();
+    expect(within(screen.getByRole("list", { name: "Permission results" })).getByText("Screen Recording").closest("li")?.getAttribute("data-state")).toBe("unknown");
   });
 
   it("offers the recommended pull once a runtime is reported, and shows a refusal in surface", async () => {
@@ -399,7 +406,7 @@ describe("the checks", () => {
     expect(screen.getByText("machine is under the floor for local models")).toBeTruthy();
   });
 
-  it("asks the served model something through the router, pinned to the fleet model", async () => {
+  it("automatically checks the served model without a chat button or reply transcript", async () => {
     h.chat.mockResolvedValue({ message: { role: "assistant", content: "hello" }, provider: "fleet:llama3.1:8b" });
     const connection = fakeConnection();
     mount(connection);
@@ -413,16 +420,57 @@ describe("the checks", () => {
     );
     await settle();
     expect(screen.getByText("Serving one model: llama3.1:8b.")).toBeTruthy();
-    await click(screen.getByRole("button", { name: "Ask it something" }));
-    await settle();
-    expect(h.chat).toHaveBeenCalledTimes(1);
-    expect(h.chat.mock.calls[0]?.[2]).toEqual({ provider: "fleet:llama3.1:8b", fleetRegistrationId: "v1:worker:registration:mini" });
-    expect(screen.getByText("hello")).toBeTruthy();
-    expect(screen.getByText(/through fleet:llama3.1:8b/)).toBeTruthy();
+    await waitFor(() => expect(h.chat).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("button", { name: "Ask it something" })).toBeNull();
+    expect(h.chat.mock.calls[0]?.[2]).toMatchObject({ provider: "fleet:llama3.1:8b", fleetRegistrationId: "v1:worker:registration:mini" });
+    await waitFor(() => expect(screen.getByText("Response verified on this machine.")).toBeTruthy());
+    expect(screen.queryByText("hello")).toBeNull();
   });
 });
 
 describe("cancel after a mint asks which of two things", () => {
+  it("keeps setup incomplete during the automatic check and retains it across navigation", async () => {
+    let answer!: (value: unknown) => void;
+    h.chat.mockImplementationOnce(() => new Promise(resolve => { answer = resolve; }));
+    const connection = fakeConnection();
+    const view = mount(connection);
+    await describeAndMint("mini", { inference: true });
+    const row = arrival({ labels: { "model:a-embed": "embeddings=1", "model:z-chat": "tools=1" } });
+    emit(connection, row);
+    await beat(connection, row, 15);
+    await beat(connection, row, 30);
+    await waitFor(() => expect(h.chat).toHaveBeenCalledTimes(1));
+    expect(h.chat.mock.calls[0]?.[2]).toMatchObject({ provider: "fleet:z-chat" });
+    expect(within(bar()).queryByText("Ready")).toBeNull();
+    expect(within(bar()).queryByRole("button", { name: "Done" })).toBeNull();
+    expect(stopStates().at(-1)).toBe("current");
+    rerenderAt(view, "policies");
+    await act(async () => answer({ message: { content: "hello" } }));
+    rerenderAt(view, "machines");
+    await waitFor(() => expect(within(bar()).getByText("Ready")).toBeTruthy());
+    expect(within(bar()).getByRole("button", { name: "Done" })).toBeTruthy();
+    expect(screen.queryByText("hello")).toBeNull();
+    expect(h.chat).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a retry after a failed response and never marks the failed setup ready", async () => {
+    h.chat.mockRejectedValueOnce(new Error("Runtime unavailable"));
+    h.chat.mockResolvedValueOnce({ message: { content: "hello" } });
+    const connection = fakeConnection();
+    mount(connection);
+    await describeAndMint("mini", { inference: true });
+    const row = arrival({ labels: { "model:z-chat": "tools=1" } });
+    emit(connection, row);
+    await beat(connection, row, 15);
+    await beat(connection, row, 30);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Retry check" })).toBeTruthy());
+    expect(within(bar()).queryByText("Ready")).toBeNull();
+    expect(within(bar()).queryByRole("button", { name: "Done" })).toBeNull();
+    await click(screen.getByRole("button", { name: "Retry check" }));
+    await waitFor(() => expect(within(bar()).getByText("Ready")).toBeTruthy());
+    expect(h.chat).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps the token and leaves without revoking", async () => {
     mount(fakeConnection());
     await describeAndMint();
@@ -475,7 +523,7 @@ describe("cancel after a mint asks which of two things", () => {
     emit(connection, arrival());
     await settle();
     expect(within(bar()).queryByRole("button", { name: "Cancel" })).toBeNull();
-    await click(within(bar()).getByRole("button", { name: "Done" }));
+    await click(within(bar()).getByRole("button", { name: "Leave setup" }));
     expect(screen.getByRole("heading", { name: "Machines" })).toBeTruthy();
   });
 });
@@ -485,7 +533,7 @@ describe("the flow survives the window's own navigation", () => {
     const view = mount(fakeConnection());
     await describeAndMint();
     rerenderAt(view, "routing");
-    expect(screen.queryByLabelText("the worker token")).toBeNull();
+    expect(screen.getByLabelText("the worker token").closest("[hidden]")).not.toBeNull();
     rerenderAt(view, "machines");
     await settle();
     expect((screen.getByLabelText("the worker token") as HTMLInputElement).value).toBe(TOKEN);

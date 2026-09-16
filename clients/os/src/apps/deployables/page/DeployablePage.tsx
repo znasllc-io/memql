@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 import { Concepts } from "@znasllc-io/memql-sdk-core/client";
-import { ArrowLeft, ExternalLink, History } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 
-import { Mark } from "../../../chrome/Mark";
-import { Button, Chip, Chips, Head, Input, Panel, useLiveView } from "../../../kit";
+import { Button, Caption, Chip, Chips, Head, Input, Panel, useLiveView } from "../../../kit";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
 import { OpenLogsButton } from "../../../logs/OpenLogs";
 import { useAccountOptions } from "../../accounts/tie";
@@ -18,8 +17,12 @@ import { liveUrlFor, ownerLabel, siteName, type SiteRow } from "../rows";
 import type { CredentialRow } from "../sources/rows";
 import { confirmationWordFor } from "../words";
 import { actsFor, runForApp, siblingRunInFlight, type ActName } from "./acts";
-import { Rail } from "./RailView";
-import { openStopFor, refusalStopFor, type RailStage, type StandingInput } from "./rail";
+import { DeployableWorkspace, type WorkspaceDetail } from "./DeployableWorkspace";
+import { DetailDialog } from "./DetailDialog";
+import { RuntimeSettingsPanel } from "./stops/RuntimeSettings";
+import { TrafficPanel } from "./stops/Traffic";
+import "../composition.css";
+import { railFor, refusalStopFor, type RailStage, type StandingInput } from "./rail";
 import { BuildStop } from "./stops/Build";
 import { LiveStop } from "./stops/Live";
 import { SourceStop } from "./stops/Source";
@@ -74,6 +77,7 @@ export interface DeployablePageProps {
   onAsk?: (tag: string) => void;
   /** The quiet Back to the list. */
   onBack: () => void;
+  backLabel?: string;
   /** Opens the source's own view. */
   onOpenSource: (packageId: string) => void;
   /** Opens the source's history view. */
@@ -96,8 +100,8 @@ export function DeployablePage({
   nameOf,
   can,
   clusterDomain,
-  onAsk,
   onBack,
+  backLabel = "Deployables",
   onOpenSource,
   onOpenHistory,
   deleting = false,
@@ -131,19 +135,18 @@ export function DeployablePage({
   // stop is the question; clicking another opens it instead, and clicking the
   // open one closes it. Cleared when the deployable changes, so a stop opened
   // on one is never carried onto another.
-  const [openOverride, setOpenOverride] = useState<string | null>(null);
+  const [detail, setDetail] = useState<WorkspaceDetail | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [typed, setTyped] = useState("");
   useEffect(() => {
-    setOpenOverride(null);
+    setDetail(null);
     setConfirming(false);
     setTyped("");
   }, [site.id]);
 
   const rail: StandingInput = { mode: "standing", pkg, app, run, site };
-  const openStop = openOverride ?? openStopFor(rail);
   const refusalStop = refusalStopFor(run);
-  const name = siteName(site);
+  const name = site.title || site.packageDeployableName || siteName(site);
   const url = liveUrlFor(site.hostname);
 
   const reading = actsFor({ site, pkg, run, siblingRun, can, deleting, releasing: site.hostname });
@@ -194,7 +197,7 @@ export function DeployablePage({
         if (pkg === null) {
           // A hand-made deployable's next version IS a zip, so the act opens
           // the picker rather than starting a run there is no source for.
-          setOpenOverride("source");
+          setDetail("source");
           setZipOpen(true);
           return;
         }
@@ -218,8 +221,8 @@ export function DeployablePage({
 
   async function runConfirm() {
     if (confirmAct === "Archive") {
-      await lifecycle.archive(site.id, typed);
-      setConfirming(false);
+      const done = await lifecycle.archive(site.id, typed);
+      if (done) setConfirming(false);
       return;
     }
     if (confirmAct === "Deactivate") {
@@ -281,51 +284,35 @@ export function DeployablePage({
       case "build":
         return <BuildStop run={run} app={site.packageDeployableName} refusal={refusal} />;
       case "live":
-        return <LiveStop site={site} canPublish={can.publish} lifecycle={lifecycle} refusal={refusal} />;
+        return <LiveStop site={site} canPublish={can.publish} lifecycle={lifecycle} refusal={refusal} includeConfiguration={false} />;
       default:
         return null;
     }
   };
 
   return (
-    <div className="os-deploy-pane">
+    <div className="os-deploy-pane deployable-workspace" data-os-page-context={JSON.stringify({ page: "Deployable", siteId: site.id, hostname: site.hostname, name, status: site.status, packageId: pkg?.id, view: detail ? detailTitle(detail) : "Overview" })}>
       <div className="os-deploy-scroll">
-        <Panel label={`Deployable ${name}`}>
-          {/* ONE HEAD, and no primary action in it: every act is on the bar
-              (rule 12). What stays is the quiet three -- where the thing is,
-              its lines, and Ask -- none of which changes its state. */}
-          <Head title={name}>
-            <Button tone="quiet" onClick={onBack}>
-              <ArrowLeft size={13} aria-hidden /> Deployables
-            </Button>
+        <Panel label={`Deployable ${siteName(site)}`}>
+          {/* Page navigation stays with the title; Ask belongs to the window. */}
+          <Head title={name} breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label: name }]} back={{ label: backLabel, onSelect: onBack }}>
             {url === "" ? null : (
-              <a className="os-button" data-tone="quiet" href={url} target="_blank" rel="noreferrer noopener">
-                <ExternalLink size={13} aria-hidden /> Open
+              <a className="os-icon-button" aria-label={`Open ${name} in a new tab`} title={`Open ${name} in a new tab`} href={url} target="_blank" rel="noreferrer noopener">
+                <ExternalLink size={16} aria-hidden />
               </a>
             )}
-            <OpenLogsButton subject={site.id} subjectConcept={Concepts.PLATFORM_SITE} ariaLabel={`Logs for ${name}`} />
-            {onAsk ? (
-              <Button
-                tone="quiet"
-                onClick={() => onAsk(`app:deployables site:${site.hostname || site.id}`)}
-                ariaLabel={`Ask about ${name}`}
-              >
-                <Mark size={13} aria-hidden /> Ask
-              </Button>
-            ) : null}
+            <OpenLogsButton iconOnly subject={site.id} subjectConcept={Concepts.PLATFORM_SITE} ariaLabel={`Logs for ${name}`} />
           </Head>
 
           <Chips label="Deployable facts">
-            <Chip tone={ownerLabel(site, viewerUserId) === "yours" ? "accent" : "muted"}>
-              {ownerLabel(site, viewerUserId)}
-            </Chip>
+            {deployedBy === "you" && ownerLabel(site, viewerUserId) === "yours" ? null : <Chip tone="muted">{ownerLabel(site, viewerUserId)}</Chip>}
             {site.apiProxy ? (
-              <Chip title="/_memql/* is mounted on this origin and forwarded to the bff, so the site is same-origin with its own API.">
+              <Chip title="This app can use the cluster API from its own address.">
                 api proxy
               </Chip>
             ) : null}
             {site.systemOwned ? (
-              <Chip title="Re-seeded at boot and refused at the delete path, so cluster management cannot be bricked by deleting it.">
+              <Chip title="Managed by the cluster. Cannot be deleted here.">
                 system-owned
               </Chip>
             ) : null}
@@ -340,25 +327,13 @@ export function DeployablePage({
             <ProblemNotice problem={{ ...headActions.refusal, fatal: true }} tone="error" />
           ) : null}
 
-          <Rail
-            input={rail}
-            stopBody={stopBody}
-            openStop={openStop}
-            onOpenStop={(id) => setOpenOverride(id)}
-            answerFor={(stage) => (stage.reason === "" ? "" : stage.reason)}
+          <DeployableWorkspace
+            site={site} pkg={pkg} run={run} accounts={accounts} canDomains={can.domains}
+            timelineState={deployments?.snapshot.state ?? "disconnected"}
+            timelineError={deployments?.snapshot.error ?? ""} onRetryRead={reseed}
+            onInspect={setDetail} onOpenSource={() => pkg && onOpenSource(pkg.id)}
+            onHistory={() => pkg ? onOpenHistory(pkg.id) : setDetail("live")}
           />
-
-          {/* THE HISTORY IS ONE LINE, AND IT IS THE SOURCE'S. Six attempts,
-              each a full six-stop rail with its own refusal block, is 2,600px
-              -- and `usePackageDeployments` reads the PACKAGE's timeline, so
-              two apps of one source rendered the identical wall twice. */}
-          {pkg === null ? null : (
-            <button type="button" className="os-deploy-history-line" onClick={() => onOpenHistory(pkg.id)}>
-              <History size={12} aria-hidden />
-              <span>History &middot; {historySummary(deployments?.snapshot.rows ?? [])}</span>
-              <span aria-hidden>&#9656;</span>
-            </button>
-          )}
 
           {/* A refusal renders IN SURFACE, beside the rail -- never a toast,
               and never inside a dialog that then closes, because a refusal
@@ -366,6 +341,12 @@ export function DeployablePage({
           {lifecycle.refusal ? (
             <ProblemNotice problem={{ ...lifecycle.refusal, fatal: true }} tone="error" />
           ) : null}
+      {detail ? <DetailDialog title={detailTitle(detail)} onClose={() => setDetail(null)}>
+        {detail === "runtime" ? <RuntimeSettingsPanel site={site} canEdit={can.publish} /> :
+          detail === "traffic" ? <TrafficPanel site={site} /> :
+          (() => { const stage = railFor(rail).stages.find(s => s.id === detail); return stage ? <>{stage.reason ? <Caption>{stage.reason}</Caption> : null}{stopBody(stage)}</> : null; })()}
+        {lifecycle.refusal ? <ProblemNotice problem={{ ...lifecycle.refusal, fatal: true }} tone="error" /> : null}
+      </DetailDialog> : null}
         </Panel>
       </div>
 
@@ -488,32 +469,6 @@ function onlyThisApp(pkg: PackageRow, site: SiteRow): Record<string, Placement> 
   return everyOtherAppSkipped(pkg.declares, site.packageDeployableName);
 }
 
-/** The history line's own summary: how many, and how the last one went. */
-function historySummary(rows: readonly DeploymentRow[]): string {
-  if (rows.length === 0) return "no attempts yet";
-  const attempts = `${rows.length} attempt${rows.length === 1 ? "" : "s"}`;
-  const last = rows[0];
-  if (last === undefined) return attempts;
-  return `${attempts}, last ${statusWord(last.status)}`;
-}
-
-function statusWord(status: string): string {
-  switch (status) {
-    case "succeeded":
-      // NOT "live". A run that succeeded put files in place; whether the
-      // deployable is serving is the site's business, and a first deploy
-      // leaves it Built. The old word put "last live" on a page whose own bar
-      // read "not served to anyone yet", two lines apart and contradicting.
-      return "finished";
-    case "abandoned":
-      return "lost";
-    case "awaiting_confirm":
-      return "waiting for you";
-    default:
-      return status.replace(/_/g, " ");
-  }
-}
-
 /**
  * The timeline, newest first.
  *
@@ -527,4 +482,8 @@ function newestFirst(rows: DeploymentRow[]): DeploymentRow[] {
     const byTime = at(b).localeCompare(at(a));
     return byTime !== 0 ? byTime : b.id.localeCompare(a.id);
   });
+}
+
+function detailTitle(detail: WorkspaceDetail): string {
+  return { source: "Source", whatItIs: "App and deployment plan", whereItLives: "Addresses and client", build: "Build", live: "Versions", runtime: "App values", traffic: "Traffic" }[detail];
 }

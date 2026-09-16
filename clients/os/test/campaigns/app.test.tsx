@@ -559,7 +559,7 @@ describe("the rules builder", () => {
       ],
     });
     mount(conn, "rules");
-    fireEvent.click(await screen.findByText("New rule"));
+    fireEvent.click(await screen.findByRole("button", { name: "New rule" }));
 
     expect(await screen.findByText("When a")).toBeTruthy();
     // A hardcoded list would make the newest half of a cluster's schema
@@ -574,7 +574,7 @@ describe("the rules builder", () => {
   it("names the recipient choice as WHO, and the lane only as an effect", async () => {
     const conn = fakeConnection({ emailRules: [], templates: [], concepts: [] });
     mount(conn, "rules");
-    fireEvent.click(await screen.findByText("New rule"));
+    fireEvent.click(await screen.findByRole("button", { name: "New rule" }));
 
     expect(await screen.findByText("People in this cluster")).toBeTruthy();
     expect(screen.getByText("Everyone in an audience")).toBeTruthy();
@@ -589,7 +589,7 @@ describe("the rules builder", () => {
   it("says a new rule sends nothing until it is turned on", async () => {
     const conn = fakeConnection({ emailRules: [], templates: [], concepts: [] });
     mount(conn, "rules");
-    fireEvent.click(await screen.findByText("New rule"));
+    fireEvent.click(await screen.findByRole("button", { name: "New rule" }));
     expect(await screen.findByText(/A name, something to fire on/)).toBeTruthy();
   });
 
@@ -610,7 +610,7 @@ describe("the rules builder", () => {
       concepts: [{ id: "v1:identity:user", domain: "identity", entity: "user" }],
     });
     mount(conn, "rules");
-    fireEvent.click(await screen.findByText("New rule"));
+    fireEvent.click(await screen.findByRole("button", { name: "New rule" }));
     fireEvent.click(screen.getByText("Only sometimes, and other details"));
 
     const field = screen.getByLabelText("Condition that must hold for the rule to fire");
@@ -816,7 +816,7 @@ describe("a refused activation", () => {
       throw new Error(`createEmailRule: MemQL engine failed to execute query. Details: ${said}`);
     });
     mount(conn, "rules");
-    fireEvent.click(await screen.findByText("New rule"));
+    fireEvent.click(await screen.findByRole("button", { name: "New rule" }));
     fireEvent.change(screen.getByLabelText("Rule name"), { target: { value: "Welcome new users" } });
     chooseOption(screen.getByLabelText("The kind of thing that fires this rule"), "user (identity)");
     chooseOption(screen.getByLabelText("Template to send"), "Welcome");

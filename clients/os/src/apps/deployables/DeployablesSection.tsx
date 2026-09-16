@@ -1,17 +1,21 @@
-import { useMemo, useState } from "react";
-import { Archive, ArrowUpCircle, ChevronRight, GitBranch, Globe, Plus } from "lucide-react";
+import { healthExplanation } from "./health";
+import { AddButton } from "../../kit/AddButton";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ActivePane } from "./paneActivity";
+import { Archive, ArrowUpCircle, ChevronRight, GitBranch, Globe, ShoppingBag } from "lucide-react";
 
+import type { OsAppProps } from "../../system/registry";
 import { useDeployablesSettings } from "./settingsContext";
-import { siteStateWord, stateChip, statusFacetLabel } from "./words";
+import { siteStateWord, statusFacetLabel } from "./words";
 import {
   Button,
+  EmptyState,
+  RefreshButton,
   Caption,
-  Chip,
   Head,
   LiveList,
   Notice,
   Refine,
-  Row as ListRow,
   Select,
   useNow,
   useThreeFeedView,
@@ -20,7 +24,7 @@ import {
 import { formatFreshness } from "../../kit/format";
 import type { LiveView } from "../../live/liveView";
 import type { ArrivalKind } from "../../live/arrival";
-import { AccountChip, NO_ACCOUNT_LABEL } from "../accounts/AccountPicker";
+import { NO_ACCOUNT_LABEL } from "../accounts/AccountPicker";
 import { accountIsArchived, accountName, accountNameFrom, type AccountRow } from "../accounts/rows";
 import { useAccountOptions } from "../accounts/tie";
 import { deployedByLabel, deployerOf, usePeopleNames } from "./people";
@@ -35,7 +39,6 @@ import {
   listViewKey,
   newestParkedRun,
   SECTION_LABELS,
-  standingInputFor,
   type DeployableListGroup,
   type DeployableListRow,
   type ListFilter,
@@ -45,7 +48,6 @@ import { ComposePage } from "./page/ComposePage";
 import type { PartsHeld } from "./parts";
 import { DeployablePage } from "./page/DeployablePage";
 import { HistoryView } from "./page/HistoryView";
-import { Rail } from "./page/RailView";
 import { SourceView } from "./page/SourceView";
 import { SITE_STATUSES, type SiteRow } from "./rows";
 import type { ListDensity } from "./settings";
@@ -94,15 +96,16 @@ import { DEPLOYABLE_KINDS, kindLabel } from "./targets";
 /** Which view the section is showing. One at a time, one Head each. */
 type DeployablesView =
   | { kind: "list" }
-  | { kind: "deployable"; siteId: string }
-  | { kind: "source"; packageId: string }
-  | { kind: "history"; packageId: string }
-  | { kind: "compose"; parkedPackageId?: string; only?: string };
+  | { kind: "deployable"; siteId: string; from?: string }
+  | { kind: "source"; packageId: string; fromSite?: string }
+  | { kind: "history"; packageId: string; siteId?: string; returnTo?: DeployablesView }
+  | { kind: "compose"; parkedPackageId?: string; only?: string; fromSource?: string };
 
 /** What the list says about the row that just left it. */
 type Gone = { name: string; what: "deleted" | "deactivated" } | null;
 
 export function DeployablesSection({
+  active = true, navigation, openRequest,
   sites,
   packages,
   parked,
@@ -118,6 +121,9 @@ export function DeployablesSection({
   onAsk,
   onReseed,
 }: {
+  active?: boolean;
+  navigation?: OsAppProps["navigation"];
+  openRequest?: { siteId: string; revision: number };
   sites: LiveView<SiteRow> | null;
   packages: LiveView<PackageRow> | null;
   parked: LiveView<DeploymentRow> | null;
@@ -139,9 +145,28 @@ export function DeployablesSection({
   // THE VIEW INITIALISES FROM THE SELECTION, so arriving from the Map -- which
   // navigates here with a site chosen -- lands on that deployable rather than
   // on the list with an invisible selection.
-  const [view, setView] = useState<DeployablesView>(() =>
+  const [view, holdView] = useState<DeployablesView>(() =>
     selectedSiteId === "" ? { kind: "list" } : { kind: "deployable", siteId: selectedSiteId },
   );
+  // A peer tab shows the landing without destroying an unfinished nested pane.
+  // Reopening New resumes its retained draft; contextual Back restores the pane.
+  const [landing, setLanding] = useState(false);
+  const lastNavigation = useRef<number | undefined>(undefined);
+  const lastOpenRequest = useRef<number | undefined>(undefined);
+  function setView(next: DeployablesView) { setLanding(false); holdView(next); }
+  useLayoutEffect(() => {
+    if (!active) return;
+    if (openRequest && openRequest.revision !== lastOpenRequest.current) {
+      lastOpenRequest.current = openRequest.revision;
+      setView({ kind: "deployable", siteId: openRequest.siteId });
+      lastNavigation.current = navigation?.revision;
+      return;
+    }
+    if (navigation && navigation.revision !== lastNavigation.current) {
+      lastNavigation.current = navigation.revision;
+      setLanding(navigation.origin === "peer");
+    }
+  }, [active, navigation?.revision, navigation?.origin, openRequest?.revision, openRequest?.siteId]);
   // WHAT WAS JUST DELETED, so the list can say what happened to it. The name
   // is free the instant the row is stamped; the domains come down on the
   // reconciliation sweep's own schedule, and this says so rather than implying
@@ -197,7 +222,7 @@ export function DeployablesSection({
   function openSite(siteId: string) {
     onSelectSite(siteId);
     setJustGone(null);
-    setView({ kind: "deployable", siteId });
+    setView({ kind: "deployable", siteId, ...(!landing && view.kind === "source" ? { from: view.packageId } : {}) });
   }
 
   function backToList() {
@@ -216,98 +241,113 @@ export function DeployablesSection({
   // nothing is written until the bar's act is pressed. The flow reads the
   // source and the off-list off the root feeds, so it knows which it is.
   function openDeclared(packageId: string, app: string) {
-    setView({ kind: "compose", parkedPackageId: packageId, only: app });
+    setView({ kind: "compose", parkedPackageId: packageId, only: app, ...(!landing && view.kind === "source" ? { fromSource: packageId } : {}) });
   }
 
-  if (view.kind === "compose") {
-    const parkedFor =
-      view.parkedPackageId === undefined ? null : newestParked(packageRows, parkedRows, view.parkedPackageId);
-    return (
-      <ComposePage
-        clusterDomain={clusterDomain}
-        can={can}
-        isClusterOwner={isClusterOwner}
-        viewerUserId={viewerUserId}
-        credentials={credentials}
-        onBack={backToList}
-        onAsk={onAsk}
-        parked={parkedFor ?? undefined}
-        source={
-          view.parkedPackageId === undefined
-            ? undefined
-            : (packageRows.find((p) => p.id === view.parkedPackageId) ?? undefined)
-        }
-        only={view.only}
-        packages={packageRows}
-        placed={
-          parkedFor === null
-            ? []
-            : siteRows.filter((s) => s.packageId === parkedFor.pkg.id).map((s) => s.packageDeployableName)
-        }
-      />
-    );
-  }
+  return <>
+    <ActivePane active={!landing || view.kind === "list"}>
+      <div data-deployable-view hidden={landing && view.kind !== "list"} inert={landing && view.kind !== "list"} style={{ display: landing && view.kind !== "list" ? "none" : "contents" }}>{renderCurrentView()}</div>
+    </ActivePane>
+    {landing && view.kind !== "list" ? renderList() : null}
+  </>;
 
-  if (view.kind === "source" || view.kind === "history") {
-    const pkg = packageRows.find((p) => p.id === view.packageId) ?? null;
-    // The source left the feed while this was open -- archived from another
-    // window, say. The list is what the person sees, rather than a page about
-    // a thing that is gone.
-    if (pkg === null) return renderList();
-    const apps = siteRows.filter((s) => s.packageId === pkg.id);
-    if (view.kind === "history") {
-      return <HistoryView pkg={pkg} can={can} onBack={() => setView({ kind: "source", packageId: pkg.id })} />;
+  function renderCurrentView() {
+    if (view.kind === "compose") {
+      const parkedFor =
+        view.parkedPackageId === undefined ? null : newestParked(packageRows, parkedRows, view.parkedPackageId);
+      return (
+        <ComposePage
+          clusterDomain={clusterDomain}
+          can={can}
+          isClusterOwner={isClusterOwner}
+          viewerUserId={viewerUserId}
+          credentials={credentials}
+          backLabel={view.fromSource ? "Source" : "Deployables"}
+          onBack={() => view.fromSource ? setView({ kind: "source", packageId: view.fromSource }) : backToList()}
+          onAsk={onAsk}
+          parked={parkedFor ?? undefined}
+          source={
+            view.parkedPackageId === undefined
+              ? undefined
+              : (packageRows.find((p) => p.id === view.parkedPackageId) ?? undefined)
+          }
+          only={view.only}
+          packages={packageRows}
+          placed={
+            parkedFor === null
+              ? []
+              : siteRows.filter((s) => s.packageId === parkedFor.pkg.id).map((s) => s.packageDeployableName)
+          }
+        />
+      );
     }
-    return (
-      <SourceView
-        pkg={pkg}
-        apps={apps}
-        credentials={credentials}
-        can={can}
-        onBack={backToList}
-        onOpenHistory={() => setView({ kind: "history", packageId: pkg.id })}
-        onOpenApp={openSite}
-        onOpenDeclared={(app) => openDeclared(pkg.id, app)}
-        onAsk={onAsk}
-        attempts={parkedRows.filter((d) => d.packageId === pkg.id).length}
-        deployedBy={deployedByLabel(
-          deployerOf(parkedRows.find((d) => d.packageId === pkg.id) ?? null, null, pkg),
-          viewerUserId,
-          nameOf,
-        )}
-      />
-    );
-  }
 
-  if (view.kind === "deployable") {
-    const site = siteRows.find((s) => s.id === view.siteId) ?? null;
-    if (site === null) return renderList();
-    const pkg = site.packageId === "" ? null : (packageRows.find((p) => p.id === site.packageId) ?? null);
-    return (
-      <DeployablePage
-        key={site.id}
-        site={site}
-        pkg={pkg}
-        credentials={credentials}
-        viewerUserId={viewerUserId}
-        nameOf={nameOf}
-        can={can}
-        clusterDomain={clusterDomain}
-        onAsk={onAsk}
-        onBack={backToList}
-        onOpenSource={(packageId) => setView({ kind: "source", packageId })}
-        onOpenHistory={(packageId) => setView({ kind: "history", packageId })}
-        onDeleted={(goneId, what) => {
-          const gone = siteRows.find((s) => s.id === goneId);
-          setJustGone(gone === undefined ? null : { name: gone.hostname, what });
-          onSelectSite("");
-          setView({ kind: "list" });
-        }}
-      />
-    );
-  }
+    if (view.kind === "source" || view.kind === "history") {
+      const pkg = packageRows.find((p) => p.id === view.packageId) ?? null;
+      // The source left the feed while this was open -- archived from another
+      // window, say. The list is what the person sees, rather than a page about
+      // a thing that is gone.
+      if (pkg === null) return renderList();
+      const apps = siteRows.filter((s) => s.packageId === pkg.id);
+      if (view.kind === "history") {
+        return <HistoryView pkg={pkg} can={can} app={siteRows.find(s => s.id === view.siteId)}
+          backLabel={view.returnTo?.kind === "history" ? "App history" : undefined}
+          onOpenSourceHistory={() => setView({ kind: "history", packageId: pkg.id, returnTo: view })}
+          onBack={() => setView(view.returnTo ?? (view.siteId ? { kind: "deployable", siteId: view.siteId } : { kind: "source", packageId: pkg.id }))} />;
+      }
+      return (
+        <SourceView
+          pkg={pkg}
+          apps={apps}
+          credentials={credentials}
+          can={can}
+          backLabel={view.fromSite ? (siteRows.find(s => s.id === view.fromSite)?.title || "Deployable") : "Deployables"}
+          onBack={() => view.fromSite ? setView({ kind: "deployable", siteId: view.fromSite }) : backToList()}
+          onOpenHistory={() => setView({ kind: "history", packageId: pkg.id, returnTo: view })}
+          onOpenApp={openSite}
+          onOpenDeclared={(app) => openDeclared(pkg.id, app)}
+          onAsk={onAsk}
+          attempts={parkedRows.filter((d) => d.packageId === pkg.id).length}
+          deployedBy={deployedByLabel(
+            deployerOf(parkedRows.find((d) => d.packageId === pkg.id) ?? null, null, pkg),
+            viewerUserId,
+            nameOf,
+          )}
+        />
+      );
+    }
 
-  return renderList();
+    if (view.kind === "deployable") {
+      const site = siteRows.find((s) => s.id === view.siteId) ?? null;
+      if (site === null) return renderList();
+      const pkg = site.packageId === "" ? null : (packageRows.find((p) => p.id === site.packageId) ?? null);
+      return (
+        <DeployablePage
+          key={site.id}
+          site={site}
+          pkg={pkg}
+          credentials={credentials}
+          viewerUserId={viewerUserId}
+          nameOf={nameOf}
+          can={can}
+          clusterDomain={clusterDomain}
+          onAsk={onAsk}
+          onBack={() => view.from ? setView({ kind: "source", packageId: view.from }) : backToList()}
+          backLabel={view.from ? "Source" : "Deployables"}
+          onOpenSource={(packageId) => setView({ kind: "source", packageId, fromSite: site.id })}
+          onOpenHistory={(packageId) => setView({ kind: "history", packageId, siteId: site.id, returnTo: view })}
+          onDeleted={(goneId, what) => {
+            const gone = siteRows.find((s) => s.id === goneId);
+            setJustGone(gone === undefined ? null : { name: gone.hostname, what });
+            onSelectSite("");
+            setView({ kind: "list" });
+          }}
+        />
+      );
+    }
+
+    return renderList();
+  }
 
   // ---- the list ------------------------------------------------------------
 
@@ -332,17 +372,18 @@ export function DeployablesSection({
     }
 
     const emptyText = showArchived
-      ? "Nothing archived. Archived deployables stay here, so they can always be found again."
+      ? "No archived deployables."
       : filterIsNarrowing(filter)
-        ? "Nothing matches. Clear the search or a facet in Refine to see your deployables."
+        ? "No matching deployables. Clear the filters to see everything."
         : can.deploy
-          ? "No deployables yet. New deployable is where one starts."
-          : "No deployables yet. The engine decides which reach you: your own, or every one of them if you are a cluster owner.";
+          ? "No deployables yet. Add a repository, upload built files or connect your CI."
+          : "No deployables are available to this account.";
 
+    const filtered = filterIsNarrowing(filter);
     return (
-      <div className="os-app-stack os-deployables-list" data-density={density}>
-        <Head title="Deployables" meta={listedCount}>
-          <Refine
+      <div className="os-app-stack os-deployables-list deployable-overview" data-density={density}>
+        <Head title="Deployables" meta={!feedError && list?.snapshot.state === "live" ? listedCount : undefined}>
+          <Refine iconOnly
             search={filter.search}
             onSearch={(search) => patch({ search })}
             chips={chips}
@@ -402,9 +443,7 @@ export function DeployablesSection({
           {/* `deploy`, because composing ENDS in a deploy: a person holding
               only `sources` has nothing to reach here that is theirs. */}
           {can.deploy ? (
-            <Button tone="primary" ariaLabel="New deployable" onClick={() => setView({ kind: "compose" })}>
-              <Plus size={13} aria-hidden /> New
-            </Button>
+            <AddButton label="New deployable" className="deployable-new" onClick={() => setView({ kind: "compose" })} />
           ) : null}
         </Head>
 
@@ -436,19 +475,28 @@ export function DeployablesSection({
         {feedError ? (
           <Notice
             tone="error"
-            sentence="This cluster did not return its deployables."
-            next="The engine decides which reach you -- your own, or every one of them if you are a cluster owner."
+            sentence="Deployables could not be loaded."
+            detail={feedError}
+            next="Check your connection and try again."
           >
-            <Button onClick={onReseed}>Try again</Button>
+            <RefreshButton label="Reload deployables" onClick={onReseed} />
           </Notice>
         ) : null}
 
-        <LiveList<DeployableListGroup>
+        {groups.length === 0 && (feedError || list?.snapshot.state !== "live") ? (feedError ? null : <div data-os-livelist data-state={list?.snapshot.state ?? "disconnected"}>
+          <EmptyState icon={Globe} title={list?.snapshot.state === "seeding" ? "Loading from the cluster" : "Not connected to the cluster"}>
+            {list?.snapshot.state === "seeding" ? "Your apps and sources will appear here." : "Your apps will appear when the connection returns."}
+          </EmptyState>
+        </div>) : <LiveList<DeployableListGroup>
           source={list}
           rowId={(g) => g.id}
           fingerprint={groupFingerprint}
           label="Deployables in this cluster"
           emptyText={emptyText}
+          emptyContent={<EmptyState icon={Globe} title={showArchived ? "No archived deployables" : filtered ? "No matching deployables" : "No deployables yet"}
+            action={filtered ? <Button onClick={() => setFilter(DEFAULT_LIST_FILTER)}>Clear filters</Button> : undefined}>
+            {showArchived ? "Archived apps will appear here. Restore one to bring it back offline." : filtered ? "Try a different search or clear the filters." : can.deploy ? "Use New deployable to add a repository, built files or a CI pipeline." : "Apps shared with your account will appear here."}
+          </EmptyState>}
           renderRow={(group, tick) => (
             <GroupLine
               group={group}
@@ -465,7 +513,7 @@ export function DeployablesSection({
               onOpenDeclared={openDeclared}
             />
           )}
-        />
+        />}
 
         {archivedCount > 0 || showArchived ? (
           <div className="os-archive-toggle">
@@ -475,8 +523,8 @@ export function DeployablesSection({
             </button>
             <Caption>
               {showArchived
-                ? "Archived deployables are kept, not deleted -- restoring one brings it back offline. Deleting a standalone one releases its name; deactivating a source's app does the same."
-                : "An archive is a place, not a void."}
+                ? "Restored apps return offline. Open an app to restore it."
+                : "Restore archived apps here."}
             </Caption>
           </div>
         ) : null}
@@ -526,12 +574,9 @@ function GroupLine({
   onOpenDeclared: (packageId: string, app: string) => void;
   figures: Map<string, TrafficSummary>;
 }) {
-  // COLLAPSED IS THE DEFAULT, and which groups are open is remembered. The
-  // OPEN set is stored rather than the closed one: closed is the default, so a
-  // list of what is shut would have to name every source that ever existed and
-  // a source added tomorrow would arrive open.
+  // Show source relationships until the person explicitly collapses a group.
   const { settings, toggleSource } = useDeployablesSettings();
-  const expanded = settings.expandedSources.includes(group.id);
+  const expanded = !settings.collapsedSources?.includes(group.id);
 
   const line = (row: DeployableListRow, rowTick: ArrivalKind | null, waiting: boolean) => (
     <DeployableLine
@@ -578,77 +623,25 @@ function GroupLine({
   const waiting = group.rows.some((row) => row.parked !== null);
   const appsId = `os-deploy-apps-${group.id.replace(/[^A-Za-z0-9_-]/g, "-")}`;
 
-  // THE SOURCE IS A REAL ROW. It was a `div` of caption text with two chips,
-  // wedged between clickable rows -- not focusable, not announced, and not
-  // openable, while looking like a heading for the list beneath it. It opens
-  // the source's own view now, which is where its credential, its auto-deploy
-  // switch, its history and its archive live.
-  return (
-    <>
-      {heading}
-      <div className="os-deploy-group" data-archived={pkg.status === "archived" || undefined}>
-        <div className="os-deploy-grouphead">
-          {/* THE COUNT IS THE CONTROL, and a bare chevron was not: a lone arrow
-              said nothing about what it would do. The count was already on this
-              row and is exactly what opening the group reveals, so the two are
-              one control -- "2 apps" with a chevron that turns.
-
-              IT SITS OUTSIDE THE ROW, not in its trailing cluster, because an
-              openable ListRow IS a button and a button cannot contain another
-              one: nested, this rendered but never fired.
-
-              TWO CONTROLS, TWO JOBS: this opens the group, the row opens the
-              SOURCE's own view. Folding them together would cost one. */}
-          <button
-            type="button"
-            className="os-deploy-disclose"
-            aria-expanded={expanded}
-            aria-controls={appsId}
-            aria-label={`${expanded ? "Collapse" : "Expand"} ${sourceLabel(pkg)}`}
-            onClick={() => toggleSource(group.id)}
-          >
-            <ChevronRight size={12} aria-hidden />
-            <span>
-              {group.rows.length} app{group.rows.length === 1 ? "" : "s"}
-            </span>
-          </button>
-          <ListRow
-            icon={<GitBranch size={15} aria-hidden />}
-            name={sourceLabel(pkg)}
-            current
-            onOpen={() => onOpenSource(pkg.id)}
-            state={
-              <>
-                {pkg.updateAvailable ? (
-                  <Chip tone="accent" title={`Newer upstream: ${pkg.latestKnownVersion}`}>
-                    <ArrowUpCircle size={11} aria-hidden /> update
-                  </Chip>
-                ) : null}
-                {pkg.status === "archived" ? (
-                  <Chip tone="muted">
-                    <Archive size={11} aria-hidden /> archived
-                  </Chip>
-                ) : null}
-                {waiting ? <span className="os-deploy-waiting">a deploy is waiting for you</span> : null}
-
-                {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
-                <span className="os-deploy-railcol" />
-              </>
-            }
-          />
-        </div>
-        {/* A SHUT GROUP RENDERS NO APPS AT ALL rather than hiding them with
-            CSS: they are not read, not focusable, and not found by a search of
-            the page -- which is what "collapsed" has to mean for the count on
-            the row to be the honest summary of what is inside. */}
-        {expanded ? (
-          <div id={appsId} className="os-deploy-group-apps">
-            {group.rows.map((row) => line(row, null, false))}
-          </div>
-        ) : null}
+  return <>
+    {heading}
+    <div className="os-deploy-group" data-archived={pkg.status === "archived" || undefined}>
+      <div className="os-deploy-grouphead">
+        <button type="button" className="deployable-source-heading" onClick={() => onOpenSource(pkg.id)} aria-label={`Open ${sourceLabel(pkg)}`}>
+          <GitBranch size={14} aria-hidden />
+          <span className="os-row-name">{sourceLabel(pkg)}</span>
+          {pkg.updateAvailable ? <span className="deployable-status" data-tone="accent"><ArrowUpCircle size={12} aria-hidden /> Update available</span> : null}
+          {pkg.status === "archived" ? <span className="deployable-status">Archived</span> : null}
+        </button>
+        <button type="button" className="os-deploy-disclose" aria-expanded={expanded} aria-controls={appsId}
+          aria-label={`${expanded ? "Collapse" : "Expand"} ${sourceLabel(pkg)}`} onClick={() => toggleSource(group.id)}>
+          <span>{group.rows.length} app{group.rows.length === 1 ? "" : "s"}</span><ChevronRight size={13} aria-hidden />
+        </button>
       </div>
-    </>
-  );
+      {waiting && !expanded ? <span className="os-deploy-waiting">Review needed</span> : null}
+      {expanded ? <div id={appsId} className="os-deploy-group-apps">{group.rows.map(row => line(row, null, false))}</div> : null}
+    </div>
+  </>;
 }
 
 function DeployableLine({
@@ -674,51 +667,24 @@ function DeployableLine({
   const now = useNow();
   const site = row.site;
   const archived = site?.status === "archived" || row.pkg?.status === "archived";
-  // THE STATE WORD, on the row (2026-09-05, D1): the same word the bar reads,
-  // lowercase, and absent for a live row -- the row's own accent says live.
-  const chip = row.disabled === true ? "inactive" : site === null ? "" : stateChip(siteStateWord(site));
-  return (
-    <ListRow
-      icon={<Globe size={16} aria-hidden />}
-      name={row.name}
-      current={site?.status === "live"}
-      dim={site?.status === "disabled" || archived || row.disabled === true}
-      open={open}
-      onOpen={onOpen}
-      state={
-        <>
-          {waiting ? <span className="os-deploy-waiting">a deploy is waiting for you</span> : null}
-          {/* SAID ON THE ROW rather than only by dimming it: a greyed row with
-              no word reads as broken. */}
-          {chip === "" ? null : <Chip tone="muted">{chip}</Chip>}
-          <AccountChip name={accountNameFrom(accounts, site?.accountId ?? "")} />
-          {/* WHO DEPLOYED IT, beside who it is for: the two facts the owner
-              asked to see on every row (epic memql#5289, task memql#5306). */}
-          {deployedBy === "" ? null : (
-            <span className="os-deploy-by" data-os-deployed-by>
-              deployed by {deployedBy}
-            </span>
-          )}
-          {traffic === null || traffic.lastServedAt === "" ? null : (
-            <Chip title={`${traffic.requests.toLocaleString()} requests over the last week`}>
-              served {formatFreshness(traffic.lastServedAt, now)}
-            </Chip>
-          )}
-          {/* A FIXED TRAILING COLUMN, so the five marks land at the same x on
-              every row and can be scanned DOWN the list. They used to follow a
-              variable-length hostname and land somewhere different on each. */}
-          <span className="os-deploy-railcol">
-            <Rail compact input={standingInputFor(row)} label={`${row.name} stops`} />
-          </span>
-          {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
-        </>
-      }
-    >
-      {row.hostname === "" ? (
-        <span className="os-deploy-address">no address yet</span>
-      ) : row.hostname === row.name ? null : (
-        <span className="os-deploy-address os-mono">{row.hostname}</span>
-      )}
-    </ListRow>
-  );
+  const state = row.disabled ? "Inactive" : site ? siteStateWord(site) : row.parked ? "Review needed" : "Not deployed";
+  const name = row.name;
+  const client = accountNameFrom(accounts, site?.accountId ?? "");
+  return <button type="button" className="os-row deployable-list-row" data-current={state === "Live" || undefined}
+    data-dim={site?.status === "disabled" || archived || row.disabled || undefined} data-open={open || undefined} onClick={onOpen}>
+    <span className="deployable-list-icon">{site?.kind === "shopify_storefront" ? <ShoppingBag size={18} aria-hidden /> : <Globe size={18} aria-hidden />}</span>
+    <span className="deployable-list-identity"><span className="os-row-name">{name}</span>
+      <span className="os-deploy-address">{row.hostname === name ? kindLabel(row.kind) : row.hostname || "No address yet"}</span>
+    </span>
+    <span className="deployable-list-summary">
+      {client ? <span>{client}</span> : null}
+      {deployedBy ? <span className="os-deploy-by" data-os-deployed-by>{site || row.parked ? "deployed" : "added"} by {deployedBy}</span> : null}
+      {traffic?.lastServedAt ? <span title={`${traffic.requests.toLocaleString()} requests over the last week`}>served {formatFreshness(traffic.lastServedAt, now)}</span> : null}
+    </span>
+    <span className="deployable-list-state"><span className="deployable-status" data-tone={state === "Live" ? "accent" : state === "Unavailable" ? "warn" : "muted"} title={site?.status === "live" ? healthExplanation(site, now.getTime()) : undefined}>{state}</span>
+      {waiting && state !== "Review needed" ? <span className="os-deploy-waiting">Review needed</span> : null}
+      {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
+    </span>
+    <ChevronRight size={14} aria-hidden className="deployable-list-chevron" />
+  </button>;
 }

@@ -909,3 +909,17 @@ concept modelEvidence {
 
   @relationship(type="parent", field="approvalId", target=approval, direction="outgoing")
 }
+
+/// Synthetic current website observation, stored outside append-only graph history.
+/// siteHealthRead authorizes every result against the current site under the caller.
+@displayCard(primary="siteId", secondary="reason", tertiary="checkedAt", status="state")
+concept siteHealth {
+  siteId string!
+  hostname string!
+  bundleRef string!
+  checkedAt datetime!
+  state enum("reachable", "unavailable", "unknown")!
+  reason string!
+  httpStatus int!
+  durationMs int!
+}

@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { UserInvitationResult } from "@znasllc-io/memql-sdk-core/identityadmin";
-import { ArrowLeft } from "lucide-react";
 
 import {
-  Button,
   Chip,
   CopyValue,
   Fact,
@@ -242,25 +240,23 @@ export function InvitePage({
     : [];
 
   return (
-    <div className="os-app-stack">
-      <Head title="Invite somebody">
-        <Button tone="quiet" onClick={onBack} ariaLabel="Back to People">
-          <ArrowLeft size={13} aria-hidden /> People
-        </Button>
-      </Head>
+    <div className="os-action-pane">
+      <div className="os-action-body os-app-stack">
+        <Head title="Invite somebody" back={{ label: "People", onSelect: onBack }} />
 
-      <Panel label="The invitation">
-        {/* NO `openStop`, and that is the COMPOSE reading of this control:
-            a rail with none is not a disclosure at all and every stop renders
-            its body (kit/Rail.tsx states it). Here the rail IS the form -- the
-            stops are what the person fills in, in the order the answers depend
-            on each other -- and collapsing the one being typed into would take
-            the field away at the first keystroke. The marks still carry which
-            stops are settled, which is the whole reason it is a rail rather
-            than three panels. */}
-        <Rail stops={stops} label="What this invitation says" />
-      </Panel>
+        <Panel label="The invitation">
+          {/* NO `openStop`, and that is the COMPOSE reading of this control:
+              a rail with none is not a disclosure at all and every stop renders
+              its body (kit/Rail.tsx states it). Here the rail IS the form -- the
+              stops are what the person fills in, in the order the answers depend
+              on each other -- and collapsing the one being typed into would take
+              the field away at the first keystroke. The marks still carry which
+              stops are settled, which is the whole reason it is a rail rather
+              than three panels. */}
+          <Rail stops={stops} label="What this invitation says" />
+        </Panel>
 
+      </div>
       <ActionBar
         state={answered ? "Ready to send" : "Not answered yet"}
         detail={
@@ -322,53 +318,51 @@ function InvitedPersonPage({
     : [];
 
   return (
-    <div className="os-app-stack">
-      <Head title={email || "Invited"} meta="Invited">
-        <Button tone="quiet" onClick={onBack} ariaLabel="Back to People">
-          <ArrowLeft size={13} aria-hidden /> People
-        </Button>
-      </Head>
+    <div className="os-action-pane">
+      <div className="os-action-body os-app-stack">
+        <Head title={email || "Invited"} meta="Invited" back={{ label: "People", onSelect: onBack }} />
 
-      {result === null ? null : (
-        <Notice
-          tone={result.emailSent ? "info" : "warn"}
-          sentence={
-            result.emailSent
-              ? "The invitation is on its way."
-              : result.emailError === ""
-                ? "The invitation exists, and no mail is wired on this cluster."
-                : "The invitation exists, and the email did not go out."
-          }
-          next="This link is shown once. The cluster kept only its hash, so it cannot be retrieved again."
-          detail={result.emailError === "" ? undefined : result.emailError}
-        >
-          <CopyValue value={result.url} label="Invitation link" />
-        </Notice>
-      )}
-
-      <Panel label="What this invitation says">
-        <Subhead>Invitation</Subhead>
-        <Facts>
-          <Fact label="Address" value={email} mono />
-          <Fact label="Role" value={role} mono />
-          <Fact label="Expires" value={invitation ? daysLeft(invitation, now) : ""} title={invitation?.expiresAt} />
-          <Fact label="Invited by" value={invitation?.inviterName ?? ""} />
-          <Fact label="Sent" value={invitation ? formatMoment(invitation.createdAt) : ""} />
-        </Facts>
-        {joined.length === 0 ? (
-          <p className="os-caption">They join no groups on acceptance.</p>
-        ) : (
-          <p className="os-caption">
-            They join{" "}
-            {joined.map((group) => (
-              <Chip key={group.id}>{group.name}</Chip>
-            ))}{" "}
-            when they accept.
-          </p>
+        {result === null ? null : (
+          <Notice
+            tone={result.emailSent ? "info" : "warn"}
+            sentence={
+              result.emailSent
+                ? "The invitation is on its way."
+                : result.emailError === ""
+                  ? "The invitation exists, and no mail is wired on this cluster."
+                  : "The invitation exists, and the email did not go out."
+            }
+            next="This link is shown once. The cluster kept only its hash, so it cannot be retrieved again."
+            detail={result.emailError === "" ? undefined : result.emailError}
+          >
+            <CopyValue value={result.url} label="Invitation link" />
+          </Notice>
         )}
-        <RefusalLine actions={actions} />
-      </Panel>
 
+        <Panel label="What this invitation says">
+          <Subhead>Invitation</Subhead>
+          <Facts>
+            <Fact label="Address" value={email} mono />
+            <Fact label="Role" value={role} mono />
+            <Fact label="Expires" value={invitation ? daysLeft(invitation, now) : ""} title={invitation?.expiresAt} />
+            <Fact label="Invited by" value={invitation?.inviterName ?? ""} />
+            <Fact label="Sent" value={invitation ? formatMoment(invitation.createdAt) : ""} />
+          </Facts>
+          {joined.length === 0 ? (
+            <p className="os-caption">They join no groups on acceptance.</p>
+          ) : (
+            <p className="os-caption">
+              They join{" "}
+              {joined.map((group) => (
+                <Chip key={group.id}>{group.name}</Chip>
+              ))}{" "}
+              when they accept.
+            </p>
+          )}
+          <RefusalLine actions={actions} />
+        </Panel>
+
+      </div>
       <ActionBar state="Invited" tone="paused" acts={acts} />
     </div>
   );

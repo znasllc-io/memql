@@ -1,9 +1,12 @@
 import { useMemo, useState } from "react";
+import { FleetTabs, RefreshButton, useFleetScroll } from "../FleetControls";
+import { InfoDetail } from "../../../kit/InfoDetail";
 
 import {
-  Button,
   Caption,
-  Check,
+  Switch,
+  EmptyState,
+  Button,
   Chip,
   Chips,
   Fact,
@@ -74,9 +77,10 @@ const TURNS: Array<{ id: string; label: string; needs: ModelNeeds }> = [
   { id: "embedding", label: "Embeddings", needs: { embeddings: true } },
 ];
 
-export function ModelsSection() {
+export function ModelsSection({ onHome }: { onHome?: () => void } = {}) {
   const { catalog, doors, profiles, preference } = useInference();
   const models = catalog.value ?? [];
+  const [catalogSearch, setCatalogSearch] = useState("");
   const reading = catalog.state === "reading" || doors.state === "reading";
 
   // REFINE, not a standing filter strip (DESIGN.md rule 2): collapsed until
@@ -93,6 +97,11 @@ export function ModelsSection() {
   // is a control lying about what it did, which is the failure mode the same
   // note was written to avoid. Two lists that answer different questions get
   // two controls, or one control whose every chip governs both.
+  const [view, setView] = useState<"available" | "catalog" | "sources">("available");
+  const root = useFleetScroll(view);
+  const [category, setCategory] = useState("");
+  const [runtime, setRuntime] = useState("");
+  const [lackingOnly, setLackingOnly] = useState(false);
   const [search, setSearch] = useState("");
   const [capability, setCapability] = useState("");
   const [onlineOnly, setOnlineOnly] = useState(false);
@@ -143,35 +152,29 @@ export function ModelsSection() {
   }, [ranked]);
 
   return (
-    <div className="os-fleet">
+    <div ref={root} className="os-fleet">
+      <div className="fleet-section-header">
       <Head
-        title="Models"
+        title="Model library"
         meta={models.length === 0 ? undefined : `${models.length} on your fleet`}
       >
         {/* A REFRESH CONTROL BELONGS HERE, unlike on the live sections: both
             readings are on-demand projections that are never broadcast, so
             offering to look again is the honest affordance rather than a
             contradiction of a feed that arrives on its own. */}
-        <Button
-          tone="quiet"
-          busy={reading}
-          busyLabel="Reading"
-          onClick={() => {
-            catalog.reread();
-            doors.reread();
-          }}
-        >
-          Read again
-        </Button>
+        <RefreshButton label="Refresh model library" busy={reading} onClick={() => { catalog.reread(); doors.reread(); profiles.reread(); }} />
       </Head>
 
-      <DoorsPanel doors={doors.value} state={doors.state} error={doors.error} />
+      <FleetTabs label="Model library views" value={view} onChange={setView} options={[["available", "Available models"], ["catalog", "Catalog"], ["sources", "Inference sources"]]} />
+      </div>
+      <div hidden={view !== "sources"}><DoorsPanel doors={doors.value} state={doors.state} error={doors.error} /></div>
+      <div hidden={view !== "available"}>
 
       {catalog.state === "failed" ? (
         <Notice
           tone="info"
           sentence="We could not read your fleet's catalog."
-          next="That is not the same as a fleet with no models -- try again, or read the agent node's logs."
+          next="Refresh to try again. If it still fails, check Fleet logs."
           detail={catalog.error}
         />
       ) : null}
@@ -186,12 +189,12 @@ export function ModelsSection() {
           message on its own. */}
       {models.length === 0 ? null : (
         <>
-          <Caption>
+          <InfoDetail title="Model ranking"><Caption>
             This list shows your preferences, then active parameters per token (total when
             unreported), context window, and model id. A model that did not report its size sorts last.
             For <span className="os-mono">fleet:strongest</span>, measured structured-output reliability
             takes priority over preferences and size, so the model selected for a call can differ.
-          </Caption>
+          </Caption></InfoDetail>
 
           {preference.length > 0 ? (
             <Chips label="Your preferred order">
@@ -203,7 +206,7 @@ export function ModelsSection() {
             </Chips>
           ) : null}
 
-          <Caption>What each kind of turn would land on right now:</Caption>
+          <Caption>Highest-ranked compatible models:</Caption>
           <NextForEachTurn next={nextByTurn} known />
 
           <div className="os-fleet-models-scope">
@@ -238,24 +241,20 @@ export function ModelsSection() {
                 <option value="tools">Tool calling</option>
                 <option value="embeddings">Embeddings</option>
               </Select>
-              <Check checked={onlineOnly} onChange={setOnlineOnly}>
+              <Switch checked={onlineOnly} onChange={setOnlineOnly}>
                 Online now
-              </Check>
+              </Switch>
             </Refine>
           </div>
         </>
       )}
 
       {catalog.state === "read" && ranked.length === 0 ? (
-        <Notice
-          tone="info"
-          sentence="Your fleet offers no models."
-          next="Pair a machine in Machines, install a runtime on it, and pull a model. Ollama and any OpenAI-compatible endpoint are discovered automatically."
-        />
+        <EmptyState title="No models available" action={<><Button onClick={() => setView("catalog")}>Browse model catalog</Button>{onHome ? <Button onClick={onHome}>Go to Machines</Button> : null}</>}>Connect a machine and install a local model to make it available here.</EmptyState>
       ) : null}
 
       {ranked.length > 0 && shown.length === 0 ? (
-        <Caption>No model matches that.</Caption>
+        <EmptyState title="No matching models" action={<Button onClick={() => { setSearch(""); setCapability(""); setOnlineOnly(false); }}>Clear filters</Button>}>Try another name or include more capabilities and offline machines.</EmptyState>
       ) : null}
 
       <ul className="os-fleet-models">
@@ -277,8 +276,7 @@ export function ModelsSection() {
           appears and this line goes away on its own. */}
       {ranked.length > 0 && !anyMeasured ? (
         <Caption>
-          Nothing on this fleet has been measured yet, so there are no figures
-          to compare. That is not the same as a model that measured badly.
+          Performance has not been measured yet. Open a machine’s Models tab to run a probe.
         </Caption>
       ) : null}
 
@@ -292,12 +290,26 @@ export function ModelsSection() {
           the question they have once they have seen the answer to the first
           one -- and putting it first would make every visit start with a
           recommendation nobody asked for. */}
+      </div>
+      <div hidden={view !== "catalog"}>
+      {(profiles.value?.length ?? 0) > 0 ? <Refine label="Refine model catalog" search={catalogSearch} onSearch={setCatalogSearch} chips={[
+        ...(category ? [{ id: "category", label: category, onRemove: () => setCategory("") }] : []),
+        ...(runtime ? [{ id: "runtime", label: runtime, onRemove: () => setRuntime("") }] : []),
+        ...(lackingOnly ? [{ id: "gaps", label: "Capability gaps", onRemove: () => setLackingOnly(false) }] : []),
+      ]}><div className="fleet-catalog-filters">
+        <Select id="fleet-catalog-category" label="Catalog category" value={category} onChange={setCategory}><option value="">All categories</option>{Array.from(new Set((profiles.value ?? []).map(p => p.category))).map(c => <option key={c} value={c}>{c}</option>)}</Select>
+        <Select id="fleet-catalog-runtime" label="Catalog runtime" value={runtime} onChange={setRuntime}><option value="">All runtimes</option>{Array.from(new Set((profiles.value ?? []).map(p => p.runtime))).map(r => <option key={r} value={r}>{r}</option>)}</Select>
+        <Switch checked={lackingOnly} onChange={setLackingOnly}>Capability gaps</Switch>
+      </div></Refine> : null}
       <CatalogSection
+        onClearFilters={() => { setCatalogSearch(""); setCategory(""); setRuntime(""); setLackingOnly(false); }}
+        facets={{ search: catalogSearch, category, runtime, lackingOnly }}
         profiles={profiles.value ?? []}
         profilesState={profiles.state}
         profilesError={profiles.error}
         fleet={models}
       />
+      </div>
     </div>
   );
 }
@@ -316,12 +328,12 @@ function DoorsPanel({
   error: string;
 }) {
   return (
-    <Panel label="Doors">
+    <Panel label="Inference sources">
       {state === "failed" ? (
         <Notice
           tone="info"
-          sentence="We could not ask this cluster which doors are open."
-          next="That is not the same as a cluster with no inference."
+          sentence="Inference sources could not be read."
+          next="Refresh to check source availability again."
           detail={error}
         />
       ) : null}
@@ -387,8 +399,7 @@ function DoorsPanel({
             />
           </div>
           <Caption>
-            The chain tries them in this order: your own hardware, then a subscription you already
-            pay for, then anybody's money. Work parks only when every one is shut.
+            Source availability and policy preference are separate. A configured source must still be compatible with the call.
           </Caption>
         </>
       )}
@@ -400,7 +411,7 @@ function DoorState({ name, open, detail }: { name: string; open: boolean; detail
   return (
     <div className="os-fleet-door" data-open={open || undefined}>
       <span className="os-fleet-door-name">{name}</span>
-      <span className="os-fleet-door-state">{open ? "open" : "shut"}</span>
+      <span className="os-fleet-door-state">{open ? "Available" : "Unavailable"}</span>
       <span className="os-caption">{detail}</span>
     </div>
   );
@@ -453,7 +464,7 @@ function ModelLine({
 
   return (
     <li className="os-fleet-model" data-offline={model.online ? undefined : true}>
-      <div className="os-fleet-model-head">
+      <details className="fleet-model-detail"><summary className="os-fleet-model-head">
         <span className="os-fleet-model-rank" aria-hidden="true">
           {rank}
         </span>
@@ -466,7 +477,7 @@ function ModelLine({
         ) : null}
         {preferred ? <Chip tone="accent">preferred</Chip> : null}
         {model.online ? null : <Chip tone="muted">offline</Chip>}
-      </div>
+      </summary>
 
       <Facts>
         {/* SIZE IS NOT PRINTED AS ZERO. Zero parameters is not a thing, and a
@@ -525,6 +536,7 @@ function ModelLine({
           ))}
         </ul>
       )}
+      </details>
     </li>
   );
 }
@@ -533,7 +545,7 @@ function ModelLine({
 function doorSentence(doors: DoorsReading): string {
   const open = doors.doorsOpen.map(doorWord);
   if (open.length === 0) {
-    return "No door to a model is open, so anything that needs one will refuse or park.";
+    return "No inference source is available. Connect a model or a signed-in app to run tasks that need inference.";
   }
   if (open.length === 1) return `This cluster reaches a model through ${open[0]}.`;
   return `This cluster reaches a model through ${open.slice(0, -1).join(", ")} and ${open[open.length - 1]}, in that order.`;

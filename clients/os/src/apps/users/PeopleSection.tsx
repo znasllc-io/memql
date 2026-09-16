@@ -1,3 +1,4 @@
+import { AddButton } from "../../kit/AddButton";
 import { useEffect, useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { Mail, UserRound } from "lucide-react";
@@ -204,9 +205,7 @@ export function PeopleSection({
     <div className="os-app-stack">
       <Head title="People" meta={count === 0 ? undefined : `${count}`}>
         {emailReady ? (
-          <Button tone="primary" onClick={() => setView({ kind: "invite" })}>
-            Invite
-          </Button>
+          <AddButton onClick={() => setView({ kind: "invite" })} label="Invite" />
         ) : (
           // THE GATE'S OWN SENTENCE, IN THE ACTION'S PLACE. An app that hides
           // Invite with no account of itself reads as a missing feature, and

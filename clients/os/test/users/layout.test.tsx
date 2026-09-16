@@ -95,7 +95,7 @@ describe("every view of the Users app", () => {
   it("renders one Head on the Invite rail", async () => {
     const view = mount("people");
     await click(await screen.findByRole("button", { name: "Invite" }));
-    await screen.findByText("Invite somebody");
+    await screen.findByRole("heading", { name: "Invite somebody" });
     expect(heads()).toBe(1);
     view.unmount();
   });

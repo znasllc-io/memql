@@ -86,14 +86,14 @@ describe("status", () => {
     // A deliberately paused site answering 503 is a state somebody chose.
     expect(statusTone(siteFromRow(siteRow({ id: "a", status: "disabled" })))).toBe("warn");
     expect(statusTone(siteFromRow(siteRow({ id: "b", status: "draft" })))).toBe("muted");
-    expect(statusTone(siteFromRow(siteRow({ id: "c", status: "live" })))).toBe("ok");
+    expect(statusTone(siteFromRow(siteRow({ id: "c", status: "live" })))).toBe("muted");
   });
 
   it("maps onto the SHELL's dot language rather than inventing a fourth dot", () => {
     // Three states, three tones, and one of them is silence: a draft has never
     // been reachable, and painting a screen of new deployables amber would
     // alarm somebody about the normal case.
-    expect(statusDotTone(siteFromRow(siteRow({ id: "a", status: "live" })))).toBe("reachable");
+    expect(statusDotTone(siteFromRow(siteRow({ id: "a", status: "live" })))).toBe("unknown");
     expect(statusDotTone(siteFromRow(siteRow({ id: "b", status: "disabled" })))).toBe("unreachable");
     expect(statusDotTone(siteFromRow(siteRow({ id: "c", status: "draft" })))).toBe("unknown");
     // A row whose status has not arrived is not asserted to be anything.

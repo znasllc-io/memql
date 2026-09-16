@@ -24,6 +24,7 @@
 // carries the cluster bring-up installers instead. The panel says so under
 // the command rather than implying this repo builds it.
 
+import { localInstallerEnvironment, type LocalCockpitInstall } from "./localInstall";
 export type InstallPlatform = "mac" | "linux";
 
 export const INSTALL_PLATFORMS: readonly InstallPlatform[] = ["mac", "linux"];
@@ -86,6 +87,7 @@ export interface InstallCommandInput {
   inference: boolean;
   /** Install into this account's ~/.memql/bin instead of /usr/local/bin. */
   userLocal?: boolean;
+  localTest?: LocalCockpitInstall | null;
 }
 
 // installCommand composes the runbook's one-liner.
@@ -109,6 +111,11 @@ export interface InstallCommandInput {
 // AddMachine <pre> scrolls horizontally); correctness under paste is this
 // module's, and only a single physical line survives every terminal.
 export function installCommand(input: InstallCommandInput): string {
+  if (input.localTest && input.platform === "mac") {
+    const source = input.localTest;
+    const inference = input.inference ? " --inference" : "";
+    return `curl -fsSL ${source.base}/scripts/install/install-mac.sh | ${localInstallerEnvironment(source)}bash -s -- --token ${input.token} --cluster ${input.clusterUrl || CLUSTER_URL_PLACEHOLDER} --computeruse${inference} --user-local --download-base=${source.base}/releases/download/v${source.version}`;
+  }
   const cluster = input.clusterUrl === "" ? CLUSTER_URL_PLACEHOLDER : input.clusterUrl;
   const script = `https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/install-${input.platform}.sh`;
   const computeruse = input.computerUse ? " --computeruse" : "";
@@ -137,8 +144,9 @@ export function installCommand(input: InstallCommandInput): string {
 // --user-local: a worker installed under ~/.memql/bin is removed from there.
 export function uninstallCommand(
   platform: InstallPlatform,
-  opts: { purge?: boolean; userLocal?: boolean } = {},
+  opts: { purge?: boolean; userLocal?: boolean; clusterUrl?: string; localTest?: LocalCockpitInstall | null } = {},
 ): string {
+  if (opts.localTest && platform === "mac") return `curl -fsSL ${opts.localTest.base}/scripts/install/uninstall-mac.sh | ${localInstallerEnvironment(opts.localTest)}bash -s -- --user-local --cluster=${opts.clusterUrl || CLUSTER_URL_PLACEHOLDER}${opts.purge ? " --purge" : ""}`;
   const script = `https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/uninstall-${platform}.sh`;
   const flags = [opts.purge ? " --purge" : "", opts.userLocal ? " --user-local" : ""].join("");
   // `bash -s --` even with no flags, so a person appending one edits the same

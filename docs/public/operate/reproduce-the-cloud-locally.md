@@ -23,9 +23,9 @@ only after a deploy.
 > environments of one, which is why the only differences enumerated below are
 > resource sizes and the sources of DNS, TLS and secrets.
 
-> **Development principle: multi-node is the default.** Every feature
-> runs across the 2-replica mesh locally and in the cloud -- never
-> assume a single process. State/context/events that cross a node
+> **Development principle: test across multiple replicas.** Scale the local
+> mesh for cross-node validation; the local overlay reduces several services
+> to one replica to fit developer machines. Never assume a single process. State/context/events that cross a node
 > boundary need explicit plumbing (proxied/forwarded requests don't
 > carry another node's session state; cross-node events need a routing
 > rule). Implement AND test for the hop: a green single-node unit test
@@ -41,7 +41,7 @@ only after a deploy.
 |---|---|---|---|
 | Orchestrator | ArgoCD (k3d) | ArgoCD (AKS) | identical |
 | Manifests | `deploy/k8s/overlays/local/` | `deploy/k8s/overlays/cloud/` | same base, values differ |
-| Node-type split | identity / mcp / agent / planner / workbench / edge | same | identical (the product `bff` head is pack-owned, #2204) |
+| Node-type split | identity / bff / mcp / agent / planner / workbench / edge | same node roles | same engine; product DSL and clients come from downstream repositories |
 | Build model | engine (`Dockerfile`) for ALL node types (`memql-<type>:local`), product-agnostic | same product-agnostic engine images | identical -- a product's DSL mounts at runtime via `MEMQL_DSL_PATH` (the `dsl-bundle` component), not a per-product image; see [downstream-stacks.md](downstream-stacks.md) |
 | Replicas per mesh node (default) | **1** (scale to 2 with `make scale N=2`) | **2**; scaled to 0 when idle | equivalent once scaled -- the saving is the idle time, not the width |
 | Per-replica node id | `fieldRef: metadata.name` (downward API, same as the cloud) | `fieldRef: metadata.name` | **identical** |
@@ -52,7 +52,7 @@ only after a deploy.
 | Blob storage | Azurite emulator | Azure Blob | config only |
 | Secrets / keys | dev defaults (seeded by `make secrets`) | Key Vault via ESO | config only |
 | ExternalSecrets | deleted by `$patch: delete` in local overlay | present | config only |
-| Ingress | k3s-bundled traefik front door (`identity.memql.localhost`, mkcert TLS) + port-forwards for the gRPC heads | ingress-nginx | divergent -- traefik vs nginx |
+| Ingress | k3s-bundled traefik front door (`identity`, `api`, `mcp`, and `os` under `memql.localhost`, mkcert TLS) | ingress-nginx | divergent -- traefik vs nginx |
 | Digest-pinning gate | skipped for the `local` overlay in `scripts/deploy/drift-check.sh` (`check_rendered`'s `ENV=local` branch, which still asserts the overlay renders) | enforced | divergent -- justified |
 
 ## Prerequisites
@@ -265,14 +265,12 @@ The identity (`8085`) mapping is gone: it was a second entrance to a service
 the front door already serves, which is what
 [environment-parity.md](environment-parity.md) forbids.
 
-The product SPA (`:8080`) and the product `bff` gRPC head (`:50051`) -- a
-plain engine `bff` node fronting the product's DSL bundle -- are NOT part of
-the engine repo's local overlay (#2204); they are wired from the product's own
-overlay (the client image + the `dsl-bundle` component). Clients (the Cockpit,
-SDKs) connect to the product-neutral `bff` node **exactly as in the cloud** --
-through the `api.memql.localhost` traefik front door (TLS on 443, mkcert
-`*.memql.localhost` wildcard, h2c gRPC to `svc/bff:50051`); no port-forward is in
-the connection path (see [environment-parity.md](environment-parity.md)). For
+The engine overlay includes the product-neutral `bff` API head and MemQL OS,
+served by the edge at `https://os.memql.localhost/`. Product-specific clients
+and DSL bundles still belong to their own downstream overlays. Clients connect
+to the engine through `api.memql.localhost` (TLS on 443, h2c gRPC from traefik
+to `svc/bff:50051`); no port-forward is in the normal connection path. See
+[environment parity](environment-parity.md). For
 low-level gRPC debugging only, a raw port-forward is still available:
 
 ```bash
@@ -582,8 +580,9 @@ with its justification.
 
 ### Invariants -- MUST stay identical
 
-- **Service set:** identity / mcp / agent / planner / workbench / edge (the
-  product `bff` head and SPA are pack-owned, #2204).
+- **Service set:** identity / bff / mcp / agent / planner / workbench / edge.
+  The bff is product-neutral; product DSL bundles and clients are downstream.
+  MemQL OS is the platform client included with the engine.
 - **Build source per node:** every node is the same **product-agnostic engine
   image** (built here from this repo's Dockerfile; digest-pinned in the cloud
   overlay) -- local and cloud never diverge on build. Only the **DSL bundle** mounted at
@@ -601,7 +600,7 @@ with its justification.
 | # | Divergence | Local | Cloud | Why acceptable |
 |---|---|---|---|---|
 | 1 | **Replicas (default)** | 1 per Deployment | 2 per Deployment (0 when idle) | Resource-constrained laptops locally; cost in the cloud, which parks at zero between uses. Multi-node is opt-in in BOTH via `make scale N=2`. The fieldRef mechanism is identical everywhere, so the multi-node path fully reproduces wherever you scale it up. |
-| 2 | **Ingress** | k3s-bundled **traefik** front door for `identity.memql.localhost` (mkcert TLS); gRPC heads via port-forward | ingress-nginx on AKS | Same ingress *topology* as cloud (an HTTPS front door for identity); traefik ships with k3s so there's no extra install. gRPC heads (`mcp:50051`) stay on port-forward -- they're not fronted locally. |
+| 2 | **Ingress** | k3s-bundled **traefik** HTTPS front doors for identity, API, MCP, and OS (mkcert TLS) | ingress-nginx on AKS | Same hostname-based ingress topology as cloud; traefik ships with k3s. Raw port-forwards are available for debugging, not normal client connection. |
 | 3 | **Digest-pinning gate** | skipped for `ENV=local` in `scripts/deploy/drift-check.sh` | enforced | Local images are built by `make dev` with a stable `:local` tag; they have no ACR digest. `check_rendered` special-cases `ENV=local`: it skips the digest-pin assertion but still fails if the overlay does not render. As of this writing no Go test asserts this exemption specifically -- `scripts/deploy/drift_check_test.go` covers image-ref normalization, not the local-skip branch -- so the behaviour is enforced by the script alone. |
 | 4 | **ExternalSecrets / Key Vault** | deleted by `$patch: delete` in local overlay | ESO syncs from Key Vault | Dev secrets are seeded directly by `make secrets`. |
 | 5 | **Connection pooler** | direct Postgres connection | direct Postgres connection (a PgBouncer `Pooler` ships ready but not enabled, `cnpg-db/optional/pooler`) | Single-node dev without a pool is safe; the cloud runs without one today too, and the optional pooler can be enabled on either side if a connection-count ceiling ever demands it. |
@@ -611,8 +610,8 @@ with its justification.
 - `MEMQL_DATABASE_DSN` (local `memql-db-rw` vs cloud `memql-db-rw`, self-hosted CloudNativePG on both sides).
 - Blob backend (Azurite connection string vs Azure Blob).
 - Bootstrap/dev escape hatches (`MEMQL_IDENTITY_ALLOW_INSECURE_*`).
-- `MEMQL_IDENTITY_BASE_URL` / `MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER` (local port-forward
-  vs AKS ingress hostname).
+- `MEMQL_IDENTITY_BASE_URL` / `MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER` (local
+  HTTPS domain vs the cloud installation's HTTPS domain).
 
 ## Worked example: reproduce a cross-node mesh bug
 

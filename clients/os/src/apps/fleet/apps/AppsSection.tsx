@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { FleetTabs, RefreshButton, useFleetScroll } from "../FleetControls";
+import { InfoDetail } from "../../../kit/InfoDetail";
 
-import { Button, Check, Chip, Field, Head, Input, Notice, Panel, Row, Select, Subhead } from "../../../kit";
+import { Button, Check, Switch, EmptyState, Chip, Field, Head, Input, Notice, Panel, Select, Subhead } from "../../../kit";
 import { formatFreshness, formatMoment } from "../../../kit/format";
 import { useNow } from "../../../kit/useNow";
 import { Measure } from "../../../kit/MeasureView";
@@ -32,47 +34,42 @@ import { useDelegationPolicy, type DelegationPolicyDraft } from "./useDelegation
 // a quiet back-Head, exactly as DeployablePage does. One Head per view; two
 // Heads in one scroller is the tell that neither happened.
 
-export function AppsSection() {
+export function AppsSection({ sessionTarget, navigation }: { sessionTarget?: { id: string; revision: number }; navigation?: { origin: "peer" | "content" | "back"; revision: number } } = {}) {
   const policy = useDelegationPolicy();
   const sessions = useAppSessions();
   const [openSessionId, setOpenSessionId] = useState("");
+  useEffect(() => { if (sessionTarget) setOpenSessionId(sessionTarget.id); }, [sessionTarget?.revision]);
+  useEffect(() => { if (navigation?.origin === "peer") { setOpenSessionId(""); setView("sessions"); } }, [navigation?.revision]);
   const now = useNow(30_000);
 
-  if (openSessionId !== "") {
-    return (
-      <SessionPage
-        sessionId={openSessionId}
-        onBack={() => setOpenSessionId("")}
-      />
-    );
-  }
+  const [view, setView] = useState<"sessions" | "delegation">("sessions");
+  const root = useFleetScroll(openSessionId || view);
 
   return (
-    <div className="os-fleet">
-      <Head title="Apps" meta={sessions.sessions.length}>
+    <div ref={root} className="os-fleet">
+    {openSessionId ? <SessionPage sessionId={openSessionId} onBack={() => setOpenSessionId("")} /> : null}
+    <div className="fleet-pane-overview" hidden={openSessionId !== ""}>
+      <div className="fleet-section-header">
+      <Head title="Activity" meta={sessions.sessions.length}>
         {/* NOT A STANDING REFRESH. Neither read on this screen is live --
             v1:worker:delegationPolicy and v1:worker:appSession carry no
             broadcast rule -- so unlike the Routing and Workbenches sections,
             where the control appears only when the FEED is behind, here it is
             the honest permanent affordance: this surface says when it looked
             and offers to look again. */}
-        <Button
-          onClick={() => {
-            policy.reread();
-            sessions.reread();
-          }}
-        >
-          Re-read
-        </Button>
+        <RefreshButton label="Refresh app activity" busy={sessions.loading || policy.loading} onClick={() => { policy.reread(); sessions.reread(); }} />
       </Head>
 
-      <DelegationPanel state={policy} />
+      <FleetTabs label="Activity views" value={view} onChange={setView} options={[["sessions", "App sessions"], ["delegation", "Delegation"]]} />
+      </div>
+      <div hidden={view !== "delegation"}><DelegationPanel state={policy} /></div>
+      <div hidden={view !== "sessions"}>
 
       <Subhead>Delegated runs</Subhead>
       <p className="os-caption">
         {sessions.readAt === null
           ? "Not read yet."
-          : `Read ${formatFreshness(sessions.readAt.toISOString(), now)}. These rows are not a live feed -- re-read to see newer runs.`}
+          : `Read ${formatFreshness(sessions.readAt.toISOString(), now)}. Refresh for newer sessions.`}
       </p>
 
       {sessions.error === "" ? null : (
@@ -93,10 +90,7 @@ export function AppsSection() {
       ) : null}
 
       {!sessions.loading && sessions.sessions.length === 0 && sessions.error === "" ? (
-        <p className="os-caption">
-          No app session has run yet. One appears here the first time a task is handed to a local
-          app on one of your machines.
-        </p>
+        <EmptyState title="No app sessions yet" action={<Button onClick={() => setView("delegation")}>Review delegation</Button>}>Sessions appear when MemQL hands a task to an allowed app on one of your machines.</EmptyState>
       ) : null}
 
       <ul className="os-fleet-sessions" aria-label="Delegated runs">
@@ -106,6 +100,7 @@ export function AppsSection() {
           </li>
         ))}
       </ul>
+      </div></div>
     </div>
   );
 }
@@ -120,36 +115,14 @@ function SessionLine({
   onOpen: () => void;
 }) {
   return (
-    <Row
-      name={appLabel(session.app)}
-      current={session.status === "running" || session.status === "starting"}
-      dim={session.status === "cancelled"}
-      onOpen={onOpen}
-      state={
-        <>
-          {/* The word, in its own tone -- not a colour alone. "The red one"
-              is not something a person can say to a colleague on a call, and
-              a screen reader has no colour at all. */}
-          <span className="os-fleet-session-status" data-tone={statusTone(session.status)}>
-            {session.status}
-          </span>
-          {/* Subscription spend is the fact this row exists to make visible:
-              it does not burn the plan's dollar ceiling. `unknown` is a real
-              answer (the app reported nothing) and never folded into either
-              side. */}
-          <Chip tone={session.billing === "subscription" ? "accent" : "muted"}>
-            {session.billing}
-          </Chip>
-          {/* TOKENS THAT WERE NOT REPORTED ARE ABSENT, NOT ZERO. An app that
-              said nothing did not say zero, and a 0 beside "tokens" is a
-              measurement -- it reads as a run that spent nothing. */}
-          <span className="os-fleet-session-tokens">
-            <Measure figure={totalTokens(session)} suffix=" tokens" />
-          </span>
-          <span className="os-caption">{formatFreshness(session.startedAt, now)}</span>
-        </>
-      }
-    />
+    <button type="button" className="fleet-activity-record" onClick={onOpen}>
+      <span className="fleet-record-identity"><strong>{appLabel(session.app)}</strong><small>{session.runId || session.kind || "App session"}</small></span>
+      <span className="os-fleet-session-status" data-tone={statusTone(session.status)}>{session.status}</span>
+      <Chip tone={session.billing === "subscription" ? "accent" : "muted"}>{session.billing}</Chip>
+      {totalTokens(session).kind === "measured" ? <span className="os-fleet-session-tokens fleet-record-meta"><Measure figure={totalTokens(session)} suffix=" tokens" /></span> : null}
+      <span className="fleet-record-meta">{formatFreshness(session.startedAt, now)}</span>
+      <span aria-hidden>›</span>
+    </button>
   );
 }
 
@@ -212,31 +185,26 @@ function DelegationPanel({ state }: { state: ReturnType<typeof useDelegationPoli
       {!state.found && !state.loading ? (
         <Notice tone="info">
           <p className="os-notice-line">
-            <strong>Delegation is off.</strong> You have not set a policy, so nothing is handed to
-            a local app -- every task runs in the cluster, as it always has. That is the default
-            on purpose: an agent running on your own computer should be something you turned on.
-            Nothing is written until you save.
+            <strong>Delegation is off.</strong> Tasks stay in the cluster until you save a policy.
           </p>
         </Notice>
       ) : null}
 
       <fieldset className="os-field-group">
-        <legend>The master choice</legend>
-        <Check
+        <legend className="os-sr-only">Delegation preference</legend>
+        <Switch
           checked={draft.preferSubscriptionApps}
           disabled={state.saving}
           onChange={(preferSubscriptionApps) => edit({ preferSubscriptionApps })}
         >
           Delegate eligible tasks to my local apps
-        </Check>
+        </Switch>
         {/* A PREFERENCE WITH A FALLBACK, said where the switch is. Somebody
             reading this must not believe they are switching work OFF: with no
             allowed, signed-in, online machine the task runs in-process, and a
             plan never waits for a laptop to wake up. */}
         <p className="os-caption">
-          With this off, nothing below applies. With it on, a task is delegated only when a
-          machine with an allowed, signed-in app is online right now -- otherwise it runs in the
-          cluster exactly as before. A plan never waits for a laptop to wake up.
+          Use your signed-in apps when an allowed machine is online. Otherwise, tasks continue in the cluster. Changes take effect when you save.
         </p>
       </fieldset>
 
@@ -257,11 +225,9 @@ function DelegationPanel({ state }: { state: ReturnType<typeof useDelegationPoli
         {/* ORDER IS PRIORITY, and it is stated because nothing about a pair of
             checkboxes says so. The chosen order is shown back, so the list is
             not something to infer from click history. */}
-        <p className="os-caption">
-          Order is priority: the FIRST app on this list that a machine actually has wins. An app
-          you do not list is never selected, even on a machine that has it -- the list is how you
-          say which of your subscriptions to spend.
-        </p>
+        <InfoDetail title="App ordering"><p className="os-caption">
+          MemQL tries selected apps in the order shown below. Only these apps may use your subscriptions. Remove and reselect an app to move it to the end.
+        </p></InfoDetail>
         <p className="os-caption">
           {draft.appOrder.length === 0
             ? "No app listed, so nothing can be selected even with delegation on."
@@ -279,13 +245,12 @@ function DelegationPanel({ state }: { state: ReturnType<typeof useDelegationPoli
               disabled={state.saving}
               onChange={() => edit({ eligibleKinds: toggleIn(draft.eligibleKinds, kind) })}
             >
-              {kind}
+              {({ runCommand: "Run commands", fileProcessor: "Process files", callTool: "Use tools", persistResult: "Save results" } as Record<string, string>)[kind] ?? kind}
             </Check>
           ))}
         </div>
         <p className="os-caption">
-          A kind absent from this list runs in the cluster whatever else is true. Turning
-          delegation on does not silently opt every kind of work in with it.
+          Only selected task kinds may use local apps. Other work stays in the cluster.
         </p>
       </fieldset>
 
@@ -323,8 +288,7 @@ function DelegationPanel({ state }: { state: ReturnType<typeof useDelegationPoli
           is what stops "I set the root and it did not use it" reading as a
           bug in this form. */}
       <p className="os-caption">
-        Each run gets its own directory under this root. The cockpit refuses a workspace outside
-        its own policy roots, so this is a preference the machine still gets to veto.
+        Each session gets its own directory here. The location must also be allowed by Cockpit on that machine.
       </p>
 
       {state.saveError === "" ? null : (
@@ -350,7 +314,7 @@ function DelegationPanel({ state }: { state: ReturnType<typeof useDelegationPoli
             });
           }}
         >
-          {state.found ? "Save delegation policy" : "Turn delegation on"}
+          {state.found || !draft.preferSubscriptionApps ? "Save delegation policy" : "Turn delegation on"}
         </Button>
         <Button
           disabled={!touched || state.saving}
@@ -367,10 +331,7 @@ function DelegationPanel({ state }: { state: ReturnType<typeof useDelegationPoli
         {state.announcement}
       </p>
 
-      <p className="os-caption">
-        Saved as one write: the whole form goes together, so delegation is never switched on with
-        an empty app list -- a policy that routes nothing and says nothing.
-      </p>
+
     </Panel>
   );
 }

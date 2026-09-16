@@ -73,7 +73,7 @@ describe("the workbenches section", () => {
       }),
     );
 
-    await screen.findByText("v1:work:run:1");
+    await screen.findAllByText("v1:work:run:1");
     // One group bar per replica, in replica order.
     const bars = screen.getAllByText(/^workbench-/, { selector: ".os-fleet-groupbar" });
     expect(bars.map((b) => b.textContent)).toEqual(["workbench-0", "workbench-1"]);
@@ -81,12 +81,12 @@ describe("the workbenches section", () => {
 
   it("hides released workspaces until asked, then spells node_lost out", async () => {
     mount(fakeConnection({ myWorkspaces: [LIVE_A, LOST] }));
-    await screen.findByText("v1:work:run:1");
+    await screen.findAllByText("v1:work:run:1");
     expect(screen.queryByText("v1:work:run:3")).toBeNull();
 
     await click(screen.getByLabelText("Show released"));
 
-    await screen.findByText("v1:work:run:3");
+    await screen.findAllByText("v1:work:run:3");
     // The one thing an operator must not have to go to the source for: the
     // files went with the replica, they were NOT migrated, and the plan got
     // a fresh workspace elsewhere.
@@ -102,7 +102,7 @@ describe("the workbenches section", () => {
       }),
     );
     await click(await screen.findByLabelText("Show released"));
-    expect(await screen.findByText(/does not have copy for: some_future_reason/)).toBeTruthy();
+    expect(await screen.findByText(/Release reason: some_future_reason/)).toBeTruthy();
   });
 
   it("distinguishes a replica with no workspaces from a cluster with no replicas", async () => {
@@ -118,15 +118,15 @@ describe("the workbenches section", () => {
       }),
     );
 
-    const idle = await screen.findByText("workbench-7", { selector: ".os-mono" });
-    expect(within(idle.closest("li") as HTMLElement).getByText("no workspaces")).toBeTruthy();
+    const idle = await screen.findByText("workbench-7", { selector: "strong" });
+    expect(within(idle.closest("li") as HTMLElement).getByText("None in this view")).toBeTruthy();
     expect(screen.queryByText("bff-0")).toBeNull();
   });
 
   it("says so when no workbench replica is running at all", async () => {
     mount(fakeConnection({ myWorkspaces: [], clusterNodes: [] }));
     expect(
-      await screen.findByText(/No workbench replicas are running in this cluster/),
+      await screen.findByText(/No workbench replicas/),
     ).toBeTruthy();
   });
 
@@ -143,20 +143,20 @@ describe("the workbenches section", () => {
     await screen.findByText("healthy");
     // Without the collapse a replica renders once per liveness row it has
     // ever written.
-    expect(screen.getAllByText("workbench-0", { selector: ".os-mono" })).toHaveLength(1);
+    expect(screen.getAllByText("workbench-0", { selector: "strong" })).toHaveLength(1);
     expect(screen.queryByText("starting")).toBeNull();
   });
 
   it("subscribes to BOTH feeds -- neither is polled", async () => {
     const connection = fakeConnection({ myWorkspaces: [LIVE_A], clusterNodes: [] });
     mount(connection);
-    await screen.findByText("v1:work:run:1");
+    await screen.findAllByText("v1:work:run:1");
 
     // v1:cluster:node is covered by the `v1:cluster:*` wildcards in
     // component/node/routing.go, so the replica list arrives on its own like
     // the workspaces beside it. The first cut of this screen asserted the
     // opposite and printed it as operator copy.
-    expect(screen.queryByText(/refreshes on request rather than on its own/)).toBeNull();
+    expect(screen.queryByText(/Refresh to see newer calls/)).toBeNull();
     expect(screen.queryByText(/not broadcast to browsers/)).toBeNull();
     // Both feeds seed exactly once. A polled surface would read again.
     expect(connection.query.clusterNodes).toHaveBeenCalledTimes(1);
@@ -165,7 +165,7 @@ describe("the workbenches section", () => {
 
   it("offers NO refresh control while both feeds are live", async () => {
     mount(fakeConnection({ myWorkspaces: [LIVE_A], clusterNodes: [] }));
-    await screen.findByText("v1:work:run:1");
+    await screen.findAllByText("v1:work:run:1");
     // A refresh button standing beside a live list says "this may be stale"
     // about rows that arrive on their own.
     expect(screen.queryByRole("button", { name: "Re-read" })).toBeNull();

@@ -38,7 +38,7 @@ describe("placement", () => {
   it("fullscreen covers the desk area while the sibling keeps its half", () => {
     const rects = placeWindows([win("a", "fullscreen"), win("b")], VIEW, T);
     const area = deskArea(VIEW, T);
-    expect(rects.a).toEqual(area);
+    expect(rects.a).toEqual({ x: 0, y: 0, w: VIEW.w, h: VIEW.h - T.dockReserve });
     expect(rects.b!.w).toBeLessThan(area.w);
   });
 

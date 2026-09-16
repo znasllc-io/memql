@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { ArrowLeft } from "lucide-react";
 
 import { Button, Caption, Field, Head, Input, Notice, Panel, Select, Subhead } from "../../kit";
 import { ActionBar, type Act } from "../../kit/ActionBar";
@@ -63,11 +62,7 @@ export function AddStoreForm({
     <div className="os-stores-pane">
       <div className="os-stores-scroll">
         <Panel label="Add a store">
-          <Head title="Add a store">
-            <Button tone="quiet" onClick={onBack}>
-              <ArrowLeft size={13} aria-hidden /> Stores
-            </Button>
-          </Head>
+          <Head title="Add a store" back={{ label: "Stores", onSelect: onBack }} />
 
           <Subhead>Which store</Subhead>
           <div className="os-stores-form">

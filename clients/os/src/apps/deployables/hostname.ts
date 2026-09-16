@@ -26,7 +26,7 @@
 //     the form does not offer it at all.
 //
 // The reserved set below is a COPY of a set the Go side DERIVES
-// (`frontdoor.Roles()` + the portal + the squat list). A copy of a derived set
+// (`frontdoor.Roles()` + MemQL OS + the squat list). A copy of a derived set
 // is exactly the shape that goes stale when a role is added, so it is written
 // to fail in the SAFE direction: a label this list forgets is still refused by
 // the server, and the person reads the server's message rather than seeing a
@@ -45,11 +45,12 @@ export const SLUG_MAX_LENGTH = 40;
  */
 export const SLUG_PATTERN = /^[a-z0-9-]{3,40}$/;
 
-/** The front-door roles, the platform's own site, and the three squat labels. */
+/** The front-door roles, the platform's own site, and the four protected labels. */
 export const RESERVED_LABELS: readonly string[] = [
   "api",
   "identity",
   "mcp",
+  "os",
   "portal",
   "www",
   "admin",
@@ -85,6 +86,13 @@ export function validateSlug(slug: string, domain: string): string {
   if (label !== label.toLowerCase()) {
     return "Use lowercase only. A hostname is case-folded, so Shop and shop would resolve to one site while reading as two.";
   }
+  if (RESERVED_LABELS.includes(label)) {
+    const where =
+      domain.trim() === ""
+        ? ""
+        : ` -- ${hostnameFor(label, domain)} is protected for cluster use`;
+    return `"${label}" is reserved${where}. Reserved names: ${RESERVED_LABELS.join(", ")}.`;
+  }
   if (label.length < SLUG_MIN_LENGTH || label.length > SLUG_MAX_LENGTH) {
     return `A name is ${SLUG_MIN_LENGTH} to ${SLUG_MAX_LENGTH} characters long; this one is ${label.length}.`;
   }
@@ -93,13 +101,6 @@ export function validateSlug(slug: string, domain: string): string {
   }
   if (!SLUG_PATTERN.test(label)) {
     return "Use lowercase letters, digits and hyphens only.";
-  }
-  if (RESERVED_LABELS.includes(label)) {
-    const where =
-      domain.trim() === ""
-        ? ""
-        : ` -- ${hostnameFor(label, domain)} is where this cluster serves the platform itself`;
-    return `"${label}" is reserved${where}. Reserved names: ${RESERVED_LABELS.join(", ")}.`;
   }
   return "";
 }

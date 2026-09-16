@@ -1,5 +1,6 @@
+import { AddButton } from "../../kit/AddButton";
 import { useCallback, useState } from "react";
-import { Plus, RefreshCw, Store as StoreIcon } from "lucide-react";
+import { RefreshCw, Store as StoreIcon } from "lucide-react";
 
 import { Button, Caption, Head, Notice, Panel, Row as ListRow } from "../../kit";
 import { Measure } from "../../kit/MeasureView";
@@ -86,9 +87,7 @@ export function StoresSection({
           <Button tone="quiet" onClick={reread} ariaLabel="Re-read every store's health">
             <RefreshCw size={13} aria-hidden /> Re-read
           </Button>
-          <Button tone="primary" ariaLabel="Add a store" onClick={() => setView({ kind: "add" })}>
-            <Plus size={13} aria-hidden /> Add a store
-          </Button>
+          <AddButton onClick={() => setView({ kind: "add" })} label="Add a store" />
         </Head>
 
         {writes.error === "" ? null : (

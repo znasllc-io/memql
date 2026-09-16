@@ -1,9 +1,8 @@
+import { AddButton } from "../../kit/AddButton";
 import { useMemo, useState } from "react";
-import { Plus } from "lucide-react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import {
-  Button,
   Chip,
   Head,
   LiveList,
@@ -146,16 +145,12 @@ export function GoalsSection({
         />
         {/* THE HEAD'S ONE ACTION (rule 1). Everything else on this surface is
             a way of reading; this is the way of asking. */}
-        <Button
-          tone="primary"
+        <AddButton
           onClick={() => {
             setComposing(true);
             create.reset();
           }}
-        >
-          <Plus size={13} aria-hidden />
-          New goal
-        </Button>
+         label="New goal" />
       </Head>
 
       <div className="os-nexus-scope">

@@ -3,7 +3,7 @@ import { runIsScopedToApp, sourceLabel } from "../packages/rows";
 import { bundleForm, bundleFormLabel, type SiteRow } from "../rows";
 import type { DeployablePart } from "../parts";
 import { WEB_TARGET, kindLabel, type StopDef, type StopId } from "../targets";
-import { isPlaceholderBundle, liveStopNote, siteIsBuilt } from "../words";
+import { isPlaceholderBundle, liveStopNote, siteIsBuilt, siteStateWord } from "../words";
 
 // The two bundle readings live in `words.ts` now, with the vocabulary they
 // decide (Built versus Not deployed); they are re-exported here because every
@@ -114,7 +114,7 @@ export type StandingSource = Pick<PackageRow, "sourceKind" | "repoUrl" | "repoRe
 /** `packageDeployableName` is here so the rail can tell a gate about THIS app
  *  from one about the whole source -- the two mean different things for a
  *  deployable that is already serving. */
-export type StandingSite = Pick<SiteRow, "hostname" | "kind" | "status" | "bundleRef" | "packageDeployableName">;
+export type StandingSite = Pick<SiteRow, "hostname" | "kind" | "status" | "bundleRef" | "packageDeployableName" | "health">;
 
 export interface StandingInput {
   mode: "standing";
@@ -563,7 +563,7 @@ function liveStop(stop: StopDef, site: StandingSite | null): RailStage {
   const note = liveStopNote(site);
   switch (site.status) {
     case "live":
-      return stage(stop, "done", note);
+      return stage(stop, siteStateWord(site) === "Live" ? "done" : siteStateWord(site) === "Unavailable" ? "stopped" : "ahead", note);
     case "disabled":
       // Amber is what the shell says "not reachable" with; a deployable taken
       // offline is exactly that, and the sentence says it was chosen.

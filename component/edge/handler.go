@@ -91,7 +91,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// by the same line. A deployable's traffic figure is about somebody's
 	// app; folding the console an operator is reading it in into the same
 	// table would measure the act of looking.
-	if h.requestLog == nil || site.SystemOwned {
+	// Synthetic homepage probes do not count as visitor traffic. This is a
+	// metrics classification only, not an authentication or security-log bypass.
+	probe := r.Method == http.MethodGet && r.URL.Path == "/" && r.UserAgent() == "MemQL-Site-Health/1.0"
+	if h.requestLog == nil || site.SystemOwned || probe {
 		h.serve(w, r, site)
 		return
 	}
