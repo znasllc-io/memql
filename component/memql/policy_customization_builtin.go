@@ -40,6 +40,7 @@ func policyExpectedRevision(args map[string]any) (int64, error) {
 		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 9007199254740991 || math.Trunc(v) != v {
 			return 0, fmt.Errorf("expectedRevision must be a nonnegative integer")
 		}
+		// narrowing: GUARDED -- only whole values in the JavaScript safe-integer range reach this cast.
 		n = int64(v)
 	default:
 		return 0, fmt.Errorf("expectedRevision is required; read the policy catalog first")

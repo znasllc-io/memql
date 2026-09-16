@@ -444,8 +444,9 @@ button:not(:disabled):active {
   color: var(--os-muted);
   cursor: pointer;
 }
-.os-icon-button:hover {
-  background: var(--os-raised);
+.os-icon-button:hover:not(:disabled),
+.os-icon-button:focus-visible:not(:disabled) {
+  background: var(--os-hover);
   color: var(--os-ink);
 }
 .os-window-close:hover {
@@ -13698,7 +13699,7 @@ a.os-button {
 .fleet-connections-grid small { font-size: var(--os-text-xs); color: var(--os-muted); margin-top: 4px; }
 .os-info-detail { display: inline-flex; vertical-align: middle; }
 .os-info-detail .os-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; background: transparent; color: var(--os-muted); border-radius: 50%; cursor: pointer; }
-.os-info-detail .os-icon-button:hover { background: var(--os-hover); color: var(--os-ink); }
+.os-info-detail .os-icon-button:hover:not(:disabled), .os-info-detail .os-icon-button:focus-visible:not(:disabled) { background: var(--os-hover); color: var(--os-ink); }
 .os-info-dialog { padding: 0; color: var(--os-ink); background: var(--os-raised); border: 1px solid var(--os-line-strong); border-radius: 12px; width: min(430px,calc(100vw - 40px)); max-height: calc(100vh - 60px); box-shadow: var(--os-shadow-float); }
 .os-info-dialog::backdrop { background: #0006; }
 .os-info-dialog-body { padding: 20px 24px; font-size: var(--os-text-sm); line-height: 1.65; }

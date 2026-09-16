@@ -1,3 +1,12 @@
+---
+title: Fleet Visual Composition
+audience: internal
+status: draft
+area: design
+sinceVersion: 0.22.0
+owner: znas
+---
+
 # Fleet Visual Composition
 
 ## Interaction model

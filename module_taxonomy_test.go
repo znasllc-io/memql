@@ -77,6 +77,7 @@ var pluginKinds = map[string]moduleKind{
 	"deployversion": kindComponent,
 	"packages":      kindComponent, // see the note below
 	"sitePublish":   kindComponent, // see the note below
+	"siteHealth":    kindComponent, // Mandatory deployable observation storage and readiness reporting.
 	// The edge's request log and the traffic figure folded from it (epic
 	// memql#4906). A COMPONENT by this table's own test: turning it off does
 	// not remove a feature, it breaks the engine. `siteTrafficInWindow` is
