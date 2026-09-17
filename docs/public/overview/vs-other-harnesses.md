@@ -7,81 +7,42 @@ sinceVersion: 0.9.0
 owner: znas
 ---
 
-# MemQL vs. Agent Libraries and Frameworks
+# MemQL and agent libraries
 
-This is meant to be fair. MemQL is not the right tool for every job, and
-the projects below are good at what they do. The point of this page is
-to make the **category difference** clear so you can choose well.
+Choose based on the system you want to operate. An agent library is a dependency
+inside an application you build. MemQL is an installed platform with its own
+language, data model, identity, execution services, and clients.
 
-## The category difference
+This page compares deployment approaches, not feature checklists for specific
+third-party products. Libraries differ and evolve; evaluate their current
+capabilities against your requirements.
 
-Most "agent frameworks" are **libraries / SDKs**: you import them, wire
-chains/agents/tools in your own code, bring your own persistence, and
-add your own guardrails, multi-process coordination, and observability.
+## The tradeoff
 
-- **Python:** LangChain / LangGraph, LlamaIndex, and the surrounding
-  glue. Huge ecosystems, every integration imaginable -- and you assemble
-  and operate the system.
-- **Go:** the field is growing fast -- Google ADK, Firebase **Genkit**,
-  **LangChainGo**, ByteDance's **Eino**, and others. These are
-  well-built Go-native libraries for composing model calls, tools, and
-  flows.
-
-MemQL is a different category: a **platform that runs**. The
-[harness](why-memql-harness.md) (the work spine), the
-persistent memory graph, the cost/safety enforcement, the multi-node
-mesh, the identity layer, and the observability are the product -- not
-things you assemble on top.
-
-A useful one-liner: *the others give you the pieces to build an agent
-runtime; MemQL is the platform whose harness IS the agent
-runtime.*
-
-## Comparison
-
-| Capability | Library/SDK (Genkit, LangChainGo, Eino, LangChain) | MemQL |
+| Decision | An application built with a library | MemQL |
 |---|---|---|
-| Shape | Library you import + wire | Platform + DSL you declare against |
-| Persistent memory | BYO (pick a store, wire it) | Built in: append-only time-series graph, provenance, replay |
-| Memory consolidation | DIY | Episodic -> semantic, recency+semantic scoring |
-| Cost/loop guardrails | DIY | Built in: global rate ceiling, per-plan budgets, loop breakers, approval gate, model tiering |
-| Behavior definition | Code (chains/flows) | Declarative DSL (concepts, automations, tools, prompts, specs) |
-| Multi-node coordination | DIY | Built in: node mesh, event bridge w/ dedup+TTL |
-| Identity / authz | BYO | Built in: identity service, JWT/JWKS, per-row authz (test-enforced) |
-| Observability | BYO | Built in: per-invocation hypertable + Cockpit topology |
-| Footprint | Small, no database required | A real system: PostgreSQL + TimescaleDB substrate |
-| Language | Go (or Python) | Go engine + the MemQL DSL |
+| Where behavior lives | Your application's code and chosen runtime | `.memql` constructs plus Go components and integrations |
+| State and identity | Your application's architecture | Shared engine records and cluster identity |
+| Operation | Deploy your application and its dependencies | Operate the MemQL cluster and its configured resources |
+| Authoring | Your language and development tools | MemQL DSL, VS Code support, and engine APIs |
+| Inspection | The tooling you select or build | MemQL OS, runtime views, logs, and work records |
+| Adoption cost | Depends on the selected library and services | Learn the DSL and run a multi-service cluster |
 
-## Where the others are a better fit (honestly)
+## When a library may fit better
 
-- **You want a small dependency, no storage substrate.** A Go library
-  (Genkit, Eino) drops into an existing service with a fraction of the
-  surface. MemQL is a system with a Postgres/TimescaleDB substrate --
-  that is the point, and the cost.
-- **You need the widest provider/integration catalog today.** The
-  Python ecosystem still has the longest tail of connectors.
-- **You're prototyping a single, stateless flow.** If there is no
-  durable memory, no fleet, and no budget risk, a platform is overkill --
-  reach for a library.
-- **Maturity.** MemQL is honestly pre-1.0 (versioning policy: git-tag
-  semver, 1.0 at the beta); the established libraries have more miles on
-  them.
+If you need one stateless model call inside an existing application, adding an
+entire platform can be unnecessary. A library may also fit when you want to keep
+your current data and identity architecture or need a particular provider that
+MemQL does not integrate with.
 
-## When to choose MemQL
+## When to evaluate MemQL
 
-Choose MemQL when the **hard parts are the point**:
+Consider it when data, history, agent work, tools, automations, and hosted client
+surfaces need to share a runtime and access model. Start with a small prototype
+that tests the operations you actually need, including a refused operation and
+a recovery case.
 
-- agents that must **remember** across sessions and restarts, with
-  provenance;
-- workloads where an unbounded loop or a stuck model is a **real cost or
-  safety risk**;
-- multi-agent / multi-node systems you'd otherwise have to coordinate by
-  hand;
-- a product you intend to **operate and inspect**, not just demo;
-- a team that wants behavior expressed **declaratively** and versioned,
-  not buried in glue.
-
-And the standing proof that those are solved problems and not roadmap
-items: MemQL runs a **full production product** today. See
-[The Harness](why-memql-harness.md) for the code behind each
-claim, and [What is MemQL](what-is-memql.md) for the platform picture.
+MemQL is alpha and pre-1.0. Its [proving scorecard](proving-scorecard.md) states
+what has been measured and what has not; it is not a general guarantee about
+your workload. [What is MemQL?](what-is-memql.md) covers the broader product,
+and [the harness guide](why-memql-harness.md) covers its work execution system.

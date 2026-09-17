@@ -6489,6 +6489,11 @@ a.os-button {
  * somebody assemble the meaning themselves every time.
  */
 
+.os-campaign-journey > .os-deploy-scroll > * {
+  /* Keep the step trail readable when the setup instructions need to scroll. */
+  flex-shrink: 0;
+}
+
 .os-campaign-detail {
   display: flex;
   flex-direction: column;

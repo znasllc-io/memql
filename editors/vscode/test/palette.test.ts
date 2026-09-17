@@ -1,76 +1,28 @@
-// The palette module: one source of hexes, three consumers (memql#4419, D3).
-//
-// WHY IT WAS EXTRACTED. The hexes used to live inside `brandStyleBlock()`, as
-// CSS text. That was fine while CSS was the only thing that wanted them; it
-// stopped being fine the moment the extension had to emit VS Code COLOR THEME
-// JSON from the same values (memql#4420). A generator cannot read a template
-// literal, so either the theme files would carry a second hand-typed copy of
-// the palette -- which is the drift this repo's generate-then-gate pairs exist
-// to prevent -- or the palette had to become data. It became data.
-//
-// The three consumers, all of which must agree by construction rather than by
-// anyone remembering:
-//   1. `brandStyleBlock()` composes its `--memql-*` custom properties from it.
-//   2. `buildEditorTheme()` maps it onto VS Code workbench colors.
-//   3. `scripts/generate-themes.mjs` writes (2)'s output to themes/*.json.
-//
-// WHAT THIS FILE PINS, AND WHY THE HEXES ARE REPEATED HERE. The literals below
-// are typed out a second time on purpose. Asserting `LIGHT.bg === LIGHT.bg`
-// via an import would be a tautology; the claim worth making is that the
-// palette is memql.io's EXACT palette (memql#4177, the portal redesign), so
-// the expected values have to come from somewhere other than the module under
-// test. Changing a brand hex should require editing two files and noticing.
-
 import test from "node:test";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import assert from "node:assert/strict";
 
 import { DARK, LIGHT, PALETTE_KEYS, type PaletteKey } from "../src/webview/palette.js";
 
-// memql.io's palette, transcribed from memql#4177 / brand/. The order matches
-// PALETTE_KEYS so a reader can compare the two columns down the page.
-const EXPECTED_LIGHT: Record<PaletteKey, string> = {
-  bg: "#f2f4ef",
-  surface: "#ffffff",
-  raised: "#e9ede6",
-  border: "#d6ddd4",
-  "border-strong": "#c2cabf",
-  fg: "#14201a",
-  muted: "#586159",
-  subtle: "#7c847b",
-  accent: "#047d5a",
-  "accent-deep": "#026842",
-  "on-accent": "#ffffff",
-  "on-accent-hover": "#ffffff",
-  danger: "#b42318",
-  "data-number": "#0f766e",
-  "data-string": "#b45309",
+const brand = fs.readFileSync(path.resolve(__dirname, "../../../..", "brand/tokens.css"), "utf8");
+const roles: Partial<Record<PaletteKey, string>> = {
+  bg: "bg", surface: "surface", raised: "surface-raised", border: "border",
+  "border-strong": "border-strong", fg: "fg", muted: "fg-muted", subtle: "fg-subtle",
+  accent: "accent", "accent-deep": "accent-deep", "on-accent": "accent-fg",
+  danger: "danger", "data-number": "data-number", "data-string": "data-string",
 };
-
-const EXPECTED_DARK: Record<PaletteKey, string> = {
-  bg: "#07090a",
-  surface: "#0b1110",
-  raised: "#0e1311",
-  border: "#18231e",
-  "border-strong": "#213029",
-  fg: "#e8e6dd",
-  muted: "#9ca395",
-  subtle: "#6c726a",
-  accent: "#5ccda7",
-  "accent-deep": "#026842",
-  "on-accent": "#052e21",
-  "on-accent-hover": "#ffffff",
-  danger: "#f97066",
-  "data-number": "#98ffe0",
-  "data-string": "#cbb083",
-};
-
-test("the light palette is memql.io's, value for value", () => {
-  assert.deepEqual(LIGHT, EXPECTED_LIGHT);
-});
-
-test("the dark palette is memql.io's, value for value", () => {
-  assert.deepEqual(DARK, EXPECTED_DARK);
-});
+const lifted = new Set(["bg", "surface", "raised", "border", "border-strong"]);
+for (const [variant, palette, column] of [["light", LIGHT, 1], ["dark", DARK, 2]] as const) {
+  test(`${variant}: canonical brand roles stay in sync`, () => {
+    for (const [key, role] of Object.entries(roles)) {
+      if (variant === "dark" && lifted.has(key)) continue;
+      const match = brand.match(new RegExp(`--memql-${role}:\\s*light-dark\\((#[a-f0-9]{6}),\\s*(#[a-f0-9]{6})\\)`));
+      assert.ok(match, `${role} exists in brand/tokens.css`);
+      assert.equal(palette[key as PaletteKey], match[column], `${variant}.${key}`);
+    }
+  });
+}
 
 test("both palettes carry exactly the same keys, in the same order", () => {
   // A key present in one palette and absent from the other is a token that

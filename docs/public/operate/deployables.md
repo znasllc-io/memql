@@ -470,7 +470,9 @@ stamped value is the caller's own id. The outcome is therefore "the caller owns
 it" or "nobody does" -- it can never name a third party.
 
 An **empty `ownerUserId` means cluster-owned.** The seeded OS site row keeps it
-empty and lands cluster-owned on every boot.
+empty and lands cluster-owned on every boot, and so does the VS Code landing
+page's row (`vscode.<domain>`, memql#5518) -- the second platform site, seeded
+from the same file and behaving identically: managed by the cluster, no acts.
 
 Consequences worth stating plainly, because they are surprising:
 
@@ -720,9 +722,10 @@ cluster's secrets and name it from the deployable's `binding`.
 | System-owned rows | refused, for a cluster owner too |
 
 The caps are on the row because the document is served on every page load and
-grows with it. A system-owned deployable (MemQL OS) refuses the
-write whoever asks: those rows are re-seeded at every boot, so a value set on
-one would be reverted and would look like it had worked until then.
+grows with it. A system-owned deployable (MemQL OS, the VS Code landing page)
+refuses the write whoever asks: those rows are re-seeded at every boot, so a
+value set on one would be reverted and would look like it had worked until
+then.
 
 Enforced beside the engine's write path
 (`component/memql/platform_site_settings_guard.go`), not in the mutation
@@ -762,9 +765,10 @@ make a window unmeasured:
 - nobody visited;
 - `MEMQL_EDGE_REQUEST_LOG_ENABLED` is `false` on the replica that served
   (the aggregate is then short by that replica's share);
-- the deployable is **system-owned**. MemQL OS is excluded by
-  construction, so they are always unmeasured -- measuring the console
-  somebody reads a figure in would be measuring the act of looking.
+- the deployable is **system-owned**. MemQL OS and the VS Code landing page
+  are excluded by construction, so they are always unmeasured -- measuring
+  the console somebody reads a figure in would be measuring the act of
+  looking.
 
 **Errors and not-found are counted apart.** 5xx is the deployable failing;
 4xx is somebody asking for a page it does not have. Folding them together

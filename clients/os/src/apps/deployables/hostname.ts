@@ -26,7 +26,7 @@
 //     the form does not offer it at all.
 //
 // The reserved set below is a COPY of a set the Go side DERIVES
-// (`frontdoor.Roles()` + MemQL OS + the squat list). A copy of a derived set
+// (`frontdoor.Roles()` + `frontdoor.PlatformSites()` + the squat list). A copy of a derived set
 // is exactly the shape that goes stale when a role is added, so it is written
 // to fail in the SAFE direction: a label this list forgets is still refused by
 // the server, and the person reads the server's message rather than seeing a
@@ -45,12 +45,13 @@ export const SLUG_MAX_LENGTH = 40;
  */
 export const SLUG_PATTERN = /^[a-z0-9-]{3,40}$/;
 
-/** The front-door roles, the platform's own site, and the four protected labels. */
+/** The front-door roles, the platform's own sites, and the four protected labels. */
 export const RESERVED_LABELS: readonly string[] = [
   "api",
   "identity",
   "mcp",
   "os",
+  "vscode",
   "portal",
   "www",
   "admin",

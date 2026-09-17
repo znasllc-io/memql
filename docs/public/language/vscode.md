@@ -1,5 +1,5 @@
 ---
-title: MemQL in VS Code (offline language server)
+title: MemQL in Visual Studio Code and Cursor (offline language server)
 audience: public
 status: stable
 area: language
@@ -7,34 +7,89 @@ sinceVersion: 0.13.0
 owner: znas
 ---
 
-# MemQL in VS Code
+# MemQL in Visual Studio Code and Cursor
 
-The MemQL VS Code extension gives `.memql` authors first-class editing --
-syntax highlighting, live diagnostics, context-aware completion, hover, and
-signature help -- powered by the **same MemQL Sense brain** the engine serves
-over gRPC. It works **fully offline against local
-files**: no running cluster, no auth. Open a folder of `.memql` files and
-iterate on the syntax itself.
+Author `.memql` files with syntax highlighting, live diagnostics, completion,
+hover, signature help, and go-to-definition. The bundled language server runs
+locally and uses MemQL Sense, the engine's language-intelligence implementation.
+Editing local files works offline, without sign-in.
 
-> The extension also ships a runtime panel -- cluster selection and a
-> generic concept browser against a live cluster. See
-> [VS Code Runtime Panel](vscode-runtime-panel.md).
+Connect a trusted workspace to a cluster when you want to inspect definitions
+and data, run constructs, or train them. **Clusters**, **Deployments**,
+**Constructs**, **Data**, and **Runs** are separate views in the MemQL panel.
+Saving a file does not deploy it.
 
-> Connected to a cluster, the extension additionally reports each construct's
-> **training state** -- whether the cluster knows it, knows an older version of
-> it, or has never heard of it -- and offers dry-run, try-in-session, promote
-> and demote. That surface, and the seeded-versus-trained model underneath it,
-> is [Training Constructs Into a Running Cluster](training.md).
+## Get the extension
 
-Sense stays the single language-intelligence component serving both the Cockpit
-and VS Code (see [Sense & the DSL Spec](./sense.md)). This extension adds a new
-*delivery mechanism* -- an offline language server -- on top of the existing
-Sense package; it forks no brain and changes no wire contract.
+The reproducible installation path from this repository is a local VSIX build.
+You need Git, Make, Go (the toolchain in `go.mod`), Node.js 20+, npm, unzip, and
+VS Code 1.91+ or a compatible Cursor version, with its `code` or `cursor` CLI
+on your PATH. Both use the same extension package. Choose the install command
+for your editor below.
+
+```bash
+git clone https://github.com/znasllc-io/memql.git
+cd memql
+make vscode-install                  # Visual Studio Code
+make vscode-install EDITOR_CMD=cursor # Cursor
+```
+
+Then run **Developer: Reload Window** in the editor you installed into. This rebuilds and replaces your
+installed MemQL extension. To create the archive without installing it, use
+`make vscode-package`; the script prints the `.vsix` path. Packaging defaults
+to your host's OS and architecture.
+
+The repository also contains a release workflow targeting Marketplace and Open
+VSX for Linux x64/ARM64 and macOS x64/ARM64. A configured workflow does not prove
+that a particular version is available in a registry; this guide uses the
+source-build path rather than an unverified listing or download link.
+
+## Appearance
+
+Open **Preferences: Color Theme** in Visual Studio Code or Cursor and choose
+**MemQL Light** or **MemQL Dark**. Light uses neutral paper with green accents;
+Dark uses brighter charcoal surfaces with mint and amber syntax colours. These
+themes are optional.
+
+`memql.appearance` controls the extension panels separately: `system` follows
+your editor theme; `light` and `dark` select a fixed palette. High-contrast editor
+themes take precedence. See the [appearance reference](../../../editors/vscode/REFERENCE.md#appearance).
+
+## First session
+
+1. Open [the reading-list example](../../../examples/reading-list/reading.memql)
+   in a folder. Try completion and hover; read any diagnostics before connecting.
+2. To run it, trust the workspace and choose **MemQL: Add Cluster**. Enter an
+   existing cluster's domain and sign in, or choose local installation on a
+   supported host. Docker is needed for a local cluster, not for offline editing.
+3. Select the cluster. **Constructs** shows definitions, **Data** shows authorized
+   rows, and a runnable declaration's CodeLens opens its argument form.
+4. Follow [Your first MemQL program](first-program.md) to add and query a row.
+
+## What each action changes
+
+| Action | Effect |
+|---|---|
+| Edit and save | Changes local source only |
+| Dry-run | Validates authoring against the cluster without promoting |
+| Try in session | Makes supported definitions available to the current authoring session |
+| Run | Executes a query, mutation, logic, tool, or automation; writes and other side effects are real |
+| Stage | Persists a supported construct for its author; concepts cannot use this private staging tier |
+| Promote | Persists and activates a definition on the cluster, subject to authorization and validation |
+
+See [training](training.md) for seeded, trained, staged, and drifted states;
+[runtime panel](vscode-runtime-panel.md) for connection and execution details;
+and [MemQL OS](../operate/memql-os.md) for the browser workspace opened by
+**Open Console**.
+
+The rest of this page is technical reference for the language server and its
+packaging. The [extension guide](../../../editors/vscode/README.md) provides a
+short product tour.
 
 ## Architecture
 
 ```
-  VS Code  (editors/vscode, TypeScript)
+  Visual Studio Code / Cursor  (editors/vscode, TypeScript)
     - vscode-languageclient  -- spawns -->  memql-lsp (stdio)
     - memql.tmLanguage.json  (baseline offline highlighting, generated)
     - language-configuration.json (comments / brackets / brace
@@ -160,8 +215,9 @@ side too, and whether `parser.EditorRelease` has been published decides how:
 make memql-lsp                       # -> bin/memql-lsp
 
 # Develop the extension.
+make vscode-deps
 cd editors/vscode
-npm install
+npm ci
 npm run compile
 # Press F5 (Extension Development Host), set memql.lsp.serverPath to the built
 # binary, and open a folder of .memql files.
@@ -189,11 +245,12 @@ always a locally-installed VSIX, never a repo artifact.
 ## Packaging
 
 ```bash
-make vscode-package   # build the darwin-arm64 binary, compile the client, vsce package -> .vsix
+make vscode-package   # build for this host, compile the client, package -> .vsix
 ```
 
 The offline LSP embeds the engine, so the binary is bundled per platform;
-darwin-arm64 (standardized dev hardware) is built first. The `vscode-extension`
+the default build targets the current host. Pass `--goos`, `--goarch`, and
+`--target` to `scripts/vscode/package.sh` for a platform-specific release archive. The `vscode-extension`
 CI lane runs every drift guard under `cmd/memql-lsp` -- the grammar against
 `dslspec`, `language-configuration.json`, and `package.json`'s `engines.vscode`
 / `engines.node` floors -- then runs this packaging flow. It gates on the

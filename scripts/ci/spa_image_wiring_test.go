@@ -1,18 +1,20 @@
-// Static guard: the MemQL OS bundle actually reaches the EDGE IMAGE
+// Static guard: the built-in platform sites actually reach the EDGE IMAGE
 // (znasllc-io/memql#3314, retargeted from the bff by #3711, and from the portal
 // to the OS shell by epic memql#4984 -- the shell is a site row served by
-// component/edge).
+// component/edge). memql#5518 made the VS Code landing page the second such
+// site, built in the same stage and seeded the same way, so the guards at the
+// bottom of this file run once per bundle.
 //
 // # The failure this exists to prevent
 //
-// The shell is served from a directory, not //go:embed'ed, so nothing in the
+// A site is served from a directory, not //go:embed'ed, so nothing in the
 // Go build knows whether the bundle is present. component/edge degrades
 // deliberately -- a missing bundle 404s asset-by-asset rather than failing
 // the node -- which is right for resilience and terrible for detection: an
 // image built without the SPA stage boots green, passes every probe, and
 // serves 404 for every request to a hostname that only a human ever visits.
 //
-// Three separate declarations have to agree for the bundle to be there, and
+// Three separate declarations have to agree for a bundle to be there, and
 // they live in three files with nothing tying them together:
 //
 //	Dockerfile                              -- the runtime COPYs from `spa-dist`
@@ -39,6 +41,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -435,6 +438,100 @@ func TestEveryRuntimeStageCopiesTheOs(t *testing.T) {
 	}
 	if runtimes == 0 {
 		t.Fatal("found no runtime stage; this guard cannot pass vacuously")
+	}
+}
+
+// The VS Code landing page's counterpart of TestEveryRuntimeStageCopiesTheOs
+// (memql#5518). Its seed's bundleRef names /app/vscode-site, and the same
+// asymmetry applies: a copy present in only one runtime stage ships the page
+// in the images nobody runs.
+func TestEveryRuntimeStageCopiesTheVSCodeSite(t *testing.T) {
+	body := readRepoFile(t, "Dockerfile")
+	blocks := regexp.MustCompile(`(?mi)^FROM\s`).Split(body, -1)
+	names := regexp.MustCompile(`(?mi)^FROM\s+(.*)$`).FindAllStringSubmatch(body, -1)
+	runtimes := 0
+	for i, block := range blocks[1:] {
+		if !strings.Contains(block, `ENTRYPOINT ["./memql"]`) {
+			continue
+		}
+		runtimes++
+		if !strings.Contains(block, "/vscode-site-dist") {
+			label := "stage"
+			if i < len(names) {
+				label = strings.TrimSpace(names[i][1])
+			}
+			t.Errorf("runtime %q does not COPY the VS Code landing page from /vscode-site-dist. "+
+				"The edge would 404 at vscode.<domain> (memql#5518).", label)
+		}
+	}
+	if runtimes == 0 {
+		t.Fatal("found no runtime stage; this guard cannot pass vacuously")
+	}
+}
+
+// The VS Code landing page's build reaches OUTSIDE editors/vscode/site, and
+// every tree it reaches into has to be in the spa-build stage's context --
+// the memql#4266 shape again (see TestSpaBuildStageCopiesEveryTreeTheShellImports),
+// on a build that runs the release cut and no pull-request lane.
+//
+// The reads are derived from build.mjs itself rather than listed here: every
+// `path.join(root, "<literal>")` is a repo-root-relative read, and every
+// `path.join(source, "<literal>")` is one relative to editors/vscode/site --
+// a template literal (`../themes/memql-${variant}-...`) is cut at the first
+// substitution and taken as the directory it names. The page's own directory
+// is required unconditionally, because the assets are copied out of it.
+func TestSpaBuildStageCopiesEveryTreeTheVSCodeSiteReads(t *testing.T) {
+	copied := copySourcesIn(spaBuildStageBlock(t, readRepoFile(t, "Dockerfile")))
+
+	siteRel := path.Join("editors", "vscode", "site")
+	needed := map[string]bool{siteRel: true}
+
+	build := readRepoFile(t, path.Join(siteRel, "build.mjs"))
+	joinRe := regexp.MustCompile("path\\.join\\(\\s*(root|source)\\s*,\\s*([\"'`])([^\"'`]+)[\"'`]")
+	derived := 0
+	for _, m := range joinRe.FindAllStringSubmatch(build, -1) {
+		base, lit := m[1], m[3]
+		if i := strings.Index(lit, "${"); i >= 0 {
+			lit = path.Dir(lit[:i])
+		}
+		rel := lit
+		if base == "source" {
+			rel = path.Join(siteRel, lit)
+		}
+		rel = path.Clean(rel)
+		if rel == "." || strings.HasPrefix(rel, "..") {
+			t.Fatalf("build.mjs reads %q, which resolves outside the repository", m[0])
+		}
+		derived++
+		needed[rel] = true
+	}
+	if derived == 0 {
+		t.Fatal("derived no path.join(root|source, ...) reads from build.mjs; the regexp no " +
+			"longer matches how it addresses the repository, so this guard is checking nothing")
+	}
+
+	paths := make([]string, 0, len(needed))
+	for p := range needed {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	for _, rel := range paths {
+		found := false
+		for _, src := range copied {
+			src = path.Clean(src)
+			if src == rel || strings.HasPrefix(rel, src+"/") {
+				found = true
+				break
+			}
+		}
+		if found {
+			continue
+		}
+		t.Errorf("editors/vscode/site/build.mjs reads %s, but the Dockerfile's `%s` stage never "+
+			"COPYs a tree containing it (it copies %v). The stage's build context would not "+
+			"contain the file, so the page's build fails and the EDGE image fails to build -- "+
+			"at a release cut, not in any pull-request lane (memql#5518).", rel, spaBuildStage, copied)
 	}
 }
 

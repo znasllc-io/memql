@@ -48,8 +48,9 @@ describe("validating a name", () => {
     }
   });
 
-  it("reserves the current platform site and protects retired platform names", () => {
+  it("reserves the current platform sites and protects retired platform names", () => {
     expect(validateSlug("os", DOMAIN)).toContain("reserved");
+    expect(validateSlug("vscode", DOMAIN)).toContain("reserved");
     expect(validateSlug("portal", DOMAIN)).toContain("reserved");
   });
 

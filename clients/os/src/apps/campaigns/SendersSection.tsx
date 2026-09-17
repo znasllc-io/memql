@@ -1,13 +1,14 @@
 import { AddButton } from "../../kit/AddButton";
 import { useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
-import { AtSign, } from "lucide-react";
+import { AtSign } from "lucide-react";
 
 import { AccountChip, AccountPicker } from "../accounts/AccountPicker";
 import { accountNameFrom } from "../accounts/rows";
 import { useAccountOptions } from "../accounts/tie";
 import {
   Button,
+  EmptyState,
   Caption,
   Chip,
   Fact,
@@ -79,6 +80,37 @@ export function SendersSection({
     [source, source?.snapshot, openId],
   );
 
+  if (adding)
+    return (
+      <div className="os-app-stack">
+        <Head title="Add a mailbox" back={{ label: "Senders", onSelect: () => setAdding(false) }} />
+        <SenderForm
+          writes={writes}
+          onDone={(id) => {
+            setAdding(false);
+            if (id !== "") setOpenId(id);
+          }}
+        />
+      </div>
+    );
+  if (open)
+    return (
+      <div
+        className="os-app-stack"
+        data-os-page-context={JSON.stringify({
+          page: "Senders",
+          name: senderLabel(open),
+          id: open.id,
+        })}
+      >
+        <Head
+          title={senderLabel(open)}
+          back={{ label: "Senders", onSelect: () => setOpenId("") }}
+        />
+        <SenderDetail key={open.id} sender={open} writes={writes} />
+      </div>
+    );
+
   return (
     <div className="os-app-stack">
       <Head title="Senders">
@@ -95,17 +127,6 @@ export function SendersSection({
         </Notice>
       ) : null}
 
-      {adding ? (
-        <SenderForm
-          writes={writes}
-          onDone={(id) => {
-            setAdding(false);
-            if (id !== "") setOpenId(id);
-          }}
-        />
-      ) : null}
-
-
       <LiveList<SenderIdentityRow>
         key={`senders:${showFiled}`}
         source={source}
@@ -113,6 +134,12 @@ export function SendersSection({
         fingerprint={senderFingerprint}
         label="Mailboxes this cluster can send as"
         emptyText="No mailboxes declared. Campaigns will use this cluster's configured default -- add one here to send as a specific address."
+        emptyContent={
+          <EmptyState icon={AtSign} title="No mailboxes declared">
+            Add a mailbox your provider permits this cluster to send from, or use its configured
+            default.
+          </EmptyState>
+        }
         renderRow={(sender, tick) => (
           <SenderLine
             sender={sender}
@@ -122,10 +149,6 @@ export function SendersSection({
           />
         )}
       />
-
-      {open === null ? null : (
-        <SenderDetail key={open.id} sender={open} writes={writes} />
-      )}
     </div>
   );
 }
@@ -311,7 +334,7 @@ function RetirePanel({
   );
 }
 
-function SenderForm({
+export function SenderForm({
   sender,
   writes,
   onDone,
@@ -393,8 +416,8 @@ function SenderForm({
 
       <Caption>
         Declaring a mailbox here says this cluster may send as it. It does not create the mailbox or
-        grant access to it -- if your mail tenant has not been told to allow it, the first send comes
-        back with the provider&apos;s own refusal on the campaign.
+        grant access to it -- if your mail tenant has not been told to allow it, the first send
+        comes back with the provider&apos;s own refusal on the campaign.
       </Caption>
 
       {write.error === "" ? null : (
@@ -407,7 +430,13 @@ function SenderForm({
       )}
 
       <div className="os-campaign-actions">
-        <Button tone="primary" busy={write.busy} busyLabel="Saving" onClick={submit} disabled={!ready}>
+        <Button
+          tone="primary"
+          busy={write.busy}
+          busyLabel="Saving"
+          onClick={submit}
+          disabled={!ready}
+        >
           {editing ? "Save" : "Add mailbox"}
         </Button>
         <Button
@@ -420,7 +449,9 @@ function SenderForm({
         </Button>
       </div>
       {ready ? null : (
-        <Caption>An address and a display name are both needed -- they are what a recipient sees.</Caption>
+        <Caption>
+          An address and a display name are both needed -- they are what a recipient sees.
+        </Caption>
       )}
     </Panel>
   );

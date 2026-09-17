@@ -1,9 +1,9 @@
 // The MemQL brand, as far as a VS Code webview can carry it (memql#4196;
 // re-keyed onto the appearance setting in memql#4419).
 //
-// ONE token module for every panel. The palette is memql.io's exactly -- the
-// same hexes the portal redesign (memql#4177) ships -- and since memql#4419 it
-// lives next door in palette.ts as DATA, because a theme-JSON generator cannot
+// ONE token module for every panel. Canonical brand roles and the brighter
+// dark editor surfaces live next door in palette.ts as DATA, because a
+// theme-JSON generator cannot
 // read a template literal (see that file's header). This module COMPOSES the
 // CSS from it; it no longer holds a hex of its own.
 //

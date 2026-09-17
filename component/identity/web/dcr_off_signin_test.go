@@ -87,7 +87,7 @@ func TestDCROff_EditorAuthorizeRendersTheConsentPage(t *testing.T) {
 		`name="redirect_uri"`,
 		`name="code_challenge"`,
 		identity.BuiltinClientVSCode,
-		"MemQL for VS Code",
+		"MemQL for Visual Studio Code and Cursor",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("consent page missing %q", want)

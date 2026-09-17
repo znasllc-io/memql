@@ -72,11 +72,11 @@ func TestSitesWildcardAndApex(t *testing.T) {
 
 // TestHostsIsTheWholeSet pins the count, because the count is the property
 // docs/public/operate/front-door.md is about: it is fixed by the closed role
-// set plus the platform's own site, and never grows with customer sites.
+// set plus the platform's own sites, and never grows with customer sites.
 func TestHostsIsTheWholeSet(t *testing.T) {
 	hosts := Hosts(domain)
-	if len(hosts) != 6 {
-		t.Errorf("Hosts returns %d rules, want 6 (three roles, the OS shell, the sites wildcard, the apex)", len(hosts))
+	if len(hosts) != 7 {
+		t.Errorf("Hosts returns %d rules, want 7 (three roles, the OS shell, the VS Code landing page, the sites wildcard, the apex)", len(hosts))
 	}
 
 	seen := map[string]bool{}
@@ -105,16 +105,49 @@ func TestHostsIsTheWholeSet(t *testing.T) {
 		t.Errorf("Hosts carries %d wildcard rules, want exactly 1 (the sites rule)", wildcards)
 	}
 
-	// The three rules that reach the edge: the OS shell (exact), every other
-	// site (the wildcard), and the apex.
+	// The four rules that reach the edge: the two platform sites (exact), every
+	// other site (the wildcard), and the apex.
 	var sites []string
 	for _, h := range hosts {
 		if h.Sites {
 			sites = append(sites, h.Name)
 		}
 	}
-	if want := strings.Join([]string{OsHost(domain), SitesWildcard(domain), Apex(domain)}, ","); strings.Join(sites, ",") != want {
+	if want := strings.Join([]string{OsHost(domain), VSCodeHost(domain), SitesWildcard(domain), Apex(domain)}, ","); strings.Join(sites, ",") != want {
 		t.Errorf("sites rules are %v, want [%s]", sites, want)
+	}
+}
+
+// TestPlatformSitesAreExactHostsAndNotRoles pins the second platform site the
+// way the OS is pinned: every platform site is an exact host in Hosts (so it
+// gets a SAN and a rule of its own), is composed like any site, and shadows no
+// role label.
+func TestPlatformSitesAreExactHostsAndNotRoles(t *testing.T) {
+	if got, want := strings.Join(PlatformSites(), ","), OsSite+","+VSCodeSite; got != want {
+		t.Fatalf("PlatformSites = %q, want %q", got, want)
+	}
+	if got, want := VSCodeHost(domain), "vscode.example.test"; got != want {
+		t.Errorf("VSCodeHost = %q, want %q", got, want)
+	}
+	exact := map[string]bool{}
+	for _, h := range Hosts(domain) {
+		if !h.Wildcard {
+			exact[h.Name] = true
+		}
+	}
+	for _, s := range PlatformSites() {
+		host := PlatformSiteHost(s, domain)
+		if host != SiteHost(s, domain) {
+			t.Errorf("PlatformSiteHost(%q) = %q but SiteHost gives %q; a platform site is composed like any site", s, host, SiteHost(s, domain))
+		}
+		if !exact[host] {
+			t.Errorf("platform site %q has no exact host in Hosts; it would be served from the wildcard's server block with no SAN", host)
+		}
+		for _, r := range Roles() {
+			if s == string(r) {
+				t.Errorf("platform site %q shadows the %q role", s, r)
+			}
+		}
 	}
 }
 
@@ -134,6 +167,7 @@ func TestCertificateSANsAreExactlyTheExactHosts(t *testing.T) {
 		RoleHost(RoleIdentity, domain),
 		RoleHost(RoleMCP, domain),
 		OsHost(domain),
+		VSCodeHost(domain),
 		Apex(domain),
 	}
 	if strings.Join(sans, ",") != strings.Join(want, ",") {

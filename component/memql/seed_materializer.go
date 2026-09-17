@@ -34,12 +34,10 @@ const (
 	seedWriteBaseBackoff = 300 * time.Millisecond
 )
 
-// memqlDomainEnv is the ONE install-domain input (#4222 / #3593). The OS site
-// hostname is derived from it on every global rematerialize; the committed DSL
-// seed stays os.memql.localhost.
+// memqlDomainEnv is the ONE install-domain input (#4222 / #3593). Every
+// platform site's hostname is derived from it on every global rematerialize;
+// the committed DSL seeds stay <name>.memql.localhost.
 const memqlDomainEnv = "MEMQL_DOMAIN"
-
-const osSiteSeedName = "os"
 
 // siteSeedConcept is the concept a site seed binds. Named for the CONCEPT and
 // not for its one inhabitant: it was `portalSiteConcept` while both the portal
@@ -47,9 +45,15 @@ const osSiteSeedName = "os"
 // check the OS also depended on (epic memql#4984).
 const siteSeedConcept = "site"
 
-// defaultOsHostname is the product fail-closed hostname when MEMQL_DOMAIN
-// is unset or empty. Same committed default as dsl/platform/seeds.memql.
-const defaultOsHostname = "os.memql.localhost"
+// defaultSeedDomain is the domain a platform site's hostname fails closed to
+// when MEMQL_DOMAIN is unset or empty: the committed default every seed in
+// dsl/platform/seeds.memql carries.
+const defaultSeedDomain = "memql.localhost"
+
+// defaultOsHostname is the OS shell's fail-closed hostname. Same committed
+// default as dsl/platform/seeds.memql; kept as a named constant because the
+// hostname policy pins its own default domain against it.
+const defaultOsHostname = frontdoor.OsSite + "." + defaultSeedDomain
 
 // seedMaterializerActor is the synthetic actor every materializer
 // mutation runs as. Mutations require an actor (for createdBy
@@ -415,7 +419,7 @@ func (m *SeedMaterializer) materializeGlobal(ctx context.Context, def *SeedDefin
 		return fmt.Errorf("global seed %q must declare a string `id` field", def.Name)
 	}
 	args := buildArgsFromBody(def.Body, def.UseConcept, idVal.str, "")
-	applyOsSiteHostname(def, args)
+	applyPlatformSiteHostname(def, args)
 	if m.seedRowIsCurrent(ctx, def, idVal.str, args) {
 		return nil
 	}
@@ -538,35 +542,55 @@ func (m *SeedMaterializer) materializePerUser(ctx context.Context, def *SeedDefi
 	return m.invokeCreateMutation(ctx, def.UseConcept, args)
 }
 
-// applyOsSiteHostname rewrites the OS site hostname from MEMQL_DOMAIN on
-// every global rematerialize (memql#4705, and #4222 before it for the portal
-// this replaced). The committed seed in dsl/platform/seeds.memql stays
-// os.memql.localhost; this overwrite is why a kubectl patch of the site row is
-// out of scope -- the next boot sweep would clobber it.
+// applyPlatformSiteHostname rewrites a platform site's hostname from
+// MEMQL_DOMAIN on every global rematerialize (memql#4705, and #4222 before it
+// for the portal the OS replaced; memql#5518 generalised it from the OS alone
+// to every platform site). The committed seeds in dsl/platform/seeds.memql
+// stay <name>.memql.localhost; this overwrite is why a kubectl patch of a
+// platform site row is out of scope -- the next boot sweep would clobber it.
 //
-// Only the `os` / concept `site` seed is touched. The hostname is
-// frontdoor.OsHost -- the same call cmd/frontdoorhosts makes for the OS's
-// Ingress rule and certificate SAN and envregistry makes for its redirect URI
-// (memql#4224) -- so the certificate cannot name a host the site row does not
-// carry. Unset or empty MEMQL_DOMAIN fail-closed to os.memql.localhost.
-func applyOsSiteHostname(def *SeedDefinition, args map[string]any) {
+// Only a concept `site` seed whose NAME is one of frontdoor.PlatformSites()
+// is touched, so a site seed by any other name is left alone. The hostname is
+// frontdoor.PlatformSiteHost -- the same call cmd/frontdoorhosts makes for the
+// site's Ingress rule and certificate SAN and envregistry makes for the OS's
+// redirect URI (memql#4224) -- so the certificate cannot name a host the site
+// row does not carry. Unset or empty MEMQL_DOMAIN fails closed to
+// <name>.memql.localhost.
+func applyPlatformSiteHostname(def *SeedDefinition, args map[string]any) {
 	if def == nil || args == nil {
 		return
 	}
-	if def.Name != osSiteSeedName || def.UseConcept != siteSeedConcept {
+	if def.UseConcept != siteSeedConcept || !isPlatformSiteSeed(def.Name) {
 		return
 	}
-	args["hostname"] = osSiteHostname(os.Getenv(memqlDomainEnv))
+	args["hostname"] = platformSiteHostname(def.Name, os.Getenv(memqlDomainEnv))
 }
 
-// osSiteHostname is the pure derivation: frontdoor.OsHost when MEMQL_DOMAIN
-// is set, else the committed localhost default.
-func osSiteHostname(domain string) string {
+// isPlatformSiteSeed reports whether a seed name is one of the sites the
+// platform ships itself.
+func isPlatformSiteSeed(name string) bool {
+	for _, s := range frontdoor.PlatformSites() {
+		if s == name {
+			return true
+		}
+	}
+	return false
+}
+
+// platformSiteHostname is the pure derivation: frontdoor.PlatformSiteHost
+// over MEMQL_DOMAIN when it is set, else over the committed localhost default.
+func platformSiteHostname(name, domain string) string {
 	domain = strings.TrimSpace(domain)
 	if domain == "" {
-		return defaultOsHostname
+		domain = defaultSeedDomain
 	}
-	return frontdoor.OsHost(domain)
+	return frontdoor.PlatformSiteHost(name, domain)
+}
+
+// osSiteHostname is platformSiteHostname for the OS shell: frontdoor.OsHost
+// when MEMQL_DOMAIN is set, else the committed localhost default.
+func osSiteHostname(domain string) string {
+	return platformSiteHostname(frontdoor.OsSite, domain)
 }
 
 // lookupOrMintPerUserId returns the existing perUser-seed row id for

@@ -204,7 +204,7 @@ describe("the core gate, mounted by the real shell", () => {
 });
 
 describe("an unconfigured app gates only once readiness has loaded", () => {
-  it("renders the app body while unknown, then the setup surface, with the mark on Settings", async () => {
+  it("keeps preparation open and gates Rules once sending readiness has loaded", async () => {
     const { connection, openReadiness } = fakeConnection([
       readinessRow("email", "unconfigured"),
       readinessRow("campaigns", "configured"),
@@ -213,6 +213,7 @@ describe("an unconfigured app gates only once readiness has loaded", () => {
     mountShell();
     await openApp("Campaigns");
     const win = await screen.findByRole("dialog", { name: "Campaigns" });
+    fireEvent.click(within(win).getByRole("button", { name: "Rules" }));
 
     // Unknown: nothing gated, nothing drawn. This is the frame the test
     // exists for -- a configured cluster passes through it on every load.
@@ -222,7 +223,7 @@ describe("an unconfigured app gates only once readiness has loaded", () => {
     openReadiness();
 
     await waitFor(() => {
-      expect(within(win).getByRole("heading", { name: "Campaigns is not set up yet" })).toBeTruthy();
+      expect(within(win).getByRole("heading", { name: "Rules is not set up yet" })).toBeTruthy();
     });
     // TWO marks, and both are wanted: the title-bar gear and the rail's own
     // Settings entry. A person looking at the window chrome and a person

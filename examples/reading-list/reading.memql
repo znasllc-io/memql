@@ -1,0 +1,43 @@
+/// A reading-list item owned by the signed-in person.
+@rowAuthz(owner="ownerUserId")
+@displayCard(primary="title", status="finished")
+concept readingItem {
+  ownerUserId  string!
+  title        string!
+  finished     bool
+}
+
+/// Add an item. Ownership comes from the authenticated actor.
+@actor
+mutation readingItem addReadingItem {
+  args {
+    itemId  string!
+    title   string!
+  }
+  insert {
+    accept { title }
+    stamp {
+      id: args.itemId
+      ownerUserId: actor.userId
+      finished: false
+    }
+  }
+}
+
+/// Read your list, optionally narrowed to finished or unfinished items.
+@actor
+query readingItem readingItems {
+  args {
+    finished  bool
+  }
+  filter row => row.ownerUserId == actor.userId && (args.finished == nil || row.finished == args.finished)
+  sort "row.createdAt", "desc"
+  paginate 50
+}
+
+/// Give the same read operation a tool interface.
+@handler(type="query", query="query readingItems(finished: args.finished)")
+@executionTime("fast")
+tool listReadingItems {
+  finished  boolean @description("True for finished; false for unfinished. Omit for both.")
+}

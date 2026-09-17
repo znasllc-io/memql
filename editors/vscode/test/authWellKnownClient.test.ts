@@ -232,7 +232,7 @@ test("a role-floor refusal surfaces the server's sentence verbatim", async () =>
   // person less than the server already told it.
   const net = recorder();
   const description =
-    "MemQL for VS Code manages this cluster. Your role on it is reader, and signing in " +
+    "MemQL for Visual Studio Code and Cursor manages this cluster. Your role on it is reader, and signing in " +
     "from an editor needs developer or above. Ask a cluster owner or admin to raise your role.";
 
   await assert.rejects(

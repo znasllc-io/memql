@@ -1,0 +1,63 @@
+# The VS Code landing page's own check lane (editors/vscode/site): build,
+# self-check, browser verification, screenshots. It is a CHECK, not a publish
+# -- the deployable is the edge image, whose spa-build stage builds this same
+# page and serves it at vscode.<domain> from a seeded site row (memql#5518).
+# The built page is kept only so a reviewer can open what the lane rendered.
+name: VS Code landing page
+
+on:
+  pull_request:
+    paths:
+      - 'editors/vscode/site/**'
+      - 'editors/vscode/themes/**'
+      - 'examples/research-desk/**'
+      - 'brand/**'
+      - '.github/workflows/vscode-site.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'editors/vscode/site/**'
+      - 'editors/vscode/themes/**'
+      - 'examples/research-desk/**'
+      - 'brand/**'
+      - '.github/workflows/vscode-site.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static-site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: editors/vscode/site/package-lock.json
+      - name: Install browser test tooling
+        working-directory: editors/vscode/site
+        run: npm ci --no-audit --no-fund
+      - name: Build and check the page
+        working-directory: editors/vscode/site
+        run: npm run build && npm run check
+      - name: Install the isolated browser
+        working-directory: editors/vscode/site
+        run: npx playwright install --with-deps chromium
+      - name: Verify the rendered page
+        working-directory: editors/vscode/site
+        run: npm run test:browser
+      - name: Keep the built page for review
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: memql-vscode-site
+          path: editors/vscode/site/dist
+          if-no-files-found: error
+      - name: Keep review screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: memql-vscode-site-screenshots
+          path: editors/vscode/site/artifacts
+          if-no-files-found: ignore

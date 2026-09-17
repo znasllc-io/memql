@@ -91,7 +91,7 @@ var builtinClients = []BuiltinClient{
 		Client: RegisteredClient{
 			ClientId:     BuiltinClientVSCode,
 			RedirectURIs: []string{builtinRedirectVSCode},
-			Name:         "MemQL for VS Code",
+			Name:         "MemQL for Visual Studio Code and Cursor",
 		},
 		// Developer and above: owner, admin and developer complete sign-in;
 		// writer and reader are refused.

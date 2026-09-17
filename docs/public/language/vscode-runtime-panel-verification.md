@@ -1,5 +1,5 @@
 ---
-title: VS Code Runtime Panel -- Manual Verification Checklist
+title: Visual Studio Code and Cursor Runtime Panel -- Manual Verification Checklist
 audience: public
 status: stable
 area: language
@@ -7,10 +7,10 @@ sinceVersion: 0.14.0
 owner: znas
 ---
 
-# VS Code Runtime Panel -- Manual Verification Checklist
+# Visual Studio Code and Cursor Runtime Panel -- Manual Verification Checklist
 
-The artifact a human works through before calling a change to the VS Code
-runtime panel done.
+The artifact a human works through before calling a change to the MemQL
+runtime panel in Visual Studio Code and Cursor done.
 
 ## Why this exists even though there is an automated host lane
 
@@ -256,13 +256,13 @@ tooltip -- deliberately a different picture from the red dot an unreachable
 cluster gets, because "your token ran out" and "the cluster went away" have
 completely different next actions.
 
-Full narrative: [VS Code Runtime Panel](vscode-runtime-panel.md).
+Full narrative: [Visual Studio Code and Cursor Runtime Panel](vscode-runtime-panel.md).
 
 ### Record what you verified against
 
 "It worked" means little without these:
 
-- [ ] VS Code version: ____________
+- [ ] Editor and version (Visual Studio Code or Cursor): ____________
 - [ ] Extension commit: ____________
 - [ ] Cluster: ____________
 
@@ -329,7 +329,7 @@ and `refresh_token` keys deliberately blank.
 - [ ] **MemQL: Sign In** (the cluster's context menu, or the palette) opens a
       cancellable progress notification reading `signing in to <cluster>` and
       opens a browser at the cluster's `identity.<domain>` login page
-- [ ] Signing in there returns to VS Code without a manual paste, and the tree's
+- [ ] Signing in there returns to the editor without a manual paste, and the tree's
       yellow key clears
 - [ ] `clusters.yaml` now carries a `token:` and a `client_id:` for that cluster,
       and does **not** carry a `refresh_token:` -- custody moved to SecretStorage
@@ -630,7 +630,7 @@ description and its actions are in the title menu.
       status and a relative time
 - [ ] A run started from this editor appears in the tree BEFORE its first step
       reports, and its steps fill in live
-- [ ] Kill VS Code mid-run, reopen: the run is still listed, and names exactly
+- [ ] Kill the editor mid-run, reopen: the run is still listed, and names exactly
       the steps that had completed
 - [ ] Disconnect (or sign out): the rows go, the description clears, and the
       welcome returns

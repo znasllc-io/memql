@@ -8,6 +8,7 @@ import { accountNameFrom } from "../accounts/rows";
 import { useAccountOptions } from "../accounts/tie";
 import {
   Button,
+  EmptyState,
   Caption,
   Chip,
   ChoiceStack,
@@ -89,14 +90,18 @@ export function RulesSection({
   const [openId, setOpenId] = useState("");
   const [adding, setAdding] = useState(false);
 
-  const source = useLiveView<Row, EmailRuleRow>(feeds.rules.source, `filed:${showFiled}`, (rows) => {
-    const rules = rows.map(emailRuleFromRow).filter((r) => r.id !== "");
-    // "Filed" for a rule means paused: a paused rule is one somebody turned
-    // off, which is a different thing from a draft (never armed) and a
-    // different thing again from failed (the engine refused it). Drafts and
-    // failures stay visible because both are waiting on somebody.
-    return showFiled ? rules : rules.filter((r) => r.status !== "paused");
-  });
+  const source = useLiveView<Row, EmailRuleRow>(
+    feeds.rules.source,
+    `filed:${showFiled}`,
+    (rows) => {
+      const rules = rows.map(emailRuleFromRow).filter((r) => r.id !== "");
+      // "Filed" for a rule means paused: a paused rule is one somebody turned
+      // off, which is a different thing from a draft (never armed) and a
+      // different thing again from failed (the engine refused it). Drafts and
+      // failures stay visible because both are waiting on somebody.
+      return showFiled ? rules : rules.filter((r) => r.status !== "paused");
+    },
+  );
 
   const templates = useProjected(feeds.templates.snapshot.rows, templateProjection);
   const audiences = useProjected(feeds.audiences.snapshot.rows, audienceProjection);
@@ -108,6 +113,40 @@ export function RulesSection({
     () => source?.snapshot.rows.find((r) => r.id === openId) ?? null,
     [source, source?.snapshot, openId],
   );
+
+  if (adding)
+    return (
+      <div className="os-app-stack">
+        <Head title="New rule" back={{ label: "Rules", onSelect: () => setAdding(false) }} />
+        <RuleBuilder
+          concepts={concepts}
+          templates={templates}
+          audiences={audiences}
+          senders={senders}
+          writes={writes}
+          onDone={(id) => {
+            setAdding(false);
+            if (id !== "") setOpenId(id);
+          }}
+        />
+      </div>
+    );
+  if (open)
+    return (
+      <div className="os-app-stack">
+        <Head title={ruleName(open)} back={{ label: "Rules", onSelect: () => setOpenId("") }} />
+        <AuthoredAutomationsBanner authored={authored} />
+        <RuleDetail
+          key={open.id}
+          rule={open}
+          concepts={concepts}
+          templates={templates}
+          audiences={audiences}
+          senders={senders}
+          writes={writes}
+        />
+      </div>
+    );
 
   return (
     <div className="os-app-stack">
@@ -127,21 +166,6 @@ export function RulesSection({
         </Notice>
       ) : null}
 
-      {adding ? (
-        <RuleBuilder
-          concepts={concepts}
-          templates={templates}
-          audiences={audiences}
-          senders={senders}
-          writes={writes}
-          onDone={(id) => {
-            setAdding(false);
-            if (id !== "") setOpenId(id);
-          }}
-        />
-      ) : null}
-
-
       <LiveList<EmailRuleRow>
         key={`rules:${showFiled}`}
         source={source}
@@ -149,6 +173,11 @@ export function RulesSection({
         fingerprint={ruleFingerprint}
         label="Your event-email rules"
         emptyText="No rules yet. A rule sends one email whenever something happens in the cluster -- a new sign-up, a status change, an order."
+        emptyContent={
+          <EmptyState icon={Zap} title="No email rules yet">
+            Create a rule to email people when something happens in this cluster.
+          </EmptyState>
+        }
         renderRow={(rule, tick) => (
           <RuleLine
             rule={rule}
@@ -160,18 +189,6 @@ export function RulesSection({
           />
         )}
       />
-
-      {open === null ? null : (
-        <RuleDetail
-          key={open.id}
-          rule={open}
-          concepts={concepts}
-          templates={templates}
-          audiences={audiences}
-          senders={senders}
-          writes={writes}
-        />
-      )}
     </div>
   );
 }
@@ -825,8 +842,8 @@ function RuleBuilder({
             <code className="os-mono">row</code> is {conditionRowIs(draft)}. For example,{" "}
             <code className="os-mono">{CONDITION_EXAMPLE}</code> means the status is active or trial
             and the plan is not free. Use <code className="os-mono">{"=="}</code> (is),{" "}
-            <code className="os-mono">{"!="}</code> (is not), <code className="os-mono">in</code> (is
-            one of), <code className="os-mono">{"&&"}</code> (and),{" "}
+            <code className="os-mono">{"!="}</code> (is not), <code className="os-mono">in</code>{" "}
+            (is one of), <code className="os-mono">{"&&"}</code> (and),{" "}
             <code className="os-mono">{"||"}</code> (or) and <code className="os-mono">{"!"}</code>{" "}
             (not). A condition with a mistake in it is refused when you turn the rule on, not later
             when it fires.
@@ -870,8 +887,8 @@ function RuleBuilder({
         </div>
         {draft.recipientMode === "cluster_roles" ? (
           <Caption>
-            The mailbox is not used for this rule: internal mail leaves through the cluster&apos;s own
-            configured sender.
+            The mailbox is not used for this rule: internal mail leaves through the cluster&apos;s
+            own configured sender.
           </Caption>
         ) : null}
       </details>
@@ -886,7 +903,13 @@ function RuleBuilder({
       )}
 
       <div className="os-campaign-actions">
-        <Button tone="primary" busy={write.busy} busyLabel="Saving" onClick={submit} disabled={!ready}>
+        <Button
+          tone="primary"
+          busy={write.busy}
+          busyLabel="Saving"
+          onClick={submit}
+          disabled={!ready}
+        >
           {editing ? "Save" : "Create rule"}
         </Button>
         <Button

@@ -22,9 +22,9 @@ applications or websites the cluster serves. That property is what this page is
 about.
 
 The host **set** is DERIVED from the closed **role** set plus the platform's
-own site (memql#3767, memql#4224) rather than maintained as a list. It grows
-only when a ROLE is added, which is a design change; it never grows with
-customers, apps or sites.
+own sites (memql#3767, memql#4224) rather than maintained as a list. It grows
+only when a ROLE or a platform site is added, which is a design change; it
+never grows with customers, apps or the sites an operator creates.
 
 Related: [environment-parity.md](environment-parity.md) ·
 [install-prerequisites.md](install-prerequisites.md) ·
@@ -40,8 +40,16 @@ Related: [environment-parity.md](environment-parity.md) ·
 | `identity.<domain>` | `svc/identity:8085` | https | `memql-front-door-tls` |
 | `mcp.<domain>` | `svc/mcp:8090` | http | `memql-front-door-tls` |
 | `os.<domain>` | `svc/edge:8085` | http | `memql-front-door-tls` |
+| `vscode.<domain>` | `svc/edge:8085` | http | `memql-front-door-tls` |
 | `*.<domain>` | `svc/edge:8085` | http | `memql-wildcard-tls` — see below |
 | `<domain>` (apex) | `svc/edge:8085` | http | `memql-front-door-tls` (and named by the wildcard's too) |
+
+`os.<domain>` and `vscode.<domain>` are the two **platform sites**
+(`frontdoor.PlatformSites`): sites the platform ships itself, each a seeded
+`v1:platform:site` row served by the edge exactly like a customer's. The OS
+shell is MemQL OS; `vscode.<domain>` is the landing page for the MemQL
+extension for Visual Studio Code and Cursor -- a static page, seeded like the
+OS, with its own exact rule for the same certificate reason (memql#5518).
 
 **Every host is a single label under the domain, and that is a routing
 decision.** An Ingress wildcard matches exactly **one** label, so the one
@@ -56,7 +64,7 @@ it was hand-edited to exact names, the edge Ingress whose `tls.hosts` still
 said `*.<domain>` made ingress-nginx serve its self-signed default for
 `os.<domain>` (Safari: "This Connection Is Not Private"). So the front-door
 certificate `memql-front-door-tls` names **exact hosts only** — `api.`,
-`identity.`, `mcp.`, `os.` and the apex — and every Ingress lists under
+`identity.`, `mcp.`, `os.`, `vscode.` and the apex — and every Ingress lists under
 `tls` exactly the hosts the certificate it points at can cover.
 
 ### The wildcard has a certificate now, and it is a second one
@@ -72,9 +80,9 @@ reaches Key Vault — and one `Certificate` for `*.<domain>` **plus the apex**.
 | | `memql-front-door-tls` | `memql-wildcard-tls` |
 |---|---|---|
 | Issuer | `letsencrypt-prod` (HTTP-01) | `letsencrypt-dns01` (DNS-01, Azure DNS) |
-| Names | `api.`, `identity.`, `mcp.`, `os.`, the apex | `*.<domain>`, the apex |
+| Names | `api.`, `identity.`, `mcp.`, `os.`, `vscode.`, the apex | `*.<domain>`, the apex |
 | Declared in | `front-door.generated.yaml` (generated) | `dns01-wildcard-tls.yaml` (hand-authored) |
-| Terminates | every role host, the OS shell, the apex | the `*.<domain>` rule on `edge-front-door` |
+| Terminates | every role host, the platform sites, the apex | the `*.<domain>` rule on `edge-front-door` |
 
 **Why the apex is on both.** `*.<domain>` matches exactly one label and the
 apex has none, so a sites-plane certificate without it could not serve the main
@@ -82,7 +90,7 @@ website. The apex rule still terminates with `memql-front-door-tls`; the second
 SAN is what lets it move without a reissue.
 
 **Why two certificates and not one.** The reversal is **staged on purpose**:
-sign-in (`identity.`), the API (`api.`) and the OS shell keep terminating with a
+sign-in (`identity.`), the API (`api.`) and the platform sites keep terminating with a
 Secret the DNS-01 issuer does not touch, so a wrong zone name, a missing role
 assignment or an expired federation cannot reach them. Until the install-time
 values below are real the wildcard Certificate simply never becomes
@@ -111,15 +119,15 @@ regime holds by default); each Ingress's `tls.hosts` equals the rule hosts
 something in the overlay can certify; and every requested SAN is a host some
 rule serves.
 
-**The OS shell keeps its own exact rule** — the certificate reason for it is
-gone, the server-block reason is not. ingress-nginx builds a
+**Each platform site keeps its own exact rule** — the certificate reason for
+it is gone, the server-block reason is not. ingress-nginx builds a
 certificate-bearing server block per **rule** host, never per `tls` host, so an
-exact rule is what makes `os.<domain>` outrank `*.<domain>` and get its own
-certificate rather than the wildcard's. The OS shell is the one site the
-platform ships itself: their names exist before any operator creates a row, so
-the generator can write each rule and SAN, and the engine seeds each
-`v1:platform:site` hostname from `MEMQL_DOMAIN` through the same derivation
-(`frontdoor.OsHost`).
+exact rule is what makes `os.<domain>` and `vscode.<domain>` outrank
+`*.<domain>` and get their own certificate rather than the wildcard's. The
+platform sites are the sites the platform ships itself: their names exist
+before any operator creates a row, so the generator can write each rule and
+SAN, and the engine seeds each `v1:platform:site` hostname from `MEMQL_DOMAIN`
+through the same derivation (`frontdoor.PlatformSiteHost`).
 
 > **WARNING: the wildcard certificate is a cloud thing with install-time
 > prerequisites.** It needs an Azure DNS zone for `<domain>`, a managed identity
@@ -157,17 +165,19 @@ and it is not proxied through the edge either: MCP clients configure a URL,
 they are not browsers, and an extra hop on a tool-calling path buys nothing.
 See [mcp-connect.md](mcp-connect.md).
 
-**`os.<domain>`, `*.<domain>` and the apex** all point at the `edge` node,
-which resolves the request `Host` header against a `v1:platform:site` row and
-serves that site's bundle. The apex is not a special case: for a customer's own
-cluster the bare domain **is** their main website, so it is a site row like
-every other one. The OS shell is a site like any other and takes the same path; its own rule
-exists for the certificate's sake ([above](#the-seven-hosts)), not because the
-edge treats it differently.
+**`os.<domain>`, `vscode.<domain>`, `*.<domain>` and the apex** all point at
+the `edge` node, which resolves the request `Host` header against a
+`v1:platform:site` row and serves that site's bundle. The apex is not a
+special case: for a customer's own cluster the bare domain **is** their main
+website, so it is a site row like every other one. A platform site is a site
+like any other and takes the same path; its own rule exists for the
+certificate's sake ([above](#the-seven-hosts)), not because the edge treats it
+differently.
 
 > **INFO: the edge route and the edge backend both ship as of memql#3714.**
 > `deploy/k8s/overlays/local/edge-front-door.yaml` carries the wildcard and
-> apex rules (`os-front-door.yaml` the shell's);
+> apex rules (`os-front-door.yaml` and `vscode-front-door.yaml` the platform
+> sites');
 > `deploy/k8s/base/edge.yaml` carries the Deployment, Service and
 > PodDisruptionBudget behind `svc/edge`. The `edge` node type itself — build
 > tag `edge`, `make edge`, see [build-tags.md](../build/build-tags.md) — is
@@ -201,12 +211,12 @@ nothing more about sites than the rule that routes them.
 
 ### Exact-versus-wildcard precedence is declared, not inherited
 
-`*.<domain>` also matches `api.<domain>`, `identity.<domain>`, `mcp.<domain>`
-and `os.<domain>`. So whether the named hosts keep their own backends is
-not a detail — it is a **load-bearing assumption of the seven-host design**, and
-it is worth knowing the state of it. (For the OS shell the question is moot —
-its rule and the wildcard reach the same Service — which is exactly why it is
-not in the precedence probe's host set.)
+`*.<domain>` also matches `api.<domain>`, `identity.<domain>`, `mcp.<domain>`,
+`os.<domain>` and `vscode.<domain>`. So whether the named hosts keep their own
+backends is not a detail — it is a **load-bearing assumption of the seven-host
+design**, and it is worth knowing the state of it. (For the platform sites the
+question is moot — their rules and the wildcard reach the same Service — which
+is exactly why they are not in the precedence probe's host set.)
 
 **Precedence between an exact host and a wildcard host is
 implementation-defined.** The Ingress specification says what a wildcard host
@@ -385,9 +395,9 @@ generators that answer different questions and stay separable.
 **The HOSTS** — `cmd/frontdoorhosts` writes `front-door.generated.yaml` into
 each instance overlay (`deploy/k8s/overlays/cloud` and `overlays/cloud-entry`)
 whole: the seven Ingress rules and the cert-manager `Certificate` with its
-exact-host SANs. Its whole input is the closed role set, the OS shell and the
-domain, and it emits ~440 lines from those — which is what earns generation for
-a listed target.
+exact-host SANs. Its whole input is the closed role set, the platform sites
+and the domain, and it emits ~500 lines from those — which is what earns
+generation for a listed target.
 
 The DNS-01 `ClusterIssuer` and the wildcard `Certificate` beside it
 (`dns01-wildcard-tls.yaml`, memql#4347) are **not** generated, for the same
@@ -506,9 +516,9 @@ Ingress and a `Certificate` of its own, one object pair each. It is still
 **cluster-owner-only**; what is no longer true is that somebody applies that
 pair by hand ([the custom-domain regime](#custom-domains-a-clients-own-name),
 epic memql#4805). And the wildcard covers exactly one label, so
-`shop.<domain>` is certified and `shop.eu.<domain>` is not. The OS shell is the
-one site whose rule and SAN the generator writes, because it is the two sites
-whose names are known before any row exists.
+`shop.<domain>` is certified and `shop.eu.<domain>` is not. The platform sites
+are the only sites whose rule and SAN the generator writes, because they are
+the sites whose names are known before any row exists.
 
 This is not a hole in "ArgoCD is the only deploy path". That rule is about the
 shape of the system: the edge Deployment lives in git and is reconciled like
@@ -517,9 +527,10 @@ a chat message is.
 
 Two consequences worth stating plainly:
 
-- **Adding an eighth host rule — a fourth ROLE — is a design change, not a
-  configuration change.** If a proposal needs one, the thing being added is
-  probably a site. `TestRenderedHostsAreExactlyTheProduct` fails on an eighth
+- **Adding an eighth host rule — a fourth ROLE or a third platform site — is
+  a design change, not a configuration change.** If a proposal needs one, the
+  thing being added is probably a site an operator creates, which the wildcard
+  already routes. `TestRenderedHostsAreExactlyTheProduct` fails on an eighth
   host rule that is not one of the seven.
 - **A wildcard DNS record is not a wildcard hosts file.** In the cloud
   `*.<domain>` resolves at the DNS layer and nothing local is involved. On a
@@ -774,7 +785,7 @@ The domain reaches every side through ONE derivation: `cmd/frontdoorhosts`
 composes the Ingress hosts and certificate SANs from it,
 `component/envregistry/domain.go` composes the issuer, CORS origins, redirect
 URIs and MCP public URL from it, and `component/memql`'s SeedMaterializer
-composes the OS site row's hostname from it — all through
+composes each platform site row's hostname from it — all through
 `component/frontdoor`. Two copies of that rule would be two copies that can
 disagree, and the disagreement is an issuer nothing is served at, or a
 certificate naming a host the site row does not carry — which fails as
