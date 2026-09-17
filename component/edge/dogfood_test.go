@@ -26,12 +26,14 @@ import (
 // platform's site, at which point banning "portal" alone guarded a site that
 // no longer exists. "portal" is KEPT -- a special case must not come back
 // under the old name either -- and the OS shell's own literals are added
-// beside it.
+// beside it. The VS Code landing page (memql#5518) is the second platform
+// site, seeded the same way, and its literals are banned the same way.
 //
-// The OS ban is by LITERAL (`app/os`, the seeded hostname) rather than by the
-// substring "os", which would match os.DirFS, Close, Hostname and most of
-// this package. A gate that cannot be written precisely is worse than no gate:
-// it gets disabled the first time it cries wolf.
+// The platform-site bans are by LITERAL (`app/os`, `app/vscode-site`, the
+// seeded hostnames) rather than by the substring "os" or "vscode", which would
+// match os.DirFS, Close, Hostname and most of this package. A gate that cannot
+// be written precisely is worse than no gate: it gets disabled the first time
+// it cries wolf.
 func TestPlatformSiteHasNoSpecialCaseInTheServingPath(t *testing.T) {
 	fset := token.NewFileSet()
 	entries, err := os.ReadDir(".")
@@ -54,7 +56,7 @@ func TestPlatformSiteHasNoSpecialCaseInTheServingPath(t *testing.T) {
 				return true
 			}
 			v := strings.ToLower(strings.Trim(lit.Value, `"`))
-			for _, banned := range []string{"portal", "app/os", "os.memql.localhost"} {
+			for _, banned := range []string{"portal", "app/os", "os.memql.localhost", "app/vscode-site", "vscode.memql.localhost"} {
 				if strings.Contains(v, banned) {
 					t.Errorf("%s:%d names the platform's own site in the serving path (%q): %s\n"+
 						"The platform's site is resolved and served exactly like any "+

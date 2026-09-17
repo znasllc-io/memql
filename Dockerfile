@@ -1,28 +1,32 @@
 # syntax=docker/dockerfile:1
 
-# SPA_DIST_STAGE selects which stage the runtime copies the MemQL OS bundle
-# from (memql#3314). It is a GLOBAL ARG -- declared before the first FROM --
+# SPA_DIST_STAGE selects which stage the runtime copies the built-in platform
+# sites from (memql#3314): the MemQL OS shell and, since memql#5518, the VS
+# Code landing page. It is a GLOBAL ARG -- declared before the first FROM --
 # because that is the only scope a `FROM ${VAR}` line can read.
 #
 # It was PORTAL_DIST_STAGE and its stages were portal-build / portal-skip /
 # portal-dist until epic memql#4984 retired the portal. The mechanism did not
 # change: the stage always built BOTH bundles, so the names outlived the thing
 # they named, and renaming beats leaving a `portal-build` stage that builds no
-# portal.
+# portal. The stage builds two bundles again now -- every site the platform
+# ships built-in -- and there is still exactly one selector, because the edge
+# is the only node that serves any of them.
 #
 # WHY A STAGE SELECTOR RATHER THAN AN UNCONDITIONAL COPY
 #
-# Only the edge serves the OS shell (component/edge; the OS is a site row whose
-# bundleRef is file:///app/os, memql#4705). A Dockerfile has no conditional
-# COPY, so the alternatives were: build the SPA in every node image (a Node
+# Only the edge serves hosted sites (component/edge; the OS is a site row whose
+# bundleRef is file:///app/os, memql#4705, and the VS Code page is one whose
+# bundleRef is file:///app/vscode-site). A Dockerfile has no conditional
+# COPY, so the alternatives were: build the sites in every node image (a Node
 # toolchain + npm install + vite build on all seven, for bytes six of them
 # never serve), or add a second runtime target and duplicate the runtime
 # stage. Naming the SOURCE stage instead costs one indirection and leaves
 # both runtime stages identical for every node type.
 #
 # BuildKit only builds stages that are actually referenced, so the default --
-# spa-skip, an empty directory -- means a non-edge build never pulls the Node
-# image and never runs npm. Its cost is one `mkdir` on a stage that was
+# spa-skip, two empty directories -- means a non-edge build never pulls the
+# Node image and never runs npm. Its cost is one `mkdir` on a stage that was
 # already built.
 #
 #   docker build --build-arg SPA_DIST_STAGE=spa-build ...   # with the SPA
@@ -302,17 +306,32 @@ COPY sdk/ts ./sdk/ts
 COPY clients/os ./clients/os
 COPY scripts/os ./scripts/os
 
-# The SAME script `make os-build` runs, so the image bundle and a locally built
-# one cannot diverge in how they were produced. Moved to /os-dist so both
-# alternatives of the SPA_DIST_STAGE selector expose the bundle at one path --
-# the runtime's COPY cannot branch on which stage it resolved to.
+# The VS Code landing page (editors/vscode/site, memql#5518) is the second
+# built-in platform site, served at vscode.<domain> from a seeded site row
+# exactly as the OS shell is. Its build is Node stdlib only -- no npm install
+# -- but it reads OUTSIDE its own directory, and every tree it reaches into
+# has to be in this stage's context or the release cut is the first place the
+# build runs without it (the memql#4266 shape, which
+# scripts/ci/spa_image_wiring_test.go asserts for both sites): the editor
+# themes it generates the code-colour CSS from, the research-desk example it
+# renders and offers for download, and brand/, copied above.
+COPY editors/vscode/themes ./editors/vscode/themes
+COPY editors/vscode/site ./editors/vscode/site
+COPY examples/research-desk ./examples/research-desk
+
+# The SAME commands `make os-build` and `make vscode-site-build` run, so the
+# image bundles and locally built ones cannot diverge in how they were
+# produced. Each is moved to a fixed path (/os-dist, /vscode-site-dist) so
+# both alternatives of the SPA_DIST_STAGE selector expose the bundles at one
+# path each -- the runtime's COPY cannot branch on which stage it resolved to.
 RUN bash scripts/os/build.sh build && mv clients/os/dist /os-dist
+RUN node editors/vscode/site/build.mjs && mv editors/vscode/site/dist /vscode-site-dist
 
 # spa-skip is the empty alternative the SPA_DIST_STAGE selector resolves to by
 # default. Derived FROM builder purely because that stage is already built --
-# it contributes one empty directory and pulls no additional image.
+# it contributes two empty directories and pulls no additional image.
 FROM builder AS spa-skip
-RUN mkdir -p /os-dist
+RUN mkdir -p /os-dist /vscode-site-dist
 
 FROM ${SPA_DIST_STAGE} AS spa-dist
 
@@ -361,10 +380,11 @@ WORKDIR /app
 
 COPY --from=builder /app/bin/memql ./memql
 COPY --from=builder /app/bin/healthcheck ./healthcheck
-# Same OS-bundle copy as every other runtime stage: empty for this node type, and
-# present so a stage selector change cannot silently ship an image with no
-# bundle directory at all.
+# Same site-bundle copies as every other runtime stage: empty for this node
+# type, and present so a stage selector change cannot silently ship an image
+# with no bundle directory at all.
 COPY --from=spa-dist /os-dist ./os
+COPY --from=spa-dist /vscode-site-dist ./vscode-site
 
 EXPOSE 8085 50051
 
@@ -399,14 +419,17 @@ COPY --from=builder /app/bin/healthcheck ./healthcheck
 # MEMQL_DSL_PATH is set at runtime to override the embedded tree
 # (dev/per-deploy patches). Cloud Run runs from the embedded copy.
 #
-# The MemQL OS bundle is the opposite: NEVER embedded, always a directory,
-# because embedding it would put a Node build in front of every Go build (see
-# component/edge/doc.go). /app/os is the directory the OS site seed's bundleRef
-# names (file:///app/os, dsl/platform/seeds.memql, memql#4705).
+# The built-in site bundles are the opposite: NEVER embedded, always a
+# directory, because embedding one would put a Node build in front of every Go
+# build (see component/edge/doc.go). /app/os is the directory the OS site
+# seed's bundleRef names (file:///app/os, dsl/platform/seeds.memql,
+# memql#4705); /app/vscode-site is what the VS Code landing page's seed names
+# (file:///app/vscode-site, memql#5518).
 # Empty for every node type except the edge -- a site whose bundle directory
 # is missing on disk 404s asset-by-asset rather than failing boot
 # (component/edge/handler.go resolves against whatever os.DirFS finds there).
 COPY --from=spa-dist /os-dist ./os
+COPY --from=spa-dist /vscode-site-dist ./vscode-site
 
 EXPOSE 8085 50051
 

@@ -3,13 +3,14 @@
 # and TestFrontDoorHostsAreNotStale fails the build until they are.
 #
 # The front door for the `cloud-entry` overlay, derived from the closed ROLE set plus
-# the platform's own site (memql#3767, memql#4224). The host COUNT never grows with
+# the platform's own sites (memql#3767, memql#4224). The host COUNT never grows with
 # customers, apps or sites, which is what the sites wildcard is for (memql#3700).
 #
 #   api          api.memql.localhost
 #   identity     identity.memql.localhost
 #   mcp          mcp.memql.localhost
 #   sites        os.memql.localhost
+#   sites        vscode.memql.localhost
 #   sites        *.memql.localhost
 #   sites        memql.localhost
 #
@@ -28,13 +29,14 @@
 # under tls (memql#4347). Where it does not -- the default -- the wildcard rule still has
 # no certificate behind it and a customer site hostname needs its own Certificate and
 # exact-host Ingress (docs/public/operate/site-hosting.md). Either way this generated
-# certificate names exact hosts only, because HTTP-01 cannot issue a wildcard. The OS shell
-# is the one site the generator can name in advance, so it is the one site with an exact
-# rule and a SAN here.
+# certificate names exact hosts only, because HTTP-01 cannot issue a wildcard. The platform
+# sites (component/frontdoor.PlatformSites: the OS shell and the VS Code landing page) are
+# the sites the generator can name in advance, so they are the sites with an exact rule
+# and a SAN here.
 #
 # THE DOMAIN IS A COMMITTED DEFAULT, NOT A CONSTANT (memql#3593). No file under deploy/
 # names a real domain: the domain is a value on the memql-domain ConfigMap, which every
-# node derives its issuer, CORS origins, redirect URIs and OS site hostname from at
+# node derives its issuer, CORS origins, redirect URIs and platform site hostnames from at
 # boot (component/envregistry/domain.go and component/memql's SeedMaterializer, threaded
 # through component/frontdoor so the hosts below and the hosts the nodes believe in
 # cannot disagree). An Ingress host is a Kubernetes API object, so it has to be in the
@@ -44,8 +46,8 @@
 #
 # NO ROUTER-PRIORITY ANNOTATIONS, unlike the local overlay's traefik front door. nginx
 # resolves server_name by specificity in its own core -- an exact name beats a leading
-# wildcard -- so the role hosts and the OS shell outrank *.<domain> without anything being
-# declared. That is a guarantee traefik does not give, which is why the local overlay
+# wildcard -- so the role hosts and the platform sites outrank *.<domain> without anything
+# being declared. That is a guarantee traefik does not give, which is why the local overlay
 # declares the ranking by hand and why doing it there went wrong once (memql#3810). Do
 # not copy that annotation here: it would be an unnecessary declaration of something
 # nginx already does, and Ingress-level priority is what flattened the api host's path
@@ -79,6 +81,7 @@ spec:
     - "identity.memql.localhost"
     - "mcp.memql.localhost"
     - "os.memql.localhost"
+    - "vscode.memql.localhost"
     - "memql.localhost"
 ---
 # The API edge's HTTP half.
@@ -413,25 +416,26 @@ spec:
                 port:
                   number: 8090
 ---
-# The MemQL OS shell -- the platform's own site, and the ONE site with an exact rule
-# of its own (memql#4705; the portal held this slot until epic memql#4984).
+# The `os` platform site -- a site the platform ships itself, and so one of the
+# sites with an exact rule of its own (memql#4705; the portal held the first such slot
+# until epic memql#4984, and the VS Code landing page joined the OS shell in memql#5518).
 #
-# To the edge the OS is a site like any other: the same Service the wildcard below
-# points at, resolved against the same v1:platform:site rows, no special path
+# To the edge a platform site is a site like any other: the same Service the wildcard
+# below points at, resolved against the same v1:platform:site rows, no special path
 # (component/edge's dogfood gate forbids one). It gets its own Ingress for a TLS reason
 # and only that (memql#4224): ingress-nginx creates a certificate-bearing server block
 # per RULE host, never per tls host. With only the *.<domain> rule, os.<domain> is
 # answered by the wildcard's server block, whose certificate is the controller's
 # self-signed default because no wildcard SAN can be issued over HTTP-01 -- exactly what
-# the first entry-shape cluster served to Safari. An exact rule gives the OS a server
+# the first entry-shape cluster served to Safari. An exact rule gives the site a server
 # block the certificate verifies for.
 #
-# It is the only site the generator can do this for, because it is the only site whose
-# name exists before an operator creates a row. The engine seeds that row's hostname
-# from MEMQL_DOMAIN through the same derivation that wrote this host
-# (component/frontdoor.OsHost), so the certificate cannot name a host the row does not
-# carry. The same Service and port as the edge Ingress below, deliberately: this is not
-# a second way to serve the OS, it is the first way with a certificate.
+# The platform sites are the only sites the generator can do this for, because they are
+# the only sites whose names exist before an operator creates a row. The engine seeds
+# each row's hostname from MEMQL_DOMAIN through the same derivation that wrote this host
+# (component/frontdoor.PlatformSiteHost), so the certificate cannot name a host the row
+# does not carry. The same Service and port as the edge Ingress below, deliberately: this
+# is not a second way to serve the site, it is the first way with a certificate.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -455,12 +459,55 @@ spec:
                 port:
                   number: 8085
 ---
+# The `vscode` platform site -- a site the platform ships itself, and so one of the
+# sites with an exact rule of its own (memql#4705; the portal held the first such slot
+# until epic memql#4984, and the VS Code landing page joined the OS shell in memql#5518).
+#
+# To the edge a platform site is a site like any other: the same Service the wildcard
+# below points at, resolved against the same v1:platform:site rows, no special path
+# (component/edge's dogfood gate forbids one). It gets its own Ingress for a TLS reason
+# and only that (memql#4224): ingress-nginx creates a certificate-bearing server block
+# per RULE host, never per tls host. With only the *.<domain> rule, vscode.<domain> is
+# answered by the wildcard's server block, whose certificate is the controller's
+# self-signed default because no wildcard SAN can be issued over HTTP-01 -- exactly what
+# the first entry-shape cluster served to Safari. An exact rule gives the site a server
+# block the certificate verifies for.
+#
+# The platform sites are the only sites the generator can do this for, because they are
+# the only sites whose names exist before an operator creates a row. The engine seeds
+# each row's hostname from MEMQL_DOMAIN through the same derivation that wrote this host
+# (component/frontdoor.PlatformSiteHost), so the certificate cannot name a host the row
+# does not carry. The same Service and port as the edge Ingress below, deliberately: this
+# is not a second way to serve the site, it is the first way with a certificate.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vscode-front-door
+  namespace: memql
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - "vscode.memql.localhost"
+      secretName: memql-front-door-tls
+  rules:
+    - host: vscode.memql.localhost
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: edge
+                port:
+                  number: 8085
+---
 # The site edge -- the wildcard and the apex, the last front-door rules that will ever
 # be added.
 #
 # Everything after this is a graph row. That is the whole of memql#3700's "a site is
 # data, not infrastructure": the host count is fixed by the closed ROLE set plus the
-# platform's own shell, and never grows with sites.
+# platform's own sites, and never grows with sites an operator creates.
 #
 # TLS NAMES THE APEX ONLY, IN THIS GENERATED BLOCK (memql#4224). The issuer here is
 # HTTP-01, which cannot issue *.<domain>, and listing the wildcard under tls against an
@@ -486,11 +533,11 @@ spec:
       secretName: memql-front-door-tls
   rules:
     # Every hosted site: every SPA or website the operator creates a v1:platform:site
-    # row for (the OS shell has its own rule above, for TLS; it is served exactly like
-    # these). ONE rule, forever -- the edge node resolves the request Host against the
-    # graph, so a new site is an upload plus a row write and the number of Kubernetes
-    # objects does not grow with it. What a new site does NOT get from this rule is a
-    # certificate: see the tls block above.
+    # row for (the platform sites have their own rules above, for TLS; they are served
+    # exactly like these). ONE rule, forever -- the edge node resolves the request Host
+    # against the graph, so a new site is an upload plus a row write and the number of
+    # Kubernetes objects does not grow with it. What a new site does NOT get from this
+    # rule is a certificate: see the tls block above.
     - host: "*.memql.localhost"
       http:
         paths:

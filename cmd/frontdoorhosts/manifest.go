@@ -41,9 +41,10 @@ const ingressClass = "nginx"
 // manifest renders one instance overlay's whole front door.
 //
 // The order is: certificate first (nothing else works without it), then the
-// roles in the order component/frontdoor declares them, then the OS shell, then
-// the sites wildcard and the apex. Stable, because a reordering would show up
-// as a diff in a generated file and cost a review round for nothing.
+// roles in the order component/frontdoor declares them, then each platform
+// site in the order frontdoor.PlatformSites declares them, then the sites
+// wildcard and the apex. Stable, because a reordering would show up as a diff
+// in a generated file and cost a review round for nothing.
 func manifest(overlay, domain, pathBlock string) string {
 	var b strings.Builder
 	b.WriteString(header(overlay, domain))
@@ -52,7 +53,9 @@ func manifest(overlay, domain, pathBlock string) string {
 	b.WriteString(apiGRPCIngress(domain))
 	b.WriteString(identityIngress(domain))
 	b.WriteString(mcpIngress(domain))
-	b.WriteString(osIngress(domain))
+	for _, site := range frontdoor.PlatformSites() {
+		b.WriteString(platformSiteIngress(site, domain))
+	}
 	b.WriteString(edgeIngress(domain))
 	return b.String()
 }
@@ -69,7 +72,7 @@ func header(overlay, domain string) string {
 		"# and TestFrontDoorHostsAreNotStale fails the build until they are.\n" +
 		"#\n" +
 		"# The front door for the `" + overlay + "` overlay, derived from the closed ROLE set plus\n" +
-		"# the platform's own site (memql#3767, memql#4224). The host COUNT never grows with\n" +
+		"# the platform's own sites (memql#3767, memql#4224). The host COUNT never grows with\n" +
 		"# customers, apps or sites, which is what the sites wildcard is for (memql#3700).\n" +
 		"#\n" +
 		rows.String() +
@@ -89,13 +92,14 @@ func header(overlay, domain string) string {
 		"# under tls (memql#4347). Where it does not -- the default -- the wildcard rule still has\n" +
 		"# no certificate behind it and a customer site hostname needs its own Certificate and\n" +
 		"# exact-host Ingress (docs/public/operate/site-hosting.md). Either way this generated\n" +
-		"# certificate names exact hosts only, because HTTP-01 cannot issue a wildcard. The OS shell\n" +
-		"# is the one site the generator can name in advance, so it is the one site with an exact\n" +
-		"# rule and a SAN here.\n" +
+		"# certificate names exact hosts only, because HTTP-01 cannot issue a wildcard. The platform\n" +
+		"# sites (component/frontdoor.PlatformSites: the OS shell and the VS Code landing page) are\n" +
+		"# the sites the generator can name in advance, so they are the sites with an exact rule\n" +
+		"# and a SAN here.\n" +
 		"#\n" +
 		"# THE DOMAIN IS A COMMITTED DEFAULT, NOT A CONSTANT (memql#3593). No file under deploy/\n" +
 		"# names a real domain: the domain is a value on the memql-domain ConfigMap, which every\n" +
-		"# node derives its issuer, CORS origins, redirect URIs and OS site hostname from at\n" +
+		"# node derives its issuer, CORS origins, redirect URIs and platform site hostnames from at\n" +
 		"# boot (component/envregistry/domain.go and component/memql's SeedMaterializer, threaded\n" +
 		"# through component/frontdoor so the hosts below and the hosts the nodes believe in\n" +
 		"# cannot disagree). An Ingress host is a Kubernetes API object, so it has to be in the\n" +
@@ -105,8 +109,8 @@ func header(overlay, domain string) string {
 		"#\n" +
 		"# NO ROUTER-PRIORITY ANNOTATIONS, unlike the local overlay's traefik front door. nginx\n" +
 		"# resolves server_name by specificity in its own core -- an exact name beats a leading\n" +
-		"# wildcard -- so the role hosts and the OS shell outrank *.<domain> without anything being\n" +
-		"# declared. That is a guarantee traefik does not give, which is why the local overlay\n" +
+		"# wildcard -- so the role hosts and the platform sites outrank *.<domain> without anything\n" +
+		"# being declared. That is a guarantee traefik does not give, which is why the local overlay\n" +
 		"# declares the ranking by hand and why doing it there went wrong once (memql#3810). Do\n" +
 		"# not copy that annotation here: it would be an unnecessary declaration of something\n" +
 		"# nginx already does, and Ingress-level priority is what flattened the api host's path\n" +
@@ -332,34 +336,41 @@ func mcpIngress(domain string) string {
 		pathRule("/", "mcp", 8090)
 }
 
-// osIngress is the OS shell's own exact-host rule (memql#4705).
-func osIngress(domain string) string {
-	host := frontdoor.OsHost(domain)
+// platformSiteIngress is one platform site's own exact-host rule: the OS shell
+// (memql#4705) and the VS Code landing page (memql#5518), one Ingress each,
+// named `<site>-front-door`.
+//
+// One function rather than one per site, because the two are the same rule
+// with a different host: a third platform site is an entry in
+// frontdoor.PlatformSites and a seed, never a copy of this block.
+func platformSiteIngress(site, domain string) string {
+	host := frontdoor.PlatformSiteHost(site, domain)
 
 	return "---\n" +
-		"# The MemQL OS shell -- the platform's own site, and the ONE site with an exact rule\n" +
-		"# of its own (memql#4705; the portal held this slot until epic memql#4984).\n" +
+		"# The `" + site + "` platform site -- a site the platform ships itself, and so one of the\n" +
+		"# sites with an exact rule of its own (memql#4705; the portal held the first such slot\n" +
+		"# until epic memql#4984, and the VS Code landing page joined the OS shell in memql#5518).\n" +
 		"#\n" +
-		"# To the edge the OS is a site like any other: the same Service the wildcard below\n" +
-		"# points at, resolved against the same v1:platform:site rows, no special path\n" +
+		"# To the edge a platform site is a site like any other: the same Service the wildcard\n" +
+		"# below points at, resolved against the same v1:platform:site rows, no special path\n" +
 		"# (component/edge's dogfood gate forbids one). It gets its own Ingress for a TLS reason\n" +
 		"# and only that (memql#4224): ingress-nginx creates a certificate-bearing server block\n" +
-		"# per RULE host, never per tls host. With only the *.<domain> rule, os.<domain> is\n" +
+		"# per RULE host, never per tls host. With only the *.<domain> rule, " + site + ".<domain> is\n" +
 		"# answered by the wildcard's server block, whose certificate is the controller's\n" +
 		"# self-signed default because no wildcard SAN can be issued over HTTP-01 -- exactly what\n" +
-		"# the first entry-shape cluster served to Safari. An exact rule gives the OS a server\n" +
+		"# the first entry-shape cluster served to Safari. An exact rule gives the site a server\n" +
 		"# block the certificate verifies for.\n" +
 		"#\n" +
-		"# It is the only site the generator can do this for, because it is the only site whose\n" +
-		"# name exists before an operator creates a row. The engine seeds that row's hostname\n" +
-		"# from MEMQL_DOMAIN through the same derivation that wrote this host\n" +
-		"# (component/frontdoor.OsHost), so the certificate cannot name a host the row does not\n" +
-		"# carry. The same Service and port as the edge Ingress below, deliberately: this is not\n" +
-		"# a second way to serve the OS, it is the first way with a certificate.\n" +
+		"# The platform sites are the only sites the generator can do this for, because they are\n" +
+		"# the only sites whose names exist before an operator creates a row. The engine seeds\n" +
+		"# each row's hostname from MEMQL_DOMAIN through the same derivation that wrote this host\n" +
+		"# (component/frontdoor.PlatformSiteHost), so the certificate cannot name a host the row\n" +
+		"# does not carry. The same Service and port as the edge Ingress below, deliberately: this\n" +
+		"# is not a second way to serve the site, it is the first way with a certificate.\n" +
 		"apiVersion: networking.k8s.io/v1\n" +
 		"kind: Ingress\n" +
 		"metadata:\n" +
-		"  name: os-front-door\n" +
+		"  name: " + site + "-front-door\n" +
 		"  namespace: memql\n" +
 		"spec:\n" +
 		"  ingressClassName: " + ingressClass + "\n" +
@@ -377,11 +388,11 @@ func edgeIngress(domain string) string {
 
 	rules := "" +
 		"    # Every hosted site: every SPA or website the operator creates a v1:platform:site\n" +
-		"    # row for (the OS shell has its own rule above, for TLS; it is served exactly like\n" +
-		"    # these). ONE rule, forever -- the edge node resolves the request Host against the\n" +
-		"    # graph, so a new site is an upload plus a row write and the number of Kubernetes\n" +
-		"    # objects does not grow with it. What a new site does NOT get from this rule is a\n" +
-		"    # certificate: see the tls block above.\n" +
+		"    # row for (the platform sites have their own rules above, for TLS; they are served\n" +
+		"    # exactly like these). ONE rule, forever -- the edge node resolves the request Host\n" +
+		"    # against the graph, so a new site is an upload plus a row write and the number of\n" +
+		"    # Kubernetes objects does not grow with it. What a new site does NOT get from this\n" +
+		"    # rule is a certificate: see the tls block above.\n" +
 		"    - host: " + fmt.Sprintf("%q", wildcard) + "\n" +
 		"      http:\n" +
 		"        paths:\n" +
@@ -401,7 +412,7 @@ func edgeIngress(domain string) string {
 		"#\n" +
 		"# Everything after this is a graph row. That is the whole of memql#3700's \"a site is\n" +
 		"# data, not infrastructure\": the host count is fixed by the closed ROLE set plus the\n" +
-		"# platform's own shell, and never grows with sites.\n" +
+		"# platform's own sites, and never grows with sites an operator creates.\n" +
 		"#\n" +
 		"# TLS NAMES THE APEX ONLY, IN THIS GENERATED BLOCK (memql#4224). The issuer here is\n" +
 		"# HTTP-01, which cannot issue *.<domain>, and listing the wildcard under tls against an\n" +

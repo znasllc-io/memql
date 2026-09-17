@@ -12,7 +12,11 @@ node_modules
 **/node_modules
 .DS_Store
 deploy/k8s
-# A host-built SPA bundle must never enter the build context: the image's
-# bundle is produced by the Dockerfile's own spa stage, from source, and a
-# stale dist/ copied in would be indistinguishable from a fresh one.
+# A host-built site bundle must never enter the build context: the image's
+# bundles (the OS shell and the VS Code landing page, memql#5518) are produced
+# by the Dockerfile's own spa stage, from source, and a stale dist/ copied in
+# would be indistinguishable from a fresh one. The page's browser-test
+# screenshots are review evidence, not source.
 clients/os/dist
+editors/vscode/site/dist
+editors/vscode/site/artifacts

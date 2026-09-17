@@ -14,9 +14,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// The six hosts the front door serves (design D3, plus the OS shell's own exact
-// rule from memql#4224). The COUNT is the invariant: it must not grow with
-// customers, apps or sites.
+// The seven hosts the front door serves (design D3, plus the platform sites'
+// own exact rules from memql#4224: the OS shell and the VS Code landing page).
+// The COUNT is the invariant: it must not grow with customers, apps or sites.
 //
 // COMPUTED from component/frontdoor rather than listed, since memql#3767. Local
 // is ONE environment (TestLocalStaysOneEnvironment) and it is the UNPREFIXED
@@ -24,7 +24,7 @@ import (
 // default domain -- the same set cmd/frontdoorhosts writes into the two cloud
 // overlays.
 //
-// The point of computing it is that this overlay's five front-door files stay
+// The point of computing it is that this overlay's six front-door files stay
 // HAND-AUTHORED, and deliberately so: they are traefik rather than nginx, and
 // they carry the measured reasoning for a priority ranking that broke the API
 // once already (memql#3810). Hand-authored is not the same as unchecked. This
@@ -32,15 +32,17 @@ import (
 // defaults cannot drift from what the cloud overlay serves -- which is what
 // would make the local cluster stop proving anything about the cloud one.
 //
-// The OS shell is the host this gate most needs to keep honest: locally the
-// mkcert wildcard covers os.memql.localhost whether or not an exact rule
-// exists, so a developer would never notice the rule missing. In the cloud the
-// certificate names exact hosts only (HTTP-01 cannot issue a wildcard), and
-// without the rule the OS serves the ingress controller's self-signed default.
-// Same six rules everywhere is what lets local prove the shape. (It was the
-// portal's rule that taught this, and the portal was retired in epic
-// memql#4984 -- the OS inherited the exception whole, and TestTheOsRuleReachesTheEdge
-// below is the portal test renamed rather than a new one.)
+// The platform sites are the hosts this gate most needs to keep honest: locally
+// the mkcert wildcard covers os.memql.localhost and vscode.memql.localhost
+// whether or not an exact rule exists, so a developer would never notice a rule
+// missing. In the cloud the certificate names exact hosts only (HTTP-01 cannot
+// issue a wildcard), and without the rule the site serves the ingress
+// controller's self-signed default. Same seven rules everywhere is what lets
+// local prove the shape. (It was the portal's rule that taught this, and the
+// portal was retired in epic memql#4984 -- the OS inherited the exception
+// whole, the VS Code landing page joined it in memql#5518, and
+// TestEachPlatformSiteRuleReachesTheEdge below is the portal test generalized
+// rather than a new one.)
 var frontDoorHosts = func() []string {
 	var out []string
 	for _, h := range frontdoor.Hosts("memql.localhost") {
@@ -111,25 +113,34 @@ func TestNoSecondEntranceToIdentity(t *testing.T) {
 	}
 }
 
-func TestTheOsRuleReachesTheEdge(t *testing.T) {
+// TestEachPlatformSiteRuleReachesTheEdge: every platform site
+// (frontdoor.PlatformSites) has a hand-authored exact rule here, pointing at
+// svc/edge and declaring no router.priority -- the local mirror of the rule the
+// cloud generator emits per site. Iterated rather than written per site so a
+// site the derivation names and this overlay forgot fails here rather than
+// being covered by the mkcert wildcard and noticed only in the cloud.
+func TestEachPlatformSiteRuleReachesTheEdge(t *testing.T) {
 	rendered := render(t)
-	osHost := frontdoor.OsHost("memql.localhost")
 
-	var found bool
-	for _, doc := range strings.Split(rendered, "\n---\n") {
-		if !strings.Contains(doc, "kind: Ingress") || !strings.Contains(doc, "host: "+osHost) {
-			continue
+	for _, site := range frontdoor.PlatformSites() {
+		host := frontdoor.PlatformSiteHost(site, "memql.localhost")
+
+		var found bool
+		for _, doc := range strings.Split(rendered, "\n---\n") {
+			if !strings.Contains(doc, "kind: Ingress") || !strings.Contains(doc, "host: "+host) {
+				continue
+			}
+			found = true
+			if !strings.Contains(doc, "name: edge") {
+				t.Errorf("the Ingress serving %q does not point at svc/edge; a platform site is a site and takes the site path", host)
+			}
+			if strings.Contains(doc, "router.priority") {
+				t.Errorf("the Ingress serving %q declares a router.priority; precedence is declared on the wildcard only (memql#3810)", host)
+			}
 		}
-		found = true
-		if !strings.Contains(doc, "name: edge") {
-			t.Errorf("the Ingress serving %q does not point at svc/edge; the OS is a site and takes the site path", osHost)
+		if !found {
+			t.Errorf("no Ingress in the rendered overlay carries an exact rule for %q (platform site %q)", host, site)
 		}
-		if strings.Contains(doc, "router.priority") {
-			t.Errorf("the Ingress serving %q declares a router.priority; precedence is declared on the wildcard only (memql#3810)", osHost)
-		}
-	}
-	if !found {
-		t.Fatalf("no Ingress in the rendered overlay carries an exact rule for %q", osHost)
 	}
 }
 

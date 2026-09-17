@@ -393,9 +393,10 @@ func TestUserSiteHostnamePolicy(t *testing.T) {
 	}
 }
 
-// The reserved list is DERIVED from the front door's own role set plus the OS
-// shell, not re-listed. A second copy would mean adding a front-door role
-// silently opens its hostname to the first user who asks for it.
+// The reserved list is DERIVED from the front door's own role set plus the
+// platform sites, not re-listed. A second copy would mean adding a front-door
+// role or a platform site silently opens its hostname to the first user who
+// asks for it.
 func TestReservedSiteLabelsCoverEveryFrontDoorRole(t *testing.T) {
 	reserved := reservedSiteLabels()
 	for _, r := range frontdoor.Roles() {
@@ -405,8 +406,17 @@ func TestReservedSiteLabelsCoverEveryFrontDoorRole(t *testing.T) {
 				frontdoor.RoleHost(r, "example.com"))
 		}
 	}
+	for _, site := range frontdoor.PlatformSites() {
+		if !reserved[site] {
+			t.Errorf("platform site %q's own label is not reserved. A user could claim %q",
+				site, frontdoor.PlatformSiteHost(site, "example.com"))
+		}
+	}
 	if !reserved[frontdoor.OsSite] {
 		t.Error("the OS shell's own label is not reserved")
+	}
+	if !reserved[frontdoor.VSCodeSite] {
+		t.Error("the VS Code landing page's own label is not reserved")
 	}
 	// `portal` is no longer a front-door host and is STILL reserved, as a
 	// squat label (epic memql#4984). Un-reserving a label is a one-way door,
@@ -422,10 +432,10 @@ func TestReservedSiteLabelsCoverEveryFrontDoorRole(t *testing.T) {
 	}
 	// And nothing beyond those: an over-broad reserved list refuses names for
 	// no stated reason, which is how a list acquires entries nobody can defend.
-	if want := len(frontdoor.Roles()) + 1 + len(squatReservedSiteLabels); len(reserved) != want {
-		t.Errorf("the reserved set holds %d labels, want %d (%d roles + os + %d squat "+
+	if want := len(frontdoor.Roles()) + len(frontdoor.PlatformSites()) + len(squatReservedSiteLabels); len(reserved) != want {
+		t.Errorf("the reserved set holds %d labels, want %d (%d roles + %d platform sites + %d squat "+
 			"labels). Every entry needs a reason recorded beside it",
-			len(reserved), want, len(frontdoor.Roles()), len(squatReservedSiteLabels))
+			len(reserved), want, len(frontdoor.Roles()), len(frontdoor.PlatformSites()), len(squatReservedSiteLabels))
 	}
 }
 

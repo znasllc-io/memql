@@ -54,28 +54,38 @@ new headless process and never attaches to an existing browser. Screenshots go
 to the ignored `artifacts/` directory, outside the deployable bundle.
 
 The [CI workflow](../../../.github/workflows/vscode-site.yml) builds and tests
-the page and retains the static bundle and screenshots. It publishes nothing.
+the page and keeps the built page and screenshots for review. It is a check,
+not a publish.
 
-## Deployable artifact
+## Hosting: a built-in platform site
 
-`dist/` is the complete artifact: static files with `index.html` at the root.
-It follows the repository's [site hosting contract](../../../docs/public/operate/site-hosting.md).
-Serve it at a hostname's root, or at a static host subdirectory with a trailing
-slash. Relative asset paths support either. No SPA fallback is required.
+The page is a built-in platform site, hosted the same way MemQL OS is
+(memql#5518). The edge image builds it in the Dockerfile's `spa-build` stage --
+the stage that also builds the OS shell -- and copies the output to
+`/app/vscode-site`. A seeded, system-owned site row
+([`dsl/platform/seeds.memql`](../../../dsl/platform/seeds.memql), bundleRef
+`file:///app/vscode-site`) names that directory, and the edge serves it at
+`vscode.<domain>` -- locally `https://vscode.memql.localhost/` after `make up`.
+Nothing is published by hand: a change to the page ships with the next edge
+image, and the site row is seeded on boot like the OS shell's.
 
-For MemQL hosting, publish the built directory through the existing Deployables /
-site bundle workflow, then associate the resulting bundle with the intended site
-and hostname. The source tree needs the repository root as build context because
-it reads `brand/`, `editors/vscode/themes/`, and `examples/research-desk/`; the output directory is
-`editors/vscode/site/dist`. Do not use `editors/vscode/site` alone as the build
-context. The edge must be able to read the published bundle; a developer's local
-filesystem path is not a path inside the edge pod.
+`make vscode-site-build` is the local build: the same `npm run build && npm run
+check` the image stage runs, so a locally built `dist/` and the image bundle
+cannot differ in how they were produced. `dist/` has `index.html` at the root
+and follows the repository's
+[site hosting contract](../../../docs/public/operate/site-hosting.md); relative
+asset paths mean it also serves from a static host subdirectory with a trailing
+slash, and no SPA fallback is required.
+
+The build needs the repository root as its context because it reads `brand/`,
+`editors/vscode/themes/`, and `examples/research-desk/`; the `spa-build` stage
+copies exactly those trees, and `scripts/ci/spa_image_wiring_test.go` derives
+the list from `build.mjs` so a new read outside `editors/vscode/site` fails a
+test before it fails a release cut.
 
 Use external scripts and same-origin assets; the page is compatible with the
 edge's script/style/font policy without adding inline-script permission. The
 preview server is only a local inspection tool, not the deployment server.
-Public publishing and cluster/site-row changes are separate actions and have
-not been performed by this build.
 
 ## Content and verification
 

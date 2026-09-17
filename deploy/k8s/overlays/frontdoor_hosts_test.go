@@ -1,8 +1,9 @@
 // Package overlays -- the front-door render gates (memql#3767, memql#4224, memql#4347).
 //
 // WHY A TEST AND NOT A REVIEW. The host set is a DERIVATION -- three roles plus
-// the OS shell plus the sites wildcard plus the apex -- written into ~400 lines
-// of Ingress and Certificate by a generator. A host missing a rule is a service
+// the platform sites (the OS shell and the VS Code landing page) plus the sites
+// wildcard plus the apex -- written into ~500 lines of Ingress and Certificate
+// by a generator. A host missing a rule is a service
 // nothing can reach at the name every client was told to dial: nothing fails to
 // build, nothing fails to reconcile, and the symptom arrives whenever somebody
 // first dials it.
@@ -43,8 +44,8 @@
 //	under this regime the omission is the bug.
 //
 // The two overlays are in the MIXED state today, deliberately: letsencrypt-prod
-// still issues the exact-host certificate for api / identity / mcp / os and
-// the apex, and letsencrypt-dns01 issues one additional certificate for the
+// still issues the exact-host certificate for api / identity / mcp / os /
+// vscode and the apex, and letsencrypt-dns01 issues one additional certificate for the
 // sites plane. Nothing here waves that through as a special case --
 // TestBothOverlaysDeclareTheDNS01Issuer states it, so a regression to either
 // single regime fails rather than being absorbed.
@@ -90,7 +91,7 @@ var generatedOverlays = []string{cloudOverlay, entryOverlay}
 // select by Secret name.
 var frontDoorIngressNames = []string{
 	"api-front-door", "api-front-door-grpc", "identity-front-door",
-	"mcp-front-door", "os-front-door", "edge-front-door",
+	"mcp-front-door", "os-front-door", "vscode-front-door", "edge-front-door",
 }
 
 // hostsIn returns every Ingress rule host in a rendered stream. Parsed by line
@@ -546,49 +547,67 @@ func TestEveryRequestedSANIsAHostTheFrontDoorServes(t *testing.T) {
 	}
 }
 
-// TestTheOsHasItsOwnExactRuleToTheEdge pins the mechanism of the memql#4224
-// fix, which the OS shell now carries alone (memql#4705; the portal held this
-// slot and had a twin of this test until epic memql#4984).
+// TestEachPlatformSiteHasItsOwnExactRuleToTheEdge pins the mechanism of the
+// memql#4224 fix, which every platform site carries (memql#4705 for the OS
+// shell, memql#5518 for the VS Code landing page; the portal held the first
+// such slot and had a twin of this test until epic memql#4984).
 //
-// A tls entry for os.<domain> on the wildcard Ingress would NOT be enough --
-// ingress-nginx has no server block to attach it to -- so the OS carries an
-// exact rule of its own, pointing at the same edge Service the wildcard does.
-// The wildcard rule stays: it is how every other site reaches the edge.
+// A tls entry for <site>.<domain> on the wildcard Ingress would NOT be enough
+// -- ingress-nginx has no server block to attach it to -- so each platform site
+// carries an exact rule of its own, pointing at the same edge Service the
+// wildcard does. The wildcard rule stays: it is how every other site reaches
+// the edge.
 //
-// The DNS-01 wildcard certificate does not retire this rule. It removes the
-// CERTIFICATE reason the OS needs one, not the server-block reason: nginx
-// still builds a certificate-bearing server block per rule host, and the OS's
-// exact rule is what outranks the wildcard for that name.
-func TestTheOsHasItsOwnExactRuleToTheEdge(t *testing.T) {
-	osHost := frontdoor.OsHost(committedDomain)
+// Iterated over frontdoor.PlatformSites rather than written per site, so a
+// platform site the derivation names and the generator forgot fails here
+// instead of being served from the wildcard's server block with no SAN.
+//
+// The DNS-01 wildcard certificate does not retire these rules. It removes the
+// CERTIFICATE reason a platform site needs one, not the server-block reason:
+// nginx still builds a certificate-bearing server block per rule host, and the
+// site's exact rule is what outranks the wildcard for that name.
+func TestEachPlatformSiteHasItsOwnExactRuleToTheEdge(t *testing.T) {
 	wildcard := frontdoor.SitesWildcard(committedDomain)
 
 	for _, overlay := range generatedOverlays {
 		t.Run(overlay, func(t *testing.T) {
-			var sawOs, sawWildcard bool
-			for _, ing := range frontDoorIngresses(t, render(t, overlay)) {
+			ingresses := frontDoorIngresses(t, render(t, overlay))
+
+			var sawWildcard bool
+			for _, ing := range ingresses {
 				for _, r := range ing.Spec.Rules {
-					switch r.Host {
-					case wildcard:
+					if r.Host == wildcard {
 						sawWildcard = true
-					case osHost:
-						sawOs = true
+					}
+				}
+			}
+			if !sawWildcard {
+				t.Errorf("the %s overlay has no %q rule; every other site reaches the edge through it", overlay, wildcard)
+			}
+
+			for _, site := range frontdoor.PlatformSites() {
+				host := frontdoor.PlatformSiteHost(site, committedDomain)
+				var saw bool
+				for _, ing := range ingresses {
+					for _, r := range ing.Spec.Rules {
+						if r.Host != host {
+							continue
+						}
+						saw = true
 						for _, p := range r.HTTP.Paths {
 							if p.Backend.Service.Name != "edge" {
-								t.Errorf("the OS rule on %s points at Service %q, want edge -- the OS is a site "+
-									"and takes the site path; the exact rule exists for TLS only",
-									ing.Metadata.Name, p.Backend.Service.Name)
+								t.Errorf("the %s rule on %s points at Service %q, want edge -- a platform site is a "+
+									"site and takes the site path; the exact rule exists for TLS only",
+									site, ing.Metadata.Name, p.Backend.Service.Name)
 							}
 						}
 					}
 				}
-			}
-			if !sawOs {
-				t.Errorf("the %s overlay has no exact Ingress rule for %q; ingress-nginx then answers it from the "+
-					"wildcard's server block with its self-signed default certificate (memql#4224 / #4705)", overlay, osHost)
-			}
-			if !sawWildcard {
-				t.Errorf("the %s overlay has no %q rule; every other site reaches the edge through it", overlay, wildcard)
+				if !saw {
+					t.Errorf("the %s overlay has no exact Ingress rule for %q; ingress-nginx then answers it from the "+
+						"wildcard's server block with its self-signed default certificate (memql#4224 / #4705 / #5518)",
+						overlay, host)
+				}
 			}
 		})
 	}

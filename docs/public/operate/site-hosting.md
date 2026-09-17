@@ -222,7 +222,11 @@ coupled to, an engine deploy.
 The OS shell itself is the worked example of the baked case: its row's
 `bundleRef` is `file:///app/os` (`dsl/platform/seeds.memql`), because
 the platform's own console has to resolve the moment the cluster boots and
-rolls out exactly on the engine's own cadence. A customer's storefront is
+rolls out exactly on the engine's own cadence. The VS Code landing page is
+the second baked case (memql#5518): seeded from the same file with
+`bundleRef` `file:///app/vscode-site` and `kind: "static"` (plain files with
+`index.html` at the root, so no SPA fallback), built into the edge image the
+way the OS is, and served at `vscode.<domain>`. A customer's storefront is
 the opposite case -- it will change far more often than the engine does, so
 `blob://` is almost always the right choice for one.
 
@@ -353,7 +357,7 @@ be added to the managed block `scripts/install/hosts-entries.sh` owns
 
 > **WARNING: `--action=add` REPLACES the managed block; it does not merge
 > into it.** Passing only your new hostname drops `api.`, `identity.`,
-> `mcp.`, `os.` and the apex from `/etc/hosts` along with it --
+> `mcp.`, `os.`, `vscode.` and the apex from `/etc/hosts` along with it --
 > `render()`'s `upsert` mode discards every line of the existing managed
 > block before writing the new one
 > (`scripts/install/hosts-entries.sh`). Pass the **complete** set you want
@@ -361,7 +365,7 @@ be added to the managed block `scripts/install/hosts-entries.sh` owns
 
 ```bash
 sudo scripts/install/hosts-entries.sh --action=add \
-  --hostnames=api.memql.localhost,identity.memql.localhost,mcp.memql.localhost,os.memql.localhost,memql.localhost,shop.memql.localhost \
+  --hostnames=api.memql.localhost,identity.memql.localhost,mcp.memql.localhost,os.memql.localhost,vscode.memql.localhost,memql.localhost,shop.memql.localhost \
   --confirm=add-memql-hosts
 ```
 

@@ -648,14 +648,23 @@ dictates the wire (a browser, a mail client, a probe, a third-party webhook).
 ### The front door's HOST set is generated too (memql#3767)
 
 The host set is DERIVED from the closed **role** set plus the platform's own
-site, not maintained as a list:
+sites (`frontdoor.PlatformSites()`: the OS shell and the VS Code landing
+page), not maintained as a list:
 
 | Role | Host |
 |---|---|
 | api | `api.<domain>` |
 | identity | `identity.<domain>` |
 | mcp | `mcp.<domain>` |
-| sites | `os.<domain>` (the platform's own site, its own exact rule), `*.<domain>`, plus the apex |
+| sites | `os.<domain>` and `vscode.<domain>` (the platform's own sites, an exact rule each), `*.<domain>`, plus the apex |
+
+**A platform site is a seeded `v1:platform:site` row, not a role** (issue
+memql#5518). Both are `systemOwned`, both are directories the edge image
+ships (`/app/os`, `/app/vscode-site`, built in the Dockerfile's `spa-build`
+stage for the edge only), and both are served through the same resolver as a
+customer's site. Adding a third is one entry in `PlatformSites()`, one seed in
+`dsl/platform/seeds.memql`, one build step, and one hand-authored local rule;
+the generator, the reserved-label set and the render gates iterate the set.
 
 **Every host is a SINGLE label under the domain, and that is a ROUTING fact.**
 An Ingress wildcard matches exactly ONE label, so the one `*.<domain>` rule
@@ -668,14 +677,14 @@ exact rule hosts under `tls` (`deploy/k8s/overlays/frontdoor_hosts_test.go`
 gates it). The wildcard RULE gets a certificate only where the overlay
 declares a DNS-01 issuer, which the cloud overlay does (memql#4347) with a
 wildcard Certificate on the edge Ingress; the render gate reads the SOLVER,
-not the issuer's name. The OS shell carries an exact rule because
+not the issuer's name. Each platform site carries an exact rule because
 ingress-nginx builds a certificate-bearing server block per RULE host.
 
 `cmd/frontdoorhosts` writes `front-door.generated.yaml` into each instance
 overlay; `component/envregistry/domain.go` composes the node's own issuer / CORS
 origins / redirect URIs from the SAME rule through `component/frontdoor`; and
-`component/memql`'s SeedMaterializer seeds the OS site row's hostname from
-it. One derivation, three consumers -- a second copy would disagree, and the
+`component/memql`'s SeedMaterializer seeds every platform site row's hostname
+from it. One derivation, three consumers -- a second copy would disagree, and the
 disagreement is an issuer nothing is served at, which presents as "sign-in is
 broken" with every manifest looking correct.
 

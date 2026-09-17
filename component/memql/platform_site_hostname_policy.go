@@ -103,9 +103,10 @@ const defaultSiteDomain = "memql.localhost"
 // door does not already name.
 //
 // The front door's own labels come from frontdoor.Roles() and
-// frontdoor.OsSite rather than being re-listed here, so a new role reserves
-// its label automatically -- the failure mode of a second copy is that adding a
-// role silently opens its hostname to the first user who asks for it.
+// frontdoor.PlatformSites() rather than being re-listed here, so a new role or
+// platform site reserves its label automatically -- the failure mode of a
+// second copy is that adding one silently opens its hostname to the first user
+// who asks for it.
 //
 // These four are different: nothing in the cluster serves www / admin / mail /
 // portal today, and that is exactly why they are reserved. They are the labels
@@ -124,11 +125,13 @@ var squatReservedSiteLabels = []string{"www", "admin", "mail", "portal"}
 // reservedSiteLabels is the closed set of labels a user may not claim, keyed
 // lowercase.
 func reservedSiteLabels() map[string]bool {
-	out := make(map[string]bool, len(frontdoor.Roles())+1+len(squatReservedSiteLabels))
+	out := make(map[string]bool, len(frontdoor.Roles())+len(frontdoor.PlatformSites())+len(squatReservedSiteLabels))
 	for _, r := range frontdoor.Roles() {
 		out[string(r)] = true
 	}
-	out[frontdoor.OsSite] = true
+	for _, s := range frontdoor.PlatformSites() {
+		out[s] = true
+	}
 	for _, l := range squatReservedSiteLabels {
 		out[l] = true
 	}
@@ -216,14 +219,14 @@ func validateUserSiteHostname(hostname, domain string) error {
 
 // sortedReservedSiteLabels renders the reserved set for an error message in a
 // stable order (front-door roles first, in the order the manifests emit them,
-// then the OS shell, then the squat list) so the message does not shuffle
-// between runs of a map iteration.
+// then the platform sites in theirs, then the squat list) so the message does
+// not shuffle between runs of a map iteration.
 func sortedReservedSiteLabels() []string {
-	out := make([]string, 0, len(frontdoor.Roles())+1+len(squatReservedSiteLabels))
+	out := make([]string, 0, len(frontdoor.Roles())+len(frontdoor.PlatformSites())+len(squatReservedSiteLabels))
 	for _, r := range frontdoor.Roles() {
 		out = append(out, string(r))
 	}
-	out = append(out, frontdoor.OsSite)
+	out = append(out, frontdoor.PlatformSites()...)
 	out = append(out, squatReservedSiteLabels...)
 	return out
 }

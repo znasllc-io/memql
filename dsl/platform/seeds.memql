@@ -47,3 +47,39 @@ seed site os {
   systemOwned: true
   title:       "MemQL OS"
 }
+
+/// The landing page for the MemQL extension for Visual Studio Code and Cursor,
+/// as the SECOND platform site (memql#5518).
+///
+/// Everything the OS seed above says about being seeded rather than
+/// special-cased holds here too: the source is editors/vscode/site, built into
+/// the edge image at /app/vscode-site exactly the way the OS is at /app/os, so
+/// bundleRef is file:///app/vscode-site and a deploy of the page is an image
+/// rollout. It is served at vscode.<domain> -- a named front-door host with its
+/// own exact Ingress rule and certificate SAN, one of frontdoor.PlatformSites().
+///
+/// kind is "static", not "spa": the page is plain files with index.html at the
+/// root and no client-side router, so it needs no index.html fallback -- a
+/// mistyped path should answer 404 rather than render the home page.
+///
+/// apiProxy is false because the page calls no API; it links to the extension
+/// and explains it, nothing more.
+///
+/// NO ownerUserId, for the same reason the OS has none: an empty owner is the
+/// CLUSTER-OWNED state, and this is the platform's row.
+///
+/// The hostname is the committed localhost default; SeedMaterializer rewrites
+/// it from MEMQL_DOMAIN through the same hook that rewrites the OS's
+/// (applyPlatformSiteHostname), which iterates frontdoor.PlatformSites() rather
+/// than naming either seed.
+@description("The MemQL extension landing page")
+seed site vscode {
+  id:          "vscode"
+  hostname:    "vscode.memql.localhost"
+  kind:        "static"
+  bundleRef:   "file:///app/vscode-site"
+  status:      "live"
+  apiProxy:    false
+  systemOwned: true
+  title:       "MemQL for Visual Studio Code and Cursor"
+}

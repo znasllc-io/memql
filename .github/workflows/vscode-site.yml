@@ -1,3 +1,8 @@
+# The VS Code landing page's own check lane (editors/vscode/site): build,
+# self-check, browser verification, screenshots. It is a CHECK, not a publish
+# -- the deployable is the edge image, whose spa-build stage builds this same
+# page and serves it at vscode.<domain> from a seeded site row (memql#5518).
+# The built page is kept only so a reviewer can open what the lane rendered.
 name: VS Code landing page
 
 on:
@@ -34,7 +39,7 @@ jobs:
       - name: Install browser test tooling
         working-directory: editors/vscode/site
         run: npm ci --no-audit --no-fund
-      - name: Build the static artifact
+      - name: Build and check the page
         working-directory: editors/vscode/site
         run: npm run build && npm run check
       - name: Install the isolated browser
@@ -43,7 +48,7 @@ jobs:
       - name: Verify the rendered page
         working-directory: editors/vscode/site
         run: npm run test:browser
-      - name: Keep the deployable static bundle
+      - name: Keep the built page for review
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: memql-vscode-site

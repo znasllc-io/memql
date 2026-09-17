@@ -1,19 +1,23 @@
 package memql
 
 import (
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/frontdoor"
 )
 
-// applyOsSiteHostname is the memql#4705 hook: SeedMaterializer rewrites the
-// OS site hostname on every global rematerialize from MEMQL_DOMAIN via
-// frontdoor.OsHost. The committed DSL seed stays os.memql.localhost.
+// applyPlatformSiteHostname is the memql#4705 hook: SeedMaterializer rewrites
+// every platform site's hostname on every global rematerialize from
+// MEMQL_DOMAIN via frontdoor.PlatformSiteHost. The committed DSL seeds stay
+// <name>.memql.localhost. It was the OS-only applyOsSiteHostname until
+// memql#5518 seeded the VS Code landing page as the second platform site.
 
 func TestApplyOsSiteHostname_FromMEMQLDomain(t *testing.T) {
 	t.Setenv("MEMQL_DOMAIN", "example.com")
 	args := map[string]any{"hostname": "os.memql.localhost", "siteId": "os"}
-	applyOsSiteHostname(&SeedDefinition{Name: "os", UseConcept: "site"}, args)
+	applyPlatformSiteHostname(&SeedDefinition{Name: "os", UseConcept: "site"}, args)
 	if got := args["hostname"]; got != "os.example.com" {
 		t.Fatalf("hostname = %v, want os.example.com", got)
 	}
@@ -22,7 +26,7 @@ func TestApplyOsSiteHostname_FromMEMQLDomain(t *testing.T) {
 func TestApplyOsSiteHostname_UnsetFallsBackToLocalhost(t *testing.T) {
 	t.Setenv("MEMQL_DOMAIN", "")
 	args := map[string]any{"hostname": "os.stale.example", "siteId": "os"}
-	applyOsSiteHostname(&SeedDefinition{Name: "os", UseConcept: "site"}, args)
+	applyPlatformSiteHostname(&SeedDefinition{Name: "os", UseConcept: "site"}, args)
 	if got := args["hostname"]; got != "os.memql.localhost" {
 		t.Fatalf("hostname = %v, want os.memql.localhost when MEMQL_DOMAIN is unset", got)
 	}
@@ -31,11 +35,11 @@ func TestApplyOsSiteHostname_UnsetFallsBackToLocalhost(t *testing.T) {
 func TestApplyOsSiteHostname_RematerializeOverwritesStale(t *testing.T) {
 	t.Setenv("MEMQL_DOMAIN", "example.com")
 	args := map[string]any{"hostname": "os.memql.localhost", "siteId": "os"}
-	applyOsSiteHostname(&SeedDefinition{Name: "os", UseConcept: "site"}, args)
+	applyPlatformSiteHostname(&SeedDefinition{Name: "os", UseConcept: "site"}, args)
 	if got := args["hostname"]; got != "os.example.com" {
 		t.Fatalf("first rematerialize hostname = %v, want os.example.com", got)
 	}
-	applyOsSiteHostname(&SeedDefinition{Name: "os", UseConcept: "site"}, args)
+	applyPlatformSiteHostname(&SeedDefinition{Name: "os", UseConcept: "site"}, args)
 	if got := args["hostname"]; got != "os.example.com" {
 		t.Fatalf("second rematerialize hostname = %v, want os.example.com (overwrite, not skip)", got)
 	}
@@ -44,11 +48,11 @@ func TestApplyOsSiteHostname_RematerializeOverwritesStale(t *testing.T) {
 func TestApplyOsSiteHostname_NoOpForOtherSeeds(t *testing.T) {
 	t.Setenv("MEMQL_DOMAIN", "example.com")
 	args := map[string]any{"hostname": "shop.memql.localhost"}
-	applyOsSiteHostname(&SeedDefinition{Name: "shop", UseConcept: "site"}, args)
+	applyPlatformSiteHostname(&SeedDefinition{Name: "shop", UseConcept: "site"}, args)
 	if got := args["hostname"]; got != "shop.memql.localhost" {
 		t.Fatalf("non-os site seed must not be rewritten, got %v", got)
 	}
-	applyOsSiteHostname(&SeedDefinition{Name: "os", UseConcept: "agent"}, args)
+	applyPlatformSiteHostname(&SeedDefinition{Name: "os", UseConcept: "agent"}, args)
 	if got := args["hostname"]; got != "shop.memql.localhost" {
 		t.Fatalf("os-named non-site seed must not be rewritten, got %v", got)
 	}
@@ -57,9 +61,62 @@ func TestApplyOsSiteHostname_NoOpForOtherSeeds(t *testing.T) {
 	// name that is not a platform site at all: the hook keys on the seed NAME,
 	// so the mistake it guards against is a site whose name somebody adds
 	// later, not one the repo happens to ship today.
-	applyOsSiteHostname(&SeedDefinition{Name: "docs", UseConcept: "site"}, args)
+	applyPlatformSiteHostname(&SeedDefinition{Name: "docs", UseConcept: "site"}, args)
 	if got := args["hostname"]; got != "shop.memql.localhost" {
-		t.Fatalf("a site seed the OS hook does not name must not be rewritten, got %v", got)
+		t.Fatalf("a site seed the platform-site hook does not name must not be rewritten, got %v", got)
+	}
+}
+
+// The VS Code landing page is the second platform site (memql#5518) and rides
+// the same hook: rewritten from MEMQL_DOMAIN, fail-closed to the committed
+// localhost default, and never mistaken for the OS.
+func TestApplyPlatformSiteHostname_VSCodeSite(t *testing.T) {
+	t.Setenv("MEMQL_DOMAIN", "example.com")
+	args := map[string]any{"hostname": "vscode.memql.localhost", "siteId": "vscode"}
+	applyPlatformSiteHostname(&SeedDefinition{Name: "vscode", UseConcept: "site"}, args)
+	if got := args["hostname"]; got != "vscode.example.com" {
+		t.Fatalf("hostname = %v, want vscode.example.com", got)
+	}
+
+	t.Setenv("MEMQL_DOMAIN", "")
+	args = map[string]any{"hostname": "vscode.stale.example", "siteId": "vscode"}
+	applyPlatformSiteHostname(&SeedDefinition{Name: "vscode", UseConcept: "site"}, args)
+	if got := args["hostname"]; got != "vscode.memql.localhost" {
+		t.Fatalf("hostname = %v, want vscode.memql.localhost when MEMQL_DOMAIN is unset", got)
+	}
+
+	// The vscode NAME on a non-site concept is not a platform site.
+	t.Setenv("MEMQL_DOMAIN", "example.com")
+	args = map[string]any{"hostname": "untouched"}
+	applyPlatformSiteHostname(&SeedDefinition{Name: "vscode", UseConcept: "agent"}, args)
+	if got := args["hostname"]; got != "untouched" {
+		t.Fatalf("vscode-named non-site seed must not be rewritten, got %v", got)
+	}
+}
+
+// Every platform site's seeded hostname is a front-door certificate SAN, at
+// any domain: the seed row and the certificate are one derivation.
+func TestPlatformSiteHostname_EveryPlatformSiteIsACertificateSAN(t *testing.T) {
+	for _, domain := range []string{"example.com", "lab.example.com", "memql.localhost", ""} {
+		sans := frontdoor.CertificateSANs(domain)
+		if domain == "" {
+			sans = frontdoor.CertificateSANs(defaultSeedDomain)
+		}
+		for _, name := range frontdoor.PlatformSites() {
+			host := platformSiteHostname(name, domain)
+			if want := frontdoor.PlatformSiteHost(name, strings.TrimSpace(domain)); domain != "" && host != want {
+				t.Errorf("platformSiteHostname(%q, %q) = %q, frontdoor.PlatformSiteHost = %q; the site row and the certificate disagree", name, domain, host, want)
+			}
+			if !slices.Contains(sans, host) {
+				t.Errorf("platform site %q's hostname %q at domain %q is not a front-door certificate SAN (%v)", name, host, domain, sans)
+			}
+		}
+	}
+	if !isPlatformSiteSeed("vscode") || !isPlatformSiteSeed("os") {
+		t.Error("os and vscode are the platform sites and must both be recognised by the hook")
+	}
+	if isPlatformSiteSeed("docs") || isPlatformSiteSeed("") {
+		t.Error("a name outside frontdoor.PlatformSites() must not be treated as a platform site")
 	}
 }
 

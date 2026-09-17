@@ -1,0 +1,47 @@
+# The VS Code landing page's own exact-host rule (memql#5518) -- the second
+# platform site, after the OS shell in os-front-door.yaml, served by the same
+# edge Service the wildcard in edge-front-door.yaml points at.
+#
+# A platform site is a site the platform ships itself: a seeded
+# v1:platform:site row, a directory the edge image carries, and a hostname
+# known before any operator creates a row. That last property is what earns it
+# a rule of its own (memql#4224): in the cloud the front-door certificate names
+# EXACT hosts and no wildcard, and ingress-nginx builds a certificate-bearing
+# server block per Ingress RULE host, so with only the wildcard rule
+# vscode.<domain> is answered by the wildcard's server block and its
+# certificate is the controller's self-signed default. This file is the
+# hand-authored traefik mirror of the `vscode-front-door` rule
+# cmd/frontdoorhosts generates for the cloud overlays; the set of platform
+# sites is component/frontdoor.PlatformSites, and ../render_frontdoor_test.go
+# asserts this overlay carries a rule for each.
+#
+# Locally the mkcert pair IS a wildcard, so this rule changes nothing a
+# browser can see here. It exists because the local cluster is the cloud's
+# parity topology: the front door has the same host rules everywhere.
+#
+# NO router.priority HERE, DELIBERATELY (memql#3810). Precedence over the
+# wildcard is declared ON THE WILDCARD.
+#
+# THE HOSTNAME IS A COMMITTED DEFAULT, NOT A CONSTANT (memql#3593).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vscode-front-door
+  namespace: memql
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  tls:
+    - hosts: ["vscode.memql.localhost"]
+      secretName: memql-front-door-tls
+  rules:
+    - host: vscode.memql.localhost
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: edge
+                port:
+                  number: 8085
