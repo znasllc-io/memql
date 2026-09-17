@@ -29,7 +29,7 @@ function show_help() {
     cat <<EOF
 Usage: $0 [options]
 
-Build the MemQL VS Code extension and (re)install it into a local editor.
+Build the MemQL extension for Visual Studio Code and Cursor and (re)install it into a local editor.
 
 Options:
     --editor-cmd=CMD  Editor CLI to install into (default: $DEFAULT_EDITOR_CMD;

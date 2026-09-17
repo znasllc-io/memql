@@ -62,7 +62,7 @@ export interface LanguageFacts {
   edition?: string;
   /** The grammar version inside the edition. A label: compared for equality only. */
   grammarVersion?: string;
-  /** The cluster's: the first release of MemQL for VS Code that carries its grammar. */
+  /** The cluster's: the first release of MemQL for Visual Studio Code and Cursor that carries its grammar. */
   editorRelease?: string;
   /** This extension's own version, from its package.json. */
   version?: string;
@@ -117,7 +117,7 @@ function detailLines(c: ClusterSide, e: ExtensionSide): string[] {
       : c.grammar === ""
         ? `The cluster speaks MemQL edition ${c.edition} and reported no grammar version.`
         : `The cluster speaks MemQL edition ${c.edition}, grammar ${c.grammar}.`;
-  const self = e.version === "" ? "This extension" : `This extension (MemQL for VS Code ${e.version})`;
+  const self = e.version === "" ? "This extension" : `This extension (MemQL for Visual Studio Code and Cursor ${e.version})`;
   const extension =
     e.edition === ""
       ? `${self} carries no language pin, so the cluster's language cannot be compared with it.`
@@ -126,8 +126,8 @@ function detailLines(c: ClusterSide, e: ExtensionSide): string[] {
         : `${self} speaks edition ${e.edition}, grammar ${e.grammar}.`;
   const release =
     c.release === ""
-      ? "The cluster did not name the release of MemQL for VS Code that carries its grammar."
-      : `MemQL for VS Code ${c.release} is the first release that carries the cluster's grammar.`;
+      ? "The cluster did not name the release of MemQL for Visual Studio Code and Cursor that carries its grammar."
+      : `MemQL for Visual Studio Code and Cursor ${c.release} is the first release that carries the cluster's grammar.`;
   return [cluster, extension, release];
 }
 
@@ -163,13 +163,13 @@ export function compareLanguage(cluster: LanguageFacts, extension: LanguageFacts
       if (c.release === "") {
         return {
           state: "clusterNewer",
-          headline: `${both} Update MemQL for VS Code to a release that speaks edition ${c.edition}.`,
+          headline: `${both} Update MemQL for Visual Studio Code and Cursor to a release that speaks edition ${c.edition}.`,
           details,
         };
       }
       return {
         state: "clusterNewer",
-        headline: `${both} Update MemQL for VS Code to ${c.release} or newer.`,
+        headline: `${both} Update MemQL for Visual Studio Code and Cursor to ${c.release} or newer.`,
         details,
         releaseToInstall: c.release,
       };
@@ -188,7 +188,7 @@ export function compareLanguage(cluster: LanguageFacts, extension: LanguageFacts
     // when the cluster sent one.
     return {
       state: "differs",
-      headline: `This cluster speaks MemQL edition ${c.edition}; this extension was built for edition ${e.edition}. Use the MemQL for VS Code release built for this cluster's edition (Show details has both).`,
+      headline: `This cluster speaks MemQL edition ${c.edition}; this extension was built for edition ${e.edition}. Use the MemQL for Visual Studio Code and Cursor release built for this cluster's edition (Show details has both).`,
       details,
     };
   }
@@ -203,7 +203,7 @@ export function compareLanguage(cluster: LanguageFacts, extension: LanguageFacts
     case "behind":
       return {
         state: "clusterNewer",
-        headline: `This cluster's MemQL grammar is newer than this extension's. Update MemQL for VS Code to ${c.release} or newer so completion and diagnostics match the cluster.`,
+        headline: `This cluster's MemQL grammar is newer than this extension's. Update MemQL for Visual Studio Code and Cursor to ${c.release} or newer so completion and diagnostics match the cluster.`,
         details,
         releaseToInstall: c.release,
       };
@@ -221,7 +221,7 @@ export function compareLanguage(cluster: LanguageFacts, extension: LanguageFacts
       // and the release to look for.
       return {
         state: "differs",
-        headline: `This cluster runs MemQL grammar ${c.grammar}; this extension was built for ${e.grammar}. Use the MemQL for VS Code release built for this cluster's grammar (Show details has both).`,
+        headline: `This cluster runs MemQL grammar ${c.grammar}; this extension was built for ${e.grammar}. Use the MemQL for Visual Studio Code and Cursor release built for this cluster's grammar (Show details has both).`,
         details,
       };
   }

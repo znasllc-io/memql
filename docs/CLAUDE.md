@@ -11,7 +11,8 @@ owner: znas
 
 **Purpose:** MemQL documentation, split public (drives memql.io) vs internal.
 **Rules:** [DOCS_STANDARD.md](DOCS_STANDARD.md) — front-matter, layout, the
-repo→site release-versioned pipeline. **Index:** [../GLOSSARY.md](../GLOSSARY.md).
+repo→site release-versioned pipeline. **User entry:** [Documentation home](public/overview/index.md).
+**Index:** [../GLOSSARY.md](../GLOSSARY.md).
 
 ---
 

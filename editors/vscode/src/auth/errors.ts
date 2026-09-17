@@ -192,7 +192,7 @@ const MAX_CAUSE_DEPTH = 6;
 const MAX_AGGREGATED = 4;
 
 const TRUST_STORE_ADVICE =
-  "Node does not read the operating system trust store, so a CA this machine's browser and curl already trust (a mkcert or corporate root) is still unknown to the editor: point NODE_EXTRA_CA_CERTS at the CA file and restart VS Code.";
+  "Node does not read the operating system trust store, so a CA this machine's browser and curl already trust (a mkcert or corporate root) is still unknown to the editor: point NODE_EXTRA_CA_CERTS at the CA file and restart your editor.";
 
 /** The codes whose fix cannot be read off the code itself. */
 const TLS_ADVICE: Record<string, string> = {

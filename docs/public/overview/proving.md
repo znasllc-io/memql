@@ -9,9 +9,9 @@ owner: znas
 
 # memQL Proving Log
 
-A timestamped scorecard that memQL is exercised as a production-grade
-platform. A PM should be able to open a day file and see what was
-validated, when, and the result.
+A timestamped record of manual walkthroughs. Each entry names what was
+validated, when, and the result. Historical portal entries describe that
+interface at the recorded commit; they are not current OS acceptance evidence.
 
 This is **pass / fail / confounder per surface** — a portal section,
 a component, a pack, or an engine action (query, mutation,

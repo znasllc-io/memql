@@ -1,441 +1,56 @@
 ---
-title: MemQL Tech Stack & Deployment Practices
+title: MemQL tech stack
 audience: public
 status: stable
 area: overview
-sinceVersion: 0.9.0
+sinceVersion: 0.20.0
 owner: znas
 ---
 
-# MemQL Tech Stack & Deployment Practices
-
-**Version:** 1.0
-**Date:** February 8, 2026
-**Audience:** Backend and Frontend Development Teams
-
----
-
-## [TASKS] Purpose
-
-This document establishes the **opinionated technologies and practices** for MemQL development and deployment. These standards ensure consistency, effectiveness, and clear separation of environments across all teams.
-
----
-
-## [BUILD] Technology Stack
-
-### Backend
-
-| Component | Technology | Version | Purpose |
-|-----------|-----------|---------|---------|
-| **Language** | Go | 1.26.1+ | Primary backend language |
-| **Database** | PostgreSQL + TimescaleDB | 16 + latest | Time-series memory graph |
-| **API** | HTTP + gRPC | - | REST and real-time communication |
-| **WebSocket** | Native Go | - | Real-time collaboration |
-| **AI** | Multi-provider (OpenAI, Anthropic) | latest | All AI text/chat/vision/speech goes through gRPC on `MemqlService.Stream` (`AiChatMsg`, `AiSpeechMsg`, `AiTranscribeMsg`, `AiSuggestMsg`). The legacy AI HTTP path is gone. |
-| **Auth** | In-house identity service | - | Magic-link login, JWT, JWKS-published; PAT for CLI |
-| **Container** | Docker | latest | Local image builds (imported into k3d) |
-| **Orchestration** | k3d + ArgoCD | latest | Local Kubernetes cluster with GitOps reconciliation (cloud parity) |
-| **Coding Agent** | NemoClaw (NVIDIA) | latest | Enterprise coding/automation agent (Apache 2.0) |
-
-### Query Language
-
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| **MemQL DSL** | Custom language | Query language for time-series graphs |
-| **Automations** | MemQL DSL | Event-driven workflows |
-| **Functions** | MemQL DSL | Reusable query functions |
-
-### Frontend (for reference)
-
-| Component | Technology | Notes |
-|-----------|-----------|-------|
-| **Framework** | TBD | Coordinate with frontend team |
-| **API Client** | HTTP + WebSocket | Connect to MemQL service |
-| **Auth** | In-house identity service (magic-link JWT) | Same auth provider as backend |
-
----
-
-## Environment Architecture
-
-### 1. Development Environment
-
-**Purpose:** Isolated development and testing on developer machines
-
-| Component | Technology | Location |
-|-----------|-----------|----------|
-| **Database** | PostgreSQL + TimescaleDB | Pod in the local k3d cluster |
-| **Service** | MemQL node pods | k3d cluster, reconciled by ArgoCD from `deploy/k8s/overlays/local` |
-| **Access** | kubectl port-forwards (mcp gRPC :50051, identity :8085, postgres :5432) | localhost |
-| **Data** | Ephemeral | Recreated by `make down && make up` |
-
-**Commands:**
-```bash
-# Start the local cluster
-make up
-
-# Inner-loop rebuild + reload after a code change
-make dev [NODE=<type>]
-
-# View logs
-kubectl logs -n memql deploy/mcp -f
-
-# Access database (via the postgres port-forward; make db opens psql)
-psql postgres://memql:memql_dev@localhost:5432/memql
-```
-
-**Developer Access:** [x] All developers
-
----
-
-### 2. Cloud Deploy Target
-
-**Purpose:** The installation an operator runs for real. MemQL ships ONE
-installation shape (epic memql#3943) -- an operator who wants a second
-environment installs a second instance, with its own domain, its own ArgoCD and
-its own database, so this section describes ONE target rather than a ladder of
-them.
-
-| Component | Technology | Location |
-|-----------|-----------|----------|
-| **Database** | Self-hosted CloudNativePG (PostgreSQL + TimescaleDB Community + pgvector) | In-cluster, reconciled by the CloudNativePG operator |
-| **Service** | MemQL node pods | Azure Kubernetes Service, reconciled by ArgoCD from `deploy/k8s/overlays/cloud` |
-| **URL** | HTTPS | `https://api.<domain>`, `https://identity.<domain>`, `https://mcp.<domain>`, `*.<domain>` |
-| **Data** | Persistent | Managed by the database platform |
-
-**Commands:**
-```bash
-# The deploy IS a GIT MERGE: bump the digests in
-# deploy/k8s/overlays/cloud and merge -> ArgoCD reconciles.
-# There is no imperative deploy command (memql#4550).
-
-# View logs
-kubectl logs -n memql deployment/bff -f
-```
-
-See [docs/public/operate/deploy-bundle-runbook.md](../operate/deploy-bundle-runbook.md)
-for the full deploy flow and topology.
-
-**Developer Access:** [x] Per the cluster's own role model
-
----
-
-## AUTH Authentication & Authorization
-
-### In-house identity service
-
-All environments use the in-house identity service
-(`component/identity`, `make identity`) for authentication:
-- Magic-link login as the primary path
-- Personal Access Tokens (PATs) for CLI clients
-- Per-node JWT verifier (`component/identity/verifier`) on every
-  verifier-consuming node type (bff/agent/planner/workbench/mcp);
-  JWKS-published. The identity node is the JWKS authority and does not
-  verify against itself; the edge node serves public bytes to anonymous
-  visitors and is not an auth boundary
-- Role-based access control (owner / admin / developer / writer / reader)
-- Centralized user + invitation management via the MemQL Portal's
-  People surface (`IdentityAdminMsg`, gated by
-  `component/identity/adminops`). The server-rendered admin web app is
-  retired -- `/admin/` now answers `410 Gone` except its sign-in pages
-
-See [docs/public/operate/auth/identity-service.md](../operate/auth/identity-service.md)
-for the operator-side narrative.
-
-### Developer Access Levels
-
-| Target | Access Level | Permissions |
-|--------|-------------|-------------|
-| **Local** | All Developers | Full access (own machine) |
-| **Cloud** | Per the cluster's role model (owner / admin / developer / writer / reader) | Deploy and rollback are role-gated and audited; see [access-model.md](../operate/auth/access-model.md) |
-
-### Service Accounts
-
-- AKS pulls images from ACR (`acrmemql.azurecr.io`)
-- Secrets managed via the `memql-secrets` Secret, reconciled from Azure Key Vault by External Secrets
-  (the operator's own vault); see [docs/public/operate/deploy-bundle-runbook.md](../operate/deploy-bundle-runbook.md)
-- Environment variables injected at runtime
-
----
-
-## Deployment Practices
-
-### Development Workflow
-
-**Workflow:**
-1. Pull latest from `main`
-2. Start the local cluster: `make up`
-3. Make code changes
-4. Rebuild + reload the changed node: `make dev [NODE=<type>]`
-5. Test locally: `make test`
-6. View logs: `kubectl logs -n memql deploy/mcp -f`
-7. Branch, push, open a PR, wait for CI to go green, then enqueue it:
-   `gh pr merge <n> --repo znasllc-io/memql` (bare -- no strategy, no
-   `--delete-branch`). `main` refuses direct pushes; every change,
-   including a one-line docs fix, goes through a branch + PR + merge
-   queue
-
-**Best Practices:**
-- Always use the local k3d cluster database (never a deployed cluster's)
-- Reset the local database if migrations conflict: `make down && make up`
-- Use debug logging (enabled by default in the local overlay)
-- Test automations and functions locally before deploying
-- Secrets are seeded into the `memql-secrets` k8s Secret by `make up`; re-seed with `make secrets`
-
----
-
-### Cloud Deployment
-
-**Workflow:**
-1. Feature branch reviewed and approved via PR
-2. Merge PR to `main` branch
-3. CI/CD pipeline automatically deploys to production
-4. Monitor deployment logs for errors
-5. Verify production health endpoint
-6. Monitor for 24 hours after deployment
-
-**Best Practices:**
-- Never deploy untested code to production
-- Always run full test suite before merging
-- Schema migrations run automatically (use caution)
-- Coordinate with team for major changes
-- Have rollback plan ready
-- Test thoroughly on the local parity cluster before deploying
-
----
-
-## CONFIG Development Tools
-
-### Hardware Requirements
-
-**Supported platforms:** macOS / Apple Silicon and Linux/amd64 both run the
-full local k3d + ArgoCD stack. `make up`, `make dev`, and the rest of the
-local run path are platform-agnostic; pick whichever host you already
-develop on.
-
-| Component | Requirement | Notes |
-|-----------|------------|-------|
-| **Operating System** | macOS (Monterey 12.0+) or Linux (amd64) | |
-| **Processor** | Apple Silicon (M1/M2/M3) on macOS, or x86-64 on Linux | |
-| **RAM** | 16GB minimum, 32GB recommended | For Docker + IDE + services |
-| **Storage** | 50GB free minimum | For Docker images, dependencies |
-
-### Required Software
-
-| Tool | Purpose | Installation |
-|------|---------|--------------|
-| **Go 1.26.1+** | Backend development | https://go.dev/dl/ |
-| **Docker** | Image builds + k3d runtime | Docker Desktop on macOS; Docker Engine on Linux |
-| **k3d** | Local Kubernetes cluster | `brew install k3d` (macOS) or your Linux package manager |
-| **kubectl** | Local + AKS cluster management | `brew install kubectl` (macOS) or your Linux package manager |
-| **Azure CLI (`az`)** | Cloud deployments (AKS, ACR) | https://learn.microsoft.com/cli/azure/install-azure-cli |
-| **git** | Version control | Pre-installed on macOS; package manager on Linux |
-
-### Optional Tools
-
-| Tool | Purpose | Installation |
-|------|---------|--------------|
-| **Database GUI** | Inspect the local DB | Point any client at the forwarded `localhost:5432` (`make db` for a psql shell) |
-| **Postman** | API testing | https://postman.com/downloads/ |
-
----
-
-## DOCS Documentation Standards
-
-### Documentation Structure
-
-```
-MemQL/
-├── CLAUDE.md              # Project overview (read first)
-├── GLOSSARY.md            # Complete doc index
-├── docs/
-│   ├── public/            # Published docs (rendered on memql.io)
-│   │   ├── overview/      # Quickstart, tech stack, positioning
-│   │   ├── concepts/      # Architecture, events, identifiers, ...
-│   │   ├── language/      # The DSL reference
-│   │   ├── ai/            # LLM cost control, operator capabilities
-│   │   ├── build/         # Build tags, audio streaming
-│   │   └── operate/       # Deploy, infra, env vars, auth
-│   └── internal/          # Design records, plans, internal runbooks
-└── .claude/               # Claude Code CLI configuration
-```
-
-### Finding Documentation
-
-1. **Project overview:** Start with `CLAUDE.md`
-2. **Quick setup:** Read `docs/public/overview/quickstart.md`
-3. **Find topics:** Use `GLOSSARY.md`
-4. **Component details:** Check directory `CLAUDE.md` files
-5. **Commands:** See [docs/public/overview/quickstart.md](quickstart.md) for common development commands
-
----
-
-## START Quick Reference
-
-### Common Commands
-
-```bash
-# Development Environment
-make up                 # Start local k3d cluster (ArgoCD + local overlay + secrets)
-make dev [NODE=<type>]  # Rebuild + reload a node after a code change
-make down               # Tear down the cluster
-kubectl logs -n memql deploy/mcp -f                             # View logs
-psql postgres://memql:memql_dev@localhost:5432/memql            # PostgreSQL shell (via make db)
-
-# Testing
-make test                        # Run the Go test suite -- NOT `go test ./...`,
-                                  # which misses the engine's own modules (memql#4032)
-
-# Deployment (Azure AKS) -- GitOps only; see docs/public/operate/deploy-bundle-runbook.md
-#   Pin {engine version, bundle digest, client digest} in ONE overlay and merge;
-#   ArgoCD reconciles. There is no imperative deploy target (memql#4550 removed
-#   the cockpit `deploy` subcommand the old break-glass path shelled into).
-
-# Dev secrets workflow
-make secrets                                     # Seed/re-seed the k8s Secrets the local
-                                                  # overlay needs (scripts/k3d/seed-secrets.sh);
-                                                  # idempotent, reads MEMQL_MASTER_KEY from
-                                                  # the environment
-
-# AKS
-kubectl get pods -n memql                                   # List pods
-kubectl logs -n memql deployment/bff -f                     # View logs
-kubectl get deployments -n memql                            # Deployment status
-```
-
-### Environment Variables
-
-**Managed via MemQL concept storage** (`v1:platform:globalVariable` and
-`v1:platform:globalSecret`). The bootstrap envelope (master key, identity
-signing seed, node bootstrap token, DB DSN, ...) is seeded into the
-`memql-secrets` k8s Secret by `make secrets`; see
-[docs/public/operate/env-vars.md](../operate/env-vars.md) for the full
-bootstrap-envelope-vs-concept-storage design.
-
-**Development (k3d):**
-- `make up` seeds the k8s Secrets on first boot via `make secrets`
-  (`scripts/k3d/seed-secrets.sh`), which reads `MEMQL_MASTER_KEY` from the
-  environment -- when unset, an existing valid key in `memql-secrets` is
-  reused, and only a cluster with no usable key falls back to the dev
-  default
-- Re-seed after changing a secret with `make secrets`
-- Debug logging enabled by default
-
-**Cloud (AKS):**
-- Shared secrets (DSN, master key, operator key, identity signing seed)
-  are KEYS on the `memql-secrets` Secret, reconciled from Azure Key Vault
-  by External Secrets (`deploy/external-secrets/`). One delivery path
-  (epic memql#3958); the two-bearer design this replaced (a second,
-  irreplaceable credential that also decrypted config) is gone. Per-node,
-  non-secret config lives in the k8s manifest env. See
-  [docs/public/operate/deploy-bundle-runbook.md](../operate/deploy-bundle-runbook.md)
-  for the canonical add/rotate flow.
-- Everything else lives in MemQL's `v1:platform:globalSecret` /
-  `v1:platform:globalVariable` concepts
-- Never commit secrets to git
-
----
-
-## Opinionated Practices
-
-### Code Standards
-
-1. **Go formatting:** Use `gofmt` and `goimports`
-2. **Testing:** Write tests for all new features
-3. **Error handling:** Always handle errors explicitly
-4. **Logging:** Use structured logging (slog)
-5. **Comments:** Document why, not what
-
-### Git Workflow
-
-1. **Single long-lived branch:** `main`. `main` refuses direct pushes
-   (a repository ruleset, not a convention) -- every change, including a
-   one-line docs fix, goes through a short-lived feature branch + PR +
-   merge queue.
-2. **Stage by explicit path** (`git add <file>`) -- never `git add -A` /
-   `.`. Multiple Claude sessions may share a worktree.
-3. **Pre-release; no backwards-compat shims.** When a contract changes,
-   fix both MemQL and the consumer (typically the downstream product)
-   at once and delete what's no longer needed.
-4. **Commit messages:** Clear, imperative mood. Subject under ~70
-   chars. Body explains the why.
-5. **Co-authoring:** Include AI contributions
-   (`Co-Authored-By: Claude ... <noreply@anthropic.com>`).
-
-### Docker Practices
-
-1. **Development isolation:** Always use development Docker for local work
-2. **Volume mounts:** Use for live code changes
-3. **Health checks:** All containers must have health checks
-4. **Multi-stage builds:** Optimize image sizes
-5. **Non-root users:** Security best practice
-6. **Environment variables:** Seed the k8s Secrets with `make secrets` (`scripts/k3d/seed-secrets.sh`); re-run after changing a secret
-
-### Database Practices
-
-1. **Migrations:** Automatic on startup (use carefully in production)
-2. **Seeding:** Use concept seeding for test data
-3. **Backups:** Managed by the database platform
-4. **Reset:** `make down && make up` for a fresh local database (recreates the cluster)
-5. **Schema changes:** Coordinate with team
-
----
-
-## Team Coordination
-
-### Before Major Changes
-
-Notify team if changes affect:
-- Database schema
-- API contracts
-- Authentication flow
-- Environment variables
-- Deployment process
-
-### Communication Channels
-
-- **Code reviews:** GitHub pull requests
-- **Questions:** Team chat or documentation
-- **Issues:** GitHub issues
-- **Architecture:** Architecture decision records (ADRs)
-
----
-
-## INFO Success Metrics
-
-### Development Velocity
-
-- Local setup time: < 5 minutes
-- Test execution time: < 2 minutes
-- Deploy time: < 5 minutes
-- Deploy to production time: < 10 minutes
-
-### Code Quality
-
-- Test coverage: > 70%
-- Build success rate: > 95%
-- Production incidents: Minimize
-- Documentation completeness: 100%
-
----
-
-## [REFRESH] Continuous Improvement
-
-This document is a living standard. Update it when:
-- New technologies are adopted
-- Practices are refined based on experience
-- Team feedback suggests improvements
-- Industry best practices evolve
-
-**Last Updated:** April 29, 2026
-
----
-
-## Support & Questions
-
-- **Documentation:** Check `GLOSSARY.md` first
-- **Quick start:** See `docs/public/overview/quickstart.md`
-- **Team:** Ask in team chat or create GitHub issue
-
----
-
-**This document establishes our opinionated tech stack and practices for effective, standardized development across all teams.**
+# MemQL tech stack
+
+MemQL runs as specialized services in one cluster. Clients connect to the
+engine; they do not connect directly to its storage.
+
+| Layer | Implementation | What it means for you |
+|---|---|---|
+| Engine | Go; module minimum and selected toolchain are declared in `go.mod` | Build with the repository's toolchain rather than a guessed version |
+| Data | PostgreSQL 16, TimescaleDB, pgvector, managed by CloudNativePG | Versioned records, time-oriented retrieval, and vector support underneath the platform |
+| Engine API | gRPC `MemqlService.Stream`; WebSocket bridge for browsers | Use the Go or TypeScript SDK for typed operations |
+| HTTP edge | Hostname-based static site serving, runtime configuration, health and identity endpoints | HTTP complements the engine API; there is no general REST CRUD API to substitute for it |
+| Language | `.memql` declarations, compiler, registries, and MemQL Sense | The editor and engine share language intelligence |
+| Identity | Cluster-owned identity service, OAuth/PKCE, passkeys, magic links, JWT/JWKS | Sign in to the cluster that owns the resource |
+| AI | Level/policy/rule routing across configured sources | Local resources and vendor integrations have explicit readiness and permission requirements |
+| Browser client | MemQL OS: React, TypeScript, Vite | A static SPA served by the edge as an ordinary site |
+| Editor | TypeScript VS Code extension and bundled Go language server | Offline authoring; optional authenticated runtime connection |
+| Deployment | Docker images, Kubernetes/Kustomize, ArgoCD | k3d locally; the supported cloud overlay targets AKS |
+
+## Local and cloud operation
+
+Local Kubernetes runs inside Docker through k3d. ArgoCD reconciles the cluster's
+manifests; the front door uses HTTPS hostnames such as `os.memql.localhost` and
+`api.memql.localhost`. Debug port-forwards are optional, not the regular client
+connection. The initial local build uses `make up`; the engine development loop
+uses `make dev`.
+
+Cloud installations use the same base manifests with environment configuration
+and pinned images. GitOps changes update the deployed revision; do not replace
+this workflow with an ad hoc application server or direct production rollout.
+The same topology does not imply identical hardware capacity or performance.
+
+- [Getting started](quickstart.md)
+- [Environment parity](../operate/environment-parity.md)
+- [Database platform](../operate/database-platform.md)
+- [Minimum requirements](../operate/minimum-requirements.md)
+- [Build tags and node types](../build/build-tags.md)
+
+## Build a client
+
+Use [the SDKs and client model](../concepts/clients.md). A site build emits a
+folder of static files with `index.html` at its root; the edge serves it without
+a Node.js runtime. MemQL OS is a worked example. A product's client can also be
+hosted elsewhere and connect through the supported API.
+
+[Site hosting](../operate/site-hosting.md) ·
+[TypeScript SDK](../../../sdk/ts/README.md) · [Go SDK](../../../sdk/go) ·
+[Contributing](../../../CONTRIBUTING.md).

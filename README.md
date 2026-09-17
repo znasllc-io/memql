@@ -1,37 +1,90 @@
 <p align="center">
-  <img src="assets/memql-lockup.png" alt="MemQL" width="500">
+  <img src="assets/memql-lockup.png" alt="MemQL" width="440">
 </p>
 
-<h1 align="center">MemQL</h1>
+# MemQL
 
-<p align="center">
-  <strong>The open-source AI platform: agents, automations, voice, campaigns, and hosted sites on a time-series memory graph.</strong><br>
-  Declare behavior in one DSL; a mesh of specialized nodes runs it. The harness is the platform's work spine, and clients are what you build on it.
-</p>
+**Build applications where AI can work with your data, tools, and workflows.**
 
-<p align="center">
-  <a href="https://github.com/znasllc-io/memql/actions/workflows/ci.yml"><img src="https://github.com/znasllc-io/memql/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/znasllc-io/memql?color=blue" alt="License"></a>
-  <img src="https://img.shields.io/github/go-mod/go-version/znasllc-io/memql" alt="Go version">
-  <img src="https://img.shields.io/github/last-commit/znasllc-io/memql" alt="Last commit">
-  <a href="https://goreportcard.com/report/github.com/znasllc-io/memql"><img src="https://goreportcard.com/badge/github.com/znasllc-io/memql" alt="Go Report Card"></a>
-</p>
+MemQL is an open-source AI platform. Its engine combines typed, versioned
+records and relationships with queries, mutations, model routing, agent work,
+and event-driven automations. A single `.memql` language connects those pieces.
+Integrations bring in external systems; hosted sites and SDKs give people a way
+to use what you build.
 
-<p align="center"><sub><em>Designed and built with Claude as co-author.</em></sub></p>
+> **Alpha / pre-1.0 — not production-ready.** Expect breaking changes to the
+> language, engine API, and wire protocol. Start with experiments and prototypes.
 
-> **Status: Alpha / pre-1.0 — not production-ready.** MemQL is under active development. The DSL, engine API, and wire surface are still evolving; expect breaking changes between commits. Suitable for experimentation, prototyping, and early-design feedback today.
+[Get started](docs/public/overview/quickstart.md) ·
+[Documentation](docs/public/overview/index.md) ·
+[Visual Studio Code and Cursor extension](editors/vscode/README.md) ·
+[MemQL OS](docs/public/operate/memql-os.md)
 
----
+## One engine, several ways to work
 
-## What is MemQL?
+| Part | What it does | Where you use it |
+|---|---|---|
+| **MemQL engine** | Stores the memory graph, enforces declared access rules, executes constructs, routes model calls, and records agent work | A cluster, reached through gRPC or the browser WebSocket bridge |
+| **MemQL OS** | The browser workspace for managing that cluster and working with its data | Apps such as Fleet, Files, Deployables, Nexus, Concepts, and Logs |
+| **MemQL for Visual Studio Code and Cursor** | Edits `.memql` files offline; connects to clusters to inspect, run, and train constructs | Your editor |
+| **Your applications** | Present your own product using MemQL's capabilities | A hosted site or an external client built with an SDK |
 
-MemQL is an open-source AI platform built on a time-series memory graph, with its own DSL — a single language for declaring concepts (schemas), queries, mutations, tools, and event-driven automations side-by-side, then executing them across specialized nodes. What the platform runs are its [modules](docs/public/concepts/modules.md) — components, integrations, packs (per-instance enable/disable), and node-type modules like voice. The agent harness is not one of them: it is the work spine, and every goal, run, step, model call, approval, skill and belief it produces is a typed, authorized, replayable row in the memory graph. What you build on it are [clients](docs/public/concepts/clients.md) — SPAs, websites, and apps, one repo per client stamped from the `memql-project` template, with the engine staying product-agnostic.
+The engine is built on a time-series memory graph backed by PostgreSQL,
+TimescaleDB, and pgvector. That storage supports the platform; MemQL also runs
+the behavior around it. The agent harness is its durable work system, one part
+of the broader product. [Explore the capabilities](docs/public/overview/what-is-memql.md).
 
-It replaces the integration glue AI-native teams typically hand-write — vector store + workflow engine + AI gateway + voice stack — with one deployable primitive. A team that would otherwise stitch together four systems can declare an agent's memory, behavior, and triggers in one DSL file and run them on a MemQL cluster.
+## Start with something you can inspect
 
-## Why MemQL?
+A concept describes a kind of record. A query names a reusable read operation.
+Here is a caller-owned reading list:
 
-Agent and voice deployments today are integration-heavy. Most of the engineering effort is plumbing — keeping state consistent across a vector store, an orchestrator, a tool registry, and a model provider. MemQL collapses that plumbing: concepts and queries live in the same place; tools, automations, and workflows reference them directly; the engine handles consistency, time-series storage, and execution.
+```memql
+@rowAuthz(owner="ownerUserId")
+concept readingItem {
+  ownerUserId  string!
+  title        string!
+  finished     bool
+}
+
+@actor
+query readingItem readingItems {
+  args {
+    finished  bool
+  }
+  filter row => row.ownerUserId == actor.userId && (args.finished == nil || row.finished == args.finished)
+  sort "row.createdAt", "desc"
+  paginate 50
+}
+```
+
+`@actor` supplies the authenticated caller. The query filters to that caller,
+and `@rowAuthz` declares the ownership tier. `paginate 50` bounds the first
+page. The [complete reading-list tutorial](docs/public/language/first-program.md)
+adds a mutation and a tool, explains how to validate the file, and walks through
+running it in VS Code or Cursor. Saving a file does not deploy it.
+
+## Get started
+
+- **Try the language:** [build and install the Visual Studio Code and Cursor extension](docs/public/language/vscode.md#get-the-extension), then open the [example](examples/reading-list/reading.memql). Editing works without a cluster.
+- **Use an existing cluster:** add it in the extension, sign in, and inspect a query before running it.
+- **Run MemQL locally:** follow the [quickstart](docs/public/overview/quickstart.md). The supported local stack uses Docker, k3d, and ArgoCD. An initial image build can take time.
+
+## A visual workspace for the cluster
+
+MemQL OS is a single-page application made of focused apps. Fleet manages
+machines and execution resources; Files holds artifacts; Deployables manages
+what is served; Nexus exposes goals, runs, and approvals. It uses the same
+engine APIs as other clients.
+
+**[Supervised Visual Composition](docs/public/operate/supervised-visual-composition.md)**
+is the approved design direction: compose objects and their relationships
+with mouse and keyboard, and review MemQL's proposals in the same visible
+workspace. Fleet provides visual composition, persistent routing-policy editing,
+and review of typed Ask proposals; generating proposals requires compatible
+inference to be configured. The approved Deployables redesign is implemented and
+verified locally. New Settings/Logs layouts await approval; generalized autonomous
+UI driving is future work.
 
 ## Does it work?
 
@@ -57,422 +110,23 @@ a counter that never rises on any path reads as zero forever. Full figures,
 including everything a replay cannot honestly answer: **[the proving
 scorecard](docs/public/overview/proving-scorecard.md)**.
 
-These three sentences are checked against the committed scorecard by
-`TestPublishedClaimsRestOnAScorecardNumber`. A claim here cannot outlive its
-number.
-
-## Example
-
-A concept (schema), a query over it, and an LLM-callable tool wired to that query — the same shape every real domain in `dsl/` uses (this one is trimmed from `dsl/todos/`). The one thing a real file would omit is `@namespace("todos")`: a concept's namespace DEFAULTS to its containing `dsl/<domain>/` directory, and you write it only for a colon-scoped sub-namespace or a pinned divergence. It is spelled out here because this block is validated standalone by the docs snippet gate, where there is no directory to default from:
-
-```memql
-@namespace("todos")
-@description("A user-owned to-do item.")
-@rowAuthz(owner="ownerUserId")
-concept todo {
-  ownerUserId  string!
-  title        string!
-  done         bool  @default("false")
-}
-
-@actor
-@description("List the caller's to-dos, optionally filtered by completion.")
-query todo todos {
-  args {
-    done  bool
-  }
-  filter  row => row.ownerUserId == actor.userId && (args.done == nil || row.done == args.done)
-}
-
-@handler(type="query", query="query todos(done: args.done)")
-@executionTime("fast")
-@description("List the caller's to-dos.")
-tool todosList {
-  done  boolean  @description("Filter by completion: true for done, false for open. Omit for everything.")
-}
-```
-
-`@rowAuthz(owner="ownerUserId")` makes the query's `row.ownerUserId == actor.userId` filter a load-time-enforced authorization tier, not just a convention — a caller can never read another user's rows through this query. Add mutations or event-driven automations right next to them, in the same file family.
-
----
-
-## Quick Start
-
-```bash
-# Start the local cluster (k3d + ArgoCD)
-make up
-
-# Run tests
-make test
-```
-
-**Full setup guide:** [docs/public/overview/quickstart.md](docs/public/overview/quickstart.md)
-
----
-
-## Documentation
-
-- **[docs/public/overview/what-is-memql.md](docs/public/overview/what-is-memql.md)** - What MemQL is: the platform, its modules, and its clients
-- **[CLAUDE.md](CLAUDE.md)** - Project overview and architecture
-- **[docs/public/overview/quickstart.md](docs/public/overview/quickstart.md)** - 5-minute setup guide
-- **[GLOSSARY.md](GLOSSARY.md)** - Complete documentation index
-- **[docs/public/overview/tech-stack.md](docs/public/overview/tech-stack.md)** - Tech stack and deployment practices
-
----
-
-## Tech Stack
-
-### Backend
-- **Language:** Go 1.26.1+
-- **Database:** PostgreSQL 16 + TimescaleDB
-- **API:** gRPC (primary) + WebSocket bridge for browsers + HTTP for OAuth callbacks / health / file uploads
-- **AI:** Centralized provider system (OpenAI, Anthropic) on `MemqlService.Stream`
-- **Auth:** in-house identity service (magic-link + JWT, JWKS-published)
-
-### Query Language
-- **MemQL DSL:** Custom query language for time-series graphs
-- **Constructs:** Concepts, queries, mutations, shapes, specs, tools, prompts, automations -- declared in `.memql` files under `dsl/<namespace>/`
-- **Automations:** Event- and schedule-triggered workflows
-
----
-
-## Environments
-
-MemQL ships **one installation shape**: an operator who wants a second
-environment installs a second instance, with its own domain and its own
-ArgoCD — there is no staging-versus-production dimension inside the product.
-What varies between a local dev cluster and a cloud install is the deploy
-**target**, not the architecture:
-
-| Target | Database | Service | Access |
-|---|---|---|---|
-| **Local** (`make up`) | self-hosted CloudNativePG in k3d | k3d + ArgoCD, reconciled from `deploy/k8s/overlays/local` | all developers |
-| **Cloud** | self-hosted CloudNativePG (same operator + manifests as local) | Azure Kubernetes Service (AKS), reconciled from `deploy/k8s/overlays/cloud` | per the cluster's own role model |
-
-Both targets run the **same self-hosted CloudNativePG database on the same
-manifests** — the local/cloud split is DNS, TLS source, and secrets
-provisioning, never the shape of the system. See
-[docs/public/operate/database-platform.md](docs/public/operate/database-platform.md).
-
-**Full details:** [docs/public/overview/tech-stack.md](docs/public/overview/tech-stack.md)
-
----
-
-## Development
-
-### Prerequisites
-
-MemQL development runs on **both Linux/amd64 and macOS/Apple Silicon** —
-the local cluster's prerequisites (`docker`, `k3d`, `kubectl`) have no
-platform-specific step on either, and the `make up` dev flow is exercised
-on both. Linux/amd64 is a fully supported target in its own right, not a
-fallback from macOS. The one-command **installer** targets the same two:
-`SUPPORTED_PLATFORMS` in `scripts/lib/platform.sh` is `linux/amd64` and
-`darwin/arm64`, and every tool it downloads carries a verified digest for
-each (memql#4295). `make up` remains the supported path on both, and is
-what an operator who already has the tools should reach for; the installer
-is for a machine that has none of them.
-
-**Software:**
-- Go 1.26.1+
-- Docker (Docker Desktop on macOS; the Docker Engine on Linux)
-- k3d + kubectl (`brew install k3d kubectl` on macOS; your distro's package
-  manager or the upstream install scripts on Linux)
-- Azure CLI (`az`) — for cloud deploys only
-- git
-
-### Local Development Workflow
-
-1. **Clone repository**
-   ```bash
-   git clone https://github.com/znasllc-io/memql.git
-   cd memql
-   ```
-
-2. **Start the local cluster**
-   ```bash
-   make up
-   ```
-
-3. **Make changes and test**
-   ```bash
-   # Edit code
-   # ...
-
-   # Rebuild + reload the changed node into k3d
-   make dev
-
-   # Run tests
-   make test
-
-   # View logs
-   kubectl logs -n memql deploy/bff -f
-   ```
-
-4. **Exercise the 2-replica parity cluster** for anything cross-node
-   ```bash
-   make up SERVERS=2 && make scale N=2 && make status
-   ```
-
-5. **Branch, PR, merge queue.** `main` refuses direct pushes — a
-   repository ruleset enforces `pull_request` + `required_status_checks` +
-   `merge_queue`, so `git push origin main` fails no matter how small the
-   change. Stage by explicit path, then branch, push, and open a PR as
-   usual; once CI is green, enqueue it:
-   ```bash
-   git add path/to/changed.file
-   git commit -m "domain: imperative subject"
-   gh pr merge <n> --repo znasllc-io/memql   # bare: enqueues into the merge queue
-   ```
-
----
-
-## Project Structure
-
-```
-MemQL/
-├── main.go              # Entry point (thin orchestrator)
-├── app/                  # Phased service bootstrap
-│   ├── app.go            # Build() orchestrator
-│   ├── config.go         # Config + auth
-│   ├── database.go       # Database + concepts
-│   ├── engine.go         # Engine + bus + automations
-│   ├── integrations.go   # Integration providers
-│   ├── transport.go      # gRPC + HTTP + WebSocket
-│   └── cluster.go        # Distributed node bootstrap
-├── component/            # Core Go service components
-│   ├── memql/            # Core query engine
-│   ├── database/         # Database providers
-│   ├── server/           # HTTP/WebSocket servers
-│   └── auth/             # Authentication
-├── integrations/         # External service integrations
-│   ├── cognition/        # AI collaboration
-│   └── voice/            # Voice + video pipeline (LiveKit room, avatar)
-├── clients/              # Surfaces built ON the platform (SPAs, the shell)
-│   └── os/               # MemQL OS -- the platform's ops console
-├── dsl/                  # The MemQL DSL tree (one directory per namespace)
-│   ├── cognition/        # e.g. concepts.memql, queries.memql, mutations.memql,
-│   │                     #      tools.memql, automations.memql, ... per namespace
-│   ├── identity/
-│   ├── _reference/       # Authoring reference skeletons (not loaded)
-│   └── ...
-├── core/                 # Shared utilities (logger, env, id, dslfs)
-├── cmd/                  # Command-line tools (memqllint, memqlfmt, memqlmigrate, ...)
-├── scripts/              # k3d bring-up, deploy, release, install, migrations
-├── sdk/                  # Generated client SDKs (Go, TS)
-├── docs/                 # Documentation
-│   ├── public/           # Published docs (overview, concepts, language, ai,
-│   │                     #      build, operate) -- rendered on memql.io
-│   └── internal/         # Design records, plans, internal runbooks
-├── deploy/k8s/           # Kustomize manifests (base + overlays/local|cloud)
-└── .claude/              # Configuration
-```
-
----
-
-## Common Commands
-
-| Task | Command |
-|------|---------|
-| **Start local cluster** | `make up` |
-| **Tear down cluster** | `make down` |
-| **Inner-loop rebuild + reload** | `make dev [NODE=<type>]` |
-| **Run Go test suite** | `make test` |
-| **Run tests with coverage** | `make test-cover` |
-| **DSL lint** | `make dsl-lint` |
-| **View pod logs** | `kubectl logs -n memql deploy/<node> -f` |
-| **Database shell** | `psql postgres://memql:memql_dev@localhost:5432/memql` |
-
----
-
-## Authentication
-
-Every environment authenticates against the in-house **identity
-service** (`component/identity`):
-- Magic-link sign-in (no passwords)
-- OAuth-style code exchange for SPAs (`/oauth/token`)
-- JWKS-published EdDSA signing keys (`/.well-known/jwks.json`)
-- Role-based access control (RBAC) per `v1:identity:user.role`
-- Admin surfaces (people, tokens, keys, settings) live in MemQL OS
-
-**Developer access:**
-- **Local:** All developers (own machine)
-- **Cloud:** per the cluster's own role model -- deploy and rollback are
-  role-gated and audited (see docs/public/operate/auth/access-model.md)
-
----
-
-## Testing
-
-```bash
-# Run all tests
-make test
-
-# Run with coverage
-make test-cover
-```
-
-Always verify with `make test`. This is a multi-module workspace, and a
-reflex `go test` invocation resolves inside one module only -- silently
-skipping the engine's own modules and reporting a false "ok". See
-[CLAUDE.md's Testing section](CLAUDE.md#testing) for the full explanation
-and the `MEMQL_REQUIRE_DB=1` / db-gated-lane details.
-
-The **proving suite** is a separate lane and a separate question: not "does
-the code do what it says" but "how well does the platform work, measured
-against a model on its own". It runs the corpus in
-`test/proving/scenarios/` on both arms against a real Postgres.
-
-```bash
-# ?sslmode=disable is required: the local Postgres has no SSL, and the driver
-# refuses rather than downgrading. This is the DSN the CI lane uses.
-export MEMQL_DATABASE_DSN='postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable'
-
-# what CI runs on every pull request
-go run ./cmd/memql-bench --do=gate --runner=local
-
-# run the corpus and publish the dated scorecard and its page
-go run ./cmd/memql-bench --do=run --tier=ci --write
-
-# what the binary takes, machine-readably
-go run ./cmd/memql-bench --print-spec
-```
-
-The DSN is required and there is no default: a benchmark that silently picked a
-database is one whose numbers came from somewhere nobody chose. It migrates a
-fresh database itself, so an empty one with the four extensions is enough.
-
-Structural regressions block a merge -- a scenario that stops passing, a
-duplicated side effect, a governance property that fails, or a negative
-control that reads zero. Cost and speed movements are published and never
-red.
-
----
-
-## Local Cluster (k3d + ArgoCD)
-
-Full stack with PostgreSQL + TimescaleDB (via CloudNativePG) + MemQL node
-pods, reconciled by ArgoCD from `deploy/k8s/overlays/local`:
-
-```bash
-# Bootstrap (cluster + ArgoCD + seeded secrets)
-make up
-
-# View pod logs
-kubectl logs -n memql deploy/bff -f
-
-# Tear down
-make down
-```
-
-**Documentation:** [docs/public/operate/reproduce-the-cloud-locally.md](docs/public/operate/reproduce-the-cloud-locally.md)
-
----
-
-## MemQL Language
-
-MemQL DSL is a domain-specific query language for time-series memory graphs.
-
-### Example Query
-
-A query is declared once, bound to its concept in the signature, and read
-through a lambda over the row:
-
-```memql
-/// List the caller's Library rows for one lens (artifact | record).
-@actor
-query artifact libraryArtifactsByLens {
-  args {
-    lens  string!
-  }
-  filter   row => row.ownerUserId == actor.userId && row.lens == args.lens
-  sort     "row.createdAt", "desc"
-  paginate 50
-  shape    artifactFull
-}
-```
-
-A logic or an automation calls it by kind and name, with named arguments, as a
-statement of its own: `rows := query libraryArtifactsByLens(lens: "record")`.
-
-### Example Automation
-
-An automation's `args` block is the contract the triggering row's payload is
-bound into, and its body is statements that run in the order written:
-
-```memql
-/// On to-do creation, promote it into the Library Records lens.
-@trigger(event="node.created", concept="v1:todos:todo")
-automation indexTodoOnCreate {
-  args {
-    id any
-    ownerUserId any
-    title any
-  }
-
-  persist := mutation createArtifact(
-    sourceConceptRef: args.id,
-    ownerUserId:      args.ownerUserId,
-    lens:             "record",
-    kind:             "todo",
-    source:           "agent_generated",
-    title:            args.title ?? "Untitled to-do",
-    live:             false
-  )
-}
-```
-
-**Full reference:** [docs/public/language/memql.md](docs/public/language/memql.md)
-
----
-
-## Deployment
-
-MemQL runs on Azure Kubernetes Service (AKS), reconciled by ArgoCD from
-`deploy/k8s/overlays/cloud`. The blessed deploy is a GIT MERGE: bump the
-`{engine version, bundle digest, client digest}` in that overlay and merge.
-
-There is no imperative alternative. The break-glass `deploy` make target
-delegated to the MemQL Cockpit's `deployEngineCluster` automation, and both
-were removed in memql#4550 -- the Cockpit is the machine-side worker runtime
-now and does not deploy clusters.
-
-See [docs/public/operate/deploy-bundle-runbook.md](docs/public/operate/deploy-bundle-runbook.md)
-for deploy/topology (ACR `acrmemql.azurecr.io`, the database, and the migration
-+ smoke gates).
-
----
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-1. Read [docs/public/overview/tech-stack.md](docs/public/overview/tech-stack.md)
-2. Make changes and test locally (`make test`)
-3. Exercise the 2-replica parity cluster for anything cross-node
-4. Branch, PR, CI green, then `gh pr merge <n>` (bare) — every change,
-   including a one-line docs fix, goes through the merge queue
-5. Stage files by explicit path (`git add <file>`)
-
-**Git workflow:** Single long-lived `main` branch. Pre-release: no
-backwards-compat shims; fix both MemQL and the consumer at once.
-
----
+## Go deeper
+
+- [What is MemQL?](docs/public/overview/what-is-memql.md) — capabilities, boundaries, and maturity.
+- [Documentation home](docs/public/overview/index.md) — choose a path by task.
+- [Language reference](docs/public/language/memql.md) and [authoring rules](docs/public/language/authoring-rules.md).
+- [Operating MemQL](docs/public/operate/memql-os.md), [AI routing](docs/public/operate/ai-routing.md), and [site hosting](docs/public/operate/site-hosting.md).
+- [Full documentation index](GLOSSARY.md) and [architecture](docs/public/concepts/architecture.md).
+
+## Contribute
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development and checks. Run
+`make test` for the workspace suite; testing only the root module does not
+reach all engine modules. Engine implementation guidance lives in [CLAUDE.md](CLAUDE.md).
+Report reproducible problems through [GitHub issues](https://github.com/znasllc-io/memql/issues).
+For security reports, follow [SECURITY.md](SECURITY.md).
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE).
-
----
-
-## Need Help?
-
-1. **Quick start:** [docs/public/overview/quickstart.md](docs/public/overview/quickstart.md)
-2. **Find documentation:** [GLOSSARY.md](GLOSSARY.md)
-3. **Tech stack details:** [docs/public/overview/tech-stack.md](docs/public/overview/tech-stack.md)
-4. **Component docs:** Check directory `CLAUDE.md` files
-5. **Issues:** Create GitHub issue
-
----
-
-**MemQL - the open-source AI platform: agents, automations, voice, campaigns, and hosted sites on a time-series memory graph**
+MemQL is licensed under [Apache 2.0](LICENSE). Bundled infrastructure has its
+own licensing; see [the database platform guide](docs/public/operate/database-platform.md).

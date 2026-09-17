@@ -2,8 +2,8 @@
 // memql#4419).
 //
 // Four claims, each mechanically checkable:
-//   1. The palette is memql.io's EXACTLY (the same hexes the portal ships,
-//      memql#4177), in both themes, and high contrast defers to VS Code.
+//   1. The CSS uses the shared editor palette in both themes, and high
+//      contrast defers to the editor. palette.test.ts gates brand parity.
 //   2. The dark palette is selected by the attribute MemQL stamps
 //      (`body[data-memql-theme="dark"]`), NOT by the class VS Code stamps
 //      (`body.vscode-dark`). That swap is the whole of decision D2: while the
@@ -24,19 +24,18 @@ import { brandHeader, brandMarkSvg, brandStrip, brandStyleBlock } from "../src/w
 
 const ROOT = path.resolve(__dirname, "..", "..");
 
-const DARK = ["#07090a", "#0b1110", "#0e1311", "#18231e", "#213029", "#e8e6dd", "#9ca395", "#6c726a", "#5ccda7", "#026842", "#98ffe0", "#cbb083"];
-const LIGHT = ["#f2f4ef", "#ffffff", "#e9ede6", "#d6ddd4", "#c2cabf", "#14201a", "#586159", "#7c847b", "#047d5a", "#0f766e", "#b45309"];
+import { DARK, LIGHT } from "../src/webview/palette.js";
 
 const DARK_SELECTOR = 'body[data-memql-theme="dark"]';
 
-test("both memql.io palettes are present, dark scoped to the stamped attribute", () => {
+test("both MemQL editor palettes are present, dark scoped to the stamped attribute", () => {
   const css = brandStyleBlock();
-  for (const hex of [...DARK, ...LIGHT]) {
+  for (const hex of [...Object.values(DARK), ...Object.values(LIGHT)]) {
     assert.ok(css.includes(hex), `palette hex ${hex} missing`);
   }
   const darkBlock = css.slice(css.indexOf(DARK_SELECTOR), css.indexOf("high-contrast"));
-  assert.ok(darkBlock.includes("#07090a"), "dark bg lives in the stamped-attribute block");
-  assert.ok(darkBlock.includes("#98ffe0"), "dark data tint lives in the stamped-attribute block");
+  assert.ok(darkBlock.includes(`--memql-bg: ${DARK.bg}`), "dark bg lives in the stamped-attribute block");
+  assert.ok(darkBlock.includes(`--memql-data-number: ${DARK["data-number"]}`), "dark data tint lives in the stamped-attribute block");
 });
 
 test("the dark palette is no longer selected by the editor's own theme class", () => {

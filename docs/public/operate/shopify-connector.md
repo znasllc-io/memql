@@ -193,7 +193,7 @@ query, writes a JSONL file, and the connector streams it in resumable
 batches, persisting the line offset as the domain's cursor. Bulk queries are
 exempt from the cost limit, which is why a hundred thousand orders are
 affordable at all. It is OPERATOR-DRIVEN -- nothing schedules it -- from the
-portal's Data origins surface or with
+MemQL OS Cluster app's Data origins section or with
 `datasyncStartBackfill(connector: "shopify", conceptId: "v1:shopify:order")`.
 
 Domains are applied **parents first** (`generated.ApplyOrder`), so a line
@@ -296,7 +296,7 @@ retrying it is how a queue stops draining while every individual attempt
 looks transient -- so the connector returns it as `sync.Permanent` and the
 drain dead-letters it immediately rather than spending its attempt budget.
 Dead-lettered entries are in `outboxDeadLetters(connector: "shopify")` and on
-the portal's Data origins surface.
+the MemQL OS Cluster app's Data origins section.
 
 Accepting a quote is the other write: `draftOrderCreate` with the company as
 `purchasingEntity`, the company's payment terms, a PO number, and
@@ -318,7 +318,7 @@ vendor's own `Retry-After` where one is given.
 - Bulk queries are exempt from the bucket. At most five run per shop at once,
   they must finish within ten days, and the signed result URL is valid for
   one week -- past that the runner restarts the operation.
-- The store's current bucket is on the portal's Stores page.
+- The store's current bucket is on the MemQL OS Stores app.
 
 ---
 
@@ -408,7 +408,7 @@ boundary.
 
 ### The Stores page
 
-Portal → Cluster → Stores. Per store: status, the granted scopes against the
+MemQL OS → Stores. Per store: status, the granted scopes against the
 allowlist's needs, the protected-data level, the last subscription reconcile
 and what it changed, the cost bucket, and every domain's sync state with its
 drift counters.
@@ -445,8 +445,8 @@ a real one. It is the end-to-end proof, in the order things can break:
 1. **Install.** Create the custom-distribution app on the dev store with the
    scopes above. Note the Admin token, the Storefront token and the webhook
    secret.
-2. **Configure.** Seal the three secrets, add the store in the portal, and
-   confirm the portal shows `configured` with no missing scopes.
+2. **Configure.** Seal the three secrets, add the store in MemQL OS, and
+   confirm the Stores app shows `configured` with no missing scopes.
 3. **Subscriptions.** Run `shopifyEnsureSubscriptions()`. The store's health
    should show `created` equal to the desired count and `failed` empty.
    Cross-check in the Shopify admin that the subscriptions point at

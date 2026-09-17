@@ -182,6 +182,10 @@ jobs:
             # `ci` and `go` are BOTH false, so every Go file these trees also
             # contain is inert. Under-matching is the defect.
             gates:
+              # The tutorial/source/edition parity gate reads this manifest.
+              - 'examples/reading-list/memql.toml'
+              - 'examples/reading-list/namespace.pin'
+              - 'examples/research-desk/research/memql.toml'
               - '**/*.md'
               - '**/*.memql'
               # .claude/settings.json is TRACKED on purpose (the .gitignore
@@ -522,6 +526,8 @@ jobs:
             # nothing. Renaming an export is enough to do it. The consumer must
             # rebuild whenever what it compiles against moves.
             vscode:
+              # Editor palette tests compare against the authoritative brand.
+              - 'brand/tokens.css'
               - 'editors/vscode/**'
               - 'cmd/memql-lsp/**'
               - 'scripts/vscode/**'

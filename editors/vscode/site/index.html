@@ -1,0 +1,595 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Write MemQL in Visual Studio Code and Cursor. Offline language intelligence, connected cluster tools, and explicit control over what you run and promote."
+    />
+    <meta name="theme-color" content="#047d5a" />
+    <title>
+      MemQL for Visual Studio Code and Cursor — Write. Inspect. Run.
+    </title>
+    <link rel="icon" href="brand/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="brand/fonts.css" />
+    <link rel="stylesheet" href="brand/tokens.css" />
+    <link rel="stylesheet" href="editor-theme.css" />
+    <link rel="stylesheet" href="style.css" />
+    <script src="appearance.js"></script>
+    <script type="module" src="site.js"></script>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <header class="header wrap">
+      <a
+        class="brand"
+        href="https://github.com/znasllc-io/memql"
+        aria-label="MemQL repository"
+        ><span class="brand-mark" aria-hidden="true"></span
+        ><span>MemQL</span></a
+      >
+      <span class="product-name">for VS Code &amp; Cursor</span>
+      <nav aria-label="Main navigation">
+        <a href="#workflow">Workflow</a>
+        <a href="#example">Example</a>
+        <a href="https://github.com/znasllc-io/memql/blob/main/GLOSSARY.md"
+          >Docs</a
+        >
+        <a class="nav-cta" href="#install">Get the extension</a>
+      </nav>
+      <fieldset class="appearance-controls" hidden>
+        <legend class="sr-only">Page appearance</legend>
+        <label
+          ><input type="radio" name="appearance" value="system" checked /><span
+            >System</span
+          ></label
+        >
+        <label
+          ><input type="radio" name="appearance" value="light" /><span
+            >Light</span
+          ></label
+        >
+        <label
+          ><input type="radio" name="appearance" value="dark" /><span
+            >Dark</span
+          ></label
+        >
+      </fieldset>
+    </header>
+    <main id="main">
+      <section class="hero wrap" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="product-note">
+            <span aria-hidden="true" class="file-icon">{ }</span> A language for
+            data and the work around it
+          </p>
+          <h1 id="hero-title">Your engine.<br />Your editor.</h1>
+          <p class="lead">
+            Define data, search by meaning, call AI, and compose automations in
+            MemQL. Author the DSL in VS Code or Cursor with offline language
+            intelligence; connect to the engine to inspect and run your work.
+          </p>
+          <div class="actions">
+            <a class="button primary" href="#install">Build &amp; install</a
+            ><a class="text-link" href="#example"
+              >Explore the language <span aria-hidden="true">↗</span></a
+            >
+          </div>
+          <p class="hero-detail">
+            Open source. Alpha. Local editing needs no cluster.
+          </p>
+        </div>
+        <figure class="code-figure">
+          <div class="editor">
+            <div class="editor-title">
+              <span class="file-dot" aria-hidden="true"></span
+              ><span>brief.memql</span><span class="editor-mode">MemQL</span>
+            </div>
+            <div
+              class="editor-code"
+              aria-label="Research brief concept code example"
+            >
+              <pre><code><span class="comment">/// A research brief you can inspect and review.</span>
+<span class="annotation">@rowAuthz</span>(owner=<span class="string">"ownerUserId"</span>)
+<span class="keyword">concept</span> researchBrief {
+  ownerUserId  <span class="type">string!</span>
+  question     <span class="type">string!</span>
+  answer       <span class="type">string</span>
+  sources      []<span class="type">object</span>
+}</code></pre>
+            </div>
+            <div class="editor-explanation">
+              <span class="annotation-sign" aria-hidden="true">@</span>
+              <div>
+                <strong>Ownership is part of the definition.</strong
+                ><span
+                  >Declare a row's owner, then use the authenticated actor in
+                  your reads and writes.</span
+                >
+              </div>
+            </div>
+            <div class="editor-footer">
+              <span>Concept</span><span>Edition 2026</span
+              ><span>Local source</span>
+            </div>
+          </div>
+          <figcaption>
+            Excerpt from the complete research-brief example, using the bundled
+            MemQL theme. No live cluster connection.
+          </figcaption>
+        </figure>
+      </section>
+
+      <section
+        class="capabilities wrap"
+        aria-label="Three connected capabilities"
+      >
+        <div>
+          <span class="capability-icon" aria-hidden="true">{ }</span>
+          <h2>Write with context</h2>
+          <p>
+            Completion, hover, diagnostics, and definitions powered by MemQL
+            Sense.
+          </p>
+        </div>
+        <div>
+          <span class="capability-icon" aria-hidden="true">⌘</span>
+          <h2>See what is there</h2>
+          <p>
+            Browse cluster definitions and the rows your account is allowed to
+            read.
+          </p>
+        </div>
+        <div>
+          <span class="capability-icon" aria-hidden="true">▷</span>
+          <h2>Choose what goes live</h2>
+          <p>
+            Run with arguments. Review training state. Explicitly promote your
+            changes.
+          </p>
+        </div>
+      </section>
+
+      <section
+        id="workflow"
+        class="workflow section wrap"
+        aria-labelledby="workflow-title"
+      >
+        <div class="section-intro">
+          <h2 id="workflow-title">
+            A shorter path from<br />definition to understanding.
+          </h2>
+          <p>
+            MemQL is an AI platform with a typed, versioned memory graph and an
+            execution engine. The extension brings its language and connected
+            tools into your editor.
+          </p>
+        </div>
+        <div class="workflow-body">
+          <div class="workflow-story">
+            <article>
+              <h3>Start with a file.</h3>
+              <p>
+                The bundled language server runs on your machine. Get semantic
+                highlighting, cross-reference diagnostics, signature help, and
+                go-to-definition as you write.
+              </p>
+              <span class="fact">Available offline</span>
+            </article>
+            <article>
+              <h3>Connect to the real thing.</h3>
+              <p>
+                Select a cluster and sign in. Inspect a definition, open its
+                source, or run a query with an argument form. Results belong to
+                the selected cluster and your account.
+              </p>
+              <span class="fact">Requires a trusted workspace</span>
+            </article>
+            <article>
+              <h3>Make the next step explicit.</h3>
+              <p>
+                Saving changes your file. Training controls let you dry-run, try
+                supported definitions in a session, stage for yourself, or
+                promote to the cluster. A mutation run still writes real data.
+              </p>
+              <a
+                href="https://github.com/znasllc-io/memql/blob/main/docs/public/language/training.md"
+                >Understand training and scope</a
+              >
+            </article>
+          </div>
+          <aside class="view-map" aria-labelledby="views-title">
+            <div class="view-map-head">
+              <span class="brand-mark" aria-hidden="true"></span>
+              <h3 id="views-title">A place for each question</h3>
+            </div>
+            <dl>
+              <div>
+                <dt>Clusters</dt>
+                <dd>What can I connect to?</dd>
+              </div>
+              <div>
+                <dt>Deployments</dt>
+                <dd>What changed this cluster?</dd>
+              </div>
+              <div>
+                <dt>Constructs</dt>
+                <dd>What is defined?</dd>
+              </div>
+              <div>
+                <dt>Data</dt>
+                <dd>What rows can I read?</dd>
+              </div>
+              <div>
+                <dt>Runs</dt>
+                <dd>Which configuration can I run again?</dd>
+              </div>
+            </dl>
+            <p>
+              The extension's five views. For the broader cluster workspace, use
+              <strong>Open Console</strong> to reach MemQL OS.
+            </p>
+          </aside>
+        </div>
+      </section>
+
+      <section
+        id="example"
+        class="example-section section"
+        aria-labelledby="example-title"
+      >
+        <div class="wrap">
+          <div class="core-language" aria-labelledby="core-title">
+            <p class="section-label">01 / Core language</p>
+            <div class="section-intro">
+              <h2 id="core-title">Define the pieces.</h2>
+              <p>
+                Concepts model data. Traits and specs name conditions. Shapes,
+                queries, and mutations define what comes out and what changes.
+              </p>
+            </div>
+            <div class="example-layout">
+              <div class="example-controls">
+                <div
+                  class="example-tabs"
+                  role="tablist"
+                  aria-label="Core language constructs"
+                  aria-orientation="vertical"
+                >
+                  <button
+                    role="tab"
+                    id="core-model"
+                    aria-controls="core-panel"
+                    aria-selected="false"
+                    tabindex="-1"
+                    data-core-example="0"
+                  >
+                    <span>Concepts &amp; shapes</span
+                    ><small>Define data and its projection</small>
+                  </button>
+                  <button
+                    role="tab"
+                    id="core-predicates"
+                    aria-controls="core-panel"
+                    aria-selected="true"
+                    data-core-example="1"
+                  >
+                    <span>Traits &amp; specs</span
+                    ><small>Reuse and bind conditions</small>
+                  </button>
+                  <button
+                    role="tab"
+                    id="core-write"
+                    aria-controls="core-panel"
+                    aria-selected="false"
+                    tabindex="-1"
+                    data-core-example="2"
+                  >
+                    <span>Queries &amp; mutations</span
+                    ><small>Separate reads from writes</small>
+                  </button>
+                </div>
+                <p class="example-note">
+                  The same research-brief domain, from its foundation up.
+                </p>
+              </div>
+              <div
+                class="example-code"
+                id="core-panel"
+                role="tabpanel"
+                tabindex="0"
+                aria-labelledby="core-predicates"
+              >
+                <div class="example-code-title">
+                  <span>brief.memql · core declarations</span>
+                </div>
+                <pre><code id="core-code">/// A reusable condition for concepts with a compatible status field.
+trait hasDraftStatus = row =&gt; row.status == "draft"
+
+/// A condition bound specifically to the researchBrief concept.
+spec researchBrief hasResearchAnswer = row =&gt; row.answer != nil &amp;&amp; row.answer != ""</code></pre>
+                <p id="core-description">
+                  A trait is an unbound row predicate; a spec binds its
+                  predicate to one concept or shape. The draft query below
+                  applies both, alongside the caller’s ownership check.
+                </p>
+              </div>
+            </div>
+            <p class="core-bridge">
+              <strong>Logic</strong> composes calls and returns a value.
+              <strong>Automation</strong> starts those steps from an event or
+              schedule. Put these building blocks to work in the example below.
+            </p>
+            <p class="showcase-links">
+              <a
+                href="https://github.com/znasllc-io/memql/blob/main/docs/public/language/specifications.md"
+                >Specs and traits reference</a
+              >
+              ·
+              <a
+                href="https://github.com/znasllc-io/memql/blob/main/docs/public/language/memql.md"
+                >Language reference</a
+              >
+              · <a href="research-guide.md">Complete example and setup</a>
+            </p>
+          </div>
+          <p class="section-label">02 / Advanced example</p>
+          <div class="section-intro">
+            <h2 id="example-title">
+              From a question<br />to a research draft.
+            </h2>
+            <p>
+              Search your indexed Files, ask a configured agent to draft from
+              the evidence, and save the result for review. Four pieces of one
+              workflow, written in the DSL.
+            </p>
+          </div>
+          <div class="example-layout">
+            <div class="example-controls">
+              <div
+                class="example-tabs"
+                role="tablist"
+                aria-label="Research workflow"
+                aria-orientation="vertical"
+              >
+                <button
+                  role="tab"
+                  id="tab-search"
+                  aria-controls="code-panel"
+                  aria-selected="true"
+                  data-example="0"
+                >
+                  <span>Similarity search</span
+                  ><small>Find passages by meaning</small>
+                </button>
+                <button
+                  role="tab"
+                  id="tab-ai"
+                  aria-controls="code-panel"
+                  aria-selected="false"
+                  tabindex="-1"
+                  data-example="1"
+                >
+                  <span>AI in the DSL</span
+                  ><small>Turn evidence into a draft</small>
+                </button>
+                <button
+                  role="tab"
+                  id="tab-cache"
+                  aria-controls="code-panel"
+                  aria-selected="false"
+                  tabindex="-1"
+                  data-example="2"
+                >
+                  <span>Cached reads</span
+                  ><small>Set TTL on saved results</small>
+                </button>
+                <button
+                  role="tab"
+                  id="tab-automation"
+                  aria-controls="code-panel"
+                  aria-selected="false"
+                  tabindex="-1"
+                  data-example="3"
+                >
+                  <span>Whole automation</span><small>Connect the steps</small>
+                </button>
+              </div>
+              <p class="example-note">
+                Focused excerpts from one program.<br />This page does not
+                execute MemQL.
+              </p>
+              <noscript
+                ><p class="example-note">
+                  Code tabs need JavaScript. The complete source download works
+                  without it.
+                </p></noscript
+              >
+            </div>
+            <div
+              class="example-code"
+              id="code-panel"
+              role="tabpanel"
+              tabindex="0"
+              aria-labelledby="tab-search"
+            >
+              <div class="example-code-title">
+                <span>brief.memql</span
+                ><button class="copy" id="copy-code" hidden>
+                  Copy snippet
+                </button>
+              </div>
+              <pre><code id="example-code">@actor
+logic relevantResearchFiles {
+  args { question string! }
+  matches := builtin librarySimilarArtifacts(
+    text: args.question, limit: 5
+  )
+  return matches.select(file =&gt; {
+    title: file.title, snippet: file.snippet,
+    artifactId: file.artifactId
+  })
+}</code></pre>
+              <p id="example-description">
+                Search indexed Files by meaning with the caller’s ownership
+                checks. The complete source includes imports, schema, mutations,
+                and the automation.
+              </p>
+              <p id="copy-status" class="sr-only" role="status"></p>
+            </div>
+          </div>
+          <div class="example-next">
+            <a href="brief.memql" download>Download the complete .memql file</a>
+            <a href="memql.toml" download>Download its language manifest</a>
+          </div>
+          <p class="showcase-setup">
+            Needs indexed Files, matching embedding configuration, and an agent
+            with compatible inference on an agent node. The output is a draft
+            for human review.
+          </p>
+          <details class="run-guide">
+            <summary>Setup and run the complete workflow</summary>
+            <ol>
+              <li>
+                Open the complete example in either editor. Its source includes
+                the schema, both mutations, imports, and the four constructs
+                above.
+              </li>
+              <li>
+                Validate the bundle offline with
+                <code>go run ./cmd/memqllint examples/research-desk</code>. The
+                directory check uses the engine loader.
+              </li>
+              <li>
+                On a development cluster, configure Files indexing and an agent,
+                then load the domain as described in the guide. Model execution
+                requires the cluster’s permissions and compatible inference.
+              </li>
+              <li>
+                Run <code>requestResearchBrief</code> with a fresh
+                <code>briefId</code>, a question, and your configured
+                <code>agentId</code>. Inspect the saved draft with
+                <code>researchBriefs</code>.
+              </li>
+            </ol>
+            <p>
+              <a href="research-guide.md"
+                >Complete setup and execution guide (Markdown) →</a
+              >
+            </p>
+          </details>
+          <p class="showcase-links">
+            <a href="research-guide.md">Read the full setup guide</a>
+            ·
+            <a
+              href="https://github.com/znasllc-io/memql/blob/main/docs/public/language/first-program.md"
+              >Start with a simpler first program</a
+            >
+          </p>
+        </div>
+      </section>
+
+      <section
+        id="install"
+        class="install section wrap"
+        aria-labelledby="install-title"
+      >
+        <div>
+          <h2 id="install-title">Make room<br />for MemQL.</h2>
+          <p>
+            Build the extension from the repository and install it into your
+            editor. Your first file can stay entirely local.
+          </p>
+          <p class="install-requirements">
+            VS Code 1.91+ or compatible Cursor · Node.js 20+ · Go toolchain from
+            go.mod · npm · Git · Make · unzip
+          </p>
+          <a
+            href="https://github.com/znasllc-io/memql/blob/main/docs/public/language/vscode.md#install--update-locally"
+            >Read the installation guide</a
+          >
+        </div>
+        <div class="install-steps">
+          <ol>
+            <li>
+              <h3>Clone and install</h3>
+              <pre><code>git clone https://github.com/znasllc-io/memql.git
+cd memql
+make vscode-install                  # VS Code
+make vscode-install EDITOR_CMD=cursor # Cursor</code></pre>
+              <p>
+                Choose the install command for your editor. It builds for your
+                host and uses the selected <code>code</code> or
+                <code>cursor</code> CLI. Replaces an existing local MemQL
+                extension.
+              </p>
+            </li>
+            <li>
+              <h3>Reload your editor</h3>
+              <p>
+                Run <strong>Developer: Reload Window</strong>, then open a
+                folder of <code>.memql</code> files.
+              </p>
+            </li>
+            <li>
+              <h3>Connect when you need the engine</h3>
+              <p>
+                Use <strong>MemQL: Add Cluster</strong> and sign in. Local
+                cluster installation supports Linux x64 and Apple Silicon macOS,
+                with Docker running.
+              </p>
+            </li>
+          </ol>
+          <p class="build-note">
+            Want only the archive? Run <code>make vscode-package</code>. The
+            script prints the VSIX path. Public registry availability is not
+            assumed here.
+          </p>
+        </div>
+      </section>
+
+      <section
+        class="editor-appearance wrap"
+        aria-labelledby="editor-appearance-title"
+      >
+        <h2 id="editor-appearance-title">Two themes. Your choice.</h2>
+        <p>
+          <strong>MemQL Light</strong> pairs neutral paper with green accents.
+          <strong>MemQL Dark</strong> uses brighter charcoal surfaces with mint
+          and amber syntax. In VS Code or Cursor, open
+          <strong>Preferences: Color Theme</strong> and choose either. The page
+          appearance control changes only this website.
+        </p>
+      </section>
+      <section class="closing wrap" aria-labelledby="engine-title">
+        <div>
+          <span class="brand-mark" aria-hidden="true"></span>
+          <h2 id="engine-title">An editor for a broader engine.</h2>
+          <p>
+            MemQL connects typed data, relationships, agent work, automations,
+            integrations, and hosted sites. VS Code and Cursor are where you
+            author. MemQL OS is where you manage the cluster.
+          </p>
+        </div>
+        <a
+          class="button secondary"
+          href="https://github.com/znasllc-io/memql/blob/main/docs/public/overview/what-is-memql.md"
+          >Meet MemQL</a
+        >
+      </section>
+    </main>
+    <footer class="footer wrap">
+      <span>MemQL for VS Code &amp; Cursor</span>
+      <nav aria-label="Footer">
+        <a href="https://github.com/znasllc-io/memql/tree/main/editors/vscode"
+          >Source</a
+        ><a href="https://github.com/znasllc-io/memql/issues">Report an issue</a
+        ><a href="https://github.com/znasllc-io/memql/blob/main/LICENSE"
+          >Apache 2.0</a
+        >
+      </nav>
+      <p>Alpha software. Language and APIs may change before 1.0.</p>
+    </footer>
+  </body>
+</html>

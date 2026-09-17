@@ -16,3 +16,5 @@ esbuild.host.js
 .gitignore
 .vscode-test/**
 node_modules/**
+
+site/**
