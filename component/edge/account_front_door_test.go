@@ -173,7 +173,7 @@ func TestADocumentWithNoDoorIsUnchanged(t *testing.T) {
 // wss://os.<cluster-domain> while the page opens wss://app.<reservedName>.
 func TestTheCspNamesTheDoorsOwnOrigins(t *testing.T) {
 	env := envOf(map[string]string{"MEMQL_IDENTITY_BASE_URL": "https://identity.memql.localhost"})
-	policy := policyForSite(httptest.NewRequest("GET", "/", nil), osSiteThroughDoor(), env)
+	policy := policyForSite(httptest.NewRequest("GET", "/", nil), osSiteThroughDoor(), env, "")
 
 	for _, want := range []string{
 		"https://" + testAppHost,
@@ -207,7 +207,7 @@ func TestTheCspNamesTheSameIdentityOriginTheRuntimeConfigDoes(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			doc := runtimeConfigForSite(context.Background(), site, env, true, nil)
-			policy := policyForSite(httptest.NewRequest("GET", "/", nil), site, env)
+			policy := policyForSite(httptest.NewRequest("GET", "/", nil), site, env, "")
 			if !strings.Contains(policy, doc.IdentityURL) {
 				t.Errorf("runtime config sends the browser to %q; connect-src does not name it:\n%s", doc.IdentityURL, policy)
 			}
