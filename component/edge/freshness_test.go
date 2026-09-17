@@ -73,7 +73,8 @@ func TestFileReleaseWithPreservedSizeAndTimestampUsesContentValidator(t *testing
 			r.Header.Set(key, value)
 		}
 		w := httptest.NewRecorder()
-		h.serveFile(w, r, os.DirFS(dir), "app.js", "file://"+dir)
+		etag, hasETag := assetETagFor(os.DirFS(dir), "app.js", "file://"+dir)
+		h.serveFile(w, r, os.DirFS(dir), "app.js", etag, hasETag)
 		return w
 	}
 	write("release one")

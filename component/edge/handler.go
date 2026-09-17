@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
-	"os"
 	"path"
 	"strings"
 	"time"
@@ -47,6 +46,14 @@ type Handler struct {
 	identityTarget string
 	secretResolver SecretResolver
 	requestLog     RequestRecorder
+	// hashCache holds one document's inline-script hash list per asset
+	// validator (scripthash.go). Same LRU as the bundle byte cache, and
+	// immutable for the same reason: the key names exact bytes, so a
+	// republish is a new key and there is no invalidation path.
+	hashCache *bundleCache
+	// hashSF coalesces concurrent misses on that cache, the way blob.go and
+	// resolve.go already guard their own cold paths.
+	hashSF hashGroup
 }
 
 var _ http.Handler = (*Handler)(nil)
@@ -64,6 +71,7 @@ func NewHandler(opts Options) *Handler {
 		identityTarget: opts.IdentityTarget,
 		secretResolver: opts.SecretResolver,
 		requestLog:     opts.RequestLog,
+		hashCache:      newBundleCache(cspHashCacheBytes),
 	}
 }
 
@@ -177,10 +185,27 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, site *Site) stri
 	}
 
 	securityHeaders(w, r)
-	w.Header().Set("Content-Security-Policy", policyForSite(r, site, os.Getenv))
 
+	// THE POLICY IS SET AFTER RESOLUTION, NOT BEFORE, and the ordering is
+	// the whole of what makes inline-script hashes work (scripthash.go).
+	// Which hashes belong in script-src is a property of the DOCUMENT being
+	// served, so the header cannot be written until resolveAsset has said
+	// which file that is.
+	//
+	// It must still be written BEFORE serveFile, because serveFile answers a
+	// conditional request with 304 and returns -- and a 304's headers
+	// REPLACE the stored ones, so a 304 that omitted the hashes would
+	// overwrite the good policy its own 200 established. The page would work
+	// on a first visit and be inert on every one after, which is the failure
+	// TestNotModifiedRepeatsTheInlineScriptHashes exists to catch.
 	if name, ok := resolveAsset(fsys, r.URL.Path); ok {
-		h.serveFile(w, r, fsys, name, site.BundleRef)
+		// ONE VALIDATOR, TWO CONSUMERS. On the file:// path assetETagFor
+		// reads the whole file and SHA-256s it (contentETag), so letting the
+		// policy and serveFile each derive it would hash every served asset
+		// twice per request.
+		etag, hasETag := assetETagFor(fsys, name, site.BundleRef)
+		h.setContentSecurityPolicy(w, r, site, fsys, name, etag, hasETag)
+		h.serveFile(w, r, fsys, name, etag, hasETag)
 		return classifyServed(name, false)
 	}
 
@@ -192,10 +217,16 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, site *Site) stri
 	// (/products/x, /cart) 404s on a hard reload.
 	if site.Kind == "spa" || site.Kind == storefrontKind {
 		if _, err := fs.Stat(fsys, "index.html"); err == nil {
-			h.serveFile(w, r, fsys, "index.html", site.BundleRef)
+			// The fallback serves a DOCUMENT, so it needs its hashes exactly
+			// as the root does. Without this every client-side route breaks
+			// on a hard reload while the root keeps working.
+			etag, hasETag := assetETagFor(fsys, "index.html", site.BundleRef)
+			h.setContentSecurityPolicy(w, r, site, fsys, "index.html", etag, hasETag)
+			h.serveFile(w, r, fsys, "index.html", etag, hasETag)
 			return pathClassFallback
 		}
 	}
+	h.setContentSecurityPolicy(w, r, site, fsys, "", "", false)
 	noCache(w)
 	http.NotFound(w, r)
 	return pathClassUnserved
@@ -226,16 +257,24 @@ func resolveAsset(fsys fs.FS, urlPath string) (string, bool) {
 	return "", false
 }
 
-func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request, fsys fs.FS, name string, bundleRef string) {
-	// THE VALIDATOR IS COMPUTED BEFORE THE FILE IS OPENED (memql#4545), and
-	// on the blob path that ordering is the entire point: a bundle's
+func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request, fsys fs.FS, name, etag string, hasETag bool) {
+	// THE VALIDATOR IS COMPUTED BEFORE THE FILE IS OPENED (memql#4545) --
+	// by the CALLER now, which also hands it to the CSP builder so it is
+	// derived once rather than twice (see the call site).
+	//
+	// On the blob path that ordering is the entire point: a bundle's
 	// version prefix is a content hash, so (prefix, path) names the bytes
-	// without reading them, and a conditional request is answered 304 with
-	// ZERO downloads. Opening first would make every 304 cost exactly what
-	// a 200 costs, which is most of what this was worth.
+	// without reading them, and a conditional request for an ASSET is
+	// answered 304 with ZERO downloads.
+	//
+	// A DOCUMENT is the exception, and it is a cost rather than a
+	// correctness problem: the CSP builder must know the document's inline
+	// scripts, so on a cold hash cache it reads the document even for a
+	// response that will carry no body. Bounded to once per (bundle
+	// version, document, replica) by that cache, and coalesced across
+	// concurrent requests by its singleflight.
 	//
 	// The file:// path hashes content because build timestamps can be preserved.
-	etag, hasETag := assetETagFor(fsys, name, bundleRef)
 
 	// Every mutable URL must reach this handler again after a release. Only
 	// a filename digest VERIFIED against its bytes earns immutable caching.
