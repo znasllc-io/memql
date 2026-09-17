@@ -1,3 +1,10 @@
+import { NeedsConfiguration } from "./NeedsConfiguration";
+import { useSession } from "../../chrome/access";
+import { campaignSendingConfigured } from "./readiness";
+import type { UploadProvider } from "../../items/upload";
+import { CampaignJourney } from "./CampaignJourney";
+import type { EmailReadiness } from "./rows";
+import type { Reading } from "./useCampaigns";
 import { AddButton } from "../../kit/AddButton";
 import { useEffect, useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -8,6 +15,7 @@ import { useAccountOptions } from "../accounts/tie";
 import { accountNameFrom } from "../accounts/rows";
 import {
   Button,
+  EmptyState,
   Caption,
   Check,
   Chip,
@@ -58,7 +66,11 @@ export function CampaignsSection({
   writes,
   showFiled,
   trackByDefault,
+  uploads,
+  email,
 }: {
+  uploads: UploadProvider;
+  email: Reading<EmailReadiness>;
   feeds: CampaignFeeds;
   writes: CampaignWrites;
   showFiled: boolean;
@@ -88,11 +100,55 @@ export function CampaignsSection({
     [source, source?.snapshot, openId],
   );
 
+  if (adding)
+    return (
+      <CampaignJourney
+        feeds={feeds}
+        writes={writes}
+        uploads={uploads}
+        email={email}
+        trackByDefault={trackByDefault}
+        onDone={(id) => {
+          setAdding(false);
+          if (id) {
+            setOpenId(id);
+            feeds.campaigns.reseed();
+          }
+        }}
+      />
+    );
+  if (open)
+    return (
+      <div
+        className="os-app-stack"
+        data-os-page-context={JSON.stringify({
+          page: "Campaign",
+          name: campaignName(open),
+          id: open.id,
+        })}
+      >
+        <Head
+          title={campaignName(open)}
+          back={{ label: "Campaigns", onSelect: () => setOpenId("") }}
+        />
+        <NeedsConfiguration email={email} />
+        <CampaignDetail
+          key={open.id}
+          campaign={open}
+          audiences={audiences}
+          templates={templates}
+          senders={senders}
+          writes={writes}
+        />
+      </div>
+    );
+
   return (
     <div className="os-app-stack">
       <Head title="Campaigns">
         <AddButton onClick={() => setAdding((v) => !v)} label="New campaign" />
       </Head>
+      <NeedsConfiguration email={email} />
 
       {feeds.campaigns.snapshot.error ? (
         <Notice
@@ -103,21 +159,6 @@ export function CampaignsSection({
           <Button onClick={feeds.campaigns.reseed}>Try again</Button>
         </Notice>
       ) : null}
-
-      {adding ? (
-        <CampaignForm
-          audiences={audiences}
-          templates={templates}
-          senders={senders}
-          trackByDefault={trackByDefault}
-          writes={writes}
-          onDone={(id) => {
-            setAdding(false);
-            if (id !== "") setOpenId(id);
-          }}
-        />
-      ) : null}
-
 
       {/* Keyed on the filter so flipping it RE-BASELINES the arrival cues.
           Revealing rows the browser already had is not the cluster sending
@@ -137,6 +178,12 @@ export function CampaignsSection({
             ? "No campaigns yet. Write one above -- you will need an audience and a template first."
             : "Nothing in flight. Start a campaign above -- or turn on finished campaigns in this app's settings to see what has already gone out."
         }
+        emptyContent={
+          <EmptyState icon={Send} title="No campaigns yet">
+            Start a campaign to prepare your sender, audience and content. Finished campaigns are
+            available through Settings.
+          </EmptyState>
+        }
         renderRow={(campaign, tick) => (
           <CampaignLine
             campaign={campaign}
@@ -147,17 +194,6 @@ export function CampaignsSection({
           />
         )}
       />
-
-      {open === null ? null : (
-        <CampaignDetail
-          key={open.id}
-          campaign={open}
-          audiences={audiences}
-          templates={templates}
-          senders={senders}
-          writes={writes}
-        />
-      )}
     </div>
   );
 }
@@ -355,8 +391,8 @@ function CampaignDetail({
             />
           ) : (
             <Caption>
-              A draft can still be changed. Once a send starts, the audience and template it went out
-              with stay on the record.
+              A draft can still be changed. Once a send starts, the audience and template it went
+              out with stay on the record.
             </Caption>
           )}
         </Panel>
@@ -382,6 +418,7 @@ function CampaignDetail({
  * "Send?" and it is the one being asked.
  */
 function SendControls({ campaign, writes }: { campaign: CampaignRow; writes: CampaignWrites }) {
+  const readyToSend = campaignSendingConfigured(useSession().readiness);
   const controls = writes.sendControls;
   const [asking, setAsking] = useState<"" | "start" | "cancel">("");
   const [when, setWhen] = useState("");
@@ -407,8 +444,15 @@ function SendControls({ campaign, writes }: { campaign: CampaignRow; writes: Cam
   return (
     <Panel label="Send controls">
       <Subhead>Sending</Subhead>
+      {!readyToSend ? (
+        <Notice
+          tone="warn"
+          sentence="Sending setup is incomplete or unconfirmed."
+          next="Review Campaigns settings. You can still edit this draft or stop an existing send."
+        />
+      ) : null}
 
-      {asking === "start" ? (
+      {asking === "start" && readyToSend ? (
         <div className="os-campaign-confirm">
           <p className="os-campaign-confirm-line">
             Send {campaignName(campaign)} now
@@ -471,7 +515,7 @@ function SendControls({ campaign, writes }: { campaign: CampaignRow; writes: Cam
         </div>
       ) : (
         <div className="os-campaign-actions">
-          {draft || scheduled ? (
+          {(draft || scheduled) && readyToSend ? (
             <Button tone="primary" onClick={() => setAsking("start")}>
               Send now
             </Button>
@@ -480,7 +524,7 @@ function SendControls({ campaign, writes }: { campaign: CampaignRow; writes: Cam
               was starting it; resuming picks up a run that is already
               underway, and asking again would train somebody to click
               through the question that matters. */}
-          {paused ? (
+          {paused && readyToSend ? (
             <Button
               tone="primary"
               busy={controls.busy}
@@ -505,7 +549,7 @@ function SendControls({ campaign, writes }: { campaign: CampaignRow; writes: Cam
         </div>
       )}
 
-      {draft || scheduled ? (
+      {(draft || scheduled) && readyToSend ? (
         <div className="os-campaign-schedule">
           <Field label="Or send it at">
             <Input
@@ -518,14 +562,16 @@ function SendControls({ campaign, writes }: { campaign: CampaignRow; writes: Cam
             <Button
               busy={controls.busy}
               busyLabel="Scheduling"
-              onClick={() => controls.schedule(campaign.id, when === "" ? campaign.scheduledAt : when)}
+              onClick={() =>
+                controls.schedule(campaign.id, when === "" ? campaign.scheduledAt : when)
+              }
             >
               Schedule
             </Button>
           </Field>
           <Caption>
-            A time with no offset is read as UTC. The same checks run now as they would at send time,
-            so a missing sender or an unfinished template is caught here rather than at 3am.
+            A time with no offset is read as UTC. The same checks run now as they would at send
+            time, so a missing sender or an unfinished template is caught here rather than at 3am.
           </Caption>
         </div>
       ) : null}
@@ -578,6 +624,7 @@ export function TestSendPanel({
   label?: string;
 }) {
   const [to, setTo] = useState("");
+  const readyToSend = campaignSendingConfigured(useSession().readiness);
 
   // The result belongs to the campaign it was run against. Switching campaigns
   // with a stale "Test sent" on screen would credit one campaign with another's
@@ -590,6 +637,13 @@ export function TestSendPanel({
   return (
     <Panel label={label}>
       <Subhead>{label}</Subhead>
+      {!readyToSend ? (
+        <Notice
+          tone="warn"
+          sentence="Finish sending setup before sending a test."
+          next="Review Campaigns settings, then check again."
+        />
+      ) : null}
       <Field label="Send one copy to">
         <Input
           id={`os-campaign-test-${campaignId}`}
@@ -597,9 +651,12 @@ export function TestSendPanel({
           value={to}
           onChange={setTo}
           placeholder="you@example.com"
-          onEnter={() => testSend.send(campaignId, to)}
+          onEnter={() => {
+            if (readyToSend) void testSend.send(campaignId, to);
+          }}
         />
         <Button
+          disabled={!readyToSend}
           busy={testSend.busy}
           busyLabel="Sending"
           onClick={() => testSend.send(campaignId, to)}
@@ -630,7 +687,11 @@ export function TestSendPanel({
           sentence="Test sent -- but these merge tags did not resolve."
           next="They will appear as their own text in the message. Check the spelling, or the column name on the audience."
         >
-          <div className="os-campaign-tags" role="list" aria-label="Merge tags that did not resolve">
+          <div
+            className="os-campaign-tags"
+            role="list"
+            aria-label="Merge tags that did not resolve"
+          >
             {testSend.unresolved.map((tag) => (
               <span key={tag} className="os-campaign-tag" role="listitem" data-unresolved>
                 <span className="os-mono">{tag}</span>
@@ -693,7 +754,10 @@ function StatsPanel({
             <Fact label="Not yet sent" value={formatFigure(value.pending)} />
             <Fact label="Failed" value={formatFigure(value.failed)} />
             <Fact label="Skipped" value={formatFigure(value.skipped)} />
-            <Fact label="Skipped: on the do-not-mail list" value={formatFigure(value.skippedSuppressed)} />
+            <Fact
+              label="Skipped: on the do-not-mail list"
+              value={formatFigure(value.skippedSuppressed)}
+            />
             <Fact label="Skipped: unsubscribed" value={formatFigure(value.skippedUnsubscribed)} />
             <Fact label="Skipped: some other reason" value={formatFigure(value.skippedOther)} />
             <Fact label="Hard bounces" value={formatFigure(value.hardBounces)} />
@@ -782,7 +846,8 @@ function DeliveriesPanel({ campaignId }: { campaignId: string }) {
       {ledger.readAt === "" ? null : (
         <Caption>
           Read at {new Date(ledger.readAt).toLocaleTimeString()}. Delivery records are not broadcast
-          -- there is one per recipient per send, so they are read when you ask rather than streamed.
+          -- there is one per recipient per send, so they are read when you ask rather than
+          streamed.
         </Caption>
       )}
     </Panel>
@@ -804,8 +869,9 @@ function DeliveriesPanel({ campaignId }: { campaignId: string }) {
  * rather than by sending and being refused: both are `string!` on the concept.
  * Everything else is correctable later.
  */
-function CampaignForm({
+export function CampaignForm({
   campaign,
+  initial,
   audiences,
   templates,
   senders,
@@ -814,6 +880,11 @@ function CampaignForm({
   onDone,
 }: {
   campaign?: CampaignRow;
+  initial?: {
+    audienceId: string;
+    templateId: string;
+    senderIdentityId: string;
+  };
   audiences: AudienceRow[];
   templates: TemplateRow[];
   senders: SenderIdentityRow[];
@@ -826,19 +897,23 @@ function CampaignForm({
   const write = editing ? writes.updateCampaign : writes.createCampaign;
   const [draft, setDraft] = useState(() => ({
     name: campaign?.name ?? "",
-    audienceId: campaign?.audienceId ?? "",
-    templateId: campaign?.templateId ?? "",
+    audienceId: campaign?.audienceId ?? initial?.audienceId ?? "",
+    templateId: campaign?.templateId ?? initial?.templateId ?? "",
     fromName: campaign?.fromName ?? "",
     replyTo: campaign?.replyTo ?? "",
     scheduledAt: campaign?.scheduledAt ?? "",
     accountId: campaign?.accountId ?? "",
-    senderIdentityId: campaign?.senderIdentityId ?? "",
+    senderIdentityId: campaign?.senderIdentityId ?? initial?.senderIdentityId ?? "",
     trackOpens: campaign?.trackOpens ?? trackByDefault,
     trackClicks: campaign?.trackClicks ?? trackByDefault,
   }));
 
-  const ready =
-    draft.name.trim() !== "" && draft.audienceId !== "" && draft.templateId !== "";
+  useEffect(() => {
+    if (!initial || campaign) return;
+    setDraft((previous) => ({ ...previous, ...initial }));
+  }, [initial?.audienceId, initial?.templateId, initial?.senderIdentityId, campaign]);
+
+  const ready = draft.name.trim() !== "" && draft.audienceId !== "" && draft.templateId !== "";
 
   async function submit() {
     if (editing && campaign) {
@@ -940,16 +1015,10 @@ function CampaignForm({
       </div>
 
       <div className="os-campaign-tracking">
-        <Check
-          checked={draft.trackOpens}
-          onChange={(v) => setDraft({ ...draft, trackOpens: v })}
-        >
+        <Check checked={draft.trackOpens} onChange={(v) => setDraft({ ...draft, trackOpens: v })}>
           Count who opens it
         </Check>
-        <Check
-          checked={draft.trackClicks}
-          onChange={(v) => setDraft({ ...draft, trackClicks: v })}
-        >
+        <Check checked={draft.trackClicks} onChange={(v) => setDraft({ ...draft, trackClicks: v })}>
           Count who clicks a link
         </Check>
         <Caption>
@@ -968,7 +1037,13 @@ function CampaignForm({
       )}
 
       <div className="os-campaign-actions">
-        <Button tone="primary" busy={write.busy} busyLabel="Saving" onClick={submit} disabled={!ready}>
+        <Button
+          tone="primary"
+          busy={write.busy}
+          busyLabel="Saving"
+          onClick={submit}
+          disabled={!ready}
+        >
           {editing ? "Save" : "Create campaign"}
         </Button>
         <Button

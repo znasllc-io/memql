@@ -15,10 +15,10 @@ const app = (id: string) => {
 };
 
 describe("the readiness mapping (design record section 5.1)", () => {
-  it("Campaigns requires email and campaign sending on every section", () => {
+  it("Campaigns permits preparation while requiring setup at the send controls", () => {
     expect(requirementsFor(app("campaigns"), "campaigns")).toEqual({
-      requires: ["email", "campaigns"],
-      wants: [],
+      requires: [],
+      wants: ["email", "campaigns"],
     });
     expect(requirementsFor(app("campaigns"), "settings")).toEqual({ requires: [], wants: [] });
   });

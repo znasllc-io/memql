@@ -1,5 +1,5 @@
 import { AddButton } from "../../kit/AddButton";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { Users } from "lucide-react";
 
@@ -9,6 +9,7 @@ import { useAccountOptions } from "../accounts/tie";
 import type { UploadProvider } from "../../items/upload";
 import {
   Button,
+  EmptyState,
   Caption,
   Check,
   Chip,
@@ -81,6 +82,46 @@ export function AudiencesSection({
     [source, source?.snapshot, openId],
   );
 
+  if (adding)
+    return (
+      <div className="os-app-stack">
+        <Head
+          title="New audience"
+          back={{ label: "Audiences", onSelect: () => setAdding(false) }}
+        />
+        <AudienceForm
+          writes={writes}
+          onDone={(id) => {
+            setAdding(false);
+            if (id !== "") setOpenId(id);
+          }}
+        />
+      </div>
+    );
+  if (open)
+    return (
+      <div
+        className="os-app-stack"
+        data-os-page-context={JSON.stringify({
+          page: "Audiences",
+          name: audienceName(open),
+          id: open.id,
+        })}
+      >
+        <Head
+          title={audienceName(open)}
+          back={{ label: "Audiences", onSelect: () => setOpenId("") }}
+        />
+        <AudienceDetail
+          key={open.id}
+          audience={open}
+          writes={writes}
+          uploads={uploads}
+          onArchived={() => setOpenId("")}
+        />
+      </div>
+    );
+
   return (
     <div className="os-app-stack">
       <Head title="Audiences">
@@ -97,17 +138,6 @@ export function AudiencesSection({
         </Notice>
       ) : null}
 
-      {adding ? (
-        <AudienceForm
-          writes={writes}
-          onDone={(id) => {
-            setAdding(false);
-            if (id !== "") setOpenId(id);
-          }}
-        />
-      ) : null}
-
-
       <LiveList<AudienceRow>
         key={`audiences:${showFiled}`}
         source={source}
@@ -115,6 +145,11 @@ export function AudiencesSection({
         fingerprint={audienceFingerprint}
         label="Your audiences"
         emptyText="No audiences yet. Create one above, then import a CSV or add an address by hand."
+        emptyContent={
+          <EmptyState icon={Users} title="No audiences yet">
+            Create an audience, then import a CSV or add subscribed recipients.
+          </EmptyState>
+        }
         renderRow={(audience, tick) => (
           <AudienceLine
             audience={audience}
@@ -124,16 +159,6 @@ export function AudiencesSection({
           />
         )}
       />
-
-      {open === null ? null : (
-        <AudienceDetail
-          key={open.id}
-          audience={open}
-          writes={writes}
-          uploads={uploads}
-          onArchived={() => setOpenId("")}
-        />
-      )}
     </div>
   );
 }
@@ -176,21 +201,26 @@ function AudienceLine({
 // One audience
 // ---------------------------------------------------------------------------
 
-function AudienceDetail({
+export function AudienceDetail({
   audience,
   writes,
   uploads,
   onArchived,
+  onReadiness,
 }: {
   audience: AudienceRow;
   writes: CampaignWrites;
   uploads: UploadProvider;
   onArchived: () => void;
+  onReadiness?: (id: string, count: number | null) => void;
 }) {
   const roster = useAudienceRecipients(audience.id);
   const accounts = useAccountOptions();
   const recipients = useMemo(() => roster.value.map(recipientFromRow), [roster.value]);
   const sendable = sendableCount(recipients);
+  useEffect(() => {
+    onReadiness?.(audience.id, roster.state === "ready" ? sendable : null);
+  }, [audience.id, roster.state, sendable, onReadiness]);
 
   return (
     <div className="os-campaign-detail">
@@ -201,24 +231,35 @@ function AudienceDetail({
         </div>
         <Facts>
           <Fact label="Description" value={audience.description} />
-          <Fact label="On the list" value={recipients.length} />
+          <Fact
+            label="On the list"
+            value={roster.state === "ready" ? recipients.length : "Not available"}
+          />
           {/* THE DIFFERENCE BETWEEN THESE TWO IS THE SUPPRESSION RATE, which
               is the number somebody about to schedule actually wants -- and it
               is one the roster read already contains, because
               recipientsForAudience returns suppressed rows deliberately. */}
-          <Fact label="A send would reach" value={sendable} />
+          <Fact
+            label="Subscribed recipients"
+            value={roster.state === "ready" ? sendable : "Not available"}
+          />
           <Fact label="Created" value={formatMoment(audience.createdAt)} />
         </Facts>
         {recipients.length > 0 && sendable < recipients.length ? (
           <Caption>
-            {recipients.length - sendable} of these cannot be mailed -- they unsubscribed, bounced or
-            reported a message. They stay on the list on purpose: removing them destroys the record
-            and lets the next import bring them back.
+            {recipients.length - sendable} of these cannot be mailed -- they unsubscribed, bounced
+            or reported a message. They stay on the list on purpose: removing them destroys the
+            record and lets the next import bring them back.
           </Caption>
         ) : null}
       </Panel>
 
-      <ImportPanel audience={audience} writes={writes} uploads={uploads} onImported={roster.reload} />
+      <ImportPanel
+        audience={audience}
+        writes={writes}
+        uploads={uploads}
+        onImported={roster.reload}
+      />
 
       <AddOnePanel audience={audience} writes={writes} onAdded={roster.reload} />
 
@@ -380,9 +421,7 @@ export function ImportReportPanel({
                   {sample.line > 0 ? `Line ${sample.line}` : "A line"}
                 </span>
                 <span className="os-mono">{sample.text || "(empty)"}</span>
-                {sample.reason === "" ? null : (
-                  <span className="os-caption">{sample.reason}</span>
-                )}
+                {sample.reason === "" ? null : <span className="os-caption">{sample.reason}</span>}
               </li>
             ))}
           </ul>
@@ -471,7 +510,13 @@ function AddOnePanel({
         />
       )}
       <div className="os-campaign-actions">
-        <Button tone="primary" busy={add.busy} busyLabel="Adding" onClick={submit} disabled={email.trim() === ""}>
+        <Button
+          tone="primary"
+          busy={add.busy}
+          busyLabel="Adding"
+          onClick={submit}
+          disabled={email.trim() === ""}
+        >
           Add
         </Button>
       </div>
@@ -569,9 +614,7 @@ function RosterPanel({
             </li>
           ))}
           {recipients.length > ROSTER_ROWS ? (
-            <li className="os-caption">
-              and {recipients.length - ROSTER_ROWS} more in this page
-            </li>
+            <li className="os-caption">and {recipients.length - ROSTER_ROWS} more in this page</li>
           ) : null}
         </ul>
       )}
@@ -588,9 +631,9 @@ function RosterPanel({
       {roster.readAt === "" ? null : (
         <Caption>
           Read at {new Date(roster.readAt).toLocaleTimeString()}, and not updated since. An audience
-          can be a whole imported file, so it is read when you ask rather than streamed -- an address
-          added in another window, or an unsubscribe that arrived a minute ago, shows up when you read
-          again. {subscriptionNote(recipients)}
+          can be a whole imported file, so it is read when you ask rather than streamed -- an
+          address added in another window, or an unsubscribe that arrived a minute ago, shows up
+          when you read again. {subscriptionNote(recipients)}
         </Caption>
       )}
     </Panel>
@@ -606,7 +649,7 @@ function subscriptionNote(recipients: RecipientRow[]): string {
 // Creating and archiving
 // ---------------------------------------------------------------------------
 
-function AudienceForm({
+export function AudienceForm({
   writes,
   onDone,
 }: {
@@ -726,8 +769,8 @@ function ArchivePanel({
           <p className="os-campaign-confirm-line">Archive {audienceName(audience)}?</p>
           <Caption>
             It stops being offered when a campaign is written, and it appears under the archived
-            filter. Everyone on it stays on it, and past sends keep naming it -- an archived audience
-            is filed, not deleted.
+            filter. Everyone on it stays on it, and past sends keep naming it -- an archived
+            audience is filed, not deleted.
           </Caption>
           <Check checked={understood} onChange={setUnderstood}>
             I want to file this audience away
