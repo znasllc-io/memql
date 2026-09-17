@@ -43,22 +43,21 @@
 // platform's own site host ("This Connection Is Not Private").
 //
 // So CertificateSANs is every EXACT host the front door serves -- the three
-// role hosts, the OS shell, and the apex -- and the wildcard is an Ingress RULE
-// this package requests no SAN for. That is a statement about the HTTP-01
-// certificate this package derives, not about the wildcard being uncovered:
-// an overlay that declares a DNS-01 ClusterIssuer also declares a SECOND,
-// wildcard Certificate and gives the wildcard rule its tls entry by patch
-// (memql#4347), which is why the render gate reads the SOLVER rather than
-// this list. Without such an issuer the wildcard rule still has nothing
+// role hosts, the platform sites, and the apex -- and the wildcard is an
+// Ingress RULE this package requests no SAN for. That is a statement about the
+// HTTP-01 certificate this package derives, not about the wildcard being
+// uncovered: an overlay that declares a DNS-01 ClusterIssuer also declares a
+// SECOND, wildcard Certificate and gives the wildcard rule its tls entry by
+// patch (memql#4347), which is why the render gate reads the SOLVER rather
+// than this list. Without such an issuer the wildcard rule still has nothing
 // behind it and every other site needs its own Certificate
-// (docs/public/operate/site-hosting.md). The OS shell is the one site the
-// platform ships itself, which is why it is the site this package can name in
-// advance -- the MemQL Portal was the other until epic memql#4984 retired it,
-// and the slot it vacated is one the OS now occupies alone rather than a
-// second exception. A server block under ingress-nginx is created per Ingress
-// RULE host, never per tls host, so naming the OS in tls.hosts is not enough:
-// it carries its own exact rule, pointing at the same edge Service the
-// wildcard does.
+// (docs/public/operate/site-hosting.md). The platform sites (PlatformSites:
+// the OS shell and the VS Code landing page) are the sites the platform ships
+// itself, which is why they are the sites this package can name in advance --
+// the MemQL Portal was one until epic memql#4984 retired it. A server block
+// under ingress-nginx is created per Ingress RULE host, never per tls host,
+// so naming a platform site in tls.hosts is not enough: each carries its own
+// exact rule, pointing at the same edge Service the wildcard does.
 package frontdoor
 
 // Role is a front-door role: one of the fixed set of services the cluster
@@ -89,33 +88,61 @@ func RoleHost(role Role, domain string) string { return string(role) + "." + dom
 // SiteHost is the host a NAMED site is served at: `<name>.<domain>`.
 func SiteHost(name, domain string) string { return name + "." + domain }
 
-// OsSite is the name of the one site the platform ships itself: the MemQL OS
-// shell (memql#4705). It is the seed id of its v1:platform:site row and the
-// label its hostname carries.
+// OsSite is the name of the MemQL OS shell (memql#4705), the first of the
+// sites the platform ships itself. It is the seed id of its v1:platform:site
+// row and the label its hostname carries.
 //
-// It is the SECOND inhabitant of this slot and the only one left. The MemQL
-// Portal held it first (memql#3711); epic memql#4984 retired the portal, and
-// the OS is what replaced the console it was -- so this is the same single
-// exception under a new name, not a survivor of a pair.
+// The MemQL Portal held the slot before it (memql#3711); epic memql#4984
+// retired the portal, and the OS is what replaced the console it was.
 const OsSite = "os"
+
+// VSCodeSite is the name of the second platform site: the landing page for
+// the MemQL extension for Visual Studio Code and Cursor
+// (editors/vscode/site). A static page rather than an app -- it proxies no
+// API and registers no OAuth client -- but hosted exactly the way the OS is:
+// a seeded v1:platform:site row, a directory the edge image ships, and a
+// front-door host the certificate can name in advance.
+const VSCodeSite = "vscode"
+
+// PlatformSites is the closed set of sites the platform ships itself, in the
+// order the generated manifests emit their rules. Every consumer that used to
+// special-case the OS -- the seed materializer's hostname hook, the reserved
+// site labels, the front-door generator, the overlay render gates -- iterates
+// this set instead, so a third platform site is one entry here and one seed,
+// never a fourth copy of the list.
+//
+// A platform site is NOT a role. A role is a service under its own hostname
+// (api, identity, mcp); a platform site is a v1:platform:site row the edge
+// resolves and serves exactly like a customer's, and what makes it nameable
+// here is only that its name exists before any operator creates a row.
+func PlatformSites() []string { return []string{OsSite, VSCodeSite} }
+
+// PlatformSiteHost is the host a platform site is served at: `<name>.<domain>`.
+// The same composition as any site's; a platform site's hostname differs from
+// a customer's only in who wrote the row.
+func PlatformSiteHost(name, domain string) string { return SiteHost(name, domain) }
 
 // OsHost is the host the OS shell is served at: `os.<domain>`.
 //
 // The OS is a site like any other to the edge, which resolves the request Host
 // against the graph and cannot tell it apart from a customer's SPA. What makes
-// it different to THIS package is that it is the only site whose name is known
-// before any operator creates a row, so it is the only site the front-door
-// certificate can name (memql#4224) -- and therefore the only site with an
-// exact Ingress rule of its own, because ingress-nginx builds a
-// certificate-bearing server block per RULE host, not per tls host. Putting it
-// on `*.<domain>` instead would send Safari through edge site-hosting with no
-// HTTP-01 SAN.
+// it different to THIS package is that its name is known before any operator
+// creates a row, so it is a site the front-door certificate can name
+// (memql#4224) -- and therefore a site with an exact Ingress rule of its own,
+// because ingress-nginx builds a certificate-bearing server block per RULE
+// host, not per tls host. Putting it on `*.<domain>` instead would send Safari
+// through edge site-hosting with no HTTP-01 SAN.
 //
 // Every consumer of the OS's hostname composes it here: the engine's
 // SeedMaterializer (the site row's hostname), envregistry (its OAuth redirect
 // URI and CORS origin) and cmd/frontdoorhosts (its rule and SAN). A second
 // spelling would be a certificate for a host the site row does not carry.
-func OsHost(domain string) string { return SiteHost(OsSite, domain) }
+func OsHost(domain string) string { return PlatformSiteHost(OsSite, domain) }
+
+// VSCodeHost is the host the VS Code landing page is served at:
+// `vscode.<domain>`. Same reasoning as OsHost: the seed materializer and the
+// generator both compose it here.
+func VSCodeHost(domain string) string { return PlatformSiteHost(VSCodeSite, domain) }
 
 // SitesWildcard is the one Ingress rule that routes every present and future
 // site to the edge node.
@@ -133,12 +160,12 @@ func Apex(domain string) string { return domain }
 // Host is one generated front-door rule.
 type Host struct {
 	// Role is the role that owns it, or "sites" for the rules that reach
-	// the edge: the OS shell, the wildcard and the apex.
+	// the edge: the platform sites, the wildcard and the apex.
 	Role string
 	// Name is the hostname itself.
 	Name string
 	// Sites is true for the rules that reach the edge node rather than a named
-	// service: the OS shell, the wildcard and the apex.
+	// service: the platform sites, the wildcard and the apex.
 	Sites bool
 	// Wildcard is true for the one rule whose host is `*.<domain>`. It is the
 	// only rule this package requests no certificate SAN for (memql#4224) --
@@ -151,14 +178,16 @@ type Host struct {
 const SitesRole = "sites"
 
 // Hosts is the whole front-door host set, in the order the generated manifests
-// emit them: the roles, then the OS shell, then the sites wildcard, then the
-// apex.
+// emit them: the roles, then each platform site (the OS shell, the VS Code
+// landing page), then the sites wildcard, then the apex.
 func Hosts(domain string) []Host {
-	out := make([]Host, 0, len(Roles())+3)
+	out := make([]Host, 0, len(Roles())+len(PlatformSites())+2)
 	for _, r := range Roles() {
 		out = append(out, Host{Role: string(r), Name: RoleHost(r, domain)})
 	}
-	out = append(out, Host{Role: SitesRole, Name: OsHost(domain), Sites: true})
+	for _, s := range PlatformSites() {
+		out = append(out, Host{Role: SitesRole, Name: PlatformSiteHost(s, domain), Sites: true})
+	}
 	out = append(out, Host{Role: SitesRole, Name: SitesWildcard(domain), Sites: true, Wildcard: true})
 	out = append(out, Host{Role: SitesRole, Name: Apex(domain), Sites: true})
 	return out
