@@ -54,11 +54,13 @@ func corpusFileListPath(edition, language string) string {
 // fixture.memql into a corpusRun, only the files expect.json's cases name.
 //
 // Deduplicated because "a file a case names" is not the same count as "a
-// case": a pushdown expression commonly gets both a `lower` case (the SQL)
-// and an `evaluate` case (the post-filter answer) over the SAME source file,
-// two corpusRuns sharing one rel. The list is the SET a second implementation
-// must load, one entry per physical file -- not a count of the cases that
-// exercise it.
+// case": 877 cases name 715 files, and 69 files carry more than one. Most of
+// those (52) are one expression evaluated over several `row` payloads -- nil,
+// "", " ", 0, false, unicode, a case fold -- which is one file answering one
+// question many times. The rest (17) are a pushdown expression carrying both a
+// `lower` case (the SQL) and an `evaluate` case (the post-filter answer) over
+// the same source. The list is the SET a second implementation must load, one
+// entry per physical file -- not a count of the cases that exercise it.
 func corpusFileListFor(runs []*corpusRun, edition string) []string {
 	prefix := edition + "/"
 	seen := make(map[string]bool, len(runs))
