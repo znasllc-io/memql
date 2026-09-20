@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // Epic memql#4358, end to end against a real database. Every DB-free test
@@ -144,7 +145,12 @@ func TestAppSessionRowPersistsAndReadsBack(t *testing.T) {
 	// nilled the bundle, the allocator would find no session and every
 	// recorded step would fall back to a local counter -- silently, and with
 	// the two writers' positions colliding again.
-	shaped, err := eng.Execute(ctx, fmt.Sprintf("query appSessionById(sessionId:%q)", sessionID))
+	// QuoteString, never %q: Go's escape grammar emits \x00, \a, \v and \xNN,
+	// none of which the MemQL lexer implements, so one control byte in the
+	// value makes the whole statement unparseable and the read silently
+	// does not happen (memql#3035 / #3192 / #3611).
+	shaped, err := eng.Execute(ctx, fmt.Sprintf("query appSessionById(sessionId:%s)",
+		langparser.QuoteString(sessionID)))
 	require.NoError(t, err)
 	require.NotNil(t, shaped.Bundle, "a shaped read nilled the bundle; the seq allocator reads it")
 	require.NotEmpty(t, shaped.Bundle.Nodes, "a shaped read returned no bundle nodes")
