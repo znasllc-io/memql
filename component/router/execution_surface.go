@@ -56,3 +56,38 @@ func surfaceOf(p any) string {
 	}
 	return r.ExecutionSurface()
 }
+
+// servedModelReporter is what a provider says about the model that ACTUALLY
+// served the most recent call, and at what reasoning effort.
+//
+// STRUCTURAL, for the reason surfaceReporter above is: component/router pins
+// the root module at a PUBLISHED version and cannot name a method that exists
+// only in the working tree. A provider that does not implement it simply does
+// not answer, which is the correct reading for every vendor provider -- what
+// was asked for is what ran, and `model` on the row already says it.
+//
+// IT IS A REPORT, NOT A REQUEST (design D9). An app may reroute mid-session,
+// and an app that ignores an effort flag states none. Copying the request's
+// pin here would record as MEASURED something nobody measured, and the gap
+// between what was pinned and what ran is the only way to see either.
+type servedModelReporter interface {
+	// ServedModel names the model the surface reported serving the most
+	// recent call with, and the effort it reported running at. Both are ""
+	// when it said nothing, which the row records as unknown.
+	ServedModel() (model, effort string)
+}
+
+// servedModelOf asks a provider what served the call.
+//
+// Two empty strings is a REAL ANSWER and not a failure: it is what every
+// vendor provider says, and what an app says when its harness reported no
+// model. The caller records it verbatim rather than filling it in, because
+// "the surface did not say" and "it served what we asked for" are different
+// facts and only one of them is knowable here.
+func servedModelOf(p any) (string, string) {
+	r, ok := p.(servedModelReporter)
+	if !ok {
+		return "", ""
+	}
+	return r.ServedModel()
+}

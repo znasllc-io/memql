@@ -897,6 +897,8 @@ func buildRouterCallArgs(rec CallRecord, callId string) map[string]any {
 		"errorCategory":      rec.ErrorCategory,
 		"errorMessage":       rec.ErrorMessage,
 		"fallbackFromModel":  rec.FallbackFromModel,
+		"servedModel":        rec.ServedModel,
+		"servedEffort":       rec.ServedEffort,
 		"billing":            billingOrMetered(rec.Billing),
 		"executionSurface":   rec.ExecutionSurface,
 

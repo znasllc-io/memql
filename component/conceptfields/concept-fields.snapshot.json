@@ -4510,7 +4510,9 @@
         "requestId",
         "requestedLevel",
         "rule",
+        "servedEffort",
         "servedLevel",
+        "servedModel",
         "streaming",
         "timeToFirstTokenMs",
         "tokensEstimated",
@@ -4539,7 +4541,8 @@
         "door": [
           "app",
           "federation",
-          "local"
+          "local",
+          "session"
         ],
         "level": [
           "embeddings",

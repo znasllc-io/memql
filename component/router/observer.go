@@ -180,6 +180,8 @@ func buildRecord(
 		ttftMs = int(firstTokenAt.Sub(start).Milliseconds())
 	}
 
+	servedModel, servedEffort := servedModelOf(inner)
+
 	return CallRecord{
 		RequestId:          req.RequestId,
 		Partition:          req.Partition,
@@ -229,5 +231,13 @@ func buildRecord(
 		// decision row carried "" and the sharing ledger, which folds the
 		// calls that ran on ONE machine, had nothing to fold on.
 		ExecutionSurface: surfaceOf(inner),
+
+		// WHAT ACTUALLY SERVED IT (design D9). Asked of the provider rather
+		// than copied off the resolution: `resolved.Model` is what the chain
+		// picked, and for an app door that is the door's own name. What the
+		// app ran is the app's to report, and a surface that reports nothing
+		// leaves both empty rather than being filled in from the request.
+		ServedModel:  servedModel,
+		ServedEffort: servedEffort,
 	}
 }
