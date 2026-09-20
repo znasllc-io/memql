@@ -11,6 +11,7 @@ import (
 	"github.com/znasllc-io/memql/component/mcp"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	workerservice "github.com/znasllc-io/memql/component/worker"
+	"github.com/znasllc-io/memql/core/num"
 	"github.com/znasllc-io/memql/integrations/work"
 )
 
@@ -175,14 +176,23 @@ func (r *mcpAppSessionRecorder) allocateSeq(ctx context.Context, sessionId strin
 	return seq
 }
 
+// intFromRow reads the step allocator off the session row.
+//
+// narrowing: SATURATE -- `recordedSteps` is an ORDERING, the position the next
+// step takes in the run. An absurd value is nonsense either way, but the two
+// wrong answers are not equally wrong: saturating puts the step at the top of
+// the range, where it sorts last and is visibly odd, while zero collides with
+// the FIRST action's seq and quietly makes two steps share a position. A bare
+// int() is worse than both -- out of range it is implementation-defined and
+// answers with the integer indefinite value.
 func intFromRow(row map[string]any, key string) int {
 	switch v := row[key].(type) {
 	case int:
 		return v
 	case int64:
-		return int(v)
+		return num.ClampInt64(v)
 	case float64:
-		return int(v)
+		return num.ClampFloat64(v)
 	}
 	return 0
 }
