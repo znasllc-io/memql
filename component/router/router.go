@@ -857,6 +857,13 @@ func (r *Router) providerLookup(ctx context.Context, req ResolveRequest, name st
 	if scoped, ok := client.(interface{ WithMinContextTokens(int) any }); ok {
 		client = scoped.WithMinContextTokens(req.Needs.MinContextTokens)
 	}
+	// Bind the LEVEL the same way (epic memql#5391, design D8). An app door
+	// serving a chat turn opens a session too, and the cockpit translates the
+	// level into that app's own knobs -- so a `fast` turn and a `reasoning`
+	// one through the same signed-in app should not run identically.
+	if levelled, ok := client.(interface{ WithLevel(string) any }); ok {
+		client = levelled.WithLevel(string(req.Level))
+	}
 	return client, resolved, true
 }
 

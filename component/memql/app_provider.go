@@ -157,6 +157,11 @@ type AppCallRequest struct {
 // AppCallResult is the answer.
 type AppCallResult struct {
 	Content string
+	// Model and Effort are what the APP REPORTED serving this turn with
+	// (epic memql#5391, design D9), never what was asked for. Empty means it
+	// did not say, which the decision row records as unknown.
+	Model  string
+	Effort string
 	// Usage is what the APP reported about its own spend, never inferred.
 	Usage AppUsage
 	// ExecutionSurface names where the call ran, in the
@@ -331,8 +336,8 @@ func (r *ProviderRegistry) appEntry(ctx context.Context, actingUserId, appId, mo
 
 // appProvider is the client behind an `app:<appId>` entry.
 type appProvider struct {
-	registry     *ProviderRegistry
-	appId        string
+	registry *ProviderRegistry
+	appId    string
 	// model is the model a policy PINNED with `app:<id>:<model>` (design D8).
 	// EMPTY IS NO PIN, and the app runs at its own default -- which is every
 	// call that came through `app:*` or a bare `app:<id>`.
@@ -340,10 +345,19 @@ type appProvider struct {
 	actingUserId string
 	wildcard     bool
 
+	// level is the call's LEVEL, bound per RESOLUTION rather than held on the
+	// registry entry (epic memql#5391, design D8). The entry is per (user,
+	// reference) and is shared by every call that resolves to it; a level is
+	// one call's, so binding it on the entry would let a `fast` turn run at
+	// whatever the last `reasoning` turn asked for.
+	level string
+
 	lastMu      sync.Mutex
 	lastSurface string
 	lastUsage   AppUsage
 	lastBilling string
+	lastModel   string
+	lastEffort  string
 }
 
 // LastCall reports the machine, usage and billing of the most recent call. The
@@ -387,6 +401,9 @@ func (p *appProvider) call(ctx context.Context, req AppCallRequest) (AppCallResu
 	if strings.TrimSpace(req.Model) == "" {
 		req.Model = p.model
 	}
+	if strings.TrimSpace(req.Level) == "" {
+		req.Level = p.level
+	}
 	req.ActingUserId = p.actingUserId
 	if strings.TrimSpace(req.ActingUserId) == "" {
 		req.ActingUserId = actingUserFromContext(ctx)
@@ -417,8 +434,46 @@ func (p *appProvider) call(ctx context.Context, req AppCallRequest) (AppCallResu
 	p.lastSurface = res.ExecutionSurface
 	p.lastUsage = res.Usage
 	p.lastBilling = res.Billing
+	p.lastModel = res.Model
+	p.lastEffort = res.Effort
 	p.lastMu.Unlock()
 	return res, nil
+}
+
+// WithLevel binds one resolution's level without changing the registry client
+// or another resolution, the way fleetProvider.WithMinContextTokens binds a
+// floor -- and for the same reason: the entry is shared and a level is one
+// call's. Constructing a fresh provider also keeps the per-call bookkeeping
+// and its mutex independent, which is what lets ServedModel answer about THIS
+// call rather than about whichever finished last.
+func (p *appProvider) WithLevel(level string) any {
+	if p == nil {
+		return p
+	}
+	return &appProvider{
+		registry:     p.registry,
+		appId:        p.appId,
+		model:        p.model,
+		actingUserId: p.actingUserId,
+		wildcard:     p.wildcard,
+		level:        strings.TrimSpace(level),
+	}
+}
+
+// ServedModel reports what the APP said it served the most recent turn with,
+// for the router's decision row (epic memql#5391, design D9).
+//
+// The same structural seam ExecutionSurface rides, and for the same reason:
+// component/router pins this module at a published version. Two empty strings
+// means the app said nothing, which the row records as unknown -- never the
+// app id, never the level, never a guess.
+func (p *appProvider) ServedModel() (string, string) {
+	if p == nil {
+		return "", ""
+	}
+	p.lastMu.Lock()
+	defer p.lastMu.Unlock()
+	return p.lastModel, p.lastEffort
 }
 
 // resolveWildcard picks which app an `app:*` call runs.

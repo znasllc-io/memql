@@ -260,6 +260,14 @@ func (a *AppInference) Call(ctx context.Context, req memqlengine.AppCallRequest)
 		RunId:          req.RunId,
 		StepId:         req.StepId,
 		MaxDuration:    appSessionMaxDuration,
+		// The CHAT door carries the level too (epic memql#5391, design D8).
+		// The same app on the same machine should not answer a `fast` turn at
+		// the effort a `reasoning` one asked for merely because this door
+		// serves a turn rather than a step.
+		Level: req.Level,
+		// Library artifacts the cockpit pulls into the workspace before the
+		// run. Empty for an ordinary chat turn.
+		Inputs: req.Inputs,
 	}
 
 	result, err := a.runner.Run(ctx, w, spec, nil)
@@ -275,6 +283,10 @@ func (a *AppInference) Call(ctx context.Context, req memqlengine.AppCallRequest)
 	}
 	return memqlengine.AppCallResult{
 		Content: content,
+		// WHAT THE APP REPORTED, verbatim (design D9). The chat door's own
+		// provider reads these back through ServedModel for the decision row.
+		Model:  result.Model,
+		Effort: result.Effort,
 		Usage: memqlengine.AppUsage{
 			InputTokens:  result.Usage.InputTokens,
 			OutputTokens: result.Usage.OutputTokens,
