@@ -445,9 +445,19 @@ func TestASessionRunsWhenNothingRecords(t *testing.T) {
 // already dead -- that is one of the ways a session ends -- and the output of
 // a run somebody cancelled is often exactly the output they wanted to read.
 // finishRow detaches for this reason; so must the transcript and the close.
+//
+// THE CANCEL FIRES FROM THE PROGRESS CALLBACK, not from the sending goroutine,
+// and that is what makes this a test rather than a coin flip. progress runs on
+// the drain goroutine AFTER the chunk has been appended, so cancelling there
+// guarantees the transcript is non-empty when the context dies. Cancelling
+// beside the send passed in isolation and failed under the full suite: the
+// cancel won the race, the collector was empty, and StoreTranscript correctly
+// declined to write an empty file -- a green run proving nothing about the
+// property it names.
 func TestACancelledSessionStillStoresWhatItProduced(t *testing.T) {
 	runner, session, store, rec, contents := recordingFixture(t)
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	go func() {
 		waitForSession(t, session, "sess-run")
@@ -455,10 +465,14 @@ func TestACancelledSessionStillStoresWhatItProduced(t *testing.T) {
 		session.handleAppSessionChunk(&memqlv1.AppSessionChunk{
 			SessionId: "sess-run", Stream: "stdout", Data: []byte("half-finished work"), Seq: 2,
 		})
-		cancel()
 	}()
 
-	result, _ := runner.Run(ctx, session.worker, runSpec(), nil)
+	var once sync.Once
+	result, _ := runner.Run(ctx, session.worker, runSpec(), func(c AppSessionChunk) {
+		if c.Stream == "stdout" {
+			once.Do(cancel)
+		}
+	})
 	if result.Status != AppSessionStatusCancelled {
 		t.Fatalf("status = %q, want cancelled", result.Status)
 	}
