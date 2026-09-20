@@ -765,7 +765,28 @@ jobs:
   # cache is warm for vet/test/run/lint that follow.
   go-checks:
     name: go-checks
-    timeout-minutes: 20
+    # 30, not the 20 the 2026-08-06 audit sized against a 6.3-minute lane.
+    # memql#5387 added the bounded fuzz step below, measured at 4m30s on a
+    # 24-core developer machine; a hosted runner has 4, and a fuzz-instrumented
+    # build does not reuse the ordinary `go build` cache, so the step should be
+    # expected to cost 5-7 minutes here. That puts this lane's median somewhere
+    # near 11-13 minutes against what was a 20-minute cap: inside it, but at
+    # roughly 1.5x rather than the 2x headroom
+    # scripts/ci/workflow_timeout_test.go exists to keep.
+    #
+    # This is the db-tests shape exactly, and that lane's comment is worth
+    # re-reading: a cap sized against a stale median "cancelled healthy runs,
+    # one of them a push to main". Raising the cap costs nothing -- the gate is
+    # a FLOOR with no upper bound -- and shortening the fuzz search to fit a
+    # number would be the wrong trade.
+    #
+    # timeoutMedianMinutes still records 6.3, which is now stale in the other
+    # direction. It is left alone DELIBERATELY rather than replaced with an
+    # estimate: that table says "measured", and the measurement has to come off
+    # this lane's own runs. Re-measure it once a few builds carrying the fuzz
+    # step have landed, and move the median there rather than adjusting this
+    # cap again.
+    timeout-minutes: 30
     needs: changes
     if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' || needs.changes.outputs.proto == 'true' || needs.changes.outputs.gates == 'true' }}
     runs-on: ubuntu-latest
