@@ -28,22 +28,26 @@ package conformance
 // sides (component/memql/expr_stored.go): not equal, not ordered, not a
 // member, not true, and counted by what it holds.
 //
-// ADVISORY until memql#5386 (the freeze epic: "the differential lane joins the
-// required db-tests set") makes it required: a disagreement is logged on a
-// line starting `DIFFERENTIAL:` and the test passes, unless
-// MEMQL_DIFFERENTIAL_REQUIRED=1, which makes the first disagreement a failure.
-// Zero disagreements is the lane's expected state, so required mode passes
-// today. An expression the lowering refuses at load is not a disagreement --
-// the refusal IS its answer, and the corpus pins refusals -- but the lane
-// counts them, and fails when it compared nothing at all.
+// REQUIRED since memql#5386: the `mcp-conformance` job sets
+// MEMQL_DIFFERENTIAL_REQUIRED=1, and under it EVERY disagreement is a test
+// error -- not just the first, so a divergence's width is readable from one
+// run. Unset (a local run, a developer machine), a disagreement is logged on a
+// line starting `DIFFERENTIAL:` and the test passes. Zero disagreements is the
+// lane's expected state either way. An expression the lowering refuses at load
+// is not a disagreement -- the refusal IS its answer, and the corpus pins
+// refusals -- but the lane counts them, and fails when it compared nothing at
+// all.
 //
 // WHERE IT RUNS. The `mcp-conformance` job of .github/workflows/ci.yml runs
-// `go test -count=1 -timeout=300s -v ./test/conformance/...` against a
+// `go test -count=1 -timeout=600s -v ./test/conformance/...` against a
 // TimescaleDB service container with MEMQL_DATABASE_DSN pointing at it, so
 // this lane runs there on every change to the Go tree, the DSL tree or the
-// corpus. Locally it reaches Postgres the way the MCP dimensions beside it do
-// (tryDB, harness_test.go); without one it skips, and MEMQL_REQUIRE_DB=1 turns
-// the skip into a failure.
+// corpus. That job is one of ci-required's needs, and
+// scripts/ci/differential_lane_required_test.go holds both halves -- the env
+// flag and the membership -- because each fails open on its own. Locally it
+// reaches Postgres the way the MCP dimensions beside it do (tryDB,
+// harness_test.go); without one it skips, and MEMQL_REQUIRE_DB=1 turns the
+// skip into a failure.
 
 import (
 	"context"
@@ -51,6 +55,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/rand"
 	"os"
 	"regexp"
 	"sort"
@@ -218,6 +223,9 @@ func TestDifferentialLane(t *testing.T) {
 	for i, src := range laneMatrix() {
 		exprs = append(exprs, &laneExpr{source: fmt.Sprintf("generated #%d", i+1), domain: laneDomain, concept: "probe", lambda: src})
 	}
+	for i, src := range laneGenerated(laneGeneratorSeed, 240) {
+		exprs = append(exprs, &laneExpr{source: fmt.Sprintf("generated(seed=%d) #%d", laneGeneratorSeed, i+1), domain: laneDomain, concept: "probe", lambda: src})
+	}
 	tree := laneTree(t, exprs, fixtures)
 	eng, stop := laneEngine(t, db, tree)
 	defer stop()
@@ -244,7 +252,11 @@ func TestDifferentialLane(t *testing.T) {
 	report := func(line string) {
 		disagreements = append(disagreements, line)
 		if differentialRequired() {
-			t.Fatalf("the two evaluators disagree: %s", line)
+			// Errorf, not Fatalf: a divergence's WIDTH is the first thing a
+			// reader needs -- one row of one expression is a typo, forty rows
+			// across every comparison is a lowering that changed meaning. The
+			// summary line below prints the count either way.
+			t.Errorf("the two evaluators disagree: %s", line)
 		}
 	}
 	for _, x := range exprs {
@@ -280,8 +292,8 @@ func TestDifferentialLane(t *testing.T) {
 	for _, nodes := range written {
 		rowCount += len(nodes)
 	}
-	t.Logf("differential lane: %d expressions (%d lowered, %d refused at load) over %d rows of %d concepts: %d comparisons, %d disagreements",
-		len(exprs), lowered, len(exprs)-lowered, rowCount, len(written), compared, len(disagreements))
+	t.Logf("differential lane (generator seed %d): %d expressions (%d lowered, %d refused at load) over %d rows of %d concepts: %d comparisons, %d disagreements",
+		laneGeneratorSeed, len(exprs), lowered, len(exprs)-lowered, rowCount, len(written), compared, len(disagreements))
 	for _, d := range disagreements {
 		t.Log("DIFFERENTIAL: " + d)
 	}
@@ -693,3 +705,242 @@ func laneLabel(node memoryNodes.MemoryNode) string {
 func laneComment(source string) string {
 	return strings.ReplaceAll(source, "\n", " ")
 }
+
+// TestLaneGeneratedIsGrammarDriven holds the generator to four properties, all
+// of which a hand-written list fails: it draws from the TIER MANIFEST rather
+// than from a literal list, so a node kind the query-filter position stops
+// admitting stops being generated and one it starts admitting is a shape to
+// add rather than a silent gap; it is deterministic in its seed, so a
+// disagreement found in CI is reproducible from the seed printed beside it;
+// every expression it emits PARSES, so a generator bug reads as a generator
+// bug rather than as a lane that compared nothing; and the operators the
+// position admits all appear, because a generator that emits only `==` proves
+// the two evaluators agree about equality and nothing else.
+func TestLaneGeneratedIsGrammarDriven(t *testing.T) {
+	const n = 240
+	a := laneGenerated(7, n)
+	b := laneGenerated(7, n)
+	if len(a) != n {
+		t.Fatalf("laneGenerated(7, %d) returned %d expressions", n, len(a))
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			t.Fatalf("laneGenerated is not deterministic: seed 7 gave %q then %q at %d", a[i], b[i], i)
+		}
+	}
+	if c := laneGenerated(8, n); c[0] == a[0] && c[1] == a[1] && c[2] == a[2] {
+		t.Fatal("laneGenerated ignores its seed: seeds 7 and 8 opened identically")
+	}
+	for i, src := range a {
+		if _, err := langparser.ParseV1Lambda(src); err != nil {
+			t.Fatalf("laneGenerated #%d does not parse: %q: %v", i+1, src, err)
+		}
+	}
+	// The operators the tier manifest admits at a query filter must all
+	// appear.
+	for _, op := range []string{"==", "!=", "<", "<=", ">", ">=", " in ", "startsWith", "&&", "||", "!"} {
+		found := false
+		for _, src := range a {
+			if strings.Contains(src, op) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("no generated expression uses %q -- the generator is not covering the admitted operator set", op)
+		}
+	}
+	// The manifest, not a literal list, is what the shapes are selected by:
+	// every shape laneShapes() offers names the node kind it produces, and a
+	// kind the query-filter position does not admit must not be generated.
+	// This is the half that makes "grammar-driven" falsifiable -- without it
+	// the generator could be a list with a comment claiming otherwise.
+	shapes := laneShapes()
+	if len(shapes) == 0 {
+		t.Fatal("laneShapes() is empty, so the generator draws from nothing and the properties above are vacuous")
+	}
+	for _, s := range shapes {
+		if !tiers.Allows(tiers.PositionQueryFilter, s.kind) {
+			t.Errorf("laneShapes offers a shape producing %q, which tiers.PositionQueryFilter does not admit: "+
+				"the lane would compare an expression that cannot lower", s.kind)
+		}
+	}
+	for _, kind := range []ast.NodeKind{ast.KindComparison, ast.KindIn, ast.KindStartsWith, ast.KindNot, ast.KindAnd, ast.KindOr} {
+		covered := false
+		for _, s := range shapes {
+			if s.kind == kind {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			t.Errorf("no shape produces %q, a kind the query-filter position admits: the lane holds the two "+
+				"evaluators to nothing about it", kind)
+		}
+	}
+}
+
+// laneShape is one expression shape the generator can emit.
+//
+// `kind` is the node kind the shape EXERCISES -- the one whose admission at a
+// query filter decides whether the shape may be generated at all. For
+// `row.tags.count() > 1` that is the method call, not the comparison at the
+// top: a position that stopped admitting method calls is a position this shape
+// cannot reach, whatever else it contains.
+//
+// A `composite` shape takes atoms; a leaf shape ignores the atom function.
+// The split is what bounds the recursion: atoms are drawn from leaves only, so
+// a term is at most two deep.
+type laneShape struct {
+	kind      ast.NodeKind
+	composite bool
+	emit      func(rnd *rand.Rand, atom func() string) string
+}
+
+// laneFields are the operands the scratch concept offers: a plain payload
+// path, a second one holding booleans and strings, and the absent-safe path
+// through a nested object. laneRowsFor writes value, tags, obj and flag.
+var laneFields = []string{"row.value", "row.flag", "row.?obj.a"}
+
+// laneLits is the literal set the absence table is built from: the values that
+// sit either side of every boundary the two evaluators have to agree about.
+var laneLits = []string{`""`, `nil`, `"a"`, `"e"`, `"é"`, `"1"`, `1`, `0`, `1.5`, `true`, `false`}
+
+// laneCmps are the comparison operators.
+var laneCmps = []string{"==", "!=", "<", "<=", ">", ">="}
+
+func lanePick(rnd *rand.Rand, from []string) string { return from[rnd.Intn(len(from))] }
+
+// laneShapeTable is every shape the generator knows how to write, in a stable
+// order -- a map would make the generator's output depend on iteration order
+// rather than on its seed. laneShapes filters it through the tier manifest.
+func laneShapeTable() []laneShape {
+	return []laneShape{
+		{kind: ast.KindComparison, emit: func(rnd *rand.Rand, _ func() string) string {
+			return fmt.Sprintf(`%s %s %s`, lanePick(rnd, laneFields), lanePick(rnd, laneCmps), lanePick(rnd, laneLits))
+		}},
+		{kind: ast.KindIn, emit: func(rnd *rand.Rand, _ func() string) string {
+			return fmt.Sprintf(`%s in [%s, %s]`, lanePick(rnd, laneFields), lanePick(rnd, laneLits), lanePick(rnd, laneLits))
+		}},
+		{kind: ast.KindIn, emit: func(rnd *rand.Rand, _ func() string) string {
+			// Membership the other way round: the operand is the literal and
+			// the collection is the stored array, which is where a scalar, an
+			// object and an absent key stored where an array was expected are
+			// answered.
+			return fmt.Sprintf(`%s in row.tags`, lanePick(rnd, laneLits))
+		}},
+		{kind: ast.KindStartsWith, emit: func(rnd *rand.Rand, _ func() string) string {
+			if rnd.Intn(4) == 0 {
+				return fmt.Sprintf(`%s startsWith [%s, %s]`, lanePick(rnd, laneFields),
+					lanePick(rnd, laneStrLits), lanePick(rnd, laneStrLits))
+			}
+			return fmt.Sprintf(`%s startsWith %s`, lanePick(rnd, laneFields), lanePick(rnd, laneStrLits))
+		}},
+		{kind: ast.KindMethodCall, emit: func(rnd *rand.Rand, _ func() string) string {
+			return fmt.Sprintf(`%s.includes(%s)`, lanePick(rnd, laneFields), lanePick(rnd, laneStrLits))
+		}},
+		{kind: ast.KindMethodCall, emit: func(rnd *rand.Rand, _ func() string) string {
+			return fmt.Sprintf(`row.tags.count() %s %d`, lanePick(rnd, laneCmps), rnd.Intn(3))
+		}},
+		{kind: ast.KindLambda, emit: func(rnd *rand.Rand, _ func() string) string {
+			return fmt.Sprintf(`row.tags.%s(t => t %s %s)`,
+				[]string{"any", "all"}[rnd.Intn(2)], lanePick(rnd, laneCmps), lanePick(rnd, laneLits))
+		}},
+		{kind: ast.KindOptionalMember, emit: func(rnd *rand.Rand, _ func() string) string {
+			return fmt.Sprintf(`row.?obj.a %s %s`, lanePick(rnd, laneCmps), lanePick(rnd, laneLits))
+		}},
+		{kind: ast.KindMember, emit: func(rnd *rand.Rand, _ func() string) string {
+			// A bare field read IS a condition, and what a non-boolean stored
+			// value means there is one of the questions the lane exists to
+			// ask.
+			return lanePick(rnd, laneFields)
+		}},
+		{kind: ast.KindNot, composite: true, emit: func(_ *rand.Rand, atom func() string) string {
+			return "!(" + atom() + ")"
+		}},
+		{kind: ast.KindAnd, composite: true, emit: func(_ *rand.Rand, atom func() string) string {
+			return "(" + atom() + " && " + atom() + ")"
+		}},
+		{kind: ast.KindOr, composite: true, emit: func(_ *rand.Rand, atom func() string) string {
+			return "(" + atom() + " || " + atom() + ")"
+		}},
+		{kind: ast.KindTernary, composite: true, emit: func(_ *rand.Rand, atom func() string) string {
+			// A BOOLEAN ternary over the row lowers to (c && p) || (!c && q);
+			// a value ternary over the row is refused, so all three branches
+			// are conditions.
+			return "(" + atom() + " ? " + atom() + " : " + atom() + ")"
+		}},
+	}
+}
+
+// laneStrLits are the string prefixes and substrings the string shapes use.
+var laneStrLits = []string{`"a"`, `""`, `"e"`, `"é"`, `"1"`}
+
+// laneShapes is laneShapeTable narrowed to what the TIER MANIFEST admits at a
+// query filter. This is what makes the generator grammar-driven rather than a
+// list: a kind the position stops admitting stops being generated, and the
+// lane stops asserting agreement about an expression that can no longer lower.
+func laneShapes() []laneShape {
+	var out []laneShape
+	for _, s := range laneShapeTable() {
+		if tiers.Allows(tiers.PositionQueryFilter, s.kind) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// laneGenerated is the grammar-driven half of the lane (memql#5386): random
+// P-tier expressions over the scratch concept, drawn from the shapes the TIER
+// MANIFEST admits at a query filter rather than from a list somebody
+// maintains. laneMatrix beside it stays: it is the CHOSEN half, the absence
+// table and the typed comparisons the language is known to find awkward, and a
+// random generator reaches those rows only by luck.
+//
+// Deterministic in seed. The seed is printed in the lane's summary line, so a
+// disagreement found on a hosted runner is reproducible on a developer machine
+// with one number.
+func laneGenerated(seed int64, n int) []string {
+	rnd := rand.New(rand.NewSource(seed))
+	shapes := laneShapes()
+	var leaves []laneShape
+	for _, s := range shapes {
+		if !s.composite {
+			leaves = append(leaves, s)
+		}
+	}
+	if len(shapes) == 0 || len(leaves) == 0 {
+		return nil
+	}
+
+	atom := func() string { return leaves[rnd.Intn(len(leaves))].emit(rnd, nil) }
+	// A term is any admitted shape: a leaf, or a composite over two or three
+	// atoms. Depth stops at two -- the lane is comparing two EVALUATORS, and a
+	// deeper tree tests the same operators through more parentheses.
+	term := func() string { return shapes[rnd.Intn(len(shapes))].emit(rnd, atom) }
+
+	seen := map[string]bool{}
+	out := make([]string, 0, n)
+	// Bounded: a small vocabulary saturates, and an unbounded loop over a
+	// saturated generator is an infinite loop in CI.
+	for attempts := 0; len(out) < n && attempts < n*50; attempts++ {
+		src := "row => " + term()
+		if rnd.Intn(3) == 0 {
+			src += " " + []string{"&&", "||"}[rnd.Intn(2)] + " " + term()
+		}
+		if seen[src] {
+			continue
+		}
+		seen[src] = true
+		out = append(out, src)
+	}
+	return out
+}
+
+// laneGeneratorSeed is the lane's seed. It is a CONSTANT rather than a clock
+// reading: a lane that generates different expressions on every run is a lane
+// whose red is not reproducible, and "it passed when I re-ran it" is the answer
+// that ends an investigation without resolving it. Move it deliberately, the
+// way a fuzz corpus grows -- by committing the case that broke, not by
+// reshuffling.
+const laneGeneratorSeed = 20260920
