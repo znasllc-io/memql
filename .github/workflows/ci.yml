@@ -1013,6 +1013,47 @@ jobs:
         if: ${{ env.RUN_PROTO == 'true' }}
         run: make proto-gen-check
 
+      # --- bounded fuzzing (memql#5387) ---
+      #
+      # `go test -fuzz` runs ONE target per invocation and runs until
+      # -fuzztime expires, so this is five short runs rather than one long
+      # one. 40s each keeps the step near three and a half minutes.
+      #
+      # WHAT THIS BUYS OVER THE SEED CORPUS ALONE. The committed seeds under
+      # testdata/fuzz/<Target>/ run as ordinary subtests on every `go test`,
+      # which is the REGRESSION half: an input that once broke the lexer is
+      # replayed forever. This is the SEARCH half -- it mutates those seeds
+      # looking for the NEXT crash. A crash here writes the failing input
+      # into testdata/fuzz/<Target>/, and the fix is to COMMIT that file: a
+      # bug is not fixed until its case is in the corpus (docs/CLAUDE.md).
+      #
+      # GATED ON RUN_GO OR RUN_DSL, deliberately. A docs-only PR reaches this
+      # job through RUN_GATES and must not pay three and a half minutes for a
+      # search over code it did not touch. RUN_DSL is in because FuzzParse
+      # seeds from every conformance corpus .memql at run time, so a corpus
+      # change genuinely changes what is searched.
+      #
+      # ON THE LANE'S TIMEOUT: go-checks is capped at 20 minutes against the
+      # 6.3-minute median scripts/ci/workflow_timeout_test.go records, so the
+      # 2x floor that gate enforces is 12.6 and this step does not breach it.
+      # It does eat headroom -- if the lane is re-measured after this lands,
+      # re-measure the median there rather than silently raising the cap.
+      - name: bounded fuzz (lexer, parser, lowering, evaluation)
+        if: ${{ env.RUN_GO == 'true' || env.RUN_DSL == 'true' }}
+        run: |
+          set -euo pipefail
+          fuzz() {
+            local pkg="$1" target="$2"
+            echo "INFO: fuzzing $target in $pkg"
+            go test "$pkg" -run "^$target$" -fuzz "^$target$" -fuzztime=40s
+          }
+          fuzz ./component/language/parser FuzzLexer
+          fuzz ./component/language/parser FuzzParseV1Expression
+          fuzz ./component/memql FuzzLower
+          fuzz ./component/memql FuzzEvalExpr
+          fuzz ./test/conformance FuzzParse
+          echo "SUCCESS: bounded fuzz completed with no new failing inputs"
+
   # Test lane (memql#3161 / design D5.3c). Split out of go-checks so that lane's
   # duration becomes max(test, build+vet+drift) rather than their sum: `go test`
   # was 223s of go-checks' 364s and the drift checks (15s combined) sat behind

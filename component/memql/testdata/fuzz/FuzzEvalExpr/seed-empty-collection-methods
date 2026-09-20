@@ -1,0 +1,2 @@
+go test fuzz v1
+string("args.none.count() + args.none.where(i => true).count()")
