@@ -207,6 +207,7 @@ func run(args []string) int {
 	// mode only: single-file mode keeps its file-scoped report, and the root
 	// there is a namespace directory rather than a DSL root of domains.
 	var paritySkipped []string
+	var parityWarnings []Diagnostic
 	if target == "" {
 		parityDiags, skipped, perr := memql.LintUnifiedTree(nil, root)
 		// What the parity pass found that LOADS -- a use of a deprecated form
@@ -214,8 +215,18 @@ func run(args []string) int {
 		// reach the error list or the exit code. It is DROPPED rather than
 		// printed: deprecatedFormWarnings below is this tool's one source for
 		// those warnings, in every mode, so a use is reported once and is
-		// reported in the modes this pass does not run in.
-		parityDiags = parityErrors(parityDiags)
+		// reported in the modes this pass does not run in. A warning of any
+		// other kind is kept and printed, rather than dropped for being a
+		// warning.
+		var unreportedWarnings []memql.LintDiagnostic
+		parityDiags, unreportedWarnings = parityErrors(parityDiags)
+		for _, w := range unreportedWarnings {
+			if w.File != "" {
+				parityWarnings = append(parityWarnings, Diagnostic{Level: "warning", Message: w.File + ": " + w.Message})
+				continue
+			}
+			parityWarnings = append(parityWarnings, Diagnostic{Level: "warning", Message: w.Message})
+		}
 		// Loop analysis requires a complete function registry. Report the
 		// original parse/load refusal once before attempting that graph.
 		if perr == nil && len(parityDiags) == 0 && len(loadDiags) == 0 {
@@ -250,6 +261,7 @@ func run(args []string) int {
 	}
 	sort.SliceStable(report.Errors, func(i, j int) bool { return report.Errors[i].Message < report.Errors[j].Message })
 	report.Warnings = append(report.Warnings, deprecatedFormWarnings(tree, target)...)
+	report.Warnings = append(report.Warnings, parityWarnings...)
 	if rootLineWarning != "" {
 		report.Warnings = append(report.Warnings, Diagnostic{Level: "warning", Message: rootLineWarning})
 	}
@@ -295,14 +307,36 @@ type Diagnostic struct {
 // parityErrors keeps what boot would refuse and drops what it would only warn
 // about, so a warning never reaches the error list, the exit code, or the
 // "clean pass" test that gates the lanes behind it.
-func parityErrors(diags []memql.LintDiagnostic) []memql.LintDiagnostic {
-	out := diags[:0:0]
+//
+// A deprecation warning is dropped because deprecatedFormWarnings reports it
+// in every mode, so keeping this copy would print it twice. Any OTHER warning
+// is returned to be printed: baseloader.Warning is the general "found it, does
+// not fail the load" channel, and a second kind added to it would otherwise
+// appear in the engine's boot log and vanish here, which is the failure this
+// command exists to not have.
+func parityErrors(diags []memql.LintDiagnostic) (errs, unreported []memql.LintDiagnostic) {
+	errs = diags[:0:0]
 	for _, d := range diags {
-		if !d.IsWarning() {
-			out = append(out, d)
+		switch {
+		case !d.IsWarning():
+			errs = append(errs, d)
+		case isDeprecatedFormRule(d.Code):
+			// Reported by deprecatedFormWarnings, in every mode.
+		default:
+			unreported = append(unreported, d)
 		}
 	}
-	return out
+	return errs, unreported
+}
+
+// isDeprecatedFormRule answers whether a warning's rule id is one the
+// deprecation registry owns, which is what deprecatedFormWarnings reports.
+func isDeprecatedFormRule(code string) bool {
+	if code == "" {
+		return false
+	}
+	_, ok := deprecation.Lookup(code)
+	return ok
 }
 
 // deprecatedFormWarnings is this tool's account of the deprecated language
