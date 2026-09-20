@@ -185,11 +185,17 @@ func (p *Parser) parseV1Expression() (ast.ExpressionNode, error) {
 	return e.n, nil
 }
 
-// v1Expr is a parsed node and its source extent (see the file comment for why
-// the extent travels beside the node).
+// v1Expr is a parsed node, its source extent (see the file comment for why the
+// extent travels beside the node) and how tall the tree under it is.
 type v1Expr struct {
 	n  ast.ExpressionNode
 	sp ast.Span
+	// links is the most chain links on any path from n down to a leaf: an
+	// operator fold, a member read or a method call is one, and every other
+	// node kind carries its operands' count onward. MaxExpressionChain bounds
+	// it, which is what bounds every recursive walk over the tree
+	// (chain_bound.go).
+	links int
 }
 
 // v1Take returns the token at the cursor and moves past it -- but never past
@@ -267,7 +273,8 @@ func (p *Parser) parseV1Ternary() (v1Expr, error) {
 		return v1Expr{}, err
 	}
 	sp := joinV1Span(cond.sp, els.sp)
-	return v1Expr{n: &ast.TernaryExpr{Condition: cond.n, Then: then.n, Else: els.n}, sp: sp}, nil
+	return v1Expr{n: &ast.TernaryExpr{Condition: cond.n, Then: then.n, Else: els.n}, sp: sp,
+		links: maxLinks(cond.links, then.links, els.links)}, nil
 }
 
 func (p *Parser) parseV1Or() (v1Expr, error) {
@@ -300,7 +307,7 @@ func (p *Parser) parseV1Compare() (v1Expr, error) {
 	if next, chained := v1ComparisonOp(p.current); chained {
 		return v1Expr{}, v1Errorf(p.current, "comparisons do not chain: parenthesise one side, as in (a %s b) %s c", op, next)
 	}
-	return v1Binary(op, left, right), nil
+	return v1Binary(opTok, op, left, right)
 }
 
 // parseV1Coalesce parses level 5. `a ?? b ?? c` folds left into nested
@@ -337,7 +344,12 @@ func (p *Parser) parseV1LeftAssoc(next func() (v1Expr, error), op func(Token) (s
 		if err != nil {
 			return v1Expr{}, err
 		}
-		left = v1Binary(name, left, right)
+		// Each fold is one link of a tree as tall as the chain, and this
+		// loop is where a flat `a && a && ...` is built without recursing
+		// (chain_bound.go).
+		if left, err = v1Binary(opTok, name, left, right); err != nil {
+			return v1Expr{}, err
+		}
 	}
 }
 
@@ -366,7 +378,9 @@ func (p *Parser) parseV1Unary() (v1Expr, error) {
 				return v1Expr{n: lit, sp: sp}, nil
 			}
 		}
-		return v1Expr{n: &ast.UnaryExpr{Op: tok.Literal, Operand: operand.n, Span: sp}, sp: sp}, nil
+		// A prefix is not a link -- it is counted by v1Depth -- so it carries
+		// its operand's count onward (chain_bound.go).
+		return v1Expr{n: &ast.UnaryExpr{Op: tok.Literal, Operand: operand.n, Span: sp}, sp: sp, links: operand.links}, nil
 	}
 	if tok.Type == TokenNumber && strings.HasPrefix(tok.Literal, "-") && v1StartsPostfix(p.peekAhead(1)) {
 		return p.parseV1UngluedNegative()
@@ -390,7 +404,7 @@ func (p *Parser) parseV1UngluedNegative() (v1Expr, error) {
 		return v1Expr{}, err
 	}
 	sp := joinV1Span(v1TokenSpan(tok), operand.sp)
-	return v1Expr{n: &ast.UnaryExpr{Op: "-", Operand: operand.n, Span: sp}, sp: sp}, nil
+	return v1Expr{n: &ast.UnaryExpr{Op: "-", Operand: operand.n, Span: sp}, sp: sp, links: operand.links}, nil
 }
 
 // v1NegateLiteral folds a unary minus over a non-negative number literal into
@@ -481,8 +495,15 @@ func (p *Parser) v1MemberChain(base v1Expr, segs []v1Seg, optionalFirst bool) (v
 			}
 			return p.parseV1MethodCall(base, seg)
 		}
+		// Each member read is one link, and this loop -- with the one in
+		// parseV1PostfixFrom around it -- is where `a.b.c...` is built
+		// without recursing (chain_bound.go).
+		links, err := v1ChainLink(seg.token(), base.links)
+		if err != nil {
+			return v1Expr{}, err
+		}
 		sp := joinV1Span(base.sp, seg.sp)
-		base = v1Expr{n: &ast.MemberExpr{Object: base.n, Field: seg.text, Optional: optional, Span: sp}, sp: sp}
+		base = v1Expr{n: &ast.MemberExpr{Object: base.n, Field: seg.text, Optional: optional, Span: sp}, sp: sp, links: links}
 	}
 	return base, nil
 }
@@ -494,12 +515,18 @@ func (p *Parser) parseV1MethodCall(recv v1Expr, seg v1Seg) (v1Expr, error) {
 	if seg.text == "contains" {
 		return v1Expr{}, v1Retired(seg.token(), ruleContainsMethod)
 	}
-	args, named, closeTok, err := p.parseV1CallArgs(seg.text, "", false)
+	args, named, closeTok, argLinks, err := p.parseV1CallArgs(seg.text, "", false)
+	if err != nil {
+		return v1Expr{}, err
+	}
+	// A method call on a receiver is one link: `x.m().m()...` is built in the
+	// postfix loop, without recursing (chain_bound.go).
+	links, err := v1ChainLink(seg.token(), recv.links, argLinks)
 	if err != nil {
 		return v1Expr{}, err
 	}
 	sp := joinV1Span(recv.sp, v1TokenSpan(closeTok))
-	return v1Expr{n: &ast.CallExpr{Receiver: recv.n, Name: seg.text, Args: args, Named: named, Span: sp}, sp: sp}, nil
+	return v1Expr{n: &ast.CallExpr{Receiver: recv.n, Name: seg.text, Args: args, Named: named, Span: sp}, sp: sp, links: links}, nil
 }
 
 // parseV1Primary parses a literal, a name (and what a name can begin: a call,
@@ -640,7 +667,7 @@ func (p *Parser) parseV1FunctionCall() (v1Expr, error) {
 	if lower == "asof" && p.asOfOutsideQuery() {
 		return v1Expr{}, v1Errorf(nameTok, "%s", asOfQueryOnlyMessage(p.currentFuncType))
 	}
-	args, named, closeTok, err := p.parseV1CallArgs(name, "", true)
+	args, named, closeTok, argLinks, err := p.parseV1CallArgs(name, "", true)
 	if err != nil {
 		return v1Expr{}, err
 	}
@@ -661,7 +688,9 @@ func (p *Parser) parseV1FunctionCall() (v1Expr, error) {
 		return v1Expr{}, v1Retired(nameTok, ruleContainsCall)
 	}
 	sp := joinV1Span(v1TokenSpan(nameTok), v1TokenSpan(closeTok))
-	return v1Expr{n: &ast.CallExpr{Name: name, Args: args, Named: named, Span: sp}, sp: sp}, nil
+	// A bare call is not a link -- its arguments are nested full expressions,
+	// counted by v1Depth -- so it carries their count onward (chain_bound.go).
+	return v1Expr{n: &ast.CallExpr{Name: name, Args: args, Named: named, Span: sp}, sp: sp, links: argLinks}, nil
 }
 
 // parseV1ConstructCall parses `<kind> <name>(args)`, kind one of the
@@ -677,12 +706,12 @@ func (p *Parser) parseV1ConstructCall() (v1Expr, error) {
 		return v1Expr{}, v1Errorf(nameTok, "a construct call needs its argument list: %s %s(k: v, ...), or %s %s() with none", kindTok.Literal, nameTok.Literal, kindTok.Literal, nameTok.Literal)
 	}
 	p.v1Take()
-	args, named, closeTok, err := p.parseV1CallArgs(nameTok.Literal, kindTok.Literal, false)
+	args, named, closeTok, argLinks, err := p.parseV1CallArgs(nameTok.Literal, kindTok.Literal, false)
 	if err != nil {
 		return v1Expr{}, err
 	}
 	sp := joinV1Span(v1TokenSpan(kindTok), v1TokenSpan(closeTok))
-	return v1Expr{n: &ast.CallExpr{Kind: kindTok.Literal, Name: nameTok.Literal, Args: args, Named: named, Span: sp}, sp: sp}, nil
+	return v1Expr{n: &ast.CallExpr{Kind: kindTok.Literal, Name: nameTok.Literal, Args: args, Named: named, Span: sp}, sp: sp, links: argLinks}, nil
 }
 
 // parseV1CallArgs parses a parenthesised argument list with the cursor on its
@@ -701,7 +730,11 @@ func (p *Parser) parseV1ConstructCall() (v1Expr, error) {
 // refused, because nothing in `f(a, k: 1)` says whether `a` fills the first
 // slot or means `a: a`. A named argument's key may contain '-'
 // (`dry-run: args.dryRun`): a key is never an expression.
-func (p *Parser) parseV1CallArgs(callee, kind string, bare bool) ([]ast.ExpressionNode, []ast.NamedArg, Token, error) {
+//
+// argLinks is the most chain links any argument holds, which the call node
+// carries onward so a chain continued inside an argument is still one chain
+// (chain_bound.go).
+func (p *Parser) parseV1CallArgs(callee, kind string, bare bool) (args []ast.ExpressionNode, named []ast.NamedArg, closeTok Token, argLinks int, err error) {
 	open := p.v1Take()
 	type argument struct {
 		named *ast.NamedArg      // set for `name: value`
@@ -712,38 +745,40 @@ func (p *Parser) parseV1CallArgs(callee, kind string, bare bool) ([]ast.Expressi
 	seen := map[string]any{}
 	for !p.check(TokenParenClose) {
 		if p.check(TokenEOF) {
-			return nil, nil, Token{}, p.v1Expected(fmt.Sprintf("`)` to close the argument list of %s(...) opened at %s", callee, v1Where(open)))
+			return nil, nil, Token{}, 0, p.v1Expected(fmt.Sprintf("`)` to close the argument list of %s(...) opened at %s", callee, v1Where(open)))
 		}
 		tok := p.current
 		switch {
 		case v1IsNameToken(tok) && p.peekAhead(1).Type == TokenColon:
 			if strings.ContainsAny(tok.Literal, ".:") {
-				return nil, nil, Token{}, v1Errorf(tok, "an argument name is one name, got `%s`", tok.Literal)
+				return nil, nil, Token{}, 0, v1Errorf(tok, "an argument name is one name, got `%s`", tok.Literal)
 			}
 			if err := checkCallArgName(&tok, callee, tok.Literal, seen); err != nil {
-				return nil, nil, Token{}, err
+				return nil, nil, Token{}, 0, err
 			}
 			seen[tok.Literal] = true
 			p.v1Take()
 			colon := p.v1Take()
 			if err := p.v1ExpectOperand(colon); err != nil {
-				return nil, nil, Token{}, err
+				return nil, nil, Token{}, 0, err
 			}
 			val, err := p.parseV1Ternary()
 			if err != nil {
-				return nil, nil, Token{}, err
+				return nil, nil, Token{}, 0, err
 			}
+			argLinks = maxLinks(argLinks, val.links)
 			list = append(list, argument{named: &ast.NamedArg{Name: tok.Literal, Value: val.n}, start: tok})
 		case tok.Type == TokenString && p.peekAhead(1).Type == TokenColon:
-			return nil, nil, Token{}, v1Errorf(tok, "an argument's name is not quoted: write %s: ... in %s(...)", tok.Literal, callee)
+			return nil, nil, Token{}, 0, v1Errorf(tok, "an argument's name is not quoted: write %s: ... in %s(...)", tok.Literal, callee)
 		default:
 			val, err := p.parseV1Ternary()
 			if err != nil {
-				return nil, nil, Token{}, err
+				return nil, nil, Token{}, 0, err
 			}
 			if id, ok := val.n.(*ast.IdentExpr); ok && p.check(TokenOperator) && p.current.Literal == "=" {
-				return nil, nil, Token{}, v1Errorf(p.current, "a named argument is written `%s: ...`, not `%s = ...`", id.Name, id.Name)
+				return nil, nil, Token{}, 0, v1Errorf(p.current, "a named argument is written `%s: ...`, not `%s = ...`", id.Name, id.Name)
 			}
+			argLinks = maxLinks(argLinks, val.links)
 			list = append(list, argument{value: val.n, start: tok})
 		}
 		if p.check(TokenComma) {
@@ -751,25 +786,21 @@ func (p *Parser) parseV1CallArgs(callee, kind string, bare bool) ([]ast.Expressi
 			continue
 		}
 		if !p.check(TokenParenClose) {
-			return nil, nil, Token{}, p.v1Expected(fmt.Sprintf("`,` or `)` in the argument list of %s(...)", callee))
+			return nil, nil, Token{}, 0, p.v1Expected(fmt.Sprintf("`,` or `)` in the argument list of %s(...)", callee))
 		}
 	}
-	closeTok := p.v1Take()
+	closeTok = p.v1Take()
 
 	// The retired object-literal wrapper (memql#2335): named arguments go in
 	// the parentheses, not in one map passed positionally. A method's
 	// argument is data, so only bare and construct calls are held to it.
 	if (bare || kind != "") && len(list) == 1 && list[0].named == nil {
 		if _, isMap := list[0].value.(*ast.MapExpr); isMap {
-			return nil, nil, Token{}, v1Errorf(list[0].start,
+			return nil, nil, Token{}, 0, v1Errorf(list[0].start,
 				"object-literal call args are removed; pass named args directly: %s(k: v, ...), empty = %s() (was: %s({...}))", callee, callee, callee)
 		}
 	}
 
-	var (
-		args  []ast.ExpressionNode
-		named []ast.NamedArg
-	)
 	if kind != "" {
 		for _, a := range list {
 			if a.named != nil {
@@ -778,18 +809,18 @@ func (p *Parser) parseV1CallArgs(callee, kind string, bare bool) ([]ast.Expressi
 			}
 			id, pun := a.value.(*ast.IdentExpr)
 			if !pun {
-				return nil, nil, Token{}, v1Errorf(a.start,
+				return nil, nil, Token{}, 0, v1Errorf(a.start,
 					"positional args are removed on construct calls; name the argument: %s %s(k: v, ...) -- a bare name puns to its own name (%s(x) == %s(x: x))",
 					kind, callee, callee, callee)
 			}
 			start := a.start
 			if err := checkCallArgName(&start, callee, id.Name, seen); err != nil {
-				return nil, nil, Token{}, err
+				return nil, nil, Token{}, 0, err
 			}
 			seen[id.Name] = true
 			named = append(named, ast.NamedArg{Name: id.Name, Value: id})
 		}
-		return nil, named, closeTok, nil
+		return nil, named, closeTok, argLinks, nil
 	}
 
 	var firstPositional *Token
@@ -811,9 +842,9 @@ func (p *Parser) parseV1CallArgs(callee, kind string, bare bool) ([]ast.Expressi
 				break
 			}
 		}
-		return nil, nil, Token{}, v1Errorf(*firstPositional, "%s", msg)
+		return nil, nil, Token{}, 0, v1Errorf(*firstPositional, "%s", msg)
 	}
-	return args, named, closeTok, nil
+	return args, named, closeTok, argLinks, nil
 }
 
 // v1LambdaAhead reports whether the cursor is at a parenthesised lambda
@@ -884,7 +915,7 @@ func (p *Parser) parseV1Lambda() (v1Expr, error) {
 	if err != nil {
 		return v1Expr{}, err
 	}
-	return v1Expr{n: &ast.LambdaExpr{Params: names, Body: body.n}, sp: joinV1Span(v1TokenSpan(first), body.sp)}, nil
+	return v1Expr{n: &ast.LambdaExpr{Params: names, Body: body.n}, sp: joinV1Span(v1TokenSpan(first), body.sp), links: body.links}, nil
 }
 
 // v1CheckParam refuses a parameter that is not a simple name. A reserved root
@@ -921,7 +952,9 @@ func (p *Parser) parseV1Paren() (v1Expr, error) {
 	case p.check(TokenParenClose):
 		closeTok := p.v1Take()
 		sp := joinV1Span(v1TokenSpan(open), v1TokenSpan(closeTok))
-		return v1Expr{n: &ast.ParenExpr{Inner: inner.n, Span: sp}, sp: sp}, nil
+		// A group is not a link, and it carries its inner count onward: a
+		// chain continued past a group is one chain (chain_bound.go).
+		return v1Expr{n: &ast.ParenExpr{Inner: inner.n, Span: sp}, sp: sp, links: inner.links}, nil
 	case p.check(TokenComma):
 		// A comma inside a group separates nothing: it is the retired `,`.
 		return v1Expr{}, v1Retired(p.current, ruleCommaConnective)
@@ -933,6 +966,7 @@ func (p *Parser) parseV1Paren() (v1Expr, error) {
 func (p *Parser) parseV1List() (v1Expr, error) {
 	open := p.v1Take()
 	var elems []ast.ExpressionNode
+	links := 0
 	for !p.check(TokenBracketClose) {
 		if p.check(TokenEOF) {
 			return v1Expr{}, p.v1Expected(fmt.Sprintf("`]` to close the list opened at %s", v1Where(open)))
@@ -941,6 +975,7 @@ func (p *Parser) parseV1List() (v1Expr, error) {
 		if err != nil {
 			return v1Expr{}, err
 		}
+		links = maxLinks(links, el.links)
 		elems = append(elems, el.n)
 		if p.check(TokenComma) {
 			p.v1Take()
@@ -952,7 +987,7 @@ func (p *Parser) parseV1List() (v1Expr, error) {
 	}
 	closeTok := p.v1Take()
 	sp := joinV1Span(v1TokenSpan(open), v1TokenSpan(closeTok))
-	return v1Expr{n: &ast.ListExpr{Elems: elems, Span: sp}, sp: sp}, nil
+	return v1Expr{n: &ast.ListExpr{Elems: elems, Span: sp}, sp: sp, links: links}, nil
 }
 
 // parseV1Map parses `{key: value, ...}`, a trailing comma allowed. Keys are
@@ -970,6 +1005,7 @@ func (p *Parser) parseV1Map() (v1Expr, error) {
 func (p *Parser) parseV1MapWith(allowPuns bool) (v1Expr, error) {
 	open := p.v1Take()
 	var entries []ast.MapEntry
+	links := 0
 	seen := map[string]bool{}
 	for !p.check(TokenBraceClose) {
 		keyTok := p.current
@@ -1025,6 +1061,7 @@ func (p *Parser) parseV1MapWith(allowPuns bool) (v1Expr, error) {
 		if err != nil {
 			return v1Expr{}, err
 		}
+		links = maxLinks(links, val.links)
 		entries = append(entries, ast.MapEntry{Key: key, Value: val.n})
 		if p.check(TokenComma) {
 			p.v1Take()
@@ -1036,7 +1073,7 @@ func (p *Parser) parseV1MapWith(allowPuns bool) (v1Expr, error) {
 	}
 	closeTok := p.v1Take()
 	sp := joinV1Span(v1TokenSpan(open), v1TokenSpan(closeTok))
-	return v1Expr{n: &ast.MapExpr{Entries: entries, Span: sp}, sp: sp}, nil
+	return v1Expr{n: &ast.MapExpr{Entries: entries, Span: sp}, sp: sp, links: links}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -1175,9 +1212,16 @@ func v1Number(tok Token, lit string) (any, error) {
 	return v, nil
 }
 
-func v1Binary(op string, l, r v1Expr) v1Expr {
+// v1Binary folds l and r under op, the operator token opTok carried so a
+// refusal of the link past MaxExpressionChain points at the operator that made
+// it.
+func v1Binary(opTok Token, op string, l, r v1Expr) (v1Expr, error) {
+	links, err := v1ChainLink(opTok, l.links, r.links)
+	if err != nil {
+		return v1Expr{}, err
+	}
 	sp := joinV1Span(l.sp, r.sp)
-	return v1Expr{n: &ast.BinaryExpr{Op: op, Left: l.n, Right: r.n, Span: sp}, sp: sp}
+	return v1Expr{n: &ast.BinaryExpr{Op: op, Left: l.n, Right: r.n, Span: sp}, sp: sp, links: links}, nil
 }
 
 // v1TokenSpan is tok's extent as a node Span. A Span is where the node sits in
