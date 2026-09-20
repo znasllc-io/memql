@@ -20,6 +20,7 @@ func WithBuiltinPreview(ctx context.Context) context.Context {
 func CheckBuiltinPreview(executor string) error {
 	switch executor {
 	case BuiltinExecutorConcepts, BuiltinExecutorMemqlDocs,
+		BuiltinExecutorMemqlGrammar, BuiltinExecutorMemqlVocabulary,
 		BuiltinExecutorValidate, BuiltinExecutorFunctions, BuiltinExecutorTools,
 		BuiltinExecutorHelp, BuiltinExecutorShapeTemplates, BuiltinExecutorShapeHelp,
 		BuiltinExecutorContentId, BuiltinExecutorPreviewInsert,

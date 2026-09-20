@@ -1,0 +1,57 @@
+{
+  "_readme": [
+    "The deliberately-breaking fixture's BEFORE side (memql#5389, Step 7).",
+    "It is a hand-trimmed surface, not a capture: a fixture that is a copy of the real baseline re-breaks every time the real language moves, and then it is edited to make the test pass rather than read.",
+    "breaking.json is this file with exactly four changes -- one parse, one meaning, one wire, and one deletion the fixture ledger reserves.",
+    "Keys beginning with an underscore are ignored by the decoder; this array is here for whoever opens the file next."
+  ],
+  "edition": "2026",
+  "grammarVersion": "fixture-0001",
+  "constructs": {
+    "query": {
+      "name": "query",
+      "form": "query <Concept> <name>",
+      "on": ["args", "filter", "paginate", "shape", "sort"]
+    },
+    "shape": {
+      "name": "shape",
+      "form": "shape <Concept> <name>"
+    }
+  },
+  "annotations": {
+    "cache": {
+      "name": "cache",
+      "form": "one number",
+      "on": ["Query"]
+    },
+    "description": {
+      "name": "description",
+      "form": "one string",
+      "on": ["Mutation", "Query"]
+    },
+    "scopes": {
+      "name": "scopes",
+      "form": "a list of strings",
+      "on": ["Tool"]
+    },
+    "serverOnly": {
+      "name": "serverOnly",
+      "form": "no arguments",
+      "on": ["Mutation", "Query"]
+    }
+  },
+  "functions": {
+    "addDuration": {
+      "name": "addDuration",
+      "form": "addDuration(ts datetime, dur duration) datetime [M]"
+    },
+    "list.any": {
+      "name": "list.any",
+      "form": "list.any(pred lambda) bool [M]"
+    }
+  },
+  "shapes": {
+    "folderCard": ["createdAt", "id", "name"],
+    "userCard": ["email", "id"]
+  }
+}

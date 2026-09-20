@@ -1,0 +1,48 @@
+{
+  "_readme": [
+    "The deliberately-breaking fixture's AFTER side (memql#5389, Step 7). baseline.json with exactly four changes:",
+    "PARSE    -- @serverOnly is gone from `annotations`, and reserved.json beside it does NOT reserve it.",
+    "MEANING  -- @cache still exists and its argument form narrowed from a bare number to a keyword set.",
+    "WIRE     -- folderCard projects `title` where it projected `name`; nothing refuses to load and every client reading the old key gets an absent value.",
+    "RESERVED -- @scopes is gone AND reserved, so it must produce NO finding. Without that arm the fixture would prove the classifier reports things, not that the ledger is read."
+  ],
+  "edition": "2026",
+  "grammarVersion": "fixture-0002",
+  "constructs": {
+    "query": {
+      "name": "query",
+      "form": "query <Concept> <name>",
+      "on": ["args", "filter", "paginate", "shape", "sort"]
+    },
+    "shape": {
+      "name": "shape",
+      "form": "shape <Concept> <name>"
+    }
+  },
+  "annotations": {
+    "cache": {
+      "name": "cache",
+      "form": "keyword arguments(ttl:int)",
+      "on": ["Query"]
+    },
+    "description": {
+      "name": "description",
+      "form": "one string",
+      "on": ["Mutation", "Query"]
+    }
+  },
+  "functions": {
+    "addDuration": {
+      "name": "addDuration",
+      "form": "addDuration(ts datetime, dur duration) datetime [M]"
+    },
+    "list.any": {
+      "name": "list.any",
+      "form": "list.any(pred lambda) bool [M]"
+    }
+  },
+  "shapes": {
+    "folderCard": ["createdAt", "id", "title"],
+    "userCard": ["email", "id"]
+  }
+}

@@ -69,3 +69,33 @@ accumulated in it by then.
   anything. Otherwise leave it: a stale-but-cited record wants its content
   repointed, not the file removed.
 - No emojis (global convention).
+
+## A bug is not fixed until its case is in the corpus
+
+Borrowed from SQL Logic Test, and it is the rule that makes
+`test/conformance/2026/` worth its size: a defect in the language — a filter
+that lowers to the wrong SQL, an expression the two evaluators answer
+differently, a refusal whose wording stopped naming the fix — is not fixed by
+the commit that changes the code. It is fixed by the commit that adds the case
+the old code fails and the new code passes.
+
+The corpus is the only thing that remembers. A fix with no case survives
+exactly until someone refactors the path it lives on, and the regression comes
+back reading like a new bug.
+
+Where the case goes, by what it is about:
+
+| The defect | The case |
+|---|---|
+| A filter lowers wrongly, or the two evaluators disagree | `2026/expr/<position>/`, as a `lower` and an `evaluate` verdict over the rows that split them |
+| A construct or annotation accepts what it should refuse | `2026/cells/<construct>/<attribute>/`, with the `code` and `message` the refusal carries |
+| A refusal's wording lost the replacement it used to name | the same cell's `expect.json`; the wording is pinned, so a change to it is a deliberate edit and not a drift |
+| A load refusal nothing covered | `2026/negative/<construct>/<fault>.memql` |
+| The parser panicked on an input | `2026/fuzz/`, or the package's own `testdata/fuzz/<Target>/` |
+
+**The differential lane is REQUIRED** (memql#5386). It runs in the
+`mcp-conformance` job with `MEMQL_DIFFERENTIAL_REQUIRED=1`, and a disagreement
+between the SQL lowering and the in-process evaluator fails it. The lane draws
+its expressions from the corpus plus a deterministic grammar-driven generator,
+so its seed is printed on the summary line: a red on a hosted runner is
+reproducible locally from that one number.

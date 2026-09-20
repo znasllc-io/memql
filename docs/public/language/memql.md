@@ -89,6 +89,46 @@ memqlmigrate --rewrite=language-line -w bundle/
 
 Later epics that change the language register their rewrites in the same registry, keyed by edition; the [versioning rule](authoring-rules.md#grammar-versioning-and-the-migration-channel) says when one is owed.
 
+## Version one is frozen
+
+Edition **2026** and language **1.0** are frozen (memql#5385). The freeze is not
+a date. It is a set of gates that fail when the authoring surface moves without
+saying so, which is what makes it safe to hold all of a product's logic in the
+DSL.
+
+What it means in practice:
+
+- **Adding needs no ceremony.** A new construct, annotation, function or clause
+  breaks nobody, and `memqlbreaking` never reports one. A command that reports
+  every change is a command whose output nobody reads.
+- **Removing is a window, then a reservation.** A public form deprecates with a
+  load-time warning naming its replacement and the release it stops loading at,
+  for at least two minor releases, and every use is counted so the removal rests
+  on evidence rather than on a guess about who still writes it. Only then may it
+  go -- and its name is reserved forever, so it can never come back meaning
+  something else. A bundle still carrying the old spelling would otherwise load
+  under the new meaning and quietly do the new thing.
+- **The corpus is the language.** `test/conformance/2026/` holds a case per
+  construct, attribute, expression position and refusal, and its manifest reads
+  `"status": "frozen"`. A bug is not fixed until its case is there.
+
+Three artifacts ship with the engine and are generated from the same tables the
+parser reads, so none can describe a language the cluster does not accept:
+
+| Artifact | Page | Served over |
+|---|---|---|
+| The grammar, in EBNF | [grammar.md](grammar.md) | `memqlGrammar()` |
+| Every name and what it means | [vocabulary.md](vocabulary.md) | `memqlVocabulary()` |
+| Which annotation is legal where | [attribute-matrix.md](attribute-matrix.md) | -- |
+
+The first two exist to be given to a **model**: the grammar as grammar-in-prompt
+or as the grammar a constrained decoder is held to, the vocabulary as what each
+name means. A hand-maintained grammar does not fail when it drifts; it teaches a
+form the parser refuses, and the failure reads as "the model is bad at MemQL".
+
+Reserved names, which a payload field escapes with a raw identifier, are in
+[reserved.md](reserved.md).
+
 ## Quick Start
 
 ### The DSL Tree

@@ -90,6 +90,16 @@ func TestAgentRoleTierIsPromptAdvisoryOnly(t *testing.T) {
 		// branches on either.
 		"factory.go | Tier:        stringField(payload, \"tier\"),": "populates skillSnapshot.Tier; not a read",
 		"factory.go | \"tier\":        s.Tier,":                     "skill catalog -> prompt, same advisory role as the role catalog",
+		// memql#5388 added the memqlVocabulary builtin, which serves every
+		// construct, annotation, builtin and function with what it means.
+		// Both lines read dslspec.VocabularyEntry.Tier -- the EXPRESSION
+		// tier a function carries in component/language/functions, `P` for
+		// one that pushes down to SQL and `M` for one that evaluates in
+		// process. It is a property of the language, not of any agent, and
+		// the builtin only renders it into the reply so a reader can tell
+		// which functions a query filter may use. Nothing branches on it.
+		"executor_builtin.go | if entry.Tier != \"\" {":     "vocabulary entry's expression tier (P/M), not agentRole",
+		"executor_builtin.go | item[\"tier\"] = entry.Tier": "renders the same into the reply; not a read of agentRole",
 	}
 	// The rowauthz_* files carry a whole rowAuthz decl.Tier surface --
 	// `langparser.RowAuthzDecl.Tier`, the tier a CONCEPT declares about who may

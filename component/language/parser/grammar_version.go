@@ -250,6 +250,42 @@ package parser
 // exclude, a @loop on an automation no event triggers, and a @mode naming no
 // mode or two. Nothing previously valid stopped being valid, so no rewrite
 // mode is owed.
+//
+// # The freeze (memql#5390), and why this constant did NOT move for it
+//
+// Edition 2026 and language 1.0 are FROZEN. Six epics narrowed, widened and
+// consolidated the authoring surface; this one stops it moving by accident.
+//
+// The freeze changed NO authored form, so the surface digest is unchanged and
+// this constant is unchanged with it. That is the freeze working rather than
+// the freeze being skipped: the digest is computed from what an author may
+// write, and the point of the last epic is that it adds gates and artifacts
+// without touching the language. If you are reading this because you expected
+// a bump, TestGrammarVersionCarriesTheSurfaceDigest is the arbiter, and it was
+// green across the change.
+//
+// What the freeze installed, none of it a grammar edit:
+//
+//   - The corpus manifest (test/conformance/2026/manifest.json) reads
+//     `"status": "frozen"`, and the loader's own test admits nothing else for
+//     this edition.
+//   - cmd/memqlbreaking classifies every later change to the authoring surface
+//     against the committed baseline (component/language/surface/2026.json) as
+//     parse, meaning or wire, and refuses a DELETION carrying no entry in
+//     component/language/reserved.json. A reserved name can never return with
+//     another meaning, which is the failure a bare deletion leaves open: a
+//     bundle written against the old meaning loads under the new one and
+//     quietly does something else.
+//   - component/language/deprecation is how a public form leaves from here: a
+//     load-time warning naming its replacement and the release it stops
+//     loading at, for at least two minor releases, with the use COUNTED so the
+//     removal rests on evidence rather than on a guess about who still writes
+//     it.
+//
+// So the rule this file has always stated is now narrower in one direction and
+// unchanged in the other. A bump still records what the grammar IS. But a
+// NARROWING of the authored surface is no longer a bump plus a rewrite mode:
+// it is a deprecation window first, and a reservation afterwards.
 
 import (
 	"crypto/sha256"

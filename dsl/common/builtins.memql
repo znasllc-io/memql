@@ -210,6 +210,39 @@ builtin knowledgeSeedStandardDomains {
 builtin memqlDocs {
 }
 
+// ---- builtinMemqlGrammar ----
+//
+// The generated BNF for the authoring grammar, for grammar-in-prompt and for
+// syntax-only constrained decoding. Generated from the parser, the annotation
+// registry and the function catalog at call time, so it cannot disagree with
+// what THIS cluster accepts -- which is the whole reason to ask a cluster for
+// its grammar rather than read a committed page.
+//
+// A sibling of memqlDocs rather than a mode of it: a caller asking for the
+// grammar and a caller asking for the guide want different artifacts, and a
+// mode argument is a second thing to discover.
+
+@executor("memqlGrammar")
+@description("Returns the generated BNF for this cluster's MemQL authoring grammar, with the edition and grammar version it was built from.")
+builtin memqlGrammar {
+}
+
+// ---- builtinMemqlVocabulary ----
+//
+// Every construct, annotation, keyword, operator, field type, function and
+// builtin this cluster knows, each with a description. The grammar says what
+// may be written; this says what it means.
+//
+// An unknown `kind` is REFUSED and the refusal names the kinds there are. An
+// empty list would read as "this cluster has no annotations", which is a
+// sentence a model will believe.
+
+@executor("memqlVocabulary")
+@description("Returns every construct, annotation, keyword, operator, field type, function and builtin with its description, as the vocabulary a model is given alongside the grammar.")
+builtin memqlVocabulary {
+  kind  string  @description("Narrow to one kind: construct, annotation, keyword, operator, fieldType, function or builtin. Omitted, every kind is returned.")
+}
+
 // ---- queries/v1/common/builtin/builtinPreviewInsert.memql ----
 
 // builtinPreviewInsert - Preview Insert

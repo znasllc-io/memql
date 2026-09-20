@@ -1,0 +1,3332 @@
+{
+  "edition": "2026",
+  "grammarVersion": "2026.09-before-write-error-accessor-77cda60c",
+  "constructs": {
+    "action": {
+      "name": "action",
+      "form": "action \u003cname\u003e",
+      "on": [
+        "args"
+      ]
+    },
+    "automation": {
+      "name": "automation",
+      "form": "automation \u003cname\u003e",
+      "on": [
+        "args",
+        "precondition"
+      ]
+    },
+    "builtin": {
+      "name": "builtin",
+      "form": "builtin \u003cname\u003e"
+    },
+    "capability": {
+      "name": "capability",
+      "form": "capability \u003cname\u003e",
+      "on": [
+        "args"
+      ]
+    },
+    "concept": {
+      "name": "concept",
+      "form": "concept \u003cname\u003e"
+    },
+    "logic": {
+      "name": "logic",
+      "form": "logic \u003cname\u003e",
+      "on": [
+        "args"
+      ]
+    },
+    "mutation": {
+      "name": "mutation",
+      "form": "mutation \u003cConcept\u003e \u003cname\u003e",
+      "on": [
+        "accept",
+        "args",
+        "insert",
+        "stamp",
+        "update"
+      ]
+    },
+    "policy": {
+      "name": "policy",
+      "form": "policy \u003cname\u003e"
+    },
+    "prompt": {
+      "name": "prompt",
+      "form": "prompt \u003cname\u003e"
+    },
+    "provider": {
+      "name": "provider",
+      "form": "provider \u003cname\u003e",
+      "on": [
+        "auth",
+        "params"
+      ]
+    },
+    "query": {
+      "name": "query",
+      "form": "query \u003cConcept\u003e \u003cname\u003e",
+      "on": [
+        "args",
+        "asOf",
+        "count",
+        "filter",
+        "paginate",
+        "refine",
+        "shape",
+        "sort"
+      ]
+    },
+    "rule": {
+      "name": "rule",
+      "form": "rule \u003cname\u003e"
+    },
+    "seed": {
+      "name": "seed",
+      "form": "seed \u003cConcept\u003e \u003cname\u003e"
+    },
+    "shape": {
+      "name": "shape",
+      "form": "shape \u003cConcept\u003e \u003cname\u003e"
+    },
+    "spec": {
+      "name": "spec",
+      "form": "spec \u003cname\u003e"
+    },
+    "tool": {
+      "name": "tool",
+      "form": "tool \u003cname\u003e"
+    },
+    "trait": {
+      "name": "trait",
+      "form": "trait \u003cname\u003e"
+    },
+    "use": {
+      "name": "use",
+      "form": "use \u003cname\u003e"
+    }
+  },
+  "annotations": {
+    "actor": {
+      "name": "actor",
+      "form": "no arguments",
+      "on": [
+        "Automation",
+        "Logic",
+        "Mutation",
+        "Query",
+        "Shape"
+      ]
+    },
+    "addToSet": {
+      "name": "addToSet",
+      "form": "one or more strings",
+      "on": [
+        "Mutation"
+      ]
+    },
+    "alias": {
+      "name": "alias",
+      "form": "one string repeatable",
+      "on": [
+        "Builtin"
+      ]
+    },
+    "allowedRoles": {
+      "name": "allowedRoles",
+      "form": "one or more strings",
+      "on": [
+        "Tool"
+      ]
+    },
+    "appendFields": {
+      "name": "appendFields",
+      "form": "one or more strings",
+      "on": [
+        "Mutation"
+      ]
+    },
+    "args": {
+      "name": "args",
+      "form": "keyword arguments(additionalProperties:string, excludes:string, profile:string, stringKey:string, when:string)",
+      "on": [
+        "Builtin"
+      ]
+    },
+    "autoInjected": {
+      "name": "autoInjected",
+      "form": "no arguments",
+      "on": [
+        "ToolField"
+      ]
+    },
+    "base": {
+      "name": "base",
+      "form": "no arguments",
+      "on": [
+        "Provider"
+      ]
+    },
+    "cache": {
+      "name": "cache",
+      "form": "one number or keyword arguments(ttl:string)",
+      "on": [
+        "Query"
+      ]
+    },
+    "composable": {
+      "name": "composable",
+      "form": "no arguments or keyword arguments(as:string, fields:string, list:string)",
+      "on": [
+        "Concept"
+      ]
+    },
+    "createOnly": {
+      "name": "createOnly",
+      "form": "one or more strings",
+      "on": [
+        "Mutation"
+      ]
+    },
+    "default": {
+      "name": "default",
+      "form": "PromptField: one string or one number; Provider: no arguments; ToolField: one string",
+      "on": [
+        "PromptField",
+        "Provider",
+        "ToolField"
+      ]
+    },
+    "defaultProvider": {
+      "name": "defaultProvider",
+      "form": "one string",
+      "on": [
+        "Prompt"
+      ]
+    },
+    "description": {
+      "name": "description",
+      "form": "one string",
+      "on": [
+        "Action",
+        "Automation",
+        "Builtin",
+        "BuiltinField",
+        "Capability",
+        "Concept",
+        "ConceptField",
+        "Logic",
+        "Mutation",
+        "Policy",
+        "Prompt",
+        "PromptField",
+        "Provider",
+        "Query",
+        "Rule",
+        "Seed",
+        "Shape",
+        "Spec",
+        "Tool",
+        "ToolField"
+      ]
+    },
+    "destructive": {
+      "name": "destructive",
+      "form": "no arguments",
+      "on": [
+        "Tool"
+      ]
+    },
+    "disabled": {
+      "name": "disabled",
+      "form": "no arguments",
+      "on": [
+        "Action",
+        "Automation",
+        "Builtin",
+        "Capability",
+        "Logic",
+        "Mutation",
+        "Prompt",
+        "Provider",
+        "Query",
+        "Rule",
+        "Seed",
+        "Spec",
+        "Tool"
+      ]
+    },
+    "displayCard": {
+      "name": "displayCard",
+      "form": "keyword arguments(primary:string, secondary:string, status:string, tertiary:string)",
+      "on": [
+        "Concept"
+      ]
+    },
+    "enum": {
+      "name": "enum",
+      "form": "one or more strings",
+      "on": [
+        "ArgsField",
+        "BuiltinField",
+        "PromptField",
+        "ToolField"
+      ]
+    },
+    "eventField": {
+      "name": "eventField",
+      "form": "one or more strings",
+      "on": [
+        "Logic"
+      ]
+    },
+    "exclude": {
+      "name": "exclude",
+      "form": "one or more strings repeatable",
+      "on": [
+        "Rule"
+      ]
+    },
+    "executionTime": {
+      "name": "executionTime",
+      "form": "one string",
+      "on": [
+        "Tool"
+      ]
+    },
+    "executor": {
+      "name": "executor",
+      "form": "one string",
+      "on": [
+        "Builtin"
+      ]
+    },
+    "extends": {
+      "name": "extends",
+      "form": "one string",
+      "on": [
+        "Provider"
+      ]
+    },
+    "fallback": {
+      "name": "fallback",
+      "form": "one string repeatable",
+      "on": [
+        "Policy"
+      ]
+    },
+    "filter": {
+      "name": "filter",
+      "form": "an expression",
+      "on": [
+        "Automation"
+      ]
+    },
+    "handler": {
+      "name": "handler",
+      "form": "keyword arguments(method:string, name:string, query:string, type:string, url:string)",
+      "on": [
+        "Tool"
+      ]
+    },
+    "internal": {
+      "name": "internal",
+      "form": "no arguments",
+      "on": [
+        "ConceptField"
+      ]
+    },
+    "level": {
+      "name": "level",
+      "form": "one string",
+      "on": [
+        "Prompt",
+        "Rule"
+      ]
+    },
+    "locked": {
+      "name": "locked",
+      "form": "no arguments",
+      "on": [
+        "Rule"
+      ]
+    },
+    "loop": {
+      "name": "loop",
+      "form": "keyword arguments(maxDepth:int, until:expression)",
+      "on": [
+        "Automation"
+      ]
+    },
+    "maxLength": {
+      "name": "maxLength",
+      "form": "one number",
+      "on": [
+        "ArgsField",
+        "ConceptField"
+      ]
+    },
+    "maximum": {
+      "name": "maximum",
+      "form": "one number",
+      "on": [
+        "ArgsField",
+        "ConceptField"
+      ]
+    },
+    "mcp": {
+      "name": "mcp",
+      "form": "no arguments",
+      "on": [
+        "Automation",
+        "Mutation",
+        "Query",
+        "Tool"
+      ]
+    },
+    "mergeFields": {
+      "name": "mergeFields",
+      "form": "one or more strings",
+      "on": [
+        "Mutation"
+      ]
+    },
+    "minLength": {
+      "name": "minLength",
+      "form": "one number",
+      "on": [
+        "ConceptField"
+      ]
+    },
+    "minimum": {
+      "name": "minimum",
+      "form": "one number",
+      "on": [
+        "ArgsField",
+        "ConceptField"
+      ]
+    },
+    "mirroredTo": {
+      "name": "mirroredTo",
+      "form": "one or more strings",
+      "on": [
+        "Concept"
+      ]
+    },
+    "modality": {
+      "name": "modality",
+      "form": "one string",
+      "on": [
+        "Provider"
+      ]
+    },
+    "mode": {
+      "name": "mode",
+      "form": "keyword arguments(max:int, parallel:flag, queued:flag, restart:flag, single:flag)",
+      "on": [
+        "Automation"
+      ]
+    },
+    "model": {
+      "name": "model",
+      "form": "one string",
+      "on": [
+        "Provider"
+      ]
+    },
+    "noUnset": {
+      "name": "noUnset",
+      "form": "one or more strings",
+      "on": [
+        "Mutation"
+      ]
+    },
+    "onUnavailable": {
+      "name": "onUnavailable",
+      "form": "one string",
+      "on": [
+        "Rule"
+      ]
+    },
+    "open": {
+      "name": "open",
+      "form": "no arguments",
+      "on": [
+        "ConceptField"
+      ]
+    },
+    "origin": {
+      "name": "origin",
+      "form": "one string",
+      "on": [
+        "Concept"
+      ]
+    },
+    "pattern": {
+      "name": "pattern",
+      "form": "one string",
+      "on": [
+        "ArgsField",
+        "ConceptField"
+      ]
+    },
+    "pii": {
+      "name": "pii",
+      "form": "no arguments",
+      "on": [
+        "ConceptField"
+      ]
+    },
+    "policy": {
+      "name": "policy",
+      "form": "one string",
+      "on": [
+        "Rule"
+      ]
+    },
+    "precedence": {
+      "name": "precedence",
+      "form": "one number",
+      "on": [
+        "Rule"
+      ]
+    },
+    "primary": {
+      "name": "primary",
+      "form": "one string",
+      "on": [
+        "Policy"
+      ]
+    },
+    "public": {
+      "name": "public",
+      "form": "no arguments",
+      "on": [
+        "Mutation",
+        "Query"
+      ]
+    },
+    "relationship": {
+      "name": "relationship",
+      "form": "keyword arguments(as:string, direction:string, field:string, fieldSource:string, target:string, type:string) repeatable",
+      "on": [
+        "ConceptBody"
+      ]
+    },
+    "removeFromSet": {
+      "name": "removeFromSet",
+      "form": "one or more strings",
+      "on": [
+        "Mutation"
+      ]
+    },
+    "required": {
+      "name": "required",
+      "form": "no arguments",
+      "on": [
+        "ArgsField",
+        "BuiltinField",
+        "ConceptField",
+        "PromptField",
+        "ToolField"
+      ]
+    },
+    "requiresCapability": {
+      "name": "requiresCapability",
+      "form": "one or more strings",
+      "on": [
+        "Builtin",
+        "Logic",
+        "Mutation",
+        "Query"
+      ]
+    },
+    "requiresConfirmation": {
+      "name": "requiresConfirmation",
+      "form": "no arguments",
+      "on": [
+        "Tool"
+      ]
+    },
+    "requiresRank": {
+      "name": "requiresRank",
+      "form": "one string",
+      "on": [
+        "Logic",
+        "Mutation",
+        "Query"
+      ]
+    },
+    "row": {
+      "name": "row",
+      "form": "no arguments",
+      "on": [
+        "Shape"
+      ]
+    },
+    "rowAuthz": {
+      "name": "rowAuthz",
+      "form": "keyword arguments(account:string, clusterOwner:flag, owner:string, public:flag, rankFloor:string, rankStrict:flag, rankVisible:flag, requiresIdentity:flag, unowned:string, via:string)",
+      "on": [
+        "Concept"
+      ]
+    },
+    "scope": {
+      "name": "scope",
+      "form": "one string",
+      "on": [
+        "Seed"
+      ]
+    },
+    "scrubPii": {
+      "name": "scrubPii",
+      "form": "no arguments",
+      "on": [
+        "Mutation"
+      ]
+    },
+    "sdk": {
+      "name": "sdk",
+      "form": "no arguments",
+      "on": [
+        "Builtin"
+      ]
+    },
+    "secret": {
+      "name": "secret",
+      "form": "no arguments",
+      "on": [
+        "ConceptField"
+      ]
+    },
+    "serverOnly": {
+      "name": "serverOnly",
+      "form": "no arguments",
+      "on": [
+        "Mutation",
+        "Query"
+      ]
+    },
+    "serverSet": {
+      "name": "serverSet",
+      "form": "no arguments",
+      "on": [
+        "ConceptField"
+      ]
+    },
+    "sideEffect": {
+      "name": "sideEffect",
+      "form": "one string",
+      "on": [
+        "Capability"
+      ]
+    },
+    "template": {
+      "name": "template",
+      "form": "no arguments",
+      "on": [
+        "Automation"
+      ]
+    },
+    "templateFile": {
+      "name": "templateFile",
+      "form": "one string",
+      "on": [
+        "Prompt",
+        "Seed"
+      ]
+    },
+    "trigger": {
+      "name": "trigger",
+      "form": "keyword arguments(before:string, concept:string, event:string, filter:expression, on:string, schedule:string)",
+      "on": [
+        "Automation"
+      ]
+    },
+    "type": {
+      "name": "type",
+      "form": "one string",
+      "on": [
+        "Concept"
+      ]
+    },
+    "unbounded": {
+      "name": "unbounded",
+      "form": "one string",
+      "on": [
+        "Query"
+      ]
+    },
+    "variant": {
+      "name": "variant",
+      "form": "keyword arguments(discriminator:string)",
+      "on": [
+        "ConceptField"
+      ]
+    },
+    "vendor": {
+      "name": "vendor",
+      "form": "one string",
+      "on": [
+        "Provider"
+      ]
+    },
+    "version": {
+      "name": "version",
+      "form": "one string",
+      "on": [
+        "Concept",
+        "Seed"
+      ]
+    },
+    "when": {
+      "name": "when",
+      "form": "empty parentheses or keyword arguments(actorRole:string, level:string, modality:string, prompt:string, role:string, tag:string, touches:string)",
+      "on": [
+        "Rule"
+      ]
+    }
+  },
+  "functions": {
+    "addDuration": {
+      "name": "addDuration",
+      "form": "addDuration(ts datetime, dur duration) datetime [M]"
+    },
+    "aliasOf": {
+      "name": "aliasOf",
+      "form": "aliasOf(label? string, match lambda) rows [P]"
+    },
+    "canonicalId": {
+      "name": "canonicalId",
+      "form": "canonicalId(value string, concept string) string [M]"
+    },
+    "childOf": {
+      "name": "childOf",
+      "form": "childOf(label? string, match lambda) rows [P]"
+    },
+    "contains": {
+      "name": "contains",
+      "form": "contains(label? string, match lambda) rows [P]"
+    },
+    "createdBy": {
+      "name": "createdBy",
+      "form": "createdBy(label? string, match lambda) rows [P]"
+    },
+    "daysBetween": {
+      "name": "daysBetween",
+      "form": "daysBetween(a datetime, b datetime) number [M]"
+    },
+    "equals": {
+      "name": "equals",
+      "form": "equals(label? string, match lambda) rows [P]"
+    },
+    "error": {
+      "name": "error",
+      "form": "error(message string) any [M]"
+    },
+    "hash": {
+      "name": "hash",
+      "form": "hash(value string) string [M]"
+    },
+    "ids": {
+      "name": "ids",
+      "form": "ids(match lambda) rows [P]"
+    },
+    "list.all": {
+      "name": "list.all",
+      "form": "list.all(pred lambda) bool [P]"
+    },
+    "list.any": {
+      "name": "list.any",
+      "form": "list.any(pred lambda) bool [P]"
+    },
+    "list.avg": {
+      "name": "list.avg",
+      "form": "list.avg(fn lambda) number [M]"
+    },
+    "list.count": {
+      "name": "list.count",
+      "form": "list.count() number [P]"
+    },
+    "list.distinct": {
+      "name": "list.distinct",
+      "form": "list.distinct(key? lambda) list [M]"
+    },
+    "list.empty": {
+      "name": "list.empty",
+      "form": "list.empty() bool [M]"
+    },
+    "list.first": {
+      "name": "list.first",
+      "form": "list.first() any [M]"
+    },
+    "list.groupBy": {
+      "name": "list.groupBy",
+      "form": "list.groupBy(key lambda) list [M]"
+    },
+    "list.last": {
+      "name": "list.last",
+      "form": "list.last() any [M]"
+    },
+    "list.max": {
+      "name": "list.max",
+      "form": "list.max(fn lambda) number [M]"
+    },
+    "list.min": {
+      "name": "list.min",
+      "form": "list.min(fn lambda) number [M]"
+    },
+    "list.nodes": {
+      "name": "list.nodes",
+      "form": "list.nodes() list [M]"
+    },
+    "list.orderBy": {
+      "name": "list.orderBy",
+      "form": "list.orderBy(key lambda) list [M]"
+    },
+    "list.orderByDesc": {
+      "name": "list.orderByDesc",
+      "form": "list.orderByDesc(key lambda) list [M]"
+    },
+    "list.reduce": {
+      "name": "list.reduce",
+      "form": "list.reduce(seed any, fn lambda) any [M]"
+    },
+    "list.select": {
+      "name": "list.select",
+      "form": "list.select(fn lambda) list [M]"
+    },
+    "list.single": {
+      "name": "list.single",
+      "form": "list.single() any [M]"
+    },
+    "list.skip": {
+      "name": "list.skip",
+      "form": "list.skip(n number) list [M]"
+    },
+    "list.sum": {
+      "name": "list.sum",
+      "form": "list.sum(fn lambda) number [M]"
+    },
+    "list.take": {
+      "name": "list.take",
+      "form": "list.take(n number) list [M]"
+    },
+    "list.where": {
+      "name": "list.where",
+      "form": "list.where(pred lambda) list [M]"
+    },
+    "lower": {
+      "name": "lower",
+      "form": "lower(value string) string [M]"
+    },
+    "owns": {
+      "name": "owns",
+      "form": "owns(label? string, match lambda) rows [P]"
+    },
+    "parentOf": {
+      "name": "parentOf",
+      "form": "parentOf(label? string, match lambda) rows [P]"
+    },
+    "references": {
+      "name": "references",
+      "form": "references(label? string, match lambda) rows [P]"
+    },
+    "secret": {
+      "name": "secret",
+      "form": "secret(name string) string [M]"
+    },
+    "shortId": {
+      "name": "shortId",
+      "form": "shortId(value string) string [M]"
+    },
+    "string.count": {
+      "name": "string.count",
+      "form": "string.count() number [M]"
+    },
+    "string.includes": {
+      "name": "string.includes",
+      "form": "string.includes(sub string) bool [P]"
+    },
+    "systemSecret": {
+      "name": "systemSecret",
+      "form": "systemSecret(name string) string [M]"
+    },
+    "systemVar": {
+      "name": "systemVar",
+      "form": "systemVar(name string) string [M]"
+    },
+    "toString": {
+      "name": "toString",
+      "form": "toString(value any) string [M]"
+    },
+    "trim": {
+      "name": "trim",
+      "form": "trim(value string) string [M]"
+    },
+    "upper": {
+      "name": "upper",
+      "form": "upper(value string) string [M]"
+    },
+    "var": {
+      "name": "var",
+      "form": "var(name string) string [M]"
+    }
+  },
+  "shapes": {
+    "abandonedCheckoutMirror": [
+      "@concept=abandonedCheckout"
+    ],
+    "accessRequestFull": [
+      "additionalContext",
+      "createdAt",
+      "email",
+      "id",
+      "invitationId",
+      "name",
+      "reviewedAt",
+      "reviewedBy",
+      "reviewerNote",
+      "riskScore",
+      "riskSignals",
+      "sourceIP",
+      "status",
+      "userAgent"
+    ],
+    "accountDomainWalk": [
+      "domain",
+      "domainStatus",
+      "domainToken",
+      "id",
+      "memqlDomain",
+      "memqlReservedAt"
+    ],
+    "accountEntitlementFull": [
+      "accountId",
+      "accountKind",
+      "createdAt",
+      "createdBy",
+      "id",
+      "maxConcurrentTasks",
+      "note",
+      "tier"
+    ],
+    "accountFrontDoorFull": [
+      "accountId",
+      "createdAt",
+      "driftFailures",
+      "failureDetail",
+      "failureReason",
+      "hostChecks",
+      "id",
+      "issuedAt",
+      "lastCheckedAt",
+      "removedAt",
+      "reservedName",
+      "status",
+      "verifiedAt"
+    ],
+    "accountFull": [
+      "archivedAt",
+      "createdAt",
+      "description",
+      "externalRef",
+      "id",
+      "name",
+      "ownerUserId",
+      "primaryContactEmail",
+      "primaryContactName",
+      "status",
+      "updatedAt"
+    ],
+    "accountIdRef": [
+      "id"
+    ],
+    "accountTokenSummary": [
+      "accountId",
+      "active",
+      "createdAt",
+      "expiresAt",
+      "id",
+      "label",
+      "lastUsedAt",
+      "mintedBy",
+      "userId"
+    ],
+    "actionFull": [
+      "calls",
+      "capability",
+      "createdAt",
+      "id",
+      "inputFingerprint",
+      "intent",
+      "kind",
+      "ownerUserId",
+      "paramBindings",
+      "recordedResult",
+      "recordedSurface",
+      "reinforceCount",
+      "reliability",
+      "resourceEdges",
+      "resultFingerprint",
+      "sideEffectClass",
+      "slug",
+      "status",
+      "steps",
+      "templateFingerprint",
+      "version"
+    ],
+    "activeRowTrait": [
+      "active"
+    ],
+    "actorEnvelope": [
+      "identityId",
+      "isClusterOwner",
+      "now",
+      "role",
+      "userId"
+    ],
+    "agentAuthorizationFull": [
+      "active",
+      "agentId",
+      "computerUseScope",
+      "createdAt",
+      "expiresAt",
+      "id",
+      "planKind",
+      "spaceScope",
+      "tokenBudgetCap",
+      "userId"
+    ],
+    "agentFull": [
+      "active",
+      "capabilities",
+      "createdAt",
+      "createdBy",
+      "deleted",
+      "description",
+      "groupIds",
+      "id",
+      "kind",
+      "name",
+      "ownerUserId",
+      "personality",
+      "providerConfig",
+      "role",
+      "roleSlug",
+      "systemPrompt"
+    ],
+    "agentMinimalForDedupe": [
+      "capabilities",
+      "description",
+      "id",
+      "kind",
+      "lineage",
+      "name",
+      "role",
+      "roleEmbedding",
+      "roleSlug"
+    ],
+    "agentRoleFull": [
+      "active",
+      "availableSkillIds",
+      "category",
+      "defaultSkillIds",
+      "description",
+      "forbiddenSkillIds",
+      "id",
+      "lockedSkillIds",
+      "maxSkills",
+      "name",
+      "predefined",
+      "slug",
+      "systemPromptHints",
+      "tier"
+    ],
+    "agentRoleSlugLite": [
+      "id",
+      "roleSlug"
+    ],
+    "approvalChainFull": [
+      "@concept=approvalChain"
+    ],
+    "approvalRequestFull": [
+      "action",
+      "agentId",
+      "argsRedacted",
+      "categories",
+      "correlationKey",
+      "createdAt",
+      "decidedAt",
+      "decidedBy",
+      "decisionReason",
+      "expiresAt",
+      "id",
+      "ownerUserId",
+      "reason",
+      "runId",
+      "status",
+      "surface",
+      "tier"
+    ],
+    "archivedRowTrait": [
+      "archivedAt"
+    ],
+    "articleCommentMirror": [
+      "@concept=articleComment"
+    ],
+    "articleMirror": [
+      "@concept=article"
+    ],
+    "artifactFull": [
+      "accountIds",
+      "agentId",
+      "archived",
+      "createdAt",
+      "folderId",
+      "format",
+      "id",
+      "kind",
+      "labels",
+      "lens",
+      "live",
+      "mimeType",
+      "ownerUserId",
+      "partitionId",
+      "producedByRunId",
+      "producedByWorkerId",
+      "producedByWorkerName",
+      "scope",
+      "source",
+      "sourceConceptRef",
+      "summary",
+      "title",
+      "updatedAt",
+      "validationStatus"
+    ],
+    "attentionReceiptDetail": [
+      "changeId",
+      "id",
+      "revision"
+    ],
+    "audienceFull": [
+      "accountId",
+      "createdAt",
+      "description",
+      "id",
+      "name",
+      "ownerUserId",
+      "status"
+    ],
+    "auditEventFull": [
+      "action",
+      "actorEmail",
+      "actorIdentityId",
+      "actorRole",
+      "actorUserId",
+      "category",
+      "correlationId",
+      "createdAt",
+      "detail",
+      "failureReason",
+      "id",
+      "occurredAt",
+      "outcome",
+      "prevEventHash",
+      "sourceIP",
+      "targetEmail",
+      "targetId",
+      "targetType",
+      "userAgent"
+    ],
+    "authActivityFull": [
+      "action",
+      "actorEmail",
+      "actorIdentityId",
+      "actorRole",
+      "actorUserId",
+      "clientLabel",
+      "createdAt",
+      "detail",
+      "failureReason",
+      "id",
+      "occurredAt",
+      "outcome",
+      "retiredTokenHash",
+      "sessionId",
+      "sourceIP",
+      "userAgent"
+    ],
+    "authCodeFull": [
+      "clientId",
+      "codeHash",
+      "consumedAt",
+      "consumedFromIP",
+      "createdAt",
+      "expiresAt",
+      "id",
+      "identityId",
+      "magicLinkRequestId",
+      "redirectURI",
+      "state",
+      "userId"
+    ],
+    "authSessionAdminSummary": [
+      "clientLabel",
+      "createdAt",
+      "expiresAt",
+      "firstAuthenticatedAt",
+      "id",
+      "lastActivityAt",
+      "lastRefreshedAt",
+      "revokedAt",
+      "revokedReason",
+      "source",
+      "subject",
+      "userId"
+    ],
+    "authSessionFull": [
+      "clientLabel",
+      "createdAt",
+      "expiresAt",
+      "firstAuthenticatedAt",
+      "id",
+      "identityId",
+      "lastActivityAt",
+      "lastRefreshedAt",
+      "previousRefreshTokenHash",
+      "previousRotatedAt",
+      "refreshTokenHash",
+      "revokedAt",
+      "revokedReason",
+      "source",
+      "subject",
+      "tokenHash",
+      "userId"
+    ],
+    "authSessionSelf": [
+      "clientLabel",
+      "createdAt",
+      "expiresAt",
+      "firstAuthenticatedAt",
+      "id",
+      "lastActivityAt",
+      "lastRefreshedAt",
+      "source"
+    ],
+    "benchRunFull": [
+      "blockingFailures",
+      "commit",
+      "corpusFingerprint",
+      "costUsd",
+      "createdAt",
+      "finishedAt",
+      "id",
+      "modelIds",
+      "runner",
+      "scenarioCount",
+      "startedAt",
+      "tier",
+      "verdict"
+    ],
+    "benchSampleFull": [
+      "absentReason",
+      "arm",
+      "benchRunId",
+      "commit",
+      "createdAt",
+      "detail",
+      "family",
+      "id",
+      "mad",
+      "maximum",
+      "measuredOn",
+      "median",
+      "metric",
+      "minimum",
+      "n",
+      "p10",
+      "p90",
+      "scenarioId",
+      "tier",
+      "unit"
+    ],
+    "blogMirror": [
+      "@concept=blog"
+    ],
+    "bookingFull": [
+      "bookerEmail",
+      "bookerName",
+      "createdAt",
+      "endsAt",
+      "hoursId",
+      "id",
+      "notes",
+      "ownerUserId",
+      "rescheduledToId",
+      "startsAt",
+      "status"
+    ],
+    "bookingHoursFull": [
+      "createdAt",
+      "endLocal",
+      "id",
+      "label",
+      "ownerUserId",
+      "published",
+      "slotMinutes",
+      "startLocal",
+      "timezone",
+      "weekday"
+    ],
+    "budgetFull": [
+      "active",
+      "alertSent",
+      "alertThresholdPct",
+      "createdAt",
+      "id",
+      "limitUSD",
+      "periodType",
+      "resetAt",
+      "scope",
+      "scopeId"
+    ],
+    "bundleFull": [
+      "activatedAt",
+      "createdAt",
+      "createdBy",
+      "dryRunReport",
+      "failureReason",
+      "id",
+      "ownerUserId",
+      "responsibilityId",
+      "retiredAt",
+      "reusedConstructRefs",
+      "sourceRunId",
+      "status",
+      "summary",
+      "supersedesBundleId",
+      "title",
+      "validationReport",
+      "version"
+    ],
+    "businessEntityMirror": [
+      "@concept=businessEntity"
+    ],
+    "calendarEventFull": [
+      "allDay",
+      "createdAt",
+      "endsAt",
+      "externalRef",
+      "id",
+      "location",
+      "notes",
+      "ownerUserId",
+      "recurrence",
+      "source",
+      "startsAt",
+      "title"
+    ],
+    "campaignFull": [
+      "accountId",
+      "audienceId",
+      "completedAt",
+      "createdAt",
+      "failedCount",
+      "fromName",
+      "id",
+      "lastError",
+      "name",
+      "ownerUserId",
+      "recipientCount",
+      "replyTo",
+      "scheduledAt",
+      "senderIdentityId",
+      "sentCount",
+      "skippedCount",
+      "startedAt",
+      "status",
+      "templateId",
+      "trackClicks",
+      "trackOpens"
+    ],
+    "capabilityFull": [
+      "active",
+      "createdAt",
+      "description",
+      "effect",
+      "id",
+      "predefined",
+      "resourceType",
+      "roleSlug",
+      "verb"
+    ],
+    "catalogMirror": [
+      "@concept=catalog"
+    ],
+    "channelMirror": [
+      "@concept=channel"
+    ],
+    "classificationFull": [
+      "action",
+      "agentId",
+      "argsRedacted",
+      "categories",
+      "confidence",
+      "correlationId",
+      "createdAt",
+      "decision",
+      "id",
+      "latencyMs",
+      "mode",
+      "ownerUserId",
+      "reason",
+      "ruleId",
+      "runId",
+      "source",
+      "surface",
+      "tier"
+    ],
+    "clientAccountFull": [
+      "configuredAt",
+      "createdAt",
+      "domain",
+      "domainFailureDetail",
+      "domainFailureReason",
+      "domainLastCheckedAt",
+      "domainStatus",
+      "domainToken",
+      "domainVerifiedAt",
+      "id",
+      "joinOnDomain",
+      "memqlDomain",
+      "memqlReservationReason",
+      "memqlReservedAt",
+      "name",
+      "notes",
+      "ownerUserId",
+      "primaryContactEmail",
+      "primaryContactName",
+      "status"
+    ],
+    "clusterSettingsFull": [
+      "accessRequestNotifyEmails",
+      "accessRequestNotifyThrottleMins",
+      "authoredAutomationsEnabled",
+      "bootstrapEmail",
+      "bootstrappedAt",
+      "brandLogoDataURI",
+      "brandName",
+      "brandPrimaryColor",
+      "createdAt",
+      "id",
+      "internalDefaultRole",
+      "internalDomains",
+      "registeredClientsJSON",
+      "registrationDomains",
+      "registrationMode"
+    ],
+    "collectionMirror": [
+      "@concept=collection"
+    ],
+    "companyContactMirror": [
+      "@concept=companyContact"
+    ],
+    "companyLocationMirror": [
+      "@concept=companyLocation"
+    ],
+    "companyLocationNoteFull": [
+      "@concept=companyLocationNote"
+    ],
+    "companyMirror": [
+      "@concept=company"
+    ],
+    "complianceJobFull": [
+      "@concept=complianceJob"
+    ],
+    "composeRecipeFull": [
+      "accountIds",
+      "archived",
+      "createdAt",
+      "description",
+      "folderId",
+      "format",
+      "id",
+      "lastRunAt",
+      "name",
+      "ownerUserId",
+      "runCount",
+      "sourceSelectors",
+      "templateId"
+    ],
+    "composeTemplateFull": [
+      "accountIds",
+      "archived",
+      "createdAt",
+      "description",
+      "fileId",
+      "format",
+      "id",
+      "name",
+      "ownerUserId",
+      "placeholders"
+    ],
+    "compositionCard": [
+      "accountIds",
+      "archived",
+      "createdAt",
+      "deployableKind",
+      "failureReason",
+      "folderId",
+      "format",
+      "goalId",
+      "id",
+      "name",
+      "outputFileId",
+      "ownerUserId",
+      "provenanceEmbedded",
+      "provenanceNote",
+      "recipeId",
+      "runId",
+      "statement",
+      "status",
+      "templateId"
+    ],
+    "compositionExecution": [
+      "deployableKind",
+      "format",
+      "goalId",
+      "id",
+      "modelsUsed",
+      "name",
+      "outputFileId",
+      "ownerUserId",
+      "provenanceEmbedded",
+      "provenanceNote",
+      "runId",
+      "sha256",
+      "status"
+    ],
+    "compositionFull": [
+      "accountIds",
+      "archived",
+      "createdAt",
+      "deployableKind",
+      "failureReason",
+      "folderId",
+      "format",
+      "goalId",
+      "id",
+      "modelsUsed",
+      "name",
+      "outputFileId",
+      "ownerUserId",
+      "provenanceEmbedded",
+      "provenanceNote",
+      "recipeId",
+      "runId",
+      "sha256",
+      "sources",
+      "statement",
+      "status",
+      "templateId"
+    ],
+    "compositionInputFull": [
+      "compositionId",
+      "id",
+      "ownerUserId",
+      "request"
+    ],
+    "consentEventFull": [
+      "campaignId",
+      "createdAt",
+      "emailDigest",
+      "id",
+      "kind",
+      "occurredAt",
+      "ownerUserId",
+      "reason",
+      "recipientId",
+      "source"
+    ],
+    "constructFull": [
+      "bundleId",
+      "catalogKey",
+      "catalogMatchText",
+      "catalogedAt",
+      "catalogedFromBundleId",
+      "catalogued",
+      "compiledForm",
+      "conceptDataStaged",
+      "conceptRetired",
+      "createdAt",
+      "createdBy",
+      "goalSignature",
+      "grammarVersion",
+      "id",
+      "kind",
+      "lastReinforced",
+      "name",
+      "origin",
+      "ownerUserId",
+      "reinforceCount",
+      "reliability",
+      "source",
+      "status",
+      "targetNamespace"
+    ],
+    "creditLimitFull": [
+      "@concept=creditLimit"
+    ],
+    "customDomainFull": [
+      "accountId",
+      "createdAt",
+      "failureDetail",
+      "failureReason",
+      "hostname",
+      "id",
+      "issuedAt",
+      "lastCheckedAt",
+      "removedAt",
+      "siteId",
+      "status",
+      "token",
+      "verifiedAt"
+    ],
+    "customerMirror": [
+      "@concept=customer"
+    ],
+    "customerNoteFull": [
+      "@concept=customerNote"
+    ],
+    "customerPaymentMethodMirror": [
+      "@concept=customerPaymentMethod"
+    ],
+    "delegationFull": [
+      "active",
+      "agentId",
+      "approvedBySubject",
+      "createdAt",
+      "createdBySubject",
+      "expiresAt",
+      "id",
+      "identityId",
+      "identitySubject",
+      "identityType",
+      "note",
+      "revokedAt",
+      "revokedBySubject",
+      "roleCeiling",
+      "scopes"
+    ],
+    "deletedRowTrait": [
+      "deleted"
+    ],
+    "deliveryCarrierServiceMirror": [
+      "@concept=deliveryCarrierService"
+    ],
+    "deliveryCustomizationMirror": [
+      "@concept=deliveryCustomization"
+    ],
+    "deliveryFull": [
+      "campaignId",
+      "createdAt",
+      "email",
+      "emailRuleId",
+      "id",
+      "lastError",
+      "outboundRequestId",
+      "ownerUserId",
+      "recipientId",
+      "sentAt",
+      "skipReason",
+      "status"
+    ],
+    "deliveryLedgerEntry": [
+      "attempts",
+      "id",
+      "nextAttemptAt",
+      "recipientId",
+      "status"
+    ],
+    "deliveryProfileMirror": [
+      "@concept=deliveryProfile"
+    ],
+    "dependencyEdgeFull": [
+      "bundleId",
+      "createdAt",
+      "createdBy",
+      "fromConstruct",
+      "fromKind",
+      "id",
+      "ownerUserId",
+      "toKind",
+      "toName",
+      "toSource"
+    ],
+    "deploymentFull": [
+      "changelog",
+      "clusterId",
+      "createdAt",
+      "deploymentId",
+      "id",
+      "imageDigest",
+      "notes",
+      "previousDeploymentId",
+      "provider",
+      "region",
+      "status",
+      "triggeredBy",
+      "updatedAt",
+      "version"
+    ],
+    "deploymentNodeSpecFull": [
+      "createdAt",
+      "deploymentId",
+      "id",
+      "imageDigest",
+      "nodeType",
+      "replicas",
+      "updatedAt",
+      "version"
+    ],
+    "desktopDocument": [
+      "createdAt",
+      "document",
+      "id",
+      "ownerUserId",
+      "revision"
+    ],
+    "deviceCodeFull": [
+      "approvedAt",
+      "approvedByUserId",
+      "clientId",
+      "codeChallenge",
+      "codeChallengeMethod",
+      "createdAt",
+      "deniedAt",
+      "deviceCodeHash",
+      "expiresAt",
+      "id",
+      "intervalSeconds",
+      "lastPolledAt",
+      "redeemedAt",
+      "scope",
+      "sourceIP",
+      "status",
+      "userAgent",
+      "userCodeHash"
+    ],
+    "discountNodeMirror": [
+      "@concept=discountNode"
+    ],
+    "documentChunkDomainLite": [
+      "domainId",
+      "validationStatus"
+    ],
+    "documentChunkFull": [
+      "createdAt",
+      "documentId",
+      "domainId",
+      "id",
+      "seq",
+      "source",
+      "sourceRef",
+      "sourceTopic",
+      "superseded",
+      "supersededReason",
+      "text",
+      "tokenCount",
+      "validationStatus"
+    ],
+    "documentVersionFull": [
+      "attachmentId",
+      "authorId",
+      "authorKind",
+      "content",
+      "createdAt",
+      "documentId",
+      "id",
+      "note",
+      "ownerUserId",
+      "parentVersionId",
+      "partitionId",
+      "producedByRunId",
+      "versionNumber"
+    ],
+    "documentVersionSummary": [
+      "attachmentId",
+      "authorId",
+      "authorKind",
+      "createdAt",
+      "documentId",
+      "id",
+      "note",
+      "ownerUserId",
+      "parentVersionId",
+      "partitionId",
+      "producedByRunId",
+      "versionNumber"
+    ],
+    "draftOrderMirror": [
+      "@concept=draftOrder"
+    ],
+    "emailRuleFull": [
+      "accountId",
+      "audienceId",
+      "bundleId",
+      "condition",
+      "constructName",
+      "createdAt",
+      "description",
+      "eventKind",
+      "firedCount",
+      "id",
+      "lastError",
+      "lastFiredAt",
+      "name",
+      "ownerUserId",
+      "recipientField",
+      "recipientMode",
+      "recipientRoles",
+      "senderIdentityId",
+      "status",
+      "templateId",
+      "triggerConcept"
+    ],
+    "embedderBindingFull": [
+      "activatedAt",
+      "createdAt",
+      "dimensions",
+      "id",
+      "previousRef",
+      "providerRef",
+      "reembedRunId"
+    ],
+    "engagementDeliveryRef": [
+      "deliveryId",
+      "id"
+    ],
+    "engagementEventFull": [
+      "campaignId",
+      "createdAt",
+      "deliveryId",
+      "id",
+      "kind",
+      "occurredAt",
+      "ownerUserId",
+      "url"
+    ],
+    "enrolmentTokenFull": [
+      "consumedAt",
+      "consumedFromIP",
+      "createdAt",
+      "expiresAt",
+      "id",
+      "invitationId",
+      "issuedBy",
+      "revokedAt",
+      "sourceIP",
+      "tokenHash",
+      "userId"
+    ],
+    "fulfillmentMirror": [
+      "@concept=fulfillment"
+    ],
+    "fulfillmentOrderMirror": [
+      "@concept=fulfillmentOrder"
+    ],
+    "generatedOutputFull": [
+      "attachmentId",
+      "body",
+      "createdAt",
+      "format",
+      "id",
+      "mimeType",
+      "ownerUserId",
+      "partitionId",
+      "producedByAgentId",
+      "producedByRunId",
+      "source",
+      "summary",
+      "title"
+    ],
+    "giftCardMirror": [
+      "@concept=giftCard"
+    ],
+    "githubConnectStateFull": [
+      "consumedAt",
+      "consumedFromIP",
+      "createdAt",
+      "expiresAt",
+      "id",
+      "returnPath",
+      "sourceIP",
+      "stateHash",
+      "userId"
+    ],
+    "grantCard": [
+      "active",
+      "createdAt",
+      "effect",
+      "grantedBy",
+      "id",
+      "resourceType",
+      "subjectId",
+      "subjectKind",
+      "verb"
+    ],
+    "groupFull": [
+      "accountId",
+      "archivedAt",
+      "createdAt",
+      "description",
+      "id",
+      "kind",
+      "name",
+      "status"
+    ],
+    "groupMembershipFull": [
+      "addedBy",
+      "createdAt",
+      "groupId",
+      "id",
+      "origin",
+      "removedAt",
+      "removedBy",
+      "status",
+      "userId"
+    ],
+    "healedOverrideFull": [
+      "active",
+      "baseConstructId",
+      "blastRadius",
+      "createdAt",
+      "id",
+      "overrideData",
+      "ownerUserId",
+      "reason",
+      "rejectionReason",
+      "sourcePreconditionId",
+      "tier",
+      "valid",
+      "validatedAt",
+      "validatedBy",
+      "validationStatus",
+      "version"
+    ],
+    "identityFull": [
+      "active",
+      "createdAt",
+      "credentials",
+      "id",
+      "identityType",
+      "label",
+      "lastUsedAt",
+      "usableByAgents",
+      "userId"
+    ],
+    "identitySummary": [
+      "active",
+      "id",
+      "identityType",
+      "label",
+      "usableByAgents",
+      "userId"
+    ],
+    "inboundRequestFull": [
+      "body",
+      "contentType",
+      "createdAt",
+      "dedupeKey",
+      "id",
+      "lastError",
+      "medium",
+      "processedAt",
+      "receivedAt",
+      "signatureVerified",
+      "source",
+      "status"
+    ],
+    "inventoryItemMirror": [
+      "@concept=inventoryItem"
+    ],
+    "inventoryLevelMirror": [
+      "@concept=inventoryLevel"
+    ],
+    "inventoryShipmentMirror": [
+      "@concept=inventoryShipment"
+    ],
+    "inventoryTransferMirror": [
+      "@concept=inventoryTransfer"
+    ],
+    "invitationAdminSummary": [
+      "accountId",
+      "active",
+      "createdAt",
+      "deliveryAttemptedAt",
+      "deliveryError",
+      "deliveryState",
+      "expiresAt",
+      "groupIds",
+      "id",
+      "inviteeEmail",
+      "inviteeId",
+      "inviteeName",
+      "inviteeRole",
+      "inviterId",
+      "inviterName",
+      "kind",
+      "respondedAt",
+      "status"
+    ],
+    "invitationFull": [
+      "accountId",
+      "active",
+      "bindingHash",
+      "createdAt",
+      "expiresAt",
+      "groupIds",
+      "id",
+      "inviteeEmail",
+      "inviteeId",
+      "inviteeName",
+      "inviteeRole",
+      "inviterId",
+      "inviterName",
+      "kind",
+      "previousTokenHash",
+      "respondedAt",
+      "status",
+      "tokenHash"
+    ],
+    "knowledgeDomainFull": [
+      "accountId",
+      "active",
+      "category",
+      "createdAt",
+      "description",
+      "id",
+      "name",
+      "predefined",
+      "relevantForRoles",
+      "requiredByToolSlugs",
+      "source",
+      "tier"
+    ],
+    "libraryFileChunkFull": [
+      "artifactId",
+      "createdAt",
+      "fileId",
+      "id",
+      "ownerUserId",
+      "seq",
+      "text",
+      "tokenCount"
+    ],
+    "libraryFileFull": [
+      "archived",
+      "blobUrl",
+      "createdAt",
+      "embeddingStatus",
+      "failureReason",
+      "folderId",
+      "format",
+      "id",
+      "linkCheckedAt",
+      "linkState",
+      "mimeType",
+      "name",
+      "ownerUserId",
+      "producedByRunId",
+      "producedByStepKey",
+      "sha256",
+      "size",
+      "source",
+      "status",
+      "summary",
+      "trainedIntoDomainIds",
+      "uploadedFromPath",
+      "uploadedFromWorkerId",
+      "uploadedFromWorkerName",
+      "versionNumber",
+      "versionUploadedAt"
+    ],
+    "libraryFileSize": [
+      "id",
+      "size"
+    ],
+    "libraryFileVersionFull": [
+      "blobUrl",
+      "createdAt",
+      "fileId",
+      "format",
+      "id",
+      "mimeType",
+      "name",
+      "ownerUserId",
+      "sha256",
+      "size",
+      "summary",
+      "supersededAt",
+      "uploadedAt",
+      "uploadedFromPath",
+      "uploadedFromWorkerId",
+      "uploadedFromWorkerName",
+      "versionNumber"
+    ],
+    "libraryFileVersionSize": [
+      "id",
+      "size"
+    ],
+    "libraryFolderFull": [
+      "archived",
+      "createdAt",
+      "id",
+      "name",
+      "ownerUserId",
+      "parentFolderId"
+    ],
+    "locationMirror": [
+      "@concept=location"
+    ],
+    "logFull": [
+      "action",
+      "active",
+      "createdAt",
+      "fromState",
+      "id",
+      "identityId",
+      "identityType",
+      "note",
+      "partitionId",
+      "recordId",
+      "toState"
+    ],
+    "magicLinkRequestFull": [
+      "approvedAt",
+      "approvedFromIP",
+      "approvedUserAgent",
+      "bindingHash",
+      "consumedAt",
+      "consumedFromIP",
+      "createdAt",
+      "email",
+      "expiresAt",
+      "id",
+      "invitationId",
+      "oauthCtxJSON",
+      "sourceIP",
+      "tokenHash",
+      "userAgent"
+    ],
+    "marketMirror": [
+      "@concept=market"
+    ],
+    "marketWebPresenceMirror": [
+      "@concept=marketWebPresence"
+    ],
+    "marketingActivityMirror": [
+      "@concept=marketingActivity"
+    ],
+    "marketingEventMirror": [
+      "@concept=marketingEvent"
+    ],
+    "memoryFull": [
+      "agentId",
+      "content",
+      "createdAt",
+      "id",
+      "kind",
+      "ownerUserId",
+      "partitionId",
+      "summary",
+      "title"
+    ],
+    "menuMirror": [
+      "@concept=menu"
+    ],
+    "metafieldDefinitionMirror": [
+      "@concept=metafieldDefinition"
+    ],
+    "metaobjectDefinitionMirror": [
+      "@concept=metaobjectDefinition"
+    ],
+    "metaobjectMirror": [
+      "@concept=metaobject"
+    ],
+    "missingCapabilityFull": [
+      "capability",
+      "description",
+      "exampleGoals",
+      "firstSeenAt",
+      "id",
+      "kind",
+      "lastSeenAt",
+      "partitionId",
+      "partitionScope",
+      "requestedByAgentId",
+      "requestedFromRunId",
+      "resolution",
+      "sightingCount",
+      "status"
+    ],
+    "modelEvidenceFull": [
+      "approvalId",
+      "calls",
+      "createdAt",
+      "foldedAt",
+      "id",
+      "level",
+      "modelId",
+      "parks",
+      "proposal",
+      "repairs",
+      "retries",
+      "ruleHash",
+      "structuredFailures",
+      "week"
+    ],
+    "modelMeasurementFull": [
+      "createdAt",
+      "id",
+      "machineId",
+      "measuredAt",
+      "modelId",
+      "ownerUserId",
+      "probeError",
+      "structuredValidity",
+      "suiteVersion",
+      "throughputTps",
+      "toolCallCorrectness",
+      "ttftMs"
+    ],
+    "modelProfileFull": [
+      "category",
+      "contextWindow",
+      "createdAt",
+      "curated",
+      "dimensions",
+      "family",
+      "flags",
+      "id",
+      "license",
+      "measured",
+      "memoryNeedBytes",
+      "minMachineClass",
+      "modelId",
+      "notes",
+      "offeredOn",
+      "params",
+      "quant",
+      "recommendedFor",
+      "runtime",
+      "sizeBytes",
+      "source",
+      "unavailable"
+    ],
+    "moduleReadinessFull": [
+      "core",
+      "createdAt",
+      "id",
+      "lanes",
+      "module",
+      "nodeId",
+      "nodeType",
+      "reason",
+      "reportedAt",
+      "state"
+    ],
+    "nodeTokenSummary": [
+      "active",
+      "bootstrappedAt",
+      "createdAt",
+      "expiresAt",
+      "id",
+      "lastConnectAt",
+      "mintedBy",
+      "nodeId",
+      "nodeType",
+      "userId"
+    ],
+    "noteFull": [
+      "body",
+      "createdAt",
+      "id",
+      "ownerUserId",
+      "tags",
+      "title",
+      "updatedAt"
+    ],
+    "oauthClientCORSGrant": [
+      "clientId",
+      "corsOriginsJSON",
+      "id"
+    ],
+    "oauthClientFull": [
+      "clientId",
+      "clientName",
+      "corsOriginsJSON",
+      "createdAt",
+      "grantTypes",
+      "id",
+      "redirectURIsJSON",
+      "registeredAt",
+      "responseTypes",
+      "tokenEndpointAuthMethod"
+    ],
+    "onlineStoreThemeMirror": [
+      "@concept=onlineStoreTheme"
+    ],
+    "orderLineItemMirror": [
+      "@concept=orderLineItem"
+    ],
+    "orderMirror": [
+      "@concept=order"
+    ],
+    "orderTransactionMirror": [
+      "@concept=orderTransaction"
+    ],
+    "outboundRequestFull": [
+      "attempts",
+      "body",
+      "createdAt",
+      "dedupeKey",
+      "id",
+      "lastError",
+      "medium",
+      "nextAttemptAt",
+      "requestedBy",
+      "sentAt",
+      "status",
+      "subject",
+      "target"
+    ],
+    "outboxEntryFull": [
+      "action",
+      "attempts",
+      "conceptId",
+      "createdAt",
+      "deliveredAt",
+      "id",
+      "idempotencyKey",
+      "lastError",
+      "nextAttemptAt",
+      "rowRef",
+      "status",
+      "target",
+      "version"
+    ],
+    "outputScreeningFull": [
+      "agentId",
+      "categories",
+      "confidence",
+      "contentLength",
+      "contentType",
+      "correlationId",
+      "createdAt",
+      "id",
+      "latencyMs",
+      "mode",
+      "ownerUserId",
+      "reason",
+      "redactedSample",
+      "ruleId",
+      "runId",
+      "screener",
+      "tier",
+      "verdict"
+    ],
+    "packageDeploymentFull": [
+      "accountId",
+      "automatic",
+      "buildLogTail",
+      "builtOn",
+      "createdAt",
+      "deployables",
+      "dslVersion",
+      "error",
+      "finishedAt",
+      "fromDeploymentId",
+      "heartbeatAt",
+      "id",
+      "nodeId",
+      "ownerUserId",
+      "packageId",
+      "report",
+      "requestedBy",
+      "scopedTo",
+      "snapshotArtifactId",
+      "sourceVersion",
+      "startedAt",
+      "status",
+      "stoppedAt"
+    ],
+    "packageFull": [
+      "accountId",
+      "artifactId",
+      "autoDeploy",
+      "autoDeployChangedAt",
+      "createdAt",
+      "credentialId",
+      "declares",
+      "deployedVersion",
+      "disabledDeployables",
+      "id",
+      "latestKnownVersion",
+      "name",
+      "ownerUserId",
+      "repoRef",
+      "repoUrl",
+      "sourceKind",
+      "status",
+      "updateAvailable"
+    ],
+    "pageMirror": [
+      "@concept=page"
+    ],
+    "passkeySummary": [
+      "aaguid",
+      "active",
+      "backupEligible",
+      "backupState",
+      "createdAt",
+      "credentialId",
+      "id",
+      "label",
+      "lastUsedAt",
+      "registeredBy",
+      "transports",
+      "userId"
+    ],
+    "patSummary": [
+      "active",
+      "createdAt",
+      "id",
+      "label",
+      "lastUsedAt",
+      "usableByAgents",
+      "userId"
+    ],
+    "paymentTermsTemplateMirror": [
+      "@concept=paymentTermsTemplate"
+    ],
+    "policyFull": [
+      "active",
+      "checkedDataUsable",
+      "createdAt",
+      "id",
+      "partitionId",
+      "requiredChecks",
+      "requiredConfirmations",
+      "revertMinRole",
+      "targetRecordType"
+    ],
+    "priceListMirror": [
+      "@concept=priceList"
+    ],
+    "priceListPriceMirror": [
+      "@concept=priceListPrice"
+    ],
+    "productContentFull": [
+      "@concept=productContent"
+    ],
+    "productFeedMirror": [
+      "@concept=productFeed"
+    ],
+    "productMirror": [
+      "@concept=product"
+    ],
+    "productVariantMirror": [
+      "@concept=productVariant"
+    ],
+    "projectFull": [
+      "createdAt",
+      "createdByUserId",
+      "description",
+      "id",
+      "name",
+      "repo",
+      "slug",
+      "status",
+      "targetApp"
+    ],
+    "publicationMirror": [
+      "@concept=publication"
+    ],
+    "quantityRuleMirror": [
+      "@concept=quantityRule"
+    ],
+    "quoteFull": [
+      "@concept=quote"
+    ],
+    "recipientFull": [
+      "audienceId",
+      "createdAt",
+      "displayName",
+      "email",
+      "fields",
+      "id",
+      "ownerUserId",
+      "source",
+      "subscriptionStatus",
+      "unsubscribedAt"
+    ],
+    "recordFull": [
+      "active",
+      "checkCount",
+      "confidence",
+      "confirmCount",
+      "createdAt",
+      "data",
+      "id",
+      "importSource",
+      "importedBy",
+      "label",
+      "lastCheckedAt",
+      "lastCheckedBy",
+      "lastConfirmedAt",
+      "lastConfirmedBy",
+      "naturalKeyField",
+      "naturalKeyValue",
+      "partitionId",
+      "recordType",
+      "sourceAttachmentId",
+      "validationState"
+    ],
+    "refundMirror": [
+      "@concept=refund"
+    ],
+    "reorderListFull": [
+      "@concept=reorderList"
+    ],
+    "reputationWindowFull": [
+      "accepted",
+      "complaint",
+      "createdAt",
+      "domain",
+      "hardBounce",
+      "id",
+      "nodeId",
+      "sendingIdentity",
+      "softBounce",
+      "windowStart"
+    ],
+    "requestEventFull": [
+      "actorRole",
+      "actorUserId",
+      "createdAt",
+      "fromStatus",
+      "id",
+      "kind",
+      "note",
+      "requestId",
+      "toStatus"
+    ],
+    "requestFull": [
+      "approvedByUserId",
+      "attachmentIds",
+      "body",
+      "createdAt",
+      "id",
+      "priority",
+      "projectId",
+      "requestType",
+      "resolution",
+      "status",
+      "submitterRole",
+      "submitterUserId",
+      "targetEnv",
+      "title",
+      "validatedByUserId"
+    ],
+    "responsibilityFull": [
+      "assignedAgentId",
+      "assignedRoleSlug",
+      "condition",
+      "createdAt",
+      "createdBy",
+      "enabled",
+      "id",
+      "intakeRequest",
+      "intakeResponse",
+      "intakeStatus",
+      "lastEvaluatedAt",
+      "lastResult",
+      "notifyHow",
+      "ownerUserId",
+      "schedule",
+      "scopePartitionId",
+      "statement",
+      "status",
+      "successCriteria",
+      "targetKind",
+      "trigger"
+    ],
+    "reverseDeliveryMirror": [
+      "@concept=reverseDelivery"
+    ],
+    "reverseFulfillmentOrderMirror": [
+      "@concept=reverseFulfillmentOrder"
+    ],
+    "roleFull": [
+      "accountId",
+      "active",
+      "aliases",
+      "createdAt",
+      "createdBy",
+      "description",
+      "id",
+      "name",
+      "predefined",
+      "rank",
+      "slug"
+    ],
+    "routerCallEvidence": [
+      "billing",
+      "createdAt",
+      "errorCategory",
+      "id",
+      "level",
+      "model",
+      "outcome",
+      "promptName"
+    ],
+    "routerCallLedger": [
+      "createdAt",
+      "executionSurface",
+      "id",
+      "level",
+      "userId"
+    ],
+    "routerDecision": [
+      "billing",
+      "considered",
+      "createdAt",
+      "degraded",
+      "door",
+      "executionSurface",
+      "id",
+      "level",
+      "machineOwnerUserId",
+      "minContextTokens",
+      "model",
+      "outcome",
+      "policy",
+      "promptName",
+      "providerName",
+      "requestId",
+      "requestedLevel",
+      "rule",
+      "servedLevel",
+      "totalCost",
+      "totalDurationMs",
+      "touches",
+      "vendor"
+    ],
+    "salesRepFull": [
+      "@concept=salesRep"
+    ],
+    "savedRowTrait": [
+      "savedAt"
+    ],
+    "segmentMirror": [
+      "@concept=segment"
+    ],
+    "sellingPlanGroupMirror": [
+      "@concept=sellingPlanGroup"
+    ],
+    "sellingPlanMirror": [
+      "@concept=sellingPlan"
+    ],
+    "sendJobFull": [
+      "audienceId",
+      "campaignAccountId",
+      "campaignId",
+      "campaignOwnerUserId",
+      "completedAt",
+      "createdAt",
+      "failedCount",
+      "id",
+      "lastError",
+      "recipientCount",
+      "rosterCursor",
+      "rosterOutstanding",
+      "scheduledAt",
+      "sentCount",
+      "skippedCount",
+      "startedAt",
+      "status",
+      "templateId",
+      "throttledUntil"
+    ],
+    "senderIdentityFull": [
+      "accountId",
+      "address",
+      "createdAt",
+      "fromName",
+      "id",
+      "notes",
+      "ownerUserId",
+      "replyTo",
+      "status"
+    ],
+    "shopLocaleMirror": [
+      "@concept=shopLocale"
+    ],
+    "shopMirror": [
+      "@concept=shop"
+    ],
+    "shopPolicyMirror": [
+      "@concept=shopPolicy"
+    ],
+    "shopifyPaymentsBalanceTransactionMirror": [
+      "@concept=shopifyPaymentsBalanceTransaction"
+    ],
+    "shopifyPaymentsDisputeMirror": [
+      "@concept=shopifyPaymentsDispute"
+    ],
+    "shopifyPaymentsPayoutMirror": [
+      "@concept=shopifyPaymentsPayout"
+    ],
+    "shopifyReturnMirror": [
+      "@concept=shopifyReturn"
+    ],
+    "siteFull": [
+      "accountId",
+      "apiProxy",
+      "artifactId",
+      "binding",
+      "bundleRef",
+      "createdAt",
+      "hostname",
+      "id",
+      "kind",
+      "notes",
+      "ownerUserId",
+      "packageDeployableName",
+      "packageId",
+      "settings",
+      "status",
+      "systemOwned",
+      "title"
+    ],
+    "skillChangeEventFull": [
+      "actorAgentId",
+      "actorUserId",
+      "after",
+      "before",
+      "changeKind",
+      "createdAt",
+      "id",
+      "runId",
+      "skillId",
+      "targetAgentId"
+    ],
+    "skillEdgeFull": [
+      "createdAt",
+      "edgeType",
+      "evidence",
+      "fromSkillId",
+      "id",
+      "ownerUserId",
+      "proposedBy",
+      "status",
+      "toSkillId"
+    ],
+    "skillFull": [
+      "active",
+      "category",
+      "constructRefs",
+      "createdAt",
+      "createdBy",
+      "description",
+      "domainIds",
+      "effects",
+      "id",
+      "instructions",
+      "lastReinforced",
+      "liveSourceIds",
+      "mintedByRunId",
+      "name",
+      "originatingGoalId",
+      "predefined",
+      "reinforceCount",
+      "reliability",
+      "resources",
+      "scripts",
+      "slug",
+      "status",
+      "tags",
+      "tier",
+      "toolSlugs",
+      "version"
+    ],
+    "skillSummary": [
+      "active",
+      "category",
+      "description",
+      "id",
+      "name",
+      "predefined",
+      "reliability",
+      "slug",
+      "status",
+      "tags",
+      "tier"
+    ],
+    "sourceCredentialCard": [
+      "createdAt",
+      "fingerprint",
+      "host",
+      "id",
+      "installationIds",
+      "kind",
+      "label",
+      "lastUsedAt",
+      "login",
+      "ownerUserId",
+      "revokedAt",
+      "status"
+    ],
+    "sourceCredentialSealed": [
+      "encryptedValue",
+      "expiresAt",
+      "externalId",
+      "host",
+      "id",
+      "installationIds",
+      "kind",
+      "login",
+      "ownerUserId",
+      "refreshToken",
+      "status"
+    ],
+    "staffMemberMirror": [
+      "@concept=staffMember"
+    ],
+    "statusRowTrait": [
+      "status"
+    ],
+    "storeCreditAccountMirror": [
+      "@concept=storeCreditAccount"
+    ],
+    "storeFull": [
+      "adminTokenRef",
+      "apiVersion",
+      "appClientId",
+      "createdAt",
+      "domain",
+      "health",
+      "id",
+      "name",
+      "ownerUserId",
+      "plan",
+      "protectedDataLevel",
+      "redactedAt",
+      "scopesGranted",
+      "status",
+      "storefrontTokenRef",
+      "subscriptionsCheckedAt",
+      "webhookSecretRef"
+    ],
+    "subscriptionContractMirror": [
+      "@concept=subscriptionContract"
+    ],
+    "suppressionFull": [
+      "createdAt",
+      "domain",
+      "id",
+      "note",
+      "reason",
+      "sourceCampaignId",
+      "suppressedAt"
+    ],
+    "surfaceFull": [
+      "available",
+      "capabilities",
+      "createdAt",
+      "id",
+      "kind",
+      "lastSeen",
+      "machineId",
+      "ownerUserId",
+      "priority",
+      "slug",
+      "status"
+    ],
+    "syncStateFull": [
+      "backfillCursor",
+      "backfillStatus",
+      "conceptId",
+      "connector",
+      "createdAt",
+      "deadLetterCount",
+      "direction",
+      "driftCount",
+      "id",
+      "lagSeconds",
+      "lastError",
+      "lastInboundAt",
+      "lastReconcileAt",
+      "outboxDepth",
+      "paused"
+    ],
+    "templateFull": [
+      "accountId",
+      "createdAt",
+      "htmlBody",
+      "id",
+      "name",
+      "ownerUserId",
+      "status",
+      "subject",
+      "textBody"
+    ],
+    "tenderTransactionMirror": [
+      "@concept=tenderTransaction"
+    ],
+    "territoryFull": [
+      "@concept=territory"
+    ],
+    "todoFull": [
+      "createdAt",
+      "done",
+      "dueAt",
+      "id",
+      "ownerUserId",
+      "priority",
+      "sourceResponsibilityId",
+      "title"
+    ],
+    "uploadSessionFull": [
+      "blobPath",
+      "chunkSize",
+      "createdAt",
+      "fileId",
+      "folderId",
+      "id",
+      "labels",
+      "mimeType",
+      "name",
+      "ownerUserId",
+      "size",
+      "status",
+      "targetArtifactId",
+      "uploadedFromPath",
+      "uploadedFromWorkerId",
+      "uploadedFromWorkerName"
+    ],
+    "uploadSessionSize": [
+      "id",
+      "size"
+    ],
+    "urlRedirectMirror": [
+      "@concept=urlRedirect"
+    ],
+    "userDisplayCard": [
+      "displayName",
+      "id"
+    ],
+    "userFull": [
+      "active",
+      "birthdate",
+      "createdAt",
+      "displayName",
+      "firstName",
+      "gender",
+      "id",
+      "lastName",
+      "lastSeenAt",
+      "phone",
+      "preferences",
+      "primaryEmail",
+      "primaryRole",
+      "revocationEpoch",
+      "role",
+      "sharedMailbox",
+      "signInPolicy",
+      "suspendedAt",
+      "suspendedReason"
+    ],
+    "userIdRef": [
+      "id"
+    ],
+    "validationRowTrait": [
+      "checkedAt",
+      "confirmedAt",
+      "validationStatus"
+    ],
+    "variableFull": [
+      "createdAt",
+      "description",
+      "id",
+      "name",
+      "value"
+    ],
+    "warmupStateFull": [
+      "acceptedInStep",
+      "createdAt",
+      "decision",
+      "evaluatedAt",
+      "id",
+      "ratePerMinute",
+      "reason",
+      "sendingIdentity",
+      "step",
+      "stepEnteredAt"
+    ],
+    "watchedFolderFull": [
+      "archived",
+      "bytesSeen",
+      "createdAt",
+      "excludeGlobs",
+      "filesSeen",
+      "folderId",
+      "id",
+      "includeHidden",
+      "lastSweepAt",
+      "lastSweepError",
+      "localPath",
+      "originState",
+      "ownerUserId",
+      "status",
+      "workerId"
+    ],
+    "workApprovalFull": [
+      "answer",
+      "artifactHash",
+      "createdAt",
+      "decidedAt",
+      "decidedBy",
+      "decision",
+      "evidence",
+      "expiresAt",
+      "id",
+      "kind",
+      "options",
+      "ownerUserId",
+      "question",
+      "requestedAt",
+      "runId",
+      "stepKey",
+      "subject"
+    ],
+    "workGoalFull": [
+      "accountIds",
+      "ceilings",
+      "closeReason",
+      "closedAt",
+      "createdAt",
+      "id",
+      "input",
+      "origin",
+      "ownerUserId",
+      "requestedVia",
+      "responsibilityId",
+      "statement",
+      "status"
+    ],
+    "workModelCallFull": [
+      "cost",
+      "createdAt",
+      "error",
+      "id",
+      "inputTokens",
+      "latencyMs",
+      "model",
+      "outputTokens",
+      "ownerUserId",
+      "promptRef",
+      "promptVersion",
+      "provider",
+      "requestHash",
+      "response",
+      "runId",
+      "served",
+      "settings",
+      "stepKey"
+    ],
+    "workObservationFull": [
+      "content",
+      "createdAt",
+      "data",
+      "id",
+      "kind",
+      "ownerUserId",
+      "runId",
+      "stepKey"
+    ],
+    "workRunFull": [
+      "actualFootprint",
+      "automationName",
+      "callerSuppliedPayload",
+      "cancelRequested",
+      "cancelledBy",
+      "chainHead",
+      "createdAt",
+      "errorCode",
+      "errorMessage",
+      "expectedFootprint",
+      "finishedAt",
+      "forkAtStepKey",
+      "forkedFromRunId",
+      "goalId",
+      "heartbeatAt",
+      "id",
+      "initialChainHead",
+      "input",
+      "inputFingerprint",
+      "mode",
+      "nodeId",
+      "outcome",
+      "ownerUserId",
+      "replayPolicy",
+      "spent",
+      "startedAt",
+      "status",
+      "stepOrder",
+      "summary",
+      "templateConstructId",
+      "templateFingerprint",
+      "templateVersion",
+      "triggerEvent",
+      "triggeredBy",
+      "variables",
+      "waitingOn"
+    ],
+    "workRunLoopStop": [
+      "automationName",
+      "createdAt",
+      "errorCode",
+      "finishedAt",
+      "id",
+      "outcome"
+    ],
+    "workStepFull": [
+      "actualFootprint",
+      "approvalId",
+      "attempt",
+      "binding",
+      "call",
+      "childRunId",
+      "cost",
+      "createdAt",
+      "dependsOn",
+      "durationMs",
+      "errorCode",
+      "errorMessage",
+      "expectedFootprint",
+      "externalKey",
+      "finishedAt",
+      "id",
+      "idempotencyKey",
+      "input",
+      "key",
+      "kind",
+      "ownerUserId",
+      "postcondition",
+      "result",
+      "resultFingerprint",
+      "resumeAt",
+      "runId",
+      "seq",
+      "startedAt",
+      "status",
+      "stepType",
+      "symptom",
+      "tokens"
+    ],
+    "workerAppSessionCard": [
+      "app",
+      "billing",
+      "createdAt",
+      "endedAt",
+      "exitCode",
+      "id",
+      "kind",
+      "ownerUserId",
+      "runId",
+      "startedAt",
+      "status",
+      "stepId",
+      "usage",
+      "workerId"
+    ],
+    "workerAppSessionFull": [
+      "app",
+      "appSessionRef",
+      "billing",
+      "cancelReason",
+      "createdAt",
+      "credentialExpiresAt",
+      "credentialRef",
+      "endedAt",
+      "errorMessage",
+      "exitCode",
+      "id",
+      "inputArtifactIds",
+      "kind",
+      "mcpEndpoint",
+      "ownerUserId",
+      "producedArtifactIds",
+      "prompt",
+      "responseSchema",
+      "result",
+      "resultSubmittedAt",
+      "runId",
+      "startedAt",
+      "status",
+      "stepId",
+      "transcript",
+      "transcriptBytes",
+      "transcriptTruncated",
+      "usage",
+      "workerId",
+      "workspace"
+    ],
+    "workerDelegationPolicyFull": [
+      "appOrder",
+      "createdAt",
+      "credentialLifetimeSeconds",
+      "eligibleKinds",
+      "id",
+      "maxConcurrentSessions",
+      "ownerUserId",
+      "preferSubscriptionApps",
+      "updatedAt",
+      "workspaceRoot"
+    ],
+    "workerInvocationFull": [
+      "action",
+      "agentId",
+      "argsRedacted",
+      "bytesIn",
+      "bytesOut",
+      "completedAt",
+      "correlationId",
+      "createdAt",
+      "durationMs",
+      "errorCode",
+      "errorMessage",
+      "exitCode",
+      "id",
+      "outcome",
+      "outputPreview",
+      "ownerUserId",
+      "routing",
+      "runId",
+      "signal",
+      "startedAt",
+      "stepId",
+      "tool",
+      "workerId"
+    ],
+    "workerModelProbeFull": [
+      "completedCases",
+      "createdAt",
+      "currentCase",
+      "endedAt",
+      "errorMessage",
+      "id",
+      "measurementId",
+      "model",
+      "ownerUserId",
+      "requestedAt",
+      "status",
+      "suiteVersion",
+      "targetNodeId",
+      "totalCases",
+      "updatedAt",
+      "workerId"
+    ],
+    "workerModelPullFull": [
+      "completedBytes",
+      "createdAt",
+      "endedAt",
+      "errorMessage",
+      "id",
+      "layer",
+      "model",
+      "ownerUserId",
+      "readvertised",
+      "requestedAt",
+      "status",
+      "statusLine",
+      "targetNodeId",
+      "totalBytes",
+      "updatedAt",
+      "workerId"
+    ],
+    "workerPairingCodeFull": [
+      "clusterURL",
+      "codeHash",
+      "createdAt",
+      "expiresAt",
+      "id",
+      "ownerUserId",
+      "redeemedAt",
+      "redeemedBy",
+      "redeemedFromIP",
+      "sourceIP"
+    ],
+    "workerRegistrationFull": [
+      "activeCount",
+      "appDescriptors",
+      "apps",
+      "buildTag",
+      "capabilities",
+      "capabilityDescriptor",
+      "concurrency",
+      "connectedNodeId",
+      "createdAt",
+      "displayName",
+      "hardware",
+      "id",
+      "identityId",
+      "labels",
+      "lastConnectedFromIP",
+      "lastSeenAt",
+      "lastSelectedAt",
+      "name",
+      "operatorLabels",
+      "ownerUserId",
+      "permissions",
+      "platformInfo",
+      "registeredAt",
+      "revokeReason",
+      "revokedAt",
+      "revokedBy",
+      "rttAt",
+      "rttMs",
+      "sharing",
+      "version"
+    ],
+    "workerRoutingPolicyFull": [
+      "active",
+      "createdAt",
+      "fallback",
+      "id",
+      "modelPreference",
+      "ownerUserId",
+      "preferLabels",
+      "requireLabels",
+      "strategy"
+    ],
+    "workspaceFull": [
+      "createdAt",
+      "id",
+      "lastUsedAt",
+      "nodeId",
+      "ownerUserId",
+      "releasedAt",
+      "releasedReason",
+      "runId",
+      "status",
+      "storageRoot"
+    ]
+  }
+}

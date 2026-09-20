@@ -505,7 +505,7 @@ Mark a vendor-level base provider (auth + type only).
 |---|---|---|
 | `ttl` | string | Cache TTL in whole seconds. Positional preferred (#2618): @cache(300); keyword ttl="300" keeps parsing. |
 
-Override the result-cache TTL for the query. Preferred form (#2618): @cache(300) -- the single ttl arg makes position unambiguous. The keyword form @cache(ttl="300") keeps parsing. Pure reads cache BY DEFAULT (a 60s backstop) without this annotation; @cache sets a different TTL, longer or shorter. @cache(ttl="0") is the explicit "never cache" opt-out (or use @nocache). The engine keys the cache on the plan signature (query/sort/limit/depth/shape + the keyset cursor) and evicts on any write to the read concept via the cache.invalidate.* broadcast channel -- cross-node eviction needs no per-concept routing rule.
+Override the result-cache TTL for the query. Preferred form (#2618): @cache(300) -- the single ttl arg makes position unambiguous. The keyword form @cache(ttl="300") keeps parsing. Pure reads cache BY DEFAULT (a 60s backstop) without this annotation; @cache sets a different TTL, longer or shorter. @cache(0) is the explicit "never cache" opt-out -- @nocache was retired with it (epic memql#5375), and one annotation for the TTL is the whole reason. The engine keys the cache on the plan signature (query/sort/limit/depth/shape + the keyset cursor) and evicts on any write to the read concept via the cache.invalidate.* broadcast channel -- cross-node eviction needs no per-concept routing rule.
 
 ### @composable
 

@@ -596,6 +596,50 @@ docs-matrix:
 docs-matrix-check:
 	$(GO) test -count=1 -run 'TestAttributeMatrix' .
 
+## Regenerate the grammar and vocabulary pages (docs/public/language/grammar.md
+## and vocabulary.md) from the parser, the annotation registry and the function
+## catalog.
+##
+## Both pages are GENERATED (memql#5388) and exist to be given to a MODEL: the
+## grammar as grammar-in-prompt or as the grammar a constrained decoder is held
+## to, the vocabulary as what each name means. A hand-maintained grammar does
+## not fail when it drifts -- it teaches a form the parser refuses, and the
+## failure reads as "the model is bad at MemQL". Change the tables, then run
+## this; never hand-edit either page.
+docs-grammar:
+	$(GO) run ./cmd/dslgrammar
+
+## CI gate: fail when either generated page differs from what the language
+## tables render. Pair with `make docs-grammar` locally to fix.
+##
+## Also enforced by TestGrammarPageIsGenerated and TestVocabularyPageIsGenerated
+## so it runs in the ordinary `make test` lane, which needs no workflow change.
+docs-grammar-check:
+	$(GO) test -count=1 -run 'TestGrammarPageIsGenerated|TestVocabularyPageIsGenerated' .
+
+## Classify authoring-surface breaks against the committed baseline
+## (component/language/surface/2026.json).
+##
+## memqlbreaking diffs THIS tree's authoring surface -- every construct, every
+## annotation with its receivers and argument contract, every function with its
+## signature and tier, and every shape's projected keys -- against the last
+## captured one, and classifies each difference as a `parse`, `meaning` or
+## `wire` break (memql#5389, D21). An ADDITION is never reported: a command
+## that reports every change is a command whose output nobody reads.
+##
+## A DELETION is refused unless component/language/reserved.json reserves the
+## name. That refusal is the gate. Without it a removed name is free to be
+## given to something else later, and a bundle still carrying the old spelling
+## would load under the new meaning and do the new thing silently.
+memqlbreaking:
+	$(GO) run ./cmd/memqlbreaking -baseline component/language/surface/2026.json
+
+## Refresh the committed surface baseline. Run this in the SAME change that
+## breaks it, next to the reservation in component/language/reserved.json, so
+## the two move together and a reviewer reads one diff rather than two.
+memqlbreaking-capture:
+	$(GO) run ./cmd/memqlbreaking -capture -out component/language/surface/2026.json
+
 ## DSL lint: load the embedded DSL tree through the same
 ## dslimports.Load pipeline the engine runs at boot and fail on any
 ## parse / import / build diagnostics. Mirrors the CI gate so authors
@@ -711,7 +755,7 @@ test-cover:
 # ---------------------------------------------------------------------------
 
 ##@ Quality & codegen
-.PHONY: vet fmt lint tidy generate proto-gen proto-gen-check prs-stalled claims-stale arch-model arch-model-check frontdoor frontdoor-hosts frontdoor-hosts-check frontdoor-paths frontdoor-paths-check concept-snapshot concept-snapshot-check docs-matrix docs-matrix-check
+.PHONY: vet fmt lint tidy generate proto-gen proto-gen-check prs-stalled claims-stale arch-model arch-model-check frontdoor frontdoor-hosts frontdoor-hosts-check frontdoor-paths frontdoor-paths-check concept-snapshot concept-snapshot-check docs-matrix docs-matrix-check docs-grammar docs-grammar-check memqlbreaking memqlbreaking-capture
 
 ## Run go vet on all packages
 vet:

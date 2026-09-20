@@ -58,6 +58,26 @@ const Edition = "2026"
 // `version` and the `memql.grammarVersion` pin in editors/vscode/package.json
 // move in the same change -- cmd/memql-lsp/editorparity_test.go refuses the
 // change otherwise, and its failure names each edit.
+//
+// # Why it stayed at 0.5.1 while the extension went to 0.6.0 (memql#5390)
+//
+// The freeze shipped an extension release that carries no grammar change:
+// edition 2026 was frozen, the engine began serving the generated BNF and
+// vocabulary, and `make vscode-grammar` regenerated the TextMate grammar and
+// the language configuration BYTE-IDENTICAL, because the tables they derive
+// from did not move.
+//
+// So 0.5.1 is still the answer to the question this constant asks -- "which is
+// the first release that carries this grammar" -- and 0.6.0 is not. Raising it
+// would tell an older editor to install 0.6.0 to reach a grammar 0.5.1 already
+// has, which is a true-sounding instruction that is wrong about the only fact
+// it exists to state.
+//
+// It is therefore NORMAL for this constant to lag the extension's `version`,
+// and the parity gate is built for that: it refuses this constant being NEWER
+// than the extension, never older. If you are here because you bumped the
+// extension and wondered whether this should follow, the question to ask is
+// whether GrammarVersion moved. If it did not, leave this alone.
 const EditorRelease = "0.5.1"
 
 // FrontEnd is how one edition's source reaches the core parser.

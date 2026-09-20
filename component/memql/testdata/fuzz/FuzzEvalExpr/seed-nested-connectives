@@ -1,0 +1,2 @@
+go test fuzz v1
+string("(row.status == \"open\" || row.value != nil) && !(row.title startsWith \"INC-\")")

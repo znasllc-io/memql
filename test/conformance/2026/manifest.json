@@ -1,5 +1,7 @@
 {
   "edition": "2026",
   "language": "1.0",
-  "status": "draft"
+  "status": "frozen",
+  "frozenAt": "2026-09-20",
+  "note": "Edition 2026 / language 1.0 is frozen (memql#5390). A form this corpus holds IS the language. Adding to it needs no ceremony -- an addition breaks nobody. REMOVING one is a deprecation window first (component/language/deprecation: warn naming the replacement for at least two minor releases, with the use counted) and a reservation afterwards (component/language/reserved.json, enforced by cmd/memqlbreaking against component/language/surface/2026.json)."
 }

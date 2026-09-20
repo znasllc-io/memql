@@ -258,6 +258,20 @@ jobs:
               # and hand the failure to whoever pushed next -- the delayed-blame
               # shape the embed inventory had.
               - 'component/conceptfields/concept-fields.snapshot.json'
+              # The authoring-surface baseline and its reservation ledger
+              # (memql#5389), for the same reason as the concept-field snapshot
+              # directly above: the gates that read them are cmd/memqlbreaking
+              # and the memqlbreaking step, and a change to either file touches
+              # no `.go`, so the `go` bucket does not fire.
+              #
+              # The ledger's whole point is that it is edited ON ITS OWN. A
+              # deletion is landed by adding an entry here and re-capturing the
+              # baseline; an entry deleted or mis-typed is exactly what the
+              # inverse check -- a reserved name coming back -- exists to catch.
+              # Unrouted, such a PR runs zero lanes and merges green.
+              - 'component/language/reserved.json'
+              - 'component/language/surface/**'
+              - 'cmd/memqlbreaking/testdata/**'
               #   deploy/db-image/** -> scripts/ci/db_image_wiring_test.go
               #                  (epic memql#3842 / #3844). The database operand
               #                  image's Dockerfile and its smoke test, both READ
@@ -455,6 +469,19 @@ jobs:
               # at all: dropping a line from the baseline merged green and
               # reddened `main` for the next author.
               - 'component/memql/testdata/**'
+              # The committed fuzz seed corpus (memql#5387). Go reads
+              # testdata/fuzz/<Target>/ by CONVENTION rather than by name -- no
+              # test file mentions a seed path -- so the coverage gate's
+              # mention-scan finds nothing and reads it as "exempt this". That
+              # reading is wrong: every one of these files IS executed, as an
+              # ordinary subtest of its target on every `go test`, which is the
+              # regression half of the fuzzing (the search half is the bounded
+              # -fuzz step in go-checks). Changing or adding a seed therefore
+              # changes what the Go lane runs, and belongs in the bucket that
+              # reaches it. `component/memql/testdata/**` above already covered
+              # that package's FuzzLower and FuzzEvalExpr seeds, which is why
+              # only the parser's 49 came back orphaned.
+              - 'component/language/parser/testdata/**'
               # The recorded Shopify Admin introspection the mirror generator
               # reads. Same reasoning as the line above: the drift gate that
               # consumes it (cmd/shopifyschema) regenerates the whole tree from
@@ -765,7 +792,28 @@ jobs:
   # cache is warm for vet/test/run/lint that follow.
   go-checks:
     name: go-checks
-    timeout-minutes: 20
+    # 30, not the 20 the 2026-08-06 audit sized against a 6.3-minute lane.
+    # memql#5387 added the bounded fuzz step below, measured at 4m30s on a
+    # 24-core developer machine; a hosted runner has 4, and a fuzz-instrumented
+    # build does not reuse the ordinary `go build` cache, so the step should be
+    # expected to cost 5-7 minutes here. That puts this lane's median somewhere
+    # near 11-13 minutes against what was a 20-minute cap: inside it, but at
+    # roughly 1.5x rather than the 2x headroom
+    # scripts/ci/workflow_timeout_test.go exists to keep.
+    #
+    # This is the db-tests shape exactly, and that lane's comment is worth
+    # re-reading: a cap sized against a stale median "cancelled healthy runs,
+    # one of them a push to main". Raising the cap costs nothing -- the gate is
+    # a FLOOR with no upper bound -- and shortening the fuzz search to fit a
+    # number would be the wrong trade.
+    #
+    # timeoutMedianMinutes still records 6.3, which is now stale in the other
+    # direction. It is left alone DELIBERATELY rather than replaced with an
+    # estimate: that table says "measured", and the measurement has to come off
+    # this lane's own runs. Re-measure it once a few builds carrying the fuzz
+    # step have landed, and move the median there rather than adjusting this
+    # cap again.
+    timeout-minutes: 30
     needs: changes
     if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' || needs.changes.outputs.proto == 'true' || needs.changes.outputs.gates == 'true' }}
     runs-on: ubuntu-latest
@@ -959,6 +1007,19 @@ jobs:
       - name: concept-snapshot-check (concept field drift)
         if: ${{ env.RUN_DSL == 'true' }}
         run: make concept-snapshot-check
+      # Authoring-surface break classification (memql#5389, D21). Reads the
+      # DSL tree plus the parser, annotation and function registries, so it
+      # gates with the DSL lanes beside the concept-field snapshot above.
+      #
+      # It answers a question none of its siblings can: did this branch REMOVE
+      # something a bundle author writes -- an annotation, a construct, a
+      # function, a shape key -- and if so, is the removal recorded? A deletion
+      # with no entry in component/language/reserved.json fails this step. An
+      # ADDITION never does: a gate that reports every change is one whose
+      # output nobody reads, and the one signal that matters drowns.
+      - name: memqlbreaking (authoring-surface break classification)
+        if: ${{ env.RUN_DSL == 'true' }}
+        run: make memqlbreaking
       # Proto drift check (memql#928): regenerate the pinned-toolchain proto
       # bindings (component/grpc, component/node and component/bus -- bus was
       # normalized onto the pinned toolchain in memql#928 itself, so the
@@ -1012,6 +1073,47 @@ jobs:
       - name: proto-gen-check (proto drift)
         if: ${{ env.RUN_PROTO == 'true' }}
         run: make proto-gen-check
+
+      # --- bounded fuzzing (memql#5387) ---
+      #
+      # `go test -fuzz` runs ONE target per invocation and runs until
+      # -fuzztime expires, so this is five short runs rather than one long
+      # one. 40s each keeps the step near three and a half minutes.
+      #
+      # WHAT THIS BUYS OVER THE SEED CORPUS ALONE. The committed seeds under
+      # testdata/fuzz/<Target>/ run as ordinary subtests on every `go test`,
+      # which is the REGRESSION half: an input that once broke the lexer is
+      # replayed forever. This is the SEARCH half -- it mutates those seeds
+      # looking for the NEXT crash. A crash here writes the failing input
+      # into testdata/fuzz/<Target>/, and the fix is to COMMIT that file: a
+      # bug is not fixed until its case is in the corpus (docs/CLAUDE.md).
+      #
+      # GATED ON RUN_GO OR RUN_DSL, deliberately. A docs-only PR reaches this
+      # job through RUN_GATES and must not pay three and a half minutes for a
+      # search over code it did not touch. RUN_DSL is in because FuzzParse
+      # seeds from every conformance corpus .memql at run time, so a corpus
+      # change genuinely changes what is searched.
+      #
+      # ON THE LANE'S TIMEOUT: go-checks is capped at 20 minutes against the
+      # 6.3-minute median scripts/ci/workflow_timeout_test.go records, so the
+      # 2x floor that gate enforces is 12.6 and this step does not breach it.
+      # It does eat headroom -- if the lane is re-measured after this lands,
+      # re-measure the median there rather than silently raising the cap.
+      - name: bounded fuzz (lexer, parser, lowering, evaluation)
+        if: ${{ env.RUN_GO == 'true' || env.RUN_DSL == 'true' }}
+        run: |
+          set -euo pipefail
+          fuzz() {
+            local pkg="$1" target="$2"
+            echo "INFO: fuzzing $target in $pkg"
+            go test "$pkg" -run "^$target$" -fuzz "^$target$" -fuzztime=40s
+          }
+          fuzz ./component/language/parser FuzzLexer
+          fuzz ./component/language/parser FuzzParseV1Expression
+          fuzz ./component/memql FuzzLower
+          fuzz ./component/memql FuzzEvalExpr
+          fuzz ./test/conformance FuzzParse
+          echo "SUCCESS: bounded fuzz completed with no new failing inputs"
 
   # Test lane (memql#3161 / design D5.3c). Split out of go-checks so that lane's
   # duration becomes max(test, build+vet+drift) rather than their sum: `go test`
@@ -1398,6 +1500,13 @@ jobs:
           --health-retries 12
     env:
       MEMQL_DATABASE_DSN: postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable
+      # The differential lane is REQUIRED (memql#5386, D23). Unset, a
+      # disagreement between the SQL lowering and the in-process evaluator is
+      # LOGGED on a DIFFERENTIAL: line and the lane passes -- green over a
+      # language whose two implementations of one meaning have diverged.
+      # scripts/ci/differential_lane_required_test.go holds this line and the
+      # ci-required membership together.
+      MEMQL_DIFFERENTIAL_REQUIRED: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0

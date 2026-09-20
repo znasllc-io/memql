@@ -11,6 +11,8 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v5"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/language/dslspec"
+	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/docs"
 )
 
@@ -30,6 +32,12 @@ func (e *MemQLEngine) initBuiltinExecutorHandlers() error {
 		},
 		BuiltinExecutorMemqlDocs: func(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateDocsExpression(ctx)
+		},
+		BuiltinExecutorMemqlGrammar: func(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			return e.evaluateGrammarExpression(ctx)
+		},
+		BuiltinExecutorMemqlVocabulary: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			return e.evaluateVocabularyExpression(ctx, args)
 		},
 		BuiltinExecutorValidate: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateValidateExpression(ctx, args)
@@ -267,6 +275,113 @@ func (e *MemQLEngine) evaluateDocsExpression(ctx context.Context) ([]memorynodes
 	}
 
 	return []memorynodes.MemoryNode{node}, nil
+}
+
+// evaluateGrammarExpression returns the generated EBNF authoring grammar
+// (memql#5388), with the edition and grammar version it was built from.
+//
+// It is the same bytes `make docs-grammar` writes into
+// docs/public/language/grammar.md, rendered from the parser's own tables at
+// call time -- so a cluster answers with ITS grammar, not with whatever page
+// was committed when its image was built. That is the whole point of serving
+// it: a model handed a grammar from a different version of the engine emits
+// forms this one refuses.
+func (e *MemQLEngine) evaluateGrammarExpression(ctx context.Context) ([]memorynodes.MemoryNode, error) {
+	actor, err := mutationActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	schemaBytes, err := json.Marshal(map[string]any{
+		"description": "The generated EBNF authoring grammar for this cluster's MemQL edition.",
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payloadBytes, err := json.Marshal(map[string]any{
+		"format":         "ebnf",
+		"edition":        parser.Edition,
+		"grammarVersion": parser.GrammarVersion,
+		"content":        dslspec.BNF(),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return []memorynodes.MemoryNode{{
+		ID:        "memql:grammar",
+		Concept:   "memql:grammar",
+		Type:      memorynodes.NodeTypeObject,
+		CreatedAt: time.Now().UTC(),
+		CreatedBy: actor,
+		Schema:    schemaBytes,
+		Payload:   payloadBytes,
+	}}, nil
+}
+
+// evaluateVocabularyExpression returns every named thing in the language with
+// its description (memql#5388). `kind` narrows to one of the closed set;
+// omitted, every kind is returned.
+//
+// An unknown kind is REFUSED and the refusal names the kinds there are. The
+// alternative -- answering with an empty list -- is the shape that reads as
+// "this cluster has no annotations", which is a sentence a model will believe.
+func (e *MemQLEngine) evaluateVocabularyExpression(ctx context.Context, args map[string]any) ([]memorynodes.MemoryNode, error) {
+	actor, err := mutationActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	kind, _ := args["kind"].(string)
+	kind = strings.TrimSpace(kind)
+	entries, known := dslspec.VocabularyOf(kind)
+	if !known {
+		return nil, fmt.Errorf("memqlVocabulary: unknown kind %q; the kinds are %s",
+			kind, strings.Join(dslspec.VocabularyKinds(), ", "))
+	}
+
+	list := make([]map[string]any, 0, len(entries))
+	for _, entry := range entries {
+		item := map[string]any{
+			"kind":        entry.Kind,
+			"name":        entry.Name,
+			"signature":   entry.Signature,
+			"description": entry.Description,
+		}
+		if entry.Tier != "" {
+			item["tier"] = entry.Tier
+		}
+		list = append(list, item)
+	}
+
+	schemaBytes, err := json.Marshal(map[string]any{
+		"description": "Every construct, annotation, keyword, operator, field type, function and builtin with its description.",
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	payloadBytes, err := json.Marshal(map[string]any{
+		"edition":        parser.Edition,
+		"grammarVersion": parser.GrammarVersion,
+		"kinds":          dslspec.VocabularyKinds(),
+		"entries":        list,
+		"count":          len(list),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return []memorynodes.MemoryNode{{
+		ID:        "memql:vocabulary",
+		Concept:   "memql:vocabulary",
+		Type:      memorynodes.NodeTypeObject,
+		CreatedAt: time.Now().UTC(),
+		CreatedBy: actor,
+		Schema:    schemaBytes,
+		Payload:   payloadBytes,
+	}}, nil
 }
 
 // evaluateValidateExpression validates a payload against a concept's JSON schema.
