@@ -14105,19 +14105,6 @@ a.os-button {
 .os-info-dialog p { margin: 14px 0 0; }
 /* The numbered trail reflects registration events, never a fabricated Next. */
 .os-fleet-addpage { container-type: inline-size; }
-.os-fleet-addpage .os-deploy-scroll { padding: 26px 32px; }
-.os-fleet-addpage .os-panel { max-width: 850px; margin-inline: auto; width: 100%; }
-.fleet-install-trail { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); list-style: none; padding: 0; margin: 26px 0 32px; gap: 12px; }
-.fleet-install-trail button { display: flex; align-items: center; gap: 9px; border: 0; background: transparent; font: inherit; color: var(--os-ink); padding: 8px 0; text-align: left; width: 100%; cursor: pointer; }
-.fleet-install-trail button:disabled { cursor: default; }
-.fleet-step-number { display: grid; place-items: center; flex-shrink: 0; width: 28px; height: 28px; border: 1px solid var(--os-line-strong); border-radius: 50%; font-size: var(--os-text-sm); }
-.fleet-install-trail [aria-current="step"] .fleet-step-number { background: var(--os-accent); color: var(--os-accent-fg); border-color: var(--os-accent); }
-.fleet-install-trail [data-state="ahead"] { color: var(--os-muted); }
-.fleet-install-trail strong, .fleet-install-trail small { display: block; }
-.fleet-install-trail strong { font-size: var(--os-text-sm); font-weight: 550; }
-.fleet-install-trail small { font-size: var(--os-text-xs); color: var(--os-muted); margin-top: 4px; }
-.fleet-install-current { max-width: 620px; margin-inline: auto; }
-.fleet-install-current .os-stop-body { padding: 0; margin: 0; }
 .fleet-install-options { display: flex; flex-direction: column; margin-top: 18px; }
 .fleet-install-options > div { position: relative; border-top: 1px solid var(--os-line); padding: 18px 36px 18px 0; }
 .fleet-install-options p { margin: 6px 0 0 24px; color: var(--os-muted); font-size: var(--os-text-sm); line-height: 1.6; }
@@ -14155,7 +14142,6 @@ a.os-button {
   .fleet-machine-picker ul { display: flex; flex-wrap: wrap; gap: 8px; }
   .fleet-machine-picker li { flex: 1; min-width: 140px; }
   .fleet-equipment-rig { gap: 14px; }
-  .fleet-install-trail { gap: 5px; }
 }
 @container (max-width: 490px) {
   .fleet-equipment-rig { grid-template-columns: minmax(0,1fr); }
@@ -14166,8 +14152,6 @@ a.os-button {
   .fleet-policy-workspace { grid-template-columns: minmax(0,1fr); }
   .fleet-rule-picker { border-right: 0; padding: 0; max-height: 180px; overflow-y: auto; }
   .fleet-task-create { flex-wrap: wrap; }
-  .fleet-install-trail { grid-template-columns: repeat(2,minmax(0,1fr)); }
-  .os-fleet-addpage .os-deploy-scroll { padding: 18px; }
 }
 .fleet-routing-tabs { display: flex; gap: 10px; border-bottom: 1px solid var(--os-line); padding: 14px 0; margin-bottom: 20px; }
 .fleet-policy-editor { padding: 18px 0; }
@@ -14225,11 +14209,8 @@ a.os-button {
 
 /* Keep the guided workflow's own scroller and fixed action floor intact. */
 .fleet-retained-workspace { height: 100%; min-height: 0; }
-.os-fleet-addpage .os-deploy-scroll { padding-block: 20px; }
-.fleet-install-trail { margin-block: 18px 20px; }
 .fleet-install-options > div { padding-block: 12px; }
 .fleet-install-options .os-info-detail { top: 9px; }
-.fleet-install-trail { margin-block: 4px 8px; }
 
 /* Fleet details must fit the space left by the desktop navigation rail. */
 .fleet-retained-workspace { container-name: fleet-surface; container-type: inline-size; }
@@ -14421,7 +14402,6 @@ a.os-button {
 .fleet-page .os-fleet-model-head { flex-wrap:wrap; gap:10px; }
 .fleet-page .os-fleet-model { padding-inline:0; border-radius:0; background:transparent; border-inline:0; }
 .fleet-page .os-fleet-session > .os-head { position:sticky; top:0; z-index:4; padding:18px 0 12px; background:var(--os-glass-solid); }
-.fleet-page .os-fleet-addpage .os-head { margin-bottom:16px; }
 @container fleet-page (max-width:500px) {
   .fleet-record > summary { flex-wrap:wrap; gap:8px 12px; }
   .fleet-record-identity { flex-basis:65%; }
