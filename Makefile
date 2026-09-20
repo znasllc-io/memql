@@ -596,6 +596,27 @@ docs-matrix:
 docs-matrix-check:
 	$(GO) test -count=1 -run 'TestAttributeMatrix' .
 
+## Regenerate the grammar and vocabulary pages (docs/public/language/grammar.md
+## and vocabulary.md) from the parser, the annotation registry and the function
+## catalog.
+##
+## Both pages are GENERATED (memql#5388) and exist to be given to a MODEL: the
+## grammar as grammar-in-prompt or as the grammar a constrained decoder is held
+## to, the vocabulary as what each name means. A hand-maintained grammar does
+## not fail when it drifts -- it teaches a form the parser refuses, and the
+## failure reads as "the model is bad at MemQL". Change the tables, then run
+## this; never hand-edit either page.
+docs-grammar:
+	$(GO) run ./cmd/dslgrammar
+
+## CI gate: fail when either generated page differs from what the language
+## tables render. Pair with `make docs-grammar` locally to fix.
+##
+## Also enforced by TestGrammarPageIsGenerated and TestVocabularyPageIsGenerated
+## so it runs in the ordinary `make test` lane, which needs no workflow change.
+docs-grammar-check:
+	$(GO) test -count=1 -run 'TestGrammarPageIsGenerated|TestVocabularyPageIsGenerated' .
+
 ## DSL lint: load the embedded DSL tree through the same
 ## dslimports.Load pipeline the engine runs at boot and fail on any
 ## parse / import / build diagnostics. Mirrors the CI gate so authors
@@ -711,7 +732,7 @@ test-cover:
 # ---------------------------------------------------------------------------
 
 ##@ Quality & codegen
-.PHONY: vet fmt lint tidy generate proto-gen proto-gen-check prs-stalled claims-stale arch-model arch-model-check frontdoor frontdoor-hosts frontdoor-hosts-check frontdoor-paths frontdoor-paths-check concept-snapshot concept-snapshot-check docs-matrix docs-matrix-check
+.PHONY: vet fmt lint tidy generate proto-gen proto-gen-check prs-stalled claims-stale arch-model arch-model-check frontdoor frontdoor-hosts frontdoor-hosts-check frontdoor-paths frontdoor-paths-check concept-snapshot concept-snapshot-check docs-matrix docs-matrix-check docs-grammar docs-grammar-check
 
 ## Run go vet on all packages
 vet:

@@ -454,17 +454,29 @@ func (*BuiltinFunctionExpression) isExpressionNode() {}
 
 // Executor identifiers for builtin functions.
 const (
-	BuiltinExecutorConcepts       = "concepts"
-	BuiltinExecutorMemqlDocs      = "memqlDocs"
-	BuiltinExecutorValidate       = "validate"
-	BuiltinExecutorFunctions      = "functions"
-	BuiltinExecutorTools          = "tools"
-	BuiltinExecutorHelp           = "help"
-	BuiltinExecutorShapeTemplates = "shapeTemplates"
-	BuiltinExecutorShapeHelp      = "shapeHelp"
-	BuiltinExecutorContentId      = "contentId"
-	BuiltinExecutorPreviewInsert  = "previewInsert"
-	BuiltinExecutorServiceVersion = "serviceVersion"
+	BuiltinExecutorConcepts  = "concepts"
+	BuiltinExecutorMemqlDocs = "memqlDocs"
+	// BuiltinExecutorMemqlGrammar returns the generated EBNF authoring grammar
+	// (dslspec.BNF), for grammar-in-prompt and for syntax-only constrained
+	// decoding. It is a SIBLING of memqlDocs rather than a mode of it
+	// (memql#5388): a caller asking for the grammar and a caller asking for
+	// the guide want different artifacts, and a mode argument on memqlDocs is
+	// a second thing to discover.
+	BuiltinExecutorMemqlGrammar = "memqlGrammar"
+	// BuiltinExecutorMemqlVocabulary returns every construct, annotation,
+	// keyword, operator, field type, function and builtin with its description
+	// (dslspec.Vocabulary) -- what the grammar's names MEAN, which a grammar
+	// structurally cannot carry.
+	BuiltinExecutorMemqlVocabulary = "memqlVocabulary"
+	BuiltinExecutorValidate        = "validate"
+	BuiltinExecutorFunctions       = "functions"
+	BuiltinExecutorTools           = "tools"
+	BuiltinExecutorHelp            = "help"
+	BuiltinExecutorShapeTemplates  = "shapeTemplates"
+	BuiltinExecutorShapeHelp       = "shapeHelp"
+	BuiltinExecutorContentId       = "contentId"
+	BuiltinExecutorPreviewInsert   = "previewInsert"
+	BuiltinExecutorServiceVersion  = "serviceVersion"
 	// BuiltinExecutorDataOrigins projects every concept's data-origins
 	// declaration from the live registry (epic memql#4378). Virtual: no
 	// row is persisted. See data_origins_read.go.
