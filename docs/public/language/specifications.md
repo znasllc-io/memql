@@ -113,9 +113,13 @@ spec actorEnvelope requiresClusterOwner = actor => actor.role == "owner"
 
 (The shipped spec of exactly this shape is `requiresOwner`, in
 `dsl/deployment/specs.memql`. The example declares its own name because a
-second declaration of a shipped construct's name makes every bare lookup of
-it ambiguous -- the shipped queries that apply `requiresOwner(actor)` stop
-resolving it, and the engine refuses the load.)
+shipped construct resolves `requiresOwner` BY BARE NAME: three shipped queries
+apply `requiresOwner(actor)` in their filters, and a second declaration makes
+that name ambiguous, so those filters stop lowering and the engine refuses the
+load. The rule is about bare-name resolution, not about duplicate names in
+general -- a spec or trait applied in a shipped filter, or a query or logic a
+shipped tool's `@handler` names, is what breaks; a second `provider`, `shape`
+or `builtin` of a shipped name loads.)
 
 **A ROLE COMPARISON IS THE ONE THING THIS FORM IS NOW WRONG FOR** (epic
 memql#5166). `requiresOwner` survives because `owner` is the cluster-owner tier

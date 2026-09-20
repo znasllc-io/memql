@@ -562,6 +562,14 @@ automation routeRequestWithPrecondition {
 }
 ```
 
+The `@filter` there is not part of the precondition mechanism -- it is loop
+protection, and it is here because the example needs it to load.
+`advanceRequest` writes the same concept the trigger fires on, so without a
+filter the write re-triggers the automation and the load is refused naming the
+cycle (`loop_cycle`). Narrowing the trigger to a request's first version is the
+filter the refusal itself suggests, and it is what the shipped `recordRouted`
+automation does. Do not copy it as precondition ceremony.
+
 The `check` expression is an automation condition, written in the same
 expression language as every other. It reads only the roots -- `args.<field>`
 (the automation's declared args, bound from the trigger payload), `actor`,
@@ -590,13 +598,6 @@ misses here. Fields:
 | `check` | yes | The deterministic boolean expression that must hold |
 | `literal` | no | Names the machine-specific literal asserted (path / id / endpoint) -- the portability hint the repair loop relativizes |
 | `description` | no | Human-readable context surfaced in the miss signal |
-
-The `@filter` above is not part of the precondition mechanism: it is loop
-protection. `advanceRequest` writes the same concept the trigger fires on, so
-without a filter the write re-triggers the automation and the load is refused
-naming the cycle (`loop_cycle`). Narrowing the trigger to a request's first
-version is the filter the refusal itself suggests, and it is what the shipped
-`recordRouted` automation does.
 
 Preconditions are evaluated in declaration order; the first miss wins and
 aborts the run. They are deterministic by design -- they guard the
@@ -727,7 +728,7 @@ rendered template is a Go text/template file named by `@templateFile`.
 ```memql
 @level("fast")
 @defaultProvider("chat54Mini")
-@templateFile("condenseConversation.tmpl")
+@templateFile("prompts/condenseConversation.tmpl")
 @description("Summarize older conversation messages into a rolling summary.")
 prompt condenseConversation {
   entries          []object  @required @description("Conversation messages, oldest first.")

@@ -32,7 +32,12 @@ the directory. Every `.memql` file in the directory is either the fixture or
 named by a case; the runner refuses a file nothing names. Any other file in the
 directory -- a prompt's or a seed's `@templateFile`, a `namespace.pin` -- is
 mounted beside every case in it under the same name, as it would sit beside a
-domain's `.memql` files.
+domain's `.memql` files. Subdirectories are carried too, under their relative
+path, so a case may hold `prompts/<name>.tmpl` -- the layout every shipped
+prompt's `@templateFile` uses. The one boundary is a nested directory with an
+`expect.json` of its own: that is a case directory in its own right and its
+files are its, not the parent's. The stray rule applies at every depth, and a
+case's `file` may not contain a slash, so a nested `.memql` is always a stray.
 
 Each case loads as its own domain, and the load cases share boots. A concept
 is qualified by its domain (`v1:<domain>:ticket`), so a concept's name may

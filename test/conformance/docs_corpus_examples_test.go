@@ -462,6 +462,13 @@ func docsCorpusPages(t *testing.T) []string {
 // fence names. The examples tree exists to back the pages: a case there that
 // nothing shows is either a page that lost its marker or a case nobody deleted,
 // and both leave the tree saying something it does not mean.
+//
+// The ONE exemption is a case staged under a page this gate does not read yet,
+// and it is keyed on the coverage list holding that page AT ALL rather than on
+// it being false. Keyed on false alone, `examples/functionz/` -- a directory
+// named after a page that does not exist -- would be exempt too, since a map
+// lookup of a name nobody listed is false as well, and a typo would buy a case
+// silence instead of a failure.
 func docsCorpusCheckEveryCaseIsShown(t *testing.T, verdicts map[string]string, claimed map[string]bool) {
 	t.Helper()
 	var orphans []string
@@ -469,8 +476,10 @@ func docsCorpusCheckEveryCaseIsShown(t *testing.T, verdicts map[string]string, c
 		if !strings.Contains(casePath, "/examples/") || claimed[casePath] {
 			continue
 		}
-		if page := docsCorpusPageOf(casePath); page != "" && !docsCorpusCoverage[page] {
-			continue // a case staged for a page the gate does not read yet
+		if page := docsCorpusPageOf(casePath); page != "" {
+			if on, listed := docsCorpusCoverage[page]; listed && !on {
+				continue // a case staged for a page the gate does not read yet
+			}
 		}
 		orphans = append(orphans, casePath)
 	}

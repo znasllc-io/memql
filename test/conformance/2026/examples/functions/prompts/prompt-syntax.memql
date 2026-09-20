@@ -1,6 +1,6 @@
 @level("fast")
 @defaultProvider("chat54Mini")
-@templateFile("condenseConversation.tmpl")
+@templateFile("prompts/condenseConversation.tmpl")
 @description("Summarize older conversation messages into a rolling summary.")
 prompt condenseConversation {
   entries          []object  @required @description("Conversation messages, oldest first.")

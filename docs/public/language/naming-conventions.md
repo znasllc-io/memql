@@ -116,10 +116,11 @@ trait isRetired = row => row.retired == true
 
 Each construct in that block is one the engine loads: every cross-file name
 it uses is imported at the top, every field it writes or projects is one its
-concept declares, and none of its names is already taken by a shipped
-construct -- a second declaration of `userById` or `isActiveRecord` would make
-every bare lookup of that name ambiguous and break the shipped queries that
-resolve it.
+concept declares, and no name it declares is one a SHIPPED construct resolves
+by bare name. That last one is the trap: declaring `isActiveRecord` again
+breaks the shipped filters that apply it, and declaring `userById` again breaks
+the handler of the tool the engine generates for it -- the duplicate's own file
+loads, and the tree around it stops.
 
 Constructs live in one consolidated file per kind per namespace
 (`dsl/<namespace>/queries.memql`, `dsl/<namespace>/mutations.memql`,
