@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // Epic memql#4358, end to end against a real database. Every DB-free test
@@ -50,7 +51,9 @@ func TestAppSessionRowPersistsAndReadsBack(t *testing.T) {
 		"stepId":    "step-4360",
 		"workspace": "/w/4360",
 		"prompt":    "do the thing",
-		"startedAt": "2026-08-22T09:00:00Z",
+		// The run the session's actions are recorded into (epic memql#5396).
+		"sessionRunId": "v1:work:run:rec-4360",
+		"startedAt":    "2026-08-22T09:00:00Z",
 	})
 
 	p := latestPayload(t, ctx, db, conceptName, storedID)
@@ -65,13 +68,45 @@ func TestAppSessionRowPersistsAndReadsBack(t *testing.T) {
 	require.Equal(t, "starting", p["status"], "a fresh session starts in 'starting'")
 	require.Equal(t, "unknown", p["billing"], "billing is unknown until the app reports usage")
 
-	// The transcript flush, which the runner calls on a 2s cadence.
-	runMutation(t, ctx, eng, "appendAppSessionTranscript", map[string]any{
-		"sessionId": sessionID, "transcript": "line one\n", "transcriptBytes": 9, "status": "running",
+	require.Equal(t, "v1:work:run:rec-4360", p["sessionRunId"],
+		"the row must name the run its actions are recorded into: the MCP node is a different "+
+			"replica and this field is how it finds the run to write an `mcp` step into")
+
+	// The progress write, which the runner calls as actions arrive and which
+	// is ALSO the seq allocator the MCP node reads (epic memql#5396). It
+	// replaced appendAppSessionTranscript.
+	runMutation(t, ctx, eng, "recordAppSessionProgress", map[string]any{
+		"sessionId": sessionID, "recordedSteps": 4, "droppedActions": 1, "status": "running",
 	})
 	p = latestPayload(t, ctx, db, conceptName, storedID)
-	require.Equal(t, "line one\n", p["transcript"])
+	require.Equal(t, float64(4), p["recordedSteps"])
+	require.Equal(t, float64(1), p["droppedActions"])
 	require.Equal(t, "running", p["status"])
+
+	// AND A LATER PROGRESS WRITE NAMING ONLY ONE COUNTER MUST NOT RESET THE
+	// OTHER. The mutation omits both defaults for exactly this reason: a
+	// caller advancing the drop count that reset the allocator to zero would
+	// hand the next two steps the same seq.
+	runMutation(t, ctx, eng, "recordAppSessionProgress", map[string]any{
+		"sessionId": sessionID, "droppedActions": 2, "status": "running",
+	})
+	p = latestPayload(t, ctx, db, conceptName, storedID)
+	require.Equal(t, float64(4), p["recordedSteps"],
+		"advancing only droppedActions reset the step allocator, which gives two steps one seq")
+	require.Equal(t, float64(2), p["droppedActions"])
+
+	// AND THE OTHER DIRECTION, which is the one the allocator itself depends
+	// on: ClaimRecordingSlot writes recordedSteps and names droppedActions
+	// nowhere, so if the mutation defaulted the absent one a claim would
+	// erase every gap the drain had already counted -- and a recording that
+	// lost actions would read as complete.
+	runMutation(t, ctx, eng, "recordAppSessionProgress", map[string]any{
+		"sessionId": sessionID, "recordedSteps": 5,
+	})
+	p = latestPayload(t, ctx, db, conceptName, storedID)
+	require.Equal(t, float64(5), p["recordedSteps"])
+	require.Equal(t, float64(2), p["droppedActions"],
+		"claiming a step position erased the drop count, so an incomplete recording reads as complete")
 
 	// The terminal write, carrying the app's REPORTED usage verbatim.
 	runMutation(t, ctx, eng, "endAppSession", map[string]any{
@@ -82,8 +117,10 @@ func TestAppSessionRowPersistsAndReadsBack(t *testing.T) {
 			"inputTokens": 900, "outputTokens": 350, "costUSD": 0.22, "known": true,
 		},
 		"billing":             "subscription",
-		"transcript":          "line one\nline two\n",
-		"transcriptBytes":     19,
+		"transcriptFileId":    "v1:library:file:t-4360",
+		"transcriptTruncated": true,
+		"recordedSteps":       5,
+		"droppedActions":      2,
 		"producedArtifactIds": []string{"artifact-a"},
 		"appSessionRef":       "cc-1",
 		"endedAt":             "2026-08-22T10:00:00Z",
@@ -91,10 +128,32 @@ func TestAppSessionRowPersistsAndReadsBack(t *testing.T) {
 	p = latestPayload(t, ctx, db, conceptName, storedID)
 	require.Equal(t, "ended", p["status"])
 	require.Equal(t, "subscription", p["billing"])
+	require.Equal(t, "v1:library:file:t-4360", p["transcriptFileId"],
+		"the prose is one Library file and the row names it; the transcript string is retired")
+	require.Equal(t, true, p["transcriptTruncated"])
+	require.Equal(t, float64(5), p["recordedSteps"])
 	usage, ok := p["usage"].(map[string]any)
 	require.True(t, ok, "usage must round-trip as an object, got %T", p["usage"])
 	require.Equal(t, float64(900), usage["inputTokens"])
 	require.Equal(t, true, usage["known"])
+
+	// THE SHAPED READ POPULATES THE BUNDLE AS WELL AS THE OUTPUT ROWS, and
+	// that is measured here rather than assumed because two readers of this
+	// one query take different halves: component/mcp's next_task walks
+	// res.Bundle.Nodes and component/worker's ClaimRecordingSlot does too,
+	// while integrations/work reads OutputPayload. If a shaped read ever
+	// nilled the bundle, the allocator would find no session and every
+	// recorded step would fall back to a local counter -- silently, and with
+	// the two writers' positions colliding again.
+	// QuoteString, never %q: Go's escape grammar emits \x00, \a, \v and \xNN,
+	// none of which the MemQL lexer implements, so one control byte in the
+	// value makes the whole statement unparseable and the read silently
+	// does not happen (memql#3035 / #3192 / #3611).
+	shaped, err := eng.Execute(ctx, fmt.Sprintf("query appSessionById(sessionId:%s)",
+		langparser.QuoteString(sessionID)))
+	require.NoError(t, err)
+	require.NotNil(t, shaped.Bundle, "a shaped read nilled the bundle; the seq allocator reads it")
+	require.NotEmpty(t, shaped.Bundle.Nodes, "a shaped read returned no bundle nodes")
 
 	// And the reads the portal and the planner call actually find it.
 	got := queryIds(t, ctx, eng, fmt.Sprintf("appSessionById(sessionId:%q)", sessionID))
@@ -114,7 +173,7 @@ func TestAppSessionRowPersistsAndReadsBack(t *testing.T) {
 
 // TestAppSessionReadsAreCallerScoped: the queries filter on actor.userId, so
 // another user's session must be invisible even by exact id. A leak here
-// would expose a transcript of somebody's machine.
+// would expose what an agent did on somebody's machine.
 func TestAppSessionReadsAreCallerScoped(t *testing.T) {
 	eng, _, _ := sharedReadMergeEngine(t)
 

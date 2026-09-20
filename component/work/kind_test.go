@@ -125,3 +125,45 @@ func contains(h, n string) bool {
 	}
 	return false
 }
+
+// TestDeriveKind_AppSessionActions: the six step types an app session's
+// recording writes (epic memql#5396, design D2).
+//
+// THE SPLIT IS THE POINT, and it is what epic C rests on. A shell command, a
+// file read or write, a fetch and an MCP call back into MemQL all reach NO
+// prompt -- they are deterministic, which is exactly why a recurring sequence
+// of them can later replay without a model. `app_answer` is the one that
+// cannot: it is the app's own structured answer, so the intelligence IS the
+// step, and recording it as deterministic would tell a later lift that the
+// cheapest part of the session was the expensive one.
+//
+// It also catches the near-miss that would otherwise be silent. DeriveKind
+// errors on a type it does not know, and it is the ONLY thing in the tree that
+// validates a stepType at all -- nothing on the write path does -- so a
+// recorder spelling `fsWrite` or `app-answer` would write rows nobody rejects
+// and this function would start failing on them later, in a caller that has
+// not been wired yet.
+func TestDeriveKind_AppSessionActions(t *testing.T) {
+	r := reg()
+	for _, tc := range []struct {
+		stepType string
+		want     Kind
+	}{
+		{"exec", KindDeterministic},
+		{"fs_write", KindDeterministic},
+		{"fs_read", KindDeterministic},
+		{"fetch", KindDeterministic},
+		{"mcp", KindDeterministic},
+		{"app_answer", KindReasoning},
+	} {
+		got, err := DeriveKind(tc.stepType, "", r)
+		if err != nil {
+			t.Errorf("%s: %v -- an app session records this type, and DeriveKind is the one "+
+				"place a stepType is checked at all", tc.stepType, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("DeriveKind(%q) = %q, want %q", tc.stepType, got, tc.want)
+		}
+	}
+}

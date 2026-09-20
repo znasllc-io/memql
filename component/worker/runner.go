@@ -18,15 +18,20 @@ import (
 
 // Defaults for a run whose delegation policy says nothing.
 const (
-	// DefaultTranscriptBytes bounds what the ROW keeps. The full
-	// transcript is pushed to the Library at end; the row is a
-	// readable summary, not an archive.
-	DefaultTranscriptBytes = 256 * 1024
-	// transcriptFlushInterval is how often the accumulated transcript
-	// is written. A chatty run emits thousands of chunks a minute and
-	// a row-write each would saturate the engine to deliver text
-	// nobody reads between flushes.
-	transcriptFlushInterval = 2 * time.Second
+	// DefaultTranscriptBytes bounds the session's PROSE, which since epic
+	// memql#5396 is one content-addressed Library file rather than a field on
+	// the row. It rose from 256 KiB with the destination: 256 KiB was a bound
+	// on what a ROW should carry, and a file has no such reason to be small.
+	//
+	// It is also the limit the cockpit is told on AppSessionStart, so raising
+	// it means a chatty run streams more -- which is the intent. The prose
+	// now has somewhere to live.
+	DefaultTranscriptBytes = MaxTranscriptFileBytes
+	// recordingPublishInterval is how often the recording's counters are
+	// written when no action has arrived. A chatty run emits thousands of
+	// stdout chunks a minute and a row-write each would saturate the engine
+	// to deliver a count nobody reads between ticks.
+	recordingPublishInterval = 2 * time.Second
 	// transcriptTruncationNotice is appended once the bound is hit.
 	// Marked rather than silent: a transcript that stops without
 	// saying why reads as a run that stopped.
@@ -41,6 +46,15 @@ type SessionRunner struct {
 	Auditor Auditor
 	// MCPEndpoint is the streamable-HTTP MCP URL handed to the app.
 	MCPEndpoint string
+	// Recorder turns the session's action events into rows of the work spine
+	// (epic memql#5396). NIL IS A WORKING SESSION: a node without it runs the
+	// session and records nothing, which is what it did before the recording
+	// existed.
+	Recorder SessionRecorder
+	// Contents stores the file contents an action read or wrote, and the
+	// session's prose, as content-addressed Library files. Nil records the
+	// actions and omits the bytes, saying so on each observation.
+	Contents ContentStore
 	// Clock is injectable for tests.
 	Clock func() time.Time
 }
@@ -70,6 +84,12 @@ type RunSpec struct {
 	// as asking and getting nothing back -- only a run that asked can be
 	// disappointed by a session that ends with no structured answer.
 	ResponseSchema string
+	// RecordingRunId is the v1:work:run the session's actions are recorded
+	// into -- the subrun epic memql#5391's delegate opened and stamped on the
+	// delegating step. EMPTY asks the recorder to open one, which is the
+	// delegated-task path: nothing handed a step over, so nothing opened a
+	// run for it.
+	RecordingRunId string
 	// Level is the call's LEVEL, one of core/airoute's closed four (epic
 	// memql#5391, design D8). It rides AppSessionStart and THE COCKPIT owns
 	// the translation into the app's own knobs. Empty means no level was
@@ -89,7 +109,15 @@ type RunResult struct {
 	ProducedArtifactIds []string
 	Transcript          string
 	TranscriptTruncated bool
-	ErrorMessage        string
+	// TranscriptFileId is the Library file the prose went to, empty when the
+	// write failed or nothing stores content on this node.
+	TranscriptFileId string
+	// RecordedActions and DroppedActions are the recording's own accounting.
+	// A caller reads them to say whether what it is about to lift is the
+	// whole session.
+	RecordedActions int
+	DroppedActions  int
+	ErrorMessage    string
 	// Result is the harness's structured final answer as raw JSON, when it
 	// produced one. Carried whatever the exit code says: a harness can
 	// answer the schema and still fail, and dropping the answer because the
@@ -143,6 +171,23 @@ func (r *SessionRunner) Run(ctx context.Context, w *Worker, spec RunSpec, progre
 	if !IsValidAppSessionKind(spec.Kind) {
 		return RunResult{}, fmt.Errorf("worker: unknown app session kind %q", spec.Kind)
 	}
+	// AN UNRESOLVABLE OWNER IS REFUSED BEFORE THE SESSION STARTS (epic
+	// memql#5396, task memql#5398), which is the workbench's
+	// workspace_owner_unresolved rule applied here (memql#4354).
+	//
+	// Every row this run writes -- the session, its steps, its observations,
+	// the Library files holding what it read and wrote -- is owner-tiered and
+	// stamps ownerUserId from the actor. Under a blank one they are written
+	// and readable by NOBODY, including the operator answering "what did this
+	// agent do on my machine". CockpitAppExecutor already refuses this, and
+	// so does the delegate; the check is here as well because this is the
+	// last frame before the credential is minted and the row is written, and
+	// a third caller arriving later would otherwise inherit the hole.
+	if strings.TrimSpace(spec.OwnerUserId) == "" {
+		return RunResult{}, fmt.Errorf(
+			"worker: workspace_owner_unresolved: an app session with no owner cannot run; every row it " +
+				"would write is owner-tiered and a row written under a blank actor is readable by nobody")
+	}
 
 	// The router matched on the `app:` label; RunsApp is the same test
 	// asked of this worker directly. Re-checking is not redundant: the
@@ -173,9 +218,16 @@ func (r *SessionRunner) Run(ctx context.Context, w *Worker, spec RunSpec, progre
 		return RunResult{}, fmt.Errorf("worker: mint back-channel credential: %w", err)
 	}
 
+	// Opened BEFORE the session row so the row can name the run it records
+	// into: the MCP node reads that field off the row to write an `mcp` step
+	// into the same run, and a row written without it would leave an app's
+	// own calls back into MemQL unrecorded for the life of the session.
+	recording := newSessionRecording(ctx, r, spec)
+
 	startedAt := r.now()
 	row := AppSessionRow{
 		ID:                  spec.SessionId,
+		SessionRunId:        recording.RunId(),
 		OwnerUserId:         spec.OwnerUserId,
 		WorkerId:            w.RegistrationId,
 		App:                 spec.App,
@@ -260,26 +312,36 @@ func (r *SessionRunner) Run(ctx context.Context, w *Worker, spec RunSpec, progre
 	drained := make(chan struct{})
 	go func() {
 		defer close(drained)
-		flush := time.NewTicker(transcriptFlushInterval)
+		flush := time.NewTicker(recordingPublishInterval)
 		defer flush.Stop()
 		for {
 			select {
 			case chunk, ok := <-handle.Chunks():
 				if !ok {
-					r.flushTranscript(ctx, spec.SessionId, collector, AppSessionStatusRunning)
+					recording.Publish(ctx, r.Store, AppSessionStatusRunning)
 					return
 				}
-				collector.append(chunk)
+				// THE STREAM DECIDES WHERE THE CHUNK GOES. An `event` is a
+				// completed action the cockpit normalized and becomes rows;
+				// stdout and stderr are the model's prose and become the
+				// transcript. Flattening both into one string, which is what
+				// this did, is what made a session a black box.
+				if chunk.Stream == AppSessionStreamEvent {
+					recording.Observe(ctx, chunk)
+					recording.Publish(ctx, r.Store, AppSessionStatusRunning)
+				} else {
+					collector.append(chunk)
+				}
 				if progress != nil {
 					progress(chunk)
 				}
 			case <-flush.C:
-				r.flushTranscript(ctx, spec.SessionId, collector, AppSessionStatusRunning)
+				recording.Publish(ctx, r.Store, AppSessionStatusRunning)
 			case <-ctx.Done():
-				// Flush what arrived before giving up, so a cancelled run
-				// still leaves the transcript it produced. That output is
-				// often the reason somebody cancelled.
-				r.flushTranscript(ctx, spec.SessionId, collector, AppSessionStatusRunning)
+				// Publish what was recorded before giving up, so a cancelled
+				// run still says how far it got. That count is often the
+				// reason somebody cancelled.
+				recording.Publish(ctx, r.Store, AppSessionStatusRunning)
 				return
 			}
 		}
@@ -313,7 +375,7 @@ func (r *SessionRunner) Run(ctx context.Context, w *Worker, spec RunSpec, progre
 		errMessage = fmt.Sprintf("app exited %d", outcome.ExitCode)
 	}
 
-	transcript, bytesSeen, truncated := collector.snapshot()
+	transcript, _, truncated := collector.snapshot()
 	result := RunResult{
 		SessionId:           spec.SessionId,
 		WorkerId:            w.RegistrationId,
@@ -330,7 +392,15 @@ func (r *SessionRunner) Run(ctx context.Context, w *Worker, spec RunSpec, progre
 		Model:               outcome.Model,
 		Effort:              outcome.Effort,
 	}
-	row.TranscriptBytes = bytesSeen
+	// The prose goes to the Library as ONE file per session and the row names
+	// it (design D5). Stored before finishRow so the terminal row carries the
+	// pointer: a row that said "ended" and named no transcript would read as
+	// a session that produced no output.
+	row.TranscriptFileId = recording.StoreTranscript(ctx, transcript, truncated, result.Model, result.Effort)
+	row.TranscriptTruncated = truncated
+	row.RecordedSteps, row.DroppedActions = recording.Close(ctx, result, row.TranscriptFileId)
+	result.TranscriptFileId = row.TranscriptFileId
+	result.RecordedActions, result.DroppedActions = row.RecordedSteps, row.DroppedActions
 	r.finishRow(ctx, row, result, spec, w)
 	r.stampProduced(ctx, spec, result)
 	if waitErr != nil {
@@ -443,7 +513,6 @@ func (r *SessionRunner) finishRow(ctx context.Context, row AppSessionRow, result
 	row.ExitCode = result.ExitCode
 	row.Usage = result.Usage
 	row.Billing = result.Billing
-	row.Transcript = result.Transcript
 	row.TranscriptTruncated = result.TranscriptTruncated
 	row.ProducedArtifactIds = result.ProducedArtifactIds
 	// Written only when the END carried one. A session that ended with
@@ -453,9 +522,6 @@ func (r *SessionRunner) finishRow(ctx context.Context, row AppSessionRow, result
 	row.AppSessionRef = result.AppSessionRef
 	row.ErrorMessage = result.ErrorMessage
 	row.EndedAt = r.now()
-	if row.TranscriptBytes == 0 {
-		row.TranscriptBytes = len(result.Transcript)
-	}
 
 	if r.Store != nil {
 		// A detached context: the caller's may already be cancelled
@@ -538,23 +604,6 @@ func (r *SessionRunner) startRenewal(ctx context.Context, handle *AppSessionHand
 	return func() { once.Do(func() { close(stop) }) }
 }
 
-func (r *SessionRunner) flushTranscript(ctx context.Context, sessionId string, c *transcriptCollector, status string) {
-	if r.Store == nil || !c.dirty() {
-		return
-	}
-	text, bytesSeen, truncated := c.snapshot()
-	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-	defer cancel()
-	if err := r.Store.AppendAppSessionTranscript(writeCtx, sessionId, text, bytesSeen, truncated, status); err != nil {
-		if r.Logger != nil {
-			r.Logger.Warn("worker: flush app session transcript failed",
-				"session_id", sessionId, "error", err)
-		}
-		return
-	}
-	c.markClean()
-}
-
 func (r *SessionRunner) audit(ctx context.Context, action string, spec RunSpec, w *Worker, detail map[string]any) {
 	if r.Auditor == nil {
 		return
@@ -580,21 +629,23 @@ func (r *SessionRunner) audit(ctx context.Context, action string, spec RunSpec, 
 	})
 }
 
-// transcriptCollector accumulates chunk output under a byte bound.
+// transcriptCollector accumulates the session's PROSE under a byte bound.
+//
+// It sees stdout and stderr only. An `event` chunk is a completed action and
+// goes to the recording instead -- the split this epic exists for, because
+// flattening both into one string is what made a session a black box.
 type transcriptCollector struct {
 	mu        sync.Mutex
 	buf       strings.Builder
 	seen      int
 	max       int64
 	truncated bool
-	changed   bool
 }
 
 func (c *transcriptCollector) append(chunk AppSessionChunk) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.seen += len(chunk.Data)
-	c.changed = true
 	if c.truncated {
 		return
 	}
@@ -617,16 +668,4 @@ func (c *transcriptCollector) snapshot() (string, int, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.buf.String(), c.seen, c.truncated
-}
-
-func (c *transcriptCollector) dirty() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.changed
-}
-
-func (c *transcriptCollector) markClean() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.changed = false
 }

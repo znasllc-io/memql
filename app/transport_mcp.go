@@ -56,11 +56,22 @@ func (a *App) transportMCP() {
 	// tools/list no longer re-parses the whole automation tree ("automations
 	// loaded count=36") on every `initialize`.
 	sharedRunner := newMCPAutomationRunner(a)
+	// THE RECORDING (epic memql#5396, task memql#5399). Shared for the same
+	// reason the automation runner is: it holds no per-session state -- the
+	// session, its owner and its recording run all come off the row the
+	// bearer's own credential names. Without it an app's calls back into
+	// MemQL are the one hole in the account of what it did, because the
+	// harness sees an opaque MCP result and the replica running the session
+	// never sees the call at all.
+	sharedRecorder := newMCPAppSessionRecorder(a)
 	newServer := func(c mcp.Config) *mcp.Server {
 		s := mcp.NewServer(a.Logger, "memql-mcp", a.Version, a.engine, c)
 		// Phase 4 (#1534): wire the automation runner (run_automation + @mcp
 		// automations) over the automation Loader + a dedicated manual Executor.
 		s.SetAutomationRunner(sharedRunner)
+		if sharedRecorder != nil {
+			s.SetAppSessionRecorder(sharedRecorder)
+		}
 		return s
 	}
 

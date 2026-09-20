@@ -552,6 +552,7 @@ var BoundConcepts = map[string]string{
 	"libraryArtifactsByLabel":                          "v1:library:artifact",
 	"libraryArtifactsByLens":                           "v1:library:artifact",
 	"libraryFileById":                                  "v1:library:file",
+	"libraryFileBySha256":                              "v1:library:file",
 	"libraryFileByUploadedFrom":                        "v1:library:file",
 	"libraryFileChunksForFile":                         "v1:library:fileChunk",
 	"libraryFileSizesForOwner":                         "v1:library:file",

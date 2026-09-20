@@ -35,7 +35,21 @@ const observationKindToolResult = "tool_result"
 // is recorded IN THE ROW (`data.argsTruncated`) rather than done silently,
 // because the transcript reader reproduces calls from this and a silently
 // shortened argument reproduces a DIFFERENT call.
-const maxObservationArgsBytes = 8 << 10
+//
+// IT WAS 8 KiB AND IT IS NOW A HARD CEILING (epic memql#5396, design D5).
+// 8 KiB was a bound on how much of a call to keep; the recording's rule is
+// that arguments are kept WHOLE, because an action is only reproducible from
+// its arguments and the lift that reads these is the thing that reproduces it.
+// integrations/planner's authoring capture already rendered a truncated
+// argument set as an EMPTY OBJECT, so the largest calls -- the ones most worth
+// having -- lost their arguments silently.
+//
+// What is left is a backstop against the pathological case, and a large
+// caller-supplied argument spills to a content-addressed Library file whose id
+// the observation carries as `argsRef`. 256 KiB is sized above the largest
+// thing a coding agent plausibly passes inline -- a whole source file in a
+// write call -- so the ceiling is reached by accidents rather than by work.
+const maxObservationArgsBytes = 256 << 10
 
 // RecordToolInvocation writes one tool_result observation.
 //
