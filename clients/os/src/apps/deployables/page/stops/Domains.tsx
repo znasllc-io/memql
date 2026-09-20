@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Check, Copy, Globe } from "lucide-react";
 
 import { Button, Caption, Field, FormRow, Input, Notice, Select, Subhead } from "../../../../kit";
+import { AddButton } from "../../../../kit/AddButton";
+import { RecordList, RecordRow } from "../../../../kit/RecordRow";
 import { formatFreshness } from "../../../../kit/format";
 import { useNow } from "../../../../kit/useNow";
 import { LiveList } from "../../../../live/LiveList";
@@ -30,19 +32,20 @@ import { JourneyTrail } from "../../../../kit/JourneyTrail";
 import { useDomainDNSGuidance } from "../../useDomainDNSGuidance";
 import { InfoDetail } from "../../../../kit/InfoDetail";
 import { useCustomDomains } from "../../useCustomDomains";
-import type { SiteRow } from "../../rows";
+import { liveUrlFor, type SiteRow } from "../../rows";
+import { siteStateWord } from "../../words";
 
 // Domain setup stays in the Deployables page. Navigation reveals one task at
 // a time; the live reconciliation feed alone determines completion.
 
-export function DomainsContent({ site }: { site: SiteRow; domain: string }) {
+/** The bindings on ONE deployable, projected and narrowed in one pass. */
+function useSiteDomains(site: SiteRow) {
   const { source: collection } = useCustomDomains();
-
   // PROJECT, THEN NARROW, in one pass -- the collection holds RAW wire rows,
   // so every predicate has to run on a `domainFromRow` result. The site filter
   // lives here rather than in the read: `customDomainsAll` takes no arguments,
   // so selecting another deployable changes no subscription.
-  const view = useLiveView<Record<string, unknown>, DomainRow>(
+  return useLiveView<Record<string, unknown>, DomainRow>(
     collection,
     `domains:${site.id}`,
     (rows) =>
@@ -52,57 +55,193 @@ export function DomainsContent({ site }: { site: SiteRow; domain: string }) {
           .filter((d) => d.id !== "" && d.siteId === site.id),
       ),
   );
+}
+
+/**
+ * THE DOMAINS OF A DEPLOYABLE, AS A LIST -- every name it answers on.
+ *
+ * It used to be two different things. The address the deployable actually
+ * answers at was a bare underlined link at the top of the stop, and "Domains"
+ * beneath it listed only the CUSTOM ones -- so a seeded deployable, which has
+ * an address and can have no custom domain, read "No custom domains" with its
+ * own domain sitting a few lines above. And each binding drew itself as a whole
+ * card in the list: one domain filled the panel, and the list and its detail
+ * shared a scroll column (DESIGN.md rule 11).
+ *
+ * It is one list now, on the kit's `RecordRow` -- the row the Deployables and
+ * Machines lists draw. The cluster address is ALWAYS its first row, because a
+ * deployable always has one; a custom domain is a row that OPENS its setup.
+ *
+ * A SEEDED deployable (MemQL OS, the VS Code site) shows its built-in address
+ * FIXED -- that row is the site's own, re-seeded at every boot -- and still
+ * offers Add, because a binding is a separate record the server accepts for a
+ * seeded site like any other. `editable` is about the reader, not the site:
+ * without the `domains` part the Add control is ABSENT rather than disabled,
+ * which is rule 12's grammar.
+ */
+export function DomainsContent({ site, bindings, editable, onOpenDomain, onAdd, addressFacts }: {
+  site: SiteRow;
+  domain: string;
+  /** Quiet facts for the cluster address row -- who the deployable is for. */
+  addressFacts?: ReactNode;
+  /** Does this reader hold the `domains` part? Only then is the bindings feed
+   *  mounted at all: the concept is clusterOwner tier, and subscribing for
+   *  somebody who may not read it is a refusal waiting to be rendered. */
+  bindings: boolean;
+  /** May this reader add a binding? Seeded or not makes no difference. */
+  editable: boolean;
+  onOpenDomain: (domainId: string) => void;
+  onAdd: () => void;
+}) {
+  const url = liveUrlFor(site.hostname);
+  const serving = site.status === "live";
 
   return (
-    <section className="os-report-part" aria-label={`Domains for ${site.hostname || site.id}`}>
-      <Subhead>Domains</Subhead>
-      <Caption>
-        Use your own domain for this app. Its cluster address{" "}
-        <code className="os-mono">{site.hostname || "--"}</code> remains available.
-      </Caption>
-      {/* WHO THIS IS FOR, SAID ONCE. The concept is clusterOwner tier, so on a
-          cluster where admin and cluster owner are different people an admin
-          reads no bindings at all -- the filter narrows, it does not error, so
-          without this line an empty list would be a false statement rather than
-          an empty one. The panel deliberately does not detect which reader it
-          has: it says what is true for both, and anyone who tries anyway gets
-          the server's own sentence beside the control they used. */}
+    <section className="os-record-section" aria-label={`Domains for ${site.hostname || site.id}`}>
+      <div className="os-record-heading">
+        <Subhead>Domains</Subhead>
+        {editable ? <AddButton label="Add a domain" onClick={onAdd} /> : null}
+      </div>
 
-      {/* WHAT THE DOMAIN'S OWN STATUS DOES NOT SAY. A binding reaches `live`
-          when ITS setup is finished -- both DNS records check out and the
-          certificate is Ready -- and that is a fact about the domain. Whether a
-          visitor gets anything is a fact about the DEPLOYABLE, decided by the
-          status gate in component/edge/handler.go before any file is looked at.
-          The two are independent, and a panel that showed only the first would
-          say "serving" about a hostname the internet 404s.
+      <NotServing site={site} />
 
-          NAMED BY WHAT SERVES, not by listing what does not -- the same
-          inversion the edge's own switch carries. `live` is the one status that
-          serves, so every other value, including any added later, gets this
-          notice without anybody remembering to come back for it. */}
-      {site.status === "live" ? null : (
-        <Notice
-          tone="warn"
-          sentence={`This deployable is ${site.status || "not live"}, so nothing is served at any of its domains.`}
-          next="Go live to serve this app at its verified domains."
-        />
-      )}
+      <RecordList label={`Domains of ${site.hostname || site.id}`}>
+        {/* THE CLUSTER ADDRESS, first and always. It is not a binding and
+            nothing can remove it, so it is a plain line rather than a row that
+            opens: the address is CONTENT, and it is the link -- the one thing
+            on the page whose text is the thing it opens. */}
+        <RecordRow
+          icon={<Globe size={18} aria-hidden />}
+          name={url === "" ? <code className="os-mono">{site.hostname || "--"}</code> : <a className="os-mono" href={url} target="_blank" rel="noreferrer noopener">{site.hostname}</a>}
+          secondary={site.systemOwned ? "Cluster address \u00b7 built in" : "Cluster address"}
+          state={siteStateWord(site)}
+          tone={serving ? "accent" : "muted"}
+          current={serving}
+        >
+          {addressFacts}
+        </RecordRow>
+        {bindings ? <BoundDomains site={site} onOpenDomain={onOpenDomain} /> : null}
+      </RecordList>
 
-      <AddDomain siteId={site.id} />
-
-      {/* KEYED ON THE SITE ID so that changing deployable RE-BASELINES rather
-          than animating. Revealing rows the browser already had is not the
-          cluster sending them, and the arrival cue must only fire for news. */}
-      <LiveList<DomainRow>
-        key={`domains:${site.id}`}
-        source={view}
-        label={`Domains bound to ${site.hostname || site.id}`}
-        emptyText="No custom domains. Add a hostname to get its DNS records."
-        rowId={(d) => d.id}
-        fingerprint={domainFingerprint}
-        renderRow={(d) => <DomainCard key={d.id} domain={d} site={site} />}
-      />
+      {/* SAID ONCE (DESIGN.md rule 7), and only what is true for this reader:
+          what is fixed, and what they may do about it. */}
+      {site.systemOwned || editable ? (
+        <Caption>
+          {site.systemOwned
+            ? editable
+              ? "This address is built into the cluster and cannot be changed. You can add your own domains alongside it."
+              : "This address is built into the cluster and cannot be changed."
+            : "Add your own domain for this app. Its cluster address stays available alongside."}
+        </Caption>
+      ) : null}
     </section>
+  );
+}
+
+/**
+ * WHAT THE DOMAIN'S OWN STATUS DOES NOT SAY. A binding reaches `live` when ITS
+ * setup is finished -- both DNS records check out and the certificate is Ready
+ * -- and that is a fact about the domain. Whether a visitor gets anything is a
+ * fact about the DEPLOYABLE, decided by the status gate in
+ * component/edge/handler.go before any file is looked at. The two are
+ * independent, and a surface that showed only the first would say "serving"
+ * about a hostname the internet 404s.
+ *
+ * NAMED BY WHAT SERVES, not by listing what does not -- the same inversion the
+ * edge's own switch carries. `live` is the one status that serves, so every
+ * other value, including any added later, gets this notice without anybody
+ * remembering to come back for it.
+ *
+ * SAID ON THE LIST AND ON A BINDING'S OWN PAGE. The page is where somebody
+ * reads "domain ready", and that is exactly where it must not be mistaken for
+ * "serving".
+ */
+function NotServing({ site }: { site: SiteRow }) {
+  if (site.status === "live") return null;
+  return (
+    <Notice
+      tone="warn"
+      sentence={`This deployable is ${site.status || "not live"}, so nothing is served at any of its domains.`}
+      next="Go live to serve this app at its verified domains."
+    />
+  );
+}
+
+/** The custom bindings, mounted only for a reader who may read them. */
+function BoundDomains({ site, onOpenDomain }: { site: SiteRow; onOpenDomain: (domainId: string) => void }) {
+  const view = useSiteDomains(site);
+  // KEYED ON THE SITE ID so that changing deployable RE-BASELINES rather than
+  // animating. Revealing rows the browser already had is not the cluster
+  // sending them, and the arrival cue must only fire for news.
+  return (
+    <LiveList<DomainRow>
+      key={`domains:${site.id}`}
+      source={view}
+      label={`Domains bound to ${site.hostname || site.id}`}
+      emptyText=""
+      rowId={(d) => d.id}
+      fingerprint={domainFingerprint}
+      renderRow={(d, tick) => <DomainListRow key={d.id} domain={d} site={site} changed={tick !== null} onOpen={() => onOpenDomain(d.id)} />}
+    />
+  );
+}
+
+/** One binding, as a row. The setup it opens is `DomainDetail`. */
+function DomainListRow({ domain: d, site, changed, onOpen }: { domain: DomainRow; site: SiteRow; changed: boolean; onOpen: () => void }) {
+  const step = domainSetupStep(d);
+  const total = DOMAIN_SETUP_STEPS.length;
+  // A domain that finished its own setup still serves nothing on a deployable
+  // that is not live -- the same independence the notice above explains.
+  const serving = d.status === "live" && site.status === "live";
+  const where = isRemovalPath(d.status)
+    ? "Being removed"
+    : d.status === "live"
+      ? "Custom domain \u00b7 set up"
+      : `Custom domain \u00b7 step ${Math.min(step + 1, total)} of ${total}, ${DOMAIN_SETUP_STEPS[Math.min(step, total - 1)]}`;
+  return (
+    <RecordRow
+      icon={<Globe size={18} aria-hidden />}
+      name={d.hostname}
+      secondary={where}
+      state={statusLabel(d.status)}
+      tone={serving ? "accent" : "muted"}
+      stateExtra={changed ? <span className="os-livelist-tick">updated</span> : null}
+      current={serving}
+      dim={isRemovalPath(d.status)}
+      label={`Open ${d.hostname}, ${statusLabel(d.status)}`}
+      onOpen={onOpen}
+    />
+  );
+}
+
+/**
+ * ONE BINDING'S SETUP, as the detail its row opens.
+ *
+ * The card is unchanged -- the stepped rail, the records to create, what the
+ * sweep last saw, removal -- it simply has a page of its own now instead of
+ * being a row in the list it was chosen from.
+ */
+export function DomainDetail({ site, domainId }: { site: SiteRow; domainId: string }) {
+  const view = useSiteDomains(site);
+  // A SUBSCRIPTION, not a read of `view.snapshot` in render: the binding's
+  // status changes under the person watching it, and a plain read would show
+  // the step it was on when the page opened.
+  const subscribe = useCallback((listener: () => void) => view?.subscribe(listener) ?? (() => {}), [view]);
+  const snapshot = useSyncExternalStore(subscribe, () => view?.snapshot ?? null, () => null);
+  const found = (snapshot?.rows ?? []).find((d) => d.id === domainId);
+  if (found) return <><NotServing site={site} /><DomainCard domain={found} site={site} /></>;
+  // Absent while the feed is still arriving is "not read yet", not "removed".
+  if (snapshot === null || snapshot.state !== "live") return <Caption>Reading this domain...</Caption>;
+  return <Notice tone="warn" sentence="This domain is not bound to this deployable any more." next="It may have been removed since this page opened." />;
+}
+
+/** Adding a binding, as the page the list's Add control opens. */
+export function AddDomainView({ siteId }: { siteId: string }) {
+  return (
+    <>
+      <Caption>Bind a domain you own. You will be given the DNS records to create, and the cluster checks them on its own every couple of minutes.</Caption>
+      <AddDomain siteId={siteId} />
+    </>
   );
 }
 

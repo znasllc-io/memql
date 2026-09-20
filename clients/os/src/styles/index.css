@@ -1606,6 +1606,18 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 .os-record-status::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .os-record-status[data-tone="accent"] { color: var(--os-accent); }
 .os-record-chevron { color: var(--os-muted); }
+/* A list that is a SECTION of a page. It keeps `.os-report-part`'s spacing and
+ * none of its top rule: that rule separates a part from what stands above it,
+ * and a list that opens a page has only the title above it -- where the rule
+ * read as a divider under the heading, which is the look this shell is rid of. */
+.os-record-section { display: grid; gap: 6px; }
+/* A list's own heading line: what it is a list OF, and its one Add control on
+ * the trailing edge -- the same place the Head puts it on a section's list. */
+.os-record-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: var(--os-control-h); }
+.os-record-heading .os-subhead { margin: 0; }
+/* A name that is itself a link -- the cluster address -- reads as the name it
+ * is, in ink, and says it is a link with its underline. */
+.os-record-identity .os-row-name a { color: var(--os-ink); }
 @container os-record-list (max-width: 600px) {
   .os-row.os-record-row { grid-template-columns: 22px minmax(0, 1fr) auto 12px; gap: 10px; }
   .os-record-summary { grid-column: 2; grid-row: 2; display: flex; flex-wrap: wrap; column-gap: 12px; }

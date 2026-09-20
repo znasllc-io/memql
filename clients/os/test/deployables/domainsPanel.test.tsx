@@ -87,6 +87,18 @@ async function openWhereItLives(): Promise<void> {
 }
 
 /**
+ * Matches a binding's row by its accessible name, "Open <hostname>, <state>".
+ *
+ * A PLAIN STRING COMPARISON, not a RegExp built from the hostname. A hostname
+ * is full of dots, and a pattern assembled from one either matches more than
+ * was meant or needs an escaper that has to be right about every
+ * metacharacter -- for a lookup that only ever wanted "starts with".
+ */
+function opens(hostname: string): (name: string) => boolean {
+  return (name) => name.startsWith(`Open ${hostname},`);
+}
+
+/**
  * The card for one binding, found by its HEADING.
  *
  * A hostname appears TWICE on a card -- as the row's title, and as the Name of
@@ -99,9 +111,32 @@ function card(hostname: string): HTMLElement {
   return screen.getByRole("heading", { name: hostname }).closest("article") as HTMLElement;
 }
 
+/**
+ * A binding is a ROW in the domains list now, and its card is the page that
+ * row opens -- so reaching the card means opening the row, which is what a
+ * person does too. Already on the card's page: nothing to open.
+ */
 async function findCard(hostname: string): Promise<HTMLElement> {
+  if (screen.queryByRole("heading", { name: hostname }) === null) {
+    await click(await screen.findByRole("button", { name: opens(hostname) }));
+  }
   await screen.findByRole("heading", { name: hostname });
   return card(hostname);
+}
+
+/** The row for one binding, in the domains list. */
+async function findRow(hostname: string): Promise<HTMLElement> {
+  return screen.findByRole("button", { name: opens(hostname) });
+}
+
+/** Back from a binding's page (or the add form) to the domains list. */
+async function backToDomains(): Promise<void> {
+  await click(screen.getByRole("button", { name: "Back to Addresses and client" }));
+}
+
+/** The list's Add control opens the add form as its own page. */
+async function openAddDomain(): Promise<void> {
+  await click(await screen.findByRole("button", { name: "Add a domain" }));
 }
 
 beforeEach(() => {
@@ -124,11 +159,99 @@ describe("who sees the panel", () => {
   // PRESENTATION, NEVER THE BOUNDARY. The concept's clusterOwner tier and the
   // three Go guards are the enforcement; hiding the content from a reader who
   // cannot use it is a courtesy.
-  it("renders nowhere for a reader who is not an operator", async () => {
-    const connection = fakeConnection({ sites: [SHOP], domains: [domainRow({ id: "cd-1" })] });
+  // A READER SEES THE ADDRESS, AND ONLY THE ADDRESS. The cluster address was
+  // always shown to everybody -- it stood alone above the panel -- so it is in
+  // the list for everybody. What the `domains` part decides is the BINDINGS:
+  // the concept is clusterOwner tier, so the feed is not even mounted for
+  // somebody who may not read it, and no Add control is offered.
+  it("shows a reader the cluster address, and no binding and no Add control", async () => {
+    const connection = fakeConnection({ sites: [SHOP], domains: [domainRow({ id: "cd-1", hostname: "www.acme.com" })] });
     await openShop(connection, { role: "reader" });
 
-    expect(screen.queryByText("Domains")).toBeNull();
+    const list = await screen.findByRole("region", { name: /^Domains for / });
+    expect(within(list).getByText("shop.memql.example.com")).toBeTruthy();
+    expect(within(list).getByText(/Cluster address/)).toBeTruthy();
+    expect(screen.queryByText("www.acme.com")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add a domain" })).toBeNull();
+  });
+});
+
+// ===========================================================================
+// Every name the deployable answers on, as one list
+// ===========================================================================
+
+describe("the domains, as a list", () => {
+  // THE REGRESSION THIS PINS. The address a deployable answers at stood alone
+  // as a bare link while "Domains" listed only the custom ones, so a deployable
+  // with no binding read "No custom domains" with its own domain a few lines up.
+  it("always lists the cluster address, so a deployable is never shown with no domain", async () => {
+    const connection = fakeConnection({ sites: [SHOP], domains: [] });
+    await openShop(connection);
+
+    const list = await screen.findByRole("region", { name: /^Domains for / });
+    expect(within(list).getByRole("link", { name: "shop.memql.example.com" })).toBeTruthy();
+    expect(within(list).getByText(/Cluster address/)).toBeTruthy();
+    expect(screen.queryByText(/No custom domains/i)).toBeNull();
+  });
+
+  it("draws a binding as a row that opens its setup, not as a card in the list", async () => {
+    const connection = fakeConnection({ sites: [SHOP], domains: [domainRow({ id: "cd-1", hostname: "www.acme.com" })] });
+    await openShop(connection);
+
+    // On the list there is a row, and the card's own heading is not drawn yet:
+    // the list and its detail do not share a scroll column (DESIGN.md rule 11).
+    await findRow("www.acme.com");
+    expect(screen.queryByRole("heading", { name: "www.acme.com" })).toBeNull();
+    expect(document.querySelector("article.os-domain")).toBeNull();
+
+    await findCard("www.acme.com");
+    expect(document.querySelector("article.os-domain")).not.toBeNull();
+    await backToDomains();
+    await findRow("www.acme.com");
+    expect(document.querySelector("article.os-domain")).toBeNull();
+  });
+
+  // A SEEDED deployable -- MemQL OS, the VS Code site -- keeps its OWN address
+  // fixed: that row is the site's, re-seeded at every boot. It still takes
+  // bindings. A binding is a separate record pointing at the site, and nothing
+  // in the custom-domain policy refuses a seeded one -- so hiding Add here was
+  // the panel inventing a rule the server does not have.
+  it("keeps a seeded deployable's own address fixed, and still lets a domain be added", async () => {
+    const seeded = siteRow({ id: "site-shop", hostname: "shop.memql.example.com", status: "live", systemOwned: true });
+    const connection = fakeConnection({ sites: [seeded], domains: [] });
+    await openShop(connection);
+
+    const list = await screen.findByRole("region", { name: /^Domains for / });
+    expect(within(list).getByRole("link", { name: "shop.memql.example.com" })).toBeTruthy();
+    expect(within(list).getByText(/Cluster address . built in$/)).toBeTruthy();
+    // The built-in address is a plain line: nothing opens it, nothing removes it.
+    expect(within(list).queryByRole("button", { name: /^Open shop\.memql\.example\.com/ })).toBeNull();
+    // Said ONCE (DESIGN.md rule 7).
+    expect(within(list).getAllByText(/cannot be changed/)).toHaveLength(1);
+
+    await openAddDomain();
+    await type(screen.getByLabelText("Domain to bind") as HTMLInputElement, "www.acme.com");
+    await click(screen.getByRole("button", { name: /add domain/i }));
+    await waitFor(() => expect(connection.callsNamed("customDomainAdd")).toHaveLength(1));
+    expect(connection.callsNamed("customDomainAdd")[0]).toContain('siteId: "site-shop"');
+  });
+
+  it("shows a seeded deployable's bound domain as a row like any other", async () => {
+    const seeded = siteRow({ id: "site-shop", hostname: "shop.memql.example.com", status: "live", systemOwned: true });
+    const connection = fakeConnection({ sites: [seeded], domains: [domainRow({ id: "cd-1", hostname: "www.acme.com" })] });
+    await openShop(connection);
+    await findRow("www.acme.com");
+    await findCard("www.acme.com");
+  });
+
+  it("offers Add on a deployable that is not seeded, as the list's one control", async () => {
+    const connection = fakeConnection({ sites: [SHOP], domains: [] });
+    await openShop(connection);
+    await screen.findByRole("region", { name: /^Domains for / });
+    // The form is not standing above the list any more -- it is the page Add opens.
+    expect(screen.queryByLabelText("Domain to bind")).toBeNull();
+    await openAddDomain();
+    expect(screen.getByLabelText("Domain to bind")).toBeTruthy();
   });
 });
 
@@ -270,7 +393,9 @@ describe("the records to create", () => {
     await openShop(connection);
     const c = await findCard("www.acme.com");
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(screen.getByRole("heading", { name: "Addresses and client" })).toBeTruthy();
+    // The binding's setup is a page of its own now, not a card in the list it
+    // was chosen from -- still inside the Deployables page, and still no modal.
+    expect(screen.getByRole("heading", { name: "Domain" })).toBeTruthy();
     expect(within(c).getByLabelText("Copy value: tok-xyz")).toBeTruthy();
     expect(within(c).getByLabelText("Copy name: _memql-verify.www.acme.com")).toBeTruthy();
     expect(within(c).queryByRole("button", { name: /DNS$/ })).toBeNull();
@@ -443,6 +568,7 @@ describe("adding a domain", () => {
     await openShop(connection);
 
     await screen.findByText("Domains");
+    await openAddDomain();
     const input = screen.getByLabelText("Domain to bind") as HTMLInputElement;
     await type(input, "  WWW.Acme.com. ");
     await click(screen.getByRole("button", { name: /add domain/i }));
@@ -471,6 +597,7 @@ describe("adding a domain", () => {
     await openShop(connection);
 
     await screen.findByText("Domains");
+    await openAddDomain();
     await type(screen.getByLabelText("Domain to bind") as HTMLInputElement, "shop.memql.example.com");
     await click(screen.getByRole("button", { name: /add domain/i }));
 
@@ -485,6 +612,7 @@ describe("adding a domain", () => {
     await openShop(connection);
 
     await screen.findByText("Domains");
+    await openAddDomain();
     await type(screen.getByLabelText("Domain to bind") as HTMLInputElement, "www.acme.com");
     await click(screen.getByRole("button", { name: /add domain/i }));
 

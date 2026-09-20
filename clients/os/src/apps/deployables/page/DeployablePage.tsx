@@ -28,6 +28,7 @@ import { LiveStop } from "./stops/Live";
 import { SourceStop } from "./stops/Source";
 import { WhatItIsStop } from "./stops/WhatItIs";
 import { WhereItLivesStop } from "./stops/WhereItLives";
+import { AddDomainView, DomainDetail } from "./stops/Domains";
 import { useBundleFlip } from "./useBundleFlip";
 
 // The deployable page (epic memql#4937, design sections C and D): ONE head,
@@ -136,10 +137,17 @@ export function DeployablePage({
   // open one closes it. Cleared when the deployable changes, so a stop opened
   // on one is never carried onto another.
   const [detail, setDetail] = useState<WorkspaceDetail | null>(null);
+  // WHICH PART OF "Addresses and client" IS OPEN. The domains list, one
+  // binding's setup, or the add form -- each its OWN view with its own Head, so
+  // the trail names the real depth and a list never shares a scroll column
+  // with the detail it opened (DESIGN.md rule 11). The state lives HERE rather
+  // than in the stop because the Head that owns the trail is drawn here.
+  const [domainView, setDomainView] = useState<{ kind: "list" } | { kind: "domain"; id: string } | { kind: "add" }>({ kind: "list" });
   const [confirming, setConfirming] = useState(false);
   const [typed, setTyped] = useState("");
   useEffect(() => {
     setDetail(null);
+    setDomainView({ kind: "list" });
     setConfirming(false);
     setTyped("");
   }, [site.id]);
@@ -279,6 +287,8 @@ export function DeployablePage({
             accounts={accounts}
             canBindDomain={can.domains}
             clusterDomain={clusterDomain}
+            onOpenDomain={(id) => setDomainView({ kind: "domain", id })}
+            onAddDomain={() => setDomainView({ kind: "add" })}
           />
         );
       case "build":
@@ -289,6 +299,20 @@ export function DeployablePage({
         return null;
     }
   };
+
+  if (detail === "whereItLives" && domainView.kind !== "list") {
+    const toAddresses = () => setDomainView({ kind: "list" });
+    const adding = domainView.kind === "add";
+    const title = adding ? "Add a domain" : "Domain";
+    return <div className="os-deploy-pane deployable-workspace" data-os-page-context={JSON.stringify({ page: "Deployable", siteId: site.id, hostname: site.hostname, name, view: adding ? "Add a domain" : "Domain setup" })}><div className="os-deploy-scroll">
+      <Panel label={adding ? `Add a domain to ${siteName(site)}` : `A domain of ${siteName(site)}`}>
+        <Head title={title}
+          breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label: name, onSelect: () => { setDomainView({ kind: "list" }); setDetail(null); } }, { label: "Addresses and client", onSelect: toAddresses }, { label: title }]}
+          back={{ label: "Addresses and client", onSelect: toAddresses }} />
+        {adding ? <AddDomainView siteId={site.id} /> : <DomainDetail site={site} domainId={domainView.id} />}
+      </Panel>
+    </div></div>;
+  }
 
   if (detail === "whereItLives") {
     const stage = railFor(rail).stages.find(stage => stage.id === "whereItLives");

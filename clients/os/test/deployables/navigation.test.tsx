@@ -47,12 +47,18 @@ describe("shared shell navigation", () => {
     await click(await screen.findByLabelText(/^Deployable shop.memql.example.com/));
     await click(await screen.findByRole("button", { name: /^Cluster address/ }));
     expect(screen.queryByRole("dialog", { name: "Addresses and client" })).toBeNull();
+    // The add form is the page the domains list's Add control opens.
+    await click(screen.getByRole("button", { name: "Add a domain" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
     const input = screen.getByRole("textbox", { name: "Domain to bind" });
     fireEvent.change(input, { target: { value: "www.acme.com" } });
     setVisible(false);
     setVisible(true);
     expect(screen.getByRole("textbox", { name: "Domain to bind" })).toBe(input);
     expect((input as HTMLInputElement).value).toBe("www.acme.com");
+    // Back walks the real depth: the add form, the addresses, the deployable.
+    await click(screen.getByRole("button", { name: "Back to Addresses and client" }));
+    expect(screen.getByRole("region", { name: /^Domains for / })).toBeTruthy();
     await click(screen.getByRole("button", { name: "Back to Storefront" }));
     expect(screen.getByRole("region", { name: "Deployable shop.memql.example.com" })).toBeTruthy();
   });
