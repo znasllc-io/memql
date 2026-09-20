@@ -320,6 +320,11 @@ type RecordedAction struct {
 	// at. ContentOmitted names the ones that were not stored, and why.
 	ContentRefs    []string
 	ContentOmitted []string
+	// ArgsRef is the Library file the arguments spilled to when they exceeded
+	// the observation's ceiling. Empty is the ordinary case: arguments are
+	// kept WHOLE inline, and the spill is a backstop so that even the
+	// pathological call stays reproducible.
+	ArgsRef string
 	// Fingerprint is written on the session's FIRST recorded step only.
 	Fingerprint map[string]any
 	StartedAt   time.Time
