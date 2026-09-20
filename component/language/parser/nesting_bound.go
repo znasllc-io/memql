@@ -3,15 +3,15 @@ package parser
 // nesting_bound.go -- the bound on how DEEP the parser recurses.
 //
 // This is the mirror of v1Depth (v1_expr.go), which bounds the edition-2026
-// expression grammar only. Everything else the parser reads recursed without a
-// bound: the PROCEDURAL expression grammar -- the internal query form an SDK
-// sends to Execute, what the HTTP gateway builds from a POST body, the MCP
-// `query` argument, and what the struct-form rewriter lowers a query and a
-// mutation into -- and the declaration parsers and the statement-block parser
-// beside it. A goroutine's stack is not something Go lets a program run out of
+// expression grammar only. The parser's other grammars recurse too: the
+// PROCEDURAL expression grammar -- the internal query form an SDK sends to
+// Execute, what the HTTP gateway builds from a POST body, the MCP `query`
+// argument, and what the struct-form rewriter lowers a query and a mutation
+// into -- and the declaration parsers and the statement-block parser beside
+// it. A goroutine's stack is not something Go lets a program run out of
 // gracefully: past the process's maximum stack the runtime prints "goroutine
 // stack exceeds ...-byte limit" and ends the process, and recover() never sees
-// it.
+// it. So every grammar the parser holds takes this bound.
 //
 // The DEPTH at which that happens is a property of the STACK CEILING, not of
 // the source's SIZE: the same number of levels costs the same number of frames
@@ -61,10 +61,12 @@ package parser
 //	* bracketed by the runs at 4 and at 256 rather than measured directly.
 //
 // So the deepest nesting anything real writes is SEVEN levels, and it is not
-// hand-written DSL: the shipped tree needs only three, and the two cases that
-// need seven are both GENERATED -- the Go SDK rendering a mutation call whose
-// argument is a nested document, and the lambda serializer's
-// `groupBy(...).select(...)` with arithmetic in the projection. Generated
+// hand-written DSL: the shipped tree needs only three, and the two deepest
+// cases are both GENERATED -- the lambda serializer's
+// `groupBy(...).select(...)` with arithmetic in the projection, which needs
+// seven, and the Go SDK rendering a mutation call whose argument is a nested
+// document, which needs six (the table's row at 6 is that serializer; the row
+// at 5 would be the SDK renderer). Generated
 // callers are exactly the ones that would nest deeper tomorrow without anybody
 // noticing, which is the argument for headroom rather than for a snug bound.
 //
