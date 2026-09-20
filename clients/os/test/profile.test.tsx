@@ -6,6 +6,7 @@ import { accessFromSummary } from "../src/modules/profile/useResolvedAccess";
 import { resetIdsForTest } from "../src/system/desks";
 import { LocalDesktopStore } from "../src/system/store";
 import type { OsRuntimeConfig } from "../src/cluster/config";
+import { appTileName } from "./appTile";
 
 // The Profile MODULE is gone (spec A0): its MyAccess facts now surface in
 // Settings -> About and the avatar menu. The parse layer stays -- the Shell
@@ -112,7 +113,7 @@ describe("the access facts surface in chrome", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Launcher" }));
     fireEvent.click(
-      within(screen.getByRole("dialog", { name: "Launcher" })).getByRole("button", { name: "Settings" }),
+      within(screen.getByRole("dialog", { name: "Launcher" })).getByRole("button", { name: appTileName("Settings") }),
     );
     expect(screen.getByText("ada@example.test")).toBeTruthy();
     expect(screen.getByText("owner")).toBeTruthy();

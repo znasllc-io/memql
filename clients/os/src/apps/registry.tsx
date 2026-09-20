@@ -81,6 +81,13 @@ const settings: OsAppManifest = {
     // diagnostics is engineering surface, and developer is the engineering
     // tier -- so this is a line the flip fixes rather than one it endangers.
     { id: "cluster", name: "Cluster", requires: "app:settings/cluster" },
+    // Language (memql#5390): the MemQL line this cluster speaks, what its
+    // edition's status actually promises, and where its DSL still spells a
+    // deprecated form. Beside Cluster, on the same three roles, because it is
+    // the same kind of engineering fact -- and `app:settings/language` is also
+    // the capability the languageStatus builtin declares, so the engine refuses
+    // the read to anybody this entry hides the section from.
+    { id: "language", name: "Language", requires: "app:settings/language" },
     { id: "diagnostics", name: "Diagnostics" },
     // Benchmarks (epic memql#4993). BESIDE Diagnostics rather than inside it:
     // Diagnostics is three panels about THIS SESSION, and folding a fact about
@@ -146,6 +153,19 @@ const settings: OsAppManifest = {
   ],
   settingsSection: "appearance",
   logsSection: "logs",
+  // The shell's first STATIC unseen-change marker (memql#5390). A new place to
+  // learn what this cluster's DSL may still write and for how long is a new
+  // capability rather than a restyling, and it is not discoverable from
+  // anywhere else -- which is what the marker is for.
+  //
+  // The destination is the section itself, so the common shell acknowledges it
+  // when Language is VISIBLE and an ancestor (opening Settings on About, or the
+  // Settings tile) never can. Advance the revision only when the section itself
+  // changes meaningfully -- a new language line, say -- and never when a form
+  // is added to the table it reads: that is data moving, not the surface.
+  attentionChanges: [
+    { id: "settings:language", revision: "language-1.0", sectionId: "language", label: "MemQL 1.0 language and deprecations" },
+  ],
   component: SettingsApp,
 };
 

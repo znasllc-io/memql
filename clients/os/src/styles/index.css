@@ -1368,6 +1368,105 @@ button:not(:disabled):active {
   resize: vertical;
 }
 
+/* --- Settings: Language (memql#5390) --- */
+
+/* A COPY BUTTON'S LABEL ANSWERS THE CLICK WITHOUT MOVING THE LINE. Every word
+ * the button can say sits in one grid cell and only the current one has ink, so
+ * the button is as wide as its longest word from the first paint: "Copy
+ * vocabulary" becoming "Copied" does not pull the control's edge out from under
+ * the pointer that pressed it. */
+.os-copy-label {
+  display: inline-grid;
+}
+.os-copy-label > span {
+  grid-area: 1 / 1;
+  text-align: center;
+}
+.os-copy-label > .os-copy-label-sizer {
+  visibility: hidden;
+}
+
+/* One entry per deprecated form. A hairline between forms rather than a card
+ * each: they are entries in one list inside one Panel (rule 8), and a card per
+ * form would be a second container language. */
+.os-language-forms {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.os-language-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.os-language-form + .os-language-form {
+  padding-top: 14px;
+  border-top: 1px solid var(--os-line);
+}
+
+/* THE ONE LARGER LINE on the page, and the reason it is larger: what an author
+ * wrote and what to write now are the whole of a deprecation, so they are set
+ * in the data voice at the content size. The arrow between them is muted -- it
+ * is grammar, not data. */
+.os-language-pair {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: var(--os-text-md);
+  color: var(--os-ink);
+}
+.os-language-pair code {
+  overflow-wrap: anywhere;
+}
+.os-language-pair svg {
+  flex: none;
+  color: var(--os-muted);
+}
+.os-language-window {
+  margin: 0;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+}
+
+/* Where the loaded tree still spells the form: one `file:line` per line -- the
+ * form an editor and a terminal both jump to -- with the spelling AS WRITTEN
+ * quiet beside it, because `array(string)` is the part `array(T)` cannot show. */
+.os-language-uses {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--os-text-sm);
+  color: var(--os-ink);
+  overflow-wrap: anywhere;
+}
+.os-language-uses li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.os-language-use-text {
+  color: var(--os-muted);
+}
+
+/* The document a clipboard would not take, under the control that asked. */
+.os-language-fallback {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.os-language-fallback .os-report {
+  margin-top: 0;
+}
+
 .os-stub {
   height: 100%;
   display: grid;

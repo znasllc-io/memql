@@ -7,6 +7,7 @@ import { resetIdsForTest } from "../src/system/desks";
 import { LocalDesktopStore } from "../src/system/store";
 import type { OsRuntimeConfig } from "../src/cluster/config";
 import { artifactHandoffUrl, openInVsCode } from "../src/items/vscode";
+import { appTileName } from "./appTile";
 import { installSeededAccess } from "./seededAccess";
 
 // The shell behavior suite (spec K): rendered against the REAL registry,
@@ -55,7 +56,7 @@ function renderShell({
 
 function openFromLauncher(name: string) {
   fireEvent.click(screen.getByRole("button", { name: "Launcher" }));
-  fireEvent.click(within(screen.getByRole("dialog", { name: "Launcher" })).getByRole("button", { name }));
+  fireEvent.click(within(screen.getByRole("dialog", { name: "Launcher" })).getByRole("button", { name: appTileName(name) }));
 }
 
 beforeEach(() => {
@@ -302,7 +303,7 @@ describe("phone chrome (spec D13)", () => {
     expect(document.querySelector("[data-os-dock]")).toBeNull();
     expect(document.querySelector("[data-os-phone]")).not.toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("button", { name: appTileName("Settings") }));
     expect(screen.getByRole("heading", { name: "About this OS" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Back to home" }));
     expect(screen.queryByRole("heading", { name: "About this OS" })).toBeNull();
