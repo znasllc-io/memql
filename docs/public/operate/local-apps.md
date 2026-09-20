@@ -121,10 +121,26 @@ is a **session**:
 
 | Message | Direction | Carries |
 |---|---|---|
-| `AppSessionStart` | server → worker | app, kind, prompt, inputs, workspace, credential, mcpEndpoint, limits |
+| `AppSessionStart` | server → worker | app, kind, prompt, inputs, workspace, credential, mcpEndpoint, limits, responseSchema, **level** |
 | `AppSessionChunk` | worker → server | stream (`stdout` / `stderr` / `event`), data, seq |
 | `AppSessionControl` | server → worker | `cancel` or `renew_credential` |
-| `AppSessionEnd` | worker → server | exitCode, usage, appSessionRef, producedArtifactIds |
+| `AppSessionEnd` | worker → server | exitCode, usage, appSessionRef, producedArtifactIds, result, **model**, **effort** |
+
+**The level goes out; the model comes back.** `level` is one of the closed four
+(`fast`, `strong`, `reasoning`, `embeddings`) and says how much intelligence the run
+needs rather than which model serves it. THE COCKPIT owns the translation into the
+app's own knobs -- Claude Code's `--model` and `--effort`, Codex's model flag and
+reasoning-effort key -- from one table per app the machine's owner may override in
+`policy.yaml`, because the knob names are the app's and only the machine knows which
+app, at which version, is installed. An EMPTY level is what every session had before
+the field: the app runs at its own defaults. `embeddings` is always refused -- an
+embedding must come from the embedder of the index it is written into, and no app
+exposes one.
+
+`model` and `effort` on the end are what the app REPORTED, never what was asked for.
+Empty means it did not say, which is recorded as unknown: a report copied from the
+request would record as measured something nobody measured. Claude Code's headless
+output states no effort at all, so an empty `effort` is the ordinary case.
 
 Three kinds:
 
@@ -134,7 +150,16 @@ Three kinds:
   app cannot be opened.
 - **`attach`** — stream a run the human started, named by `app_session_ref`.
 
-> **`run` is the only kind anything initiates today.** The protocol carries all
+> **A tool-needing call resolved to an app door now opens a `run` session**
+> (epic memql#5391, design D7). It used to be passed over: MemQL drives a tool loop
+> and an app is an agent that drives itself, so the app could not serve the TURN --
+> which meant that on a cluster whose only open door is a signed-in Claude Code, Ask
+> stayed dark. The app does not serve the turn; it takes the whole STEP, drives its
+> own loop, reaches MemQL's tools back over MCP, and answers once. The step records
+> a `childRunId` naming the subrun, and a call carrying no step is REFUSED at
+> resolution rather than falling through to the vendor behind it.
+>
+> **`run` is still the only kind anything initiates today.** The protocol carries all
 > three and the runner accepts all three; `open` and `attach` have no
 > engine-side caller yet, because a planner Task is autonomous by definition —
 > they are for a console hand-off and a resume, neither of which exists. Said
@@ -303,6 +328,10 @@ and a cost surface that records only successes understates what work cost.
 
 - `billing` ∈ `metered | subscription | unknown`
 - `executionSurface` = `cockpit-app:<appId>`
+- `door` = `app` for a chat turn an app answered, `session` for a whole STEP an app
+  was handed and drove its own loop through (they are different answers, so they are
+  different values)
+- `servedModel` / `servedEffort` = what the app reported, empty when it said nothing
 - `plan.tokenSpentSubscription` accumulates the covered spend separately from
   `plan.tokenSpent`
 
@@ -313,6 +342,22 @@ money nobody was charged — and the more a user leans on the subscription they
 already pay for, the sooner their plans would stop, which is backwards. A cap
 blind to those calls, meanwhile, is a hole the cheapest path walks straight
 through.
+
+**Everything a session produced carries `producedBy`.** `{app, model, effort,
+sessionId}` is stamped on each `v1:library:artifact` the session pushed -- the
+transcript included -- and on the backing `v1:library:file` row, by the session runner
+at end. `model` and `effort` are the app's own report and may be empty; `sessionId`
+is the `v1:worker:appSession` row the run is readable at. A lifted construct's source
+reads this stamp, which is what lets its provenance say "recorded from claude-code,
+model X, effort Y, session Z".
+
+**It is ABSENT on anything a person uploaded, and the absence is the answer.** A stamp
+naming no app would read as "an app produced this and reported nothing", which is a
+different fact from "nobody delegated this". The upload route physically cannot write
+one: its params struct has no field for it, and the two stamping mutations are
+`@serverOnly`. Caller-scoping is not the alternative there -- the party who would
+write a false stamp is the row's own OWNER, and `actor.userId` answers whose row it is
+rather than whether the claim on it is true.
 
 **Cost is never synthesised.** MemQL knows its own providers' per-token prices,
 not the prices inside somebody's subscription. `totalCost` carries what the app

@@ -43,13 +43,17 @@ mutation call recordRouterCall {
     requestedLevel      string
     /// The level that actually served; differs from level only when degraded.
     servedLevel         string
+    /// What the SURFACE reported serving the call with; empty means it did not say.
+    servedModel         string
+    /// The effort the surface reported running at; empty means it stated none.
+    servedEffort        string
     /// True when the chain was exhausted at the requested level and the rule said degrade.
     degraded            bool
     /// The rule that matched. Empty only for a call pinned with an explicit provider.
     rule                string
     /// The policy that rule named, after policy: expansion.
     policy              string
-    /// local | app | federation -- which door the winning entry belongs to.
+    /// local | app | federation | session -- which door the winning entry belongs to.
     door                string
     /// The door report: every entry the walk passed over, and the one it took.
     considered          []object
@@ -61,7 +65,7 @@ mutation call recordRouterCall {
     machineOwnerUserId  string
   }
   insert {
-    accept { requestId, agentId, userId, promptName, policyName, vendor, model, providerName, inputTokens, outputTokens, cachedInputTokens, tokensEstimated, inputCost, outputCost, cachedInputCost, totalCost, pricingConfigured, timeToFirstTokenMs, totalDurationMs, tokensPerSec, streaming, outcome, errorCategory, errorMessage, fallbackFromModel, executionSurface, level, requestedLevel, servedLevel, degraded, rule, policy, door, considered, touches, minContextTokens, machineOwnerUserId }
+    accept { requestId, agentId, userId, promptName, policyName, vendor, model, providerName, inputTokens, outputTokens, cachedInputTokens, tokensEstimated, inputCost, outputCost, cachedInputCost, totalCost, pricingConfigured, timeToFirstTokenMs, totalDurationMs, tokensPerSec, streaming, outcome, errorCategory, errorMessage, fallbackFromModel, executionSurface, level, requestedLevel, servedLevel, servedModel, servedEffort, degraded, rule, policy, door, considered, touches, minContextTokens, machineOwnerUserId }
     stamp {
       id: args.callId
       // NOT in accept{}: a concept-level @default is documentation and is

@@ -340,6 +340,13 @@ type ProviderRegistry struct {
 	// has no app door, which is a state the chain walks past rather than an
 	// error it raises -- see app_provider.go.
 	apps AppInference
+	// appSessions is the STEP-handover seam (epic memql#5391, design D7):
+	// how a tool-needing call resolved to an app door becomes a session
+	// subrun. Nil on a build with no worker service, and unlike `apps` a nil
+	// here REFUSES rather than being walked past -- the router already chose
+	// this door, so there is no chain left to continue. See
+	// app_session_provider.go.
+	appSessions AppSessionDelegate
 }
 
 // ProviderConfigEntry stores metadata + instantiated client for a provider.
@@ -662,11 +669,11 @@ func (r *ProviderRegistry) EntryForUser(ctx context.Context, actingUserId, name 
 		}
 		return r.fleetEntry(ctx, actingUserId, modelId)
 	}
-	if appId, isApp := IsAppReference(key); isApp {
+	if appId, model, isApp := SplitAppReference(key); isApp {
 		if strings.TrimSpace(actingUserId) == "" {
 			actingUserId = actingUserFromContext(ctx)
 		}
-		return r.appEntry(ctx, actingUserId, appId)
+		return r.appEntry(ctx, actingUserId, appId, model, key)
 	}
 	return nil, false
 }

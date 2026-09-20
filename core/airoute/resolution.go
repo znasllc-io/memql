@@ -9,6 +9,17 @@ const (
 	DoorLocal      = "local"
 	DoorApp        = "app"
 	DoorFederation = "federation"
+	// DoorSession is an app door that took the whole STEP rather than serving
+	// one turn (epic memql#5391, design D7).
+	//
+	// IT IS A FOURTH DOOR RATHER THAN A FLAG ON DoorApp, because
+	// v1:router:call.door is what a reader filters on and the two are
+	// different answers: `app` is "a signed-in subscription app answered this
+	// turn", `session` is "a signed-in subscription app was handed this step
+	// and drove its own loop". Folding them would make the whole history of a
+	// cluster whose only door is a signed-in Claude Code read as ordinary chat
+	// turns.
+	DoorSession = "session"
 )
 
 // ConsideredEntry is one line of the door report: an entry the chain walk

@@ -401,3 +401,168 @@ func TestIsCancellationReasonMatchesLoosely(t *testing.T) {
 		}
 	}
 }
+
+// stampingStore is a recording store that ALSO serves the provenance stamper,
+// which is how the runner finds one: the interface is separate from
+// AppSessionStore so a binary that runs no sessions is not obliged to
+// implement it, and a store that does not simply is not asked.
+type stampingStore struct {
+	recordingAppSessionStore
+	mu       sync.Mutex
+	stamps   []ArtifactProvenance
+	ids      [][]string
+	owners   []string
+	stampErr error
+}
+
+func (s *stampingStore) StampArtifactProvenance(_ context.Context, ownerUserId string, artifactIds []string, p ArtifactProvenance) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stamps = append(s.stamps, p)
+	s.ids = append(s.ids, artifactIds)
+	s.owners = append(s.owners, ownerUserId)
+	return s.stampErr
+}
+
+func (s *stampingStore) recorded() ([]ArtifactProvenance, [][]string, []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stamps, s.ids, s.owners
+}
+
+// newStampingFixture is newRunnerFixture with a store that can be asked for a
+// stamp. It is a separate builder rather than a flag because the point of the
+// interface split is that most stores cannot answer.
+func newStampingFixture(t *testing.T) (*SessionRunner, *streamSession, *stampingStore) {
+	t.Helper()
+	session, _ := newAppSessionTestSession(t)
+	session.worker.SetApps([]AppInfo{
+		{Id: AppIdClaudeCode, Version: "2.1.4", Allowed: true, SignedIn: true, Subscription: SubscriptionPresent},
+	})
+	session.server.registry.Add(session.worker)
+	store := &stampingStore{}
+	return &SessionRunner{
+		Store:       store,
+		Minter:      &stubMinter{},
+		Auditor:     &recordingAuditor{},
+		MCPEndpoint: "https://mcp.example.com/mcp",
+	}, session, store
+}
+
+// producedBy is stamped on EVERY artifact a session produced, the transcript
+// included (epic memql#5391, design D9). A lifted construct's source reads
+// this stamp, and the transcript is the artifact a recording pass reads first.
+func TestEveryProducedArtifactIsStamped(t *testing.T) {
+	runner, session, store := newStampingFixture(t)
+
+	go func() {
+		waitForSession(t, session, "sess-run")
+		session.handleAppSessionEnd(&memqlv1.AppSessionEnd{
+			SessionId:           "sess-run",
+			Model:               "claude-opus-5",
+			Effort:              "high",
+			ProducedArtifactIds: []string{"artifact-1", "artifact-2", "artifact-transcript"},
+		})
+	}()
+
+	if _, err := runner.Run(context.Background(), session.worker, runSpec(), nil); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	stamps, ids, owners := store.recorded()
+	if len(stamps) != 1 {
+		t.Fatalf("expected one stamp call, got %d", len(stamps))
+	}
+	if len(ids[0]) != 3 {
+		t.Fatalf("every produced artifact must be stamped, got %v", ids[0])
+	}
+	if owners[0] != "user-1" {
+		t.Fatalf("the stamp must run as the session's owner, got %q", owners[0])
+	}
+	got := stamps[0]
+	if got.App != AppIdClaudeCode || got.SessionId != "sess-run" {
+		t.Fatalf("the stamp must name the app and the session: %+v", got)
+	}
+	if got.Model != "claude-opus-5" || got.Effort != "high" {
+		t.Fatalf("the stamp carries the APP'S REPORT: %+v", got)
+	}
+}
+
+// An app that reported NO model still gets a stamp: the app and the session id
+// are known, and "an app produced this and reported nothing" is a different
+// fact from "no session produced this". Only the second is an absent stamp.
+func TestAStampWithNoReportedModelStillNamesTheApp(t *testing.T) {
+	runner, session, store := newStampingFixture(t)
+	spec := runSpec()
+	spec.Level = "reasoning"
+
+	go func() {
+		waitForSession(t, session, "sess-run")
+		session.handleAppSessionEnd(&memqlv1.AppSessionEnd{
+			SessionId:           "sess-run",
+			ProducedArtifactIds: []string{"artifact-1"},
+		})
+	}()
+
+	if _, err := runner.Run(context.Background(), session.worker, spec, nil); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	stamps, _, _ := store.recorded()
+	if len(stamps) != 1 {
+		t.Fatalf("expected one stamp call, got %d", len(stamps))
+	}
+	if stamps[0].App != AppIdClaudeCode || stamps[0].SessionId != "sess-run" {
+		t.Fatalf("the stamp must still name the app and session: %+v", stamps[0])
+	}
+	// THE LEVEL IS NOT SUBSTITUTED. A level is what was asked for; this object
+	// is what happened, and an effort of "reasoning" would be a measurement
+	// nobody made -- readable months later as the app having confirmed it.
+	if stamps[0].Model != "" || stamps[0].Effort != "" {
+		t.Fatalf("an app that reported nothing leaves both empty, got %+v", stamps[0])
+	}
+}
+
+// A session that produced NOTHING stamps nothing, and that is not an error.
+func TestASessionWithNoArtifactsStampsNothing(t *testing.T) {
+	runner, session, store := newStampingFixture(t)
+
+	go func() {
+		waitForSession(t, session, "sess-run")
+		session.handleAppSessionEnd(&memqlv1.AppSessionEnd{SessionId: "sess-run"})
+	}()
+
+	if _, err := runner.Run(context.Background(), session.worker, runSpec(), nil); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if stamps, _, _ := store.recorded(); len(stamps) != 0 {
+		t.Fatalf("a session with no artifacts stamps nothing, got %+v", stamps)
+	}
+}
+
+// A FAILED STAMP DOES NOT FAIL THE RUN. The session already happened on
+// somebody's machine and already spent their subscription; losing the
+// back-pointer costs a reader a journey, and refusing the work would cost them
+// the work.
+func TestAFailedStampDoesNotFailTheRun(t *testing.T) {
+	runner, session, store := newStampingFixture(t)
+	store.stampErr = errContext
+
+	go func() {
+		waitForSession(t, session, "sess-run")
+		session.handleAppSessionEnd(&memqlv1.AppSessionEnd{
+			SessionId:           "sess-run",
+			ProducedArtifactIds: []string{"artifact-1"},
+		})
+	}()
+
+	result, err := runner.Run(context.Background(), session.worker, runSpec(), nil)
+	if err != nil {
+		t.Fatalf("a failed stamp must not fail the run: %v", err)
+	}
+	if result.Status != AppSessionStatusEnded {
+		t.Fatalf("status = %q, want the run's own outcome", result.Status)
+	}
+}
+
+// errContext is a stand-in failure for the stamp path.
+var errContext = context.Canceled

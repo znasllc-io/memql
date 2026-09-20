@@ -313,10 +313,18 @@ func (*chainUnavailableError) Error() string {
 // it cannot recreate the rule decision that produced the fallback chain.
 // Preserve that decision for every observer and retry record, while naming
 // the door of the provider actually attempted (which may differ on fallback).
+//
+// THE ATTEMPT'S DOOR COMES FROM THE LOOKUP, NOT FROM THE NAME, and since epic
+// memql#5391 it cannot come from the name: `app:claude-code` is the same entry
+// for two different doors. It serves a chat turn as `app` and takes a whole
+// step as a `session`, and only the resolution knows which happened. Deriving
+// it here would quietly record every session as an ordinary app turn -- which
+// is what this did, and what the ledger test now catches.
 func (resolved Resolved) withDecisionFrom(selection Resolved) Resolved {
+	attemptDoor := resolved.Decision.Door
 	resolved.PolicyName = selection.PolicyName
 	resolved.Decision = selection.Decision
-	resolved.Decision.Door = doorFor(resolved.ProviderName)
+	resolved.Decision.Door = attemptDoor
 	if resolved.ProviderName != selection.ProviderName {
 		// Each call can walk the same wrapper concurrently. Copy before
 		// appending so neither another call nor the caller's resolution changes.

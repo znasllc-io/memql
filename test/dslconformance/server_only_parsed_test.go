@@ -939,6 +939,16 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// version would put that back in a caller's hands.
 		{Path: "library/mutations.memql", Name: "createLibraryFileVersion"}: true,
 		{Path: "library/mutations.memql", Name: "supersedeLibraryFileHead"}: true,
+
+		// The provenance stamps (epic memql#5391, design D9). Caller-scoping is
+		// not the fix here and the reason is unusual enough to be worth the
+		// line: the party who would write a FALSE stamp is the row's own owner.
+		// A person may legitimately own an artifact and still must not be able
+		// to claim an app produced it, so actor.userId answers whose row it is
+		// and not whether the claim on it is true. The session runner is the
+		// only writer, at end, under borrowed authority.
+		{Path: "library/mutations.memql", Name: "stampArtifactProvenance"}:    true,
+		{Path: "library/mutations.memql", Name: "stampLibraryFileProvenance"}: true,
 		// The membership half, in cognition because the SPACE is cognition's.
 		// Same gate, different asset: `isGuest` is authorization-relevant, not
 		// decoration, so a client-reachable version would let any authenticated

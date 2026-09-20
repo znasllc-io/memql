@@ -96,6 +96,18 @@ type AppSessionRequest struct {
 	// from asking and getting nothing back: only a session that asked can
 	// report a missing structured answer as a disappointment.
 	ResponseSchema string
+	// Level is the call's LEVEL -- one of core/airoute's closed four -- which
+	// says how much intelligence this run needs rather than which model serves
+	// it (epic memql#5391, design D8). THE COCKPIT owns the translation into
+	// the app's own knobs, from one table per app the machine's owner may
+	// override, because the knob names are the app's and only the machine
+	// knows which app, at which version, is installed.
+	//
+	// EMPTY MEANS NO LEVEL WAS NAMED, and the app runs at its own defaults --
+	// which is what every session did before this field and what a person's
+	// `open` still does. A level is never invented here: a session run at a
+	// level nobody chose reports a model nobody asked for.
+	Level string
 }
 
 // AppSessionLimits are the policy ceilings the session runs under.
@@ -135,6 +147,17 @@ type AppSessionOutcome struct {
 	// exit non-zero, and folding the two would make an answer we have
 	// unreadable because the run that produced it also failed.
 	Result []byte
+	// Model and Effort are what the APP REPORTED serving this session with
+	// (epic memql#5391, design D9): Claude Code's result event, Codex's thread
+	// settings, replaced by any reroute the app announced.
+	//
+	// NOT what was asked for. A request is not a report, and a served model
+	// copied from the request would record as measured something nobody
+	// measured. EMPTY MEANS THE APP DID NOT SAY, which the engine records as
+	// unknown -- and for effort that is the common case rather than the edge
+	// one, since Claude Code's headless output states none.
+	Model  string
+	Effort string
 }
 
 // AppSessionHandle is the caller's view of a running session.

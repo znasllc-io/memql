@@ -362,3 +362,106 @@ func TestAppSessionCallerCancelStopsTheRun(t *testing.T) {
 	}
 	t.Fatal("caller context cancellation did not cancel the run on the machine")
 }
+
+// THE LEVEL RIDES OUT ON THE START (epic memql#5391, design D8), and the
+// cockpit owns what it means: the knob names are the app's, and only the
+// machine knows which app, at which version, is installed.
+//
+// wire_readiness_test.go pins that the FIELD survives a round trip. This pins
+// that the engine puts a value in it -- the half a marshalling test cannot see,
+// and the half that was missing for every field this tree has shipped and then
+// never filled.
+func TestTheSessionStartPutsTheCallsLevelOnTheWire(t *testing.T) {
+	session, stream := newAppSessionTestSession(t)
+
+	if _, err := session.worker.StartAppSession(context.Background(), AppSessionRequest{
+		SessionId: "sess-level", App: AppIdClaudeCode, Kind: AppSessionKindRun,
+		Prompt: "ship it", Level: "reasoning",
+	}); err != nil {
+		t.Fatalf("StartAppSession: %v", err)
+	}
+	starts := stream.starts()
+	if len(starts) != 1 {
+		t.Fatalf("expected 1 AppSessionStart, got %d", len(starts))
+	}
+	if got := starts[0].GetLevel(); got != "reasoning" {
+		t.Fatalf("level = %q, want the level the call declared", got)
+	}
+}
+
+// AN UNSET LEVEL STAYS EMPTY. That is what every session did before the field
+// existed and what a person's `open` still does: the app runs at its own
+// defaults. Naming one here would report a model nobody asked for -- and on
+// the far side a level the cockpit has no translation for is REFUSED, so a
+// guessed one would refuse runs that would have worked.
+func TestAppSessionStartLeavesAnUnsetLevelEmpty(t *testing.T) {
+	session, stream := newAppSessionTestSession(t)
+
+	if _, err := session.worker.StartAppSession(context.Background(), AppSessionRequest{
+		SessionId: "sess-nolevel", App: AppIdClaudeCode, Kind: AppSessionKindRun,
+	}); err != nil {
+		t.Fatalf("StartAppSession: %v", err)
+	}
+	if got := stream.starts()[0].GetLevel(); got != "" {
+		t.Fatalf("level = %q, want empty when none was named", got)
+	}
+}
+
+// THE APP'S REPORT RIDES BACK (design D9), verbatim. The model an app served
+// with is the app's to state, and it may differ from anything that was asked
+// for -- which is the whole reason the field exists.
+//
+// wire_readiness_test.go pins the decode; this pins that the END HANDLER reads
+// it onto the outcome the caller sees.
+func TestTheEndHandlerReadsTheAppsReport(t *testing.T) {
+	session, _ := newAppSessionTestSession(t)
+	handle, err := session.worker.StartAppSession(context.Background(), AppSessionRequest{
+		SessionId: "sess-report", App: AppIdClaudeCode, Kind: AppSessionKindRun, Level: "reasoning",
+	})
+	if err != nil {
+		t.Fatalf("StartAppSession: %v", err)
+	}
+	go func() {
+		for range handle.Chunks() {
+		}
+	}()
+	session.handleAppSessionEnd(&memqlv1.AppSessionEnd{
+		SessionId: "sess-report",
+		Model:     "claude-opus-5",
+		Effort:    "high",
+	})
+	outcome, err := handle.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if outcome.Model != "claude-opus-5" || outcome.Effort != "high" {
+		t.Fatalf("the app's report was lost: %+v", outcome)
+	}
+}
+
+// AN APP THAT SAYS NOTHING LEAVES BOTH EMPTY -- never the level it was given,
+// never the app id. Claude Code's headless output states no effort at all, so
+// this is the ordinary case: a token count spent at an unknown effort cannot
+// be compared with one spent at a known one, and recording the requested value
+// would make the two indistinguishable.
+func TestAppSessionEndRecordsSilenceAsSilence(t *testing.T) {
+	session, _ := newAppSessionTestSession(t)
+	handle, err := session.worker.StartAppSession(context.Background(), AppSessionRequest{
+		SessionId: "sess-silent", App: AppIdClaudeCode, Kind: AppSessionKindRun, Level: "reasoning",
+	})
+	if err != nil {
+		t.Fatalf("StartAppSession: %v", err)
+	}
+	go func() {
+		for range handle.Chunks() {
+		}
+	}()
+	session.handleAppSessionEnd(&memqlv1.AppSessionEnd{SessionId: "sess-silent"})
+	outcome, err := handle.Wait(context.Background())
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if outcome.Model != "" || outcome.Effort != "" {
+		t.Fatalf("silence must stay silence, got model=%q effort=%q", outcome.Model, outcome.Effort)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -232,4 +233,82 @@ func stringsOrEmpty(in []string) []string {
 		return []string{}
 	}
 	return in
+}
+
+// ArtifactProvenance is what an app session stamps onto everything it produced
+// (epic memql#5391, design D9).
+//
+// Model and Effort are the APP'S REPORT and may be EMPTY, which is the point:
+// a lifted construct's provenance says "recorded from claude-code, model X,
+// effort Y, session Z", and a model copied from what was requested would put a
+// measurement into that sentence that nobody made.
+type ArtifactProvenance struct {
+	App       string
+	Model     string
+	Effort    string
+	SessionId string
+}
+
+// AsMap renders the stamp for the mutation. Every key is written, empty ones
+// included: a reader of the object can then tell "the app reported no effort"
+// from "this stamp predates the field", and only one of those is a fact about
+// the run.
+func (p ArtifactProvenance) AsMap() map[string]any {
+	return map[string]any{
+		"app":       p.App,
+		"model":     p.Model,
+		"effort":    p.Effort,
+		"sessionId": p.SessionId,
+	}
+}
+
+// Empty reports a stamp with nothing worth writing. A session with no app and
+// no id is not a session anything was produced by.
+func (p ArtifactProvenance) Empty() bool {
+	return strings.TrimSpace(p.App) == "" && strings.TrimSpace(p.SessionId) == ""
+}
+
+// ArtifactProvenanceStamper records which app session produced an artifact.
+//
+// It is a SEPARATE interface from AppSessionStore, and separate for the reason
+// AppSessionStore is separate from Store: a binary that runs no app sessions is
+// not obliged to implement it, and a caller that holds no stamper simply does
+// not stamp. EngineStore serves all three.
+type ArtifactProvenanceStamper interface {
+	// StampArtifactProvenance writes the stamp onto each artifact id, and onto
+	// the backing Library file row when one resolves by the same id.
+	StampArtifactProvenance(ctx context.Context, ownerUserId string, artifactIds []string, p ArtifactProvenance) error
+}
+
+// StampArtifactProvenance implements ArtifactProvenanceStamper.
+//
+// It writes the INDEX row and the backing FILE row, and it writes them
+// independently: the Files list reads the index and the analysis and sync
+// passes read the file, so one stamped and the other not would make "which of
+// these did an app produce" answerable in one place and not the other -- which
+// is worse than neither, because the reader cannot tell which answer they got.
+//
+// A file id that does not resolve is NOT an error. The cockpit pushes
+// artifacts, and an artifact id is not always a file id; the write is attempted
+// and its refusal is a debug fact rather than a failure of the run.
+func (s *EngineStore) StampArtifactProvenance(ctx context.Context, ownerUserId string, artifactIds []string, p ArtifactProvenance) error {
+	if s == nil || s.Engine == nil || len(artifactIds) == 0 || p.Empty() {
+		return nil
+	}
+	ctx = appSessionWriteContext(ctx, ownerUserId)
+	stamp := p.AsMap()
+	var firstErr error
+	for _, artifactId := range artifactIds {
+		artifactId = strings.TrimSpace(artifactId)
+		if artifactId == "" {
+			continue
+		}
+		if err := s.executeMutation(ctx, "stampArtifactProvenance", map[string]any{
+			"artifactId": artifactId,
+			"producedBy": stamp,
+		}); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
