@@ -517,7 +517,7 @@ is unaffected, and it is the fix for this shape.
 
 **Park the annotations with the declaration**, inside the comment:
 
-```memql
+```memql fragment
 /*
 @executor("integration.workbench.dispatchHost")
 @description("does real work")

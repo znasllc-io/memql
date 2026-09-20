@@ -36,11 +36,16 @@ func TestSpecNamesTheLanguageItDescribes(t *testing.T) {
 	}
 }
 
-// TestSpecVersionRecordsTheAdditiveEnvelope: the envelope gained two keys,
-// which is an additive change to its shape -- a minor move of SpecVersion, so
-// a consumer checking the major it was built against keeps working.
+// TestSpecVersionRecordsTheAdditiveEnvelope: the envelope gained keys, which
+// is an additive change to its shape -- a minor move of SpecVersion, so a
+// consumer checking the major it was built against keeps working.
+//
+// 1.1.0 added `edition` and `grammarVersion` (memql#5362). 1.2.0 added the
+// three keys the generated grammar derives its productions from (memql#5388):
+// `constructs[].signature`, `constructs[].bodyForm` and `keywords[].grammar`
+// with its `keywords[].heads`.
 func TestSpecVersionRecordsTheAdditiveEnvelope(t *testing.T) {
-	if SpecVersion != "1.1.0" {
-		t.Errorf("SpecVersion = %q, want 1.1.0: the envelope gained edition and grammarVersion", SpecVersion)
+	if SpecVersion != "1.2.0" {
+		t.Errorf("SpecVersion = %q, want 1.2.0: the envelope gained signature, bodyForm, grammar and heads", SpecVersion)
 	}
 }

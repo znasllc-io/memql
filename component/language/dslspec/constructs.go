@@ -125,6 +125,8 @@ func constructCatalog() []Construct {
 			Doc:                "Define a node schema (the base of the dependency tree). Body is a field list; cross-concept links via @relationship.",
 			AnnotationReceiver: string(annotations.Concept),
 			ConceptInSignature: false,
+			Signature:          `<name>`,
+			BodyForm:           BodyFormFields,
 		},
 		{
 			Keyword:            "query",
@@ -132,6 +134,8 @@ func constructCatalog() []Construct {
 			Doc:                "Read function: stitch a bound concept + filter (specs) + projection (shape) + args into a typed read. Struct form `query <Concept> <name>`.",
 			AnnotationReceiver: "Query",
 			ConceptInSignature: true,
+			Signature:          `<concept-name> <name>`,
+			BodyForm:           BodyFormClauses,
 		},
 		{
 			Keyword:            "mutation",
@@ -139,6 +143,8 @@ func constructCatalog() []Construct {
 			Doc:                "Write function on a bound concept: declared `mutation <Concept> <name>` with exactly one insert{} OR update{} block, and called `mutation <name>(...)` -- the one word declares and calls (D13).",
 			AnnotationReceiver: "Mutation",
 			ConceptInSignature: true,
+			Signature:          `<concept-name> <name>`,
+			BodyForm:           BodyFormClauses,
 		},
 		{
 			Keyword:            "logic",
@@ -146,6 +152,8 @@ func constructCatalog() []Construct {
 			Doc:                "A procedure that decides. `args { }` declares its inputs; its statements follow in the order they run (`x := <kind> name(...)`, if, for, switch, parallel) and end with `return <expr>`. It calls queries, mutations, logic and builtins; publishing, calling an automation and dispatching an action are an automation's (D14).",
 			AnnotationReceiver: "Logic",
 			ConceptInSignature: false,
+			Signature:          `<name>`,
+			BodyForm:           BodyFormStatements,
 		},
 		{
 			Keyword:            "automation",
@@ -153,6 +161,8 @@ func constructCatalog() []Construct {
 			Doc:                "Event-, schedule-, or before-write-triggered body (via @trigger). A before-write body adjusts declared fields with `row.<field> = <expression>` before persistence and may call only transitively read-only logic or queries. Its statements run in the order written and call every construct kind; the triggering event's payload is bound into its `args { }` block.",
 			AnnotationReceiver: "Automation",
 			ConceptInSignature: false,
+			Signature:          `<name>`,
+			BodyForm:           BodyFormStatements,
 		},
 		{
 			Keyword:            "action",
@@ -160,6 +170,8 @@ func constructCatalog() []Construct {
 			Doc:                "Authored external-side-effect primitive (behavioral-constructs ADR §2.3, construct-invocation ADR Decision 3): performs exactly ONE external capability (shell.* / fs.* / http.* / integration.* / mcp.*) on a surface and never touches the graph. Body is an `args { }` schema plus a SINGLE `capability <verb>(...)` call -- no body{}, no return; the @sideEffect class lives on the capability, not the action. Invoked from an automation as `action <name>(args...)`; replays token-free (fingerprint-verified) on identical input.",
 			AnnotationReceiver: "Action",
 			ConceptInSignature: false,
+			Signature:          `<name>`,
+			BodyForm:           BodyFormCapabilityCall,
 		},
 		{
 			Keyword:            "capability",
@@ -167,6 +179,8 @@ func constructCatalog() []Construct {
 			Doc:                "Surface-backed external capability verb (construct-invocation ADR Decision 4): declared like a typed, side-effect-classified builtin with NO body. Namespaced/dotted name (fs.* / shell.* / http.* / integration.* / mcp.*). @sideEffect(\"read\"|\"write\"|\"exec\") -- the UNSPOOFABLE risk class -- lives HERE, not on the action that invokes it (ADR §7). Imported at the verb level (`use capabilities.<ns>.{ verb }`) and called via `capability verb(args)`. Body: an optional args{} input schema.",
 			AnnotationReceiver: "Capability",
 			ConceptInSignature: false,
+			Signature:          `<dotted-name>`,
+			BodyForm:           BodyFormClauses,
 		},
 		{
 			Keyword:            "spec",
@@ -174,6 +188,8 @@ func constructCatalog() []Construct {
 			Doc:                "Atomic boolean predicate over one bound concept or shape: `spec <bound> <name> = row => <predicate>`, applied as `name(row)`. Over an @actor shape the parameter is `actor` and the predicate evaluates in process; over a row it pushes down to SQL.",
 			AnnotationReceiver: "Spec",
 			ConceptInSignature: false,
+			Signature:          `<bound-name> <name>`,
+			BodyForm:           BodyFormLambda,
 		},
 		{
 			Keyword:            "trait",
@@ -181,6 +197,8 @@ func constructCatalog() []Construct {
 			Doc:                "Concept-agnostic boolean predicate (same runtime contract as spec): `trait <name> = row => <predicate>`, applied as `name(row)` to a row of any concept.",
 			AnnotationReceiver: "Spec",
 			ConceptInSignature: false,
+			Signature:          `<name>`,
+			BodyForm:           BodyFormLambda,
 		},
 		{
 			Keyword:            "shape",
@@ -188,6 +206,8 @@ func constructCatalog() []Construct {
 			Doc:                "Reusable field projection. @row projects a concept payload/intrinsics (signature `shape <Concept> <name>`); @actor projects the auth envelope; both = mixed. Body is a path list; there is no composition verb.",
 			AnnotationReceiver: "Shape",
 			ConceptInSignature: true,
+			Signature:          `[ <concept-name> ] <name>`,
+			BodyForm:           BodyFormPaths,
 		},
 		{
 			Keyword:            "tool",
@@ -195,6 +215,8 @@ func constructCatalog() []Construct {
 			Doc:                "AI-callable tool definition. Body is the input-schema field list; @handler wires it to a query/function.",
 			AnnotationReceiver: "Tool",
 			ConceptInSignature: false,
+			Signature:          `<name>`,
+			BodyForm:           BodyFormFields,
 		},
 		{
 			Keyword:            "prompt",
@@ -202,6 +224,8 @@ func constructCatalog() []Construct {
 			Doc:                "AI prompt template with an input schema and a default provider. Body is a bare input-schema field list; @templateFile points at the .tmpl.",
 			AnnotationReceiver: "Prompt",
 			ConceptInSignature: false,
+			Signature:          `<name>`,
+			BodyForm:           BodyFormFields,
 		},
 		{
 			Keyword:            "provider",
@@ -209,6 +233,8 @@ func constructCatalog() []Construct {
 			Doc:                "AI provider configuration (vendor + model + auth). @base providers carry auth+type; children @extends a base. Body: params{} / auth{}.",
 			AnnotationReceiver: "Provider",
 			ConceptInSignature: false,
+			Signature:          `<name>`,
+			BodyForm:           BodyFormClauses,
 		},
 		{
 			Keyword:            "builtin",
@@ -216,6 +242,8 @@ func constructCatalog() []Construct {
 			Doc:                "Go-backed executor exposed as a DSL function. Body is the input schema; @executor names the integration.X.Y implementation.",
 			AnnotationReceiver: "Builtin",
 			ConceptInSignature: false,
+			Signature:          `<name>`,
+			BodyForm:           BodyFormFields,
 		},
 		{
 			Keyword:            "policy",
@@ -223,6 +251,8 @@ func constructCatalog() []Construct {
 			Doc:                "AI provider-selection record (empty body): an ordered chain of @primary / @fallback entries -- a provider name, a fleet: / app: / federation: selector, or policy:<name> -- consumed by the AI Router. (Caller-context checks use specs, not policies.)",
 			AnnotationReceiver: "Policy",
 			ConceptInSignature: false,
+			Signature:          `<name>`,
+			BodyForm:           BodyFormEmpty,
 		},
 		{
 			Keyword:            "rule",
@@ -230,6 +260,8 @@ func constructCatalog() []Construct {
 			Doc:                "Routing rule (empty body): maps a call's declared metadata to a policy. @when(...) states the closed condition set, @policy names the chain, @level overrides the call's level, @precedence orders the set (highest first) and @onUnavailable says whether an exhausted chain degrades or parks.",
 			AnnotationReceiver: "Rule",
 			ConceptInSignature: false,
+			Signature:          `<name>`,
+			BodyForm:           BodyFormEmpty,
 		},
 		{
 			Keyword:            "seed",
@@ -237,6 +269,8 @@ func constructCatalog() []Construct {
 			Doc:                "Seed an initial row for a bound concept. Struct form `seed <Concept> <name>`.",
 			AnnotationReceiver: "Seed",
 			ConceptInSignature: true,
+			Signature:          `<concept-name> <name>`,
+			BodyForm:           BodyFormAssignments,
 		},
 		{
 			Keyword:            "use",
@@ -244,6 +278,8 @@ func constructCatalog() []Construct {
 			Doc:                "File-top cross-file import: `use <domain>.<construct>.{ a, b }` pulls named constructs (concepts/shapes/specs/...) into local scope.",
 			AnnotationReceiver: "",
 			ConceptInSignature: false,
+			Signature:          `<dotted-path> "{" <name> { "," <name> } "}"`,
+			BodyForm:           BodyFormImport,
 		},
 	}
 }

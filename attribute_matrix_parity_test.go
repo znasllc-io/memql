@@ -292,3 +292,49 @@ func linkTexts(cell string) []string {
 	}
 	return out
 }
+
+// TestGrammarPageIsGenerated and TestVocabularyPageIsGenerated are the
+// attribute matrix's siblings for the two pages memql#5388 added: the EBNF
+// authoring grammar and the vocabulary. They live in this file, in this shape,
+// on purpose -- a reader who has understood why the matrix is generated has
+// understood why these are, and a second shape for the same rule is a second
+// thing to learn.
+//
+// Both pages exist to be handed to a MODEL. That is what makes staleness worse
+// here than on a page a human reads: a stale sentence a person reads is
+// confusing, and a stale PRODUCTION is a form the model emits confidently and
+// the parser refuses.
+
+// TestGrammarPageIsGenerated compares the committed grammar with what the
+// language tables render.
+func TestGrammarPageIsGenerated(t *testing.T) {
+	assertGeneratedPage(t, dslspec.GrammarPath, dslspec.RenderGrammar(),
+		"the parser's construct and clause tables, the annotation registry and the function catalog")
+}
+
+// TestVocabularyPageIsGenerated compares the committed vocabulary with what
+// the language tables render.
+func TestVocabularyPageIsGenerated(t *testing.T) {
+	assertGeneratedPage(t, dslspec.VocabularyPath, dslspec.RenderVocabulary(),
+		"the doc each language table carries for the names it owns")
+}
+
+// assertGeneratedPage holds one committed page to its renderer, byte for byte,
+// and reports the first line they differ on.
+func assertGeneratedPage(t *testing.T, path, want, derivedFrom string) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("%s is missing (%v); generate it with `make docs-grammar`", path, err)
+	}
+	if string(raw) == want {
+		return
+	}
+	line, committed, rendered := firstDifferentLine(string(raw), want)
+	t.Errorf("%s is stale against %s.\n\n"+
+		"First difference, line %d:\n  committed: %q\n  rendered:  %q\n\n"+
+		"Run `make docs-grammar` and commit the result. The page is generated, so a hand edit is always "+
+		"the wrong repair: change the TABLE (component/language/{parser,annotations,functions,dslspec}) "+
+		"and regenerate.",
+		path, derivedFrom, line, committed, rendered)
+}

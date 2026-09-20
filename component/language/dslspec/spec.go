@@ -51,10 +51,12 @@ import (
 // SpecVersion is the schema version of the serialized spec, so a consuming
 // editor can detect a contract mismatch. The MAJOR moves on a
 // backward-incompatible change to the JSON envelope; the MINOR on an additive
-// one (1.1.0: `edition` and `grammarVersion`, memql#5362). The field/value
-// semantics living inside the spec (a new construct, a new annotation) do NOT
-// move it -- only the envelope shape does.
-const SpecVersion = "1.1.0"
+// one (1.1.0: `edition` and `grammarVersion`, memql#5362; 1.2.0:
+// `Construct.bodyForm` and `Keyword.grammar` / `Keyword.heads`, the three facts
+// the generated grammar derives its productions from, memql#5388). The
+// field/value semantics living inside the spec (a new construct, a new
+// annotation) do NOT move it -- only the envelope shape does.
+const SpecVersion = "1.2.0"
 
 // Category groups a construct by how it reads, so an editor can present
 // constructs in sensible sections and the legal-next rules can refer to a
@@ -117,7 +119,62 @@ type Construct struct {
 	// registry's field receiver for the construct (memql#5359). Empty for a
 	// construct with no field list.
 	FieldAnnotations []string `json:"fieldAnnotations,omitempty"`
+	// Signature is the EBNF of everything between the construct's keyword and
+	// its body -- `<concept-name> <name>` for a query, `<bound-name> <name>`
+	// for a spec, `<name>` for the rest (memql#5388). It is the spelling the
+	// generated grammar emits.
+	//
+	// It does NOT replace ConceptInSignature, which is the EDITOR's flag
+	// ("offer a concept right after the keyword"): a spec's bound name may be
+	// a concept OR a shape, and a shape's is optional, so the two answer
+	// different questions. TestSignatureAgreesWithConceptInSignature holds
+	// them together, so the pair cannot drift into disagreeing.
+	Signature string `json:"signature,omitempty"`
+	// BodyForm says what the body between the braces IS (memql#5388).
+	// BodyBlocks answers "which clauses may appear"; it cannot answer "and
+	// what else", which is the difference between a query (clauses only) and
+	// a logic (clauses THEN statements), or between a concept (a field list)
+	// and a shape (a path list). The generated grammar emits one production
+	// per form, so a construct's body production is derived rather than
+	// written out per construct.
+	BodyForm BodyForm `json:"bodyForm,omitempty"`
 }
+
+// BodyForm is what a construct's body is made of -- a closed set, one member
+// per shape of body the language has. It is hand-authored in constructCatalog
+// beside Category and Doc, because it is a fact about the construct the parser
+// tables cannot state: parser.BodyClauses lists the clauses a body ACCEPTS and
+// is empty for every construct whose body is a bare list, which is exactly
+// where the forms below differ from one another.
+type BodyForm string
+
+const (
+	// BodyFormClauses: the body is the construct's body clauses and nothing
+	// else (query, mutation, provider, capability).
+	BodyFormClauses BodyForm = "clauses"
+	// BodyFormStatements: the body clauses, then the statements that run
+	// (logic, automation).
+	BodyFormStatements BodyForm = "statements"
+	// BodyFormCapabilityCall: an args block and exactly ONE capability call
+	// (action). The single call is the construct's whole definition, so it is
+	// its own form rather than a statement list of length one.
+	BodyFormCapabilityCall BodyForm = "capabilityCall"
+	// BodyFormFields: a field list -- the input schema a tool / prompt /
+	// builtin body IS, or a concept's declared fields.
+	BodyFormFields BodyForm = "fields"
+	// BodyFormPaths: a projection path list (shape).
+	BodyFormPaths BodyForm = "paths"
+	// BodyFormAssignments: `key: value` assignments (seed).
+	BodyFormAssignments BodyForm = "assignments"
+	// BodyFormEmpty: braces with nothing between them (policy, rule) -- the
+	// construct is entirely its annotations.
+	BodyFormEmpty BodyForm = "empty"
+	// BodyFormLambda: no braces at all; the construct is `= <lambda>`
+	// (spec, trait).
+	BodyFormLambda BodyForm = "lambda"
+	// BodyFormImport: the `use` statement's dotted path and brace list.
+	BodyFormImport BodyForm = "import"
+)
 
 // Annotation is one `@name` directive and the set of construct keywords it
 // is legal on, projected from the annotations registry.
@@ -154,6 +211,25 @@ type Keyword struct {
 	// (filter/shape/args... block headers), "reserved" (now/actor/partition...),
 	// or "import" (use).
 	Kind string `json:"kind"`
+	// Grammar is the EBNF right-hand side of the production this keyword
+	// heads, where it heads one (memql#5388): `"filter" <lambda>` for the
+	// filter clause, the whole if/else chain for `if`. Empty for a keyword
+	// that heads no production of its own -- a reserved root, or a
+	// continuation such as `else` / `case` / `branch`, which is spelled
+	// inside the production that contains it.
+	//
+	// It lives here, beside Doc, for the reason the generated grammar exists:
+	// a clause's shape written in the renderer would be the one fact on the
+	// page that nothing checks. A clause whose Grammar is empty fails the
+	// drift test, so a clause added to the parser cannot reach the page
+	// undescribed.
+	Grammar string `json:"grammar,omitempty"`
+	// Heads names the production this keyword is an alternative OF, for the
+	// keywords that head one: "statement" for a statement of a logic or
+	// automation body, "trailing" for a trailing clause of a construct call.
+	// Body clauses are identified by Kind ("clause") and leave this empty, as
+	// does every keyword with no Grammar.
+	Heads string `json:"heads,omitempty"`
 	// Properties is the structured member table for Kind=="reserved"
 	// identifiers that expose a closed dotted-path set (#2623: actor is
 	// the first). Empty for every other keyword; additive in the JSON
