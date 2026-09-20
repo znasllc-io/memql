@@ -64,6 +64,13 @@ const (
 	// with bytes they never asked for.
 	MaxRecordedContentBytes = 8 << 20
 
+	// MaxObservationArgsBytes is the ceiling above which an action's
+	// arguments spill to a Library file rather than staying inline. It
+	// mirrors integrations/work's own ceiling, which is what the observation
+	// writer enforces; this side decides whether to spill BEFORE the write,
+	// because only this side holds a ContentStore.
+	MaxObservationArgsBytes = 256 << 10
+
 	// MaxTranscriptFileBytes bounds the session's prose -- the one Library
 	// file stdout and stderr go to. Beyond it the tail is cut and
 	// `transcriptTruncated` says so.

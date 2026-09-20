@@ -24,12 +24,11 @@ func (s *recordingAppSessionStore) CreateAppSession(_ context.Context, row AppSe
 	return nil
 }
 
-func (s *recordingAppSessionStore) AppendAppSessionTranscript(_ context.Context, sessionId, transcript string, bytes int, truncated bool, status string) error {
+func (s *recordingAppSessionStore) RecordAppSessionProgress(_ context.Context, sessionId string, recordedSteps, droppedActions int, status string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.appends = append(s.appends, AppSessionRow{
-		ID: sessionId, Transcript: transcript, TranscriptBytes: bytes,
-		TranscriptTruncated: truncated, Status: status,
+		ID: sessionId, RecordedSteps: recordedSteps, DroppedActions: droppedActions, Status: status,
 	})
 	return nil
 }
@@ -280,9 +279,8 @@ func TestRunnerBoundsTheTranscript(t *testing.T) {
 	if !strings.Contains(result.Transcript, "truncated") {
 		t.Fatalf("truncation must be visible in the transcript itself: %q", result.Transcript)
 	}
-	terminal := store.terminal()
-	if terminal[0].TranscriptBytes != 100 {
-		t.Fatalf("transcriptBytes = %d, want the full 100 seen", terminal[0].TranscriptBytes)
+	if terminal := store.terminal(); !terminal[0].TranscriptTruncated {
+		t.Fatal("the terminal row must say the transcript file does not hold the whole output")
 	}
 }
 

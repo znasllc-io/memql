@@ -31,20 +31,32 @@ const (
 
 // AppSessionRow is the persistence projection of v1:worker:appSession.
 type AppSessionRow struct {
-	ID                  string
-	OwnerUserId         string
-	WorkerId            string
-	App                 string
-	Kind                string
-	RunId               string
-	StepId              string
-	Status              string
-	Workspace           string
-	Prompt              string
-	InputArtifactIds    []string
-	Transcript          string
-	TranscriptBytes     int
+	ID               string
+	OwnerUserId      string
+	WorkerId         string
+	App              string
+	Kind             string
+	RunId            string
+	StepId           string
+	Status           string
+	Workspace        string
+	Prompt           string
+	InputArtifactIds []string
+	// SessionRunId names the v1:work:run this session's actions are recorded
+	// into -- the subrun the delegating step's childRunId points at. It is on
+	// the ROW because the MCP node is a different replica and the row is the
+	// only state both can see.
+	SessionRunId string
+	// TranscriptFileId names the Library file the session's prose went to.
+	// It replaced Transcript and TranscriptBytes, which flattened every chunk
+	// into one bounded string with the stream and the sequence discarded.
+	TranscriptFileId    string
 	TranscriptTruncated bool
+	// RecordedSteps is how many steps the recording wrote, and the SEQ
+	// ALLOCATOR both writers read. DroppedActions is how many actions were
+	// lost.
+	RecordedSteps       int
+	DroppedActions      int
 	Usage               AppSessionUsage
 	Billing             string
 	ExitCode            int
@@ -73,7 +85,7 @@ type AppSessionRow struct {
 // not obliged to implement it.
 type AppSessionStore interface {
 	CreateAppSession(ctx context.Context, row AppSessionRow) error
-	AppendAppSessionTranscript(ctx context.Context, sessionId, transcript string, bytes int, truncated bool, status string) error
+	RecordAppSessionProgress(ctx context.Context, sessionId string, recordedSteps, droppedActions int, status string) error
 	EndAppSession(ctx context.Context, row AppSessionRow) error
 }
 
@@ -98,6 +110,7 @@ func (s *EngineStore) CreateAppSession(ctx context.Context, row AppSessionRow) e
 		"kind":             row.Kind,
 		"runId":            row.RunId,
 		"stepId":           row.StepId,
+		"sessionRunId":     row.SessionRunId,
 		"workspace":        row.Workspace,
 		"prompt":           row.Prompt,
 		"inputArtifactIds": stringsOrEmpty(row.InputArtifactIds),
@@ -112,20 +125,26 @@ func (s *EngineStore) CreateAppSession(ctx context.Context, row AppSessionRow) e
 	return s.executeMutation(appSessionWriteContext(ctx, row.OwnerUserId), "createAppSession", args)
 }
 
-// AppendAppSessionTranscript flushes the accumulated transcript.
-func (s *EngineStore) AppendAppSessionTranscript(ctx context.Context, sessionId, transcript string, bytes int, truncated bool, status string) error {
+// RecordAppSessionProgress advances a live session's recording counters.
+//
+// It replaced AppendAppSessionTranscript, which flushed the whole bounded
+// transcript string onto the row every two seconds. The prose is now one
+// content-addressed Library file written at end, and what a live reader needs
+// from the row is how far the recording has got -- which is also the seq the
+// MCP node allocates its own step from.
+//
+// No owner to borrow here -- the progress write names only the session -- but
+// the internal-origin stamp is still required: the mutation is @serverOnly and
+// an unstamped context reads as a client call.
+func (s *EngineStore) RecordAppSessionProgress(ctx context.Context, sessionId string, recordedSteps, droppedActions int, status string) error {
 	if s == nil || s.Engine == nil {
 		return nil
 	}
-	// No owner to borrow here -- the transcript flush names only the session
-	// -- but the internal-origin stamp is still required: the mutation is
-	// @serverOnly and an unstamped context reads as a client call.
-	return s.executeMutation(appSessionWriteContext(ctx, ""), "appendAppSessionTranscript", map[string]any{
-		"sessionId":           sessionId,
-		"transcript":          transcript,
-		"transcriptBytes":     bytes,
-		"transcriptTruncated": truncated,
-		"status":              status,
+	return s.executeMutation(appSessionWriteContext(ctx, ""), "recordAppSessionProgress", map[string]any{
+		"sessionId":      sessionId,
+		"recordedSteps":  recordedSteps,
+		"droppedActions": droppedActions,
+		"status":         status,
 	})
 }
 
@@ -149,9 +168,10 @@ func (s *EngineStore) EndAppSession(ctx context.Context, row AppSessionRow) erro
 			"known":        row.Usage.Known,
 		},
 		"billing":             row.Billing,
-		"transcript":          row.Transcript,
-		"transcriptBytes":     row.TranscriptBytes,
+		"transcriptFileId":    row.TranscriptFileId,
 		"transcriptTruncated": row.TranscriptTruncated,
+		"recordedSteps":       row.RecordedSteps,
+		"droppedActions":      row.DroppedActions,
 		"producedArtifactIds": stringsOrEmpty(row.ProducedArtifactIds),
 		"appSessionRef":       row.AppSessionRef,
 		"errorMessage":        row.ErrorMessage,
