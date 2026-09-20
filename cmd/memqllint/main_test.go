@@ -1122,3 +1122,89 @@ func TestRun_AnExpiredFormIsAnErrorNamingTheReplacement(t *testing.T) {
 		t.Errorf("a form past its window is an error, not a warning; output:\n%s", out)
 	}
 }
+
+// TestRun_ADeprecatedFormWarnsInSingleFileMode is fix round 1, IMPORTANT 2.
+//
+// The engine-parity pass runs in directory mode only, so for the whole of this
+// change's first round `memqllint <one-file>.memql` printed "no diagnostics"
+// over a file spelling a deprecated form -- and the same invocation on a
+// binary past the window exited 1. Silent for two minors and then a wall is
+// the opposite of what a window is for, so the warning has to appear wherever
+// the refusal eventually will.
+func TestRun_ADeprecatedFormWarnsInSingleFileMode(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"demo/concepts.memql": deprecatedArrayConcepts,
+		"demo/queries.memql":  testQueries,
+	})
+	form, _ := deprecation.Lookup(deprecation.ArrayType)
+	// Single-file mode roots at the file's own directory, so the path is bare.
+	want := "WARNING: concepts.memql:5:9: " + form.Warning()
+
+	code, out := captureRun(t, []string{filepath.Join(root, "demo", "concepts.memql")})
+	if code != 0 {
+		t.Fatalf("run() = %d, want 0: a deprecated form loads; output:\n%s", code, out)
+	}
+	if !strings.Contains(out, want+"\n") || strings.Count(out, "WARNING:") != 1 {
+		t.Errorf("want exactly one line %q; output:\n%s", want, out)
+	}
+
+	// And the file that does NOT spell one stays quiet, or the warning would be
+	// about the directory rather than about the file the author named.
+	code, out = captureRun(t, []string{filepath.Join(root, "demo", "queries.memql")})
+	if code != 0 || strings.Contains(out, "WARNING: ") {
+		t.Errorf("linting a file that spells no deprecated form warned: code=%d output:\n%s", code, out)
+	}
+}
+
+// The same invocation, past the window: the refusal an author would otherwise
+// meet with no warning behind it. Paired with the test above, this is the
+// before/after of the channel that was dark.
+func TestRun_AnExpiredFormIsAnErrorInSingleFileModeToo(t *testing.T) {
+	restore := deprecation.SetCurrent("0.25.0")
+	defer restore()
+	root := writeTree(t, map[string]string{
+		"demo/concepts.memql": deprecatedArrayConcepts,
+		"demo/queries.memql":  testQueries,
+	})
+	code, out := captureRun(t, []string{filepath.Join(root, "demo", "concepts.memql")})
+	if code != 1 {
+		t.Fatalf("run() = %d, want 1: past its window the form does not load; output:\n%s", code, out)
+	}
+	for _, want := range []string{"`[]T`", "memqlmigrate --rewrite=slice-syntax", deprecation.ArrayType} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the refusal does not name %q; output:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "WARNING: concepts.memql") {
+		t.Errorf("a form past its window is an error, not a warning; output:\n%s", out)
+	}
+}
+
+// A NAMESPACE directory -- one holding .memql files rather than domain
+// directories -- mounts nothing for the parity pass, so it was the second dark
+// mode. It warns too, and a use is reported ONCE in every mode: the scan is
+// this tool's one source, and the parity pass's copy of the same finding is
+// dropped rather than printed beside it.
+func TestRun_ADeprecatedFormWarnsOnceInEveryMode(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"demo/concepts.memql": deprecatedArrayConcepts,
+		"demo/queries.memql":  testQueries,
+	})
+	for name, args := range map[string][]string{
+		"dsl root":            {root},
+		"namespace directory": {filepath.Join(root, "demo")},
+		"single file":         {filepath.Join(root, "demo", "concepts.memql")},
+	} {
+		code, out := captureRun(t, args)
+		if code != 0 {
+			t.Errorf("%s: run() = %d, want 0; output:\n%s", name, code, out)
+			continue
+		}
+		if n := strings.Count(out, "WARNING: "); n != 1 {
+			t.Errorf("%s: %d warnings, want exactly 1; output:\n%s", name, n, out)
+		}
+		if !strings.Contains(out, deprecation.ArrayType) {
+			t.Errorf("%s: the warning does not name the rule; output:\n%s", name, out)
+		}
+	}
+}

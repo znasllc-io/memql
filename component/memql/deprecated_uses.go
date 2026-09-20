@@ -47,7 +47,10 @@ package memql
 // after the door shuts: cmd/memqlmigrate does not import this package, so its
 // Current() stays empty and `--rewrite=slice-syntax` still reads a form the
 // engine has stopped loading. A migration tool that refused the spelling it
-// exists to remove would leave a bundle with no way across.
+// exists to remove would leave a bundle with no way across. That is a
+// BUILD-GRAPH fact rather than a hope -- cmd/memqlmigrate/import_gate_test.go
+// walks `go list -deps` and fails on the import, because adding one would look
+// like a convenience and would stay green on every unstamped test binary.
 
 import (
 	"fmt"

@@ -109,6 +109,11 @@ func Lookup(rule string) (Form, bool) {
 }
 
 // Window is the window f is read through at release current.
+//
+// The length is always MinimumMinorReleases: a form cannot be given a longer
+// window without moving DeprecatedIn, which is also the published column. See
+// the package comment's "Known limitation" for why that is not built for and
+// what the fix would look like.
 func (f Form) Window(current string) Window {
 	return Window{MinorReleases: MinimumMinorReleases, DeprecatedAt: f.DeprecatedIn, Current: current}
 }

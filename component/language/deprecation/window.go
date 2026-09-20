@@ -57,6 +57,26 @@
 // empty DeprecatedAt, a nil Tracker: none refuses. The asymmetry is the point.
 // What this mechanism protects is a courtesy window; what a fail-closed bug
 // here costs is a cluster that will not boot over a malformed version string.
+//
+// # Known limitation: a window cannot be EXTENDED without moving its start
+//
+// MinorReleases is a value here, but Form.Window (forms.go) always passes
+// MinimumMinorReleases, so every form gets exactly the floor: a form's end is
+// DeprecatedIn + 2 and nothing else. The only way to give a form more time is
+// therefore to move DeprecatedIn forward -- and DeprecatedIn is also the column
+// the language reference publishes, so buying two more minors would mean
+// publishing a release the form was not deprecated in. The extension would be
+// paid for with a false date.
+//
+// This is deliberately not built for. No form has needed it, and a length
+// nobody has ever set to anything but the floor is a knob that would be wrong
+// the first time somebody turned it. The shape of the fix, for whoever does
+// need it: give Form its own window length (`MinorReleases int`, zero meaning
+// the floor), pass it through Form.Window, PUBLISH the end beside the start
+// rather than deriving it silently, and hold the length to
+// MinimumMinorReleases as a floor in the gate that already checks the derived
+// end. The published table then carries an honest start AND an honest end,
+// which is exactly what moving DeprecatedIn destroys.
 package deprecation
 
 import (

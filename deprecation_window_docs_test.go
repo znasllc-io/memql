@@ -76,10 +76,44 @@ func TestDeprecationWindowTableMatchesTheRegistry(t *testing.T) {
 		memqlLanguagePage, got, want, deprecation.MinimumMinorReleases)
 }
 
+// The authoring skeleton teaches the types, so it is the other page that can
+// teach a deprecated spelling as if it were canonical -- it did, until fix
+// round 1 (MINOR 6). It is a `//` comment in a .memql file, which the token
+// scan does not see and no other gate reads, so the one number it states is
+// pinned here rather than left to rot.
+func TestTheConceptSkeletonTeachesTheReplacementAndNamesTheWindow(t *testing.T) {
+	const skeleton = "dsl/_reference/_concept.memql"
+	raw, err := os.ReadFile(skeleton)
+	if err != nil {
+		t.Fatalf("%s is missing: %v", skeleton, err)
+	}
+	body := string(raw)
+	f, ok := deprecation.Lookup(deprecation.ArrayType)
+	if !ok {
+		t.Fatalf("the %s form is not registered", deprecation.ArrayType)
+	}
+	if strings.Contains(body, "shorthand for array(") {
+		t.Errorf("%s still presents `array(T)` as the spelling `[]T` is shorthand FOR, which teaches "+
+			"the deprecated form as canonical", skeleton)
+	}
+	for _, want := range []string{"Deprecated", f.RefusedFrom(), f.Migrator} {
+		if !strings.Contains(body, want) {
+			t.Errorf("%s does not name %q: a skeleton that shows `array(T)` without its window and its "+
+				"rewrite is teaching a form the reader has no way to know is going", skeleton, want)
+		}
+	}
+}
+
 // Every form the page lists names a window the engine will actually keep: the
-// release it stops loading at refuses, and the release before it does not. The
-// table test above pins the strings; this pins what they MEAN, so a table that
-// agrees with a renderer that agrees with nothing still fails.
+// release it stops loading at refuses, and the release it was DEPRECATED in
+// does not. The table test above pins the strings; this pins what they MEAN, so
+// a table that agrees with a renderer that agrees with nothing still fails.
+//
+// The release immediately BEFORE the refusal -- the last one that still loads,
+// and the one an operator is most likely to be running when the window closes
+// -- is checked in component/language/deprecation's own
+// TestRefusesOnlyOnceTheWindowIsSpent (0.24.9), which is where the arithmetic
+// lives. This test is about the published pair.
 func TestThePublishedWindowIsTheWindowTheEngineKeeps(t *testing.T) {
 	for _, f := range deprecation.Forms() {
 		if f.RefusesAt(f.DeprecatedIn) {
