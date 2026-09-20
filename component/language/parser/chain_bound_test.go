@@ -1,13 +1,12 @@
 package parser
 
 // chain_bound_test.go -- the chain bound is a BOUND: a chain at
-// MaxExpressionChain parses and walks, the link past it is refused, and the
-// input that used to end the process is now a message.
+// MaxExpressionChain parses and walks, and the link past it is refused.
 //
-// The tests that matter most are the last two. A tree taller than the runtime
-// stack is a `fatal error: stack overflow`, which no recover() sees and no
-// interceptor survives, so the only honest proof is to build the thing that
-// used to kill the process and run the walk over what the parser hands back.
+// The pair that matters most is the last two. A bound on what the parser
+// builds is only worth anything if BOTH halves hold: a chain far past it is
+// refused without the tree ever being walked, and a chain at it is handed back
+// and walks. Either half alone is satisfiable by a bound that is wrong.
 
 import (
 	"errors"
@@ -129,12 +128,12 @@ func TestOrdinaryExpressionsAreUntouchedByTheBound(t *testing.T) {
 }
 
 // The walk is what the chain bound exists to protect, so the proof is to run
-// it. Before the bound, ParseFile built this tree and the parser's OWN walk
-// over it (checkV1BodyExpression -> ast.WalkV1) ended the process with
-// "fatal error: stack overflow" -- not a panic, not something recover() sees.
+// the parse that would reach it. The parser's own check of a statement body
+// walks the expression it has just read (checkV1BodyExpression -> ast.WalkV1),
+// recursing once per link, so a chain far past the bound must be refused while
+// the tree is still being built rather than after.
 func TestTheWalkIsUnreachableAtCrashDepthThroughTheParser(t *testing.T) {
-	// Twelve million member reads: measured on this tree as the payload that
-	// ended the test binary before the bound existed.
+	// Far past the bound, and far past any depth a walk could recurse to.
 	const links = 12_000_000
 	src := "automation crashProbe { x := mutation m(v: args" + strings.Repeat(".a", links) + ") }"
 

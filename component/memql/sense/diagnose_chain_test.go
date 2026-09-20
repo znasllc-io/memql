@@ -1,15 +1,12 @@
 package sense
 
 // diagnose_chain_test.go -- Diagnose answers a diagnostic for an over-long
-// expression chain instead of ending the process.
+// expression chain.
 //
-// Diagnose is the reachable end of the path the chain bound protects: the six
-// Sense requests arrive on an authenticated stream, so any signed-in client
-// can send source, and Diagnose parses it. Before the bound, the source in
-// TestDiagnoseRefusesACrashDepthChain ended the process inside the parser's
-// own walk over what it had just built -- a `fatal error: stack overflow`,
-// which no recover() sees, so the pod died with every other client's work on
-// it.
+// Diagnose is the end of the path the chain bound protects that a client
+// reaches, so the bound is checked here and not only in the parser's own
+// tests: the refusal has to survive the rewrite chain, the lowering and the
+// diagnostic mapping, and still carry its rule id and a position.
 
 import (
 	"strings"
@@ -25,8 +22,9 @@ func diagnoseChainSource(links int) string {
 		strings.Repeat(".a", links) + "\n}\n"
 }
 
-// The measured crash payload: twelve million member reads in an automation
-// body. It is now a diagnostic, in about the time it takes to lex it.
+// A chain far past the bound, in an automation body, is a diagnostic in about
+// the time it takes to lex it -- the bound is checked while the tree is built,
+// so the cost is the lexing and not the length of the chain.
 func TestDiagnoseRefusesACrashDepthChain(t *testing.T) {
 	const links = 12_000_000
 	source := "automation crashProbe { x := mutation m(v: args" + strings.Repeat(".a", links) + ") }"

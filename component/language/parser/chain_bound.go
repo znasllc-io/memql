@@ -10,10 +10,10 @@ package parser
 // check of the expression it just read (checkV1BodyExpression -> ast.WalkV1),
 // the printer, the lowering, the evaluator, the cost estimate, the call graph,
 // the import integrity walk. A goroutine stack is not something Go lets a
-// program run out of gracefully: past 1 GB the runtime prints "goroutine stack
-// exceeds 1000000000-byte limit" and ends the process, and recover() never
-// sees it. So a chain nothing bounds is a fatal error, in a process that also
-// serves every other client.
+// program run out of gracefully: past the process's maximum stack the runtime
+// prints "goroutine stack exceeds ...-byte limit" and ends the process, and
+// recover() never sees it. So a chain nothing bounds is a fatal error rather
+// than a refusal.
 //
 // Bounding the WALKS instead would mean bounding each of them, and there are
 // at least eight callers of ast.WalkV1 outside this package; the next one
@@ -43,12 +43,24 @@ package parser
 // A tree that survives is therefore at most MaxExpressionChain links plus
 // v1MaxDepth nesting levels tall -- a few thousand frames, not a few million.
 //
-// # Why this is not a wall in front of real code
+// # What the budget actually is, and why it is not a wall
 //
 // The longest chain in the 1,151 .memql files of this repository is 8 links.
 // The bound is three orders of magnitude above that, so it is reached only by
 // generated or hostile input; chain_bound_test.go parses a chain AT the bound
 // of every kind, so the bound is a bound rather than a wall.
+//
+// Two things about the budget are worth writing down rather than measuring
+// again:
+//
+//   - In the PROCEDURAL grammar the count is cumulative over a DECLARATION, so
+//     the budget there is "every operator fold, member read and method call in
+//     the declaration", not "one chain". A query with 4096 `||` terms is
+//     refused whether they sit in one chain or across several clauses.
+//   - That does not bite idiomatic MemQL, because a long alternation is
+//     written with `in` rather than with `||`, and a list is ONE node holding
+//     many elements rather than a chain of many nodes: a 20,000-element `in`
+//     list parses in milliseconds, and so does a 100,000-element one.
 
 import "fmt"
 

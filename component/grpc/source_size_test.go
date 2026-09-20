@@ -32,33 +32,42 @@ const (
 	sourceBoundMessageId = "m-source"
 )
 
-// payloadsCarryingDSLSource are the client payloads DSL source rides in: every
-// Sense request and every authoring bundle request, by oneof field name.
-var payloadsCarryingDSLSource = []string{
-	"authoring_session_define_bundle",
-	"authoring_validate_bundle",
-	"durable_demote_bundle",
-	"durable_promote_bundle",
-	"sense_complete",
-	"sense_definition",
-	"sense_diagnose",
-	"sense_hover",
-	"sense_signature_help",
-	"sense_tokenize",
-	"stage_bundle",
+// payloadsCarryingDSLSource are the client payloads DSL source rides in, with
+// the bound each one earns: every Sense request carries the ONE FILE an author
+// has open, and every authoring payload carries a BUNDLE of constructs, which
+// is sized against the largest whole domain rather than the largest file.
+var payloadsCarryingDSLSource = map[string]int{
+	"authoring_session_define_bundle": langparser.MaxBundleBytes,
+	"authoring_validate_bundle":       langparser.MaxBundleBytes,
+	"durable_demote_bundle":           langparser.MaxBundleBytes,
+	"durable_promote_bundle":          langparser.MaxBundleBytes,
+	"stage_bundle":                    langparser.MaxBundleBytes,
+	"sense_complete":                  langparser.MaxSourceBytes,
+	"sense_definition":                langparser.MaxSourceBytes,
+	"sense_diagnose":                  langparser.MaxSourceBytes,
+	"sense_hover":                     langparser.MaxSourceBytes,
+	"sense_signature_help":            langparser.MaxSourceBytes,
+	"sense_tokenize":                  langparser.MaxSourceBytes,
 }
 
-// sourceTooLargeMessage is the refusal of a source of n bytes, written out
-// here rather than built from the error type, so the wording is pinned by this
-// file and not by the file that produces it.
-func sourceTooLargeMessage(n int) string {
-	return fmt.Sprintf("source is %d bytes, over the 512 KiB limit: send one file at a time, or split it into smaller files [source_too_large]", n)
+// sourcePayloadNames is the pinned set, sorted.
+func sourcePayloadNames() []string { return slices.Sorted(maps.Keys(payloadsCarryingDSLSource)) }
+
+// sourceTooLargeMessage is the refusal of a source of n bytes over limit,
+// written out here rather than built from the error type, so the wording is
+// pinned by this file and not by the file that produces it.
+func sourceTooLargeMessage(n, limit int) string {
+	label := fmt.Sprintf("%d KiB", limit>>10)
+	if limit >= 1<<20 {
+		label = fmt.Sprintf("%d MiB", limit>>20)
+	}
+	return fmt.Sprintf("source is %d bytes, over the %s limit: send one file at a time, or split it into smaller files [source_too_large]", n, label)
 }
 
-// dslSourceField is the payload's DSL source field, or nil.
-func dslSourceField(body protoreflect.MessageDescriptor) protoreflect.FieldDescriptor {
-	for _, name := range dslSourceFieldNames {
-		if field := body.Fields().ByName(name); field != nil && field.Kind() == protoreflect.StringKind && !field.IsList() {
+// sourceFieldOf is the payload's DSL source field, or nil.
+func sourceFieldOf(body protoreflect.MessageDescriptor) protoreflect.FieldDescriptor {
+	for _, carrier := range dslSourceFields {
+		if field := body.Fields().ByName(carrier.name); field != nil && field.Kind() == protoreflect.StringKind && !field.IsList() {
 			return field
 		}
 	}
@@ -72,7 +81,7 @@ func dslSourcePayloads() map[string]protoreflect.FieldDescriptor {
 	fields := clientPayloadOneof.Fields()
 	for i := range fields.Len() {
 		payload := fields.Get(i)
-		if payload.Kind() == protoreflect.MessageKind && dslSourceField(payload.Message()) != nil {
+		if payload.Kind() == protoreflect.MessageKind && sourceFieldOf(payload.Message()) != nil {
 			found[string(payload.Name())] = payload
 		}
 	}
@@ -90,7 +99,7 @@ func envelopeWithSource(t *testing.T, name, source string) *memqlv1.MemqlClientM
 	value := reflected.NewField(payload)
 	body := value.Message()
 	body.Set(body.Descriptor().Fields().ByName("request_id"), protoreflect.ValueOfString(sourceBoundRequestId))
-	body.Set(dslSourceField(body.Descriptor()), protoreflect.ValueOfString(source))
+	body.Set(sourceFieldOf(body.Descriptor()), protoreflect.ValueOfString(source))
 	reflected.Set(payload, value)
 	return envelope
 }
@@ -141,7 +150,7 @@ func awaitSent(t *testing.T, cs *captureStream) *memqlv1.MemqlServerMessage {
 // rule is written down in source_size.go.
 func TestSourceBoundCoversEverySourceCarryingPayload(t *testing.T) {
 	found := dslSourcePayloads()
-	assert.Equal(t, payloadsCarryingDSLSource, slices.Sorted(maps.Keys(found)))
+	assert.Equal(t, sourcePayloadNames(), slices.Sorted(maps.Keys(found)))
 	for name, payload := range found {
 		id := payload.Message().Fields().ByName("request_id")
 		assert.True(t, id != nil && id.Kind() == protoreflect.StringKind,
@@ -150,13 +159,32 @@ func TestSourceBoundCoversEverySourceCarryingPayload(t *testing.T) {
 }
 
 func TestSenseAndBundleSourceOverTheBoundIsRefusedBeforeItsHandler(t *testing.T) {
-	over := strings.Repeat("a", langparser.MaxSourceBytes+1)
-	for _, name := range payloadsCarryingDSLSource {
+	for _, name := range sourcePayloadNames() {
+		limit := payloadsCarryingDSLSource[name]
 		t.Run(name, func(t *testing.T) {
 			s, cs := newSourceBoundSession(t)
+			over := strings.Repeat("a", limit+1)
 			require.NoError(t, s.handleMessage(envelopeWithSource(t, name, over)))
-			requireSourceRefusal(t, cs, sourceTooLargeMessage(langparser.MaxSourceBytes+1))
+			requireSourceRefusal(t, cs, sourceTooLargeMessage(limit+1, limit))
 		})
+	}
+}
+
+// The two bounds are not one. A bundle between them -- over the FILE bound,
+// under the bundle bound -- reaches its handler, and the same source on a
+// Sense payload is refused. Collapsing them would leave the bundle path 1.18x
+// clear of the largest whole domain in the tree.
+func TestABundleBetweenTheBoundsReachesItsHandler(t *testing.T) {
+	between := strings.Repeat("a", langparser.MaxSourceBytes+1)
+	for _, name := range sourcePayloadNames() {
+		limit := payloadsCarryingDSLSource[name]
+		requestId, err := oversizedDSLSource(envelopeWithSource(t, name, between))
+		if limit == langparser.MaxBundleBytes {
+			assert.NoError(t, err, "%s carries a bundle and must accept this", name)
+			assert.Empty(t, requestId, name)
+			continue
+		}
+		assert.Error(t, err, "%s carries one file and must refuse this", name)
 	}
 }
 
@@ -171,7 +199,8 @@ func TestSenseAndBundleRefusalOfA20MiBSourceNeverLexesIt(t *testing.T) {
 		maxRefusalMem = 1 << 20
 	)
 	source := strings.Repeat("1+", huge/2)
-	for _, name := range payloadsCarryingDSLSource {
+	for _, name := range sourcePayloadNames() {
+		limit := payloadsCarryingDSLSource[name]
 		t.Run(name, func(t *testing.T) {
 			s, cs := newSourceBoundSession(t)
 			envelope := envelopeWithSource(t, name, source)
@@ -186,7 +215,7 @@ func TestSenseAndBundleRefusalOfA20MiBSourceNeverLexesIt(t *testing.T) {
 
 			allocated := after.TotalAlloc - before.TotalAlloc
 			t.Logf("refused in %v, allocating %d bytes", elapsed, allocated)
-			requireSourceRefusal(t, cs, sourceTooLargeMessage(huge))
+			requireSourceRefusal(t, cs, sourceTooLargeMessage(huge, limit))
 			assert.Less(t, elapsed, maxRefusal, "the refusal took %v", elapsed)
 			assert.Less(t, allocated, uint64(maxRefusalMem), "the refusal allocated %d bytes", allocated)
 		})
@@ -194,8 +223,8 @@ func TestSenseAndBundleRefusalOfA20MiBSourceNeverLexesIt(t *testing.T) {
 }
 
 func TestSenseAndBundleSourceAtTheBoundPassesTheGate(t *testing.T) {
-	at := strings.Repeat("a", langparser.MaxSourceBytes)
-	for _, name := range payloadsCarryingDSLSource {
+	for _, name := range sourcePayloadNames() {
+		at := strings.Repeat("a", payloadsCarryingDSLSource[name])
 		requestId, err := oversizedDSLSource(envelopeWithSource(t, name, at))
 		assert.NoError(t, err, name)
 		assert.Empty(t, requestId, name)
