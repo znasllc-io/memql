@@ -11,7 +11,7 @@ import {
   type AppSessionRow,
 } from "../rows";
 
-// Delegated app sessions: the caller's list, and one run's transcript
+// Delegated app sessions: the caller's list, and one run's detail
 // (epic memql#5009).
 //
 // ===========================================================================
@@ -30,9 +30,10 @@ import {
 // will never change again, and a surface that never settles.
 //
 // THE TWO READS PROJECT DIFFERENT SHAPES ON PURPOSE. `appSessionsForUser`
-// answers `workerAppSessionCard`, which deliberately carries NO transcript --
-// the largest field on the row by orders of magnitude. Only
-// `appSessionById` (`workerAppSessionFull`) asks for it.
+// answers `workerAppSessionCard`, which carries neither the prompt nor the
+// workspace -- a list renders a handful of lines and must not pull a page of
+// text per row to do it. Only `appSessionById` (`workerAppSessionFull`) asks
+// for those, and for the recording's own counters.
 //
 // THERE IS NO WRITE HERE AT ALL. Every writer of this concept is
 // `@serverOnly` and absent from the SDK, so this surface is strictly a

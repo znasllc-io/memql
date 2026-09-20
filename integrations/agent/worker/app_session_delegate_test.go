@@ -11,6 +11,7 @@ import (
 
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/planner"
+	"github.com/znasllc-io/memql/component/workjournal"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -248,5 +249,66 @@ func TestDelegateStampsNothingWithoutAChildRun(t *testing.T) {
 	}
 	if len(stamper.queries) != 0 {
 		t.Fatalf("nothing may be stamped when there is no child run: %v", stamper.queries)
+	}
+}
+
+// TestTheRecordingRunIsTheSubrunTheStepPointsAt (epic memql#5396).
+//
+// The delegate opens a subrun and stamps its id on the delegating step's
+// childRunId. The session's ACTIONS must be recorded into that same run: a
+// recording in a second run would leave the pointer a reader follows aimed at
+// a run holding one step and no actions, which is the "points at nothing"
+// failure this file's own header warns about.
+func TestTheRecordingRunIsTheSubrunTheStepPointsAt(t *testing.T) {
+	ex := &recordingExecutor{out: planner.ExecutorResult{
+		Output: map[string]any{"sessionId": "v1:worker:appSession:s1"},
+	}}
+	stamper := &recordingStamper{}
+	journal := workjournal.New(workjournal.ExecutorFunc(func(_ context.Context, q string) (any, error) {
+		return nil, nil
+	}), nil, "node-a")
+	d := newAppSessionDelegateFor(ex, journal, stamper, nil)
+
+	out, err := d.RunStep(context.Background(), memqlengine.AppSessionHandover{
+		ActingUserId: "u1", AppId: "claude-code",
+		RunId: "v1:work:run:r1", StepId: "v1:work:step:s1", Prompt: "ship it",
+	})
+	if err != nil {
+		t.Fatalf("RunStep: %v", err)
+	}
+	if out.ChildRunId == "" {
+		t.Fatal("the delegate opened no child run, so this test measures nothing")
+	}
+	if got := ex.got.Input["recordingRunId"]; got != out.ChildRunId {
+		t.Fatalf("Input[recordingRunId] = %v, want the child run %q the step now points at",
+			got, out.ChildRunId)
+	}
+	// And the step really does point at it, or the two facts would agree with
+	// each other while both being wrong.
+	var stamped bool
+	for _, q := range stamper.queries {
+		if strings.Contains(q, "childRunId") && strings.Contains(q, out.ChildRunId) {
+			stamped = true
+		}
+	}
+	if !stamped {
+		t.Fatalf("childRunId was never stamped on the delegating step: %v", stamper.queries)
+	}
+}
+
+// TestNoJournalLeavesTheRecordingRunToTheRecorder. A node whose journal is
+// unwired still runs the session; the recorder then opens its own run rather
+// than the actions going unrecorded.
+func TestNoJournalLeavesTheRecordingRunToTheRecorder(t *testing.T) {
+	ex := &recordingExecutor{out: planner.ExecutorResult{Output: map[string]any{"sessionId": "s"}}}
+	d := newAppSessionDelegateFor(ex, nil, nil, nil)
+
+	if _, err := d.RunStep(context.Background(), memqlengine.AppSessionHandover{
+		ActingUserId: "u1", AppId: "claude-code", StepId: "v1:work:step:s1",
+	}); err != nil {
+		t.Fatalf("RunStep: %v", err)
+	}
+	if got := ex.got.Input["recordingRunId"]; got != "" {
+		t.Fatalf("Input[recordingRunId] = %v, want empty so the recorder opens one", got)
 	}
 }

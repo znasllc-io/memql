@@ -995,19 +995,24 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// could open a session naming a directory nobody approved. Only the
 		// server knows which workspace the card actually named.
 		//
-		// appendAppSessionTranscript writes EVIDENCE -- the record a later
+		// recordAppSessionProgress writes EVIDENCE -- the record a later
 		// reader consults to answer what an agent did on somebody's computer.
 		// The person best placed to edit it is its owner, including for the
-		// run whose behaviour is the reason anyone is reading it.
+		// run whose behaviour is the reason anyone is reading it. It is also
+		// the SEQ ALLOCATOR two replicas share (epic memql#5396), so a
+		// caller-reachable version could hand every step of somebody's
+		// recording the same position and make the timeline unreadable. It
+		// replaced appendAppSessionTranscript, which flushed the whole
+		// transcript string onto the row.
 		//
 		// endAppSession carries `billing` and `usage`, which feed the plan's
 		// spend rollup and the AI ledger. A client-reachable version would let
 		// a caller declare their own run subscription-covered and its token
 		// count zero, which is the one write that can make the dollar ceiling
 		// stop working -- and again, the caller who benefits is the owner.
-		{Path: "worker/mutations.memql", Name: "createAppSession"}:           true,
-		{Path: "worker/mutations.memql", Name: "appendAppSessionTranscript"}: true,
-		{Path: "worker/mutations.memql", Name: "endAppSession"}:              true,
+		{Path: "worker/mutations.memql", Name: "createAppSession"}:         true,
+		{Path: "worker/mutations.memql", Name: "recordAppSessionProgress"}: true,
+		{Path: "worker/mutations.memql", Name: "endAppSession"}:            true,
 		// epic memql#5103, the model-pull trio. Same shape as the three
 		// above, and the same reason caller-scoping is no help: the caller
 		// IS the owner of their own machine, so a self-scoped filter admits

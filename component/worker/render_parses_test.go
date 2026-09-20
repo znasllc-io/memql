@@ -126,9 +126,10 @@ func writeDrivers() []driver {
 		Workspace:           "/Users/x/dev/my repo",
 		Prompt:              awkwardText,
 		InputArtifactIds:    []string{"v1:library:artifact:a-1"},
-		Transcript:          awkwardText,
-		TranscriptBytes:     len(awkwardText),
+		TranscriptFileId:    "v1:library:file:transcript-1",
 		TranscriptTruncated: true,
+		RecordedSteps:       7,
+		DroppedActions:      1,
 		Usage:               AppSessionUsage{InputTokens: 1200, OutputTokens: 340, CostUSD: 0.0125, Known: true},
 		Billing:             BillingSubscription,
 		ExitCode:            0,
@@ -231,11 +232,20 @@ func writeDrivers() []driver {
 		{"CreateAppSession", func(ctx context.Context, s *EngineStore) error {
 			return s.CreateAppSession(ctx, sess)
 		}},
-		{"AppendAppSessionTranscript", func(ctx context.Context, s *EngineStore) error {
-			return s.AppendAppSessionTranscript(ctx, sess.ID, awkwardText, len(awkwardText), true, AppSessionStatusRunning)
+		{"RecordAppSessionProgress", func(ctx context.Context, s *EngineStore) error {
+			return s.RecordAppSessionProgress(ctx, sess.ID, 7, 1, AppSessionStatusRunning)
 		}},
 		{"EndAppSession", func(ctx context.Context, s *EngineStore) error {
 			return s.EndAppSession(ctx, sess)
+		}},
+		// The seq allocator renders BOTH a read and a write -- appSessionById
+		// then recordAppSessionProgress -- and both have to parse. The error
+		// is ignored because the recording executor answers no rows, which is
+		// not what is under test here: what is under test is the two
+		// statements it handed the engine on the way.
+		{"ClaimRecordingSlot", func(ctx context.Context, s *EngineStore) error {
+			_, _ = s.ClaimRecordingSlot(ctx, sess.ID, sess.OwnerUserId)
+			return nil
 		}},
 	}
 }

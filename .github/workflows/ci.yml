@@ -1240,9 +1240,14 @@ jobs:
       # package under every tag, which is cheap and is what these lanes now do.
       #
       # These lanes are CGO-free, so they ride the warm go-checks cache.
+      # ./app/ joined the list in epic memql#5396: the app-session content
+      # store -- the Library half of the recording -- is agent-tagged and its
+      # tests are the only place the content-addressing property is measured.
+      # Without it here they compile in no lane and assert nothing on any PR,
+      # which scripts/citags refuses by name.
       - name: go test -tags agent (build-tagged suites)
         if: ${{ env.RUN_GO == 'true' }}
-        run: go test -tags agent -timeout=300s ./integrations/agent/ ./integrations/agent/worker/ ./component/node/
+        run: go test -tags agent -timeout=300s ./app/ ./integrations/agent/ ./integrations/agent/worker/ ./component/node/
       # RUN_GO or RUN_DSL: component/mcp/real_engine_surface_test.go pins DSL
       # contracts (e.g. @mcp on readyHarnessStep), so a DSL-only change can red
       # this lane. Mirrors the engine-load-check step's gating.

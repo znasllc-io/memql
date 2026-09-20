@@ -1,6 +1,6 @@
 import { RefreshButton } from "../FleetControls";
 
-import { EmptyState, Chip, Fact, Facts, Head, Notice, Panel, Subhead, formatBytes, formatMoment } from "../../../kit";
+import { EmptyState, Chip, Fact, Facts, Head, Notice, Panel, Subhead, formatMoment } from "../../../kit";
 import { Measure } from "../../../kit/MeasureView";
 import {
   appLabel,
@@ -17,26 +17,31 @@ import { useAppSessionDetail } from "./useAppSessions";
 // ===========================================================================
 // IT REPLACES THE LIST (DESIGN.md rule 11)
 // ===========================================================================
-// A transcript is TALL -- it is the whole output of a coding agent working on
-// somebody's machine -- so appending it beneath the list it was selected from
-// would be exactly the 5,069px, two-Head page rule 11 was written against.
+// A run's detail is TALL -- what it was asked, what it spent, its recording
+// and every artifact it produced -- so appending it beneath the list it was
+// selected from would be exactly the 5,069px, two-Head page rule 11 was
+// written against.
 // This carries the quiet back-Head instead, DeployablePage's shape. ONE Head
 // per view.
 //
 // ===========================================================================
-// THE TRANSCRIPT IS A RECORD, RENDERED VERBATIM
+// THE RECORDING REPLACED THE TRANSCRIPT PANEL (epic memql#5396)
 // ===========================================================================
-// It goes into a <pre> and nothing is parsed, prettified or re-wrapped. Chunk
-// `seq` is monotonic and the engine DROPS out-of-order and duplicate chunks
-// (component/worker/session.go), so what arrived is what there is -- any
-// interpretation this client applied would be a second account of a run, free
-// to be confidently wrong about what the agent did.
+// This page used to render a bounded transcript string off the session row:
+// every chunk flattened into one field with the stream and the sequence
+// discarded. What an app DID -- each command, each file it read or wrote,
+// each call back into MemQL -- is now one v1:work:step per action in the
+// session's own recording run, and the model's prose is one Library file.
 //
-// TRUNCATION IS STATED, AND POINTS AT THE ARTIFACTS. The row keeps a bounded
-// transcript and the FULL one is pushed to the Library at the end of the run.
-// A transcript that simply stops reads as a run that stopped, which is the
-// failure to avoid -- so when the bound was hit the page says so and names
-// where the whole thing is.
+// So the panel states the RECORDING and points at both. It deliberately does
+// not draw the step timeline: that is the Work app's surface, and a second
+// timeline here would be a second account of one run, free to disagree with
+// the first. What belongs here is whether the recording is COMPLETE, which
+// is the question a person on this page is actually asking.
+//
+// AN ABSENT COUNT IS NOT ZERO. A session nothing recorded and a session that
+// recorded and found nothing to record are different facts about a run, and
+// Measure renders the first as unmeasured rather than as a 0 nobody measured.
 
 export function SessionPage({
   sessionId,
@@ -160,32 +165,59 @@ function SessionBody({
         </Panel>
       )}
 
-      <Subhead>Transcript</Subhead>
-      <p className="os-caption">
-        <Measure figure={session.transcriptBytes} format={formatBytes} />
-        {session.transcriptTruncated ? " kept -- truncated" : " kept"}
-      </p>
+      <Subhead>Recording</Subhead>
+      <Facts>
+        <Fact label="Actions recorded" value={<Measure figure={session.recordedSteps} />} />
+        <Fact label="Actions lost" value={<Measure figure={session.droppedActions} />} />
+        <Fact
+          label="Timeline"
+          value={session.sessionRunId === "" ? "not recorded" : session.sessionRunId}
+          mono
+        />
+        <Fact
+          label="Transcript"
+          value={
+            session.transcriptFileId === ""
+              ? live
+                ? "saved to your Library when the session ends"
+                : "not saved"
+              : session.transcriptFileId
+          }
+          mono
+        />
+      </Facts>
+
+      {session.sessionRunId === "" ? (
+        <p className="os-caption">
+          Nothing recorded this run, so there is no step-by-step account of what the app
+          did. That is not the same as a run that did nothing.
+        </p>
+      ) : (
+        <p className="os-caption">
+          Every action this app took is a step of the run above -- each command, each file
+          it read or wrote, and each call it made back into MemQL, with its arguments and
+          the digest of what came back.
+        </p>
+      )}
+
+      {/* A LOST ACTION IS SAID OUT LOUD. Anything lifted from an incomplete
+          recording is incomplete, and a count nobody reads is a count that
+          lets that happen quietly. */}
+      {session.droppedActions.kind === "measured" && session.droppedActions.value > 0 ? (
+        <Notice
+          tone="warn"
+          sentence="Some of this run's actions were not recorded."
+          next="Its sequence has gaps, so anything built from this recording is incomplete. The run itself was unaffected."
+        />
+      ) : null}
 
       {session.transcriptTruncated ? (
         <Notice
           tone="warn"
-          sentence="This is a shortened transcript."
-          next={
-            session.producedArtifactIds.length > 0
-              ? "The complete transcript is in your Library, among the files listed below."
-              : "The complete transcript is saved to your Library when the session ends."
-          }
+          sentence="The saved transcript is shortened."
+          next="The app produced more output than one transcript file holds, and the tail was cut."
         />
       ) : null}
-
-      {/* VERBATIM, in a <pre>, and never parsed. See this file's header. */}
-      <pre className="os-fleet-transcript" aria-label="Run transcript">
-        {session.transcript === ""
-          ? live
-            ? "Waiting for the first output."
-            : "This run produced no output."
-          : session.transcript}
-      </pre>
 
       {session.producedArtifactIds.length === 0 ? null : (
         <>

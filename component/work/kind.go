@@ -118,6 +118,31 @@ func ReachesPrompt(name string, reg Registry) (bool, []string) {
 	return walk(name, nil)
 }
 
+// The step types an APP SESSION's recording writes (epic memql#5396, design
+// D2 and D12). They share `v1:work:step.stepType` with the types a compiled
+// automation statement produces, because a reader asking what a step did
+// should not first have to ask which writer wrote it.
+//
+// They are declared HERE rather than beside component/automations' StepType
+// constants, and the split is the honest one: those name what the compiler
+// EMITS, and nothing here is compiled from a statement. What both sets share
+// is this function, which is the only thing in the tree that checks a
+// stepType at all -- no writer validates one.
+const (
+	// StepTypeExec is a command the app ran.
+	StepTypeExec = "exec"
+	// StepTypeFSWrite is a file the app wrote.
+	StepTypeFSWrite = "fs_write"
+	// StepTypeFSRead is a file the app read.
+	StepTypeFSRead = "fs_read"
+	// StepTypeFetch is a URL the app fetched.
+	StepTypeFetch = "fetch"
+	// StepTypeMCP is a MemQL tool the app called back over MCP.
+	StepTypeMCP = "mcp"
+	// StepTypeAppAnswer is the structured answer the session closed with.
+	StepTypeAppAnswer = "app_answer"
+)
+
 // DeriveKind answers the kind for one step. stepType is the automation
 // step type a statement compiles to; target is the construct it calls,
 // empty for the statements that call nothing by name.
@@ -133,6 +158,12 @@ func DeriveKind(stepType, target string, reg Registry) (Kind, error) {
 		return KindLoop, nil
 	case "spec":
 		return KindDecision, nil
+	case StepTypeAppAnswer:
+		// The one app-session action that IS intelligence: the structured
+		// answer the session closed with. Recording it as deterministic
+		// would tell a later lift that the most expensive part of the
+		// session was the cheapest.
+		return KindReasoning, nil
 	}
 	if target != "" {
 		if t, ok := reg[target]; ok && t.ConstructKind == ConstructSpec {
@@ -144,6 +175,13 @@ func DeriveKind(stepType, target string, reg Registry) (Kind, error) {
 	}
 	switch stepType {
 	case "function", "action", "forEach", "parallel", "block", "event", "expression", "return":
+		return KindDeterministic, nil
+	case StepTypeExec, StepTypeFSWrite, StepTypeFSRead, StepTypeFetch, StepTypeMCP:
+		// An app session's actions (epic memql#5396, design D2). A shell
+		// command, a file read or write, a fetch and a call back into
+		// MemQL over MCP reach no prompt, which is the definition -- and
+		// it is what makes a recurring sequence of them replayable
+		// without a model later.
 		return KindDeterministic, nil
 	}
 	return KindUnset, fmt.Errorf("work: unknown step type %q", stepType)
