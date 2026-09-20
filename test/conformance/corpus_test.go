@@ -142,9 +142,17 @@ type corpusCase struct {
 type corpusVersionManifest struct {
 	Edition  string `json:"edition"`
 	Language string `json:"language"`
-	// Status is "draft" until the freeze epic (dsl-v1-freeze) flips it to
-	// "frozen".
+	// Status was "draft" until the freeze epic (dsl-v1-freeze, memql#5390)
+	// flipped it to "frozen". TestCorpusManifestMatchesTheEngine now requires
+	// the edition this engine WRITES to be frozen; a later edition being
+	// drafted lives in its own directory and may still say "draft".
 	Status string `json:"status"`
+	// FrozenAt is the date the edition froze and Note says what the freeze
+	// means for anyone changing a case. Both are read by people rather than by
+	// code -- but readCorpusManifest sets DisallowUnknownFields, so they are
+	// declared here or the manifest does not parse at all.
+	FrozenAt string `json:"frozenAt,omitempty"`
+	Note     string `json:"note,omitempty"`
 }
 
 // corpusRun is one case as the runner carries it through the batches.
