@@ -13845,12 +13845,19 @@ a.os-button {
 .os-window[data-fullscreen] { border-radius: 0; }
 .os-window[data-os-window="fleet"] .os-window-content { padding: 0; overflow: hidden; }
 .fleet-app { height: 100%; min-height: 0; }
-.fleet-page { height: 100%; overflow: auto; scrollbar-gutter: stable; padding: 0 24px 28px; container: fleet-page / inline-size; }
+/* ONE WINDOW RHYTHM. Fleet zeroes `.os-window-content`'s padding so its pages
+ * can own their scrolling, and then set its own: 24px at the sides and 12px
+ * above a title, against the 20px and 18px every other window gets -- and
+ * against Fleet's OWN Overview, which already took 18px 20px (below). Side by
+ * side with Deployables, Fleet's title sat 6px high and 4px to the right, and
+ * nothing lined up. These are the standard values now, in all four places a
+ * Fleet page sets a heading, so a list starts at the same x and y everywhere. */
+.fleet-page { height: 100%; overflow: auto; scrollbar-gutter: stable; padding: 0 20px 28px; container: fleet-page / inline-size; }
 .fleet-page .os-head { flex-wrap: wrap; gap: 10px; }
 .fleet-page > .os-fleet > .os-head,
 .fleet-page > .os-settings > .os-head,
 .fleet-page > .fleet-task-routing > .os-head,
-.fleet-home > .fleet-workspace > .os-head { position: sticky; top: 0; z-index: 3; padding: 12px 0; margin: 0 0 18px; background: var(--os-glass-solid); border-bottom: 1px solid var(--os-line); }
+.fleet-home > .fleet-workspace > .os-head { position: sticky; top: 0; z-index: 3; padding: 18px 0 12px; margin: 0 0 22px; background: var(--os-glass-solid); }
 .fleet-page .os-head-actions { flex-wrap: wrap; }
 .fleet-home .fleet-workspace-body { display: block; }
 .fleet-home .fleet-equipment-area { min-width: 0; }
@@ -13901,7 +13908,7 @@ a.os-button {
 .fleet-pane-overview > .os-head { position: sticky; top: 0; z-index: 3; background: var(--os-glass-solid); padding: 12px 0; margin-bottom: 18px; border-bottom: 1px solid var(--os-line); }
 .fleet-page:has(> .os-fleet-addpage) { padding: 0; overflow: hidden; scrollbar-gutter: auto; }
 .fleet-page .os-fleet-addpage { margin: 0; height: 100%; }
-.fleet-page > .os-logs > .os-head { position: sticky; top: 0; z-index: 3; background: var(--os-glass-solid); padding: 12px 0; }
+.fleet-page > .os-logs > .os-head { position: sticky; top: 0; z-index: 3; background: var(--os-glass-solid); padding: 18px 0 12px; }
 @container fleet-page (max-width: 820px) { .fleet-routing-stages { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 @container fleet-page (max-width: 420px) { .fleet-routing-stages { grid-template-columns: minmax(0,1fr); } .fleet-routing-stage[open] { grid-column: auto; } .fleet-home .fleet-equipment-rig > .fleet-equipment-bank:first-child ul { grid-template-columns: minmax(0,1fr); } }
 
@@ -13956,8 +13963,12 @@ a.os-button {
 .os-empty-state h4 { margin:0 0 8px; color:var(--os-ink); font-size:18px; font-weight:550; }
 .os-empty-state-copy { font-size:var(--os-text-sm); line-height:1.7; }
 .os-empty-state-action { display:flex; flex-wrap:wrap; gap:8px; margin-top:18px; }
-.fleet-section-header, .fleet-workspace-header { position:sticky; top:0; z-index:4; background:var(--os-glass-solid); border-bottom:1px solid var(--os-line); margin-bottom:22px; }
-.fleet-section-header > .os-head, .fleet-workspace-header > .os-head { position:static; padding:12px 0; margin:0; border:0; }
+/* NO LINE UNDER THE HEADING. It drew a hairline a few pixels beneath the trail
+ * row's own, so a list opened on a rule that belonged to nothing -- the
+ * Deployables list, which draws none, is the look. The hairlines in a window
+ * are the chrome's (tabs, trail) and the rows'; a heading does not get one. */
+.fleet-section-header, .fleet-workspace-header { position:sticky; top:0; z-index:4; background:var(--os-glass-solid); margin-bottom:22px; }
+.fleet-section-header > .os-head, .fleet-workspace-header > .os-head { position:static; padding:18px 0 12px; margin:0; border:0; }
 .fleet-section-header > .fleet-local-tabs, .fleet-workspace-header > .fleet-local-tabs { margin:0; padding-block:2px 8px; }
 .fleet-local-tabs { flex-wrap:nowrap; overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; gap:4px; padding:3px; scroll-padding-inline:4px; }
 .fleet-local-tabs button { flex:0 0 auto; white-space:nowrap; min-height:36px; }
@@ -13985,7 +13996,7 @@ a.os-button {
 .fleet-page .fleet-inspector > .os-panel { padding-inline:0; }
 .fleet-page .os-fleet-model-head { flex-wrap:wrap; gap:10px; }
 .fleet-page .os-fleet-model { padding-inline:0; border-radius:0; background:transparent; border-inline:0; }
-.fleet-page .os-fleet-session > .os-head { position:sticky; top:0; z-index:4; padding:12px 0; background:var(--os-glass-solid); }
+.fleet-page .os-fleet-session > .os-head { position:sticky; top:0; z-index:4; padding:18px 0 12px; background:var(--os-glass-solid); }
 .fleet-page .os-fleet-addpage .os-head { margin-bottom:16px; }
 @container fleet-page (max-width:500px) {
   .fleet-record > summary { flex-wrap:wrap; gap:8px 12px; }

@@ -67,7 +67,11 @@ export function FleetApp({
   const [selection, select] = useState<FleetSelection>({ machineId: "", view: "equipment" });
 
   useEffect(() => {
-    if (navigation?.origin === "peer" && sectionId === "machines") select(held => ({ ...held, view: "equipment" }));
+    // CLICKING THE MACHINES TAB BRINGS UP THE LIST. It used to keep the held
+    // machine and reset only its view, because there was no list to return
+    // to. Opening a machine from the Overview map is a CONTENT navigation, not
+    // a peer one, so it still lands on that machine.
+    if (navigation?.origin === "peer" && sectionId === "machines") select({ machineId: "", view: "equipment" });
   }, [navigation?.revision]);
 
   function update(patch: Partial<FleetSettings>) {
