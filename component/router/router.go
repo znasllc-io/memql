@@ -837,6 +837,11 @@ func (r *Router) providerLookup(ctx context.Context, req ResolveRequest, name st
 		Streaming:    mod == modalityStreamTools || mod == modalityStreamChat,
 		Entry:        entry,
 	}
+	// THE ATTEMPT'S DOOR IS ESTABLISHED HERE, and withDecisionFrom carries it
+	// rather than re-deriving it from the name -- since epic memql#5391 the
+	// name cannot say which door was taken, because `app:claude-code` serves a
+	// chat turn as `app` and takes a whole step as a `session`.
+	resolved.Decision.Door = doorFor(entry.Config.Name)
 	if ok, _ := servesModality(entry.Client, mod); !ok {
 		// THE SAME QUESTION THE WALK ASKED, and asking it here is what keeps
 		// the fallback wrapper from stepping past a session winner it just

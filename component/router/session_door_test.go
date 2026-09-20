@@ -332,3 +332,51 @@ func TestTheLevelRidesTheSessionHandover(t *testing.T) {
 		t.Fatalf("the handover's level = %q, want %q", delegate.got.Level, airoute.LevelReasoning)
 	}
 }
+
+// A SESSION CALL WRITES ITS LEDGER ROW, and this test exists because the way
+// it would not is invisible.
+//
+// The chain walk builds a session client and hands it back on
+// Resolved.Client. Handing THAT to the caller from ResolveFor is the obvious
+// move and it is wrong: every client the resolve* paths return is already
+// wrapped in a fallback wrapper which wraps again in the OBSERVER, and the
+// observer is what writes v1:router:call. Substituting the bare session client
+// would leave a run that spent somebody's entire subscription with no ledger
+// row -- and the call itself would work perfectly, so nothing would report it.
+//
+// The row also has to carry the SESSION door and the app's own report, because
+// those are the two facts that make the run readable afterwards.
+func TestASessionCallWritesItsLedgerRow(t *testing.T) {
+	r, _, delegate := sessionRouter(t, []memql.AppDoor{openApp("claude-code")})
+	ledger := &decisionLedger{writes: make(chan string, 4)}
+	r.engine = ledger
+
+	resolved, err := r.ResolveFor(context.Background(), toolRequest())
+	if err != nil {
+		t.Fatalf("ResolveFor: %v", err)
+	}
+	if _, err := resolved.Client.(common.ToolCallingChatAIProvider).CallChatWithTools(
+		context.Background(), []common.ChatMessage{{Role: "user", Content: "ship it"}}, nil); err != nil {
+		t.Fatalf("CallChatWithTools: %v", err)
+	}
+	if delegate.runs != 1 {
+		t.Fatalf("the delegate ran %d times, want one session", delegate.runs)
+	}
+
+	args := ledger.next(t)
+	if args["door"] != DoorSession {
+		t.Fatalf("the ledger row's door = %v, want %q", args["door"], DoorSession)
+	}
+	if args["providerName"] != "app:claude-code" {
+		t.Fatalf("providerName = %v, want the entry the policy named", args["providerName"])
+	}
+	// `model` is what the CHAIN resolved -- the app id. `servedModel` is what
+	// the app said it ran. The gap between them is the whole point.
+	if args["model"] != "claude-code" {
+		t.Fatalf("model = %v, want the app id the chain resolved", args["model"])
+	}
+	if args["servedModel"] != "claude-opus-5" || args["servedEffort"] != "high" {
+		t.Fatalf("the app's report did not reach the row: servedModel=%v servedEffort=%v",
+			args["servedModel"], args["servedEffort"])
+	}
+}

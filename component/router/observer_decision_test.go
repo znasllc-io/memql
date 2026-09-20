@@ -113,7 +113,7 @@ func assertRecordedDecision(t *testing.T, args map[string]any, decision airoute.
 			t.Errorf("%s=%q would fail the router:call enum", key, value)
 		}
 	}
-	if args["door"] != DoorLocal && args["door"] != DoorApp && args["door"] != DoorFederation {
+	if args["door"] != DoorLocal && args["door"] != DoorApp && args["door"] != DoorFederation && args["door"] != DoorSession {
 		t.Errorf("door=%q would fail the router:call enum", args["door"])
 	}
 }
