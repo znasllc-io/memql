@@ -845,9 +845,17 @@ func (r *Router) providerLookup(ctx context.Context, req ResolveRequest, name st
 	if ok, _ := servesModality(entry.Client, mod); !ok {
 		// THE SAME QUESTION THE WALK ASKED, and asking it here is what keeps
 		// the fallback wrapper from stepping past a session winner it just
-		// re-resolved by name (design D7). A stepless call is refused rather
-		// than skipped, for the same reason: skipping it here would advance to
-		// the vendor behind it, silently.
+		// re-resolved by name (design D7). Without it the wrapper would skip
+		// the app entry as "does not serve tool-calling turns" and advance to
+		// whatever is behind it, which on the shipped chains is a vendor.
+		//
+		// THE STEPLESS ERROR IS SKIPPED RATHER THAN SURFACED, and that is
+		// sound rather than a shortcut: this lookup has no error channel, and
+		// the case cannot arrive. A stepless call is refused by the WALK,
+		// before any wrapper is built -- so the only way here is a chain the
+		// walk already resolved, which means the request carried a step. If it
+		// ever did arrive, a session winner's chain is itself alone, so the
+		// skip exhausts the chain and refuses rather than reaching a vendor.
 		sessionClient, isSession, err := r.sessionDoorFor(req, name, mod)
 		if err != nil || !isSession {
 			return nil, Resolved{}, false
