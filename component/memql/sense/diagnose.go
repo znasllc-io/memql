@@ -131,6 +131,12 @@ func (s *Service) Diagnose(source string, filePath string) []Diagnostic {
 		diagnostics = append(diagnostics, bodyScopeDiagnostics(file, lexed, place)...)
 	}
 
+	// Uses of a deprecated form still inside its window (memql#5390). Lexical
+	// and vocabulary-free, so outside both guards above: a registry-less
+	// service, a file whose only constructs the lowering strips (a builtin, a
+	// prompt) and a file broken elsewhere all still say where they spell one.
+	diagnostics = append(diagnostics, deprecatedFormsRule(source)...)
+
 	return diagnostics
 }
 
@@ -366,7 +372,7 @@ func (s *Service) semanticDiagnostics(file *parser.File, source string) []Diagno
 	// so the rule can no longer fire on real authored input. The rule (and
 	// its unit test) are kept for reference.
 	diagnostics = append(diagnostics, nameShapeRule(file, source)...)
-	diagnostics = append(diagnostics, arraySyntaxRule(source)...)
+	// deprecatedFormsRule runs in Diagnose itself, outside the vocabulary guard.
 	diagnostics = append(diagnostics, redundantEnabledRule(source)...)
 	diagnostics = append(diagnostics, redundantVersionRule(source)...)
 	diagnostics = append(diagnostics, bareRowIntrinsicRule(source)...)

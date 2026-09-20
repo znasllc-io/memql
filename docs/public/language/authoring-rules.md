@@ -2411,6 +2411,17 @@ A stale bundle is therefore detectable (the line it declares, and the refusal
 naming it), diagnosable (a rejection with a hint), and mechanically fixable
 (the rewrite) -- never a silent soft-skip.
 
+**Rejecting at parse time is one of two narrowings, and the harsher one.** Since
+language 1.0 was frozen, a form a bundle outside this repo could plausibly be
+holding leaves through a **deprecation window** instead: it keeps loading, every
+load warns naming the replacement and the release it stops loading at, every use
+is counted on `memql_dsl_deprecated_uses_total{rule}`, and only after at least
+two minor releases does the parser refuse it. The rewrite requirement above is
+unchanged -- a window with no rewrite is a warning with no way out -- and the
+forms currently in a window are in
+[memql.md](memql.md#forms-in-a-deprecation-window). Reject at parse time where
+nothing outside this repo could have written the form; deprecate where it could.
+
 ## Reserved args-field names
 
 `now`, `actor`, `partition`, `config`, and `trace` are reserved

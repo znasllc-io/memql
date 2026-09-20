@@ -18,7 +18,10 @@
 // This catches the init-only validation classes dslimports does not model
 // -- non-canonical @relationship types, declared-but-unused mutation args,
 // CQS / dependency-tree violations, and every other unified-loader
-// parse/register skip.
+// parse/register skip. What that pass finds that still LOADS -- a use of a
+// deprecated form inside its window (memql#5390) -- prints as
+// `WARNING: <file>:<line>:<column>: <message>` and in the --json warnings
+// array, and leaves the exit code alone.
 //
 // Usage:
 //
@@ -200,9 +203,17 @@ func run(args []string) int {
 	// it, so a pack that lints clean here also MOUNTS clean at boot. Directory
 	// mode only: single-file mode keeps its file-scoped report, and the root
 	// there is a namespace directory rather than a DSL root of domains.
-	var paritySkipped []string
+	var (
+		paritySkipped  []string
+		parityWarnings []Diagnostic
+	)
 	if target == "" {
 		parityDiags, skipped, perr := memql.LintUnifiedTree(nil, root)
+		// What the parity pass found that LOADS -- a deprecated form still
+		// inside its window (memql#5390) -- is a warning: printed, never a
+		// reason to fail, and never a reason to skip the lanes behind a clean
+		// pass.
+		parityDiags, parityWarnings = splitParityWarnings(parityDiags)
 		// Loop analysis requires a complete function registry. Report the
 		// original parse/load refusal once before attempting that graph.
 		if perr == nil && len(parityDiags) == 0 && len(loadDiags) == 0 {
@@ -236,6 +247,7 @@ func run(args []string) int {
 		report.Errors = append(report.Errors, Diagnostic{Level: "error", Message: e.Error()})
 	}
 	sort.SliceStable(report.Errors, func(i, j int) bool { return report.Errors[i].Message < report.Errors[j].Message })
+	report.Warnings = append(report.Warnings, parityWarnings...)
 	if rootLineWarning != "" {
 		report.Warnings = append(report.Warnings, Diagnostic{Level: "warning", Message: rootLineWarning})
 	}
@@ -259,11 +271,15 @@ type Report struct {
 	// embedded tree owns the namespace -- but without them a clean report is
 	// ambiguous between "parity-checked and clean" and "never parity-checked".
 	ParitySkippedDomains []string `json:"paritySkippedDomains,omitempty"`
-	// Warnings is what the run found that does not fail it: a root that is
-	// itself a domain a mount would read, and declares no language line.
-	// Whether that directory IS a mounted domain depends on the tree it is
-	// mounted in, which this run cannot see, so it warns and leaves the exit
-	// code alone.
+	// Warnings is what the run found that does not fail it, and it never
+	// changes the exit code:
+	//
+	//   - each use of a deprecated form still inside its window (memql#5390),
+	//     "<file>:<line>:<column>: <the form's warning>", in file and line
+	//     order;
+	//   - a root that is itself a domain a mount would read, and declares no
+	//     language line. Whether that directory IS a mounted domain depends on
+	//     the tree it is mounted in, which this run cannot see.
 	Warnings []Diagnostic `json:"warnings,omitempty"`
 }
 
@@ -272,6 +288,26 @@ type Report struct {
 type Diagnostic struct {
 	Level   string `json:"level"`
 	Message string `json:"message"`
+}
+
+// splitParityWarnings separates what the engine-parity pass found that loads
+// from what boot refuses, rendering each warning as its report line.
+func splitParityWarnings(diags []memql.LintDiagnostic) (errs []memql.LintDiagnostic, warnings []Diagnostic) {
+	for _, d := range diags {
+		if !d.IsWarning() {
+			errs = append(errs, d)
+			continue
+		}
+		msg := d.Message
+		switch {
+		case d.File != "" && d.Line > 0:
+			msg = fmt.Sprintf("%s:%d:%d: %s", d.File, d.Line, d.Column, d.Message)
+		case d.File != "":
+			msg = d.File + ": " + d.Message
+		}
+		warnings = append(warnings, Diagnostic{Level: "warning", Message: msg})
+	}
+	return errs, warnings
 }
 
 // buildReport renders the run: diags is every diagnostic to print -- Load's,

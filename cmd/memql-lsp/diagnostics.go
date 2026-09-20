@@ -8,6 +8,7 @@ import (
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
 	"github.com/znasllc-io/memql/cmd/memql-lsp/internal/position"
+	"github.com/znasllc-io/memql/component/language/deprecation"
 	"github.com/znasllc-io/memql/component/memql/sense"
 )
 
@@ -61,7 +62,10 @@ func senseDiagnostics(svc *sense.Service, uri protocol.DocumentUri, text string)
 
 // toLSPDiagnostic maps a Sense diagnostic to the LSP wire form: Sense's 1-based
 // rune positions convert to LSP 0-based UTF-16 positions, its 1-4 severity maps
-// directly to the LSP DiagnosticSeverity 1-4, and its code is carried.
+// directly to the LSP DiagnosticSeverity 1-4, and its code is carried. A code
+// that is a deprecated form's rule -- the warning on a use inside its window,
+// or the refusal of one past it (memql#5390) -- adds the Deprecated tag, which
+// an editor draws as a strike-through (deprecatedforms.go).
 func toLSPDiagnostic(content string, d sense.Diagnostic) protocol.Diagnostic {
 	severity := protocol.DiagnosticSeverity(d.Severity)
 	out := protocol.Diagnostic{
@@ -72,6 +76,9 @@ func toLSPDiagnostic(content string, d sense.Diagnostic) protocol.Diagnostic {
 	}
 	if d.Code != "" {
 		out.Code = &protocol.IntegerOrString{Value: d.Code}
+		if _, deprecated := deprecation.Lookup(d.Code); deprecated {
+			out.Tags = []protocol.DiagnosticTag{protocol.DiagnosticTagDeprecated}
+		}
 	}
 	return out
 }

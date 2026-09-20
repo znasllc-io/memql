@@ -36,6 +36,21 @@
 // inside the window loads, a form past it does not -- are decided by
 // arithmetic over two version strings and nothing else.
 //
+// # Who consults it
+//
+// This file is the ARITHMETIC; forms.go is the table of forms it is applied to,
+// and the four callers that make the window a mechanism rather than a library:
+//
+//	component/language/parser   ScanDeprecatedUses finds every use, and
+//	                            parseTypeRef refuses one past its window
+//	component/memql             the load warns, counts and (past the window)
+//	                            refuses -- deprecated_uses.go
+//	component/memql/sense       the editor's squiggle, carrying the rule
+//	cmd/memql-lsp               the Deprecated tag and the quick fix
+//
+// component/memql is also the one caller of SetCurrent: it knows which release
+// the binary was cut from, and every other consumer reads that one answer.
+//
 // # Fail-open, deliberately
 //
 // Every uncertainty resolves toward "keep loading". An unreadable version, an

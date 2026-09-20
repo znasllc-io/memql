@@ -129,6 +129,57 @@ form the parser refuses, and the failure reads as "the model is bad at MemQL".
 Reserved names, which a payload field escapes with a raw identifier, are in
 [reserved.md](reserved.md).
 
+### Forms in a deprecation window
+
+The window is the promise the bullet above makes, made concrete. While a form is
+in its window:
+
+- **it still loads.** Nothing you have written stops working during the window;
+  that is the whole point of having one.
+- **every load warns**, naming what you wrote, what to write instead, the
+  release it stops loading at, and the `memqlmigrate` rewrite that does the
+  work. The same sentence reaches you three ways: the boot log, `memqllint`, and
+  the squiggle in your editor.
+- **every use is counted**, on `memql_dsl_deprecated_uses_total{rule}`, once per
+  load of the tree per node. The count is what turns "can this form go now?"
+  into a question with evidence behind it rather than a guess about who still
+  writes it. Every registered rule exists at `0` from boot, so a series reading
+  zero means "nobody loaded a use", not "nobody scraped it".
+- **your editor offers the fix.** The diagnostic carries the form's rule as its
+  code and the LSP `Deprecated` tag, and the quick fix writes the replacement
+  over the spelling.
+
+Once the window is spent the form refuses: the parser refuses the spelling as it
+refuses a [retired form](#retired-forms), and a load refuses the tree naming the
+replacement. The window is counted in MINOR releases, so a patch release never
+closes one -- every `0.25.x` refuses a form whose window ends at `0.25`.
+
+**Finding the uses:**
+
+```bash
+go run ./cmd/memqllint dsl/          # WARNING: <file>:<line>:<column>: <what to write instead>
+```
+
+and, on a running cluster, `memql_dsl_deprecated_uses_total{rule="..."}`.
+
+**Fixing them** is the rewrite the warning names, which is mechanical:
+
+```bash
+memqlmigrate --rewrite=slice-syntax -w dsl/
+```
+
+<!-- deprecation-window:begin -- generated from component/language/deprecation; see deprecation_window_docs_test.go -->
+
+| Form | Write instead | Rewrite | Deprecated in | Stops loading in | Rule |
+|---|---|---|---|---|---|
+| `array(T)` | `[]T` | `memqlmigrate --rewrite=slice-syntax` | 0.23.0 | 0.25 | `deprecated_array_type` |
+
+<!-- deprecation-window:end -->
+
+The table is the registry, not a copy of it: `TestDeprecationWindowTableMatchesTheRegistry`
+fails the build when the two disagree, because a page that lists a window the
+engine does not keep is worse than no page -- it is a promise about a date.
+
 ## Quick Start
 
 ### The DSL Tree

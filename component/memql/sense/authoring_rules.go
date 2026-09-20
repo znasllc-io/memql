@@ -11,7 +11,8 @@ package sense
 //                 / shape) inside a function body
 //   Gotcha #6 -- name shape (DNS-label, max 50 chars) for function and
 //                 concept declarations
-//   Phase 6   -- `array(T)` deprecation hint (migrate to `[]T`)
+//   memql#5390 -- a use of a deprecated form still inside its window, e.g.
+//                 `array(T)` (write `[]T`), warned with the load's own text
 //
 // Each rule is a function that appends zero or more Diagnostics based
 // on an AST walk over *parser.File.
@@ -24,6 +25,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/language/deprecation"
 	"github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -216,44 +218,44 @@ func appendIfBadName(diagnostics []Diagnostic, name, kind, source string) []Diag
 	return diagnostics
 }
 
-// arraySyntaxRule emits a deprecation hint for `array(T)` usages,
-// guiding authors toward the Go-aligned `[]T` spelling introduced in
-// Phase 6 of the language-improvements plan. memqlmigrate --rewrite=
-// slice-syntax performs the automated rewrite.
-func arraySyntaxRule(source string) []Diagnostic {
+// deprecatedFormsRule warns on every use of a deprecated form still inside its
+// window (component/language/deprecation, memql#5390): a Warning whose code is
+// the form's rule and whose message is the form's warning -- the text a load
+// reports for the same use, so the squiggle and the load agree -- over the
+// spelling as written.
+//
+// The uses are the parser's scan (ScanDeprecatedUses), the one the engine's
+// load counts, so the editor and the load cannot disagree about WHERE a form
+// is spelled. It replaced a line-by-line regexp whose only signal was a HINT
+// with no expiry: a hint that never becomes anything is a note, not a
+// deprecation.
+//
+// A form past its window gets nothing here: the parser refuses the spelling,
+// and that refusal, carrying the same rule, is the diagnostic.
+//
+// The scan lexes and does not parse, and needs no vocabulary, so Diagnose runs
+// this on every source that lexes -- a registry-less service, and a file broken
+// elsewhere, still say where it spells a deprecated form.
+func deprecatedFormsRule(source string) []Diagnostic {
 	var diagnostics []Diagnostic
-	// Scan source for `array(T)` occurrences. Skip inside string
-	// literals and comments -- a full tokenize would be more robust,
-	// but a crude heuristic is enough for a deprecation hint.
-	lines := strings.Split(source, "\n")
-	for lineIdx, line := range lines {
-		content := stripStringsAndComments(line)
-		for _, m := range arrayCallRE.FindAllStringIndex(content, -1) {
-			start := m[0]
-			end := m[1]
-			matchText := content[start:end]
-			// Filter out calls named `array` inside a larger identifier;
-			// the regex anchors to non-identifier-chars on both sides.
-			_ = matchText
-			pos := Position{Line: lineIdx + 1, Column: runeColumn(line, start)}
-			diagnostics = append(diagnostics, Diagnostic{
-				Range: Range{
-					Start: pos,
-					End:   Position{Line: pos.Line, Column: runeColumn(line, end)},
-				},
-				Severity: SeverityHint,
-				Message:  "`array(T)` is deprecated; use `[]T` (run `memqlmigrate --rewrite=slice-syntax` to migrate). See Phase 6 of the language-improvements plan.",
-				Code:     "deprecated-array-syntax",
-			})
+	for _, use := range parser.ScanDeprecatedUses(source) {
+		form, ok := deprecation.Lookup(use.Rule)
+		if !ok || form.RefusesAt(deprecation.Current()) {
+			continue
 		}
+		endLine, endCol := use.End()
+		diagnostics = append(diagnostics, Diagnostic{
+			Range: Range{
+				Start: Position{Line: use.Line, Column: use.Column},
+				End:   Position{Line: endLine, Column: endCol},
+			},
+			Severity: SeverityWarning,
+			Message:  form.Warning(),
+			Code:     form.Rule,
+		})
 	}
 	return diagnostics
 }
-
-// arrayCallRE matches `array(T)` where T is a Go-ish type identifier.
-// It deliberately matches only the declared-shape form, not a call
-// named `array` that appears inside a larger expression.
-var arrayCallRE = regexp.MustCompile(`\barray\(\s*[A-Za-z_][A-Za-z0-9_:]*\s*\)`)
 
 // runeColumn converts a 0-based BYTE offset into line to the 1-based RUNE
 // column the Sense position contract specifies (cmd/memql-lsp/internal/

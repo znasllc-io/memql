@@ -14,6 +14,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/znasllc-io/memql/component/language/deprecation"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/dslfs"
 )
@@ -1041,5 +1042,83 @@ automation loopProbe {
 	code, out := captureRun(t, []string{"--json", root})
 	if code != 1 || !strings.Contains(out, "[loop_cycle]") {
 		t.Fatalf("want loop_cycle refusal, code=%d output=%s", code, out)
+	}
+}
+
+// deprecatedArrayConcepts declares a field in the deprecated `array(T)` form
+// (memql#5390): `array(` starts at line 5, column 9.
+const deprecatedArrayConcepts = `@version("1.0.0")
+@description("A demo item.")
+concept item {
+  name  string  @required @description("Item name.")
+  tags  array(string)  @description("Item tags.")
+}`
+
+// TestRun_ADeprecatedFormIsAWarningThatLeavesTheExitCodeAlone: a use of a
+// deprecated form still inside its window loads, so the lint says where it is
+// and what to write, as a WARNING line and in the --json warnings array, and
+// exits as it would without it.
+func TestRun_ADeprecatedFormIsAWarningThatLeavesTheExitCodeAlone(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"demo/concepts.memql": deprecatedArrayConcepts,
+		"demo/queries.memql":  testQueries,
+	})
+	form, _ := deprecation.Lookup(deprecation.ArrayType)
+	want := "demo/concepts.memql:5:9: " + form.Warning()
+
+	code, out := captureRun(t, []string{root})
+	if code != 0 {
+		t.Fatalf("run() = %d, want 0: a deprecated form loads; output:\n%s", code, out)
+	}
+	if !strings.Contains(out, "WARNING: "+want+"\n") || strings.Count(out, "WARNING:") != 1 {
+		t.Errorf("want exactly one line %q; output:\n%s", "WARNING: "+want, out)
+	}
+
+	code, report, out := jsonReport(t, root)
+	if code != 0 || len(report.Errors) != 0 {
+		t.Fatalf("--json: run() = %d with %d error(s), want 0 and none; output:\n%s", code, len(report.Errors), out)
+	}
+	if len(report.Warnings) != 1 || report.Warnings[0].Level != "warning" || report.Warnings[0].Message != want {
+		t.Errorf("--json warnings = %+v, want one warning %q", report.Warnings, want)
+	}
+}
+
+// TestRun_ADeprecatedFormDoesNotSilenceAnError: a warning is not a finding that
+// stops the lanes behind it. The loop lint runs only on a tree the parity pass
+// found clean, and a warning leaves it clean.
+func TestRun_ADeprecatedFormDoesNotSilenceAnError(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"demo/concepts.memql": deprecatedArrayConcepts,
+		"demo/automations.memql": `@trigger(event="demo.loop")
+automation loopProbe {
+  publish "demo.loop" { value: 1 }
+}`,
+	})
+	code, out := captureRun(t, []string{root})
+	if code != 1 || !strings.Contains(out, "[loop_cycle]") || !strings.Contains(out, "WARNING: demo/concepts.memql:5:9: ") {
+		t.Fatalf("want the loop_cycle refusal and the warning, code=%d output=%s", code, out)
+	}
+}
+
+// Past its window the same tree is REFUSED, with a non-zero exit and the
+// replacement and the rewrite named. Only the release deciding changes.
+func TestRun_AnExpiredFormIsAnErrorNamingTheReplacement(t *testing.T) {
+	restore := deprecation.SetCurrent("0.25.0")
+	defer restore()
+	root := writeTree(t, map[string]string{
+		"demo/concepts.memql": deprecatedArrayConcepts,
+		"demo/queries.memql":  testQueries,
+	})
+	code, out := captureRun(t, []string{root})
+	if code != 1 {
+		t.Fatalf("run() = %d, want 1: past its window the form does not load; output:\n%s", code, out)
+	}
+	for _, want := range []string{"`[]T`", "memqlmigrate --rewrite=slice-syntax", deprecation.ArrayType} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the refusal does not name %q; output:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "WARNING: demo/concepts.memql") {
+		t.Errorf("a form past its window is an error, not a warning; output:\n%s", out)
 	}
 }
