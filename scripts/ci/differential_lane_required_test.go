@@ -3,13 +3,18 @@ package ci
 // The differential lane is REQUIRED (memql#5386, D5 and D23 of
 // docs/superpowers/specs/2026-09-13-dsl-v1-language-freeze-program-design.md).
 //
-// "Required" is two separate facts, and each fails open on its own:
+// "Required" is three separate facts, and each fails open on its own:
 //
 //  1. The job that runs test/conformance sets MEMQL_DIFFERENTIAL_REQUIRED=1.
 //     Without it the lane logs a disagreement on a DIFFERENTIAL: line and
 //     passes -- green over a language whose two evaluators disagree.
 //  2. That job is one of ci-required's needs. A lane outside the aggregate is
 //     advisory however red it goes, which is the memql#3019 fail-open shape.
+//  3. The job sets MEMQL_REQUIRE_DB=1. Without it an unreachable Postgres --
+//     despite the service container's health check and the job's own wait --
+//     degrades every DB-backed dimension in test/conformance to a skip,
+//     including the differential lane and its negative control, and the job
+//     still reports success over a comparison that compared nothing.
 //
 // test/conformance is deliberately NOT in DB_GATED_TREES: it runs in its own
 // seeded lane (scripts/cidb/dsnliteral_test.go says so by name), and adding it
@@ -75,6 +80,38 @@ func TestDifferentialLaneRunsInRequiredMode(t *testing.T) {
 	if !strings.Contains(block, "./test/conformance/") {
 		t.Fatalf("the %s job no longer runs ./test/conformance/..., so setting "+
 			"MEMQL_DIFFERENTIAL_REQUIRED there gates nothing", conformanceJobKey)
+	}
+}
+
+// TestConformanceJobRequiresReachableDatabase guards the third fact (memql#5385
+// audit): MEMQL_REQUIRE_DB=1 on the conformance job is what turns "Postgres was
+// unreachable when go test started" into a failure instead of a lane that skips
+// every DB-backed dimension and still reports success. db-tests
+// (scripts/cidb/dbgate_test.go) closes the identical hole for its own lane;
+// test/conformance runs in its own seeded lane with its own HasDB gating (see
+// the comment on conformanceJobKey and scripts/cidb/dsnliteral_test.go), so
+// scripts/cidb does not and cannot see this job -- this is the only gate that
+// does.
+func TestConformanceJobRequiresReachableDatabase(t *testing.T) {
+	block := differentialJobBlock(t, readDifferentialWorkflow(t), conformanceJobKey)
+	if !strings.Contains(block, "MEMQL_REQUIRE_DB") {
+		t.Fatalf("the %s job does not set MEMQL_REQUIRE_DB.\n"+
+			"Without it, an unreachable Postgres -- despite the service container's health check "+
+			"and the job's own wait -- degrades every DB-backed dimension in test/conformance "+
+			"(including the differential lane and its negative control) to a skip, and the job "+
+			"still exits 0. Add `MEMQL_REQUIRE_DB: \"1\"` to the job's env, the same key and value "+
+			"the db-tests job already sets for the identical reason.",
+			conformanceJobKey)
+	}
+	if !regexp.MustCompile(`MEMQL_REQUIRE_DB:\s*"?1"?`).MatchString(block) {
+		t.Fatalf("the %s job names MEMQL_REQUIRE_DB but not with the value 1; the db-gated tests "+
+			"that honor it (tryDB's callers in test/conformance) compare against exactly \"1\", so "+
+			"any other value leaves them skipping on an unreachable database",
+			conformanceJobKey)
+	}
+	if !strings.Contains(block, "./test/conformance/") {
+		t.Fatalf("the %s job no longer runs ./test/conformance/..., so setting MEMQL_REQUIRE_DB "+
+			"there gates nothing", conformanceJobKey)
 	}
 }
 

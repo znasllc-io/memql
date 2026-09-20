@@ -1507,6 +1507,14 @@ jobs:
       # scripts/ci/differential_lane_required_test.go holds this line and the
       # ci-required membership together.
       MEMQL_DIFFERENTIAL_REQUIRED: "1"
+      # Without this the service container's health check and the job's own
+      # wait are the only things standing between an unreachable Postgres and
+      # a lane that PASSES having compared nothing: tryDB (test/conformance)
+      # self-skips when it cannot reach a database, and the differential lane
+      # and its negative control both fall back to Skip rather than Fail. The
+      # db-tests job closes exactly this hole for itself below, with the same
+      # key -- see the comment on its own MEMQL_REQUIRE_DB.
+      MEMQL_REQUIRE_DB: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
