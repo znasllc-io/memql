@@ -171,8 +171,8 @@ type SessionRequest struct {
 // It returns `any` for the reason ResolvedProvider.Client is `any`: the
 // modalities do not share an interface, and the router hands this straight back
 // to a call site that type-asserts to the one it asked for. The value satisfies
-// both tool-calling surfaces, plus the two structural reporters the decision
-// row reads.
+// both tool-calling surfaces, plus the three structural reporters the decision
+// row reads: where it ran, what served it, and who paid.
 func (r *ProviderRegistry) SessionProvider(appId, model string, req SessionRequest) any {
 	return &sessionProvider{registry: r, appId: appId, model: model, req: req}
 }
