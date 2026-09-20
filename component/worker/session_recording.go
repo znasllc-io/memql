@@ -276,17 +276,20 @@ func (s *sessionRecording) allocateSeq(ctx context.Context) int {
 	if s.store != nil {
 		allocCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
-		if slot, err := s.store.ClaimRecordingSlot(allocCtx, s.sessionId, s.owner); err == nil {
-			seq := slot.Seq
-			s.mu.Lock()
-			if seq >= s.fallbackSeq {
-				s.fallbackSeq = seq + 1
-			}
-			s.mu.Unlock()
-			return seq
-		} else {
+		slot, err := s.store.ClaimRecordingSlot(allocCtx, s.sessionId, s.owner)
+		if err != nil {
 			s.logger.Warn("app session: could not allocate a step position; falling back to a local count",
 				"session_id", s.sessionId, "error", err)
+		} else {
+			s.mu.Lock()
+			// The fallback keeps up with the shared counter, so if the NEXT
+			// allocation fails it continues from here rather than handing out
+			// a position the row already gave away.
+			if slot.Seq >= s.fallbackSeq {
+				s.fallbackSeq = slot.Seq + 1
+			}
+			s.mu.Unlock()
+			return slot.Seq
 		}
 	}
 	s.mu.Lock()
