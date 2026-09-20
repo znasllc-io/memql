@@ -168,3 +168,79 @@ A workspace toolbar above an inspector sets `navigation={false}` so the
 inspector owns the page trail. Section breadcrumb jumps consume the intervening
 history; peer tab navigation starts a fresh path. Existing forms retain their
 own cancellation and completion callbacks through the shared back prop.
+
+### One wizard for adding
+
+Pressing an Add control runs a wizard (`kit` `Wizard`), whatever is being
+added. There were three flows and they did not match: a deployable opened a
+horizontal numbered stepper over an indented form, a machine opened a second
+stepper numbered differently inside a bordered card, and a domain opened one
+text field with its own button while the setup that followed lived on another
+page. One component now, and its shape is the first-run gate's -- the orb, the
+title, one sentence, then a column of steps -- because that was the one guided
+surface in the shell that read as a single thought.
+
+- **It takes the window** (rule 9). The first version stood in the gate's
+  centred 38rem column: in a wide window that painted a third of the pane and
+  left the rest empty, while the one thing on the page that wants width -- a
+  DNS record's value -- wrapped inside it. Given room (`SPLIT_AT`, 760px of
+  pane) the wizard is TWO PANES on the list page's own gutters: the steps on
+  the left, still a vertical rail and now standing still, and the open step on
+  the right with the rest of the width, headed by its name and what it asks.
+  Without room it is one column with the open step's body beneath its line.
+  That is a different place in the tree rather than a different style, so it
+  is measured (`kit/useWide`), not left to a container query. **Width is for
+  what needs it:** records, tables and commands take the pane; a sentence
+  keeps a readable measure and a field keeps a field's width.
+- **The orb names the subject.** The gate wears the MemQL mark, because what is
+  being set up there is the cluster. An add wears the thing being added: a
+  globe, a machine, a rocket. Same circle, same theme tokens.
+- **The title is the control's own words.** "Add a machine" opens "Add a
+  machine". An act keeps its name through the whole flow, so a refusal says it
+  "was not added".
+- **Steps are the rail, vertical, at page scale** (`Rail` `scale="page"`), with
+  the rail's closed state set: a check is done, a held ring is waiting on you,
+  a pulse is the cluster working, a dimmed ring is not reached. Every step is
+  one line -- its name, then its answer -- so a person can read back what they
+  have said. One step is always open, and its body sits on the text edge with
+  the rail's thread down its left side: there are two left edges on the page
+  and no box. A step nobody has reached is its name and nothing else.
+- **The floor is the action bar, and it says whose turn it is** (rule 12). The
+  state in words on the left; on the right the way out, then the ONE forward
+  act, primary last. **The forward act lives nowhere else** -- a step's body
+  holds what is being answered, never the button that moves on. An act that is
+  not legal yet is absent, and the words on the left say what is missing.
+- **A wait is visible.** When it is the cluster's turn (`tone: "busy"`) there
+  is no forward act, the bar's top hairline becomes a moving thread, the dot
+  becomes a spinner, the state takes the accent, and `meta` measures the wait
+  ("0:42", "checked 40s ago"). Waiting for a record somebody has not created
+  yet is a wait and is drawn as one, not as a failure. Reduced motion keeps the
+  held line and the held dot.
+- **The floor has two verbs and one button.** *Cancel* undoes the whole thing:
+  before anything is written that is simply going; after, it REMOVES what was
+  made (the binding, the token), so it asks first, by name, in the bar
+  (`confirm`). *Leave* goes and everything stays -- the cluster keeps working,
+  and the thing's row opens the wizard again where it was left. *Done* when it
+  is finished. **Only one of them is ever a button.** The act is the button;
+  whatever stands beside it is a text action (`Act.text`) -- Cancel, Keep,
+  Done beside Go live. Two buttons side by side ask to be weighed against each
+  other, and a way out is not the same kind of thing as what happens next.
+  While the cluster works there is no forward act, so Leave is the button and
+  Cancel the text beside it. A flow with no act that undoes it (a deploy that
+  has started) offers Leave and does not call it Cancel.
+- **A wizard can be come back to.** Until the thing is finished its row opens
+  THE SAME WIZARD, at whatever stage the cluster has walked it to -- never a
+  second surface with its own look. There were two for a domain, and the owner
+  found the seam within a minute of binding a real one: Leave, click the row,
+  "now it looks completely different". What a wizard follows is the row the
+  cluster sends, found by the thing's natural key (a hostname) as well as its
+  id: the reply to an add and the graph row are two egress seams, and they do
+  not promise to spell an id alike.
+- **A step that can be done early can be opened early, and says so.** The DNS
+  records are created in the same place as the ownership record and checked in
+  the same pass, so they open while ownership is still waiting, and the line
+  reads "Can be created now; checked together with ownership". A step that
+  looks reachable for no stated reason reads as a bug.
+- **Adding only.** Once the thing is finished it has a page of its own, and
+  that page is where it is read and changed by whoever may. Nothing in a wizard
+  edits.

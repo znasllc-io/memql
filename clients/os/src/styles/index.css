@@ -699,7 +699,8 @@ button:not(:disabled):active {
 }
 
 .os-ask-orb,
-.os-core-gate-mark {
+.os-core-gate-mark,
+.os-wizard-mark {
   display: grid;
   place-items: center;
   width: 34px;
@@ -8434,6 +8435,417 @@ a.os-button {
   font-size: var(--os-text-sm);
   color: var(--os-muted);
   line-height: 1.45;
+}
+
+/* ===========================================================================
+ * THE WIZARD (kit/Wizard) -- one way to add a thing
+ * ===========================================================================
+ * The first-run gate's composition inside a window: the orb, the title, one
+ * sentence, then the rail as the page's spine, over the action bar as its
+ * floor. There are exactly TWO left edges -- the marks and the text -- and
+ * everything a step holds sits on the second. No card, no border: the rail's
+ * connector runs down the open step's left side, and that is what holds a
+ * body to its step.
+ * ======================================================================== */
+.os-wizard-scroll {
+  /* THE LIST PAGE'S OWN GUTTERS. The wizard used to stand in a centred 38rem
+     column, and in a wide window that painted a third of the pane and left the
+     rest empty (rule 9) -- while a record's value wrapped inside it. It starts
+     where every other page's title starts, and runs to the same right edge. */
+  padding: 18px 20px 32px;
+  align-items: stretch;
+  gap: 0;
+}
+.os-wizard-column {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+}
+/* ONE COLUMN, when there is no room for two: a readable measure that still
+   takes a DNS record on one line, on the page's left edge rather than floating
+   in the middle of it. */
+.os-wizard[data-layout="stack"] .os-wizard-column {
+  max-width: 40rem;
+}
+/* TWO PANES. The steps keep a rail's width and stand still; the stage has the
+   rest. `minmax(0, 1fr)` rather than `1fr`, so a long unbroken value shrinks
+   the stage's content instead of pushing the pane sideways. */
+.os-wizard[data-layout="split"] .os-wizard-column {
+  display: grid;
+  grid-template-columns: clamp(232px, 27%, 340px) minmax(0, 1fr);
+  column-gap: clamp(28px, 4%, 64px);
+  align-items: start;
+}
+.os-wizard-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  /* The map stays in view while a long step scrolls beside it. */
+  position: sticky;
+  top: 0;
+}
+.os-wizard-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  /* Level with the title across the gutter, not with the orb above it: the
+     orb is the wizard's, the title line is where both panes start to SAY
+     something. 34 of orb, 4 beneath it, the column's 8, and the 1.5px between
+     an 18px title's centre and a 15px one's. */
+  padding-top: 47px;
+}
+.os-wizard-stage-title {
+  margin: 0;
+  font-size: var(--os-text-md);
+  font-weight: 600;
+  color: var(--os-ink);
+}
+.os-wizard-stage-lead {
+  margin: -4px 0 0;
+  font-size: var(--os-text-base);
+  color: var(--os-muted);
+  max-width: 72ch;
+  text-wrap: pretty;
+}
+.os-wizard-stage > .os-wizard-body {
+  padding: 4px 0 0;
+}
+/* WIDTH IS FOR WHAT NEEDS IT. A record, a table, a command take the pane. A
+   sentence keeps a readable measure and a field keeps a field's width --
+   stretching a text box across a monitor is not using the space, it is
+   filling it. */
+.os-wizard-body .os-caption,
+.os-wizard-body > p,
+.os-wizard-body .os-notice,
+.os-wizard-seen {
+  max-width: 76ch;
+}
+.os-wizard-body .os-field,
+.os-wizard-body .os-form-field,
+.os-wizard-body > .os-input {
+  max-width: 34rem;
+}
+.os-wizard-body .os-choice-stack,
+.os-wizard-body .fleet-install-options {
+  max-width: 46rem;
+}
+/* IN THE ASIDE a step is two short lines -- its name, then its answer -- since
+   a rail's width cannot hold both on one. No chevron: side by side the line
+   does not disclose anything beneath itself, it chooses what the stage shows,
+   and the accent on the open one already says which. */
+.os-wizard[data-layout="split"] .os-rail[data-scale="page"] .os-rail-line {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}
+.os-wizard[data-layout="split"] .os-rail[data-scale="page"] .os-rail-answer {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  font-size: var(--os-text-sm);
+}
+.os-wizard[data-layout="split"] .os-rail[data-scale="page"] .os-rail-answer:empty {
+  display: none;
+}
+.os-wizard[data-layout="split"] .os-rail[data-scale="page"] .os-rail-chev {
+  display: none;
+}
+.os-wizard-mark {
+  flex: none;
+  align-self: flex-start;
+  margin-bottom: 4px;
+}
+.os-wizard-mark > svg {
+  width: 18px;
+  height: 18px;
+}
+/* The gate's own title, for the gate's reason: while this draws it is what
+   the window is about. The Head stays the Head -- it is what publishes the
+   trail -- and only its resting spacing is the wizard's. */
+.os-wizard-column > .os-head,
+.os-wizard-aside > .os-head {
+  position: static;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: none;
+  min-height: 0;
+}
+.os-wizard-column > .os-head .os-settings-title,
+.os-wizard-aside > .os-head .os-settings-title {
+  font-size: var(--os-text-lg);
+  font-weight: 600;
+}
+.os-wizard-lead {
+  margin: 0;
+  font-size: var(--os-text-base);
+  color: var(--os-muted);
+  text-wrap: pretty;
+}
+.os-wizard-column > .os-rail,
+.os-wizard-aside > .os-rail {
+  margin: 18px 0 0;
+}
+.os-wizard-column > .os-notice,
+.os-wizard-stage > .os-notice {
+  margin-top: 10px;
+}
+
+/* ---- the rail at page scale ---- */
+.os-rail[data-scale="page"] .os-rail-stage {
+  grid-template-columns: 21px 1fr;
+  gap: 14px;
+  padding: 8px 0;
+}
+.os-rail[data-scale="page"] .os-rail-mark {
+  width: 21px;
+  height: 21px;
+}
+/* The same 4px of air above and below every segment, so the thread reads as
+   one line interrupted by marks rather than as dashes between them. */
+.os-rail[data-scale="page"] .os-rail-stage::before {
+  left: 10px;
+  top: 33px;
+  bottom: -4px;
+}
+/* AN UNREACHED MARK IS AS PRESENT AS THE THREAD THROUGH IT. At the widget's
+   scale the base hairline is enough; at this one a 21px ring drawn in
+   `--os-line` and then dimmed all but vanished, and the rail read as a line
+   with nothing on it. */
+.os-rail[data-scale="page"] .os-rail-mark {
+  border-color: color-mix(in oklab, var(--os-line) 65%, var(--os-ink));
+}
+.os-rail[data-scale="page"] .os-rail-stage[data-state="ahead"] .os-rail-mark,
+.os-rail[data-scale="page"] .os-rail-stage[data-state="pending"] .os-rail-mark,
+.os-rail[data-scale="page"] .os-rail-stage[data-state="unknown"] .os-rail-mark {
+  opacity: 0.6;
+}
+.os-rail[data-scale="page"] .os-rail-stage:is([data-state="done"], [data-state="complete"], [data-state="current"], [data-state="open"]) .os-rail-mark {
+  border-color: var(--os-accent);
+}
+.os-rail[data-scale="page"] .os-rail-stage[data-state="stopped"] .os-rail-mark {
+  border-color: var(--os-warn);
+}
+.os-rail[data-scale="page"] .os-rail-body {
+  gap: 0;
+  /* The mark is 21px; the line's text sits on its optical centre. */
+  padding-top: 1px;
+}
+.os-rail[data-scale="page"] .os-rail-label {
+  font-size: var(--os-text-base);
+  font-weight: 600;
+}
+.os-rail[data-scale="page"] .os-rail-line {
+  gap: 12px;
+  padding: 0 4px 0 0;
+  line-height: 19px;
+}
+.os-rail[data-scale="page"] .os-rail-line .os-rail-label {
+  min-width: 0;
+}
+.os-rail[data-scale="page"] .os-rail-answer,
+.os-rail[data-scale="page"] .os-rail-note {
+  font-size: var(--os-text-base);
+}
+/* THE OPEN STEP'S LINE IS NOT A CONTROL. One step is always open in a wizard,
+   so its line does nothing on a click -- and a pointer and a turned chevron
+   would both say otherwise. */
+.os-rail[data-scale="page"] .os-rail-line[aria-expanded="true"] {
+  cursor: default;
+}
+.os-rail[data-scale="page"] .os-rail-line[aria-expanded="true"] .os-rail-chev {
+  display: none;
+}
+/* THE CHEVRON STAYS WITH WHAT IT IS ABOUT. Pushed to the far edge it is right
+   on a widget's 300px line, where the far edge is next to the name; on a page
+   it landed 500px away, a ten-pixel speck belonging to nothing. */
+.os-rail[data-scale="page"] .os-rail-chev {
+  margin-left: 0;
+  font-size: 11px;
+}
+.os-wizard-body {
+  display: grid;
+  gap: 12px;
+  padding: 12px 0 16px;
+  min-width: 0;
+}
+.os-wizard-body > * {
+  margin-block: 0;
+}
+/* A step's body was written for a rail that indented it and spaced it from a
+   heading of its own. Here the step's line is the heading and the wizard sets
+   the spacing, once. */
+.os-wizard-body .os-stop-body {
+  margin: 0;
+  padding: 0;
+}
+/* The record-type choice with its explanation beside it: the field takes the
+   line and the information control sits at its end, on the control's own
+   baseline rather than floating over the step. */
+.os-domain-method {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.os-domain-method > .os-field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* What the last check actually saw, in the data voice: the difference between
+   a fix and a guess for somebody editing a zone file. */
+.os-wizard-seen {
+  margin: 0;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+  overflow-wrap: anywhere;
+}
+.os-wizard-seen > code {
+  font-family: var(--os-font-mono);
+  color: var(--os-ink);
+}
+
+/* A CHOICE IN A WIZARD RESTS UNFILLED. The card's raised ground is right in a
+   settings panel, where it sits among other filled controls; here three of
+   them stacked were the heaviest thing on a page whose whole point is one
+   quiet column. The border still says "option" and the accent still says
+   "chosen" -- the shell's one selection language, at rest. */
+.os-wizard-body .os-choice-card {
+  background: none;
+  padding: 10px 12px;
+}
+.os-wizard-body .os-choice-card[aria-checked="true"] {
+  background: var(--os-accent-soft);
+}
+.os-wizard-body .os-choice-row {
+  margin-bottom: 0;
+}
+
+/* ---- the floor ---- */
+/* THE WAY OUT IS A LABEL, THE ACT IS THE BUTTON (`Act.text`). Muted until it
+   is pointed at, underlined when it is, and spaced from the button by more
+   than two buttons would be from each other -- they are not a pair. The hit
+   area is the full control height, so a label is no harder to press than the
+   button beside it. */
+.os-actbar-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--os-control-h);
+  padding: 0 6px;
+  margin-right: 6px;
+  border: 0;
+  border-radius: var(--os-radius-xs);
+  background: none;
+  font: inherit;
+  font-size: var(--os-text-base);
+  color: var(--os-muted);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
+  transition:
+    color var(--os-duration-fast) var(--os-ease),
+    text-decoration-color var(--os-duration-fast) var(--os-ease);
+}
+.os-actbar-text:hover {
+  color: var(--os-ink);
+  text-decoration-color: currentColor;
+}
+.os-actbar-text:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 1px;
+  color: var(--os-ink);
+}
+.os-actbar-text:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+/* A MEASURE, NOT MORE OF THE SENTENCE. Set off by a hairline so "checked 40s
+   ago" is read as a figure beside the state rather than as its last clause. */
+.os-actbar-meta {
+  flex: none;
+  align-self: center;
+  margin-left: 4px;
+  padding-left: 12px;
+  border-left: 1px solid var(--os-line);
+  font-size: var(--os-text-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--os-muted);
+}
+/* THE CLUSTER'S TURN. The bar's own top hairline becomes a moving thread --
+   the line that was already there, in a different state, rather than a new
+   element -- the dot becomes a spinner, and the state word takes the accent.
+   Scoped to the wizard: elsewhere `busy` sits beside a rail that is already
+   animating the same fact, and here the bar is the one place that is always
+   on screen. */
+.os-wizard > .os-actbar {
+  position: relative;
+}
+.os-wizard > .os-actbar[data-tone="busy"]::before {
+  content: "";
+  position: absolute;
+  inset: -1px 0 auto 0;
+  height: 2px;
+  background:
+    linear-gradient(90deg, transparent, var(--os-accent) 35%, var(--os-accent) 65%, transparent) no-repeat,
+    var(--os-accent-soft);
+  background-size: 42% 100%, 100% 100%;
+  animation: os-wizard-thread 1.9s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+@keyframes os-wizard-thread {
+  from {
+    background-position: -73% 0, 0 0;
+  }
+  to {
+    background-position: 173% 0, 0 0;
+  }
+}
+.os-wizard > .os-actbar[data-tone="busy"] .os-actbar-word {
+  color: var(--os-accent);
+}
+.os-wizard > .os-actbar .os-actbar-dot[data-tone="busy"] {
+  width: 14px;
+  height: 14px;
+  background: none;
+  box-shadow: none;
+  border: 2px solid color-mix(in oklab, var(--os-accent) 22%, transparent);
+  border-top-color: var(--os-accent);
+  animation: os-wizard-spin 0.8s linear infinite;
+}
+@keyframes os-wizard-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* Reduced motion keeps the FACT and drops the movement: a held accent line
+   and the held dot still say the cluster is working. */
+@media (prefers-reduced-motion: reduce) {
+  .os-wizard > .os-actbar[data-tone="busy"]::before {
+    animation: none;
+    background: var(--os-accent);
+    background-size: 100% 100%;
+    opacity: 0.55;
+  }
+  .os-wizard > .os-actbar .os-actbar-dot[data-tone="busy"] {
+    animation: none;
+    width: 8px;
+    height: 8px;
+    border: 0;
+    background: var(--os-accent);
+    box-shadow: 0 0 0 3px var(--os-accent-soft);
+  }
+}
+@container os-window (max-width: 560px) {
+  .os-wizard-scroll {
+    padding: 16px 16px 28px;
+  }
 }
 
 /* ---- the rail's collapsed line ---- */
