@@ -62,7 +62,14 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
 
 9. **Real estate belongs to content.** Lists take the window; forms take a
    readable measure; nothing paints half a window of dead space beside a
-   half-width column.
+   half-width column. **A page starts at the same left edge as the list that
+   opened it, and runs to the same right edge.** Deployables broke this for
+   everything past its list -- a deployable's page in a centred 1080px column,
+   its source and history in 760px, its settings in 900px -- so a click on a
+   row moved the title 65px sideways at the default window size and 250px in a
+   maximised one. The measure belongs to the THING (a sentence at ~80ch, a
+   field at ~34rem), never to the page: capping the page to keep a text box
+   from stretching is how the margins got painted empty.
 
 10. **In-surface state is never a checkbox.** "Show archived" as a standing
     checkbox is the legacy tell this language exists to remove: archived
