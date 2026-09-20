@@ -51,6 +51,7 @@ func TestTheRetiredFieldMigrationsAreDiscoveredAndPaired(t *testing.T) {
 		"20260909010000", // remaining agent fields and closed nested blocks
 		"20260915220000", // retired system-owned Portal site
 		"20260915230000", // current site-health observations
+		"20260920000000", // the app session's flattened transcript
 	} {
 		var found *migrate.Migration
 		for i := range sorted {
