@@ -5,6 +5,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // recording_test.go -- an app's calls back into MemQL are part of its
@@ -201,4 +203,40 @@ func TestASuccessfulCallRecordsNoResultText(t *testing.T) {
 	if got := toolResultText(textResult("a page of rows"), false); got != "" {
 		t.Errorf("a successful call recorded its output: %q", got)
 	}
+}
+
+// TestTheRecordingDoesNotInheritTheToolExecutionMarks. callMCPTool derives
+// its context three times after the recording is deferred -- the acting-agent
+// role, strict unknown args, and the MCP-tool-execution mark. A deferred
+// closure captures the VARIABLE, so writing `ctx` rather than binding it
+// would hand the recorder all three, on writes this package is not making on
+// the caller's behalf.
+func TestTheRecordingDoesNotInheritTheToolExecutionMarks(t *testing.T) {
+	rec := &markCapturingRecorder{}
+	base := withMCPAppSessionRecorder(context.Background(), rec)
+
+	callMCPTool(base, newFakeEngine(), "assistant", TierAuthoring,
+		"v1:worker:appSession:s1", toolRunQuery, map[string]any{"name": "librarySearch"})
+
+	if !rec.called {
+		t.Fatal("nothing was recorded, so this test measures nothing")
+	}
+	// The acting role is the one of the three with an exported reader, and it
+	// stands for all three: they are set on consecutive lines, so a context
+	// carrying none of them cannot be carrying the other two.
+	if rec.actingRole != "" {
+		t.Errorf("the recording inherited the acting agent role %q, so it inherited the "+
+			"strict-unknown-args and tool-execution marks beside it", rec.actingRole)
+	}
+}
+
+type markCapturingRecorder struct {
+	called     bool
+	actingRole string
+}
+
+func (m *markCapturingRecorder) RecordToolCall(ctx context.Context, _ AppSessionToolCall) error {
+	m.called = true
+	m.actingRole = memql.ActingAgentRoleFromContext(ctx)
+	return nil
 }

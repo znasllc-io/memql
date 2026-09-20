@@ -345,8 +345,17 @@ func callMCPTool(ctx context.Context, eng Engine, role string, tier Tier, appSes
 	// that worked would make every lifted procedure look more reliable than
 	// the session it came from. A no-op for every other caller, and for a
 	// node with no recorder wired.
+	//
+	// THE RECORDING CONTEXT IS BOUND HERE, before the derivations below. A
+	// deferred closure captures the VARIABLE, so writing `ctx` would hand the
+	// recorder whatever `ctx` had become by the time the tool returned --
+	// carrying the acting-agent role, the strict-unknown-args mark and the
+	// MCP-tool-execution mark, none of which belong on a write this package
+	// is not making on the caller's behalf. Harmless today and the kind of
+	// coupling that is only ever noticed once it breaks something.
+	recordCtx := ctx
 	result := errorResult("mcp tool surface: the tool returned nothing")
-	defer func() { recordAppSessionToolCall(ctx, appSessionId, name, args, result) }()
+	defer func() { recordAppSessionToolCall(recordCtx, appSessionId, name, args, result) }()
 	ctx = memql.WithActingAgentRole(ctx, role)
 	// Reject unknown mutation args at the MCP boundary instead of silently
 	// dropping them (memql#1633). Scoped to MCP calls so internal engine
