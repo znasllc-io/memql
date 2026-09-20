@@ -69,16 +69,16 @@ package conformance
 // body carries the indentation it has inside the file, which is what makes
 // "contiguous substring" mean what it says.
 //
-// # The covered set is a list, and the two pages it leaves out are named
+// # The covered set is a list, and the page it leaves out is named
 //
 // docsCorpusCoverage below is the one place that says which pages this gate
-// holds. memql.md and authoring-rules.md are in it as `false`: they carry 47
-// and 55 fences and are the follow-up tasks. They are not silently absent --
-// a page under docs/public/language with a ```memql fence and no entry at all
-// fails this gate, so a new page cannot escape by being new, and turning one
-// of the two on is one word.
+// holds. authoring-rules.md is in it as `false`: it carries 55 fences and is
+// the follow-up task. It is not silently absent -- a page under
+// docs/public/language with a ```memql fence and no entry at all fails this
+// gate, so a new page cannot escape by being new, and turning the last one on
+// is one word.
 //
-// Both pages keep their existing cover meanwhile: TestDocsExamplesParse reads
+// That page keeps its existing cover meanwhile: TestDocsExamplesParse reads
 // every page in the tree regardless of this list, and nothing here weakens it.
 
 import (
@@ -257,9 +257,9 @@ func docsCorpusCompare(t *testing.T, where, marker, casePath, verdict, body stri
 // sentence the failure ends with when they do not.
 //
 // It is separate from the comparison so the three-way decision can be tested
-// without a page (TestDocsCorpusFenceKindDecision). The `retired` arm has no
-// live example among the covered pages today, and an arm that never fires is
-// an arm nothing has ever checked.
+// without a page (TestDocsCorpusFenceKindDecision), including the pairs no page
+// writes -- an arm that fires only when some page happens to show a refused
+// form is an arm that stops being checked the day that page changes.
 func docsCorpusKindAgrees(marker, verdict string) string {
 	switch marker {
 	case "", "fragment":
@@ -550,10 +550,12 @@ func TestPublishedExamplesMatchTheirCorpusCases(t *testing.T) {
 }
 
 // TestDocsCorpusFenceKindDecision pins the three-way decision the marker makes,
-// including the `retired` arm, which no covered page exercises yet: memql.md
-// and authoring-rules.md are where the retired forms are shown, and they are
-// the follow-up. Without this, a third of the gate's answers would be code
-// nothing has run.
+// including the `retired` arm, which memql.md now exercises end to end: its
+// "Calling a prompt" section shows the `si(...)` call a body cannot make, over
+// a refuse_load case. This test came first and still earns its keep -- it pins
+// the arm as a pure function over (marker, verdict), including the pairs no
+// page writes, so the answer does not depend on a page continuing to show a
+// refused form.
 func TestDocsCorpusFenceKindDecision(t *testing.T) {
 	for _, tc := range []struct {
 		marker, verdict string

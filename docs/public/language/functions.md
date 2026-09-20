@@ -708,10 +708,25 @@ These are names, not calls:
 
 ### AI
 
-| Function | Description | Example |
-|----------|-------------|---------|
-| `si(promptName, data)` | Blocking LLM call through a named prompt | `si("consolidateMemory", {episodes: cluster})` |
-| `agent("name", "prompt", partitionId)` | Async agent invocation through the planner | see `dsl/agents/builtins.memql` |
+**There is no AI function in the catalog above, and there is no bare AI call.**
+`si(promptName, data)` is what this page used to list here, and it does not
+exist -- neither does the `ai(promptName, data)` spelling some comments in the
+tree still point at. A body that writes either is refused at load with
+`body_call_unknown`, because the only bare calls a body admits are catalog
+functions and the specs and traits it can see. See
+[Calling a prompt](memql.md#calling-a-prompt).
+
+AI work is reached from a body the way every other Go-backed capability is:
+through a `builtin` call, with named arguments and a file-top import of the
+domain that declares it (`use agents.builtins.{ agent }`).
+
+| Builtin | Description | Called as |
+|---------|-------------|-----------|
+| `agent` | Opens a `v1:work:goal` naming the `invokeAgent` template and returns `{goalId, runId}`; a run dispatcher claims it on an agent node | `builtin agent(name: "assistant", prompt: args.question, partitionId: "system")` |
+| `runAgentTurn` | Runs one agent turn in line and returns its reply. Answers only on an agent node | `builtin runAgentTurn(agentId: args.agentId, prompt: args.question)` |
+
+Both are declared in `dsl/agents/builtins.memql`, which is where their full
+field lists live.
 
 ---
 

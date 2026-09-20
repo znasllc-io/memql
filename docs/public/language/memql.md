@@ -1290,29 +1290,28 @@ AI provider configurations (OpenAI and Anthropic — the only supported vendors)
 <!-- corpus: 2026/examples/memql/providers/model-provider.memql -->
 ```memql
 @extends("openai")
-@model("gpt-5.4-nano")
-/// OpenAI GPT-5.4 Nano - cheapest high-volume chat for low-complexity tasks (non-streaming)
-provider chat54Nano {
+@model("gpt-5.4-mini")
+/// OpenAI GPT-5.4 Mini - balanced cost/latency chat (non-streaming)
+provider chat54Mini {
   params {
-    contextWindow        32000
-    maxCompletionTokens  2048
+    contextWindow        128000
+    maxCompletionTokens  16384
   }
 }
 ```
 
-The base a child `@extends` carries the vendor-level auth and type, in the same
-form. Anthropic's base is the sibling of this one, with the
-`MEMQL_AI_ANTHROPIC_*` federation quartet in its `auth` block:
+Base providers (vendor-level auth + type) use the same form:
 
 <!-- corpus: 2026/examples/memql/providers/base-provider.memql -->
 ```memql
 @base
-@vendor("OpenAI")
-provider openai {
+@vendor("Anthropic")
+provider anthropic {
   auth {
-    identityProviderId  env("MEMQL_AI_OPENAI_IDENTITY_PROVIDER_ID")
-    serviceAccountId    env("MEMQL_AI_OPENAI_SERVICE_ACCOUNT_ID")
-    identityTokenFile   env("MEMQL_AI_OPENAI_IDENTITY_TOKEN_FILE")
+    federationRuleId   env("MEMQL_AI_ANTHROPIC_FEDERATION_RULE_ID")
+    organizationId     env("MEMQL_AI_ANTHROPIC_ORGANIZATION_ID")
+    serviceAccountId   env("MEMQL_AI_ANTHROPIC_SERVICE_ACCOUNT_ID")
+    identityTokenFile  env("MEMQL_AI_ANTHROPIC_IDENTITY_TOKEN_FILE")
   }
 }
 ```
@@ -1480,12 +1479,15 @@ logic respondThroughPrompt {
 }
 ```
 
-A prompt is rendered and sent from **Go**: an integration builds a
-`core/airoute` request carrying the prompt's `@level`, the router picks the
-provider ([Levels](#levels)), and the reply is parsed through the prompt's input
-schema. A body reaches that work through a **builtin that wraps it** — `agent`
-in `dsl/agents/builtins.memql` is the one the tree ships, and like every
-cross-namespace construct it comes in through a file-top import:
+A prompt is rendered and sent from **Go**: an integration binds the values the
+prompt's body declares — that body IS the input schema, validated before the
+template renders — builds a `core/airoute` request carrying the prompt's
+`@level`, and the router picks the provider ([Levels](#levels)). A prompt
+declares no OUTPUT schema, so what the reply is read as belongs to the calling
+integration, not to the construct. A body reaches that work through a **builtin
+that wraps it** — `agent` in `dsl/agents/builtins.memql` is the one the tree
+ships, and like every cross-namespace construct it comes in through a file-top
+import:
 
 <!-- corpus: 2026/examples/memql/si/agent-builtin.memql -->
 ```memql
@@ -1678,8 +1680,9 @@ When a trait covers a predicate (e.g. the shipped `isActiveRecord` for
 — the inline comparison is rejected by the conformance test
 (`test/dslconformance/conformance_test.go`). A trait name is resolved by bare
 name everywhere it is applied, so a second declaration of a shipped one does not
-shadow it politely: it makes every shipped filter that applies it ambiguous, and
-the load refuses them all.
+shadow it politely: the name stops resolving, and every filter that applies it
+is refused with `lower_unknown_name` — ~49 shipped queries, for
+`isActiveRecord`.
 
 ### Using Specs and Traits in Filters
 
@@ -1749,7 +1752,7 @@ Time-travel is a **query-only** clause (alongside `filter` / `shape` / `sort` / 
 ```memql
 use cluster.concepts.{ node }
 
-/// Every node the cluster holds right now.
+/// The cluster's healthy nodes, as they stand right now.
 query node liveNodes {
   asOf latest
   filter  row => row.health == "healthy"
@@ -1845,8 +1848,20 @@ that is the shape of every cross-domain import in the tree today.
 already works the day another construct kind becomes namespaced. It is **inert
 for the twelve flat kinds** (query, mutation, logic, spec, trait, shape, tool,
 prompt, provider, builtin, policy, seed): their registries are keyed by bare
-name with a load-time uniqueness gate, so two same-named constructs cannot
-coexist and there is nothing to alias between.
+name and by nothing else, so there is no second key for an alias to bind and
+nothing to alias between.
+
+**What a second declaration of one of those names does is NOT uniform, and only
+one kind refuses it outright.** A `rule` is refused at load naming both files
+("a rule name is unique across the whole corpus"). A `provider`, `policy`,
+`builtin` or `tool` loads with no diagnostic at all, and one of the two simply
+wins the key. A `query`, `mutation`, `logic`, `spec` or `trait` loads too, and
+the damage lands on its CONSUMERS instead: every construct that named it by
+bare name stops resolving. Declaring a second `trait isActiveRecord` refuses
+~49 shipped queries with `lower_unknown_name`; declaring a second
+`query todos` leaves the shipped `todosList` tool's handler naming a function
+that is "not a registered function, query, mutation or builtin". Treat the
+names as unique because the tree does, not because a gate makes them so.
 
 > **Retired.** The `@use*` annotation family (`@useConcept`, `@useShape`, `@useQuery`, `@useMutation`, `@useLogic`, `@useBuiltin`, ...) is retired and rejected at parse time with a migration-pointing error. The concept binding lives in the construct signature; everything else comes in through `use` imports.
 >

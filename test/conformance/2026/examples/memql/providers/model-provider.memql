@@ -1,9 +1,9 @@
 @extends("openai")
-@model("gpt-5.4-nano")
-/// OpenAI GPT-5.4 Nano - cheapest high-volume chat for low-complexity tasks (non-streaming)
-provider chat54Nano {
+@model("gpt-5.4-mini")
+/// OpenAI GPT-5.4 Mini - balanced cost/latency chat (non-streaming)
+provider chat54Mini {
   params {
-    contextWindow        32000
-    maxCompletionTokens  2048
+    contextWindow        128000
+    maxCompletionTokens  16384
   }
 }
