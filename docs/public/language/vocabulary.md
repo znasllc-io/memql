@@ -23,10 +23,10 @@ Edition `2026`, grammar version `2026.09-before-write-error-accessor-77cda60c`.
 | [Annotations](#annotations) | 74 |
 | [Keywords](#keywords) | 37 |
 | [Operators](#operators) | 22 |
-| [Field types](#field-types) | 8 |
+| [Field types](#field-types) | 12 |
 | [Functions and methods](#functions-and-methods) | 46 |
 | [Builtins](#builtins) | 10 |
-| **Total** | **215** |
+| **Total** | **219** |
 
 ## Constructs
 
@@ -163,7 +163,7 @@ The reserved words that are not constructs: the statements of a body, the clause
 | `params` | `"params" "{" <param-entry>* "}"` | Provider block: the model parameters this provider is called with -- context window, completion cap and the per-million input and output costs the router bills against. Written `params { contextWindow 128000 ... }`, one `key value` pair per line. |
 | `partition` | `partition` | Reserved: the active partition for this call. |
 | `payload` | `payload` | Reserved: bound-concept row payload (payload.X) -- valid in query filter/shape only (SQL pushdown). |
-| `precondition` | `"precondition" <name> "{" <statement>* "}"` | Automation block: `precondition <name> { ... }`, a deterministic check that must hold before the statements run (Epic 4, memql#2139). |
+| `precondition` | `"precondition" <name> "{" <precondition-entry>* "}"` | Automation block: `precondition <name> { check: <expr> }`, a deterministic check that must hold before the statements run (Epic 4, memql#2139). Its body is `key: value` entries, NOT statements: three keys -- `check:` the boolean expression, required; `literal:` the machine-specific literal it asserts, for the repair loop; `description:` the context the miss signal carries. A block with no `check:` is refused at load. |
 | `publish` | `"publish" <string> "{" <map-entry> { "," <map-entry> } "}"` | Publish statement, in an automation: `publish "<topic>" { key: value, ... }` puts an event on the bus. A logic may not publish (D14): publish from the automation that calls it. |
 | `refine` | `"refine" <lambda>` | Query clause: `refine row => <predicate>`, a predicate the database cannot run, applied in process to each page `paginate` reads, so a page may come back short. Requires paginate; never with count. |
 | `retry` | `"retry" "(" <number> ")"` | Trailing clause of a construct call: `<call> retry(n)` runs a failed call up to n more times. Written after `on surface(...)` and before `on error continue`. |
@@ -213,12 +213,16 @@ The type words a concept field, an args field or a schema-body field is declared
 
 | Name | Written | What it means |
 |---|---|---|
+| `any` | `<name> any` | No declared type: the field takes whatever the caller sends, and nothing checks it. It is what an automation's args block writes for the fields of a trigger payload, where the concept the event came from has already declared their types. Write it only there: `any` is the one spelling that buys no validation, and a named type is what makes a wrong value a refusal instead of a surprise further down. |
 | `array` | `<name> array` | Deprecated list spelling. DEPRECATED: write []T instead. |
 | `bool` | `<name> bool` | True or false, and nothing else. There is no truthiness in the language, so a bool field is the only thing a condition may read directly; `false` is a value and is never coalesced away by `??`. |
+| `boolean` | `<name> boolean` | True or false: the second spelling of `bool`, and the same type everywhere. The args validator, the schema a tool advertises and the expression lowering all answer to either word, so which to write is house style -- and `bool` is the one the rest of this table is written in. |
 | `datetime` | `<name> datetime` | An RFC 3339 timestamp, carried as a string. Strings order by byte, so an RFC 3339 field orders by time under `<` and `>`, and `addDuration` and `daysBetween` take and return this type. |
 | `enum` | `<name> enum` | Restricted value set. First-class parameterized form (#2618): `status enum("open", "closed")` -- self-contained, same representation as the legacy `string @enum(...)` pair (which keeps parsing). |
 | `float` | `<name> float` | A number with a fractional part, carried as a JSON number. @minimum and @maximum bound it inclusively, and a value that arrives as an integer is accepted. |
 | `int` | `<name> int` | A whole number, positive or negative. Bound it with @minimum and @maximum, which are inclusive; a discrete numeric set has no annotation, because @enum takes string literals only. |
+| `integer` | `<name> integer` | A whole number: the second spelling of `int`, and the same type everywhere. The args validator accepts a JSON number under either word only when it is whole, and the tool schema emits `"integer"` for both. |
+| `number` | `<name> number` | A JSON number, whole or fractional. Broader than `int`, which refuses a fraction, and the word a tool's or a prompt's schema emits for `float` -- so a field that must take both is `number` or `float`, never `int`. |
 | `object` | `<name> object` | A nested object -- a JSON map of further fields, declared as a block. Read a leaf through the optional-member operator (`row.?lineage.planId`) wherever the object itself may be absent, which the load requires. |
 | `string` | `<name> string` | UTF-8 text of any length. It is the type an enum, a pattern and a length bound narrow, and the one an absent value reads as the empty string in. |
 

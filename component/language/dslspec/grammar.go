@@ -326,6 +326,14 @@ func clauseProduction(spec *Spec) string {
 	// carries no colon at all.
 	b.WriteString(production("param-entry", `<name> ( <string> | <number> | "true" | "false" )`))
 	b.WriteString(production("auth-entry", `<name> ( <string> | "env" "(" <string> ")" )`))
+	// A precondition's keys are the closed set the loader's regex names, and
+	// `check:` is required -- which is a LOAD rule, not a syntax one, so the
+	// production offers the three keys and the doc carries the requirement.
+	// Each value runs to the end of its line and quotes around it are
+	// optional, so <expression> is what an author writes there rather than
+	// what the regex would take.
+	b.WriteString(production("precondition-entry", `<precondition-key> ":" <expression>`))
+	b.WriteString(production("precondition-key", `"check" | "literal" | "description"`))
 	b.WriteString(production("seed-entry", `<name> ":" <seed-value> | <name> "{" <seed-entry>* "}"`))
 	b.WriteString(production("seed-value", `<string> | <number> | "true" | "false" | "[" ( <string> [ "," ] )* "]"`))
 	b.WriteString(production("path", `<name> { "." <name> }`))
@@ -480,14 +488,15 @@ func fieldReceiverNames() []fieldReceiver {
 // grammar without it cannot derive most of the tree, and a model held to one
 // would be taught the long form the codemod removes.
 //
-// <field-type> is a NAME, which is what every field parser reads: the args
-// block takes any identifier as a type, and so do the concept, tool, prompt
-// and builtin field parsers. The canonical words are the field-type table's
-// and are named in the comment beside the production, for the same reason the
-// annotation block points at the attribute matrix: which spelling is canonical
-// is vocabulary, and a syntax-only grammar that enumerated a closed set here
-// would refuse `any`, `boolean`, `integer`, `number` and `array`, all of which
-// this engine's own DSL tree writes.
+// <field-type> ENUMERATES the field-type table, DEPRECATED SPELLINGS
+// INCLUDED. A field type is the most frequent token in a field declaration and
+// the one a constrained decoder most needs told, so `<name>` there would be
+// guidance thrown away -- and it would newly admit `title return`, which the
+// parser refuses. The table is what makes the enumeration safe: every word the
+// engine reads is in it, and a word that is not is now a LOUD failure naming
+// the file, which is what this whole change buys. A deprecated spelling stays
+// derivable (the tree writes `array` 43 times) and the vocabulary is where it
+// is flagged, with its replacement.
 func fieldProduction(spec *Spec) string {
 	var b strings.Builder
 	b.WriteString("\n(* ---- Fields ---- *)\n")
@@ -506,31 +515,40 @@ func fieldProduction(spec *Spec) string {
 			"<concept-field-annotation>", "<args-field-annotation>",
 			"<tool-field-annotation>", "<prompt-field-annotation>", "<builtin-field-annotation>",
 		})))
-	fmt.Fprintf(&b, "(* The canonical type words are %s.\n"+
-		"   A field type is READ as a name, so a non-canonical spelling parses;\n"+
-		"   which word to write is the vocabulary, not a syntax rule. *)\n", canonicalFieldTypes(spec))
-	b.WriteString(production("field-type", joinAlternatives([]string{
-		"<type-name>", `"enum" "(" <string> { "," <string> } ")"`, `"[]" <field-type>`,
-	})))
-	b.WriteString(production("type-name", `<name>`))
+	if flagged := deprecatedFieldTypes(spec); flagged != "" {
+		fmt.Fprintf(&b, "(* %s. It still derives --\n"+
+			"   the tree writes it -- and the vocabulary is where a reader is told what\n"+
+			"   to write instead. *)\n", flagged)
+	}
+	var types []string
+	for _, ft := range spec.FieldTypes {
+		if ft.Name == "enum" {
+			types = append(types, `"enum" "(" <string> { "," <string> } ")"`)
+			continue
+		}
+		types = append(types, `"`+ft.Name+`"`)
+	}
+	types = append(types, `"[]" <field-type>`)
+	b.WriteString(production("field-type", joinAlternatives(types)))
 	b.WriteString(production("doc-comment", `"///" <text>`))
 	return b.String()
 }
 
-// canonicalFieldTypes names the field-type table's live spellings, in its
-// order, for the note beside <field-type>. A type the table marks deprecated
-// is left out of the NOTE -- it still parses, and the production still derives
-// it, but a model reading the grammar is not shown a spelling the language
-// flags.
-func canonicalFieldTypes(spec *Spec) string {
+// deprecatedFieldTypes names the field types the table flags, with each one's
+// replacement, for the note beside <field-type>. Empty when none is flagged,
+// so the note appears only while there is something to say.
+func deprecatedFieldTypes(spec *Spec) string {
 	var out []string
 	for _, ft := range spec.FieldTypes {
-		if ft.Deprecated {
+		if !ft.Deprecated {
 			continue
 		}
-		out = append(out, ft.Name)
+		out = append(out, fmt.Sprintf("`%s` is a deprecated spelling of %s", ft.Name, ft.ReplacedBy))
 	}
-	return strings.Join(out, ", ")
+	if len(out) == 0 {
+		return ""
+	}
+	return strings.Join(out, "; ")
 }
 
 // expressionProduction renders the frame of the expression grammar: what an
@@ -679,6 +697,74 @@ func memberTails(ops []functions.Operator) string {
 	return strings.Join(tails, " | ")
 }
 
+// RetiredCall is one retired spelling written as a call: the name it is
+// written with, the spelling the parser's table carries and the edition-2026
+// form that replaces it.
+type RetiredCall struct {
+	Name        string
+	Spelling    string
+	Replacement string
+}
+
+// OneArgumentRetiredCalls names the retired call spellings `<predicate-name>
+// "(" <expression> ")"` admits, read from the parser's own retired-form table
+// rather than listed here: a spelling of the shape `name(x)` -- one argument,
+// no comma -- has the same tokens as a spec or a trait applied to its
+// receiver, so no syntax rule can tell them apart. The set is exported for the
+// test that records the looseness, so the note in the grammar and the test
+// cannot name different sets.
+func OneArgumentRetiredCalls() []RetiredCall {
+	var out []RetiredCall
+	for _, f := range parser.V1RetiredForms() {
+		name, arg, ok := splitCallSpelling(f.Spelling)
+		if !ok || arg == "" || strings.Contains(arg, ",") {
+			continue
+		}
+		out = append(out, RetiredCall{Name: name, Spelling: f.Spelling, Replacement: f.Replacement})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// splitCallSpelling reads a retired form written as a call, `name(args)`,
+// into its name and its argument text. Anything else -- an operator, a
+// keyword, a method with a leading dot -- is not a call and answers false.
+func splitCallSpelling(spelling string) (name, args string, ok bool) {
+	open := strings.IndexByte(spelling, '(')
+	if open <= 0 || !strings.HasSuffix(spelling, ")") {
+		return "", "", false
+	}
+	name = spelling[:open]
+	for i, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r == '_':
+		case i > 0 && r >= '0' && r <= '9':
+		default:
+			return "", "", false
+		}
+	}
+	return name, strings.TrimSpace(spelling[open+1 : len(spelling)-1]), true
+}
+
+// oneArgumentRetiredCallNote renders the comment that names them, so the
+// published grammar says out loud what its predicate application admits.
+func oneArgumentRetiredCallNote() string {
+	calls := OneArgumentRetiredCalls()
+	if len(calls) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("(* <predicate-name> is a spec or a trait applied to its receiver, so it is any\n" +
+		"   name. It therefore also derives the retired ONE-ARGUMENT calls, which have\n" +
+		"   the same tokens and which the PARSER refuses by name:\n")
+	for _, c := range calls {
+		fmt.Fprintf(&b, "     %-14s write %s\n", c.Spelling, c.Replacement)
+	}
+	b.WriteString("   Every other retired call takes a different number of arguments, and none of\n" +
+		"   those derives here at all. *)\n")
+	return b.String()
+}
+
 // functionProduction renders the callable names from the function catalog:
 // the functions a call may name and the methods a value may answer to. A
 // spelling the catalog retires has no entry, so it cannot be offered here.
@@ -701,10 +787,18 @@ func functionProduction(catalog []functions.Function) string {
 	// function is called by name with its arguments. A spec or a trait is
 	// APPLIED to its one receiver -- `isActiveRecord(row)`, `requiresOwner(
 	// actor)` -- and its name is declared by a `.memql` file, so no table can
-	// list it. Spelling that as one open `<name> "(" ... ")"` form would make
-	// every retired spelling derive again: `cond(p, a, b)`, `coalesce(a, b)`,
-	// `concat(a, b)`, `now()` and `and(a, b)` all take a number of arguments a
-	// predicate application cannot.
+	// list it and no closed alternation can spell it.
+	//
+	// It is a ONE-argument form, which is the whole of the containment: every
+	// retired call taking two or more arguments, and `now()` and `timestamp()`
+	// taking none, still fail to derive. What it does admit is the retired
+	// calls that take exactly one -- they are indistinguishable at the syntax
+	// level from a predicate application, and BNF cannot say "any name except
+	// these". That is a bounded, known looseness rather than a gap, so the
+	// note below NAMES them from the parser's own retired-form table, and
+	// TestPublishedGrammarAdmitsTheOneArgumentRetiredCalls records that they
+	// derive. The parser refuses each by name with its replacement.
+	b.WriteString(oneArgumentRetiredCallNote())
 	b.WriteString(production("call", `<function-name> "(" [ <expression> { "," <expression> } ] ")"`+
 		"\n"+strings.Repeat(" ", productionColumn)+`  | <predicate-name> "(" <expression> ")"`))
 	b.WriteString(production("predicate-name", `<name>`))

@@ -44,6 +44,7 @@ import (
 	"testing"
 
 	"github.com/znasllc-io/memql/component/language/dslspec/internal/bnfmatch"
+	"github.com/znasllc-io/memql/component/language/functions"
 	"github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -425,6 +426,9 @@ func TestPublishedGrammarRefusesNonsense(t *testing.T) {
 		{"a field with no type", "file",
 			"concept ticket {\n  title string\n}\n",
 			"concept ticket {\n  title\n}\n"},
+		{"a field whose type is a word the table does not carry", "file",
+			"concept ticket {\n  title string\n}\n",
+			"concept ticket {\n  title return\n}\n"},
 		{"a clause no construct takes", "file",
 			"query ticket openTickets {\n  filter row => row.status == \"open\"\n}\n",
 			"query ticket openTickets {\n  sieve row => row.status == \"open\"\n}\n"},
@@ -501,6 +505,217 @@ func derives(t *testing.T, g *bnfmatch.Grammar, start, src string) bool {
 		t.Fatalf("this input does not lex (%v), so it says nothing about the grammar:\n%s", err, src)
 	}
 	return bnfmatch.Match(g, start, tokens).OK
+}
+
+// unexercisedProductions are the productions no source the gate reads can
+// exercise, each with the reason it cannot. The test below fails on any OTHER
+// unexercised production -- that is a form the grammar publishes and the
+// corpus never checks, which is exactly how `<precondition-block>` shipped
+// describing statements for a body of `key: value` entries: its only example
+// in the tree was a `dsl/_reference/` skeleton, which no loader and no gate
+// reads.
+//
+// Two shapes, and the difference matters when one is added:
+//
+//   - LEXICAL: reached only from a production matched by the token's KIND, or
+//     not reachable at token level at all. Nothing can exercise these and
+//     nothing should try.
+//   - SHADOWED: a sibling alternative derives the same tokens, so blanking
+//     this one changes no answer. That is an ambiguity in the grammar rather
+//     than a gap in the corpus -- worth knowing about, never a defect on its
+//     own.
+var unexercisedProductions = map[string]string{
+	"string":                   "lexical: matched by the token's kind, because a string token carries its decoded value rather than its spelling",
+	"character":                "lexical: reached only from <string> and <text>, over characters",
+	"text":                     "lexical: reached only from <doc-comment>",
+	"doc-comment":              "lexical: `///` leaves the token stream on the lexer's side channel, so no token can match it",
+	"reserved-root":            "shadowed: <primary> also offers <name>, which derives `actor`, `args` and `now` as well",
+	"args-field-annotation":    "shadowed: <field-annotation> unions five receivers, and <concept-field-annotation> derives the same names",
+	"builtin-field-annotation": "shadowed: as args-field-annotation",
+	"prompt-field-annotation":  "shadowed: as args-field-annotation",
+}
+
+// TestEveryPublishedProductionIsExercisedByTheCorpus blanks one production at
+// a time and asks whether anything the gate reads stops deriving. A production
+// nothing stops deriving without is a production the gate cannot check: it may
+// say whatever it likes about the language and the 306 tree files and 627
+// conformance sources will still pass.
+//
+// This is the durable form of "is any form's only example a `_reference/`
+// skeleton". The walk deliberately does NOT read those skeletons -- the
+// engine's own loader skips `_`-prefixed directories (core/dslfs), so holding
+// the grammar to text the engine never loads would be holding it to the wrong
+// thing -- and a corpus case is how every other form here is covered.
+func TestEveryPublishedProductionIsExercisedByTheCorpus(t *testing.T) {
+	_, block := publishedGrammar(t)
+	sources := allGatedSources(t)
+	base, err := bnfmatch.ParseGrammar(block)
+	if err != nil {
+		t.Fatalf("read the published grammar: %v", err)
+	}
+
+	names := append([]string(nil), base.Order...)
+	exercised := make([]bool, len(names))
+	var wg sync.WaitGroup
+	next := make(chan int)
+	go func() {
+		for i := range names {
+			next <- i
+		}
+		close(next)
+	}()
+	for w := 0; w < runtime.GOMAXPROCS(0); w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range next {
+				exercised[i] = blankingBreaksSomething(t, block, names[i], sources)
+			}
+		}()
+	}
+	wg.Wait()
+
+	for i, name := range names {
+		reason, listed := unexercisedProductions[name]
+		switch {
+		case exercised[i] && listed:
+			t.Errorf("<%s> IS exercised now, but this file still lists it as unexercisable (%q). "+
+				"Delete the entry: a list of exceptions that is no longer true is worse than none.", name, reason)
+		case !exercised[i] && !listed:
+			t.Errorf("<%s> is published and NOTHING the gate reads exercises it: blanking it changes no "+
+				"answer, so it may describe the language wrongly and both corpora still pass. Give it a "+
+				"conformance case, or -- if no source can reach it -- add it to unexercisedProductions with "+
+				"the reason.", name)
+		}
+	}
+}
+
+// blankingBreaksSomething replaces one production with a right-hand side
+// nothing matches and reports whether any source stops deriving.
+func blankingBreaksSomething(t *testing.T, block, name string, sources []source) bool {
+	t.Helper()
+	g, err := bnfmatch.ParseGrammar(blankProduction(block, name))
+	if err != nil {
+		t.Errorf("blanking <%s> left a grammar that does not read: %v", name, err)
+		return true
+	}
+	for _, s := range sources {
+		tokens, lexErr := bnfmatch.Tokens(s.text)
+		if lexErr != nil {
+			continue
+		}
+		if !bnfmatch.Match(g, s.start, tokens).OK {
+			return true
+		}
+	}
+	return false
+}
+
+// blankProduction rewrites one production's right-hand side, continuation
+// lines included, to a reference the grammar does not define -- which derives
+// nothing, wherever it is reached.
+func blankProduction(block, name string) string {
+	head := "<" + name + ">"
+	var out []string
+	inProduction := false
+	for _, line := range strings.Split(block, "\n") {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trimmed, head+" ") && strings.Contains(trimmed, "::="):
+			inProduction = true
+			out = append(out, head+" ::= <no-production-is-this>")
+		case inProduction && strings.HasPrefix(trimmed, "|"):
+			// a continuation of the production just blanked: drop it
+		default:
+			inProduction = false
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// allGatedSources is everything the two derivation tests read, in one slice.
+func allGatedSources(t *testing.T) []source {
+	t.Helper()
+	var out []source
+	for _, f := range embeddedTreeFiles(t) {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		rel, _ := filepath.Rel(repoRoot, f)
+		out = append(out, source{what: rel, start: "file", text: string(raw)})
+	}
+	return append(out, corpusSources(t)...)
+}
+
+// TestPublishedGrammarAdmitsTheOneArgumentRetiredCalls RECORDS a known,
+// bounded looseness rather than leaving it to be discovered.
+//
+// `<predicate-name> "(" <expression> ")"` is how a spec or a trait is applied
+// to its receiver -- `isActiveRecord(row)`, which nearly every shipped query
+// filter writes -- and a spec's name is declared by a `.memql` file, so no
+// table can list it and BNF cannot say "any name except these". The price is
+// that the retired calls taking exactly ONE argument have the same tokens and
+// derive too; the parser refuses each by name with its replacement.
+//
+// This exists because the negative pairs that pin the retired calls are all
+// MULTI-argument, so the suite would otherwise read as covering a boundary it
+// does not. Both halves are generated from the parser's own retired-form
+// table, and the second assertion holds the grammar's published note to the
+// same set -- so the page, this test and the table cannot drift apart.
+func TestPublishedGrammarAdmitsTheOneArgumentRetiredCalls(t *testing.T) {
+	g, block := publishedGrammar(t)
+	admitted := OneArgumentRetiredCalls()
+	if len(admitted) == 0 {
+		t.Fatal("the parser's retired-form table names no one-argument call; either it changed shape or " +
+			"splitCallSpelling stopped reading it, and this test is now vacuous")
+	}
+	for _, c := range admitted {
+		t.Run(c.Name, func(t *testing.T) {
+			src := "row => " + c.Name + "(row.a)"
+			if !derives(t, g, "expression", src) {
+				t.Errorf("%q no longer derives. That is a TIGHTER grammar than this test records, which is "+
+					"good news -- update the note beside <call> and this test rather than reverting it.", src)
+			}
+			if !strings.Contains(block, c.Spelling) {
+				t.Errorf("the published grammar does not name %q in its note beside <call>; a looseness "+
+					"nobody is told about is the same as one nobody noticed", c.Spelling)
+			}
+		})
+	}
+	// The containment: every retired call that is NOT one argument stays
+	// underivable, which is what keeps <function-name> worth closing.
+	for _, f := range parser.V1RetiredForms() {
+		name, args, ok := splitCallSpelling(f.Spelling)
+		if !ok || (args != "" && !strings.Contains(args, ",")) {
+			continue
+		}
+		if catalogFunctionNames()[name] {
+			// `contains` is retired only as the two-argument substring test;
+			// the catalog keeps the name for the graph traversal, so it
+			// derives as a catalog function and is judged after its arguments.
+			continue
+		}
+		t.Run(f.Spelling, func(t *testing.T) {
+			if derives(t, g, "expression", "row => "+f.Spelling) {
+				t.Errorf("`%s` derives, though it takes a number of arguments a predicate application cannot. "+
+					"The one-argument form is the whole of the intended looseness.", f.Spelling)
+			}
+		})
+	}
+}
+
+// catalogFunctionNames is the set of bare function names the catalog carries,
+// which <function-name> enumerates.
+func catalogFunctionNames() map[string]bool {
+	out := map[string]bool{}
+	for _, f := range functions.Catalog() {
+		if f.Receiver == "" {
+			out[f.Name] = true
+		}
+	}
+	return out
 }
 
 // TestDocCommentIsTheOnlyTerminalTheLexerHides pins the one place where the

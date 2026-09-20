@@ -1,0 +1,2 @@
+@description("Matches the tickets that are still open, whatever concept they are on.")
+trait isOpenTicketTraitDescription = row => row.status == "open"

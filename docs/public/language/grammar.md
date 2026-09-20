@@ -87,7 +87,7 @@ Edition `2026`, grammar version `2026.09-before-write-error-accessor-77cda60c`.
 <update-block>        ::= "update" "{" ( <write-entry> [ "," ] )* "}"
 <accept-block>        ::= "accept" "{" ( <name> [ "," ] )* "}"
 <stamp-block>         ::= "stamp" "{" ( <map-entry> [ "," ] )* "}"
-<precondition-block>  ::= "precondition" <name> "{" <statement>* "}"
+<precondition-block>  ::= "precondition" <name> "{" <precondition-entry>* "}"
 <params-block>        ::= "params" "{" <param-entry>* "}"
 <auth-block>          ::= "auth" "{" <auth-entry>* "}"
 <capability-call>     ::= "capability" <dotted-name> "(" [ <argument> { "," <argument> } ] ")"
@@ -96,6 +96,8 @@ Edition `2026`, grammar version `2026.09-before-write-error-accessor-77cda60c`.
 <map-entry>           ::= <name> ":" <expression>
 <param-entry>         ::= <name> ( <string> | <number> | "true" | "false" )
 <auth-entry>          ::= <name> ( <string> | "env" "(" <string> ")" )
+<precondition-entry>  ::= <precondition-key> ":" <expression>
+<precondition-key>    ::= "check" | "literal" | "description"
 <seed-entry>          ::= <name> ":" <seed-value> | <name> "{" <seed-entry>* "}"
 <seed-value>          ::= <string> | <number> | "true" | "false" | "[" ( <string> [ "," ] )* "]"
 <path>                ::= <name> { "." <name> }
@@ -181,12 +183,12 @@ Edition `2026`, grammar version `2026.09-before-write-error-accessor-77cda60c`.
 <field-annotation>    ::= <concept-field-annotation> | <args-field-annotation>
                         | <tool-field-annotation> | <prompt-field-annotation>
                         | <builtin-field-annotation>
-(* The canonical type words are string, int, float, bool, datetime, object, enum.
-   A field type is READ as a name, so a non-canonical spelling parses;
-   which word to write is the vocabulary, not a syntax rule. *)
-<field-type>          ::= <type-name> | "enum" "(" <string> { "," <string> } ")"
-                        | "[]" <field-type>
-<type-name>           ::= <name>
+(* `array` is a deprecated spelling of []T. It still derives --
+   the tree writes it -- and the vocabulary is where a reader is told what
+   to write instead. *)
+<field-type>          ::= "string" | "int" | "float" | "bool" | "datetime" | "object"
+                        | "enum" "(" <string> { "," <string> } ")" | "any" | "boolean"
+                        | "integer" | "number" | "array" | "[]" <field-type>
 <doc-comment>         ::= "///" <text>
 
 (* ---- Expressions ---- *)
@@ -214,6 +216,18 @@ Edition `2026`, grammar version `2026.09-before-write-error-accessor-77cda60c`.
 <expr-1>              ::= <primary> { "." ( <name> | <method-call> ) | ".?" <name> }
 
 (* ---- Calls ---- *)
+(* <predicate-name> is a spec or a trait applied to its receiver, so it is any
+   name. It therefore also derives the retired ONE-ARGUMENT calls, which have
+   the same tokens and which the PARSER refuses by name:
+     count(x)       write x.count()
+     exists(x)      write x != nil
+     first(x)       write x.first()
+     last(x)        write x.last()
+     len(x)         write x.count()
+     mean(x)        write x.avg()
+     not(a)         write !a
+   Every other retired call takes a different number of arguments, and none of
+   those derives here at all. *)
 <call>                ::= <function-name> "(" [ <expression> { "," <expression> } ] ")"
                         | <predicate-name> "(" <expression> ")"
 <predicate-name>      ::= <name>

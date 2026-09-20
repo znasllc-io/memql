@@ -60,7 +60,7 @@ var clauseDocs = map[string]string{
 	"update":       "Mutation block: partial read-merge-write of an existing row (keyed by id).",
 	"accept":       "Write-block sugar: `accept { name, ... }` lists the public fields the mutation accepts -- each auto-binds to its same-named arg (`name` -> `name: args.name`). Every name must be a declared arg. Nested inside insert{}/update{} (or top-level, which means insert). Never mixed with loose fields.",
 	"stamp":        "Write-block sugar: `stamp { key: value, ... }` carries the server-set fields beside an accept{} list. Nested inside insert{}/update{} (or top-level with accept, which means insert).",
-	"precondition": "Automation block: `precondition <name> { ... }`, a deterministic check that must hold before the statements run (Epic 4, memql#2139).",
+	"precondition": "Automation block: `precondition <name> { check: <expr> }`, a deterministic check that must hold before the statements run (Epic 4, memql#2139). Its body is `key: value` entries, NOT statements: three keys -- `check:` the boolean expression, required; `literal:` the machine-specific literal it asserts, for the repair loop; `description:` the context the miss signal carries. A block with no `check:` is refused at load.",
 	"params":       "Provider block: the model parameters this provider is called with -- context window, completion cap and the per-million input and output costs the router bills against. Written `params { contextWindow 128000 ... }`, one `key value` pair per line.",
 	"auth":         "Provider block: vendor auth (e.g. apiKey env(\"...\")).",
 }
@@ -92,11 +92,20 @@ var clauseGrammar = map[string]string{
 	// drops a trailing one (parser.splitInsertFields). The grammar has no
 	// newline terminal, so the comma is optional -- `{ "," <entry> }` said
 	// the comma was required and no shipped mutation writes one.
-	"insert":       `"insert" "{" ( <write-entry> [ "," ] )* "}"`,
-	"update":       `"update" "{" ( <write-entry> [ "," ] )* "}"`,
-	"accept":       `"accept" "{" ( <name> [ "," ] )* "}"`,
-	"stamp":        `"stamp" "{" ( <map-entry> [ "," ] )* "}"`,
-	"precondition": `"precondition" <name> "{" <statement>* "}"`,
+	"insert": `"insert" "{" ( <write-entry> [ "," ] )* "}"`,
+	"update": `"update" "{" ( <write-entry> [ "," ] )* "}"`,
+	"accept": `"accept" "{" ( <name> [ "," ] )* "}"`,
+	"stamp":  `"stamp" "{" ( <map-entry> [ "," ] )* "}"`,
+	// A precondition body is NOT statements. The statement parser only
+	// brace-matches the block (parser.skipV1PreconditionBlock) and the
+	// automations loader reads its `key: value` lines with a regex
+	// (automations.parsePreconditionBody), over a CLOSED key set, with
+	// `check:` required. Publishing `<statement>*` here was the worst shape
+	// this grammar could take: a decoder held to it emits statements, the
+	// parser brace-skips them without complaint, `check` comes out empty, and
+	// the automation is refused at load with "a `check:` boolean expression
+	// is required" -- a refusal the grammar caused and does not mention.
+	"precondition": `"precondition" <name> "{" <precondition-entry>* "}"`,
 	// A provider's two blocks are NOT map entries and never were: their
 	// parsers (parseProviderParamsBlock, parseProviderAuthBlock) read
 	// `<key> <literal>` with NO COLON, and auth reads one more form, the
@@ -186,6 +195,15 @@ func operators() []Operator {
 // fieldTypes returns the type names valid in a concept field, args field, or
 // declarative-construct body field. `array` is retained as a deprecated
 // spelling that the grammar still accepts but flags (migrate to []T).
+//
+// The table is what the generated grammar ENUMERATES, so a word missing from
+// it is a word the grammar refuses and a model is taught not to write. `any`,
+// `boolean`, `integer` and `number` are here because the engine reads them
+// everywhere a type word is read -- expr_lower.go's argTypeWord,
+// function_validator.go's type check and function_tools.go's schema converter
+// all answer to each -- and because this engine's own DSL tree writes them 196
+// times between them. Leaving them out is the one mistake this table can make
+// that nothing downstream can correct.
 func fieldTypes() []FieldType {
 	return []FieldType{
 		{Name: "string", Doc: "UTF-8 text of any length. It is the type an enum, a pattern and a length bound narrow, and the one an absent value reads as the empty string in."},
@@ -195,6 +213,10 @@ func fieldTypes() []FieldType {
 		{Name: "datetime", Doc: "An RFC 3339 timestamp, carried as a string. Strings order by byte, so an RFC 3339 field orders by time under `<` and `>`, and `addDuration` and `daysBetween` take and return this type."},
 		{Name: "object", Doc: "A nested object -- a JSON map of further fields, declared as a block. Read a leaf through the optional-member operator (`row.?lineage.planId`) wherever the object itself may be absent, which the load requires."},
 		{Name: "enum", Doc: "Restricted value set. First-class parameterized form (#2618): `status enum(\"open\", \"closed\")` -- self-contained, same representation as the legacy `string @enum(...)` pair (which keeps parsing)."},
+		{Name: "any", Doc: "No declared type: the field takes whatever the caller sends, and nothing checks it. It is what an automation's args block writes for the fields of a trigger payload, where the concept the event came from has already declared their types. Write it only there: `any` is the one spelling that buys no validation, and a named type is what makes a wrong value a refusal instead of a surprise further down."},
+		{Name: "boolean", Doc: "True or false: the second spelling of `bool`, and the same type everywhere. The args validator, the schema a tool advertises and the expression lowering all answer to either word, so which to write is house style -- and `bool` is the one the rest of this table is written in."},
+		{Name: "integer", Doc: "A whole number: the second spelling of `int`, and the same type everywhere. The args validator accepts a JSON number under either word only when it is whole, and the tool schema emits `\"integer\"` for both."},
+		{Name: "number", Doc: "A JSON number, whole or fractional. Broader than `int`, which refuses a fraction, and the word a tool's or a prompt's schema emits for `float` -- so a field that must take both is `number` or `float`, never `int`."},
 		{Name: "array", Doc: "Deprecated list spelling.", Deprecated: true, ReplacedBy: "[]T"},
 	}
 }
