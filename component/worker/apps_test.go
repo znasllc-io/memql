@@ -7,6 +7,7 @@ import (
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/airoute"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -332,6 +333,26 @@ func TestAppProviderReferencesMatchTheClosedSet(t *testing.T) {
 		if AppLabelKey(id) != memql.AppReferencePrefix+id {
 			t.Errorf("label key %q and provider reference %q disagree for %q",
 				AppLabelKey(id), memql.AppReferencePrefix+id, id)
+		}
+	}
+}
+
+// TestKnownAppIdsDeriveFromTheRoutingVocabulary pins the ONE list. The DSL
+// parser refuses `app:<id>` for an id outside the set at load and reads it from
+// core/airoute; a second copy here would let a policy entry be refused for an
+// app this package happily drives, or the reverse.
+func TestKnownAppIdsDeriveFromTheRoutingVocabulary(t *testing.T) {
+	got := KnownAppIds()
+	want := airoute.RunnableApps()
+	if len(got) != len(want) {
+		t.Fatalf("KnownAppIds() = %v, airoute.RunnableApps() = %v", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Fatalf("KnownAppIds()[%d] = %q, airoute.RunnableApps()[%d] = %q", i, got[i], i, want[i])
+		}
+		if !IsKnownAppId(got[i]) || !airoute.IsRunnableApp(got[i]) {
+			t.Fatalf("%q is in the list and fails one of the two predicates", got[i])
 		}
 	}
 }

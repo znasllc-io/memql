@@ -302,8 +302,12 @@ func servesModality(client any, mod providerModality) (bool, string) {
 // chainWinner is the entry a walk settled on, plus the concrete names left
 // after it for the fallback wrapper to try.
 type chainWinner struct {
-	entry     *memql.ProviderConfigEntry
-	door      string
+	entry *memql.ProviderConfigEntry
+	door  string
+	// client OVERRIDES the entry's own client, and is set only for a SESSION
+	// winner (design D7): the step is handed to an app session, and the thing
+	// that carries it is not the registry entry's appProvider.
+	client    any
 	remaining []string
 }
 
@@ -637,11 +641,32 @@ func (r *Router) walkChain(
 			}
 			// Confirm interface support for the requested modality.
 			//
-			// An app door lands here for a TOOL turn and is passed over, which
-			// is the design rather than a gap (D3): on a tool turn MemQL is
-			// driving, and an app is an agent that drives itself. It reaches
-			// MemQL's tools through MCP, in the other direction.
+			// An app door lands here for a TOOL turn and is NOT passed over
+			// any more (epic memql#5391, design D7). On a tool turn MemQL is
+			// driving and an app is an agent that drives itself, so the app
+			// cannot serve the TURN -- it takes the whole STEP instead, which
+			// is the `session` door. It still reaches MemQL's tools through
+			// MCP, in the other direction.
+			//
+			// The decision lives in session_door.go because providerLookup has
+			// to reach the same answer when the fallback wrapper re-resolves
+			// this winner by name.
 			if serves, why := servesModality(entry.Client, mod); !serves {
+				sessionClient, isSession, sessionErr := r.sessionDoorFor(req, cand.Name, mod)
+				if sessionErr != nil {
+					return nil, sessionErr
+				}
+				if isSession {
+					// NO REMAINING CHAIN, and that is the park rule (design D7,
+					// carried from the 2026-09-06 record). A session that fails
+					// has run on somebody's machine; letting the fallback
+					// wrapper advance to the vendor behind it would be a silent
+					// paid call at exactly the moment the local door shut. A
+					// machine that went to sleep parks the step with the
+					// existing inferenceUnavailable approval instead, which is
+					// a condition the world changes.
+					return &chainWinner{entry: entry, door: DoorSession, client: sessionClient}, nil
+				}
 				report.note(cand.Name, why)
 				continue
 			}
@@ -713,6 +738,14 @@ func (r *Router) resolvedFrom(
 		Reason: "selected",
 	})
 	decision.Outcome = airoute.OutcomeOK
+	// A SESSION WINNER'S CHAIN IS ITSELF AND NOTHING ELSE. `remaining` is empty
+	// for one by construction (see walkChain), and naming the winner keeps the
+	// fallback wrapper able to resolve it -- while giving it nowhere to advance
+	// to, which is the park rule.
+	chain := winner.remaining
+	if winner.door == DoorSession {
+		chain = []string{winner.entry.Config.Name}
+	}
 	return Resolved{
 		ProviderName: winner.entry.Config.Name,
 		Vendor:       vendorFromType(winner.entry.Config.Type),
@@ -720,9 +753,10 @@ func (r *Router) resolvedFrom(
 		Pricing:      winner.entry.Config.Pricing(),
 		Streaming:    mod == modalityStreamTools || mod == modalityStreamChat,
 		PolicyName:   policyName,
-		Chain:        winner.remaining,
+		Chain:        chain,
 		Decision:     decision,
 		Entry:        winner.entry,
+		Client:       winner.client,
 	}
 }
 
@@ -803,14 +837,45 @@ func (r *Router) providerLookup(ctx context.Context, req ResolveRequest, name st
 		Streaming:    mod == modalityStreamTools || mod == modalityStreamChat,
 		Entry:        entry,
 	}
+	// THE ATTEMPT'S DOOR IS ESTABLISHED HERE, and withDecisionFrom carries it
+	// rather than re-deriving it from the name -- since epic memql#5391 the
+	// name cannot say which door was taken, because `app:claude-code` serves a
+	// chat turn as `app` and takes a whole step as a `session`.
+	resolved.Decision.Door = doorFor(entry.Config.Name)
 	if ok, _ := servesModality(entry.Client, mod); !ok {
-		return nil, Resolved{}, false
+		// THE SAME QUESTION THE WALK ASKED, and asking it here is what keeps
+		// the fallback wrapper from stepping past a session winner it just
+		// re-resolved by name (design D7). Without it the wrapper would skip
+		// the app entry as "does not serve tool-calling turns" and advance to
+		// whatever is behind it, which on the shipped chains is a vendor.
+		//
+		// THE STEPLESS ERROR IS SKIPPED RATHER THAN SURFACED, and that is
+		// sound rather than a shortcut: this lookup has no error channel, and
+		// the case cannot arrive. A stepless call is refused by the WALK,
+		// before any wrapper is built -- so the only way here is a chain the
+		// walk already resolved, which means the request carried a step. If it
+		// ever did arrive, a session winner's chain is itself alone, so the
+		// skip exhausts the chain and refuses rather than reaching a vendor.
+		sessionClient, isSession, err := r.sessionDoorFor(req, name, mod)
+		if err != nil || !isSession {
+			return nil, Resolved{}, false
+		}
+		resolved.Client = sessionClient
+		resolved.Decision.Door = DoorSession
+		return sessionClient, resolved, true
 	}
 	var client any = entry.Client
 	// Bind the floor on every lookup, including fallback attempts and direct
 	// structured/vision resolutions. The provider returns an independent client.
 	if scoped, ok := client.(interface{ WithMinContextTokens(int) any }); ok {
 		client = scoped.WithMinContextTokens(req.Needs.MinContextTokens)
+	}
+	// Bind the LEVEL the same way (epic memql#5391, design D8). An app door
+	// serving a chat turn opens a session too, and the cockpit translates the
+	// level into that app's own knobs -- so a `fast` turn and a `reasoning`
+	// one through the same signed-in app should not run identically.
+	if levelled, ok := client.(interface{ WithLevel(string) any }); ok {
+		client = levelled.WithLevel(string(req.Level))
 	}
 	return client, resolved, true
 }
@@ -852,6 +917,8 @@ func buildRouterCallArgs(rec CallRecord, callId string) map[string]any {
 		"errorCategory":      rec.ErrorCategory,
 		"errorMessage":       rec.ErrorMessage,
 		"fallbackFromModel":  rec.FallbackFromModel,
+		"servedModel":        rec.ServedModel,
+		"servedEffort":       rec.ServedEffort,
 		"billing":            billingOrMetered(rec.Billing),
 		"executionSurface":   rec.ExecutionSurface,
 

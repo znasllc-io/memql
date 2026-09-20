@@ -55,8 +55,13 @@ const AppProviderName = "app"
 // a shared lookup.
 const AppReferencePrefix = "app:"
 
+// AppWildcardId is what follows `app:` to mean ANY runnable app, in the
+// owner's own order. It is NOT a member of the closed runnable set: it is a
+// selector over that set, which is why airoute.IsRunnableApp refuses it.
+const AppWildcardId = "*"
+
 // AppWildcard names ANY runnable app, in the owner's own order.
-const AppWildcard = AppReferencePrefix + "*"
+const AppWildcard = AppReferencePrefix + AppWildcardId
 
 // ErrAppUnavailable is what an app call returns when no machine can serve it.
 var ErrAppUnavailable = errors.New("no machine can run this app right now")
@@ -134,11 +139,29 @@ type AppCallRequest struct {
 	Purpose string
 	RunId   string
 	StepId  string
+
+	// Model is the model a policy PINNED with `app:<id>:<model>` (design D8).
+	// EMPTY IS NO PIN, and the app runs at its own default.
+	Model string
+	// Level is the call's LEVEL, one of core/airoute's closed four. It rides
+	// AppSessionStart.level, and THE COCKPIT owns the translation into the
+	// app's own knobs -- the knob names are the app's, and only the machine
+	// knows which app, at which version, is installed. Empty means no level
+	// was named, which is what every session did before the field existed.
+	Level string
+	// Inputs are Library artifact ids the cockpit pulls into the session
+	// workspace before the run starts.
+	Inputs []string
 }
 
 // AppCallResult is the answer.
 type AppCallResult struct {
 	Content string
+	// Model and Effort are what the APP REPORTED serving this turn with
+	// (epic memql#5391, design D9), never what was asked for. Empty means it
+	// did not say, which the decision row records as unknown.
+	Model  string
+	Effort string
 	// Usage is what the APP reported about its own spend, never inferred.
 	Usage AppUsage
 	// ExecutionSurface names where the call ran, in the
@@ -219,15 +242,39 @@ func (r *ProviderRegistry) AppDoors(ctx context.Context, actingUserId string) ([
 	return doors, nil
 }
 
-// IsAppReference reports whether a provider name refers to an app door, and
-// returns the app id. The wildcard returns "*".
-func IsAppReference(name string) (string, bool) {
+// SplitAppReference decomposes an app door reference into the app id and the
+// MODEL PIN a policy may write after it (`app:<id>:<model>`, design D8).
+//
+// The wildcard answers ("*", "", true): `app:*` names any signed-in app and
+// carries no pin, because a model name belongs to one app. The parser refuses
+// `app:*:<model>` at load, so a pinned wildcard cannot reach here.
+func SplitAppReference(name string) (appId, model string, ok bool) {
 	name = strings.TrimSpace(name)
 	if !strings.HasPrefix(name, AppReferencePrefix) {
-		return "", false
+		return "", "", false
 	}
-	appId := strings.TrimSpace(strings.TrimPrefix(name, AppReferencePrefix))
-	return appId, appId != ""
+	rest := strings.TrimSpace(strings.TrimPrefix(name, AppReferencePrefix))
+	if rest == "" {
+		return "", "", false
+	}
+	appId, model, _ = strings.Cut(rest, ":")
+	appId = strings.TrimSpace(appId)
+	model = strings.TrimSpace(model)
+	if appId == "" {
+		return "", "", false
+	}
+	return appId, model, true
+}
+
+// IsAppReference reports whether a provider name refers to an app door, and
+// returns the app id. The wildcard returns "*".
+//
+// It answers the APP ID and NOT the model pin: `app:claude-code:sonnet` is a
+// door on claude-code with a model asked for, and a caller resolving the door
+// must look up "claude-code". SplitAppReference is the one that returns both.
+func IsAppReference(name string) (string, bool) {
+	appId, _, ok := SplitAppReference(name)
+	return appId, ok
 }
 
 // IsAppWildcard reports whether a reference names ANY runnable app.
@@ -235,23 +282,30 @@ func IsAppWildcard(name string) bool {
 	return strings.TrimSpace(name) == AppWildcard
 }
 
-// appEntry synthesizes the registry entry for `app:<appId>`.
+// appEntry synthesizes the registry entry for `app:<appId>` and, since epic
+// memql#5391, for `app:<appId>:<model>` -- the model a policy PINNED.
+//
+// entryName is the reference an AUTHOR WROTE, and it is what the entry is named
+// after rather than a re-composition from appId: the decision record has to
+// say what the policy said, and `app:claude-code` where the policy wrote
+// `app:claude-code:claude-opus-5` would hide the pin from the one reader who
+// needs to see it.
 //
 // Resolved in EntryForUser rather than at load, for the reason fleetEntry
 // states about its own subject: an app that nobody has signed into must not
 // refuse boot, and signing in must not need a reload.
-func (r *ProviderRegistry) appEntry(ctx context.Context, actingUserId, appId string) (*ProviderConfigEntry, bool) {
+func (r *ProviderRegistry) appEntry(ctx context.Context, actingUserId, appId, model, entryName string) (*ProviderConfigEntry, bool) {
 	r.mu.RLock()
 	a := r.apps
 	r.mu.RUnlock()
 
-	wildcard := appId == "*"
+	wildcard := appId == AppWildcardId
 	cfg := ProviderConfig{
-		Name:  AppReferencePrefix + appId,
+		Name:  entryName,
 		Type:  AppProviderType,
 		Model: appId,
 	}
-	client := &appProvider{registry: r, appId: appId, actingUserId: actingUserId, wildcard: wildcard}
+	client := &appProvider{registry: r, appId: appId, model: model, actingUserId: actingUserId, wildcard: wildcard}
 	entry := &ProviderConfigEntry{Config: cfg, Client: client}
 	if a == nil {
 		entry.err = fmt.Errorf("this node has no app sessions installed")
@@ -282,15 +336,28 @@ func (r *ProviderRegistry) appEntry(ctx context.Context, actingUserId, appId str
 
 // appProvider is the client behind an `app:<appId>` entry.
 type appProvider struct {
-	registry     *ProviderRegistry
-	appId        string
+	registry *ProviderRegistry
+	appId    string
+	// model is the model a policy PINNED with `app:<id>:<model>` (design D8).
+	// EMPTY IS NO PIN, and the app runs at its own default -- which is every
+	// call that came through `app:*` or a bare `app:<id>`.
+	model        string
 	actingUserId string
 	wildcard     bool
+
+	// level is the call's LEVEL, bound per RESOLUTION rather than held on the
+	// registry entry (epic memql#5391, design D8). The entry is per (user,
+	// reference) and is shared by every call that resolves to it; a level is
+	// one call's, so binding it on the entry would let a `fast` turn run at
+	// whatever the last `reasoning` turn asked for.
+	level string
 
 	lastMu      sync.Mutex
 	lastSurface string
 	lastUsage   AppUsage
 	lastBilling string
+	lastModel   string
+	lastEffort  string
 }
 
 // LastCall reports the machine, usage and billing of the most recent call. The
@@ -331,6 +398,12 @@ func (p *appProvider) call(ctx context.Context, req AppCallRequest) (AppCallResu
 		return AppCallResult{}, fmt.Errorf("%w: this node has no app sessions installed", ErrAppUnavailable)
 	}
 	req.AppId = p.appId
+	if strings.TrimSpace(req.Model) == "" {
+		req.Model = p.model
+	}
+	if strings.TrimSpace(req.Level) == "" {
+		req.Level = p.level
+	}
 	req.ActingUserId = p.actingUserId
 	if strings.TrimSpace(req.ActingUserId) == "" {
 		req.ActingUserId = actingUserFromContext(ctx)
@@ -361,8 +434,62 @@ func (p *appProvider) call(ctx context.Context, req AppCallRequest) (AppCallResu
 	p.lastSurface = res.ExecutionSurface
 	p.lastUsage = res.Usage
 	p.lastBilling = res.Billing
+	p.lastModel = res.Model
+	p.lastEffort = res.Effort
 	p.lastMu.Unlock()
 	return res, nil
+}
+
+// WithLevel binds one resolution's level without changing the registry client
+// or another resolution, the way fleetProvider.WithMinContextTokens binds a
+// floor -- and for the same reason: the entry is shared and a level is one
+// call's. Constructing a fresh provider also keeps the per-call bookkeeping
+// and its mutex independent, which is what lets ServedModel answer about THIS
+// call rather than about whichever finished last.
+func (p *appProvider) WithLevel(level string) any {
+	if p == nil {
+		return p
+	}
+	return &appProvider{
+		registry:     p.registry,
+		appId:        p.appId,
+		model:        p.model,
+		actingUserId: p.actingUserId,
+		wildcard:     p.wildcard,
+		level:        strings.TrimSpace(level),
+	}
+}
+
+// Billing reports who PAID for the most recent turn, for the router's decision
+// row: "subscription" when the app reported one, "unknown" when it said
+// nothing. Never "metered" -- MemQL was not billed for a call it did not make.
+//
+// LastCall has returned this since the app door landed and nothing read it, so
+// every app-served decision row said `metered`. This is the accessor the
+// router's structural seam can reach.
+func (p *appProvider) Billing() string {
+	if p == nil {
+		return ""
+	}
+	p.lastMu.Lock()
+	defer p.lastMu.Unlock()
+	return p.lastBilling
+}
+
+// ServedModel reports what the APP said it served the most recent turn with,
+// for the router's decision row (epic memql#5391, design D9).
+//
+// The same structural seam ExecutionSurface rides, and for the same reason:
+// component/router pins this module at a published version. Two empty strings
+// means the app said nothing, which the row records as unknown -- never the
+// app id, never the level, never a guess.
+func (p *appProvider) ServedModel() (string, string) {
+	if p == nil {
+		return "", ""
+	}
+	p.lastMu.Lock()
+	defer p.lastMu.Unlock()
+	return p.lastModel, p.lastEffort
 }
 
 // resolveWildcard picks which app an `app:*` call runs.

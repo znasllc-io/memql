@@ -84,6 +84,7 @@ fleet:fastest               the quickest local model that can serve this call
 fleet:qwen3.8:27b           one local model by id
 app:*                       any signed-in app on one of the caller's machines
 app:claude-code             one app by id
+app:claude-code:claude-opus-5   one app by id, with its model pinned
 federation:cheapest         the cheapest vendor record that qualifies
 federation:strongest        the strongest vendor record that qualifies
 federation:streamClaudeSonnet   one vendor record by name
@@ -92,6 +93,19 @@ policy:localFirst           another policy, expanded at load
 
 `fleet:*` is retired. It said "any", which is not what it did; write
 `fleet:strongest`.
+
+**An app id is held to the engine's closed runnable set at LOAD.** `app:gemini-cli`
+refuses to load, naming the set, because the engine has no protocol for a third app
+-- so an entry naming one would be a chain step that could only ever be passed over,
+which reads months later as a door that is shut rather than as a policy that is
+wrong. Growing the set is a value change in `core/airoute/apps.go`, not a release.
+
+**`app:<id>:<model>` pins that app's model**, the way `fleet:<modelId>` pins a fleet
+model. The wildcard cannot take one: `app:*` names any signed-in app and a model name
+belongs to ONE app, so `app:*:claude-opus-5` would ask Codex for a Claude model. It
+refuses rather than being ignored on the apps it cannot apply to. What the app
+ACTUALLY served with comes back on the decision row as `servedModel`, which is how
+you see an app that rerouted or ignored the pin.
 
 `fleet:strongest` keeps measured structured validity first, then the owner's
 explicit model preference. Its size heuristic ranks active parameters per token
@@ -269,10 +283,24 @@ the tokens, cost and latency the row already carried, a decision carries:
 | `level` / `servedLevel` / `degraded` | what was asked for, what served, and whether it was a step down |
 | `rule` | which rule matched |
 | `policy` | which chain it named |
-| `door` | `local`, `app` or `federation` |
+| `door` | `local`, `app`, `federation` or `session` |
+| `servedModel` / `servedEffort` | what the SURFACE reported serving it with, empty when it said nothing |
 | `considered` | every entry the walk passed over, its door, and why -- **kept on success as well as on a refusal** |
 | `touches` | the call's footprint |
 | `minContextTokens` | the context floor this resolution was made against |
+
+**`session` is a fourth door, not a flag on `app`.** `app` means a subscription app
+answered this TURN; `session` means one was handed the whole STEP and drove its own
+loop (design D7 of the app-session record). They are separate values because this
+field is what you filter on, and folding them would make the entire history of a
+cluster whose only open door is a signed-in Claude Code read as ordinary chat turns.
+
+**`servedModel` is a REPORT, never the request.** `model` is what the chain resolved
+-- for an app door that is the door's own name, `claude-code` -- and what actually
+ran is the app's to state. Both fields are EMPTY when the surface said nothing, which
+reads as unknown: a value copied from the request would record as measured something
+nobody measured, in the one case anybody would want to look at. Claude Code's headless
+output states no effort at all, so an empty `servedEffort` is the ordinary case.
 
 Read them with `routerDecisionsRecent`, filtering by `since`, `level`, `door`,
 `rule` and `outcome`. Floored at **admin**, which on this ladder admits admin,
