@@ -258,6 +258,20 @@ jobs:
               # and hand the failure to whoever pushed next -- the delayed-blame
               # shape the embed inventory had.
               - 'component/conceptfields/concept-fields.snapshot.json'
+              # The authoring-surface baseline and its reservation ledger
+              # (memql#5389), for the same reason as the concept-field snapshot
+              # directly above: the gates that read them are cmd/memqlbreaking
+              # and the memqlbreaking step, and a change to either file touches
+              # no `.go`, so the `go` bucket does not fire.
+              #
+              # The ledger's whole point is that it is edited ON ITS OWN. A
+              # deletion is landed by adding an entry here and re-capturing the
+              # baseline; an entry deleted or mis-typed is exactly what the
+              # inverse check -- a reserved name coming back -- exists to catch.
+              # Unrouted, such a PR runs zero lanes and merges green.
+              - 'component/language/reserved.json'
+              - 'component/language/surface/**'
+              - 'cmd/memqlbreaking/testdata/**'
               #   deploy/db-image/** -> scripts/ci/db_image_wiring_test.go
               #                  (epic memql#3842 / #3844). The database operand
               #                  image's Dockerfile and its smoke test, both READ
@@ -993,6 +1007,19 @@ jobs:
       - name: concept-snapshot-check (concept field drift)
         if: ${{ env.RUN_DSL == 'true' }}
         run: make concept-snapshot-check
+      # Authoring-surface break classification (memql#5389, D21). Reads the
+      # DSL tree plus the parser, annotation and function registries, so it
+      # gates with the DSL lanes beside the concept-field snapshot above.
+      #
+      # It answers a question none of its siblings can: did this branch REMOVE
+      # something a bundle author writes -- an annotation, a construct, a
+      # function, a shape key -- and if so, is the removal recorded? A deletion
+      # with no entry in component/language/reserved.json fails this step. An
+      # ADDITION never does: a gate that reports every change is one whose
+      # output nobody reads, and the one signal that matters drowns.
+      - name: memqlbreaking (authoring-surface break classification)
+        if: ${{ env.RUN_DSL == 'true' }}
+        run: make memqlbreaking
       # Proto drift check (memql#928): regenerate the pinned-toolchain proto
       # bindings (component/grpc, component/node and component/bus -- bus was
       # normalized onto the pinned toolchain in memql#928 itself, so the
