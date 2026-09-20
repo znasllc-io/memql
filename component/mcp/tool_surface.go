@@ -347,6 +347,12 @@ func callMCPTool(ctx context.Context, eng Engine, role string, tier Tier, appSes
 	// (memql#1684).
 	ctx = memql.WithMCPToolExecution(ctx)
 
+	// The wire bound on DSL source is checked before a handler lexes it. See
+	// source_size.go.
+	if err := oversizedToolSource(name, args); err != nil {
+		return errorResult(err.Error())
+	}
+
 	switch name {
 	case toolRunQuery, toolRunMutation:
 		return runNamedConstruct(ctx, eng, name, args)
