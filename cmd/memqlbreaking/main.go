@@ -5,10 +5,28 @@
 //	memqlbreaking -capture -out surface.json     write this tree's surface
 //	memqlbreaking -baseline surface.json         diff this tree against it
 //	memqlbreaking -baseline surface.json -json   the same, machine-readable
+//	memqlbreaking -baseline <base>/2026.json -base-reserved <base>/reserved.json
+//	                                             ...where <base> is another
+//	                                             commit's copy of both files
 //
 // With neither flag it diffs against the committed baseline,
 // component/language/surface/2026.json, which is what the `memqlbreaking` make
 // target runs.
+//
+// # Where the baseline comes from, and why it matters
+//
+// Both committed files live in the tree being judged, so a change that edits
+// the source AND the baseline in lockstep passes: the name is gone from the
+// head surface and gone from what it is compared against, so no deletion is
+// seen and the reservation is never asked for. That is the exact move the
+// ledger exists to force into the open.
+//
+// -baseline and -base-reserved are therefore pointed, in CI, at the BASE
+// COMMIT's copies of the two files -- extracted by
+// scripts/ci/memqlbreaking-base.sh, which the ci.yml step runs. Editing the
+// committed baseline in the same change then hides nothing, because the
+// comparison never reads it. -base-label is how the report names that base,
+// since a temporary path means nothing to whoever reads the log.
 //
 // # Why this exists
 //
@@ -51,13 +69,21 @@ func run(args []string, stdout, stderr *os.File) int {
 		out      = fs.String("out", "", "with -capture: where to write the surface (default: the committed baseline)")
 		baseline = fs.String("baseline", "", "the surface to diff this tree against (default: the committed baseline)")
 		reserved = fs.String("reserved", "", "the reservation ledger (default: "+ReservedPath+")")
-		asJSON   = fs.Bool("json", false, "emit the findings as JSON")
+		baseRes  = fs.String("base-reserved", "", "the reservation ledger as the BASE COMMIT had it; an entry it holds "+
+			"that this tree has dropped, for a name that has not come back, is reported")
+		baseLabel = fs.String("base-label", "", "how the report names the baseline (default: its path). CI names the "+
+			"base commit, because a temporary path says nothing to whoever reads the log")
+		asJSON = fs.Bool("json", false, "emit the findings as JSON")
 	)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: memqlbreaking [-capture -out <file>] [-baseline <file>] [-reserved <file>] [-json]")
+		fmt.Fprintln(stderr, "Usage: memqlbreaking [-capture -out <file>] [-baseline <file>] [-reserved <file>]")
+		fmt.Fprintln(stderr, "                    [-base-reserved <file>] [-base-label <text>] [-json]")
 		fmt.Fprintln(stderr, "")
 		fmt.Fprintln(stderr, "Classifies the authoring-surface changes between a captured baseline and this tree")
 		fmt.Fprintln(stderr, "as parse, meaning or wire breaks, and refuses a deletion with no reserved entry.")
+		fmt.Fprintln(stderr, "")
+		fmt.Fprintln(stderr, "In CI -baseline and -base-reserved name the BASE COMMIT's copies of the two committed")
+		fmt.Fprintln(stderr, "files, so editing the baseline in the same change hides no removal.")
 		fmt.Fprintln(stderr, "")
 		fs.PrintDefaults()
 		fmt.Fprintln(stderr, "")
@@ -123,6 +149,26 @@ func run(args []string, stdout, stderr *os.File) int {
 		fmt.Fprintf(stderr, "ERROR: %v\n", err)
 		return 2
 	}
+	// The BASE commit's ledger, when the caller supplied one. Absent is not the
+	// same as empty: absent disables the erasure check entirely (the local
+	// `make memqlbreaking` run, which has no base commit to read), while an
+	// empty file is a base that genuinely reserved nothing.
+	var baseLedger *Reservations
+	if *baseRes != "" {
+		loaded, loadErr := LoadReservations(*baseRes)
+		if loadErr != nil {
+			fmt.Fprintf(stderr, "ERROR: %v\n", loadErr)
+			return 2
+		}
+		baseLedger = &loaded
+	}
+	// baseName is what the report calls the baseline. A run holding the tree to
+	// the base commit compares against a temporary file, and a temporary path in
+	// a CI log tells a reader nothing about which tree they are being held to.
+	baseName := basePath
+	if *baseLabel != "" {
+		baseName = *baseLabel
+	}
 
 	// An UNMEASURED half is reported as unmeasured, never as zero and never as
 	// deleted (memql#5389).
@@ -143,19 +189,24 @@ func run(args []string, stdout, stderr *os.File) int {
 	}
 
 	findings := Diff(base, current, res)
+	if baseLedger != nil {
+		findings = append(findings, DiffLedger(*baseLedger, res, current)...)
+		SortFindings(findings)
+	}
 
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(struct {
 			Baseline     string    `json:"baseline"`
+			Base         string    `json:"base,omitempty"`
 			Was          Surface   `json:"-"`
 			Edition      string    `json:"edition"`
 			Grammar      string    `json:"grammarVersion"`
 			Findings     []Finding `json:"findings"`
 			ShapesUnread string    `json:"shapesUnread,omitempty"`
-		}{Baseline: basePath, Edition: current.Edition, Grammar: current.GrammarVersion, Findings: findings,
-			ShapesUnread: shapesUnread(shapesErr)}); err != nil {
+		}{Baseline: basePath, Base: *baseLabel, Edition: current.Edition, Grammar: current.GrammarVersion,
+			Findings: findings, ShapesUnread: shapesUnread(shapesErr)}); err != nil {
 			fmt.Fprintf(stderr, "ERROR: encoding findings: %v\n", err)
 			return 2
 		}
@@ -165,7 +216,7 @@ func run(args []string, stdout, stderr *os.File) int {
 		return 0
 	}
 
-	fmt.Fprintf(stdout, "INFO: baseline %s -- edition %s, grammar %s\n", basePath, base.Edition, base.GrammarVersion)
+	fmt.Fprintf(stdout, "INFO: baseline %s -- edition %s, grammar %s\n", baseName, base.Edition, base.GrammarVersion)
 	fmt.Fprintf(stdout, "INFO: this tree -- edition %s, grammar %s\n", current.Edition, current.GrammarVersion)
 	fmt.Fprintf(stdout, "INFO: %s\n", counts(current))
 	if shapesErr != nil {
@@ -177,10 +228,10 @@ func run(args []string, stdout, stderr *os.File) int {
 	if len(findings) == 0 {
 		if shapesErr != nil {
 			fmt.Fprintf(stdout, "ERROR: no breaks in the registry half, and the shape half was not read, so this run "+
-				"cannot say there are no breaks against %s\n", basePath)
+				"cannot say there are no breaks against %s\n", baseName)
 			return 1
 		}
-		fmt.Fprintf(stdout, "SUCCESS: no breaks against %s\n", basePath)
+		fmt.Fprintf(stdout, "SUCCESS: no breaks against %s\n", baseName)
 		return 0
 	}
 	byCat := map[Category]int{}
@@ -188,13 +239,18 @@ func run(args []string, stdout, stderr *os.File) int {
 		byCat[f.Category]++
 	}
 	fmt.Fprintf(stdout, "ERROR: %d break(s) against %s -- %d parse, %d meaning, %d wire\n\n",
-		len(findings), basePath, byCat[CategoryParse], byCat[CategoryMeaning], byCat[CategoryWire])
+		len(findings), baseName, byCat[CategoryParse], byCat[CategoryMeaning], byCat[CategoryWire])
 	for _, f := range findings {
 		fmt.Fprintf(stdout, "  %s\n", f)
 	}
 	fmt.Fprintf(stdout, "\nINFO: a deliberate break is landed by reserving what was removed in %s and then\n"+
 		"      re-capturing the baseline (the memqlbreaking-capture make target) in the SAME change, so\n"+
 		"      the reservation and the surface move together.\n", ReservedPath)
+	if *baseLabel != "" || *baseRes != "" {
+		fmt.Fprintln(stdout, "INFO: the RESERVATION is what clears this. CI holds this tree to the BASE COMMIT's "+
+			"copy of\n      the baseline (scripts/ci/memqlbreaking-base.sh), so editing the committed one in this\n"+
+			"      change hides nothing there.")
+	}
 	return 1
 }
 
