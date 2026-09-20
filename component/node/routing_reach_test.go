@@ -304,3 +304,61 @@ func twoReplicaMesh(t *testing.T) (a, b *replica, deliver func(*testing.T)) {
 	deliver = func(t *testing.T) { t.Helper() }
 	return a, b, deliver
 }
+
+// TestARecordedAppSessionReachesASubscriberOnAnotherReplica (epic
+// memql#5396, task memql#5401).
+//
+// THE ROWS ARE WRITTEN ON THE AGENT AND READ ON THE BFF. A session runs on
+// the replica holding the machine's stream; the person watching it is
+// attached to a bff. Under default-deny an unrouted concept is silence, and
+// the failure that produces is a page that is correct on load and frozen
+// after -- which routing.go's own header calls the worst of the three
+// behaviours because it looks like it is working.
+//
+// The four topics below are the whole recording as a reader sees it: the run
+// it lives in, the steps that are its timeline, the session row carrying the
+// recording's progress, and the goal above them.
+func TestARecordedAppSessionReachesASubscriberOnAnotherReplica(t *testing.T) {
+	for _, tc := range []struct {
+		topic string
+		why   string
+	}{
+		{GraphEventTopic("created", "v1:worker:appSession"),
+			"the session row appears on the agent replica and the Fleet page is served by a bff"},
+		{GraphEventTopic("updated", "v1:worker:appSession"),
+			"recordedSteps and droppedActions advance on the agent; without this the page freezes at zero"},
+		{GraphEventTopic("created", "v1:work:run"),
+			"the recording run is opened on whichever replica holds the session"},
+		{GraphEventTopic("created", "v1:work:step"),
+			"one step per action the app took -- this IS the live timeline"},
+		{GraphEventTopic("updated", "v1:work:step"),
+			"a step's receipt lands after its body, on the same replica"},
+	} {
+		if !ForwardsGraphEvent(tc.topic) {
+			t.Errorf("%s does not forward, so %s", tc.topic, tc.why)
+		}
+	}
+}
+
+// TestTheRecordingsHighVolumeHalfStaysLocalAndSaysSo. An observation per
+// action is the volume of a whole coding session, and the step beside it is
+// what a timeline draws from. The exclusion is RECORDED rather than silent,
+// which is the difference between a decision and an oversight.
+func TestTheRecordingsHighVolumeHalfStaysLocalAndSaysSo(t *testing.T) {
+	for _, concept := range []string{"v1:work:observation", "v1:work:modelCall"} {
+		topic := GraphEventTopic("created", concept)
+		if ForwardsGraphEvent(topic) {
+			t.Errorf("%s forwards; it is excluded on volume grounds", topic)
+			continue
+		}
+		rec, ok := ExcludedFromForwarding(topic)
+		if !ok {
+			t.Errorf("%s is neither forwarded nor a recorded exclusion -- which is exactly the "+
+				"silence this file exists to make impossible", topic)
+			continue
+		}
+		if strings.TrimSpace(rec.Reason) == "" {
+			t.Errorf("%s is excluded with no reason", topic)
+		}
+	}
+}

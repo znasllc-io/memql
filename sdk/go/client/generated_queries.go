@@ -4162,6 +4162,32 @@ func LibraryFileByIdBuild(args LibraryFileByIdArgs) string {
 	return b.String()
 }
 
+// LibraryFileBySha256 -- The caller's live file at one content digest -- the dedup read behind content-addressed storage (epic memql#5396, design D5).
+// `sha256` has been documented on the row as "a DEDUP HINT and an integrity check" since the file concept existed, and until now nothing read it that way: an app session that writes the same file content in two steps, or two sessions that read the same source file, would each have stored their own copy. This is what makes "two identical writes yield one file" true, and it is what makes a later branch from a recorded step cost no copy.
+// SCOPED TO THE CALLER, always. A digest is not an access key -- knowing one grants nothing -- so a cross-owner dedup would be a read of somebody else's bytes dressed as an optimisation, and two people who happen to hold the same file are two people who each own a copy.
+// Archived rows are EXCLUDED, for libraryFileByUploadedFrom's reason: reusing a row its owner threw away would resurrect it under a new reference, which is not a coherent reading of a deletion. A digest that matches only an archived file stores a fresh copy.
+// The hash is OPTIONAL on the row (a chunked upload lands with it absent and the analysis pass stamps it later), so a blank argument is guarded to nothing rather than matching every file that has not been hashed yet -- which would hand a caller somebody's unhashed upload as its own content.
+//
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["libraryFileBySha256"] in generated_concepts.go).
+type LibraryFileBySha256Args struct {
+	Sha256 string
+}
+
+// LibraryFileBySha256 calls the engine query libraryFileBySha256.
+func (qc *QueryClient) LibraryFileBySha256(ctx context.Context, args LibraryFileBySha256Args) (*Result, error) {
+	call := LibraryFileBySha256Build(args)
+	return qc.executeNamed(ctx, "libraryFileBySha256", call)
+}
+
+func LibraryFileBySha256Build(args LibraryFileBySha256Args) string {
+	var b strings.Builder
+	b.WriteString("query libraryFileBySha256(")
+	b.WriteString("sha256: ")
+	b.WriteString(quoteMemQL(args.Sha256))
+	b.WriteString(")")
+	return b.String()
+}
+
 // LibraryFileByUploadedFrom -- Resolve the live file a machine pushed from a given path -- the (machine, path) key the watched-folder backup versions on (epic memql#4783, design E).
 // THIS IS THE WHOLE IDENTITY STORY, and it is why a browser upload cannot have one. The pair is honest only where the uploader could name it: a cockpit push names its own verified worker registration and the absolute path the file occupied, while a browser physically cannot name a machine and sends neither. Matching on filename instead would silently merge two different files, which is the reasoning memql#4721's D5 already settled and this read does not reopen -- the browser's answer to the same question stays what it is, the person naming the target artifact from its own inspector.
 // ARCHIVED ROWS ARE EXCLUDED, deliberately. The key names the LIVE copy, and a re-push that versioned an archived row would write new bytes straight into the Bin -- the person would see nothing arrive and the backup would report success. Excluding them means a re-push after an archive starts a fresh file, which is a coherent reading of "they threw it away and it is still in the folder being watched"; resurrecting the row they archived is not.

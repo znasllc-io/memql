@@ -272,6 +272,11 @@ func (e *CockpitAppExecutor) Run(ctx context.Context, req planner.ExecutorReques
 		// the field existed. The COCKPIT translates it; nothing here maps a
 		// level to a model, because the knob names are the app's.
 		Level: stringFromInput(req, "level"),
+		// The subrun the session's actions are recorded into (epic
+		// memql#5396). The step-handover path opens it and stamps childRunId
+		// on the delegating step; a delegated TASK opens no run at all and
+		// leaves this empty, and the recorder opens one for itself.
+		RecordingRunId: stringFromInput(req, "recordingRunId"),
 	}
 
 	// Machine selection goes through the FLEET ROUTER (memql#4350), not

@@ -256,6 +256,10 @@ func defaultRoutingRules() []RoutingRule {
 		// excluded on volume grounds exactly as v1:worker:invocation is: a
 		// busy run writes one observation per tool result, and forwarding
 		// those to every replica buys nothing any surface subscribes to.
+		// Epic memql#5396 made that volume argument STRONGER rather than
+		// weaker -- an app session now writes one observation per action it
+		// takes -- and both are recorded in RoutingExclusions() so the
+		// absence is a decision a reader can find rather than a silence.
 		{Pattern: "graph.node.created.v1:work:goal", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:work:goal", TargetType: ""},
 		{Pattern: "graph.node.deleted.v1:work:goal", TargetType: ""},
@@ -268,6 +272,24 @@ func defaultRoutingRules() []RoutingRule {
 		{Pattern: "graph.node.created.v1:work:approval", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:work:approval", TargetType: ""},
 		{Pattern: "graph.node.deleted.v1:work:approval", TargetType: ""},
+		// THE APP SESSION ROW (epic memql#5396). It had no rule and no
+		// recorded exclusion -- pure silence, which is the state
+		// routing_reach.go's header calls indistinguishable from a concept
+		// nobody has thought about.
+		//
+		// The session is written and advanced on the AGENT replica holding
+		// the machine's stream while the person watching it is attached to a
+		// bff, which is the cross-replica shape every block above exists for.
+		// Without these the Fleet session page is correct on load and frozen
+		// after -- and since this epic moved the transcript off the row, what
+		// freezes is now the RECORDING's own progress: `recordedSteps`,
+		// `droppedActions` and the transcript file the session ends with.
+		//
+		// Created and updated only. The row is append-only and nothing
+		// deletes one, so a delete rule would forward an event nothing
+		// publishes.
+		{Pattern: "graph.node.created.v1:worker:appSession", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:worker:appSession", TargetType: ""},
 
 		// THE PROVING SUITE (design record
 		// docs/superpowers/specs/2026-09-06-proving-suite-design.md, section
