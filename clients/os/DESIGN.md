@@ -118,16 +118,51 @@ notices remain visible.
 Fleet and Deployables adopt this composition first. Other apps can reuse these
 components as their overview data is added, without changing their workflows.
 
-### One page navigation trail
+### One trail row, and the window draws it
 
-The window shell must not draw a second return row beneath its section tabs.
-`PageNavigationProvider` passes section origins to the first visible page `Head`;
-parked panes, secondary headings and other windows do not own that trail.
-Use `Head`'s `breadcrumbs` and `back` props for local drill-downs. The resulting
-breadcrumb trail sits immediately before the title, and the one back icon sits
-with the title's right-hand actions. A local back destination takes precedence;
-the section origin remains reachable in the same breadcrumb trail. Do not add
-an independent back button or breadcrumb block next to a `Head`.
+Every window carries exactly one trail row (`kit` `TrailRow`), drawn by the
+window frame directly UNDER the section tabs. It is in the same place in every
+app, and it is always there. **The order is the hierarchy:** the tabs choose
+the section, and the trail is depth within it. Drawn above the tabs it read as
+though `Deployables > MemQL OS` outranked the Deployables tab that is that
+crumb's own parent. A window with a single destination has no tabs, and the
+row sits under the window header.
+
+**A heading publishes; it never draws.** Use `Head`'s `breadcrumbs` and `back`
+props for local drill-downs exactly as before -- inside a window they are
+PUBLISHED to the row rather than rendered beside the title. This is what makes
+a second trail impossible rather than discouraged. It used to be a convention
+each app had to honour, and Fleet showed two, because a `Head` handed an
+explicit `breadcrumbs` prop drew them whether or not it was the window's
+primary heading. Do not add a back button or a breadcrumb block anywhere in an
+app body. Outside a window (a section rendered alone) there is no row, and
+`Head` keeps its inline navigation so it still works.
+
+The row reads, left to right: **Back, a hairline, the trail.**
+
+- **Back is first, and the hairline is a boundary.** 21px separates Back from
+  the first crumb (10, a 1px rule, 10) so a cursor aimed at one cannot land on
+  the other. Left of the rule is history -- where you came from. Right of it is
+  hierarchy -- where this page sits.
+- **Back is always drawn, inert at an app's root.** Rule 12's "absent, never
+  disabled" governs the ACTS of a lifecycle, where a disabled control promised
+  something the server refused. Navigation runs the other way: a Back that
+  appeared on the first drill-down would shove the trail 51px sideways under
+  the cursor. The slot is fixed so the row stays a stable target.
+- **The current page is never the part that is cut.** A trail wider than its
+  window is pinned to its END: the beginning slides out of view and going back
+  brings it home again. It is a real scroller with its bar hidden, not a clip,
+  so a crumb reached by keyboard scrolls into view instead of taking focus
+  while invisible. No single crumb may crowd the rest: ancestors cap at 28ch,
+  the current page at 44ch, each with its full name on hover.
+- **The current page is never a link**, whatever handler it carries: there is
+  nowhere for it to go.
+
+`PageNavigationProvider` still gives the trail to the first VISIBLE heading in
+document order, so parked panes and secondary headings cannot claim it. A
+page's own `back` wins; then the window's section origin; then the nearest
+ancestor crumb that goes anywhere, so a page that names a clickable parent
+never leaves Back dead.
 
 A workspace toolbar above an inspector sets `navigation={false}` so the
 inspector owns the page trail. Section breadcrumb jumps consume the intervening

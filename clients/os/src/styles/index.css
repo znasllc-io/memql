@@ -13992,6 +13992,40 @@ a.os-button {
 .fleet-device-work { gap: 2px; flex-wrap: wrap; }
 
 /* Detail pages share a reading path above the title; navigation sits at right. */
+/* THE TRAIL ROW (kit/TrailRow) -- one per window, drawn by the window frame
+ * directly under the section tabs (tabs choose the section; the trail is
+ * depth within it). Back, dead
+ * space and a hairline, then the trail. `.os-page-breadcrumbs` below is what a
+ * heading still draws OUTSIDE a window, where there is no row.
+ *
+ * The 21px between Back and the first crumb (10 + 1 + 10) is the point of the
+ * hairline: two targets that were one gesture apart are now visibly two. */
+.os-trail-row { flex: none; display: flex; align-items: center; min-width: 0; height: 34px; padding: 0 12px; border-bottom: 1px solid var(--os-line); }
+.os-trail-back { appearance: none; flex: none; display: inline-flex; align-items: center; justify-content: center; width: var(--os-control-h); height: var(--os-control-h); padding: 0; border: 0; border-radius: var(--os-radius-xs); background: transparent; color: var(--os-muted); cursor: pointer; }
+.os-trail-back:hover:not(:disabled) { background: var(--os-hover); color: var(--os-ink); }
+.os-trail-back:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 1px; }
+/* Inert at an app's root, and still drawn: a Back that appeared on the first
+ * drill-down would shove the trail sideways under the cursor. */
+.os-trail-back:disabled { opacity: 0.32; cursor: default; }
+.os-trail-divider { flex: none; width: 1px; height: 16px; margin: 0 10px; background: color-mix(in srgb, var(--os-ink) 18%, transparent); }
+/* A real scroller with its bar hidden, pinned to its END by TrailRow, so the
+ * page somebody is on is never the part that is cut. Not `overflow: hidden`:
+ * a clipped crumb still takes focus and could not be scrolled into view. */
+.os-trail { flex: 1 1 auto; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; color: var(--os-muted); font-size: var(--os-text-xs); }
+.os-trail::-webkit-scrollbar { display: none; }
+.os-trail[data-clipped] { -webkit-mask-image: linear-gradient(to right, transparent, #000 28px); mask-image: linear-gradient(to right, transparent, #000 28px); }
+.os-trail ol { display: flex; align-items: center; width: max-content; margin: 0; padding: 0; list-style: none; }
+.os-trail li { display: inline-flex; align-items: center; flex: none; }
+/* Decoration between two targets, never one itself. */
+.os-trail-sep { flex: none; margin: 0 3px; opacity: 0.55; }
+.os-trail button, .os-trail span { display: block; max-width: 28ch; padding: 5px 6px; border-radius: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.os-trail button { appearance: none; border: 0; background: transparent; font: inherit; color: inherit; cursor: pointer; }
+.os-trail button:hover { background: var(--os-hover); color: var(--os-ink); }
+/* Inset, because the scroller would clip an outline drawn outside the crumb. */
+.os-trail button:focus-visible { outline: 2px solid var(--os-accent); outline-offset: -2px; }
+.os-trail [aria-current="page"] { max-width: 44ch; color: var(--os-ink); }
+@media (prefers-reduced-motion: no-preference) { .os-trail-back, .os-trail button { transition: background var(--os-duration-fast) var(--os-ease), color var(--os-duration-fast) var(--os-ease); } }
+
 .os-page-breadcrumbs { margin: 0 0 10px; color: var(--os-muted); font-size: var(--os-text-xs); }
 .os-page-breadcrumbs ol { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; list-style: none; padding: 0; margin: 0; }
 .os-page-breadcrumbs li { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
