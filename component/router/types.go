@@ -79,6 +79,16 @@ type Resolved struct {
 	// answer-affecting parameters and its declared modality -- without a
 	// second lookup that could resolve differently.
 	Entry *memql.ProviderConfigEntry
+
+	// Client is the client to call, set ONLY for a SESSION winner (design D7).
+	//
+	// Every other door hands its client back through the modality-specific
+	// resolve* path, which looks the winning entry up again and type-asserts
+	// it. A session winner cannot: its client is NOT the entry's. The entry's
+	// appProvider deliberately does not serve tool turns, and the session
+	// client is built around the STEP rather than the turn. Nil means the
+	// ordinary path applies.
+	Client any
 }
 
 // CallRecord is the payload for one v1:router:call row. Populated by

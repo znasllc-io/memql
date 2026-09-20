@@ -302,8 +302,12 @@ func servesModality(client any, mod providerModality) (bool, string) {
 // chainWinner is the entry a walk settled on, plus the concrete names left
 // after it for the fallback wrapper to try.
 type chainWinner struct {
-	entry     *memql.ProviderConfigEntry
-	door      string
+	entry *memql.ProviderConfigEntry
+	door  string
+	// client OVERRIDES the entry's own client, and is set only for a SESSION
+	// winner (design D7): the step is handed to an app session, and the thing
+	// that carries it is not the registry entry's appProvider.
+	client    any
 	remaining []string
 }
 
@@ -637,11 +641,32 @@ func (r *Router) walkChain(
 			}
 			// Confirm interface support for the requested modality.
 			//
-			// An app door lands here for a TOOL turn and is passed over, which
-			// is the design rather than a gap (D3): on a tool turn MemQL is
-			// driving, and an app is an agent that drives itself. It reaches
-			// MemQL's tools through MCP, in the other direction.
+			// An app door lands here for a TOOL turn and is NOT passed over
+			// any more (epic memql#5391, design D7). On a tool turn MemQL is
+			// driving and an app is an agent that drives itself, so the app
+			// cannot serve the TURN -- it takes the whole STEP instead, which
+			// is the `session` door. It still reaches MemQL's tools through
+			// MCP, in the other direction.
+			//
+			// The decision lives in session_door.go because providerLookup has
+			// to reach the same answer when the fallback wrapper re-resolves
+			// this winner by name.
 			if serves, why := servesModality(entry.Client, mod); !serves {
+				sessionClient, isSession, sessionErr := r.sessionDoorFor(req, cand.Name, mod)
+				if sessionErr != nil {
+					return nil, sessionErr
+				}
+				if isSession {
+					// NO REMAINING CHAIN, and that is the park rule (design D7,
+					// carried from the 2026-09-06 record). A session that fails
+					// has run on somebody's machine; letting the fallback
+					// wrapper advance to the vendor behind it would be a silent
+					// paid call at exactly the moment the local door shut. A
+					// machine that went to sleep parks the step with the
+					// existing inferenceUnavailable approval instead, which is
+					// a condition the world changes.
+					return &chainWinner{entry: entry, door: DoorSession, client: sessionClient}, nil
+				}
 				report.note(cand.Name, why)
 				continue
 			}
@@ -713,6 +738,14 @@ func (r *Router) resolvedFrom(
 		Reason: "selected",
 	})
 	decision.Outcome = airoute.OutcomeOK
+	// A SESSION WINNER'S CHAIN IS ITSELF AND NOTHING ELSE. `remaining` is empty
+	// for one by construction (see walkChain), and naming the winner keeps the
+	// fallback wrapper able to resolve it -- while giving it nowhere to advance
+	// to, which is the park rule.
+	chain := winner.remaining
+	if winner.door == DoorSession {
+		chain = []string{winner.entry.Config.Name}
+	}
 	return Resolved{
 		ProviderName: winner.entry.Config.Name,
 		Vendor:       vendorFromType(winner.entry.Config.Type),
@@ -720,9 +753,10 @@ func (r *Router) resolvedFrom(
 		Pricing:      winner.entry.Config.Pricing(),
 		Streaming:    mod == modalityStreamTools || mod == modalityStreamChat,
 		PolicyName:   policyName,
-		Chain:        winner.remaining,
+		Chain:        chain,
 		Decision:     decision,
 		Entry:        winner.entry,
+		Client:       winner.client,
 	}
 }
 
@@ -804,7 +838,18 @@ func (r *Router) providerLookup(ctx context.Context, req ResolveRequest, name st
 		Entry:        entry,
 	}
 	if ok, _ := servesModality(entry.Client, mod); !ok {
-		return nil, Resolved{}, false
+		// THE SAME QUESTION THE WALK ASKED, and asking it here is what keeps
+		// the fallback wrapper from stepping past a session winner it just
+		// re-resolved by name (design D7). A stepless call is refused rather
+		// than skipped, for the same reason: skipping it here would advance to
+		// the vendor behind it, silently.
+		sessionClient, isSession, err := r.sessionDoorFor(req, name, mod)
+		if err != nil || !isSession {
+			return nil, Resolved{}, false
+		}
+		resolved.Client = sessionClient
+		resolved.Decision.Door = DoorSession
+		return sessionClient, resolved, true
 	}
 	var client any = entry.Client
 	// Bind the floor on every lookup, including fallback attempts and direct

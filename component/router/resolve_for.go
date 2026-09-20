@@ -72,6 +72,14 @@ func (r *Router) ResolveFor(ctx context.Context, req ResolveRequest) (memql.Reso
 	if err != nil {
 		return memql.ResolvedProvider{}, err
 	}
+	// A SESSION WINNER CARRIES ITS OWN CLIENT (design D7). The resolve* paths
+	// above look the winning entry up again and type-assert it; a session
+	// winner's client is not the entry's, so it travels on the resolution
+	// instead of being re-derived from a registry record that cannot produce
+	// it.
+	if resolved.Client != nil {
+		client = resolved.Client
+	}
 	return memql.ResolvedProvider{
 		Client: client,
 		Entry:  resolved.Entry,
