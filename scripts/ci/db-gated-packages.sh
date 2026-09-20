@@ -143,6 +143,21 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # from go-checks to db-tests whole. Nothing is lost -- the lane runs whole
 # packages -- and the sink's own suite is DB-free through its insert seam, so
 # it now happens to run beside a database it ignores.
+#
+# `test/conformance` is deliberately ABSENT, and memql#5386 re-confirmed it
+# rather than changing it. The tree's db-gated cases -- the differential lane
+# above all -- run in the SEPARATE mcp-conformance job, which brings up the same
+# TimescaleDB service container and is one of ci-required's needs; scripts/cidb
+# exempts the tree by name for that reason (dsnliteral_test.go). Adding it here
+# would move it out of go-checks and into db-tests WITHOUT taking it out of
+# mcp-conformance, so the ten-minute suite would run twice on every PR for no
+# property that is not already held.
+#
+# What holds the property instead is executable, not this comment:
+# scripts/ci/differential_lane_required_test.go asserts that the
+# mcp-conformance job sets MEMQL_DIFFERENTIAL_REQUIRED=1 AND that the job is in
+# ci-required's needs. Both facts fail open on their own, which is why both are
+# gated.
 readonly DB_GATED_TREES=(
 	"app"
 	"component/memql"
