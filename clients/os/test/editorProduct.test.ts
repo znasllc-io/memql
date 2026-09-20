@@ -24,6 +24,10 @@ import { describe, expect, it } from "vitest";
  * literal would be a second copy of the name in a third language, which is the
  * defect this file exists to catch; read from source, a rename in
  * editors/vscode fails every OS string that has not followed it.
+ *
+ * THE SCOPE IS `clients/os/src`, AND THAT IS LOAD-BEARING, not lazy: this
+ * comment quotes the wrong spelling twice in order to explain itself, so a
+ * scan widened to `clients/os` would fail on the gate's own explanation.
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
