@@ -455,6 +455,19 @@ jobs:
               # at all: dropping a line from the baseline merged green and
               # reddened `main` for the next author.
               - 'component/memql/testdata/**'
+              # The committed fuzz seed corpus (memql#5387). Go reads
+              # testdata/fuzz/<Target>/ by CONVENTION rather than by name -- no
+              # test file mentions a seed path -- so the coverage gate's
+              # mention-scan finds nothing and reads it as "exempt this". That
+              # reading is wrong: every one of these files IS executed, as an
+              # ordinary subtest of its target on every `go test`, which is the
+              # regression half of the fuzzing (the search half is the bounded
+              # -fuzz step in go-checks). Changing or adding a seed therefore
+              # changes what the Go lane runs, and belongs in the bucket that
+              # reaches it. `component/memql/testdata/**` above already covered
+              # that package's FuzzLower and FuzzEvalExpr seeds, which is why
+              # only the parser's 49 came back orphaned.
+              - 'component/language/parser/testdata/**'
               # The recorded Shopify Admin introspection the mirror generator
               # reads. Same reasoning as the line above: the drift gate that
               # consumes it (cmd/shopifyschema) regenerates the whole tree from
