@@ -1396,6 +1396,11 @@ func (s *streamSession) openAppSession(ctx context.Context, req AppSessionReques
 		// Empty when nothing structured was asked for, which the far side
 		// reads as "free text" rather than as an empty schema.
 		ResponseSchemaJson: req.ResponseSchema,
+		// Empty when no level was named, which the cockpit reads as "run at
+		// your own defaults" rather than as a level it has no translation for
+		// (design D8). The two are different answers and only one of them is
+		// refused on the far side.
+		Level: req.Level,
 	}
 	if err := s.send(&memqlv1.WorkerServerMessage{
 		Payload: &memqlv1.WorkerServerMessage_AppSessionStart{AppSessionStart: start},
@@ -1488,6 +1493,11 @@ func (s *streamSession) handleAppSessionEnd(end *memqlv1.AppSessionEnd) {
 		AppSessionRef:       end.GetAppSessionRef(),
 		ProducedArtifactIds: end.GetProducedArtifactIds(),
 		Error:               end.GetError(),
+		// What the APP said it ran, verbatim (design D9). An older cockpit
+		// sends neither and both stay empty, which is read as unknown rather
+		// than as the level or the model that was asked for.
+		Model:  end.GetModel(),
+		Effort: end.GetEffort(),
 	}
 	// Carried whatever the exit code says. A harness can answer the schema
 	// and still exit non-zero, and dropping the answer because the run

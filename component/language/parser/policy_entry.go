@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/znasllc-io/memql/core/airoute"
 )
 
 // policy_entry.go holds the CLOSED grammar for one entry of a policy chain --
@@ -25,6 +27,7 @@ import (
 //	fleet:<modelId>             one named local model
 //	app:*                       any signed-in local app that can run the call
 //	app:<id>                    one named local app
+//	app:<id>:<model>            one named local app, with its model pinned
 //	federation:cheapest         the cheapest qualifying federated record
 //	federation:strongest        the strongest one
 //	federation:<providerName>   one named federated provider
@@ -53,6 +56,11 @@ const (
 	// never walks one.
 	EntrySchemePolicy = "policy"
 )
+
+// AppWildcardSelector is what follows `app:` to mean ANY signed-in app, in the
+// owner's own order. It is spelled once here rather than as a bare literal so
+// the two places that special-case it cannot disagree.
+const AppWildcardSelector = "*"
 
 // entrySchemes is the closed set, in the order an error message lists them:
 // the three doors in cost order, then the composition form.
@@ -123,12 +131,41 @@ func ValidatePolicyEntry(entry string) error {
 	case EntrySchemeApp:
 		if rest == "" {
 			return fmt.Errorf("policy entry %q names no app: write app:* for any signed-in app, "+
-				"or app:<id> for one of them", trimmed)
+				"app:<id> for one of them, or app:<id>:<model> to pin that app's model", trimmed)
 		}
-		if rest == "*" {
+		// THE WILDCARD TAKES NO MODEL. `app:*` asks for any signed-in app, and
+		// a model name belongs to ONE app -- `app:*:claude-sonnet-4-6` would
+		// ask Codex for a Claude model. Refusing is the only honest answer;
+		// ignoring the pin on the apps it cannot apply to would make the
+		// decision record say a model was asked for that never was.
+		if rest == AppWildcardSelector {
 			return nil
 		}
-		return validateEntryId(trimmed, rest, "app id")
+		appId, model, pinned := strings.Cut(rest, ":")
+		if appId == AppWildcardSelector {
+			return fmt.Errorf("policy entry %q: app:* names any signed-in app and cannot pin a model, "+
+				"because a model name belongs to one app -- write app:<id>:<model> to pin one", trimmed)
+		}
+		// THE APP ID IS HELD TO THE CLOSED SET, at LOAD. The engine drives the
+		// apps core/airoute names and has no protocol for another one, so an
+		// entry naming anything else is a chain step that could only ever be
+		// passed over -- which reads, months later, as a door that is shut
+		// rather than as a policy that is wrong.
+		if !airoute.IsRunnableApp(appId) {
+			return fmt.Errorf("policy entry %q: %q is not an app this engine drives -- the runnable set is %s",
+				trimmed, appId, strings.Join(airoute.RunnableApps(), ", "))
+		}
+		if !pinned {
+			return nil
+		}
+		// NOTHING FOLLOWS THE MODEL. An app's model names are flags on a
+		// command line rather than Ollama tags, so a third colon is a
+		// malformed entry rather than a model id that contains one.
+		if head, tail, more := strings.Cut(model, ":"); more {
+			return fmt.Errorf("policy entry %q: nothing follows the model in app:<id>:<model> "+
+				"(the model reads as %q and the trailing %q looks like a typo)", trimmed, head, tail)
+		}
+		return validateEntryId(trimmed, model, "app model")
 
 	case EntrySchemeFederation:
 		if rest == "" {
@@ -212,7 +249,7 @@ func entryFormsForMessage() []string {
 		case EntrySchemeFleet:
 			out = append(out, "fleet:strongest, fleet:fastest, fleet:<modelId>")
 		case EntrySchemeApp:
-			out = append(out, "app:*, app:<id>")
+			out = append(out, "app:*, app:<id>, app:<id>:<model>")
 		case EntrySchemeFederation:
 			out = append(out, "federation:cheapest, federation:strongest, federation:<providerName>")
 		case EntrySchemeEmbedder:

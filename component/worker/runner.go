@@ -70,6 +70,11 @@ type RunSpec struct {
 	// as asking and getting nothing back -- only a run that asked can be
 	// disappointed by a session that ends with no structured answer.
 	ResponseSchema string
+	// Level is the call's LEVEL, one of core/airoute's closed four (epic
+	// memql#5391, design D8). It rides AppSessionStart and THE COCKPIT owns
+	// the translation into the app's own knobs. Empty means no level was
+	// named and the app runs at its own defaults.
+	Level string
 }
 
 // RunResult is what a completed run reports back.
@@ -90,6 +95,12 @@ type RunResult struct {
 	// answer the schema and still fail, and dropping the answer because the
 	// run failed loses the only part of it that can be read.
 	Result []byte
+	// Model and Effort are what the APP REPORTED serving this run with (epic
+	// memql#5391, design D9), never what was asked for. Empty means it did not
+	// say, which every reader records as unknown -- and for effort that is the
+	// common case, since Claude Code's headless output states none.
+	Model  string
+	Effort string
 }
 
 // ProgressFunc receives each chunk as it arrives, so a caller can
@@ -211,9 +222,12 @@ func (r *SessionRunner) Run(ctx context.Context, w *Worker, spec RunSpec, progre
 		Credential:     cred.Token,
 		MCPEndpoint:    r.MCPEndpoint,
 		ResponseSchema: spec.ResponseSchema,
-		RunId:          spec.RunId,
-		StepId:         spec.StepId,
-		AppSessionRef:  spec.AppSessionRef,
+		// The level the CALL declared (design D8). The cockpit translates it
+		// into this app's own knobs; the engine never names a model here.
+		Level:         spec.Level,
+		RunId:         spec.RunId,
+		StepId:        spec.StepId,
+		AppSessionRef: spec.AppSessionRef,
 		Limits: AppSessionLimits{
 			CredentialLifetime: lifetime,
 			MaxDuration:        spec.MaxDuration,
@@ -313,13 +327,53 @@ func (r *SessionRunner) Run(ctx context.Context, w *Worker, spec RunSpec, progre
 		TranscriptTruncated: truncated,
 		ErrorMessage:        errMessage,
 		Result:              outcome.Result,
+		Model:               outcome.Model,
+		Effort:              outcome.Effort,
 	}
 	row.TranscriptBytes = bytesSeen
 	r.finishRow(ctx, row, result, spec, w)
+	r.stampProduced(ctx, spec, result)
 	if waitErr != nil {
 		return result, waitErr
 	}
 	return result, nil
+}
+
+// stampProduced records WHICH INTELLIGENCE made each artifact this session
+// produced (epic memql#5391, design D9).
+//
+// EVERY artifact, the transcript included. A lifted construct's source reads
+// this stamp, so a session whose transcript carried no provenance would produce
+// procedures whose origin is unanswerable -- and the transcript is the one a
+// recording pass reads first.
+//
+// A FAILED STAMP DOES NOT FAIL THE RUN, and that is deliberate rather than
+// lenient. The session already happened on somebody's machine and already spent
+// their subscription; losing the back-pointer on a delivered artifact costs a
+// reader a journey, while refusing the run would cost them the work. It is
+// logged at WARN because it is the kind of silence that otherwise goes
+// unnoticed for months.
+func (r *SessionRunner) stampProduced(ctx context.Context, spec RunSpec, result RunResult) {
+	if r == nil || len(result.ProducedArtifactIds) == 0 {
+		return
+	}
+	stamper, ok := r.Store.(ArtifactProvenanceStamper)
+	if !ok || stamper == nil {
+		return
+	}
+	provenance := ArtifactProvenance{
+		App: spec.App,
+		// The APP'S REPORT, and empty when it said nothing (design D9). The
+		// level the session was RUN AT is deliberately not substituted here:
+		// a level is what was asked for, and this object is what happened.
+		Model:     result.Model,
+		Effort:    result.Effort,
+		SessionId: result.SessionId,
+	}
+	if err := stamper.StampArtifactProvenance(ctx, spec.OwnerUserId, result.ProducedArtifactIds, provenance); err != nil && r.Logger != nil {
+		r.Logger.Warn("app session: could not stamp provenance on produced artifacts",
+			"session_id", result.SessionId, "artifacts", len(result.ProducedArtifactIds), "error", err)
+	}
 }
 
 // Message sends a FOLLOW-UP into a running session (design D7).

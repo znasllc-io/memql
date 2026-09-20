@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/core/airoute"
 )
 
 // apps.go owns the local-app inventory a cockpit reports and the
@@ -26,10 +27,14 @@ import (
 //     the alternative is a dispatch that fails on the far side after
 //     the plan has already committed to it.
 const (
-	// AppIdClaudeCode is Claude Code's app id.
-	AppIdClaudeCode = "claude-code"
+	// AppIdClaudeCode is Claude Code's app id. The value is the shared
+	// routing vocabulary's: the closed set is declared ONCE, in
+	// core/airoute, so the DSL parser can refuse a policy entry naming an
+	// app the engine does not drive without importing this package -- which
+	// it cannot, because component/worker imports component/language.
+	AppIdClaudeCode = airoute.AppClaudeCode
 	// AppIdCodex is Codex's app id.
-	AppIdCodex = "codex"
+	AppIdCodex = airoute.AppCodex
 
 	// AppLabelPrefix prefixes every derived routing label. A label is
 	// "app:claude-code" => "2.1" -- the value is the app's major.minor
@@ -67,18 +72,10 @@ func (a AppInfo) Runnable() bool {
 
 // IsKnownAppId reports whether id is in the engine's closed runnable
 // set. Unknown ids are stored, never driven.
-func IsKnownAppId(id string) bool {
-	switch strings.TrimSpace(id) {
-	case AppIdClaudeCode, AppIdCodex:
-		return true
-	}
-	return false
-}
+func IsKnownAppId(id string) bool { return airoute.IsRunnableApp(id) }
 
 // KnownAppIds returns the closed runnable set, sorted.
-func KnownAppIds() []string {
-	return []string{AppIdClaudeCode, AppIdCodex}
-}
+func KnownAppIds() []string { return airoute.RunnableApps() }
 
 // NormalizeSubscription clamps a reported subscription value to the
 // closed set. Anything unrecognised -- including empty -- reads as
