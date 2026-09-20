@@ -497,6 +497,12 @@ func fieldReceiverNames() []fieldReceiver {
 // the file, which is what this whole change buys. A deprecated spelling stays
 // derivable (the tree writes `array` 43 times) and the vocabulary is where it
 // is flagged, with its replacement.
+//
+// It is narrower than the parser in one way nothing writes: parseTypeRef's
+// default arm also accepts a CONCEPT REFERENCE as a field type
+// (`concept ticket { owner user }`), which no file in dsl/ and no corpus case
+// does. If one ever does, the recognizer fails naming that file instead of
+// passing over it -- which is the trade this enumeration is for.
 func fieldProduction(spec *Spec) string {
 	var b strings.Builder
 	b.WriteString("\n(* ---- Fields ---- *)\n")

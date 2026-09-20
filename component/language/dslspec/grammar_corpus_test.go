@@ -530,7 +530,7 @@ var unexercisedProductions = map[string]string{
 	"text":                     "lexical: reached only from <doc-comment>",
 	"doc-comment":              "lexical: `///` leaves the token stream on the lexer's side channel, so no token can match it",
 	"reserved-root":            "shadowed: <primary> also offers <name>, which derives `actor`, `args` and `now` as well",
-	"args-field-annotation":    "shadowed: <field-annotation> unions five receivers, and <concept-field-annotation> derives the same names",
+	"args-field-annotation":    "shadowed: <field-annotation> unions five receivers, and the tool and builtin field annotations derive the same names (@enum is not on the concept receiver)",
 	"builtin-field-annotation": "shadowed: as args-field-annotation",
 	"prompt-field-annotation":  "shadowed: as args-field-annotation",
 }
@@ -538,7 +538,7 @@ var unexercisedProductions = map[string]string{
 // TestEveryPublishedProductionIsExercisedByTheCorpus blanks one production at
 // a time and asks whether anything the gate reads stops deriving. A production
 // nothing stops deriving without is a production the gate cannot check: it may
-// say whatever it likes about the language and the 306 tree files and 627
+// say whatever it likes about the language and the 306 tree files and 628
 // conformance sources will still pass.
 //
 // This is the durable form of "is any form's only example a `_reference/`
