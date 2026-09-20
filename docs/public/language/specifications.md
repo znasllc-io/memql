@@ -18,7 +18,7 @@ shape XOR concept in its signature** (epic #2281), and its body is a
 lambda: one parameter, then one boolean expression that reads what the
 signature binds through that parameter:
 
-```memql fragment
+```text
 spec <boundName> <name> = row => <boolean expression>
 ```
 
@@ -64,8 +64,10 @@ concept where it is applied.
 
 ### Row-spec (SQL pushdown)
 
-```memql
+<!-- corpus: 2026/examples/specifications/archived-artifacts.memql -->
+```memql fragment
 use library.concepts.{ artifact }
+use library.shapes.{ artifactFull }
 
 @description("Matches archived artifacts")
 spec artifact isArchivedArtifact = row => row.archived == true
@@ -79,9 +81,8 @@ concept in the signature (`query <Concept> <name>`) and pulls cross-file
 constructs in via file-top `use` imports; predicates compose with `&&`,
 `||`, `!` and parentheses:
 
-```memql
-use library.concepts.{ artifact }
-
+<!-- corpus: 2026/examples/specifications/archived-artifacts.memql -->
+```memql fragment
 query artifact archivedArtifacts {
   args {
     folderId  string  @required
@@ -91,6 +92,10 @@ query artifact archivedArtifacts {
 }
 ```
 
+(Both blocks are parts of one file -- the two `use` lines above are its
+imports, and the query resolves `isArchivedArtifact` and `artifactFull`
+through them.)
+
 (The `;`-AND / `,`-OR separators are retired: the parser refuses them
 and names `&&` / `||`. The pre-v1 bare reference `isArchivedArtifact`
 is what `memqlmigrate --rewrite=expressions` rewrites to
@@ -98,12 +103,19 @@ is what `memqlmigrate --rewrite=expressions` rewrites to
 
 ### Context-spec (in-process)
 
+<!-- corpus: 2026/examples/specifications/requires-cluster-owner.memql -->
 ```memql
 use common.shapes.{ actorEnvelope }
 
 @description("Caller must hold the owner role -- the rollback gate (#1876).")
-spec actorEnvelope requiresOwner = actor => actor.role == "owner"
+spec actorEnvelope requiresClusterOwner = actor => actor.role == "owner"
 ```
+
+(The shipped spec of exactly this shape is `requiresOwner`, in
+`dsl/deployment/specs.memql`. The example declares its own name because a
+second declaration of a shipped construct's name makes every bare lookup of
+it ambiguous -- the shipped queries that apply `requiresOwner(actor)` stop
+resolving it, and the engine refuses the load.)
 
 **A ROLE COMPARISON IS THE ONE THING THIS FORM IS NOW WRONG FOR** (epic
 memql#5166). `requiresOwner` survives because `owner` is the cluster-owner tier

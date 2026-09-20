@@ -118,14 +118,15 @@ ordinary properties.
 
 A filter, spec or trait reads every field through its lambda parameter.
 `row.id`, `row.createdAt` and `row.provenance.kind` are intrinsics, and
-`row.status` is a payload property: the intrinsic names are reserved on
+`row.archived` is a payload property: the intrinsic names are reserved on
 every payload schema, so `row.<name>` reads the intrinsic when the name
 is one and the payload property otherwise, and the two can never
 collide.
 
+<!-- corpus: 2026/examples/reserved/intrinsic-filter.memql -->
 ```memql fragment
-filter  row => row.id == args.folderId && row.status == "active"
-//             ^^^^^^ intrinsic           ^^^^^^^^^^ payload property
+  filter  row => row.id == args.folderId && row.archived != true
+  //             ^^^^^^ intrinsic           ^^^^^^^^^^^^ payload property
 ```
 
 The intrinsics a filter pushes down are `id`, `concept`, `type`,
@@ -215,6 +216,7 @@ construct and is unaffected.
 
 Cross-file dependencies are declared with file-top `use` imports:
 
+<!-- corpus: 2026/examples/reserved/use-imports.memql -->
 ```memql fragment
 use library.concepts.{ artifact, folder }
 use common.traits.{ isActiveRecord }

@@ -33,11 +33,19 @@ or `seed*` prefix.
 
 The keyword already marks the kind at the declaration -- `query user
 userById { ... }` -- so a prefix restates in the name what the grammar
-states one token earlier. Call sites read better without it:
+states one token earlier. Call sites read better without it -- a query's
+filter applying a trait:
 
+<!-- corpus: 2026/examples/naming-conventions/artifacts-by-folder.memql -->
 ```memql fragment
-filter  row => row.folderId == args.folderId && isActiveRecord(row)
-decide := logic indexArtifact(event: event)
+  filter  row => row.folderId == args.folderId && isActiveRecord(row)
+```
+
+and an automation's statement calling a logic:
+
+<!-- corpus: 2026/examples/naming-conventions/index-artifact.memql -->
+```memql fragment
+  decide := logic indexArtifact(event: event)
 ```
 
 This is also what the codebase has always done. Measured across the shipped
@@ -77,15 +85,17 @@ the embedded tree.
 
 Examples:
 
+<!-- corpus: 2026/examples/naming-conventions/named-for-what-they-do.memql -->
 ```memql
 use identity.concepts.{ user }
 use identity.shapes.{ userFull }
+use library.concepts.{ folder }
 
-query user userById {
+query user userByPrimaryEmail {
   args {
-    userId  string  @required
+    primaryEmail  string  @required
   }
-  filter  row => row.id == args.userId
+  filter  row => row.primaryEmail == args.primaryEmail
   shape   userFull
 }
 
@@ -94,24 +104,32 @@ mutation user archiveUser {
     userId  string  @required
   }
   update {
-    id:     args.userId
-    status: "archived"
+    id:      args.userId
+    active:  false
   }
 }
 
-spec folder folderIsShared = row => row.visibility == "shared"
+spec folder folderIsArchived = row => row.archived == true
 
-trait isActiveRecord = row => row.active == true
+trait isRetired = row => row.retired == true
 ```
+
+Each construct in that block is one the engine loads: every cross-file name
+it uses is imported at the top, every field it writes or projects is one its
+concept declares, and none of its names is already taken by a shipped
+construct -- a second declaration of `userById` or `isActiveRecord` would make
+every bare lookup of that name ambiguous and break the shipped queries that
+resolve it.
 
 Constructs live in one consolidated file per kind per namespace
 (`dsl/<namespace>/queries.memql`, `dsl/<namespace>/mutations.memql`,
 ...), so file names never carry an individual construct's name.
 
-An automation's statement calls a logic construct by the name the
-file-top import gives it -- `decide := logic indexArtifact(event: event)`
-resolves through `use library.logic.{ indexArtifact }`. There is no
-prefixed/bare split between the two.
+An automation's statement calls a logic construct by its declared name --
+`decide := logic indexArtifact(event: event)` names the logic itself. A
+construct declared in the same namespace needs no import; one declared in
+another is brought into scope by a file-top `use <ns>.logic.{ indexArtifact }`.
+There is no prefixed/bare split between the two.
 
 
 ## Enforcement

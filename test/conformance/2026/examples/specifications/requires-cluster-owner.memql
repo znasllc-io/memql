@@ -1,0 +1,4 @@
+use common.shapes.{ actorEnvelope }
+
+@description("Caller must hold the owner role -- the rollback gate (#1876).")
+spec actorEnvelope requiresClusterOwner = actor => actor.role == "owner"

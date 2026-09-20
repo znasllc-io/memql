@@ -1,0 +1,6 @@
+{
+  "cases": [
+    { "file": "archived-artifacts.memql", "verdict": "load_ok" },
+    { "file": "requires-cluster-owner.memql", "verdict": "load_ok" }
+  ]
+}
