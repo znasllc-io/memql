@@ -76,21 +76,37 @@ var clauseDocs = map[string]string{
 // (TestClauseKeywordsCarryAGrammar), so the generated page cannot list a
 // clause it cannot spell.
 var clauseGrammar = map[string]string{
-	"args":         `"args" "{" <field>* "}"`,
-	"filter":       `"filter" <lambda>`,
-	"refine":       `"refine" <lambda>`,
-	"shape":        `"shape" <name>`,
-	"sort":         `"sort" <string> [ "," <string> ]`,
-	"paginate":     `"paginate" <number>`,
-	"asOf":         `"asOf" ( "latest" | <expression> )`,
-	"count":        `"count"`,
-	"insert":       `"insert" "{" <write-entry>* "}"`,
-	"update":       `"update" "{" <write-entry>* "}"`,
-	"accept":       `"accept" "{" <name> { "," <name> } "}"`,
-	"stamp":        `"stamp" "{" <map-entry> { "," <map-entry> } "}"`,
+	"args":   `"args" "{" <field>* "}"`,
+	"filter": `"filter" <lambda>`,
+	"refine": `"refine" <lambda>`,
+	"shape":  `"shape" <name>`,
+	// A sort clause takes the rest of its line and hands it to the `sort`
+	// directive whole, so it carries as many keys and directions as the
+	// author writes -- `sort "priority", "desc", "row.createdAt", "desc"` is
+	// one clause, and `[ "," <string> ]` could derive only the first pair.
+	"sort":     `"sort" <string> { "," <string> }`,
+	"paginate": `"paginate" <number>`,
+	"asOf":     `"asOf" ( "latest" | <expression> )`,
+	"count":    `"count"`,
+	// A write block separates its entries by a NEWLINE **or** a comma, and
+	// drops a trailing one (parser.splitInsertFields). The grammar has no
+	// newline terminal, so the comma is optional -- `{ "," <entry> }` said
+	// the comma was required and no shipped mutation writes one.
+	"insert":       `"insert" "{" ( <write-entry> [ "," ] )* "}"`,
+	"update":       `"update" "{" ( <write-entry> [ "," ] )* "}"`,
+	"accept":       `"accept" "{" ( <name> [ "," ] )* "}"`,
+	"stamp":        `"stamp" "{" ( <map-entry> [ "," ] )* "}"`,
 	"precondition": `"precondition" <name> "{" <statement>* "}"`,
-	"params":       `"params" "{" <map-entry>* "}"`,
-	"auth":         `"auth" "{" <map-entry>* "}"`,
+	// A provider's two blocks are NOT map entries and never were: their
+	// parsers (parseProviderParamsBlock, parseProviderAuthBlock) read
+	// `<key> <literal>` with NO COLON, and auth reads one more form, the
+	// `env("VAR")` placeholder the loader substitutes at startup. The
+	// `<map-entry>*` these used to carry required a colon the language does
+	// not write and admitted an arbitrary expression it does not read -- and
+	// the params doc above had spelled `params { contextWindow 128000 ... }`
+	// correctly all along, in the same table entry.
+	"params": `"params" "{" <param-entry>* "}"`,
+	"auth":   `"auth" "{" <auth-entry>* "}"`,
 }
 
 // controlKeywords are the control-flow words of logic / automation bodies.

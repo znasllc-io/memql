@@ -71,7 +71,10 @@ func BNF() string {
 		"   GENERATED from the parser, the annotation registry and the function\n"+
 		"   catalog -- do not edit. Run `make docs-grammar` to refresh it.\n\n"+
 		"   Notation: <name> is a production, \"x\" a terminal, [ x ] optional,\n"+
-		"   { x } zero or more, x* zero or more, ( a | b ) a choice. *)\n\n",
+		"   { x } zero or more, x* zero or more, x+ one or more, ( a | b ) a\n"+
+		"   choice, \"a\"..\"z\" a character range, and 'x' a terminal holding a\n"+
+		"   double quote. A right-hand side written in English is lexical: the\n"+
+		"   lexer decides it. *)\n\n",
 		parser.Edition, parser.GrammarVersion)
 
 	b.WriteString("(* ---- A file ---- *)\n")
@@ -244,14 +247,25 @@ func constructBodyProduction(c Construct) string {
 	case BodyFormCapabilityCall:
 		return production(name, "( "+joinAlternatives(clauseRefs(c))+" )* <capability-call>")
 	case BodyFormFields:
-		if extra := annotations.ByReceiver[string(annotations.ConceptBody)]; len(extra) > 0 && c.Keyword == "concept" {
-			return production(name, "( <field> | <"+c.Keyword+"-body-annotation> )*")
+		// A concept's fields are their own production: only a concept
+		// property may be a nested object block or carry a @variant body
+		// (parser.parsePropertyDecl); an args, tool, prompt or builtin field
+		// reads a type word and stops.
+		if c.Keyword == "concept" {
+			if extra := annotations.ByReceiver[string(annotations.ConceptBody)]; len(extra) > 0 {
+				return production(name, "( <concept-field> | <"+c.Keyword+"-body-annotation> )*")
+			}
+			return production(name, "<concept-field>*")
 		}
 		return production(name, "<field>*")
 	case BodyFormPaths:
 		return production(name, "<path>*")
 	case BodyFormAssignments:
-		return production(name, "<map-entry>*")
+		// A seed body is NOT a map literal: its entries carry a literal value
+		// rather than an expression, and a nested object is written as a
+		// BLOCK with no colon (`providerConfig { llm { provider: "..." } }`,
+		// parser.parseSeedBlock). Spelling it `<map-entry>*` said neither.
+		return production(name, "<seed-entry>*")
 	default:
 		return ""
 	}
@@ -294,8 +308,26 @@ func clauseProduction(spec *Spec) string {
 		b.WriteString(production(clauseProductionName(k.Name), k.Grammar))
 	}
 	b.WriteString(production("capability-call", `"capability" <dotted-name> "(" [ <argument> { "," <argument> } ] ")"`))
-	b.WriteString(production("write-entry", `<name> ":" <expression> | <accept-block> | <stamp-block>`))
+	// The bare-mirror shorthand (authoring rule 15): a write-block entry that
+	// is only `args.name` means `name: args.name`. It is write-block SYNTAX
+	// rather than an expression -- the struct-form rewriter expands it while
+	// the block is still lines (expandBareMirror), because the edition-2026
+	// map literal has no key-less entry -- so the grammar has to spell it, or
+	// it describes a write block this engine's own mutations do not write.
+	// One segment only: `args.user.id` is refused by name.
+	b.WriteString(production("write-entry", `<name> ":" <expression> | "args" "." <name>`+
+		"\n"+strings.Repeat(" ", productionColumn)+`  | <accept-block> | <stamp-block>`))
 	b.WriteString(production("map-entry", `<name> ":" <expression>`))
+	// The three entry forms that are NOT map entries, each because the
+	// construct's own parser reads a literal where a map entry reads an
+	// expression: a provider's params and auth (parseProviderParamsBlock,
+	// parseProviderAuthBlock) and a seed's body (parseSeedBlock). All three
+	// were spelled <map-entry> and none of them is one -- a provider entry
+	// carries no colon at all.
+	b.WriteString(production("param-entry", `<name> ( <string> | <number> | "true" | "false" )`))
+	b.WriteString(production("auth-entry", `<name> ( <string> | "env" "(" <string> ")" )`))
+	b.WriteString(production("seed-entry", `<name> ":" <seed-value> | <name> "{" <seed-entry>* "}"`))
+	b.WriteString(production("seed-value", `<string> | <number> | "true" | "false" | "[" ( <string> [ "," ] )* "]"`))
 	b.WriteString(production("path", `<name> { "." <name> }`))
 	return b.String()
 }
@@ -318,9 +350,25 @@ func statementProduction(spec *Spec) string {
 			trailing = append(trailing, k.Grammar)
 		}
 	}
-	b.WriteString(production("statement", joinAlternatives(append([]string{"<binding>", "<construct-call>"}, heads...))))
-	b.WriteString(production("binding", `<name> ":=" <construct-call>`))
-	b.WriteString(production("construct-call", `<construct-kind> <name> "(" [ <argument> { "," <argument> } ] ")" <trailing-clause>*`))
+	// The three forms written with no keyword of their own, in the order
+	// parser.BodyStatementForms() names them: assign, fieldWrite, call.
+	// statementFormsHaveAProduction holds this list to that one.
+	b.WriteString(production("statement", joinAlternatives(append([]string{"<binding>", "<field-write>", "<construct-call>"}, heads...))))
+	// A binding's value is a construct call OR an expression
+	// (parser.parseV1Assign falls through to parseV1BodyExpression), which is
+	// what `decide := row.submitterRole == "owner" ? ... : ...` is.
+	b.WriteString(production("binding", `<name> ":=" ( <construct-call> | <expression> )`))
+	// The before-write field write (ast.FieldWriteStatement): one declared
+	// payload field of the row being written, in an automation whose trigger
+	// carries `before=`.
+	b.WriteString(production("field-write", `"row" "." <name> "=" <expression>`))
+	// The invocation is split from the statement because an EXPRESSION may
+	// hold one too: `query lbTickets().count()` is what a logic body and a
+	// step argument write (parseV1Name dispatches to parseV1ConstructCall).
+	// Only the statement takes trailing clauses, so <primary> references the
+	// invocation and <statement> the call.
+	b.WriteString(production("construct-call", `<construct-invocation> <trailing-clause>*`))
+	b.WriteString(production("construct-invocation", `<construct-kind> <name> "(" [ <argument> { "," <argument> } ] ")"`))
 	b.WriteString(production("construct-kind", joinAlternatives(callableConstructKinds(spec))))
 	b.WriteString(production("argument", `<name> ":" <expression>`))
 	if len(trailing) > 0 {
@@ -385,7 +433,10 @@ func annotationProduction(spec *Spec) string {
 		"<string>", "<number>", `"true"`, `"false"`, "<object>", "<lambda>",
 		`<name> [ "=" <annotation-value> ]`, `"!" <string>`,
 	})))
-	b.WriteString(production("annotation-value", `<string> | <number> | "true" | "false" | <name>`))
+	// A keyword argument's value may be a LAMBDA: `@trigger(filter=row => ...)`
+	// and `@loop(until=row => ...)` both take one (parseAttributeArgValue),
+	// and neither derived while this listed scalars only.
+	b.WriteString(production("annotation-value", `<string> | <number> | "true" | "false" | <name> | <lambda>`))
 	return b.String()
 }
 
@@ -421,34 +472,65 @@ func fieldReceiverNames() []fieldReceiver {
 	}
 }
 
-// fieldProduction renders a field and the type words it may carry, from the
-// field-type table. A type the table marks deprecated is left out: the grammar
-// is what a model is told to emit, and emitting a spelling the language flags
-// is a defect the grammar caused.
+// fieldProduction renders a field: its name, its type, the `!` required sigil
+// and its annotations.
+//
+// `!` is the CANONICAL required spelling (#2618) -- the codemod rewrites
+// `@required` into it and every field receiver's parser reads it -- so a
+// grammar without it cannot derive most of the tree, and a model held to one
+// would be taught the long form the codemod removes.
+//
+// <field-type> is a NAME, which is what every field parser reads: the args
+// block takes any identifier as a type, and so do the concept, tool, prompt
+// and builtin field parsers. The canonical words are the field-type table's
+// and are named in the comment beside the production, for the same reason the
+// annotation block points at the attribute matrix: which spelling is canonical
+// is vocabulary, and a syntax-only grammar that enumerated a closed set here
+// would refuse `any`, `boolean`, `integer`, `number` and `array`, all of which
+// this engine's own DSL tree writes.
 func fieldProduction(spec *Spec) string {
 	var b strings.Builder
 	b.WriteString("\n(* ---- Fields ---- *)\n")
-	b.WriteString(production("field", `<doc-comment>* <name> <field-type> <field-annotation>*`))
+	b.WriteString(production("field", `<doc-comment>* <name> <field-type> [ "!" ] <field-annotation>*`))
+	// A concept property has two more forms, and neither is available to an
+	// args, tool, prompt or builtin field: a nested object written as a BLOCK
+	// with no type word (`capabilities { ... }`), and a trailing block after
+	// the annotations, which is the @variant body or an @open object's fields.
+	// The two trailing roles are one token shape -- a variant branch IS a
+	// name and a block -- and which one the parser reads is decided by the
+	// annotation, which is the attribute matrix's subject, not a syntax rule.
+	b.WriteString(production("concept-field", `<doc-comment>* <name> ( "{" <concept-field>* "}"`+
+		"\n"+strings.Repeat(" ", productionColumn)+`  | <field-type> [ "!" ] <concept-field-annotation>* [ "{" <concept-field>* "}" ] )`))
 	b.WriteString(production("field-annotation",
 		joinAlternatives([]string{
 			"<concept-field-annotation>", "<args-field-annotation>",
 			"<tool-field-annotation>", "<prompt-field-annotation>", "<builtin-field-annotation>",
 		})))
-	var types []string
+	fmt.Fprintf(&b, "(* The canonical type words are %s.\n"+
+		"   A field type is READ as a name, so a non-canonical spelling parses;\n"+
+		"   which word to write is the vocabulary, not a syntax rule. *)\n", canonicalFieldTypes(spec))
+	b.WriteString(production("field-type", joinAlternatives([]string{
+		"<type-name>", `"enum" "(" <string> { "," <string> } ")"`, `"[]" <field-type>`,
+	})))
+	b.WriteString(production("type-name", `<name>`))
+	b.WriteString(production("doc-comment", `"///" <text>`))
+	return b.String()
+}
+
+// canonicalFieldTypes names the field-type table's live spellings, in its
+// order, for the note beside <field-type>. A type the table marks deprecated
+// is left out of the NOTE -- it still parses, and the production still derives
+// it, but a model reading the grammar is not shown a spelling the language
+// flags.
+func canonicalFieldTypes(spec *Spec) string {
+	var out []string
 	for _, ft := range spec.FieldTypes {
 		if ft.Deprecated {
 			continue
 		}
-		if ft.Name == "enum" {
-			types = append(types, `"enum" "(" <string> { "," <string> } ")"`)
-			continue
-		}
-		types = append(types, `"`+ft.Name+`"`)
+		out = append(out, ft.Name)
 	}
-	types = append(types, `"[]" <field-type>`)
-	b.WriteString(production("field-type", joinAlternatives(types)))
-	b.WriteString(production("doc-comment", `"///" <text>`))
-	return b.String()
+	return strings.Join(out, ", ")
 }
 
 // expressionProduction renders the frame of the expression grammar: what an
@@ -460,12 +542,14 @@ func expressionProduction(spec *Spec) string {
 	b.WriteString(production("expression", "<"+expressionLevelName(loosestLevel(functions.Operators()))+">"))
 	b.WriteString(production("lambda-params", `<name> | "(" <name> "," <name> ")"`))
 	b.WriteString(production("primary", joinAlternatives([]string{
-		"<literal>", "<reserved-root>", "<call>", "<list>", "<object>",
+		"<literal>", "<reserved-root>", "<construct-invocation>", "<call>", "<list>", "<object>",
 		`"(" <expression> ")"`, "<name>",
 	})))
 	b.WriteString(production("reserved-root", joinAlternatives(reservedRoots(spec))))
-	b.WriteString(production("list", `"[" [ <expression> { "," <expression> } ] "]"`))
-	b.WriteString(production("object", `"{" [ <map-entry> { "," <map-entry> } ] "}"`))
+	// Both literals admit a TRAILING comma (parseV1List, parseV1Map), which
+	// the shipped tree writes and the shape without it could not derive.
+	b.WriteString(production("list", `"[" [ <expression> { "," <expression> } [ "," ] ] "]"`))
+	b.WriteString(production("object", `"{" [ <map-entry> { "," <map-entry> } [ "," ] ] "}"`))
 	return b.String()
 }
 
@@ -561,12 +645,38 @@ func levelRHS(ops []functions.Operator, tighter string) string {
 	case kinds["not"] || kinds["negate"]:
 		return "( " + strings.Join(symbols, " | ") + " ) <" + expressionLevelName(ops[0].Level) + "> | " + tighter
 	case kinds["member"] || kinds["optionalMember"]:
-		return tighter + " { ( " + strings.Join(symbols, " | ") + " ) <name> | <method-call> }"
+		// The two member operators do NOT take the same right-hand side, so
+		// one alternative cannot spell both. `.` reads a field OR calls a
+		// method; `.?` reads a field only -- v1MemberChain refuses a method
+		// call after it by name, because `.?` is about an absent OBJECT and a
+		// method on an absent object has no answer. The earlier shape,
+		// `( "." | ".?" ) <name> | <method-call>`, was wrong in both
+		// directions at once: `x.count()` did not derive (the alternation
+		// left the method call with no dot in front of it) and `x count()`
+		// did.
+		return tighter + " { " + memberTails(ops) + " }"
 	case len(symbols) == 1:
 		return tighter + " { " + symbols[0] + " " + tighter + " }"
 	default:
 		return tighter + " { ( " + strings.Join(symbols, " | ") + " ) " + tighter + " }"
 	}
+}
+
+// memberTails renders the member rung's tails, one per member operator, from
+// the operator's Kind: the plain member reads a field or calls a method, the
+// optional one reads a field.
+func memberTails(ops []functions.Operator) string {
+	var tails []string
+	for _, op := range ops {
+		switch op.Kind {
+		case "member":
+			tails = append(tails, `"`+op.Symbol+`" ( <name> | <method-call> )`)
+		case "optionalMember":
+			tails = append(tails, `"`+op.Symbol+`" <name>`)
+		}
+	}
+	sort.Strings(tails)
+	return strings.Join(tails, " | ")
 }
 
 // functionProduction renders the callable names from the function catalog:
@@ -587,7 +697,17 @@ func functionProduction(catalog []functions.Function) string {
 
 	var b strings.Builder
 	b.WriteString("\n(* ---- Calls ---- *)\n")
-	b.WriteString(production("call", `<function-name> "(" [ <expression> { "," <expression> } ] ")"`))
+	// Two call forms, and the second is why the first stays closed. A catalog
+	// function is called by name with its arguments. A spec or a trait is
+	// APPLIED to its one receiver -- `isActiveRecord(row)`, `requiresOwner(
+	// actor)` -- and its name is declared by a `.memql` file, so no table can
+	// list it. Spelling that as one open `<name> "(" ... ")"` form would make
+	// every retired spelling derive again: `cond(p, a, b)`, `coalesce(a, b)`,
+	// `concat(a, b)`, `now()` and `and(a, b)` all take a number of arguments a
+	// predicate application cannot.
+	b.WriteString(production("call", `<function-name> "(" [ <expression> { "," <expression> } ] ")"`+
+		"\n"+strings.Repeat(" ", productionColumn)+`  | <predicate-name> "(" <expression> ")"`))
+	b.WriteString(production("predicate-name", `<name>`))
 	b.WriteString(production("method-call", `<method-name> "(" [ <expression> { "," <expression> } ] ")"`))
 	b.WriteString(production("function-name", joinAlternatives(fns)))
 	b.WriteString(production("method-name", joinAlternatives(methods)))
@@ -613,7 +733,12 @@ func literalProduction(spec *Spec) string {
 	var b strings.Builder
 	b.WriteString("\n(* ---- Terminals ---- *)\n")
 	b.WriteString(production("literal", `<string> | <number> | "true" | "false" | "nil"`))
-	b.WriteString(production("name", `( "a".."z" | "A".."Z" | "_" ) { "a".."z" | "A".."Z" | "0".."9" | "_" }`))
+	// The hyphen is the lexer's (isIdentifierCharNoColon), not an oversight:
+	// seed ids carry one by design (`seed skill go-backend-engineering`,
+	// `seed capability cap-owner-read-principal`), and a <name> without it
+	// cannot derive them. It may not OPEN a name, because the scanner reaches
+	// an identifier on a letter or an underscore.
+	b.WriteString(production("name", `( "a".."z" | "A".."Z" | "_" ) { "a".."z" | "A".."Z" | "0".."9" | "_" | "-" }`))
 	b.WriteString(production("dotted-name", `<name> { "." <name> }`))
 	b.WriteString(production("concept-name", `<name>`))
 	b.WriteString(production("bound-name", `<name>`))

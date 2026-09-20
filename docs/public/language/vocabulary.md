@@ -140,11 +140,11 @@ The reserved words that are not constructs: the statements of a body, the clause
 
 | Name | Written | What it means |
 |---|---|---|
-| `accept` | `"accept" "{" <name> { "," <name> } "}"` | Write-block sugar: `accept { name, ... }` lists the public fields the mutation accepts -- each auto-binds to its same-named arg (`name` -> `name: args.name`). Every name must be a declared arg. Nested inside insert{}/update{} (or top-level, which means insert). Never mixed with loose fields. |
+| `accept` | `"accept" "{" ( <name> [ "," ] )* "}"` | Write-block sugar: `accept { name, ... }` lists the public fields the mutation accepts -- each auto-binds to its same-named arg (`name` -> `name: args.name`). Every name must be a declared arg. Nested inside insert{}/update{} (or top-level, which means insert). Never mixed with loose fields. |
 | `actor` | `actor` | Reserved: the auth envelope. Closed member set (#2623): userId, role, identityId, isClusterOwner, primaryEmail, now, plus the legacy isOwner alias. Reading it requires @actor in the construct preamble (#2621). Members: actor.userId, actor.role, actor.identityId, actor.isClusterOwner, actor.primaryEmail, actor.now, actor.isOwner. |
 | `args` | `"args" "{" <field>* "}"  /  args` | Input-schema block: declares caller-passed args read as args.X in the body. Reserved namespace for caller-passed inputs (args.X). |
 | `asOf` | `"asOf" ( "latest" | <expression> )` | Query clause: read the stream as of a moment -- `asOf latest`, or `asOf args.at ?? latest`. Query-only (core-builtins ADR 2.3). |
-| `auth` | `"auth" "{" <map-entry>* "}"` | Provider block: vendor auth (e.g. apiKey env("...")). |
+| `auth` | `"auth" "{" <auth-entry>* "}"` | Provider block: vendor auth (e.g. apiKey env("...")). |
 | `branch` | `branch` | One list of a parallel statement: `branch <label> { ... }`. |
 | `case` | `case` | A switch branch: `case <literal>[, <literal>] { ... }`. A label is a literal, written once per switch. |
 | `config` | `config` | Reserved namespace for the allow-listed configuration values a body may read, as `config.<key>`. The allow-list is component/config/policy_exposable.go; a key outside it is not readable from the DSL at all, so configuration cannot leak into a construct by accident. |
@@ -155,12 +155,12 @@ The reserved words that are not constructs: the statements of a body, the clause
 | `for` | `"for" <name> "in" <expression> [ "if" <expression> ] "{" <statement>* "}" [ <trailing-clause> ]` | Loop statement: `for item in <source> [if <cond>] { ... }` -- the loop variable and every name bound in the body exist in each iteration only. A return inside ends the body the loop is in. Trailing clause: `on error continue`. |
 | `if` | `"if" <expression> "{" <statement>* "}" { "else" "if" <expression> "{" <statement>* "}" } [ "else" "{" <statement>* "}" ]` | Conditional statement: `if <cond> { ... } else if <cond> { ... } else { ... }`. A name bound in a branch is readable after the chain -- absent if the branch that binds it did not run -- and the branches of one chain may bind the same name. For a conditional VALUE write the expression `p ? a : b`. |
 | `in` | `in` | Membership test: `args.tag in row.tags`, or `row.kind in ["a", "b"]`. The single membership operator (`has` and the `.contains(v)` collection method are retired). |
-| `insert` | `"insert" "{" <write-entry>* "}"` | Mutation block: the row to create. Exactly one insert OR update per mutation. |
+| `insert` | `"insert" "{" ( <write-entry> [ "," ] )* "}"` | Mutation block: the row to create. Exactly one insert OR update per mutation. |
 | `now` | `now` | Reserved: RFC3339 timestamp captured at eval start. |
 | `on` | `"on" "surface" "(" <string> ")" | "on" "error" ( "continue" | "stop" )` | Trailing clauses: `on surface("<name>")` names where an action runs; `on error continue` records a failed call, for or parallel and goes on, its name left absent (`on error stop` is the default and is not written). |
 | `paginate` | `"paginate" <number>` | Query clause: bound the result to a window -- `paginate 25`. A list-returning query carries paginate, sort, count or @unbounded("reason") (memql#1965). |
 | `parallel` | `"parallel" "{" { "branch" <name> "{" <statement>* "}" } "}" [ "wait" "any" ] [ <trailing-clause> ]` | Parallel statement: `parallel { branch <label> { ... } ... } [wait any]` -- the branches run at once, each a list of its own whose names stay inside it; a failed branch stops the others. A branch cannot return. Trailing clause: `on error continue`. |
-| `params` | `"params" "{" <map-entry>* "}"` | Provider block: the model parameters this provider is called with -- context window, completion cap and the per-million input and output costs the router bills against. Written `params { contextWindow 128000 ... }`, one `key value` pair per line. |
+| `params` | `"params" "{" <param-entry>* "}"` | Provider block: the model parameters this provider is called with -- context window, completion cap and the per-million input and output costs the router bills against. Written `params { contextWindow 128000 ... }`, one `key value` pair per line. |
 | `partition` | `partition` | Reserved: the active partition for this call. |
 | `payload` | `payload` | Reserved: bound-concept row payload (payload.X) -- valid in query filter/shape only (SQL pushdown). |
 | `precondition` | `"precondition" <name> "{" <statement>* "}"` | Automation block: `precondition <name> { ... }`, a deterministic check that must hold before the statements run (Epic 4, memql#2139). |
@@ -169,12 +169,12 @@ The reserved words that are not constructs: the statements of a body, the clause
 | `retry` | `"retry" "(" <number> ")"` | Trailing clause of a construct call: `<call> retry(n)` runs a failed call up to n more times. Written after `on surface(...)` and before `on error continue`. |
 | `return` | `"return" ( <construct-call> | <expression> )` | End the body with a value: `return <expr>`, or `return <call>` for what the call returns. A logic's last statement is its return; an automation's return is its run's outcome. |
 | `shape` | `"shape" <name>` | Query clause: names the projection shape for the result -- `shape <name>`. (Also the `shape` construct keyword and the `<expr> with shape(...)` expression.) |
-| `sort` | `"sort" <string> [ "," <string> ]` | Query clause: order the result -- `sort "row.createdAt", "desc"`. Payload keys are bare; row intrinsics take the row. namespace. |
-| `stamp` | `"stamp" "{" <map-entry> { "," <map-entry> } "}"` | Write-block sugar: `stamp { key: value, ... }` carries the server-set fields beside an accept{} list. Nested inside insert{}/update{} (or top-level with accept, which means insert). |
+| `sort` | `"sort" <string> { "," <string> }` | Query clause: order the result -- `sort "row.createdAt", "desc"`. Payload keys are bare; row intrinsics take the row. namespace. |
+| `stamp` | `"stamp" "{" ( <map-entry> [ "," ] )* "}"` | Write-block sugar: `stamp { key: value, ... }` carries the server-set fields beside an accept{} list. Nested inside insert{}/update{} (or top-level with accept, which means insert). |
 | `startsWith` | `startsWith` | String-prefix test: `row.name startsWith "lit"`, a list of prefixes (ANY of), or an arg. An empty list and a blank prefix match nothing (memql#4208). |
 | `switch` | `"switch" <expression> "{" { "case" <literal> { "," <literal> } "{" <statement>* "}" } [ "default" "{" <statement>* "}" ] "}"` | Switch statement: `switch <value> { case <literal>[, <literal>] { ... } default { ... } }` -- the first case whose label equals the value runs, else the default. Its names share the switch's scope, as an if chain's do. |
 | `trace` | `trace` | Reserved engine identifier for the current call's trace context. It is reserved so an args field or a local cannot take the name and shadow it; no construct in the tree reads it today. |
-| `update` | `"update" "{" <write-entry>* "}"` | Mutation block: partial read-merge-write of an existing row (keyed by id). |
+| `update` | `"update" "{" ( <write-entry> [ "," ] )* "}"` | Mutation block: partial read-merge-write of an existing row (keyed by id). |
 | `use` | `use` | File-top import: use <domain>.<construct>.{ names }. |
 | `wait` | `"wait" ( "any" | "all" )` | Trailing clause of a parallel: `wait any` ends it when one branch ends. `wait all` is the default and is not written. |
 
