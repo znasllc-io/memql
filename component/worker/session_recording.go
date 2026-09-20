@@ -35,7 +35,13 @@ import (
 type sessionRecording struct {
 	recorder SessionRecorder
 	contents ContentStore
-	logger   *slog.Logger
+	// store is the session row, which is the SEQ ALLOCATOR both writers
+	// share. It is not an optimisation to skip: the MCP node counts from the
+	// row and this side counting in memory collide systematically -- an app
+	// that calls MemQL before its first recorded action, which is ordinary,
+	// takes seq 0 and so does the action.
+	store  AppSessionStore
+	logger *slog.Logger
 
 	sessionId string
 	owner     string
@@ -47,10 +53,16 @@ type sessionRecording struct {
 	// which is honest: they are what was known when the bytes were written.
 	provenance ArtifactProvenance
 
-	mu       sync.Mutex
-	seq      int
+	mu sync.Mutex
+	// recorded and dropped are the recording's OWN ACCOUNTING -- how many
+	// actions it wrote and how many it lost. They are not the seq: that comes
+	// from the row.
 	recorded int
 	sequence ActionSequence
+	// fallbackSeq is used only when the allocator cannot be reached. It keeps
+	// a recording going during an engine blip rather than losing the actions,
+	// and it is seeded from the last allocation so it does not restart at 0.
+	fallbackSeq int
 	// fingerprintPending holds the environment until the first action has a
 	// step to carry it. The fingerprint is emitted as the session's first
 	// event and belongs ON a step (design D16), so it waits for one rather
@@ -72,6 +84,7 @@ func newSessionRecording(ctx context.Context, r *SessionRunner, spec RunSpec) *s
 	rec := &sessionRecording{
 		recorder:   r.Recorder,
 		contents:   r.Contents,
+		store:      r.Store,
 		logger:     r.Logger,
 		sessionId:  spec.SessionId,
 		owner:      spec.OwnerUserId,
@@ -139,11 +152,9 @@ func (s *sessionRecording) recordAction(ctx context.Context, action ActionEvent)
 	s.mu.Lock()
 	take, gap := s.sequence.Admit(action.Seq)
 	var fingerprint map[string]any
-	seq := s.seq
 	if take {
 		fingerprint = s.fingerprintPending
 		s.fingerprintPending = nil
-		s.seq++
 		s.recorded++
 	}
 	s.mu.Unlock()
@@ -161,6 +172,7 @@ func (s *sessionRecording) recordAction(ctx context.Context, action ActionEvent)
 	if !take {
 		return
 	}
+	seq := s.allocateSeq(ctx)
 
 	refs, omitted := s.storeContents(ctx, action)
 	argsRef, args := s.spillArgs(ctx, action)
@@ -252,21 +264,54 @@ func (s *sessionRecording) spillArgs(ctx context.Context, action ActionEvent) (s
 	return res.FileId, action.Args
 }
 
-// Publish writes the recording's counters onto the session row.
+// allocateSeq takes the next step position from the SESSION ROW, which is the
+// one piece of state this replica and the MCP node both see.
 //
-// IT IS ALSO THE SEQ HANDOFF. The MCP node allocates its own step's seq by
-// reading `recordedSteps` off this row, so a session that never published
-// would hand every MCP step the seq of the first action.
+// A FAILURE FALLS BACK TO A LOCAL COUNTER rather than dropping the action. An
+// engine blip during a session should cost the recording its ordering
+// guarantee against the other writer, not the actions themselves -- and the
+// fallback is seeded from the last allocation, so it continues rather than
+// restarting at 0.
+func (s *sessionRecording) allocateSeq(ctx context.Context) int {
+	if s.store != nil {
+		allocCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		if seq, err := s.store.AllocateRecordingSeq(allocCtx, s.sessionId, s.owner); err == nil {
+			s.mu.Lock()
+			if seq >= s.fallbackSeq {
+				s.fallbackSeq = seq + 1
+			}
+			s.mu.Unlock()
+			return seq
+		} else {
+			s.logger.Warn("app session: could not allocate a step position; falling back to a local count",
+				"session_id", s.sessionId, "error", err)
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	seq := s.fallbackSeq
+	s.fallbackSeq++
+	return seq
+}
+
+// Publish writes how much of the session was LOST onto the row.
+//
+// It no longer writes the step count: that is the allocator's, and a second
+// writer of the same field would undo an allocation the MCP node had already
+// taken. The drop count has one writer -- this one -- so it is published from
+// here.
 func (s *sessionRecording) Publish(ctx context.Context, store AppSessionStore, status string) {
 	if s == nil || store == nil {
 		return
 	}
 	s.mu.Lock()
-	recorded, dropped := s.seq, s.sequence.Dropped()
+	dropped := s.sequence.Dropped()
 	s.mu.Unlock()
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	if err := store.RecordAppSessionProgress(writeCtx, s.sessionId, recorded, dropped, status); err != nil {
+	// -1 for recordedSteps means "do not name it".
+	if err := store.RecordAppSessionProgress(writeCtx, s.sessionId, -1, dropped, status); err != nil {
 		s.logger.Warn("app session: could not publish recording progress",
 			"session_id", s.sessionId, "error", err)
 	}
@@ -308,9 +353,8 @@ func (s *sessionRecording) Close(ctx context.Context, result RunResult, transcri
 	if s == nil {
 		return 0, 0
 	}
+	seq := s.allocateSeq(ctx)
 	s.mu.Lock()
-	seq := s.seq
-	s.seq++
 	recorded, dropped = s.recorded, s.sequence.Dropped()
 	s.mu.Unlock()
 

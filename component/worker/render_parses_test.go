@@ -238,6 +238,15 @@ func writeDrivers() []driver {
 		{"EndAppSession", func(ctx context.Context, s *EngineStore) error {
 			return s.EndAppSession(ctx, sess)
 		}},
+		// The seq allocator renders BOTH a read and a write -- appSessionById
+		// then recordAppSessionProgress -- and both have to parse. The error
+		// is ignored because the recording executor answers no rows, which is
+		// not what is under test here: what is under test is the two
+		// statements it handed the engine on the way.
+		{"AllocateRecordingSeq", func(ctx context.Context, s *EngineStore) error {
+			_, _ = s.AllocateRecordingSeq(ctx, sess.ID, sess.OwnerUserId)
+			return nil
+		}},
 	}
 }
 

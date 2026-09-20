@@ -9,6 +9,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // appsession_store.go persists v1:worker:appSession rows (memql#4360).
@@ -87,6 +88,17 @@ type AppSessionStore interface {
 	CreateAppSession(ctx context.Context, row AppSessionRow) error
 	RecordAppSessionProgress(ctx context.Context, sessionId string, recordedSteps, droppedActions int, status string) error
 	EndAppSession(ctx context.Context, row AppSessionRow) error
+	// AllocateRecordingSeq takes the next step position for this session's
+	// recording and advances the shared counter.
+	//
+	// IT IS ON THE ROW BECAUSE TWO REPLICAS WRITE INTO ONE RUN. The replica
+	// holding the session writes its actions; the MCP node writes an `mcp`
+	// step when the app calls back into MemQL, and the two never speak. A
+	// run's step order is what a client sorts by, so a counter in either
+	// one's memory is a second opinion about that order -- and not a
+	// theoretical one: an app that calls MemQL before its first recorded
+	// action, which is ordinary, would collide on seq 0 every time.
+	AllocateRecordingSeq(ctx context.Context, sessionId, ownerUserId string) (int, error)
 }
 
 // EngineStore serves both surfaces. Asserted rather than left to the
@@ -140,12 +152,22 @@ func (s *EngineStore) RecordAppSessionProgress(ctx context.Context, sessionId st
 	if s == nil || s.Engine == nil {
 		return nil
 	}
-	return s.executeMutation(appSessionWriteContext(ctx, ""), "recordAppSessionProgress", map[string]any{
-		"sessionId":      sessionId,
-		"recordedSteps":  recordedSteps,
-		"droppedActions": droppedActions,
-		"status":         status,
-	})
+	args := map[string]any{"sessionId": sessionId}
+	// A NEGATIVE COUNT MEANS "DO NOT NAME THIS FIELD", and an empty status the
+	// same. The mutation is a read-merge with no `?? 0` on either counter
+	// precisely so a caller can advance one without resetting the other --
+	// the allocator advances only recordedSteps, and naming droppedActions as
+	// 0 beside it would erase a gap the drain had already counted.
+	if recordedSteps >= 0 {
+		args["recordedSteps"] = recordedSteps
+	}
+	if droppedActions >= 0 {
+		args["droppedActions"] = droppedActions
+	}
+	if strings.TrimSpace(status) != "" {
+		args["status"] = status
+	}
+	return s.executeMutation(appSessionWriteContext(ctx, ""), "recordAppSessionProgress", args)
 }
 
 // EndAppSession drives the row to a terminal status.
@@ -179,6 +201,67 @@ func (s *EngineStore) EndAppSession(ctx context.Context, row AppSessionRow) erro
 		"result":              resultArg(row.Result),
 		"endedAt":             row.EndedAt.UTC().Format(time.RFC3339Nano),
 	})
+}
+
+// AllocateRecordingSeq implements the shared allocator.
+//
+// Read-modify-write, under the OWNER's actor for the read (appSessionById is
+// @actor and owner-tiered) and with internal origin for the write. Two
+// genuinely concurrent allocations can still take one value -- a tie in
+// display order, never a lost row, because the step KEY is what the row id
+// derives from and each writer's is distinct. What it removes is the
+// SYSTEMATIC collision of two independent counters.
+func (s *EngineStore) AllocateRecordingSeq(ctx context.Context, sessionId, ownerUserId string) (int, error) {
+	if s == nil || s.Engine == nil {
+		return 0, fmt.Errorf("worker.store: engine not configured")
+	}
+	query, err := langparser.RenderCall("appSessionById", map[string]any{"sessionId": sessionId})
+	if err != nil {
+		return 0, fmt.Errorf("worker.store: render appSessionById: %w", err)
+	}
+	nodes, err := s.executeAndExtract(appSessionReadContext(ctx, ownerUserId), "query "+query)
+	if err != nil {
+		return 0, fmt.Errorf("worker.store: read the session's step count: %w", err)
+	}
+	seq := 0
+	for _, node := range nodes {
+		if node == nil || node.Payload == nil {
+			continue
+		}
+		seq = num.Float64Or(payloadNumber(node.Payload.AsMap(), "recordedSteps"), 0)
+		break
+	}
+	if err := s.RecordAppSessionProgress(ctx, sessionId, seq+1, -1, ""); err != nil {
+		return seq, err
+	}
+	return seq, nil
+}
+
+// appSessionReadContext borrows the owner for a read and stamps NOTHING else.
+//
+// Deliberately not appSessionWriteContext: stamping internal origin on a read
+// would widen it silently and move the decision away from the actor, which is
+// the failure nobody notices (integrations/work's RULE 2, same reasoning).
+func appSessionReadContext(ctx context.Context, ownerUserId string) context.Context {
+	if strings.TrimSpace(ownerUserId) == "" {
+		return ctx
+	}
+	return auth.ContextWithUserActor(ctx, ownerUserId)
+}
+
+// payloadNumber reads a numeric payload field as a float64, whatever concrete
+// type the decode produced. An absent key is 0, which for the step allocator
+// is the honest answer: a session with no steps recorded starts at position 0.
+func payloadNumber(payload map[string]any, key string) float64 {
+	switch v := payload[key].(type) {
+	case float64:
+		return v
+	case int64:
+		return float64(v)
+	case int:
+		return float64(v)
+	}
+	return 0
 }
 
 // resultArg renders the harness's structured answer for the mutation, or nil

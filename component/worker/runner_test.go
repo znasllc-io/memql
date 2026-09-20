@@ -11,10 +11,12 @@ import (
 )
 
 type recordingAppSessionStore struct {
-	mu       sync.Mutex
-	created  []AppSessionRow
-	appends  []AppSessionRow
-	finished []AppSessionRow
+	mu        sync.Mutex
+	created   []AppSessionRow
+	appends   []AppSessionRow
+	finished  []AppSessionRow
+	allocated map[string]int
+	allocErr  error
 }
 
 func (s *recordingAppSessionStore) CreateAppSession(_ context.Context, row AppSessionRow) error {
@@ -27,9 +29,18 @@ func (s *recordingAppSessionStore) CreateAppSession(_ context.Context, row AppSe
 func (s *recordingAppSessionStore) RecordAppSessionProgress(_ context.Context, sessionId string, recordedSteps, droppedActions int, status string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.appends = append(s.appends, AppSessionRow{
-		ID: sessionId, RecordedSteps: recordedSteps, DroppedActions: droppedActions, Status: status,
-	})
+	// A NEGATIVE COUNT MEANS "the caller did not name this field", which is
+	// how the allocator advances one counter without resetting the other.
+	// Recording it as 0 would make this fake claim a write the real store
+	// never makes.
+	row := AppSessionRow{ID: sessionId, Status: status}
+	if recordedSteps >= 0 {
+		row.RecordedSteps = recordedSteps
+	}
+	if droppedActions >= 0 {
+		row.DroppedActions = droppedActions
+	}
+	s.appends = append(s.appends, row)
 	return nil
 }
 
@@ -38,6 +49,25 @@ func (s *recordingAppSessionStore) EndAppSession(_ context.Context, row AppSessi
 	defer s.mu.Unlock()
 	s.finished = append(s.finished, row)
 	return nil
+}
+
+// AllocateRecordingSeq is the SHARED allocator, modelled here as the real one
+// behaves: read the count off the row, hand it out, advance. Keeping it in
+// this fake rather than returning a fresh counter per caller is what lets a
+// test observe the property that matters -- two writers into one session
+// never take the same position.
+func (s *recordingAppSessionStore) AllocateRecordingSeq(_ context.Context, sessionId, _ string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.allocErr != nil {
+		return 0, s.allocErr
+	}
+	if s.allocated == nil {
+		s.allocated = map[string]int{}
+	}
+	seq := s.allocated[sessionId]
+	s.allocated[sessionId] = seq + 1
+	return seq, nil
 }
 
 func (s *recordingAppSessionStore) terminal() []AppSessionRow {

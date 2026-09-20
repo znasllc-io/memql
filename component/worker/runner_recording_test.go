@@ -241,16 +241,18 @@ func TestAnOutOfOrderActionIsDroppedAndTheGapRecorded(t *testing.T) {
 			closes[0].DroppedActions)
 	}
 
-	// The count reaches the ROW, which is what a Fleet reader sees and what
-	// the MCP node allocates its own step's seq from.
-	var sawProgress bool
+	// THE LOSS REACHES THE ROW, which is what a Fleet reader sees. The step
+	// COUNT deliberately does not come from here -- it is the allocator's
+	// field, and a second writer would undo a position the MCP node had
+	// already taken.
+	var sawDrops bool
 	for _, p := range store.appends {
-		if p.RecordedSteps > 0 {
-			sawProgress = true
+		if p.DroppedActions > 0 {
+			sawDrops = true
 		}
 	}
-	if !sawProgress {
-		t.Error("the recording's progress never reached the session row")
+	if !sawDrops {
+		t.Error("the recording's lost actions never reached the session row")
 	}
 }
 
@@ -487,5 +489,104 @@ func TestACancelledSessionStillStoresWhatItProduced(t *testing.T) {
 	}
 	if len(store.terminal()) != 1 {
 		t.Error("the terminal row was lost with the context")
+	}
+}
+
+// TestTheTwoWritersNeverTakeTheSameStepPosition -- the defect the design's
+// first draft shipped with, caught before it landed.
+//
+// The replica holding the session and the MCP node write into ONE recording
+// run, and a run's step order is what a client sorts by. With a counter in
+// each one's memory they do not merely race -- they collide SYSTEMATICALLY:
+// an app that calls MemQL before its first recorded action, which is
+// ordinary, takes seq 0 and so does the action.
+//
+// The allocator lives on the session row because that is the only state both
+// replicas can see -- the same reasoning `submit` rests on, and the reason
+// there is no NodeService hop here.
+func TestTheTwoWritersNeverTakeTheSameStepPosition(t *testing.T) {
+	runner, session, store, rec, _ := recordingFixture(t)
+
+	// THE MCP NODE GOES FIRST, which is the case an in-memory counter gets
+	// wrong every time.
+	mcpFirst, err := store.AllocateRecordingSeq(context.Background(), "sess-run", "user-1")
+	if err != nil {
+		t.Fatalf("AllocateRecordingSeq: %v", err)
+	}
+
+	go func() {
+		waitForSession(t, session, "sess-run")
+		for i := 1; i <= 3; i++ {
+			session.handleAppSessionChunk(actionChunk(t, uint64(i), map[string]any{
+				"id": fmt.Sprintf("a%d", i), "seq": i, "tool": "exec",
+			}))
+		}
+		session.handleAppSessionEnd(&memqlv1.AppSessionEnd{SessionId: "sess-run"})
+	}()
+
+	if _, err := runner.Run(context.Background(), session.worker, runSpec(), nil); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// A second MCP call after the session, to catch an allocator that only
+	// agrees in one direction.
+	mcpLast, err := store.AllocateRecordingSeq(context.Background(), "sess-run", "user-1")
+	if err != nil {
+		t.Fatalf("AllocateRecordingSeq: %v", err)
+	}
+
+	actions, _, closes := rec.recorded()
+	taken := map[int]string{mcpFirst: "the MCP node's first call", mcpLast: "the MCP node's last call"}
+	for i, a := range actions {
+		if who, clash := taken[a.Seq]; clash {
+			t.Errorf("action %d took seq %d, already held by %s -- two steps at one position "+
+				"make the run's order a coin flip", i, a.Seq, who)
+		}
+		taken[a.Seq] = fmt.Sprintf("action %d", i)
+	}
+	for _, c := range closes {
+		if who, clash := taken[c.Seq]; clash {
+			t.Errorf("the app_answer step took seq %d, already held by %s", c.Seq, who)
+		}
+		taken[c.Seq] = "the app_answer step"
+	}
+	// 2 MCP calls + 3 actions + 1 answer, each at its own position.
+	if len(taken) != 6 {
+		t.Fatalf("6 writers took %d distinct positions: %v", len(taken), taken)
+	}
+}
+
+// TestAnUnreachableAllocatorStillRecordsTheActions. An engine blip during a
+// session should cost the recording its ordering guarantee against the other
+// writer, not the actions themselves.
+func TestAnUnreachableAllocatorStillRecordsTheActions(t *testing.T) {
+	runner, session, store, rec, _ := recordingFixture(t)
+	store.allocErr = fmt.Errorf("the engine is unreachable")
+
+	go func() {
+		waitForSession(t, session, "sess-run")
+		for i := 1; i <= 3; i++ {
+			session.handleAppSessionChunk(actionChunk(t, uint64(i), map[string]any{
+				"id": fmt.Sprintf("a%d", i), "seq": i, "tool": "exec",
+			}))
+		}
+		session.handleAppSessionEnd(&memqlv1.AppSessionEnd{SessionId: "sess-run"})
+	}()
+
+	if _, err := runner.Run(context.Background(), session.worker, runSpec(), nil); err != nil {
+		t.Fatalf("Run: %v -- an unreachable allocator must not fail the session", err)
+	}
+	actions, _, _ := rec.recorded()
+	if len(actions) != 3 {
+		t.Fatalf("recorded %d actions, want 3 -- the fallback keeps the recording going", len(actions))
+	}
+	// And the fallback still counts UP rather than restarting at 0 on each
+	// action, which would put every step of the session at one position.
+	seen := map[int]bool{}
+	for _, a := range actions {
+		if seen[a.Seq] {
+			t.Errorf("the fallback handed out seq %d twice", a.Seq)
+		}
+		seen[a.Seq] = true
 	}
 }
