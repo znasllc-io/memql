@@ -283,7 +283,12 @@ func (s *sessionRecording) StoreTranscript(ctx context.Context, text string, tru
 	// By END the app has reported what it served with, so the transcript --
 	// the artifact a recording pass reads first -- carries the full stamp.
 	provenance.Model, provenance.Effort = model, effort
-	res, err := s.contents.StoreContent(ctx, ContentRequest{
+	// A DETACHED CONTEXT, for finishRow's reason: the caller's may already be
+	// cancelled -- that is one of the ways a session ends -- and a cancelled
+	// run's output is often exactly the output somebody wants to read.
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
+	defer cancel()
+	res, err := s.contents.StoreContent(writeCtx, ContentRequest{
 		OwnerUserId: s.owner,
 		Name:        "transcript-" + shortLabel(s.sessionId) + ".txt",
 		MimeType:    "text/plain",

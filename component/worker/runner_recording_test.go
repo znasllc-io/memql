@@ -440,3 +440,38 @@ func TestASessionRunsWhenNothingRecords(t *testing.T) {
 		t.Error("a node that stores no content must not claim a transcript file")
 	}
 }
+
+// TestACancelledSessionStillStoresWhatItProduced. The caller's context is
+// already dead -- that is one of the ways a session ends -- and the output of
+// a run somebody cancelled is often exactly the output they wanted to read.
+// finishRow detaches for this reason; so must the transcript and the close.
+func TestACancelledSessionStillStoresWhatItProduced(t *testing.T) {
+	runner, session, store, rec, contents := recordingFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	go func() {
+		waitForSession(t, session, "sess-run")
+		session.handleAppSessionChunk(actionChunk(t, 1, map[string]any{"id": "a1", "seq": 1, "tool": "exec"}))
+		session.handleAppSessionChunk(&memqlv1.AppSessionChunk{
+			SessionId: "sess-run", Stream: "stdout", Data: []byte("half-finished work"), Seq: 2,
+		})
+		cancel()
+	}()
+
+	result, _ := runner.Run(ctx, session.worker, runSpec(), nil)
+	if result.Status != AppSessionStatusCancelled {
+		t.Fatalf("status = %q, want cancelled", result.Status)
+	}
+	if result.TranscriptFileId == "" {
+		t.Error("a cancelled run lost the output it had already produced")
+	}
+	if contents.count() == 0 {
+		t.Error("nothing was stored for a cancelled run")
+	}
+	if _, _, closes := rec.recorded(); len(closes) != 1 {
+		t.Errorf("the recording closed %d times, want once even on a cancel", len(closes))
+	}
+	if len(store.terminal()) != 1 {
+		t.Error("the terminal row was lost with the context")
+	}
+}
