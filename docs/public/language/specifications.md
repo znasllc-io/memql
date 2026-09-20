@@ -113,7 +113,7 @@ spec actorEnvelope requiresClusterOwner = actor => actor.role == "owner"
 
 (The shipped spec of exactly this shape is `requiresOwner`, in
 `dsl/deployment/specs.memql`. The example declares its own name because a
-shipped construct resolves `requiresOwner` BY BARE NAME: three shipped queries
+shipped construct resolves `requiresOwner` BY BARE NAME: shipped queries
 apply `requiresOwner(actor)` in their filters, and a second declaration makes
 that name ambiguous, so those filters stop lowering and the engine refuses the
 load. The rule is about bare-name resolution, not about duplicate names in
