@@ -270,6 +270,12 @@ import {
 } from './library/artifactDocuments.js';
 import { resolveArtifactMeta } from './library/artifactMeta.js';
 import { ResultPanel, RunPanel, conceptMap, type RunPanelHost } from './webview/runPanel.js';
+import {
+  COMMAND_LANGUAGE_REFERENCE,
+  LanguageReferencePanel,
+  type LanguageClusterReader,
+} from './webview/languageReferencePanel.js';
+import { languagePin } from './state/languageReference.js';
 
 let client: LanguageClient | undefined;
 let connections: ConnectionManager | undefined;
@@ -478,6 +484,8 @@ export function activate(context: ExtensionContext): MemqlExtensionApi {
   // operator in a restricted folder never learns the themes exist.
   offerMemqlThemeOnce(context);
 
+  registerLanguageReference(context);
+
   // The runtime surface reads credentials from the home directory and opens a
   // network connection, so it is gated on workspace trust. Language features
   // above are not.
@@ -503,6 +511,69 @@ export function activate(context: ExtensionContext): MemqlExtensionApi {
   // inside a real editor can drive a uri without asking the operator to click
   // VS Code's own "allow this extension to open the URI" prompt.
   return { handleOpenUri };
+}
+
+/**
+ * Register "MemQL: Show Language Reference".
+ *
+ * OUTSIDE THE TRUST GATE, for the reason offerMemqlThemeOnce above it is: this
+ * is a LANGUAGE surface, not a runtime one. With no cluster it shows the
+ * edition, that edition's status and the grammar version this extension was
+ * built against -- which is exactly the language its bundled server is giving
+ * the person completion and diagnostics in -- and it reads no credential and
+ * opens no connection to do it. A restricted folder is where somebody is most
+ * likely to be reading `.memql` with nothing connected, so gating this would
+ * take the reference away from the window that needs it most.
+ *
+ * THE THREE DEPENDENCIES ARE CLOSURES OVER `connections`, read at the moment
+ * they are called rather than captured here: this runs before the runtime
+ * surface exists (and, in an untrusted window, before it may ever exist), so a
+ * value read now would be `undefined` forever.
+ *
+ * THE ONE GAP, stated rather than hidden: a panel opened in an untrusted
+ * window subscribes to nothing, because there is no ConnectionManager to
+ * subscribe to. Granting trust and connecting therefore does not refresh a
+ * panel that is already open -- running the command again does, since `open()`
+ * re-points the deps and re-reads. In a trusted window, which is every window
+ * that can connect at all, the manager exists from activation and the panel
+ * follows every connect, disconnect and cluster switch.
+ */
+function registerLanguageReference(context: ExtensionContext): void {
+  context.subscriptions.push(
+    commands.registerCommand(COMMAND_LANGUAGE_REFERENCE, () => {
+      LanguageReferencePanel.open(context, {
+        pin: languagePin(context.extension?.packageJSON),
+        reader: languageClusterReader,
+        canSelectCluster: () => connections !== undefined,
+        onDidChangeConnection: (listener) => {
+          const stop = connections?.onDidChangeState(() => listener());
+          return () => stop?.();
+        },
+      });
+    })
+  );
+}
+
+/**
+ * The connected cluster, as the language reference reads it.
+ *
+ * Undefined unless there is a live query client AND the manager reports
+ * "connected": the panel names the cluster it read from, and a name taken from
+ * a manager that is mid-reconnect would label one cluster's grammar with
+ * another's name.
+ */
+function languageClusterReader(): LanguageClusterReader | undefined {
+  const query = connections?.query;
+  const state = connections?.state;
+  if (query === undefined || state === undefined || state.status !== 'connected') {
+    return undefined;
+  }
+  return {
+    name: state.clusterName,
+    edition: connections?.edition,
+    grammarVersion: connections?.grammarVersion,
+    executeNamed: (name, call) => query.executeNamed(name, call),
+  };
 }
 
 /**

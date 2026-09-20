@@ -1,13 +1,13 @@
 // Every panel document inlines the brand tokens (memql#4422, D5).
 //
-// WHAT IT IS FOR. All nine panel classes wear the brand today. This gate is
-// what keeps the tenth honest: a new panel that forgets `brandStyleBlock()`
-// renders with VS Code's raw defaults, which does not look broken -- it looks
-// like a different product, which is the exact complaint that opened this
-// epic and the exact thing nobody notices in review.
+// WHAT IT IS FOR. All ten panel classes wear the brand today. This gate is
+// what keeps the eleventh honest: a new panel that forgets
+// `brandStyleBlock()` renders with VS Code's raw defaults, which does not look
+// broken -- it looks like a different product, which is the exact complaint
+// that opened this epic and the exact thing nobody notices in review.
 //
-// WHY A SOURCE CHECK AND NOT A RENDER OF ALL NINE. Nine panel classes take
-// nine different dependency sets, several of which need a live
+// WHY A SOURCE CHECK AND NOT A RENDER OF ALL TEN. Ten panel classes take ten
+// different dependency sets, several of which need a live
 // ConnectionManager. A render-of-everything gate would in practice become a
 // render-of-whatever-was-cheap gate, and the panels left out would be exactly
 // where the next one goes wrong. So the sweep is over source -- and the last
@@ -218,7 +218,7 @@ test("the detector is not fooled by a sibling document carrying the block", () =
 // The sweep
 // -----------------------------------------------------------------------------
 
-test("the sweep sees all seven panel files and nine documents", () => {
+test("the sweep sees all eight panel files and ten documents", () => {
   // The reachable positive for the sweep below. Every assertion after this is
   // "nothing was missing"; without a count, a sweep that found no files at all
   // -- a renamed directory, a changed suffix -- would satisfy them all while
@@ -233,6 +233,7 @@ test("the sweep sees all seven panel files and nine documents", () => {
       "connectionPanel.ts",
       "constructPanel.ts",
       "deploymentPanel.ts",
+      "languageReferencePanel.ts",
       "runPanel.ts",
     ],
     "ADDED OR REMOVED A PANEL? Update this list and the document count below. Failing here on a legitimately-added panel is the intended cost: a new panel is exactly when somebody should be made to look at whether it wears the brand.",
@@ -243,8 +244,8 @@ test("the sweep sees all seven panel files and nine documents", () => {
   );
   assert.equal(
     total,
-    9,
-    "seven files, nine panel classes, nine documents -- automationPanel.ts and runPanel.ts host two each. If you added a panel class, bump this; if this dropped without you touching a panel, the document scan has stopped matching and the sweep below is no longer looking at anything.",
+    10,
+    "eight files, ten panel classes, ten documents -- automationPanel.ts and runPanel.ts host two each. If you added a panel class, bump this; if this dropped without you touching a panel, the document scan has stopped matching and the sweep below is no longer looking at anything.",
   );
 });
 
@@ -261,7 +262,7 @@ test("every panel document inlines the brand tokens", () => {
 });
 
 test("the *Screens.ts fragment modules are exempt because they build no document", () => {
-  // EXEMPT BY CONSTRUCTION, not by name. These three modules produce HTML
+  // EXEMPT BY CONSTRUCTION, not by name. These four modules produce HTML
   // FRAGMENTS that are interpolated into a panel's document, so they inherit
   // that document's <style> block and have nowhere of their own to put one.
   // Asserting that they emit no document is what keeps the exemption honest:
@@ -276,6 +277,7 @@ test("the *Screens.ts fragment modules are exempt because they build no document
     "constructScreens.ts",
     "deploymentScreens.ts",
     "installScreens.ts",
+    "languageReferenceScreens.ts",
   ]);
   for (const name of screens) {
     assert.deepEqual(
