@@ -75,7 +75,15 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
     <div ref={scrollRoot} className="fleet-home" hidden={flow.active}>
     <div className="fleet-workspace" data-os-page-context={JSON.stringify({ page: "Machines", machineId: machine?.id, machine: machine ? machineName(machine) : undefined, view: VIEW_NAMES[selection.view], search: machineSearch || undefined })}>
       <div className="fleet-workspace-header">
-      <Head title="Machines" navigation={selection.view === "equipment" || !machine} meta={<span className="fleet-feed-label">{snapshot?.error && machines.length === 0 ? "Unavailable" : settled ? `${machines.length} ${machines.length === 1 ? "machine" : "machines"}` : "Connecting"}</span>}>
+      {/* EQUIPMENT IS A DEPTH TOO. Every other machine view publishes
+          "Machines > <machine> > <view>" from the inspector heading below, and
+          this one used to publish only its title -- so the trail read
+          "Machines" on Equipment and "Machines > local > Details" one click
+          away, as though selecting a machine had not happened. The ancestors
+          carry no handler here on purpose: both lead to this machine's
+          Equipment view, which is where the person already is, and a crumb
+          that goes nowhere is not a link. */}
+      <Head title="Machines" breadcrumbs={machine ? [{ label: "Machines" }, { label: machineName(machine) }, { label: VIEW_NAMES.equipment }] : undefined} navigation={selection.view === "equipment" || !machine} meta={<span className="fleet-feed-label">{snapshot?.error && machines.length === 0 ? "Unavailable" : settled ? `${machines.length} ${machines.length === 1 ? "machine" : "machines"}` : "Connecting"}</span>}>
         {machines.length ? <Select id="fleet-selected-machine" label="Selected machine" value={machine?.id ?? ""} onChange={id => select({ machineId: id, view: "equipment" })}>
           {!machine ? <option value="">Choose a machine</option> : null}
           {machines.map(m => <option key={m.id} value={m.id}>{machineName(m)} · {isRevoked(m) ? "Revoked" : isWorkerOnline(m, now) ? "Online" : "Offline"}</option>)}
