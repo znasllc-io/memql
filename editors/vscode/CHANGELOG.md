@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.0
+
+MemQL edition 2026 is frozen, and this release is the editor that speaks it.
+
+- **The language is version one.** Edition 2026 / language 1.0 is frozen:
+  grammar `2026.09-before-write-error-accessor-77cda60c`, unchanged from 0.5.1.
+  What the freeze means for you is that a form this extension highlights and
+  completes is a form clusters will go on accepting -- a public form now leaves
+  only through a deprecation window, warning with its replacement for at least
+  two minor releases before it stops loading.
+- **The cluster can now hand a model its own grammar.** Clusters on this
+  release serve a generated BNF and a vocabulary of every construct,
+  annotation, builtin and function over `memqlGrammar()` and
+  `memqlVocabulary()`. Both are generated from the same tables this extension's
+  highlighting and completion are generated from, so what a cluster tells a
+  model it accepts and what the editor offers you cannot drift apart.
+- **No change to how the extension behaves.** Highlighting, completion,
+  diagnostics, hover and signature help are as they were in 0.5.1; the language
+  server, TextMate grammar and language configuration regenerate byte-identical
+  against the frozen edition. Upgrade for the freeze, not for a fix.
+
 ## 0.5.1
 
 - Support edition 2026 before-write triggers and `row.<field> = <expression>` statements. Retire the no-argument `error()` accessor while retaining `error("message")`. Grammar: `2026.09-before-write-error-accessor-77cda60c`.
