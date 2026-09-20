@@ -94,6 +94,19 @@ func TestAppSessionRowPersistsAndReadsBack(t *testing.T) {
 		"advancing only droppedActions reset the step allocator, which gives two steps one seq")
 	require.Equal(t, float64(2), p["droppedActions"])
 
+	// AND THE OTHER DIRECTION, which is the one the allocator itself depends
+	// on: ClaimRecordingSlot writes recordedSteps and names droppedActions
+	// nowhere, so if the mutation defaulted the absent one a claim would
+	// erase every gap the drain had already counted -- and a recording that
+	// lost actions would read as complete.
+	runMutation(t, ctx, eng, "recordAppSessionProgress", map[string]any{
+		"sessionId": sessionID, "recordedSteps": 5,
+	})
+	p = latestPayload(t, ctx, db, conceptName, storedID)
+	require.Equal(t, float64(5), p["recordedSteps"])
+	require.Equal(t, float64(2), p["droppedActions"],
+		"claiming a step position erased the drop count, so an incomplete recording reads as complete")
+
 	// The terminal write, carrying the app's REPORTED usage verbatim.
 	runMutation(t, ctx, eng, "endAppSession", map[string]any{
 		"sessionId": sessionID,

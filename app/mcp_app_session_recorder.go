@@ -6,12 +6,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/znasllc-io/memql/component/auth"
-	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/mcp"
-	memqlengine "github.com/znasllc-io/memql/component/memql"
 	workerservice "github.com/znasllc-io/memql/component/worker"
-	"github.com/znasllc-io/memql/core/num"
 	"github.com/znasllc-io/memql/integrations/work"
 )
 
@@ -31,20 +27,21 @@ import (
 // that nobody recorded, on the node that was the only one to see it.
 //
 // ============================================================================
-// SEQ IS ALLOCATED FROM THE ROW
+// ONE ALLOCATOR, AND IT IS component/worker's
 // ============================================================================
 // A run's step order is what a client sorts by, and two writers cannot
-// produce one order without sharing a counter. `recordedSteps` is that
-// counter: this reads it, takes it as the step's seq, and writes it back
-// incremented. A race with the other replica gives two steps one seq -- a tie
-// in display order, never a lost row, because the step KEY is what the row id
-// derives from and this one's is unique per call.
+// produce one order without sharing a counter. `ClaimRecordingSlot` is that
+// shared read-modify-write, and it answers all three things this side needs
+// -- the owner, the recording run and the position -- from one read of the
+// row. Writing a second copy here is what would drift: it would be the same
+// three lines in two packages, and the first divergence is a timeline whose
+// steps sit on top of each other.
 
 // mcpAppSessionRecorder writes an app's MCP tool calls into its recording.
 type mcpAppSessionRecorder struct {
-	engine *memqlengine.MemQLEngine
-	writer *work.SessionWriter
-	logger *slog.Logger
+	sessions *workerservice.EngineStore
+	writer   *work.SessionWriter
+	logger   *slog.Logger
 }
 
 var _ mcp.AppSessionRecorder = (*mcpAppSessionRecorder)(nil)
@@ -54,9 +51,9 @@ func newMCPAppSessionRecorder(a *App) *mcpAppSessionRecorder {
 		return nil
 	}
 	return &mcpAppSessionRecorder{
-		engine: a.engine,
-		writer: work.NewSessionWriter(a.engine, a.Logger),
-		logger: a.Logger,
+		sessions: &workerservice.EngineStore{Engine: a.engine, Logger: a.Logger},
+		writer:   work.NewSessionWriter(a.engine, a.Logger),
+		logger:   a.Logger,
 	}
 }
 
@@ -69,40 +66,43 @@ func (r *mcpAppSessionRecorder) RecordToolCall(ctx context.Context, c mcp.AppSes
 	if sessionId == "" {
 		return nil
 	}
-	session, err := r.readSession(ctx, sessionId)
+	// NO OWNER IS PASSED: an app-session credential's subject IS the owning
+	// user, so the inbound actor is already the right one and there is
+	// nothing to borrow. That is the whole reason the class exists
+	// (memql#4857), and it is what makes this read safe without a wider
+	// authority.
+	slot, err := r.sessions.ClaimRecordingSlot(ctx, sessionId, "")
 	if err != nil {
 		// A session this credential cannot read is not this caller's, which
 		// the credential makes impossible unless the row was deleted
-		// underneath it. Logged rather than raised: the tool already ran.
-		r.logger.Warn("app session recording: the session row could not be read; the MCP call is unrecorded",
+		// underneath it. Logged rather than raised: the tool already ran and
+		// its result is on its way back to the app.
+		r.logger.Warn("app session recording: the session's recording slot could not be claimed; the MCP call is unrecorded",
 			"session_id", sessionId, "error", err)
 		return err
 	}
-	owner, _ := session["ownerUserId"].(string)
-	runId, _ := session["sessionRunId"].(string)
-	if strings.TrimSpace(owner) == "" || strings.TrimSpace(runId) == "" {
+	if strings.TrimSpace(slot.OwnerUserId) == "" || strings.TrimSpace(slot.RunId) == "" {
 		// A session opened before the recording existed, or on a node with no
 		// recorder. Nothing to write into, and inventing a run would put a
 		// step somewhere no reader of this session will look.
 		return nil
 	}
-	seq := r.allocateSeq(ctx, sessionId, session)
 
 	return r.writer.RecordAction(ctx, workerservice.RecordedAction{
 		SessionId:   sessionId,
-		OwnerUserId: owner,
-		RunId:       runId,
-		Seq:         seq,
+		OwnerUserId: slot.OwnerUserId,
+		RunId:       slot.RunId,
+		Seq:         slot.Seq,
 		Action: workerservice.ActionEvent{
 			// THE STEP KEY DERIVES FROM THIS ID, so it must be unique per
 			// call within the session. The seq alone would collide with an
 			// action's on a tie, and two steps at one row id is one step
 			// overwriting the other.
-			Id: fmt.Sprintf("mcp-%s-%d", sanitizeStepIdPart(c.Tool), seq),
-			// The action seq is the allocated one. It is not the cockpit's
-			// counter -- the cockpit never saw this call -- and reusing that
+			Id: fmt.Sprintf("mcp-%s-%d", sanitizeStepIdPart(c.Tool), slot.Seq),
+			// The action seq is the CLAIMED one. It is not the cockpit's
+			// counter -- the cockpit never saw this call -- and sharing that
 			// space is what puts the two writers in one order.
-			Seq:          uint64(seq),
+			Seq:          uint64(slot.Seq),
 			Tool:         "mcp",
 			Args:         mcpCallArgs(c),
 			ResultDigest: c.ResultDigest,
@@ -125,76 +125,6 @@ func mcpCallArgs(c mcp.AppSessionToolCall) map[string]any {
 		args["arguments"] = c.Args
 	}
 	return args
-}
-
-// readSession reads the app session's own row.
-//
-// UNDER THE SESSION'S OWNER, borrowed from... nothing yet: the row must be
-// read before the owner is known. `appSessionById` is @actor and owner-tiered,
-// so this runs it under the MCP request's own actor -- which for an
-// app-session bearer IS the owning user, because the credential's `sub` is
-// theirs. That is the whole reason the class exists (memql#4857), and it is
-// what makes this read safe without a wider authority.
-func (r *mcpAppSessionRecorder) readSession(ctx context.Context, sessionId string) (map[string]any, error) {
-	query, err := langparser.RenderCall("appSessionById", map[string]any{"sessionId": sessionId})
-	if err != nil {
-		return nil, err
-	}
-	res, err := r.engine.Execute(ctx, "query "+query)
-	if err != nil {
-		return nil, err
-	}
-	rows, _ := res.OutputPayload().([]any)
-	for _, raw := range rows {
-		if row, ok := raw.(map[string]any); ok {
-			return row, nil
-		}
-	}
-	return nil, fmt.Errorf("no session row is readable for this credential")
-}
-
-// allocateSeq takes the next step position and writes it back.
-//
-// The write is @serverOnly and this package is on the internal-origin
-// allowlist; the stamp is inline as the Execute argument, so the marked
-// context dies there. A failed write-back does NOT fail the recording: the
-// step still lands, and the cost is that the next allocation repeats this seq
-// -- a display tie rather than a lost row.
-func (r *mcpAppSessionRecorder) allocateSeq(ctx context.Context, sessionId string, session map[string]any) int {
-	seq := intFromRow(session, "recordedSteps")
-	query, err := langparser.RenderCall("recordAppSessionProgress", map[string]any{
-		"sessionId":     sessionId,
-		"recordedSteps": seq + 1,
-	})
-	if err != nil {
-		return seq
-	}
-	if _, err := r.engine.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+query); err != nil {
-		r.logger.Warn("app session recording: could not advance the step allocator; the next step may repeat this seq",
-			"session_id", sessionId, "error", err)
-	}
-	return seq
-}
-
-// intFromRow reads the step allocator off the session row.
-//
-// narrowing: SATURATE -- `recordedSteps` is an ORDERING, the position the next
-// step takes in the run. An absurd value is nonsense either way, but the two
-// wrong answers are not equally wrong: saturating puts the step at the top of
-// the range, where it sorts last and is visibly odd, while zero collides with
-// the FIRST action's seq and quietly makes two steps share a position. A bare
-// int() is worse than both -- out of range it is implementation-defined and
-// answers with the integer indefinite value.
-func intFromRow(row map[string]any, key string) int {
-	switch v := row[key].(type) {
-	case int:
-		return v
-	case int64:
-		return num.ClampInt64(v)
-	case float64:
-		return num.ClampFloat64(v)
-	}
-	return 0
 }
 
 // sanitizeStepIdPart bounds a tool name for use inside a step key.

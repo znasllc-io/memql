@@ -88,8 +88,9 @@ type AppSessionStore interface {
 	CreateAppSession(ctx context.Context, row AppSessionRow) error
 	RecordAppSessionProgress(ctx context.Context, sessionId string, recordedSteps, droppedActions int, status string) error
 	EndAppSession(ctx context.Context, row AppSessionRow) error
-	// AllocateRecordingSeq takes the next step position for this session's
-	// recording and advances the shared counter.
+	// ClaimRecordingSlot reads where this session's steps go -- its owner and
+	// its recording run -- and takes the next step position, advancing the
+	// shared counter.
 	//
 	// IT IS ON THE ROW BECAUSE TWO REPLICAS WRITE INTO ONE RUN. The replica
 	// holding the session writes its actions; the MCP node writes an `mcp`
@@ -98,7 +99,23 @@ type AppSessionStore interface {
 	// one's memory is a second opinion about that order -- and not a
 	// theoretical one: an app that calls MemQL before its first recorded
 	// action, which is ordinary, would collide on seq 0 every time.
-	AllocateRecordingSeq(ctx context.Context, sessionId, ownerUserId string) (int, error)
+	// ownerUserId is the actor to borrow for the read. EMPTY means "use the
+	// actor ctx already carries", which is the MCP node's case: an
+	// app-session credential's subject IS the owning user, so the inbound
+	// actor is already the right one and there is nothing to borrow.
+	ClaimRecordingSlot(ctx context.Context, sessionId, ownerUserId string) (RecordingSlot, error)
+}
+
+// RecordingSlot is where one step of a session's recording goes.
+type RecordingSlot struct {
+	// OwnerUserId and RunId come off the session row. Both EMPTY means the
+	// session predates the recording, or ran on a node with no recorder --
+	// which is not the same as a session that did nothing, and the caller
+	// records nothing rather than inventing a run.
+	OwnerUserId string
+	RunId       string
+	// Seq is this step's position, already claimed.
+	Seq int
 }
 
 // EngineStore serves both surfaces. Asserted rather than left to the
@@ -203,38 +220,51 @@ func (s *EngineStore) EndAppSession(ctx context.Context, row AppSessionRow) erro
 	})
 }
 
-// AllocateRecordingSeq implements the shared allocator.
+// ClaimRecordingSlot implements the shared allocator.
 //
-// Read-modify-write, under the OWNER's actor for the read (appSessionById is
-// @actor and owner-tiered) and with internal origin for the write. Two
-// genuinely concurrent allocations can still take one value -- a tie in
-// display order, never a lost row, because the step KEY is what the row id
-// derives from and each writer's is distinct. What it removes is the
-// SYSTEMATIC collision of two independent counters.
-func (s *EngineStore) AllocateRecordingSeq(ctx context.Context, sessionId, ownerUserId string) (int, error) {
+// ONE READ FOR ALL THREE ANSWERS. Both writers need the step position; the
+// MCP node also needs the owner and the run, which it cannot know any other
+// way -- its credential names a session and nothing else. A second reader for
+// those would be a second read of the same row on the same call.
+//
+// Read-modify-write: the read borrows the owner (appSessionById is @actor and
+// owner-tiered) and the write stamps internal origin. Two genuinely
+// concurrent allocations can still take one value -- a tie in display order,
+// never a lost row, because the step KEY is what the row id derives from and
+// each writer's is distinct. What it removes is the SYSTEMATIC collision of
+// two independent counters.
+func (s *EngineStore) ClaimRecordingSlot(ctx context.Context, sessionId, ownerUserId string) (RecordingSlot, error) {
 	if s == nil || s.Engine == nil {
-		return 0, fmt.Errorf("worker.store: engine not configured")
+		return RecordingSlot{}, fmt.Errorf("worker.store: engine not configured")
 	}
 	query, err := langparser.RenderCall("appSessionById", map[string]any{"sessionId": sessionId})
 	if err != nil {
-		return 0, fmt.Errorf("worker.store: render appSessionById: %w", err)
+		return RecordingSlot{}, fmt.Errorf("worker.store: render appSessionById: %w", err)
 	}
 	nodes, err := s.executeAndExtract(appSessionReadContext(ctx, ownerUserId), "query "+query)
 	if err != nil {
-		return 0, fmt.Errorf("worker.store: read the session's step count: %w", err)
+		return RecordingSlot{}, fmt.Errorf("worker.store: read the session's recording slot: %w", err)
 	}
-	seq := 0
+	var slot RecordingSlot
+	var found bool
 	for _, node := range nodes {
 		if node == nil || node.Payload == nil {
 			continue
 		}
-		seq = num.Float64Or(payloadNumber(node.Payload.AsMap(), "recordedSteps"), 0)
+		payload := node.Payload.AsMap()
+		slot.OwnerUserId, _ = payload["ownerUserId"].(string)
+		slot.RunId, _ = payload["sessionRunId"].(string)
+		slot.Seq = num.Float64Or(payloadNumber(payload, "recordedSteps"), 0)
+		found = true
 		break
 	}
-	if err := s.RecordAppSessionProgress(ctx, sessionId, seq+1, -1, ""); err != nil {
-		return seq, err
+	if !found {
+		return RecordingSlot{}, fmt.Errorf("worker.store: no session row is readable for %s", sessionId)
 	}
-	return seq, nil
+	if err := s.RecordAppSessionProgress(ctx, sessionId, slot.Seq+1, -1, ""); err != nil {
+		return slot, err
+	}
+	return slot, nil
 }
 
 // appSessionReadContext borrows the owner for a read and stamps NOTHING else.

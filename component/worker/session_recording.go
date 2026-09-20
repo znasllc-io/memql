@@ -276,7 +276,8 @@ func (s *sessionRecording) allocateSeq(ctx context.Context) int {
 	if s.store != nil {
 		allocCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
-		if seq, err := s.store.AllocateRecordingSeq(allocCtx, s.sessionId, s.owner); err == nil {
+		if slot, err := s.store.ClaimRecordingSlot(allocCtx, s.sessionId, s.owner); err == nil {
+			seq := slot.Seq
 			s.mu.Lock()
 			if seq >= s.fallbackSeq {
 				s.fallbackSeq = seq + 1

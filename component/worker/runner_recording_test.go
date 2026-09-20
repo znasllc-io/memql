@@ -509,10 +509,11 @@ func TestTheTwoWritersNeverTakeTheSameStepPosition(t *testing.T) {
 
 	// THE MCP NODE GOES FIRST, which is the case an in-memory counter gets
 	// wrong every time.
-	mcpFirst, err := store.AllocateRecordingSeq(context.Background(), "sess-run", "user-1")
+	firstSlot, err := store.ClaimRecordingSlot(context.Background(), "sess-run", "user-1")
 	if err != nil {
-		t.Fatalf("AllocateRecordingSeq: %v", err)
+		t.Fatalf("ClaimRecordingSlot: %v", err)
 	}
+	mcpFirst := firstSlot.Seq
 
 	go func() {
 		waitForSession(t, session, "sess-run")
@@ -530,10 +531,11 @@ func TestTheTwoWritersNeverTakeTheSameStepPosition(t *testing.T) {
 
 	// A second MCP call after the session, to catch an allocator that only
 	// agrees in one direction.
-	mcpLast, err := store.AllocateRecordingSeq(context.Background(), "sess-run", "user-1")
+	lastSlot, err := store.ClaimRecordingSlot(context.Background(), "sess-run", "user-1")
 	if err != nil {
-		t.Fatalf("AllocateRecordingSeq: %v", err)
+		t.Fatalf("ClaimRecordingSlot: %v", err)
 	}
+	mcpLast := lastSlot.Seq
 
 	actions, _, closes := rec.recorded()
 	taken := map[int]string{mcpFirst: "the MCP node's first call", mcpLast: "the MCP node's last call"}

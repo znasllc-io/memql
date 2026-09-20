@@ -51,23 +51,23 @@ func (s *recordingAppSessionStore) EndAppSession(_ context.Context, row AppSessi
 	return nil
 }
 
-// AllocateRecordingSeq is the SHARED allocator, modelled here as the real one
-// behaves: read the count off the row, hand it out, advance. Keeping it in
-// this fake rather than returning a fresh counter per caller is what lets a
-// test observe the property that matters -- two writers into one session
-// never take the same position.
-func (s *recordingAppSessionStore) AllocateRecordingSeq(_ context.Context, sessionId, _ string) (int, error) {
+// ClaimRecordingSlot is the SHARED allocator, modelled here as the real one
+// behaves: read the row, hand out the count, advance. Keeping the counter in
+// this fake rather than returning a fresh one per caller is what lets a test
+// observe the property that matters -- two writers into one session never
+// take the same position.
+func (s *recordingAppSessionStore) ClaimRecordingSlot(_ context.Context, sessionId, _ string) (RecordingSlot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.allocErr != nil {
-		return 0, s.allocErr
+		return RecordingSlot{}, s.allocErr
 	}
 	if s.allocated == nil {
 		s.allocated = map[string]int{}
 	}
 	seq := s.allocated[sessionId]
 	s.allocated[sessionId] = seq + 1
-	return seq, nil
+	return RecordingSlot{OwnerUserId: "user-1", RunId: "v1:work:run:rec", Seq: seq}, nil
 }
 
 func (s *recordingAppSessionStore) terminal() []AppSessionRow {
