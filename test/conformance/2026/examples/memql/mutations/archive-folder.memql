@@ -1,0 +1,15 @@
+use library.concepts.{ folder }
+
+/// Insert a new version of a folder record (typically used to archive a folder).
+@actor
+mutation folder archiveFolder {
+  args {
+    folderId  string  @required
+    payload   object  @required
+  }
+  insert {
+    id: args.folderId
+    ownerUserId: actor.userId
+    args.payload
+  }
+}

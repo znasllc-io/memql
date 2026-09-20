@@ -109,13 +109,13 @@ var docsCorpusCoverage = map[string]bool{
 	"reserved.md":           true,
 	"specifications.md":     true,
 	"functions.md":          true,
+	"memql.md":              true,
 
-	// FOLLOW-UP (memql#5388). The mechanism already runs over these two --
-	// flipping either to true is the whole change -- but their fences carry no
-	// markers yet: 47 on memql.md and 55 on authoring-rules.md, each needing a
-	// corpus case the engine loads. TestDocsExamplesParse keeps parsing both in
-	// the meantime, which is the cover they had before this gate existed.
-	"memql.md":           false,
+	// FOLLOW-UP (memql#5388). The mechanism already runs over this page --
+	// flipping it to true is the whole change -- but its fences carry no
+	// markers yet: 55 on authoring-rules.md, each needing a corpus case the
+	// engine loads. TestDocsExamplesParse keeps parsing it in the meantime,
+	// which is the cover it had before this gate existed.
 	"authoring-rules.md": false,
 }
 

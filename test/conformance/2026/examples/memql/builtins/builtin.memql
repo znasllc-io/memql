@@ -1,0 +1,5 @@
+@executor("integration.auth.checkPermission")
+/// Check if the current authenticated user has a specific role. Returns boolean result.
+builtin authCheckPermission {
+  role  string  @required
+}

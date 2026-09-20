@@ -1,0 +1,13 @@
+use agents.concepts.{ agent }
+use library.concepts.{ folder }
+
+/// Per-(folderId, agentId) retention override.
+concept retentionOverride {
+  folderId  string  @required @description("v1:library:folder.id this override is scoped to.")
+  agentId   string  @required @description("v1:agents:agent.id this override targets.")
+  mode      enum("keep_forever", "keep_one_year", "inherit")  @required
+  active    bool    @description("Soft-revoke flag.")
+
+  @relationship(type="parent", field="folderId", target=folder, direction="outgoing")
+  @relationship(type="references", field="agentId", target=agent, direction="outgoing")
+}

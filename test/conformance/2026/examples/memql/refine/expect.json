@@ -1,0 +1,5 @@
+{
+  "cases": [
+    { "file": "refine.memql", "verdict": "load_ok" }
+  ]
+}

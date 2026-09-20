@@ -1,0 +1,10 @@
+@level("fast")
+@defaultProvider("chat54Mini")
+@templateFile("prompts/planStep.tmpl")
+/// Choose the next step for an in-flight run
+prompt planStep {
+  run       object!   @description("The run row being advanced.")
+  steps     []object! @description("Steps already recorded, newest first.")
+  phase     string    @description("Phase off the run's own state machine.")
+  // one entry per variable the template renders
+}

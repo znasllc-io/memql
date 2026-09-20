@@ -1,0 +1,6 @@
+@trigger(event="node.created", concept="v1:data:record")
+@filter(row => row.naturalKeyValue != nil)
+/// Detects conflicts between new data records and existing confirmed records.
+automation noticeRecordConflicts {
+  logic recordsConflictingWith(event: event)
+}

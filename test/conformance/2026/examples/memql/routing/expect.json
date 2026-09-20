@@ -1,0 +1,8 @@
+{
+  "cases": [
+    { "file": "policy.memql", "verdict": "load_ok" },
+    { "file": "prompt-input.memql", "verdict": "load_ok" },
+    { "file": "prompt-level.memql", "verdict": "load_ok" },
+    { "file": "rule.memql", "verdict": "load_ok" }
+  ]
+}

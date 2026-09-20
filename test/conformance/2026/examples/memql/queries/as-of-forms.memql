@@ -1,0 +1,14 @@
+use cluster.concepts.{ node }
+
+/// Every node the cluster holds right now.
+query node liveNodes {
+  asOf latest
+  filter  row => row.health == "healthy"
+  paginate 50
+}
+
+/// The nodes the cluster held at the start of 2026.
+query node nodesAt {        // asOf <ts> -> deterministic, no marker
+  asOf "2026-01-01T00:00:00Z"
+  paginate 50
+}

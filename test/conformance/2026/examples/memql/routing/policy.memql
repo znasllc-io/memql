@@ -1,0 +1,5 @@
+/// The default chain: local strongest, then a signed-in app, then the cheapest vendor.
+@primary("fleet:strongest")
+@fallback("app:*")
+@fallback("federation:cheapest")
+policy localFirst { }

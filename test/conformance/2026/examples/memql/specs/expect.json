@@ -1,0 +1,7 @@
+{
+  "cases": [
+    { "file": "specs.memql", "verdict": "load_ok" },
+    { "file": "trait.memql", "verdict": "load_ok" },
+    { "file": "using-specs.memql", "verdict": "load_ok" }
+  ]
+}

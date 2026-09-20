@@ -1,0 +1,8 @@
+/// Ask the prompt the event names -- refused: no body calls a prompt.
+logic respondThroughPrompt {
+  args {
+    event  object!
+  }
+  answer := si(args.event.payload.promptTemplateId, args.event.payload.promptData)
+  return answer
+}

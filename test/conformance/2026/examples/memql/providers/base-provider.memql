@@ -1,0 +1,9 @@
+@base
+@vendor("OpenAI")
+provider openai {
+  auth {
+    identityProviderId  env("MEMQL_AI_OPENAI_IDENTITY_PROVIDER_ID")
+    serviceAccountId    env("MEMQL_AI_OPENAI_SERVICE_ACCOUNT_ID")
+    identityTokenFile   env("MEMQL_AI_OPENAI_IDENTITY_TOKEN_FILE")
+  }
+}

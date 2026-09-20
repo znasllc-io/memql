@@ -1,0 +1,11 @@
+{
+  "cases": [
+    { "file": "agent-builtin.memql", "verdict": "load_ok" },
+    {
+      "file": "si-in-a-logic-body.memql",
+      "verdict": "refuse_load",
+      "code": "body_call_unknown",
+      "message": "`si(...)` is not a function or a predicate known here"
+    }
+  ]
+}

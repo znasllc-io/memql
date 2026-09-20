@@ -1,0 +1,13 @@
+use library.concepts.{ artifact }
+use common.shapes.{ actorEnvelope }
+
+/// Matches archived artifacts
+spec artifact artifactIsArchived = row => row.archived == true
+
+/// Actor is acting on their own behalf rather than through a delegation.
+///
+/// A ROLE comparison is deliberately not the example (epic memql#5166): a slug
+/// comparison cannot see a role a cluster authored for itself, so a role
+/// question is `@requiresRank("<slug>")` or
+/// `@requiresCapability("<verb>", "<resource>")` rather than any spec.
+spec actorEnvelope isSelfActing = actor => actor.identityId == actor.userId
