@@ -105,13 +105,18 @@ type AppSessionOutcome struct {
 	// (design D9). Empty means it did not say, which is recorded as unknown.
 	Model  string
 	Effort string
-	// Usage is what the app reported about its own spend. Known=false means it
-	// said nothing, which the ledger records as `unknown` rather than as a
-	// free call.
-	Usage AppUsage
 	// Billing is "subscription" when the app reported one and "unknown" when
 	// it said nothing. Never "metered": MemQL was not billed for a call it did
 	// not make.
+	//
+	// THE TOKEN COUNTS ARE DELIBERATELY NOT HERE. The session's own reported
+	// spend is already written to v1:router:call by the executor's ledger
+	// writer, from the runner's RunResult -- which carries the app's `known`
+	// flag. A second copy taken off the executor's output map would have the
+	// count and NOT the flag, so "the app reported zero" and "the app said
+	// nothing" would arrive here as the same value. Two places for one fact
+	// are two places for it to disagree, and this is the one where the
+	// disagreement would be silent.
 	Billing string
 	// ExecutionSurface names where the session ran, for the decision row.
 	ExecutionSurface string

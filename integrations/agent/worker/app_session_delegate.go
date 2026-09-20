@@ -141,16 +141,12 @@ func (d *AppSessionDelegate) RunStep(ctx context.Context, h memqlengine.AppSessi
 	}, nil)
 
 	out := memqlengine.AppSessionOutcome{
-		ChildRunId:  childRunId,
-		SessionId:   outputString(res.Output, "sessionId"),
-		ArtifactIds: res.ArtifactIds,
-		Model:       outputString(res.Output, "model"),
-		Effort:      outputString(res.Output, "effort"),
-		Billing:     res.Billing,
-		Usage: memqlengine.AppUsage{
-			OutputTokens: int64(res.TokensSpent),
-			Known:        res.TokensSpent > 0,
-		},
+		ChildRunId:       childRunId,
+		SessionId:        outputString(res.Output, "sessionId"),
+		ArtifactIds:      res.ArtifactIds,
+		Model:            outputString(res.Output, "model"),
+		Effort:           outputString(res.Output, "effort"),
+		Billing:          res.Billing,
 		ExecutionSurface: surfaceFor(h.AppId, outputString(res.Output, "workerId")),
 	}
 	// THE STRUCTURED ANSWER AND THE TRANSCRIPT ARE BOTH KEPT, and neither
