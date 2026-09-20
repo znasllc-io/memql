@@ -56,3 +56,71 @@ func surfaceOf(p any) string {
 	}
 	return r.ExecutionSurface()
 }
+
+// servedModelReporter is what a provider says about the model that ACTUALLY
+// served the most recent call, and at what reasoning effort.
+//
+// STRUCTURAL, for the reason surfaceReporter above is: component/router pins
+// the root module at a PUBLISHED version and cannot name a method that exists
+// only in the working tree. A provider that does not implement it simply does
+// not answer, which is the correct reading for every vendor provider -- what
+// was asked for is what ran, and `model` on the row already says it.
+//
+// IT IS A REPORT, NOT A REQUEST (design D9). An app may reroute mid-session,
+// and an app that ignores an effort flag states none. Copying the request's
+// pin here would record as MEASURED something nobody measured, and the gap
+// between what was pinned and what ran is the only way to see either.
+type servedModelReporter interface {
+	// ServedModel names the model the surface reported serving the most
+	// recent call with, and the effort it reported running at. Both are ""
+	// when it said nothing, which the row records as unknown.
+	ServedModel() (model, effort string)
+}
+
+// servedModelOf asks a provider what served the call.
+//
+// Two empty strings is a REAL ANSWER and not a failure: it is what every
+// vendor provider says, and what an app says when its harness reported no
+// model. The caller records it verbatim rather than filling it in, because
+// "the surface did not say" and "it served what we asked for" are different
+// facts and only one of them is knowable here.
+func servedModelOf(p any) (string, string) {
+	r, ok := p.(servedModelReporter)
+	if !ok {
+		return "", ""
+	}
+	return r.ServedModel()
+}
+
+// billingReporter is what a provider says about WHO PAID for the most recent
+// call.
+//
+// STRUCTURAL, beside the two above and for their reason. A provider that does
+// not implement it says nothing, and the row's existing rule applies: an empty
+// billing reads as `metered`, the conservative direction, because unattributed
+// spend should count against the ceiling rather than disappear into a bucket
+// the ceiling cannot see.
+//
+// IT WAS THE THIRD ACCESSOR WITH NO CALLER. `appProvider.LastCall()` has
+// returned a billing value since the app door landed and nothing ever read it,
+// so every app-served decision row said `metered` for a call that ran inside
+// somebody's own subscription -- the same shape as the ExecutionSurface gap
+// memql#5146 found, in the same file, one field along. It matters more now:
+// a `session` door runs a whole step on a subscription, and a cost reader
+// separating "what we spent" from "what ran somewhere we do not pay" would
+// have had every one of them on the wrong side.
+type billingReporter interface {
+	// Billing is "subscription", "local", "metered" or "" when the provider
+	// cannot tell. It is never inferred from anything else.
+	Billing() string
+}
+
+// billingOf asks a provider who paid. The empty string is a real answer -- it
+// is what every vendor provider says, and the row reads it as metered.
+func billingOf(p any) string {
+	r, ok := p.(billingReporter)
+	if !ok {
+		return ""
+	}
+	return r.Billing()
+}

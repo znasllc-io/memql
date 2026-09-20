@@ -72,6 +72,20 @@ func (r *Router) ResolveFor(ctx context.Context, req ResolveRequest) (memql.Reso
 	if err != nil {
 		return memql.ResolvedProvider{}, err
 	}
+	// A SESSION WINNER'S CLIENT IS *NOT* SUBSTITUTED HERE, and the temptation
+	// to is worth naming because it is wrong in a way nothing would report.
+	//
+	// resolved.Client holds the session client the chain walk built, and it
+	// would be the obvious thing to hand back. But every client above is
+	// already wrapped -- the tool and chat surfaces in a fallback wrapper that
+	// wraps again in an OBSERVER, which is what writes the v1:router:call row.
+	// Swapping the wrapper out for the bare session client would leave a run
+	// that spent somebody's whole subscription with no ledger row at all, and
+	// the call would work perfectly.
+	//
+	// The wrapper reaches the session on its own: providerLookup asks
+	// sessionDoorFor the same question the walk did, which is exactly why that
+	// decision lives in one function.
 	return memql.ResolvedProvider{
 		Client: client,
 		Entry:  resolved.Entry,

@@ -252,30 +252,55 @@ func TestACeilingRefusalIsNotAPark(t *testing.T) {
 	}
 }
 
-// A tool turn walks past every app door with no special case, because the app
-// provider does not implement the tool surfaces (design D3). The report says
-// so rather than leaving the door unexplained.
-func TestAToolTurnWalksPastTheAppDoor(t *testing.T) {
+// A tool turn NO LONGER walks past an open app door (epic memql#5391, design
+// D7), and this test is the old one rewritten rather than deleted, because the
+// premise it used to assert is the thing that changed.
+//
+// It used to read: "a tool turn walks past every app door with no special case,
+// because the app provider does not implement the tool surfaces (design D3)".
+// That was the right answer to the wrong question. The app still cannot serve
+// MemQL's TURN -- two agents driving one conversation -- but it can be handed
+// the whole STEP, and on a cluster whose only open door is a signed-in Claude
+// Code, walking past meant Ask stayed dark.
+//
+// So what happens at an open app door on a tool turn now depends on ONE thing:
+// whether the call carries a step to hand over.
+func TestAToolTurnTakesTheSessionDoorOrRefusesForWantOfAStep(t *testing.T) {
+	// No step: refused AT RESOLUTION, naming the modality, having opened
+	// nothing. A bare Go model call with tools has nothing to delegate, and
+	// that is a fact about the call site -- which is why it is not reported as
+	// a shut door.
 	r, _, apps := threeStepRouter(t, nil, []memql.AppDoor{openApp("claude-code")}, false)
 	_, _, err := r.ResolveWithTools(ResolveRequest{UserId: "alice"})
+	if err == nil {
+		t.Fatalf("a stepless tool turn at an open app door must refuse")
+	}
 	var refusal *InferenceUnavailable
-	if !errors.As(err, &refusal) {
-		t.Fatalf("err = %v, want the typed refusal", err)
+	if errors.As(err, &refusal) {
+		t.Fatalf("the stepless refusal is a CALL-SITE fault, not a shut-door report: %v", err)
 	}
-	var appDoor *work.DoorReport
-	for i := range refusal.Doors {
-		if refusal.Doors[i].Door == DoorApp {
-			appDoor = &refusal.Doors[i]
-		}
-	}
-	if appDoor == nil {
-		t.Fatalf("the app door must appear in the report: %+v", refusal.Doors)
-	}
-	if !strings.Contains(appDoor.Reason, "tool-calling") {
-		t.Errorf("the reason must say the app door does not serve tool turns, got %q", appDoor.Reason)
+	if !strings.Contains(err.Error(), "no work step to hand over") {
+		t.Fatalf("the refusal must say what is missing, got %q", err)
 	}
 	if apps.calls != 0 {
-		t.Fatalf("no app session may be opened for a tool turn, got %d", apps.calls)
+		t.Fatalf("no app session may be opened for a stepless tool turn, got %d", apps.calls)
+	}
+
+	// With a step: the door is TAKEN, and the decision says `session` rather
+	// than `app` -- the two are different answers about what the app did.
+	_, resolved, err := r.ResolveWithTools(ResolveRequest{
+		UserId: "alice",
+		RunId:  "v1:work:run:r1",
+		StepId: "v1:work:step:s1",
+	})
+	if err != nil {
+		t.Fatalf("a tool turn with a step must take the app door as a session: %v", err)
+	}
+	if resolved.Decision.Door != DoorSession {
+		t.Fatalf("door = %q, want %q", resolved.Decision.Door, DoorSession)
+	}
+	if apps.calls != 0 {
+		t.Fatalf("resolution alone opens no session, got %d", apps.calls)
 	}
 }
 

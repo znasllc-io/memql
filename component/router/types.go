@@ -79,6 +79,16 @@ type Resolved struct {
 	// answer-affecting parameters and its declared modality -- without a
 	// second lookup that could resolve differently.
 	Entry *memql.ProviderConfigEntry
+
+	// Client is the client to call, set ONLY for a SESSION winner (design D7).
+	//
+	// Every other door hands its client back through the modality-specific
+	// resolve* path, which looks the winning entry up again and type-asserts
+	// it. A session winner cannot: its client is NOT the entry's. The entry's
+	// appProvider deliberately does not serve tool turns, and the session
+	// client is built around the STEP rather than the turn. Nil means the
+	// ordinary path applies.
+	Client any
 }
 
 // CallRecord is the payload for one v1:router:call row. Populated by
@@ -161,6 +171,15 @@ type CallRecord struct {
 	// pays for) or "unknown". Empty reads as metered on the row, so
 	// every existing writer keeps its meaning without a migration.
 	Billing string
+	// ServedModel and ServedEffort are what the SURFACE REPORTED serving this
+	// call with (design D9), as distinct from Model, which is what the CHAIN
+	// resolved. For an app door those are different facts: the chain resolves
+	// `app:claude-code` and the app itself reports `claude-opus-5`, and the
+	// gap between them is the only way to see an app that rerouted or ignored
+	// a model pin. Both are EMPTY when the surface said nothing, which the row
+	// records as unknown -- never the requested value, never a guess.
+	ServedModel  string
+	ServedEffort string
 	// ExecutionSurface names where the call ran: empty for MemQL's
 	// own provider calls, "cockpit-app:<appId>" for one made by a
 	// local app on a user's machine.

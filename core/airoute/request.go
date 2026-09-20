@@ -37,6 +37,19 @@ func (m Modality) Valid() bool {
 
 func (m Modality) String() string { return string(m) }
 
+// NeedsTools reports whether this modality is MemQL DRIVING a tool loop.
+//
+// It is the predicate the app door turns on (design D7). An app is an agent
+// that drives itself, so it cannot serve a turn in somebody else's loop -- two
+// agents fighting over one conversation. What it CAN do is take the whole
+// step, which is what the `session` door is.
+//
+// EMBEDDINGS ARE NOT HERE and never will be (D10): an embedding must come from
+// the embedder of the index it is written into, and no app exposes one.
+func (m Modality) NeedsTools() bool {
+	return m == ModalityTools || m == ModalityStreamingTools
+}
+
 // Needs are the capability floors a provider must clear to serve the call.
 //
 // Vision, AudioIn, AudioOut and Image are declared here and are consumed from
@@ -115,6 +128,18 @@ type ResolveRequest struct {
 	UserId    string
 	AgentId   string
 	Partition string
+
+	// RunId and StepId name the WORK STEP this call serves, when it serves
+	// one.
+	//
+	// They are the hinge of design D7. An app door resolved for a tool-needing
+	// call takes the whole step as a session subrun, and a session is opened
+	// FROM a step -- so a call that carries none is refused at resolution
+	// rather than resolved to a door with nothing to hand over. A bare Go
+	// model call with tools has no step, and that is a fact about the call
+	// site rather than a failure of anybody's fleet.
+	RunId  string
+	StepId string
 
 	// CloudConsent is one person's explicit yes for THIS call, after they
 	// were shown the refusal. Nothing in the router can set it.

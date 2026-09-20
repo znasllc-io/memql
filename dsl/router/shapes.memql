@@ -42,6 +42,8 @@ shape call routerDecision {
   providerName
   vendor
   model
+  servedModel
+  servedEffort
   considered
   touches
   minContextTokens

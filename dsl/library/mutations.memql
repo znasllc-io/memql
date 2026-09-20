@@ -41,6 +41,8 @@ mutation artifact createArtifact {
     producedByRunId  string
     producedByWorkerId   string
     producedByWorkerName string
+    /// {app, model, effort, sessionId} when an app session produced this. Absent otherwise.
+    producedBy        object
     validationStatus  enum("none", "unvalidated", "validated", "rejected", "partiallyValidated", "superseded")
   }
   insert {
@@ -71,6 +73,7 @@ mutation artifact createArtifact {
     args.producedByRunId
     args.producedByWorkerId
     args.producedByWorkerName
+    args.producedBy
     validationStatus: args.validationStatus ?? "none"
     updatedAt: now
   }
@@ -268,9 +271,11 @@ mutation file createLibraryFile {
     uploadedFromWorkerId    string
     uploadedFromWorkerName  string
     uploadedFromPath        string
+    /// {app, model, effort, sessionId} when an app session produced this. Absent otherwise.
+    producedBy              object
   }
   insert {
-    accept { producedByRunId, producedByStepKey, name, mimeType, size, sha256, blobUrl, source, summary, folderId, uploadedFromWorkerId, uploadedFromWorkerName, uploadedFromPath }
+    accept { producedByRunId, producedByStepKey, name, mimeType, size, sha256, blobUrl, source, summary, folderId, uploadedFromWorkerId, uploadedFromWorkerName, uploadedFromPath, producedBy }
     stamp {
       id: args.fileId
       ownerUserId: actor.userId
@@ -980,5 +985,55 @@ mutation watchedFolder reportLibraryWatchedFolderSweep {
     bytesSeen: args.bytesSeen ?? 0
     lastSweepError: args.lastSweepError ?? ""
     lastSweepAt: now
+  }
+}
+
+/// Stamp an artifact with the app session that produced it (epic memql#5391, design D9).
+///
+/// @serverOnly, AND SCOPING TO actor.userId WOULD NOT BE THE FIX, because the forger this guards
+/// against IS THE OWNER. A person may legitimately own an artifact and still must not be able to
+/// claim an app produced it: whose row this is and whether the claim on it is true are independent
+/// questions, and a filter over actor.userId answers only the first. Every caller-scoped spelling
+/// of this mutation still lets somebody write "recorded from claude-code, model X, session Z" onto
+/// a file they typed themselves -- and a lifted construct's provenance reads exactly that sentence,
+/// so the stamp is the evidence behind every procedure the catalog learns.
+///
+/// The SESSION RUNNER calls it at end, once per produced artifact, under the owner's actor and
+/// with internal origin stamped. It is a read-merge update, so an artifact's labels, folder and
+/// archived state survive the stamp.
+@serverOnly
+mutation artifact stampArtifactProvenance {
+  args {
+    artifactId  string!
+    /// {app, model, effort, sessionId}. Model and effort are the APP'S REPORT and may be empty.
+    producedBy  object!
+  }
+  update {
+    id: args.artifactId
+    producedBy: args.producedBy
+  }
+}
+
+/// Stamp a Library FILE row with the app session that produced it (epic memql#5391, design D9).
+///
+/// The index row and the backing file row both carry the stamp, because they are read by different
+/// surfaces: the Files list reads the index, and the analysis and sync passes read the file. One
+/// stamped and the other not would make "which of these did an app produce" answerable in one
+/// place and not the other, which is worse than neither -- the reader cannot tell which answer
+/// they are getting.
+///
+/// @serverOnly for stampArtifactProvenance's reason, unchanged by the row being a different one:
+/// scoping to actor.userId answers whose file this is and not whether the claim written on it is
+/// true, and the person who would write a false one is the owner.
+@serverOnly
+mutation file stampLibraryFileProvenance {
+  args {
+    fileId      string!
+    /// {app, model, effort, sessionId}. Model and effort are the APP'S REPORT and may be empty.
+    producedBy  object!
+  }
+  update {
+    id: args.fileId
+    producedBy: args.producedBy
   }
 }

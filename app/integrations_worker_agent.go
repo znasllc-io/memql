@@ -3,6 +3,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"os"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	memqlgrpc "github.com/znasllc-io/memql/component/grpc"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/worker"
+	"github.com/znasllc-io/memql/component/workjournal"
 	agentworker "github.com/znasllc-io/memql/integrations/agent/worker"
 )
 
@@ -199,5 +201,31 @@ func (a *App) setupCockpitAppExecutor(
 		a.Logger.Info("app door: this replica can serve inference through a signed-in local app",
 			"apps", strings.Join(worker.KnownAppIds(), ", "),
 		)
+
+		// THE STEP-HANDOVER SEAM (epic memql#5391, design D7). The door above
+		// serves a CHAT turn through an app; this one hands a whole STEP to
+		// one, which is what a tool-needing call resolved to an `app:` entry
+		// becomes. Same executor, same consent gates, same session runner --
+		// a routed step and a delegated task are the same act.
+		//
+		// The wiring IS the feature here as much as it is above: without this
+		// line the router still resolves a `session` winner and every one of
+		// them refuses as an unwired seam.
+		providers.SetAppSessionDelegate(agentworker.NewAppSessionDelegate(
+			exec,
+			workjournal.New(
+				workjournal.ExecutorFunc(func(ctx context.Context, q string) (any, error) {
+					return a.engine.Execute(ctx, q)
+				}),
+				a.Logger,
+				// MEMQL_NODE_ID straight from the environment, for the reason
+				// transport_artifacts.go states: the pod carries it in every
+				// topology (fieldRef: metadata.name).
+				strings.TrimSpace(os.Getenv("MEMQL_NODE_ID")),
+			),
+			a.engine,
+			a.Logger,
+		))
+		a.Logger.Info("app door: a tool-needing step resolved to an app runs as a session subrun")
 	}
 }

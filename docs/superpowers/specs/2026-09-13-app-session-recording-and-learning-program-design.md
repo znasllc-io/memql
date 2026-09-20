@@ -342,6 +342,18 @@ Claude Code reads images natively. A vision call through the app door writes the
 into the session workspace and references it from the prompt. It is in scope for epic A
 only if it costs no wire change; otherwise it is the first follow-up.
 
+**Shipped as the follow-up, memql#5523.** The WIRE test passes: `AppSessionStart.inputs`
+already carries Library artifact ids the cockpit pulls into the workspace, and the landing
+filename is the engine's to choose, because the cockpit reads `Content-Disposition` and
+`GET /artifacts/{id}/content` sets it from the file row's `name`. The cost is elsewhere and
+this decision did not anticipate it: `inputs` takes Library artifact ids and NOTHING ELSE,
+so every image in every vision turn becomes a permanent, owned, listed `v1:library:file`
+plus its index row, and the model call cannot start until the asynchronous
+`indexFileOnCreate` promotion has produced that index row -- the artifact id is deliberately
+not derivable in Go. A person's Files app filling with transient inputs, and an async
+automation on the critical path of every vision turn, are product decisions rather than
+implementation details, and neither was put to the owner.
+
 ### D12 -- One recording format for both apps, keyed by the app's own ids
 
 Claude Code's `tool_use` / `tool_result` pairs and Codex's completed items both carry
@@ -832,6 +844,7 @@ epic up and deleted in the epic's merge.
 | Priority | Epic | Repository | Epic issue | Task issues |
 |---|---|---|---|---|
 | P07 | A The app door completion (engine half) | memql | #5391 | #5392-#5395 |
+| -- | A's first follow-up: vision through the app door (D11) | memql | -- | #5523 |
 | P02 | A The app door completion (cockpit half) | memql-cockpit | #436 | #437-#439 |
 | P08 | B Recording (engine half) | memql | #5396 | #5397-#5401 |
 | P03 | B Recording (cockpit half) | memql-cockpit | #440 | #441-#443 |

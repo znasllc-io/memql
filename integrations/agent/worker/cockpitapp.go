@@ -266,6 +266,12 @@ func (e *CockpitAppExecutor) Run(ctx context.Context, req planner.ExecutorReques
 		// descriptor -- the answer is a bonus, not a requirement, on this
 		// path.
 		ResponseSchema: responseSchemaFromInput(req),
+		// The call's LEVEL, when the caller named one (epic memql#5391,
+		// design D8). A task that named none leaves it empty and the app runs
+		// at its own defaults, which is what every delegated task did before
+		// the field existed. The COCKPIT translates it; nothing here maps a
+		// level to a model, because the knob names are the app's.
+		Level: stringFromInput(req, "level"),
 	}
 
 	// Machine selection goes through the FLEET ROUTER (memql#4350), not
@@ -300,6 +306,11 @@ func (e *CockpitAppExecutor) Run(ctx context.Context, req planner.ExecutorReques
 			"exitCode":      result.ExitCode,
 			"appSessionRef": result.AppSessionRef,
 			"transcript":    result.Transcript,
+			// WHAT THE APP REPORTED, verbatim (design D9). Empty means it did
+			// not say, which every reader records as unknown -- never the
+			// level it was given, never the app id.
+			"model":  result.Model,
+			"effort": result.Effort,
 			// The structured answer, when the harness produced one -- from
 			// the session's end or from a `submit` the app made over MCP.
 			// ABSENT rather than empty when there is none: a caller that
@@ -414,6 +425,15 @@ func promptFromInput(req planner.ExecutorRequest) string {
 		}
 	}
 	return ""
+}
+
+// stringFromInput reads one string off the Task input. A missing key and a
+// non-string value both read as EMPTY, which is the honest answer for every
+// field on this path: absent means the caller named none, and the far side
+// has a defined behaviour for that.
+func stringFromInput(req planner.ExecutorRequest, key string) string {
+	raw, _ := req.Input[key].(string)
+	return strings.TrimSpace(raw)
 }
 
 // billingOrUnknown normalizes a runner billing value for the seam.

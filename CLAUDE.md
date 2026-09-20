@@ -1359,12 +1359,18 @@ the first** (epic memql#5127). Full operator doc:
   fleet changes, which is the whole reason the level exists.
 - A **policy** is an ordered chain of places to look. Entries are a closed
   grammar: a provider name; `fleet:strongest` / `fleet:fastest` /
-  `fleet:<modelId>`; `app:*` / `app:<id>`; `federation:cheapest` /
-  `federation:strongest` / `federation:<providerName>`; `policy:<name>`.
-  **`fleet:*` is retired** and refuses load with the new spelling in the
-  message. `policy:<name>` is expanded at load and a cycle refuses load naming
-  the loop, so the router only ever walks a chain with no `policy:` left in it.
-  The shipped set is `dsl/policies/policies.memql`.
+  `fleet:<modelId>`; `app:*` / `app:<id>` / `app:<id>:<model>`;
+  `federation:cheapest` / `federation:strongest` / `federation:<providerName>`;
+  `policy:<name>`. **`fleet:*` is retired** and refuses load with the new
+  spelling in the message. **An app id is held to the engine's closed runnable
+  set at LOAD** (`core/airoute/apps.go`, the ONE list every reader derives
+  from), naming the set -- an entry the engine has no protocol for could only
+  ever be passed over, which reads later as a shut door rather than a wrong
+  policy. `app:*:<model>` is REFUSED rather than ignored: the wildcard names any
+  signed-in app and a model name belongs to one app. `policy:<name>` is expanded
+  at load and a cycle refuses load naming the loop, so the router only ever
+  walks a chain with no `policy:` left in it. The shipped set is
+  `dsl/policies/policies.memql`.
 - A **rule** maps a call's metadata to a policy, in explicit precedence order,
   first match wins. `@when` takes a closed key set (`level`, `modality`,
   `prompt`, `role`, `actorRole`, `tag`, `touches`), every key optional and all
@@ -1417,12 +1423,29 @@ and every re-pointed call site lives inside `component/memql`, so declaring the
 request beside the router would be an import cycle.
 
 **Every resolution is a decision record.** `v1:router:call` carries `level`,
-`requestedLevel`, `servedLevel`, `degraded`, `rule`, `policy`, `door`,
-`considered`, `touches`, `minContextTokens` and `machineOwnerUserId`, read
-through `routerDecisionsRecent` and never broadcast (the volume argument that
-excludes `v1:worker:invocation`). `considered` is KEPT ON SUCCESS as well as on
-a refusal: a rule is falsifiable only if the decisions it made can be read, and
-what a chain did not pick is half of that.
+`requestedLevel`, `servedLevel`, `servedModel`, `servedEffort`, `degraded`,
+`rule`, `policy`, `door`, `considered`, `touches`, `minContextTokens` and
+`machineOwnerUserId`, read through `routerDecisionsRecent` and never broadcast
+(the volume argument that excludes `v1:worker:invocation`). `considered` is KEPT
+ON SUCCESS as well as on a refusal: a rule is falsifiable only if the decisions
+it made can be read, and what a chain did not pick is half of that.
+`servedModel` / `servedEffort` are what the SURFACE REPORTED, as distinct from
+`model`, which is what the chain resolved; both are EMPTY when it said nothing,
+because a value copied from the request would record as measured something
+nobody measured (epic memql#5391, design D9).
+
+**A tool-needing call resolved to an `app:` door becomes a SESSION** (epic
+memql#5391, design D7), which is `door`'s fourth value beside `local` / `app` /
+`federation`. MemQL drives a tool loop and an app drives itself, so an app
+cannot serve the TURN -- it takes the whole STEP, drives its own loop, reaches
+MemQL's tools back over MCP and answers once with no tool calls. The step
+records a `childRunId` naming a real subrun; a call carrying NO step is refused
+at resolution rather than falling through to the vendor behind it, and a session
+winner's chain is itself alone, so a failed session parks rather than becoming a
+silent paid call. `app` and `session` stay separate values because `door` is what
+a reader filters on. Every artifact a session produces is stamped `producedBy`
+`{app, model, effort, sessionId}`, and the absence of that stamp is what says a
+person uploaded it.
 
 **Mechanism stays in Go, and that is the boundary to defend.** A kill switch a
 policy can author around is not a kill switch. Door classification, provider

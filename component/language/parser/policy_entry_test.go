@@ -3,6 +3,8 @@ package parser
 import (
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/airoute"
 )
 
 // TestValidatePolicyEntry_AcceptsEveryFormOfTheClosedGrammar walks the whole
@@ -192,5 +194,72 @@ func TestEntryFormsMessageListsEveryScheme(t *testing.T) {
 		if !strings.Contains(joined, scheme+":") {
 			t.Fatalf("the entry-forms message %q omits the %q scheme", joined, scheme)
 		}
+	}
+}
+
+// TestAppEntryTakesAModelPin covers the one form the grammar gains in epic
+// memql#5391 (design D8): `app:<id>:<model>` pins an app model the way
+// `fleet:<modelId>` pins a fleet model.
+func TestAppEntryTakesAModelPin(t *testing.T) {
+	for _, entry := range []string{
+		"app:*",
+		"app:claude-code",
+		"app:codex",
+		"app:claude-code:claude-sonnet-4-6",
+		"app:codex:gpt-5.4",
+	} {
+		if err := ValidatePolicyEntry(entry); err != nil {
+			t.Fatalf("ValidatePolicyEntry(%q) = %v, want nil", entry, err)
+		}
+	}
+}
+
+// An app id outside the closed runnable set is refused AT LOAD, and the message
+// names the set. The engine has no protocol for another app, so an entry naming
+// one is a chain step that could only ever be passed over -- which reads,
+// months later, as a door that is shut rather than as a policy that is wrong.
+func TestAppEntryRefusesAnAppOutsideTheClosedSet(t *testing.T) {
+	for _, entry := range []string{"app:gemini-cli", "app:codexx", "app:gemini-cli:gemini-3"} {
+		err := ValidatePolicyEntry(entry)
+		if err == nil {
+			t.Fatalf("ValidatePolicyEntry(%q) = nil, want a refusal", entry)
+		}
+		for _, known := range airoute.RunnableApps() {
+			if !strings.Contains(err.Error(), known) {
+				t.Fatalf("ValidatePolicyEntry(%q) = %q, which does not name %q -- the message must name the set", entry, err, known)
+			}
+		}
+	}
+}
+
+// The WILDCARD CANNOT PIN A MODEL. `app:*` asks for any signed-in app, and a
+// model name belongs to one app -- `app:*:claude-sonnet-4-6` would ask Codex
+// for a Claude model. Refused rather than silently ignored on the apps it
+// cannot apply to.
+func TestAppWildcardTakesNoModelPin(t *testing.T) {
+	err := ValidatePolicyEntry("app:*:claude-sonnet-4-6")
+	if err == nil {
+		t.Fatalf(`ValidatePolicyEntry("app:*:claude-sonnet-4-6") = nil, want a refusal`)
+	}
+	if !strings.Contains(err.Error(), "app:<id>:<model>") {
+		t.Fatalf("the refusal must name the form that does pin a model, got %q", err)
+	}
+}
+
+// A model pin with nothing after the second colon is a typo, not "no pin".
+func TestAppEntryRefusesAnEmptyModelPin(t *testing.T) {
+	for _, entry := range []string{"app:claude-code:", "app:claude-code: ", "app:claude-code:a b"} {
+		if err := ValidatePolicyEntry(entry); err == nil {
+			t.Fatalf("ValidatePolicyEntry(%q) = nil, want a refusal", entry)
+		}
+	}
+}
+
+// Nothing may follow the model. A third colon is a malformed entry rather than
+// a model id containing one: an app's model names are flags on a command line,
+// not Ollama tags.
+func TestAppEntryRefusesATrailingSegment(t *testing.T) {
+	if err := ValidatePolicyEntry("app:claude-code:sonnet:extra"); err == nil {
+		t.Fatalf(`ValidatePolicyEntry("app:claude-code:sonnet:extra") = nil, want a refusal`)
 	}
 }
