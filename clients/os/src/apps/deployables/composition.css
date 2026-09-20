@@ -60,7 +60,7 @@
   .deployable-slot > svg:last-child { display: none; }
 }
 @container (max-width: 480px) {
-  .deployable-workspace .os-deploy-scroll, .deployable-journey .os-deploy-scroll { padding: 18px 16px; }
+  .deployable-workspace .os-deploy-scroll { padding: 18px 16px; }
   .deployable-composition { grid-template-columns: 1fr; gap: 23px; }
   .deployable-source-piece::after { width: 1px; height: 24px; left: 50%; top: 100%; }
   .deployable-object { width: 100%; max-width: 320px; justify-self: center; }
@@ -72,8 +72,8 @@
 @media (pointer: coarse) { .deployable-source-piece, .deployable-slot, .deployable-piece-chip { min-height: 44px; } }
 
 @container (max-width: 480px) {
-  .deployable-workspace .os-head, .deployable-journey .os-head { flex-wrap: wrap; }
-  .deployable-workspace .os-head-actions, .deployable-journey .os-head-actions { margin-left: 0; }
+  .deployable-workspace .os-head { flex-wrap: wrap; }
+  .deployable-workspace .os-head-actions { margin-left: 0; }
 }
 
 @container (max-width: 360px) {

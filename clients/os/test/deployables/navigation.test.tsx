@@ -65,39 +65,39 @@ describe("shared shell navigation", () => {
 
   it("shows the landing with no Back on an explicit same-tab click", async () => {
     const { go } = mount();
-    await click(await screen.findByRole("button", { name: /New deployable/ }));
+    await click(await screen.findByRole("button", { name: /Add a deployable/ }));
     expect(screen.getByRole("button", { name: "Back to Deployables" })).toBeTruthy();
     go("deployables");
-    expect(screen.queryByRole("region", { name: "New deployable" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Add a deployable" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Back to Deployables" })).toBeNull();
-    expect(screen.getByRole("button", { name: /New deployable/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Add a deployable/ })).toBeTruthy();
   });
 
   it("retains an unfinished source form across peer tabs and resumes it from New", async () => {
     const { go } = mount();
-    await click(await screen.findByRole("button", { name: /New deployable/ }));
-    const draft = screen.getByRole("region", { name: "New deployable" });
+    await click(await screen.findByRole("button", { name: /Add a deployable/ }));
+    const draft = screen.getByRole("region", { name: "Add a deployable" });
     await click(within(draft).getByRole("radio", { name: /A repository/ }));
     await click(within(draft).getByRole("button", { name: "Use a token instead" }));
     const input = within(draft).getByRole("textbox", { name: "The repository this deployable is built from" });
     fireEvent.change(input, { target: { value: "https://github.com/acme/unfinished" } });
     go("settings");
-    expect(screen.queryByRole("region", { name: "New deployable" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Add a deployable" })).toBeNull();
     go("deployables");
     expect(screen.queryByRole("button", { name: "Back to Deployables" })).toBeNull();
-    await click(screen.getByRole("button", { name: /New deployable/ }));
+    await click(screen.getByRole("button", { name: /Add a deployable/ }));
     expect(screen.getByRole("textbox", { name: "The repository this deployable is built from" })).toBe(input);
     expect((input as HTMLInputElement).value).toBe("https://github.com/acme/unfinished");
   });
 
   it("restores the nested origin on contextual Back", async () => {
     const { go } = mount();
-    await click(await screen.findByRole("button", { name: /New deployable/ }));
-    const draft = screen.getByRole("region", { name: "New deployable" });
+    await click(await screen.findByRole("button", { name: /Add a deployable/ }));
+    const draft = screen.getByRole("region", { name: "Add a deployable" });
     go("logs", "content");
-    expect(screen.queryByRole("region", { name: "New deployable" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Add a deployable" })).toBeNull();
     go("deployables", "back");
-    expect(screen.getByRole("region", { name: "New deployable" })).toBe(draft);
+    expect(screen.getByRole("region", { name: "Add a deployable" })).toBe(draft);
     expect(screen.getByRole("button", { name: "Back to Deployables" })).toBeTruthy();
   });
 

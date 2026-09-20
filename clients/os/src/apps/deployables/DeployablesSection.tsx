@@ -80,7 +80,7 @@ import { DEPLOYABLE_KINDS, kindLabel } from "./targets";
 //       |                          |
 //       |   --select a source--> Source
 //       |
-//       '-- New deployable -----> Compose
+//       '-- Add a deployable -----> Compose
 //
 // Compose already worked this way; everything else joins it.
 //
@@ -449,15 +449,17 @@ export function DeployablesSection({
               ))}
             </Select>
           </Refine>
-          {/* "New", not "New deployable": the Head directly beside it reads
-              Deployables, so the noun was said twice on one line. The
-              ACCESSIBLE name keeps the full phrase, because a screen reader
-              reaching this button out of context has no Head to read it
-              against. */}
+          {/* THE SAME WORDS AS THE PAGE IT OPENS. The button draws a plus and
+              nothing else -- the Head beside it already says Deployables --
+              so the phrase lives in its ACCESSIBLE name, where a screen reader
+              reaching it out of context has no Head to read it against. It is
+              "Add a deployable" because the wizard it opens is titled that,
+              the way "Add a machine" and "Add a domain" open theirs: an act
+              keeps its name through the whole flow. */}
           {/* `deploy`, because composing ENDS in a deploy: a person holding
               only `sources` has nothing to reach here that is theirs. */}
           {can.deploy ? (
-            <AddButton label="New deployable" className="deployable-new" onClick={() => setView({ kind: "compose" })} />
+            <AddButton label="Add a deployable" className="deployable-new" onClick={() => setView({ kind: "compose" })} />
           ) : null}
         </Head>
 
@@ -509,7 +511,7 @@ export function DeployablesSection({
           emptyText={emptyText}
           emptyContent={<EmptyState icon={Globe} title={showArchived ? "No archived deployables" : filtered ? "No matching deployables" : "No deployables yet"}
             action={filtered ? <Button onClick={() => setFilter(DEFAULT_LIST_FILTER)}>Clear filters</Button> : undefined}>
-            {showArchived ? "Archived apps will appear here. Restore one to bring it back offline." : filtered ? "Try a different search or clear the filters." : can.deploy ? "Use New deployable to add a repository, built files or a CI pipeline." : "Apps shared with your account will appear here."}
+            {showArchived ? "Archived apps will appear here. Restore one to bring it back offline." : filtered ? "Try a different search or clear the filters." : can.deploy ? "Add a deployable from a repository, built files or a CI pipeline." : "Apps shared with your account will appear here."}
           </EmptyState>}
           renderRow={(group, tick) => (
             <GroupLine
