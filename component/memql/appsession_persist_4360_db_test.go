@@ -136,6 +136,19 @@ func TestAppSessionRowPersistsAndReadsBack(t *testing.T) {
 	require.Equal(t, float64(900), usage["inputTokens"])
 	require.Equal(t, true, usage["known"])
 
+	// THE SHAPED READ POPULATES THE BUNDLE AS WELL AS THE OUTPUT ROWS, and
+	// that is measured here rather than assumed because two readers of this
+	// one query take different halves: component/mcp's next_task walks
+	// res.Bundle.Nodes and component/worker's ClaimRecordingSlot does too,
+	// while integrations/work reads OutputPayload. If a shaped read ever
+	// nilled the bundle, the allocator would find no session and every
+	// recorded step would fall back to a local counter -- silently, and with
+	// the two writers' positions colliding again.
+	shaped, err := eng.Execute(ctx, fmt.Sprintf("query appSessionById(sessionId:%q)", sessionID))
+	require.NoError(t, err)
+	require.NotNil(t, shaped.Bundle, "a shaped read nilled the bundle; the seq allocator reads it")
+	require.NotEmpty(t, shaped.Bundle.Nodes, "a shaped read returned no bundle nodes")
+
 	// And the reads the portal and the planner call actually find it.
 	got := queryIds(t, ctx, eng, fmt.Sprintf("appSessionById(sessionId:%q)", sessionID))
 	require.True(t, contains(got, storedID),
