@@ -38,3 +38,22 @@ const DefaultStepBudget = 1_000_000
 // the point: two nested scans of an unsized list are a million evaluations and
 // refuse at MaxStaticCost, where one scan is a thousand and loads.
 const DefaultCollectionSizeEstimate = 1_000
+
+// DeprecationWindowMinorReleases is the fourth value in this file's list, and
+// the one the comment at the top has named since that list was written: how
+// long a public language form warns before it refuses (memql#5390, D22).
+//
+// D22's wording is "at least two minor releases", so this is a FLOOR rather
+// than a default. A caller asking for a shorter window gets this one, because a
+// window shorter than the record's minimum is the thing the record forbids, and
+// a silently-honoured zero would let a form refuse in the very release that
+// deprecated it.
+//
+// The mechanism is component/language/deprecation, which declares the same
+// number as the constant its code reads. It deliberately does NOT import this
+// package: the window is consulted from inside the loader, so every import it
+// carries is an import taken at load time, and a leaf with no dependencies is
+// the shape that cannot introduce a cycle there. The two are held equal by
+// TestDeprecationWindowMatchesTheManifest, which is what stops a second copy
+// becoming a second answer.
+const DeprecationWindowMinorReleases = 2
