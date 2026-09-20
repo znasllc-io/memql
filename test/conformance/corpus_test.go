@@ -384,36 +384,86 @@ var corpusEditionDir = regexp.MustCompile(`^[0-9]{4}$`)
 func discoverCorpus(t *testing.T) []*corpusRun {
 	t.Helper()
 	root := os.DirFS(".")
-	entries, err := fs.ReadDir(root, ".")
+	editions, err := corpusEditions(root)
 	if err != nil {
 		t.Fatalf("read test/conformance: %v", err)
 	}
 	var runs []*corpusRun
 	domains := map[string]string{}
-	for _, e := range entries {
-		if !e.IsDir() || !corpusEditionDir.MatchString(e.Name()) {
-			continue
-		}
-		edition := e.Name()
+	for _, edition := range editions {
 		vm := readCorpusManifest(t, root, edition)
 		line := dslfs.Manifest{Language: vm.Language, Edition: vm.Edition}
-		err := fs.WalkDir(root, edition, func(p string, d fs.DirEntry, werr error) error {
-			if werr != nil {
-				return werr
-			}
-			if d.IsDir() || path.Base(p) != "expect.json" {
-				return nil
-			}
-			dir := path.Dir(p)
-			runs = append(runs, readCorpusDir(t, root, edition, dir, line, domains)...)
-			return nil
-		})
+		dirs, err := corpusExpectDirsIn(root, edition)
 		if err != nil {
 			t.Fatalf("walk %s: %v", edition, err)
+		}
+		for _, dir := range dirs {
+			runs = append(runs, readCorpusDir(t, root, edition, dir, line, domains)...)
 		}
 	}
 	sort.SliceStable(runs, func(i, j int) bool { return runs[i].rel < runs[j].rel })
 	return runs
+}
+
+// corpusEditions lists the edition directories under test/conformance, in
+// name order. It is shared with the refusal-wording pins
+// (refusal_wording_test.go): two readers of the corpus that disagreed about
+// WHICH directories are the corpus would each be correct about a different
+// set, and the narrower one would pass by matching nothing.
+func corpusEditions(root fs.FS) ([]string, error) {
+	entries, err := fs.ReadDir(root, ".")
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, e := range entries {
+		if e.IsDir() && corpusEditionDir.MatchString(e.Name()) {
+			out = append(out, e.Name())
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// corpusExpectDirsIn lists every directory under one edition that holds an
+// expect.json, in path order. Shared with the refusal-wording pins.
+func corpusExpectDirsIn(root fs.FS, edition string) ([]string, error) {
+	var out []string
+	err := fs.WalkDir(root, edition, func(p string, d fs.DirEntry, werr error) error {
+		if werr != nil {
+			return werr
+		}
+		if d.IsDir() || path.Base(p) != "expect.json" {
+			return nil
+		}
+		out = append(out, path.Dir(p))
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// readCorpusExpect decodes one directory's expect.json. It is the ONE decoder
+// for that file format -- readCorpusDir builds the runner's cases from it and
+// the refusal-wording pins read the same file through it. A second decoder
+// would be a second answer about what the corpus says, and the two would
+// disagree first about a field one of them had not heard of, silently, since
+// only this one refuses unknown fields.
+func readCorpusExpect(root fs.FS, dir string) (corpusExpectFile, error) {
+	data, err := fs.ReadFile(root, dir+"/expect.json")
+	if err != nil {
+		return corpusExpectFile{}, fmt.Errorf("read %s/expect.json: %w", dir, err)
+	}
+	var ef corpusExpectFile
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&ef); err != nil {
+		return corpusExpectFile{}, fmt.Errorf("%s/expect.json: %w", dir, err)
+	}
+	return ef, nil
 }
 
 func readCorpusManifest(t *testing.T, root fs.FS, edition string) corpusVersionManifest {
@@ -436,15 +486,9 @@ func readCorpusManifest(t *testing.T, root fs.FS, edition string) corpusVersionM
 
 func readCorpusDir(t *testing.T, root fs.FS, edition, dir string, line dslfs.Manifest, domains map[string]string) []*corpusRun {
 	t.Helper()
-	data, err := fs.ReadFile(root, dir+"/expect.json")
+	ef, err := readCorpusExpect(root, dir)
 	if err != nil {
-		t.Fatalf("read %s/expect.json: %v", dir, err)
-	}
-	var ef corpusExpectFile
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&ef); err != nil {
-		t.Fatalf("%s/expect.json: %v", dir, err)
+		t.Fatalf("%v", err)
 	}
 	if len(ef.Cases) == 0 {
 		t.Fatalf("%s/expect.json lists no cases", dir)
