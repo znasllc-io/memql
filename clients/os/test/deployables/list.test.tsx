@@ -525,8 +525,8 @@ describe("a deploy waiting for you", () => {
   it("separates the address from availability", async () => {
     mount(fakeConnection(WITH_PACKAGE));
     const row = (await screen.findByText("storefront")).closest(".os-row") as HTMLElement;
-    expect(within(row).getByText("store.memql.example.com").closest(".deployable-list-identity")).not.toBeNull();
-    expect(within(row).getByText("Unknown").closest(".deployable-list-state")).not.toBeNull();
+    expect(within(row).getByText("store.memql.example.com").closest(".os-record-identity")).not.toBeNull();
+    expect(within(row).getByText("Unknown").closest(".os-record-state")).not.toBeNull();
   });
 
   it("clears the mark when the run moves on, on its own event", async () => {
