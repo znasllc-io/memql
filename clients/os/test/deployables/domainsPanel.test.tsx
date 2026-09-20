@@ -107,21 +107,36 @@ function opens(hostname: string): (name: string) => boolean {
  * string somebody pastes into a registrar, which is the same string that names
  * the row.
  */
-function card(hostname: string): HTMLElement {
-  return screen.getByRole("heading", { name: hostname }).closest("article") as HTMLElement;
+function card(_hostname: string): HTMLElement {
+  return document.querySelector(".os-domain-page") as HTMLElement;
 }
 
 /**
- * A binding is a ROW in the domains list now, and its card is the page that
- * row opens -- so reaching the card means opening the row, which is what a
- * person does too. Already on the card's page: nothing to open.
+ * A binding is a ROW in the domains list, and what the row opens is THE
+ * WIZARD, come back to -- the same surface that added it, at whatever stage
+ * the cluster has walked it to. So reaching it means opening the row, which
+ * is what a person does too. Already on it: nothing to open.
+ *
+ * "Read" is the hostname being on the page: as the Domain step's answer while
+ * it is being set up, as the title once it serves or is on its way out.
  */
 async function findCard(hostname: string): Promise<HTMLElement> {
-  if (screen.queryByRole("heading", { name: hostname }) === null) {
+  if (document.querySelector(".os-domain-page") === null) {
     await click(await screen.findByRole("button", { name: opens(hostname) }));
   }
-  await screen.findByRole("heading", { name: hostname });
+  await waitFor(() => expect(document.querySelector(".os-domain-page")).not.toBeNull());
+  await waitFor(() => expect(within(card(hostname)).getAllByText(hostname).length).toBeGreaterThan(0));
   return card(hostname);
+}
+
+/** The states of the setup steps on the page, in order. */
+function setupStates(): (string | null)[] {
+  return [...document.querySelectorAll(".os-domain-page .os-rail > li")].map((li) => li.getAttribute("data-state"));
+}
+
+/** The floor of the page: whose turn it is, and what can be done. */
+function floor(): HTMLElement {
+  return document.querySelector(".os-domain-page .os-actbar") as HTMLElement;
 }
 
 /** The row for one binding, in the domains list. */
@@ -198,17 +213,16 @@ describe("the domains, as a list", () => {
     const connection = fakeConnection({ sites: [SHOP], domains: [domainRow({ id: "cd-1", hostname: "www.acme.com" })] });
     await openShop(connection);
 
-    // On the list there is a row, and the card's own heading is not drawn yet:
-    // the list and its detail do not share a scroll column (DESIGN.md rule 11).
+    // On the list there is a row, and its setup is not drawn yet: the list
+    // and its detail do not share a scroll column (DESIGN.md rule 11).
     await findRow("www.acme.com");
-    expect(screen.queryByRole("heading", { name: "www.acme.com" })).toBeNull();
-    expect(document.querySelector("article.os-domain")).toBeNull();
+    expect(document.querySelector(".os-domain-page")).toBeNull();
 
     await findCard("www.acme.com");
-    expect(document.querySelector("article.os-domain")).not.toBeNull();
+    expect(document.querySelector(".os-domain-page")).not.toBeNull();
     await backToDomains();
     await findRow("www.acme.com");
-    expect(document.querySelector("article.os-domain")).toBeNull();
+    expect(document.querySelector(".os-domain-page")).toBeNull();
   });
 
   // A SEEDED deployable -- MemQL OS, the VS Code site -- keeps its OWN address
@@ -225,7 +239,7 @@ describe("the domains, as a list", () => {
     expect(within(list).getByRole("link", { name: "shop.memql.example.com" })).toBeTruthy();
     expect(within(list).getByText(/Cluster address . built in$/)).toBeTruthy();
     // The built-in address is a plain line: nothing opens it, nothing removes it.
-    expect(within(list).queryByRole("button", { name: /^Open shop\.memql\.example\.com/ })).toBeNull();
+    expect(within(list).queryByRole("button", { name: opens("shop.memql.example.com") })).toBeNull();
     // Said ONCE (DESIGN.md rule 7).
     expect(within(list).getAllByText(/cannot be changed/)).toHaveLength(1);
 
@@ -271,7 +285,7 @@ describe("the list", () => {
     await openShop(connection);
 
     await findCard("www.acme.com");
-    expect(screen.queryByRole("heading", { name: "other.example.net" })).toBeNull();
+    expect(screen.queryByText("other.example.net")).toBeNull();
   });
 
   // ROWS SURVIVE REMOVAL, and the list keeps them: what a cluster served, and
@@ -285,7 +299,12 @@ describe("the list", () => {
     await openShop(connection);
 
     await findCard("gone.acme.com");
-    expect(screen.getByText("removed")).toBeTruthy();
+    // Its adding is long over, so the page is the domain's own: titled by its
+    // name, no steps left to take, and the floor says what it is.
+    expect(screen.getByRole("heading", { name: "gone.acme.com" })).toBeTruthy();
+    expect(within(floor()).getByText("Removed")).toBeTruthy();
+    expect(setupStates()).toEqual([]);
+    expect(within(floor()).queryByRole("button", { name: /^Remove/ })).toBeNull();
   });
 });
 
@@ -309,8 +328,12 @@ describe("what the domain's status does not say", () => {
     await findCard("www.acme.com");
     // The domain's own status is unchanged -- it IS live, and saying otherwise
     // would be a different lie.
-    expect(within(card("www.acme.com")).getByText("domain ready")).toBeTruthy();
+    expect(within(floor()).getByText("Ready")).toBeTruthy();
+    expect(within(floor()).getByText(/make the deployable live/)).toBeTruthy();
+    // The last step is the person's, and it is not on this page.
+    expect(setupStates()).toEqual(["done", "done", "done", "done", "open"]);
     expect(within(card("www.acme.com")).queryByRole("link", { name: /Open/ })).toBeNull();
+    expect(within(floor()).queryByRole("button", { name: /^Open / })).toBeNull();
     // And the panel says what that does and does not mean.
     expect(screen.getByText(/This deployable is draft, so nothing is served/i)).toBeTruthy();
   });
@@ -393,20 +416,29 @@ describe("the records to create", () => {
     await openShop(connection);
     const c = await findCard("www.acme.com");
     expect(screen.queryByRole("dialog")).toBeNull();
-    // The binding's setup is a page of its own now, not a card in the list it
-    // was chosen from -- still inside the Deployables page, and still no modal.
-    expect(screen.getByRole("heading", { name: "Domain" })).toBeTruthy();
+    // COME BACK TO, IT IS THE WIZARD THAT ADDED IT -- the same title, the name
+    // as a fact, and the stage the cluster has walked it to standing open.
+    expect(screen.getByRole("heading", { name: "Add a domain" })).toBeTruthy();
+    expect(setupStates()).toEqual(["done", "current", "waiting", "ahead", "ahead"]);
     expect(within(c).getByLabelText("Copy value: tok-xyz")).toBeTruthy();
     expect(within(c).getByLabelText("Copy name: _memql-verify.www.acme.com")).toBeTruthy();
-    expect(within(c).queryByRole("button", { name: /DNS$/ })).toBeNull();
+    // The DNS records are one click away before ownership passes; the stages
+    // after them are names.
+    expect(within(c).getByRole("button", { name: /^DNS/ }).getAttribute("aria-expanded")).toBe("false");
+    expect(within(c).queryByRole("button", { name: /^Certificate/ })).toBeNull();
+
     await emit(connection, CUSTOM_DOMAIN_CONCEPT, domainRow({ id: "cd-1", hostname: "www.acme.com", token: "tok-xyz", status: "verifying", failureReason: "dns_not_pointing" }));
-    await waitFor(() => expect(within(c).getByRole("heading", { name: "DNS" })).toBeTruthy());
+    // THE RAIL FOLLOWS THE FEED: ownership passed, so DNS opens by itself.
+    await waitFor(() => expect(setupStates()).toEqual(["done", "done", "current", "ahead", "ahead"]));
     await waitFor(() => expect(within(c).getByLabelText("Copy value: 203.0.113.10")).toBeTruthy());
     expect(within(c).getByText("A")).toBeTruthy();
-    await click(within(c).getByRole("button", { name: /Ownership$/ }));
+    // A settled step can be read again, and the step the flow is at is one
+    // click back -- there is no separate "continue" control to find.
+    await click(within(c).getByRole("button", { name: /^Ownership/ }));
     expect(within(c).getByLabelText("Copy value: tok-xyz")).toBeTruthy();
-    await click(within(c).getByRole("button", { name: "Continue to DNS" }));
-    expect(within(c).getByRole("heading", { name: "DNS" })).toBeTruthy();
+    expect(within(c).queryByLabelText("Copy value: 203.0.113.10")).toBeNull();
+    await click(within(c).getByRole("button", { name: /^DNS/ }));
+    expect(within(c).getByLabelText("Copy value: 203.0.113.10")).toBeTruthy();
   });
 
   it("offers a GoDaddy-compatible A record and keeps alternate choices read-only", async () => {
@@ -443,13 +475,22 @@ describe("the records to create", () => {
     await openShop(connection);
     const c = await findCard("www.acme.com");
     await emit(connection, CUSTOM_DOMAIN_CONCEPT, domainRow({ id: "cd-1", status: "issuing", failureReason: "issuance_failed", failureDetail: "Certificate pending" }));
-    await waitFor(() => expect(within(c).getByRole("heading", { name: "Certificate" })).toBeTruthy());
+    // A REASON THE SWEEP CANNOT OUTWAIT IS A STOP, said under the step that stopped.
+    await waitFor(() => expect(setupStates()).toEqual(["done", "done", "done", "stopped", "ahead"]));
     expect(within(c).getByText("Certificate pending")).toBeTruthy();
+    expect(within(floor()).getByText("Needs attention")).toBeTruthy();
+    expect(floor().getAttribute("data-tone")).toBe("paused");
     expect(within(c).queryByRole("link", { name: /Open/ })).toBeNull();
+
     await emit(connection, CUSTOM_DOMAIN_CONCEPT, domainRow({ id: "cd-1", status: "live" }));
     await waitFor(() => expect(within(c).getByRole("link", { name: "Open www.acme.com" })).toBeTruthy());
+    // The adding is over, so the page is the domain's own.
+    expect(screen.getByRole("heading", { name: "www.acme.com" })).toBeTruthy();
+    expect(within(floor()).getByText("Serving")).toBeTruthy();
+
+    // A REGRESSION IS FOLLOWED TOO: completion is the feed's to say, both ways.
     await emit(connection, CUSTOM_DOMAIN_CONCEPT, domainRow({ id: "cd-1", status: "verifying", failureReason: "dns_token_missing" }));
-    await waitFor(() => expect(within(c).getByRole("heading", { name: "Ownership" })).toBeTruthy());
+    await waitFor(() => expect(setupStates()).toEqual(["done", "current", "waiting", "ahead", "ahead"]));
     expect(within(c).queryByRole("link", { name: /Open/ })).toBeNull();
   });
 
@@ -476,11 +517,20 @@ describe("a typed failure", () => {
     await openShop(connection);
 
     const c = await findCard("www.acme.com");
-    expect(within(c).getByText(/does not point at this cluster yet/i)).toBeTruthy();
-    // THE OBSERVATION, VERBATIM. The typed reason says which record is wrong;
-    // this says what is in it, and somebody editing a zone file needs both.
+    // WAITING FOR A RECORD IS A WAIT. The reason arrives in `failureReason`,
+    // and it used to open this page on a red box and a stopped step -- for a
+    // record that simply is not there YET. It names the step, in the tone of a
+    // wait, and the sweep will look again.
+    expect(setupStates()).toEqual(["done", "done", "current", "ahead", "ahead"]);
+    expect(within(c).getByText("Waiting for the records to point here")).toBeTruthy();
+    expect(floor().getAttribute("data-tone")).toBe("busy");
+    expect(within(floor()).getByText("Waiting for DNS to point here")).toBeTruthy();
+    // THE OBSERVATION, VERBATIM, under the step it is about: somebody editing
+    // a zone file needs to know what IS published, not only that it is wrong.
     expect(within(c).getByText(/resolves to 198\.51\.100\.7/)).toBeTruthy();
-    expect(within(c).getByText(/Last checked/)).toBeTruthy();
+    // ...and the record it is about is marked as the one still looked for.
+    await waitFor(() => expect(c.querySelector('.os-record[data-awaited="true"]')).not.toBeNull());
+    expect(within(floor()).getByText(/^checked /)).toBeTruthy();
   });
 
   // AN UNRECOGNISED REASON KEEPS ITS OWN TOKEN. Inventing a friendly sentence
@@ -511,8 +561,9 @@ describe("a typed failure", () => {
       expect(screen.queryByRole("button", { name: label })).toBeNull();
     }
     // And it says WHY the control is absent, so it does not read as an
-    // omission.
-    expect(screen.getByText(/Checks run automatically every couple of minutes/i)).toBeTruthy();
+    // omission: the floor says the cluster checks by itself, and when it did.
+    expect(within(floor()).getByText(/this keeps checking if you leave/)).toBeTruthy();
+    expect(within(floor()).getByText(/^checked |^not checked yet$/)).toBeTruthy();
   });
 });
 
@@ -552,7 +603,7 @@ describe("live", () => {
       CUSTOM_DOMAIN_CONCEPT,
       domainRow({ id: "cd-1", status: "verifying", lastCheckedAt: "2026-09-01T12:02:00Z" }),
     );
-    await waitFor(() => expect(screen.getByText("checking DNS")).toBeTruthy());
+    await waitFor(() => expect(within(floor()).getByText("Waiting for the ownership record")).toBeTruthy());
     // The cue's own marker, which LiveList renders on an arrival.
     expect(container.querySelectorAll("[data-tick]").length).toBe(0);
   });
@@ -602,7 +653,14 @@ describe("adding a domain", () => {
     await click(screen.getByRole("button", { name: /add domain/i }));
 
     await screen.findByText(refusal);
-    expect(screen.getByText(/was not bound/i)).toBeTruthy();
+    // THE ACT KEEPS ITS NAME. The control said "Add domain", so the refusal
+    // says it was not added -- and the bar says the same, with what to do.
+    expect(screen.getByText(/was not added/i)).toBeTruthy();
+    const bar = document.querySelector(".os-actbar") as HTMLElement;
+    expect(within(bar).getByText("Not added")).toBeTruthy();
+    // Nothing was written, so the step is still the name and Cancel is still Cancel.
+    expect(screen.getByLabelText("Domain to bind")).toBeTruthy();
+    expect(within(bar).getByRole("button", { name: "Cancel" })).toBeTruthy();
   });
 
   // NOTHING IS INSERTED LOCALLY. The row arrives on its own broadcast, with
@@ -616,9 +674,144 @@ describe("adding a domain", () => {
     await type(screen.getByLabelText("Domain to bind") as HTMLInputElement, "www.acme.com");
     await click(screen.getByRole("button", { name: /add domain/i }));
 
-    await screen.findByText(/bound and waiting for its DNS records/i);
-    // The list still has nothing until the cluster says so.
-    expect(screen.queryByLabelText(/Copy value:/)).toBeNull();
+    // THE WIZARD MOVES ON with the server's own answer -- the token it minted
+    // is the ownership record, on screen the instant the bind returns.
+    await screen.findByLabelText("Copy value: tok-minted-server-side");
+    // The LIST still has nothing until the cluster says so.
+    await click(screen.getByRole("button", { name: "Leave" }));
+    const list = await screen.findByRole("region", { name: /^Domains for / });
+    expect(within(list).queryByRole("button", { name: opens("www.acme.com") })).toBeNull();
+  });
+});
+
+// ===========================================================================
+// The add wizard -- one flow from the name to the moment it serves
+// ===========================================================================
+
+describe("the add wizard", () => {
+  const stepStates = () =>
+    [...screen.getByRole("list", { name: "Adding a domain" }).querySelectorAll(":scope > li")].map((li) => li.getAttribute("data-state"));
+  const bar = () => document.querySelector(".os-actbar") as HTMLElement;
+
+  it("opens on the name, with every later step ahead and no forward act yet", async () => {
+    await openShop(fakeConnection({ sites: [SHOP], domains: [] }));
+    await openAddDomain();
+    expect(screen.getByRole("heading", { name: "Add a domain" })).toBeTruthy();
+    expect(stepStates()).toEqual(["open", "ahead", "ahead", "ahead", "ahead"]);
+    // ABSENT, NEVER DISABLED: the bar says what is missing instead.
+    expect(within(bar()).getByText("Name the domain")).toBeTruthy();
+    expect(within(bar()).queryByRole("button", { name: "Add domain" })).toBeNull();
+    expect(within(bar()).getByRole("button", { name: "Cancel" })).toBeTruthy();
+  });
+
+  it("offers the forward act only for a name that could be a domain", async () => {
+    await openShop(fakeConnection({ sites: [SHOP], domains: [] }));
+    await openAddDomain();
+    await type(screen.getByLabelText("Domain to bind") as HTMLInputElement, "acme");
+    expect(within(bar()).queryByRole("button", { name: "Add domain" })).toBeNull();
+    expect(within(bar()).getByText(/needs at least one dot/)).toBeTruthy();
+    await type(screen.getByLabelText("Domain to bind") as HTMLInputElement, "www.acme.com");
+    expect(within(bar()).getByRole("button", { name: "Add domain" })).toBeTruthy();
+    expect(within(bar()).getByText("Ready to add")).toBeTruthy();
+  });
+
+  it("keeps the forward act on the bar and nowhere in the step", async () => {
+    await openShop(fakeConnection({ sites: [SHOP], domains: [] }));
+    await openAddDomain();
+    await type(screen.getByLabelText("Domain to bind") as HTMLInputElement, "www.acme.com");
+    expect(screen.getAllByRole("button", { name: "Add domain" })).toHaveLength(1);
+    expect(bar().contains(screen.getByRole("button", { name: "Add domain" }))).toBe(true);
+  });
+
+  it("turns the name into a fact and waits, visibly, once it is bound", async () => {
+    await openShop(fakeConnection({ sites: [SHOP], domains: [] }));
+    await openAddDomain();
+    await type(screen.getByLabelText("Domain to bind") as HTMLInputElement, "www.acme.com");
+    await click(screen.getByRole("button", { name: "Add domain" }));
+
+    await waitFor(() => expect(stepStates()).toEqual(["done", "current", "waiting", "ahead", "ahead"]));
+    // The name is answered: no field, and its step is a line, not a control.
+    expect(screen.queryByLabelText("Domain to bind")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Domain/ })).toBeNull();
+    // THE WAIT IS THE BAR'S, in the busy tone that draws the thread, and it
+    // says when the cluster last looked.
+    expect(bar().getAttribute("data-tone")).toBe("busy");
+    expect(within(bar()).getByText("Waiting for the ownership record")).toBeTruthy();
+    expect(within(bar()).getByText("not checked yet")).toBeTruthy();
+    // LEAVE IS THE BUTTON NOW: going keeps it. Cancel -- which would REMOVE it
+    // -- waits the beat until the cluster has sent the row a removal is asked
+    // about; this harness never sends one, so Leave is the whole floor.
+    expect(within(bar()).getAllByRole("button").map((b) => b.textContent)).toEqual(["Leave"]);
+  });
+
+  // FOUND BY BINDING A REAL DOMAIN. The wizard sat on "not checked yet" through
+  // two sweeps while the list behind it said "checking DNS": it was still
+  // drawing the stand-in it builds from the add's reply, because it looked for
+  // the arrived row by an id the two seams do not promise to spell alike.
+  it("follows the binding's own row once the cluster sends it", async () => {
+    const connection = fakeConnection({ sites: [SHOP], domains: [] });
+    await openShop(connection);
+    await openAddDomain();
+    await type(screen.getByLabelText("Domain to bind") as HTMLInputElement, "www.acme.com");
+    await click(screen.getByRole("button", { name: "Add domain" }));
+    await waitFor(() => expect(within(bar()).getByText("not checked yet")).toBeTruthy());
+
+    await emit(connection, CUSTOM_DOMAIN_CONCEPT, domainRow({
+      id: "cd-new", hostname: "www.acme.com", status: "verifying", failureReason: "dns_token_missing",
+      failureDetail: "looked up TXT _memql-verify.www.acme.com: no such record", lastCheckedAt: new Date().toISOString(),
+    }), "NODE_CREATED");
+
+    await waitFor(() => expect(within(bar()).getByText(/^checked /)).toBeTruthy());
+    // The row is here, so the whole thing can be cancelled by name.
+    expect(within(bar()).getAllByRole("button").map((b) => b.textContent)).toEqual(["Cancel", "Leave"]);
+    expect(within(bar()).getByRole("button", { name: "Cancel adding www.acme.com" })).toBeTruthy();
+    // STILL A WAIT, not a failure: the record has simply not been seen yet.
+    expect(bar().getAttribute("data-tone")).toBe("busy");
+    expect(stepStates()).toEqual(["done", "current", "waiting", "ahead", "ahead"]);
+    expect(screen.getByText("looked up TXT _memql-verify.www.acme.com: no such record")).toBeTruthy();
+  });
+
+  it("follows it by its name when the two seams spell the id differently", async () => {
+    const connection = fakeConnection({ sites: [SHOP], domains: [] });
+    await openShop(connection);
+    await openAddDomain();
+    await type(screen.getByLabelText("Domain to bind") as HTMLInputElement, "www.acme.com");
+    await click(screen.getByRole("button", { name: "Add domain" }));
+    await waitFor(() => expect(within(bar()).getByText("not checked yet")).toBeTruthy());
+
+    await emit(connection, CUSTOM_DOMAIN_CONCEPT, domainRow({
+      id: "some-other-spelling", hostname: "www.acme.com", status: "issuing", lastCheckedAt: new Date().toISOString(),
+    }), "NODE_CREATED");
+
+    await waitFor(() => expect(within(bar()).getByText("Getting a certificate")).toBeTruthy());
+    expect(stepStates()).toEqual(["done", "done", "done", "current", "ahead"]);
+  });
+
+  it("never mistakes a removed binding of the same name for the one it just made", async () => {
+    const gone = domainRow({ id: "cd-old", hostname: "www.acme.com", status: "removed", lastCheckedAt: "2026-01-01T00:00:00Z" });
+    const connection = fakeConnection({ sites: [SHOP], domains: [gone] });
+    await openShop(connection);
+    await openAddDomain();
+    await type(screen.getByLabelText("Domain to bind") as HTMLInputElement, "www.acme.com");
+    await click(screen.getByRole("button", { name: "Add domain" }));
+    // The history row has the name and a check time; the new binding has neither yet.
+    await waitFor(() => expect(within(bar()).getByText("not checked yet")).toBeTruthy());
+    expect(stepStates()).toEqual(["done", "current", "waiting", "ahead", "ahead"]);
+  });
+
+  it("lets the DNS records be read before ownership has passed", async () => {
+    await openShop(fakeConnection({ sites: [SHOP], domains: [] }));
+    await openAddDomain();
+    await type(screen.getByLabelText("Domain to bind") as HTMLInputElement, "www.acme.com");
+    await click(screen.getByRole("button", { name: "Add domain" }));
+    await screen.findByLabelText("Copy value: tok-minted-server-side");
+    // Both records are created in the same place, so the second is one click
+    // away while the first is still being checked -- a disclosure, closed.
+    const dns = screen.getByRole("button", { name: /^DNS/ });
+    expect(dns.getAttribute("aria-expanded")).toBe("false");
+    // A stage nobody can act on yet is a name, not a control.
+    expect(screen.queryByRole("button", { name: /^Certificate/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Serving/ })).toBeNull();
   });
 });
 
@@ -626,7 +819,50 @@ describe("adding a domain", () => {
 // Remove
 // ===========================================================================
 
+describe("leaving a binding that is still being set up", () => {
+  it("keeps it, and its row opens the wizard again where it was left", async () => {
+    const connection = fakeConnection({ sites: [SHOP], domains: [domainRow({ id: "cd-1", hostname: "www.acme.com", token: "tok-xyz" })] });
+    await openShop(connection);
+    await findCard("www.acme.com");
+
+    await click(within(floor()).getByRole("button", { name: "Leave" }));
+    await findRow("www.acme.com");
+    expect(connection.callsNamed("removeCustomDomain")).toHaveLength(0);
+
+    await findCard("www.acme.com");
+    expect(screen.getByRole("heading", { name: "Add a domain" })).toBeTruthy();
+    expect(setupStates()).toEqual(["done", "current", "waiting", "ahead", "ahead"]);
+    expect(within(card("www.acme.com")).getByLabelText("Copy value: tok-xyz")).toBeTruthy();
+  });
+});
+
 describe("removing a binding", () => {
+  // THE FLOOR'S TWO VERBS. Leave goes and everything stays; CANCEL undoes the
+  // whole thing, which after the bind means the domain is removed -- so it
+  // asks first, by name, in the words of THIS state: nothing is served yet.
+  it("cancels one that is still being set up, and goes back to the list", async () => {
+    const connection = fakeConnection({ sites: [SHOP], domains: [domainRow({ id: "cd-1", hostname: "www.acme.com" })] });
+    await openShop(connection);
+    await findCard("www.acme.com");
+
+    // ONE BUTTON ON THE FLOOR. The way out beside it is a label, not a second
+    // button to be weighed against the first.
+    expect(within(floor()).getAllByRole("button").map((b) => b.textContent)).toEqual(["Cancel", "Leave"]);
+    expect(floor().querySelectorAll(".os-button")).toHaveLength(1);
+    expect(floor().querySelector(".os-button")?.textContent).toBe("Leave");
+    expect(floor().querySelector(".os-actbar-text")?.textContent).toBe("Cancel");
+
+    await click(within(floor()).getByRole("button", { name: "Cancel adding www.acme.com" }));
+    expect(within(floor()).getByText("Cancel adding www.acme.com? It is removed, and its setup stops here.")).toBeTruthy();
+    expect(within(floor()).getAllByRole("button").map((b) => b.textContent)).toEqual(["Keep", "Remove"]);
+    expect(floor().querySelectorAll(".os-button")).toHaveLength(1);
+
+    await click(within(floor()).getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(connection.callsNamed("removeCustomDomain")).toHaveLength(1));
+    await screen.findByRole("region", { name: /^Domains for / });
+    expect(document.querySelector(".os-domain-page")).toBeNull();
+  });
+
   it("confirms in surface, naming the hostname, and cancel is a no-op", async () => {
     const connection = fakeConnection({
       sites: [SHOP],

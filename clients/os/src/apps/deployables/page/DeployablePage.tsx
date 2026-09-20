@@ -28,7 +28,7 @@ import { LiveStop } from "./stops/Live";
 import { SourceStop } from "./stops/Source";
 import { WhatItIsStop } from "./stops/WhatItIs";
 import { WhereItLivesStop } from "./stops/WhereItLives";
-import { AddDomainView, DomainDetail } from "./stops/Domains";
+import { DomainWizard } from "./stops/Domains";
 import { useBundleFlip } from "./useBundleFlip";
 
 // The deployable page (epic memql#4937, design sections C and D): ONE head,
@@ -302,16 +302,19 @@ export function DeployablePage({
 
   if (detail === "whereItLives" && domainView.kind !== "list") {
     const toAddresses = () => setDomainView({ kind: "list" });
-    const adding = domainView.kind === "add";
-    const title = adding ? "Add a domain" : "Domain";
-    return <div className="os-deploy-pane deployable-workspace" data-os-page-context={JSON.stringify({ page: "Deployable", siteId: site.id, hostname: site.hostname, name, view: adding ? "Add a domain" : "Domain setup" })}><div className="os-deploy-scroll">
-      <Panel label={adding ? `Add a domain to ${siteName(site)}` : `A domain of ${siteName(site)}`}>
-        <Head title={title}
-          breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label: name, onSelect: () => { setDomainView({ kind: "list" }); setDetail(null); } }, { label: "Addresses and client", onSelect: toAddresses }, { label: title }]}
-          back={{ label: "Addresses and client", onSelect: toAddresses }} />
-        {adding ? <AddDomainView siteId={site.id} /> : <DomainDetail site={site} domainId={domainView.id} />}
-      </Panel>
-    </div></div>;
+    // ONE SURFACE FOR A DOMAIN, whether it is being added or come back to: the
+    // wizard opens on the name, or on the binding at whatever stage the
+    // cluster has walked it to. It owns the whole pane -- its bar is the
+    // window's floor, so it cannot sit inside a page that already has one.
+    return <DomainWizard
+      key={domainView.kind === "domain" ? domainView.id : "add"}
+      site={site}
+      name={name}
+      domainId={domainView.kind === "domain" ? domainView.id : ""}
+      trail={[{ label: backLabel, onSelect: onBack }, { label: name, onSelect: () => { setDomainView({ kind: "list" }); setDetail(null); } }, { label: "Addresses and client", onSelect: toAddresses }]}
+      back={{ label: "Addresses and client", onSelect: toAddresses }}
+      onLeave={toAddresses}
+    />;
   }
 
   if (detail === "whereItLives") {

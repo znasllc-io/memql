@@ -5104,80 +5104,12 @@ a.os-button {
  * shell that ignored the theme.
  */
 
-.os-domain-add {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid var(--os-line);
-  border-radius: var(--os-radius-sm);
-  background: var(--os-raised);
-}
-
-.os-domain {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--os-line);
-  border-radius: var(--os-radius-sm);
-  background: var(--os-plate);
-}
 
 /* The tone rides a LEFT EDGE rather than a background wash. A row whose whole
  * plate turns amber reads as broken; a domain waiting for DNS is not broken,
  * it is waiting -- which is most of a domain's life. The edge is enough to
  * find the row that needs attention in a list of five. */
-.os-domain[data-tone="warn"] {
-  box-shadow: inset 3px 0 0 var(--os-warn);
-}
 
-.os-domain[data-tone="error"] {
-  box-shadow: inset 3px 0 0 var(--os-error);
-}
-
-.os-domain[data-tone="ok"] {
-  box-shadow: inset 3px 0 0 var(--os-accent);
-}
-
-.os-domain[data-tone="muted"] {
-  opacity: 0.72;
-}
-
-.os-domain-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.os-domain-host {
-  margin: 0;
-  font-family: var(--os-font-mono);
-  font-size: var(--os-text-md);
-  color: var(--os-ink);
-  /* A hostname is the row's identity and can be long. It wraps rather than
-   * truncating: a truncated domain is a different domain, and this is the one
-   * string on the panel somebody is checking character by character. */
-  overflow-wrap: anywhere;
-}
-
-.os-domain-status {
-  font-size: var(--os-text-xs);
-  color: var(--os-muted);
-}
-
-.os-domain-status[data-tone="ok"] {
-  color: var(--os-accent);
-}
-
-.os-domain-status[data-tone="error"] {
-  color: var(--os-error);
-}
-
-.os-domain-head > :last-child {
-  margin-left: auto;
-}
 
 /* The Type value: read, not copied, so it is not a control. It keeps the
  * boxed monospace treatment because it is still a literal somebody has to
@@ -5231,11 +5163,6 @@ a.os-button {
 
 /* ---- the record strip: this panel's one piece of real design ---- */
 
-.os-domain-records {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
 
 .os-record {
   display: flex;
@@ -5250,8 +5177,12 @@ a.os-button {
 /* THE ONE THAT IS STILL WRONG, marked. The typed failureReason says which
  * record it is about, so the panel points at it rather than making somebody
  * read both and work it out. */
-.os-record[data-faulty="true"] {
-  border-color: var(--os-error);
+/* THE RECORD THE CLUSTER IS STILL LOOKING FOR, in the accent -- "this one" --
+   and not in the error colour. Both reasons that mark a record mean it has not
+   been SEEN yet, which is the ordinary state of a record somebody was handed a
+   moment ago; a red box around it said they had done something wrong. */
+.os-record[data-awaited="true"] {
+  border-color: var(--os-accent);
 }
 
 .os-record-parts {
@@ -5271,6 +5202,14 @@ a.os-button {
  * actually copies, so they take the room. */
 .os-record-part[data-grow="true"] {
   flex: 1 1 220px;
+  /* A VALUE TAKES ITS OWN ROW BEFORE IT BREAKS. These are strings somebody
+     copies into another application, and one split across two lines reads as
+     two values. `fit-content` holds a part at its full width while that width
+     exists -- so when Name and Value do not fit side by side the second WRAPS
+     to a row of its own, whole -- and gives way to `overflow-wrap: anywhere`
+     only when the value is wider than the strip itself. */
+  min-width: fit-content;
+  max-width: 100%;
 }
 
 .os-record-label {
@@ -5544,22 +5483,6 @@ a.os-button {
   color: var(--os-muted);
 }
 
-.os-domain-foot {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-  font-size: var(--os-text-xs);
-  color: var(--os-muted);
-}
-
-.os-domain-confirm {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  font-size: var(--os-text-xs);
-  color: var(--os-ink);
-}
 
 @media (prefers-reduced-motion: reduce) {
   .os-record-value {
@@ -14559,8 +14482,7 @@ a.os-button {
 .os-journey-trail [aria-current="step"] .os-step-number { color: var(--os-accent-fg); background: var(--os-accent); border-color: var(--os-accent); }
 .os-journey-trail button:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }
 
-.os-domain .deployable-journey-current { width: 100%; min-width: 0; }
-.os-domain .os-form-field + .os-form-field { margin-top: 12px; }
+
 @container (max-width: 600px) {
   .os-journey-trail { gap: 12px; padding-bottom: 6px; margin-block: 16px; }
   .os-journey-trail li { flex: 0 0 auto; }
