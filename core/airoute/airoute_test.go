@@ -155,3 +155,48 @@ func TestAirouteImportsOnlyTheStandardLibrary(t *testing.T) {
 		t.Fatal("go list -deps did not report the package itself; the check proved nothing")
 	}
 }
+
+// NeedsTools names the modalities on which MemQL DRIVES a tool loop. It is the
+// predicate the app door turns on (design D7): on a tool turn MemQL is driving
+// and an app is an agent that drives itself, so the door does not serve the
+// turn -- it takes the whole STEP instead.
+func TestModalityNeedsTools(t *testing.T) {
+	want := map[Modality]bool{
+		ModalityTools:          true,
+		ModalityStreamingTools: true,
+		ModalityChat:           false,
+		ModalityStreamingChat:  false,
+		ModalityStructured:     false,
+		ModalityVision:         false,
+		ModalityEmbedding:      false,
+		ModalitySpeech:         false,
+		ModalityTranscribe:     false,
+	}
+	for _, m := range Modalities() {
+		if got := m.NeedsTools(); got != want[m] {
+			t.Fatalf("%s.NeedsTools() = %v, want %v", m, got, want[m])
+		}
+	}
+}
+
+// EMBEDDINGS NEVER GO THROUGH AN APP (design D10), and the session door does
+// not quietly become the exception: an embedding is not a tool turn, so an app
+// entry is passed over for it exactly as before.
+func TestEmbeddingsAreNeverToolNeeding(t *testing.T) {
+	if ModalityEmbedding.NeedsTools() {
+		t.Fatalf("embeddings must never be a tool-needing modality: a degraded or substituted embedder answers in a different vector space")
+	}
+}
+
+// The four doors are distinct strings. `session` is a door rather than a flag
+// on `app` because v1:router:call.door is what a reader filters on, and "an app
+// answered a chat turn" and "an app ran the whole step" are different answers.
+func TestDoorsAreDistinct(t *testing.T) {
+	seen := map[string]bool{}
+	for _, d := range []string{DoorLocal, DoorApp, DoorFederation, DoorSession} {
+		if d == "" || seen[d] {
+			t.Fatalf("door %q is empty or repeated", d)
+		}
+		seen[d] = true
+	}
+}

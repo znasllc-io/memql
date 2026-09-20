@@ -55,8 +55,13 @@ const AppProviderName = "app"
 // a shared lookup.
 const AppReferencePrefix = "app:"
 
+// AppWildcardId is what follows `app:` to mean ANY runnable app, in the
+// owner's own order. It is NOT a member of the closed runnable set: it is a
+// selector over that set, which is why airoute.IsRunnableApp refuses it.
+const AppWildcardId = "*"
+
 // AppWildcard names ANY runnable app, in the owner's own order.
-const AppWildcard = AppReferencePrefix + "*"
+const AppWildcard = AppReferencePrefix + AppWildcardId
 
 // ErrAppUnavailable is what an app call returns when no machine can serve it.
 var ErrAppUnavailable = errors.New("no machine can run this app right now")
@@ -134,6 +139,19 @@ type AppCallRequest struct {
 	Purpose string
 	RunId   string
 	StepId  string
+
+	// Model is the model a policy PINNED with `app:<id>:<model>` (design D8).
+	// EMPTY IS NO PIN, and the app runs at its own default.
+	Model string
+	// Level is the call's LEVEL, one of core/airoute's closed four. It rides
+	// AppSessionStart.level, and THE COCKPIT owns the translation into the
+	// app's own knobs -- the knob names are the app's, and only the machine
+	// knows which app, at which version, is installed. Empty means no level
+	// was named, which is what every session did before the field existed.
+	Level string
+	// Inputs are Library artifact ids the cockpit pulls into the session
+	// workspace before the run starts.
+	Inputs []string
 }
 
 // AppCallResult is the answer.
@@ -219,15 +237,39 @@ func (r *ProviderRegistry) AppDoors(ctx context.Context, actingUserId string) ([
 	return doors, nil
 }
 
-// IsAppReference reports whether a provider name refers to an app door, and
-// returns the app id. The wildcard returns "*".
-func IsAppReference(name string) (string, bool) {
+// SplitAppReference decomposes an app door reference into the app id and the
+// MODEL PIN a policy may write after it (`app:<id>:<model>`, design D8).
+//
+// The wildcard answers ("*", "", true): `app:*` names any signed-in app and
+// carries no pin, because a model name belongs to one app. The parser refuses
+// `app:*:<model>` at load, so a pinned wildcard cannot reach here.
+func SplitAppReference(name string) (appId, model string, ok bool) {
 	name = strings.TrimSpace(name)
 	if !strings.HasPrefix(name, AppReferencePrefix) {
-		return "", false
+		return "", "", false
 	}
-	appId := strings.TrimSpace(strings.TrimPrefix(name, AppReferencePrefix))
-	return appId, appId != ""
+	rest := strings.TrimSpace(strings.TrimPrefix(name, AppReferencePrefix))
+	if rest == "" {
+		return "", "", false
+	}
+	appId, model, _ = strings.Cut(rest, ":")
+	appId = strings.TrimSpace(appId)
+	model = strings.TrimSpace(model)
+	if appId == "" {
+		return "", "", false
+	}
+	return appId, model, true
+}
+
+// IsAppReference reports whether a provider name refers to an app door, and
+// returns the app id. The wildcard returns "*".
+//
+// It answers the APP ID and NOT the model pin: `app:claude-code:sonnet` is a
+// door on claude-code with a model asked for, and a caller resolving the door
+// must look up "claude-code". SplitAppReference is the one that returns both.
+func IsAppReference(name string) (string, bool) {
+	appId, _, ok := SplitAppReference(name)
+	return appId, ok
 }
 
 // IsAppWildcard reports whether a reference names ANY runnable app.
@@ -235,23 +277,30 @@ func IsAppWildcard(name string) bool {
 	return strings.TrimSpace(name) == AppWildcard
 }
 
-// appEntry synthesizes the registry entry for `app:<appId>`.
+// appEntry synthesizes the registry entry for `app:<appId>` and, since epic
+// memql#5391, for `app:<appId>:<model>` -- the model a policy PINNED.
+//
+// entryName is the reference an AUTHOR WROTE, and it is what the entry is named
+// after rather than a re-composition from appId: the decision record has to
+// say what the policy said, and `app:claude-code` where the policy wrote
+// `app:claude-code:claude-opus-5` would hide the pin from the one reader who
+// needs to see it.
 //
 // Resolved in EntryForUser rather than at load, for the reason fleetEntry
 // states about its own subject: an app that nobody has signed into must not
 // refuse boot, and signing in must not need a reload.
-func (r *ProviderRegistry) appEntry(ctx context.Context, actingUserId, appId string) (*ProviderConfigEntry, bool) {
+func (r *ProviderRegistry) appEntry(ctx context.Context, actingUserId, appId, model, entryName string) (*ProviderConfigEntry, bool) {
 	r.mu.RLock()
 	a := r.apps
 	r.mu.RUnlock()
 
-	wildcard := appId == "*"
+	wildcard := appId == AppWildcardId
 	cfg := ProviderConfig{
-		Name:  AppReferencePrefix + appId,
+		Name:  entryName,
 		Type:  AppProviderType,
 		Model: appId,
 	}
-	client := &appProvider{registry: r, appId: appId, actingUserId: actingUserId, wildcard: wildcard}
+	client := &appProvider{registry: r, appId: appId, model: model, actingUserId: actingUserId, wildcard: wildcard}
 	entry := &ProviderConfigEntry{Config: cfg, Client: client}
 	if a == nil {
 		entry.err = fmt.Errorf("this node has no app sessions installed")
@@ -284,6 +333,10 @@ func (r *ProviderRegistry) appEntry(ctx context.Context, actingUserId, appId str
 type appProvider struct {
 	registry     *ProviderRegistry
 	appId        string
+	// model is the model a policy PINNED with `app:<id>:<model>` (design D8).
+	// EMPTY IS NO PIN, and the app runs at its own default -- which is every
+	// call that came through `app:*` or a bare `app:<id>`.
+	model        string
 	actingUserId string
 	wildcard     bool
 
@@ -331,6 +384,9 @@ func (p *appProvider) call(ctx context.Context, req AppCallRequest) (AppCallResu
 		return AppCallResult{}, fmt.Errorf("%w: this node has no app sessions installed", ErrAppUnavailable)
 	}
 	req.AppId = p.appId
+	if strings.TrimSpace(req.Model) == "" {
+		req.Model = p.model
+	}
 	req.ActingUserId = p.actingUserId
 	if strings.TrimSpace(req.ActingUserId) == "" {
 		req.ActingUserId = actingUserFromContext(ctx)

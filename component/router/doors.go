@@ -39,6 +39,11 @@ const (
 	DoorLocal      = "local"
 	DoorApp        = "app"
 	DoorFederation = "federation"
+	// DoorSession is an app door that took the whole STEP (design D7). The
+	// value is airoute's: the record, the log and the park card read one
+	// vocabulary, and a door spelled two ways is a filter that silently
+	// misses half its rows.
+	DoorSession = airoute.DoorSession
 )
 
 // doorFor classifies a chain entry by the reference an author wrote.

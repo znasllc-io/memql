@@ -662,11 +662,11 @@ func (r *ProviderRegistry) EntryForUser(ctx context.Context, actingUserId, name 
 		}
 		return r.fleetEntry(ctx, actingUserId, modelId)
 	}
-	if appId, isApp := IsAppReference(key); isApp {
+	if appId, model, isApp := SplitAppReference(key); isApp {
 		if strings.TrimSpace(actingUserId) == "" {
 			actingUserId = actingUserFromContext(ctx)
 		}
-		return r.appEntry(ctx, actingUserId, appId)
+		return r.appEntry(ctx, actingUserId, appId, model, key)
 	}
 	return nil, false
 }
