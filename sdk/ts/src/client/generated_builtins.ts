@@ -1282,6 +1282,25 @@ QueryClient.prototype.integrationStatus = function (this: QueryClient, args: Int
   return this.executeNamed("integrationStatus", buildIntegrationStatus(args), opts);
 };
 
+/** The MemQL line this cluster speaks, the forms it deprecates, and where the DSL it loaded still spells one. ONE row: language, edition, status (frozen or draft), grammarVersion, editorRelease, deprecationWindowMinors, and forms[] with rule, spelling, replacement, migrator, deprecatedIn, refusedFrom (a floor, not a date), state (deprecated | refused) and uses[] (file, line, column, text). The uses are the answering node's last load; every mesh node mounts the same tree, so any of them answers for the cluster. */
+export interface LanguageStatusArgs {
+}
+
+export function buildLanguageStatus(args: LanguageStatusArgs): string {
+  void args;
+  return "builtin languageStatus()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    languageStatus(args?: LanguageStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.languageStatus = function (this: QueryClient, args: LanguageStatusArgs = {} as LanguageStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("languageStatus", buildLanguageStatus(args), opts);
+};
+
 /** Add a label to a Library artifact index row. Idempotent -- a label already present is left alone and nothing is written. artifactId is the v1:library:artifact row id; the load + write-back run under a synthetic actor derived from the row's own ownerUserId, so a caller can only ever label an artifact they own. */
 export interface LibraryAddArtifactLabelArgs {
   artifactId: string;

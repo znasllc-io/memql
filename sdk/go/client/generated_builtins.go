@@ -1568,6 +1568,21 @@ func IntegrationStatusBuild(args IntegrationStatusArgs) string {
 	return b.String()
 }
 
+// LanguageStatus -- The MemQL line this cluster speaks, the forms it deprecates, and where the DSL it loaded still spells one. ONE row: language, edition, status (frozen or draft), grammarVersion, editorRelease, deprecationWindowMinors, and forms[] with rule, spelling, replacement, migrator, deprecatedIn, refusedFrom (a floor, not a date), state (deprecated | refused) and uses[] (file, line, column, text). The uses are the answering node's last load; every mesh node mounts the same tree, so any of them answers for the cluster.
+type LanguageStatusArgs struct {
+}
+
+// LanguageStatus calls the engine builtin languageStatus.
+func (qc *QueryClient) LanguageStatus(ctx context.Context, args LanguageStatusArgs) (*Result, error) {
+	call := LanguageStatusBuild(args)
+	return qc.executeNamed(ctx, "languageStatus", call)
+}
+
+func LanguageStatusBuild(args LanguageStatusArgs) string {
+	_ = args
+	return "builtin languageStatus()"
+}
+
 // LibraryAddArtifactLabel -- Add a label to a Library artifact index row. Idempotent -- a label already present is left alone and nothing is written. artifactId is the v1:library:artifact row id; the load + write-back run under a synthetic actor derived from the row's own ownerUserId, so a caller can only ever label an artifact they own.
 type LibraryAddArtifactLabelArgs struct {
 	ArtifactId string
