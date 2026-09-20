@@ -54,7 +54,6 @@ export function LanguageSection() {
       <Head title="Language">
         {readDocs === null ? null : <CopyButton copy={grammar} idle="Copy grammar" tone="primary" />}
       </Head>
-      <CopyOutcome copy={grammar} />
 
       {language.state === "failed" ? (
         // The engine's sentence, verbatim: it names the capability the read
@@ -99,9 +98,28 @@ export function LanguageSection() {
               <CopyButton copy={vocabulary} idle="Copy vocabulary" tone="quiet" />
             </FormRow>
           )}
-          <CopyOutcome copy={vocabulary} />
         </Panel>
       ) : null}
+
+      {/* WHAT A COPY HAS TO SAY WHEN IT DID NOT END IN Copied LANDS AT THE FOOT,
+          both documents' in one place, and NOT under the button that asked.
+          "Under the control that acted" is where the vocabulary's already was
+          and where the grammar's cannot be: the grammar's control is the Head's,
+          so anything drawn under it is drawn above every other control on the
+          page -- a refusal Notice or a ten-row textarea used to push "Copy
+          vocabulary" and every per-form control down by a couple of hundred
+          pixels, out from under a pointer already reaching for one.
+
+          The ANSWER TO THE CLICK is on the button itself (Copying, then Copied),
+          which is where the person is looking. These two are the answers that
+          are not that: a cluster that refused, or a clipboard that would not
+          take the text. They are standing facts to read, not controls to reach
+          for, and each names its own document -- so the foot costs a glance and
+          displaces nothing. The fallback focuses and selects its text on the
+          way in, which brings it into view and leaves the next keystroke a
+          copy. */}
+      <CopyOutcome copy={grammar} />
+      <CopyOutcome copy={vocabulary} />
     </div>
   );
 }
@@ -114,7 +132,14 @@ function SpeaksPanel({ facts }: { facts: LanguageFacts }) {
         <Fact label="Language" value={`MemQL ${facts.language}`} />
         <Fact label="Edition" value={`${facts.edition}, ${facts.status}`} />
         <Fact label="Grammar" value={facts.grammarVersion} mono />
-        <Fact label="Editor" value={`MemQL for VS Code ${facts.editorRelease} or later`} />
+        {/* THE EXTENSION'S OWN NAME, IN FULL. This is the one row on the page
+            that tells an operator what to install, and the extension is for
+            TWO editors -- naming only the first reads to a user of the second
+            as "not for you". `test/editorProduct.test.ts` fails the build on
+            any product name in this tree that the extension's own README and
+            package.json do not use, and it reads the expected name from them
+            rather than holding a copy. */}
+        <Fact label="Editor" value={`MemQL for Visual Studio Code and Cursor ${facts.editorRelease} or later`} />
       </Facts>
       {/* What the edition promises depends on its STATUS, which is read rather
           than assumed: a draft is not held to the frozen guarantee, so the page
@@ -212,7 +237,25 @@ function DeprecatedForm({ form }: { form: LanguageForm }) {
           ) : null}
         </>
       )}
-      <CopyField value={form.migrator} label="command" />
+      {/* THE MIGRATOR IS AN ACT ONLY WHERE THERE IS SOMETHING TO RUN IT ON.
+          With uses on screen the command is the fix, and a copy field is
+          exactly right. With NONE -- the panel having just said nothing this
+          cluster loads uses a deprecated form -- a field with a Copy button was
+          the only act-shaped affordance on the page, sitting under a sentence
+          saying it was not needed, and it read as an instruction.
+
+          The form and its window still list: knowing a window exists before
+          anybody writes the form is the useful half. The rewrite is named as a
+          FACT about the form rather than offered as a ready command -- which is
+          what somebody reading this row actually wants to know, and it is one
+          `memqlmigrate --help` away if they ever need to run it. */}
+      {form.uses.length === 0 ? (
+        <p className="os-language-migrator">
+          The rewrite is <code className="os-mono">{form.migrator}</code>.
+        </p>
+      ) : (
+        <CopyField value={form.migrator} label="command" />
+      )}
     </li>
   );
 }

@@ -312,7 +312,9 @@ describe("Settings -> Language", () => {
     expect(within(speaks).getByText("MemQL 1.0")).toBeTruthy();
     expect(within(speaks).getByText("2026, frozen")).toBeTruthy();
     expect(within(speaks).getByText("2026.09-dsl-v1-foundations-77cda60c").className).toContain("os-mono");
-    expect(within(speaks).getByText("MemQL for VS Code 0.5.1 or later")).toBeTruthy();
+    // The extension's own name, in full -- test/editorProduct.test.ts holds
+    // every "MemQL for ..." in the shell to the one the extension uses.
+    expect(within(speaks).getByText("MemQL for Visual Studio Code and Cursor 0.5.1 or later")).toBeTruthy();
     expect(
       within(speaks).getByText(
         "A frozen edition keeps every form it accepts, with the same meaning, until a new edition. Deprecated forms keep loading for at least 2 minor releases.",
@@ -405,6 +407,42 @@ describe("Settings -> Language", () => {
     expect(nothing.compareDocumentPosition(spelling) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(forms.querySelector(".os-head-meta")).toBeNull();
     expect(within(forms).queryByText("No loaded file uses a deprecated form.")).toBeNull();
+  });
+
+  it("offers no ready command for a form nothing uses", async () => {
+    // A copy field under a sentence saying nothing needs it read as an
+    // instruction: it was the only act-shaped affordance on the panel.
+    connect({ status: statusRow({ forms: [arrayForm()] }) });
+    renderLanguage();
+    await landed();
+    const forms = screen.getByRole("region", { name: "Deprecated forms" });
+
+    // The form and its window still list -- that is the useful half.
+    expect(within(forms).getByText("array(T)")).toBeTruthy();
+    expect(within(forms).getByText("Loads with a warning. It may be refused from 0.25.")).toBeTruthy();
+
+    // The rewrite is named as a FACT about the form, not offered as an act.
+    expect(within(forms).queryByRole("textbox", { name: "command" })).toBeNull();
+    const rewrite = within(forms).getByText("memqlmigrate --rewrite=slice-syntax");
+    expect(rewrite.tagName).toBe("CODE");
+    expect(rewrite.closest("p")!.textContent).toBe("The rewrite is memqlmigrate --rewrite=slice-syntax.");
+
+    // And the panel then carries no control at all -- not the copy, and (with
+    // no uses) not the toggle either.
+    expect(within(forms).queryAllByRole("button")).toEqual([]);
+  });
+
+  it("still offers the command where there is something to run it on", async () => {
+    // The reachable positive for the case above: suppressing the act on every
+    // form would pass it.
+    connect();
+    renderLanguage();
+    await landed();
+    const forms = screen.getByRole("region", { name: "Deprecated forms" });
+    expect((within(forms).getByRole("textbox", { name: "command" }) as HTMLInputElement).value).toBe(
+      "memqlmigrate --rewrite=slice-syntax",
+    );
+    expect(within(forms).queryByText(/^The rewrite is/)).toBeNull();
   });
 
   it("keeps a long list of uses behind one control", async () => {
@@ -558,6 +596,48 @@ describe("copying for a model", () => {
     expect(text.readOnly).toBe(true);
     // Not a confirmation: the button offers the copy again.
     expect(screen.getByRole("button", { name: "Copy grammar" })).toBeTruthy();
+  });
+
+  it.each([
+    [
+      "a clipboard that will not take it",
+      { clipboard: async () => Promise.reject(new Error("denied")) },
+      "Copy did not reach the clipboard. Select the text and copy it.",
+    ],
+    [
+      "a cluster that will not send it",
+      { docsError: "memqlGrammar: refused" },
+      "The cluster did not send the grammar.",
+    ],
+  ])("leaves every control where it was when the grammar copy fails on %s", async (_what, how, says) => {
+    // THE HEAD'S COPY IS THE ONE CONTROL AT THE TOP OF THE PAGE, so its answer
+    // is the one thing that could land above every other control. Drawn under
+    // the Head it pushed "Copy vocabulary" and every per-form control down by
+    // the height of a ten-row textarea, out from under a pointer already
+    // reaching for one. It goes at the foot instead.
+    connect("docsError" in how ? { docsError: how.docsError } : {});
+    if ("clipboard" in how) stubClipboard(how.clipboard!);
+    else stubClipboard(async () => {});
+    const { container } = renderLanguage();
+    await landed();
+
+    const controls = () => [
+      ...container.querySelectorAll(".os-settings button, .os-settings input, .os-settings textarea"),
+    ];
+    const before = controls();
+    // The Head's copy, the vocabulary's, and the migrator's field and button.
+    expect(before.length).toBeGreaterThan(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy grammar" }));
+    const landedAt = await screen.findByText(says);
+
+    // Every control that was on screen is the SAME node at the SAME index --
+    // nothing moved, nothing was replaced...
+    const after = controls();
+    before.forEach((node, i) => expect(after[i]).toBe(node));
+    // ...and whatever the copy had to say came after the last of them.
+    const last = before[before.length - 1]!;
+    expect(last.compareDocumentPosition(landedAt) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("starts the clipboard write inside the click where the browser takes a promised item", async () => {

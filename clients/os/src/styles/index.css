@@ -1457,7 +1457,28 @@ button:not(:disabled):active {
   color: var(--os-muted);
 }
 
-/* The document a clipboard would not take, under the control that asked. */
+/* The rewrite named as a FACT about a form nothing uses, where a copy field
+ * would otherwise offer a command the panel has just said is not needed. */
+.os-language-migrator {
+  margin: 0;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+}
+
+/* The document a clipboard would not take, at the foot of the section.
+ *
+ * THE THREE OVERRIDES ARE NOT COSMETIC. `.os-report` is declared TWICE in this
+ * stylesheet -- as this textarea, and some 4,600 lines further down as the
+ * Diagnostics report's GRID CONTAINER -- so the box picks up a `display: grid`
+ * meant for something else; and the earlier declaration's `background` and
+ * `color` name `--os-surface` / `--os-text`, which tokens.css does not define.
+ * An undefined custom property with no fallback makes the declaration invalid
+ * at computed-value time, so the box came out transparent with inherited ink
+ * rather than taking the panel it sits in.
+ *
+ * Fixed HERE, scoped to this surface, rather than by renaming or re-scoping a
+ * class two apps share; the duplication is reported so it can be dealt with on
+ * its own. */
 .os-language-fallback {
   display: flex;
   flex-direction: column;
@@ -1465,6 +1486,9 @@ button:not(:disabled):active {
 }
 .os-language-fallback .os-report {
   margin-top: 0;
+  display: block;
+  background: var(--os-plate);
+  color: var(--os-ink);
 }
 
 .os-stub {
