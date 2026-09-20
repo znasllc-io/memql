@@ -1,0 +1,11 @@
+{
+  "readme": [
+    "The fixture ledger for TestSelfTestOverABreakingFixture (memql#5389, Step 7). NOT the real ledger, which is component/language/reserved.json.",
+    "It holds exactly one entry, so the self-test can tell a classifier that reports every deletion from one that reads the ledger."
+  ],
+  "annotations": {
+    "scopes": "memql#5375: Tool.Scopes was advertised on the gRPC tool descriptor and checked nowhere, so it read as an authorization gate while gating nothing."
+  },
+  "constructs": {},
+  "functions": {}
+}

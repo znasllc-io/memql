@@ -1,0 +1,62 @@
+{
+  "readme": [
+    "APPEND-ONLY. A name here was removed from the authoring surface and may never return with another meaning.",
+    "memqlbreaking refuses a deletion that has no entry here; that refusal is the gate (memql#5389, D21).",
+    "It refuses the other direction too: a name here that reappears in the surface is reported, because files in the wild still carry the old spelling and would load under the new meaning without a word.",
+    "To un-reserve a name -- when the same thing genuinely comes back -- delete its entry in the SAME change that brings it back, so the un-reservation is a line a reviewer reads rather than an absence nobody sees.",
+    "`annotations`, `constructs` and `functions` reserve WORDS, the things that can be handed to something else. A construct's body clause, an annotation's receiver and a shape's projected keys are part of a contract rather than words; a break in one is reported and acknowledged by re-capturing component/language/surface/2026.json in the same change.",
+    "The retired @use* FAMILY (@useConcept, @useShape, @useQuery, ...) is a prefix rule in component/language/annotations, not a list of names, so it is reserved by that rule rather than by an entry here.",
+    "The concept-field ledger (component/conceptfields/concept-fields.snapshot.json) is the same rule for concept fields, and predates this file."
+  ],
+  "annotations": {
+    "async": "refused on automations since memql#2712: an automation already runs asynchronously off its event or schedule trigger, and nothing read the annotation.",
+    "audit": "removed from the allow-lists in memql#989; nothing read it.",
+    "caller": "#221: @caller on a shape became @actor, and the field accessor was renamed with it (caller.X -> actor.X).",
+    "clientExecution": "epic memql#4988: it dispatched a tool's body to the connected browser over the client-tool relay, which went with the cognition node. Every tool now needs a server-side @handler.",
+    "concepts": "epic #2281: a shape binds its concept in the two-identifier signature, `shape <Concept> <name>`, with the concept imported by a file-top use line.",
+    "deprecated": "memql#5375: rendered by help() and editor hover and read by nothing that changes behaviour. Deprecation is said in the construct's @description.",
+    "enabled": "memql#5375: constructs are enabled by default, so @enabled was an explicit no-op that read like a switch. @disabled is the one that deactivates.",
+    "idempotent": "removed from the mutation allow-list in memql#989; nothing read it.",
+    "immutable": "memql#5375: declared metadata with no write guard behind it, so it read as a constraint while constraining nothing. A field that must not change is enforced by the mutation that writes it.",
+    "kind": "an action is always one primitive capability call, and a composite of several is an automation, so there was nothing left to mark.",
+    "latestMode": "memql#5375: the engine derives time-dependence from `asOf latest` in the body, so the annotation restated it and could contradict it.",
+    "namespace": "memql#5375: a concept's namespace is its domain directory, or that directory's one-line namespace.pin (#2614). The annotation could only restate one of those or silently disagree with it.",
+    "nocache": "memql#5375: one annotation for the cache TTL, with @cache(0) meaning never.",
+    "permission": "buried (#2631 ruling close-out / #2713), the @role twin: documented but never enforced. Access control lives at the actor layer -- RBAC plus the @public per-row-authz classification.",
+    "rateLimit": "memql#5375: Tool.RateLimit was cloned and copied into a Function field nothing reads, so the declared ceiling did not exist. The live ceilings are the provider chokepoint in ai_guard.go and the run budget in component/work.",
+    "reliability": "reliability is runtime state the engine keeps, not something the source declares.",
+    "retry": "removed from the allow-lists in memql#989; nothing read it.",
+    "role": "buried (#2631 ruling / #2709); documented but never enforced -- nothing ever checked the value at runtime. Access control lives at the actor layer.",
+    "schedule": "D15, epic memql#5370: a scheduled automation is written @trigger(schedule=\"<cron>\"), the one spelling. memqlmigrate --rewrite=bodies rewrites it.",
+    "scopes": "memql#5375: Tool.Scopes was advertised on the gRPC tool descriptor and checked nowhere, so it read as an authorization gate while gating nothing. @requiresCapability is the real one.",
+    "shape": "epic #2281: a spec binds its shape or concept in the signature, `spec <boundName> <name> = row => <predicate>`, with boundName resolved through the file-top use import.",
+    "timeout": "removed from the allow-lists in memql#989; nothing read it.",
+    "unique": "memql#5375: declared metadata with no uniqueness check behind it (memql#2960), so it read as a constraint while constraining nothing.",
+    "visibility": "removed in the genesis simplification: it chose which node types load a construct, and every binary now loads everything while build tags decide which integrations are active."
+  },
+  "constructs": {
+    "import": "epic memql#5356, D17: the file-top `import ( ... )` block loaded on the engine and no loader ever read it. A construct is imported with a file-top `use <domain>.<file>.{ names }` line.",
+    "mutate": "D13, epic memql#5370: a mutation is declared with the word a call spells -- `mutation <Concept> <name> { ... }`. memqlmigrate --rewrite=bodies rewrites it."
+  },
+  "functions": {
+    "and": "edition 2026: the connective is the operator, `a && b`.",
+    "coalesce": "edition 2026: `a ?? b`, which is also blank-coalescing.",
+    "concat": "edition 2026: `a + b`.",
+    "cond": "edition 2026: the ternary, `p ? a : b`.",
+    "count": "edition 2026: the method, `x.count()`.",
+    "exists": "edition 2026: `x != nil`. exists(x) read a blank string as absent, and so does the comparison -- absent, null, nil and \"\" are one unset value.",
+    "first": "edition 2026: the method, `x.first()`.",
+    "gt": "edition 2026: the operator, `a > b`.",
+    "gte": "edition 2026: the operator, `a >= b`.",
+    "last": "edition 2026: the method, `x.last()`.",
+    "len": "edition 2026: the method, `x.count()`.",
+    "list.contains": "edition 2026: membership is the `in` operator, `v in <list>`. The graph traversal keeps the name `contains`, which is why only the collection METHOD is reserved here.",
+    "lt": "edition 2026: the operator, `a < b`.",
+    "lte": "edition 2026: the operator, `a <= b`.",
+    "mean": "edition 2026: the method, `x.avg()`. mean() was an automation-evaluator operand the tree never used.",
+    "not": "edition 2026: the operator, `!a`.",
+    "now": "edition 2026: `now` is a reserved ROOT, not a call. The `now()` call form is gone.",
+    "or": "edition 2026: the connective is the operator, `a || b`.",
+    "timestamp": "edition 2026: `now`."
+  }
+}
