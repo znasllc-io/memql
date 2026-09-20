@@ -314,6 +314,23 @@ func (p *sessionProvider) ServedModel() (string, string) {
 	return p.lastResult.Model, p.lastResult.Effort
 }
 
+// Billing reports who PAID for the most recent session, for the router's
+// decision row. A session runs inside somebody's own subscription, so it is
+// "subscription" when the app reported one and "unknown" when it said nothing
+// -- never "metered", because MemQL was not billed for work it did not buy.
+//
+// Without this the router's row would say `metered` for a whole step run on a
+// person's own quota, and a cost reader separating "what we spent" from "what
+// ran somewhere we do not pay" would have had every session on the wrong side.
+func (p *sessionProvider) Billing() string {
+	if p == nil {
+		return ""
+	}
+	p.lastMu.Lock()
+	defer p.lastMu.Unlock()
+	return p.lastResult.Billing
+}
+
 // LastSession reports the session the most recent call ran as, for a caller
 // that needs the subrun id. Ok is false before the first call.
 func (p *sessionProvider) LastSession() (AppSessionOutcome, bool) {

@@ -239,5 +239,11 @@ func buildRecord(
 		// leaves both empty rather than being filled in from the request.
 		ServedModel:  servedModel,
 		ServedEffort: servedEffort,
+
+		// WHO PAID. Empty stays empty and the row reads it as metered, which
+		// is the conservative direction. A provider that knows -- an app door
+		// or a session, both running on somebody's own subscription -- says so
+		// rather than having it inferred from the surface string.
+		Billing: billingOf(inner),
 	}
 }

@@ -1284,6 +1284,8 @@ export interface CreateArtifactArgs {
   producedByRunId?: string;
   producedByWorkerId?: string;
   producedByWorkerName?: string;
+  /** {app, model, effort, sessionId} when an app session produced this. Absent otherwise. */
+  producedBy?: Record<string, unknown>;
   // Enum: none | unvalidated | validated | rejected | partiallyValidated | superseded
   validationStatus?: string;
 }
@@ -1309,6 +1311,7 @@ export function buildCreateArtifact(args: CreateArtifactArgs): string {
   if (args.producedByRunId !== undefined) parts.push("producedByRunId: " + renderMemQLValue(args.producedByRunId));
   if (args.producedByWorkerId !== undefined) parts.push("producedByWorkerId: " + renderMemQLValue(args.producedByWorkerId));
   if (args.producedByWorkerName !== undefined) parts.push("producedByWorkerName: " + renderMemQLValue(args.producedByWorkerName));
+  if (args.producedBy !== undefined) parts.push("producedBy: " + renderMemQLValue(args.producedBy));
   if (args.validationStatus !== undefined) parts.push("validationStatus: " + renderMemQLValue(args.validationStatus));
   return "mutation createArtifact(" + parts.join(", ") + ")";
 }
@@ -2380,6 +2383,8 @@ export interface CreateLibraryFileArgs {
   uploadedFromWorkerId?: string;
   uploadedFromWorkerName?: string;
   uploadedFromPath?: string;
+  /** {app, model, effort, sessionId} when an app session produced this. Absent otherwise. */
+  producedBy?: Record<string, unknown>;
 }
 
 export function buildCreateLibraryFile(args: CreateLibraryFileArgs): string {
@@ -2399,6 +2404,7 @@ export function buildCreateLibraryFile(args: CreateLibraryFileArgs): string {
   if (args.uploadedFromWorkerId !== undefined) parts.push("uploadedFromWorkerId: " + renderMemQLValue(args.uploadedFromWorkerId));
   if (args.uploadedFromWorkerName !== undefined) parts.push("uploadedFromWorkerName: " + renderMemQLValue(args.uploadedFromWorkerName));
   if (args.uploadedFromPath !== undefined) parts.push("uploadedFromPath: " + renderMemQLValue(args.uploadedFromPath));
+  if (args.producedBy !== undefined) parts.push("producedBy: " + renderMemQLValue(args.producedBy));
   return "mutation createLibraryFile(" + parts.join(", ") + ")";
 }
 
@@ -5132,13 +5138,17 @@ export interface RecordRouterCallArgs {
   requestedLevel?: string;
   /** The level that actually served; differs from level only when degraded. */
   servedLevel?: string;
+  /** What the SURFACE reported serving the call with; empty means it did not say. */
+  servedModel?: string;
+  /** The effort the surface reported running at; empty means it stated none. */
+  servedEffort?: string;
   /** True when the chain was exhausted at the requested level and the rule said degrade. */
   degraded?: boolean;
   /** The rule that matched. Empty only for a call pinned with an explicit provider. */
   rule?: string;
   /** The policy that rule named, after policy: expansion. */
   policy?: string;
-  /** local | app | federation -- which door the winning entry belongs to. */
+  /** local | app | federation | session -- which door the winning entry belongs to. */
   door?: string;
   /** The door report: every entry the walk passed over, and the one it took. */
   considered?: Record<string, unknown>[];
@@ -5183,6 +5193,8 @@ export function buildRecordRouterCall(args: RecordRouterCallArgs): string {
   if (args.level !== undefined) parts.push("level: " + renderMemQLValue(args.level));
   if (args.requestedLevel !== undefined) parts.push("requestedLevel: " + renderMemQLValue(args.requestedLevel));
   if (args.servedLevel !== undefined) parts.push("servedLevel: " + renderMemQLValue(args.servedLevel));
+  if (args.servedModel !== undefined) parts.push("servedModel: " + renderMemQLValue(args.servedModel));
+  if (args.servedEffort !== undefined) parts.push("servedEffort: " + renderMemQLValue(args.servedEffort));
   if (args.degraded !== undefined) parts.push("degraded: " + renderMemQLValue(args.degraded));
   if (args.rule !== undefined) parts.push("rule: " + renderMemQLValue(args.rule));
   if (args.policy !== undefined) parts.push("policy: " + renderMemQLValue(args.policy));

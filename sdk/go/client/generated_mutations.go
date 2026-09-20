@@ -1918,6 +1918,8 @@ type CreateArtifactArgs struct {
 	ProducedByRunId      string
 	ProducedByWorkerId   string
 	ProducedByWorkerName string
+	// {app, model, effort, sessionId} when an app session produced this. Absent otherwise.
+	ProducedBy map[string]any
 	// Enum: none | unvalidated | validated | rejected | partiallyValidated | superseded
 	ValidationStatus string
 }
@@ -2048,6 +2050,13 @@ func CreateArtifactBuild(args CreateArtifactArgs) string {
 		}
 		b.WriteString("producedByWorkerName: ")
 		b.WriteString(quoteMemQL(args.ProducedByWorkerName))
+	}
+	if args.ProducedBy != nil {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("producedBy: ")
+		b.WriteString(renderMemQLValue(args.ProducedBy))
 	}
 	if args.ValidationStatus != "" {
 		if b.Len() > 24 {
@@ -4284,6 +4293,8 @@ type CreateLibraryFileArgs struct {
 	UploadedFromWorkerId   string
 	UploadedFromWorkerName string
 	UploadedFromPath       string
+	// {app, model, effort, sessionId} when an app session produced this. Absent otherwise.
+	ProducedBy map[string]any
 }
 
 // CreateLibraryFile calls the engine mutation createLibraryFile.
@@ -4384,6 +4395,13 @@ func CreateLibraryFileBuild(args CreateLibraryFileArgs) string {
 		}
 		b.WriteString("uploadedFromPath: ")
 		b.WriteString(quoteMemQL(args.UploadedFromPath))
+	}
+	if args.ProducedBy != nil {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("producedBy: ")
+		b.WriteString(renderMemQLValue(args.ProducedBy))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -9418,6 +9436,10 @@ type RecordRouterCallArgs struct {
 	RequestedLevel string
 	// The level that actually served; differs from level only when degraded.
 	ServedLevel string
+	// What the SURFACE reported serving the call with; empty means it did not say.
+	ServedModel string
+	// The effort the surface reported running at; empty means it stated none.
+	ServedEffort string
 	// True when the chain was exhausted at the requested level and the rule said degrade.
 	Degraded    bool
 	DegradedSet bool // set true to send degraded; required because zero-value bool is ambiguous
@@ -9425,7 +9447,7 @@ type RecordRouterCallArgs struct {
 	Rule string
 	// The policy that rule named, after policy: expansion.
 	Policy string
-	// local | app | federation -- which door the winning entry belongs to.
+	// local | app | federation | session -- which door the winning entry belongs to.
 	Door string
 	// The door report: every entry the walk passed over, and the one it took.
 	Considered []map[string]any
@@ -9635,6 +9657,20 @@ func RecordRouterCallBuild(args RecordRouterCallArgs) string {
 		}
 		b.WriteString("servedLevel: ")
 		b.WriteString(quoteMemQL(args.ServedLevel))
+	}
+	if args.ServedModel != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("servedModel: ")
+		b.WriteString(quoteMemQL(args.ServedModel))
+	}
+	if args.ServedEffort != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("servedEffort: ")
+		b.WriteString(quoteMemQL(args.ServedEffort))
 	}
 	if args.DegradedSet {
 		if b.Len() > 26 {

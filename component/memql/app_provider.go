@@ -460,6 +460,22 @@ func (p *appProvider) WithLevel(level string) any {
 	}
 }
 
+// Billing reports who PAID for the most recent turn, for the router's decision
+// row: "subscription" when the app reported one, "unknown" when it said
+// nothing. Never "metered" -- MemQL was not billed for a call it did not make.
+//
+// LastCall has returned this since the app door landed and nothing read it, so
+// every app-served decision row said `metered`. This is the accessor the
+// router's structural seam can reach.
+func (p *appProvider) Billing() string {
+	if p == nil {
+		return ""
+	}
+	p.lastMu.Lock()
+	defer p.lastMu.Unlock()
+	return p.lastBilling
+}
+
 // ServedModel reports what the APP said it served the most recent turn with,
 // for the router's decision row (epic memql#5391, design D9).
 //

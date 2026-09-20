@@ -91,3 +91,36 @@ func servedModelOf(p any) (string, string) {
 	}
 	return r.ServedModel()
 }
+
+// billingReporter is what a provider says about WHO PAID for the most recent
+// call.
+//
+// STRUCTURAL, beside the two above and for their reason. A provider that does
+// not implement it says nothing, and the row's existing rule applies: an empty
+// billing reads as `metered`, the conservative direction, because unattributed
+// spend should count against the ceiling rather than disappear into a bucket
+// the ceiling cannot see.
+//
+// IT WAS THE THIRD ACCESSOR WITH NO CALLER. `appProvider.LastCall()` has
+// returned a billing value since the app door landed and nothing ever read it,
+// so every app-served decision row said `metered` for a call that ran inside
+// somebody's own subscription -- the same shape as the ExecutionSurface gap
+// memql#5146 found, in the same file, one field along. It matters more now:
+// a `session` door runs a whole step on a subscription, and a cost reader
+// separating "what we spent" from "what ran somewhere we do not pay" would
+// have had every one of them on the wrong side.
+type billingReporter interface {
+	// Billing is "subscription", "local", "metered" or "" when the provider
+	// cannot tell. It is never inferred from anything else.
+	Billing() string
+}
+
+// billingOf asks a provider who paid. The empty string is a real answer -- it
+// is what every vendor provider says, and the row reads it as metered.
+func billingOf(p any) string {
+	r, ok := p.(billingReporter)
+	if !ok {
+		return ""
+	}
+	return r.Billing()
+}
