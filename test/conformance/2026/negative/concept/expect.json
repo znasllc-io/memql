@@ -1,0 +1,11 @@
+{
+  "cases": [
+    {
+      "file": "nesting-too-deep.memql",
+      "verdict": "refuse_parse",
+      "code": "nesting_too_deep",
+      "message": "the declaration nests too deeply (more than 256 levels): flatten the nesting into separate fields or concepts",
+      "note": "The parser is recursive descent, and a goroutine stack overflow is a fatal error no recover() sees, so how deep it reads is bounded in every grammar it holds. The remedy is the DECLARATION one: \"name its parts as separate statements\" is the wrong instruction for a property or a container type. The depth at which an unbounded parse fails is a property of the stack ceiling rather than of the source's size, which is why no byte cap stands in for this."
+    }
+  ]
+}

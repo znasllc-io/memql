@@ -72,6 +72,12 @@ type Parser struct {
 	// Go cannot recover and which would take the whole engine down.
 	v1Depth int
 
+	// nesting is how many levels deep the parser is right now, outside the
+	// edition-2026 expression grammar (which counts with v1Depth). It bounds
+	// recursion so a pathological input is a parse error, not a goroutine
+	// stack overflow, which Go cannot recover (nesting_bound.go).
+	nesting int
+
 	// chainLinks is how many links the PROCEDURAL expression grammar has
 	// folded in the declaration, or standalone expression, being parsed now.
 	// A chain is built in a loop, so recursion depth never bounds it; the
@@ -2254,6 +2260,12 @@ func (p *Parser) parsePropertyDecl() (*PropertyDecl, error) {
 	if !p.check(TokenIdentifier) {
 		return nil, newParseErrorf(&p.current, "expected property name, got %q", p.current.Literal)
 	}
+	// A nested object, an @open body and a variant each hold properties a
+	// level down (nesting_bound.go).
+	if err := p.enterNesting(siteDeclaration); err != nil {
+		return nil, err
+	}
+	defer p.leaveNesting()
 	prop := &PropertyDecl{Name: p.current.Literal}
 	// The line the property is DECLARED on. Every annotation that belongs to
 	// it has to sit on this line (memql#3692) -- see
@@ -2560,6 +2572,14 @@ func hasVariantAttribute(attrs []*Attribute) bool {
 // alongside the legacy `array(T)` form so existing `.memql` files
 // keep working.
 func (p *Parser) parseTypeRef() (*TypeRef, error) {
+	// []T, array(T) and map[K]V hold their element type a level down
+	// (nesting_bound.go); a type that holds none is no level.
+	if p.check(TokenBracketOpen) || (p.check(TokenIdentifier) && (p.current.Literal == "array" || p.current.Literal == "map")) {
+		if err := p.enterNesting(siteDeclaration); err != nil {
+			return nil, err
+		}
+		defer p.leaveNesting()
+	}
 	// Go-style slice: []T
 	if p.check(TokenBracketOpen) {
 		p.advance()
@@ -3236,6 +3256,12 @@ func (p *Parser) parseTernary() (ExpressionNode, error) {
 	if !p.check(TokenQuestion) {
 		return cond, nil
 	}
+	// Both branches are a level down, so a chain of conditionals nests
+	// (nesting_bound.go).
+	if err := p.enterNesting(siteExpression); err != nil {
+		return nil, err
+	}
+	defer p.leaveNesting()
 	p.advance() // consume '?'
 
 	// Parse "then" expression
@@ -3590,6 +3616,10 @@ func (p *Parser) parseMultiplicative() (ExpressionNode, error) {
 // from the lexer and never reaches here. Recurses to allow `- - x`.
 func (p *Parser) parseUnary() (ExpressionNode, error) {
 	if p.check(TokenOperator) && p.current.Literal == "-" {
+		if err := p.enterNesting(siteExpression); err != nil {
+			return nil, err
+		}
+		defer p.leaveNesting()
 		p.advance()
 		operand, err := p.parseUnary()
 		if err != nil {
@@ -3612,6 +3642,10 @@ func (p *Parser) parsePrimary() (ExpressionNode, error) {
 	case p.check(TokenParenOpen):
 		return p.parseGrouped()
 	case p.check(TokenBang):
+		if err := p.enterNesting(siteExpression); err != nil {
+			return nil, err
+		}
+		defer p.leaveNesting()
 		p.advance() // consume '!'
 		operand, err := p.parsePrimary()
 		if err != nil {
@@ -3678,6 +3712,11 @@ func (p *Parser) parseGrouped() (ExpressionNode, error) {
 	prevFold := p.suppressComparisonFold
 	p.suppressComparisonFold = false
 	defer func() { p.suppressComparisonFold = prevFold }()
+
+	if err := p.enterNesting(siteExpression); err != nil {
+		return nil, err
+	}
+	defer p.leaveNesting()
 
 	p.advance() // consume '('
 	expr, err := p.parseExpression()
@@ -3834,6 +3873,10 @@ func errNotStartsWith(tok *Token) error {
 // missing. Unlike `?.`, the block can hold any boolean expression, which makes
 // the drop unambiguous inside `||`.
 func (p *Parser) parseWhenGuard() (ExpressionNode, error) {
+	if err := p.enterNesting(siteExpression); err != nil {
+		return nil, err
+	}
+	defer p.leaveNesting()
 	p.advance() // consume 'when'
 	if err := p.expect(TokenParenOpen); err != nil {
 		return nil, err
@@ -4316,6 +4359,13 @@ func (p *Parser) parseFunctionCall(name string) (ExpressionNode, error) {
 //     legitimately take positional args and are untouched. A lone
 //     object-literal still routes to the Story 9 wrapper-specific error.
 func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, error) {
+	// Every call's arguments are a level down, whichever parser the name
+	// dispatches to (nesting_bound.go).
+	if err := p.enterNesting(siteExpression); err != nil {
+		return nil, err
+	}
+	defer p.leaveNesting()
+
 	p.advance() // consume '('
 
 	// Call arguments are a fresh expression context: the ??-operand fold
@@ -5408,6 +5458,10 @@ func (p *Parser) parseValue() (any, error) {
 
 // parseArray parses a JSON-like array.
 func (p *Parser) parseArray() ([]any, error) {
+	if err := p.enterNesting(siteExpression); err != nil {
+		return nil, err
+	}
+	defer p.leaveNesting()
 	p.advance() // consume '['
 	arr := []any{}
 
@@ -5434,6 +5488,10 @@ func (p *Parser) parseArray() ([]any, error) {
 
 // parseObject parses a JSON-like object.
 func (p *Parser) parseObject() (map[string]any, error) {
+	if err := p.enterNesting(siteExpression); err != nil {
+		return nil, err
+	}
+	defer p.leaveNesting()
 	p.advance() // consume '{'
 	obj := make(map[string]any)
 
@@ -6081,6 +6139,10 @@ func (p *Parser) parseExpressionArg() (ExpressionNode, error) {
 // arithmetic, and the `??` fold inherits that restriction rather than
 // widening the arg surface.
 func (p *Parser) parseCoalesceArgOperand() (ExpressionNode, error) {
+	if err := p.enterNesting(siteExpression); err != nil {
+		return nil, err
+	}
+	defer p.leaveNesting()
 	left, err := p.parsePrimary()
 	if err != nil {
 		return nil, err
