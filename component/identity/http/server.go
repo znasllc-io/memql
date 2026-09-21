@@ -333,6 +333,16 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	// github_callback.go for why declaring it in component/server would be
 	// wrong rather than merely unnecessary.
 	mux.HandleFunc("GET "+githubconnect.CallbackPath, wrap(s.handleGitHubCallback))
+	// THE GITHUB APP SETUP CALLBACK (design record 2026-09-20-github-app-setup,
+	// D4; owner-approved HTTP exception, CLAUDE.md). The same class as the
+	// route above and registered beside it for the same two reasons: GitHub
+	// redirects a BROWSER here, and declaring it in component/server would
+	// route it to the bff. No s.cors -- a top-level navigation, not a fetch.
+	// Registered unconditionally, like its neighbours: what it needs is a live
+	// setup state, and without one it sends the browser back to MemQL OS. The
+	// page that STARTS the flow is component/identity/web's, because it is a
+	// page.
+	mux.HandleFunc("GET "+githubconnect.AppSetupCallbackPath, wrap(s.handleGitHubAppSetupCallback))
 	mux.HandleFunc("POST /oauth/token", wrap(s.cors(s.handleToken)))
 	mux.HandleFunc("OPTIONS /oauth/token", wrap(s.cors(s.handleOptions)))
 
