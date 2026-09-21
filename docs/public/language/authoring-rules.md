@@ -45,13 +45,17 @@ writes is a field `v1:library:folder` declares.
 Measured: a mutation writing a key its concept does not declare loads with
 NO diagnostic at all. A concept's schema is closed
 ([#21b](#21b-nested-object-blocks-are-closed)), so the undeclared key is a
-WRITE-time failure, not a build-time one, and a read-merge update carries it
-into the merged payload it validates -- the class that makes a row unwritable
-on its next write (memql#5199 / memql#5209), invisible to CI because CI runs
-against a fresh database. That is why this example writes `name`,
-`ownerUserId` and `archived` and not the `status` an earlier revision showed:
-`v1:library:folder` declares no `status`, and nothing would have told the
-author so until a row refused to save.
+WRITE-time failure rather than a build-time one: the FIRST insert is refused,
+`additionalProperties '<key>' not allowed`, and the key is never stored. That
+is why this example writes `name`, `ownerUserId` and `archived` and not the
+`status` an earlier revision showed: `v1:library:folder` declares no
+`status`, and nothing tells the author so until the mutation is called.
+
+> Not to be confused with memql#5199 / memql#5209, which is the opposite
+> order of events: a field that WAS declared, whose rows were written, and
+> which the concept later dropped. Those rows are already stored, and it is
+> their NEXT write that fails -- which CI cannot see, because CI runs against
+> a fresh database. An undeclared key never gets that far.
 
 <!-- corpus: 2026/examples/authoring-rules/one-write/one-insert.memql -->
 ```memql
