@@ -236,11 +236,18 @@ func confirm(kind string, fields map[string]any) ([]memorynodes.MemoryNode, erro
 	if err != nil {
 		return nil, fmt.Errorf("wholesale: marshal %s: %w", kind, err)
 	}
+	now := time.Now().UTC()
 	return []memorynodes.MemoryNode{{
-		ID:        kind + ":" + strconv.FormatInt(time.Now().UTC().UnixNano(), 36),
-		Concept:   "v1:" + strings.ReplaceAll(kind, ":", ":"),
+		// NOT A ROW ID AND NOT A CONCEPT ID. A receipt is never stored --
+		// the engine returns a builtin's nodes as the expression's value and
+		// persists nothing -- so these two fields exist to identify the
+		// ANSWER, not a row. They deliberately do not take the "v1:" form a
+		// stored id carries, because a reader who saw one would reasonably
+		// go looking for the row it names.
+		ID:        kind + "@" + strconv.FormatInt(now.UnixNano(), 36),
+		Concept:   kind,
 		Type:      memorynodes.NodeTypeObject,
-		CreatedAt: time.Now().UTC(),
+		CreatedAt: now,
 		Payload:   payload,
 	}}, nil
 }
