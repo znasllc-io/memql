@@ -2564,13 +2564,14 @@ func hasVariantAttribute(attrs []*Attribute) bool {
 //
 //	string | bool | int | float | datetime | any | object    primitives
 //	enum("a", "b", ...)                                      inline enum
-//	array(T)                                                 legacy slice
+//	array(T)                                                 deprecated slice
 //	[]T                                                      Go-style slice
 //	map[string]T                                             Go-style map
 //
-// The Go-style forms (`[]T`, `map[K]V`) land in Phase 6; they parse
-// alongside the legacy `array(T)` form so existing `.memql` files
-// keep working.
+// The Go-style forms (`[]T`, `map[K]V`) land in Phase 6. `array(T)` is a
+// DEPRECATED form (component/language/deprecation, memql#5390): it parses
+// exactly as `[]T` does while it is inside its window, and is refused naming
+// `[]T` once the window is spent (refuseDeprecatedForm, deprecated_uses.go).
 func (p *Parser) parseTypeRef() (*TypeRef, error) {
 	// []T, array(T) and map[K]V hold their element type a level down
 	// (nesting_bound.go); a type that holds none is no level.
@@ -2598,6 +2599,7 @@ func (p *Parser) parseTypeRef() (*TypeRef, error) {
 		return nil, newParseErrorf(&p.current, "expected type, got %q", p.current.Literal)
 	}
 	kind := p.current.Literal
+	kindTok := p.current
 	p.advance()
 
 	switch kind {
@@ -2625,6 +2627,9 @@ func (p *Parser) parseTypeRef() (*TypeRef, error) {
 	case "array":
 		item := &TypeRef{Kind: "string"} // default
 		if p.check(TokenParenOpen) {
+			if err := p.refuseDeprecatedForm(ruleDeprecatedArrayType, kindTok); err != nil {
+				return nil, err
+			}
 			p.advance()
 			inner, err := p.parseTypeRef()
 			if err != nil {

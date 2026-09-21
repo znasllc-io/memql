@@ -20,6 +20,11 @@
 // CQS / dependency-tree violations, and every other unified-loader
 // parse/register skip.
 //
+// A use of a deprecated language form still inside its window (memql#5390)
+// still LOADS, so it prints as `WARNING: <file>:<line>:<column>: <message>`
+// and in the --json warnings array, and leaves the exit code alone. That scan
+// runs in EVERY mode, single-file included -- see deprecatedFormWarnings.
+//
 // Usage:
 //
 //	memqllint [flags] [path]
@@ -70,6 +75,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/language/deprecation"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/dslimports"
@@ -201,8 +207,26 @@ func run(args []string) int {
 	// mode only: single-file mode keeps its file-scoped report, and the root
 	// there is a namespace directory rather than a DSL root of domains.
 	var paritySkipped []string
+	var parityWarnings []Diagnostic
 	if target == "" {
 		parityDiags, skipped, perr := memql.LintUnifiedTree(nil, root)
+		// What the parity pass found that LOADS -- a use of a deprecated form
+		// still inside its window (memql#5390) -- is not an error and must not
+		// reach the error list or the exit code. It is DROPPED rather than
+		// printed: deprecatedFormWarnings below is this tool's one source for
+		// those warnings, in every mode, so a use is reported once and is
+		// reported in the modes this pass does not run in. A warning of any
+		// other kind is kept and printed, rather than dropped for being a
+		// warning.
+		var unreportedWarnings []memql.LintDiagnostic
+		parityDiags, unreportedWarnings = parityErrors(parityDiags)
+		for _, w := range unreportedWarnings {
+			if w.File != "" {
+				parityWarnings = append(parityWarnings, Diagnostic{Level: "warning", Message: w.File + ": " + w.Message})
+				continue
+			}
+			parityWarnings = append(parityWarnings, Diagnostic{Level: "warning", Message: w.Message})
+		}
 		// Loop analysis requires a complete function registry. Report the
 		// original parse/load refusal once before attempting that graph.
 		if perr == nil && len(parityDiags) == 0 && len(loadDiags) == 0 {
@@ -236,6 +260,8 @@ func run(args []string) int {
 		report.Errors = append(report.Errors, Diagnostic{Level: "error", Message: e.Error()})
 	}
 	sort.SliceStable(report.Errors, func(i, j int) bool { return report.Errors[i].Message < report.Errors[j].Message })
+	report.Warnings = append(report.Warnings, deprecatedFormWarnings(tree, target)...)
+	report.Warnings = append(report.Warnings, parityWarnings...)
 	if rootLineWarning != "" {
 		report.Warnings = append(report.Warnings, Diagnostic{Level: "warning", Message: rootLineWarning})
 	}
@@ -259,11 +285,15 @@ type Report struct {
 	// embedded tree owns the namespace -- but without them a clean report is
 	// ambiguous between "parity-checked and clean" and "never parity-checked".
 	ParitySkippedDomains []string `json:"paritySkippedDomains,omitempty"`
-	// Warnings is what the run found that does not fail it: a root that is
-	// itself a domain a mount would read, and declares no language line.
-	// Whether that directory IS a mounted domain depends on the tree it is
-	// mounted in, which this run cannot see, so it warns and leaves the exit
-	// code alone.
+	// Warnings is what the run found that does not fail it, and it never
+	// changes the exit code:
+	//
+	//   - each use of a deprecated form still inside its window (memql#5390),
+	//     "<file>:<line>:<column>: <the form's warning>", in file and line
+	//     order;
+	//   - a root that is itself a domain a mount would read, and declares no
+	//     language line. Whether that directory IS a mounted domain depends on
+	//     the tree it is mounted in, which this run cannot see.
 	Warnings []Diagnostic `json:"warnings,omitempty"`
 }
 
@@ -272,6 +302,97 @@ type Report struct {
 type Diagnostic struct {
 	Level   string `json:"level"`
 	Message string `json:"message"`
+}
+
+// parityErrors keeps what boot would refuse and drops what it would only warn
+// about, so a warning never reaches the error list, the exit code, or the
+// "clean pass" test that gates the lanes behind it.
+//
+// A deprecation warning is dropped because deprecatedFormWarnings reports it
+// in every mode, so keeping this copy would print it twice. Any OTHER warning
+// is returned to be printed: baseloader.Warning is the general "found it, does
+// not fail the load" channel, and a second kind added to it would otherwise
+// appear in the engine's boot log and vanish here, which is the failure this
+// command exists to not have.
+func parityErrors(diags []memql.LintDiagnostic) (errs, unreported []memql.LintDiagnostic) {
+	errs = diags[:0:0]
+	for _, d := range diags {
+		switch {
+		case !d.IsWarning():
+			errs = append(errs, d)
+		case isDeprecatedFormRule(d.Code):
+			// Reported by deprecatedFormWarnings, in every mode.
+		default:
+			unreported = append(unreported, d)
+		}
+	}
+	return errs, unreported
+}
+
+// isDeprecatedFormRule answers whether a warning's rule id is one the
+// deprecation registry owns, which is what deprecatedFormWarnings reports.
+func isDeprecatedFormRule(code string) bool {
+	if code == "" {
+		return false
+	}
+	_, ok := deprecation.Lookup(code)
+	return ok
+}
+
+// deprecatedFormWarnings is this tool's account of the deprecated language
+// forms the linted source still spells (memql#5390): one warning per use,
+// "<file>:<line>:<column>: <the form's warning>", in file and position order.
+//
+// It scans the tree THIS COMMAND LOADED rather than reading the engine-parity
+// pass's warnings, and that is the whole point of it existing (fix round 1,
+// IMPORTANT 2). The parity pass runs in directory mode only, so single-file
+// mode -- `memqllint concepts.memql`, the invocation an author reaches for on
+// the file they are editing -- printed "no diagnostics" for the entire window
+// and then hard-failed on the release that closed it. Silent for two minors and
+// then a wall is the opposite of what a window is for.
+//
+// Scanning here also covers the mode the parity pass cannot serve at all: a
+// root that is a NAMESPACE directory rather than a DSL root of domains mounts
+// nothing, so the pass sees no files of the caller's.
+//
+// The text is the registry's own (deprecation.Form.Warning), so the line an
+// author reads here, the line a boot log carries and the squiggle in the editor
+// are the same words. A form whose window is spent produces nothing: the parse
+// refuses it, and that refusal is already an error.
+func deprecatedFormWarnings(tree *dslimports.Tree, target string) []Diagnostic {
+	if tree == nil {
+		return nil
+	}
+	paths := make([]string, 0, len(tree.Files))
+	for p := range tree.Files {
+		// Single-file mode reports on the target file. Its neighbours are
+		// loaded to resolve imports, not to be linted, and warning about a file
+		// the author did not name would be noise they cannot act on from here.
+		if target != "" && p != target {
+			continue
+		}
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	var out []Diagnostic
+	for _, p := range paths {
+		src, err := fs.ReadFile(tree.Root, p)
+		if err != nil {
+			continue // unreadable here means the load already said so
+		}
+		for _, u := range langparser.ScanDeprecatedUses(string(src)) {
+			form, ok := deprecation.Lookup(u.Rule)
+			if !ok || form.RefusesAt(deprecation.Current()) {
+				continue
+			}
+			out = append(out, Diagnostic{
+				Level:   "warning",
+				Message: fmt.Sprintf("%s:%d:%d: %s", p, u.Line, u.Column, form.Warning()),
+			})
+		}
+	}
+	return out
 }
 
 // buildReport renders the run: diags is every diagnostic to print -- Load's,

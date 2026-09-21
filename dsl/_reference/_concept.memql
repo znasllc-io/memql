@@ -400,10 +400,16 @@ concept referenceExample {
 //     datetime    -- RFC3339 timestamp
 //
 //   The composite forms:
-//     []<type>            -- array of T (shorthand for array(T))
+//     []<type>            -- list of T
 //     enum("a", "b", ...) -- closed value set
 //     object              -- arbitrary nested object (with body fields)
 //     map[string]T        -- string-keyed map (map keys must be string)
+//
+//   Deprecated, and refused from 0.25 (memql#5390):
+//     array(T)    -- the old spelling of []T. It still loads, warns on every
+//                    load, and is counted; `memqlmigrate --rewrite=slice-syntax`
+//                    rewrites a tree. Write []T. The forms in a window are
+//                    docs/public/language/memql.md#forms-in-a-deprecation-window.
 //
 //   The escape hatch:
 //     any         -- accepts any JSON value; no validation

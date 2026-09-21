@@ -574,6 +574,13 @@ const (
 	// entered vendor API key anywhere in the product, and
 	// TestNoVendorApiKeyEntryPoint fails the build on one coming back.
 	BuiltinExecutorProviderFederationSet = "providerFederationSet"
+	// BuiltinExecutorLanguageStatus answers, in ONE row, the MemQL line this
+	// node speaks, its edition and that edition's status, the forms the
+	// language deprecates, and where the DSL its last load read still spells
+	// one (memql#5390). Virtual: no row is read or persisted, so the
+	// capability the builtin declares is its whole gate. See
+	// executor_language_status.go.
+	BuiltinExecutorLanguageStatus = "languageStatus"
 )
 
 // ModuleReadinessConcept is the canonical id of one node's per-module

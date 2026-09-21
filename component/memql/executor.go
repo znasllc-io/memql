@@ -900,6 +900,12 @@ func builtinConceptMetadata(name string) *memorynodes.Concept {
 			NodeType:    memorynodes.NodeTypeObject,
 			Description: "Service version information exposed via memqlVersion().",
 		}
+	case LanguageStatusConcept:
+		return &memorynodes.Concept{
+			Name:        LanguageStatusConcept,
+			NodeType:    memorynodes.NodeTypeObject,
+			Description: "The MemQL line, edition, edition status and deprecated forms exposed via languageStatus().",
+		}
 	default:
 		return nil
 	}

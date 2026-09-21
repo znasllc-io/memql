@@ -15,6 +15,7 @@ import { BenchmarksSection } from "./BenchmarksSection";
 import { DiagnosticsSection } from "./DiagnosticsSection";
 import { IntegrationsSection } from "./IntegrationsSection";
 import { KeysSection } from "./KeysSection";
+import { LanguageSection } from "./LanguageSection";
 import { DecisionsSection } from "./DecisionsSection";
 import { DoorsSection } from "./DoorsSection";
 import { LevelsSection } from "./LevelsSection";
@@ -57,6 +58,9 @@ function sectionFor(sectionId: string, intent: OsAppProps["intent"], consumeInte
   // role -- the two grant builtins' one surface.
   if (sectionId === "access") return <AccessSection />;
   if (sectionId === "cluster") return <ClusterSection />;
+  // Language (memql#5390): the MemQL line this cluster speaks, where its DSL
+  // still spells a deprecated form, and the grammar copied for a model.
+  if (sectionId === "language") return <LanguageSection />;
   if (sectionId === "diagnostics") return <DiagnosticsSection />;
   if (sectionId === "benchmarks") return <BenchmarksSection />;
   // The two sections the first-run wizard opens AT something (epic

@@ -99,6 +99,10 @@ describe("the settings-section contract", () => {
   //
   // SIXTEEN since Access (epic memql#5289, task memql#5307), which sits after
   // Apps: the directory of what is installed, then who may open what.
+  //
+  // SEVENTEEN since Language (memql#5390), directly after Cluster and on its
+  // roles: the MemQL line the cluster speaks is the same kind of engineering
+  // fact as the versions Cluster lists.
   it("Settings itself declares its sections", () => {
     const settings = OS_REGISTRY.apps.find((a) => a.id === "settings");
     expect(settings?.sections?.map((s) => s.id)).toEqual([
@@ -108,6 +112,7 @@ describe("the settings-section contract", () => {
       "apps",
       "access",
       "cluster",
+      "language",
       "diagnostics",
       "benchmarks",
       "integrations",
@@ -121,6 +126,11 @@ describe("the settings-section contract", () => {
     ]);
     expect(settings?.sections?.find((s) => s.id === "cluster")?.requires).toBe("app:settings/cluster");
     expect(rolesOpening("app:settings/cluster")).toEqual(["owner", "developer", "admin"]);
+    // Language (memql#5390): the same three roles, and the same name the
+    // languageStatus builtin declares -- so the engine refuses the read to
+    // exactly the people the shell hides the section from.
+    expect(settings?.sections?.find((s) => s.id === "language")?.requires).toBe("app:settings/language");
+    expect(rolesOpening("app:settings/language")).toEqual(["owner", "developer", "admin"]);
     // Access (epic memql#5289): seeded on the roles the grant reads admit.
     expect(settings?.sections?.find((s) => s.id === "access")?.requires).toBe("app:settings/access");
     expect(rolesOpening("app:settings/access")).toEqual(["owner", "developer", "admin"]);
