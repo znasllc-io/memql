@@ -112,6 +112,17 @@ func (r *aiRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data a
 		return nil, fmt.Errorf("executing prompt template %q: %w", prompt.Name, err)
 	}
 
+	// THE RUN'S CEILINGS ARE ASKED ABOVE THE CACHES, NOT BELOW THEM
+	// (memql#5580). The model seam asks too, and this second ask is the one
+	// that matters: an exact-hash or semantic cache hit returns below without
+	// ever reaching the seam, so a run past its loop cap would otherwise go
+	// on being served warm answers forever -- which is the runaway the cap
+	// exists to stop, minus the bill. Asking here costs an in-memory counter
+	// read and refuses before the router is even consulted.
+	if err := r.seam.admit(ctx, airoute.EstimateMinContextTokens(text, 0)); err != nil {
+		return nil, err
+	}
+
 	// ONE SEAM (epic memql#5127, design D2). The prompt declares a LEVEL and
 	// the call derives the modality; which model serves it is the router's
 	// decision, made from the rules and recorded on v1:router:call.
@@ -155,6 +166,16 @@ func (r *aiRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data a
 	if ttl > 0 && r.cache != nil {
 		cacheKey = buildAICacheKey(invocation.TemplateId, providerName, text)
 		if cached, ok := r.cache.get(cacheKey); ok {
+			// A CACHE HIT COSTS A LOOP CALL AND NO MONEY. It is still an
+			// answered request, so the run's maxModelCalls counts it; MemQL
+			// was not billed for it, so the dollar ceilings do not. That is
+			// the same dollar/loop split the package already applies to a
+			// subscription call, applied to the cheapest answer of all --
+			// and it is what stops a loop repeating one prompt forever on a
+			// warm answer. The overcharge we chose is on the loop side: a
+			// run that legitimately re-asks an identical question spends a
+			// call for it.
+			r.seam.charge(ctx, ModelSpend{Served: ServedCache})
 			// Emit completion finished event for cached result
 			r.publishEvent(events.TopicAICompletionFinished, events.KindAICompletionFinished, map[string]any{
 				"templateId": invocation.TemplateId,
@@ -176,6 +197,10 @@ func (r *aiRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data a
 	semanticEnabled := namespace != "" && r.semantic.Enabled(namespace)
 	if semanticEnabled {
 		if cached, ok := r.semantic.Lookup(ctx, namespace, text); ok {
+			// Counted exactly as the exact-hash hit above is, and for the
+			// same reason: a near-duplicate answered from a vector index is
+			// an answered request nobody was billed for.
+			r.seam.charge(ctx, ModelSpend{Served: ServedCache})
 			r.publishEvent(events.TopicAICompletionFinished, events.KindAICompletionFinished, map[string]any{
 				"templateId": invocation.TemplateId,
 				"provider":   providerName,

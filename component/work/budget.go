@@ -34,7 +34,100 @@ const (
 	CeilingModelCalls = "modelCalls"
 	CeilingRetries    = "retries"
 	CeilingEvents     = "events"
+
+	// CeilingUnevaluated is NOT a ceiling. It is the answer a caller gives
+	// when it could not read this run's ceilings at all, and it exists so
+	// "cannot be evaluated" has a name of its own rather than being spelled
+	// as a pass (memql#5580).
+	//
+	// A ceiling nobody could read must not read as a ceiling nobody set: the
+	// two are the same number -- zero -- and only one of them means
+	// "unbounded on purpose".
+	CeilingUnevaluated = "unevaluated"
 )
+
+// Served values one answered model request can report.
+//
+// ServeLive and ServeJournal are replay.go's and mean the same thing here.
+// The other three name answers that produce no v1:work:modelCall `served`
+// value, because no row is written for them.
+const (
+	// ServedLocal is a fleet model on a machine the user owns.
+	ServedLocal = "local"
+	// ServedSubscription is an app the user already pays for.
+	ServedSubscription = "subscription"
+	// ServedCache is an in-process response cache -- the exact-hash and
+	// semantic caches in the engine's ai() runtime. Nothing is journaled for
+	// one, and nothing was billed.
+	ServedCache = "cache"
+)
+
+// CallSpend is what ONE answered model request cost the run.
+//
+// EVERY ANSWER IS ONE, whoever answered it: a provider, a fleet machine, a
+// subscription app, the replay journal or an in-process cache. Which of those
+// it was decides only which BUCKET the tokens land in -- see AddCall.
+type CallSpend struct {
+	// Served is ServeLive, ServeJournal, ServedLocal, ServedSubscription or
+	// ServedCache. An unrecognised value counts as ServeLive, which is the
+	// fail-closed direction: an answer whose origin nobody declared is
+	// counted as metered rather than as free.
+	Served string
+	// InputTokens and OutputTokens are what the call reported. A journal or
+	// cache answer carries the ORIGINAL call's counts, which is why AddCall
+	// puts them in no bucket.
+	InputTokens  int
+	OutputTokens int
+	// Cost is what MemQL was billed, in dollars.
+	Cost float64
+}
+
+// AddCall folds one answered request into a run's spend.
+//
+// THIS IS THE DOLLAR/LOOP SPLIT AS A FUNCTION, and it answers the awkward
+// cases from the rule already written at the top of this file rather than
+// from a new one:
+//
+//   - The LOOP count rises for EVERY answer. A loop spinning on warm cache
+//     hits or replayed journal answers is still a loop, and a cap blind to
+//     those is the same hole -- in the same sentence -- as a cap blind to a
+//     subscription call.
+//   - The DOLLAR buckets take only what MemQL was BILLED for. A replayed or
+//     cached answer cost nothing (the model seam already records `cost: 0`
+//     for a journal hit, for exactly this reason) and its token counts
+//     belong to the ORIGINAL call, so charging them here would bill one run
+//     for another run's work.
+//   - Local and subscription tokens are counted SEPARATELY rather than
+//     dropped, and CheckCeilings is what excludes them from the dollar
+//     ceilings. The figures still have to be readable.
+func AddCall(s Spent, c CallSpend) Spent {
+	s.ModelCalls++
+	tokens := c.InputTokens + c.OutputTokens
+	switch c.Served {
+	case ServedLocal:
+		s.TokensLocal += tokens
+	case ServedSubscription:
+		s.TokensSubscription += tokens
+	case ServeJournal, ServedCache:
+		// Nobody was billed, and the tokens are another call's.
+	default:
+		s.Tokens += tokens
+		s.Cost += c.Cost
+	}
+	return s
+}
+
+// UnevaluatedBreach is the fail-closed refusal for a run whose ceilings could
+// not be read. reason names what could not be read, because "over budget" is
+// the one thing this is not.
+func UnevaluatedBreach(reason string) *CeilingBreach {
+	return &CeilingBreach{
+		Ceiling: CeilingUnevaluated,
+		Limit:   "unknown",
+		Actual:  "unknown",
+		Reason:  reason,
+	}
+}
 
 // Ceilings is v1:work:goal.ceilings, inherited by every run.
 type Ceilings struct {
