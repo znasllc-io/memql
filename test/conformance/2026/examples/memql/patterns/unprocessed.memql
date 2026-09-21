@@ -1,0 +1,11 @@
+/// An inbound item a worker still has to pick up.
+concept inboundItem {
+  source     string!
+  processed  bool
+}
+
+/// Items nothing has processed yet.
+query inboundItem unprocessedItems {
+  filter row => row.processed == nil
+  paginate 50
+}

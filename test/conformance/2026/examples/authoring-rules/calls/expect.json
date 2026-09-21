@@ -1,0 +1,13 @@
+{
+  "cases": [
+    {
+      "file": "named-arguments.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "object-literal-call.memql",
+      "verdict": "refuse_parse",
+      "message": "map keys are unquoted names (authoring rule 18)"
+    }
+  ]
+}

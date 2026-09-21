@@ -1,0 +1,5 @@
+{
+  "cases": [
+    { "file": "blank-coalescing.memql", "verdict": "load_ok" }
+  ]
+}

@@ -1,0 +1,28 @@
+use workbench.logic.{ runIsTerminal, releaseWorkspaceOnRunTerminal }
+use workbench.mutations.{ releaseWorkspace }
+use workbench.builtins.{ workbenchTeardownDirectory }
+
+/// When a run reaches a terminal status, release its workbench workspace and
+/// tear down its on-disk directory.
+@trigger(event="graph.node.updated.v1:work:run")
+@filter(row => row.status != "running" && row.status != "compiling" && row.status != "waiting")
+automation releaseWorkspaceOnTerminalRun {
+  args {
+    id any
+    status any
+  }
+
+  terminal := logic runIsTerminal(status: args.status)
+  decide := logic releaseWorkspaceOnRunTerminal(event: event)
+  for item in decide.nodes() {
+    if terminal == true && item.status == "provisioned" {
+      mutation releaseWorkspace(
+        workspaceId: item.id,
+        reason: "run_terminal"
+      )
+    }
+  }
+  if terminal == true && args.id != nil {
+    teardown := builtin workbenchTeardownDirectory(runId: args.id)
+  }
+}

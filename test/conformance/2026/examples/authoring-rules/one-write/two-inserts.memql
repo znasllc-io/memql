@@ -1,0 +1,8 @@
+use library.concepts.{ folder }
+
+@actor
+mutation folder createFolderAndGrantOwner {
+  args { name string @required }
+  insert { name: args.name }        // ERROR -- only one write allowed
+  insert { ownerUserId: actor.userId }
+}

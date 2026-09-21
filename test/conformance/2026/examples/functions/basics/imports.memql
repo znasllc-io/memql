@@ -1,0 +1,15 @@
+use library.concepts.{ artifact, folder }
+use library.shapes.{ artifactFull }
+use common.traits.{ isActiveRecord }
+
+@description("Live artifacts filed under a folder")
+query artifact importedArtifactsInFolder {
+  args {
+    folderId  string  @required
+  }
+  filter  row => row.folderId == args.folderId && isActiveRecord(row)
+  shape   artifactFull
+}
+
+@description("Matches a folder its owner has archived")
+spec folder importedFolderIsArchived = row => row.archived == true

@@ -15,6 +15,7 @@ package parser
 //     writes it down.
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,7 +48,7 @@ func memqlCorpusFiles(t *testing.T) []string {
 			}
 			return nil
 		}
-		if strings.HasSuffix(p, ".memql") {
+		if strings.HasSuffix(p, ".memql") && !declaredUnlexable(p) {
 			files = append(files, p)
 		}
 		return nil
@@ -63,6 +64,45 @@ func memqlCorpusFiles(t *testing.T) []string {
 		t.Fatalf("found only %d .memql files; the corpus walk is broken, not the corpus", len(files))
 	}
 	return files
+}
+
+// declaredUnlexable answers whether a conformance case DECLARES that the engine
+// refuses this file at parse.
+//
+// The sweep's claim is about AUTHORED source: no file anybody writes to be
+// loaded may carry one of these hazards. The conformance corpus holds the
+// opposite on purpose -- a `refuse_parse` case exists to pin the refusal, and
+// since memql#5388 the language docs draw their "the engine refuses this"
+// examples from those cases, so one of them now spells a leading-dot number
+// deliberately. Sweeping it would assert the corpus must not contain the thing
+// it is there to contain.
+//
+// Only a REFUSAL is skipped, and only when the case file's own expect.json says
+// so, so an accepting case is still swept and a file no case names is still
+// swept. A refusal at a later stage (load, lowering) lexes fine and is swept
+// too -- the skip costs the sweep only the handful of cases that cannot lex by
+// construction.
+func declaredUnlexable(path string) bool {
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(path), "expect.json"))
+	if err != nil {
+		return false
+	}
+	var manifest struct {
+		Cases []struct {
+			File    string `json:"file"`
+			Verdict string `json:"verdict"`
+		} `json:"cases"`
+	}
+	if json.Unmarshal(raw, &manifest) != nil {
+		return false
+	}
+	name := filepath.Base(path)
+	for _, c := range manifest.Cases {
+		if c.File == name && c.Verdict == "refuse_parse" {
+			return true
+		}
+	}
+	return false
 }
 
 // TestCorpusLexesWithoutErrorOrSurprise sweeps the whole shipped tree. Each

@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "file": "logic-one-statement.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "logic-several-statements.memql",
+      "verdict": "load_ok"
+    }
+  ]
+}

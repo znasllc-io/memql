@@ -1,0 +1,10 @@
+logic bootstrapPerson {
+  args {
+    userId string
+  }
+  checkUser := query personById(userId: args.userId)
+  if cehckUser.empty() {   // typo: cehckUser -> checkUser
+    mutation recordPerson(userId: args.userId)
+  }
+  return checkUser.count()
+}

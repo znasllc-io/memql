@@ -1,0 +1,7 @@
+{
+  "cases": [
+    { "file": "as-of-forms.memql", "verdict": "load_ok" },
+    { "file": "query-syntax.memql", "verdict": "load_ok" },
+    { "file": "sort-paginate.memql", "verdict": "load_ok" }
+  ]
+}

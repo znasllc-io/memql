@@ -34,8 +34,10 @@ import (
 // TypeScript wire strings passing `"querySpaceUtterances"` to `executeNamed`
 // -- a query that does not exist; they pass only because the test's
 // MockDispatcher replies from a canned payload and never resolves a name.
-// It also held a rename tool's REPLACEMENT values (scripts/rename/rules.json),
-// which would have re-minted the retired spelling on the next run.
+// It also held a rename tool's REPLACEMENT values, which would have re-minted
+// the retired spelling on the next run. (That rules file has since been
+// deleted with the campaign it drove; the lesson is why the sweep is not
+// extension-scoped, not the file.)
 //
 // Be precise about how it lands, because #2914's body overstates it. Inside a
 // lint root that CONTAINS the imported namespace, `make dsl-lint`

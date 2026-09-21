@@ -1,0 +1,7 @@
+/// Search for users
+@handler(type="query", query="paginate(query searchUsers(active: args.active), args.limit)")
+@executionTime("fast")
+tool findUsers {
+  active  boolean  @description("Filter by active status")
+  limit   integer  @default("10") @description("Maximum number of results to return")
+}

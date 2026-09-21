@@ -1,0 +1,7 @@
+/// A per-call telemetry row this domain declares, so its bare name is ambient
+/// here even though another namespace declares one too.
+concept invocation {
+  ownerUserId  string!
+  runId        string
+  tool         string!
+}

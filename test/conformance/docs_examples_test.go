@@ -16,6 +16,23 @@ package conformance
 // stops loading fails the build, and parsing every block delivers exactly
 // that, over every page, including the ones nobody remembered to wire up.
 //
+// HALF OF THAT WAS WRONG, and docs_corpus_examples_test.go is the correction:
+// PARSING IS NOT LOADING. A block that parses can still name a construct that
+// does not exist, project a field its concept does not declare, read the actor
+// without declaring `@actor`, or reach across a namespace with no `use` import
+// -- the engine refuses every one of those, and this gate sees none of them.
+// Measured on 2026-09-20 by lifting functions.md's examples into the corpus
+// unchanged: 16 of 30 were refused at load while this gate stayed green.
+//
+// The correction keeps the page readable rather than transcluding it: a fence
+// on a covered page names its conformance case in a `<!-- corpus: ... -->`
+// marker and is held to it. What survives here unchanged is the second half of
+// the argument above -- this gate reads EVERY page under docs/public/language,
+// including any page added tomorrow that the corpus gate's coverage list does
+// not yet name. Nothing here may be narrowed on the grounds that the other
+// gate exists; the two overlap deliberately, and this one is the wider,
+// weaker of the two.
+//
 // # The fence markers, and why there is no fourth
 //
 // The repo already had a marker convention for this, introduced with

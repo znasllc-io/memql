@@ -58,6 +58,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -119,6 +120,54 @@ type Snapshot struct {
 // file, and a glob that misses them leaves the largest single population in
 // the tree outside every check built on it. A mirror's rows brick exactly the
 // way a native concept's do.
+// ScanRoots scans several DSL trees as one snapshot.
+//
+// The core tree plus every storefront pack's, because a pack in the default
+// build holds rows a field drop would brick just as a core concept's does.
+// Duplicate-id detection spans the whole set, which is what catches a pack
+// shadowing a core concept rather than letting the walk order decide.
+func ScanRoots(roots ...string) (Snapshot, error) {
+	var all []Entry
+	seen := map[string]string{}
+	for _, root := range roots {
+		snap, err := Scan(root)
+		if err != nil {
+			return Snapshot{}, err
+		}
+		for _, e := range snap.Concepts {
+			// THE PATH IS MADE ROOT-RELATIVE, because File is the diagnostic
+			// that says where to look and two roots both produce
+			// "concepts.memql". Only for a non-core root, so every existing
+			// entry's File is byte-identical to what it was and the
+			// regenerated snapshot's diff is exactly the packs.
+			if root != DefaultDSLRoot {
+				e.File = path.Join(root, e.File)
+			}
+			if prior, dup := seen[e.Concept]; dup {
+				return Snapshot{}, fmt.Errorf(
+					"%s and %s both declare %s: the snapshot cannot record two field sets for one concept",
+					prior, e.File, e.Concept)
+			}
+			seen[e.Concept] = e.File
+			all = append(all, e)
+		}
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].Concept < all[j].Concept })
+	return Snapshot{Concepts: all}, nil
+}
+
+// DefaultRoots is the core tree plus every pack tree on disk, in a stable
+// order. A missing packs/ directory simply contributes nothing.
+func DefaultRoots() []string {
+	roots := []string{DefaultDSLRoot}
+	matches, err := filepath.Glob(DefaultPackGlob)
+	if err != nil {
+		return roots
+	}
+	sort.Strings(matches)
+	return append(roots, matches...)
+}
+
 func Scan(dslRoot string) (Snapshot, error) {
 	tree := os.DirFS(dslRoot)
 	paths, err := dslfs.WalkMemqlFiles(tree)
@@ -188,10 +237,12 @@ func Scan(dslRoot string) (Snapshot, error) {
 // shopify/generated) and every one of them changes the assembled id, so a
 // snapshot that ignored them would key 65 shopify concepts under the wrong
 // namespace and report the whole set as retired the first time anyone looked.
+// A pack's pin sits at the ROOT of its own tree (packs/<pack>/dsl/
+// namespace.pin) beside root-level construct files, so an empty dir reads
+// the root rather than answering "". The core tree has no root-level pin,
+// so its behaviour is unchanged -- and it could not have one, since its
+// domains are its subdirectories.
 func readNamespacePin(dslRoot, dir string) string {
-	if dir == "" {
-		return ""
-	}
 	raw, err := os.ReadFile(filepath.Join(dslRoot, filepath.FromSlash(dir), "namespace.pin"))
 	if err != nil {
 		return ""

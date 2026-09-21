@@ -1,0 +1,16 @@
+use library.concepts.{ folder }
+
+@description("Create a Library folder")
+@actor
+mutation folder createFolder {
+  args {
+    folderId  string  @required
+    name      string  @required
+  }
+  insert {
+    id:          args.folderId
+    name:        args.name
+    ownerUserId: actor.userId
+    createdAt:   now
+  }
+}

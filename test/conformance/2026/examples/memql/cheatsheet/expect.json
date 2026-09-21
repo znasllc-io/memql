@@ -1,0 +1,6 @@
+{
+  "cases": [
+    { "file": "authored-expressions.memql", "verdict": "load_ok" },
+    { "file": "constructs.memql", "verdict": "load_ok" }
+  ]
+}

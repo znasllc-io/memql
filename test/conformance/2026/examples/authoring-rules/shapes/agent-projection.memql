@@ -1,0 +1,10 @@
+use agents.concepts.{ agent }
+
+@row
+/// Full agent projection
+shape agent agentProfileFull {
+  row.id
+  name
+  description
+  row.createdAt
+}

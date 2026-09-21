@@ -1,0 +1,5 @@
+{
+  "cases": [
+    { "file": "cache-ttl.memql", "verdict": "load_ok" }
+  ]
+}

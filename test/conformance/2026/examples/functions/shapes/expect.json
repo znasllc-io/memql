@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "file": "shape-actor.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "shape-row.memql",
+      "verdict": "load_ok"
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+use todos.concepts.{ todo }
+use library.mutations.{ createArtifact }
+
+// 1. The product calls this mutation: one row, the to-do.
+/// Create a to-do for the caller.
+@actor
+mutation todo createTodoItem {
+  args {
+    todoId                  string!
+    title                   string!
+    dueAt                   datetime
+    priority                enum("low", "medium", "high")
+    sourceResponsibilityId  string
+  }
+  insert {
+    accept { title, dueAt, priority, sourceResponsibilityId }
+    stamp {
+      id: args.todoId
+      ownerUserId: actor.userId
+      done: false
+    }
+  }
+}
+
+// 2. An automation fires on the row landing and writes the second row.
+//    The trigger payload is bound into its args block; every call names
+//    its kind and passes named arguments.
+/// On to-do creation, promote it into the Library Records lens.
+@trigger(event="node.created", concept="v1:todos:todo")
+automation indexTodoItemOnCreate {
+  args {
+    id any
+    ownerUserId any
+    title any
+  }
+
+  persist := mutation createArtifact(
+    sourceConceptRef: args.id,
+    ownerUserId:      args.ownerUserId,
+    lens:             "record",
+    kind:             "todo",
+    source:           "agent_generated",
+    title:            args.title ?? "Untitled to-do",
+    live:             false
+  )
+}

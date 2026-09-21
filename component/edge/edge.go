@@ -271,6 +271,8 @@ func siteFromRow(r map[string]any) *Site {
 		Status:         rowString(r, "status"),
 		Title:          rowString(r, "title"),
 		APIProxy:       rowBool(r, "apiProxy"),
+		ShopperForms:   rowBool(r, "shopperForms"),
+		OwnerUserID:    rowString(r, "ownerUserId"),
 		SystemOwned:    rowBool(r, "systemOwned"),
 		Binding:        rowObject(r, "binding"),
 		CandidateRef:   rowString(r, "candidateRef"),

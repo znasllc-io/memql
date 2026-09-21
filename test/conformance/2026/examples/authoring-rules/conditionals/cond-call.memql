@@ -1,0 +1,5 @@
+/// Refused: cond(p, a, b) is retired in edition 2026 -- write p ? a : b.
+mutation folderRole recordRoleWithCond {
+  args { userId string! }
+  insert { role: cond(args.userId == "", "owner", "reader") }
+}

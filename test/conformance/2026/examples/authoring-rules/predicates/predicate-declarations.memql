@@ -1,0 +1,6 @@
+use campaigns.concepts.{ sendJob }
+use common.shapes.{ actorEnvelope }
+
+spec sendJob sendJobIsDrainable = row => row.status == "queued" || row.status == "running"
+spec actorEnvelope callerHoldsOwnerRole = actor => actor.role == "owner"
+trait recordIsLive = row => row.active == true

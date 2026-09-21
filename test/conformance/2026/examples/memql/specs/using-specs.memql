@@ -1,0 +1,14 @@
+use library.concepts.{ artifact }
+use common.traits.{ isActiveRecord }
+
+/// Matches artifacts an agent produced rather than a person.
+spec artifact isGeneratedOutput = row => row.source == "agent_generated"
+
+/// Live generated artifacts filed under a folder.
+query artifact generatedArtifactsInFolder {
+  args {
+    folderId  string  @required
+  }
+  filter  row => row.folderId == args.folderId && isGeneratedOutput(row) && isActiveRecord(row)
+  paginate 50
+}

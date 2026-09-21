@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "file": "mutation-defaults.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "mutation-syntax.memql",
+      "verdict": "load_ok"
+    }
+  ]
+}

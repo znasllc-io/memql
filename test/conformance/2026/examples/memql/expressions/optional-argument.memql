@@ -1,0 +1,24 @@
+use observability.concepts.{ codeMetric }
+
+/// One bucket of code metrics over one window, for a module's prefixes and an
+/// optional exact code reference.
+query codeMetric codeMetricsInBucket {
+  args {
+    /// codeReference prefixes to match (a module's fqnPrefixes).
+    prefixes       []string!
+    /// Optional exact codeReference, matched in addition to the prefixes.
+    codeReference  string
+    /// Which continuous aggregate the rows came from.
+    bucket         enum("1m", "1h")!
+    /// Inclusive window start, aligned to the bucket by the caller.
+    windowStart    datetime!
+    /// Exclusive window end, aligned to the bucket by the caller.
+    windowEnd      datetime!
+  }
+  filter  row => row.bucket == args.bucket
+            && row.windowStart >= args.windowStart
+            && row.windowStart < args.windowEnd
+            && ((args.codeReference != nil && row.codeReference == args.codeReference)
+                || row.codeReference startsWith args.prefixes)
+  paginate 500
+}

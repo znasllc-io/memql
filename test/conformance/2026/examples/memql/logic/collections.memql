@@ -1,0 +1,13 @@
+/// The active admins among the passed members, and the newest active node.
+logic activeAdminsAndNewestNode {
+  args {
+    members  []object!
+  }
+  nodes := query allWorkerNodes()
+  // active admins among the passed members
+  activeAdmins := args.members.where(m => m.role == "admin" && m.active).count()
+
+  // newest active node
+  newest := nodes.where(n => n.status == "active").orderByDesc(n => n.createdAt).first()
+  return { admins: activeAdmins, newest: newest }
+}

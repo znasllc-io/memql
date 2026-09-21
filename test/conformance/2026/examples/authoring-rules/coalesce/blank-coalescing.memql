@@ -1,0 +1,16 @@
+@serverOnly
+mutation settingSlot recordSettingSlot {
+  args {
+    v  string
+  }
+  // with the caller passing v:
+  //   false   -> false        kept
+  //   0       -> 0            kept
+  //   []      -> []           kept
+  //   {}      -> {}           kept
+  //   ""      -> "DEFAULT"    replaced
+  //   " "     -> "DEFAULT"    replaced   <-- the sharp edge
+  //   "\t\n"  -> "DEFAULT"    replaced
+  //   "value" -> "value"      kept
+  insert { v: args.v ?? "DEFAULT" }
+}

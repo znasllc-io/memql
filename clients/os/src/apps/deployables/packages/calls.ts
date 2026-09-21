@@ -410,6 +410,24 @@ export async function saveSiteSettings(
   await query.updateSiteSettings({ siteId, settings });
 }
 
+/**
+ * Turn a deployable's SHOPPER SURFACE on or off (epic memql#5532, issue
+ * memql#5551).
+ *
+ * A SINGLE-PURPOSE WRITE, like updateSiteAccount and unlike
+ * updateSiteSettings above: the mutation takes the boolean as required, so
+ * "off" is a write rather than an omission. A read-merge would make turning
+ * it off inexpressible, which is the same trap the settings map's replace
+ * semantics avoid from the other direction.
+ */
+export async function saveShopperForms(
+  query: QueryClient,
+  siteId: string,
+  shopperForms: boolean,
+): Promise<void> {
+  await query.updateSiteShopperForms({ siteId, shopperForms });
+}
+
 // ---------------------------------------------------------------------------
 // The version walk
 // ---------------------------------------------------------------------------

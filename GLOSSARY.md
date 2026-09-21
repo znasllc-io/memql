@@ -56,7 +56,7 @@ path, or use this detailed reference index. Layout + rules:
 - [AI routing: levels, policies and rules](docs/public/operate/ai-routing.md) — the three nouns a call is decided by. A call declares a LEVEL (fast / strong / reasoning / embeddings) and never a model; a RULE maps the call's metadata to a POLICY; a policy is an ordered chain that reaches the fleet, then a signed-in app, then a vendor, so paid inference is last by construction rather than by care. Also: degrade versus park and why embeddings never degrades, what @locked enforces, how to add a rule, and the decision record every resolution writes.
 
 ### Build Against It (`build/`)
-- [Audio Streaming](docs/public/build/audio-streaming.md) · [Build Tags](docs/public/build/build-tags.md) · [Plugin SDK](docs/public/build/plugin-sdk.md) · [Building a Pack](docs/public/build/building-a-pack.md) — worked-example developer guide (the `examples/referencepack` reference pack)
+- [Audio Streaming](docs/public/build/audio-streaming.md) · [Build Tags](docs/public/build/build-tags.md) · [Plugin SDK](docs/public/build/plugin-sdk.md) · [Building a Pack](docs/public/build/building-a-pack.md) — worked-example developer guide: the `examples/referencepack` teaching pack, and how a STOREFRONT pack under `packs/` ships in the default build and how a shopper writes to one (epic memql#5532)
 - Generated reference (DSL constructs + concept catalog) lands in `docs/public/reference/_generated/` at release time (docs-gen).
 
 ### Operate (`operate/`)

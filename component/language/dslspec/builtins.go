@@ -226,14 +226,35 @@ func handAuthoredBuiltins() []Builtin {
 		// the parser by the drift test.
 		// ============================================================
 		{
+			// THE PROVIDER ARGUMENT IS GONE, and this entry is why the removal
+			// had to be deliberate: for as long as `ai()` had no executor, this
+			// published signature was what authors and models were told the
+			// call is -- a third argument naming a provider included.
+			//
+			// A level plus the routing rules decide which model serves a call
+			// (epic memql#5127). A provider named at a call site is a release
+			// every time the fleet changes, and a routing decision written
+			// where no rule can see it and no decision record explains it. The
+			// pin that survives is @defaultProvider ON THE PROMPT, read at load
+			// and refused when it names a policy -- and TestNoPaidDefault
+			// refuses it for a federated provider, which is every concrete
+			// provider record this repository ships.
+			//
+			// `ai` is a DSL-declared BUILTIN (dsl/agents/builtins.memql), so it
+			// is written with its kind and its arguments by name:
+			// `builtin ai(templateId: "docSummary", data: { content: ... })`.
+			// It is not a catalog function and must not become one -- see
+			// component/language/tiers/ai_builtin_position_test.go for what a
+			// catalogued `ai` would thereby be Admitted to do.
 			Name:      "ai",
 			Category:  CategoryBuiltinRegistry,
-			Signature: `ai(templateId string, data object, provider? string)`,
-			Doc:       "Invoke an AI prompt template with the given data.",
+			Signature: `ai(templateId string, data object)`,
+			Doc: "Call a named prompt with a data object and return {prompt, reply}. Written as a builtin call, " +
+				"`builtin ai(templateId: ..., data: ...)`, in a logic or automation body. The prompt's @level and the " +
+				"routing rules choose the model, so the call never names one.",
 			Params: []BuiltinParam{
-				{Name: "templateId", Doc: "Name of the prompt template to invoke."},
-				{Name: "data", Doc: "Data object passed to the template."},
-				{Name: "provider", Doc: "Optional provider override (e.g., \"claudeSonnet\")."},
+				{Name: "templateId", Doc: "Name of the prompt to call."},
+				{Name: "data", Doc: "Object whose fields the prompt's body declares; `{}` when it declares none."},
 			},
 		},
 		{

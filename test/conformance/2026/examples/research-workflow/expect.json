@@ -1,0 +1,9 @@
+{
+  "cases": [
+    {
+      "file": "brief.memql",
+      "verdict": "load_ok",
+      "note": "The research-desk example domain, whole. The four excerpts on docs/public/language/research-workflow.md are contiguous substrings of it, and TestPublishedExamplesMatchTheirCorpusCases holds it byte-identical to examples/research-desk/research/brief.memql."
+    }
+  ]
+}

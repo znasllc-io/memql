@@ -1,0 +1,5 @@
+{
+  "cases": [
+    { "file": "logic-ternary.memql", "verdict": "load_ok" }
+  ]
+}

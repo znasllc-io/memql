@@ -1,0 +1,24 @@
+use rbac.concepts.{ role }
+
+/// Author one role in the cluster's ladder.
+@serverOnly
+mutation role recordRole {
+  args {
+    roleId       string
+    slug         string!
+    name         string!
+    rank         int!
+    description  string
+    predefined   bool
+    active       bool
+  }
+  // Preferred -- the corpus form after the #2616 migration.
+  insert {
+    accept { slug, name, rank, description }
+    stamp {
+      id: args.roleId ?? args.slug
+      predefined: args.predefined ?? false
+      active: args.active ?? true
+    }
+  }
+}

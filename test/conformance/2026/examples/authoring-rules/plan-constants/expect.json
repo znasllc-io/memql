@@ -1,0 +1,6 @@
+{
+  "cases": [
+    { "file": "plan-constants.memql", "verdict": "load_ok" },
+    { "file": "window-read.memql", "verdict": "load_ok" }
+  ]
+}

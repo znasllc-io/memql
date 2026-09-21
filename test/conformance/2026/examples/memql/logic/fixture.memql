@@ -1,0 +1,36 @@
+use library.concepts.{ folder }
+
+/// Archived folders whose retention window closed before an instant.
+@serverOnly
+query folder expiredArchivedFolders {
+  args {
+    asOf  datetime  @required
+  }
+  filter   row => row.archived == true && row.createdAt < args.asOf
+  paginate 200
+}
+
+/// Mark one folder deleted.
+@serverOnly
+mutation folder deleteFolderNow {
+  args {
+    folderId  string  @required
+  }
+  update {
+    id:      args.folderId
+    deleted: true
+  }
+}
+
+/// A worker node the collection example orders.
+concept workerNode {
+  status    enum("active", "draining", "offline")!
+  hostname  string!
+}
+
+/// Every worker node that is not offline.
+@serverOnly
+query workerNode allWorkerNodes {
+  filter   row => row.status != "offline"
+  paginate 200
+}

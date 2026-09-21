@@ -1,0 +1,15 @@
+use cluster.logic.{ pruneStaleClusterNodes }
+use cluster.mutations.{ updateNodeHealth }
+
+/// Every 10 min: mark departed cluster nodes as health='stopped'.
+@trigger(schedule="0 */10 * * * *")
+automation pruneStaleClusterNodesOnSchedule {
+  decide := logic pruneStaleClusterNodes(event: event)
+  for node in decide {
+    mutation updateNodeHealth(
+      id:       node.id,
+      health:   "stopped",
+      lastSeen: now
+    )
+  }
+}

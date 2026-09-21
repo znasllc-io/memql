@@ -1,0 +1,27 @@
+/// Items whose window closes within a day: addDuration() reads no row, so it
+/// is computed once and bound as a parameter.
+@serverOnly
+query queuedItem itemsExpiringSoon {
+  filter  row => row.expiresAt < addDuration(now, "P1D")
+  paginate 50
+}
+
+/// Items above twice a caller-chosen floor.
+@serverOnly
+query queuedItem itemsAboveFloor {
+  args {
+    floor  int  @required
+  }
+  filter  row => row.rank > args.floor * 2
+  paginate 50
+}
+
+/// Items in a stage, defaulting to the active one.
+@serverOnly
+query queuedItem itemsInStage {
+  args {
+    stage  string
+  }
+  filter  row => row.stage == (args.stage ?? "active")
+  paginate 50
+}

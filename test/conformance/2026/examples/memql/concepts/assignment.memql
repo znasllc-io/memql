@@ -1,0 +1,11 @@
+use agents.concepts.{ agent }
+use identity.concepts.{ user }
+
+/// Which agent answers for which person.
+concept assignment {
+  agentId    string
+  forUserId  string
+
+  @relationship(type="references", as="respondsAs", field="agentId",   target=agent, direction="outgoing")
+  @relationship(type="references", as="actsFor",    field="forUserId", target=user,  direction="outgoing")
+}

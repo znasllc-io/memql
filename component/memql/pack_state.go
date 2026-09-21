@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -115,15 +116,43 @@ func ReadPackStates(ctx context.Context, db *bun.DB) (map[string]PackStateRow, e
 	return out, nil
 }
 
-// DisabledPackDomainsFromStates projects the read into the boot-time
-// disabled set: exactly the domains whose newest row says enabled=false.
-func DisabledPackDomainsFromStates(states map[string]PackStateRow) []string {
-	var out []string
-	for domain, row := range states {
-		if !row.Enabled {
-			out = append(out, domain)
+// DisabledPackDomains folds the packState rows over the packs' DECLARED
+// DEFAULTS and projects the boot-time disabled set (epic memql#5532, issue
+// memql#5549).
+//
+// Two inputs because there are two sources of truth and they answer
+// different questions. The DEFAULTS say what a pack ships as -- declared in
+// Go at Register time, the same on every node of a release. The ROWS say
+// what this instance's operator decided, and they are the durable,
+// cluster-wide state.
+//
+// A ROW ALWAYS WINS over a declared default, in BOTH directions: a row
+// saying enabled re-enables a pack that ships off, and a row saying disabled
+// switches off a pack that ships on. A default is only what governs in the
+// row's absence, which is the whole of what "absence means the pack's
+// declared default" says.
+//
+// SORTED, because the set reaches a boot log line and the module inventory.
+// An unstable order there reads as a flip nobody made.
+func DisabledPackDomains(states map[string]PackStateRow, defaults map[string]bool) []string {
+	disabled := map[string]struct{}{}
+	for domain, enabled := range defaults {
+		if !enabled {
+			disabled[domain] = struct{}{}
 		}
 	}
+	for domain, row := range states {
+		if row.Enabled {
+			delete(disabled, domain)
+			continue
+		}
+		disabled[domain] = struct{}{}
+	}
+	out := make([]string, 0, len(disabled))
+	for d := range disabled {
+		out = append(out, d)
+	}
+	sort.Strings(out)
 	return out
 }
 

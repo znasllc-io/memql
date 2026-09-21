@@ -248,3 +248,39 @@ describe("the status projection admits every declared value", () => {
     expect(statusTone(archived)).toBe("muted");
   });
 });
+
+// ===========================================================================
+// THE SHOPPER SURFACE IS OFF UNLESS THE ROW SAYS OTHERWISE
+// ===========================================================================
+// Epic memql#5532, issue memql#5551. Absent and false are ONE answer here,
+// which is usually the wrong reading and is the right one for this field:
+// every site row written before shopperForms existed must project with no
+// shopper surface, and there is no third state to preserve.
+
+describe("a deployable's shopper surface", () => {
+  it("is off when the row does not mention it", () => {
+    expect(siteFromRow(siteRow({ id: "v1:platform:site:s1" })).shopperForms).toBe(false);
+  });
+
+  it("is off when the row says false", () => {
+    expect(
+      siteFromRow(siteRow({ id: "v1:platform:site:s1", shopperForms: false })).shopperForms,
+    ).toBe(false);
+  });
+
+  it("is on only when the row says true", () => {
+    expect(
+      siteFromRow(siteRow({ id: "v1:platform:site:s1", shopperForms: true })).shopperForms,
+    ).toBe(true);
+  });
+
+  it("is independent of apiProxy", () => {
+    const apiOnly = siteFromRow(siteRow({ id: "v1:platform:site:s1", apiProxy: true }));
+    expect(apiOnly.apiProxy).toBe(true);
+    expect(apiOnly.shopperForms).toBe(false);
+
+    const formsOnly = siteFromRow(siteRow({ id: "v1:platform:site:s2", shopperForms: true }));
+    expect(formsOnly.apiProxy).toBe(false);
+    expect(formsOnly.shopperForms).toBe(true);
+  });
+});

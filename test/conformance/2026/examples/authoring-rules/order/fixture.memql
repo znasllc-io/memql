@@ -1,0 +1,26 @@
+/// A person the order-of-statements examples read and write.
+concept person {
+  userId  string!
+  name    string
+}
+
+/// Look one person up by the id they were created under.
+@serverOnly
+query person personById {
+  args {
+    userId  string  @required
+  }
+  filter  row => row.userId == args.userId
+}
+
+/// Record one person.
+@serverOnly
+mutation person recordPerson {
+  args {
+    userId  string  @required
+  }
+  insert {
+    id: hash(args.userId)
+    args.userId
+  }
+}

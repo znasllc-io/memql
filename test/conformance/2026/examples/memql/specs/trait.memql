@@ -1,0 +1,2 @@
+/// Matches records with archived==true field
+trait isArchivedRecord = row => row.archived == true

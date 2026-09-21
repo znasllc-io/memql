@@ -1,0 +1,7 @@
+use library.mutations.{ createLibraryFolder }
+
+/// Refused: an argument list is not an object literal, so there is no key to quote.
+logic fileTheInbox {
+  created := mutation createLibraryFolder({"folderId": "folder-123", "name": "Inbox"})
+  return created
+}

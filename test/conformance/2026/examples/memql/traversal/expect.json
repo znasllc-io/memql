@@ -1,0 +1,7 @@
+{
+  "cases": [
+    { "file": "as-of-argument.memql", "verdict": "load_ok" },
+    { "file": "child-of.memql", "verdict": "load_ok" },
+    { "file": "label-scoped.memql", "verdict": "load_ok" }
+  ]
+}

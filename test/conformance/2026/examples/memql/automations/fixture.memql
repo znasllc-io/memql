@@ -1,0 +1,38 @@
+use library.concepts.{ artifact }
+use data.concepts.{ record }
+
+/// The Library artifact index rows that already point at one source row.
+@serverOnly
+query artifact artifactsForSource {
+  args {
+    sourceConceptRef  string  @required
+  }
+  filter   row => row.sourceConceptRef == args.sourceConceptRef
+  paginate 50
+}
+
+/// Decide what to index for a newly created Library file.
+logic artifactsForIndexedFile {
+  args {
+    event  object!
+  }
+  return query artifactsForSource(sourceConceptRef: args.event.payload.id ?? "")
+}
+
+/// The confirmed records sharing one natural key.
+@serverOnly
+query record recordsWithNaturalKey {
+  args {
+    naturalKeyValue  string  @required
+  }
+  filter   row => row.naturalKeyValue == args.naturalKeyValue
+  paginate 50
+}
+
+/// Decide which existing records a new one conflicts with.
+logic recordsConflictingWith {
+  args {
+    event  object!
+  }
+  return query recordsWithNaturalKey(naturalKeyValue: args.event.payload.naturalKeyValue ?? "")
+}

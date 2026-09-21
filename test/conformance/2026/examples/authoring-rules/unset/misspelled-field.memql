@@ -1,0 +1,5 @@
+@serverOnly
+query inviteToken liveTokensTypo {
+  filter  row => row.delted != true       // typo -- refused at load; it used to match every row
+  paginate 50
+}

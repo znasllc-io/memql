@@ -1,0 +1,16 @@
+use os.concepts.{ desktop }
+
+@actor
+mutation desktop saveOwnDesktop {
+  args {
+    revision  int!
+    document  object!
+  }
+  insert {
+    accept { revision, document }
+    stamp {
+      id: hash(actor.userId)
+      ownerUserId: actor.userId
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "cases": [
+    {
+      "file": "named-provider.memql",
+      "verdict": "load_ok"
+    }
+  ]
+}

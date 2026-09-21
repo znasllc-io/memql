@@ -19,6 +19,7 @@ examples a model is shown, so a case that loads is a form an author may copy.
 | `expr/<position>/` | One directory per expression position, from `component/language/tiers`. Each holds at least one case that loads and one that is refused at that position. |
 | `statements/<construct>/<form>/` | For `logic` and `automation`, one directory per statement form and trailing clause (`parser.BodyStatementForms`), plus `scope/`, `body/` and `retired/` (one refusal per retired body form). Each form holds a case that runs and one that is refused; `statements_gate_test.go` holds them to the parser's lists. |
 | `negative/<construct>/` | One fault per file, the file named after the fault. |
+| `examples/<page>/` | The examples one page of `docs/public/language` shows, as cases the engine loads. Every ```memql fence on a covered page names its case in a `<!-- corpus: 2026/examples/<page>/<file>.memql -->` marker on the line directly above it, and `test/conformance/docs_corpus_examples_test.go` holds the fence to the case: a whole-file fence equals it, a `fragment` is a contiguous part of it, a `retired` fence names a case the engine refuses. Nest further (`examples/functions/queries/`) to keep a directory under five accepting cases, since no two cases of one directory share a boot. |
 | `scenarios/<suite>/` | Whole automations as the product ships them, run over a database: one `scenario.json` per suite, naming shipped automations and mutations rather than copying them (see `scenarios/README.md`). The verdict runner does not read these directories. |
 | `fuzz/` | Inputs that once broke the parser. |
 
@@ -31,7 +32,12 @@ the directory. Every `.memql` file in the directory is either the fixture or
 named by a case; the runner refuses a file nothing names. Any other file in the
 directory -- a prompt's or a seed's `@templateFile`, a `namespace.pin` -- is
 mounted beside every case in it under the same name, as it would sit beside a
-domain's `.memql` files.
+domain's `.memql` files. Subdirectories are carried too, under their relative
+path, so a case may hold `prompts/<name>.tmpl` -- the layout every shipped
+prompt's `@templateFile` uses. The one boundary is a nested directory with an
+`expect.json` of its own: that is a case directory in its own right and its
+files are its, not the parent's. The stray rule applies at every depth, and a
+case's `file` may not contain a slash, so a nested `.memql` is always a stray.
 
 Each case loads as its own domain, and the load cases share boots. A concept
 is qualified by its domain (`v1:<domain>:ticket`), so a concept's name may

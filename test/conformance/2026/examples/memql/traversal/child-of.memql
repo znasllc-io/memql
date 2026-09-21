@@ -1,0 +1,21 @@
+/// A world: the top-level container the examples domain is built around.
+concept world {
+  title  string!
+}
+
+/// A module filed under one world.
+concept module {
+  worldId  string!
+  tier     enum("bronze", "silver", "gold")!
+
+  @relationship(type="parent", field="worldId", target=world, direction="outgoing")
+}
+
+/// The silver-tier modules of one world.
+query module silverModulesOfWorld {
+  args {
+    worldId  string  @required
+  }
+  filter row => childOf(w => w.id == args.worldId) && row.tier == "silver"
+  paginate 50
+}

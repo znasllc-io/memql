@@ -1,0 +1,11 @@
+/// A lease that stops being valid at a fixed instant.
+concept lease {
+  holderUserId  string!
+  expiresAt     datetime!
+}
+
+/// Leases that expire within the next day.
+query lease leasesExpiringSoon {
+  filter row => row.expiresAt < addDuration(now, "P1D")
+  paginate 50
+}

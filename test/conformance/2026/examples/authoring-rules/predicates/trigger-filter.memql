@@ -1,0 +1,16 @@
+use campaigns.concepts.{ sendJob }
+use campaigns.mutations.{ recordReputationWindow }
+
+@trigger(event="node.updated", concept="v1:campaigns:sendJob")
+@filter(row => row.status == "archived")
+automation noteArchivedSendJob {
+  args {
+    id  any
+  }
+  noted := mutation recordReputationWindow(
+    sendingIdentity: "system",
+    domain:          "example.test",
+    windowStart:     now,
+    nodeId:          args.id
+  )
+}

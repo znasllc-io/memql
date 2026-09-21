@@ -137,6 +137,52 @@ export function isFlippable(module: Pick<Module, "kind">): boolean {
   return module.kind === "pack";
 }
 
+/**
+ * The bar's detail line for a pack.
+ *
+ * THE RESTART SENTENCE IS NOT THE WHOLE ANSWER, and it used to be the only
+ * one shown. A flippable module replaced the engine's own `stateDetail` with
+ * "a flip is recorded now and read at next boot" -- true, and it meant an
+ * operator about to enable a storefront pack saw when it would take effect
+ * and never saw WHAT it would do. The engine says what a pack publishes to
+ * the public (component/memql/module_registry.go); composing the two puts
+ * the consequence on the screen where the decision is made.
+ *
+ * The engine's half goes FIRST. What this does matters more than when it
+ * lands, and a reader who stops after one clause should have read the one
+ * that could change their mind.
+ */
+export function packBarDetail(stateDetail: string): string {
+  const restart =
+    "A flip is recorded now and read by each node at its NEXT BOOT. Nothing running changes until they restart.";
+  const engine = stateDetail.trim();
+  return engine === "" ? restart : `${engine}. ${restart}`;
+}
+
+/**
+ * Why a pack is off, when the engine has said which.
+ *
+ * TWO DIFFERENT FACTS WEAR ONE WORD. A pack that SHIPS disabled and has
+ * never been flipped is waiting for somebody to enable it; a pack an
+ * operator switched off is a decision with a reason behind it. Both render
+ * as "Disabled", and reading the first as the second sends a person looking
+ * for a row that does not exist.
+ *
+ * Read off the engine's own sentence rather than re-derived, because the
+ * engine is the only side that can tell them apart -- it holds the declared
+ * default and the row. An empty answer means the engine said nothing this
+ * build recognises, and the caller renders nothing rather than guessing.
+ */
+export function packOffReading(stateDetail: string): string {
+  if (stateDetail.includes("ships DISABLED")) {
+    return "This pack ships disabled. No one has switched it off -- it has not been switched on.";
+  }
+  if (stateDetail.includes("set by an operator")) {
+    return "An operator switched this off for this instance.";
+  }
+  return "";
+}
+
 /** Why a non-pack has no switch, in the terms of what DOES change it. */
 export function noSwitchSentence(kind: string): string {
   if (kind === "integration") {

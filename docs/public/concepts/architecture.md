@@ -595,11 +595,11 @@ The Executor Engine (in `component/memql/`) executes parsed queries against the 
 │  │  │                                                                           │  │ │
 │  │  │  Raw Results ──▶ Traverse Relations ──▶ Apply Shape ──▶ Format Output    │  │ │
 │  │  │                                                                           │  │ │
-│  │  │               Optional: AI Shape Functions                                │  │ │
+│  │  │               Optional: AI post-processing                               │  │ │
 │  │  │               ┌────────────────┐                                         │  │ │
 │  │  │               │   AI Runtime   │                                         │  │ │
-│  │  │               │ (LLM invocation│                                         │  │ │
-│  │  │               │  for si() fn)  │                                         │  │ │
+│  │  │               │ (a prompt run  │                                         │  │ │
+│  │  │               │  from Go)      │                                         │  │ │
 │  │  │               └────────────────┘                                         │  │ │
 │  │  └──────────────────────────────────────────────────────────────────────────┘  │ │
 │  │                                                                                  │ │

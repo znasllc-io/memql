@@ -517,15 +517,43 @@ Each is filed as an issue that blocks what it names.
   all. `TestSiteKindEnumIsExactlyThreeValues` stands. Whichever way the
   product answers Q1, and if it answers differently later, the engine serves
   it and neither answer is a release.
-- **Q2 -- Who is a shopper to MemQL (owner).** A declared, narrowly scoped
-  unauthenticated route per pack; or a Shopify customer as a verified,
-  constrained principal; or the first for applying and the second for anything
-  that reads a buyer's own data. *Blocks the packs foundation, the wholesale
-  pack and reviews.*
-- **Q3 -- How a client-agnostic pack ships.** Promote storefront packs out of
-  `examples/` into the default build, governed by `packState`, and decide
-  whether a storefront pack defaults to enabled or disabled. *Blocks both
-  packs.*
+- **Q2 -- Who is a shopper to MemQL. ANSWERED by the owner, 2026-09-21
+  (epic 4, memql#5550): THE THIRD SHAPE -- a declared, narrowly scoped
+  unauthenticated route per pack for submitting, and a verified Shopify
+  customer as a constrained principal for anything that reads a buyer's own
+  data.** The FIRST HALF IS BUILT; the second is recorded and waits for the
+  wholesale pack to need it, and nothing forecloses it because reach is
+  declared per ROUTE -- a second kind of caller on the same route is an
+  addition rather than a rewrite.
+
+  **A shopper is not a principal at all, not even an anonymous one.** The
+  anonymous tier (`@rowAuthz(public)`, epic memql#4541) was the obvious reach
+  for this and is the wrong instrument: it publishes a whole CONCEPT, and a
+  review is owned by the merchant so it can be moderated while a wholesale
+  application is somebody's tax identifier. A pack DECLARES its forms and
+  reads in Go and nothing else on it is reachable; the route runs the named
+  construct under the SITE OWNER'S borrowed authority, which is the campaigns
+  pattern, and the shopper's name and email are fields on the row.
+- **Q3 -- How a client-agnostic pack ships. ANSWERED by the owner, 2026-09-21
+  (epic 4, memql#5549): storefront packs live under `packs/`, link into EVERY
+  binary with no build tag, and are governed by `v1:platform:packState`; a
+  storefront pack ships DISABLED.** Built.
+
+  The default needed a mechanism, because `packState`'s law was "absence of a
+  row means enabled". It now means **the pack's declared default**, and a pack
+  that declares nothing still defaults to enabled -- so every pack predating
+  the declaration behaves exactly as it did. A ROW ALWAYS WINS over a declared
+  default, in both directions. The declaration must be registered BEFORE the
+  rows are folded over it, which is why `app/engine.go` anchors the storefront
+  packs immediately above `loadPackEnablement()`: a default heard afterwards is
+  a default that did nothing, and the pack ships enabled with nothing saying
+  so.
+
+  **No build tag, deliberately.** A pack's reach is the row now rather than
+  which binary linked it, and a tag would be a second invisible switch
+  disagreeing with the first -- an operator enabling reviews would see it load
+  on some nodes and not others, with the module inventory correctly reporting
+  both.
 - **Q4 -- D7 itself.** The owner's law, so the owner's reading of it. *Blocks the
   preview epic.*
 - **Q5 -- The client's existing reviews.** If the store uses a reviews app

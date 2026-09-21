@@ -1,0 +1,10 @@
+{
+  "cases": [
+    {
+      "file": "concept-scope.memql",
+      "verdict": "refuse_load",
+      "message": "@scope on a concept is retired -- remove the annotation",
+      "code": "annotation_retired"
+    }
+  ]
+}

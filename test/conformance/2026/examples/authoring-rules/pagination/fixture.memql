@@ -1,0 +1,13 @@
+/// A widget the unmarked-list example reads.
+concept widget {
+  kind   string!
+  label  string
+}
+
+@row
+/// Widget projection
+shape widget widgetFull {
+  row.id
+  kind
+  label
+}

@@ -1,0 +1,12 @@
+use library.concepts.{ artifact }
+use library.shapes.{ artifactFull }
+use common.traits.{ isActiveRecord }
+
+@description("Live artifacts filed under a folder")
+query artifact libraryArtifactsByFolder {
+  args {
+    folderId  string  @required
+  }
+  filter  row => row.folderId == args.folderId && isActiveRecord(row)
+  shape   artifactFull
+}

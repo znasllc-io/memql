@@ -1,0 +1,7 @@
+use identity.concepts.{ user }
+use common.traits.{ isActiveRecord }
+
+query user activeUserCount {
+  filter  row => isActiveRecord(row)
+  count
+}
