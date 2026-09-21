@@ -434,3 +434,45 @@ func TestCallerSuppliedTextIsEscaped(t *testing.T) {
 		t.Fatalf("unexpected shape: %s", got)
 	}
 }
+
+// AN UNAVAILABLE ADAPTER IS RECORDED, NOT RETURNED.
+//
+// This is the contract issue memql#5557 sets for the builtin -- "a
+// provisioning failure leaves the application approved and the entitlement
+// pending with its error" -- applied to the refusal that arrives BEFORE the
+// push rather than from it. An earlier version returned this straight to
+// the caller, which left no row: a merchant whose store's plan cannot be
+// read would have seen an approved application, no wholesale prices, and
+// nothing anywhere saying why.
+func TestAnUnavailableAdapterIsRecordedOnTheRow(t *testing.T) {
+	registerShippedAdapters()
+	reader := approvedFixture()
+	// shopifyB2B, and a store whose plan this caller cannot read -- which is
+	// the ORDINARY case for a merchant, because v1:shopify:store is
+	// cluster-owner tier and epic memql#5530's D10 left that unchanged.
+	reader.settings["store-live"] = []map[string]any{{
+		"storeId": "store-live", "applicationsOpen": true,
+		"entitlementAdapter": AdapterShopifyB2B,
+	}}
+	reader.stores = map[string][]map[string]any{}
+	caller := &fakeCaller{}
+	p := &Provider{reader: reader, caller: caller}
+
+	nodes, err := p.provisionEntitlement(context.Background(),
+		map[string]any{"applicationId": "app-1"}, 0)
+	if err != nil {
+		t.Fatalf("an unavailable adapter must be recorded, not returned: %v", err)
+	}
+	out := decodeOne(t, nodes, err)
+	if out["state"] != EntitlementFailed {
+		t.Fatalf("state = %v, want %v -- an unreadable plan will not become readable "+
+			"because we asked again", out["state"], EntitlementFailed)
+	}
+	if !strings.Contains(asString(out["error"]), "not readable") {
+		t.Fatalf("the row must carry why, got %v", out["error"])
+	}
+	// AND NOTHING WAS PUSHED. The refusal is decided before any call.
+	if len(caller.calls) != 0 {
+		t.Fatalf("an unavailable adapter must not reach Shopify, got %v", caller.calls)
+	}
+}

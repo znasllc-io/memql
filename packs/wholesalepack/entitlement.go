@@ -304,18 +304,25 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 		}
 	}
 
-	if err := adapter.Available(grant.Plan); err != nil {
-		return nil, err
-	}
+	// AVAILABILITY IS PART OF THE ATTEMPT, NOT A GUARD IN FRONT OF IT, and
+	// the difference is a row. An earlier version returned this refusal
+	// straight to the caller, which contradicted the contract issue
+	// memql#5557 sets for this builtin: "a provisioning failure leaves the
+	// application approved and the entitlement pending with its error." A
+	// returned error leaves NO ROW, so a merchant whose store's plan cannot
+	// be read would see an approved application, no wholesale prices, and
+	// nothing anywhere saying why -- which is exactly the state the
+	// entitlement row exists to prevent. It is folded into applyErr below
+	// and recorded like any other refusal.
+	applyErr := adapter.Available(grant.Plan)
 
-	var (
-		result   Outcome
-		applyErr error
-	)
-	if revoking {
-		result, applyErr = adapter.Revoke(ctx, p.caller, grant)
-	} else {
-		result, applyErr = adapter.Provision(ctx, p.caller, grant)
+	var result Outcome
+	if applyErr == nil {
+		if revoking {
+			result, applyErr = adapter.Revoke(ctx, p.caller, grant)
+		} else {
+			result, applyErr = adapter.Provision(ctx, p.caller, grant)
+		}
 	}
 
 	entState := EntitlementGranted
@@ -324,11 +331,16 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 	}
 	errText := ""
 	if applyErr != nil {
-		// PENDING, NOT FAILED, ON A GRANT. The approval stands and the push
+		// PENDING, NOT FAILED, BY DEFAULT. The decision stands and the push
 		// is what is outstanding, so the row says what is true: somebody
-		// approved this and the grant has not landed yet. `failed` is for
-		// an adapter that refused rather than errored -- a distinction the
-		// adapters draw with ErrAdapterRefused.
+		// decided this and the push has not landed yet. `failed` is for an
+		// adapter that REFUSED rather than errored -- a ceiling, a buyer
+		// with no customer account, a plan nobody can read -- which will
+		// fail identically for ever, and which AdapterRefusal marks.
+		//
+		// On a REVOKE a `pending` row means the un-grant has not landed.
+		// The application is already revoked in the decision log either
+		// way; this field is about the push, not about the decision.
 		entState = EntitlementPending
 		if isAdapterRefusal(applyErr) {
 			entState = EntitlementFailed
