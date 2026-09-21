@@ -120,6 +120,34 @@ func (i *IdentityIntegration) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 		{
+			Name: "githubAppStatus",
+			Description: "Whether this cluster has a GitHub App, which tier it resolved from " +
+				"(the environment, or a registration made from the product), and whether the " +
+				"caller could register one. Any signed-in caller; answers no credential.",
+			Handler:    i.handleGithubAppStatus,
+			ArgsSchema: map[string]string{},
+		},
+		{
+			Name: "githubAppSetupBegin",
+			Description: "Begin registering this cluster's GitHub App from a manifest: write a " +
+				"short-lived setup state bound to the caller and answer the URL of the page that " +
+				"posts the manifest to GitHub. Cluster-owner only; audited. The manifest is " +
+				"composed server-side from the cluster's own domain and is never an argument.",
+			Handler: i.handleGithubAppSetupBegin,
+			ArgsSchema: map[string]string{
+				"returnPath":   "string?",
+				"organization": "string?",
+			},
+		},
+		{
+			Name: "githubAppRemove",
+			Description: "Remove the GitHub App registered from the product by clearing its six " +
+				"stored values. Cluster-owner only; audited. Refused when the deployment's " +
+				"environment set the app. Does not delete the app at GitHub.",
+			Handler:    i.handleGithubAppRemove,
+			ArgsSchema: map[string]string{},
+		},
+		{
 			Name:        "revokeDelegation",
 			Description: "Revoke an active delegation by setting it inactive and recording the revoker.",
 			Handler:     i.handleRevokeDelegation,

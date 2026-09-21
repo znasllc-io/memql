@@ -131,6 +131,101 @@ builtin githubConnectBegin {
   returnPath  string
 }
 
+// ---- The cluster's GitHub App, registered from the product ----
+//
+// (design record docs/superpowers/specs/2026-09-20-github-app-setup-design.md)
+//
+// GitHub Connect needs a GitHub App, and an app used to be something an operator
+// registered by hand and carried into the deployment as six environment values.
+// On a cluster nobody did that for, Connect GitHub answered
+// github_app_not_configured -- to a cluster OWNER, whose next step was a runbook
+// and a restart. These three let the owner register the app from the product
+// instead: GitHub creates it from a manifest this cluster composes, hands the
+// credentials back, and the cluster keeps them sealed.
+//
+// THE FLOW STILL STARTS OVER THE STREAM (decision C4 of the Connect design, kept).
+// githubAppSetupBegin binds a server-held state to a caller the engine has
+// already authenticated as a cluster owner; the two HTTP routes it leads to
+// (owner-approved, identity only) exist because GitHub's manifest flow begins
+// with a browser FORM POST to github.com and ends with a browser redirect, and
+// neither is something a stream can carry.
+
+/// Say whether this cluster has a GitHub App, where it came from, and whether the caller could
+/// register one.
+///
+/// It exists so a surface can know BEFORE anybody presses Connect. The only way to learn "this
+/// cluster has no app" used to be a refused githubConnectBegin, so the Source stop offered a button
+/// and then took it back.
+///
+/// It answers `{configured, source, slug, installUrl, canSetup}`:
+///
+///   configured -- true when all six values resolve, from one tier.
+///   source     -- "environment" (the deployment set them; the product shows the app and changes
+///                 nothing), "cluster" (registered from the product; replaceable and removable
+///                 here), or "" when there is no app.
+///   slug       -- the app's URL slug, which is public: it is the last segment of the app's own
+///                 page on github.com. Empty when there is no app.
+///   installUrl -- where the app is installed on another account. Empty when there is no app.
+///   canSetup   -- the caller is a cluster owner AND the environment is not the one deciding.
+///
+/// Never a credential: not the client secret, not the key, not the webhook secret, and not the
+/// app id or client id either, which nothing in a browser needs.
+@sdk
+@executor("integration.identity.githubAppStatus")
+@args(profile="object")
+@description("Whether this cluster has a GitHub App, which tier it resolved from, and whether the caller could register one. Answers {configured, source, slug, installUrl, canSetup}; source is 'environment', 'cluster' or ''. Any signed-in caller; never returns a credential.")
+builtin githubAppStatus {
+}
+
+/// Begin registering this cluster's GitHub App. CLUSTER OWNER ONLY.
+///
+/// It writes a short-lived state row (purpose `app_setup`) bound to the caller and answers
+/// `{startUrl, reason}`: navigate the browser to startUrl, a page on the identity service whose one
+/// job is to post this cluster's manifest to GitHub. GitHub shows the owner the app it is about to
+/// create; they confirm; GitHub redirects back to the identity service, which exchanges the code
+/// for the app's credentials, seals them, and sends the browser on to install the app.
+///
+/// THE MANIFEST IS NEVER AN ARGUMENT. It is composed on the server from this cluster's own
+/// domain -- the callback URL, the webhook URL, the two read permissions -- so nothing a browser
+/// sends can ask GitHub for a wider app than Connect uses, or point its callback somewhere else.
+///
+/// Reasons a caller can see:
+///
+///   ok                                -- startUrl is set; navigate to it.
+///   github_app_managed_by_environment -- the deployment set MEMQL_GITHUB_APP_*; the app is the
+///                                        operator's, and rows written here would be ignored.
+///   github_app_setup_forbidden        -- the caller is not a cluster owner.
+///   github_app_setup_invalid          -- `organization` is not a GitHub organization login.
+///   connect_state_invalid             -- the state row could not be written; retry.
+@sdk
+@executor("integration.identity.githubAppSetupBegin")
+@args(profile="object")
+@description("Begin registering this cluster's GitHub App from a manifest. Cluster-owner only; audited. Writes a short-lived state row and answers {startUrl, reason}: navigate the browser to startUrl. reason is 'ok', 'github_app_managed_by_environment', 'github_app_setup_forbidden', 'github_app_setup_invalid' or 'connect_state_invalid'. The manifest is composed server-side and is never an argument.")
+builtin githubAppSetupBegin {
+  /// Where in MemQL OS to land when the round trip finishes -- a same-origin path, validated on
+  /// the way in and again on the way out exactly as githubConnectBegin's is.
+  returnPath    string
+  /// The GitHub organization to register the app under, by login. Absent or empty registers it
+  /// under the account of whoever is signed in to GitHub in that browser.
+  organization  string
+}
+
+/// Remove the GitHub App this cluster registered from the product. CLUSTER OWNER ONLY.
+///
+/// It clears the six stored values, so Connect is absent again and every source fetching under a
+/// grant answers github_app_not_configured until an app is registered. It does NOT delete the
+/// app at GitHub -- GitHub offers no call for that, and the owner's next step, if they want it
+/// gone there too, is the app's own settings page.
+///
+/// Refused with github_app_managed_by_environment when the deployment set the values: there is
+/// nothing stored to clear, and clearing rows would change nothing about what the cluster uses.
+@sdk
+@executor("integration.identity.githubAppRemove")
+@args(profile="object")
+@description("Remove the GitHub App registered from the product: clears the six stored values. Cluster-owner only; audited. Answers {removed, reason}; reason is 'ok', 'github_app_managed_by_environment', 'github_app_setup_forbidden' or 'github_app_not_configured'. Does not delete the app at GitHub.")
+builtin githubAppRemove {
+}
+
 // ---- Groups (epic memql#5165, section D) ----
 //
 // Six verbs, all executed by integrations/groups and all writing under

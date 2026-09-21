@@ -157,8 +157,16 @@ func (i *IdentityIntegration) handleGithubConnectBegin(ctx context.Context, args
 	// identity one -- envregistry.ApplyDomainDerivations paints it from
 	// MEMQL_DOMAIN at boot in main.go -- which is what lets this capability
 	// answer the same URL wherever the stream happens to land.
-	redirectURI := githubconnect.RedirectURI(os.Getenv("MEMQL_IDENTITY_BASE_URL"))
+	redirectURI := githubconnect.RedirectURI(identityBaseURLFromEnv())
 	return connectResult(cfg.AuthorizeURL(redirectURI, state), connectReasonOK, cfg.InstallURL()), nil
+}
+
+// identityBaseURLFromEnv is the ONE read of MEMQL_IDENTITY_BASE_URL in this
+// package. Present on every node type, not only the identity one --
+// envregistry.ApplyDomainDerivations paints it from MEMQL_DOMAIN at boot -- so
+// a capability answers the same URL wherever the stream happens to land.
+func identityBaseURLFromEnv() string {
+	return strings.TrimRight(strings.TrimSpace(os.Getenv("MEMQL_IDENTITY_BASE_URL")), "/")
 }
 
 // connectResult is the one shape this capability answers, so a caller never
