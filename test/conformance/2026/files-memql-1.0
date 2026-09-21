@@ -287,6 +287,7 @@ cells/shape/row/a-field-the-concept-does-not-declare.memql
 cells/shape/row/actor-fields-without-actor.memql
 cells/shape/row/with-true.memql
 cells/shape/row/written-bare.memql
+cells/spec/description/a-string-on-a-trait.memql
 cells/spec/description/a-string.memql
 cells/spec/description/with-no-value.memql
 cells/spec/disabled/with-true.memql
@@ -624,6 +625,8 @@ negative/use/import-block.memql
 statements/automation/assign/assign.memql
 statements/automation/assign/call-inside-an-expression.memql
 statements/automation/body/no-statement.memql
+statements/automation/body/precondition-entries.memql
+statements/automation/body/precondition-without-check.memql
 statements/automation/body/two-statements-on-one-line.memql
 statements/automation/call/argument-pun.memql
 statements/automation/call/each-kind.memql
