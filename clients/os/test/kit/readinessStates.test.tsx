@@ -336,9 +336,6 @@ describe("SetupGroup", () => {
   // stops being true, this fails and names the pair, and the guard beside it
   // becomes load-bearing again.
   it("every role the group is shown to can reach every section it points at", () => {
-    const settings = OS_REGISTRY.apps.find((a) => a.id === "settings");
-    expect(settings, "the settings app must be in the registry").toBeTruthy();
-
     const configuringRoles = ["owner", "developer"] as const;
     const targets = Object.entries(MODULE_SETTINGS_SECTION).filter(([, t]) => t !== null);
     // A REACHABLE POSITIVE: an empty map would satisfy every assertion below.
@@ -347,16 +344,77 @@ describe("SetupGroup", () => {
     for (const role of configuringRoles) {
       expect(canConfigure(role), `${role} must be shown the group`).toBe(true);
       installSeededAccess(role);
-      const reachable = new Set(sectionsFor(settings!).map((sec) => sec.id));
       for (const [moduleId, target] of targets) {
+        // THE TARGET'S OWN APP, because a module's home is not always Settings:
+        // the GitHub App is registered from Deployables. An app id that is not
+        // in the registry is the same defect as an unreachable section -- a
+        // button that opens nothing -- so it fails here by name too.
+        const app = OS_REGISTRY.apps.find((a) => a.id === target!.app);
+        expect(app, `${moduleId} points at an app, ${target!.app}, that is not in the registry`).toBeTruthy();
+        const reachable = new Set(sectionsFor(app!).map((sec) => sec.id));
         expect(
           reachable.has(target!.section),
-          `${role} is shown "Set up" for ${moduleId} but cannot reach Settings -> ${target!.section}; ` +
+          `${role} is shown "Set up" for ${moduleId} but cannot reach ${target!.place} -> ${target!.section}; ` +
             `the button would navigate a window nowhere. Either widen that section or ` +
             `confirm the guard in ReadinessStates suppresses the button for this pair.`,
         ).toBe(true);
       }
     }
+  });
+
+  // THE GITHUB APP IS CONFIGURED FROM DEPLOYABLES, not from the deployment and
+  // not from Settings. The row used to name six MEMQL_GITHUB_APP_* variables --
+  // on the same page as the control that now registers the app, so one page
+  // said two different things about one module.
+  describe("a module whose home is another app", () => {
+    const unset = readiness(true, [
+      verdict("githubApp", "unconfigured", [
+        {
+          name: "app",
+          configurableFrom: "os",
+          complete: false,
+          slots: [{ name: "MEMQL_GITHUB_APP_ID", present: false, source: "unset" }],
+        },
+      ]),
+    ]);
+
+    it("opens that app's section, and never names deployment variables", () => {
+      render(
+        withOs(
+          withSession(<SetupGroup app="Nexus" requires={[]} wants={["githubApp"]} readiness={unset} />, "owner"),
+          "owner",
+        ),
+      );
+      expect(screen.getByRole("button", { name: "Open Sources" })).toBeTruthy();
+      expect(screen.queryByText("Set in the deployment")).toBeNull();
+      expect(screen.queryByText("MEMQL_GITHUB_APP_ID")).toBeNull();
+    });
+
+    it("says where in words when there is no window to open", () => {
+      render(withSession(<SetupGroup app="Nexus" requires={[]} wants={["githubApp"]} readiness={unset} />, "owner"));
+      expect(screen.getByText("Deployables settings, under Sources")).toBeTruthy();
+    });
+
+    it("points down the page, with no button, when it is drawn on the page that configures it", () => {
+      render(
+        withOs(
+          withSession(
+            <SetupGroup
+              app="Deployables"
+              requires={[]}
+              wants={["githubApp"]}
+              readiness={unset}
+              here={{ app: "deployables", section: "settings" }}
+            />,
+            "owner",
+          ),
+          "owner",
+        ),
+      );
+      // "Open Sources" here would open the page somebody is already reading.
+      expect(screen.getByText("Below, under Sources")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Open Sources" })).toBeNull();
+    });
   });
 
   // The new fact D7 establishes, asserted directly rather than inferred from
