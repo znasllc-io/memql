@@ -2126,6 +2126,15 @@ variables:
   # everybody except the operator. The redirect URI to register at GitHub is
   # https://identity.<domain>/auth/github/callback, derived from
   # MEMQL_IDENTITY_BASE_URL and never typed into a manifest.
+  #
+  # THE SIX HAVE A SECOND HOME (design record 2026-09-20-github-app-setup). A
+  # cluster owner can register the app from MemQL OS, and that registration is
+  # stored as six ROWS under these same six names: the three identifiers in
+  # v1:platform:globalVariable, the three credentials sealed under
+  # MEMQL_MASTER_KEY in v1:platform:globalSecret. THE ENVIRONMENT WINS, AND ANY
+  # OF IT IS ALL OF IT: set even one value here and the rows are never read --
+  # the app is the deployment's, the product shows it and offers no change --
+  # so the all-six-or-none rule above is unchanged for anybody who uses these.
   - name: MEMQL_GITHUB_APP_ID
     component: identity
     scope: node
@@ -2149,7 +2158,7 @@ variables:
     scope: node
     secret: true
     optional: true
-    description: "The App's OAuth client secret. Sent only from a node, only to GitHub's token endpoint, and never stored on a row."
+    description: "The App's OAuth client secret. Sent only from a node, only to GitHub's token endpoint. Set here it lives in the environment alone; an app registered from MemQL OS keeps it sealed under MEMQL_MASTER_KEY in v1:platform:globalSecret instead, and a value set here outranks that row."
 
   - name: MEMQL_GITHUB_APP_PRIVATE_KEY_B64
     component: identity
@@ -3304,8 +3313,15 @@ modules:
     hostedBy:
       nodeTypes: [identity]
     lanes:
+      # `os`, the first lane to be: a cluster owner registers the app from
+      # Deployables (design record 2026-09-20-github-app-setup), and the six
+      # slots below are then ROWS under these names rather than environment
+      # values. The evaluator walks environment and then rows for every slot
+      # whatever this says, so an operator who sets the six in the deployment
+      # still reads as configured -- this key only says what the Set up group
+      # offers somebody whose cluster has neither.
       - name: app
-        configurableFrom: deployment
+        configurableFrom: os
         slots:
           - MEMQL_GITHUB_APP_ID
           - MEMQL_GITHUB_APP_SLUG
