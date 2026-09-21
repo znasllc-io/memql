@@ -1300,10 +1300,37 @@ costs no new layout language and fixes a real mis-filing.
   when not. An empty state is an invitation to act, not an apology.
 - Icon: `ShoppingBag` (already imported in that file).
 
-**The Store panel** opens in the existing `DetailDialog`, titled `Store`. In order:
+**The Store panel is a PANE, not a dialog, and that is a design decision rather than a
+convenience.** `DetailDialog` is `min(680px, 100vw - 36px)` with its own `<h3>` header,
+and it is right for Traffic and App values — a short read and a small form. A store's
+detail is the Stores app's whole 428-line page: facts, a scope comparison, a per-domain
+mirror table, a paired development store and two acts. DESIGN.md rule 9 says real estate
+belongs to content and rule 11 says a tall detail replaces its list rather than sharing a
+scroll column. `DeployablePage` already does exactly this for ONE detail — `whereItLives`
+returns a full pane wrapped in `Panel` + `Head` with breadcrumbs and `back` instead of
+opening the dialog. Follow that branch, verbatim in shape:
 
-1. `Head` — the store's domain as title; one primary action, `Change store`; nothing else
-   standing (rule 1).
+```tsx
+  if (detail === "store") {
+    const toOverview = () => setDetail(null);
+    return <div className="os-deploy-pane deployable-workspace" data-os-page-context={JSON.stringify({ page: "Deployable", siteId: site.id, hostname: site.hostname, name, view: "Store" })}><div className="os-deploy-scroll">
+      <Panel label={`Store for ${siteName(site)}`}>
+        <Head title="Store" breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label: name, onSelect: toOverview }, { label: "Store" }]}
+          back={{ label: name, onSelect: toOverview }} />
+        <StorePanel site={site} canBind={can.store} />
+      </Panel>
+    </div></div>;
+  }
+```
+
+Do NOT add `"store"` to `detailTitle`'s map — that map is for the dialog, and a `store`
+entry there would be a second title for a pane that already has a `Head`. Add `"store"` to
+the `WorkspaceDetail` union and handle it in the branch above, before the dialog render.
+
+**Inside `StorePanel`**, under that one `Head` (rule 1: the section's one heading), in order:
+
+1. The store's domain on the first line, with the one primary action beside it:
+   `Change store`. Nothing else stands.
 2. `Facts` — Name, Plan, API version, Protected data level. Every absence is a `Figure`
    absence, never a zero and never an invented fact.
 3. A `Subhead` `Scopes` — granted against needed, with the mismatch named in a sentence.
@@ -1314,8 +1341,15 @@ costs no new layout language and fixes a real mis-filing.
 6. The two acts that are this store's alone, on one control line at the foot of the panel:
    `Pause ingestion` / `Resume ingestion` and `Reconcile subscriptions`. An act that is
    not legal from the current state is absent. These do NOT get a second `ActionBar` — the
-   window already has one and two bars is what rule 12 forbids; they sit inline exactly as
-   `RuntimeSettingsPanel`'s controls do.
+   window already draws one for the DEPLOYABLE's lifecycle and two bars is what rule 12
+   forbids; they sit inline exactly as `RuntimeSettingsPanel`'s controls do. Port the
+   legality table from `apps/stores/words.ts` rather than restating it.
+
+**Kit pieces to build with** (all from `clients/os/src/kit`): `Panel`, `Head`, `Subhead`,
+`Facts`, `Fact`, `Field`, `Select`, `Input`, `Button`, `Caption`, `Notice`, `Chip`,
+`Chips`, and `Measure` + `figureFrom` / `absent` for every number. Nothing new is invented;
+DESIGN.md's applying note says a surface needing a control the kit lacks promotes it on
+second use rather than respelling it locally.
 
 **Attaching a store** in the add-a-deployable wizard: the two free-text fields
 (`storeDomain`, `storefrontTokenRef`) are replaced by ONE field — a `Select` of the
