@@ -191,6 +191,36 @@ func RoutingExclusions() []RoutingExclusion {
 				"underneath, still far above anything else here, and read the " +
 				"same way: a windowed query on navigation, not a tail.",
 		},
+		{
+			Pattern: "graph.node.*.v1:work:observation",
+			Reason: "One row per tool result -- and since epic memql#5396, one per " +
+				"ACTION a delegated app takes as well, which is the volume of a " +
+				"whole coding session rather than of one agent turn. Invocation-" +
+				"class volume by the same measure as v1:worker:invocation. Its " +
+				"sibling v1:work:step DOES forward and is what a live timeline " +
+				"draws from; the observation is the evidence behind a step, read " +
+				"on demand through workObservationsForOwnerRun when somebody " +
+				"opens one. Epic memql#5396 made this argument stronger rather " +
+				"than weaker, which is why it is recorded now: the absence was " +
+				"explained in a comment beside the work-spine rules and in " +
+				"nothing a reader of this list could find.",
+		},
+		{
+			Pattern: "graph.node.*.v1:work:modelCall",
+			Reason: "One row per model call, read the same way an observation is: " +
+				"the Work app asks workModelCallsForOwnerRun on navigation and " +
+				"says when it last read. Excluded beside the observations it sits " +
+				"with, and for the same reason.",
+		},
+		{
+			Pattern: "graph.node.deleted.v1:worker:appSession",
+			Reason: "The created and updated verbs DO forward (epic memql#5396): a " +
+				"session is written and advanced on the agent replica holding the " +
+				"machine's stream while the person watching is attached to a bff. " +
+				"Nothing deletes a session row -- it is append-only and its " +
+				"history is the evidence somebody opens it for -- so a delete " +
+				"rule would forward an event nothing publishes.",
+		},
 	}
 }
 

@@ -53,6 +53,7 @@ export function SourceView({
   onOpenHistory,
   onOpenApp,
   onOpenDeclared,
+  onReview,
   attempts,
   deployedBy,
 }: {
@@ -68,6 +69,15 @@ export function SourceView({
   onOpenApp: (siteId: string) => void;
   /** Opens the compose flow for an app the source declares and has not deployed. */
   onOpenDeclared: (app: string) => void;
+  /**
+   * Reopen the run that is parked at this source's gate, when there is one.
+   *
+   * A parked run used to be reached from an app's row inside the old combined
+   * list. Sources have a list of their own now, where a waiting one reads
+   * "Review needed" -- and the act that answers that state belongs on this
+   * page's bar, with the state, rather than hidden in a row (rule 12).
+   */
+  onReview?: () => void;
   onAsk?: (tag: string) => void;
   /** How many runs this source has, for the history line. */
   attempts: number;
@@ -106,7 +116,7 @@ export function SourceView({
   // The bar stays, with no acts: it still reads what this source IS and how
   // many of its apps are live, which is what somebody who opened it came to
   // find out.
-  const acts: Act[] = [];
+  const acts: Act[] = onReview === undefined ? [] : [{ label: "Review", tone: "primary", onAct: onReview }];
 
   return (
     <div className="os-deploy-pane deployable-source-view" data-os-page-context={JSON.stringify({ page: "Source", packageId: pkg.id, source: label })}>
@@ -215,7 +225,7 @@ export function SourceView({
       <ActionBar
         // ARCHIVED IS NOT TRACKED. The word was hard-coded, so an archived
         // source said "Tracked" with its own Restore control directly above.
-        state={pkg.status === "archived" ? "Archived" : "Tracked"}
+        state={pkg.status === "archived" ? "Archived" : onReview !== undefined ? "Review needed" : "Tracked"}
         // COUNTED THE WAY THE LIST COUNTS, which is everything this source
         // declares -- deployed or not.
         detail={`${total} app${total === 1 ? "" : "s"}${live > 0 ? `, ${live} live` : ""}${

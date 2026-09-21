@@ -122,6 +122,16 @@ function fakeSubscriptions(): FakeSubscriptions {
 export interface FakeSeed {
   sites?: Row[];
   sitesError?: string;
+  /** The v1:shopify:store rows `stores()` and `storeById()` answer with. */
+  stores?: Row[];
+  storesError?: string;
+  /** The `shopifyStoreHealth` report, one entry per store. */
+  storeHealth?: Row[];
+  storeHealthError?: string;
+  createStoreError?: string;
+  bindStoreError?: string;
+  setStoreStatusError?: string;
+  ensureSubscriptionsError?: string;
   artifacts?: Row[];
   /** v1:platform:customDomain rows the domains feed seeds with. */
   domains?: Row[];
@@ -379,6 +389,47 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         return builtinReply("packageRestore", []);
       }
 
+      // THE STORE READS (epic memql#5530). All three are SHAPED queries, so
+      // they answer through `rows()` and never through a bundle envelope --
+      // the same reading the app makes, which is what keeps the fake honest
+      // about the one way a shaped read can be got wrong.
+      if (call === "query stores()") {
+        if (seed.storesError) throw new Error(seed.storesError);
+        return rowsResult(seed.stores ?? []);
+      }
+      if (call.startsWith("query storeById(")) {
+        if (seed.storesError) throw new Error(seed.storesError);
+        const id = /storeId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        return rowsResult((seed.stores ?? []).filter((row) => row["id"] === id));
+      }
+      if (call.startsWith("query developmentStoresFor(")) {
+        if (seed.storesError) throw new Error(seed.storesError);
+        const id = /storeId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        return rowsResult(
+          (seed.stores ?? []).filter((row) => row["isDevelopment"] === true && row["developmentOfStoreId"] === id),
+        );
+      }
+      if (call.startsWith("builtin shopifyStoreHealth(")) {
+        if (seed.storeHealthError !== undefined) throw new Error(seed.storeHealthError);
+        return builtinReply("shopifyStoreHealth", [{ stores: seed.storeHealth ?? [] } as unknown as Row]);
+      }
+      if (call.startsWith("mutation createStore(")) {
+        if (seed.createStoreError !== undefined) throw new Error(seed.createStoreError);
+        return rowsResult([]);
+      }
+      if (call.startsWith("mutation updateSiteStoreBinding(")) {
+        if (seed.bindStoreError !== undefined) throw new Error(seed.bindStoreError);
+        return rowsResult([]);
+      }
+      if (call.startsWith("mutation setStoreStatus(")) {
+        if (seed.setStoreStatusError !== undefined) throw new Error(seed.setStoreStatusError);
+        return rowsResult([]);
+      }
+      if (call.startsWith("builtin shopifyEnsureSubscriptions(")) {
+        if (seed.ensureSubscriptionsError !== undefined) throw new Error(seed.ensureSubscriptionsError);
+        return builtinReply("shopifyEnsureSubscriptions", []);
+      }
+
       if (call === "query sourceCredentialsMine()") return rowsResult(seed.credentials ?? []);
 
       if (call.startsWith("builtin sourceProbe(")) {
@@ -589,6 +640,87 @@ export const PLATFORM_SITE = siteRow({
 });
 
 /** A storefront, published from the Library. */
+/**
+ * The store SHOP is bound to, and a development store standing in for it.
+ *
+ * TWO ROWS, PAIRED BY `developmentOfStoreId` (design D8). A development store
+ * is attached and mirrored like any other, so what makes it one is a flag on
+ * its own row and a pointer at the store it stands in for -- not a mode on the
+ * site, and not a second field on the live store.
+ */
+export const STORE: Row = {
+  id: "store-example",
+  domain: "example.myshopify.com",
+  name: "Example Shop",
+  appClientId: "app-1234",
+  adminTokenRef: "EXAMPLE_ADMIN_TOKEN",
+  storefrontTokenRef: "EXAMPLE_STOREFRONT_TOKEN",
+  webhookSecretRef: "EXAMPLE_WEBHOOK_SECRET",
+  apiVersion: "2026-07",
+  protectedDataLevel: "level1",
+  plan: "Shopify Plus",
+  status: "live",
+  isDevelopment: false,
+  developmentOfStoreId: "",
+} as unknown as Row;
+
+export const DEV_STORE: Row = {
+  id: "store-example-dev",
+  domain: "example-dev.myshopify.com",
+  name: "Example Shop (development)",
+  adminTokenRef: "EXAMPLE_DEV_ADMIN_TOKEN",
+  storefrontTokenRef: "EXAMPLE_DEV_STOREFRONT_TOKEN",
+  webhookSecretRef: "EXAMPLE_DEV_WEBHOOK_SECRET",
+  apiVersion: "2026-07",
+  protectedDataLevel: "none",
+  plan: "Development",
+  status: "configured",
+  isDevelopment: true,
+  developmentOfStoreId: "store-example",
+} as unknown as Row;
+
+/**
+ * One entry of the `shopifyStoreHealth` report, with the shape the Go handler
+ * emits (`integrations/shopify/capabilities.go`).
+ *
+ * NOTE WHAT IS ABSENT BY DEFAULT: no `costBucket` (nothing has called the
+ * Admin API), no `health.subscriptions` (no reconcile has been recorded) and
+ * an EMPTY `domains` (nothing has ever synced). Those are the three states
+ * whose honest rendering is a dash, so they are what a fixture starts from --
+ * one that filled them in would make the zero-versus-absent cases impossible
+ * to write by accident.
+ */
+export function storeHealthRow(over: Partial<Row> & { storeId: string }): Row {
+  return {
+    domain: `${over.storeId}.myshopify.com`,
+    status: "live",
+    apiVersion: "2026-07",
+    mirrorApiVersion: "2026-07",
+    protectedDataLevel: "level1",
+    scopesGranted: ["read_products", "read_orders"],
+    scopesNeeded: ["read_products", "read_orders"],
+    scopesMissing: [],
+    driftLast: 0,
+    domains: [],
+    health: {},
+    ...over,
+  } as unknown as Row;
+}
+
+/** One row of a store's per-domain sync table. */
+export function domainStateRow(over: Partial<Row> & { concept: string }): Row {
+  return {
+    phase: "idle",
+    lastAppliedAt: "",
+    lastReconciledAt: "",
+    driftLast: 0,
+    lagSeconds: 0,
+    outboxDepth: 0,
+    lastError: "",
+    ...over,
+  } as unknown as Row;
+}
+
 export const SHOP = siteRow({
   id: "site-shop",
   hostname: "shop.memql.example.com",
@@ -597,7 +729,7 @@ export const SHOP = siteRow({
   bundleRef: "blob://sites/site-shop/v1/",
   artifactId: "artifact-zip",
   title: "Storefront",
-  binding: { storeDomain: "example.myshopify.com", storefrontTokenRef: "shopify-storefront-token" },
+  binding: { storeId: "store-example" },
 });
 
 /** A draft, baked into the edge image. */

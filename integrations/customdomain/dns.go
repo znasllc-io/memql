@@ -83,6 +83,11 @@ const (
 	// ReasonIssuanceFailed -- the bind script ran and the objects did not
 	// come up. failureDetail carries the envelope's own message.
 	ReasonIssuanceFailed = "issuance_failed"
+	// ReasonRemovalFailed is the unbind not going through. Its own reason
+	// rather than issuance_failed, because nothing is being issued: a panel
+	// that read "the certificate could not be issued" on a binding somebody
+	// asked to take down would be describing the opposite of what happened.
+	ReasonRemovalFailed = "removal_failed"
 )
 
 // VerifyPrefix is the label the ownership TXT record sits under:

@@ -304,21 +304,31 @@ describe("appSessionFromRow", () => {
     expect(appSessionFromRow({ id: "v1:worker:appSession:a" }).billing).toBe("unknown");
   });
 
-  it("keeps the transcript byte for byte and reads truncation as a flag", () => {
+  it("reads the recording: its run, its counts and the transcript file", () => {
     const detail = appSessionDetailFromRow({
       id: "v1:worker:appSession:a",
-      transcript: "  keep   this\n\n",
-      transcriptBytes: 15,
+      sessionRunId: "v1:work:run:rec",
+      recordedSteps: 12,
+      droppedActions: 2,
+      transcriptFileId: "v1:library:file:t1",
       transcriptTruncated: true,
     });
-    expect(detail.transcript).toBe("  keep   this\n\n");
-    expect(figureValue(detail.transcriptBytes)).toBe(15);
+    expect(detail.sessionRunId).toBe("v1:work:run:rec");
+    expect(figureValue(detail.recordedSteps)).toBe(12);
+    expect(figureValue(detail.droppedActions)).toBe(2);
+    expect(detail.transcriptFileId).toBe("v1:library:file:t1");
     expect(detail.transcriptTruncated).toBe(true);
   });
 
-  it("reads an ABSENT transcriptBytes as unmeasured rather than as 0 bytes", () => {
+  // "Nothing recorded this run" and "it recorded and found nothing to record"
+  // are different facts about a run, and a 0 for the first is a number nobody
+  // measured.
+  it("reads an ABSENT recordedSteps as unmeasured rather than as 0 actions", () => {
     const detail = appSessionDetailFromRow({ id: "v1:worker:appSession:a" });
-    expect(detail.transcriptBytes.kind).toBe("absent");
+    expect(detail.recordedSteps.kind).toBe("absent");
+    expect(detail.droppedActions.kind).toBe("absent");
+    expect(detail.sessionRunId).toBe("");
+    expect(detail.transcriptFileId).toBe("");
   });
 
   it("names starting and running as the only live statuses", () => {

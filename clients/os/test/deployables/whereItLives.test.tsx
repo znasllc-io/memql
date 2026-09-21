@@ -32,6 +32,8 @@ function mount(connection: unknown, accountId: string) {
         accounts={[accountFromRow(accountRow({ id: "acct-acme", name: "Acme" }))]}
         canBindDomain={false}
         clusterDomain="memql.example.com"
+        onOpenDomain={() => {}}
+        onAddDomain={() => {}}
       />,
     ),
   );

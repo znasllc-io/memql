@@ -27,6 +27,8 @@ shape store storeFull {
   health
   subscriptionsCheckedAt
   redactedAt
+  isDevelopment
+  developmentOfStoreId
   row.createdAt
 }
 

@@ -85,12 +85,13 @@ func analyzeDeployables(tree fs.FS, manifest *Manifest, rep *Report) {
 	for _, d := range manifest.Deployables {
 		command, output := d.BuildPlanFor()
 		dr := DeployableReport{
-			Name:    d.Name,
-			Kind:    d.Kind,
-			Path:    d.Path,
-			Command: command,
-			Output:  output,
-			Binding: d.Binding,
+			Name:           d.Name,
+			Kind:           d.Kind,
+			Path:           d.Path,
+			Command:        command,
+			Output:         output,
+			Binding:        d.Binding,
+			ResolutionTail: d.ResolutionTail,
 		}
 
 		// THREE CASES FOR A KIND (design section B, D9), and the order is
@@ -121,7 +122,7 @@ func analyzeDeployables(tree fs.FS, manifest *Manifest, rep *Report) {
 
 		case d.Kind == KindStorefront && !hasBinding(d.Binding):
 			dr.Problem = ptr(problemFrom(refuseScoped(CodeDeployableBindingMissing, d.Name,
-				"deployable %q is a %s but declares no binding. A storefront needs storeDomain and storefrontTokenRef -- the token itself stays in a cluster secret and is named, never written here.",
+				"deployable %q is a %s but names no store. A storefront names the v1:shopify:store row it fronts -- binding: {store: <shop>.myshopify.com} -- and the domain, the Storefront token reference and everything else about that store live on the row.",
 				d.Name, KindStorefront), true))
 		}
 
@@ -359,9 +360,7 @@ func hasFileIn(tree fs.FS, p string) bool {
 }
 
 func hasBinding(b *ManifestBinding) bool {
-	return b != nil &&
-		strings.TrimSpace(b.StoreDomain) != "" &&
-		strings.TrimSpace(b.StorefrontTokenRef) != ""
+	return b != nil && strings.TrimSpace(b.Store) != ""
 }
 
 // goModulePath reads the module line out of a go.mod, for the report only.

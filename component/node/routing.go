@@ -256,6 +256,10 @@ func defaultRoutingRules() []RoutingRule {
 		// excluded on volume grounds exactly as v1:worker:invocation is: a
 		// busy run writes one observation per tool result, and forwarding
 		// those to every replica buys nothing any surface subscribes to.
+		// Epic memql#5396 made that volume argument STRONGER rather than
+		// weaker -- an app session now writes one observation per action it
+		// takes -- and both are recorded in RoutingExclusions() so the
+		// absence is a decision a reader can find rather than a silence.
 		{Pattern: "graph.node.created.v1:work:goal", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:work:goal", TargetType: ""},
 		{Pattern: "graph.node.deleted.v1:work:goal", TargetType: ""},
@@ -268,6 +272,24 @@ func defaultRoutingRules() []RoutingRule {
 		{Pattern: "graph.node.created.v1:work:approval", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:work:approval", TargetType: ""},
 		{Pattern: "graph.node.deleted.v1:work:approval", TargetType: ""},
+		// THE APP SESSION ROW (epic memql#5396). It had no rule and no
+		// recorded exclusion -- pure silence, which is the state
+		// routing_reach.go's header calls indistinguishable from a concept
+		// nobody has thought about.
+		//
+		// The session is written and advanced on the AGENT replica holding
+		// the machine's stream while the person watching it is attached to a
+		// bff, which is the cross-replica shape every block above exists for.
+		// Without these the Fleet session page is correct on load and frozen
+		// after -- and since this epic moved the transcript off the row, what
+		// freezes is now the RECORDING's own progress: `recordedSteps`,
+		// `droppedActions` and the transcript file the session ends with.
+		//
+		// Created and updated only. The row is append-only and nothing
+		// deletes one, so a delete rule would forward an event nothing
+		// publishes.
+		{Pattern: "graph.node.created.v1:worker:appSession", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:worker:appSession", TargetType: ""},
 
 		// THE PROVING SUITE (design record
 		// docs/superpowers/specs/2026-09-06-proving-suite-design.md, section
@@ -381,6 +403,29 @@ func defaultRoutingRules() []RoutingRule {
 		// on. The sweep's no-change passes write no row at all.
 		{Pattern: "graph.node.created.v1:platform:customDomain", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:platform:customDomain", TargetType: ""},
+		// The store a storefront is BOUND TO (epic memql#5530, issue
+		// memql#5538). Since the site's binding NAMES a v1:shopify:store row
+		// rather than copying its domain and token reference, the two values
+		// that reach a served byte -- the origin the Content-Security-Policy
+		// admits, and the globalSecret the runtime-config document resolves --
+		// live on a row NO SITE WRITE TOUCHES. component/edge's invalidation
+		// subscriber is the consumer, and it flushes the whole resolver cache
+		// because a store row carries no hostname to evict by.
+		//
+		// THE SITE PAIR ABOVE CANNOT COVER FOR THIS ONE. Re-pointing a store,
+		// or rotating its Storefront token reference, writes the store row and
+		// nothing else -- so without this rule every edge replica keeps
+		// serving the old origin until its own TTL backstop expires,
+		// independently, and the operator sees the change take effect on one
+		// replica at a time.
+		//
+		// Volume is an operator act measured in ones per day: a store is
+		// registered once and edited when a credential rotates. The mirrored
+		// Shopify data (products, orders) lives on its own generated concepts
+		// and is not forwarded by this rule -- the pattern names the store
+		// row's concept exactly, with no wildcard on the concept segment.
+		{Pattern: "graph.node.created.v1:shopify:store", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:shopify:store", TargetType: ""},
 		// Account front doors (epic memql#5168), for BOTH of the reasons above
 		// and with the same shape.
 		//

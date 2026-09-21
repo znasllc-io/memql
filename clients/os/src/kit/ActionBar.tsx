@@ -56,6 +56,15 @@ export interface Act {
   icon?: ReactNode;
   /** Overrides the accessible name where the label alone is ambiguous out of context. */
   ariaLabel?: string;
+  /**
+   * DRAWN AS TEXT, NOT AS A BUTTON. Two buttons side by side ask to be weighed
+   * against each other, and on a wizard's floor they are not the same kind of
+   * thing: one is what happens next, and the other is a way out of it. So the
+   * bar carries ONE button -- the act -- and whatever stands beside it is a
+   * clickable label: Cancel, Keep, Remove. Still a real `<button>`, with the
+   * same focus ring and the same keyboard; only the dress is a label's.
+   */
+  text?: boolean;
 }
 
 /** The dot beside the state word, in the shell's own three-tone language. */
@@ -72,39 +81,71 @@ export interface ActionBarProps {
    */
   detail?: string;
   tone?: ActionBarTone;
+  /**
+   * A MEASURE OF A WAIT, and nothing else: "0:42", "checked 40s ago". A bar
+   * that says "Waiting" with no figure beside it cannot answer the one thing
+   * a person waiting wants to know -- whether this has been a moment or ten
+   * minutes. Tabular, quiet, last in the state group. Drawn only when given.
+   */
+  meta?: string;
+  /**
+   * Announce the state when it changes. A wizard's bar is where "Waiting for
+   * studio-mac-mini" becomes "Connected" with nobody touching anything, and a
+   * change nobody caused is exactly what a polite live region is for. Off by
+   * default: on a page whose state only moves when its reader acts, the act
+   * already told them.
+   */
+  live?: boolean;
   /** At most three. Primary last, because that is where the eye lands. */
   acts?: readonly Act[];
   /** Rendered in place of the acts -- the typed confirmation a delete takes. */
   children?: ReactNode;
 }
 
-export function ActionBar({ state, detail, tone = "none", acts = [], children }: ActionBarProps) {
+export function ActionBar({ state, detail, tone = "none", meta, live = false, acts = [], children }: ActionBarProps) {
   // NOTHING HAPPENS WHERE NOTHING IS OFFERED. With no state to name and no act
   // to offer, the bar is absent rather than an empty band of chrome -- the
   // same rule the shell states about right-click.
   if (state === "" && acts.length === 0 && !children) return null;
 
   return (
-    <div className="os-actbar" role="group" aria-label="What you can do with this">
-      <div className="os-actbar-state">
+    <div className="os-actbar" data-tone={tone} role="group" aria-label="What you can do with this">
+      <div className="os-actbar-state" role={live ? "status" : undefined}>
         {tone === "none" ? null : <span className="os-actbar-dot" data-tone={tone} aria-hidden />}
         {state === "" ? null : <span className="os-actbar-word">{state}</span>}
         {detail ? <span className="os-actbar-detail">{detail}</span> : null}
+        {meta ? <span className="os-actbar-meta">{meta}</span> : null}
       </div>
       <div className="os-actbar-acts">
         {children}
-        {acts.map((act) => (
-          <Button
-            key={act.label}
-            tone={act.tone}
-            busy={act.busy}
-            onClick={act.onAct}
-            ariaLabel={act.ariaLabel}
-          >
-            {act.icon}
-            {act.label}
-          </Button>
-        ))}
+        {acts.map((act) =>
+          act.text ? (
+            <button
+              key={act.label}
+              type="button"
+              className="os-actbar-text"
+              data-tone={act.tone}
+              disabled={act.busy}
+              aria-busy={act.busy || undefined}
+              aria-label={act.ariaLabel}
+              onClick={act.onAct}
+            >
+              {act.icon}
+              {act.label}
+            </button>
+          ) : (
+            <Button
+              key={act.label}
+              tone={act.tone}
+              busy={act.busy}
+              onClick={act.onAct}
+              ariaLabel={act.ariaLabel}
+            >
+              {act.icon}
+              {act.label}
+            </Button>
+          ),
+        )}
       </div>
     </div>
   );

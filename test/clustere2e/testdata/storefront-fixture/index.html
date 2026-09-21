@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Storefront path</title>
+<!--
+  THE FIXTURE STOREFRONT BUNDLE (memql#5536).
+
+  Not a shop. This is the bench test card for one circuit -- the browser to
+  the store this deployable is bound to -- and every choice below serves
+  reading that circuit rather than selling anything.
+
+  It runs under the policy the edge actually writes for a
+  kind="shopify_storefront" site, which is why there is no inline script and
+  no webfont here: script-src is 'self' plus the document's own inline
+  hashes, and font-src falls back to default-src 'self'. A fixture that
+  reached for either would be proving a policy this cluster does not serve.
+-->
+<link rel="stylesheet" href="/storefront.css">
+</head>
+<body>
+<main class="card">
+  <header class="head">
+    <h1>Storefront path</h1>
+    <dl class="subject">
+      <dt>Served at</dt><dd id="served-at">reading…</dd>
+      <dt>Bound to</dt><dd id="bound-to">reading…</dd>
+    </dl>
+  </header>
+
+  <!--
+    A LEDGER, NOT A LIST OF CARDS. Each check is a row: what was checked on
+    the left, what was read on the right, a dot leader between them. Readings
+    line up in one column so they can be compared down the page, which is the
+    whole reason a test report is set this way.
+
+    Every row starts UNMEASURED and says so. A row that has not run yet must
+    never look like a row that ran and found nothing.
+  -->
+  <ol class="ledger" id="ledger">
+    <li class="row" data-check="document" aria-live="polite">
+      <span class="what">Runtime document</span>
+      <span class="leader" aria-hidden="true"></span>
+      <span class="reading unmeasured">not checked</span>
+    </li>
+    <li class="row" data-check="binding">
+      <span class="what">Store binding</span>
+      <span class="leader" aria-hidden="true"></span>
+      <span class="reading unmeasured">not checked</span>
+    </li>
+    <li class="row" data-check="token">
+      <span class="what">Storefront token</span>
+      <span class="leader" aria-hidden="true"></span>
+      <span class="reading unmeasured">not checked</span>
+    </li>
+    <li class="row" data-check="catalog">
+      <span class="what">Catalog</span>
+      <span class="leader" aria-hidden="true"></span>
+      <span class="reading unmeasured">not checked</span>
+    </li>
+    <li class="row" data-check="image">
+      <span class="what">Product image</span>
+      <span class="leader" aria-hidden="true"></span>
+      <span class="reading unmeasured">not checked</span>
+    </li>
+  </ol>
+
+  <!--
+    The catalog is EVIDENCE for the row above it, so it sits under that row
+    rather than in a gallery of its own. Empty until something is read, and
+    the empty state says which of the two empties it is -- nothing fetched
+    yet, or fetched and the store has no products.
+  -->
+  <section class="evidence" id="evidence" hidden>
+    <h2>What came back</h2>
+    <ul class="items" id="items"></ul>
+  </section>
+
+  <footer class="foot">
+    <button type="button" id="recheck">Check again</button>
+    <p class="note" id="note">Nothing on this page is cached. Every check runs
+      when you load it.</p>
+  </footer>
+</main>
+<script src="/storefront.js"></script>
+</body>
+</html>

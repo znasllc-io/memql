@@ -10,14 +10,16 @@ const {ActivityTarget,SemanticActivityProvider}=await import('../../src/kit/Sema
 const {installSeededAccess}=await import('../seededAccess');
 afterEach(cleanup);
 beforeEach(()=>{installSeededAccess('owner');h.connection=fakeConnection();});
+// A machine is opened from the LIST: the section no longer selects the first one
+// on sight, and there is no dropdown to pick another from.
+const openMachine=async(name:string)=>fireEvent.click(await screen.findByRole('button',{name:new RegExp(`^Open ${name}`)}));
 function fleet(){return render(withSession(<MachinesProvider><FleetApp sectionId="machines" navigate={vi.fn()} askContext={vi.fn()} store={{load:()=>({version:1,defaultSection:'machines',showRevoked:false}),save:()=>{}}}/></MachinesProvider>));}
-it('returns to equipment when the selected machine disappears',async()=>{
+it('returns to the list when the selected machine disappears, never to another machine',async()=>{
  h.connection=fakeConnection({myWorkersWithStatus:[machineRow({id:'a',displayName:'Alpha'}),machineRow({id:'b',displayName:'Beta'})]});fleet();
- fireEvent.click(await screen.findByRole('combobox',{name:'Selected machine'}));
- fireEvent.click(screen.getByRole('option',{name:/Beta/}));
- fireEvent.click(screen.getByRole('button',{name:/Machine details/}));expect(screen.getByLabelText('Name for Beta')).toBeTruthy();
+ await openMachine('Beta');
+ fireEvent.click(await screen.findByRole('button',{name:/Machine details/}));expect(screen.getByLabelText('Name for Beta')).toBeTruthy();
  await act(async()=>h.connection.subscriptions.emit(WORKER_REGISTRATION_CONCEPT,machineRow({id:'b',displayName:'Beta',revokedAt:new Date().toISOString()}),'NODE_UPDATED'));
- expect(await screen.findByRole('button',{name:/Machine details/})).toBeTruthy();expect(screen.queryByLabelText('Name for Alpha')).toBeNull();expect(screen.queryByText('That machine is no longer in this view')).toBeNull();
+ expect(await screen.findByRole('button',{name:/^Open Alpha/})).toBeTruthy();expect(screen.queryByRole('navigation',{name:'Machine views'})).toBeNull();expect(screen.queryByLabelText('Name for Alpha')).toBeNull();expect(screen.queryByText('That machine is no longer in this view')).toBeNull();
 });
 it('saves exactly the manually ordered chain and inspected revision, retaining a refused draft',async()=>{
  const save=vi.fn().mockRejectedValueOnce(new Error('stale revision')).mockResolvedValue(rowsResult([]));h.connection.query.routingPolicySave=save;
@@ -37,10 +39,11 @@ it('has no AI activity by default and never changes keyboard focus as activity u
 
 it.each([false,true])('returns to Machines after confirmed removal, with another machine: %s',async(other)=>{
  h.connection=fakeConnection({myWorkersWithStatus:[machineRow({id:'a',displayName:'Alpha'}),...(other?[machineRow({id:'b',displayName:'Beta'})]:[])]});fleet();
+ await openMachine('Alpha');
  fireEvent.click(await screen.findByRole('button',{name:/Machine details/}));
  fireEvent.click(screen.getByRole('button',{name:'Remove this machine'}));
  fireEvent.click(screen.getByRole('button',{name:'Revoke Alpha'}));
- if(other) expect(await screen.findByRole('button',{name:/Machine details/})).toBeTruthy();
+ if(other){expect(await screen.findByRole('button',{name:/^Open Beta/})).toBeTruthy();expect(screen.queryByRole('navigation',{name:'Machine views'})).toBeNull();}
  else expect(await screen.findByRole('button',{name:'Connect your first machine'})).toBeTruthy();
  expect(screen.getByRole('heading',{name:'Machines'})).toBeTruthy();
  expect(screen.queryByLabelText('Name for Beta')).toBeNull();
@@ -50,6 +53,7 @@ it.each([false,true])('returns to Machines after confirmed removal, with another
 it('keeps a refused removal on its machine details',async()=>{
  h.connection=fakeConnection({myWorkersWithStatus:[machineRow({id:'a',displayName:'Alpha'})]});
  h.connection.query.revokeWorker.mockRejectedValue(new Error('Removal refused'));fleet();
+ await openMachine('Alpha');
  fireEvent.click(await screen.findByRole('button',{name:/Machine details/}));
  fireEvent.click(screen.getByRole('button',{name:'Remove this machine'}));
  fireEvent.click(screen.getByRole('button',{name:'Revoke Alpha'}));
@@ -77,6 +81,7 @@ it('selects the first model, keeps a chosen model across heartbeats and falls ba
 });
 it('gives empty equipment and recent work their own empty states',async()=>{
  h.connection=fakeConnection({myWorkersWithStatus:[machineRow({id:'a',displayName:'Alpha'})]});fleet();
+ await openMachine('Alpha');
  expect(await screen.findByRole('region',{name:'No local models'})).toBeTruthy();
  expect(screen.getByRole('region',{name:'No installed apps'})).toBeTruthy();
  expect(await screen.findByRole('region',{name:'No recent work'})).toBeTruthy();
