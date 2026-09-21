@@ -302,13 +302,33 @@ func packModuleRows(states map[string]PackStateRow) ([]ModuleRow, map[string]str
 		// Cluster-scope desired state from the graph; node-scope boot
 		// outcome from the loaders' set. The two can disagree between a
 		// flip and this node's restart, and the row says so.
-		enabled := true
+		// WHY a pack is off is two different facts and the row says which
+		// (epic memql#5532, issue memql#5549). A pack that ships disabled
+		// and has never been flipped is waiting for an operator; a pack an
+		// operator switched off is a decision with a reason. Reporting the
+		// first as the second sends somebody looking for a row that does
+		// not exist -- and reporting a storefront pack as "enabled" because
+		// no row governs it would be flatly wrong now that absence means
+		// the pack's declared default.
+		enabled := memqldsl.PackDefaultEnabled(name)
 		detailParts := []string{}
 		if st, ok := states[name]; ok {
 			enabled = st.Enabled
+			detailParts = append(detailParts, "set by an operator in v1:platform:packState")
 			if strings.TrimSpace(st.Reason) != "" {
 				detailParts = append(detailParts, "reason: "+st.Reason)
 			}
+		} else if declared, ok := memqldsl.PackDefaults()[name]; ok {
+			if declared {
+				detailParts = append(detailParts,
+					"no v1:platform:packState row; this pack ships enabled")
+			} else {
+				detailParts = append(detailParts,
+					"no v1:platform:packState row; this pack ships DISABLED and "+
+						"stays mounted-inert until an operator enables it")
+			}
+		} else {
+			detailParts = append(detailParts, "no v1:platform:packState row; absence means enabled")
 		}
 		loadedInert := "loaded on this node"
 		if memqldsl.PackDomainDisabled(name) {

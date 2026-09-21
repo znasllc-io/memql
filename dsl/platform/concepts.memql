@@ -396,8 +396,13 @@ concept accountFrontDoor {
 /// Per-instance pack enablement state (module-registry design,
 /// docs/superpowers/specs/2026-08-20-module-registry-design.md section 4). One row per pack at the
 /// deterministic id v1:platform:packState:<packDomain>; the append-only version history IS the audit
-/// trail of flips. ABSENCE OF A ROW MEANS ENABLED, so a pack ships with zero behavior change and a
-/// fresh database needs no seeding. Read once per node at boot (app phase 3, after the database
+/// trail of flips. ABSENCE OF A ROW MEANS THE PACK'S DECLARED DEFAULT (epic memql#5532, issue
+/// memql#5549), and a pack that declares nothing defaults to ENABLED -- so a fresh database still
+/// needs no seeding and every pack that predates the declaration behaves exactly as it did. A
+/// STOREFRONT pack declares false, because it carries a shopper write path and a public read and
+/// 'absence means enabled' would switch both on for every cluster that ever upgrades with no row
+/// anywhere saying so. A ROW ALWAYS WINS over a declared default, in both directions, because it is
+/// the operator's explicit act; the default is only what governs in its absence. Read once per node at boot (app phase 3, after the database
 /// starts and before the DSL loaders run); a flip takes effect as each node restarts, and the module
 /// inventory reports enabled-vs-loaded honestly in between. A row naming no registered pack domain
 /// is reported by the inventory and otherwise ignored.
