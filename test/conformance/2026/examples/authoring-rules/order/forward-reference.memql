@@ -1,0 +1,5 @@
+logic readsAhead {
+  total := subtotal + 1
+  subtotal := 2
+  return total
+}

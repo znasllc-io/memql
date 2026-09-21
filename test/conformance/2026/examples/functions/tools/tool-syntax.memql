@@ -1,0 +1,8 @@
+use calendar.queries.{ findEvents }
+
+@handler(type="query", query="query findEvents(title: args.title)")
+@executionTime("fast")
+@description("Find the caller's calendar events by exact title.")
+tool calendarFindByTitle {
+  title  string  @required @description("Exact event title to look up.")
+}

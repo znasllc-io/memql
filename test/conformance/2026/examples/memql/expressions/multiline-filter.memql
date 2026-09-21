@@ -1,0 +1,13 @@
+use library.concepts.{ artifact }
+use common.traits.{ isActiveRecord }
+
+/// Live document artifacts filed under a folder.
+query artifact documentArtifactsInFolder {
+  args {
+    folderId  string  @required
+  }
+  filter  row => row.folderId == args.folderId
+            && row.kind == "document"
+            && isActiveRecord(row)
+  paginate 50
+}

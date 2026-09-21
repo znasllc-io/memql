@@ -1,0 +1,18 @@
+use agents.concepts.{ agent }
+
+/// Which agent answers for which person.
+concept assignment {
+  agentId    string
+  forUserId  string
+
+  @relationship(type="references", as="respondsAs", field="agentId",   target=agent, direction="outgoing")
+}
+
+/// The assignments one agent answers as.
+query assignment assignmentsRespondingAs {
+  args {
+    agentId  string  @required
+  }
+  filter row => references("respondsAs", a => a.id == args.agentId)
+  paginate 50
+}

@@ -1,0 +1,7 @@
+/// A scored row the lexical examples read.
+concept scoreCard {
+  score      float
+  remaining  int
+  total      int
+  used       int
+}

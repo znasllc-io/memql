@@ -1,0 +1,21 @@
+use library.concepts.{ artifact }
+use library.shapes.{ artifactFull }
+use library.mutations.{ createLibraryFolder }
+
+/// Artifacts filed under a folder, by kind.
+query artifact artifactsFiledInFolder {
+  args {
+    folderId  string!
+    kind      enum("document", "note", "todo")
+  }
+  filter   row => row.folderId == args.folderId && (args.kind == nil || row.kind == args.kind)
+  paginate 50
+  shape    artifactFull
+}
+
+/// Read a folder's documents, then file a new folder beside them.
+logic refileFolderDocuments {
+  rows := query artifactsFiledInFolder(folderId: "folder-123", kind: "document")
+  created := mutation createLibraryFolder(folderId: "folder-123", name: "Inbox")
+  return created
+}

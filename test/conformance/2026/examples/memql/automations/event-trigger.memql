@@ -1,0 +1,5 @@
+@trigger(event="node.created", concept="v1:library:file")
+/// Indexes a file into the Library the moment its row lands
+automation indexLibraryFileOnCreate {
+  logic artifactsForIndexedFile(event: event)
+}

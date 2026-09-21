@@ -505,21 +505,9 @@ func readCorpusDir(t *testing.T, root fs.FS, edition, dir string, line dslfs.Man
 	if b, err := fs.ReadFile(root, dir+"/fixture.memql"); err == nil {
 		fixture = string(b)
 	}
-	entries, _ := fs.ReadDir(root, dir)
-	var sidecars map[string][]byte
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || name == "expect.json" || strings.HasSuffix(name, ".memql") {
-			continue
-		}
-		b, err := fs.ReadFile(root, dir+"/"+name)
-		if err != nil {
-			t.Fatalf("read %s/%s: %v", dir, name, err)
-		}
-		if sidecars == nil {
-			sidecars = map[string][]byte{}
-		}
-		sidecars[name] = b
+	sidecars, memqlFiles, err := corpusDirFiles(root, dir)
+	if err != nil {
+		t.Fatalf("%v", err)
 	}
 	base := corpusDomainName(strings.TrimPrefix(dir, edition+"/"))
 	if prev, taken := domains[base]; taken && prev != dir {
@@ -548,12 +536,76 @@ func readCorpusDir(t *testing.T, root fs.FS, edition, dir string, line dslfs.Man
 			domain: fmt.Sprintf("%s_%d", base, i+1),
 		})
 	}
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".memql") && !named[e.Name()] {
-			t.Fatalf("%s/%s is in the corpus but no case in expect.json names it", dir, e.Name())
+	for _, rel := range memqlFiles {
+		if !named[rel] {
+			t.Fatalf("%s/%s is in the corpus but no case in expect.json names it", dir, rel)
 		}
 	}
 	return runs
+}
+
+// corpusDirFiles reads one case directory's files: the SIDECARS (everything
+// that is neither expect.json nor a .memql, keyed by its path relative to the
+// directory) and the relative paths of every .memql it holds, for the stray
+// check above.
+//
+// It descends into subdirectories, because `@templateFile("prompts/x.tmpl")`
+// is the layout every one of the tree's 25 shipped prompts uses and the
+// MEMQL_DSL_PATH layout publishes. A reader that could not carry a nested
+// sidecar would force a corpus-backed docs example to teach a flat path
+// instead -- the gate reshaping the documentation to fit the gate (memql#5388).
+//
+// It does NOT descend into a nested CASE directory -- one with an expect.json
+// of its own, which corpusExpectDirsIn returns separately and readCorpusDir is
+// called for in its own right. Those files are that case's, not this one's;
+// walking into them would mount a sibling case's fixture beside this one and
+// swallow its expect.json as a sidecar.
+//
+// The stray property is kept and WIDENED rather than weakened: a .memql at any
+// depth must be named by a case, and since a case's `file` may not contain a
+// slash (corpusValidateFile), a nested .memql is always a stray and always
+// fatal. A sidecar is mounted without having to be referenced, at any depth,
+// exactly as a top-level one always has been -- cells/prompt/templateFile
+// leans on that, holding a .tmpl one case names and another case must not find.
+func corpusDirFiles(root fs.FS, dir string) (map[string][]byte, []string, error) {
+	var sidecars map[string][]byte
+	var memqlFiles []string
+	err := fs.WalkDir(root, dir, func(p string, d fs.DirEntry, werr error) error {
+		if werr != nil {
+			return werr
+		}
+		rel := strings.TrimPrefix(strings.TrimPrefix(p, dir), "/")
+		if d.IsDir() {
+			if rel == "" {
+				return nil
+			}
+			if _, err := fs.Stat(root, p+"/expect.json"); err == nil {
+				return fs.SkipDir // a case directory of its own
+			}
+			return nil
+		}
+		switch {
+		case rel == "expect.json":
+			return nil
+		case strings.HasSuffix(rel, ".memql"):
+			memqlFiles = append(memqlFiles, rel)
+			return nil
+		}
+		b, err := fs.ReadFile(root, p)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", p, err)
+		}
+		if sidecars == nil {
+			sidecars = map[string][]byte{}
+		}
+		sidecars[rel] = b
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	sort.Strings(memqlFiles)
+	return sidecars, memqlFiles, nil
 }
 
 func corpusValidateCase(dir string, c corpusCase) string {
@@ -1356,5 +1408,57 @@ func TestCorpusAttributionNamesOneCase(t *testing.T) {
 	}
 	if _, ok := corpusRunNamed(`2 prompt(s): prompt "summariseA": ...; prompt "summariseB": ...`, byName); ok {
 		t.Errorf("an aggregated refusal quoting two cases' constructs was claimed by one of them")
+	}
+}
+
+// TestCorpusDirFilesCarriesNestedSidecars pins what the case-directory reader
+// does with a subdirectory: a nested sidecar is carried under its relative path
+// (so `@templateFile("prompts/x.tmpl")` -- the layout every shipped prompt uses
+// -- is expressible as a case), a nested .memql is reported as a file the
+// directory holds (and therefore a stray, since a case's `file` may not contain
+// a slash), and a nested CASE directory is not descended into at all.
+func TestCorpusDirFilesCarriesNestedSidecars(t *testing.T) {
+	root := fstest.MapFS{
+		"d/expect.json":                 {Data: []byte(`{"cases":[]}`)},
+		"d/case.memql":                  {Data: []byte("concept a { }")},
+		"d/fixture.memql":               {Data: []byte("concept b { }")},
+		"d/namespace.pin":               {Data: []byte("probe")},
+		"d/prompts/summarise.tmpl":      {Data: []byte("hello {{ .x }}")},
+		"d/prompts/deep/deeper.tmpl":    {Data: []byte("deep")},
+		"d/stray/orphan.memql":          {Data: []byte("concept c { }")},
+		"d/nested/expect.json":          {Data: []byte(`{"cases":[]}`)},
+		"d/nested/case.memql":           {Data: []byte("concept d { }")},
+		"d/nested/prompts/its-own.tmpl": {Data: []byte("not the parent's")},
+	}
+	sidecars, memqlFiles, err := corpusDirFiles(root, "d")
+	if err != nil {
+		t.Fatalf("corpusDirFiles: %v", err)
+	}
+
+	wantSidecars := []string{"namespace.pin", "prompts/deep/deeper.tmpl", "prompts/summarise.tmpl"}
+	var gotSidecars []string
+	for k := range sidecars {
+		gotSidecars = append(gotSidecars, k)
+	}
+	sort.Strings(gotSidecars)
+	if strings.Join(gotSidecars, ",") != strings.Join(wantSidecars, ",") {
+		t.Errorf("sidecars = %v, want %v -- a nested sidecar is carried under its relative path, and a nested "+
+			"CASE directory's files belong to that case", gotSidecars, wantSidecars)
+	}
+	if got := string(sidecars["prompts/summarise.tmpl"]); got != "hello {{ .x }}" {
+		t.Errorf("nested sidecar content = %q", got)
+	}
+
+	// The stray check in readCorpusDir consumes this list and fatals on a name
+	// no case declares. "stray/orphan.memql" can never be declared -- a case's
+	// `file` may not contain a slash -- so a nested .memql is always fatal, and
+	// "nested/case.memql" must not appear at all or it would be fatal for the
+	// wrong directory.
+	want := []string{"case.memql", "fixture.memql", "stray/orphan.memql"}
+	if strings.Join(memqlFiles, ",") != strings.Join(want, ",") {
+		t.Errorf("memqlFiles = %v, want %v", memqlFiles, want)
+	}
+	if corpusValidateFile(corpusCase{File: "stray/orphan.memql", Verdict: verdictLoadOK}) == "" {
+		t.Error("a case naming a nested .memql must be refused, or a nested stray could be named into legitimacy")
 	}
 }

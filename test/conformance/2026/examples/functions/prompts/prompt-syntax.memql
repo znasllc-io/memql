@@ -1,0 +1,7 @@
+@level("fast")
+@templateFile("prompts/condenseConversation.tmpl")
+@description("Summarize older conversation messages into a rolling summary.")
+prompt condenseConversation {
+  entries          []object  @required @description("Conversation messages, oldest first.")
+  previousSummary  string              @description("Prior rolling summary; empty on first compaction.")
+}

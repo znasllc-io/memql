@@ -1,0 +1,10 @@
+use common.traits.{ isNotDeleted }
+
+@actor
+query invocation invocationsForOneRun {
+  args {
+    runId  string!
+  }
+  filter   row => row.runId == args.runId && isNotDeletd(row)             // typo
+  paginate 50
+}

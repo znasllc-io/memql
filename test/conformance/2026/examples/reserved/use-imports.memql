@@ -1,0 +1,10 @@
+use library.concepts.{ artifact, folder }
+use common.traits.{ isActiveRecord }
+
+@description("Live artifacts, whatever folder they are filed under")
+query artifact liveArtifacts {
+  filter  row => isActiveRecord(row)
+}
+
+@description("Matches a folder its owner has archived")
+spec folder reservedFolderIsArchived = row => row.archived == true

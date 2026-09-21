@@ -1,0 +1,7 @@
+{
+  "cases": [
+    { "file": "constrained-trailing-part.memql", "verdict": "load_ok" },
+    { "file": "pinned-prefix.memql", "verdict": "load_ok" },
+    { "file": "per-part-hashing.memql", "verdict": "load_ok" }
+  ]
+}

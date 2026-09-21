@@ -1,0 +1,12 @@
+use todos.concepts.{ todo }
+
+/// The caller's to-dos; `done` narrows to the open or the completed ones.
+@actor
+query todo myTodos {
+  args {
+    done  bool
+  }
+  filter   row => row.ownerUserId == actor.userId && (args.done == nil || row.done == args.done)
+  sort     "row.createdAt", "desc"
+  paginate 50
+}

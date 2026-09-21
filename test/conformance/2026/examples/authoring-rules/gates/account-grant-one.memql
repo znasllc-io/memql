@@ -1,0 +1,6 @@
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")   // one account
+concept clientBrief {
+  ownerUserId  string!
+  accountId    string
+  title        string!
+}

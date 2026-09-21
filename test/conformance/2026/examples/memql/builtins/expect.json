@@ -1,0 +1,7 @@
+{
+  "cases": [
+    { "file": "builtin.memql", "verdict": "load_ok" },
+    { "file": "tool-query.memql", "verdict": "load_ok" },
+    { "file": "tool-webhook.memql", "verdict": "load_ok" }
+  ]
+}

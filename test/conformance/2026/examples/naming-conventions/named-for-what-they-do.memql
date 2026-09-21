@@ -1,0 +1,25 @@
+use identity.concepts.{ user }
+use identity.shapes.{ userFull }
+use library.concepts.{ folder }
+
+query user userByPrimaryEmail {
+  args {
+    primaryEmail  string  @required
+  }
+  filter  row => row.primaryEmail == args.primaryEmail
+  shape   userFull
+}
+
+mutation user archiveUser {
+  args {
+    userId  string  @required
+  }
+  update {
+    id:      args.userId
+    active:  false
+  }
+}
+
+spec folder folderIsArchived = row => row.archived == true
+
+trait isRetired = row => row.retired == true

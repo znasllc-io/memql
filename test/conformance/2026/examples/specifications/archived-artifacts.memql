@@ -1,0 +1,16 @@
+use library.concepts.{ artifact }
+use library.shapes.{ artifactFull }
+
+@description("Matches archived artifacts")
+spec artifact isArchivedArtifact = row => row.archived == true
+
+@description("Archived artifacts filed by system automation")
+spec artifact systemArchivedArtifact = row => row.archived == true && row.createdBy == "system:automation"
+
+query artifact archivedArtifacts {
+  args {
+    folderId  string  @required
+  }
+  filter  row => row.folderId == args.folderId && isArchivedArtifact(row)
+  shape   artifactFull
+}

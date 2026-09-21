@@ -26,7 +26,7 @@ func TestCapabilities_InvokeEnsureForGoalAskSpecialist(t *testing.T) {
 	caps := i.Capabilities()
 	// A COUNT PLUS THE NAMES, and the count is the half that catches a
 	// capability arriving under a name nobody thought to assert.
-	want := []string{"invoke", "runAgentTurn", "ensureForGoal", "askSpecialist", "requestUserFeedback", "produceArtifact"}
+	want := []string{"invoke", "invokePrompt", "runAgentTurn", "ensureForGoal", "askSpecialist", "requestUserFeedback", "produceArtifact"}
 	if len(caps) != len(want) {
 		got := make([]string, 0, len(caps))
 		for _, c := range caps {

@@ -1,0 +1,17 @@
+use identity.queries.{ userById }
+use agents.queries.{ agentById, assistantAgentForUser }
+
+/// Resolve the agent to act as: the owner's preferred assistant, or their default one.
+logic resolveActingAgent {
+  args {
+    ownerUserId string!
+  }
+  user := query userById(userId: args.ownerUserId)
+  preferred := user.first().preferences.activeAssistantId ?? ""
+  if preferred != "" {
+    agent := query agentById(agentId: preferred)
+  } else {
+    agent := query assistantAgentForUser(ownerUserId: args.ownerUserId)
+  }
+  return agent.first()
+}

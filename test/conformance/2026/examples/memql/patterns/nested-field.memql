@@ -1,0 +1,11 @@
+/// A person's notification preferences.
+concept preferenceProfile {
+  label     string!
+  settings  object!  @description("Notification settings; `notifications.email` is the flag below.")
+}
+
+/// Profiles that take email notifications.
+query preferenceProfile emailNotifiedProfiles {
+  filter row => row.settings.notifications.email == true
+  paginate 50
+}

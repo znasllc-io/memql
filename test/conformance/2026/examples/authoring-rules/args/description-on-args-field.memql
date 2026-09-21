@@ -1,0 +1,13 @@
+use library.concepts.{ folder }
+use library.shapes.{ libraryFolderFull }
+
+@actor
+query folder foldersUnderParent {
+  args {
+    /// The folder whose children to list.
+    parentFolderId string @required                 // correct
+    limit          number @description("page size") // refused at load
+  }
+  filter  row => row.parentFolderId == args.parentFolderId && row.ownerUserId == actor.userId
+  shape   libraryFolderFull
+}

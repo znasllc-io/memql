@@ -1,0 +1,13 @@
+use library.concepts.{ artifact }
+use library.shapes.{ artifactFull }
+
+/// Latest artifact row filed under a folder.
+query artifact latestArtifactForFolder {
+  args {
+    folderId  string  @required
+  }
+  filter  row => row.folderId == args.folderId
+  sort    "row.createdAt", "desc"
+  paginate 1
+  shape   artifactFull
+}

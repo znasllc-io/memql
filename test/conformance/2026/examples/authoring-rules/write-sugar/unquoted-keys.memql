@@ -1,0 +1,15 @@
+/// Record one imported item.
+@serverOnly
+mutation importedItem recordImportedItem {
+  args {
+    name      string!
+    folderId  string
+  }
+  // Correct -- mutation write block
+  insert {
+    name: args.name
+    folderId: args.folderId
+    active: true
+    metadata: { source: "import" }   // unquoted key in a nested map value
+  }
+}
