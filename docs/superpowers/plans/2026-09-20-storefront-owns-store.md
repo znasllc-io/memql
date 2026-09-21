@@ -1156,7 +1156,8 @@ So the work splits, and the split is the honest one:
   redeploy. On `""` or a nil resolver, `refuseScoped(CodeDeployableStoreUnknown, dep.Name, ...)`.
 
 - **The OS copy.** Add `deployable_store_unknown` to
-  `clients/os/src/apps/deployables/packages/refusals.ts` beside `deployable_binding_missing`,
+  `clients/os/src/apps/deployables/packages/refusals.ts` beside `deployable_binding_missing`
+  (the entries are `{title, next}`; `title` names what happened, `next` names the repair),
   and to `STOP_FOR_CODE` in `clients/os/src/apps/deployables/page/rail.ts` mapped to
   `"whatItIs"`, which is where its sibling `deployable_binding_missing` already goes. The
   sentence names the Store panel as the repair.
@@ -1547,17 +1548,23 @@ git rm -r clients/os/src/apps/stores clients/os/test/stores
 - [ ] **Step 3: Re-point the cross-cutting tests**
 
 `access.test.tsx` uses `app:stores` as its canonical "a resource this role does not hold"
-fixture in 18 places. Replace it with `app:cluster/origins` — owner-only, seeded, and
-still a resource a non-owner lacks, so every assertion keeps its meaning. Read each site
-and make sure the surrounding copy assertions (`Allow Stores to Ada Lovelace`) move with
-it (`Allow Data origins to ...`).
+fixture in 18 places. Replace it with `app:cluster/origins` — seeded on owner alone
+(`dsl/rbac/seeds.memql`, `cap-owner-read-app-cluster-origins`; mirror at
+`component/auth/rbac_model.go`, `"app:cluster/origins": {RoleOwner}`), so every assertion
+keeps its exact meaning. Read each site: the surrounding copy assertions move with it
+(`Allow Stores to Ada Lovelace` becomes `Allow Data origins to Ada Lovelace`) and the call
+assertion at `:330` becomes `resourceType: "app:cluster/origins"`. Run the file and read
+the failures rather than assuming a blind substitution is enough — the label comes from
+the registry, not from the resource string.
 
 `rankLadder.test.tsx:117-121` lists `Stores` in the owner's desktop and in four `not:`
 arrays — remove it from all five.
 
-`hiddenSurfaces.test.ts:45,69` asserts `gated` contains `"Stores"` as its anti-vacuous
-floor. Replace with an app that is still gated for an admin — read the table and pick one
-(`Settings` sections or `Cluster`), and keep the assertion's role as a reachable positive.
+`hiddenSurfaces.test.ts` — VERIFIED: the anti-vacuous floor there is FOUR assertions, not
+one (`Settings -- Integrations`, `Settings -- Doors`, `Cluster -- Audit trail`, `Stores`).
+Delete the `Stores` line only; the other three keep the floor and no replacement is needed.
+Also fix the docblock at line ~45, which uses `"Stores -- Stores"` as its worked example of
+a section listed beneath a hidden app — re-point it at a surface that still exists.
 
 `readinessMapping.test.ts:86` lists `"stores"` among apps declaring no `needs`/`wants` —
 remove it.
