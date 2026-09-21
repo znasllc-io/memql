@@ -125,6 +125,46 @@ notices remain visible.
 Fleet and Deployables adopt this composition first. Other apps can reuse these
 components as their overview data is added, without changing their workflows.
 
+### A tab is a different kind of thing; a subset is a filter
+
+An app's section tabs are its NOUNS. Fleet's are machines, policies, the model
+library; Deployables' are **deployables** and **sources**. A slice of one noun
+-- standalone ones, the ones from a zip, the live ones -- is a question asked of
+a list, and belongs behind `Refine` (rule 2), not on a tab.
+
+Deployables used to draw both nouns in one list: a source was a row with its
+apps indented beneath it, then a "Standalone" heading over the rest. A tree
+inside a list, with two row types and an order that followed origin rather than
+anything a person was looking for; the owner's word was "I really hate that
+combined list". Two lists now, in one row language (`RecordRow`):
+
+- **Deployables** is every deployable, flat. A row is there because it has an
+  address of its own. Where it came from is a FACT ON THE ROW (the source's
+  name, "Zip", "CI", "Built in") and a facet in Refine -- never a heading over
+  it and an indent.
+- **Sources** is every repository or zip that produces deployables: what it is
+  called and where it lives, how much it produced, and the one state word a
+  person might have to act on (Review needed, then Update available, then the
+  quiet ones). Its page lists its apps, including the ones it declares and has
+  not deployed, and carries the act its state asks for on its bar.
+- **Every source is on it, and each is summarised by everything it made.** A
+  source whose analysis was refused has made nothing and is still a source:
+  this tab is where somebody looks for it to try again. A search is asked of
+  the SOURCE (its name, where it lives, what it made) and never trims the
+  summary of one it kept; archived is the source's own status, not one of its
+  apps'. The list has its own fold for this (`foldSources`): read as a filter
+  over the deployables list's answer it inherited that list's questions, and
+  showed three of five seeded sources.
+- **What belongs to the source is said on the source, once.** A run parked at a
+  source's gate is "Review needed" on that source's row and on its page's bar,
+  with Review beside it -- not repeated on every deployable the source made.
+- The trail keeps the way in: `Deployables > storefront`, or
+  `Sources > acme/storefront > admin` when that is how the person got there.
+
+One component draws both (`DeployablesSection` with a `root`), because every
+page either list opens is the same page. Two instances, so drilling into a
+source does not move the other tab off whatever it was showing.
+
 ### One trail row, and the window draws it
 
 Every window carries exactly one trail row (`kit` `TrailRow`), drawn by the

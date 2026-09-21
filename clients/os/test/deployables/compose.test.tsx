@@ -160,6 +160,16 @@ async function choose(label: string, option: string | RegExp): Promise<void> {
   await click(await screen.findByRole("option", { name: option }));
 }
 
+/**
+ * A source's page, from the Sources tab. An app a source declares and has not
+ * deployed, and a run parked at its gate, are facts about the SOURCE -- so its
+ * page is where they are reached, not a row wedged into the deployables list.
+ */
+async function openSourcePage(name: string): Promise<HTMLElement> {
+  await click(await screen.findByRole("button", { name: (label) => label.startsWith(`Open ${name},`) }));
+  return screen.findByRole("region", { name: /^Source / });
+}
+
 function railStates(region: HTMLElement): (string | null)[] {
   const rail = within(region).getByRole("list", { name: "Deployable setup progress" });
   return [...rail.querySelectorAll(":scope > li")].map((li) => li.getAttribute("data-state"));
@@ -1037,8 +1047,9 @@ describe("the compose flow: leaving and coming back", () => {
   it("lands on the same rail, with the report in place", async () => {
         // A window that was closed mid-compose: the run is parked, and the list's
     // "will serve" row is how somebody finds it again.
-    mount(fakeConnection({ packages: [ACME], awaitingConfirm: [parkedRun("pkg-acme")], sites: [] }));
-    await click(await screen.findByText("storefront"));
+    mount(fakeConnection({ packages: [ACME], awaitingConfirm: [parkedRun("pkg-acme")], sites: [] }), { section: "sources" });
+    await openSourcePage("acme");
+    await click(within(document.querySelector(".os-actbar") as HTMLElement).getByRole("button", { name: "Review" }));
 
     // THE TITLE NAMES THE SOURCE. Reopening a gate for a source added days ago
     // is not adding a new deployable, and calling it one is what made the
@@ -1184,8 +1195,9 @@ describe("a gate opened for one app", () => {
       packages: [{ ...ACME, declares: [{ name: "storefront", kind: "spa" }, { name: "web", kind: "spa" }] }],
       sites: [],
     });
-    mount(connection);
-    await click((await screen.findByText("web")).closest("button"));
+    mount(connection, { section: "sources" });
+    const page = await openSourcePage("acme");
+    await click((await within(page).findByText("web")).closest("button"));
 
     // NAMED FROM THE CLICK. Both facts are known before anything runs -- the
     // app from the row, the source from the row's package. Composing the
@@ -1330,8 +1342,9 @@ describe("a source this cluster already tracks", () => {
 describe("composition write failures and bindings", () => {
   it("keeps activation available when enabling the app is refused, without starting analysis", async () => {
     const connection = fakeConnection({ packages: [{...ACME, declares:[{name:"storefront",kind:"spa"}], disabledDeployables:["storefront"]}], enableDeployablesError:"Activation was refused" });
-    mount(connection);
-    await click((await screen.findByText("storefront")).closest("button"));
+    mount(connection, { section: "sources" });
+    const page = await openSourcePage("acme");
+    await click((await within(page).findByText("storefront")).closest("button"));
     await click(await forward("Activate"));
     expect(await screen.findByText("Activation was refused")).toBeTruthy();
     expect(forwardAct("Activate")).toBeTruthy();

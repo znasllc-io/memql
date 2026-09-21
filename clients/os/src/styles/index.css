@@ -8897,77 +8897,21 @@ a.os-button {
    panel reads as a table header stripped of its borders, which is a far heavier
    object than a two-word label should be. The heading scrolls with the rows it
    names now: nothing to paint, and nothing to explain. */
-.os-deploy-sectionhead {
-  margin: 14px 0 2px;
-  font-size: var(--os-text-xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--os-muted);
-}
-.os-livelist-row:first-child .os-deploy-sectionhead {
-  margin-top: 0;
-}
+
 
 /* The source's own line: disclosure, then the row. */
-.os-deploy-grouphead {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-.os-deploy-grouphead > :last-child {
-  flex: 1;
-  min-width: 0;
-}
+
+
 /* The group's disclosure: a LABELLED control, not a bare arrow. It reads
    "2 apps" with a chevron that turns, so what it does and what it will reveal
    are both on the control itself. Sized and bordered like a chip, because that
    is what it replaced and the row's rhythm should not move. */
-.os-deploy-disclose {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  height: 20px;
-  padding: 0 7px 0 4px;
-  border: 1px solid var(--os-line);
-  border-radius: 999px;
-  background: var(--os-plate);
-  color: var(--os-muted);
-  font: inherit;
-  font-size: var(--os-text-xs);
-  line-height: 1;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.os-deploy-disclose:hover {
-  border-color: var(--os-line-strong, var(--os-line));
-  background: var(--os-hover);
-  color: var(--os-text);
-}
-.os-deploy-disclose:focus-visible {
-  outline: 2px solid var(--os-accent);
-  outline-offset: 1px;
-}
-.os-deploy-disclose svg {
-  transition: transform 120ms ease;
-}
-.os-deploy-disclose[aria-expanded="true"] svg {
-  transform: rotate(90deg);
-}
+
+
 @media (prefers-reduced-motion: reduce) {
-  .os-deploy-disclose svg {
-    transition: none;
-  }
+  
 }
 
-.os-deploy-group-apps {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-left: 22px;
-  margin-top: 6px;
-}
 
 /* ---- the history line ---- */
 .os-deploy-history-line {
