@@ -20,10 +20,10 @@
 @args(profile="object")
 @description("THE SHOPPER WRITE PATH: a business applies for trade terms on one store. Refused when that store's applicationsOpen is false, and ABSENT SETTINGS ARE CLOSED -- a merchant who has never touched their wholesale settings has not asked the internet for their customers' business details. It derives the row id, because the caller is a member of the public posting a plain HTML form and a shopper who could choose a row id could overwrite another applicant's. storeId and siteId arrive STAMPED from the binding the post arrived through, never submitted.")
 builtin wholesaleSubmitApplication {
-  storeId         string  @required  @description("Stamped server-side from the binding in effect -- the serving binding, or the PREVIEW binding when the submission was made while exercising a candidate version.")
-  companyName     string  @required  @description("The business applying.")
-  applicantName   string  @required  @description("The person applying. Data, never an identity.")
-  applicantEmail  string  @required  @description("Unverified. How a decision reaches them, and how an adapter finds the Shopify customer to entitle.")
+  storeId         string!  @description("Stamped server-side from the binding in effect -- the serving binding, or the PREVIEW binding when the submission was made while exercising a candidate version.")
+  companyName     string!  @description("The business applying.")
+  applicantName   string!  @description("The person applying. Data, never an identity.")
+  applicantEmail  string!  @description("Unverified. How a decision reaches them, and how an adapter finds the Shopify customer to entitle.")
   siteId          string  @description("The deployable the post arrived on. Provenance; the row is scoped by storeId.")
 }
 
@@ -31,10 +31,10 @@ builtin wholesaleSubmitApplication {
 @args(profile="object")
 @description("Append one decision to an application's log. principalKind must be client; a Provider operator is refused on the write path exactly as reviewspack refuses one. storeId is read off the application being decided rather than supplied, so a decision can never be scoped to a store its subject is not on -- and the read runs under the CALLER'S own actor, so a caller who cannot read an application cannot decide it. The transition is checked against the FOLDED LOG rather than against an argument: approve and reject are legal from submitted, revoke only from approved, and nothing leads out of rejected or revoked because re-deciding in place would overwrite why the first decision was made.")
 builtin wholesaleRecordDecision {
-  applicationId  string  @required  @description("The application being decided.")
-  transition     string  @required  @description("approve, reject or revoke.")
-  principalKind  string  @required  @description("Must be client. provider is inexpressible.")
-  decidedBy      string  @required  @description("Client principal user id.")
+  applicationId  string!  @description("The application being decided.")
+  transition     string!  @description("approve, reject or revoke.")
+  principalKind  string!  @description("Must be client. provider is inexpressible.")
+  decidedBy      string!  @description("Client principal user id.")
   note           string  @description("The reason. Append-only storage is only worth having if this survives the next decision.")
 }
 
@@ -42,15 +42,15 @@ builtin wholesaleRecordDecision {
 @args(profile="object")
 @description("The DERIVED state of one application -- submitted, approved, rejected or revoked -- folded from its append-only decision log, plus what is legal next. There is no stored state field to read instead: an application whose state was overwritten would lose why it was refused the moment somebody approved it.")
 builtin wholesaleApplicationState {
-  applicationId  string  @required  @description("The application to fold.")
+  applicationId  string!  @description("The application to fold.")
 }
 
 @executor("integration.wholesale.setWholesaleSettings")
 @args(profile="object")
 @description("Write one store's wholesale settings. DATA, NOT SOURCE -- a client opens or closes applications, changes what the storefront says and switches entitlement adapter without a deploy or a .memql edit. One row per store at a derived id, so a merchant can take applications on their live store while they are closed on the development store a candidate is being exercised against. An UNKNOWN adapter name is refused HERE rather than at approval time, so a merchant who typed it wrong learns now.")
 builtin wholesaleSetSettings {
-  storeId             string  @required  @description("The store these settings govern.")
-  applicationsOpen    bool    @required  @description("Whether the shopper form accepts posts for this store.")
+  storeId             string!  @description("The store these settings govern.")
+  applicationsOpen    bool!  @description("Whether the shopper form accepts posts for this store.")
   entitlementAdapter  string  @description("shopifyB2B or customerTag as this pack ships. Empty means none configured, and provisioning then refuses by name rather than silently doing nothing.")
   introText           string  @description("Client-authored copy the storefront shows above its form. The only presentation this pack carries.")
 }
@@ -59,12 +59,12 @@ builtin wholesaleSetSettings {
 @args(profile="object")
 @description("Grant wholesale prices through this store's chosen adapter. Only an APPROVED application has an entitlement to provision, and the decision log decides that rather than an argument. A FAILED PUSH LEAVES THE APPLICATION APPROVED and writes the entitlement `pending` carrying the error -- an approval is a decision somebody made, and a push that failed is not a reason to undo it. An adapter REFUSAL (a plan ceiling, a buyer with no customer account) writes `failed` instead, because it will fail identically for ever and retrying it is how a queue stops draining.")
 builtin wholesaleProvisionEntitlement {
-  applicationId  string  @required  @description("The approved application to provision against.")
+  applicationId  string!  @description("The approved application to provision against.")
 }
 
 @executor("integration.wholesale.revokeEntitlement")
 @args(profile="object")
 @description("Take an entitlement back, through the adapter that GRANTED it rather than whatever the settings name today -- a merchant who switches adapters must still be able to undo what the old one gave. Requires a revoke decision to have been recorded first, so the pack's state and its history agree.")
 builtin wholesaleRevokeEntitlement {
-  applicationId  string  @required  @description("The revoked application whose entitlement to take back.")
+  applicationId  string!  @description("The revoked application whose entitlement to take back.")
 }

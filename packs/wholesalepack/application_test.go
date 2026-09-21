@@ -50,6 +50,58 @@ func (f *fixtureReader) RowsWithList(_ context.Context, query string, _ map[stri
 	return nil, nil
 }
 
+// fakeWriter records what the pack PERSISTED.
+//
+// IT IS A SEPARATE FAKE FROM fixtureReader ON PURPOSE. The write path and
+// the read path are different constructs with different call forms, and a
+// test that asserted a write by reading the capability's RETURN VALUE would
+// be asserting a receipt rather than a row -- which is exactly the mistake
+// the live e2e suite caught in the first version of this pack, where the
+// returned node was all there ever was.
+type fakeWriter struct {
+	writes []writeCall
+	err    error
+}
+
+type writeCall struct {
+	mutation string
+	args     map[string]any
+}
+
+func (f *fakeWriter) Write(_ context.Context, mutation string, args map[string]any) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.writes = append(f.writes, writeCall{mutation: mutation, args: args})
+	return nil
+}
+
+// only returns the single write of a named mutation, failing when there is
+// not exactly one.
+func (f *fakeWriter) only(t *testing.T, mutation string) map[string]any {
+	t.Helper()
+	var found []map[string]any
+	for _, w := range f.writes {
+		if w.mutation == mutation {
+			found = append(found, w.args)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("%s was written %d times, want 1 (writes: %+v)", mutation, len(found), f.writes)
+	}
+	return found[0]
+}
+
+func (f *fakeWriter) count(mutation string) int {
+	n := 0
+	for _, w := range f.writes {
+		if w.mutation == mutation {
+			n++
+		}
+	}
+	return n
+}
+
 // decodedBy curries the test handle so a capability's TWO return values can
 // be spliced straight in: decodedBy(t)(p.provisionEntitlement(...)). Go
 // allows f(g()) only when g's returns match f's params exactly, and a
@@ -192,7 +244,7 @@ func TestProviderOperatorCannotDecide(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p := &Provider{reader: &fixtureReader{}}
+	p := &Provider{reader: &fixtureReader{}, writer: &fakeWriter{}}
 	if _, err := p.recordDecision(context.Background(), map[string]any{
 		"applicationId": "app-1", "transition": TransitionApprove,
 		"principalKind": "provider", "decidedBy": "op-1",
@@ -206,7 +258,7 @@ func TestProviderOperatorCannotDecide(t *testing.T) {
 // zero rows means "not yours" and appending anyway would write a row every
 // storefront read would then miss -- hiding nothing while looking like it had.
 func TestDecisionOnUnreadableApplicationIsRefused(t *testing.T) {
-	p := &Provider{reader: &fixtureReader{}}
+	p := &Provider{reader: &fixtureReader{}, writer: &fakeWriter{}}
 	_, err := p.recordDecision(context.Background(), map[string]any{
 		"applicationId": "app-nobody-can-read", "transition": TransitionApprove,
 		"principalKind": PrincipalClient, "decidedBy": "user-1",
@@ -222,12 +274,13 @@ func TestDecisionOnUnreadableApplicationIsRefused(t *testing.T) {
 // THE STORE IS COPIED OFF THE APPLICATION, never supplied. An argument for
 // it would be a way to record a decision scoped to somebody else's store.
 func TestDecisionCopiesStoreFromItsSubject(t *testing.T) {
-	p := &Provider{reader: &fixtureReader{
+	writer := &fakeWriter{}
+	p := &Provider{writer: writer, reader: &fixtureReader{
 		apps: map[string][]map[string]any{
 			"app-1": {{"id": "app-1", "storeId": "store-live", "companyName": "Acme"}},
 		},
 	}}
-	nodes, err := p.recordDecision(context.Background(), map[string]any{
+	_, err := p.recordDecision(context.Background(), map[string]any{
 		"applicationId": "app-1", "transition": TransitionApprove,
 		"principalKind": PrincipalClient, "decidedBy": "user-1",
 		// A SUPPLIED storeId IS IGNORED. It is not in the capability's
@@ -235,12 +288,19 @@ func TestDecisionCopiesStoreFromItsSubject(t *testing.T) {
 		// changes nothing.
 		"storeId": "store-somebody-elses",
 	}, 0)
-	out := decodeOne(t, nodes, err)
-	if out["storeId"] != "store-live" {
-		t.Fatalf("storeId = %v, want store-live -- it must be copied off the application", out["storeId"])
+	if err != nil {
+		t.Fatalf("recordDecision: %v", err)
 	}
-	if out["principalKind"] != PrincipalClient {
-		t.Fatalf("principalKind = %v, want client", out["principalKind"])
+	// WHAT WAS PERSISTED, not what came back.
+	wrote := writer.only(t, "appendApplicationDecision")
+	if wrote["storeId"] != "store-live" {
+		t.Fatalf("storeId = %v, want store-live -- it must be copied off the application", wrote["storeId"])
+	}
+	// decidedBy IS NOT PASSED ON: the mutation stamps the ACTOR, because a
+	// caller-supplied decider on an append-only log is a way to attribute
+	// somebody else's approval to them permanently.
+	if _, present := wrote["decidedBy"]; present {
+		t.Fatal("decidedBy must not be written from the caller's argument")
 	}
 }
 
@@ -272,7 +332,7 @@ func TestIllegalTransitionIsRefusedAgainstTheLog(t *testing.T) {
 // wholesale settings has not asked the internet for their customers'
 // business details.
 func TestAbsentSettingsRefuseASubmission(t *testing.T) {
-	p := &Provider{reader: &fixtureReader{}}
+	p := &Provider{reader: &fixtureReader{}, writer: &fakeWriter{}}
 	_, err := p.submitApplication(context.Background(), map[string]any{
 		"storeId": "store-live", "companyName": "Acme",
 		"applicantName": "Sam", "applicantEmail": "sam@example.com",
@@ -300,19 +360,22 @@ func TestClosedApplicationsRefuseASubmission(t *testing.T) {
 // means: a merchant takes applications on their live store while they are
 // closed on the development store a candidate is being exercised against.
 func TestTheGateIsPerStore(t *testing.T) {
-	p := &Provider{reader: &fixtureReader{
+	writer := &fakeWriter{}
+	p := &Provider{writer: writer, reader: &fixtureReader{
 		settings: map[string][]map[string]any{
 			"store-live": {{"storeId": "store-live", "applicationsOpen": true}},
 			"store-dev":  {{"storeId": "store-dev", "applicationsOpen": false}},
 		},
 	}}
-	nodes, err := p.submitApplication(context.Background(), map[string]any{
+	if _, err := p.submitApplication(context.Background(), map[string]any{
 		"storeId": "store-live", "companyName": "Acme",
 		"applicantName": "Sam", "applicantEmail": "sam@example.com",
-	}, 0)
-	out := decodeOne(t, nodes, err)
-	if out["storeId"] != "store-live" {
-		t.Fatalf("storeId = %v", out["storeId"])
+	}, 0); err != nil {
+		t.Fatalf("submitApplication: %v", err)
+	}
+	wrote := writer.only(t, "createApplicationRow")
+	if wrote["storeId"] != "store-live" {
+		t.Fatalf("storeId = %v", wrote["storeId"])
 	}
 	if _, err := p.submitApplication(context.Background(), map[string]any{
 		"storeId": "store-dev", "companyName": "Acme",
@@ -320,11 +383,16 @@ func TestTheGateIsPerStore(t *testing.T) {
 	}, 0); err == nil {
 		t.Fatal("the development store is closed and must refuse")
 	}
+	// AND NOTHING WAS WRITTEN FOR THE CLOSED STORE.
+	if writer.count("createApplicationRow") != 1 {
+		t.Fatalf("createApplicationRow written %d times; the closed store must write nothing",
+			writer.count("createApplicationRow"))
+	}
 }
 
 // THE MINIMUM IS REQUIRED AND IT IS THE ONLY THING REQUIRED.
 func TestTheMinimumAnApplicationNeedsToBeOne(t *testing.T) {
-	p := &Provider{reader: &fixtureReader{
+	p := &Provider{writer: &fakeWriter{}, reader: &fixtureReader{
 		settings: map[string][]map[string]any{
 			"store-live": {{"storeId": "store-live", "applicationsOpen": true}},
 		},
@@ -349,27 +417,34 @@ func TestTheMinimumAnApplicationNeedsToBeOne(t *testing.T) {
 // one logical row rather than a second row a read would have to choose
 // between.
 func TestSettingsAreOneRowPerStore(t *testing.T) {
-	p := &Provider{reader: &fixtureReader{}}
-	live, err := p.setWholesaleSettings(context.Background(),
-		map[string]any{"storeId": "store-live", "applicationsOpen": true}, 0)
-	if err != nil {
-		t.Fatal(err)
+	writer := &fakeWriter{}
+	p := &Provider{reader: &fixtureReader{}, writer: writer}
+	for _, tc := range []struct {
+		store string
+		open  bool
+	}{{"store-live", true}, {"store-live", false}, {"store-dev", true}} {
+		if _, err := p.setWholesaleSettings(context.Background(),
+			map[string]any{"storeId": tc.store, "applicationsOpen": tc.open}, 0); err != nil {
+			t.Fatal(err)
+		}
 	}
-	again, err := p.setWholesaleSettings(context.Background(),
-		map[string]any{"storeId": "store-live", "applicationsOpen": false}, 0)
-	if err != nil {
-		t.Fatal(err)
+	if len(writer.writes) != 3 {
+		t.Fatalf("writes = %d, want 3", len(writer.writes))
 	}
-	if live[0].ID != again[0].ID {
-		t.Fatal("two writes for one store must be two versions of one row")
+	first, second, dev := writer.writes[0].args, writer.writes[1].args, writer.writes[2].args
+	if first["settingsId"] != second["settingsId"] {
+		t.Fatal("two writes for one store must be two versions of ONE row")
 	}
-	dev, err := p.setWholesaleSettings(context.Background(),
-		map[string]any{"storeId": "store-dev", "applicationsOpen": true}, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if dev[0].ID == live[0].ID {
+	if dev["settingsId"] == first["settingsId"] {
 		t.Fatal("two stores must not share one settings row")
+	}
+	// A DERIVED ID MUST BE A BARE SLUG. The engine refuses a row id with
+	// colons in it, which no fixture would ever have noticed.
+	for _, id := range []any{first["settingsId"], dev["settingsId"]} {
+		if strings.Contains(asString(id), ":") {
+			t.Fatalf("derived settings id %q carries a colon; the engine refuses it "+
+				"(docs/public/concepts/identifiers.md)", id)
+		}
 	}
 }
 
@@ -378,7 +453,7 @@ func TestSettingsAreOneRowPerStore(t *testing.T) {
 // fails to provision -- the moment they are least able to act on it.
 func TestUnknownAdapterIsRefusedWhenSettingsAreWritten(t *testing.T) {
 	registerShippedAdapters()
-	p := &Provider{reader: &fixtureReader{}}
+	p := &Provider{reader: &fixtureReader{}, writer: &fakeWriter{}}
 	_, err := p.setWholesaleSettings(context.Background(), map[string]any{
 		"storeId": "store-live", "applicationsOpen": true,
 		"entitlementAdapter": "shopifyB2b", // wrong case; a plausible typo

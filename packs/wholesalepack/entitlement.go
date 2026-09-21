@@ -2,16 +2,12 @@ package wholesalepack
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
-	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -211,7 +207,7 @@ func AdapterNames() []string {
 // between -- and "revoked when" is that version's own createdAt, which is
 // why the concept carries no revokedAt.
 func EntitlementRowID(applicationID string) string {
-	return "wholesale:entitlement:" + strings.TrimSpace(applicationID)
+	return "wholesale-entitlement-" + slugOf(applicationID)
 }
 
 // provisionEntitlement grants through the store's chosen adapter.
@@ -348,7 +344,7 @@ func (p *Provider) applyEntitlement(ctx context.Context, args map[string]any, re
 		errText = applyErr.Error()
 	}
 
-	node, err := p.entitlementNode(applicationID, storeID, grant, adapterName, entState, result, errText)
+	node, err := p.writeEntitlement(ctx, applicationID, storeID, grant, adapterName, entState, result, errText)
 	if err != nil {
 		return nil, err
 	}
@@ -409,8 +405,14 @@ func (p *Provider) entitlementRow(ctx context.Context, applicationID string) (ma
 	return rows[0], nil
 }
 
-// entitlementNode builds the one row this capability writes.
-func (p *Provider) entitlementNode(applicationID, storeID string, g Grant,
+// writeEntitlement persists the one entitlement row for this application.
+//
+// THROUGH THE MUTATION, for the reason mutations.memql gives at length: a
+// builtin's returned nodes are the expression's value and are never
+// persisted, and the mutation is also what stamps ownerUserId from the
+// actor. A row written any other way is owned by nobody and invisible to
+// the merchant who granted it.
+func (p *Provider) writeEntitlement(ctx context.Context, applicationID, storeID string, g Grant,
 	adapterName, state string, result Outcome, errText string) ([]memorynodes.MemoryNode, error) {
 	reference := result.Reference
 	if reference == "" {
@@ -419,7 +421,8 @@ func (p *Provider) entitlementNode(applicationID, storeID string, g Grant,
 		// it had told us last time would leave nothing to revoke.
 		reference = g.Reference
 	}
-	payload, err := json.Marshal(map[string]any{
+	if err := p.write(ctx, "writeEntitlementRow", map[string]any{
+		"entitlementId": EntitlementRowID(applicationID),
 		"applicationId": applicationID,
 		"storeId":       storeID,
 		"buyerEmail":    g.BuyerEmail,
@@ -427,18 +430,18 @@ func (p *Provider) entitlementNode(applicationID, storeID string, g Grant,
 		"state":         state,
 		"reference":     reference,
 		"error":         errText,
+	}); err != nil {
+		return nil, err
+	}
+	return confirm("wholesale:entitlement:written", map[string]any{
+		"applicationId": applicationID,
+		"storeId":       storeID,
+		"adapter":       adapterName,
+		"state":         state,
+		"reference":     reference,
+		"error":         errText,
 		"detail":        result.Detail,
 	})
-	if err != nil {
-		return nil, fmt.Errorf("wholesale: marshal entitlement: %w", err)
-	}
-	return []memorynodes.MemoryNode{{
-		ID:        EntitlementRowID(applicationID),
-		Concept:   "v1:wholesale:entitlement",
-		Type:      memorynodes.NodeTypeObject,
-		CreatedAt: time.Now().UTC(),
-		Payload:   payload,
-	}}, nil
 }
 
 // AdapterRefusal is a failure that will repeat identically for ever.
@@ -537,25 +540,4 @@ func renderBuiltinCall(construct string, args map[string]any) string {
 	}
 	b.WriteByte(')')
 	return b.String()
-}
-
-// renderLiteral writes one argument as MemQL source.
-//
-// QuoteString FOR EVERY STRING, never Go quoting: it is the engine's own
-// literal escaping, and a company name is caller-supplied text that reaches
-// this from a public form.
-func renderLiteral(v any) string {
-	switch t := v.(type) {
-	case string:
-		return langparser.QuoteString(t)
-	case int:
-		return strconv.Itoa(t)
-	case bool:
-		if t {
-			return "true"
-		}
-		return "false"
-	default:
-		return langparser.QuoteString(asString(v))
-	}
 }

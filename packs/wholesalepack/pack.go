@@ -48,15 +48,20 @@ func Tree() fs.FS {
 
 // Provider is the pack's IntegrationProvider.
 //
-// THREE SEAMS AND NOT AN ENGINE HANDLE PASSED AROUND. Every capability in
-// this pack is a decision over rows plus, for two of them, a call to a
-// construct -- so the Go half holds a reader for the first and a caller for
-// the second, and the tests exercise both as functions over values rather
-// than over an engine envelope. `engine` is kept because the seams are
-// built from it and a future capability may need it directly.
+// THREE SEAMS AND NOT AN ENGINE HANDLE PASSED AROUND, and the three are
+// deliberately distinct because the CALL FORMS are: a query is `query
+// name(args)`, a mutation is `name(args)`, a builtin is `builtin
+// name(args)`. Only the engine can tell them apart, so keeping them in one
+// seam would make the one difference a fake cannot model into the one
+// difference nothing checks.
+//
+// reader decides, writer persists, caller reaches an integration. `engine`
+// is kept because the seams are built from it and a future capability may
+// need it directly.
 type Provider struct {
 	engine memql.IntegrationEngineAccess
 	reader rowReader
+	writer rowWriter
 	caller Caller
 }
 
@@ -138,6 +143,7 @@ func NewProvider(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
 	return &Provider{
 		engine: pctx.Engine,
 		reader: &engineRowReader{engine: pctx.Engine},
+		writer: &engineWriter{engine: pctx.Engine},
 		caller: &engineCaller{engine: pctx.Engine},
 	}, nil
 }

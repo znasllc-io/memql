@@ -56,8 +56,11 @@ const (
 // unregisters them afterwards.
 func mountFixtureClients(t *testing.T) {
 	t.Helper()
-	memqldsl.RegisterTree(packDomainUnderTest, wholesalepack.Tree())
-	t.Cleanup(func() { memqldsl.UnregisterTree(packDomainUnderTest) })
+	// THE SAME ONE-SHOT REGISTRATION THE LIVE HARNESS USES. RegisterTree
+	// panics on a second registration of one namespace, and a boot registers
+	// once -- so both suites in this package go through the same guard
+	// rather than each assuming it is the only test in the process.
+	registerPackOnce.Do(func() { wholesalepack.Register(packDomainUnderTest) })
 	for _, client := range []string{clientNorthwind, clientContoso} {
 		dir := filepath.Join("testdata", "clients", client)
 		memqldsl.RegisterTree(client, os.DirFS(dir))

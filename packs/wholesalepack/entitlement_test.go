@@ -71,7 +71,7 @@ func TestOnlyAnApprovedApplicationIsProvisioned(t *testing.T) {
 	registerShippedAdapters()
 	reader := approvedFixture()
 	reader.decisions["app-1"] = nil // back to submitted
-	p := &Provider{reader: reader, caller: &fakeCaller{}}
+	p := &Provider{reader: reader, caller: &fakeCaller{}, writer: &fakeWriter{}}
 
 	_, err := p.provisionEntitlement(context.Background(),
 		map[string]any{"applicationId": "app-1"}, 0)
@@ -88,7 +88,7 @@ func TestOnlyAnApprovedApplicationIsProvisioned(t *testing.T) {
 // leave the log saying the buyer is still approved.
 func TestRevokeNeedsItsDecisionFirst(t *testing.T) {
 	registerShippedAdapters()
-	p := &Provider{reader: approvedFixture(), caller: &fakeCaller{}}
+	p := &Provider{reader: approvedFixture(), caller: &fakeCaller{}, writer: &fakeWriter{}}
 	_, err := p.revokeEntitlement(context.Background(),
 		map[string]any{"applicationId": "app-1"}, 0)
 	if err == nil {
@@ -106,12 +106,17 @@ func TestRevokeNeedsItsDecisionFirst(t *testing.T) {
 // silently un-approve a merchant's customers.
 func TestATransientFailureLeavesTheEntitlementPending(t *testing.T) {
 	registerShippedAdapters()
+	writer := &fakeWriter{}
 	p := &Provider{
 		reader: approvedFixture(),
+		writer: writer,
 		caller: &fakeCaller{err: errors.New("shopify: 503 from the Admin API")},
 	}
-	out := decodedBy(t)(p.provisionEntitlement(context.Background(),
-		map[string]any{"applicationId": "app-1"}, 0))
+	if _, err := p.provisionEntitlement(context.Background(),
+		map[string]any{"applicationId": "app-1"}, 0); err != nil {
+		t.Fatalf("a push failure must not be returned as an error: %v", err)
+	}
+	out := writer.only(t, "writeEntitlementRow")
 	if out["state"] != EntitlementPending {
 		t.Fatalf("state = %v, want %v -- a transient failure is outstanding work, not a refusal",
 			out["state"], EntitlementPending)
@@ -129,8 +134,10 @@ func TestATransientFailureLeavesTheEntitlementPending(t *testing.T) {
 // how a queue stops draining.
 func TestAnAdapterRefusalIsRecordedAsFailed(t *testing.T) {
 	registerShippedAdapters()
+	writer := &fakeWriter{}
 	p := &Provider{
 		reader: approvedFixture(),
+		writer: writer,
 		caller: &fakeCaller{replies: map[string]map[string]any{
 			"shopifyTagWholesaleCustomer": {
 				"status": "refused",
@@ -138,8 +145,11 @@ func TestAnAdapterRefusalIsRecordedAsFailed(t *testing.T) {
 			},
 		}},
 	}
-	out := decodedBy(t)(p.provisionEntitlement(context.Background(),
-		map[string]any{"applicationId": "app-1"}, 0))
+	if _, err := p.provisionEntitlement(context.Background(),
+		map[string]any{"applicationId": "app-1"}, 0); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	out := writer.only(t, "writeEntitlementRow")
 	if out["state"] != EntitlementFailed {
 		t.Fatalf("state = %v, want %v -- a refusal will fail identically for ever and must "+
 			"not be retried like an outage", out["state"], EntitlementFailed)
@@ -154,20 +164,24 @@ func TestAnAdapterRefusalIsRecordedAsFailed(t *testing.T) {
 // with nothing anywhere saying a push had been attempted and failed.
 func TestAFailedPushStillWritesARow(t *testing.T) {
 	registerShippedAdapters()
+	writer := &fakeWriter{}
 	p := &Provider{
 		reader: approvedFixture(),
+		writer: writer,
 		caller: &fakeCaller{err: errors.New("network unreachable")},
 	}
-	nodes, err := p.provisionEntitlement(context.Background(),
-		map[string]any{"applicationId": "app-1"}, 0)
-	if err != nil {
+	if _, err := p.provisionEntitlement(context.Background(),
+		map[string]any{"applicationId": "app-1"}, 0); err != nil {
 		t.Fatalf("a push failure must not be returned as an error: %v", err)
 	}
-	if len(nodes) != 1 {
-		t.Fatalf("len(nodes) = %d, want 1 -- the attempt must leave a row", len(nodes))
+	wrote := writer.only(t, "writeEntitlementRow")
+	if wrote["entitlementId"] != EntitlementRowID("app-1") {
+		t.Fatalf("row id = %q, want the derived one", wrote["entitlementId"])
 	}
-	if nodes[0].ID != EntitlementRowID("app-1") {
-		t.Fatalf("row id = %q, want the derived one", nodes[0].ID)
+	// A DERIVED ID MUST BE A BARE SLUG, or every write of it is refused.
+	if strings.Contains(asString(wrote["entitlementId"]), ":") {
+		t.Fatalf("derived entitlement id %q carries a colon; the engine refuses it",
+			wrote["entitlementId"])
 	}
 }
 
@@ -184,9 +198,15 @@ func TestASuccessfulGrantRecordsItsReference(t *testing.T) {
 			"detail":    "tagged memql-wholesale on acme.myshopify.com",
 		},
 	}}
-	p := &Provider{reader: approvedFixture(), caller: caller}
-	out := decodedBy(t)(p.provisionEntitlement(context.Background(),
-		map[string]any{"applicationId": "app-1"}, 0))
+	writer := &fakeWriter{}
+	p := &Provider{reader: approvedFixture(), caller: caller, writer: writer}
+	nodes, err := p.provisionEntitlement(context.Background(),
+		map[string]any{"applicationId": "app-1"}, 0)
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	receipt := decodeOne(t, nodes, err)
+	out := writer.only(t, "writeEntitlementRow")
 	if out["state"] != EntitlementGranted {
 		t.Fatalf("state = %v, want %v", out["state"], EntitlementGranted)
 	}
@@ -200,8 +220,8 @@ func TestASuccessfulGrantRecordsItsReference(t *testing.T) {
 	if len(caller.args) != 1 || caller.args[0]["buyerEmail"] != "sam@acme.example" {
 		t.Fatalf("the adapter must be handed the applicant's own email, got %v", caller.args)
 	}
-	// AND THE CONSTRAINT THE PACK CANNOT ENFORCE TRAVELS WITH THE ROW.
-	if !strings.Contains(asString(out["detail"]), "never a discount code") {
+	// AND THE CONSTRAINT THE PACK CANNOT ENFORCE TRAVELS WITH THE RECEIPT.
+	if !strings.Contains(asString(receipt["detail"]), "never a discount code") {
 		t.Fatalf("the customerTag adapter must record that the tag entitles nobody on its "+
 			"own and that a code would leak, got %v", out["detail"])
 	}
@@ -219,7 +239,7 @@ func TestNoAdapterConfiguredRefusesByName(t *testing.T) {
 	reader.settings["store-live"] = []map[string]any{{
 		"storeId": "store-live", "applicationsOpen": true, "entitlementAdapter": "",
 	}}
-	p := &Provider{reader: reader, caller: &fakeCaller{}}
+	p := &Provider{reader: reader, caller: &fakeCaller{}, writer: &fakeWriter{}}
 	_, err := p.provisionEntitlement(context.Background(),
 		map[string]any{"applicationId": "app-1"}, 0)
 	if err == nil {
@@ -299,10 +319,14 @@ func TestRevokeUsesTheAdapterThatGranted(t *testing.T) {
 		"reference": "customer=gid://shopify/Customer/1;tag=memql-wholesale",
 	}}
 	caller := &fakeCaller{}
-	p := &Provider{reader: reader, caller: caller}
+	writer := &fakeWriter{}
+	p := &Provider{reader: reader, caller: caller, writer: writer}
 
-	out := decodedBy(t)(p.revokeEntitlement(context.Background(),
-		map[string]any{"applicationId": "app-1"}, 0))
+	if _, err := p.revokeEntitlement(context.Background(),
+		map[string]any{"applicationId": "app-1"}, 0); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	out := writer.only(t, "writeEntitlementRow")
 	if out["adapter"] != AdapterCustomerTag {
 		t.Fatalf("adapter = %v, want %v -- the revoke must go through the adapter that "+
 			"granted, not the one settings name today", out["adapter"], AdapterCustomerTag)
@@ -456,14 +480,14 @@ func TestAnUnavailableAdapterIsRecordedOnTheRow(t *testing.T) {
 	}}
 	reader.stores = map[string][]map[string]any{}
 	caller := &fakeCaller{}
-	p := &Provider{reader: reader, caller: caller}
+	writer := &fakeWriter{}
+	p := &Provider{reader: reader, caller: caller, writer: writer}
 
-	nodes, err := p.provisionEntitlement(context.Background(),
-		map[string]any{"applicationId": "app-1"}, 0)
-	if err != nil {
+	if _, err := p.provisionEntitlement(context.Background(),
+		map[string]any{"applicationId": "app-1"}, 0); err != nil {
 		t.Fatalf("an unavailable adapter must be recorded, not returned: %v", err)
 	}
-	out := decodeOne(t, nodes, err)
+	out := writer.only(t, "writeEntitlementRow")
 	if out["state"] != EntitlementFailed {
 		t.Fatalf("state = %v, want %v -- an unreadable plan will not become readable "+
 			"because we asked again", out["state"], EntitlementFailed)

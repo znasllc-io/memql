@@ -10,5 +10,5 @@
 @executionTime("fast")
 @description("The derived state of one wholesale application, folded from its append-only decision log, and what is legal next.")
 tool wholesaleState {
-  applicationId  string  @required  @description("The application to fold.")
+  applicationId  string!  @description("The application to fold.")
 }

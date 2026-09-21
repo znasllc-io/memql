@@ -179,7 +179,7 @@ func FoldState(decisionsNewestFirst []map[string]any) string {
 // the read would have to choose between. reviewspack.SettingsRowID is the
 // same decision for the same reason.
 func SettingsRowID(storeID string) string {
-	return "wholesale:settings:" + strings.TrimSpace(storeID)
+	return "wholesale-settings-" + slugOf(storeID)
 }
 
 // --------------------------------------------------------------------------
@@ -216,23 +216,25 @@ func (p *Provider) submitApplication(ctx context.Context, args map[string]any, _
 	if !open {
 		return nil, fmt.Errorf("wholesale: this store is not accepting applications")
 	}
-	payload, err := json.Marshal(map[string]any{
+	// THE BUILTIN DECIDED; THE MUTATION WRITES. A builtin's returned nodes
+	// are the expression's VALUE and are never persisted, so the row is
+	// written through the pack's own mutation -- which also stamps
+	// ownerUserId from the actor, the engine's own way of saying who owns a
+	// row. Every concept here is @rowAuthz(owner="ownerUserId",
+	// clusterOwner), so a row written any other way is owned by nobody.
+	if err := p.write(ctx, "createApplicationRow", map[string]any{
 		"storeId":        storeID,
 		"siteId":         trimmed(args["siteId"]),
 		"companyName":    company,
 		"applicantName":  name,
 		"applicantEmail": email,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("wholesale: marshal application: %w", err)
+	}); err != nil {
+		return nil, err
 	}
-	return []memorynodes.MemoryNode{{
-		ID:        fmt.Sprintf("wholesale:application:%s:%d", storeID, time.Now().UTC().UnixNano()),
-		Concept:   "v1:wholesale:application",
-		Type:      memorynodes.NodeTypeObject,
-		CreatedAt: time.Now().UTC(),
-		Payload:   payload,
-	}}, nil
+	return confirm("wholesale:application:accepted", map[string]any{
+		"storeId":     storeID,
+		"companyName": company,
+	})
 }
 
 // recordDecision appends one decision to an application's log.
@@ -273,24 +275,27 @@ func (p *Provider) recordDecision(ctx context.Context, args map[string]any, _ in
 	if err := LegalTransition(state, transition); err != nil {
 		return nil, err
 	}
-	payload, err := json.Marshal(map[string]any{
+	// decidedBy IS NOT PASSED ON. The capability requires it -- a caller
+	// must say who is deciding, and refusing a Provider principal is what
+	// that argument is FOR -- but the row records the ACTOR, because a
+	// caller-supplied decider on an append-only log is a way to attribute
+	// somebody else's approval to them permanently. mutations.memql says
+	// the same thing from the other side.
+	if err := p.write(ctx, "appendApplicationDecision", map[string]any{
 		"applicationId": applicationID,
 		"storeId":       storeID,
 		"transition":    transition,
-		"decidedBy":     decidedBy,
-		"principalKind": PrincipalClient,
 		"note":          asString(args["note"]),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("wholesale: marshal decision: %w", err)
+	}); err != nil {
+		return nil, err
 	}
-	return []memorynodes.MemoryNode{{
-		ID:        fmt.Sprintf("wholesale:decision:%s:%d", applicationID, time.Now().UTC().UnixNano()),
-		Concept:   "v1:wholesale:applicationDecision",
-		Type:      memorynodes.NodeTypeObject,
-		CreatedAt: time.Now().UTC(),
-		Payload:   payload,
-	}}, nil
+	return confirm("wholesale:decision:recorded", map[string]any{
+		"applicationId": applicationID,
+		"storeId":       storeID,
+		"transition":    transition,
+		"claimedBy":     decidedBy,
+		"state":         StateAfter(transition),
+	})
 }
 
 // applicationState answers the derived state of one application.
@@ -321,7 +326,7 @@ func (p *Provider) applicationState(ctx context.Context, args map[string]any, _ 
 }
 
 // setWholesaleSettings writes one store's settings row.
-func (p *Provider) setWholesaleSettings(_ context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+func (p *Provider) setWholesaleSettings(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	storeID := trimmed(args["storeId"])
 	if storeID == "" {
 		return nil, fmt.Errorf("wholesale: storeId is required; settings are per store")
@@ -340,22 +345,20 @@ func (p *Provider) setWholesaleSettings(_ context.Context, args map[string]any, 
 			return nil, err
 		}
 	}
-	payload, err := json.Marshal(map[string]any{
+	if err := p.write(ctx, "setWholesaleSettingsRow", map[string]any{
+		"settingsId":         SettingsRowID(storeID),
 		"storeId":            storeID,
 		"applicationsOpen":   open,
 		"entitlementAdapter": adapter,
 		"introText":          asString(args["introText"]),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("wholesale: marshal settings: %w", err)
+	}); err != nil {
+		return nil, err
 	}
-	return []memorynodes.MemoryNode{{
-		ID:        SettingsRowID(storeID),
-		Concept:   "v1:wholesale:wholesaleSettings",
-		Type:      memorynodes.NodeTypeObject,
-		CreatedAt: time.Now().UTC(),
-		Payload:   payload,
-	}}, nil
+	return confirm("wholesale:settings:written", map[string]any{
+		"storeId":            storeID,
+		"applicationsOpen":   open,
+		"entitlementAdapter": adapter,
+	})
 }
 
 // --------------------------------------------------------------------------

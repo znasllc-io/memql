@@ -120,10 +120,10 @@ builtin storefrontProbe {
 @executor("integration.shopify.provisionWholesale")
 @description("Create or find one buyer's B2B account: a company stamped with the MemQL application id, its location, the buyer as a company contact, and an ACTIVE catalog with a price list. Idempotent -- a second call for one application finds the first company rather than making a twin. Refuses BEFORE creating anything when the store is below Plus and already holds its three company-location catalogs, answering {status: refused, reason} rather than an error so the caller can tell a ceiling from an outage.")
 builtin shopifyProvisionWholesale {
-  storeId        string   @required  @description("The store to provision on.")
-  applicationId  string   @required  @description("The MemQL application this grant came from. Becomes the company's externalId, which is what makes a retry find the first company.")
-  companyName    string   @required  @description("The business being entitled.")
-  buyerEmail     string   @required  @description("The applicant's email. The customer who becomes the company contact; created when the store has none.")
+  storeId        string!  @description("The store to provision on.")
+  applicationId  string!  @description("The MemQL application this grant came from. Becomes the company's externalId, which is what makes a retry find the first company.")
+  companyName    string!  @description("The business being entitled.")
+  buyerEmail     string!  @description("The applicant's email. The customer who becomes the company contact; created when the store has none.")
   buyerName      string   @description("The applicant's name, split on the last space into the two fields Shopify wants.")
   catalogTitle   string   @description("Defaults to '<company> wholesale'.")
   percentOff     integer  @description("Whole-number percentage off published prices. Zero creates the price list with no adjustment, which is somewhere for the merchant to put real per-variant prices.")
@@ -134,16 +134,16 @@ builtin shopifyProvisionWholesale {
 @executor("integration.shopify.revokeWholesale")
 @description("End a B2B entitlement by setting its catalog to DRAFT. DELETES NOTHING: the company, its location, its contact, the price list and every order placed under them are untouched, because revoking trade terms is ending a discount rather than erasing a customer -- and deleting a company would take its order history's association with it.")
 builtin shopifyRevokeWholesale {
-  storeId    string  @required  @description("The store.")
-  reference  string  @required  @description("The encoded refs a provision returned. Opaque to the pack, which never parses it.")
+  storeId    string!  @description("The store.")
+  reference  string!  @description("The encoded refs a provision returned. Opaque to the pack, which never parses it.")
 }
 
 @sdk
 @executor("integration.shopify.tagWholesaleCustomer")
 @description("The plan-independent grant: add one tag to the buyer's customer record. Writes the tag and NOTHING else -- what the tag does is the merchant's own automatic discount, which this connector deliberately does not create on their behalf. Refuses when no customer on the store has that email, because a tag on an account that does not exist entitles nobody.")
 builtin shopifyTagWholesaleCustomer {
-  storeId     string  @required  @description("The store.")
-  buyerEmail  string  @required  @description("The customer to tag.")
+  storeId     string!  @description("The store.")
+  buyerEmail  string!  @description("The customer to tag.")
   tag         string  @description("Defaults to memql-wholesale. Prefixed with ours so this connector never removes a tag somebody else put there.")
 }
 
@@ -151,8 +151,8 @@ builtin shopifyTagWholesaleCustomer {
 @executor("integration.shopify.untagWholesaleCustomer")
 @description("The plan-independent revoke: remove that one tag from the buyer's customer record.")
 builtin shopifyUntagWholesaleCustomer {
-  storeId     string  @required  @description("The store.")
-  buyerEmail  string  @required  @description("The customer to untag.")
+  storeId     string!  @description("The store.")
+  buyerEmail  string!  @description("The customer to untag.")
   tag         string  @description("Defaults to memql-wholesale.")
 }
 
@@ -160,5 +160,5 @@ builtin shopifyUntagWholesaleCustomer {
 @executor("integration.shopify.wholesaleCatalogHeadroom")
 @description("How many more company-location catalogs this store may hold: -1 on Plus, which is unlimited, and otherwise three minus what it already has. Since 2026-04-02 companies, payment terms, volume pricing and up to three catalogs are available BELOW Plus, so the ceiling is real and this is what lets an adapter REPORT it rather than discover it at the fourth grant, in a merchant's live store.")
 builtin shopifyWholesaleCatalogHeadroom {
-  storeId  string  @required  @description("The store to measure.")
+  storeId  string!  @description("The store to measure.")
 }
