@@ -5,6 +5,11 @@
       "verdict": "load_ok"
     },
     {
+      "file": "a-string-on-a-trait.memql",
+      "verdict": "load_ok",
+      "note": "the TRAIT half of this receiver -- the registry gives spec and trait one annotation set, and the refusal below says `on a spec or trait`, so the cell shows both. It is also the only annotated trait the corpus holds: without it the grammar's <trait-annotation> production is exercised by nothing the engine loads."
+    },
+    {
       "file": "with-no-value.memql",
       "verdict": "refuse_parse",
       "code": "annotation_form",
