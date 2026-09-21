@@ -1,0 +1,77 @@
+// reviews pack -- reads (epic memql#5532, issue memql#5553).
+//
+// THE PACK SHIPPED NO QUERY AT ALL, which is the third thing standing
+// between it and a storefront: nothing listed the reviews for a product, so
+// a storefront had no way to render any. These are the reads that close it.
+//
+// THE PUBLIC READ IS NOT HERE. "Only reviews no moderation decision hides,
+// only while this store's publicDisplay is true" is three reads with a gate
+// between them, and a filter cannot make a cross-concept read -- so the
+// public read is the Go builtin reviewsPublishedForProduct, and putting the
+// gate in every future caller instead is exactly the mistake that ships a
+// storefront rendering reviews a merchant had switched off.
+
+use reviews.concepts.{ review, moderationAction, reviewSettings }
+
+@description("Every review for one product on one store, newest first -- the merchant's own list, including reviews a moderation decision hides. The operator read behind a moderation screen; the public read is the reviewsPublishedForProduct builtin.")
+@actor
+query review reviewsForProduct {
+  args {
+    storeId        string!
+    productHandle  string!
+  }
+  filter  row => row.storeId == args.storeId && row.productHandle == args.productHandle
+  sort    "row.createdAt", "desc"
+}
+
+@description("One review by id. The read moderation resolves its subject through, so a caller who cannot read a review cannot record a decision against it either.")
+@unbounded("review by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+query review reviewById {
+  args {
+    reviewId  string!
+  }
+  filter  row => row.id == args.reviewId
+}
+
+@description("Every review on one store, newest first. The merchant's moderation queue.")
+@actor
+query review reviewsForStore {
+  args {
+    storeId  string!
+    limit    int
+  }
+  filter  row => row.storeId == args.storeId
+  sort    "row.createdAt", "desc"
+}
+
+@description("Every moderation decision recorded against one review, newest first. Append-only, so this IS the decision history -- there is no undo-by-overwrite to reconstruct.")
+@actor
+query moderationAction moderationActionsForReview {
+  args {
+    reviewId  string!
+  }
+  filter  row => row.reviewId == args.reviewId
+  sort    "row.createdAt", "desc"
+}
+
+@description("Every moderation decision on one store, newest first -- what the public read excludes, readable as a list.")
+@actor
+query moderationAction moderationActionsForStore {
+  args {
+    storeId  string!
+    limit    int
+  }
+  filter  row => row.storeId == args.storeId
+  sort    "row.createdAt", "desc"
+}
+
+@description("This store's reviews settings. One row per store, so this answers at most one.")
+@actor
+query reviewSettings reviewSettingsForStore {
+  args {
+    storeId  string!
+  }
+  filter  row => row.storeId == args.storeId
+  sort    "row.createdAt", "desc"
+}

@@ -336,7 +336,10 @@ jobs:
               - 'dsl/**'
               - 'examples/deploypack/dsl/**'
               - 'examples/referencepack/dsl/**'
-              - 'examples/reviewspack/dsl/**'
+              # Storefront packs live under packs/ and are LINKED INTO THE
+              # DEFAULT BUILD (epic memql#5532), so a change to one reaches
+              # every node type rather than only a tag nobody sets.
+              - 'packs/*/dsl/**'
               # memql#5357: each pack now embeds its own language line
               # (dsl/memql.toml, a non-.memql file `**/*.memql` does not route),
               # and shopifypack's was the one pinned tree with no route here.

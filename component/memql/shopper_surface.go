@@ -127,6 +127,10 @@ const shopperFieldDefaultMaxLength = 4096
 const (
 	ShopperReadKindBuiltin = "builtin"
 	ShopperReadKindQuery   = "query"
+	// ShopperWriteKindMutation is a form's default. A bare `name(args)` is
+	// the mutation invocation form, which is why it renders as an empty
+	// prefix rather than as the word.
+	ShopperWriteKindMutation = "mutation"
 )
 
 // reservedShopperFieldNames are stamped server-side and may never be
@@ -197,11 +201,19 @@ type ShopperForm struct {
 	// Name is this form's route name. It is the second path segment, so
 	// POST /_memql/forms/<Pack>/<Name> on the site's own origin.
 	Name string
-	// Construct is the mutation the accepted fields are passed to. It runs
+	// Construct is the construct the accepted fields are passed to. It runs
 	// under the site owner's borrowed authority, so it must be an ordinary
-	// @actor mutation -- never @serverOnly, which the borrowed actor
+	// @actor construct -- never @serverOnly, which the borrowed actor
 	// deliberately cannot reach.
 	Construct string
+	// Kind is ShopperWriteKindMutation (the default and the usual answer)
+	// or ShopperReadKindBuiltin, for a pack whose write needs Go -- deriving
+	// a row id, or writing more than one row from one submission.
+	//
+	// SYMMETRIC WITH ShopperRead.Kind on purpose: the handler renders the
+	// call from it, and a form and a read that named their construct
+	// differently would be two spellings of one idea.
+	Kind string
 	// Fields is the closed set of accepted inputs. A field the form posts
 	// that is not declared here is DROPPED, not refused: a browser sends
 	// what the page contains and refusing an unexpected input would make
@@ -215,6 +227,23 @@ type ShopperForm struct {
 	RedirectError string
 	// Description is what the pack guide and the module inventory show.
 	Description string
+}
+
+// CallPrefix is the keyword a construct invocation carries, or "" for a
+// mutation -- `submitReview(...)` versus `builtin reviewsPublished(...)`
+// versus `query reviewsForProduct(...)`.
+//
+// HERE RATHER THAN IN THE HANDLER, because it is a property of the
+// declaration and the handler renders both forms and reads.
+func ShopperCallPrefix(kind string) string {
+	switch kind {
+	case ShopperReadKindBuiltin:
+		return "builtin "
+	case ShopperReadKindQuery:
+		return "query "
+	default:
+		return ""
+	}
 }
 
 // ShopperRead is one declared READ: a query or builtin a shopper's browser
@@ -260,6 +289,13 @@ func RegisterShopperForm(form ShopperForm) {
 	form.Construct = strings.TrimSpace(form.Construct)
 	if err := validateShopperRoute(form.Pack, form.Name, form.Construct, form.Fields); err != nil {
 		panic("memql.RegisterShopperForm: " + err.Error())
+	}
+	if form.Kind == "" {
+		form.Kind = ShopperWriteKindMutation
+	}
+	if form.Kind != ShopperWriteKindMutation && form.Kind != ShopperReadKindBuiltin {
+		panic(fmt.Sprintf("memql.RegisterShopperForm: Kind %q is neither %q nor %q",
+			form.Kind, ShopperWriteKindMutation, ShopperReadKindBuiltin))
 	}
 	if err := validateShopperRedirect("RedirectOK", form.RedirectOK); err != nil {
 		panic("memql.RegisterShopperForm: " + err.Error())

@@ -251,7 +251,7 @@ func (h *ShopperHandler) serveForm(w http.ResponseWriter, r *http.Request) {
 	args["storeId"] = stamp.storeID
 	args["siteId"] = site.ID
 
-	call, err := dslCall(form.Construct, args)
+	call, err := dslCall(memql.ShopperCallPrefix(form.Kind)+form.Construct, args)
 	if err != nil {
 		h.logger.Error("shopper surface: could not render the construct call",
 			"component", "server", "construct", form.Construct, "err", err)
@@ -308,7 +308,7 @@ func (h *ShopperHandler) serveRead(w http.ResponseWriter, r *http.Request) {
 	args["storeId"] = stamp.storeID
 	args["siteId"] = site.ID
 
-	call, err := dslCall(read.Kind+" "+read.Construct, args)
+	call, err := dslCall(memql.ShopperCallPrefix(read.Kind)+read.Construct, args)
 	if err != nil {
 		writeShopperJSONError(w, http.StatusInternalServerError, shopperReasonFailed)
 		return
