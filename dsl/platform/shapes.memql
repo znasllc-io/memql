@@ -94,6 +94,8 @@ shape site siteFull {
   notes
   artifactId
   binding
+  candidateRef
+  previewBinding
   settings
   packageId
   packageDeployableName
@@ -366,5 +368,42 @@ shape modelEvidence modelEvidenceFull {
   approvalId
   ruleHash
   foldedAt
+  row.createdAt
+}
+
+/// A preview grant as everything but the edge sees it (epic memql#5531).
+///
+/// `tokenHash` IS ABSENT, and its absence is the decision. The digest is not itself a credential --
+/// it cannot be presented -- but projecting it would put the one stored artifact of a bearer token
+/// onto every screen and into every log line that renders a grant, for no reader who needs it. The
+/// edge FILTERS on it and never reads it back, which is the whole of what the serving path requires.
+@row
+shape sitePreviewGrant sitePreviewGrantFull {
+  row.id
+  siteId
+  ownerUserId
+  candidateRef
+  previewStoreId
+  issuedAt
+  expiresAt
+  revokedAt
+  lastSeenAt
+  row.createdAt
+}
+
+/// One of the four things the engine can observe of a preview.
+@row
+shape sitePreviewObservation sitePreviewObservationFull {
+  row.id
+  grantId
+  siteId
+  ownerUserId
+  storeId
+  kind
+  observedAt
+  ok
+  detail
+  failure
+  durationMs
   row.createdAt
 }

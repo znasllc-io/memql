@@ -217,6 +217,8 @@ concept site {
   notes        string   @description("Operator-facing notes.")
   artifactId   string   @description("The v1:library:artifact row this site's current bundle was published from, when it was published from the Library rather than uploaded by CI or baked into the image. Provenance, not a serving input -- the edge reads bundleRef and never this. Empty for a site whose bundle arrived through POST /sites/{id}/bundles or file:///app/*.")
   binding      object   @description("Per-kind connection to the system this site fronts. Shape is decided by `kind`, and only one kind declares one today: shopify_storefront => {storeId}, which NAMES a v1:shopify:store row (epic memql#5530). It is a REFERENCE, not a copy: the store row holds the myshopify.com domain and the Storefront token reference, and the edge resolves both through it at serve time, so an edit to the store reaches every site bound to it with no second write. It used to carry {storeDomain, storefrontTokenRef} -- the same two values the store row already held, edited in two places at two authorization tiers -- and that duplication is what this field stopped being. Empty for spa and static. The Admin API token reference and the webhook secret reference live on the store row and are never projected onto anything the serving path holds. Written only by createSite and updateSiteStoreBinding, both of which refuse a store the caller cannot read (component/memql/platform_site_binding_guard.go).")
+  candidateRef string   @description("The CANDIDATE VERSION: a published bundle version that is NOT serving (epic memql#5531, design D7). `bundleRef` names what serves and this names what is being exercised beside it, in exactly the same three URI forms -- the pair is the whole of the owner's staging model, and there is no second row, second hostname, second cluster or second database behind it. Empty is the ordinary state and means this deployable has no candidate; every site row written before this field existed carries that, and resolves exactly as it always has. PROMOTION IS THE ROW FLIP `bundleRef` ALREADY IS: promoteSiteCandidate copies this onto bundleRef and clears this, so ROLLBACK STAYS ONE ROW WRITE -- updateSiteBundle pointed back at the previous version, unchanged by this epic and deliberately not given a ceremony of its own. A candidate may never equal the serving version (a candidate that is serving is not a candidate) and a promotion must NAME the version it is promoting, so a candidate republished between the reading and the click is refused rather than promoted by surprise -- both are comparisons against the PRIOR row, so both live in Go beside the settings guard (component/memql/platform_site_candidate_guard.go). WHO SEES IT: the edge serves this version only to a request carrying a valid v1:platform:sitePreviewGrant, for a draft site AND for a live one, because preview is per bundle version rather than per site status -- after publishing, the owner exercises version N+1 while N goes on serving the public. Nothing in the engine branches on `preview` to change what the ENGINE does; it chooses a bundle and a binding, which is the whole of D7.")
+  previewBinding object @description("The PREVIEW BINDING: the v1:shopify:store row the CANDIDATE VERSION is exercised against, as {storeId} -- the same one-key reference shape `binding` carries and resolved through the same store row (epic memql#5531, design D8). `binding` is the store shoppers reach; this is the development store, and the two are independent fields precisely so that exercising a storefront can never reach the live one. It appears in a runtime-config document ONLY under a valid preview grant: a document served without one carries the site's ordinary `binding` and never this, asserted by grepping the SERVED document the way the Admin token's absence is (component/edge/runtimeconfig_test.go). THE STORE MUST BE A DEVELOPMENT STORE -- v1:shopify:store.isDevelopment, a fact about somebody else's system rather than about this cluster -- and a preview binding naming the store shoppers reach is REFUSED, which is the second half of the go-live guard (issue memql#5546). Empty is the unbound state and must stay expressible: a storefront is prepared before its development store is attached, and a development store can be detached. Written whole by updateSitePreviewBinding, never merged, for updateSiteStoreBinding's reason -- a read-merge would let a retired shape survive beside the reference.")
   deleted      bool @description("Soft-delete flag (memql#3717). isNotDeleted filters it out of siteByHostname/sitesAll/siteById so the edge stops resolving a deleted site's hostname; the row survives for history. deleteSite stamps this true. A systemOwned row is refused at the write path regardless of this field -- see the Go guard wired beside executeWrite.")
   packageId    string   @description("The v1:platform:package this site was deployed from (epic memql#4794, D7), or EMPTY for a hand-made site -- which stays fully supported and is the majority of rows today. Set by the pipeline on the FIRST deploy of a package deployable and never cleared, because it is what a redeploy uses to find the site it published last time instead of creating a second one at a second hostname.")
   packageDeployableName string @description("The manifest deployable name this site serves (epic memql#4794, D2/D7). Together with packageId it is the key a redeploy republishes through -- which is exactly why the manifest refuses two deployables sharing a name. Empty whenever packageId is.")
@@ -249,6 +251,96 @@ concept site {
 /// ROWS SURVIVE REMOVAL. `remove` walks the row to `removed`; nothing deletes. A binding that once
 /// existed is the audit trail of what this cluster was serving and when, and a deleted row answers
 /// no question anybody asks after an incident.
+/// A PREVIEW GRANT: one operator's short-lived permission to be served a deployable's CANDIDATE
+/// VERSION on the site's own origin (epic memql#5531, issue memql#5545).
+///
+/// WHY A ROW AND NOT A SIGNED TOKEN. A signature would verify on every replica with no read, which
+/// is the property that made the app-session credential DB-free -- and the price of it there is
+/// stated plainly: it is not revocable. Here the price is not worth paying. A preview is a handful
+/// of requests by one person, so the read is nothing; and three things fall out of the row that a
+/// signature cannot give. It is REVOCABLE, so "end this preview" is an act rather than a wait. It
+/// is LISTABLE, so an operator can see what is open against a deployable rather than guessing. And
+/// it is the ANCHOR every v1:platform:sitePreviewObservation hangs off -- without a session id
+/// there is nothing to gather four observations of one exercise under.
+///
+/// IT NAMES THE VERSION IT WAS ISSUED FOR, and that is what keeps it honest. The edge compares
+/// `candidateRef` against the site row's, so a grant stops resolving the moment the candidate is
+/// withdrawn or republished -- a person previewing version N+1 is never silently shown N+2, and
+/// clearSiteCandidate is therefore also how every open preview of a version ends at once. The same
+/// rule the work spine's approvals use, for the same reason: a decision about one specific artifact
+/// must not carry to a different one.
+///
+/// THE TOKEN IS HASHED AND RETURNED ONCE, exactly as a worker token is (component/identity/
+/// workertoken): the plain `mql_prv_<43>` goes back to the caller in the mutation reply and only
+/// its SHA-256 is stored, so a row read -- by an operator, by a support session, out of a backup --
+/// hands nobody a working preview.
+///
+/// THE TIER IS COMPOSITE, and the cluster-owner half is what lets an operator see and end a preview
+/// somebody else opened. The EDGE reads these rows under its own synthetic cluster-owner actor, the
+/// same one it resolves a site and a store with, which is why it can honour a grant belonging to
+/// any operator without holding anybody's credential.
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="siteId", secondary="candidateRef", tertiary="expiresAt")
+concept sitePreviewGrant {
+  siteId         string!  @description("The v1:platform:site this grant previews. Required: a grant naming no deployable is a credential for nothing, and the edge matches this against the site it just resolved before it looks at anything else.")
+  ownerUserId    string!  @description("The v1:identity:user this grant was minted for -- the operator who asked, never a role or a group. It is the row-authz key, and it is also what an observation is attributed to, so the four things the engine observed of an exercise belong to the person who ran it. A grant is one person's: sharing a preview is sharing a URL, which is exactly why the lifetime is short and the revoke is an act.")
+  tokenHash      string!  @description("SHA-256, lowercase hex, of the plain `mql_prv_<43>` token this grant was issued as. THE PLAIN TOKEN IS NEVER STORED and comes back exactly once, in sitePreviewGrant's reply. The edge hashes the cookie it was presented and looks the row up by this, so a leaked ROW is not a leaked preview.")
+  candidateRef   string!  @description("The candidate version this grant was issued FOR, copied off the site row at mint time. The edge refuses the grant when the site's own candidateRef no longer equals this -- so withdrawing or republishing a candidate ends every open preview of it, and nobody is ever silently shown a version they did not ask to see.")
+  previewStoreId string   @description("The v1:shopify:store the preview binding named at mint time, or empty for a deployable of a kind that has no binding. Recorded rather than re-read so an observation can be attributed to the store the exercise actually ran against, even after somebody re-points the preview binding -- and so the passive order observation has a storeId to match on.")
+  issuedAt       datetime!  @description("When the grant was minted.")
+  expiresAt      datetime!  @description("When it stops resolving. SHORT by construction -- MEMQL_SITE_PREVIEW_GRANT_TTL_MINUTES, default 30, capped at 240 -- because a preview URL is a bearer credential for an unpublished version and the honest bound on a bearer credential is its lifetime. Comparison is against the engine's clock at serve time; there is no grace.")
+  revokedAt      datetime   @description("When an operator ended this preview, or empty. A SOFT end: the row stays as the record that a preview was opened, by whom, against which version and which store, which is the question asked after a test payment lands somewhere unexpected.")
+  lastSeenAt     datetime   @description("When the edge last honoured this grant, or empty for one nobody has used. ABSENT MEANS NOBODY OPENED IT, never 'a long time ago' -- the two are different answers and an operator deciding whether a preview URL escaped needs to be able to tell them apart.")
+
+  @relationship(type="parent", field="siteId", target=site, direction="outgoing")
+  @relationship(type="references", as="previewedBy", field="ownerUserId", target=user, direction="outgoing")
+}
+
+/// WHAT THE ENGINE CAN OBSERVE OF A PREVIEW, said plainly and not one thing more (epic memql#5531,
+/// issue memql#5547, design D8).
+///
+/// The owner wants the sandbox to prove a storefront works "for real", payment included. Four of
+/// those steps are the engine's to observe and the fifth is not, and this concept is where that
+/// line is drawn rather than blurred:
+///
+///   catalog_read    the development store answers a catalog read
+///   cart_accepted   a cart accepts a line
+///   checkout_url    a checkoutUrl comes back
+///   order_mirrored  an order arrives in the mirror under that store's storeId
+///
+/// THE PAYMENT WALK IS NOT HERE. It happens in a browser on Shopify's hosted checkout, and no row
+/// this cluster writes can witness it; the test that does is the product's (znasllc-io/memql-fylo#28).
+/// A fifth value naming it would be a field nothing could ever honestly write -- and a declared
+/// field with no writer reads as a measurement that came back empty.
+///
+/// THE FIRST THREE ARE ACTIVE, THE FOURTH IS PASSIVE, and they are one concept because they answer
+/// one question. The first three are the engine ASKING the bound store, through the Storefront API,
+/// under the preview binding's token (integrations/shopify/storefront.go); the fourth is the engine
+/// NOTICING that the mirror received an order under the preview store's id. `ok` is what separates
+/// them from silence: a row here is an answer, and the absence of a row is not a failure but an
+/// exercise nobody has run.
+///
+/// AN UNMEASURED OBSERVATION IS NOT A FAILED ONE. There is deliberately no row written to say "we
+/// did not look", because the OS draws the absence itself and drawing it from a row would make
+/// "nobody asked" and "we asked and got nothing" the same shape on the screen.
+@rowAuthz(owner="ownerUserId", clusterOwner)
+@displayCard(primary="kind", secondary="siteId", tertiary="observedAt", status="ok")
+concept sitePreviewObservation {
+  grantId      string!  @description("The v1:platform:sitePreviewGrant this observation belongs to -- the session id that gathers the four steps of one exercise together. Required: an observation with no exercise behind it is a measurement of nothing, and there would be no way to say which run of which version it described.")
+  siteId       string!  @description("The v1:platform:site exercised, denormalized off the grant so the deployable's own page reads observations without walking every grant it ever issued.")
+  ownerUserId  string!  @description("The operator who ran the exercise -- STAMPED from actor.userId, never copied off the grant and never an argument, for the reason the grant's own owner field is. It is therefore WHOEVER RAN THE PROBE rather than whoever opened the preview; those are usually the same person, and when they are not a cluster owner sees both sets through the tier's second arm. The field is on the row rather than joined because row admission has to decide this row on this row.")
+  storeId      string!  @description("The v1:shopify:store the exercise ran against -- the DEVELOPMENT store the preview binding named. It is what makes the fourth observation possible at all: an order mirrored under this id is already excluded from every read scoped to the live store, which is the whole of why a test payment is safe (design D8).")
+  kind         enum("catalog_read", "cart_accepted", "checkout_url", "order_mirrored")!  @description("Which of the four the engine observed. A CLOSED set, and closing it is the decision: these are exactly what this cluster can witness of a preview, and a fifth value would have to be something a row here could honestly record. The payment is not one of them.")
+  observedAt   datetime!  @description("When the observation was made -- when the store answered, or when the order arrived. Not when the OS drew it.")
+  ok           bool!  @description("Whether the step answered. FALSE IS A RESULT AND `failure` SAYS WHY; a step nobody ran has no row at all, which is a third state and the one the OS must draw as unmeasured rather than as zero.")
+  detail       string   @description("The shortest true thing about what came back -- a product handle, a cart id, the checkout host, the mirrored order's id. Never the checkoutUrl itself and never a token: this row is read by every operator the composite tier admits, and a checkout URL is a live cart somebody else could pay from.")
+  failure      string   @description("Why the step did not answer, when it did not: the Storefront API's own error, a timeout, a missing token reference, an unbound preview store. Empty when `ok`. It is the operator's whole diagnosis, so it names the condition rather than the exception type.")
+  durationMs   int      @description("How long the step took, for the three active ones. ZERO ON THE PASSIVE ONE and that is honest rather than missing: nothing timed the order's journey, and a duration invented for it would be a measurement of the mirror's lag dressed as the storefront's.")
+
+  @relationship(type="parent", field="grantId", target=sitePreviewGrant, direction="outgoing")
+  @relationship(type="references", as="observedOn", field="siteId", target=site, direction="outgoing")
+}
+
 @rowAuthz(clusterOwner)
 @displayCard(primary="hostname", secondary="siteId", tertiary="failureReason", status="status")
 concept customDomain {

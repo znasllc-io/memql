@@ -61,6 +61,7 @@ export type ActName =
   | "Deploy the update"
   | "Redeploy"
   | "Retry the deploy"
+  | "Promote the candidate"
   | "Cancel";
 
 export interface ActSpec {
@@ -111,6 +112,21 @@ export interface ActsInput {
   siblingRun?: DeploymentRow | null;
   /** The parts this session holds. Presentation over the engine's own gate. */
   can: PartsHeld;
+  /**
+   * What the engine says is legal about this deployable's candidate version
+   * (epic memql#5531), or absent when the readiness has not landed.
+   *
+   * ABSENT IS NOT "NO" WITH A DIFFERENT NAME -- it offers no act, which is the
+   * same outcome, but it says so because the read has not answered rather than
+   * because the engine refused. The bar draws no reason either way; the Preview
+   * section draws the refusal, which is where a person can act on it.
+   *
+   * THE SHELL DOES NOT DECIDE THIS. Whether the serving binding names a
+   * development store is a field on a row a browser cannot read, so
+   * `sitePreviewReadiness` answers -- from the same functions the write guard
+   * refuses with, so an act offered here is one the engine will accept.
+   */
+  preview?: { hasCandidate: boolean; canPromote: boolean } | null;
   /** True while this deployable's own delete is still tearing its domains down. */
   deleting?: boolean;
   /** The domain the teardown is releasing right now, for the progress line. */
@@ -193,6 +209,12 @@ const PART_OF: Readonly<Record<ActName, DeployablePart>> = {
   "Deploy the update": "deploy",
   Redeploy: "deploy",
   "Retry the deploy": "deploy",
+  // PROMOTING IS A PUBLISH ACT, not a preview one, and the line is epic
+  // memql#5531's: preparing a candidate and exercising it against a
+  // development store changes nothing the public sees, while promoting is what
+  // makes the public see it. So `preview` grants the first and `publish` grants
+  // the second, and a person may hold one without the other.
+  "Promote the candidate": "publish",
   Cancel: "deploy",
 };
 
@@ -261,7 +283,7 @@ function gateClause(read: BarReading): BarReading {
 
 /** What the bar reads and offers. The whole of DESIGN.md rule 12 for this app. */
 export function actsFor(input: ActsInput): BarReading {
-  const offered = reading(input);
+  const offered = withPromotion(reading(input), input);
   const read = holdWhileTheSourceIsBusy({ ...offered, acts: heldOnly(offered.acts, input.can) }, input.siblingRun ?? null);
   // The gate did not get to be the state; it still gets to be mentioned, or a
   // person on this page would have no sign that one is waiting at all.
@@ -271,6 +293,39 @@ export function actsFor(input: ActsInput): BarReading {
     hasServed(input.site) &&
     !gateIsAboutThisApp(input.run, input.site);
   return parked ? gateClause(read) : read;
+}
+
+/**
+ * Offer the promotion, when there is a candidate and the engine would accept it.
+ *
+ * IT BECOMES THE PRIMARY ACT, because it is what the person came for: somebody
+ * looking at a deployable with a candidate has already exercised it, and the
+ * one thing left is to put it in front of shoppers. The forward deploy act
+ * stays on the bar and stops being primary -- two primaries is no primary.
+ *
+ * AT MOST THREE ACTS (rule 12), so the destructive one is dropped rather than
+ * the promotion when the bar is full. Deactivating a deployable that has a
+ * candidate waiting is not what somebody came to this bar to do, and the act is
+ * one click away again the moment the candidate is promoted or withdrawn.
+ *
+ * ABSENT WHEN THE ENGINE WOULD REFUSE, never disabled -- and the REASON is
+ * drawn by the Preview section rather than here, because a bar detail
+ * ellipsizes and a refusal cut off half way is worse than no refusal at all.
+ */
+function withPromotion(read: BarReading, input: ActsInput): BarReading {
+  const preview = input.preview ?? null;
+  if (preview === null || !preview.hasCandidate || !preview.canPromote) return read;
+  if (input.site.systemOwned || input.deleting === true) return read;
+  // A run in flight owns the bar, and a promotion during a roll would race the
+  // pointer that run is rewriting.
+  if (runIsMoving(input.run)) return read;
+  const promote = spec("Promote the candidate", "primary");
+  // The key is DROPPED rather than set undefined: `tone` is optional, and an
+  // explicit undefined is a different value from an absent one under the
+  // strict optional-property checking this client compiles with.
+  const quieted = read.acts.map((act): ActSpec => (act.tone === "primary" ? { name: act.name, requires: act.requires } : act));
+  const room = quieted.length < 3 ? quieted : quieted.filter((act) => act.tone !== "danger").slice(0, 2);
+  return { ...read, acts: [...room, promote] };
 }
 
 /**

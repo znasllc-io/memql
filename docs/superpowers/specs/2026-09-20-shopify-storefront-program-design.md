@@ -4,11 +4,13 @@
 - **Status:** brainstormed with the owner on 2026-09-20; **not yet approved as a
   whole.** Section 4 records the answers the owner gave. Several were given
   BEFORE the facts in sections 3 and 6 were known: one of them (D3) is
-  contradicted by the tree, and one derived decision (D7) reads the owner's own
-  law and is his to confirm. Each is flagged where it appears and filed as a
+  contradicted by the tree. Each is flagged where it appears and filed as a
   decision issue that blocks the work depending on it, rather than being
   written down as settled. Issues were filed on 2026-09-20; the table in
   section 12 names them.
+  **D7 was put to the owner on 2026-09-20 and CONFIRMED as argued** (issue
+  memql#5543, question Q4), which settles the one derived decision that read
+  the owner's own law back to him. The remaining open questions are unchanged.
 - **What it is:** the design for a client's Shopify storefront as a MemQL
   deployable -- configured entirely in the Deployables app, previewed end to
   end against a Shopify development store before it serves, flipped live, and
@@ -295,7 +297,7 @@ approves, in what order, what is notified -- in its own repository's DSL, over
 the pack's concepts. Reviews is an existing pack the product consumes.
 This is the connector record's D8 (2.7). Section 7 draws the line.
 
-### D7 (derived) -- Preview is not an environment -- NEEDS THE OWNER'S CONFIRMATION
+### D7 (derived) -- Preview is not an environment -- CONFIRMED BY THE OWNER, 2026-09-20
 
 The owner's sandbox has to live inside a product whose law is that it has no
 environments (2.6). It can, on this argument, and only on this argument:
@@ -315,6 +317,35 @@ version**; it has a **binding** (the store shoppers reach) and may have a
 **preview binding** (the development store); a **preview** is an authenticated
 operator's view of the candidate. `staging` and `production` are not used as
 identifiers anywhere in this program.
+
+**The owner's ruling (issue memql#5543, question Q4).** The argument above was
+put to the owner on 2026-09-20 and CONFIRMED AS ARGUED, including the part that
+makes it load-bearing: preview is per BUNDLE VERSION rather than per site
+status, so a live deployable serving version N shows version N+1 to its
+operator while N goes on serving the public (section 5, step 4). The narrower
+reading -- preview a draft site only -- was offered and declined, because it
+delivers the sandbox once and never again after go-live.
+
+It is the owner's law, so this is the owner's reading of it, and it is now
+settled rather than derived. What the ruling does NOT do is loosen anything:
+
+- `TestNoEnvironmentBranchingInEngineCode` stays green with an EMPTY exemption
+  map, which is the assertion that D7 was honoured rather than merely asserted.
+  Nothing in this epic is exempted from it and nothing asked to be.
+- Nothing in the engine branches on "this is a preview" to change what the
+  engine DOES. `component/edge/preview.go` makes that literal: a request
+  carrying a valid grant is served from a COPY of the resolved site with two
+  fields substituted -- the candidate version into `bundleRef`, the preview
+  binding's store into `Store` -- and every consumer below that line (the
+  bundle opener, the resolution tail, the inline-script hashes, the content
+  security policy, the runtime-config document) runs unchanged and has no idea
+  a preview is happening. No other file in `component/edge` mentions preview at
+  all, which is the evidence rather than the claim.
+- The vocabulary above is used unchanged from the write guard
+  (`component/memql/site_preview_rules.go`) through the readiness answer to the
+  label on the screen. A synonym anywhere in that chain would be a place two
+  readers could disagree about which store a version talks to, which is the one
+  confusion this whole epic exists to prevent.
 
 ### D8 (derived) -- The development store is what the preview binding points at
 
@@ -427,7 +458,7 @@ delivers step 2 once and never again.
 | | Gap | Evidence | Blocks |
 |---|---|---|---|
 | G1 | **CLOSED, memql#5534.** A storefront cannot reach Shopify. The policy the edge writes is the generic one for every kind: `connect-src 'self'` plus the site and identity origins; `img-src 'self' data: blob:`. A browser call to the Storefront API and every Shopify-hosted image are refused. Nothing in `component/edge/csp.go` or its tests names a store. | `policyForSite`, `component/edge/csp.go` | the whole product epic |
-| G2 | No preview, and no go-live guard. A draft site is `http.NotFound` for everybody; `status` and `binding` are written independently, so a site can go live bound to test data, or be exercised against the real store and take real orders. | the `switch` in `component/edge/handler.go`; no occurrence of "preview" in `component/edge` | section 5 entirely |
+| G2 | **CLOSED, epic memql#5531.** No preview, and no go-live guard. A draft site was `http.NotFound` for everybody; `status` and `binding` were written independently, so a site could go live bound to test data, or be exercised against the real store and take real orders. The site row carries a candidate version and a preview binding now; the edge serves the candidate to an authorized operator and to nobody else, for a draft site AND a live one; and both directions of the guard are typed refusals the OS can read BEFORE the click, so an illegal act is absent rather than drawn and refused. | the `switch` in `component/edge/handler.go`; no occurrence of "preview" in `component/edge` | section 5 entirely |
 | G3 | **Engine half CLOSED, memql#5535** -- the tail is the site's own choice, so a product may keep a multi-page bundle AND the storefront kind; the product half is memql-fylo#21. Runtime binding and build-time catalog are incompatible. The storefront bakes its catalog into prerendered pages; a bundle exercised against the development store and then promoted would serve the development store's products. The engine resolved this in its own design by making the kind an SPA -- `handler.go` gives it the `index.html` fallback because "a shopify_storefront IS a spa bundle" -- and the product declared `kind: static` to get the opposite behaviour. | `getStaticPaths` in `clients/storefront/src/pages/products/[handle].astro`; the resolution tail in `component/edge/handler.go` | Q1, and the product's catalog work |
 | G4 | **CLOSED, epic memql#5530.** Two records of one store. `site.binding` and `v1:shopify:store` both held the domain and the Storefront token reference, edited in two places, at two authorization tiers (composite owner tier; cluster owner). The binding is `{storeId}` now and the edge resolves both through the store row; the tier answer is D10 below. | 2.1, 2.3 | D5, and the guard in G2 |
 | G5 | A shopper is nobody to MemQL. `createReview` is `@actor` and stamps `ownerUserId: actor.userId`; reviewspack ships no query, so nothing lists published reviews, and `@rowAuthz(owner=...)` would hide them from everybody but their author. OIDC federation is for operators. Unauthenticated routes are a declared allowlist (`component/server/unauthenticated_surface.go`). An anonymous wholesale applicant meets the same wall, and must be able to submit with NO JavaScript (2.8). | `examples/reviewspack/dsl/mutations.memql`; `docs/public/operate/auth/access-model.md` | both packs |

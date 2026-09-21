@@ -72,3 +72,29 @@ builtin commerceCompany {
   from        string
   to          string
 }
+
+/// Ask one store's Storefront API the three questions a storefront preview can answer (epic
+/// memql#5531, issue memql#5547): does the catalog read, does a cart accept a line, does a
+/// checkoutUrl come back.
+///
+/// IT CREATES A CART, and saying so is part of the contract rather than a footnote. That is the
+/// thing being observed, which is why it is pointed at a DEVELOPMENT store by a guard one level up
+/// (component/sitepreview) rather than being safe to run anywhere. Nothing is paid for and no order
+/// is placed; the payment walk happens in a browser on Shopify's hosted checkout and is not
+/// something this cluster can observe at all.
+///
+/// IT WRITES NOTHING. The observation rows these results become are written by `sitePreviewProbe`,
+/// which calls this and owns v1:platform:sitePreviewObservation. The split is the module taxonomy:
+/// the call to Shopify lives in the package this repository classifies as the one that talks to
+/// Shopify, and the rows live with the concept that declares them.
+///
+/// The reply never carries the checkout URL -- only its host. An observation row is readable by
+/// every operator the composite tier admits, and a checkout URL is a live cart somebody else could
+/// pay from.
+@sdk
+@executor("integration.shopify.storefrontProbe")
+@requiresCapability("execute", "app:deployables/preview")
+@description("Ask one store's Storefront API the three questions a storefront preview can answer: does the catalog read, does a cart accept a line, does a checkoutUrl come back. Creates a cart on the store and buys nothing. Returns {storeId, storeDomain, isDevelopment, catalog, cart, checkout}, each of the three {ok, detail, failure, durationMs}.")
+builtin storefrontProbe {
+  storeId  string  @description("The store to ask. The only configured store when omitted.")
+}

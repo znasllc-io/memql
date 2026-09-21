@@ -128,9 +128,9 @@ seed capability cap-owner-delete-data { roleSlug: "owner"  verb: "delete"  resou
 seed capability cap-owner-execute-deployment { roleSlug: "owner"  verb: "execute"  resourceType: "deployment"  predefined: true }
 @description("owner: create agents.")
 seed capability cap-owner-create-agent { roleSlug: "owner"  verb: "create"  resourceType: "agent"  predefined: true }
-@description("owner: manage groups (create).")
+@description("owner: manage groups (create). Covers groupCreate and groupEnsureForAccount, which writes the account-KIND group at its derived id -- the one groupCreate itself refuses to mint.")
 seed capability cap-owner-create-group { roleSlug: "owner"  verb: "create"  resourceType: "group"  predefined: true }
-@description("owner: edit groups -- rename, archive, and place or remove a member. The verb every group builtin but groupCreate checks (epic memql#5165, D7), because placing somebody into a client's group is an edit OF THE GROUP rather than a change to the person: the person's own row is untouched, and what changes is who the group admits. Rank governance narrows it further -- the target must rank strictly below the caller.")
+@description("owner: edit groups -- rename, archive, place or remove a member, and archive every group an account has when the account is archived. The verb every group builtin checks except the two that WRITE a group (groupCreate and groupEnsureForAccount, which check create), because placing somebody into a client's group is an edit OF THE GROUP rather than a change to the person: the person's own row is untouched, and what changes is who the group admits. Rank governance narrows it further -- the target must rank strictly below the caller.")
 seed capability cap-owner-update-group { roleSlug: "owner"  verb: "update"  resourceType: "group"  predefined: true }
 @description("owner: read the RBAC role catalog.")
 seed capability cap-owner-read-role { roleSlug: "owner"  verb: "read"    resourceType: "role"  predefined: true }
@@ -204,9 +204,9 @@ seed capability cap-admin-delete-data { roleSlug: "admin"  verb: "delete"  resou
 seed capability cap-admin-execute-deployment { roleSlug: "admin"  verb: "execute"  resourceType: "deployment"  predefined: true }
 @description("admin: create agents (CanCreateAgent).")
 seed capability cap-admin-create-agent { roleSlug: "admin"  verb: "create"  resourceType: "agent"  predefined: true }
-@description("admin: manage groups (CanManageGroup -- create).")
+@description("admin: manage groups (CanManageGroup -- create). Covers groupEnsureForAccount too, which writes an account's own group.")
 seed capability cap-admin-create-group { roleSlug: "admin"  verb: "create"  resourceType: "group"  predefined: true }
-@description("admin: edit groups -- rename, archive, and place or remove a member (epic memql#5165, D7). The Users app's group page runs on this verb, and its floor is the app's own: an admin manages people, and a group is how people reach a client's work.")
+@description("admin: edit groups -- rename, archive, place or remove a member, and archive an account's groups on its cascade (epic memql#5165, D7). The Users app's group page runs on this verb, and its floor is the app's own: an admin manages people, and a group is how people reach a client's work.")
 seed capability cap-admin-update-group { roleSlug: "admin"  verb: "update"  resourceType: "group"  predefined: true }
 @description("admin: read the RBAC role catalog.")
 seed capability cap-admin-read-role { roleSlug: "admin"  verb: "read"    resourceType: "role"  predefined: true }
@@ -653,6 +653,22 @@ seed capability cap-developer-execute-app-deployables-retire { roleSlug: "develo
 seed capability cap-owner-execute-app-deployables-domains { roleSlug: "owner"  verb: "execute"  resourceType: "app:deployables/domains"  predefined: true }
 @description("developer: the domains part of the Deployables app -- bind or remove a custom domain (memql#5301).")
 seed capability cap-developer-execute-app-deployables-domains { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/domains"  predefined: true }
+
+// ---- app:deployables/preview -- publish a candidate version and exercise it ----
+//
+// OWNER AND DEVELOPER, and the line between this part and `publish` is the one
+// epic memql#5531 draws. Publishing a CANDIDATE and exercising it against a
+// development store changes nothing about what the public is served; PROMOTING
+// it is what makes the public see it, and that is `publish`, beside go live,
+// pause and roll back. So a person may be granted the whole of preparing and
+// proving a storefront without being able to put it in front of a shopper.
+//
+// Setting the PREVIEW BINDING is deliberately not in here: it names a
+// v1:shopify:store row, so it carries `store` like every other act that does.
+@description("owner: the preview part of the Deployables app -- publish a candidate version, exercise it against a development store, open and end a preview (memql#5531).")
+seed capability cap-owner-execute-app-deployables-preview { roleSlug: "owner"  verb: "execute"  resourceType: "app:deployables/preview"  predefined: true }
+@description("developer: the preview part of the Deployables app -- publish a candidate version, exercise it against a development store, open and end a preview (memql#5531).")
+seed capability cap-developer-execute-app-deployables-preview { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/preview"  predefined: true }
 
 // ---- app:deployables/store -- attach the Shopify store a storefront fronts ----
 //
