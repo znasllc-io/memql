@@ -239,6 +239,11 @@ surface in the shell that read as a single thought.
   is measured (`kit/useWide`), not left to a container query. **Width is for
   what needs it:** records, tables and commands take the pane; a sentence
   keeps a readable measure and a field keeps a field's width.
+- **Side by side, the accented name is the step on the stage.** The mark says
+  how far a step has got; the name says where the person is. They are the same
+  step nearly always, and not when an answered step is still showing -- choose
+  a repository and the stage went on saying "Repository" while the rail lit
+  "Review". A stopped step keeps its own colour wherever the person is.
 - **One question a step.** A step that asks three things is three steps. The
   add-a-deployable wizard's Source step used to be the kind of source, then
   two loose buttons (connect GitHub, or use a token), then a second stack of

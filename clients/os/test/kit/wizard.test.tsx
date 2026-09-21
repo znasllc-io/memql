@@ -1,5 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import type { Stop } from "../../src/kit";
 import { Wizard } from "../../src/kit/Wizard";
@@ -193,6 +195,28 @@ describe("side by side, when there is room", () => {
     expect(within(stage).getByText("One line, on the machine itself.")).toBeTruthy();
     // The rail's line is the name and the answer; the sentence is the stage's.
     expect(screen.getAllByText("One line, on the machine itself.")).toHaveLength(1);
+  });
+
+  // THE ACCENTED NAME IS THE STEP ON THE STAGE. The accent was the state's
+  // ("waiting on you"), which is the open step nearly always -- and not when a
+  // step is answered and still showing. Found in a rendered add-a-deployable:
+  // with a repository chosen the stage said "Repository" and the rail lit
+  // "Review". jsdom resolves no colour, so this pins the two halves the fix
+  // rests on: the markup says which step is on the stage, and the stylesheet
+  // keys the accent on that rather than on the state alone.
+  it("marks the step on the stage in the rail, whatever state that step is in", () => {
+    mount({ layout: "split", open: "name", steps: STEPS.map((step) => (step.id === "name" ? { ...step, openable: true, body: <p>its name</p> } : step)) });
+    const aside = document.querySelector(".os-wizard-aside") as HTMLElement;
+    const open = [...aside.querySelectorAll(".os-rail > li")].filter((li) => li.getAttribute("data-open") === "true");
+    // One step is on the stage, and it is the answered one -- not the one waiting.
+    expect(open.map((li) => li.getAttribute("data-state"))).toEqual(["done"]);
+
+    const css = readFileSync(join(__dirname, "..", "..", "src", "styles", "index.css"), "utf8");
+    const split = '.os-wizard[data-layout="split"] .os-rail[data-scale="page"] .os-rail-stage';
+    // The step on the stage takes the accent...
+    expect(css).toContain(`${split}[data-open="true"]:is([data-state="done"], [data-state="complete"], [data-state="waiting"]) .os-rail-label {\n  color: var(--os-accent);`);
+    // ...and a step that is only NEXT gives it up. Its mark still says so.
+    expect(css).toContain(`${split}:is([data-state="open"], [data-state="current"]):not([data-open="true"]) .os-rail-label {\n  color: var(--os-ink);`);
   });
 
   it("changes what the stage shows from the rail", () => {

@@ -8490,6 +8490,19 @@ a.os-button {
 .os-wizard[data-layout="split"] .os-rail[data-scale="page"] .os-rail-chev {
   display: none;
 }
+/* THE ACCENTED NAME IS THE STEP ON THE STAGE. The accent was the STATE's -- a
+   step waiting on the person -- which is the open step nearly always, and not
+   when a step is answered and still showing: choose a repository and the
+   stage went on saying "Repository" while the rail lit "Review". Side by side
+   the name says WHERE YOU ARE and the mark says HOW FAR IT HAS GOT, so the
+   two can differ without either being wrong. A stopped or skipped step keeps
+   its own colour wherever the person is: that is news, not position. */
+.os-wizard[data-layout="split"] .os-rail[data-scale="page"] .os-rail-stage:is([data-state="open"], [data-state="current"]):not([data-open="true"]) .os-rail-label {
+  color: var(--os-ink);
+}
+.os-wizard[data-layout="split"] .os-rail[data-scale="page"] .os-rail-stage[data-open="true"]:is([data-state="done"], [data-state="complete"], [data-state="waiting"]) .os-rail-label {
+  color: var(--os-accent);
+}
 .os-wizard-mark {
   flex: none;
   align-self: flex-start;
