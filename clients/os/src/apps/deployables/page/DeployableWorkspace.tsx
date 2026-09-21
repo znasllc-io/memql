@@ -8,7 +8,7 @@ import { AppWindow, Building2, ChevronRight, FileArchive, GitBranch, Globe, Hamm
 import { Button, Caption, Notice, useLiveView } from "../../../kit";
 import { ActivityTarget } from "../../../kit/SemanticActivity";
 import { accountNameFrom, type AccountRow } from "../../accounts/rows";
-import { domainFromRow } from "../domains";
+import { domainFromRow, isListedDomain } from "../domains";
 import { shortVersion, sourceLabel, type DeploymentRow, type PackageRow } from "../packages/rows";
 import { bundleForm, storefrontBinding, type SiteRow } from "../rows";
 import { kindLabel } from "../targets";
@@ -78,7 +78,7 @@ function Piece({ icon, label, detail, onClick }: { icon: ReactNode; label: strin
 
 function DomainPiece({ site, onClick }: { site: SiteRow; onClick: () => void }) {
   const { source } = useCustomDomains();
-  const view = useLiveView(source, `workspace-domains:${site.id}`, rows => rows.map(domainFromRow).filter(d => d.siteId === site.id && d.status !== "removed"));
+  const view = useLiveView(source, `workspace-domains:${site.id}`, rows => rows.map(domainFromRow).filter(d => d.siteId === site.id && isListedDomain(d)));
   const rows = view?.snapshot.rows ?? [];
   const ready = view?.snapshot.state === "live";
   const detail = view?.snapshot.error ? "Could not read domains" : rows.length ? rows.map(d => `${d.hostname}${d.status === "live" ? "" : ` · ${d.status.replace(/_/g, " ")}`}`).join(", ") : ready ? "Add a domain" : "Reading domains…";
