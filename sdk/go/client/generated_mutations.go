@@ -15187,6 +15187,38 @@ func UpdateSiteSettingsBuild(args UpdateSiteSettingsArgs) string {
 	return b.String()
 }
 
+// UpdateSiteShopperForms -- Turn this deployable's SHOPPER SURFACE on or off (epic memql#5532, issue memql#5551).
+// WHAT IT SWITCHES: POST /_memql/forms/{pack}/{name} and GET /_memql/reads/{pack}/{name} on this site's own origin, for every form and read a LOADED pack declares. Off, both answer 404 -- not 403, because a site that has not turned this on must look like it has no such path rather than like it has one it is guarding.
+// WHAT IT DOES NOT SWITCH, and this is the part worth being plain about: it does not decide WHAT is reachable. That is the pack's declaration (component/memql/shopper_surface.go), it is in Go, it is init-time, and nothing undeclared is reachable at any setting of this field. Turning this on publishes exactly the forms and reads the packs this cluster has ENABLED have declared, and nothing else.
+// `shopperForms boolean!` rather than an optional with `?? false`: this is a deliberate act in both directions and "off" must be expressible as a write rather than only as an omission -- updateSiteSettings' clearing problem, in boolean.
+// AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite, exactly as on updateSiteBundle and updateSiteSettings: the row's owner, or a cluster owner through the explicit escape, and a systemOwned row refused for both. A cluster-owned site cannot usefully turn it on either way -- the shopper write borrows the row's ownerUserId and an empty one has no authority to borrow -- but the refusal for that lives at the edge, where the answer can be a page rather than a write error nobody sees.
+//
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteShopperForms"] in generated_concepts.go).
+type UpdateSiteShopperFormsArgs struct {
+	SiteId       string
+	ShopperForms bool
+}
+
+// UpdateSiteShopperForms calls the engine mutation updateSiteShopperForms.
+func (qc *QueryClient) UpdateSiteShopperForms(ctx context.Context, args UpdateSiteShopperFormsArgs) (*Result, error) {
+	call := UpdateSiteShopperFormsBuild(args)
+	return qc.executeNamed(ctx, "updateSiteShopperForms", call)
+}
+
+func UpdateSiteShopperFormsBuild(args UpdateSiteShopperFormsArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateSiteShopperForms(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("shopperForms: ")
+	b.WriteString(fmt.Sprintf("%v", args.ShopperForms))
+	b.WriteString(")")
+	return b.String()
+}
+
 // UpdateSiteStatus -- Move a site between draft / live / disabled.
 // Owner-or-cluster-owner, enforced by guardRowAuthzWrite against v1:platform:site's composite tier rather than by anything here -- see updateSiteBundle's note for why the split is where it is.
 //

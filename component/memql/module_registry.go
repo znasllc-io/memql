@@ -345,6 +345,18 @@ func packModuleRows(states map[string]PackStateRow) ([]ModuleRow, map[string]str
 		}
 		detailParts = append(detailParts, loadedInert)
 
+		// WHAT THIS PACK PUBLISHES TO THE PUBLIC, named before the flip
+		// rather than discovered after it (epic memql#5532). Enabling a
+		// storefront pack is not only "more constructs load": it puts a
+		// write endpoint and a public read on every deployable whose
+		// shopperForms is on, and an operator deciding whether to enable it
+		// is owed that sentence on the screen where they decide.
+		if routes := shopperRoutesForPack(name); len(routes) > 0 {
+			detailParts = append(detailParts, fmt.Sprintf(
+				"when enabled, publishes %d shopper route(s) on any deployable whose "+
+					"shopperForms is on: %s", len(routes), strings.Join(routes, ", ")))
+		}
+
 		plugins := PluginsForPackDomain(name)
 		for _, p := range plugins {
 			bound[p] = struct{}{}
@@ -744,5 +756,22 @@ func moduleEnvSurface(manifest *envregistry.Manifest, envComponents []string) []
 		out = append(out, v)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// shopperRoutesForPack names this pack's declared shopper surface, sorted.
+//
+// READ FROM THE REGISTRY rather than from a list kept beside it, so a pack
+// that declares a third route says so on the operator's screen the day it
+// lands rather than the day somebody remembers this function.
+func shopperRoutesForPack(domain string) []string {
+	var out []string
+	for _, entry := range ShopperSurface() {
+		if entry.Pack != domain {
+			continue
+		}
+		out = append(out, entry.Kind+" "+entry.Pack+"/"+entry.Name)
+	}
+	sort.Strings(out)
 	return out
 }

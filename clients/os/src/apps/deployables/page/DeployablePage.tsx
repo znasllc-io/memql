@@ -401,6 +401,15 @@ export function DeployablePage({
                 api proxy
               </Chip>
             ) : null}
+            {/* PUBLIC WRITES ARE A FACT WORTH SEEING FROM THE LIST, not only
+                from the settings stop. A deployable that accepts posts from
+                anyone is the one an operator wants to notice while scanning,
+                and the chip is how it says so without being opened. */}
+            {site.shopperForms ? (
+              <Chip title="Visitors can submit forms to this app from its own address.">
+                public forms
+              </Chip>
+            ) : null}
             {site.systemOwned ? (
               <Chip title="Managed by the cluster. Cannot be deleted here.">
                 system-owned
