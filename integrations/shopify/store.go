@@ -36,6 +36,17 @@ type Store struct {
 	Health             map[string]any
 	OwnerUserID        string
 	RedactedAt         string
+	// IsDevelopment is v1:shopify:store.isDevelopment (epic memql#5530): the
+	// store a storefront is EXERCISED against rather than the one shoppers
+	// reach. It is attached and mirrored like any other, so nothing in this
+	// package treats it differently -- the flag is read here so the go-live
+	// guard and the preview probe can ask the question, and for no other
+	// reason. See component/sitepreview for what asking it decides.
+	IsDevelopment bool
+	// DevelopmentOfStoreID is the live store this one stands in for, or empty.
+	// ABSENT MEANS "NOT PAIRED", never "live": a development store nobody has
+	// paired is still a development store.
+	DevelopmentOfStoreID string
 }
 
 // Store lifecycle statuses, mirroring the concept's enum.
@@ -261,20 +272,22 @@ func storeFromRow(p map[string]any) (Store, bool) {
 		return Store{}, false
 	}
 	s := Store{
-		ID:                 shortID(mapString(p, "id")),
-		Domain:             mapString(p, "domain"),
-		Name:               mapString(p, "name"),
-		AppClientID:        mapString(p, "appClientId"),
-		AdminTokenRef:      mapString(p, "adminTokenRef"),
-		StorefrontTokenRef: mapString(p, "storefrontTokenRef"),
-		WebhookSecretRef:   mapString(p, "webhookSecretRef"),
-		APIVersion:         mapString(p, "apiVersion"),
-		ProtectedDataLevel: mapString(p, "protectedDataLevel"),
-		Plan:               mapString(p, "plan"),
-		Status:             mapString(p, "status"),
-		OwnerUserID:        mapString(p, "ownerUserId"),
-		RedactedAt:         mapString(p, "redactedAt"),
-		ScopesGranted:      mapStringSlice(p, "scopesGranted"),
+		ID:                   shortID(mapString(p, "id")),
+		Domain:               mapString(p, "domain"),
+		Name:                 mapString(p, "name"),
+		AppClientID:          mapString(p, "appClientId"),
+		AdminTokenRef:        mapString(p, "adminTokenRef"),
+		StorefrontTokenRef:   mapString(p, "storefrontTokenRef"),
+		WebhookSecretRef:     mapString(p, "webhookSecretRef"),
+		APIVersion:           mapString(p, "apiVersion"),
+		ProtectedDataLevel:   mapString(p, "protectedDataLevel"),
+		Plan:                 mapString(p, "plan"),
+		Status:               mapString(p, "status"),
+		OwnerUserID:          mapString(p, "ownerUserId"),
+		RedactedAt:           mapString(p, "redactedAt"),
+		ScopesGranted:        mapStringSlice(p, "scopesGranted"),
+		IsDevelopment:        mapBool(p, "isDevelopment"),
+		DevelopmentOfStoreID: shortID(mapString(p, "developmentOfStoreId")),
 	}
 	if h, ok := rowValue(p, "health").(map[string]any); ok {
 		s.Health = h
@@ -375,4 +388,19 @@ func mapInt(m map[string]any, key string) int {
 		return num.ClampFloat64(v)
 	}
 	return 0
+}
+
+// mapBool reads a boolean payload field. A decoded payload carries a real bool;
+// the string arm is for a row that came back through a projection that
+// stringified it, and anything else is false -- which is the safe reading for
+// isDevelopment, since the question it answers is "may this reach shoppers".
+func mapBool(m map[string]any, key string) bool {
+	switch v := m[key].(type) {
+	case bool:
+		return v
+	case string:
+		return v == "true"
+	default:
+		return false
+	}
 }

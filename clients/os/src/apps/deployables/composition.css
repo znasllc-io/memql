@@ -167,3 +167,97 @@
 .deployable-source-view .os-source-app { background: none; border: 0; border-bottom: 1px solid var(--os-line); border-radius: 0; padding: 12px 0; }
 .deployable-source-view .os-report-heading, .deployable-dialog .os-report-heading, .deployable-journey .os-report-heading { font-size: var(--os-text-sm); font-weight: 500; letter-spacing: normal; text-transform: none; }
 .deployable-workspace .os-head-actions > .os-icon-button { min-width: 36px; min-height: 36px; }
+
+/* ===========================================================================
+   PREVIEW (epic memql#5531)
+   ===========================================================================
+   THE TWO LANES ARE THE ONE BOLD THING ON THIS SECTION, and everything under
+   them is deliberately quiet. A storefront preview is one sentence -- there is
+   a version that serves and a version being exercised, and each talks to a
+   different store -- so the two readings share a marker column and a grid
+   rather than sitting in two cards. Two cards would say "two objects"; the
+   whole point is that they are two readings of ONE deployable.
+
+   THE MARKER IS SHAPE, NOT COLOUR. Filled for the version that serves, a ring
+   for the one that does not. A reader who cannot tell the theme accent from
+   the muted ink still reads which is which, and so does a monochrome screen.
+
+   Every value here is a theme token. The palette belongs to the theme packs
+   and the brand tokens are shared source; nothing in this app defines one. */
+.deployable-preview { border-top: 1px solid var(--os-line); padding-top: 18px; margin-top: 18px; display: grid; gap: 14px; }
+.deployable-preview > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.deployable-preview h3 { font: 500 var(--os-text-base) var(--os-font); margin: 0; }
+
+.preview-lanes { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; border: 1px solid var(--os-line); border-radius: 12px; overflow: hidden; background: var(--os-plate); }
+/* THE VERSION COLUMN IS SIZED TO A VERSION, not to a share of the row. At
+   `minmax(0,1fr)` a seven-character hash sat in a 500px cell and the store --
+   the fact the lane exists to put beside it -- started two thirds of the way
+   across the window, with nothing between them. They are ONE statement ("this
+   version talks to that store") and they have to read as one. */
+.preview-lane { display: grid; grid-template-columns: 22px 92px minmax(7ch,max-content) minmax(0,1fr); align-items: center; gap: 12px 16px; padding: 14px 16px; font-size: var(--os-text-sm); }
+.preview-lane + .preview-lane { border-top: 1px solid var(--os-line); }
+.preview-lane-mark { width: 9px; height: 9px; border-radius: 50%; justify-self: center; }
+/* Filled: this version is what the public is served. */
+.preview-lane[data-serving="true"] .preview-lane-mark { background: var(--os-accent); }
+/* A ring: published, and serving nobody. */
+.preview-lane[data-serving="false"] .preview-lane-mark { border: 1.5px solid var(--os-muted); }
+.preview-lane-role { color: var(--os-muted); }
+.preview-lane > strong { font-weight: 500; overflow-wrap: anywhere; }
+.preview-lane-empty { color: var(--os-muted); font-weight: 400; }
+.preview-lane-store { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; min-width: 0; color: var(--os-ink); }
+.preview-lane-store > svg { color: var(--os-muted); align-self: center; flex-shrink: 0; }
+.preview-lane-store strong { font-weight: 500; overflow-wrap: anywhere; }
+.preview-lane-store small, .preview-lane-store-none { color: var(--os-muted); }
+.preview-lane-store-empty { font: inherit; color: var(--os-accent); background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+.preview-lane-store-empty:hover { text-decoration: underline; }
+
+.preview-acts, .preview-candidate-choose { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.preview-candidate-choose .os-input, .preview-candidate-choose .os-select { max-width: 22rem; }
+
+.preview-link { border: 1px solid var(--os-accent); border-radius: 12px; padding: 14px 16px; display: grid; gap: 8px; background: var(--os-accent-soft); }
+.preview-link .os-subhead { margin: 0; }
+.preview-link-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.preview-link-open { display: inline-flex; align-items: center; gap: 7px; color: var(--os-accent); font-size: var(--os-text-sm); }
+
+/* A SUBHEAD NEEDS AIR ABOVE IT. The section's own gap is for peers; these two
+   blocks start a new subject after a row of controls, and flush against them
+   they read as part of the same group -- which the pixels said and no
+   assertion could. */
+.preview-watched, .preview-open { margin-top: 10px; }
+.preview-watched { display: grid; gap: 8px; }
+.preview-watched .os-subhead { margin: 0; }
+.preview-observations { list-style: none; margin: 0; padding: 0; display: grid; }
+/* AN ORDERED READING, NOT A NUMBERED ONE. The four steps are a sequence -- no
+   cart without a catalog, no order without a checkout -- so reading down finds
+   the first step that did not answer. Numbered markers would say the same
+   thing twice. */
+.preview-observation { display: grid; grid-template-columns: 22px 78px minmax(0,1fr) auto; gap: 12px; align-items: baseline; padding: 9px 0; border-bottom: 1px solid var(--os-line); font-size: var(--os-text-sm); }
+.preview-observation:last-child { border-bottom: 0; }
+.preview-observation-mark { justify-self: center; align-self: center; display: flex; color: var(--os-muted); }
+.preview-observation[data-state="answered"] .preview-observation-mark { color: var(--os-accent); }
+.preview-observation[data-state="failed"] .preview-observation-mark { color: var(--os-error); }
+/* UNMEASURED KEEPS THE MUTED RING and the row keeps full contrast on its text:
+   a step nobody has asked is not a failure and must not be dimmed into one. */
+.preview-observation-label { color: var(--os-muted); }
+.preview-observation-said { min-width: 0; }
+.preview-observation-said strong { font-weight: 500; display: block; }
+.preview-observation-said small { color: var(--os-muted); display: block; margin-top: 3px; overflow-wrap: anywhere; }
+.preview-observation-took { color: var(--os-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.preview-open { display: grid; gap: 8px; }
+.preview-open .os-subhead { margin: 0; }
+.preview-open ul { list-style: none; margin: 0; padding: 0; display: grid; }
+.preview-open li { display: grid; grid-template-columns: minmax(0,auto) minmax(0,1fr) auto; gap: 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--os-line); font-size: var(--os-text-sm); }
+.preview-open li:last-child { border-bottom: 0; }
+.preview-open small { color: var(--os-muted); overflow-wrap: anywhere; }
+
+@container (max-width: 680px) {
+  .preview-lane { grid-template-columns: 22px minmax(0,1fr); row-gap: 6px; }
+  .preview-lane-role { grid-column: 2; }
+  .preview-lane > strong { grid-column: 2; }
+  .preview-lane-store { grid-column: 2; }
+  .preview-observation { grid-template-columns: 22px minmax(0,1fr) auto; }
+  .preview-observation-label { grid-column: 2; }
+  .preview-observation-said { grid-column: 2; }
+  .preview-observation-took { grid-column: 3; grid-row: 1; }
+}

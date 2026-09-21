@@ -17,6 +17,7 @@ import { liveUrlFor, ownerLabel, siteName, type SiteRow } from "../rows";
 import type { CredentialRow } from "../sources/rows";
 import { confirmationWordFor } from "../words";
 import { actsFor, runForApp, siblingRunInFlight, type ActName } from "./acts";
+import { usePreviewReadiness, usePreviewWrites } from "../preview/usePreview";
 import { DeployableWorkspace, type WorkspaceDetail } from "./DeployableWorkspace";
 import { DetailDialog } from "./DetailDialog";
 import { RuntimeSettingsPanel } from "./stops/RuntimeSettings";
@@ -158,7 +159,29 @@ export function DeployablePage({
   const name = site.title || site.packageDeployableName || siteName(site);
   const url = liveUrlFor(site.hostname);
 
-  const reading = actsFor({ site, pkg, run, siblingRun, can, deleting, releasing: site.hostname });
+  // WHAT THE ENGINE SAYS IS LEGAL about this deployable's candidate (epic
+  // memql#5531). The bar offers a promotion only when the readiness has landed
+  // AND says yes -- absent, never disabled, and the Preview section below
+  // draws the reason when the answer is no.
+  const previewRead = usePreviewReadiness(site.id);
+  const previewReadiness = previewRead.readiness;
+  // The promotion is the one preview write the BAR makes, so the hook lives
+  // here rather than in the section: rule 12 puts every act that changes what
+  // the public is served on the bar, and an act needs its writer beside it.
+  const previewWrites = usePreviewWrites(previewRead.reread);
+  const reading = actsFor({
+    site,
+    pkg,
+    run,
+    siblingRun,
+    can,
+    deleting,
+    releasing: site.hostname,
+    preview:
+      previewReadiness === null
+        ? null
+        : { hasCandidate: previewReadiness.hasCandidate, canPromote: previewReadiness.canPromote },
+  });
   // WHO DEPLOYED IT, off the rows already here: this app's newest run's
   // requester, else the site's owner (the deployer since PR #5284), else the
   // source's. Only the name is looked up, and only where the roster is
@@ -181,6 +204,13 @@ export function DeployablePage({
         return;
       case "Restore":
         void lifecycle.restore(site.id);
+        return;
+      case "Promote the candidate":
+        // THE VERSION IS NAMED, and the naming is the safety: the engine
+        // refuses a promotion whose candidate is not the one stored, so a
+        // candidate republished between this page reading it and the click
+        // is refused rather than promoted by surprise.
+        if (previewReadiness !== null) void previewWrites.promote(site.id, previewReadiness.candidateRef);
         return;
       case "Cancel":
         if (pkg !== null && run !== null) void headActions.cancel(pkg.id, run.id).then(reseed);
@@ -389,7 +419,7 @@ export function DeployablePage({
 
           <DeployableWorkspace key={site.id}
             canSources={can.sources} onUpdate={reading.acts.some(a => a.name === "Deploy the update") && !headActions.busy ? () => act("Deploy the update") : undefined}
-            site={site} pkg={pkg} run={run} accounts={accounts} canDomains={can.domains} canStore={can.store}
+            site={site} pkg={pkg} run={run} runs={timelineRows} can={can} accounts={accounts} canDomains={can.domains} canStore={can.store}
             timelineState={deployments?.snapshot.state ?? "disconnected"}
             timelineError={deployments?.snapshot.error ?? ""} onRetryRead={reseed}
             onInspect={setDetail} onOpenSource={() => pkg && onOpenSource(pkg.id)}

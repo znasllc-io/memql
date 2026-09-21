@@ -218,6 +218,39 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// different question from "which exist", and stamping there would hand
 		// a caller-scoped read the engine's escape.
 		"integrations/customdomain": "the custom-domain reconciliation sweep, server-initiated; its six @serverOnly writers are refused without it",
+		// integrations/sitepreview mints a storefront preview and records what
+		// the engine observed of one (epic memql#5531). Its three @serverOnly
+		// writers -- createSitePreviewGrant, recordSitePreviewObservation and
+		// the edge's touch -- are refused without the stamp, because origin
+		// defaults to CLIENT and the function validator answers with a WARN in
+		// the log and the row silently not appearing.
+		//
+		// THE STAMP DOES NOT TOUCH THE ACTOR, and that is what bounds it. The
+		// grant is written under the CALLER's own identity, so
+		// createSitePreviewGrant stamps ownerUserId from actor.userId and the
+		// composite owner tier still decides every row -- a caller can only
+		// ever write a preview that is their own. Writing under a synthetic
+		// actor instead would produce a grant owned by the deployment and hide
+		// every operator's own previews from them.
+		//
+		// It is deliberately NOT stamped on the site and store reads the
+		// capabilities make, for integrations/customdomain's reason exactly:
+		// those run under the caller and ARE the authorization check, and
+		// stamping there would hand a caller-scoped read the engine's escape.
+		// The one system-actor read in the package (the open-preview index the
+		// passive order observation walks) is a clusterOwner-tier read that
+		// answers nobody's question but the cluster's.
+		"integrations/sitepreview": "the preview mint and the observation recorder -- server-initiated, three @serverOnly writers refused without it, and the actor is never touched so the composite owner tier still decides every row (epic memql#5531)",
+		// component/edge records that it HONOURED a preview grant
+		// (touchSitePreviewGrant, @serverOnly). The edge already reads the
+		// site, the custom domain, the account door, the bound store and the
+		// grant itself under its own synthetic cluster-owner actor; this is
+		// the one WRITE it makes, it writes one timestamp on a row it just
+		// resolved, and it is throttled to at most one per grant per minute
+		// and run detached from the request. `lastSeenAt` is the deployment's
+		// own observation of its own serving path, which is exactly what a
+		// client-writable field could not be.
+		"component/edge": "the preview grant's lastSeenAt -- the deployment's own record that it served a preview, one @serverOnly write on a row the edge just resolved (epic memql#5531)",
 		// integrations/groups writes v1:identity:group and
 		// v1:identity:groupMembership, which are UNOWNED rows (epic
 		// memql#5165 D2): no principal owns them, so a client-origin write

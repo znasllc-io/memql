@@ -23,10 +23,10 @@ Edition `2026`, grammar version `2026.09-before-write-error-accessor-77cda60c`.
 | [Annotations](#annotations) | 74 |
 | [Keywords](#keywords) | 37 |
 | [Operators](#operators) | 22 |
-| [Field types](#field-types) | 8 |
+| [Field types](#field-types) | 12 |
 | [Functions and methods](#functions-and-methods) | 46 |
 | [Builtins](#builtins) | 10 |
-| **Total** | **215** |
+| **Total** | **219** |
 
 ## Constructs
 
@@ -140,11 +140,11 @@ The reserved words that are not constructs: the statements of a body, the clause
 
 | Name | Written | What it means |
 |---|---|---|
-| `accept` | `"accept" "{" <name> { "," <name> } "}"` | Write-block sugar: `accept { name, ... }` lists the public fields the mutation accepts -- each auto-binds to its same-named arg (`name` -> `name: args.name`). Every name must be a declared arg. Nested inside insert{}/update{} (or top-level, which means insert). Never mixed with loose fields. |
+| `accept` | `"accept" "{" ( <name> [ "," ] )* "}"` | Write-block sugar: `accept { name, ... }` lists the public fields the mutation accepts -- each auto-binds to its same-named arg (`name` -> `name: args.name`). Every name must be a declared arg. Nested inside insert{}/update{} (or top-level, which means insert). Never mixed with loose fields. |
 | `actor` | `actor` | Reserved: the auth envelope. Closed member set (#2623): userId, role, identityId, isClusterOwner, primaryEmail, now, plus the legacy isOwner alias. Reading it requires @actor in the construct preamble (#2621). Members: actor.userId, actor.role, actor.identityId, actor.isClusterOwner, actor.primaryEmail, actor.now, actor.isOwner. |
 | `args` | `"args" "{" <field>* "}"  /  args` | Input-schema block: declares caller-passed args read as args.X in the body. Reserved namespace for caller-passed inputs (args.X). |
 | `asOf` | `"asOf" ( "latest" | <expression> )` | Query clause: read the stream as of a moment -- `asOf latest`, or `asOf args.at ?? latest`. Query-only (core-builtins ADR 2.3). |
-| `auth` | `"auth" "{" <map-entry>* "}"` | Provider block: vendor auth (e.g. apiKey env("...")). |
+| `auth` | `"auth" "{" <auth-entry>* "}"` | Provider block: vendor auth (e.g. apiKey env("...")). |
 | `branch` | `branch` | One list of a parallel statement: `branch <label> { ... }`. |
 | `case` | `case` | A switch branch: `case <literal>[, <literal>] { ... }`. A label is a literal, written once per switch. |
 | `config` | `config` | Reserved namespace for the allow-listed configuration values a body may read, as `config.<key>`. The allow-list is component/config/policy_exposable.go; a key outside it is not readable from the DSL at all, so configuration cannot leak into a construct by accident. |
@@ -155,26 +155,26 @@ The reserved words that are not constructs: the statements of a body, the clause
 | `for` | `"for" <name> "in" <expression> [ "if" <expression> ] "{" <statement>* "}" [ <trailing-clause> ]` | Loop statement: `for item in <source> [if <cond>] { ... }` -- the loop variable and every name bound in the body exist in each iteration only. A return inside ends the body the loop is in. Trailing clause: `on error continue`. |
 | `if` | `"if" <expression> "{" <statement>* "}" { "else" "if" <expression> "{" <statement>* "}" } [ "else" "{" <statement>* "}" ]` | Conditional statement: `if <cond> { ... } else if <cond> { ... } else { ... }`. A name bound in a branch is readable after the chain -- absent if the branch that binds it did not run -- and the branches of one chain may bind the same name. For a conditional VALUE write the expression `p ? a : b`. |
 | `in` | `in` | Membership test: `args.tag in row.tags`, or `row.kind in ["a", "b"]`. The single membership operator (`has` and the `.contains(v)` collection method are retired). |
-| `insert` | `"insert" "{" <write-entry>* "}"` | Mutation block: the row to create. Exactly one insert OR update per mutation. |
+| `insert` | `"insert" "{" ( <write-entry> [ "," ] )* "}"` | Mutation block: the row to create. Exactly one insert OR update per mutation. |
 | `now` | `now` | Reserved: RFC3339 timestamp captured at eval start. |
 | `on` | `"on" "surface" "(" <string> ")" | "on" "error" ( "continue" | "stop" )` | Trailing clauses: `on surface("<name>")` names where an action runs; `on error continue` records a failed call, for or parallel and goes on, its name left absent (`on error stop` is the default and is not written). |
 | `paginate` | `"paginate" <number>` | Query clause: bound the result to a window -- `paginate 25`. A list-returning query carries paginate, sort, count or @unbounded("reason") (memql#1965). |
 | `parallel` | `"parallel" "{" { "branch" <name> "{" <statement>* "}" } "}" [ "wait" "any" ] [ <trailing-clause> ]` | Parallel statement: `parallel { branch <label> { ... } ... } [wait any]` -- the branches run at once, each a list of its own whose names stay inside it; a failed branch stops the others. A branch cannot return. Trailing clause: `on error continue`. |
-| `params` | `"params" "{" <map-entry>* "}"` | Provider block: the model parameters this provider is called with -- context window, completion cap and the per-million input and output costs the router bills against. Written `params { contextWindow 128000 ... }`, one `key value` pair per line. |
+| `params` | `"params" "{" <param-entry>* "}"` | Provider block: the model parameters this provider is called with -- context window, completion cap and the per-million input and output costs the router bills against. Written `params { contextWindow 128000 ... }`, one `key value` pair per line. |
 | `partition` | `partition` | Reserved: the active partition for this call. |
 | `payload` | `payload` | Reserved: bound-concept row payload (payload.X) -- valid in query filter/shape only (SQL pushdown). |
-| `precondition` | `"precondition" <name> "{" <statement>* "}"` | Automation block: `precondition <name> { ... }`, a deterministic check that must hold before the statements run (Epic 4, memql#2139). |
+| `precondition` | `"precondition" <name> "{" <precondition-entry>* "}"` | Automation block: `precondition <name> { check: <expr> }`, a deterministic check that must hold before the statements run (Epic 4, memql#2139). Its body is `key: value` entries, NOT statements: three keys -- `check:` the boolean expression, required; `literal:` the machine-specific literal it asserts, for the repair loop; `description:` the context the miss signal carries. A block with no `check:` is refused at load. |
 | `publish` | `"publish" <string> "{" <map-entry> { "," <map-entry> } "}"` | Publish statement, in an automation: `publish "<topic>" { key: value, ... }` puts an event on the bus. A logic may not publish (D14): publish from the automation that calls it. |
 | `refine` | `"refine" <lambda>` | Query clause: `refine row => <predicate>`, a predicate the database cannot run, applied in process to each page `paginate` reads, so a page may come back short. Requires paginate; never with count. |
 | `retry` | `"retry" "(" <number> ")"` | Trailing clause of a construct call: `<call> retry(n)` runs a failed call up to n more times. Written after `on surface(...)` and before `on error continue`. |
 | `return` | `"return" [ <construct-call> | <expression> ]` | End the body: `return <expr>`, or `return <call>` for what the call returns. The VALUE IS OPTIONAL -- a bare `return` ends the body with none, which is what an automation writes to leave early out of an `if` branch. A logic's last statement is its return; an automation's return is its run's outcome. |
 | `shape` | `"shape" <name>` | Query clause: names the projection shape for the result -- `shape <name>`. (Also the `shape` construct keyword and the `<expr> with shape(...)` expression.) |
-| `sort` | `"sort" <string> [ "," <string> ]` | Query clause: order the result -- `sort "row.createdAt", "desc"`. Payload keys are bare; row intrinsics take the row. namespace. |
-| `stamp` | `"stamp" "{" <map-entry> { "," <map-entry> } "}"` | Write-block sugar: `stamp { key: value, ... }` carries the server-set fields beside an accept{} list. Nested inside insert{}/update{} (or top-level with accept, which means insert). |
+| `sort` | `"sort" <string> { "," <string> }` | Query clause: order the result -- `sort "row.createdAt", "desc"`. Payload keys are bare; row intrinsics take the row. namespace. |
+| `stamp` | `"stamp" "{" ( <map-entry> [ "," ] )* "}"` | Write-block sugar: `stamp { key: value, ... }` carries the server-set fields beside an accept{} list. Nested inside insert{}/update{} (or top-level with accept, which means insert). |
 | `startsWith` | `startsWith` | String-prefix test: `row.name startsWith "lit"`, a list of prefixes (ANY of), or an arg. An empty list and a blank prefix match nothing (memql#4208). |
 | `switch` | `"switch" <expression> "{" { "case" <literal> { "," <literal> } "{" <statement>* "}" } [ "default" "{" <statement>* "}" ] "}"` | Switch statement: `switch <value> { case <literal>[, <literal>] { ... } default { ... } }` -- the first case whose label equals the value runs, else the default. Its names share the switch's scope, as an if chain's do. |
 | `trace` | `trace` | Reserved engine identifier for the current call's trace context. It is reserved so an args field or a local cannot take the name and shadow it; no construct in the tree reads it today. |
-| `update` | `"update" "{" <write-entry>* "}"` | Mutation block: partial read-merge-write of an existing row (keyed by id). |
+| `update` | `"update" "{" ( <write-entry> [ "," ] )* "}"` | Mutation block: partial read-merge-write of an existing row (keyed by id). |
 | `use` | `use` | File-top import: use <domain>.<construct>.{ names }. |
 | `wait` | `"wait" ( "any" | "all" )` | Trailing clause of a parallel: `wait any` ends it when one branch ends. `wait all` is the default and is not written. |
 
@@ -213,12 +213,16 @@ The type words a concept field, an args field or a schema-body field is declared
 
 | Name | Written | What it means |
 |---|---|---|
+| `any` | `<name> any` | No declared type: the field takes whatever the caller sends, and nothing checks it. It is what an automation's args block writes for the fields of a trigger payload, where the concept the event came from has already declared their types. Write it only there: `any` is the one spelling that buys no validation, and a named type is what makes a wrong value a refusal instead of a surprise further down. |
 | `array` | `<name> array` | Deprecated list spelling. DEPRECATED: write []T instead. |
 | `bool` | `<name> bool` | True or false, and nothing else. There is no truthiness in the language, so a bool field is the only thing a condition may read directly; `false` is a value and is never coalesced away by `??`. |
+| `boolean` | `<name> boolean` | True or false: the second spelling of `bool`, and the same type everywhere. The args validator, the schema a tool advertises and the expression lowering all answer to either word, so which to write is house style -- and `bool` is the one the rest of this table is written in. |
 | `datetime` | `<name> datetime` | An RFC 3339 timestamp, carried as a string. Strings order by byte, so an RFC 3339 field orders by time under `<` and `>`, and `addDuration` and `daysBetween` take and return this type. |
 | `enum` | `<name> enum` | Restricted value set. First-class parameterized form (#2618): `status enum("open", "closed")` -- self-contained, same representation as the legacy `string @enum(...)` pair (which keeps parsing). |
 | `float` | `<name> float` | A number with a fractional part, carried as a JSON number. @minimum and @maximum bound it inclusively, and a value that arrives as an integer is accepted. |
 | `int` | `<name> int` | A whole number, positive or negative. Bound it with @minimum and @maximum, which are inclusive; a discrete numeric set has no annotation, because @enum takes string literals only. |
+| `integer` | `<name> integer` | A whole number: the second spelling of `int`, and the same type everywhere. The args validator accepts a JSON number under either word only when it is whole, and the tool schema emits `"integer"` for both. |
+| `number` | `<name> number` | A JSON number, whole or fractional. Broader than `int`, which refuses a fraction, and the word a tool's or a prompt's schema emits for `float` -- so a field that must take both is `number` or `float`, never `int`. |
 | `object` | `<name> object` | A nested object -- a JSON map of further fields, declared as a block. Read a leaf through the optional-member operator (`row.?lineage.planId`) wherever the object itself may be absent, which the load requires. |
 | `string` | `<name> string` | UTF-8 text of any length. It is the type an enum, a pattern and a length bound narrow, and the one an absent value reads as the empty string in. |
 

@@ -10839,6 +10839,141 @@ func SiteByIdBuild(args SiteByIdArgs) string {
 	return b.String()
 }
 
+// SitePreviewGrantById -- Resolve one preview by its own row id -- what the probe and the OS's detail read resolve their target through, so the gate a probe runs behind admits the same people the list does.
+//
+// Bound concept: v1:platform:sitePreviewGrant (machine-readable: BoundConcepts["sitePreviewGrantById"] in generated_concepts.go).
+type SitePreviewGrantByIdArgs struct {
+	GrantId string
+}
+
+// SitePreviewGrantById calls the engine query sitePreviewGrantById.
+func (qc *QueryClient) SitePreviewGrantById(ctx context.Context, args SitePreviewGrantByIdArgs) (*Result, error) {
+	call := SitePreviewGrantByIdBuild(args)
+	return qc.executeNamed(ctx, "sitePreviewGrantById", call)
+}
+
+func SitePreviewGrantByIdBuild(args SitePreviewGrantByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query sitePreviewGrantById(")
+	b.WriteString("grantId: ")
+	b.WriteString(quoteMemQL(args.GrantId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SitePreviewGrantByToken -- Resolve a preview grant by the SHA-256 of the token presented, for the edge (issue memql#5545).
+// THE DIGEST IS THE ARGUMENT, never the token. The plain `mql_prv_<43>` exists in the operator's URL and cookie and nowhere else; the edge hashes what it was presented and asks this. So a read of the row -- by an operator, out of a backup, in a log -- hands nobody a working preview.
+// IT IS NOT THE WHOLE GATE, and the note above says why the rest is in Go. This answers "is there a grant for this digest"; whether it is expired, revoked, for THIS site, and for the candidate the site is currently carrying are four more questions, and three of them compare against something no filter can see.
+//
+// Bound concept: v1:platform:sitePreviewGrant (machine-readable: BoundConcepts["sitePreviewGrantByToken"] in generated_concepts.go).
+type SitePreviewGrantByTokenArgs struct {
+	TokenHash string
+}
+
+// SitePreviewGrantByToken calls the engine query sitePreviewGrantByToken.
+func (qc *QueryClient) SitePreviewGrantByToken(ctx context.Context, args SitePreviewGrantByTokenArgs) (*Result, error) {
+	call := SitePreviewGrantByTokenBuild(args)
+	return qc.executeNamed(ctx, "sitePreviewGrantByToken", call)
+}
+
+func SitePreviewGrantByTokenBuild(args SitePreviewGrantByTokenArgs) string {
+	var b strings.Builder
+	b.WriteString("query sitePreviewGrantByToken(")
+	b.WriteString("tokenHash: ")
+	b.WriteString(quoteMemQL(args.TokenHash))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SitePreviewGrantsForSite -- The previews open against one deployable, newest first -- what the Deployables page lists so an operator can see what is out there and end it.
+// EVERY GRANT, INCLUDING THE SPENT ONES. Expiry and revocation are shown rather than filtered, because the question this list answers after something unexpected lands in a development store is "who opened a preview of this, and when", and a filtered list answers it for the last half hour only. The OS draws the state; this read does not decide it.
+//
+// Bound concept: v1:platform:sitePreviewGrant (machine-readable: BoundConcepts["sitePreviewGrantsForSite"] in generated_concepts.go).
+type SitePreviewGrantsForSiteArgs struct {
+	SiteId string
+}
+
+// SitePreviewGrantsForSite calls the engine query sitePreviewGrantsForSite.
+func (qc *QueryClient) SitePreviewGrantsForSite(ctx context.Context, args SitePreviewGrantsForSiteArgs) (*Result, error) {
+	call := SitePreviewGrantsForSiteBuild(args)
+	return qc.executeNamed(ctx, "sitePreviewGrantsForSite", call)
+}
+
+func SitePreviewGrantsForSiteBuild(args SitePreviewGrantsForSiteArgs) string {
+	var b strings.Builder
+	b.WriteString("query sitePreviewGrantsForSite(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SitePreviewGrantsOpen -- Every preview that is still usable, cluster-wide -- what the passive order observation reads to decide whether an order arriving in the mirror belongs to anybody's exercise (issue memql#5547).
+// THE DEPLOYMENT'S READ, NOT A PERSON'S, and the conjunct says so: it filters on actor.isClusterOwner alone, so the only caller it answers for is the synthetic operator identity integrations/sitepreview stamps. The question -- is anybody previewing against this store -- is the cluster's rather than any operator's, and an owner-scoped read would answer it for one person's previews and silently miss everybody else's.
+// UNBOUNDED, AND THE REASON IS THE SWEEP'S. A paginated read would answer for the first page of open previews and quietly record nothing for the rest, which is `customDomainsToReconcile`'s reasoning exactly. The population is bounded by the thing itself: a preview lasts half an hour by default, so this is the handful open right now rather than every one ever issued.
+// BOTH ENDS ARE FILTERED HERE. `revokedAt == nil` and `expiresAt > now` are the two ways a preview stops being usable, and a caller re-checks them anyway -- the filter is what keeps the answer small, the Go check is what keeps it correct against a clock that moved between the read and the write.
+// NO SORT, and it is not an omission: a sort makes a query paginated, which is precisely what `@unbounded` is here to refuse. The caller indexes the answer by store and never reads it in order.
+//
+// Bound concept: v1:platform:sitePreviewGrant (machine-readable: BoundConcepts["sitePreviewGrantsOpen"] in generated_concepts.go).
+type SitePreviewGrantsOpenArgs struct {
+}
+
+// SitePreviewGrantsOpen calls the engine query sitePreviewGrantsOpen.
+func (qc *QueryClient) SitePreviewGrantsOpen(ctx context.Context, args SitePreviewGrantsOpenArgs) (*Result, error) {
+	call := SitePreviewGrantsOpenBuild(args)
+	return qc.executeNamed(ctx, "sitePreviewGrantsOpen", call)
+}
+
+func SitePreviewGrantsOpenBuild(args SitePreviewGrantsOpenArgs) string {
+	_ = args
+	return "query sitePreviewGrantsOpen()"
+}
+
+// SitePreviewObservationsForGrant -- What the engine observed during one exercise, oldest first -- the four steps in the order they happen, which is the order they are drawn in.
+//
+// Bound concept: v1:platform:sitePreviewObservation (machine-readable: BoundConcepts["sitePreviewObservationsForGrant"] in generated_concepts.go).
+type SitePreviewObservationsForGrantArgs struct {
+	GrantId string
+}
+
+// SitePreviewObservationsForGrant calls the engine query sitePreviewObservationsForGrant.
+func (qc *QueryClient) SitePreviewObservationsForGrant(ctx context.Context, args SitePreviewObservationsForGrantArgs) (*Result, error) {
+	call := SitePreviewObservationsForGrantBuild(args)
+	return qc.executeNamed(ctx, "sitePreviewObservationsForGrant", call)
+}
+
+func SitePreviewObservationsForGrantBuild(args SitePreviewObservationsForGrantArgs) string {
+	var b strings.Builder
+	b.WriteString("query sitePreviewObservationsForGrant(")
+	b.WriteString("grantId: ")
+	b.WriteString(quoteMemQL(args.GrantId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SitePreviewObservationsForSite -- Everything the engine has observed of any preview of one deployable, newest first.
+// The read behind the deployable page's preview panel: it shows the LAST exercise without the page having to know which grant that was, which matters because the grant that ran it may already have expired. An empty answer is "nobody has exercised this", which the OS draws as unmeasured rather than as four failures.
+//
+// Bound concept: v1:platform:sitePreviewObservation (machine-readable: BoundConcepts["sitePreviewObservationsForSite"] in generated_concepts.go).
+type SitePreviewObservationsForSiteArgs struct {
+	SiteId string
+}
+
+// SitePreviewObservationsForSite calls the engine query sitePreviewObservationsForSite.
+func (qc *QueryClient) SitePreviewObservationsForSite(ctx context.Context, args SitePreviewObservationsForSiteArgs) (*Result, error) {
+	call := SitePreviewObservationsForSiteBuild(args)
+	return qc.executeNamed(ctx, "sitePreviewObservationsForSite", call)
+}
+
+func SitePreviewObservationsForSiteBuild(args SitePreviewObservationsForSiteArgs) string {
+	var b strings.Builder
+	b.WriteString("query sitePreviewObservationsForSite(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // SitesAll -- The deployables this caller may see: their OWN sites, or every site in the cluster when the caller is a cluster owner. The Deployables app's primary screen.
 // ARCHIVED ROWS ARE EXCLUDED HERE and listed by sitesArchived instead (epic memql#4794, D10). The exclusion is written out rather than folded into a trait, because it is the one conjunct whose counterpart query deliberately inverts it -- and a reader comparing the two needs to see the same term in both -- here `isNotArchived`, there `statusIsArchived`. The trait is `row.status != "archived"` rather than an allow-list of the other three: status is required, so every row carries one, and != is null-safe against a non-empty literal (memql#1685) -- while an allow-list would silently drop a row the day a fifth value is added.
 // The name predates self-serve deployables and is kept: it is the same read, and the concept's tier is what decides how far "all" reaches for a given actor.

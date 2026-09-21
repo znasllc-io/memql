@@ -270,6 +270,12 @@ import {
 } from './library/artifactDocuments.js';
 import { resolveArtifactMeta } from './library/artifactMeta.js';
 import { ResultPanel, RunPanel, conceptMap, type RunPanelHost } from './webview/runPanel.js';
+import {
+  COMMAND_LANGUAGE_REFERENCE,
+  LanguageReferencePanel,
+  type LanguageClusterReader,
+} from './webview/languageReferencePanel.js';
+import { languagePin } from './state/languageReference.js';
 
 let client: LanguageClient | undefined;
 let connections: ConnectionManager | undefined;
@@ -478,6 +484,8 @@ export function activate(context: ExtensionContext): MemqlExtensionApi {
   // operator in a restricted folder never learns the themes exist.
   offerMemqlThemeOnce(context);
 
+  registerLanguageReference(context);
+
   // The runtime surface reads credentials from the home directory and opens a
   // network connection, so it is gated on workspace trust. Language features
   // above are not.
@@ -494,6 +502,12 @@ export function activate(context: ExtensionContext): MemqlExtensionApi {
     const trustGranted = workspace.onDidGrantWorkspaceTrust(() => {
       trustGranted.dispose();
       registerRuntimeSurface(context);
+      // The language reference is registered OUTSIDE this gate, so a panel may
+      // already be open -- bound, when it opened, over a host that had no
+      // ConnectionManager to subscribe to. This is the moment that changed,
+      // and nothing else is in a position to tell it. A no-op when no panel is
+      // open, which is the ordinary case.
+      LanguageReferencePanel.connectionSurfaceChanged();
     });
     context.subscriptions.push(trustGranted);
   }
@@ -503,6 +517,74 @@ export function activate(context: ExtensionContext): MemqlExtensionApi {
   // inside a real editor can drive a uri without asking the operator to click
   // VS Code's own "allow this extension to open the URI" prompt.
   return { handleOpenUri };
+}
+
+/**
+ * Register "MemQL: Show Language Reference".
+ *
+ * OUTSIDE THE TRUST GATE, for the reason offerMemqlThemeOnce above it is: this
+ * is a LANGUAGE surface, not a runtime one. With no cluster it shows the
+ * edition, that edition's status and the grammar version this extension was
+ * built against -- which is exactly the language its bundled server is giving
+ * the person completion and diagnostics in -- and it reads no credential and
+ * opens no connection to do it. A restricted folder is where somebody is most
+ * likely to be reading `.memql` with nothing connected, so gating this would
+ * take the reference away from the window that needs it most.
+ *
+ * THE THREE DEPENDENCIES ARE CLOSURES OVER `connections`, read at the moment
+ * they are called rather than captured here: this runs before the runtime
+ * surface exists (and, in an untrusted window, before it may ever exist), so a
+ * value read now would be `undefined` forever.
+ *
+ * A PANEL OPENED BEFORE THE CONNECTION SURFACE EXISTS still follows it
+ * afterwards, and that takes two things rather than one. `onDidChangeConnection`
+ * here returns a no-op unsubscribe while `connections` is undefined -- there is
+ * nothing to subscribe to -- so binding it once would leave an untrusted
+ * window's panel deaf for the rest of its life. `open()` re-subscribes on every
+ * invocation, and the workspace-trust listener above calls
+ * `LanguageReferencePanel.connectionSurfaceChanged()` for the panel nobody is
+ * about to re-open. Between them, a panel follows every connect, disconnect and
+ * cluster switch in every window.
+ */
+function registerLanguageReference(context: ExtensionContext): void {
+  context.subscriptions.push(
+    commands.registerCommand(COMMAND_LANGUAGE_REFERENCE, () => {
+      LanguageReferencePanel.open(context, {
+        pin: languagePin(context.extension?.packageJSON),
+        reader: languageClusterReader,
+        canSelectCluster: () => connections !== undefined,
+        onDidChangeConnection: (listener) => {
+          const stop = connections?.onDidChangeState(() => listener());
+          return () => stop?.();
+        },
+      });
+    })
+  );
+}
+
+/**
+ * The connected cluster, as the language reference reads it.
+ *
+ * Undefined unless there is a live query client AND the manager reports
+ * "connected": the panel names the cluster it read from, and a name taken from
+ * a manager that is mid-reconnect would label one cluster's grammar with
+ * another's name.
+ */
+function languageClusterReader(): LanguageClusterReader | undefined {
+  const query = connections?.query;
+  const state = connections?.state;
+  if (query === undefined || state === undefined || state.status !== 'connected') {
+    return undefined;
+  }
+  return {
+    name: state.clusterName,
+    edition: connections?.edition,
+    grammarVersion: connections?.grammarVersion,
+    // `options` carries the panel's read deadline through as the SDK's own
+    // QueryCallOptions.signal, which is what lets a page give up on a cluster
+    // that takes the call and never answers.
+    executeNamed: (name, call, options) => query.executeNamed(name, call, options),
+  };
 }
 
 /**

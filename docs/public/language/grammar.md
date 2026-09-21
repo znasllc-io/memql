@@ -25,7 +25,10 @@ Edition `2026`, grammar version `2026.09-before-write-error-accessor-77cda60c`.
    catalog -- do not edit. Run `make docs-grammar` to refresh it.
 
    Notation: <name> is a production, "x" a terminal, [ x ] optional,
-   { x } zero or more, x* zero or more, ( a | b ) a choice. *)
+   { x } zero or more, x* zero or more, x+ one or more, ( a | b ) a
+   choice, "a".."z" a character range, and 'x' a terminal holding a
+   double quote. A right-hand side written in English is lexical: the
+   lexer decides it. *)
 
 (* ---- A file ---- *)
 <file>                ::= <declaration-annotation>* <use>* <declaration>*
@@ -47,7 +50,7 @@ Edition `2026`, grammar version `2026.09-before-write-error-accessor-77cda60c`.
 <capability>          ::= <capability-annotation>* "capability" <dotted-name> "{" <capability-body> "}"
 <capability-body>     ::= ( <args-block> )*
 <concept>             ::= <concept-annotation>* "concept" <name> "{" <concept-body> "}"
-<concept-body>        ::= ( <field> | <concept-body-annotation> )*
+<concept-body>        ::= ( <concept-field> | <concept-body-annotation> )*
 <logic>               ::= <logic-annotation>* "logic" <name> "{" <logic-body> "}"
 <logic-body>          ::= ( <args-block> )* <statement>*
 <mutation>            ::= <mutation-annotation>* "mutation" <concept-name> <name> "{" <mutation-body> "}"
@@ -64,7 +67,7 @@ Edition `2026`, grammar version `2026.09-before-write-error-accessor-77cda60c`.
                         | <asOf-clause> | <count-clause> )*
 <rule>                ::= <rule-annotation>* "rule" <name> "{" "}"
 <seed>                ::= <seed-annotation>* "seed" <concept-name> <name> "{" <seed-body> "}"
-<seed-body>           ::= <map-entry>*
+<seed-body>           ::= <seed-entry>*
 <shape>               ::= <shape-annotation>* "shape" [ <concept-name> ] <name> "{" <shape-body> "}"
 <shape-body>          ::= <path>*
 <spec>                ::= <spec-annotation>* "spec" <bound-name> <name> "=" <lambda>
@@ -77,28 +80,38 @@ Edition `2026`, grammar version `2026.09-before-write-error-accessor-77cda60c`.
 <filter-clause>       ::= "filter" <lambda>
 <refine-clause>       ::= "refine" <lambda>
 <shape-clause>        ::= "shape" <name>
-<sort-clause>         ::= "sort" <string> [ "," <string> ]
+<sort-clause>         ::= "sort" <string> { "," <string> }
 <paginate-clause>     ::= "paginate" <number>
 <asOf-clause>         ::= "asOf" ( "latest" | <expression> )
 <count-clause>        ::= "count"
-<insert-block>        ::= "insert" "{" <write-entry>* "}"
-<update-block>        ::= "update" "{" <write-entry>* "}"
-<accept-block>        ::= "accept" "{" <name> { "," <name> } "}"
-<stamp-block>         ::= "stamp" "{" <map-entry> { "," <map-entry> } "}"
-<precondition-block>  ::= "precondition" <name> "{" <statement>* "}"
-<params-block>        ::= "params" "{" <map-entry>* "}"
-<auth-block>          ::= "auth" "{" <map-entry>* "}"
+<insert-block>        ::= "insert" "{" ( <write-entry> [ "," ] )* "}"
+<update-block>        ::= "update" "{" ( <write-entry> [ "," ] )* "}"
+<accept-block>        ::= "accept" "{" ( <name> [ "," ] )* "}"
+<stamp-block>         ::= "stamp" "{" ( <map-entry> [ "," ] )* "}"
+<precondition-block>  ::= "precondition" <name> "{" <precondition-entry>* "}"
+<params-block>        ::= "params" "{" <param-entry>* "}"
+<auth-block>          ::= "auth" "{" <auth-entry>* "}"
 <capability-call>     ::= "capability" <dotted-name> "(" [ <argument> { "," <argument> } ] ")"
-<write-entry>         ::= <name> ":" <expression> | <accept-block> | <stamp-block>
+<write-entry>         ::= <name> ":" <expression> | "args" "." <name>
+                        | <accept-block> | <stamp-block>
 <map-entry>           ::= <name> ":" <expression>
+<param-entry>         ::= <name> ( <string> | <number> | "true" | "false" )
+<auth-entry>          ::= <name> ( <string> | "env" "(" <string> ")" )
+<precondition-entry>  ::= <precondition-key> ":" <expression>
+<precondition-key>    ::= "check" | "literal" | "description"
+<seed-entry>          ::= <name> ":" <seed-value> | <name> "{" <seed-entry>* "}"
+<seed-value>          ::= <string> | <number> | "true" | "false" | "[" ( <string> [ "," ] )* "]"
 <path>                ::= <name> { "." <name> }
 
 (* ---- Statements (a logic's and an automation's body) ---- *)
-<statement>           ::= <binding> | <construct-call> | <if-statement>
-                        | <for-statement> | <switch-statement> | <parallel-statement>
-                        | <publish-statement> | <return-statement>
-<binding>             ::= <name> ":=" <construct-call>
-<construct-call>      ::= <construct-kind> <name> "(" [ <argument> { "," <argument> } ] ")" <trailing-clause>*
+<statement>           ::= <binding> | <field-write> | <construct-call>
+                        | <if-statement> | <for-statement> | <switch-statement>
+                        | <parallel-statement> | <publish-statement>
+                        | <return-statement>
+<binding>             ::= <name> ":=" ( <construct-call> | <expression> )
+<field-write>         ::= "row" "." <name> "=" <expression>
+<construct-call>      ::= <construct-invocation> <trailing-clause>*
+<construct-invocation> ::= <construct-kind> <name> "(" [ <argument> { "," <argument> } ] ")"
 <construct-kind>      ::= "action" | "automation" | "builtin" | "logic" | "mutation"
                         | "query"
 <argument>            ::= <name> ":" <expression>
@@ -170,26 +183,32 @@ Edition `2026`, grammar version `2026.09-before-write-error-accessor-77cda60c`.
 <annotation-args>     ::= "(" [ <annotation-arg> { "," <annotation-arg> } ] ")"
 <annotation-arg>      ::= <string> | <number> | "true" | "false" | <object> | <lambda>
                         | <name> [ "=" <annotation-value> ] | "!" <string>
-<annotation-value>    ::= <string> | <number> | "true" | "false" | <name>
+<annotation-value>    ::= <string> | <number> | "true" | "false" | <name> | <lambda>
 
 (* ---- Fields ---- *)
-<field>               ::= <doc-comment>* <name> <field-type> <field-annotation>*
+<field>               ::= <doc-comment>* <name> <field-type> [ "!" ] <field-annotation>*
+<concept-field>       ::= <doc-comment>* <name> ( "{" <concept-field>* "}"
+                        | <field-type> [ "!" ] <concept-field-annotation>* [ "{" <concept-field>* "}" ] )
 <field-annotation>    ::= <concept-field-annotation> | <args-field-annotation>
                         | <tool-field-annotation> | <prompt-field-annotation>
                         | <builtin-field-annotation>
+(* `array` is a deprecated spelling of []T. It still derives --
+   the tree writes it -- and the vocabulary is where a reader is told what
+   to write instead. *)
 <field-type>          ::= "string" | "int" | "float" | "bool" | "datetime" | "object"
-                        | "enum" "(" <string> { "," <string> } ")" | "[]" <field-type>
+                        | "enum" "(" <string> { "," <string> } ")" | "any" | "boolean"
+                        | "integer" | "number" | "array" | "[]" <field-type>
 <doc-comment>         ::= "///" <text>
 
 (* ---- Expressions ---- *)
 <expression>          ::= <expr-10>
 <lambda-params>       ::= <name> | "(" <name> "," <name> ")"
-<primary>             ::= <literal> | <reserved-root> | <call> | <list> | <object>
-                        | "(" <expression> ")" | <name>
+<primary>             ::= <literal> | <reserved-root> | <construct-invocation>
+                        | <call> | <list> | <object> | "(" <expression> ")" | <name>
 <reserved-root>       ::= "actor" | "args" | "config" | "now" | "partition"
                         | "payload" | "trace"
-<list>                ::= "[" [ <expression> { "," <expression> } ] "]"
-<object>              ::= "{" [ <map-entry> { "," <map-entry> } ] "}"
+<list>                ::= "[" [ <expression> { "," <expression> } [ "," ] ] "]"
+<object>              ::= "{" [ <map-entry> { "," <map-entry> } [ "," ] ] "}"
 
 (* ---- The precedence ladder, loosest binding first.
    Level numbers are the operator table's; level 1 binds tightest. ---- *)
@@ -203,10 +222,24 @@ Edition `2026`, grammar version `2026.09-before-write-error-accessor-77cda60c`.
 <expr-4>              ::= <expr-3> { ( "+" | "-" ) <expr-3> }
 <expr-3>              ::= <expr-2> { ( "%" | "*" | "/" ) <expr-2> }
 <expr-2>              ::= ( "!" | "-" ) <expr-2> | <expr-1>
-<expr-1>              ::= <primary> { ( "." | ".?" ) <name> | <method-call> }
+<expr-1>              ::= <primary> { "." ( <name> | <method-call> ) | ".?" <name> }
 
 (* ---- Calls ---- *)
+(* <predicate-name> is a spec or a trait applied to its receiver, so it is any
+   name. It therefore also derives the retired ONE-ARGUMENT calls, which have
+   the same tokens and which the PARSER refuses by name:
+     count(x)       write x.count()
+     exists(x)      write x != nil
+     first(x)       write x.first()
+     last(x)        write x.last()
+     len(x)         write x.count()
+     mean(x)        write x.avg()
+     not(a)         write !a
+   Every other retired call takes a different number of arguments, and none of
+   those derives here at all. *)
 <call>                ::= <function-name> "(" [ <expression> { "," <expression> } ] ")"
+                        | <predicate-name> "(" <expression> ")"
+<predicate-name>      ::= <name>
 <method-call>         ::= <method-name> "(" [ <expression> { "," <expression> } ] ")"
 <function-name>       ::= "addDuration" | "aliasOf" | "canonicalId" | "childOf"
                         | "contains" | "createdBy" | "daysBetween" | "equals"
@@ -220,7 +253,7 @@ Edition `2026`, grammar version `2026.09-before-write-error-accessor-77cda60c`.
 
 (* ---- Terminals ---- *)
 <literal>             ::= <string> | <number> | "true" | "false" | "nil"
-<name>                ::= ( "a".."z" | "A".."Z" | "_" ) { "a".."z" | "A".."Z" | "0".."9" | "_" }
+<name>                ::= ( "a".."z" | "A".."Z" | "_" ) { "a".."z" | "A".."Z" | "0".."9" | "_" | "-" }
 <dotted-name>         ::= <name> { "." <name> }
 <concept-name>        ::= <name>
 <bound-name>          ::= <name>

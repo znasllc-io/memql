@@ -109,6 +109,14 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 		{
+			Name:        "storefrontProbe",
+			Description: "Ask one store's Storefront API the three questions a storefront preview can answer: does the catalog read, does a cart accept a line, does a checkoutUrl come back (epic memql#5531, issue memql#5547). Writes nothing and buys nothing -- it creates a cart and reads the URL a shopper would be sent to, and the payment walk itself happens in a browser and is not something this cluster can observe. Returns {storeId, storeDomain, isDevelopment, catalog, cart, checkout}, each of the three {ok, detail, failure, durationMs}.",
+			Handler:     i.handleStorefrontProbe,
+			ArgsSchema: map[string]string{
+				"storeId": "string (optional) - the store to ask; the only configured store when omitted",
+			},
+		},
+		{
 			Name:        "storeHealth",
 			Description: "Report every configured store's status, subscription reconcile time, per-domain sync state and drift counters. The read behind the portal's Stores page.",
 			Handler:     i.handleStoreHealth,
@@ -558,4 +566,75 @@ func argInt(args map[string]any, key string, fallback int) int {
 		return num.Float64Or(v, fallback)
 	}
 	return fallback
+}
+
+// handleStorefrontProbe asks one store the three questions a preview can answer.
+//
+// # It is a READ of somebody else's system, and it changes nothing here
+//
+// It writes no row. The observation rows these results become are written by
+// the package that owns them (integrations/sitepreview), which reaches this
+// through a builtin over the engine -- the seam component/packages already uses
+// to reach customDomainAdd. That split is what keeps the module taxonomy
+// honest: the call to Shopify lives in the package classified as the one that
+// talks to Shopify, and the rows live with the concept that declares them.
+//
+// # A cart IS created, and saying so is part of the contract
+//
+// `cartCreate` leaves a cart on the store. That is not a side effect to hide:
+// it is the thing being observed, and it is why this is pointed at a
+// DEVELOPMENT store by a guard one level up rather than being safe to run
+// anywhere. Nothing is paid for and no order is placed.
+//
+// # The store's own development flag is reported back
+//
+// The guard that refuses a preview against the store shoppers reach lives in
+// component/sitepreview, and this capability does not repeat it -- a second
+// copy of a safety rule is a copy that drifts. What it does do is REPORT the
+// flag, so a caller that reached here by some path with no guard in front of it
+// can still see what it just talked to.
+func (i *Integration) handleStorefrontProbe(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	c := i.connector
+	if c == nil {
+		return resultNode("shopify", map[string]any{"status": "unconfigured"})
+	}
+	store, err := c.resolveStoreArg(ctx, argString(args, "storeId"))
+	if err != nil {
+		return nil, err
+	}
+	endpoint, err := StorefrontEndpoint(store.Domain, store.APIVersion)
+	if err != nil {
+		return nil, fmt.Errorf("shopify: store %q cannot be reached for a storefront probe: %w", store.ID, err)
+	}
+	token, err := c.stores.Secret(ctx, store.StorefrontTokenRef)
+	if err != nil {
+		return nil, fmt.Errorf("shopify: store %q has no resolvable Storefront token (%s): %w", store.ID, store.StorefrontTokenRef, err)
+	}
+	if strings.TrimSpace(token) == "" {
+		return nil, fmt.Errorf("shopify: store %q names no Storefront token, so a storefront cannot read its catalog at all", store.ID)
+	}
+
+	report := StorefrontProbe(ctx, endpoint, token)
+	return resultNode("shopify", map[string]any{
+		"storeId":       store.ID,
+		"storeDomain":   store.Domain,
+		"isDevelopment": store.IsDevelopment,
+		// THE THREE KEYS ARE NOT SPELLED HERE. They are the wire between this
+		// capability and the one that turns its answers into rows, and a wire
+		// spelled at both ends drifts -- silently, into a panel that reports
+		// three unmeasured steps against a store that answered all three. The
+		// one spelling is component/sitepreview/wire.go.
+		memql.PreviewStepCatalog:  probeStepPayload(report.Catalog),
+		memql.PreviewStepCart:     probeStepPayload(report.Cart),
+		memql.PreviewStepCheckout: probeStepPayload(report.Checkout),
+	})
+}
+
+func probeStepPayload(s ProbeStep) map[string]any {
+	return map[string]any{
+		"ok":         s.OK,
+		"detail":     s.Detail,
+		"failure":    s.Failure,
+		"durationMs": s.DurationMs,
+	}
 }

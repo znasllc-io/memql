@@ -602,6 +602,318 @@ mutation site updateSiteStoreBinding {
   }
 }
 
+// ---- The candidate version and the preview binding (epic memql#5531) ----
+//
+// `bundleRef` names what SERVES; `candidateRef` names a published version that
+// is being exercised beside it. `binding` names the store shoppers reach;
+// `previewBinding` names the development store the candidate is exercised
+// against. Four mutations over that pair, and between them they are the whole
+// of the owner's staging model inside a product that has no environments
+// (design D7, confirmed by the owner 2026-09-20).
+//
+// WHAT IS NOT HERE IS THE POINT. There is no rollback mutation: rollback is
+// updateSiteBundle pointed back at the previous version, one row write,
+// exactly as it was before this epic -- and giving it a ceremony of its own
+// would have made the cheap operation look like the expensive one.
+
+/// Publish a CANDIDATE VERSION beside the one that serves (epic memql#5531).
+///
+/// A candidate is a bundle version this deployable is not serving. Setting one changes NOTHING
+/// about what the public is served: the edge goes on serving `bundleRef` to every request that
+/// does not carry a preview grant, for a draft site and for a live one alike.
+///
+/// `candidateRef` IS STAMPED, NOT ACCEPTED, and clearSiteCandidate exists anyway. The stamp is what
+/// makes this mutation always write the value it was given; the separate clear is what makes
+/// "there is no candidate" expressible as an act a person takes deliberately, rather than as the
+/// side effect of omitting an argument. updateSiteAccount's note is the general form of the rule.
+///
+/// `artifactId` is accepted for updateSiteBundle's reason exactly: it is optional provenance, and
+/// an omitted accepted arg is DROPPED from the payload so the read-merge inherits what is stored.
+///
+/// A CANDIDATE MAY NOT EQUAL THE SERVING VERSION, which is a comparison against the PRIOR row and
+/// therefore Go (component/memql/platform_site_candidate_guard.go). A candidate that is already
+/// serving is not a candidate: there would be nothing to exercise, and promoting it would be a
+/// write that changes nothing while reading like a release.
+///
+/// AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite -- the row's owner, or a
+/// cluster owner through the explicit escape -- and @requiresCapability names the surface.
+/// `preview` rather than `publish` is the line this epic draws: preparing and exercising a version
+/// is one grant, making the public see it is another, and a person may hold the first without the
+/// second.
+@requiresCapability("execute", "app:deployables/preview")
+mutation site setSiteCandidate {
+  args {
+    siteId        string!
+    candidateRef  string!
+    artifactId    string
+  }
+  update {
+    accept { artifactId }
+    stamp {
+      id:            args.siteId
+      candidateRef:  args.candidateRef
+    }
+  }
+}
+
+/// Withdraw the candidate version, leaving the deployable with only what it serves.
+///
+/// The plain inverse of setSiteCandidate, and its own act rather than an omitted argument -- see
+/// that mutation's note. It touches neither `bundleRef` nor `previewBinding`: withdrawing a
+/// candidate is not detaching a development store, and a person who withdraws one usually means to
+/// publish another against the same store.
+///
+/// Every preview grant naming the withdrawn version stops resolving, because a grant names the
+/// candidate it was issued for and the edge compares the two (component/edge/preview.go). So this
+/// is also how an operator ends every open preview of a version at once.
+@requiresCapability("execute", "app:deployables/preview")
+mutation site clearSiteCandidate {
+  args {
+    siteId  string!
+  }
+  update {
+    id:            args.siteId
+    candidateRef:  ""
+  }
+}
+
+/// Promote the candidate: the version being exercised becomes the version that serves.
+///
+/// THE ROW FLIP `bundleRef` ALREADY WAS. `bundleRef := candidateRef`, `candidateRef := ""`, one
+/// write -- which is why rollback needs nothing new: updateSiteBundle pointed back at the previous
+/// version is still one row write, and the version this promotion replaced is still sitting under
+/// its own prefix in object storage.
+///
+/// THE CALLER NAMES THE VERSION IT IS PROMOTING, and that argument is the whole safety of this
+/// mutation. A mutation body cannot read the row's own stored field, so the candidate has to arrive
+/// as an argument; and an argument nobody checked would let a candidate republished between the
+/// reading and the click be promoted by surprise. So a Go guard refuses a `candidateRef` that is
+/// not the one STORED (component/memql/platform_site_candidate_guard.go) -- the same rule the work
+/// spine's approvals use, where an approval is a decision about one specific artifact and the hash
+/// is what stops it carrying to a modified one.
+///
+/// REFUSED WHILE THE SERVING BINDING NAMES A DEVELOPMENT STORE (issue memql#5546). Promoting is how
+/// a version reaches shoppers, and a deployable whose `binding` points at a development store has
+/// no shoppers to reach -- it would serve a catalog nobody can buy from and take orders into a
+/// store that is not the merchant's. The guard is Go because whether a store is a development store
+/// is a field on ANOTHER row (platform_site_golive_guard.go), and the refusal names the store and
+/// the act that clears it, so the OS can make the act ABSENT rather than draw it and have it fail.
+///
+/// AUTHORIZATION is @requiresCapability("execute", "app:deployables/publish") -- promotion sits with
+/// go live, pause and roll back rather than with preview, because it is the act that changes what
+/// the public is served.
+@requiresCapability("execute", "app:deployables/publish")
+mutation site promoteSiteCandidate {
+  args {
+    siteId        string!
+    candidateRef  string!
+    artifactId    string
+  }
+  update {
+    accept { artifactId }
+    stamp {
+      id:            args.siteId
+      bundleRef:     args.candidateRef
+      candidateRef:  ""
+    }
+  }
+}
+
+/// Point a storefront's CANDIDATE at the development store it is exercised against, or clear it
+/// (epic memql#5531, design D8).
+///
+/// The preview binding's twin is `binding`, and the two are separate fields for the reason the
+/// whole epic exists: `binding` is the store shoppers reach, and a version being exercised must
+/// never be able to reach it. Written whole as {storeId} rather than merged, for
+/// updateSiteStoreBinding's reason -- a read-merge would let a retired shape survive beside the
+/// reference. An empty storeId writes an empty object, the unbound state, so detaching a
+/// development store stays expressible.
+///
+/// THE STORE MUST BE A DEVELOPMENT STORE. v1:shopify:store.isDevelopment is a fact about somebody
+/// else's system, recorded on the store row when it is attached, and a preview binding naming a
+/// store without it is REFUSED -- that is the second direction of the go-live guard, and the reason
+/// it matters is that the failure it prevents is silent: a preview against the live store looks
+/// exactly like a preview, right up to the test payment landing in the merchant's real orders.
+///
+/// AUTHORIZATION is `app:deployables/store`, the same gate updateSiteStoreBinding carries and for
+/// the same reason -- this names a v1:shopify:store row, which is cluster-owner tier, and the Go
+/// guard beside it refuses a store the CALLER CANNOT READ whatever capability they hold. `preview`
+/// is deliberately not enough: preparing a version is one thing, choosing which of the cluster's
+/// stores it talks to is another.
+@requiresCapability("execute", "app:deployables/store")
+mutation site updateSitePreviewBinding {
+  args {
+    siteId   string!
+    storeId  string
+  }
+  update {
+    id:              args.siteId
+    previewBinding:  { storeId: args.storeId ?? "" }
+  }
+}
+
+// ---- Preview grants and what the engine observed (epic memql#5531) ----
+//
+// THREE OF THE FOUR ARE @serverOnly, and the split is customDomain's exactly.
+// A write that carries a CREDENTIAL, or that records a MEASUREMENT, is minted
+// in Go and reaches the graph through a builtin; a write that decides nothing
+// the tier has not already decided stays an ordinary mutation.
+//
+//   createSitePreviewGrant      @serverOnly -- writes a token digest
+//   touchSitePreviewGrant       @serverOnly -- the edge's own record of use
+//   recordSitePreviewObservation @serverOnly -- a measurement
+//   revokeSitePreviewGrant      reachable   -- an operator ends a preview
+//
+// The reason the create cannot be reachable is the reason customDomain's
+// cannot: a caller who chooses the token digest chooses the token, and the
+// whole of what makes a preview URL a credential is that the person holding it
+// did not pick it. A caller who chose `expiresAt` would choose the lifetime
+// too, which is the only bound a bearer credential has here.
+
+/// Mint a preview grant (epic memql#5531). @serverOnly: `tokenHash` is the digest of a bearer
+/// credential and `expiresAt` is the only bound on it, so neither may be a caller's choice.
+/// `sitePreviewOpen` (dsl/platform/builtins.memql) is the reachable surface.
+///
+/// `ownerUserId` IS STAMPED FROM THE ACTOR AND IS NOT AN ARGUMENT. The concept declares the
+/// composite owner tier over this field, and a tier over a caller-supplied value records a guarantee
+/// nothing provides -- it reads as safe, so an auditor seeing the tier stops looking. That is what
+/// TestDeclaredOwnerFieldsAreServerStamped refuses, and it is right to: a preview is a credential
+/// for an unpublished version, so "whose is it" must be a fact the engine established rather than a
+/// field the wire carried. The builtin runs under the CALLER's own context, so `actor.userId` here
+/// IS the person who asked.
+///
+/// SCOPING TO actor.userId IS NOT THE FIX, AND IT IS ALREADY DONE. The stamp above is exactly that
+/// scoping -- the row is the caller's and the composite owner tier decides it -- and this mutation
+/// is @serverOnly anyway, because ownership is not the property in question. What has to hold is
+/// that the TOKEN DIGEST was minted rather than supplied and that `expiresAt` was computed rather
+/// than chosen. A caller who picks the digest picks the token, and a caller who picks the expiry
+/// picks the only bound a bearer credential has. Neither is a question about whose row it is, so no
+/// amount of actor scoping answers it; only the Go frame that minted the token knows, which is why
+/// `sitePreviewOpen` is the one way in (customDomain's createCustomDomain draws the same line for
+/// the same reason).
+///
+/// `candidateRef` and `previewStoreId` are COPIED, not referenced, and the copy is the mechanism.
+/// The edge compares the copy against the site row's live value and refuses a grant whose candidate
+/// has moved, which is what makes withdrawing a candidate end every open preview of it.
+@actor
+@serverOnly
+mutation sitePreviewGrant createSitePreviewGrant {
+  args {
+    grantId         string!
+    siteId          string!
+    tokenHash       string!  @maxLength(64) @pattern("^[0-9a-f]{64}$")
+    candidateRef    string!
+    previewStoreId  string
+    issuedAt        datetime!
+    expiresAt       datetime!
+  }
+  insert {
+    accept { siteId, tokenHash, candidateRef, previewStoreId, issuedAt, expiresAt }
+    stamp {
+      id:           args.grantId
+      ownerUserId:  actor.userId
+    }
+  }
+}
+
+/// Record that the edge honoured a grant (epic memql#5531). @serverOnly: it is the deployment's own
+/// observation of its own serving path, and a client-writable "last seen" is a field that says what
+/// its writer wanted it to say.
+///
+/// THE EDGE THROTTLES THIS RATHER THAN WRITING PER REQUEST. A preview loads a document and every
+/// asset under it, and a write per asset would put the graph in the serving path of a page --
+/// component/edge/preview.go holds the value for previewSeenThrottle before writing again. The
+/// field is evidence that a URL was used, not a request counter, and it says so.
+///
+/// actor.userId SCOPING COULD NOT BE THE FIX HERE, because the writer is not a person. The EDGE
+/// writes this, under its own synthetic cluster-owner actor, about a grant it has just resolved by
+/// token digest -- it holds nobody's credential and never learns who is asking, so there is no
+/// caller to scope to. And scoping it to the grant's own owner would not help either: the property
+/// that matters is that the value was OBSERVED by the deployment rather than asserted by anybody,
+/// and a field the grant's holder could write is a field that says what its writer wanted it to say.
+@serverOnly
+mutation sitePreviewGrant touchSitePreviewGrant {
+  args {
+    grantId     string!
+    lastSeenAt  datetime!
+  }
+  update {
+    id:          args.grantId
+    lastSeenAt:  args.lastSeenAt
+  }
+}
+
+/// End a preview (epic memql#5531). The plain inverse of opening one, and the ONE write here that
+/// is not @serverOnly -- it carries no credential and decides nothing the tier has not decided, so
+/// putting a Go hop in front of a timestamp would buy nothing (customDomain's `remove` draws the
+/// same line for the same reason).
+///
+/// A SOFT END. The row stays as the record that a preview was opened, by whom, against which
+/// version and which store -- which is the question asked after something unexpected turns up in a
+/// development store, and a deleted row answers it for nobody.
+///
+/// AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite -- the grant's own
+/// operator, or a cluster owner through the explicit escape, which is what lets an operator end a
+/// preview somebody else left open.
+@requiresCapability("execute", "app:deployables/preview")
+mutation sitePreviewGrant revokeSitePreviewGrant {
+  args {
+    grantId    string!
+    revokedAt  datetime!
+  }
+  update {
+    id:         args.grantId
+    revokedAt:  args.revokedAt
+  }
+}
+
+/// Record one of the four things the engine can observe of a preview (issue memql#5547).
+/// @serverOnly: it is a MEASUREMENT, and a measurement a client can write is not one.
+///
+/// `ownerUserId` IS STAMPED FROM THE ACTOR, for createSitePreviewGrant's reason exactly -- and the
+/// consequence is worth stating rather than discovering: an observation belongs to WHOEVER RAN THE
+/// EXERCISE, not to whoever opened the preview. Those are usually the same person; when they are
+/// not, a cluster owner sees both sets through the tier's second arm and the other person sees their
+/// own. Attributing the row to the grant's owner instead would mean a caller naming somebody else as
+/// the author of a measurement, which is the guarantee the tier exists to make impossible.
+///
+/// SCOPING TO actor.userId IS ALREADY DONE AND IS NOT WHAT BARS THIS FROM THE WIRE. `ownerUserId` is
+/// stamped from the actor, so the composite owner tier decides the row and a caller could only ever
+/// write their own. What actor scoping cannot establish is the thing this row CLAIMS: that a store
+/// answered, that a cart took a line, that a checkout address came back, and how long each took.
+/// Those are MEASUREMENTS, and a measurement a client can write is not one -- a caller scoped
+/// perfectly to themselves could still write four green rows against a storefront nobody exercised,
+/// and the surface that reads them exists precisely to say whether that happened. So the writer has
+/// to be the frame that did the measuring, which is what @serverOnly names.
+///
+/// `ok` IS REQUIRED AND `failure` IS THE WHY. A row here is an answer either way; a step nobody ran
+/// has NO ROW, which is the third state and the one the OS draws as unmeasured. Writing a row to
+/// say "we did not look" would make "nobody asked" and "we asked and got nothing" the same shape on
+/// the screen, which is the one thing the design record asks this surface not to do.
+@actor
+@serverOnly
+mutation sitePreviewObservation recordSitePreviewObservation {
+  args {
+    observationId  string!
+    grantId        string!
+    siteId         string!
+    storeId        string!
+    kind           enum("catalog_read", "cart_accepted", "checkout_url", "order_mirrored")!
+    observedAt     datetime!
+    ok             boolean!
+    detail         string
+    failure        string
+    durationMs     int
+  }
+  insert {
+    accept { grantId, siteId, storeId, kind, observedAt, ok, detail, failure, durationMs }
+    stamp {
+      id:           args.observationId
+      ownerUserId:  actor.userId
+    }
+  }
+}
+
 /// Soft-delete a site by stamping deleted=true (memql#3717). The time-series row survives for
 /// history; isNotDeleted on siteByHostname/sitesAll/siteById is what actually stops the edge
 /// resolving a deleted site's hostname -- this mutation only flips the flag. A systemOwned row

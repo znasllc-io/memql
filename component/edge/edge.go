@@ -26,6 +26,8 @@ package edge
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/frontdoor"
@@ -271,6 +273,8 @@ func siteFromRow(r map[string]any) *Site {
 		APIProxy:       rowBool(r, "apiProxy"),
 		SystemOwned:    rowBool(r, "systemOwned"),
 		Binding:        rowObject(r, "binding"),
+		CandidateRef:   rowString(r, "candidateRef"),
+		PreviewBinding: rowObject(r, "previewBinding"),
 		Settings:       rowStringMap(r, "settings"),
 	}
 }
@@ -327,4 +331,76 @@ func rowObject(m map[string]any, key string) map[string]any {
 		return v
 	}
 	return nil
+}
+
+// PreviewGrantByToken resolves a preview grant by the SHA-256 of the token a
+// request presented (epic memql#5531, issue memql#5545).
+//
+// UNDER THE SAME SYNTHETIC CLUSTER-OWNER ACTOR as every other read in this
+// file, and here it is what makes the feature work at all:
+// v1:platform:sitePreviewGrant declares the composite owner tier, so a read as
+// anybody else would answer only that person's own grants -- and the edge is
+// nobody. It holds no operator's credential and never learns who is asking; it
+// holds a DIGEST, and the row it finds is the whole authorization decision,
+// made earlier by the mint under the caller's own actor.
+//
+// A MISS IS (nil, nil). A cookie naming no grant is not a query failure, it is
+// a request that gets exactly what an unauthenticated one gets, and the
+// resolver above depends on that distinction to cache the negative answer.
+func (e *engineExecutor) PreviewGrantByToken(ctx context.Context, tokenHash string) (*PreviewGrant, error) {
+	ctx = systemActorContext(ctx)
+	q := fmt.Sprintf("query sitePreviewGrantByToken(tokenHash: %s)", langparser.QuoteString(tokenHash))
+	res, err := e.engine.Execute(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("edge: query sitePreviewGrantByToken: %w", err)
+	}
+	rows := memql.MaterializeRows(res)
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	r := rows[0]
+	return &PreviewGrant{
+		ID:           memql.BareShortId(rowString(r, "id")),
+		SiteID:       memql.BareShortId(rowString(r, "siteId")),
+		CandidateRef: rowString(r, "candidateRef"),
+		RevokedAt:    rowString(r, "revokedAt"),
+		// AN UNPARSEABLE OR ABSENT STAMP IS THE ZERO TIME, which preview.go
+		// reads as EXPIRED. Failing toward the refusal is the only defensible
+		// direction for the one field bounding a bearer credential.
+		ExpiresAt:  rowTime(r, "expiresAt"),
+		LastSeenAt: rowTime(r, "lastSeenAt"),
+	}, nil
+}
+
+// TouchPreviewGrant records that the edge honoured a grant. Throttled by the
+// caller (preview.go) to at most one write per grant per minute, and run
+// detached from the request, so nothing a visitor waits for happens here.
+func (e *engineExecutor) TouchPreviewGrant(ctx context.Context, grantId string, at time.Time) error {
+	ctx = systemActorContext(ctx)
+	q := fmt.Sprintf("mutation touchSitePreviewGrant(grantId: %s, lastSeenAt: %s)",
+		langparser.QuoteString(grantId), langparser.QuoteString(at.UTC().Format(time.RFC3339)))
+	// INTERNAL ORIGIN, because touchSitePreviewGrant is @serverOnly: it is the
+	// deployment's own observation of its own serving path, and a
+	// client-writable "last seen" is a field that says what its writer wanted
+	// it to say. Origin defaults to CLIENT, and a missed stamp is refused with
+	// only a WARN in the log.
+	if _, err := e.engine.Execute(auth.ContextWithInternalOrigin(ctx), q); err != nil {
+		return fmt.Errorf("edge: mutation touchSitePreviewGrant: %w", err)
+	}
+	return nil
+}
+
+// rowTime reads an RFC3339 stamp off a row. ABSENT AND UNPARSEABLE ARE ONE
+// ANSWER -- the zero time -- and every caller here treats that as "expired" or
+// "never", both of which are the safe reading.
+func rowTime(m map[string]any, key string) time.Time {
+	raw := strings.TrimSpace(rowString(m, key))
+	if raw == "" {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return t.UTC()
 }

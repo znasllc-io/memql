@@ -27,21 +27,23 @@ import (
 // That is memql#3678, and TestDeclaredMetadataKeysAreReadByNothing is the one
 // that actually broke.
 var walkerExemptions = map[string]string{
-	"cmd/memql-lsp/vscodeimportrule_test.go":         "walks vscodeExtensionSrcDir, the extension's TypeScript source",
-	"deploy/fleet/bundle_test.go":                    "walks deploy/fleet/dsl, the fleet DSL bundle, which contains no nested checkout",
-	"deploy/k8s/components/tenant/render_test.go":    "walks a t.TempDir() a capability script just rendered into",
-	"component/memql/sense/imports_test.go":          "walks corpusRoot, the DSL corpus",
-	"component/memql/sense/runnable_test.go":         "walks corpusRoot, the DSL corpus",
-	"docs_construct_names_test.go":                   "walks dsl/, and skips every dot-prefixed directory",
-	"scripts/ci/spa_image_wiring_test.go":            "walks clients/os/src, the shell stylesheet tree -- a narrow subtree that is not an ancestor of .claude",
-	"scripts/cidb/dbgate_test.go":                    "skips every dot-prefixed directory",
-	"scripts/cidb/dsnliteral_test.go":                "skips every dot-prefixed directory",
-	"scripts/citags/tags_test.go":                    "skips every dot-prefixed directory",
-	"scripts/install/mkcert_pair_round_trip_test.go": "walks a t.TempDir() the install capability scripts just wrote into -- a fixture home, not an ancestor of .claude, and it must account for EVERY file in it",
-	"scripts/k3d/up_rendered_manifest_test.go":       "copies deploy/k8s, a narrow subtree with no nested checkout -- and a COPY must skip nothing, or it renders a tree the repository does not have",
-	"test/dslconformance/callgraph_contract_test.go": "walks the DSL tree",
-	"cmd/shopifyschema/shopify_schema_drift_test.go": "walks the two GENERATED directories and the t.TempDir() they were just regenerated into -- a byte-for-byte comparison that must account for every file in both, so it can skip nothing",
-	"test/clustere2e/storefront_serving_test.go":     "walks testdata/storefront-fixture to PACK IT INTO A ZIP -- a narrow fixture subtree that is not an ancestor of .claude, and a bundle that skipped a file would publish a tree the repository does not have",
+	"cmd/memql-lsp/vscodeimportrule_test.go":            "walks vscodeExtensionSrcDir, the extension's TypeScript source",
+	"deploy/fleet/bundle_test.go":                       "walks deploy/fleet/dsl, the fleet DSL bundle, which contains no nested checkout",
+	"deploy/k8s/components/tenant/render_test.go":       "walks a t.TempDir() a capability script just rendered into",
+	"component/language/dslspec/grammar_corpus_test.go": "walks dsl/ skipping every dot-prefixed directory, and the 2026 corpus, a narrow subtree that is not an ancestor of .claude; component/language is its own module, so repowalk would be a cross-module import",
+	"component/memql/sense/imports_test.go":             "walks corpusRoot, the DSL corpus",
+	"component/memql/sense/runnable_test.go":            "walks corpusRoot, the DSL corpus",
+	"docs_construct_names_test.go":                      "walks dsl/, and skips every dot-prefixed directory",
+	"scripts/ci/spa_image_wiring_test.go":               "walks clients/os/src, the shell stylesheet tree -- a narrow subtree that is not an ancestor of .claude",
+	"scripts/cidb/dbgate_test.go":                       "skips every dot-prefixed directory",
+	"scripts/cidb/dsnliteral_test.go":                   "skips every dot-prefixed directory",
+	"scripts/citags/tags_test.go":                       "skips every dot-prefixed directory",
+	"scripts/install/mkcert_pair_round_trip_test.go":    "walks a t.TempDir() the install capability scripts just wrote into -- a fixture home, not an ancestor of .claude, and it must account for EVERY file in it",
+	"scripts/k3d/up_rendered_manifest_test.go":          "copies deploy/k8s, a narrow subtree with no nested checkout -- and a COPY must skip nothing, or it renders a tree the repository does not have",
+	"test/dslconformance/callgraph_contract_test.go":    "walks the DSL tree",
+	"cmd/shopifyschema/shopify_schema_drift_test.go":    "walks the two GENERATED directories and the t.TempDir() they were just regenerated into -- a byte-for-byte comparison that must account for every file in both, so it can skip nothing",
+	"test/clustere2e/storefront_serving_test.go":        "walks testdata/storefront-fixture to PACK IT INTO A ZIP -- a narrow fixture subtree that is not an ancestor of .claude, and a bundle that skipped a file would publish a tree the repository does not have",
+	"test/clustere2e/storefront_preview_test.go":        "walks the same fixture subtree, for the same reason, to pack a SECOND marked copy of it -- the candidate version the preview leg serves beside the serving one (epic memql#5531)",
 }
 
 // TestRepoWalkersShareOneSkipList is the memql#3678 gate.

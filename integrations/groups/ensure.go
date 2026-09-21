@@ -8,9 +8,11 @@ package groups
 // every boot. A minted id would have made the second one write a new group per
 // boot forever.
 //
-// NOT @sdk, deliberately. This is the engine placing a row; a caller-reachable
-// version would let anyone mint the one group an account's whole membership
-// hangs on, and then tie it to an account of their choosing.
+// Both builtins below are the ENGINE placing rows rather than a person, and
+// both declare the capability that says so: `create` on group to mint an
+// account's group, `update` on group to archive every group it has. They carry
+// no `@sdk` either, but that is a generator marker and not a gate -- see each
+// handler.
 
 import (
 	"context"
@@ -30,12 +32,21 @@ func AccountGroupID(accountID string) string {
 
 // handleGroupEnsureForAccount writes the account-kind group if none is active.
 //
-// NO CALLER GUARD, and that is the one place in this package where the absence
-// of a check is deliberate rather than an omission: the builtin carries no
-// `@sdk`, so it is not on the client wire at all, and both callers are the
-// engine itself -- an automation running under its own actor and the boot
-// sweep running under the seed materializer's. Adding a capability check would
-// refuse both, since neither is a person.
+// THE CALLER GATE IS `@requiresCapability("create", "group")` ON THE BUILTIN,
+// not a check in this function, and the difference is deliberate twice over.
+//
+// The engine's builtin executor runs it BEFORE this handler, so a caller who
+// may not create a group is refused having read nothing -- which is what keeps
+// the refusal from distinguishing an account that exists from one that does
+// not. And the gate passes INTERNAL ORIGIN, which is what lets both callers
+// through -- the ensureAccountGroup automation and the seed materializer's
+// boot sweep -- along with any later trusted-Go caller that stamps it. A
+// capability check written here would have to re-derive that exemption, and a
+// second copy of it is a copy that drifts.
+//
+// Do NOT restore a `@sdk`-based argument for leaving this open. `@sdk` is a
+// generator marker with no engine effect: it decides what sdk/go and sdk/ts
+// emit and decides nothing about who may name this builtin over the wire.
 func (i *Integration) handleGroupEnsureForAccount(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	accountID := memql.BareShortId(strings.TrimSpace(asString(args["accountId"])))
 	if accountID == "" {
@@ -96,12 +107,17 @@ func (i *Integration) handleGroupEnsureForAccount(ctx context.Context, args map[
 // handleGroupArchiveForAccount is the archiveAccountGroup cascade's entry
 // point.
 //
-// NO CALLER GUARD, for handleGroupEnsureForAccount's reason: the builtin
-// carries no `@sdk`, and its one caller is an automation running under the
-// engine's own actor. The authority that decided this was the archive of the
-// ACCOUNT, which `@requiresRank("admin")` on archiveClientAccount already
-// gated -- re-checking a capability here would refuse the automation, which
-// is not a person.
+// THE CALLER GATE IS `@requiresCapability("update", "group")` ON THE BUILTIN,
+// for handleGroupEnsureForAccount's reasons and for one more. `update` on
+// group is the verb groupArchive checks, and this is that archive taken over
+// every group one account has -- so reaching a client's whole membership in a
+// single call takes the same grant as reaching one group by hand.
+//
+// The authority the CASCADE runs on is still the archive of the ACCOUNT, which
+// `@requiresRank("admin")` on archiveClientAccount gates. Note that the two do
+// not name the same set: developer ranks 300, clears that floor, and holds no
+// group grant at all -- so a developer archives an account and the cascade
+// still runs, because it runs as the engine rather than as them.
 func (i *Integration) handleGroupArchiveForAccount(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	accountID := memql.BareShortId(strings.TrimSpace(asString(args["accountId"])))
 	groups, memberships, err := i.ArchiveGroupsForAccount(ctx, accountID)

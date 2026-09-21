@@ -452,6 +452,22 @@ var idBearingFieldExemptions = map[string]string{
 	"deployment/deploymentNodeSpec.deploymentId": "plain-fk-by-design; hashed into the composite concept id (#2885)",
 	"cluster/node.deploymentId":                  "plain-fk-by-design (@description declares plain string FK)",
 	"library/documentVersion.documentId":         "plain-fk-by-design; cross-concept content-history grouping key (@description declares NOT an @relationship)",
+	// --- bare by construction: a COPY of a value nothing canonicalizes ---
+	// Both name the v1:shopify:store a storefront's `previewBinding.storeId`
+	// names, copied at mint time so an exercise can be attributed to the store
+	// it actually ran against even after somebody re-points the binding
+	// (epic memql#5531).
+	//
+	// THE SOURCE IS UNCANONICALIZABLE, which is what decides this. A
+	// @relationship binds a TOP-LEVEL payload field, and `storeId` lives
+	// inside v1:platform:site's `binding` and `previewBinding` objects -- so
+	// the value these copy is bare, and every reader of it (the edge's
+	// resolver, the write guard, the preview capabilities) compares bare.
+	// Annotating the copies would canonicalize them on write and leave two
+	// spellings of one store id on one screen, with the join against the
+	// binding silently matching nothing.
+	"platform/sitePreviewGrant.previewStoreId": "bare-by-construction; copies v1:platform:site.previewBinding.storeId, which is nested and so has no @relationship to canonicalize it (epic memql#5531)",
+	"platform/sitePreviewObservation.storeId":  "bare-by-construction; the same copied value, for the same reason (epic memql#5531)",
 	// The action's provenance pair pointed at v1:harness:plan / step, which the
 	// work spine's epic A1 retired. The FIELDS stay (the concept's capture-only
 	// fields are declared and unwritten until epic A3 reshapes it) and their

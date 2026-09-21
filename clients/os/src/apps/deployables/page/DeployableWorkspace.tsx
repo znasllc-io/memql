@@ -16,13 +16,19 @@ import { useCustomDomains } from "../useCustomDomains";
 import { siteIsBuilt, siteStateWord } from "../words";
 import { railFor, type RailInput } from "./rail";
 import { storeLabel } from "../store/rows";
+import { PreviewSection } from "../preview/PreviewSection";
+import { NO_PARTS, type PartsHeld } from "../parts";
 import { useStore } from "../store/useStore";
 
 export type WorkspaceDetail = "source" | "whatItIs" | "whereItLives" | "build" | "live" | "runtime" | "traffic" | "store";
 
-export function DeployableWorkspace({ site, pkg, run, accounts, canDomains, canStore, timelineState, timelineError, onRetryRead, onInspect, onOpenSource, onHistory, canSources = false, onUpdate }: {
+export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDomains, canStore, timelineState, timelineError, onRetryRead, onInspect, onOpenSource, onHistory, canSources = false, onUpdate }: {
   canSources?: boolean; onUpdate?: () => void;
   site: SiteRow; pkg: PackageRow | null; run: DeploymentRow | null; accounts: AccountRow[];
+  /** This source's whole timeline, for the versions this deployable has published. */
+  runs?: readonly DeploymentRow[];
+  /** The parts this session holds, for the Preview section's own acts. */
+  can?: PartsHeld;
   canDomains: boolean; canStore: boolean; timelineState: string; timelineError: string; onRetryRead: () => void;
   onInspect: (detail: WorkspaceDetail) => void; onOpenSource: () => void; onHistory: () => void;
 }) {
@@ -83,6 +89,17 @@ export function DeployableWorkspace({ site, pkg, run, accounts, canDomains, canS
       {failed && site.status === "live" ? <Caption>The latest attempt did not replace the published version.</Caption> : null}
       {pkg && timelineError ? <Notice tone="error" sentence="Deployment history could not be read." detail={timelineError}><Button onClick={onRetryRead}>Try again</Button></Notice> : null}
     </section>
+    {/* PREVIEW SITS UNDER VERSIONS, because it is a reading of the same thing:
+        Versions says what is serving, Preview says what is being exercised
+        beside it. Two sections rather than one, because the second answers a
+        question the first cannot -- which store each version talks to -- and
+        folding them together would bury it.
+
+        ABSENT FOR THE PLATFORM'S OWN SITE. MemQL OS is systemOwned and exempt
+        from the preview axis as it is from the status and settings axes; the
+        engine refuses those writes, and drawing the section on the console
+        somebody is reading this in would be a panel of controls that only fail. */}
+    {!site.systemOwned ? <PreviewSection site={site} runs={runs ?? []} can={can ?? NO_PARTS} onOpenStore={() => onInspect("store")} /> : null}
     <div className="deployable-reading-tools"><IconButton label="Traffic" onClick={() => onInspect("traffic")}><Activity size={16} aria-hidden /></IconButton></div>
   </>;
 }
