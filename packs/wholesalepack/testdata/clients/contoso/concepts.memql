@@ -1,0 +1,31 @@
+// FIXTURE CLIENT TWO -- Contoso (epic memql#5533, issue memql#5560).
+//
+// Contoso's process is NOTHING LIKE NORTHWIND'S, and that is the entire
+// point of this fixture. A new application opens a review: a sales rep is
+// assigned, and an approvalChain with a threshold decides. Nobody is
+// entitled until the chain says approved.
+//
+// dsl/commerce ALREADY SHIPS approvalChain, salesRep and territory. Contoso
+// reaches for them directly, which is why the wholesale pack does not carry
+// a copy: a pack that had its own idea of an approval chain would be a pack
+// Contoso had to work around, and Northwind -- which wants no chain at all
+// -- would be carrying it for nothing.
+//
+// Contoso collects NO tax identifier. It is the second client, and the one
+// whose existence is the argument for keeping the EIN out of the pack.
+
+use wholesale.concepts.{ application }
+
+@version("1.0.0")
+@description("Contoso's review of one wholesale application: which rep owns it and which approvalChain instance is deciding it. Contoso's own concept -- the pack knows nothing about reps or chains.")
+@displayCard(primary="assignedRepId", secondary="applicationId", tertiary="chainId")
+@rowAuthz(owner="ownerUserId", clusterOwner)
+concept contosoReview {
+  ownerUserId    string!  @description("The merchant this review belongs to.")
+  applicationId  string!  @description("The v1:wholesale:application under review.")
+  storeId        string!  @description("The store, copied from the application (design D9).")
+  assignedRepId  string   @description("The v1:commerce:salesRep who owns this account. Contoso notifies them; the pack has no idea they exist.")
+  chainId        string   @description("The v1:commerce:approvalChain instance deciding this application.")
+
+  @relationship(type="references", field="applicationId", target=application, direction="outgoing")
+}
