@@ -97,6 +97,22 @@ type Actor struct {
 	MayDeployDsl bool
 }
 
+// StoreResolver answers which v1:shopify:store row a myshopify.com domain
+// names on THIS cluster, as a bare row id, or "" when there is no such row the
+// caller may read.
+//
+// Declared here rather than beside its siblings, and the difference is the
+// reason they are scattered: CredentialResolver lives in credentials.go
+// because it returns a type that file owns, and RoleResolver lives in
+// autodeploy.go because it returns an auth.Role and pipeline.go imports no
+// component/auth. This one takes and returns strings, so it has no such pull
+// and belongs beside the field that holds it.
+//
+// A MISS IS "", NOT AN ERROR. An error means the read itself failed and the
+// run stops on it; an empty answer means the question was asked and this
+// cluster has no store by that name, which is the refusal a person repairs.
+type StoreResolver func(ctx context.Context, domain string) (string, error)
+
 // Deps is the pipeline's whole outside world. Every field is an interface so
 // the state machine is testable end to end with no cluster, no network and no
 // object storage -- which is what the D6 ordering law needs, because "the
@@ -144,6 +160,20 @@ type Deps struct {
 	// deployed under a blank authority. Manual deploys never reach this --
 	// they resolve through actorFromContext.
 	Roles RoleResolver
+	// Stores resolves the v1:shopify:store row a storefront's manifest NAMES,
+	// by its myshopify.com domain, to the bare row id (epic memql#5530, issue
+	// memql#5540). Returns "" for a miss.
+	//
+	// It runs under the CALLER's actor, deliberately, which is the same answer
+	// updateSiteStoreBinding's Go guard gives: a caller who may not read a
+	// store may not bind a storefront to it. A store is cluster-owner-tier, so
+	// resolving under the deployment instead would let anyone who can deploy a
+	// package point a storefront at any merchant on the cluster.
+	//
+	// NIL IS A REFUSAL, NOT A GAP, as it is for Credentials: a storefront
+	// deployed on a node that cannot resolve stores is refused by name rather
+	// than published unbound.
+	Stores StoreResolver
 
 	// PeekCredentials is the PROBE's resolver (epic memql#4885, D11): the
 	// same read, the same two refusals, and no lastUsedAt heartbeat -- a

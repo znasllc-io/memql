@@ -593,6 +593,29 @@ cockpit's pin moved in the same commit as its go.mod, as the pin file requires.
 **Wire.** No new message. `AppSessionChunk.stream` and `seq` are already there; the
 change is that they are honoured.
 
+**What shipped differently, recorded 2026-09-20 when epic B landed.** Three things
+this section named that the implementation resolved otherwise, each for a reason the
+section could not have known:
+
+- **The field is `transcriptFileId`, not `transcriptArtifactId`.** It holds a
+  `v1:library:file` id: the Library INDEX row is promoted asynchronously by
+  `indexFileOnCreate` and its id is deliberately not derivable in Go (the reasoning
+  `app/integrations_skills_capture.go` already records), so a field named for the
+  artifact would hold a file id and read as a fact.
+- **The writer does not OPEN the session subrun; it uses the one epic A's delegate
+  already opened.** Epic A landed first, and `AppSessionDelegate.RunStep` opens a child
+  run and stamps `childRunId` on the delegating step. Opening a second here would leave
+  that pointer aimed at a run holding one step and no actions. The run id is threaded
+  down as `RunSpec.RecordingRunId`; the writer opens one only when nothing did, which is
+  the delegated-task path.
+- **`recordedSteps` on the session row is the SEQ ALLOCATOR both writers share.** This
+  section asks for an `mcp` step written by "the same writer", and a run's step order is
+  what a client sorts by -- two writers on two replicas cannot produce one order without
+  shared state. The session row is the only state both can see, which is the argument
+  `submit` already rests on, so each writer takes the count as its step's seq and writes
+  it back incremented. A race gives two steps one seq: a tie in display order, never a
+  lost row, because the step key is what the row id derives from.
+
 **Failure modes.** A session whose owner cannot be resolved is refused before it starts,
 not recorded under a blank actor (the workbench's `workspace_owner_unresolved` rule).
 An action event arriving out of order is dropped, as chunks already are, and the gap is

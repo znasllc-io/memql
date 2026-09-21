@@ -172,6 +172,36 @@ Three kinds:
 A transcript is a record; silently interleaving a replayed chunk corrupts it in
 a way no later reader can detect.
 
+**A session is RECORDED as rows of the work spine** (epic memql#5396). The
+`stream` on each chunk decides where it goes: an `event` is a completed action
+the cockpit normalized -- a command, a file read or write, a fetch, a call back
+into MemQL -- and becomes one `v1:work:step` plus one `v1:work:observation` in
+the session's recording run, which the row names as `sessionRunId`. `stdout`
+and `stderr` are the model's prose and become one content-addressed
+`v1:library:file` at end, named as `transcriptFileId`. The row used to carry a
+flattened 256 KiB `transcript` string with the stream and the sequence
+discarded; `transcript` and `transcriptBytes` are retired.
+
+Three things an operator reads off that:
+
+- **`recordedSteps` and `droppedActions`.** A hole in the action sequence is
+  recorded as a `note` observation on the run AND counted on the row, because
+  anything lifted from an incomplete recording is incomplete and a silent gap
+  lets that happen unnoticed. A refused repeat is not counted: the first copy
+  was recorded.
+- **File contents are content-addressed.** Two identical writes are one Library
+  file referenced twice, so a later branch from a recorded step costs no copy.
+  A content above the per-file cap is referenced BY DIGEST with
+  `contentOmitted` recorded, and a Library failure never fails the session.
+- **An app's MCP calls are recorded by the MCP node**, not by the replica
+  running the session -- the harness sees an opaque result and the session's
+  replica never sees the call at all. `submit` and `next_task` are excluded:
+  they are the session's protocol rather than its work.
+
+A node with no recorder wired runs the session and records nothing, exactly as
+it did before; `sessionRunId` is then empty, which is not the same answer as a
+session that did nothing.
+
 **A caller context that dies cancels the run on the machine.** Otherwise a
 plan that was cancelled leaves a headless agent working on somebody's laptop.
 A worker disconnect ends every live session with a named error rather than

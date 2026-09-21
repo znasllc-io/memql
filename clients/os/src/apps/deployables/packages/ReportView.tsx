@@ -112,8 +112,8 @@ export function ReportView({ report, only }: { report: AnalysisReport | null; on
                 </div>
                 <p className="os-report-path">{d.path}</p>
                 <p className="os-report-plan">{d.buildPlan}</p>
-                {d.binding?.storeDomain ? (
-                  <p className="os-report-plan">Fronts {d.binding.storeDomain}</p>
+                {d.binding?.store ? (
+                  <p className="os-report-plan">Fronts {d.binding.store}</p>
                 ) : null}
                 {d.problem ? <ProblemNotice problem={d.problem} tone="error" /> : null}
               </li>

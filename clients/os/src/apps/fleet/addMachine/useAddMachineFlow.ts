@@ -87,6 +87,8 @@ export interface AddMachineFlow {
   /** Cancel: before a mint, leaves; after one, asks which of two things. */
   cancel: () => void;
   keepWaiting: () => void;
+  /** Ask about leaving while a token is waiting to be used. */
+  askLeave: () => void;
   leaveKeepToken: () => void;
   revokeAndLeave: () => Promise<void>;
   /** Leave with the machine registered. Returns the registration id to open,
@@ -121,6 +123,7 @@ export function useAddMachineFlow(): AddMachineFlow {
   const [mint, setMint] = useState<Mint | null>(null);
   const [mintedAt, setMintedAt] = useState<Date | null>(null);
   const [cancelAsked, setCancelAsked] = useState(false);
+  const [leaveAsked, setLeaveAsked] = useState(false);
   const [revoking, setRevoking] = useState(false);
   const [revokeError, setRevokeError] = useState("");
   const [beats, setBeats] = useState(0);
@@ -215,6 +218,7 @@ export function useAddMachineFlow(): AddMachineFlow {
     setMint(null);
     setMintedAt(null);
     setCancelAsked(false);
+    setLeaveAsked(false);
     setRevoking(false);
     setRevokeError("");
     setBeats(0);
@@ -275,12 +279,21 @@ export function useAddMachineFlow(): AddMachineFlow {
       reset();
       return;
     }
+    setLeaveAsked(false);
     setCancelAsked(true);
   }, [mint, reset]);
 
   const keepWaiting = useCallback(() => {
     setCancelAsked(false);
+    setLeaveAsked(false);
     setRevokeError("");
+  }, []);
+
+  // ONE QUESTION AT A TIME: asking about leaving withdraws a cancel that was
+  // never answered, and the other way round.
+  const askLeave = useCallback(() => {
+    setCancelAsked(false);
+    setLeaveAsked(true);
   }, []);
 
   const leaveKeepToken = useCallback(() => reset(), [reset]);
@@ -320,11 +333,12 @@ export function useAddMachineFlow(): AddMachineFlow {
       machine,
       beats,
       cancelAsked,
+      leaveAsked,
       revokeError,
       revoking,
       now,
     }),
-    [draft, connection, minting, mintError, mint, mintedAt, machine, beats, cancelAsked, revokeError, revoking, now],
+    [draft, connection, minting, mintError, mint, mintedAt, machine, beats, cancelAsked, leaveAsked, revokeError, revoking, now],
   );
 
   const preliminaryChecks = useMemo(
@@ -367,6 +381,7 @@ export function useAddMachineFlow(): AddMachineFlow {
     mint: mintToken,
     cancel,
     keepWaiting,
+    askLeave,
     leaveKeepToken,
     revokeAndLeave,
     finish,

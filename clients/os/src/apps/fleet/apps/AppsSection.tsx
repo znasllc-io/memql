@@ -30,7 +30,7 @@ import { useDelegationPolicy, type DelegationPolicyDraft } from "./useDelegation
 // rather than as the thing that decided.
 //
 // RULE 11: THE LIST AND ONE RUN'S TRANSCRIPT NEVER SHARE A SCROLL COLUMN. A
-// transcript is tall by nature, so the detail REPLACES this view and carries
+// run's detail is tall by nature, so it REPLACES this view and carries
 // a quiet back-Head, exactly as DeployablePage does. One Head per view; two
 // Heads in one scroller is the tell that neither happened.
 

@@ -6,10 +6,17 @@ import {
   ACCOUNT_NONE,
   DEFAULT_LIST_FILTER,
   filterIsNarrowing,
+  flatDeployables,
   foldDeployables,
+  foldSources,
   groupFingerprint,
   listViewKey,
+  originLabel,
+  rowFingerprint,
+  sourceName,
   sourceOf,
+  sourceStateWord,
+  sourceSummary,
   standingInputFor,
   type ListFilter,
 } from "../../src/apps/deployables/list";
@@ -123,6 +130,15 @@ const fold = (
   filter: ListFilter = DEFAULT_LIST_FILTER,
   showArchived = false,
 ) => foldDeployables(sites, packages, parked, filter, showArchived);
+
+/** The Sources tab's own fold, over the same three feeds. */
+const sources_ = (
+  sites = [STORE, ADMIN, SHOP],
+  packages = [ACME],
+  parked: ReturnType<typeof parkedRun>[] = [],
+  search = "",
+  showArchived = false,
+) => foldSources(sites, packages, parked, search, showArchived);
 
 describe("one row per thing that serves or will, grouped under its source", () => {
   it("groups a package's apps under it, once, and a hand-made site stands alone", () => {
@@ -449,5 +465,121 @@ describe("a declared app its owner turned off", () => {
     // fact; the list is a preference about one that has none.
     const rows = fold([STORE], [{ ...SRC, disabledDeployables: ["storefront", "web"] }])[0]!.rows;
     expect(rows.find((r) => r.name === "storefront")!.disabled).toBe(false);
+  });
+});
+
+// TWO LISTS, BECAUSE THERE ARE TWO KINDS OF THING. The fold above still groups
+// (a source's page and the two readings below are all built from it); what the
+// person is shown is one flat list of deployables and one list of sources.
+describe("the two lists the tabs draw", () => {
+  it("lists every deployable flat, by name, whatever it came from", () => {
+    const flat = flatDeployables(fold());
+    // By name; two that differ only in case fall back to their address.
+    expect(flat.map((r) => r.name)).toEqual(["admin", "Storefront", "storefront"]);
+    expect(flat.map((r) => r.hostname).sort()).toEqual(["admin.memql.example.com", "shop.memql.example.com", "store.memql.example.com"]);
+    // Origin is no longer structure, so nothing about the ORDER says it.
+    expect(flat.every((r) => r.site !== null)).toBe(true);
+  });
+
+  it("keeps a row with no address of its own off the deployables list: it is a fact about its source", () => {
+    const groups = fold([STORE], [ACME], [parkedRun({ id: "dep-1", packageId: "pkg-acme" })]);
+    const willServe = groups.flatMap((g) => g.rows).filter((r) => r.site === null);
+    expect(willServe.length).toBeGreaterThan(0);
+    expect(flatDeployables(groups).some((r) => r.site === null)).toBe(false);
+  });
+
+  it("says where a deployable came from: its source by name, else the way in it took", () => {
+    const flat = flatDeployables(fold());
+    const byName = (name: string) => flat.find((r) => r.name === name)!;
+    expect(originLabel(byName("storefront"))).toBe("acme");
+    // A hand-made site is none of a source's: it says the way in, or nothing.
+    expect(originLabel(byName("Storefront"))).not.toBe("acme");
+    // Built in is NOT one of the three ways in, and must not be called one.
+    const baked = siteFromRow(siteRow({ id: "site-os", hostname: "os.memql.example.com", systemOwned: true, bundleRef: "file:///app/os" }));
+    expect(originLabel({ site: baked, pkg: null })).toBe("Built in");
+  });
+
+  it("lists each source once, with what it produced", () => {
+    const sources = sources_();
+    expect(sources.map((g) => g.pkg?.name)).toEqual(["acme"]);
+    expect(sourceSummary(sources[0]!)).toEqual({ apps: 2, deployed: 2, waiting: false });
+  });
+
+  it("puts what a person has to do about a source first in its one state word", () => {
+    const [quiet] = sources_();
+    expect(sourceStateWord(quiet!)).toEqual({ word: "Current", tone: "muted" });
+    const [waiting] = sources_([STORE, ADMIN, SHOP], [ACME], [parkedRun({ id: "dep-1", packageId: "pkg-acme" })]);
+    expect(sourceStateWord(waiting!).word).toBe("Review needed");
+    const newer = packageFromRow({ ...(ACME as unknown as Row), updateAvailable: true } as Row);
+    const [update] = sources_([STORE, ADMIN, SHOP], [newer]);
+    expect(sourceStateWord(update!)).toEqual({ word: "Update available", tone: "accent" });
+    const gone = packageFromRow({ ...(ACME as unknown as Row), status: "archived" } as Row);
+    const [archived] = sources_([STORE, ADMIN, SHOP], [gone], [], "", true);
+    expect(sourceStateWord(archived!).word).toBe("Archived");
+  });
+
+  // THE THREE THINGS A FILTER OVER THE DEPLOYABLES FOLD GOT WRONG. Nothing on
+  // a cluster with no sources could show any of them; a rendered list of five
+  // seeded sources showed three rows.
+
+  it("lists a source that has produced nothing: it is still a source, and this tab is where it is found", () => {
+    // No site, no declared app, no parked run -- what a refused analysis
+    // leaves behind. The deployables fold has no row to hang it on.
+    const empty = packageFromRow({ ...(ACME as unknown as Row), id: "pkg-empty", name: "field-notes", repoUrl: "https://github.com/acme/field-notes" } as Row);
+    expect(fold([STORE, ADMIN, SHOP], [ACME, empty]).some((g) => g.pkg?.id === "pkg-empty")).toBe(false);
+    const sources = sources_([STORE, ADMIN, SHOP], [ACME, empty]);
+    expect(sources.map((g) => g.pkg?.name)).toEqual(["acme", "field-notes"]);
+    expect(sourceSummary(sources[1]!)).toEqual({ apps: 0, deployed: 0, waiting: false });
+    expect(sourceStateWord(sources[1]!).word).toBe("Nothing deployed");
+  });
+
+  it("asks a search of the SOURCE, and never trims what a source it kept is said to have made", () => {
+    // The deployables list narrows rows, which is right for a list of rows...
+    const narrowed = fold([STORE, ADMIN, SHOP], [ACME], [], { ...DEFAULT_LIST_FILTER, search: "admin" });
+    expect(narrowed.find((g) => g.pkg?.id === "pkg-acme")?.rows).toHaveLength(1);
+    // ...and would have left its source reading "1 app" out of two.
+    const [found] = sources_([STORE, ADMIN, SHOP], [ACME], [], "admin");
+    expect(sourceSummary(found!)).toEqual({ apps: 2, deployed: 2, waiting: false });
+    // By its own name and by where it lives, too; and a miss is a miss.
+    expect(sources_([STORE, ADMIN, SHOP], [ACME], [], "ACME")).toHaveLength(1);
+    expect(sources_([STORE, ADMIN, SHOP], [ACME], [], "acme/storefront")).toHaveLength(1);
+    expect(sources_([STORE, ADMIN, SHOP], [ACME], [], "nothing-like-it")).toHaveLength(0);
+  });
+
+  it("files a source under archived by ITS status, not by one of its apps'", () => {
+    const retired = siteFromRow(siteRow({ id: "site-old", hostname: "old.memql.example.com", status: "archived", packageId: "pkg-acme", packageDeployableName: "old" }));
+    // An active source with one archived app stays where it is, with all three
+    // apps counted and the archived one not counted as deployed...
+    const [active] = sources_([STORE, ADMIN, retired], [ACME]);
+    expect(sourceSummary(active!)).toEqual({ apps: 3, deployed: 2, waiting: false });
+    // ...and does not turn up in the archived view as a source with one app.
+    expect(sources_([STORE, ADMIN, retired], [ACME], [], "", true)).toHaveLength(0);
+    // An archived source is the reverse: there, and only there.
+    const gone = packageFromRow({ ...(ACME as unknown as Row), status: "archived" } as Row);
+    expect(sources_([STORE, ADMIN], [gone])).toHaveLength(0);
+    expect(sources_([STORE, ADMIN], [gone], [], "", true).map((g) => g.pkg?.id)).toEqual(["pkg-acme"]);
+  });
+
+  it("orders sources by what they are called, which is what a list of named things is scanned for", () => {
+    const zed = packageFromRow({ ...(ACME as unknown as Row), id: "pkg-zed", name: "Zed" } as Row);
+    const beta = packageFromRow({ ...(ACME as unknown as Row), id: "pkg-beta", name: "beta" } as Row);
+    expect(sources_([], [zed, ACME, beta]).map((g) => g.pkg?.name)).toEqual(["acme", "beta", "Zed"]);
+  });
+
+  it("calls a zip nobody named the same thing on both tabs", () => {
+    const zip = packageFromRow({ ...(ACME as unknown as Row), id: "pkg-zip", name: "", sourceKind: "artifact", repoUrl: "", repoRef: "", artifactId: "artifact-zip" } as Row);
+    const site = siteFromRow(siteRow({ id: "site-zip", hostname: "zip.memql.example.com", packageId: "pkg-zip", packageDeployableName: "brochure" }));
+    expect(sourceName(zip)).toBe("Uploaded zip");
+    expect(originLabel({ site, pkg: zip })).toBe(sourceName(zip));
+    // A repository nobody named is called by where it lives.
+    const bare = packageFromRow({ ...(ACME as unknown as Row), name: "" } as Row);
+    expect(sourceName(bare)).toBe("acme/storefront at main");
+    expect(sourceName(ACME)).toBe("acme");
+  });
+
+  it("treats a parked run arriving or clearing as news on a row, and a timer as none", () => {
+    const [row] = flatDeployables(fold([STORE], [ACME]));
+    const [same] = flatDeployables(fold([STORE], [ACME]));
+    expect(rowFingerprint(row!)).toBe(rowFingerprint(same!));
   });
 });

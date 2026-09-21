@@ -2,8 +2,12 @@ import type { ConnectReturn } from "../sources/connectReturn";
 import { ConnectReturnNotice } from "../sources/ConnectReturnNotice";
 import { useEffect, useMemo, useState } from "react";
 
-import { Button, Caption, Head, Notice, Panel, useLiveView } from "../../../kit";
-import { ActionBar, type Act } from "../../../kit/ActionBar";
+import { Rocket } from "lucide-react";
+
+import { Caption, Notice, useLiveView, type Stop } from "../../../kit";
+import type { Act } from "../../../kit/ActionBar";
+import { ActivityTarget } from "../../../kit/SemanticActivity";
+import { Wizard } from "../../../kit/Wizard";
 import { SELF_ACCOUNT_ID } from "../../accounts/rows";
 import { useAccountOptions } from "../../accounts/tie";
 import { useCreateSite, usePublish, useSiteAccount } from "../actions";
@@ -47,7 +51,6 @@ import {
   accountOrSelf,
 } from "./compose";
 import { everyOtherAppSkipped } from "../packages/calls";
-import { ComposeJourney } from "./ComposeJourney";
 import { BuildStop } from "./stops/Build";
 import { CiHandoff } from "./stops/compose/CiHandoff";
 import { Rail } from "./RailView";
@@ -55,7 +58,10 @@ import "../composition.css";
 import { headActionFor, railFor, type ComposeInput, type HeadAction, type RailProblem, type RailStage } from "./rail";
 import type { PartsHeld } from "../parts";
 import { ManifestPreview } from "./stops/compose/ManifestPreview";
-import { ComposeSourceStop } from "./stops/compose/Source";
+import { returnPathFor } from "../sources/connectReturn";
+import { useGithubConnect } from "../sources/useGithubConnect";
+import type { ConnectionNeed } from "./stops/compose/RepositorySource";
+import { ComposeSourceDetailStep, ComposeSourceKindStep, SOURCE_DETAIL_NAME, SOURCE_KIND_LABEL } from "./stops/compose/Source";
 import { ComposeWhereItLivesStop } from "./stops/compose/WhereItLives";
 
 // The compose reading (epic memql#4885, design D4): THE RAIL IS THE FORM.
@@ -63,8 +69,8 @@ import { ComposeWhereItLivesStop } from "./stops/compose/WhereItLives";
 // ===========================================================================
 // THE SAME FIVE STOPS, ANSWERED INSTEAD OF READ
 // ===========================================================================
-// New deployable opens this in place of the list: the Head's title becomes
-// "New deployable", a quiet Back returns to the list, and beneath the Head
+// Add a deployable opens this in place of the list: the Head's title becomes
+// "Add a deployable", a quiet Back returns to the list, and beneath the Head
 // the five stops the page reads as facts are rendered as INPUTS -- Source
 // open first, the rest not reachable yet, the bar's ONE action following
 // the state. There is no Next, no Back between stops and no step number: the
@@ -185,7 +191,13 @@ export function ComposePage(props: ComposePageProps) {
   // state lived in the stop would close under somebody every time a probe
   // answered or a credential arrived on its own feed.
   const [tokenFormOpen, setTokenFormOpen] = useState(false);
-  const [journeyChoice, setJourneyChoice] = useState<{ key: string; stop: StopId } | null>(null);
+  const [journeyChoice, setJourneyChoice] = useState<{ key: string; stop: WizardStep } | null>(null);
+  // THE CONNECT IS HELD HERE because it is a step's forward act, and a wizard's
+  // forward act lives on its floor -- which this page draws.
+  const githubConnect = useGithubConnect();
+  // What the repository step says it needs before it can go on. The step says
+  // it, because only the step has GitHub's own answer about the grant.
+  const [connectionNeed, setConnectionNeed] = useState<ConnectionNeed>("");
 
   const probe = useSourceProbe();
   const zipProbe = useArtifactProbe();
@@ -381,7 +393,7 @@ export function ComposePage(props: ComposePageProps) {
 
     const address = addresses[""] ?? EMPTY_ADDRESS;
     const siteId = await createSite.create(
-      { slug: address.slug, kind: draft.kind, title: draft.name.trim(), storeDomain: draft.storeDomain ?? "", storefrontTokenRef: draft.storefrontTokenRef ?? "" },
+      { slug: address.slug, kind: draft.kind, title: draft.name.trim(), storeId: draft.storeId ?? "" },
       clusterDomain,
     );
     if (siteId === "") return;
@@ -510,31 +522,37 @@ export function ComposePage(props: ComposePageProps) {
     },
   };
 
-  const defaultStop: StopId = phase === "composing" ? source || parked ? "whatItIs" : "source"
+  // A NEW DEPLOYABLE OPENS ON THE CHOICE, AND THE CHOICE OPENS THE STEP IT
+  // NAMES. Reading it off the draft rather than off a click means a flow that
+  // comes back with its choice already made -- from GitHub, after connecting --
+  // lands on the repository step rather than on a question already answered.
+  const defaultStop: WizardStep = phase === "composing" ? source || parked ? "whatItIs" : draft.choice === "" ? "source" : "sourceDetail"
     : phase === "analyzing" || phase === "awaiting_confirm" && path === "package" ? "whatItIs"
     : phase === "stopped" ? (railFor(input).stages.find(s => s.state === "stopped")?.id as StopId ?? "whatItIs")
     : phase === "deploying" || phase === "awaiting_confirm" && path === "handmade" ? "build" : "live";
   const journeyStop = journeyChoice?.key === journeyKey ? journeyChoice.stop : defaultStop;
-  const chooseStop = (stop: StopId) => setJourneyChoice({ key: journeyKey, stop });
+  const chooseStop = (stop: WizardStep) => setJourneyChoice({ key: journeyKey, stop });
 
+  const sourceLocked = parked !== undefined || source !== undefined || phase !== "composing";
   const stopBody = (stage: RailStage) => {
     switch (stage.id) {
       case "source":
         return (
-          <ComposeSourceStop
+          <ComposeSourceDetailStep
             draft={draft}
             onDraft={(patch) => setDraft((held) => ({ ...held, ...patch }))}
             credentials={credentials}
             credentialFeed={props.credentialFeed}
-            isClusterOwner={isClusterOwner}
             probe={probe}
             zipProbe={zipProbe}
             zip={zip}
             siteId={created.siteId}
             clusterDomain={clusterDomain}
-            locked={parked !== undefined || source !== undefined || phase !== "composing"}
+            locked={sourceLocked}
             tokenFormOpen={tokenFormOpen}
             onTokenFormOpenChange={setTokenFormOpen}
+            connect={githubConnect}
+            onConnectionNeed={setConnectionNeed}
             duplicateOf={duplicate}
           />
         );
@@ -641,24 +659,175 @@ export function ComposePage(props: ComposePageProps) {
   const held = inactive || archivedSource;
   const finished = phase === "published" && !held;
   const canGoLive = finished && !wentLive && can.publish && (path !== "handmade" || draft.choice !== "ci");
+  // CONNECTING IS THE REPOSITORY STEP'S FORWARD ACT, so it is on the floor with
+  // every other one. The step says when it is needed; nothing is offered while
+  // the person's connections are still being read, because the step has not
+  // mounted the part of itself that could say so.
+  const needsGithub = !sourceLocked && journeyStop === "sourceDetail" && draft.choice === "repo" && connectionNeed !== "";
   const journeyActs: Act[] = !held && !finished && (
-    journeyStop === "source" && path === "handmade" && sourceDone && phase === "composing"
+    needsGithub
+      ? [{
+          label: connectionNeed === "reconnect" ? "Reconnect GitHub" : "Connect GitHub", tone: "primary", busy: githubConnect.busy,
+          onAct: () => void githubConnect.connect(returnPathFor("deployables")),
+        }]
+    : journeyStop === "source" ? []
+    : journeyStop === "sourceDetail" && path === "handmade" && sourceDone && phase === "composing"
       ? [{ label: "Continue", tone: "primary", onAct: () => chooseStop("whatItIs") }]
       : journeyStop === "whatItIs" && (phase === "awaiting_confirm" && path === "package" || phase === "composing" && path === "handmade")
         ? [{ label: "Choose addresses", tone: "primary", onAct: () => chooseStop("whereItLives") }]
         : false
   ) || barActs;
 
-  return (
-    <div className="os-deploy-pane deployable-journey" data-os-page-context={JSON.stringify({ page: title, packageId: (parked?.pkg ?? source)?.id, app: only, mode: "compose", step: journeyStop })}>
-      <div className="os-deploy-scroll">
-        {/* THE TITLE SAYS WHAT THIS IS. "New deployable" is true only when
-            there is no source yet: opened for one app of a source added days
-            ago, it read as though the whole source were being added again --
-            which is exactly what the report beside it appeared to confirm. */}
-        <Panel label={title}>
-          <Head title={title} breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label: title }]} back={{ label: backLabel, onSelect: onBack }} />
+  // THE STEPS, off the pipeline's own reading. Completion, failures and
+  // availability come from `railFor`, never from a local step counter; which
+  // step is OPEN is the only thing a click changes.
+  const awaitingLive = finished && !wentLive;
+  // WHICH WAY IN, as the rail says it. A flow opened for a source that already
+  // exists never asked, so it reads the answer off the source.
+  const kind = draft.choice !== "" ? draft.choice : (parked?.pkg ?? source) === undefined ? "" : (parked?.pkg ?? source)!.sourceKind === "artifact" ? "zip" : "repo";
+  const steps: Stop[] = railFor(input).stages.flatMap((stage): Stop[] => {
+    const id = stage.id as StopId;
+    const state = id === "live" && awaitingLive ? ("open" as const) : stage.state;
+    if (id === "source") {
+      // THE SOURCE STAGE IS TWO STEPS: the choice, and the step the choice
+      // names. One question each -- which is the whole reason the old single
+      // step read as crowded.
+      const settled = state === "complete" || state === "done";
+      const chosen = kind !== "";
+      return [
+        {
+          id: "source",
+          name: STEP_NAMES.source,
+          state: settled || (chosen && journeyStop !== "source") ? "complete" : "open",
+          answer: chosen ? SOURCE_KIND_LABEL[kind] : "",
+          // Chosen once something has been read from it: the kind is a fact.
+          openable: !sourceLocked,
+          body: sourceLocked ? undefined : (
+            <ActivityTarget target="deployables:compose:source" className="deployable-journey-current">
+              <ComposeSourceKindStep
+                draft={draft}
+                isClusterOwner={isClusterOwner}
+                onChoose={(choice) => {
+                  setDraft((held) => ({ ...held, choice, name: "", kind: "", artifactId: "", repoUrl: "", storeId: "" }));
+                  // CHOOSING ANSWERS THE STEP, so the wizard moves on to the
+                  // one the answer names.
+                  chooseStop("sourceDetail");
+                }}
+              />
+            </ActivityTarget>
+          ),
+        },
+        {
+          id: "sourceDetail",
+          // Named by the answer above it, and by nothing until there is one.
+          name: chosen ? SOURCE_DETAIL_NAME[kind]! : "Details",
+          state: !chosen ? "ahead" : settled ? "complete" : journeyStop === "source" ? "waiting" : state,
+          sentence: chosen ? DETAIL_SENTENCES[kind] : undefined,
+          // The pipeline's own word on this stage -- what it settled as, or
+          // why it stopped ("private, or not there") -- belongs to the step
+          // that holds the fields it is about.
+          answer: chosen ? stage.reason : "",
+          openable: chosen,
+          body: chosen ? (
+            <ActivityTarget target="deployables:compose:sourceDetail" className="deployable-journey-current">
+              {stopBody({ ...stage, state })}
+            </ActivityTarget>
+          ) : undefined,
+        },
+      ];
+    }
+    const reachable = (state !== "pending" && state !== "ahead") || id === journeyStop;
+    return [{
+      id,
+      name: STEP_NAMES[id],
+      state,
+      sentence: STEP_SENTENCES[id],
+      answer: stage.reason,
+      openable: reachable,
+      body: reachable ? (
+        <ActivityTarget target={`deployables:compose:${id}`} className="deployable-journey-current">
+          {stopBody({ ...stage, state })}
+        </ActivityTarget>
+      ) : undefined,
+    }];
+  });
 
+  // WHAT THE STEP THE CHOICE NAMES STILL NEEDS, in its own words. "Describe the
+  // source -- the open step has more to answer" was true of every one of these
+  // and said nothing about any of them.
+  const detailNeeds: { word: string; detail: string } | null =
+    phase !== "composing" || source !== undefined || parked !== undefined || sourceDone || draft.choice === "" || held
+      ? null
+      : draft.choice === "zip"
+        ? { word: "Choose a zip", detail: "one you have put in Files" }
+        : draft.choice === "ci"
+          ? { word: "Name it", detail: "and say what kind of app your CI will push" }
+          : connectionNeed === "connect"
+            ? { word: "Not connected to GitHub", detail: "connect to pick from your repositories, or choose A token" }
+            : connectionNeed === "reconnect"
+              ? { word: "GitHub connection lapsed", detail: "reconnect to pick from your repositories, or choose A token" }
+              : tokenFormOpen
+                ? { word: "Describe the repository", detail: "its URL, and a token if it is private" }
+                : { word: "Choose a repository", detail: "then the branch to follow, and what to call it" };
+  const word = detailNeeds !== null ? detailNeeds.word : finished && draft.choice === "ci" ? "Waiting for CI" : composePhaseWord(phase, {
+    inactive, archivedSource, declared: source !== undefined, wentLive, choice: draft.choice, moreToAnswer: action !== null && action.disabled,
+  });
+  const detail = detailNeeds !== null ? detailNeeds.detail : finished
+    ? finishedSentence(path, draft, outcomes, siteHostname, wentLive)
+    : inactive
+      ? siteStateDetail("Inactive", "")
+      : archivedSource
+        ? "restore the source to deploy its apps again"
+        : composePhaseDetail(phase, action, apps, addresses, source !== undefined, draft.choice);
+
+  // THE FLOOR HAS TWO VERBS AND ONE BUTTON, the same as every add wizard.
+  //
+  //   CANCEL   while nothing has been written -- which is everything before
+  //            Analyze -- so leaving costs nothing and the word is true.
+  //   LEAVE    once something exists: a source that was read, a run that is
+  //            parked or building. Going keeps it, the list reopens it, and a
+  //            build the cluster has started carries on without anybody
+  //            watching. There is no act here that undoes a run, so the floor
+  //            does not offer one by calling it Cancel.
+  //
+  // The forward act is the button and the way out beside it is text. When it
+  // is the cluster's turn there is no forward act, and Leave is the button --
+  // the same picture the machine and the domain draw while they wait.
+  const written = phase !== "composing";
+  const acts: Act[] = finished
+    ? canGoLive
+      ? [
+          { label: "Done", text: true, onAct: onBack },
+          { label: "Go live", tone: "primary", busy, onAct: () => void goLive() },
+        ]
+      : [{ label: "Done", tone: "primary", onAct: onBack }]
+    : journeyActs.length > 0
+      ? [{ label: written ? "Leave" : "Cancel", text: true, onAct: onBack }, ...journeyActs]
+      : written
+        ? [{ label: "Leave", onAct: onBack }]
+        : [{ label: "Cancel", text: true, onAct: onBack }];
+
+  return (
+    <Wizard
+      className="deployable-journey"
+      icon={<Rocket aria-hidden />}
+      /* THE TITLE SAYS WHAT THIS IS. "Add a deployable" is true only when
+         there is no source yet: opened for one app of a source added days
+         ago, it read as though the whole source were being added again --
+         which is exactly what the report beside it appeared to confirm. */
+      title={title}
+      lead={source === undefined && parked === undefined && only === undefined ? "Put a site or an app on this cluster." : undefined}
+      breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label: title }]}
+      back={{ label: backLabel, onSelect: onBack }}
+      label="Deployable setup progress"
+      steps={steps}
+      open={journeyStop}
+      onOpen={(id) => chooseStop(id as WizardStep)}
+      status={{ word, detail, tone: phase === "analyzing" || phase === "deploying" ? "busy" : wentLive ? "live" : "none" }}
+      acts={acts}
+      context={{ page: title, packageId: (parked?.pkg ?? source)?.id, app: only, mode: "compose", step: journeyStop }}
+      notices={
+        <>
           {/* THE NOTICE AT THE TOP (D5): an inactive app says so before
               anything else on the page, and says what Activate does. */}
           {inactive ? (
@@ -715,61 +884,54 @@ export function ComposePage(props: ComposePageProps) {
           )}
           {lifecycle.refusal ? <ProblemNotice problem={{ ...lifecycle.refusal, fatal: true }} tone="error" /> : null}
           {liveIds.length > 0 && !wentLive ? <Notice tone="warn" sentence={`${liveIds.length} app${liveIds.length === 1 ? " is" : "s are"} live.`} next="Go live again to finish the remaining apps." /> : null}
-
           <ConnectReturnNotice result={props.connectResult} />
-          <ComposeJourney awaitingLive={finished && !wentLive} input={input} selected={journeyStop} onSelect={chooseStop} stopBody={stopBody} />
-
-          {can.deploy ? null : (
-            <Caption>You do not have permission to create deployables.</Caption>
-          )}
-        </Panel>
-      </div>
-
-      <ActionBar
-        state={finished && draft.choice === "ci" ? "Waiting for CI" : composePhaseWord(phase, { inactive, archivedSource, declared: source !== undefined, wentLive })}
-        detail={
-          finished
-            ? finishedSentence(path, draft, outcomes, siteHostname, wentLive)
-            : inactive
-              ? siteStateDetail("Inactive", "")
-              : archivedSource
-                ? "restore the source to deploy its apps again"
-                : composePhaseDetail(phase, action, apps, addresses, source !== undefined)
-        }
-        tone={phase === "analyzing" || phase === "deploying" ? "busy" : wentLive ? "live" : "none"}
-        acts={
-          finished
-            ? [
-                ...(canGoLive ? [{ label: "Go live", tone: "primary" as const, busy, onAct: () => void goLive() }] : []),
-                { label: "Done", tone: canGoLive ? ("quiet" as const) : ("primary" as const), onAct: onBack },
-              ]
-            : journeyActs
-        }
-      >
-        {/* CANCEL IS ALWAYS REACHABLE WHILE THERE IS SOMETHING TO CANCEL, on
-            the left of the forward act: nothing is written until Analyze, so
-            leaving costs nothing, and a flow somebody cannot leave without
-            hunting for the way out is one they abandon by closing the window.
-            ONCE THE FILES ARE IN PLACE there is nothing to cancel, so the
-            acts are Done and Go live, and the word Cancel would be a lie
-            about what leaving now would undo. */}
-        {finished ? null : (
-          <Button tone="quiet" onClick={onBack}>
-            Cancel
-          </Button>
-        )}
-      </ActionBar>
-    </div>
+        </>
+      }
+    >
+      {can.deploy ? null : <Caption>You do not have permission to create deployables.</Caption>}
+    </Wizard>
   );
 }
+
+/** A step of this wizard: the pipeline's own stops, plus the one the Source
+ *  stage splits into. */
+type WizardStep = StopId | "sourceDetail";
+
+/** What the step a choice names is for, beside its name. */
+const DETAIL_SENTENCES: Readonly<Record<string, string>> = {
+  repo: "Which repository, and how this cluster reaches it.",
+  zip: "Which zip, and what to call it.",
+  ci: "What to call it, and what kind of app it is.",
+};
+
+/** What each step is called on the rail. */
+const STEP_NAMES: Record<StopId, string> = { source: "Source", whatItIs: "Review", whereItLives: "Address", build: "Build", live: "Live" };
+
+/**
+ * What an open step is for, beside its name.
+ *
+ * THE WIZARD'S OWN WORDS rather than the stops' shared blurbs, for two
+ * reasons the blurbs could not have known about. They were written to stand
+ * under a heading, so "Review" read "Review  Review the apps, build steps..."
+ * on one line. And Source has none at all: its body IS three named options,
+ * and a sentence listing the same three above them was the fourth place on
+ * the page the list appeared (rule 7).
+ */
+const STEP_SENTENCES: Record<StopId, string | undefined> = {
+  source: undefined,
+  whatItIs: "What the source holds, and what deploying it would do.",
+  whereItLives: "Where each app answers, and whose it is.",
+  build: "Turn the source into files and put them in place.",
+  live: "Make it available to visitors.",
+};
 
 /**
  * What this flow is about, for the Head and the Panel's label.
  *
- * "New deployable" is the ONLY-when-nothing-is-known answer, and both other
+ * "Add a deployable" is the ONLY-when-nothing-is-known answer, and both other
  * facts arrive independently: `only` is known from the click, while `parked`
  * lands when the analysis parks its gate seconds later. Reading the title off
- * `parked` alone meant an app-scoped flow was called "New deployable" for as
+ * `parked` alone meant an app-scoped flow was called "Add a deployable" for as
  * long as the analysis ran -- which is the frame the report was read in.
  */
 function composeTitle(pkg: PackageRow | undefined, only: string | undefined): string {
@@ -778,13 +940,13 @@ function composeTitle(pkg: PackageRow | undefined, only: string | undefined): st
   if (app !== "" && source !== "") return `Deploy ${app} from ${source}`;
   if (app !== "") return `Deploy ${app}`;
   if (source !== "") return `Deploy ${source}`;
-  return "New deployable";
+  return "Add a deployable";
 }
 
 /** Where the flow is, in words -- the bar's left half, in the one vocabulary. */
 function composePhaseWord(
   phase: ComposePhase,
-  at: { inactive: boolean; archivedSource: boolean; declared: boolean; wentLive: boolean },
+  at: { inactive: boolean; archivedSource: boolean; declared: boolean; wentLive: boolean; choice?: string; moreToAnswer?: boolean },
 ): string {
   if (at.archivedSource) return "Archived";
   if (at.inactive) return "Inactive";
@@ -800,9 +962,13 @@ function composePhaseWord(
     case "stopped":
       return "Stopped";
     default:
-      // An app a source declares and has not deployed is exactly that; a
-      // source nobody has added yet is a new deployable.
-      return at.declared ? "Not deployed" : "New deployable";
+      // An app a source declares and has not deployed is exactly that. A
+      // source nobody has added yet used to read the page's title here, which
+      // is the page's own title said a second time (rule 7) in the one place
+      // that is meant to say what is NEEDED. So it says that.
+      if (at.declared) return "Not deployed";
+      if ((at.choice ?? "") === "") return "Choose a source";
+      return at.moreToAnswer ? "Describe the source" : "Ready";
   }
 }
 
@@ -820,17 +986,22 @@ function composePhaseDetail(
   apps: readonly string[],
   addresses: Readonly<Record<string, AddressDraft>>,
   declared: boolean,
+  choice = "-",
 ): string {
+  // NOTHING IS CHOSEN YET, so the bar's word already says what is needed
+  // ("Choose a source") and the three choices are on the page. What is worth
+  // saying beside it is the thing somebody about to start wants to know.
+  if (phase === "composing" && !declared && choice === "") return "nothing is written until you deploy";
   if (phase === "awaiting_confirm") {
     if (apps.length > 1) {
       const going = apps.filter((app) => addresses[app]?.skip !== true).length;
       if (going === 0) return "pick at least one app to deploy";
       return `${going} of ${apps.length} apps, each at its own address -- deploying puts their files in place; going live is the step after`;
     }
-    if (action !== null && action.disabled) return "there is more to answer above";
+    if (action !== null && action.disabled) return "the open step has more to answer";
     return "deploying puts its files in place; going live is the step after";
   }
-  if (action !== null && action.disabled) return "there is more to answer above";
+  if (action !== null && action.disabled) return "the open step has more to answer";
   switch (phase) {
     case "analyzing":
       return "reading the tree and running the gates a node runs at boot";

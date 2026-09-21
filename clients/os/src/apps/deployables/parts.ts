@@ -7,9 +7,9 @@ import { holds } from "../../system/roles";
 // grants design, section 2's table and section 4 "A missing part").
 //
 // An app is `read app:<id>`; a PART of one is `execute app:<id>/<part>`, and
-// Deployables is the first app to carry the vocabulary. Five parts, each the
-// name of a thing a person does here, each seeded on owner and developer and
-// each grantable to a person or a group by name:
+// Deployables is the first app to carry the vocabulary. Six parts, each the
+// name of a thing a person does here, each grantable to a person or a group
+// by name:
 //
 //   sources   add or edit a source, its credential, its auto-deploy switch
 //   deploy    analyze, confirm, retry, cancel a run; publish a Library zip
@@ -17,6 +17,13 @@ import { holds } from "../../system/roles";
 //   retire    deactivate an app, archive a source, delete a deployable, and
 //             their plain inverses
 //   domains   bind or remove a client's own domain
+//   store     attach or change the Shopify store a storefront fronts
+//
+// FIVE OF THEM ARE SEEDED ON OWNER AND DEVELOPER; `store` IS OWNER ALONE
+// (memql#5541). It took over from the retired `app:stores` capabilities, and
+// those were owner-only because v1:shopify:store is @rowAuthz(clusterOwner):
+// a developer holding the part would be drawn the control and then served no
+// rows, which is a refusal rendered as an empty panel (memql#5216).
 //
 // THE OS HIDES; THE ENGINE REFUSES. Every act on this app names the part it
 // needs beside itself (`requires` on an ActSpec, on a HeadAction, on the
@@ -31,7 +38,7 @@ import { holds } from "../../system/roles";
 // A person granted `deploy` and not `publish` can push a build and cannot
 // take a site live, which one boolean could not say.
 
-export const DEPLOYABLE_PARTS = ["sources", "deploy", "publish", "retire", "domains"] as const;
+export const DEPLOYABLE_PARTS = ["sources", "deploy", "publish", "retire", "domains", "store"] as const;
 
 export type DeployablePart = (typeof DEPLOYABLE_PARTS)[number];
 
@@ -50,15 +57,17 @@ export const NO_PARTS: PartsHeld = Object.freeze({
   publish: false,
   retire: false,
   domains: false,
+  store: false,
 });
 
-/** Every part held: what the seeds give owner and developer. */
+/** Every part held: what the seeds give an owner. */
 export const ALL_PARTS: PartsHeld = Object.freeze({
   sources: true,
   deploy: true,
   publish: true,
   retire: true,
   domains: true,
+  store: true,
 });
 
 /** `ALL_PARTS` minus the named ones, for a surface or a test that withholds some. */

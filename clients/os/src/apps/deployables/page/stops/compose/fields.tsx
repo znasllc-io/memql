@@ -1,4 +1,6 @@
 import { Caption, Field, Input, Select } from "../../../../../kit";
+import { storeLongLabel } from "../../../store/rows";
+import { useStoreList } from "../../../store/useStore";
 import { DEPLOYABLE_KINDS } from "../../../targets";
 import type { ComposeDraft } from "../../compose";
 
@@ -65,11 +67,62 @@ export function KindField({ draft, onDraft }: { draft: ComposeDraft; onDraft: (p
         </Select>
       </Field>
       {chosen ? <Caption>{chosen.blurb}</Caption> : null}
-      {draft.kind === "shopify_storefront" ? <>
-        <Field label="Shopify store"><Input id="os-compose-store" label="Shopify store domain" value={draft.storeDomain ?? ""} onChange={(storeDomain) => onDraft({ storeDomain })} placeholder="your-store.myshopify.com" /></Field>
-        <Field label="Storefront token reference"><Input id="os-compose-token-ref" label="Storefront token reference" value={draft.storefrontTokenRef ?? ""} onChange={(storefrontTokenRef) => onDraft({ storefrontTokenRef })} placeholder="shopify-storefront-token" /></Field>
-        <Caption>Use the name of a stored secret, not the token itself.</Caption>
-      </> : null}
+      {draft.kind === "shopify_storefront" ? <StoreField draft={draft} onDraft={onDraft} /> : null}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The store a storefront fronts
+// ---------------------------------------------------------------------------
+
+/**
+ * Which registered store this storefront will front.
+ *
+ * ONE FIELD WHERE THERE WERE TWO FREE-TEXT ONES (epic memql#5530). It asked
+ * for the store's domain and the name of the secret holding its Storefront
+ * token, and wrote both onto the site row -- a second record of a store the
+ * cluster usually already had, typed by hand, with no check that either value
+ * named anything real. The site names the store now, and this offers the
+ * stores this caller may read, which is exactly the set the engine will
+ * accept a binding to.
+ *
+ * NOT ATTACHING IS AN ANSWER. Registering a store takes a cluster owner and
+ * three cluster secrets; requiring one here would stop somebody who can
+ * create deployables from creating a storefront at all. The Store pane on the
+ * finished deployable is where a store is registered and attached, and it is
+ * one place rather than two.
+ */
+function StoreField({
+  draft,
+  onDraft,
+}: {
+  draft: ComposeDraft;
+  onDraft: (patch: Partial<ComposeDraft>) => void;
+}) {
+  const list = useStoreList();
+  return (
+    <>
+      <Field label="Shopify store">
+        <Select
+          id="os-compose-store"
+          label="The Shopify store this storefront fronts"
+          value={draft.storeId ?? ""}
+          onChange={(storeId) => onDraft({ storeId })}
+        >
+          <option value="">Attach one later</option>
+          {list.stores.map((store) => (
+            <option key={store.id} value={store.id}>
+              {storeLongLabel(store)}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      <Caption>
+        {list.stores.length === 0
+          ? "No Shopify store is registered on this cluster yet. Create the deployable, then register and attach its store from its Store pane."
+          : "The storefront names the store; it does not copy it. The domain its pages call and the Storefront token the edge serves are both read from the store row."}
+      </Caption>
     </>
   );
 }

@@ -209,10 +209,6 @@ var appReadFloors = map[string][]Role{
 	"app:settings/tokens":       {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:settings/keys":         {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:settings/logs":         {RoleOwner, RoleDeveloper, RoleAdmin},
-	"app:stores":                {RoleOwner},
-	"app:stores/stores":         {RoleOwner},
-	"app:stores/logs":           {RoleOwner, RoleDeveloper, RoleAdmin},
-	"app:stores/settings":       {RoleOwner},
 	"app:bin":                   {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
 	"app:bin/logs":              {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:ask":                   {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
@@ -220,13 +216,20 @@ var appReadFloors = map[string][]Role{
 }
 
 // appPartGrants is the mirror of the Deployables PART seeds (task
-// memql#5301): `execute` on each named part, on owner and developer only.
+// memql#5301): `execute` on each named part, on owner and developer -- with
+// one exception, `store`, which is owner alone.
 var appPartGrants = map[string][]Role{
 	"app:deployables/sources": {RoleOwner, RoleDeveloper},
 	"app:deployables/deploy":  {RoleOwner, RoleDeveloper},
 	"app:deployables/publish": {RoleOwner, RoleDeveloper},
 	"app:deployables/retire":  {RoleOwner, RoleDeveloper},
 	"app:deployables/domains": {RoleOwner, RoleDeveloper},
+	// OWNER ONLY (memql#5541). This part took over from the retired
+	// app:stores set, which was seeded on owner and nobody else because
+	// v1:shopify:store is @rowAuthz(clusterOwner): a developer holding the
+	// part would be drawn the control and then served no rows, which is a
+	// refusal rendered as an empty panel (memql#5216).
+	"app:deployables/store": {RoleOwner},
 }
 
 // The app tables fold into capabilitySets before anything reads it, so the

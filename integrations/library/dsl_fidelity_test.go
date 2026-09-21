@@ -315,8 +315,8 @@ func TestArtifactEnumValuesDerivedFromDSL(t *testing.T) {
 	}
 
 	source := artifactEnumValues["source"]
-	if len(source) != 8 {
-		t.Fatalf("artifactEnumValues[\"source\"] has %d values, want 8 (memql#4298: the hand-maintained "+
+	if len(source) != 9 {
+		t.Fatalf("artifactEnumValues[\"source\"] has %d values, want 9 (memql#4298: the hand-maintained "+
 			"list silently dropped one -- \"user_created\" -- and the derivation must not repeat that): %v",
 			len(source), source)
 	}
@@ -326,9 +326,12 @@ func TestArtifactEnumValuesDerivedFromDSL(t *testing.T) {
 	// containment itself is gated by TestEveryBackingSourceValueIsPromotable in
 	// component/memql; this list is the ORDER-SENSITIVE mirror, so it moves with
 	// the declaration rather than deriving the same fact twice.
+	// "app_session" joined in epic memql#5396: a delegated app session stores the
+	// contents it read and wrote, and its own transcript, as v1:library:file rows,
+	// and the same promotion passes that source through to the index.
 	wantSource := []string{
 		"uploaded", "exported", "workbench_generated", "computer_use", "agent_generated",
-		"derived", "user_created", "live",
+		"derived", "user_created", "live", "app_session",
 	}
 	if !slices.Equal(source, wantSource) {
 		t.Fatalf("artifactEnumValues[\"source\"] = %v, want %v", source, wantSource)

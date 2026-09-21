@@ -137,6 +137,14 @@ func (d *AppSessionDelegate) RunStep(ctx context.Context, h memqlengine.AppSessi
 			"level":           h.Level,
 			"model":           h.Model,
 			"responseSchema":  schemaJSON(h.ResponseSchema),
+			// THE SUBRUN OPENED ABOVE IS WHERE THE SESSION IS RECORDED (epic
+			// memql#5396). It is the run childRunId now points at, so the
+			// actions have to land in THAT one: a recording in a second run
+			// would leave the pointer a reader follows aimed at a run holding
+			// one step and no actions, which is the "points at nothing"
+			// failure this file's own header warns about. Empty when the
+			// journal is unwired, and the recorder then opens its own.
+			"recordingRunId": childRunId,
 		},
 	}, nil)
 

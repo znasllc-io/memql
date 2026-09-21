@@ -1,6 +1,6 @@
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { absent, figureFrom, figureOf, type Figure } from "../../kit/measure";
+import { absent, figureFrom, figureOf, type Figure } from "../../../kit/measure";
 
 // The `shopifyStoreHealth` builtin's REPLY, read into the shapes this app
 // renders.
