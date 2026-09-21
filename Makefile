@@ -631,6 +631,15 @@ docs-grammar-check:
 ## name. That refusal is the gate. Without it a removed name is free to be
 ## given to something else later, and a bundle still carrying the old spelling
 ## would load under the new meaning and do the new thing silently.
+##
+## THIS TARGET READS THE BASELINE OUT OF THE TREE IT IS JUDGING, so editing the
+## source and component/language/surface/2026.json together hides the removal
+## from it -- and that is why CI does NOT run this target. CI runs
+## scripts/ci/memqlbreaking-base.sh, which holds the tree to the BASE COMMIT's
+## copies of the baseline and the ledger, so a change that edits the committed
+## baseline in lockstep with the source changes nothing the comparison reads.
+## Reproduce the CI comparison locally with
+## `BASE_SHA=$$(git rev-parse origin/main) bash scripts/ci/memqlbreaking-base.sh`.
 memqlbreaking:
 	$(GO) run ./cmd/memqlbreaking -baseline component/language/surface/2026.json
 
