@@ -219,6 +219,27 @@ jobs:
               # TestTheFixtureBundleServesItsOwnAssets, which is the evidence
               # that this is a routing case and not an exemption: it was run.
               - 'test/clustere2e/testdata/storefront-fixture/**'
+              # The two fixture CLIENT DOMAINS the wholesale pack is held to
+              # (epic memql#5533, issue memql#5560). Same shape as the
+              # storefront fixture above and the same reason: a Go test MOUNTS
+              # THE DIRECTORY -- twoclients_test.go registers
+              # os.DirFS(testdata/clients/<client>) and boot-validates both
+              # domains over the unedited pack -- so the mention-scan cannot
+              # see the link, and its own note applies that a test reading a
+              # tree reads files without naming them.
+              #
+              # `**/*.memql` above already routes the constructs; these two
+              # file types are what it misses, and neither is inert. memql.toml
+              # is the language line the loader reads before it parses
+              # anything, and namespace.pin is the domain the tree mounts
+              # under. This is a ROUTING case rather than an exemption and it
+              # was RUN: removing northwind/memql.toml reds
+              # TestTwoClientsExpressDifferentProcessesOverOnePack with
+              # "v1:northwind:northwindTaxDetail not found", because a
+              # directory with no language line loads no constructs at all --
+              # which would quietly turn the pack's own client-agnosticism
+              # gate into a test of one client.
+              - 'packs/*/testdata/clients/**'
               # The three paths that were allow-listed as "no gate reads it"
               # until memql#3451 made that claim checkable and it turned out to
               # be false of each. All three are read by a Go test in

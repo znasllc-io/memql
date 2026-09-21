@@ -7653,6 +7653,100 @@
       }
     },
     {
+      "concept": "v1:wholesale:application",
+      "file": "packs/wholesalepack/dsl/concepts.memql",
+      "fields": [
+        "applicantEmail",
+        "applicantName",
+        "companyName",
+        "ownerUserId",
+        "siteId",
+        "storeId"
+      ],
+      "required": [
+        "applicantEmail",
+        "applicantName",
+        "companyName",
+        "ownerUserId",
+        "storeId"
+      ]
+    },
+    {
+      "concept": "v1:wholesale:applicationDecision",
+      "file": "packs/wholesalepack/dsl/concepts.memql",
+      "fields": [
+        "applicationId",
+        "decidedBy",
+        "note",
+        "principalKind",
+        "storeId",
+        "transition"
+      ],
+      "required": [
+        "applicationId",
+        "decidedBy",
+        "principalKind",
+        "storeId",
+        "transition"
+      ],
+      "enums": {
+        "principalKind": [
+          "client"
+        ],
+        "transition": [
+          "approve",
+          "reject",
+          "revoke"
+        ]
+      }
+    },
+    {
+      "concept": "v1:wholesale:entitlement",
+      "file": "packs/wholesalepack/dsl/concepts.memql",
+      "fields": [
+        "adapter",
+        "applicationId",
+        "buyerEmail",
+        "error",
+        "ownerUserId",
+        "reference",
+        "state",
+        "storeId"
+      ],
+      "required": [
+        "adapter",
+        "applicationId",
+        "buyerEmail",
+        "ownerUserId",
+        "state",
+        "storeId"
+      ],
+      "enums": {
+        "state": [
+          "failed",
+          "granted",
+          "pending",
+          "revoked"
+        ]
+      }
+    },
+    {
+      "concept": "v1:wholesale:wholesaleSettings",
+      "file": "packs/wholesalepack/dsl/concepts.memql",
+      "fields": [
+        "applicationsOpen",
+        "entitlementAdapter",
+        "introText",
+        "ownerUserId",
+        "storeId"
+      ],
+      "required": [
+        "applicationsOpen",
+        "ownerUserId",
+        "storeId"
+      ]
+    },
+    {
       "concept": "v1:work:approval",
       "file": "work/concepts.memql",
       "fields": [

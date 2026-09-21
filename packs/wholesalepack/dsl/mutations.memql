@@ -1,0 +1,130 @@
+// wholesale pack -- the writes (epic memql#5533, issues memql#5555,
+// memql#5556 and memql#5557).
+//
+// # Why these exist when every ENTRY POINT is a builtin
+//
+// A BUILTIN COMPUTES; IT DOES NOT WRITE. component/memql's
+// evaluateBuiltinFunctionExpression returns its handler's nodes as the
+// expression's VALUE and persists nothing -- so a pack whose writes were
+// "the node a builtin returned" would report success, write nothing, and
+// answer zero on the very next read. Nothing errors anywhere. The live
+// e2e suite is what found that, and no fixture-backed test could have.
+//
+// So the shape is: THE BUILTIN DECIDES, THE MUTATION WRITES. Each
+// capability makes the cross-row reads a mutation body cannot -- is this
+// store accepting applications, what store is this application on, what
+// does the decision log fold to, is this transition legal -- and then
+// calls the matching mutation here through the engine, under the caller's
+// own actor.
+//
+// That split is not a workaround; it is the right seam. `stamp {
+// ownerUserId: actor.userId }` is the ENGINE's way of saying who owns a
+// row, and every concept in this pack is @rowAuthz(owner="ownerUserId",
+// clusterOwner) -- so a row written any other way is owned by nobody and
+// invisible to the merchant who just made it. Letting the mutation stamp
+// it means the pack's Go never has to know how an actor becomes an owner.
+//
+// # None of these is the shopper's entry point
+//
+// The declared shopper form names the BUILTIN, so the gate cannot be
+// skipped from outside. These are reachable by an authenticated caller on
+// their own store, which is the operator and import path -- exactly the
+// asymmetry reviewspack draws between createReview and submitReview.
+
+use wholesale.concepts.{ application, applicationDecision, entitlement, wholesaleSettings }
+
+/// Write one application. IT NAMES NO ROW ID: on the shopper path the
+/// caller is a member of the public, `id` is a name the shopper surface
+/// refuses outright, and a shopper who could choose a row id could
+/// overwrite another applicant's. The engine derives one.
+@actor
+mutation application createApplicationRow {
+  args {
+    storeId         string!
+    siteId          string
+    companyName     string!  @maxLength(200)
+    applicantName   string!  @maxLength(120)
+    applicantEmail  string!  @maxLength(320)
+  }
+  insert {
+    accept { storeId, siteId, companyName, applicantName, applicantEmail }
+    stamp {
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Append one decision. ALSO NAMES NO ID, because a decision is a new row
+/// every time: append-only is what keeps why an application was refused
+/// readable after the next decision, and an id the caller chose would let
+/// a second decision overwrite the first.
+///
+/// decidedBy IS THE ACTOR AND IS NOT AN ARGUMENT. The builtin in front of
+/// this takes one -- the issue's own wording, and reviewspack's moderation
+/// capability does the same -- but the ROW records who actually called,
+/// because a caller-supplied decider on an APPEND-ONLY log is a way to
+/// attribute somebody else's approval to them permanently, with no later
+/// write able to correct it. When the two disagree the actor wins, which
+/// is the only one of them that cannot be forged.
+@actor
+mutation applicationDecision appendApplicationDecision {
+  args {
+    applicationId  string!
+    storeId        string!
+    transition     string!  @enum("approve", "reject", "revoke")
+    note           string   @maxLength(2000)
+  }
+  insert {
+    accept { applicationId, storeId, transition, note }
+    stamp {
+      decidedBy: actor.userId
+      principalKind: "client"
+    }
+  }
+}
+
+/// Write one store's settings. NAMES ITS ID, derived from the store, so
+/// there is exactly one row per store and a second write is a new VERSION
+/// of it rather than a second row a read would have to choose between.
+@actor
+mutation wholesaleSettings setWholesaleSettingsRow {
+  args {
+    settingsId          string!
+    storeId             string!
+    applicationsOpen    bool!
+    entitlementAdapter  string
+    introText           string   @maxLength(2000)
+  }
+  insert {
+    accept { storeId, applicationsOpen, entitlementAdapter, introText }
+    stamp {
+      id: args.settingsId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Write one application's entitlement. NAMES ITS ID, derived from the
+/// application, so a re-provision after a failure is a new version of one
+/// logical row -- and "revoked when" is that version's own createdAt,
+/// which is why the concept carries no revokedAt.
+@actor
+mutation entitlement writeEntitlementRow {
+  args {
+    entitlementId  string!
+    applicationId  string!
+    storeId        string!
+    buyerEmail     string!
+    adapter        string!
+    state          string!  @enum("pending", "granted", "failed", "revoked")
+    reference      string
+    error          string   @maxLength(4000)
+  }
+  insert {
+    accept { applicationId, storeId, buyerEmail, adapter, state, reference, error }
+    stamp {
+      id: args.entitlementId
+      ownerUserId: actor.userId
+    }
+  }
+}
