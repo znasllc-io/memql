@@ -64,6 +64,20 @@ const (
 	// failure nor send a person to the right stop. It said "A storefront has no
 	// store to talk to" for an app that simply had no address yet.
 	CodeDeployableBindingMissing = "deployable_binding_missing"
+	// CodeDeployableStoreUnknown: the manifest names a store this cluster has
+	// no row for, or one this caller may not read (epic memql#5530).
+	//
+	// DELIBERATELY ONE CODE FOR BOTH. Telling a caller which of the two it was
+	// would answer "does a store with this domain exist on this cluster" for
+	// somebody who may not read stores, and that is the question the
+	// cluster-owner tier exists to refuse. The repair is the same sentence
+	// either way: attach the store on the deployable, as somebody who may.
+	//
+	// IT IS RAISED AT PUBLISH, NOT AT ANALYSIS, and that is the split this
+	// code records: whether a manifest names a store is a manifest fact
+	// (CodeDeployableBindingMissing, decided offline), and whether THIS
+	// cluster has that store is a cluster read, which Analyze does not make.
+	CodeDeployableStoreUnknown = "deployable_store_unknown"
 	// CodeDeployableHostnameUnchosen: an app the manifest declares that has
 	// never been deployed and was given no hostname in this run's placements.
 	//

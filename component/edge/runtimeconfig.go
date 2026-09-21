@@ -146,9 +146,14 @@ type AccountContext struct {
 	ReservedName string `json:"reservedName"`
 }
 
-// StorefrontConfig is the shopify_storefront binding as the browser sees it:
-// the site row's own {storeDomain, storefrontTokenRef}, with the REF
+// StorefrontConfig is the site's BOUND STORE as the browser sees it: the
+// v1:shopify:store row's domain and Storefront token reference, with the REF
 // RESOLVED to the token it names.
+//
+// SINCE EPIC memql#5530 THE SITE ROW HOLDS NEITHER VALUE. The binding names a
+// store (`{storeId}`) and the resolver reads the store row alongside the site
+// (Site.Store), so an edit to a store reaches every site bound to it with no
+// second write and no site row touched.
 //
 // # The Storefront API token is a client-side credential BY SHOPIFY'S DESIGN
 //
@@ -173,10 +178,10 @@ type StorefrontConfig struct {
 	// "shopify_storefront" -- nothing else produces this object.
 	Kind string `json:"kind"`
 	// StoreDomain is the myshopify.com domain the Storefront API calls are
-	// addressed to, copied verbatim from the site row's binding.
+	// addressed to, read from the BOUND STORE row rather than from the site.
 	StoreDomain string `json:"storeDomain"`
 	// StorefrontToken is the PUBLIC Storefront API access token, resolved at
-	// serve time from the v1:platform:globalSecret the binding's
+	// serve time from the v1:platform:globalSecret the bound store's
 	// storefrontTokenRef names. Empty when the ref is unset or the secret
 	// cannot be resolved -- an honest "this store is not wired up yet" rather
 	// than a fabricated value, and the same posture OAuthClientID takes for
@@ -279,19 +284,26 @@ const storefrontKind = "shopify_storefront"
 // storefrontForSite builds the storefront block, or nil.
 //
 // KIND IS THE GATE, not the presence of a binding. A row of any other kind
-// that happens to carry a binding object gets nothing here -- so a token ref
+// that happens to carry a binding object gets nothing here -- so a store id
 // written onto a `spa` row (by accident, or by someone probing) resolves
 // nothing and publishes nothing. The token is only ever fetched for a site
 // that is declared to be a storefront.
+//
+// NO STORE IS NIL, NOT AN EMPTY BLOCK (epic memql#5530). A storefront whose
+// binding names nothing, or names a store the edge could not read, has
+// nothing for the block to SAY: an empty storeDomain reads as a store at the
+// empty host, which a bundle would then address its Storefront API calls to.
+// The same answer a non-storefront kind gets is the honest one, and it is
+// what a storefront nobody has bound yet already got.
 func storefrontForSite(ctx context.Context, site *Site, resolveSecret SecretResolver) *StorefrontConfig {
-	if site == nil || site.Kind != storefrontKind {
+	if site == nil || site.Kind != storefrontKind || site.Store == nil {
 		return nil
 	}
 	out := &StorefrontConfig{
 		Kind:        storefrontKind,
-		StoreDomain: strings.TrimSpace(bindingString(site.Binding, "storeDomain")),
+		StoreDomain: strings.TrimSpace(site.Store.Domain),
 	}
-	ref := strings.TrimSpace(bindingString(site.Binding, "storefrontTokenRef"))
+	ref := strings.TrimSpace(site.Store.StorefrontTokenRef)
 	if ref == "" || resolveSecret == nil {
 		return out
 	}
@@ -307,12 +319,24 @@ func storefrontForSite(ctx context.Context, site *Site, resolveSecret SecretReso
 	return out
 }
 
-// bindingString reads one string leaf out of the site row's binding object.
-func bindingString(binding map[string]any, key string) string {
+// bindingStoreId reads the ONE key a shopify_storefront binding carries
+// (epic memql#5530, issue memql#5538): `storeId`, which NAMES a
+// v1:shopify:store row. It replaced a general "read a leaf out of the
+// binding" helper, because there is no second leaf to read -- the domain and
+// the Storefront token reference live on the store row, and the resolver
+// reads them through Site.Store.
+//
+// A binding still carrying the retired {storeDomain, storefrontTokenRef}
+// shape answers "" here, which is the unbound state: no storefront block, no
+// store named in the policy. That is deliberate and it is why the change
+// ships with a migration rather than a fallback read -- an unconverted row is
+// VISIBLE (the storefront stops resolving a store and the OS says so) where a
+// silent second reading would have kept two records of one store alive.
+func bindingStoreId(binding map[string]any) string {
 	if binding == nil {
 		return ""
 	}
-	if s, ok := binding[key].(string); ok {
+	if s, ok := binding["storeId"].(string); ok {
 		return s
 	}
 	return ""

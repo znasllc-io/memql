@@ -32,8 +32,10 @@ The connector's side is [the Shopify connector](shopify-connector.md).
       be sent with the buyer's IP in `Shopify-Storefront-Buyer-IP` -- without
       it, every server-rendered request shares one rate-limit bucket and the
       storefront throttles itself under load.
-- [ ] Both tokens are `globalSecret` rows; the store row references them and
-      the site binding reads them from there.
+- [ ] Both tokens are `globalSecret` rows, and the **store row** references
+      them. The site binding names the store -- `binding: {storeId}` -- so the
+      edge resolves the myshopify.com domain and the Storefront token
+      reference through that one row. There is no copy of either on the site.
 - [ ] The Storefront API version is pinned and bumped deliberately, on the
       same quarterly rhythm as the mirror.
 
@@ -154,12 +156,12 @@ A `shopify_storefront` site is now served this, and no other kind is:
 
 | Directive | Gains | Where it comes from |
 |---|---|---|
-| `connect-src` | `https://<storeDomain>` | the site's own `binding.storeDomain` |
+| `connect-src` | `https://<store domain>` | the bound store row's `domain` |
 | | `https://cdn.shopify.com` | fixed; Shopify's asset CDN, which its client SDKs also fetch from |
 | | `https://shopify.com` | fixed; where the Customer Account API's OAuth token exchange and GraphQL endpoints resolve |
 | | `https://monorail-edge.shopifysvc.com` | fixed; Shopify's analytics beacon |
-| `img-src` | `https://cdn.shopify.com`, `https://<storeDomain>` | product and collection images |
-| `media-src` | `https://cdn.shopify.com`, `https://<storeDomain>` | Shopify-hosted video. The directive exists **only** on a storefront policy; every other kind falls back to `default-src 'self'` |
+| `img-src` | `https://cdn.shopify.com`, `https://<store domain>` | product and collection images |
+| `media-src` | `https://cdn.shopify.com`, `https://<store domain>` | Shopify-hosted video. The directive exists **only** on a storefront policy; every other kind falls back to `default-src 'self'` |
 
 The three fixed hosts are Shopify's own, taken from Hydrogen's default
 directives rather than guessed, and they are the same for every store. The
@@ -168,7 +170,8 @@ from a header, a query parameter, or anything the bundle supplies. A bundle
 that could name a host in its own policy could name any host, which is the
 same as having no policy.
 
-- [ ] The binding's `storeDomain` is the host the storefront actually calls.
+- [ ] The bound store row's `domain` is the host the storefront actually
+      calls. The binding names the row; the host lives on it.
       A malformed value is DROPPED from the policy rather than interpolated
       into it, so a typo presents as "the store is refused", not as a broken
       header.
@@ -223,7 +226,10 @@ right.
 - [ ] The store's domain and Storefront token are read from
       `GET /runtime-config.json` at load, from the `storefront` block. They
       are never in the bundle, never in an environment variable baked at
-      build time, and never in a committed config file.
+      build time, and never in a committed config file. The edge fills that
+      block from the **store row** the binding names -- not from anything on
+      the site -- which is what lets one store be edited in one place and
+      reach every storefront bound to it.
 - [ ] Products, collections and prices are fetched from the bound store at
       RUNTIME. If pages are prerendered, what is prerendered is the SHELL --
       the route, the layout, the parts that are the same for every store --

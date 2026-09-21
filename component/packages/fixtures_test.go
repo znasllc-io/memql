@@ -28,8 +28,7 @@ deployables:
     path: clients/web
     kind: shopify_storefront
     binding:
-      storeDomain: acme.myshopify.com
-      storefrontTokenRef: acme-storefront-token
+      store: acme.myshopify.com
   - name: docs
     path: clients/docs
     kind: static

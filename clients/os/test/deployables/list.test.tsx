@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -60,18 +60,19 @@ function mount(
 }
 
 /** Every row on the list, by the name it renders under. */
-/**
- * The APP rows' names.
- *
- * A source is a real row now (epic memql#4937), so it appears among the
- * `.os-row-name` elements too. These assertions are about which DEPLOYABLES
- * the list is showing, so the source lines are excluded -- the grouping test
- * above is where the source row itself is asserted.
- */
 function rowNames(): string[] {
-  return [...document.querySelectorAll(".os-livelist-rows .os-row-name")]
-    .filter((el) => el.closest(".os-deploy-group-apps") !== null || el.closest(".os-deploy-group") === null)
-    .map((el) => el.textContent ?? "");
+  return [...document.querySelectorAll(".os-livelist-rows .os-row-name")].map((el) => el.textContent ?? "");
+}
+
+/** Where a row says it came from, or "" when it says nothing. */
+function originOf(name: string): string {
+  return screen.getByText(name).closest(".os-row")?.querySelector("[data-os-origin]")?.textContent ?? "";
+}
+
+/** The Sources tab's row for one source, opened. */
+async function openSource(name: string): Promise<HTMLElement> {
+  await click(await screen.findByRole("button", { name: (label) => label.startsWith(`Open ${name},`) }));
+  return screen.findByRole("region", { name: /^Source / });
 }
 
 /** The list item a row sits in -- where the arrival cue lands. */
@@ -217,35 +218,41 @@ describe("the window's sections", () => {
 // ---------------------------------------------------------------------------
 
 describe("the list", () => {
-  it("groups a source's apps under one source line and stands a hand-made site on its own", async () => {
+  // ONE FLAT LIST OF EVERY DEPLOYABLE. It used to be a tree inside a list: a
+  // source was a row with its apps indented beneath it, then a "Standalone"
+  // heading over the rest -- two row types, ordered by origin. The owner's
+  // word for it was "I really hate that combined list". Where a deployable
+  // came from is a FACT ON ITS ROW now, and a facet in Refine.
+  it("lists every deployable flat, and says where each came from on its own row", async () => {
     mount(fakeConnection(WITH_PACKAGE));
     await screen.findByText("storefront");
 
-    // The source is named ONCE, above the rows it produced (DESIGN.md rule 7)
-    // -- and it is a REAL ROW now (epic memql#4937), not a caption wedged
-    // between clickable ones. It opens the source's own view, where its
-    // credential, its auto-deploy switch, its history and its archive live.
-    expect(screen.getAllByText("acme/storefront at main")).toHaveLength(1);
-    const group = screen.getByText("acme/storefront at main").closest(".os-deploy-group") as HTMLElement;
-    // The named rows: the source, then its apps. The group also carries a
-    // DISCLOSURE button, which has no name of its own and is asserted below.
-    expect(
-      within(group)
-        .getAllByRole("button")
-        .map((b) => b.querySelector(".os-row-name")?.textContent)
-        .filter((name) => name !== undefined),
-    ).toEqual(["acme/storefront at main", "admin", "storefront"]);
-    // TWO CONTROLS, TWO JOBS: the chevron opens and shuts the group, the row
-    // opens the source's own view. A single control could not do both.
-    const disclose = within(group).getByRole("button", { name: /Collapse acme\/storefront at main/ });
-    expect(disclose.getAttribute("aria-expanded")).toBe("true");
-    // ...and each row carries its address beside the app's name.
-    expect(within(group).getByText("store.memql.example.com")).toBeTruthy();
+    // By name, and two that differ only in case fall back to their address.
+    expect(rowNames()).toEqual(["admin", "Storefront", "storefront"]);
+    // No source line, no indent, no headings: nothing on this list is a source.
+    expect(document.querySelector(".os-deploy-group")).toBeNull();
+    expect(document.querySelector(".os-deploy-sectionhead")).toBeNull();
+    expect(screen.queryByText("acme/storefront at main")).toBeNull();
+    // The source's own name, because that is what a person would look for on
+    // the Sources tab; a hand-made one says the way in it took.
+    expect(originOf("storefront")).toBe("acme");
+    expect(originOf("admin")).toBe("acme");
+    expect(originOf("Storefront")).not.toBe("acme");
+    // ...and each row still carries its address beside the app's name.
+    const row = screen.getByText("storefront").closest(".os-row") as HTMLElement;
+    expect(within(row).getByText("store.memql.example.com")).toBeTruthy();
+  });
 
-    // The hand-made site is a row of its own, outside any group.
-    const shop = screen.getByText("Storefront").closest(".os-row") as HTMLElement;
-    expect(shop.closest(".os-deploy-group")).toBeNull();
-    expect(within(shop).getByText("shop.memql.example.com")).toBeTruthy();
+  // A ROW IS HERE BECAUSE IT HAS AN ADDRESS OF ITS OWN. An app a source
+  // declares and has never deployed has none: it is a fact about its source,
+  // read on that source's page, where Analyze and Activate are.
+  it("keeps an app its source has not deployed off this list", async () => {
+    mount(fakeConnection({
+      ...WITH_PACKAGE,
+      packages: [{ ...ACME, declares: [{ name: "storefront", kind: "spa" }, { name: "web", kind: "spa" }] }],
+    }));
+    await screen.findByText("storefront");
+    expect(rowNames()).not.toContain("web");
   });
 
   it("shows an unmeasured state and keeps the full build steps on demand", async () => {
@@ -258,84 +265,6 @@ describe("the list", () => {
     expect(screen.getByRole("button", { name: "Build settings" })).toBeTruthy();
   });
 
-  it("names the two sections, so a source and a standalone site never interleave", async () => {
-    mount(fakeConnection(WITH_PACKAGE));
-    await screen.findByText("acme/storefront at main");
-    // The headings are carried by the first group of each section, which is
-    // decided in the fold where the order is known.
-    const heads = [...document.querySelectorAll(".os-deploy-sectionhead")].map((h) => h.textContent);
-    expect(heads).toEqual(["From a source", "Standalone"]);
-  });
-
-  it("shows source relationships by default, and lets a person collapse them", async () => {
-    // The default the seeded store in this file deliberately overrides, tested
-    // here where it belongs: a fresh document has no open groups.
-    const store = new LocalDeployablesSettingsStore({ getItem: () => null, setItem: () => {} });
-    h.connection = fakeConnection(WITH_PACKAGE);
-    render(
-      withSession(
-        <DeployablesApp sectionId="deployables" navigate={vi.fn()} askContext={vi.fn()} store={store} />,
-        { role: "owner", userId: "u-me" },
-      ),
-    );
-    const source = await screen.findByText("acme/storefront at main");
-    // The source line is there; its apps are NOT RENDERED AT ALL -- not hidden
-    // with CSS, which is what makes the app count on the row an honest summary.
-    expect(screen.getByText("storefront")).toBeTruthy();
-    expect(screen.getByText("admin")).toBeTruthy();
-
-    const group = source.closest(".os-deploy-group") as HTMLElement;
-    const disclose = within(group).getByRole("button", { name: /Collapse acme\/storefront at main/ });
-    expect(disclose.getAttribute("aria-expanded")).toBe("true");
-
-    await click(disclose);
-    expect(screen.queryByText("storefront")).toBeNull();
-    await click(disclose);
-    expect(await screen.findByText("storefront")).toBeTruthy();
-  });
-
-  it("keeps the disclosure OUT of the row's own button", async () => {
-    // An openable ListRow IS a button, and a button cannot contain another
-    // one. Nested, the disclosure rendered perfectly and never fired -- caught
-    // only because a different test tried to click two of them.
-    mount(fakeConnection(WITH_PACKAGE));
-    await screen.findByText("acme/storefront at main");
-    const disclose = screen.getByRole("button", { name: /^(Expand|Collapse) acme\/storefront/ });
-    expect(disclose.parentElement?.closest("button")).toBeNull();
-    // And it says what it will show, rather than being a bare arrow.
-    expect(disclose.textContent).toContain("2 apps");
-  });
-
-  it("opens TWO sources without one closing the other", async () => {
-    // Found in a browser, not here: `update` applied its patch to the document
-    // the RENDER closed over, so two toggles in one tick wrote the second id
-    // over the first and only one group opened. One preference per screen
-    // never showed it; a set with one entry per source did immediately.
-    const store = new LocalDeployablesSettingsStore({ getItem: () => null, setItem: () => {} });
-    h.connection = fakeConnection(TWO_SOURCES);
-    render(
-      withSession(
-        <DeployablesApp sectionId="deployables" navigate={vi.fn()} askContext={vi.fn()} store={store} />,
-        { role: "owner", userId: "u-me" },
-      ),
-    );
-    await screen.findByText("acme/storefront at main");
-    // BOTH CLICKS IN ONE TICK, which is what the browser does and what an
-    // `await click()` per button does NOT: awaiting flushes React between
-    // them, so each handler sees fresh state and the stale-closure write can
-    // never happen. This test passed against the bug until it fired them
-    // together.
-    await act(async () => { for (const b of screen.getAllByRole("button", { name: /^Collapse / })) b.click(); });
-    const buttons = screen.getAllByRole("button", { name: /^Expand / });
-    expect(buttons).toHaveLength(2);
-    await act(async () => {
-      for (const b of buttons) b.click();
-    });
-    // Both sources' apps, not just the last one clicked.
-    expect(await screen.findByText("storefront")).toBeTruthy();
-    expect(screen.getByText("widgets")).toBeTruthy();
-  });
-
   it("opens a DECLARED app's flow from its row, and Analyze is what deploys it -- scoped", async () => {
     // A CLICK NEVER ACTS (2026-09-05, D6). This row used to start the analysis
     // from the list; it opens the compose flow for that app now, and the
@@ -346,10 +275,10 @@ describe("the list", () => {
       ...WITH_PACKAGE,
       packages: [{ ...ACME, declares: [{ name: "storefront", kind: "spa" }, { name: "web", kind: "spa" }] }],
     });
-    mount(connection);
-    await screen.findByText("storefront");
-    // It is listed under its source, with no address of its own.
-    const web = await screen.findByText("web");
+    mount(connection, { section: "sources" });
+    // It is listed on its SOURCE's page, with no address of its own.
+    const page = await openSource("acme");
+    const web = await within(page).findByText("web");
     expect(web).toBeTruthy();
     await click(web.closest("button"));
     // NAMED FROM THE CLICK, and nothing on the wire yet.
@@ -390,11 +319,12 @@ describe("the list", () => {
         disabledDeployables: ["web"],
       }],
     });
-    mount(connection);
-    const web = await screen.findByText("web");
+    mount(connection, { section: "sources" });
+    const page = await openSource("acme");
+    const web = await within(page).findByText("web");
     // It is there to be found, and says it is inactive -- the one word every
     // surface uses for it.
-    expect(web.closest(".os-row")?.textContent).toContain("Inactive");
+    expect(web.closest("button")?.textContent ?? "").toMatch(/inactive/i);
 
     await click(web.closest("button"));
     const region = await screen.findByRole("region", { name: "Deploy web from acme" });
@@ -424,14 +354,96 @@ describe("the list", () => {
       ...WITH_PACKAGE,
       packages: [{ ...ACME, declares: [{ name: "storefront", kind: "spa" }, { name: "web", kind: "spa" }] }],
     });
-    mount(connection);
-    await click((await screen.findByText("web")).closest("button"));
+    mount(connection, { section: "sources" });
+    const page = await openSource("acme");
+    await click((await within(page).findByText("web")).closest("button"));
     await screen.findByRole("region", { name: "Deploy web from acme" });
     const bar = document.querySelector(".os-actbar") as HTMLElement;
     expect(within(bar).getByRole("button", { name: "Analyze" })).toBeTruthy();
     expect(within(bar).queryByRole("button", { name: "Activate" })).toBeNull();
     expect(screen.queryByText(/is inactive\./)).toBeNull();
     expect(connection.callsNamed("enablePackageDeployables")).toHaveLength(0);
+  });
+
+  // THE SECOND NOUN. A source is a repository or a zip that produces
+  // deployables, with a life of its own -- so it has a list of its own, in the
+  // same row language, rather than a header row inside somebody else's.
+  it("lists each source once on the Sources tab, with what it produced and where it stands", async () => {
+    mount(fakeConnection(TWO_SOURCES), { section: "sources" });
+    const acme = await screen.findByRole("button", { name: /^Open acme,/ });
+    expect(screen.getByRole("heading", { name: "Sources" })).toBeTruthy();
+    expect(rowNames()).toEqual(["acme", "widgets-co"]);
+    // Where it lives, how much it produced, and the one state word.
+    expect(within(acme).getByText("acme/storefront at main")).toBeTruthy();
+    expect(within(acme).getByText("2 apps, 2 deployed")).toBeTruthy();
+    expect(within(acme).getByText("Current")).toBeTruthy();
+    // No deployable is a row here.
+    expect(rowNames()).not.toContain("storefront");
+  });
+
+  it("opens a source's page from its row, rooted at Sources, and its apps from there", async () => {
+    mount(fakeConnection(WITH_PACKAGE), { section: "sources" });
+    const page = await openSource("acme");
+    // Back goes to the list it came from, which is Sources.
+    expect(within(page).getByRole("button", { name: "Back to Sources" })).toBeTruthy();
+    await click(within(page).getByText("storefront").closest("button"));
+    const deployable = await screen.findByRole("region", { name: /^Deployable / });
+    expect(within(deployable).getByRole("button", { name: "Back to Source" })).toBeTruthy();
+  });
+
+  // THREE THINGS A RENDERED LIST OF REAL SOURCES SHOWED, and a cluster with
+  // none could not: a source with no apps was missing, a search trimmed what
+  // its source was said to have made, and the archived flip counted apps.
+
+  it("lists a source that has produced nothing, because this tab is where somebody looks for it", async () => {
+    // What a refused analysis leaves: a source, and nothing it made.
+    const fresh = { ...(ACME as unknown as Record<string, unknown>), id: "pkg-fresh", name: "field-notes", repoUrl: "https://github.com/acme/field-notes", deployedVersion: "" } as unknown as Row;
+    mount(fakeConnection({ sites: [STORE, ADMIN], packages: [ACME, fresh] }), { section: "sources" });
+    const row = await screen.findByRole("button", { name: /^Open field-notes,/ });
+    expect(rowNames()).toEqual(["acme", "field-notes"]);
+    expect(within(row).getByText("No apps yet")).toBeTruthy();
+    expect(within(row).getByText("Nothing deployed")).toBeTruthy();
+    // And it opens, like any other: its page is where it is tried again.
+    await click(row);
+    expect(await screen.findByRole("region", { name: /^Source / })).toBeTruthy();
+  });
+
+  it("asks a search of the source, and leaves what it made alone", async () => {
+    mount(fakeConnection({ ...TWO_SOURCES, awaitingConfirm: [parkedRun()] }), { section: "sources" });
+    await screen.findByRole("button", { name: /^Open acme,/ });
+    await click(screen.getByRole("button", { name: "Find sources" }));
+    const { type: typeInto } = await import("./harness");
+    // An app's name finds the source that made it...
+    await typeInto(screen.getByLabelText("Search") as HTMLInputElement, "admin");
+    await waitFor(() => expect(rowNames()).toEqual(["acme"]));
+    // ...and the source still says everything it made, not the one that matched.
+    const acme = screen.getByRole("button", { name: /^Open acme,/ });
+    expect(within(acme).getByText("3 apps, 2 deployed")).toBeTruthy();
+
+    // THE PAGE KEEPS ITS ACT. The parked run is about storefront and reports,
+    // neither of which matches what was typed -- and Review was read off the
+    // narrowed list, so it vanished from the one page that carries it.
+    await click(acme);
+    await screen.findByRole("region", { name: /^Source / });
+    expect(within(document.querySelector(".os-actbar") as HTMLElement).getByRole("button", { name: "Review" })).toBeTruthy();
+  });
+
+  it("counts archived SOURCES under the flip, and shows them by their own status", async () => {
+    const legacy = { ...(ACME as unknown as Record<string, unknown>), id: "pkg-legacy", name: "legacy-portal", repoUrl: "https://github.com/acme/legacy-portal", status: "archived" } as unknown as Row;
+    // RETIRED is an archived DEPLOYABLE of no source: it is not this tab's noun
+    // and must not be counted here.
+    mount(fakeConnection({ sites: [STORE, ADMIN, RETIRED], packages: [ACME, legacy] }), { section: "sources" });
+    await screen.findByRole("button", { name: /^Open acme,/ });
+    expect(rowNames()).toEqual(["acme"]);
+    await click(screen.getByRole("button", { name: /Show archived \(1\)/ }));
+    await waitFor(() => expect(rowNames()).toEqual(["legacy-portal"]));
+    expect(screen.getByRole("button", { name: /Show active sources/ })).toBeTruthy();
+  });
+
+  it("says what a source is when there are none", async () => {
+    mount(fakeConnection({ sites: [SHOP], packages: [] }), { section: "sources" });
+    expect(await screen.findByText("No sources yet")).toBeTruthy();
+    expect(screen.getByText(/A source is a repository or a zip that declares one or more apps/)).toBeTruthy();
   });
 
   it("says what to do when there is nothing yet", async () => {
@@ -488,22 +500,30 @@ describe("the list", () => {
 // ---------------------------------------------------------------------------
 
 describe("a deploy waiting for you", () => {
-  it("marks the pending app once and keeps the source relationship", async () => {
-    mount(fakeConnection({ ...WITH_PACKAGE, awaitingConfirm: [parkedRun()] }));
-    await screen.findByText("storefront");
-
+  // A RUN PARKED AT A SOURCE'S GATE IS A FACT ABOUT THE SOURCE, so that is
+  // where it is said: once, on the source's row, and on its page's bar with
+  // the act that answers it. The app it is about has no address yet, so it is
+  // not a row on the Deployables list at all.
+  it("says Review needed once, on the source, and offers Review on its page", async () => {
+    mount(fakeConnection({ ...WITH_PACKAGE, awaitingConfirm: [parkedRun()] }), { section: "sources" });
+    const acme = await screen.findByRole("button", { name: /^Open acme, review needed/ });
     expect(screen.getAllByText("Review needed")).toHaveLength(1);
-    const group = screen.getByText("acme/storefront at main").closest(".os-deploy-group") as HTMLElement;
-    const pending = screen.getByText("reports").closest(".os-row") as HTMLElement;
-    expect(within(pending).getByText("Review needed")).toBeTruthy();
-    expect(group).toBeTruthy();
-    const storefront = screen.getByText("storefront").closest(".os-row") as HTMLElement;
-    expect(within(storefront).queryByText("Review needed")).toBeNull();
+    expect(within(acme).getByText("Review needed")).toBeTruthy();
 
-    const reports = screen.getByText("reports").closest(".os-row") as HTMLElement;
-    expect(within(reports).getByText("No address yet")).toBeTruthy();
+    await click(acme);
+    await screen.findByRole("region", { name: /^Source / });
+    expect((document.querySelector(".os-actbar-word")?.textContent ?? "").trim()).toBe("Review needed");
+    expect(within(document.querySelector(".os-actbar") as HTMLElement).getByRole("button", { name: "Review" })).toBeTruthy();
+  });
+
+  it("does not mark a deployable that is already serving, and lists no row for the one that is not", async () => {
+    mount(fakeConnection({ ...WITH_PACKAGE, awaitingConfirm: [parkedRun()] }));
+    const storefront = (await screen.findByText("storefront")).closest(".os-row") as HTMLElement;
+    expect(within(storefront).queryByText("Review needed")).toBeNull();
     const shop = screen.getByText("Storefront").closest(".os-row") as HTMLElement;
     expect(within(shop).queryByText("Review needed")).toBeNull();
+    // `reports` is what the run is about, and it has no address yet.
+    expect(rowNames()).not.toContain("reports");
   });
 
   it("keeps the mark ON the row when the row IS the scope: a hand-made deployable", async () => {
@@ -531,19 +551,19 @@ describe("a deploy waiting for you", () => {
 
   it("clears the mark when the run moves on, on its own event", async () => {
     const connection = fakeConnection({ ...WITH_PACKAGE, awaitingConfirm: [parkedRun()] });
-    mount(connection);
-    await screen.findByText("reports");
+    mount(connection, { section: "sources" });
+    await screen.findByText("Review needed");
 
     await emit(connection, DEPLOYMENT_CONCEPT, parkedRun({ status: "succeeded" }));
     await waitFor(() => expect(screen.queryByText("Review needed")).toBeNull());
-    // ...and the row that only existed because the run was parked goes with it.
-    expect(screen.queryByText("reports")).toBeNull();
+    // ...and the source reads as it did before the run parked.
+    expect(screen.getByText("Current")).toBeTruthy();
   });
 
   it("clears it for a refusal too", async () => {
     const connection = fakeConnection({ ...WITH_PACKAGE, awaitingConfirm: [parkedRun()] });
-    mount(connection);
-    await screen.findByText("reports");
+    mount(connection, { section: "sources" });
+    await screen.findByText("Review needed");
 
     await emit(connection, DEPLOYMENT_CONCEPT, parkedRun({ status: "refused" }));
     await waitFor(() => expect(screen.queryByText("Review needed")).toBeNull());
@@ -663,8 +683,11 @@ describe("Add a deployable", () => {
 
     // The rail is the form: Source is the open stop and carries the caption.
     const rail = within(compose).getByRole("list", { name: "Deployable setup progress" });
+    // THE SOURCE STAGE IS TWO STEPS: the choice, and the step the choice names
+    // -- which has no name and nothing behind it until there is an answer.
     expect([...rail.querySelectorAll(":scope > li")].map((li) => li.getAttribute("data-state"))).toEqual([
       "open",
+      "ahead",
       "pending",
       "pending",
       "pending",
@@ -711,9 +734,10 @@ describe("Add a deployable", () => {
     }
   });
 
-  it("reopens a parked run's reading from the row that will serve, with its report in place", async () => {
-    mount(fakeConnection({ ...WITH_PACKAGE, awaitingConfirm: [parkedRun()] }));
-    await click(await screen.findByText("reports"));
+  it("reopens a parked run's reading from its source's bar, with its report in place", async () => {
+    mount(fakeConnection({ ...WITH_PACKAGE, awaitingConfirm: [parkedRun()] }), { section: "sources" });
+    await openSource("acme");
+    await click(within(document.querySelector(".os-actbar") as HTMLElement).getByRole("button", { name: "Review" }));
 
     // NAMED AFTER THE SOURCE, because this is not a new deployable: the source
     // was added already and this reopens its gate.
@@ -723,6 +747,7 @@ describe("Add a deployable", () => {
     // is what parked it -- so the open stop is Where it lives, which is what
     // the Deploy beneath is waiting for.
     expect([...rail.querySelectorAll(":scope > li")].map((li) => li.getAttribute("data-state"))).toEqual([
+      "complete",
       "complete",
       "complete",
       "open",

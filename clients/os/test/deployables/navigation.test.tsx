@@ -78,7 +78,7 @@ describe("shared shell navigation", () => {
     await click(await screen.findByRole("button", { name: /Add a deployable/ }));
     const draft = screen.getByRole("region", { name: "Add a deployable" });
     await click(within(draft).getByRole("radio", { name: /A repository/ }));
-    await click(within(draft).getByRole("button", { name: "Use a token instead" }));
+    await click(within(draft).getByRole("radio", { name: "A token" }));
     const input = within(draft).getByRole("textbox", { name: "The repository this deployable is built from" });
     fireEvent.change(input, { target: { value: "https://github.com/acme/unfinished" } });
     go("settings");

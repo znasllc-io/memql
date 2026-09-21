@@ -6329,17 +6329,20 @@ func CreateSpawnEventBuild(args CreateSpawnEventArgs) string {
 //
 // Bound concept: v1:shopify:store (machine-readable: BoundConcepts["createStore"] in generated_concepts.go).
 type CreateStoreArgs struct {
-	StoreId            string
-	Domain             string
-	Name               string
-	AppClientId        string
-	AdminTokenRef      string
-	StorefrontTokenRef string
-	WebhookSecretRef   string
-	ApiVersion         string
-	ProtectedDataLevel string
-	Plan               string
-	OwnerUserId        string
+	StoreId              string
+	Domain               string
+	Name                 string
+	AppClientId          string
+	AdminTokenRef        string
+	StorefrontTokenRef   string
+	WebhookSecretRef     string
+	ApiVersion           string
+	ProtectedDataLevel   string
+	Plan                 string
+	OwnerUserId          string
+	IsDevelopment        bool
+	IsDevelopmentSet     bool // set true to send isDevelopment; required because zero-value bool is ambiguous
+	DevelopmentOfStoreId string
 }
 
 // CreateStore calls the engine mutation createStore.
@@ -6420,6 +6423,20 @@ func CreateStoreBuild(args CreateStoreArgs) string {
 		}
 		b.WriteString("ownerUserId: ")
 		b.WriteString(quoteMemQL(args.OwnerUserId))
+	}
+	if args.IsDevelopmentSet {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("isDevelopment: ")
+		b.WriteString(fmt.Sprintf("%v", args.IsDevelopment))
+	}
+	if args.DevelopmentOfStoreId != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("developmentOfStoreId: ")
+		b.WriteString(quoteMemQL(args.DevelopmentOfStoreId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -15032,21 +15049,56 @@ func UpdateSiteStatusBuild(args UpdateSiteStatusArgs) string {
 	return b.String()
 }
 
+// UpdateSiteStoreBinding -- Point a storefront deployable at the v1:shopify:store row it fronts, or clear the binding (epic memql#5530, issue memql#5538).
+// ONE VALUE, AND IT IS A REFERENCE. The binding is written whole as {storeId} rather than merged, so the legacy {storeDomain, storefrontTokenRef} shape cannot survive a write: a read-merge would have kept the copy beside the reference and left two records of one store, which is the thing this epic exists to end. An empty storeId writes an empty object, which is the unbound state -- clearing must be expressible, for updateSiteSettings' reason.
+// AUTHORIZATION IS TWO GATES, AND THE SECOND IS THE SUBSTANTIVE ONE. @requiresCapability names the surface: `app:deployables/store` is seeded on owner alone, which is exactly the population the retired Stores app admitted. Beside it, a Go guard refuses a binding naming a store row the CALLER CANNOT READ -- so the answer to "who may bind a storefront they own to a store they may not read" is nobody. That check needs a cross-row read no mutation body can make, which is why it sits with the hostname policy rather than here (component/memql/platform_site_binding_guard.go).
+//
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteStoreBinding"] in generated_concepts.go).
+type UpdateSiteStoreBindingArgs struct {
+	SiteId  string
+	StoreId string
+}
+
+// UpdateSiteStoreBinding calls the engine mutation updateSiteStoreBinding.
+func (qc *QueryClient) UpdateSiteStoreBinding(ctx context.Context, args UpdateSiteStoreBindingArgs) (*Result, error) {
+	call := UpdateSiteStoreBindingBuild(args)
+	return qc.executeNamed(ctx, "updateSiteStoreBinding", call)
+}
+
+func UpdateSiteStoreBindingBuild(args UpdateSiteStoreBindingArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateSiteStoreBinding(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if args.StoreId != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("storeId: ")
+		b.WriteString(quoteMemQL(args.StoreId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // UpdateStore -- Change a store's configuration. Read-merge: an argument left out keeps its stored value, so rotating one secret reference does not require re-supplying the other two.
 //
 // Bound concept: v1:shopify:store (machine-readable: BoundConcepts["updateStore"] in generated_concepts.go).
 type UpdateStoreArgs struct {
-	StoreId            string
-	Name               string
-	AppClientId        string
-	AdminTokenRef      string
-	StorefrontTokenRef string
-	WebhookSecretRef   string
-	ApiVersion         string
-	ProtectedDataLevel string
-	Plan               string
-	ScopesGranted      []string
-	OwnerUserId        string
+	StoreId              string
+	Name                 string
+	AppClientId          string
+	AdminTokenRef        string
+	StorefrontTokenRef   string
+	WebhookSecretRef     string
+	ApiVersion           string
+	ProtectedDataLevel   string
+	Plan                 string
+	ScopesGranted        []string
+	OwnerUserId          string
+	IsDevelopment        bool
+	IsDevelopmentSet     bool // set true to send isDevelopment; required because zero-value bool is ambiguous
+	DevelopmentOfStoreId string
 }
 
 // UpdateStore calls the engine mutation updateStore.
@@ -15129,6 +15181,20 @@ func UpdateStoreBuild(args UpdateStoreArgs) string {
 		}
 		b.WriteString("ownerUserId: ")
 		b.WriteString(quoteMemQL(args.OwnerUserId))
+	}
+	if args.IsDevelopmentSet {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("isDevelopment: ")
+		b.WriteString(fmt.Sprintf("%v", args.IsDevelopment))
+	}
+	if args.DevelopmentOfStoreId != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("developmentOfStoreId: ")
+		b.WriteString(quoteMemQL(args.DevelopmentOfStoreId))
 	}
 	b.WriteString(")")
 	return b.String()

@@ -26,10 +26,13 @@ import (
 //
 // The document these values land in is served to every visitor's browser,
 // unauthenticated, cached nowhere and read by whatever JavaScript the bundle
-// ships. A value put here is public by construction. The storefront binding
+// ships. A value put here is public by construction. A storefront's STORE ROW
 // already has the one convention for a value that must NOT be public: a field
 // named `...Ref` that NAMES a v1:platform:globalSecret row, which the edge
-// resolves at serve time for exactly one kind. A settings key ending in `Ref`
+// resolves at serve time for exactly one kind. (The site's `binding` NAMES
+// that row rather than carrying the reference itself, epic memql#5530, so the
+// convention is one hop away from here now and no closer to belonging in
+// `settings`.) A settings key ending in `Ref`
 // would look like that convention and be honoured by nothing -- the edge
 // serves the string as typed -- so the natural mistake ("apiTokenRef":
 // "my-secret") would publish the secret's NAME, and the natural next mistake
@@ -156,7 +159,7 @@ func (e *MemQLEngine) validateSiteSettings(
 		}
 		if strings.HasSuffix(key, siteSettingsRefSuffix) {
 			return fmt.Errorf(
-				"v1:platform:site: settings key %q ends in Ref, and a setting is never a reference -- the edge serves every value here to every visitor as typed, and resolves a named secret for exactly one field, the storefront binding's storefrontTokenRef on `binding`. A secret does not belong in settings under any name.",
+				"v1:platform:site: settings key %q ends in Ref, and a setting is never a reference -- the edge serves every value here to every visitor as typed, and resolves a named secret for exactly one field: the Storefront token's, on the v1:shopify:store row this site's `binding` names. A secret does not belong in settings under any name.",
 				key,
 			)
 		}

@@ -202,6 +202,19 @@ func (s *Store) RecordIssuanceFailure(ctx context.Context, domainID, reason, det
 		langparser.QuoteString(stamp(at))))
 }
 
+// RecordRemovalFailure records an unbind that did not go through. The row
+// stays `removing` -- see recordCustomDomainRemovalFailure for why this is not
+// RecordIssuanceFailure, which would walk a removal back onto the certificate
+// step and have the next pass bind it.
+func (s *Store) RecordRemovalFailure(ctx context.Context, domainID, reason, detail string, at time.Time) error {
+	return s.exec(ctx, fmt.Sprintf(
+		"mutation recordCustomDomainRemovalFailure(domainId: %s, failureReason: %s, failureDetail: %s, lastCheckedAt: %s)",
+		langparser.QuoteString(domainID),
+		langparser.QuoteString(reason),
+		langparser.QuoteString(detail),
+		langparser.QuoteString(stamp(at))))
+}
+
 // RecordIssuingProgress records a pass where the objects are applied and the
 // certificate is not Ready yet -- the ordinary state for the first minute of an
 // HTTP-01 order.

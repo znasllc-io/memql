@@ -935,6 +935,7 @@ func (i *Integration) resolve() (*Deps, error) {
 			Auditor:         &engineAuditor{engine: i.engine, logger: i.logger},
 			Credentials:     s.resolveCredential,
 			Roles:           s.resolveRole,
+			Stores:          s.resolveStore,
 			PeekCredentials: s.peekCredential,
 			GitHubApp:       gh,
 			Logger:          i.logger,

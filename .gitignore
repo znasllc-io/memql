@@ -163,6 +163,7 @@ clients/os/dist/
 # such session has to remember to sweep: a build cache in a large PR is
 # exactly what nobody reviews.
 clients/.vite/
+clients/os/qa/.vite/
 
 # macOS
 .DS_Store

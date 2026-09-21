@@ -58,7 +58,10 @@ import "../composition.css";
 import { headActionFor, railFor, type ComposeInput, type HeadAction, type RailProblem, type RailStage } from "./rail";
 import type { PartsHeld } from "../parts";
 import { ManifestPreview } from "./stops/compose/ManifestPreview";
-import { ComposeSourceStop } from "./stops/compose/Source";
+import { returnPathFor } from "../sources/connectReturn";
+import { useGithubConnect } from "../sources/useGithubConnect";
+import type { ConnectionNeed } from "./stops/compose/RepositorySource";
+import { ComposeSourceDetailStep, ComposeSourceKindStep, SOURCE_DETAIL_NAME, SOURCE_KIND_LABEL } from "./stops/compose/Source";
 import { ComposeWhereItLivesStop } from "./stops/compose/WhereItLives";
 
 // The compose reading (epic memql#4885, design D4): THE RAIL IS THE FORM.
@@ -188,7 +191,13 @@ export function ComposePage(props: ComposePageProps) {
   // state lived in the stop would close under somebody every time a probe
   // answered or a credential arrived on its own feed.
   const [tokenFormOpen, setTokenFormOpen] = useState(false);
-  const [journeyChoice, setJourneyChoice] = useState<{ key: string; stop: StopId } | null>(null);
+  const [journeyChoice, setJourneyChoice] = useState<{ key: string; stop: WizardStep } | null>(null);
+  // THE CONNECT IS HELD HERE because it is a step's forward act, and a wizard's
+  // forward act lives on its floor -- which this page draws.
+  const githubConnect = useGithubConnect();
+  // What the repository step says it needs before it can go on. The step says
+  // it, because only the step has GitHub's own answer about the grant.
+  const [connectionNeed, setConnectionNeed] = useState<ConnectionNeed>("");
 
   const probe = useSourceProbe();
   const zipProbe = useArtifactProbe();
@@ -384,7 +393,7 @@ export function ComposePage(props: ComposePageProps) {
 
     const address = addresses[""] ?? EMPTY_ADDRESS;
     const siteId = await createSite.create(
-      { slug: address.slug, kind: draft.kind, title: draft.name.trim(), storeDomain: draft.storeDomain ?? "", storefrontTokenRef: draft.storefrontTokenRef ?? "" },
+      { slug: address.slug, kind: draft.kind, title: draft.name.trim(), storeId: draft.storeId ?? "" },
       clusterDomain,
     );
     if (siteId === "") return;
@@ -513,31 +522,37 @@ export function ComposePage(props: ComposePageProps) {
     },
   };
 
-  const defaultStop: StopId = phase === "composing" ? source || parked ? "whatItIs" : "source"
+  // A NEW DEPLOYABLE OPENS ON THE CHOICE, AND THE CHOICE OPENS THE STEP IT
+  // NAMES. Reading it off the draft rather than off a click means a flow that
+  // comes back with its choice already made -- from GitHub, after connecting --
+  // lands on the repository step rather than on a question already answered.
+  const defaultStop: WizardStep = phase === "composing" ? source || parked ? "whatItIs" : draft.choice === "" ? "source" : "sourceDetail"
     : phase === "analyzing" || phase === "awaiting_confirm" && path === "package" ? "whatItIs"
     : phase === "stopped" ? (railFor(input).stages.find(s => s.state === "stopped")?.id as StopId ?? "whatItIs")
     : phase === "deploying" || phase === "awaiting_confirm" && path === "handmade" ? "build" : "live";
   const journeyStop = journeyChoice?.key === journeyKey ? journeyChoice.stop : defaultStop;
-  const chooseStop = (stop: StopId) => setJourneyChoice({ key: journeyKey, stop });
+  const chooseStop = (stop: WizardStep) => setJourneyChoice({ key: journeyKey, stop });
 
+  const sourceLocked = parked !== undefined || source !== undefined || phase !== "composing";
   const stopBody = (stage: RailStage) => {
     switch (stage.id) {
       case "source":
         return (
-          <ComposeSourceStop
+          <ComposeSourceDetailStep
             draft={draft}
             onDraft={(patch) => setDraft((held) => ({ ...held, ...patch }))}
             credentials={credentials}
             credentialFeed={props.credentialFeed}
-            isClusterOwner={isClusterOwner}
             probe={probe}
             zipProbe={zipProbe}
             zip={zip}
             siteId={created.siteId}
             clusterDomain={clusterDomain}
-            locked={parked !== undefined || source !== undefined || phase !== "composing"}
+            locked={sourceLocked}
             tokenFormOpen={tokenFormOpen}
             onTokenFormOpenChange={setTokenFormOpen}
+            connect={githubConnect}
+            onConnectionNeed={setConnectionNeed}
             duplicateOf={duplicate}
           />
         );
@@ -644,8 +659,19 @@ export function ComposePage(props: ComposePageProps) {
   const held = inactive || archivedSource;
   const finished = phase === "published" && !held;
   const canGoLive = finished && !wentLive && can.publish && (path !== "handmade" || draft.choice !== "ci");
+  // CONNECTING IS THE REPOSITORY STEP'S FORWARD ACT, so it is on the floor with
+  // every other one. The step says when it is needed; nothing is offered while
+  // the person's connections are still being read, because the step has not
+  // mounted the part of itself that could say so.
+  const needsGithub = !sourceLocked && journeyStop === "sourceDetail" && draft.choice === "repo" && connectionNeed !== "";
   const journeyActs: Act[] = !held && !finished && (
-    journeyStop === "source" && path === "handmade" && sourceDone && phase === "composing"
+    needsGithub
+      ? [{
+          label: connectionNeed === "reconnect" ? "Reconnect GitHub" : "Connect GitHub", tone: "primary", busy: githubConnect.busy,
+          onAct: () => void githubConnect.connect(returnPathFor("deployables")),
+        }]
+    : journeyStop === "source" ? []
+    : journeyStop === "sourceDetail" && path === "handmade" && sourceDone && phase === "composing"
       ? [{ label: "Continue", tone: "primary", onAct: () => chooseStop("whatItIs") }]
       : journeyStop === "whatItIs" && (phase === "awaiting_confirm" && path === "package" || phase === "composing" && path === "handmade")
         ? [{ label: "Choose addresses", tone: "primary", onAct: () => chooseStop("whereItLives") }]
@@ -656,11 +682,62 @@ export function ComposePage(props: ComposePageProps) {
   // availability come from `railFor`, never from a local step counter; which
   // step is OPEN is the only thing a click changes.
   const awaitingLive = finished && !wentLive;
-  const steps: Stop[] = railFor(input).stages.map((stage) => {
+  // WHICH WAY IN, as the rail says it. A flow opened for a source that already
+  // exists never asked, so it reads the answer off the source.
+  const kind = draft.choice !== "" ? draft.choice : (parked?.pkg ?? source) === undefined ? "" : (parked?.pkg ?? source)!.sourceKind === "artifact" ? "zip" : "repo";
+  const steps: Stop[] = railFor(input).stages.flatMap((stage): Stop[] => {
     const id = stage.id as StopId;
     const state = id === "live" && awaitingLive ? ("open" as const) : stage.state;
+    if (id === "source") {
+      // THE SOURCE STAGE IS TWO STEPS: the choice, and the step the choice
+      // names. One question each -- which is the whole reason the old single
+      // step read as crowded.
+      const settled = state === "complete" || state === "done";
+      const chosen = kind !== "";
+      return [
+        {
+          id: "source",
+          name: STEP_NAMES.source,
+          state: settled || (chosen && journeyStop !== "source") ? "complete" : "open",
+          answer: chosen ? SOURCE_KIND_LABEL[kind] : "",
+          // Chosen once something has been read from it: the kind is a fact.
+          openable: !sourceLocked,
+          body: sourceLocked ? undefined : (
+            <ActivityTarget target="deployables:compose:source" className="deployable-journey-current">
+              <ComposeSourceKindStep
+                draft={draft}
+                isClusterOwner={isClusterOwner}
+                onChoose={(choice) => {
+                  setDraft((held) => ({ ...held, choice, name: "", kind: "", artifactId: "", repoUrl: "", storeId: "" }));
+                  // CHOOSING ANSWERS THE STEP, so the wizard moves on to the
+                  // one the answer names.
+                  chooseStop("sourceDetail");
+                }}
+              />
+            </ActivityTarget>
+          ),
+        },
+        {
+          id: "sourceDetail",
+          // Named by the answer above it, and by nothing until there is one.
+          name: chosen ? SOURCE_DETAIL_NAME[kind]! : "Details",
+          state: !chosen ? "ahead" : settled ? "complete" : journeyStop === "source" ? "waiting" : state,
+          sentence: chosen ? DETAIL_SENTENCES[kind] : undefined,
+          // The pipeline's own word on this stage -- what it settled as, or
+          // why it stopped ("private, or not there") -- belongs to the step
+          // that holds the fields it is about.
+          answer: chosen ? stage.reason : "",
+          openable: chosen,
+          body: chosen ? (
+            <ActivityTarget target="deployables:compose:sourceDetail" className="deployable-journey-current">
+              {stopBody({ ...stage, state })}
+            </ActivityTarget>
+          ) : undefined,
+        },
+      ];
+    }
     const reachable = (state !== "pending" && state !== "ahead") || id === journeyStop;
-    return {
+    return [{
       id,
       name: STEP_NAMES[id],
       state,
@@ -672,13 +749,30 @@ export function ComposePage(props: ComposePageProps) {
           {stopBody({ ...stage, state })}
         </ActivityTarget>
       ) : undefined,
-    };
+    }];
   });
 
-  const word = finished && draft.choice === "ci" ? "Waiting for CI" : composePhaseWord(phase, {
+  // WHAT THE STEP THE CHOICE NAMES STILL NEEDS, in its own words. "Describe the
+  // source -- the open step has more to answer" was true of every one of these
+  // and said nothing about any of them.
+  const detailNeeds: { word: string; detail: string } | null =
+    phase !== "composing" || source !== undefined || parked !== undefined || sourceDone || draft.choice === "" || held
+      ? null
+      : draft.choice === "zip"
+        ? { word: "Choose a zip", detail: "one you have put in Files" }
+        : draft.choice === "ci"
+          ? { word: "Name it", detail: "and say what kind of app your CI will push" }
+          : connectionNeed === "connect"
+            ? { word: "Not connected to GitHub", detail: "connect to pick from your repositories, or choose A token" }
+            : connectionNeed === "reconnect"
+              ? { word: "GitHub connection lapsed", detail: "reconnect to pick from your repositories, or choose A token" }
+              : tokenFormOpen
+                ? { word: "Describe the repository", detail: "its URL, and a token if it is private" }
+                : { word: "Choose a repository", detail: "then the branch to follow, and what to call it" };
+  const word = detailNeeds !== null ? detailNeeds.word : finished && draft.choice === "ci" ? "Waiting for CI" : composePhaseWord(phase, {
     inactive, archivedSource, declared: source !== undefined, wentLive, choice: draft.choice, moreToAnswer: action !== null && action.disabled,
   });
-  const detail = finished
+  const detail = detailNeeds !== null ? detailNeeds.detail : finished
     ? finishedSentence(path, draft, outcomes, siteHostname, wentLive)
     : inactive
       ? siteStateDetail("Inactive", "")
@@ -728,7 +822,7 @@ export function ComposePage(props: ComposePageProps) {
       label="Deployable setup progress"
       steps={steps}
       open={journeyStop}
-      onOpen={(id) => chooseStop(id as StopId)}
+      onOpen={(id) => chooseStop(id as WizardStep)}
       status={{ word, detail, tone: phase === "analyzing" || phase === "deploying" ? "busy" : wentLive ? "live" : "none" }}
       acts={acts}
       context={{ page: title, packageId: (parked?.pkg ?? source)?.id, app: only, mode: "compose", step: journeyStop }}
@@ -798,6 +892,17 @@ export function ComposePage(props: ComposePageProps) {
     </Wizard>
   );
 }
+
+/** A step of this wizard: the pipeline's own stops, plus the one the Source
+ *  stage splits into. */
+type WizardStep = StopId | "sourceDetail";
+
+/** What the step a choice names is for, beside its name. */
+const DETAIL_SENTENCES: Readonly<Record<string, string>> = {
+  repo: "Which repository, and how this cluster reaches it.",
+  zip: "Which zip, and what to call it.",
+  ci: "What to call it, and what kind of app it is.",
+};
 
 /** What each step is called on the rail. */
 const STEP_NAMES: Record<StopId, string> = { source: "Source", whatItIs: "Review", whereItLives: "Address", build: "Build", live: "Live" };
