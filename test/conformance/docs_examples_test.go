@@ -27,10 +27,11 @@ package conformance
 // The correction keeps the page readable rather than transcluding it: a fence
 // on a covered page names its conformance case in a `<!-- corpus: ... -->`
 // marker and is held to it. What survives here unchanged is the second half of
-// the argument above -- this gate reads EVERY page, including memql.md and
-// authoring-rules.md, which the corpus gate does not cover yet. Nothing here
-// may be narrowed on the grounds that the other gate exists; the two overlap
-// deliberately, and this one is the wider, weaker of the two.
+// the argument above -- this gate reads EVERY page under docs/public/language,
+// including any page added tomorrow that the corpus gate's coverage list does
+// not yet name. Nothing here may be narrowed on the grounds that the other
+// gate exists; the two overlap deliberately, and this one is the wider,
+// weaker of the two.
 //
 // # The fence markers, and why there is no fourth
 //
