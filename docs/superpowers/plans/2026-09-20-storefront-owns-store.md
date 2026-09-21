@@ -40,6 +40,20 @@ cluster address, the custom domains and the client.
   share this working tree.
 - **No emojis** anywhere: docs, code, copy, commit messages.
 - **Commit format:** `Issue #<N>: <description>`.
+- **ONE DSL CHANGE REDS SIX UNRELATED GATES.** Every task that touches `dsl/` runs, in
+  this order, before it commits:
+  1. `go run ./cmd/memqllint dsl/` — parse plus the load-time contract gates.
+  2. `make sdk-gen` then `make sdk-gen-check` — a new CONCEPT FIELD and a new MUTATION ARG
+     red it, not only a new construct; it fails in the `go-checks` lane, which does not
+     look like an SDK lane. `@serverOnly` constructs are correctly excluded.
+  3. `make arch-model` — any Go rename or signature change orphans model edges. Tasks 2,
+     3 and 4 all add exported Go symbols, so all three run it.
+  4. `component/database/embed_inventory_test.go` — a new MIGRATION `.sql` pair changes an
+     embed COUNT. Task 2 adds one; the test names the map to update.
+  5. `TestUndeclaredRowAuthzPopulationOnlyShrinks` (`component/memql`) — a shrink-only
+     ratchet over queries on concepts declaring no `@rowAuthz` tier. `v1:shopify:store`
+     declares `clusterOwner`, so `developmentStoresFor` is fine; do NOT add an exemption.
+  6. `make test` — the only command that reaches `component/memql`, where (5) lives.
 - **Branch:** `epic/storefront-owns-store` (already created, from `main` at `fe95ee1a6`).
 - **The Admin API token reference never reaches the serving path.** `adminTokenRef` and
   `webhookSecretRef` are not projected onto anything `component/edge` holds.
@@ -650,14 +664,26 @@ Create the `.down.sql`:
 SELECT 1;
 ```
 
-- [ ] **Step 9: Run the migration gates**
+- [ ] **Step 9: Run the migration gates, INCLUDING the embed count**
 
 ```bash
-go test github.com/znasllc-io/memql/component/database -run 'Migration|Retired' -count=1
+go test github.com/znasllc-io/memql/component/database -count=1
 go test github.com/znasllc-io/memql/... -run 'TestRetiredConceptFieldsAreMigratedSafely' -count=1
 ```
-Expected: PASS. (No concept FIELD is retired here — `binding` stays declared — so the
-ledger has nothing to record.)
+
+`component/database/embed_inventory_test.go` counts the embedded migration files and WILL
+fail on this new up/down pair — that is the gate working, and its message names the map to
+update. Update it. (No concept FIELD is retired here: `binding` stays declared and only the
+SHAPE of the object it holds changes, so the `conceptfields` ledger has nothing to record
+and `make concept-snapshot` has nothing to refuse.)
+
+Also run, because this task adds exported Go symbols and a DSL construct:
+
+```bash
+go run ./cmd/memqllint dsl/
+make sdk-gen && make sdk-gen-check
+make arch-model
+```
 
 - [ ] **Step 10: Commit**
 
@@ -1510,12 +1536,23 @@ In the compose flow, replace `storeDomain` + `storefrontTokenRef` on `ComposeDra
 `storeId`, and `bindingReady` becomes `draft.kind !== "shopify_storefront" || Boolean(draft.storeId?.trim())`.
 `actions.ts` writes `binding: { storeId: ... }`.
 
-- [ ] **Step 5: Run the OS suite**
+- [ ] **Step 5: Run the OS suite — BUILD THE SDK FIRST**
+
+`clients/os` typechecks against `sdk/ts/dist`'s built `.d.ts`, NOT against the SDK source.
+`make sdk-gen` rewrites `sdk/ts/src/client/generated_*.ts` and rebuilds nothing, so
+`updateSiteStoreBinding` and `developmentStoresFor` are invisible to the OS until you
+build. Skipping this produces
+`Property 'updateSiteStoreBinding' does not exist on type 'QueryClient'`, which reads like
+a missing mutation rather than a stale build.
 
 ```bash
+make sdk-gen
+cd sdk/ts && npm run build && cd -
 cd clients/os && npm run typecheck && npx vitest run
 ```
 Expected: the new file PASSES; `test/stores/*` still fails (Task 7 deletes it).
+Run vitest from `clients/os`, NEVER from the repo root — the root run picks the OS tests
+up without their setup file and they fail for the wrong reason.
 
 - [ ] **Step 6: Commit**
 
