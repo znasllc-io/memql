@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -42,10 +43,27 @@ const sitePattern = "graph.node.*.v1:platform:site"
 // one, until the TTL backstop expires.
 const customDomainPattern = "graph.node.*.v1:platform:customDomain"
 
-// invalidator is the narrow write the subscriber needs -- Resolver.Invalidate
-// only, not the read side, so a test can stub it without a QueryExecutor.
+// storePattern is v1:shopify:store (epic memql#5530, issue memql#5538). A
+// storefront's binding NAMES a store row now rather than copying it, so the
+// domain the policy admits and the token reference the runtime document
+// resolves both live on a row no site write touches. Without this rule an
+// operator who re-points a store, or rotates its Storefront token reference,
+// changes nothing anybody is served until the TTL backstop expires on each
+// replica independently -- and, unlike the two patterns above, no site write
+// will ever come along to cover for it, because there is none to make.
+//
+// It evicts EVERYTHING, because the cache is keyed by hostname and this row
+// carries none -- see resolver.InvalidateAll for why flushing beats a reverse
+// index from store to site.
+const storePattern = "graph.node.*.v1:shopify:store"
+
+// invalidator is the narrow write the subscriber needs -- the two eviction
+// calls, not the read side, so a test can stub it without a QueryExecutor.
 type invalidator interface {
 	Invalidate(hostname string)
+	// InvalidateAll is what a store event calls: that row names no hostname,
+	// so there is no single entry to evict.
+	InvalidateAll()
 }
 
 // SiteInvalidationSubscriber bridges v1:platform:site concept events to the
@@ -131,13 +149,19 @@ func (s *SiteInvalidationSubscriber) Start(_ context.Context) {
 			s.handle,
 			events.WithSubscriberName("edge.customDomainInvalidationSubscriber"),
 		)
+		unsubStore := s.bus.Subscribe(
+			storePattern,
+			s.handleStore,
+			events.WithSubscriberName("edge.storeInvalidationSubscriber"),
+		)
 		s.unsubscribe = func() {
 			unsubSite()
 			unsubDomain()
+			unsubStore()
 		}
 		close(s.doneCh)
 		s.logger.Info("site invalidation subscriber active",
-			"patterns", sitePattern+", "+customDomainPattern)
+			"patterns", strings.Join([]string{sitePattern, customDomainPattern, storePattern}, ", "))
 	})
 }
 
@@ -179,6 +203,23 @@ func (s *SiteInvalidationSubscriber) handle(ev events.Event) {
 	s.resolver.Invalidate(hostname)
 	s.logger.Info("site resolver cache invalidated",
 		"hostname", hostname,
+		"topic", ev.Topic,
+		"originNode", ev.OriginNodeId,
+	)
+}
+
+// handleStore evicts EVERY cached resolution on a v1:shopify:store write
+// (epic memql#5530, issue memql#5538).
+//
+// IT READS NOTHING OFF THE EVENT, and that is the difference from handle
+// above. A store row carries no hostname, so there is no key to evict by --
+// and it deliberately does not try to decide whether the change MATTERED
+// either: the fields that reach a served byte are the domain and the token
+// reference, and a subscriber that filtered on them would go quietly wrong
+// the first time a third one started being served.
+func (s *SiteInvalidationSubscriber) handleStore(ev events.Event) {
+	s.resolver.InvalidateAll()
+	s.logger.Info("site resolver cache flushed for a store write",
 		"topic", ev.Topic,
 		"originNode", ev.OriginNodeId,
 	)

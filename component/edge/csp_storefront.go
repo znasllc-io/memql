@@ -18,12 +18,14 @@ import "strings"
 //
 // Two sources, and the split is load-bearing:
 //
-//   - THE STORE-SPECIFIC HOST COMES FROM THE SITE'S RESOLVED BINDING --
-//     site.Binding["storeDomain"], the same field runtimeconfig.go publishes
-//     to the bundle. Never from a header, never from a query parameter, and
-//     never from anything the BUNDLE supplies: a bundle that could name a
-//     host in its own policy could name any host, which is the same as
-//     having no policy.
+//   - THE STORE-SPECIFIC HOST COMES FROM THE SITE'S BOUND STORE --
+//     site.Store.Domain, the same value runtimeconfig.go publishes to the
+//     bundle. Since epic memql#5530 that is a field of the v1:shopify:store
+//     row the binding NAMES rather than a copy on the site row, resolved by
+//     component/edge/resolve.go alongside the site and cached with it. Never
+//     from a header, never from a query parameter, and never from anything
+//     the BUNDLE supplies: a bundle that could name a host in its own policy
+//     could name any host, which is the same as having no policy.
 //   - THE FIXED HOSTS ARE SHOPIFY'S OWN, identical for every store, and they
 //     are taken from Shopify's own reference storefront rather than guessed.
 //     Hydrogen's defaultDirectives (packages/hydrogen/src/csp/csp.ts) names
@@ -52,10 +54,10 @@ import "strings"
 //
 // # Kind is the gate, not the presence of a binding
 //
-// The same rule storefrontForSite states for the token: a storeDomain
-// written onto an `spa` row -- by accident, or by someone probing -- widens
-// nothing, because a site only takes this arm when it is DECLARED to be a
-// storefront. Together with the byte-identity twins
+// The same rule storefrontForSite states for the token: a store bound to an
+// `spa` row -- by accident, or by someone probing -- widens nothing, because
+// a site only takes this arm when it is DECLARED to be a storefront.
+// Together with the byte-identity twins
 // (TestNonStorefrontPoliciesAreUnchangedByTheStorefrontArm) that is what
 // makes this change invisible to every site that is not one.
 type storefrontCSP struct {
@@ -107,14 +109,19 @@ func storefrontSources(site *Site) storefrontCSP {
 	}
 
 	// THE BOUND STORE, VALIDATED BEFORE IT CAN LAND IN A RESPONSE HEADER.
-	// This is row data, not literal code, and it takes the same validHost
-	// whitelist the site's own hostname takes -- for csp.go's own stated
-	// reason: a malformed value must DROP the source rather than inject
-	// something unparseable, or worse a second header, into the policy. An
-	// unbound storefront is left with Shopify's fixed hosts and no invented
-	// one, which is the honest answer for "this store is not wired up yet"
-	// and the same posture StorefrontConfig.StorefrontToken takes.
-	domain := strings.TrimSpace(bindingString(site.Binding, "storeDomain"))
+	// This is row data, not literal code -- a store row's, since epic
+	// memql#5530 -- and it takes the same validHost whitelist the site's own
+	// hostname takes, for csp.go's own stated reason: a malformed value must
+	// DROP the source rather than inject something unparseable, or worse a
+	// second header, into the policy. A storefront with no store -- unbound,
+	// or bound to a row the edge could not read -- is left with Shopify's
+	// fixed hosts and no invented one, which is the honest answer for "this
+	// store is not wired up yet" and the same posture
+	// StorefrontConfig.StorefrontToken takes.
+	if site.Store == nil {
+		return out
+	}
+	domain := strings.TrimSpace(site.Store.Domain)
 	if domain == "" || !validHost(domain) {
 		return out
 	}
