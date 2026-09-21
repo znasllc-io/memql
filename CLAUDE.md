@@ -2566,6 +2566,39 @@ touches rows.
   and local spend; loop caps (`maxModelCalls`, `maxRetries`, `maxEvents`,
   `wallClockMs`) INCLUDE every call. A ceiling of zero is UNSET, never
   "nothing allowed".
+- **The ceilings are enforced at the MODEL SEAM, and that placement answers
+  three questions at once** (memql#5580). `component/memql`'s `modelSeam` is
+  the one funnel both covered call sites pass through, it reads the run off
+  the context, and it sits BEFORE the provider call -- so the call can still
+  be refused. It asks a `RunCeilingGuard` (implemented by
+  `integrations/work.RunCeilings`, which reads the goal's ceilings and folds
+  the run's `v1:work:modelCall` rows into its spend) and refuses with a typed
+  `*memql.RunCeilingError`. The three:
+  - **A breach PARKS, it does not fail.** The refused call fails its step, and
+    `closeRun` recognises the typed error and parks the run at `waiting` on a
+    `budget` approval carrying `{ceiling, limit, actual, reason}` -- plus the
+    ceiling's name and the run's `spent` on the row. **No `resumeAt`, ever**:
+    only a person changes a ceiling. Nothing in flight is cancelled, because
+    the check runs before the provider is asked.
+  - **Every ANSWER is one model call, whoever answered** -- a provider, a
+    fleet machine, a subscription app, the replay journal, or the ai()
+    runtime's in-process caches (which answer ABOVE the seam, so `Invoke`
+    asks the guard before consulting them). The dollar buckets take only what
+    MemQL was BILLED for, so a replayed or cached answer costs a loop call and
+    nothing else. `component/work.AddCall` is that fold.
+  - **A resumed run continues its first attempt's budget.** The guard seeds
+    from the run's own journal rows, so park-approve-park is not a way to buy
+    another allowance; a replay or a fork is a different run id and rightly
+    gets its own.
+
+  Two edges, stated because silence about them would be the same defect one
+  layer down. **`maxRetries` and `maxEvents` are the EXECUTOR's counters and
+  reach no model call**, so this seam clears them and WARNS rather than
+  clearing them silently against a spend it never sees; and a run whose
+  ceilings **cannot be read** is REFUSED under the sentinel ceiling
+  `unevaluated` -- a limit nobody could read must not read like a limit nobody
+  set. A run with no `goalId` inherits no ceilings and costs the guard no read
+  at all, which is what keeps it off every automation run in the cluster.
 - **Both sweeps are in `maintenanceAutomations`, and that is not optional.**
   The work concepts declare the composite owner tier, so under the default
   reader actor these reads answer ZERO ROWS AND NO ERROR: a sweep that resumes
@@ -2688,6 +2721,19 @@ include every call, asserted by
 SURVIVES as the compile order's third tier; the specialist-creation gate is
 RECORDED in memql#5063. `produceArtifact` opens a goal naming a deterministic
 template, which reaches no model to decide anything.
+
+**That replacement was written and NOT WIRED for a while, which is worth
+knowing about the sentence above** (memql#5580). `CheckCeilings` had the split,
+had the unit test cited here, and had NO PRODUCTION CALLER -- so a run's
+ceilings were settable fields nothing read, and the only real stop was the
+process-wide guard, which is per-PROCESS and shared with every other caller on
+the node. It is wired now, at the model seam -- the work spine section above
+describes the seam, the park and the three counting rules. **The test
+named above does not hold that property and never did**: it is about the
+function's arithmetic and passes whether or not anything calls it. The one that
+holds it is `TestTheRunCeilingChainHasAProductionCaller`
+(`run_ceilings_have_a_caller_test.go`), which fails when any link of decision /
+wiring / seam goes test-only.
 
 ## Notes for Claude Code CLI
 
