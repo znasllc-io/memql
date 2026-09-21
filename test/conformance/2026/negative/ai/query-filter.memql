@@ -1,0 +1,12 @@
+use agents.builtins.{ ai }
+
+/// A model call has no place in a query filter: the filter pushes down to SQL,
+/// so over the row this would be one model call per row examined. `ai` is a
+/// builtin, and a builtin call is a construct call -- refused in every pushdown
+/// position by the tier manifest, and here by the lowering that enforces it.
+query ticket ticketsTheModelLikes {
+  args {
+    topic  string!
+  }
+  filter row => builtin ai(templateId: "docSummary", data: { content: row.title }) == args.topic
+}

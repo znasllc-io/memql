@@ -1,0 +1,21 @@
+/// Every part hashes to exactly 64 characters, so the join has exactly one
+/// decomposition: no separator, and nothing constrained on the caller.
+@serverOnly
+mutation utterance recordUtterance {
+  args {
+    partitionId    string!
+    participantId  string!
+    action         object!
+  }
+  insert {
+    id: "utt-" + hash(
+      hash(args.partitionId) +
+      hash(canonicalId(args.participantId, "participant")) +
+      hash(args.action.type) +
+      hash(args.action.idempotencyKey)
+    )
+    args.partitionId
+    args.participantId
+    args.action
+  }
+}

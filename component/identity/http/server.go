@@ -207,6 +207,30 @@ type Server struct {
 	// only so the acceptance tests can drive the whole callback against an
 	// httptest server. There is no configuration path that sets it.
 	GitHubClient *githubconnect.Client
+
+	// GitHubApp answers this cluster's GitHub App AT THE MOMENT OF A REQUEST
+	// (design record 2026-09-20-github-app-setup, D2). Cfg.GitHubApp is the
+	// environment as it stood at boot, and that stopped being the whole
+	// answer when a cluster owner became able to register the app from the
+	// product: the registration is rows, written while this process is
+	// already running, by whichever identity replica GitHub's redirect
+	// reached. A handler that kept reading Cfg would go on answering 404 for
+	// an app that exists until somebody restarted the pod.
+	//
+	// Nil falls back to Cfg.GitHubApp -- the environment alone, which is what
+	// every test that builds a Server by hand means by it.
+	GitHubApp *githubconnect.Resolver
+}
+
+// gitHubApp is the one place a handler asks which GitHub App this cluster has.
+func (s *Server) gitHubApp(ctx context.Context) (githubconnect.Config, githubconnect.Source) {
+	if s.GitHubApp != nil {
+		return s.GitHubApp.Current(ctx)
+	}
+	if len(s.Cfg.GitHubApp.Present()) > 0 {
+		return s.Cfg.GitHubApp, githubconnect.SourceEnvironment
+	}
+	return githubconnect.Config{}, githubconnect.SourceNone
 }
 
 // effectiveTokenSettings returns the live TTL + cookie settings for
@@ -309,6 +333,16 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	// github_callback.go for why declaring it in component/server would be
 	// wrong rather than merely unnecessary.
 	mux.HandleFunc("GET "+githubconnect.CallbackPath, wrap(s.handleGitHubCallback))
+	// THE GITHUB APP SETUP CALLBACK (design record 2026-09-20-github-app-setup,
+	// D4; owner-approved HTTP exception, CLAUDE.md). The same class as the
+	// route above and registered beside it for the same two reasons: GitHub
+	// redirects a BROWSER here, and declaring it in component/server would
+	// route it to the bff. No s.cors -- a top-level navigation, not a fetch.
+	// Registered unconditionally, like its neighbours: what it needs is a live
+	// setup state, and without one it sends the browser back to MemQL OS. The
+	// page that STARTS the flow is component/identity/web's, because it is a
+	// page.
+	mux.HandleFunc("GET "+githubconnect.AppSetupCallbackPath, wrap(s.handleGitHubAppSetupCallback))
 	mux.HandleFunc("POST /oauth/token", wrap(s.cors(s.handleToken)))
 	mux.HandleFunc("OPTIONS /oauth/token", wrap(s.cors(s.handleOptions)))
 

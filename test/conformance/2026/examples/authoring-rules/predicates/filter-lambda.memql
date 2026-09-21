@@ -1,0 +1,11 @@
+use campaigns.concepts.{ campaign }
+
+/// The caller's campaigns, or every campaign when a cluster owner asks.
+@actor
+query campaign campaignsVisibleToCaller {
+  args {
+    status  string
+  }
+  filter  row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true) && (args.status == nil || row.status == args.status)
+  paginate 50
+}

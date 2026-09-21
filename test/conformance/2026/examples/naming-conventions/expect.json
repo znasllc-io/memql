@@ -1,0 +1,7 @@
+{
+  "cases": [
+    { "file": "named-for-what-they-do.memql", "verdict": "load_ok" },
+    { "file": "artifacts-by-folder.memql", "verdict": "load_ok" },
+    { "file": "index-artifact.memql", "verdict": "load_ok" }
+  ]
+}

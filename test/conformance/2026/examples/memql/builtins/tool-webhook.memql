@@ -1,0 +1,5 @@
+/// Tell the on-call channel
+@handler(type="webhook", url="\"https://hooks.example.com/notify\"", method="post")
+tool notifyOnCall {
+  message  string  @required @description("What to tell the on-call channel")
+}

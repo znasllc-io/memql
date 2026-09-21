@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"regexp"
 	"strings"
 	"sync"
@@ -185,6 +186,59 @@ func TestGithubConnectBeginAnswersNotConfigured(t *testing.T) {
 	if len(eng.statements) != 0 {
 		t.Errorf("an unconfigured cluster wrote %d statement(s): %v", len(eng.statements), eng.statements)
 	}
+}
+
+// storedAppRows is a registration as the two row stores hold it: the six
+// values, under the six names, each in the store its kind names.
+func storedAppRows() githubconnect.RowReader {
+	variables := map[string]string{
+		githubconnect.EnvAppID:    "654321",
+		githubconnect.EnvAppSlug:  "registered-from-the-product",
+		githubconnect.EnvClientID: "Iv1.registeredclientid",
+	}
+	secrets := map[string]string{
+		githubconnect.EnvClientSecret:  "registered-client-secret",
+		githubconnect.EnvPrivateKeyB64: "LS0tLS1CRUdJTiBFWEFNUExF",
+		githubconnect.EnvWebhookSecret: "registered-webhook-secret",
+	}
+	read := func(from map[string]string) func(context.Context, string) (string, error) {
+		return func(_ context.Context, name string) (string, error) {
+			v, ok := from[name]
+			if !ok {
+				return "", errors.New("not found")
+			}
+			return v, nil
+		}
+	}
+	return githubconnect.RowReader{Variable: read(variables), Secret: read(secrets)}
+}
+
+// TestGithubConnectBeginSeesAnAppRegisteredFromTheProduct (design record
+// 2026-09-20-github-app-setup, D2). The environment carries NOTHING -- which
+// is every cluster whose owner registered the app from the OS rather than
+// setting six values in a deployment -- and Connect has to work all the same.
+func TestGithubConnectBeginSeesAnAppRegisteredFromTheProduct(t *testing.T) {
+	unconfigureApp(t)
+	eng := &beginFakeEngine{}
+	i := NewIdentityIntegrationWithEngine(eng, nil, nil)
+	i.SetGitHubAppRows(storedAppRows())
+
+	nodes, err := i.handleGithubConnectBegin(
+		callerContext("v1:identity:user:asked"),
+		map[string]any{"returnPath": "/packages/new"}, 0)
+	reply := beginReply(t, nodes, err)
+
+	if reply["reason"] != "ok" {
+		t.Fatalf("reason = %v, want ok", reply["reason"])
+	}
+	authorizeURL, _ := reply["authorizeUrl"].(string)
+	if !strings.Contains(authorizeURL, "client_id=Iv1.registeredclientid") {
+		t.Errorf("the authorize URL does not name the registered app's client id:\n  %s", authorizeURL)
+	}
+	if reply["installUrl"] != "https://github.com/apps/registered-from-the-product/installations/new" {
+		t.Errorf("installUrl = %v", reply["installUrl"])
+	}
+	eng.statement(t, "mutation createGithubConnectState(")
 }
 
 // TestGithubConnectBeginRefusesAnEmptyActor. The state row names the only

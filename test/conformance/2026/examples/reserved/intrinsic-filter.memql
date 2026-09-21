@@ -1,0 +1,10 @@
+use library.concepts.{ folder }
+
+@description("One folder of the caller's, by id, unless it is archived")
+query folder folderByIdIfLive {
+  args {
+    folderId  string  @required
+  }
+  filter  row => row.id == args.folderId && row.archived != true
+  //             ^^^^^^ intrinsic           ^^^^^^^^^^^^ payload property
+}

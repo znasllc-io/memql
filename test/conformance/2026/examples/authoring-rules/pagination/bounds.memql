@@ -1,0 +1,33 @@
+use library.concepts.{ folder }
+use library.shapes.{ libraryFolderFull }
+use agents.concepts.{ agentRole }
+use agents.shapes.{ agentRoleFull }
+use common.traits.{ isActiveRecord }
+
+// Single-row read -- exempt (row.id == equality).
+query folder folderMeta {
+  args { folderId string @required }
+  filter  row => row.id == args.folderId
+  shape   libraryFolderFull
+}
+
+// Bounded list -- compliant (paginate window).
+query folder firstTenFolders {
+  filter  row => isActiveRecord(row)
+  paginate 10
+  shape   libraryFolderFull
+}
+
+// Legitimate full-set read -- compliant, marked + auditable.
+@unbounded("the agent-role catalog is a small bounded set -- never more than a handful of rows")
+query agentRole allAgentRoles {
+  filter  row => isActiveRecord(row)
+  shape   agentRoleFull
+}
+
+// VIOLATION -- list read with no bound. Pulls the whole table.
+query widget allWidgets {
+  args { kind string @required }
+  filter  row => row.kind == args.kind
+  shape   widgetFull
+}

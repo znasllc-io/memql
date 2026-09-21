@@ -1,0 +1,23 @@
+use observability.concepts.{ invocation as codeInvocation }
+
+/// This domain's own invocation record.
+concept invocation {
+  ownerUserId  string!
+  toolName     string!
+}
+
+/// Slow code invocations -- the imported one.
+query codeInvocation slowCodeInvocations {
+  args {
+    minDurationNs  int  @required
+  }
+  filter   row => row.durationNs >= args.minDurationNs
+  paginate 50
+}
+
+/// The caller's own invocations -- `invocation` stays ambient.
+@actor
+query invocation invocationsForCaller {
+  filter   row => row.ownerUserId == actor.userId
+  paginate 50
+}

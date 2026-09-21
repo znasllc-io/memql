@@ -325,11 +325,13 @@ const COPY: Record<string, RefusalCopy> = {
     next: "",
   },
   github_app_not_configured: {
-    // An OPERATOR's condition, not a person's. The sentence says what to do
-    // instead AND who could change it, because a person reading this did
-    // nothing wrong and cannot fix the cluster.
+    // The CLUSTER's condition, not this person's. The sentence says what to do
+    // instead AND who can change it -- a cluster owner, by that name, because
+    // this used to say "ask an operator" to the one person reading it who was
+    // the operator. Where they do it is the same place a connection is
+    // renewed, so the two sentences name it the same way.
     title: "This cluster has no GitHub connection set up",
-    next: "Paste a URL and a token instead, or ask an operator to set up the GitHub App.",
+    next: "Paste a URL and a token instead. A cluster owner sets GitHub up in Settings > Sources.",
   },
   connect_state_invalid: {
     // A connect state is consumed exactly once, so this is the SECOND click
@@ -337,6 +339,41 @@ const COPY: Record<string, RefusalCopy> = {
     // nothing, which is why the copy does not dwell on which it was.
     title: "That sign-in link is no longer valid",
     next: "Start again from Connect GitHub.",
+  },
+
+  // -- registering the cluster's GitHub App from here (engine design record
+  //    2026-09-20-github-app-setup) --
+  github_app_managed_by_environment: {
+    // Not something anybody signed in here can change, owner included: the
+    // environment outranks a stored registration wherever the app is read, so
+    // one made from here would be written and then ignored.
+    title: "This cluster's GitHub link is set by its deployment",
+    next: "It is changed where the cluster is deployed, not here.",
+  },
+  github_app_setup_forbidden: {
+    // Every person's connection is made against the app, which makes
+    // registering or removing it the cluster's business rather than theirs.
+    title: "Only a cluster owner can set up GitHub",
+    next: "Ask a cluster owner, or paste a URL and a token instead.",
+  },
+  github_app_setup_invalid: {
+    title: "That is not a GitHub organization",
+    next: "Enter the organization's login: the name in its github.com address.",
+  },
+  github_app_setup_state_invalid: {
+    // `connect_state_invalid`'s sibling, separate because the repair is: this
+    // one starts the SETUP again, and pressing Connect would do nothing.
+    title: "That setup link is no longer valid",
+    next: "Start again from Set up GitHub.",
+  },
+  github_app_setup_failed: {
+    // THE ONE FAULT OF THE FIVE. Nothing is half-kept on the cluster -- the
+    // stored values are all six or none -- but GITHUB may have created the app
+    // before the cluster failed to keep it, and app names are unique across
+    // GitHub: a second attempt under the same name is refused there, on a page
+    // that does not say why. So the next step names the leftover.
+    title: "GitHub could not be set up",
+    next: "Nothing was kept here. If GitHub now lists an app it made for this cluster, delete it there, then start again.",
   },
 
   // -- the lifecycle's fourth rung, and the stop button (epic memql#4937) --
@@ -464,6 +501,14 @@ const NOT_A_FAULT: ReadonlySet<string> = new Set([
   "repository_not_installed",
   "github_app_not_configured",
   "connect_state_invalid",
+  // Four of the setup flow's five. Whose app it is, who may register one, a
+  // login that was mistyped and a link that was already used are each
+  // somebody's next step; `github_app_setup_failed` is left out ON PURPOSE,
+  // because a registration the cluster could not keep is a fault.
+  "github_app_managed_by_environment",
+  "github_app_setup_forbidden",
+  "github_app_setup_invalid",
+  "github_app_setup_state_invalid",
 ]);
 
 /**

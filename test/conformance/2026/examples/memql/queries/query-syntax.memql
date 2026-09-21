@@ -1,0 +1,17 @@
+use library.concepts.{ artifact }
+use library.shapes.{ artifactFull }
+use common.traits.{ isActiveRecord }
+
+/// Get artifacts filed under a folder
+query artifact artifactsInFolder {
+  args {
+    folderId  string
+    lens      string  @enum("artifact", "record")
+    kind      string  @enum("document", "note", "file")
+  }
+  filter  row => (args.folderId == nil || row.folderId == args.folderId)
+              && (args.lens == nil || row.lens == args.lens)
+              && (args.kind == nil || row.kind == args.kind)
+              && isActiveRecord(row)
+  shape   artifactFull
+}

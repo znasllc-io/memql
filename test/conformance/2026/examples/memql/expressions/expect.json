@@ -1,0 +1,9 @@
+{
+  "cases": [
+    { "file": "actor-filter.memql", "verdict": "load_ok" },
+    { "file": "membership.memql", "verdict": "load_ok" },
+    { "file": "multiline-filter.memql", "verdict": "load_ok" },
+    { "file": "optional-argument.memql", "verdict": "load_ok" },
+    { "file": "plan-constant.memql", "verdict": "load_ok" }
+  ]
+}

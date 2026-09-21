@@ -1,0 +1,11 @@
+/// A participant the per-part-hashing example points a foreign key at.
+concept participant {
+  displayName  string!
+}
+
+/// One recorded action, keyed by a hash of four independently-hashed parts.
+concept utterance {
+  partitionId    string!
+  participantId  string!
+  action         object!
+}

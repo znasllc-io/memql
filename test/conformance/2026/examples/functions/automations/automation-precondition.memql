@@ -1,0 +1,27 @@
+use forge.mutations.{ advanceRequest }
+
+/// Decide the status a submitted request moves to, from the submitter's role.
+logic routeStatus {
+  args {
+    submitterRole any
+  }
+  role := args.submitterRole ?? ""
+  return role == "owner" ? "queued" : "needs_validation"
+}
+
+@trigger(event="node.created", concept="v1:forge:request")
+@filter(row => args.firstVersion == true)
+automation routeRequestWithPrecondition {
+  args {
+    id            any
+    firstVersion  bool
+    submitterRole any
+  }
+  precondition hasId {
+    check: args.id != nil
+    literal: id
+    description: "Route only a request that carries its id."
+  }
+  decide := logic routeStatus(submitterRole: args.submitterRole)
+  mutation advanceRequest(requestId: args.id, status: decide)
+}

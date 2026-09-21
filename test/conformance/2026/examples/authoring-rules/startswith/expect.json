@@ -1,0 +1,6 @@
+{
+  "cases": [
+    { "file": "prefix-scoped-read.memql", "verdict": "load_ok" },
+    { "file": "blank-prefix.memql", "verdict": "load_ok" }
+  ]
+}

@@ -1,0 +1,11 @@
+use library.concepts.{ folder }
+
+@actor
+mutation folder createOneFolder {
+  args { name string @required }
+  insert {
+    name: args.name
+    ownerUserId: actor.userId
+    archived: false
+  }
+}

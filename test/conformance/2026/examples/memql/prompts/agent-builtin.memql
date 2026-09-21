@@ -1,0 +1,10 @@
+use agents.builtins.{ agent }
+
+/// Ask the assistant agent a question; the call returns as soon as the run is open.
+logic askAssistant {
+  args {
+    question  string!
+  }
+  invoked := builtin agent(name: "assistant", prompt: args.question, partitionId: "system")
+  return invoked
+}

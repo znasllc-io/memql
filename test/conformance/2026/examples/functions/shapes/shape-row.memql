@@ -1,0 +1,10 @@
+use library.concepts.{ folder }
+
+@description("Folder summary card")
+@row
+shape folder folderCard {
+  row.id
+  name
+  parentFolderId
+  row.createdAt
+}

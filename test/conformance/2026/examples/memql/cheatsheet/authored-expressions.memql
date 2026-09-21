@@ -1,0 +1,33 @@
+use library.concepts.{ artifact }
+use common.shapes.{ actorEnvelope }
+
+/// Matches records whose active field is true.
+trait rowIsActive = row => row.active == true
+
+/// Matches artifacts an agent produced rather than a person.
+spec artifact artifactIsGenerated = row => row.source == "agent_generated"
+
+/// The caller holds the cluster-owner role.
+spec actorEnvelope callerIsOwner = actor => actor.role == "owner"
+
+/// Artifacts at one lens, narrowed in process by a search term.
+query artifact artifactsByLens {
+  args {
+    lens  string  @required
+    q     string  @required
+  }
+  filter   row => row.lens == args.lens && rowIsActive(row)
+  sort     "row.createdAt", "desc"
+  paginate 50
+  refine   row => lower(row.title).includes(lower(args.q))
+}
+
+@trigger(event="node.created", concept="v1:library:artifact")
+@filter(row => row.kind == "file" && row.archived == true)
+/// Notice an archived file artifact arriving.
+automation noticeArchivedFileArtifact {
+  args {
+    id  any
+  }
+  publish "docs.archivedFileNoticed" { artifactId: args.id }
+}

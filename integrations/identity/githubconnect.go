@@ -98,12 +98,12 @@ func (i *IdentityIntegration) handleGithubConnectBegin(ctx context.Context, args
 		return nil, fmt.Errorf("identity.githubConnectBegin: a GitHub connection belongs to the person who begins it, and this call carries no actor")
 	}
 
-	cfg := githubconnect.LoadFromEnv()
+	cfg, _ := i.githubAppConfig(ctx)
 	if !cfg.Configured() {
-		// A TYPED REASON, never an error the OS has to parse. This is an
-		// operator's condition rather than a person's -- the six
-		// MEMQL_GITHUB_APP_* values are absent -- and the Source stop's
-		// answer is to offer the pasted-token path and say why.
+		// A TYPED REASON, never an error the OS has to parse. This is the
+		// CLUSTER's condition rather than a person's -- no app in the
+		// environment and none registered from the product -- and the Source
+		// stop's answer is to offer the pasted-token path and say why.
 		//
 		// installUrl is empty too: with no app there is no installation page,
 		// and a link composed from a blank slug would 404 on github.com.
@@ -157,8 +157,16 @@ func (i *IdentityIntegration) handleGithubConnectBegin(ctx context.Context, args
 	// identity one -- envregistry.ApplyDomainDerivations paints it from
 	// MEMQL_DOMAIN at boot in main.go -- which is what lets this capability
 	// answer the same URL wherever the stream happens to land.
-	redirectURI := githubconnect.RedirectURI(os.Getenv("MEMQL_IDENTITY_BASE_URL"))
+	redirectURI := githubconnect.RedirectURI(identityBaseURLFromEnv())
 	return connectResult(cfg.AuthorizeURL(redirectURI, state), connectReasonOK, cfg.InstallURL()), nil
+}
+
+// identityBaseURLFromEnv is the ONE read of MEMQL_IDENTITY_BASE_URL in this
+// package. Present on every node type, not only the identity one --
+// envregistry.ApplyDomainDerivations paints it from MEMQL_DOMAIN at boot -- so
+// a capability answers the same URL wherever the stream happens to land.
+func identityBaseURLFromEnv() string {
+	return strings.TrimRight(strings.TrimSpace(os.Getenv("MEMQL_IDENTITY_BASE_URL")), "/")
 }
 
 // connectResult is the one shape this capability answers, so a caller never

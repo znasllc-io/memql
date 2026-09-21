@@ -1,0 +1,6 @@
+{
+  "cases": [
+    { "file": "assignment.memql", "verdict": "load_ok" },
+    { "file": "retention-override.memql", "verdict": "load_ok" }
+  ]
+}

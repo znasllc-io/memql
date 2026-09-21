@@ -1,0 +1,25 @@
+use library.concepts.{ artifact, folder }
+
+/// File one artifact under one folder.
+@serverOnly
+mutation filing fileArtifactUnderFolder {
+  args {
+    artifactId   string!
+    folderId     string!
+    displayName  string
+  }
+  // Longhand with bare mirrors -- still valid where the gate allows it.
+  // This block stays longhand deliberately: the multi-line computed id
+  // is exactly the shape the codemod refuses to reflow.
+  insert {
+    id: "filed-" + hash(
+      canonicalId(args.artifactId, "artifact") + ":" +
+      canonicalId(args.folderId, "folder")
+    )
+    args.folderId
+    args.artifactId
+    kind: "document"
+    args.displayName
+    status: "active"
+  }
+}

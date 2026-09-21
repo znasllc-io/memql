@@ -1,0 +1,11 @@
+{
+  "cases": [
+    { "file": "absent-values.memql", "verdict": "load_ok" },
+    {
+      "file": "misspelled-field.memql",
+      "verdict": "refuse_load",
+      "code": "lower_unknown_field",
+      "message": "`delted` is not a declared field of"
+    }
+  ]
+}

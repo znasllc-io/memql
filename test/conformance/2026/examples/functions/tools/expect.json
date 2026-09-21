@@ -1,0 +1,8 @@
+{
+  "cases": [
+    {
+      "file": "tool-syntax.memql",
+      "verdict": "load_ok"
+    }
+  ]
+}

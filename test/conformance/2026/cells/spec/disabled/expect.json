@@ -5,6 +5,11 @@
       "verdict": "load_ok"
     },
     {
+      "file": "on-a-later-trait.memql",
+      "verdict": "load_ok",
+      "note": "the TRAIT half of this receiver, written as the file's SECOND declaration. The grammar's <file> opens with a detached annotation run (authoring-rules 7b) that at token level cannot be told from the first declaration's own preamble, so an annotated trait at the top of a file derives with <trait-annotation> blanked. Only one written below another declaration holds that production to anything."
+    },
+    {
       "file": "with-true.memql",
       "verdict": "refuse_parse",
       "code": "annotation_form",

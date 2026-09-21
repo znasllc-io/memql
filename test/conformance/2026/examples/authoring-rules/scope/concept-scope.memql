@@ -1,0 +1,5 @@
+// REJECTED -- concept-level @scope is gone.
+@scope("global")
+concept node {
+  hostname  string!
+}

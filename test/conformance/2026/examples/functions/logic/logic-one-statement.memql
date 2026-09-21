@@ -1,0 +1,10 @@
+use workbench.queries.{ workspaceForRun }
+
+/// Pure decide for the workspace-release sweep: every v1:workbench:workspace
+/// of the updated run.
+logic workspacesForTerminalRun {
+  args {
+    event object!
+  }
+  return query workspaceForRun(runId: args.event.payload.id ?? "")
+}

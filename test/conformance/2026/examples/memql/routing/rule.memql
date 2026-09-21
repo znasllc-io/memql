@@ -1,0 +1,7 @@
+/// An operator's agent reply reasons.
+@when(prompt="agentReply", role="operator")
+@level("reasoning")
+@policy("localFirst")
+@precedence(60)
+@onUnavailable("degrade")
+rule operatorReplyReasons { }

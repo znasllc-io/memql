@@ -16,6 +16,8 @@ import { zipUnusableNote, type ZipVerdict } from "../../../sources/probe";
 import type { ArtifactProbeHandle, SourceProbeHandle } from "../../../sources/useProbes";
 import { PICKER_PAGE_SIZE, useZipArtifacts } from "../../../sources/useZipArtifacts";
 import type { CredentialFeedStatus, CredentialRow } from "../../../sources/rows";
+import type { GithubAppOwner } from "../../../sources/GithubAppSetup";
+import type { GithubAppActions } from "../../../sources/useGithubApp";
 import type { GithubConnectActions } from "../../../sources/useGithubConnect";
 import type { PackageRow } from "../../../packages/rows";
 import { sourceLabel } from "../../../packages/rows";
@@ -157,6 +159,9 @@ export function ComposeSourceDetailStep({
   onTokenFormOpenChange,
   connect,
   onConnectionNeed,
+  app,
+  appOwner,
+  onAppOwner,
   duplicateOf = null,
 }: {
   draft: ComposeDraft;
@@ -179,6 +184,11 @@ export function ComposeSourceDetailStep({
   connect: GithubConnectActions;
   /** What the repository step needs before it can go on; see RepositorySource. */
   onConnectionNeed?: (need: ConnectionNeed) => void;
+  /** The cluster's GitHub App and where an owner would register one -- held by
+   *  the page for the floor's reason, and only passed through here. */
+  app?: GithubAppActions;
+  appOwner?: GithubAppOwner;
+  onAppOwner?: (owner: GithubAppOwner) => void;
   /**
    * The ACTIVE source that already tracks this repository at this ref
    * (2026-09-05 design, D8), when there is one. The engine refuses the second
@@ -202,6 +212,9 @@ export function ComposeSourceDetailStep({
             onTokenFormOpenChange={onTokenFormOpenChange}
             connect={connect}
             onConnectionNeed={onConnectionNeed}
+            app={app}
+            appOwner={appOwner}
+            onAppOwner={onAppOwner}
           />
           {/* ASKED ONCE THERE IS A REPOSITORY TO ASK IT ABOUT. It used to stand
               under an empty picker as two more full-width cards. It is a

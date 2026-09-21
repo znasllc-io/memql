@@ -1,0 +1,6 @@
+@executor("integration.auth.checkPermission")
+@args(profile="object")
+@description("Check if the current authenticated user has a specific role. Returns boolean result.")
+builtin authCheckPermission {
+  role  string  @required
+}

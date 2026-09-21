@@ -1,0 +1,4 @@
+@primary("claudeSonnet")
+@fallback("chat54Pro")
+/// Default chat policy for non-operator agents.
+policy balancedChat { }

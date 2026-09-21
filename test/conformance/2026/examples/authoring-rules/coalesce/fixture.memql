@@ -1,0 +1,4 @@
+/// A settings row the blank-coalescing example writes.
+concept settingSlot {
+  v  string
+}

@@ -1,0 +1,11 @@
+/// Daily sweep: delete the archived folders whose retention window has elapsed.
+logic purgeExpiredArchivedFolders {
+  args {
+    olderThan  datetime
+  }
+  expired := query expiredArchivedFolders(asOf: args.olderThan ?? now)
+  for folder in expired {
+    mutation deleteFolderNow(folderId: folder.id)
+  }
+  return expired.count()
+}

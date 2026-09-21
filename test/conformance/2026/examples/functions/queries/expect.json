@@ -1,0 +1,24 @@
+{
+  "cases": [
+    {
+      "file": "query-count.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "query-optional-filter.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "query-shape-usage.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "query-sort-paginate.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "query-syntax.memql",
+      "verdict": "load_ok"
+    }
+  ]
+}

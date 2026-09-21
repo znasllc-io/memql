@@ -1,0 +1,16 @@
+/// The filing row the longhand write-block example writes.
+concept filing {
+  folderId     string!
+  artifactId   string!
+  kind         string
+  displayName  string
+  status       string
+}
+
+/// A row an importer writes, with a free-form metadata map.
+concept importedItem {
+  name      string!
+  folderId  string
+  active    bool
+  metadata  object
+}

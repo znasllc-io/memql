@@ -1,0 +1,5 @@
+@serverOnly
+query scoreCard highScoresBadFraction {
+  filter  row => row.score > .5       // refused at parse since memql#3624
+  paginate 50
+}

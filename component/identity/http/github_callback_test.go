@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -677,6 +678,61 @@ func TestTheCallbackIs404WithNoAppConfigured(t *testing.T) {
 	}
 	if len(audit.actions()) != 0 {
 		t.Errorf("an unconfigured cluster audited %v", audit.actions())
+	}
+}
+
+// TestAnAppRegisteredFromTheProductIsServedWithoutARestart (design record
+// 2026-09-20-github-app-setup, D2). Cfg.GitHubApp is the environment at boot
+// and it is EMPTY here, exactly as it is on a cluster whose owner registered
+// the app from the product a moment ago. The callback that lands their first
+// grant arrives seconds later; a handler still reading Cfg would answer 404 for
+// an app that exists until somebody restarted the pod.
+func TestAnAppRegisteredFromTheProductIsServedWithoutARestart(t *testing.T) {
+	for _, name := range githubconnect.EnvNames() {
+		t.Setenv(name, "")
+	}
+	eng := &githubFakeEngine{state: liveState()}
+	gh := newFakeGitHub()
+	s, audit, _ := newGitHubCallbackServer(t, eng, gh)
+	registered := s.Cfg.GitHubApp
+	s.Cfg.GitHubApp = githubconnect.Config{}
+
+	// THE CONTROL: with nothing in the rows either, the route does not exist.
+	rows := map[string]string{}
+	read := func(_ context.Context, name string) (string, error) {
+		v, ok := rows[name]
+		if !ok {
+			return "", errors.New("not found")
+		}
+		return v, nil
+	}
+	s.GitHubApp = &githubconnect.Resolver{Rows: githubconnect.RowReader{Variable: read, Secret: read}}
+	if rec := run(t, s, "code=the-code&state="+testStateValue); rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 before anything is registered", rec.Code)
+	}
+	if eng.consumes != 0 {
+		t.Fatal("the state was spent by a callback that answered 404")
+	}
+
+	// The registration lands -- six rows, under the six names.
+	rows[githubconnect.EnvAppID] = registered.AppID
+	rows[githubconnect.EnvAppSlug] = registered.AppSlug
+	rows[githubconnect.EnvClientID] = registered.ClientID
+	rows[githubconnect.EnvClientSecret] = registered.ClientSecret
+	rows[githubconnect.EnvPrivateKeyB64] = registered.PrivateKeyB64
+	rows[githubconnect.EnvWebhookSecret] = registered.WebhookSecret
+	s.GitHubApp.Invalidate()
+
+	rec := run(t, s, "code=the-code&state="+testStateValue)
+	assertNoUnknownConstructs(t, eng)
+	if rec.Code != http.StatusSeeOther || !strings.Contains(rec.Header().Get("Location"), "github=connected") {
+		t.Fatalf("status = %d Location = %q, want a 303 carrying the connected marker", rec.Code, rec.Header().Get("Location"))
+	}
+	if eng.creates != 1 {
+		t.Errorf("creates = %d, want the one grant", eng.creates)
+	}
+	if got := audit.actions(); len(got) != 1 || got[0] != "github_connected" {
+		t.Errorf("audit actions = %v, want exactly [github_connected]", got)
 	}
 }
 

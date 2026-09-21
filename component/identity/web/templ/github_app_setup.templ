@@ -1,0 +1,49 @@
+package webtempl
+
+// GitHubAppSetupData drives the one page whose whole job is to hand this
+// cluster's GitHub App manifest to GitHub (design record
+// 2026-09-20-github-app-setup, D4).
+//
+// WHY A PAGE AT ALL. GitHub's manifest flow begins with a browser FORM POST to
+// github.com. MemQL OS cannot make it -- the edge serves every hosted site
+// under `form-action 'self'`, deliberately the same policy for all of them --
+// and neither can any other page here, under this package's own. So the post
+// happens from this page, which carries a policy written for it alone:
+// form-action extended by exactly one origin (github_app_setup.go).
+//
+// IT IS SEEN FOR A MOMENT, OR NOT AT ALL. github-app-setup.js submits the form
+// as the page loads. The button is what somebody with scripts blocked presses,
+// and the sentence above it is what they read first -- so it says what GitHub
+// is about to ask, since this is the last page of ours they see before it does.
+type GitHubAppSetupData struct {
+	Layout LayoutData
+	// PostURL is GitHub's manifest endpoint, for the person's own account or
+	// for an organization, carrying the state. Composed server-side.
+	PostURL string
+	// Manifest is the JSON document, composed server-side from the cluster's
+	// own domain and never from the request.
+	Manifest string
+	// AppName is what GitHub will propose calling the app.
+	AppName string
+	// Owner says where it will be registered: "your GitHub account", or the
+	// organization's login.
+	Owner string
+}
+
+templ GitHubAppSetup(data GitHubAppSetupData) {
+	@Layout(data.Layout) {
+		<div class="card text-center">
+			<h1 class="card-title">Continue to GitHub</h1>
+			<p class="text-muted">
+				GitHub will ask you to create an app named { data.AppName } under { data.Owner }.
+				It can read the repositories you choose, and nothing else.
+			</p>
+			<form method="post" action={ templ.SafeURL(data.PostURL) } data-github-app-setup>
+				<input type="hidden" name="manifest" value={ data.Manifest }/>
+				<div class="btn-row">
+					<button type="submit" class="btn btn-primary">Continue to GitHub</button>
+				</div>
+			</form>
+		</div>
+	}
+}

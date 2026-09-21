@@ -1,0 +1,7 @@
+{
+  "cases": [
+    { "file": "filter-lambda.memql", "verdict": "load_ok" },
+    { "file": "predicate-declarations.memql", "verdict": "load_ok" },
+    { "file": "trigger-filter.memql", "verdict": "load_ok" }
+  ]
+}

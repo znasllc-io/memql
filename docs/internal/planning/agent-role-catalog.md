@@ -180,9 +180,10 @@ Plan is correctly minted but sits in `queued` until that wiring lands.
 (It is not necessarily the *last* open Phase 2 item -- see §3-5 below,
 which were not independently reverified.)
 
-For blocking AI calls from DSL, use `si("promptName", args)` -- the
-synchronous structured-output path. `agent()` is for agent-orchestrated
-work that runs through the planner.
+There is no bare inference call from DSL: a body reaches AI work through a
+builtin. `agent()` is for agent-orchestrated work that runs in the
+background; `runAgentTurn()` runs one agent turn in line and returns its
+reply.
 
 Concept-side: the `v1:common:knowledgeDomain.lockedForRoles` field
 is reserved for a domain-side inversion of the role catalog. If

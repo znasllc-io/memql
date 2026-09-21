@@ -1,0 +1,18 @@
+use observability.concepts.{ codeMetric }
+
+/// One bucket over one half-open window, scoped by prefix or by exact name.
+@serverOnly
+query codeMetric metricsInWindow {
+  args {
+    bucket         string!
+    windowStart    datetime!
+    windowEnd      datetime!
+    codeReference  string
+    prefixes       []string
+  }
+  filter  row => row.bucket == args.bucket
+              && row.windowStart >= args.windowStart
+              && row.windowStart < args.windowEnd
+              && ((args.codeReference != nil && row.codeReference == args.codeReference) || row.codeReference startsWith args.prefixes)
+  paginate 200
+}

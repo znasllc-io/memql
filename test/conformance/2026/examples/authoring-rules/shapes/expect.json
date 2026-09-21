@@ -1,0 +1,10 @@
+{
+  "cases": [
+    { "file": "agent-projection.memql", "verdict": "load_ok" },
+    {
+      "file": "receiver-form.memql",
+      "verdict": "refuse_parse",
+      "message": "expected '('"
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+/// One filing row per (folder, user): the id-derivation examples write it.
+@rowAuthz(owner="ownerUserId", clusterOwner)
+concept filing {
+  ownerUserId  string!
+  folderId     string!
+  userId       string!
+}

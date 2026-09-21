@@ -1,0 +1,16 @@
+{
+  "cases": [
+    {
+      "file": "automation-event.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "automation-precondition.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "automation-schedule.memql",
+      "verdict": "load_ok"
+    }
+  ]
+}

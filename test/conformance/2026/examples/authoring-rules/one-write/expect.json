@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "file": "one-insert.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "todo-and-index.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "two-inserts.memql",
+      "verdict": "refuse_parse",
+      "message": "mutation body must contain exactly one write block -- one write per mutation"
+    }
+  ]
+}

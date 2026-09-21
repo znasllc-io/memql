@@ -1,0 +1,15 @@
+/// A scheduled item with a due date.
+concept dueItem {
+  title  string!
+  dueAt  datetime
+}
+
+/// Items due inside a window.
+query dueItem itemsDueBetween {
+  args {
+    from  datetime  @required
+    to    datetime  @required
+  }
+  filter row => row.dueAt >= args.from && row.dueAt < args.to
+  paginate 50
+}

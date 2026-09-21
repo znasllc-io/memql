@@ -93,7 +93,8 @@ type IntegrationProvider interface {
 Integrations receive `IntegrationEngineAccess` (a narrow interface)
 rather than the full `MemQLEngine` -- it deliberately excludes
 `InvokeAI` / `InvokeAIChatWithTools` so AI orchestration stays in MemQL
-DSL functions or routed via the `si()` builtin. The `RegisterPlugin`
+DSL functions or is routed through the `agent` / `runAgentTurn` builtins
+(`dsl/agents/builtins.memql`). The `RegisterPlugin`
 surface enforces the same separation by the shape of `PluginContext`.
 
 When the engine's bus wiring is configured, capability calls flow over
