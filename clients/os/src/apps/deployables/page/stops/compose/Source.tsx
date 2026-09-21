@@ -4,6 +4,7 @@ import { FileArchive } from "lucide-react";
 import {
   Caption,
   ChoiceStack,
+  Field,
   LiveList,
   Notice,
   Row as ListRow,
@@ -15,12 +16,13 @@ import { zipUnusableNote, type ZipVerdict } from "../../../sources/probe";
 import type { ArtifactProbeHandle, SourceProbeHandle } from "../../../sources/useProbes";
 import { PICKER_PAGE_SIZE, useZipArtifacts } from "../../../sources/useZipArtifacts";
 import type { CredentialFeedStatus, CredentialRow } from "../../../sources/rows";
+import type { GithubConnectActions } from "../../../sources/useGithubConnect";
 import type { PackageRow } from "../../../packages/rows";
 import { sourceLabel } from "../../../packages/rows";
 import { suggestName, type ComposeDraft } from "../../compose";
 import { CiHandoff } from "./CiHandoff";
 import { KindField, NameField } from "./fields";
-import { RepositorySource } from "./RepositorySource";
+import { RepositorySource, type ConnectionNeed } from "./RepositorySource";
 
 // The compose Source stop: where this deployable comes from, asked once
 // (epic memql#4885, design section C).
@@ -56,12 +58,95 @@ import { RepositorySource } from "./RepositorySource";
 // about which of the three SOURCES they chose -- which is all this file is
 // for.
 
-export function ComposeSourceStop({
+/** What each way in is called, as a person chose it. */
+export const SOURCE_KIND_LABEL: Readonly<Record<string, string>> = {
+  repo: "A repository",
+  zip: "A zip in Files",
+  ci: "Pushed by your CI",
+};
+
+/** What the step that follows the choice is called. */
+export const SOURCE_DETAIL_NAME: Readonly<Record<string, string>> = {
+  repo: "Repository",
+  zip: "Zip",
+  ci: "Your CI",
+};
+
+/**
+ * WHERE IT COMES FROM -- one question, and the whole of its step.
+ *
+ * This used to be the top of a single Source step that then kept growing
+ * beneath it: three cards, then two loose buttons (connect, or a token), then
+ * a second stack of cards about updates, with a picker and three fields
+ * arriving in between. Three questions on one page, none of them finished
+ * before the next began -- the owner's word was "overcrowded".
+ *
+ * A wizard asks one thing at a time, so this step is the choice and nothing
+ * else. CHOOSING ANSWERS IT: there is no Continue to press after the only
+ * thing on the page has been answered, so the wizard moves on to the step the
+ * answer names -- and this one folds to a line that can be opened again to
+ * choose differently.
+ */
+export function ComposeSourceKindStep({
+  draft,
+  onChoose,
+  isClusterOwner,
+}: {
+  draft: ComposeDraft;
+  onChoose: (choice: ComposeDraft["choice"]) => void;
+  /** A CI-pushed source is a cluster owner's act (design section C). */
+  isClusterOwner: boolean;
+}) {
+  return (
+    <div className="os-stop-body">
+      <ChoiceStack
+        name="os-compose-source"
+        label="Where it comes from"
+        /* PROSE, not the data voice: "A repository" is a sentence about a
+           choice rather than a value anybody types anywhere, and the code
+           face would say it was one. */
+        voice="prose"
+        value={draft.choice}
+        onChange={(choice) => onChoose(choice as ComposeDraft["choice"])}
+        options={[
+          {
+            value: "repo",
+            label: SOURCE_KIND_LABEL.repo!,
+            description:
+              "The repository stays the source of truth, and this cluster notices when something newer lands there. github.com today.",
+          },
+          {
+            value: "zip",
+            label: SOURCE_KIND_LABEL.zip!,
+            description: "A snapshot you already own, with nothing upstream. It deploys in exactly the same way.",
+          },
+          ...(isClusterOwner
+            ? [
+                {
+                  value: "ci",
+                  label: SOURCE_KIND_LABEL.ci!,
+                  description:
+                    "Nothing is fetched. This cluster opens a door, hands you the route and the token command, and waits for the first push.",
+                },
+              ]
+            : []),
+        ]}
+      />
+    </div>
+  );
+}
+
+/**
+ * THE STEP THE CHOICE NAMES: Repository, Zip, or Your CI.
+ *
+ * Everything the chosen way in needs, and only that -- reached once the choice
+ * is made, so none of it competes with the choice itself.
+ */
+export function ComposeSourceDetailStep({
   draft,
   onDraft,
   credentials,
   credentialFeed,
-  isClusterOwner,
   probe,
   zipProbe,
   zip,
@@ -70,14 +155,14 @@ export function ComposeSourceStop({
   locked,
   tokenFormOpen,
   onTokenFormOpenChange,
+  connect,
+  onConnectionNeed,
   duplicateOf = null,
 }: {
   draft: ComposeDraft;
   onDraft: (patch: Partial<ComposeDraft>) => void;
   credentials: readonly CredentialRow[];
   credentialFeed?: CredentialFeedStatus;
-  /** A CI-pushed source is a cluster owner's act (design section C). */
-  isClusterOwner: boolean;
   probe: SourceProbeHandle;
   zipProbe: ArtifactProbeHandle;
   /** The zip's verdict once it has been probed; null before that. */
@@ -85,11 +170,15 @@ export function ComposeSourceStop({
   /** The draft site, once Analyze has created one on the hand-made path. */
   siteId: string;
   clusterDomain: string;
-  /** Chosen once: after Analyze the stop is facts, not fields. */
+  /** Chosen once: after Analyze the step is facts, not fields. */
   locked: boolean;
-  /** "Use a token instead", held by the page for `ZipPicker`'s reason. */
+  /** Which way into a repository is chosen; `true` is the token. */
   tokenFormOpen: boolean;
   onTokenFormOpenChange: (open: boolean) => void;
+  /** The GitHub connect, held by the page because it is the floor's act. */
+  connect: GithubConnectActions;
+  /** What the repository step needs before it can go on; see RepositorySource. */
+  onConnectionNeed?: (need: ConnectionNeed) => void;
   /**
    * The ACTIVE source that already tracks this repository at this ref
    * (2026-09-05 design, D8), when there is one. The engine refuses the second
@@ -101,42 +190,6 @@ export function ComposeSourceStop({
 
   return (
     <div className="os-stop-body">
-      <ChoiceStack
-        name="os-compose-source"
-        label="Where it comes from"
-        /* PROSE, not the data voice: "A repository" is a sentence about a
-           choice rather than a value anybody types anywhere, and the code
-           face would say it was one. */
-        voice="prose"
-        value={draft.choice}
-        onChange={(choice) =>
-          onDraft({ choice: choice as ComposeDraft["choice"], name: "", kind: "", artifactId: "", repoUrl: "", storeId: "" })
-        }
-        options={[
-          {
-            value: "repo",
-            label: "A repository",
-            description:
-              "The repository stays the source of truth, and this cluster notices when something newer lands there. github.com today.",
-          },
-          {
-            value: "zip",
-            label: "A zip in Files",
-            description: "A snapshot you already own, with nothing upstream. It deploys in exactly the same way.",
-          },
-          ...(isClusterOwner
-            ? [
-                {
-                  value: "ci",
-                  label: "Pushed by your CI",
-                  description:
-                    "Nothing is fetched. This cluster opens a door, hands you the route and the token command, and waits for the first push.",
-                },
-              ]
-            : []),
-        ]}
-      />
-
       {draft.choice === "repo" ? (
         <>
           <RepositorySource
@@ -147,13 +200,28 @@ export function ComposeSourceStop({
             probe={probe}
             tokenFormOpen={tokenFormOpen}
             onTokenFormOpenChange={onTokenFormOpenChange}
+            connect={connect}
+            onConnectionNeed={onConnectionNeed}
           />
-          <ChoiceStack name="compose-deployment-mode" label="Deployment mode" voice="prose"
-            value={draft.autoDeploy ? "automatic" : "manual"} onChange={mode => onDraft({ autoDeploy: mode === "automatic" })}
-            options={[
-              { value: "manual", label: "Manual", description: "Check for new versions automatically. Keep serving the current version until you deploy." },
-              { value: "automatic", label: "Automatic", description: "Check and deploy new versions automatically. Changed build plans still require review." },
-            ]} />
+          {/* ASKED ONCE THERE IS A REPOSITORY TO ASK IT ABOUT. It used to stand
+              under an empty picker as two more full-width cards. It is a
+              choice row now -- the two answers are short, and the line beneath
+              says what the chosen one does. */}
+          {draft.repoUrl === "" ? null : (
+            <>
+              <Field label="When something newer lands">
+                <div className="os-choice-row" role="radiogroup" aria-label="Deployment mode">
+                  <button type="button" role="radio" className="os-choice" aria-checked={!draft.autoDeploy} onClick={() => onDraft({ autoDeploy: false })}>Manual</button>
+                  <button type="button" role="radio" className="os-choice" aria-checked={draft.autoDeploy === true} onClick={() => onDraft({ autoDeploy: true })}>Automatic</button>
+                </div>
+              </Field>
+              <Caption>
+                {draft.autoDeploy
+                  ? "New versions are checked for and deployed automatically. A changed build plan still waits for your review."
+                  : "New versions are checked for automatically. The current one keeps serving until you deploy."}
+              </Caption>
+            </>
+          )}
           {/* ONE SOURCE, ONCE (2026-09-05, D8). The engine refuses a second
               registration of a repository at a ref; this says so here, while
               the URL is still being chosen, and names the source that has it

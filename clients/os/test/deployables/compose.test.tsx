@@ -124,7 +124,7 @@ async function chooseSource(region: HTMLElement, name: RegExp): Promise<void> {
  */
 async function chooseRepository(region: HTMLElement): Promise<void> {
   await chooseSource(region, /A repository/);
-  await click(within(region).getByRole("button", { name: "Use a token instead" }));
+  await click(within(region).getByRole("radio", { name: "A token" }));
 }
 
 /** Follow the wizard to its address step without writing anything. */
@@ -335,8 +335,9 @@ describe("the compose flow: the Source stop's probe", () => {
     expect(await within(region).findByText("private, or not there")).toBeTruthy();
     expect(within(region).getByLabelText(CREDENTIAL_FIELD)).toBeTruthy();
     // A definite answer ABOUT THE REPOSITORY parks the flow: the rail stops
-    // at Source and Analyze is out of reach.
-    expect(railStates(region)[0]).toBe("stopped");
+    // at the Repository step -- the one that holds the URL it is about -- and
+    // Analyze is out of reach. The choice above it stays answered.
+    expect(railStates(region).slice(0, 2)).toEqual(["complete", "stopped"]);
     await fill(NAME_FIELD, "storefront");
     expect(forwardAct("Analyze")).toBeNull();
   });
@@ -536,10 +537,10 @@ describe("the compose flow: a zip in Files", () => {
     await fill(NAME_FIELD, "Landing page");
 
     // Build reads SKIPPED before anything runs: a built site IS its output.
-    expect(railStates(region)[3]).toBe("skipped");
+    expect(railStates(region)[4]).toBe("skipped");
     await click(within(region).getByRole("button", { name: /^Build/ }));
     expect(within(region).getByText("its built output is in the source")).toBeTruthy();
-    await click(within(region).getByRole("button", { name: /^Source/ }));
+    await click(within(region).getByRole("button", { name: /^Zip/ }));
     await openAddresses();
 
     // A GENERATED ADDRESS, for when it should say nothing about what it
@@ -649,7 +650,7 @@ describe("the compose flow: pushed by your CI", () => {
     // the Live step as the fact it became.
     expect(within(region).getAllByText("marketing.memql.example.com").length).toBeGreaterThan(0);
     expect(document.querySelector(".os-actbar-word")?.textContent).toBe("Waiting for CI");
-    expect(railStates(region)[4]).toBe("open");
+    expect(railStates(region)[5]).toBe("open");
     // Nothing is deployed from here: the Live stop is what waits.
     expect(forwardAct("Deploy")).toBeNull();
     expect(within(region).getByText(/Waiting for the first push from your CI/)).toBeTruthy();
@@ -1021,7 +1022,7 @@ describe("the compose flow: what the run answers", () => {
     expect(await within(region).findByText("no memql-package.yaml at the root of acme/storefront")).toBeTruthy();
     // What it is is where a manifest refusal belongs, and every stop after it
     // is unreached.
-    expect(railStates(region)).toEqual(["complete", "stopped", "pending", "pending", "pending"]);
+    expect(railStates(region)).toEqual(["complete", "complete", "stopped", "pending", "pending", "pending"]);
     // ...and the one forward act is Retry, on the bar beside Cancel -- so
     // leaving a stopped flow is as reachable as trying it again.
     expect(forwardAct("Retry")).toBeTruthy();
@@ -1045,7 +1046,7 @@ describe("the compose flow: leaving and coming back", () => {
     const region = await screen.findByRole("region", { name: "Deploy acme" });
     expect(within(region).getByText("acme/storefront at main")).toBeTruthy();
     expect(within(region).getByText("clients/web")).toBeTruthy();
-    expect(railStates(region)).toEqual(["complete", "complete", "open", "skipped", "pending"]);
+    expect(railStates(region)).toEqual(["complete", "complete", "complete", "open", "skipped", "pending"]);
     await openAddresses();
     expect(await forward("Deploy")).toBeTruthy();
   });
@@ -1066,9 +1067,12 @@ describe("what the compose flow does not do", () => {
     // offered one -- and the pasted URL is still a legitimate first answer
     // rather than something behind "Advanced": one plain control, in the
     // surface, saying what it does.
-    expect(within(region).getByRole("button", { name: "Connect GitHub" })).toBeTruthy();
+    // ON THE FLOOR, where every step's forward act is -- and the two ways in
+    // are one choice in the step, as equals.
+    await waitFor(() => expect(forwardAct("Connect GitHub")).toBeTruthy());
+    expect(within(region).getByRole("radio", { name: "GitHub" }).getAttribute("aria-checked")).toBe("true");
     expect(within(region).queryByLabelText(URL_FIELD)).toBeNull();
-    await click(within(region).getByRole("button", { name: "Use a token instead" }));
+    await click(within(region).getByRole("radio", { name: "A token" }));
     expect(within(region).getByLabelText(URL_FIELD)).toBeTruthy();
   });
 
@@ -1147,7 +1151,7 @@ describe("a private repository whose build output is committed", () => {
     await waitFor(() =>
       expect((document.querySelector(".os-actbar")?.textContent ?? "")).toContain("in place at shop.memql.example.com"),
     );
-    expect(railStates(region)).toEqual(["complete", "complete", "complete", "skipped", "open"]);
+    expect(railStates(region)).toEqual(["complete", "complete", "complete", "complete", "skipped", "open"]);
     // The addresses are facts now, and the one that landed is the run's own.
     expect(within(region).queryByLabelText("The name storefront answers at")).toBeNull();
     expect(within(region).getAllByText("shop.memql.example.com").length).toBeGreaterThan(0);

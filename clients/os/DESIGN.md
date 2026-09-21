@@ -199,6 +199,26 @@ surface in the shell that read as a single thought.
   is measured (`kit/useWide`), not left to a container query. **Width is for
   what needs it:** records, tables and commands take the pane; a sentence
   keeps a readable measure and a field keeps a field's width.
+- **One question a step.** A step that asks three things is three steps. The
+  add-a-deployable wizard's Source step used to be the kind of source, then
+  two loose buttons (connect GitHub, or use a token), then a second stack of
+  cards about updates, with a picker and three fields arriving in between --
+  the owner's word was "overcrowded". It is two steps now: **Source** is the
+  choice and nothing else, and the step after it is NAMED BY THE ANSWER
+  (Repository, Zip, Your CI) and holds what that answer needs. Alternatives
+  that answer one question are ONE choice -- GitHub or a token is a choice
+  row, not a button with a second button beneath it -- and a question that
+  only makes sense once another is answered (what happens when something newer
+  lands) waits until it is.
+- **A step that is one choice is answered by choosing.** There is no Continue
+  to press after the only thing on the page has been answered: the wizard
+  moves on to the step the answer names, and the answered step folds to a line
+  that can be opened again to choose differently.
+- **A step's forward act is on the floor even when it leaves the wizard.**
+  "Connect GitHub" is the Repository step's forward act, so it is the floor's
+  button, not a button in the step. The step says what it needs (a first
+  connection, a fresh one, nothing) because only the step has GitHub's own
+  answer about the grant; the page draws the act.
 - **The orb names the subject.** The gate wears the MemQL mark, because what is
   being set up there is the cluster. An add wears the thing being added: a
   globe, a machine, a rocket. Same circle, same theme tokens.

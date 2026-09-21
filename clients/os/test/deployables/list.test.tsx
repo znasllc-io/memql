@@ -663,8 +663,11 @@ describe("Add a deployable", () => {
 
     // The rail is the form: Source is the open stop and carries the caption.
     const rail = within(compose).getByRole("list", { name: "Deployable setup progress" });
+    // THE SOURCE STAGE IS TWO STEPS: the choice, and the step the choice names
+    // -- which has no name and nothing behind it until there is an answer.
     expect([...rail.querySelectorAll(":scope > li")].map((li) => li.getAttribute("data-state"))).toEqual([
       "open",
+      "ahead",
       "pending",
       "pending",
       "pending",
@@ -723,6 +726,7 @@ describe("Add a deployable", () => {
     // is what parked it -- so the open stop is Where it lives, which is what
     // the Deploy beneath is waiting for.
     expect([...rail.querySelectorAll(":scope > li")].map((li) => li.getAttribute("data-state"))).toEqual([
+      "complete",
       "complete",
       "complete",
       "open",
