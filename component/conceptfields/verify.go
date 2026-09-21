@@ -34,7 +34,7 @@ func Verify(dslRoot, snapshotPath, migrationsDir string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	current, err := Scan(dslRoot)
+	current, err := scanFrom(dslRoot)
 	if err != nil {
 		return Result{}, err
 	}
@@ -140,4 +140,18 @@ func ledgerTemplate(n Narrowing) string {
 	}
 	fields = append(fields, `"note": "<the issue that took it away>"`)
 	return "{ " + strings.Join(fields, ", ") + " }"
+}
+
+// scanFrom scans the named core root PLUS every pack tree beside it.
+//
+// The parameter stays a single root so every caller and every flag reads as
+// it did; the packs are added here, at the one place that decides what the
+// committed snapshot covers. A caller naming a non-default root -- a test
+// with a fixture tree -- gets exactly that root and no packs, which is what
+// a fixture means.
+func scanFrom(dslRoot string) (Snapshot, error) {
+	if dslRoot != DefaultDSLRoot {
+		return Scan(dslRoot)
+	}
+	return ScanRoots(DefaultRoots()...)
 }

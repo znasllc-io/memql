@@ -302,13 +302,33 @@ func packModuleRows(states map[string]PackStateRow) ([]ModuleRow, map[string]str
 		// Cluster-scope desired state from the graph; node-scope boot
 		// outcome from the loaders' set. The two can disagree between a
 		// flip and this node's restart, and the row says so.
-		enabled := true
+		// WHY a pack is off is two different facts and the row says which
+		// (epic memql#5532, issue memql#5549). A pack that ships disabled
+		// and has never been flipped is waiting for an operator; a pack an
+		// operator switched off is a decision with a reason. Reporting the
+		// first as the second sends somebody looking for a row that does
+		// not exist -- and reporting a storefront pack as "enabled" because
+		// no row governs it would be flatly wrong now that absence means
+		// the pack's declared default.
+		enabled := memqldsl.PackDefaultEnabled(name)
 		detailParts := []string{}
 		if st, ok := states[name]; ok {
 			enabled = st.Enabled
+			detailParts = append(detailParts, "set by an operator in v1:platform:packState")
 			if strings.TrimSpace(st.Reason) != "" {
 				detailParts = append(detailParts, "reason: "+st.Reason)
 			}
+		} else if declared, ok := memqldsl.PackDefaults()[name]; ok {
+			if declared {
+				detailParts = append(detailParts,
+					"no v1:platform:packState row; this pack ships enabled")
+			} else {
+				detailParts = append(detailParts,
+					"no v1:platform:packState row; this pack ships DISABLED and "+
+						"stays mounted-inert until an operator enables it")
+			}
+		} else {
+			detailParts = append(detailParts, "no v1:platform:packState row; absence means enabled")
 		}
 		loadedInert := "loaded on this node"
 		if memqldsl.PackDomainDisabled(name) {
@@ -324,6 +344,18 @@ func packModuleRows(states map[string]PackStateRow) ([]ModuleRow, map[string]str
 				"state changed since this node booted; restart required to apply")
 		}
 		detailParts = append(detailParts, loadedInert)
+
+		// WHAT THIS PACK PUBLISHES TO THE PUBLIC, named before the flip
+		// rather than discovered after it (epic memql#5532). Enabling a
+		// storefront pack is not only "more constructs load": it puts a
+		// write endpoint and a public read on every deployable whose
+		// shopperForms is on, and an operator deciding whether to enable it
+		// is owed that sentence on the screen where they decide.
+		if routes := shopperRoutesForPack(name); len(routes) > 0 {
+			detailParts = append(detailParts, fmt.Sprintf(
+				"when enabled, publishes %d shopper route(s) on any deployable whose "+
+					"shopperForms is on: %s", len(routes), strings.Join(routes, ", ")))
+		}
 
 		plugins := PluginsForPackDomain(name)
 		for _, p := range plugins {
@@ -724,5 +756,22 @@ func moduleEnvSurface(manifest *envregistry.Manifest, envComponents []string) []
 		out = append(out, v)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// shopperRoutesForPack names this pack's declared shopper surface, sorted.
+//
+// READ FROM THE REGISTRY rather than from a list kept beside it, so a pack
+// that declares a third route says so on the operator's screen the day it
+// lands rather than the day somebody remembers this function.
+func shopperRoutesForPack(domain string) []string {
+	var out []string
+	for _, entry := range ShopperSurface() {
+		if entry.Pack != domain {
+			continue
+		}
+		out = append(out, entry.Kind+" "+entry.Pack+"/"+entry.Name)
+	}
+	sort.Strings(out)
 	return out
 }

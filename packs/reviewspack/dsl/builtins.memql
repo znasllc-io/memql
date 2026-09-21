@@ -1,0 +1,39 @@
+// reviews pack builtins -- Go-backed write/export/read (memql#4139, epic
+// memql#5532).
+
+@executor("integration.reviews.recordModerationAction")
+@args(profile="object")
+@description("Append a moderation decision. principalKind must be client; a Provider operator is refused. criterion is a closed enum. Tokens and operator identity never become a criterion. storeId is read off the review being moderated rather than supplied, so a decision can never be scoped to a store its subject is not on.")
+builtin reviewsRecordModerationAction {
+  reviewId        string  @required  @description("Review id to moderate.")
+  criterion       string  @required  @description("Closed criterion: spam, profanity, harassment, off_topic, illegal, copyright.")
+  principalKind   string  @required  @description("Must be client. provider is inexpressible.")
+  decidedBy       string  @required  @description("Client principal user id.")
+  note            string  @description("Optional client note.")
+}
+
+@executor("integration.reviews.exportReview")
+@args(profile="object")
+@description("Export a review including image FILES (bytes + filename). A URL-only image is refused -- export is bytes, not a link.")
+builtin reviewsExportReview {
+  reviewId  string  @required  @description("Review id to export.")
+  images    object  @description("Image list [{name, bytes}]. URL-only entries are refused.")
+}
+
+@executor("integration.reviews.setPublicDisplay")
+@args(profile="object")
+@description("Flip one store's public display toggle at runtime. This is data, not a .memql edit, and does not require a rebuild. Per STORE, so a merchant can show reviews on their live storefront while they stay hidden on the development store a candidate is being exercised against.")
+builtin reviewsSetPublicDisplay {
+  storeId        string  @required  @description("The store whose toggle this is.")
+  publicDisplay  bool    @required  @description("When true, reviews render on the storefront.")
+}
+
+@executor("integration.reviews.publishedForProduct")
+@args(profile="object")
+@description("THE PUBLIC READ: the reviews a storefront may render for one product. Returns an empty list when this store's publicDisplay is false, and excludes every review a moderation decision hides. It is a builtin rather than a query because that is three reads with a gate between them and a filter cannot make a cross-concept read -- and because putting the gate in each caller is how a storefront ends up rendering reviews a merchant had switched off. Projects NO author email: the email exists so a merchant can reply, not so the internet can read it.")
+builtin reviewsPublishedForProduct {
+  storeId        string  @required  @description("The store to read. Stamped server-side on the shopper path from the binding in effect.")
+  productHandle  string  @required  @description("The product whose reviews to return.")
+  siteId         string  @description("The deployable the read arrived through. Provenance; the read is scoped by storeId.")
+  limit          integer @description("Maximum reviews to return, newest first. Omitted means 50; the Go half clamps it, because a public read with no bound lets one request ask for every review a store has ever received.")
+}

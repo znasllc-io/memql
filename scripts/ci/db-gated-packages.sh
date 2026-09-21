@@ -158,6 +158,20 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # mcp-conformance job sets MEMQL_DIFFERENTIAL_REQUIRED=1 AND that the job is in
 # ci-required's needs. Both facts fail open on their own, which is why both are
 # gated.
+# `packs` -- the storefront packs, the first pack tree in the DEFAULT BUILD
+# epic memql#5532. reviews' live-e2e suite is the only place the shopper write
+# path meets a real engine: the id the engine derives for a mutation that names
+# none, storeId scoping through the real query and the real row gate, and the
+# public projection's omission of the shopper's email. None of that is
+# reachable without a database, and a db test outside this selector is one CI
+# never runs. THE TREE rather than the one pack, so the wholesale pack joins
+# the day it lands.
+#
+# KEEP COMMENTS OUT OF THE ARRAY BODY, and parentheses out of any that must go
+# there. TestDBGatedTreesMatchTheDBTestsLane finds this array's end with the
+# FIRST `)` after the declaration, so a parenthesised aside between the entries
+# truncates the list silently -- everything below it stops being read, and the
+# comparison then reports a drift nobody introduced.
 readonly DB_GATED_TREES=(
 	"app"
 	"component/memql"
@@ -178,6 +192,7 @@ readonly DB_GATED_TREES=(
 	"integrations/shopify"
 	"integrations/work"
 	"examples/referencepack"
+	"packs"
 )
 
 # KNOWN_GO_MOD_DIRS is every directory this script knows carries a `go.mod`,

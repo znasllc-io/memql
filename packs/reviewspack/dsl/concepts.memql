@@ -1,0 +1,69 @@
+// reviews pack -- client-agnostic storefront reviews (memql#4139, promoted
+// into the default build by epic memql#5532).
+//
+// Net-new PACK, not core. dsl/todos, dsl/calendar, dsl/campaigns stay
+// untouched and this domain cannot shadow them.
+//
+// Config (criteria copy, public display toggle) is DATA on reviewSettings,
+// not .memql source -- a client hides/shows without a rebuild. On-storefront
+// only; no GBP / marketplace ingest.
+//
+// EVERY ROW CARRIES THE STORE IT WAS WRITTEN AGAINST (design D9, issue
+// memql#5552). The Shopify mirror is safe under preview because it is scoped
+// by storeId: an order placed against the development store never appears in
+// a read scoped to the live one. These rows are MemQL-origin and had no such
+// scope, so a review submitted while previewing a storefront would be a real
+// row in the one database, visible to the shoppers of the live store. The
+// field is stamped SERVER-SIDE from the binding the write arrived through
+// and is refused as a form field, which is the half of D9 that cannot be
+// expressed in a schema.
+//
+// STOREFRONT PACK CONVENTION: concepts, mutations, tools, builtins and
+// queries -- NO automations and NO logic. A client's process attaches from
+// its own repository with `use reviews.concepts.{ review }` and
+// `@trigger(concept="v1:reviews:review")`. reviewspack and the wholesale
+// pack keep this; deploypack and referencepack ship both, so it is a choice
+// the storefront packs made rather than a rule of the platform.
+
+@version("1.1.0")
+@description("A storefront product review. Merchandising stays on the store; this row is the review body plus optional image attachment ids. Images export as files (bytes), not URLs.")
+@displayCard(primary="title", secondary="body", tertiary="productHandle")
+@rowAuthz(owner="ownerUserId", clusterOwner)
+concept review {
+  ownerUserId         string!   @description("v1:identity:user.id of the MERCHANT this review belongs to -- the owner of the deployable it was submitted through, NOT its author. A shopper is nobody to MemQL: they have no user row, no session and no actor, so a review's author is authorName and authorEmail below and nothing else (epic memql#5532, issue memql#5550). This is the single most important sentence in the pack. On the shopper path it is stamped from actor.userId under the site owner's BORROWED authority -- the campaigns precedent, where the drain worker runs everything owned under a userId copied off a row the starting caller had already read. On the authenticated path it is the calling user, which is what an operator or an importing job writes as.")
+  storeId             string!   @description("The v1:shopify:store this review was written against (design D9). Stamped server-side from the binding the write arrived through -- the serving binding, or the PREVIEW binding when the submission was made while exercising a candidate version -- and never accepted from a form: component/memql/shopper_surface.go refuses a declared field with this name, and the bff stamps it after the declared fields so a form-supplied copy cannot win. Every storefront read filters on it, which is what keeps a review written under preview out of the live storefront.")
+  siteId              string    @description("The v1:platform:site this review was submitted through. Provenance rather than scope: storeId above is what reads filter on, because two deployables may serve one store. Empty on a review written through the authenticated path, which arrived through no site at all.")
+  productHandle       string!   @description("Storefront product handle this review is about.")
+  productId           string    @description("Optional Shopify product GID when the thin index is present.")
+  title               string    @description("Optional short title.")
+  body                string!   @description("Review text.")
+  rating              int       @description("Optional 1-5 star rating. Sentiment analysis is not a field and must not be added.")
+  authorName          string    @description("What the shopper called themselves. DATA, never an identity: nothing authenticates it and no read is scoped by it. A storefront renders it beside the review exactly as submitted.")
+  authorEmail         string    @description("The shopper's email as they typed it. DATA, never an identity, and never verified -- it exists so a merchant can reply, and it is why the public read must not project it. A pack that later wants a verified buyer uses the Customer Account API principal recorded as the answer to Q2's second half, not this field.")
+  imageAttachmentIds  []string  @description("v1:common:attachment ids for review images. Export resolves these to bytes, never to a remote URL as the payload.")
+  createdAtClient     datetime  @description("Client-supplied authored-at watermark. The row intrinsic createdAt remains the version clock.")
+}
+
+@version("1.1.0")
+@description("Append-only moderation decision for a review. A new row is a new decision; there is no in-place update and no undo-by-overwrite. decidedBy is a Client principal -- a Provider operator cannot author one. Criterion is a closed enum: no other, no sentiment.")
+@displayCard(primary="criterion", secondary="reviewId", tertiary="decidedBy")
+@rowAuthz(owner="decidedBy", clusterOwner)
+concept moderationAction {
+  reviewId    string!  @description("v1:reviews:review.id this decision applies to.")
+  storeId     string!  @description("The store the moderated review belongs to (design D9), copied from that review by the Go capability rather than supplied. A decision is scoped to the same store its subject is, or a read scoped to one store would show a review the other store's merchant had already hidden.")
+  criterion   enum("spam", "profanity", "harassment", "off_topic", "illegal", "copyright")!  @description("Closed moderation criterion. There is no other and no free-text reason. Sentiment is not a criterion.")
+  decidedBy   string!  @description("v1:identity:user.id of the Client principal that authored this action. Provider operators are refused on the write path.")
+  principalKind enum("client")!  @description("The only expressible principal kind is client. provider is inexpressible -- the enum does not contain it.")
+  note        string   @description("Optional client-visible note. Not a criterion and not a sentiment score.")
+}
+
+@version("1.1.0")
+@description("Runtime reviews settings for one store. The public display toggle lives here as data so a client can hide or show reviews without a deploy or .memql edit.")
+@displayCard(primary="publicDisplay", secondary="storeId")
+@rowAuthz(owner="ownerUserId", clusterOwner)
+concept reviewSettings {
+  ownerUserId    string!  @description("v1:identity:user.id of the Client that owns this storefront's review settings.")
+  storeId        string!  @description("The store these settings govern (design D9). ONE ROW PER STORE, at the derived id v1:reviews:reviewSettings:<storeId>, because a merchant with a live store and a development store must be able to show reviews on one while they are still hidden on the other -- which is the whole of what previewing a storefront means.")
+  publicDisplay  bool!    @description("When true, reviews render on the storefront. Flipped at runtime; not compiled into .memql. The public read consults this FIRST and answers an empty list when it is false, so turning reviews off is one write rather than a deploy.")
+  criteriaText   string   @description("Optional client-authored copy describing the closed criteria. Data, not source.")
+}

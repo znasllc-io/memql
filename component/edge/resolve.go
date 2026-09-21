@@ -14,14 +14,41 @@ import (
 
 // Site is the projection of v1:platform:site the edge needs to serve a request.
 type Site struct {
-	ID          string
-	Hostname    string
-	Kind        string // "spa" | "static" | "shopify_storefront"
-	BundleRef   string
-	Status      string // "draft" | "live" | "disabled" | "archived" | "archived"
-	Title       string
-	APIProxy    bool
-	SystemOwned bool
+	ID        string
+	Hostname  string
+	Kind      string // "spa" | "static" | "shopify_storefront"
+	BundleRef string
+	Status    string // "draft" | "live" | "disabled" | "archived" | "archived"
+	Title     string
+	APIProxy  bool
+
+	// OwnerUserID is the site row's owner, or EMPTY for a cluster-owned
+	// site (the platform's own surfaces).
+	//
+	// IT IS AUTHORITY, not decoration. The shopper surface runs its write
+	// under this user as borrowed authority -- the merchant owns what is
+	// written through their storefront and the shopper is data on it -- so
+	// an empty value means there is nobody to borrow and the surface is
+	// refused rather than run under a synthetic actor. Nothing else on the
+	// serving path reads it.
+	OwnerUserID string
+
+	// ShopperForms mounts this deployable's SHOPPER SURFACE on its own
+	// origin (epic memql#5532, issue memql#5551): the forms and reads the
+	// loaded packs declare, under /_memql/forms/ and /_memql/reads/.
+	//
+	// OFF IS THE DEFAULT AND ABSENT READS AS OFF. rowBool collapses absent
+	// and false, which is exactly right here and worth saying because it
+	// usually is not: every site row written before this field existed must
+	// resolve with no shopper surface, and there is no third state to
+	// preserve.
+	//
+	// INDEPENDENT OF APIProxy. That switch is for a bundle holding a MemQL
+	// cookie; a shopper holds none. A storefront that wants a review form
+	// and no authenticated API says exactly that, and one that wants the
+	// API and no public form says the opposite.
+	ShopperForms bool
+	SystemOwned  bool
 
 	// Binding is the site row's typed per-kind configuration, carried through
 	// as the untyped object the row stores (memql#4345). Empty for every kind
