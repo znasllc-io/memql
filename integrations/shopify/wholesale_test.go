@@ -9,11 +9,17 @@ import (
 // exercised without a store (epic memql#5533, issues memql#5558 and
 // memql#5559).
 //
-// The Admin calls themselves need a development store and live in
-// wholesale_live_test.go, which self-skips without credentials. What is
-// here is everything that is a function over values: the plan reading, the
-// reference round trip, the ceiling refusal and the two normalisations that
-// reach a merchant's live store.
+// THE ADMIN CALLS THEMSELVES ARE NOT EXERCISED IN THIS REPOSITORY, and
+// saying so plainly is better than implying a lane that does not exist:
+// they need a Shopify development store with credentials, which no lane
+// here has. Issue memql#5558 names that walk as an operator's step against
+// a development store on a plan that supports it.
+//
+// What IS here is everything that is a function over values -- the plan
+// reading, the reference round trip, the ceiling refusal, the two
+// normalisations that reach a merchant's live store -- plus a structural
+// check over the GraphQL documents, which is the most that can be asserted
+// about them without Shopify on the other end.
 
 // THE CEILING IS A CATALOG COUNT, NOT A TIER GATE. Since 2026-04-02
 // companies, payment terms, volume pricing and up to three catalogs are
@@ -177,4 +183,96 @@ func TestTheWholesaleWritePathDeletesNothing(t *testing.T) {
 	if !strings.Contains(catalogDraftMutation, "catalogUpdate") {
 		t.Fatal("the revoke must be a catalogUpdate to DRAFT")
 	}
+}
+
+// THE DOCUMENTS ARE STRUCTURALLY CHECKED, BECAUSE NOTHING ELSE CHECKS THEM
+// HERE.
+//
+// These mutations are written against Admin API 2026-07 and are NOT verified
+// by live introspection the way the connector record's claims are; they are
+// exercised against a development store, which no lane in this repository
+// has. So what CAN be asserted without Shopify is asserted: that each
+// document is balanced, names the operation the call passes to adminCall,
+// declares every variable it uses and uses every variable it declares, and
+// asks for userErrors.
+//
+// A mismatched operation name is the sharpest of these. adminCall takes the
+// document AND the operation name separately, so a document renamed without
+// its call site is a request Shopify rejects for a reason that names
+// neither file.
+func TestWholesaleDocumentsAreWellFormed(t *testing.T) {
+	for name, doc := range map[string]struct {
+		document  string
+		operation string
+		userErrs  bool
+	}{
+		"companyCreate":   {companyCreateMutation, "ShopifyCompanyCreate", true},
+		"companyAssign":   {companyAssignContactMutation, "ShopifyCompanyAssignContact", true},
+		"catalogCreate":   {catalogCreateMutation, "ShopifyCatalogCreate", true},
+		"catalogDraft":    {catalogDraftMutation, "ShopifyCatalogDraft", true},
+		"priceListCreate": {priceListCreateMutation, "ShopifyPriceListCreate", true},
+		"customerCreate":  {customerCreateMutation, "ShopifyCustomerCreate", true},
+		"tagsAdd":         {tagsAddMutation, "ShopifyTagsAdd", true},
+		"tagsRemove":      {tagsRemoveMutation, "ShopifyTagsRemove", true},
+		"customerSearch":  {customerSearchQuery, "ShopifyCustomerByEmail", false},
+		"companySearch":   {companySearchQuery, "ShopifyCompanyByExternalID", false},
+		"catalogsCount":   {catalogsCountQuery, "ShopifyCatalogsCount", false},
+	} {
+		doc := doc
+		t.Run(name, func(t *testing.T) {
+			if strings.Count(doc.document, "{") != strings.Count(doc.document, "}") {
+				t.Errorf("unbalanced braces")
+			}
+			if strings.Count(doc.document, "(") != strings.Count(doc.document, ")") {
+				t.Errorf("unbalanced parentheses")
+			}
+			// THE OPERATION NAME MUST MATCH WHAT adminCall IS PASSED, and
+			// EXACTLY. A substring check is not enough and that is not a
+			// hypothetical: renaming ShopifyCompanyCreate to
+			// ShopifyCompanyCreated passed one, because the longer name
+			// contains the shorter. The declaration is matched instead.
+			decl := firstLine(doc.document)
+			if !strings.HasPrefix(decl, "mutation "+doc.operation+"(") &&
+				!strings.HasPrefix(decl, "query "+doc.operation+"(") &&
+				!strings.HasPrefix(decl, "query "+doc.operation+" {") {
+				t.Errorf("the document declares %q but its call site passes %q; adminCall "+
+					"takes the two separately, so a document renamed without its call site "+
+					"is a request Shopify rejects for a reason that names neither file",
+					decl, doc.operation)
+			}
+			// EVERY DECLARED VARIABLE IS USED, and every used one declared.
+			declared := map[string]bool{}
+			for _, tok := range strings.Fields(strings.NewReplacer("(", " ", ")", " ", ",", " ", ":", " ").Replace(firstLine(doc.document))) {
+				if strings.HasPrefix(tok, "$") {
+					declared[tok] = true
+				}
+			}
+			body := doc.document[len(firstLine(doc.document)):]
+			for v := range declared {
+				if !strings.Contains(body, v) {
+					t.Errorf("variable %s is declared and never used", v)
+				}
+			}
+			for _, tok := range strings.Fields(strings.NewReplacer("(", " ", ")", " ", ",", " ", ":", " ").Replace(body)) {
+				if strings.HasPrefix(tok, "$") && !declared[tok] {
+					t.Errorf("variable %s is used and never declared", tok)
+				}
+			}
+			// A WRITE MUST ASK FOR userErrors. Shopify reports validation
+			// failures as userErrors inside a 200, and a mutation that did
+			// not ask for them would read every refusal as a success --
+			// which is propagate.go's dead-letter rule losing its input.
+			if doc.userErrs && !strings.Contains(doc.document, "userErrors") {
+				t.Errorf("a write that does not select userErrors reads every Shopify " +
+					"validation failure as a success")
+			}
+		})
+	}
+}
+
+func firstLine(s string) string {
+	if i := strings.Index(s, "\n"); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
