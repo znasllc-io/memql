@@ -1851,13 +1851,14 @@ prompt, provider, builtin, policy, seed): their registries are keyed by bare
 name and by nothing else, so there is no second key for an alias to bind and
 nothing to alias between.
 
-**What a second declaration of one of those names does is NOT uniform, and only
-one kind refuses it outright.** A `rule` is refused at load naming both files
-("a rule name is unique across the whole corpus"). A `provider`, `policy`,
-`builtin` or `tool` loads with no diagnostic at all, and one of the two simply
+**What a second declaration of one of those names does is NOT uniform, and none
+of the twelve refuses it outright.** A `provider`, `policy`, `builtin`, `tool`,
+`shape` or `prompt` loads with no diagnostic at all, and one of the two simply
 wins the key. A `query`, `mutation`, `logic`, `spec` or `trait` loads too, and
 the damage lands on its CONSUMERS instead: every construct that named it by
-bare name stops resolving. Declaring a second `trait isActiveRecord` refuses
+bare name stops resolving. A `seed` has not been measured. (A `rule` IS refused
+at load naming both files -- "a rule name is unique across the whole corpus" --
+but a rule is not one of the twelve: its registry is keyed differently.) Declaring a second `trait isActiveRecord` refuses
 ~49 shipped queries with `lower_unknown_name`; declaring a second
 `query todos` leaves the shipped `todosList` tool's handler naming a function
 that is "not a registered function, query, mutation or builtin". Treat the
