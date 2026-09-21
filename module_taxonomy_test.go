@@ -91,6 +91,24 @@ var pluginKinds = map[string]moduleKind{
 	// the relationship `database` has to Postgres rather than the one
 	// `shopify` has to Shopify.
 	"siteTraffic": kindComponent,
+	// Storefront preview (epic memql#5531): the grant an operator opens, what
+	// is legal right now, and the three active observations.
+	//
+	// A COMPONENT by this table's own test, and the near miss is worth writing
+	// down because it is the one somebody will re-litigate. Its builtins are
+	// declared in dsl/platform/builtins.memql, which EVERY binary loads, so a
+	// node without the executor fails boot resolution -- turning it off breaks
+	// the engine rather than removing a feature, which is `customDomain`'s
+	// reasoning exactly.
+	//
+	// AND IT CALLS NOBODY. The one outbound call in the whole feature is the
+	// Storefront probe, and that deliberately lives in integrations/shopify --
+	// the package this table already classifies as the one that talks to
+	// Shopify -- reached from here through a builtin over the engine. Putting
+	// the call here instead would have been a second Storefront caller in a
+	// package classified as a component, which is precisely the drift this
+	// table exists to stop.
+	"sitePreview": kindComponent,
 	// Custom domains (epic memql#4805). A COMPONENT by this table's own test:
 	// does turning it off remove a feature, or break the engine?
 	//

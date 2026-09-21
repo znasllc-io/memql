@@ -654,6 +654,22 @@ seed capability cap-owner-execute-app-deployables-domains { roleSlug: "owner"  v
 @description("developer: the domains part of the Deployables app -- bind or remove a custom domain (memql#5301).")
 seed capability cap-developer-execute-app-deployables-domains { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/domains"  predefined: true }
 
+// ---- app:deployables/preview -- publish a candidate version and exercise it ----
+//
+// OWNER AND DEVELOPER, and the line between this part and `publish` is the one
+// epic memql#5531 draws. Publishing a CANDIDATE and exercising it against a
+// development store changes nothing about what the public is served; PROMOTING
+// it is what makes the public see it, and that is `publish`, beside go live,
+// pause and roll back. So a person may be granted the whole of preparing and
+// proving a storefront without being able to put it in front of a shopper.
+//
+// Setting the PREVIEW BINDING is deliberately not in here: it names a
+// v1:shopify:store row, so it carries `store` like every other act that does.
+@description("owner: the preview part of the Deployables app -- publish a candidate version, exercise it against a development store, open and end a preview (memql#5531).")
+seed capability cap-owner-execute-app-deployables-preview { roleSlug: "owner"  verb: "execute"  resourceType: "app:deployables/preview"  predefined: true }
+@description("developer: the preview part of the Deployables app -- publish a candidate version, exercise it against a development store, open and end a preview (memql#5531).")
+seed capability cap-developer-execute-app-deployables-preview { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/preview"  predefined: true }
+
 // ---- app:deployables/store -- attach the Shopify store a storefront fronts ----
 //
 // OWNER ONLY, and that is not an oversight beside the five above. It is what

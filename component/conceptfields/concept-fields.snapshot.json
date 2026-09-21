@@ -4228,6 +4228,7 @@
         "artifactId",
         "binding",
         "bundleRef",
+        "candidateRef",
         "deleted",
         "hostname",
         "kind",
@@ -4235,6 +4236,7 @@
         "ownerUserId",
         "packageDeployableName",
         "packageId",
+        "previewBinding",
         "resolutionTail",
         "settings",
         "status",
@@ -4293,6 +4295,62 @@
           "reachable",
           "unavailable",
           "unknown"
+        ]
+      }
+    },
+    {
+      "concept": "v1:platform:sitePreviewGrant",
+      "file": "platform/concepts.memql",
+      "fields": [
+        "candidateRef",
+        "expiresAt",
+        "issuedAt",
+        "lastSeenAt",
+        "ownerUserId",
+        "previewStoreId",
+        "revokedAt",
+        "siteId",
+        "tokenHash"
+      ],
+      "required": [
+        "candidateRef",
+        "expiresAt",
+        "issuedAt",
+        "ownerUserId",
+        "siteId",
+        "tokenHash"
+      ]
+    },
+    {
+      "concept": "v1:platform:sitePreviewObservation",
+      "file": "platform/concepts.memql",
+      "fields": [
+        "detail",
+        "durationMs",
+        "failure",
+        "grantId",
+        "kind",
+        "observedAt",
+        "ok",
+        "ownerUserId",
+        "siteId",
+        "storeId"
+      ],
+      "required": [
+        "grantId",
+        "kind",
+        "observedAt",
+        "ok",
+        "ownerUserId",
+        "siteId",
+        "storeId"
+      ],
+      "enums": {
+        "kind": [
+          "cart_accepted",
+          "catalog_read",
+          "checkout_url",
+          "order_mirrored"
         ]
       }
     },

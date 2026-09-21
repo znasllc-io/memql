@@ -10164,6 +10164,144 @@ QueryClient.prototype.siteById = function (this: QueryClient, args: SiteByIdArgs
   return this.executeNamed("siteById", buildSiteById(args), opts);
 };
 
+/** Resolve one preview by its own row id -- what the probe and the OS's detail read resolve their target through, so the gate a probe runs behind admits the same people the list does. */
+// Bound concept: v1:platform:sitePreviewGrant (machine-readable: BoundConcepts["sitePreviewGrantById"] in generated_concepts.ts).
+export interface SitePreviewGrantByIdArgs {
+  grantId: string;
+}
+
+export function buildSitePreviewGrantById(args: SitePreviewGrantByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("grantId: " + renderMemQLValue(args.grantId));
+  return "query sitePreviewGrantById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    sitePreviewGrantById(args: SitePreviewGrantByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.sitePreviewGrantById = function (this: QueryClient, args: SitePreviewGrantByIdArgs = {} as SitePreviewGrantByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("sitePreviewGrantById", buildSitePreviewGrantById(args), opts);
+};
+
+/** Resolve a preview grant by the SHA-256 of the token presented, for the edge (issue memql#5545).
+THE DIGEST IS THE ARGUMENT, never the token. The plain `mql_prv_<43>` exists in the operator's URL and cookie and nowhere else; the edge hashes what it was presented and asks this. So a read of the row -- by an operator, out of a backup, in a log -- hands nobody a working preview.
+IT IS NOT THE WHOLE GATE, and the note above says why the rest is in Go. This answers "is there a grant for this digest"; whether it is expired, revoked, for THIS site, and for the candidate the site is currently carrying are four more questions, and three of them compare against something no filter can see. */
+// Bound concept: v1:platform:sitePreviewGrant (machine-readable: BoundConcepts["sitePreviewGrantByToken"] in generated_concepts.ts).
+export interface SitePreviewGrantByTokenArgs {
+  tokenHash: string;
+}
+
+export function buildSitePreviewGrantByToken(args: SitePreviewGrantByTokenArgs): string {
+  const parts: string[] = [];
+  parts.push("tokenHash: " + renderMemQLValue(args.tokenHash));
+  return "query sitePreviewGrantByToken(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    sitePreviewGrantByToken(args: SitePreviewGrantByTokenArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.sitePreviewGrantByToken = function (this: QueryClient, args: SitePreviewGrantByTokenArgs = {} as SitePreviewGrantByTokenArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("sitePreviewGrantByToken", buildSitePreviewGrantByToken(args), opts);
+};
+
+/** The previews open against one deployable, newest first -- what the Deployables page lists so an operator can see what is out there and end it.
+EVERY GRANT, INCLUDING THE SPENT ONES. Expiry and revocation are shown rather than filtered, because the question this list answers after something unexpected lands in a development store is "who opened a preview of this, and when", and a filtered list answers it for the last half hour only. The OS draws the state; this read does not decide it. */
+// Bound concept: v1:platform:sitePreviewGrant (machine-readable: BoundConcepts["sitePreviewGrantsForSite"] in generated_concepts.ts).
+export interface SitePreviewGrantsForSiteArgs {
+  siteId: string;
+}
+
+export function buildSitePreviewGrantsForSite(args: SitePreviewGrantsForSiteArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  return "query sitePreviewGrantsForSite(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    sitePreviewGrantsForSite(args: SitePreviewGrantsForSiteArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.sitePreviewGrantsForSite = function (this: QueryClient, args: SitePreviewGrantsForSiteArgs = {} as SitePreviewGrantsForSiteArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("sitePreviewGrantsForSite", buildSitePreviewGrantsForSite(args), opts);
+};
+
+/** Every preview that is still usable, cluster-wide -- what the passive order observation reads to decide whether an order arriving in the mirror belongs to anybody's exercise (issue memql#5547).
+THE DEPLOYMENT'S READ, NOT A PERSON'S, and the conjunct says so: it filters on actor.isClusterOwner alone, so the only caller it answers for is the synthetic operator identity integrations/sitepreview stamps. The question -- is anybody previewing against this store -- is the cluster's rather than any operator's, and an owner-scoped read would answer it for one person's previews and silently miss everybody else's.
+UNBOUNDED, AND THE REASON IS THE SWEEP'S. A paginated read would answer for the first page of open previews and quietly record nothing for the rest, which is `customDomainsToReconcile`'s reasoning exactly. The population is bounded by the thing itself: a preview lasts half an hour by default, so this is the handful open right now rather than every one ever issued.
+BOTH ENDS ARE FILTERED HERE. `revokedAt == nil` and `expiresAt > now` are the two ways a preview stops being usable, and a caller re-checks them anyway -- the filter is what keeps the answer small, the Go check is what keeps it correct against a clock that moved between the read and the write.
+NO SORT, and it is not an omission: a sort makes a query paginated, which is precisely what `@unbounded` is here to refuse. The caller indexes the answer by store and never reads it in order. */
+// Bound concept: v1:platform:sitePreviewGrant (machine-readable: BoundConcepts["sitePreviewGrantsOpen"] in generated_concepts.ts).
+export interface SitePreviewGrantsOpenArgs {
+}
+
+export function buildSitePreviewGrantsOpen(args: SitePreviewGrantsOpenArgs): string {
+  void args;
+  return "query sitePreviewGrantsOpen()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    sitePreviewGrantsOpen(args?: SitePreviewGrantsOpenArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.sitePreviewGrantsOpen = function (this: QueryClient, args: SitePreviewGrantsOpenArgs = {} as SitePreviewGrantsOpenArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("sitePreviewGrantsOpen", buildSitePreviewGrantsOpen(args), opts);
+};
+
+/** What the engine observed during one exercise, oldest first -- the four steps in the order they happen, which is the order they are drawn in. */
+// Bound concept: v1:platform:sitePreviewObservation (machine-readable: BoundConcepts["sitePreviewObservationsForGrant"] in generated_concepts.ts).
+export interface SitePreviewObservationsForGrantArgs {
+  grantId: string;
+}
+
+export function buildSitePreviewObservationsForGrant(args: SitePreviewObservationsForGrantArgs): string {
+  const parts: string[] = [];
+  parts.push("grantId: " + renderMemQLValue(args.grantId));
+  return "query sitePreviewObservationsForGrant(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    sitePreviewObservationsForGrant(args: SitePreviewObservationsForGrantArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.sitePreviewObservationsForGrant = function (this: QueryClient, args: SitePreviewObservationsForGrantArgs = {} as SitePreviewObservationsForGrantArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("sitePreviewObservationsForGrant", buildSitePreviewObservationsForGrant(args), opts);
+};
+
+/** Everything the engine has observed of any preview of one deployable, newest first.
+The read behind the deployable page's preview panel: it shows the LAST exercise without the page having to know which grant that was, which matters because the grant that ran it may already have expired. An empty answer is "nobody has exercised this", which the OS draws as unmeasured rather than as four failures. */
+// Bound concept: v1:platform:sitePreviewObservation (machine-readable: BoundConcepts["sitePreviewObservationsForSite"] in generated_concepts.ts).
+export interface SitePreviewObservationsForSiteArgs {
+  siteId: string;
+}
+
+export function buildSitePreviewObservationsForSite(args: SitePreviewObservationsForSiteArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  return "query sitePreviewObservationsForSite(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    sitePreviewObservationsForSite(args: SitePreviewObservationsForSiteArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.sitePreviewObservationsForSite = function (this: QueryClient, args: SitePreviewObservationsForSiteArgs = {} as SitePreviewObservationsForSiteArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("sitePreviewObservationsForSite", buildSitePreviewObservationsForSite(args), opts);
+};
+
 /** The deployables this caller may see: their OWN sites, or every site in the cluster when the caller is a cluster owner. The Deployables app's primary screen.
 ARCHIVED ROWS ARE EXCLUDED HERE and listed by sitesArchived instead (epic memql#4794, D10). The exclusion is written out rather than folded into a trait, because it is the one conjunct whose counterpart query deliberately inverts it -- and a reader comparing the two needs to see the same term in both -- here `isNotArchived`, there `statusIsArchived`. The trait is `row.status != "archived"` rather than an allow-list of the other three: status is required, so every row carries one, and != is null-safe against a non-empty literal (memql#1685) -- while an allow-list would silently drop a row the day a fifth value is added.
 The name predates self-serve deployables and is kept: it is the same read, and the concept's tier is what decides how far "all" reaches for a given actor.
