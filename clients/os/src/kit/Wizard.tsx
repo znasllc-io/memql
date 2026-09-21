@@ -176,14 +176,6 @@ export function Wizard({
   useEffect(() => {
     if (!opened.current) {
       opened.current = true;
-      // THE FIRST QUESTION TAKES THE CURSOR. Somebody pressed Add and the next
-      // thing they do is type a name; making them click the one field on the
-      // page first is a step the wizard added. Only a text field, and only on
-      // the way in -- a step that opens because the flow moved on must not
-      // pull focus out from under whatever the person is doing.
-      column.current
-        ?.querySelector<HTMLInputElement>('.os-wizard-body input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not(:disabled)')
-        ?.focus({ preventScroll: true });
       return;
     }
     if (open === "") return;
@@ -192,6 +184,27 @@ export function Wizard({
     const target = column.current?.querySelector<HTMLElement>('.os-wizard-stage') ?? column.current?.querySelector<HTMLElement>('.os-rail-stage[data-open="true"]');
     target?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   }, [open]);
+
+  // THE FIRST QUESTION TAKES THE CURSOR. Somebody pressed Add and the next
+  // thing they do is type a name; making them click the one field on the page
+  // first is a step the wizard added. Only a text field, and only ON THE WAY
+  // IN -- a step that opens because the flow moved on must not pull focus out
+  // from under whatever the person is doing.
+  //
+  // "ON THE WAY IN" IS UNTIL THEY TOUCH IT, NOT "ON MOUNT". The arrangement is
+  // measured after the first commit, and going side by side moves the open
+  // step's body to another place in the tree -- so the field that was focused
+  // on mount is unmounted a moment later and the cursor went with it. Found by
+  // typing into a freshly opened wizard in a wide window and watching nothing
+  // land. So it is done again for the arrangement that settles, and never once
+  // a key or a pointer has said the person is here.
+  const touched = useRef(false);
+  useEffect(() => {
+    if (touched.current) return;
+    column.current
+      ?.querySelector<HTMLInputElement>('.os-wizard-body input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not(:disabled)')
+      ?.focus({ preventScroll: true });
+  }, [split]);
 
   const opened_ = steps.find((step) => step.id === open);
   const drawn: Stop[] = steps.map((step) => ({
@@ -232,7 +245,13 @@ export function Wizard({
       data-os-page-context={context ? JSON.stringify(context) : undefined}
     >
       <div className="os-deploy-scroll os-wizard-scroll">
-        <section ref={column} className="os-wizard-column" aria-label={title}>
+        <section
+          ref={column}
+          className="os-wizard-column"
+          aria-label={title}
+          onPointerDownCapture={() => { touched.current = true; }}
+          onKeyDownCapture={() => { touched.current = true; }}
+        >
           {split ? (
             <>
               <div className="os-wizard-aside">

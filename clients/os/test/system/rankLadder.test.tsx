@@ -113,12 +113,18 @@ describe("each seeded role's desktop is the one the floors used to draw", () => 
   // set instead, nobody's desktop changes. These are the floors as the
   // registry stated them before the switch, written out per role, so a seed
   // that drifts fails here by name.
+  //
+  // `Stores` is gone from every row (epic memql#5530): the app is deleted and
+  // the store a storefront fronts is configured on the storefront's own
+  // deployable, behind `execute app:deployables/store` -- a PART, which is
+  // not an app and so draws no icon on anybody's desktop. What that part
+  // grants is asserted where parts are, not here.
   const expected: Record<string, { apps: string[]; not: string[] }> = {
-    owner: { apps: ["Users", "Accounts", "Training", "Logs", "Stores", "Cluster", "Concepts"], not: [] },
-    developer: { apps: ["Users", "Accounts", "Training", "Logs", "Cluster", "Concepts"], not: ["Stores"] },
-    admin: { apps: ["Users", "Accounts", "Training", "Logs", "Cluster", "Concepts"], not: ["Stores"] },
-    writer: { apps: ["Training", "Deployables", "Files", "Settings"], not: ["Users", "Accounts", "Logs", "Stores"] },
-    reader: { apps: ["Deployables", "Files", "Settings"], not: ["Users", "Accounts", "Training", "Logs", "Stores"] },
+    owner: { apps: ["Users", "Accounts", "Training", "Logs", "Cluster", "Concepts"], not: [] },
+    developer: { apps: ["Users", "Accounts", "Training", "Logs", "Cluster", "Concepts"], not: [] },
+    admin: { apps: ["Users", "Accounts", "Training", "Logs", "Cluster", "Concepts"], not: [] },
+    writer: { apps: ["Training", "Deployables", "Files", "Settings"], not: ["Users", "Accounts", "Logs"] },
+    reader: { apps: ["Deployables", "Files", "Settings"], not: ["Users", "Accounts", "Training", "Logs"] },
   };
   for (const [role, want] of Object.entries(expected)) {
     it(`draws ${role}'s desktop`, () => {

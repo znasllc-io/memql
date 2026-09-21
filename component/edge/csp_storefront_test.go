@@ -16,9 +16,14 @@ func cspStorefrontSite() *Site {
 		Hostname: "shop.example.com",
 		Status:   "live",
 		Kind:     storefrontKind,
-		Binding: map[string]any{
-			"storeDomain":        "acme-dev.myshopify.com",
-			"storefrontTokenRef": "acme_storefront_token",
+		// THE STORE IS RESOLVED, NOT COPIED (epic memql#5530). The site row's
+		// binding names it; Site.Store is what the resolver read through that
+		// name, and it is what the policy and the runtime document both read.
+		Binding: map[string]any{"storeId": "store-1"},
+		Store: &BoundStore{
+			ID:                 "store-1",
+			Domain:             "acme-dev.myshopify.com",
+			StorefrontTokenRef: "acme_storefront_token",
 		},
 	}
 }
@@ -93,7 +98,11 @@ func TestNonStorefrontPoliciesAreUnchangedByTheStorefrontArm(t *testing.T) {
 // row (by accident, or by someone probing) widens no policy.
 func TestABindingOnANonStorefrontRowAdmitsNothing(t *testing.T) {
 	site := testSite() // kind: static
-	site.Binding = map[string]any{"storeDomain": "acme-dev.myshopify.com"}
+	site.Binding = map[string]any{"storeId": "store-1"}
+	// RESOLVED AS WELL AS NAMED, so this is not passing merely because the
+	// store read was skipped: the policy is handed a Site that HAS a store
+	// and must still widen nothing, because kind is the gate.
+	site.Store = &BoundStore{ID: "store-1", Domain: "acme-dev.myshopify.com"}
 
 	got := policyForSite(httptest.NewRequest("GET", "/", nil), site, noEnv, "")
 	if got != policyWithoutHashes {
@@ -108,6 +117,7 @@ func TestABindingOnANonStorefrontRowAdmitsNothing(t *testing.T) {
 func TestAnUnboundStorefrontNamesNoStore(t *testing.T) {
 	site := cspStorefrontSite()
 	site.Binding = nil
+	site.Store = nil
 
 	got := policyForSite(httptest.NewRequest("GET", "/", nil), site, noEnv, "")
 	connect := directive(got, "connect-src")
@@ -131,7 +141,7 @@ func TestAMalformedStoreDomainIsDropped(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			site := cspStorefrontSite()
-			site.Binding = map[string]any{"storeDomain": domain}
+			site.Store = &BoundStore{ID: "store-1", Domain: domain}
 
 			got := policyForSite(httptest.NewRequest("GET", "/", nil), site, noEnv, "")
 			if strings.Contains(got, domain) {

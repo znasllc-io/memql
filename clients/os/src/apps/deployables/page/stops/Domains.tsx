@@ -22,6 +22,7 @@ import {
   failureSentence,
   isApex,
   isKnownFailure,
+  isListedDomain,
   isRecordAtFault,
   isRemovalPath,
   isWaitingReason,
@@ -43,8 +44,14 @@ import { siteStateWord } from "../../words";
 // Domain setup stays in the Deployables page. Navigation reveals one task at
 // a time; the live reconciliation feed alone determines completion.
 
-/** The bindings on ONE deployable, projected and narrowed in one pass. */
-function useSiteDomains(site: SiteRow) {
+/**
+ * The bindings on ONE deployable, projected and narrowed in one pass.
+ *
+ * `listed` is the LIST's reading (`isListedDomain`): what answers or is on its
+ * way to. The wizard reads them all, because it follows one binding through
+ * whatever happens to it, including its removal.
+ */
+function useSiteDomains(site: SiteRow, listed = false) {
   const { source: collection } = useCustomDomains();
   // PROJECT, THEN NARROW, in one pass -- the collection holds RAW wire rows,
   // so every predicate has to run on a `domainFromRow` result. The site filter
@@ -52,12 +59,12 @@ function useSiteDomains(site: SiteRow) {
   // so selecting another deployable changes no subscription.
   return useLiveView<Record<string, unknown>, DomainRow>(
     collection,
-    `domains:${site.id}`,
+    `domains:${site.id}:${listed ? "listed" : "all"}`,
     (rows) =>
       sortDomains(
         rows
           .map(domainFromRow)
-          .filter((d) => d.id !== "" && d.siteId === site.id),
+          .filter((d) => d.id !== "" && d.siteId === site.id && (!listed || isListedDomain(d))),
       ),
   );
 }
@@ -174,7 +181,8 @@ function NotServing({ site }: { site: SiteRow }) {
 
 /** The custom bindings, mounted only for a reader who may read them. */
 function BoundDomains({ site, onOpenDomain }: { site: SiteRow; onOpenDomain: (domainId: string) => void }) {
-  const view = useSiteDomains(site);
+  // THE LIST'S READING: a cancelled or removed domain is not in it.
+  const view = useSiteDomains(site, true);
   // KEYED ON THE SITE ID so that changing deployable RE-BASELINES rather than
   // animating. Revealing rows the browser already had is not the cluster
   // sending them, and the arrival cue must only fire for news.
@@ -199,7 +207,9 @@ function DomainListRow({ domain: d, site, changed, onOpen }: { domain: DomainRow
   // that is not live -- the same independence the notice above explains.
   const serving = d.status === "live" && site.status === "live";
   const where = isRemovalPath(d.status)
-    ? "Being removed"
+    // The only removal that is still LISTED is one the cluster could not
+    // finish (`isListedDomain`), so that is what the line says.
+    ? "Could not be removed yet \u00b7 its name is still held"
     : d.status === "live"
       ? "Custom domain \u00b7 set up"
       : `Custom domain \u00b7 step ${Math.min(step + 1, total)} of ${total}, ${DOMAIN_SETUP_STEPS[Math.min(step, total - 1)]}`;
@@ -422,6 +432,15 @@ export function DomainWizard({ site, name, domainId = "", trail, back, onLeave }
                 : "Taking the route and certificate away. The domain has already stopped being served."}
             </p>
           ) : null}
+          {/* A REMOVAL THE CLUSTER COULD NOT FINISH is the one removal a person is
+              shown, and what it reported is why: its name stays held until it
+              is `removed`, and the sweep keeps trying on its own. */}
+          {leaving && bound !== null && bound.status === "removing" && bound.failureReason !== "" ? (
+            <div className="os-domain-problem" data-known={isKnownFailure(bound.failureReason)}>
+              <p className="os-domain-problem-sentence">{failureSentence(bound.failureReason)}</p>
+              {bound.failureDetail === "" ? null : <p className="os-domain-problem-detail os-mono">{bound.failureDetail}</p>}
+            </div>
+          ) : null}
         </>
       }
     />
@@ -493,7 +512,11 @@ export function DomainWizard({ site, name, domainId = "", trail, back, onLeave }
     if (missing) return { word: "Not bound", detail: "there is nothing here to set up" };
     if (bound !== null) {
       if (bound.status === "removed") return { word: "Removed", detail: "it is kept as a record of what this cluster served" };
-      if (bound.status === "removing") return { word: "Removing", detail: "it has already stopped being served", tone: "busy" };
+      if (bound.status === "removing") {
+        return bound.failureReason === ""
+          ? { word: "Removing", detail: "it has already stopped being served", tone: "busy" }
+          : { word: "Could not be removed yet", detail: "the cluster tries again by itself", tone: "paused", meta: bound.lastCheckedAt === "" ? undefined : `tried ${formatFreshness(bound.lastCheckedAt, now)}` };
+      }
       const reading = domainSetupReading(bound, siteLive);
       return {
         ...reading,

@@ -364,6 +364,38 @@ func rollTargets() []string {
 }
 
 // ---------------------------------------------------------------------------
+// stores
+// ---------------------------------------------------------------------------
+
+// resolveStore is the production Deps.Stores: the myshopify.com domain a
+// manifest names, answered as the bare v1:shopify:store row id (epic
+// memql#5530, issue memql#5540).
+//
+// UNDER THE CALLER'S OWN ACTOR, with nothing borrowed and nothing stamped, and
+// that is the whole authorization shape of the feature. storeByDomain is a
+// cluster-owner-tier read, so a caller who may not read stores resolves ZERO
+// ROWS and the publish is refused by name -- the same answer
+// updateSiteStoreBinding's Go guard gives. Borrowing the package OWNER's
+// authority here (the pattern resolveCredential uses, for a credential the
+// owner holds) would let anyone who can deploy a package point a storefront at
+// any merchant on the cluster, which is the one thing this seam must not do.
+func (s *store) resolveStore(ctx context.Context, domain string) (string, error) {
+	domain = strings.TrimSpace(domain)
+	if domain == "" {
+		return "", nil
+	}
+	row, err := s.queryOne(ctx, fmt.Sprintf("query storeByDomain(domain: %s)", langparser.QuoteString(domain)))
+	if err != nil {
+		return "", err
+	}
+	// ZERO ROWS IS "", NOT AN ERROR. The read cannot tell a store that does
+	// not exist from one this caller may not read, and that is the design:
+	// both are the same refusal, and answering which would tell somebody
+	// outside the tier what is on the cluster.
+	return rowString(row, "id"), nil
+}
+
+// ---------------------------------------------------------------------------
 // publish
 // ---------------------------------------------------------------------------
 
@@ -428,8 +460,11 @@ func (p *enginePublisher) EnsureSite(ctx context.Context, req EnsureSiteRequest)
 	b.WriteString(langparser.QuoteString(""))
 	b.WriteString(", status: ")
 	b.WriteString(langparser.QuoteString(siteStatusDraft))
-	if req.Binding != nil {
-		raw, _ := json.Marshal(req.Binding)
+	// THE BINDING IS A REFERENCE, written as {storeId} (epic memql#5530).
+	// json.Marshal of a map[string]string handles the quoting, which is the
+	// same reason it was used for the old two-field shape.
+	if req.StoreId != "" {
+		raw, _ := json.Marshal(map[string]string{"storeId": req.StoreId})
 		b.WriteString(", binding: ")
 		b.Write(raw)
 	}
@@ -466,6 +501,21 @@ func (p *enginePublisher) PublishBundle(ctx context.Context, siteId string, bund
 		return PublishResult{}, err
 	}
 	return PublishResult{SiteId: siteId, BundleRef: res.BundleRef, Version: res.Version}, nil
+}
+
+// BindSiteToStore re-points an existing site at the store its manifest names.
+//
+// Under the CALLER's actor, unstamped, exactly as createSite and the two
+// placement writes are: updateSiteStoreBinding carries a capability gate and a
+// Go guard that refuses a store the caller cannot read
+// (component/memql/platform_site_binding_guard.go), and a deploy gains no
+// bypass of either. A person who may deploy this package but may not bind a
+// storefront is refused here, by that guard, in the same sentence the Store
+// panel would have given them.
+func (p *enginePublisher) BindSiteToStore(ctx context.Context, siteId, storeId string) error {
+	_, err := p.engine.Execute(ctx, fmt.Sprintf("mutation updateSiteStoreBinding(siteId: %s, storeId: %s)",
+		langparser.QuoteString(siteId), langparser.QuoteString(storeId)))
+	return err
 }
 
 // RepointSite is the rollback write: updateSiteBundle pointed back at a

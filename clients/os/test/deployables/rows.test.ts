@@ -15,7 +15,7 @@ import {
   siteName,
   statusDotTone,
   statusTone,
-  storefrontBinding,
+  boundStoreId,
 } from "../../src/apps/deployables/rows";
 import { APEX, DELETED, DOCS, PLATFORM_SITE, SHOP, siteRow } from "./harness";
 
@@ -152,17 +152,28 @@ describe("the bundle reference's three usage forms", () => {
 });
 
 describe("the storefront binding", () => {
-  it("carries the store domain and the NAME of the token secret", () => {
-    const binding = storefrontBinding(siteFromRow(SHOP));
-    expect(binding.storeDomain).toBe("example.myshopify.com");
-    expect(binding.storefrontTokenRef).toBe("shopify-storefront-token");
+  // IT NAMES A STORE ROW, IT DOES NOT COPY ONE (epic memql#5530). The binding
+  // used to carry the store's domain and the name of the secret holding its
+  // Storefront token -- two fields the store row already held, so one store
+  // was recorded twice and edited in two places.
+  it("names the store row this storefront fronts", () => {
+    expect(boundStoreId(siteFromRow(SHOP))).toBe("store-example");
   });
 
   it("is empty for a site with no binding", () => {
-    expect(storefrontBinding(siteFromRow(DOCS))).toEqual({
-      storeDomain: "",
-      storefrontTokenRef: "",
+    expect(boundStoreId(siteFromRow(DOCS))).toBe("");
+  });
+
+  // THE RETIRED SHAPE READS AS UNBOUND, not as a store called
+  // "example.myshopify.com". Nothing falls back to it: a row still carrying
+  // the copy is one the migration converts, and a reader that accepted both
+  // shapes would keep the duplication alive in the one place somebody looks.
+  it("reads a legacy copied binding as no store at all", () => {
+    const legacy = siteFromRow({
+      ...SHOP,
+      binding: { storeDomain: "example.myshopify.com", storefrontTokenRef: "shopify-storefront-token" },
     });
+    expect(boundStoreId(legacy)).toBe("");
   });
 });
 
