@@ -71,8 +71,28 @@ export function storeLabel(store: StoreRow): string {
   return store.domain === "" ? store.id : store.domain;
 }
 
-/** The domain with its friendly name after it, when the two differ. */
+/**
+ * The domain, and nothing else.
+ *
+ * THE NAME DOES NOT BELONG IN THE LABEL. Appending it read
+ * `example-dev.myshopify.com (Example Shop (development))` -- nested
+ * parentheses, from a name that already carried its own. A choice's label is
+ * the identifier somebody matches against the Shopify admin; everything else
+ * about it is its description, which is where `storeNote` puts it.
+ */
 export function storeLongLabel(store: StoreRow): string {
-  const label = storeLabel(store);
-  return store.name === "" || store.name === label ? label : `${label} (${store.name})`;
+  return storeLabel(store);
+}
+
+/** What a store says about itself beneath its own name. */
+export function storeNote(store: StoreRow, all: readonly StoreRow[]): string {
+  const parts: string[] = [];
+  if (store.name !== "" && store.name !== storeLabel(store)) parts.push(store.name);
+  if (store.status !== "") parts.push(store.status);
+  if (store.plan !== "") parts.push(store.plan);
+  if (store.isDevelopment) {
+    const stands = all.find((s) => s.id === store.developmentOfStoreId);
+    parts.push(stands ? `development store for ${stands.domain}` : "development store");
+  }
+  return parts.join(" \u00b7 ");
 }

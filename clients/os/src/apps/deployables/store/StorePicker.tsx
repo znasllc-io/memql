@@ -14,7 +14,7 @@ import {
   type ChoiceOption,
 } from "../../../kit";
 import { siteName, type SiteRow } from "../rows";
-import { storeLongLabel, type StoreRow } from "./rows";
+import { storeLongLabel, storeNote } from "./rows";
 import { BLANK_STORE, useStoreList, type NewStore, type StoreWrites } from "./useStore";
 
 // CHOOSING THE STORE A STOREFRONT FRONTS (epic memql#5530, issue memql#5539).
@@ -75,7 +75,7 @@ export function StorePicker({
       list.stores.map((store) => ({
         value: store.id,
         label: storeLongLabel(store),
-        description: describeStore(store, list.stores),
+        description: storeNote(store, list.stores),
       })),
     [list.stores],
   );
@@ -256,13 +256,15 @@ export function StorePicker({
                 fronts, and it becomes the record everything else reads.
               </Caption>
             ) : (
-              <ChoiceStack
-                name="os-store-choice"
-                label="The store this storefront fronts"
-                value={chosen}
-                onChange={setChosen}
-                options={options}
-              />
+              <div className="os-store-choices">
+                <ChoiceStack
+                  name="os-store-choice"
+                  label="The store this storefront fronts"
+                  value={chosen}
+                  onChange={setChosen}
+                  options={options}
+                />
+              </div>
             )}
             <div className="os-store-bandact">
               {onCancel ? (
@@ -289,18 +291,6 @@ export function StorePicker({
       </Panel>
     </>
   );
-}
-
-/** What a choice says about itself beyond its name. */
-function describeStore(store: StoreRow, all: readonly StoreRow[]): string {
-  const parts: string[] = [];
-  if (store.status !== "") parts.push(store.status);
-  if (store.plan !== "") parts.push(store.plan);
-  if (store.isDevelopment) {
-    const stands = all.find((s) => s.id === store.developmentOfStoreId);
-    parts.push(stands ? `development store for ${stands.domain}` : "development store");
-  }
-  return parts.join(" · ");
 }
 
 /**

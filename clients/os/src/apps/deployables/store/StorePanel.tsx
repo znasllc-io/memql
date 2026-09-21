@@ -198,10 +198,24 @@ export function StorePanel({ site, canBind, trail, back }: StorePanelProps) {
       ) : (
         <>
           <Identity store={store} report={report} />
-          <Connection store={store} report={report} />
-          <Scopes report={report} />
-          <Subscriptions report={report} writes={writes} />
-          <DevelopmentStore store={store} />
+          {/* TWO COLUMNS WHERE THERE IS ROOM, and this is DESIGN.md rule 9
+              rather than decoration. Every block here is text at a readable
+              measure -- the app caps a caption at 84ch, which is right -- so
+              in one column the pane painted 800px of dead space beside a
+              600px stripe at the default window size. The measure still
+              belongs to the THING; the COLUMNS are what use the window.
+
+              `auto-fit` with a 28rem floor rather than a width query: below
+              one column's worth it collapses to one, which is the same
+              arrangement the narrow window wants and needs no second rule to
+              say so. The mirror table stays OUTSIDE, because a table is the
+              one thing here that wants the whole width. */}
+          <div className="os-store-grid">
+            <Connection store={store} report={report} />
+            <Scopes report={report} />
+            <Subscriptions report={report} writes={writes} />
+            <DevelopmentStore store={store} />
+          </div>
           <Mirror report={report} />
           <Acts store={store} report={report} writes={writes} canBind={canBind} />
           {health.at === null ? null : (
@@ -387,10 +401,11 @@ function Scopes({ report }: { report: StoreHealth | null }) {
       ) : (
         <>
           <p className="os-store-line">
-            {report.scopesMissing.length} of the {needed} scopes the mirror needs are not granted.
-            Shopify returns null for the fields they cover, so the domains below them are quietly
-            INCOMPLETE rather than broken -- nothing errors, and the missing values look exactly
-            like values the merchant never entered.
+            {report.scopesMissing.length} of the {needed} scopes the mirror needs{" "}
+            {report.scopesMissing.length === 1 ? "is" : "are"} not granted. Shopify returns null for
+            the fields they cover, so the domains below them are quietly INCOMPLETE rather than
+            broken -- nothing errors, and the missing values look exactly like values the merchant
+            never entered.
           </p>
           <Chips label="Scopes the mirror needs and does not have">
             {report.scopesMissing.map((scope) => (

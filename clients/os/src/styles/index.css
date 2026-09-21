@@ -11772,6 +11772,46 @@ a.os-button {
  * pane sideways; the wrapper takes that instead, so the window body never
  * scrolls horizontally. */
 /* ---------------------------------------------------------------------------
+ * The columns
+ * ---------------------------------------------------------------------------
+ * DESIGN.md rule 9: real estate belongs to content, and "nothing paints half a
+ * window of dead space beside a half-width column". Every block on this pane
+ * is text at a readable measure -- the app caps a caption at 84ch, which is
+ * right for a caption and wrong for a page -- so in one column the pane drew a
+ * 600px stripe with 800px of nothing beside it at the default window size.
+ *
+ * The MEASURE still belongs to the thing; the COLUMNS are what use the window.
+ *
+ * MULTI-COLUMN RATHER THAN A GRID, and the difference is visible. A grid aligns
+ * ROWS, so a short block beside a tall one leaves the tall one's height as a
+ * hole under the short one -- Scopes is three lines and Connection is seven
+ * facts, and the gap under Scopes was bigger than Scopes. Multi-column balances
+ * by height instead, which is what a column of independent blocks wants.
+ *
+ * `28rem 2` is a column WIDTH and a maximum COUNT: it collapses to one column
+ * below one column's worth on its own, so the narrow arrangement needs no
+ * second rule to say so. `break-inside: avoid` keeps a block whole; without it
+ * a panel splits across the column boundary mid-sentence.
+ *
+ * The mirror table is deliberately OUTSIDE this: it is the one thing here that
+ * wants the whole width. */
+.os-store-grid {
+  columns: 28rem 2;
+  column-gap: 32px;
+}
+.os-store-grid > * {
+  break-inside: avoid;
+  margin-bottom: 12px;
+}
+
+/* A CHOICE IS A LINE, NOT A PAGE. The stack stretched to the window, so a
+ * two-word store name sat in a 1400px box. It takes the same readable measure
+ * a field does. */
+.os-store-choices {
+  max-width: 48rem;
+}
+
+/* ---------------------------------------------------------------------------
  * The identity line
  * ---------------------------------------------------------------------------
  * The store's domain is the one fact somebody opens this pane to check -- the
