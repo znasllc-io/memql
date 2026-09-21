@@ -1,4 +1,4 @@
-import { packageFingerprint, runCoversApp, sourceLabel, type DeploymentRow, type PackageRow } from "./packages/rows";
+import { packageFingerprint, runCoversApp, shortRepo, sourceLabel, type DeploymentRow, type PackageRow } from "./packages/rows";
 import { isPlaceholderBundle, type StandingInput } from "./page/rail";
 import { bundleForm, siteFingerprint, siteName, type SiteRow } from "./rows";
 import { deployerOf } from "./people";
@@ -275,6 +275,50 @@ export function foldDeployables(
   filter: ListFilter,
   showArchived: boolean,
 ): DeployableListGroup[] {
+  const { rowsByGroup, groupPackage } = collectRows(sites, packages, parkedRuns);
+
+  const groups: DeployableListGroup[] = [];
+  for (const [id, rows] of rowsByGroup) {
+    const kept = rows
+      .filter((row) => isArchived(row) === showArchived)
+      .filter((row) => matches(row, filter))
+      .sort(compareRows);
+    if (kept.length === 0) continue;
+    const pkg = groupPackage.get(id) ?? null;
+    // `startsSection` is filled in after the sort, which is the only place the
+    // neighbours are known.
+    groups.push({ id, pkg, rows: kept, section: pkg === null ? "standalone" : "source", startsSection: false });
+  }
+  // BY SECTION, THEN BY FIRST ADDRESS. The address order is the one the list
+  // always had, and it is kept WITHIN a section: the feeds fold events in
+  // arrival order, and a list that depended on it would reshuffle on an update
+  // -- exactly when somebody is watching. The section term is what stops a
+  // source group and a hand-made site interleaving.
+  const ordered = groups.sort(
+    (a, b) =>
+      SECTION_ORDER[a.section] - SECTION_ORDER[b.section] ||
+      compareRows(a.rows[0]!, b.rows[0]!) ||
+      a.id.localeCompare(b.id),
+  );
+  return ordered.map((group, i) => ({
+    ...group,
+    startsSection: i === 0 || ordered[i - 1]!.section !== group.section,
+  }));
+}
+
+/**
+ * EVERY ROW THE THREE FEEDS DESCRIBE, grouped and not yet asked anything.
+ *
+ * Split out of `foldDeployables` so that a second reading can start from the
+ * same rows: the Sources list summarises a source by ALL its rows, and must
+ * not inherit the deployables list's questions (its search, its facets, its
+ * archived flip) by reading that list's answer.
+ */
+function collectRows(
+  sites: readonly SiteRow[],
+  packages: readonly PackageRow[],
+  parkedRuns: readonly DeploymentRow[],
+): { rowsByGroup: Map<string, DeployableListRow[]>; groupPackage: Map<string, PackageRow | null> } {
   const packageById = new Map(packages.map((p) => [p.id, p]));
   const parkedByPackage = new Map(packages.map((p) => [p.id, newestParkedRun(parkedRuns, p.id)]));
 
@@ -379,33 +423,7 @@ export function foldDeployables(
     }
   }
 
-  const groups: DeployableListGroup[] = [];
-  for (const [id, rows] of rowsByGroup) {
-    const kept = rows
-      .filter((row) => isArchived(row) === showArchived)
-      .filter((row) => matches(row, filter))
-      .sort(compareRows);
-    if (kept.length === 0) continue;
-    const pkg = groupPackage.get(id) ?? null;
-    // `startsSection` is filled in after the sort, which is the only place the
-    // neighbours are known.
-    groups.push({ id, pkg, rows: kept, section: pkg === null ? "standalone" : "source", startsSection: false });
-  }
-  // BY SECTION, THEN BY FIRST ADDRESS. The address order is the one the list
-  // always had, and it is kept WITHIN a section: the feeds fold events in
-  // arrival order, and a list that depended on it would reshuffle on an update
-  // -- exactly when somebody is watching. The section term is what stops a
-  // source group and a hand-made site interleaving.
-  const ordered = groups.sort(
-    (a, b) =>
-      SECTION_ORDER[a.section] - SECTION_ORDER[b.section] ||
-      compareRows(a.rows[0]!, b.rows[0]!) ||
-      a.id.localeCompare(b.id),
-  );
-  return ordered.map((group, i) => ({
-    ...group,
-    startsSection: i === 0 || ordered[i - 1]!.section !== group.section,
-  }));
+  return { rowsByGroup, groupPackage };
 }
 
 /**
@@ -448,3 +466,162 @@ export function groupFingerprint(group: DeployableListGroup): string {
     ),
   ].join("|");
 }
+
+// ---------------------------------------------------------------------------
+// Two lists, because there are two kinds of thing (DESIGN.md: "a tab is a
+// different kind of thing; a subset is a filter")
+// ---------------------------------------------------------------------------
+//
+// The list used to be ONE list of both: a source was a row with its apps
+// indented beneath it, then a "Standalone" heading over the rest -- a tree
+// inside a list, with two row types and an order that followed origin rather
+// than anything a person was looking for. The owner's word for it was "I
+// really hate that combined list".
+//
+// A SOURCE is a repository or a zip that produces deployables, and has a life
+// of its own (a newer version upstream, a run parked at its gate, archived). A
+// DEPLOYABLE is a thing that answers at an address, wherever it came from. They
+// are two nouns, so they are two tabs -- and where a deployable came from
+// stops being a heading and an indent, and becomes a fact on its row and a
+// facet in Refine, which already carried that facet.
+
+/**
+ * Every deployable, flat. A row is here because it HAS AN ADDRESS OF ITS OWN
+ * -- a site row. An app a source declares and has never deployed has none, and
+ * neither does one a parked run is still asking about: those are facts about
+ * their source, and they are read on its page, where Activate and the run's
+ * gate are.
+ */
+export function flatDeployables(groups: readonly DeployableListGroup[]): DeployableListRow[] {
+  return groups
+    .flatMap((group) => group.rows)
+    .filter((row) => row.site !== null)
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || a.hostname.localeCompare(b.hostname));
+}
+
+/** What a zip that was never given a name is called, on either tab. */
+const UNNAMED_ZIP = "Uploaded zip";
+
+/** What a source is called on a row: its own name, else where it lives. */
+export function sourceName(pkg: Pick<PackageRow, "name" | "sourceKind" | "repoUrl" | "repoRef">): string {
+  if (pkg.name.trim() !== "") return pkg.name.trim();
+  // A NAME, so it takes a name's capital: the same two words a deployable's
+  // row uses for where it came from (`originLabel`), because the two are read
+  // against each other across the tabs.
+  return pkg.sourceKind === "artifact" ? UNNAMED_ZIP : sourceLabel(pkg);
+}
+
+/**
+ * foldSources answers the Sources list: EVERY source this cluster tracks, each
+ * with every app it produced.
+ *
+ * It is its own fold rather than a filter over the deployables list's answer,
+ * which is what it was first written as -- and three things were wrong with
+ * that, none of which a cluster with no sources could show:
+ *
+ *  - A SOURCE WITH NO APPS WAS NOT LISTED. A group exists in that fold only
+ *    when it has a row, so a source whose analysis was refused -- no manifest,
+ *    a private repository -- had nothing to hang on and was nowhere: not on
+ *    this tab, where somebody would go to try it again or archive it.
+ *  - A SEARCH TRIMMED THE SUMMARY. The deployables list narrows ROWS, so
+ *    searching for one app left its source reading "1 app" out of three. The
+ *    search here is asked of the SOURCE -- its name, where it lives, and what
+ *    it made, so "which source made admin" still finds it -- and never removes
+ *    a row from a source it kept.
+ *  - ARCHIVED WAS THE ROW'S, NOT THE SOURCE'S. One archived app moved its
+ *    (active) source into the archived view as a source with one app. A source
+ *    is archived when ITS status says so; an archived app of an active source
+ *    is one of its apps, counted and not deployed.
+ *
+ * BY NAME, because a source is a named thing and that is what somebody scans
+ * a list of them for. (The deployables list inside it keeps address order.)
+ */
+export function foldSources(
+  sites: readonly SiteRow[],
+  packages: readonly PackageRow[],
+  parkedRuns: readonly DeploymentRow[],
+  search: string,
+  showArchived: boolean,
+): DeployableListGroup[] {
+  const { rowsByGroup } = collectRows(sites, packages, parkedRuns);
+  const needle = search.trim().toLowerCase();
+  const groups: DeployableListGroup[] = [];
+  for (const pkg of packages) {
+    if ((pkg.status === "archived") !== showArchived) continue;
+    const rows = [...(rowsByGroup.get(`pkg:${pkg.id}`) ?? [])].sort(compareRows);
+    if (needle !== "") {
+      const hay = [pkg.name, sourceLabel(pkg), sourceName(pkg), ...rows.flatMap((row) => [row.name, row.hostname])]
+        .join(" ")
+        .toLowerCase();
+      if (!hay.includes(needle)) continue;
+    }
+    groups.push({ id: `pkg:${pkg.id}`, pkg, rows, section: "source", startsSection: false });
+  }
+  return groups.sort(
+    (a, b) =>
+      sourceName(a.pkg!).localeCompare(sourceName(b.pkg!), undefined, { sensitivity: "base" }) || a.id.localeCompare(b.id),
+  );
+}
+
+/**
+ * Where a deployable came from, as its row says it.
+ *
+ * The source's own short name when it has one, because that is what a person
+ * would look for on the Sources tab. Otherwise the way in it took -- and
+ * "Built in" for a bundle baked into the edge image, which is none of the
+ * three ways in and must not be described as one of them.
+ */
+export function originLabel(row: Pick<DeployableListRow, "site" | "pkg">): string {
+  if (row.pkg !== null) {
+    if (row.pkg.name.trim() !== "") return row.pkg.name.trim();
+    return row.pkg.sourceKind === "repo" ? shortRepo(row.pkg.repoUrl) : UNNAMED_ZIP;
+  }
+  const via = sourceOf(row);
+  if (via === "zip") return "Zip";
+  if (via === "ci") return "CI";
+  if (via === "repository") return "Repository";
+  return row.site !== null && row.site.systemOwned ? "Built in" : "";
+}
+
+/** What counts as NEWS on one deployable's row, for the arrival cue. */
+export function rowFingerprint(row: DeployableListRow): string {
+  return [
+    row.key,
+    row.site === null ? "will-serve" : siteFingerprint(row.site),
+    row.pkg === null ? "" : packageFingerprint(row.pkg),
+    row.parked === null ? "" : `waiting:${row.parked.id}`,
+  ].join(":");
+}
+
+export interface SourceSummary {
+  /** How many apps the source declares (or has produced). */
+  apps: number;
+  /** How many of them answer at an address. */
+  deployed: number;
+  /** A run is parked at its gate, waiting on a person. */
+  waiting: boolean;
+}
+
+export function sourceSummary(group: DeployableListGroup): SourceSummary {
+  return {
+    apps: group.rows.length,
+    deployed: group.rows.filter((row) => row.site !== null && row.site.status !== "archived").length,
+    waiting: group.rows.some((row) => row.parked !== null),
+  };
+}
+
+/**
+ * A source's state, in one word, with the tone it carries.
+ *
+ * IN ORDER OF WHAT A PERSON HAS TO DO ABOUT IT: a run waiting on them first,
+ * then a newer version they could deploy, then the quiet states.
+ */
+export function sourceStateWord(group: DeployableListGroup): { word: string; tone: "accent" | "warn" | "muted" } {
+  const pkg = group.pkg;
+  if (pkg === null) return { word: "", tone: "muted" };
+  if (pkg.status === "archived") return { word: "Archived", tone: "muted" };
+  if (sourceSummary(group).waiting) return { word: "Review needed", tone: "warn" };
+  if (pkg.updateAvailable) return { word: "Update available", tone: "accent" };
+  return { word: sourceSummary(group).deployed === 0 ? "Nothing deployed" : "Current", tone: "muted" };
+}
+

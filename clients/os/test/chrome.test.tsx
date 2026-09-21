@@ -179,6 +179,33 @@ describe("roles (spec K bullet 7)", () => {
   });
 });
 
+describe("the one trail row", () => {
+  // The position has been specified twice and was wrong the first time, so it
+  // is pinned against the REAL window frame rather than left to a comment. The
+  // order is the hierarchy: tabs choose the section, the trail is depth in it.
+  it("sits under the section tabs and above the app body, once per window", () => {
+    renderShell();
+    openFromLauncher("Settings");
+    const tabs = screen.getByRole("navigation", { name: "Settings sections" });
+    const trails = screen.getAllByRole("navigation", { name: "Breadcrumbs" });
+    expect(trails).toHaveLength(1);
+    const row = trails[0]!.closest("[data-os-trail-row]") as HTMLElement;
+    const body = document.querySelector("[data-os-window-content]") as HTMLElement;
+    expect(tabs.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(row.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Drawn by the frame, not by the page: it is a sibling of the app body.
+    expect(body.contains(row)).toBe(false);
+  });
+
+  it("is there at an app's root, with Back in place and inert", () => {
+    renderShell();
+    openFromLauncher("Settings");
+    const back = screen.getByRole("button", { name: "Back" }) as HTMLButtonElement;
+    expect(back.disabled).toBe(true);
+    expect(back.closest("[data-os-trail-row]")).not.toBeNull();
+  });
+});
+
 describe("Ask (spec K bullet 5)", () => {
   it("the orb, the widget and the title bar open the same surface", () => {
     renderShell();

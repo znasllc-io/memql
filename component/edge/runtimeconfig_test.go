@@ -274,9 +274,14 @@ func storefrontSite() *Site {
 		Hostname: "shop.acme.example.com",
 		Kind:     "shopify_storefront",
 		Status:   "live",
-		Binding: map[string]any{
-			"storeDomain":        "acme-demo.myshopify.com",
-			"storefrontTokenRef": "acme_storefront_token",
+		// THE STORE IS RESOLVED, NOT COPIED (epic memql#5530). The binding
+		// names a v1:shopify:store row and the resolver reads it alongside
+		// the site; the document is built from that resolution.
+		Binding: map[string]any{"storeId": "store-1"},
+		Store: &BoundStore{
+			ID:                 "store-1",
+			Domain:             "acme-demo.myshopify.com",
+			StorefrontTokenRef: "acme_storefront_token",
 		},
 	}
 }
@@ -356,9 +361,22 @@ func TestRuntimeConfigNeverCarriesTheShopifyAdminToken(t *testing.T) {
 	resolve, secrets := storefrontSecrets(t)
 	admin := secrets["acme_admin_token"]
 
+	// EVERY NAME THE SERVE PATH ASKS FOR (epic memql#5530). The grep below
+	// proves the admin token's VALUE did not reach the bytes; this proves the
+	// serve path never even asked for its name. The distinction started
+	// mattering when the edge began reading the store ROW, which carries
+	// adminTokenRef and webhookSecretRef beside the one reference it is meant
+	// to resolve -- a projection that took one field too many would fail here
+	// rather than in whatever later reads the resolver's audit log.
+	var asked []string
+	recording := func(ctx context.Context, name string) (string, error) {
+		asked = append(asked, name)
+		return resolve(ctx, name)
+	}
+
 	h := NewHandler(Options{
 		Resolver:       staticResolver{site: storefrontSite()},
-		SecretResolver: resolve,
+		SecretResolver: recording,
 	})
 	req := httptest.NewRequest(http.MethodGet, runtimeConfigPath, nil)
 	req.Host = "shop.acme.example.com"
@@ -382,6 +400,10 @@ func TestRuntimeConfigNeverCarriesTheShopifyAdminToken(t *testing.T) {
 	}
 	if strings.Contains(strings.ToLower(body), "admin") {
 		t.Errorf("the served runtime-config document mentions an admin credential: %s", body)
+	}
+	if len(asked) != 1 || asked[0] != "acme_storefront_token" {
+		t.Errorf("the secret store was asked for %v, want exactly [acme_storefront_token] -- "+
+			"the serve path resolves the Storefront token reference and nothing else", asked)
 	}
 }
 

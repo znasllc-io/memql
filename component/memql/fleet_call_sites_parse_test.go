@@ -124,17 +124,18 @@ func fleetCallSites() []struct {
 			"registrationId", "apps", "labels", "lastSeenAt", "lastConnectedFromIP",
 		}, "component/worker/store.go UpdateApps"},
 		{"createAppSession", []string{
-			"sessionId", "workerId", "app", "kind", "runId", "stepId", "workspace",
-			"prompt", "inputArtifactIds", "mcpEndpoint", "credentialRef",
+			"sessionId", "workerId", "app", "kind", "runId", "stepId", "sessionRunId",
+			"workspace", "prompt", "inputArtifactIds", "mcpEndpoint", "credentialRef",
 			"credentialExpiresAt", "startedAt",
 		}, "component/worker/appsession_store.go CreateAppSession"},
-		{"appendAppSessionTranscript", []string{
-			"sessionId", "transcript", "transcriptBytes", "transcriptTruncated", "status",
-		}, "component/worker/appsession_store.go AppendAppSessionTranscript"},
+		{"recordAppSessionProgress", []string{
+			"sessionId", "recordedSteps", "droppedActions", "status",
+		}, "component/worker/appsession_store.go RecordAppSessionProgress"},
 		{"endAppSession", []string{
-			"sessionId", "status", "exitCode", "usage", "billing", "transcript",
-			"transcriptBytes", "transcriptTruncated", "producedArtifactIds",
-			"appSessionRef", "errorMessage", "cancelReason", "endedAt",
+			"sessionId", "status", "exitCode", "usage", "billing", "transcriptFileId",
+			"transcriptTruncated", "recordedSteps", "droppedActions",
+			"producedArtifactIds", "appSessionRef", "errorMessage", "cancelReason",
+			"endedAt",
 		}, "component/worker/appsession_store.go EndAppSession"},
 		{"liveAppSessionsForUser", nil, "component/worker/delegation_probe.go LiveSessionCount"},
 		{"delegationPolicyForUser", nil, "component/worker/delegation_probe.go + agent/worker/store.go"},

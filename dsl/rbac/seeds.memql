@@ -589,20 +589,6 @@ seed capability cap-developer-read-app-settings-access { roleSlug: "developer"  
 @description("admin: open the access section of the settings app -- the grant reads' admin floor (memql#5307).")
 seed capability cap-admin-read-app-settings-access { roleSlug: "admin"  verb: "read"  resourceType: "app:settings/access"  predefined: true }
 
-// ---- app:stores (registry floor: min owner) ----
-@description("owner: open the stores app -- reproduces the OS registry floor min owner (memql#5300).")
-seed capability cap-owner-read-app-stores { roleSlug: "owner"  verb: "read"  resourceType: "app:stores"  predefined: true }
-@description("owner: open the stores section of the stores app -- reproduces the OS registry floor min owner (memql#5300).")
-seed capability cap-owner-read-app-stores-stores { roleSlug: "owner"  verb: "read"  resourceType: "app:stores/stores"  predefined: true }
-@description("owner: open the logs section of the stores app -- reproduces the OS registry floor min admin (memql#5300).")
-seed capability cap-owner-read-app-stores-logs { roleSlug: "owner"  verb: "read"  resourceType: "app:stores/logs"  predefined: true }
-@description("developer: open the logs section of the stores app -- reproduces the OS registry floor min admin (memql#5300).")
-seed capability cap-developer-read-app-stores-logs { roleSlug: "developer"  verb: "read"  resourceType: "app:stores/logs"  predefined: true }
-@description("admin: open the logs section of the stores app -- reproduces the OS registry floor min admin (memql#5300).")
-seed capability cap-admin-read-app-stores-logs { roleSlug: "admin"  verb: "read"  resourceType: "app:stores/logs"  predefined: true }
-@description("owner: open the settings section of the stores app -- reproduces the OS registry floor min owner (memql#5300).")
-seed capability cap-owner-read-app-stores-settings { roleSlug: "owner"  verb: "read"  resourceType: "app:stores/settings"  predefined: true }
-
 // ---- app:bin (registry floor: no floor) ----
 @description("owner: open the bin app -- reproduces the OS registry floor no floor (memql#5300).")
 seed capability cap-owner-read-app-bin { roleSlug: "owner"  verb: "read"  resourceType: "app:bin"  predefined: true }
@@ -678,4 +664,16 @@ seed capability cap-developer-execute-app-deployables-retire { roleSlug: "develo
 seed capability cap-owner-execute-app-deployables-domains { roleSlug: "owner"  verb: "execute"  resourceType: "app:deployables/domains"  predefined: true }
 @description("developer: the domains part of the Deployables app -- bind or remove a custom domain (memql#5301).")
 seed capability cap-developer-execute-app-deployables-domains { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/domains"  predefined: true }
+
+// ---- app:deployables/store -- attach the Shopify store a storefront fronts ----
+//
+// OWNER ONLY, and that is not an oversight beside the five above. It is what
+// the retired app:stores set granted: the Stores app was `min: "owner"` and
+// v1:shopify:store is @rowAuthz(clusterOwner), so the population that could
+// manage a store was cluster owners and nobody else. Seeding this part on
+// developer too would put a control on a developer's screen that the row tier
+// then serves nothing to -- a refusal rendered as an empty panel, which is the
+// failure mode memql#5216 was filed for.
+@description("owner: the store part of the Deployables app -- attach or change the Shopify store a storefront fronts (memql#5541).")
+seed capability cap-owner-execute-app-deployables-store { roleSlug: "owner"  verb: "execute"  resourceType: "app:deployables/store"  predefined: true }
 

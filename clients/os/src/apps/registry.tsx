@@ -10,7 +10,6 @@ import {
   Send,
   Settings as SettingsIcon,
   Shapes,
-  Store,
   Trash2,
   Users,
   Waypoints,
@@ -43,8 +42,6 @@ import { MaterializerApp } from "./materializer/MaterializerApp";
 import { MATERIALIZER_SECTIONS, MATERIALIZER_REQUIRES, MATERIALIZER_WANTS } from "./materializer/settings";
 import { SettingsApp } from "./settings/SettingsApp";
 import { SETUP_WIDGET_SIZE, setupWidget } from "./setup/manifest";
-import { StoresApp } from "./stores/StoresApp";
-import { STORES_SECTIONS } from "./stores/settings";
 import { TrainingApp } from "./training/TrainingApp";
 import { TRAINING_SECTIONS, TRAINING_REQUIRES, TRAINING_WANTS } from "./training/settings";
 import { UsersApp } from "./users/UsersApp";
@@ -677,35 +674,6 @@ const materializer: OsAppManifest = {
 // scopes, subscriptions and mirror sync state, and the two acts that are
 // about a STORE.
 //
-// ITS OWN APP RATHER THAN A CLUSTER SECTION, because its subject is a live
-// integration rather than the cluster itself -- the one deferred surface
-// that is.
-//
-// `roles: { min: "owner" }` is PRESENTATION over gates the engine holds:
-// every query in dsl/shopify/overlay/queries.memql filters
-// `actor.isClusterOwner==true`, and `v1:shopify:store` declares
-// `@rowAuthz(clusterOwner)`. Owner rather than admin, which is what the
-// portal gated on too -- only the cluster owner may list, add or change a
-// store.
-//
-// THE PER-DOMAIN ACTS ARE DELIBERATELY NOT HERE. Backfill, per-domain pause,
-// retry and discard are the generic sync runtime (`datasyncStartBackfill`
-// and friends) and they act on a (concept, connector) pair rather than on a
-// store; they live in the Cluster app's Data origins section. What lives
-// here is the store-wide pause and the Shopify-specific subscription
-// reconcile. Two pages carrying the same three buttons is the duplication
-// that split exists to avoid, and the store page names where the others are
-// rather than leaving somebody to hunt.
-const stores: OsAppManifest = {
-  id: "stores",
-  name: "Stores",
-  icon: Store,
-  requires: "app:stores",
-  sections: STORES_SECTIONS,
-  settingsSection: "settings",
-  logsSection: "logs",
-  component: StoresApp,
-};
 
 function AskWidgetBody() {
   const { transport, voice, settings, availability } = useAsk();
@@ -756,7 +724,6 @@ export const OS_REGISTRY: OsRegistry = {
     training,
     nexus,
     settings,
-    stores,
     bin,
   ],
   widgets: [askWidget, setupWidget],

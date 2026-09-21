@@ -2756,6 +2756,7 @@
         ],
         "source": [
           "agent_generated",
+          "app_session",
           "computer_use",
           "derived",
           "exported",
@@ -2866,6 +2867,7 @@
         ],
         "source": [
           "agent_generated",
+          "app_session",
           "derived",
           "exported",
           "uploaded"
@@ -4233,6 +4235,7 @@
         "ownerUserId",
         "packageDeployableName",
         "packageId",
+        "resolutionTail",
         "settings",
         "status",
         "systemOwned",
@@ -4249,6 +4252,10 @@
           "shopify_storefront",
           "spa",
           "static"
+        ],
+        "resolutionTail": [
+          "fallback",
+          "not_found"
         ],
         "status": [
           "archived",
@@ -7233,8 +7240,10 @@
         "adminTokenRef",
         "apiVersion",
         "appClientId",
+        "developmentOfStoreId",
         "domain",
         "health",
+        "isDevelopment",
         "name",
         "ownerUserId",
         "plan",
@@ -7745,6 +7754,7 @@
         "errorMessage",
         "expectedFootprint",
         "externalKey",
+        "fingerprint",
         "finishedAt",
         "idempotencyKey",
         "input",
@@ -7844,6 +7854,7 @@
         "cancelReason",
         "credentialExpiresAt",
         "credentialRef",
+        "droppedActions",
         "endedAt",
         "errorMessage",
         "exitCode",
@@ -7853,15 +7864,16 @@
         "ownerUserId",
         "producedArtifactIds",
         "prompt",
+        "recordedSteps",
         "responseSchema",
         "result",
         "resultSubmittedAt",
         "runId",
+        "sessionRunId",
         "startedAt",
         "status",
         "stepId",
-        "transcript",
-        "transcriptBytes",
+        "transcriptFileId",
         "transcriptTruncated",
         "usage",
         "workerId",
@@ -8294,6 +8306,20 @@
       "kind": "field",
       "migration": "20260908030000_planner_retirement_row_keys.up.sql",
       "note": "epic memql#5000 (commit f8b0126d6) deleted v1:planner:plan, task and taskState and swept the fields pointing at them. Measured by memql#5210."
+    },
+    {
+      "concept": "v1:worker:appSession",
+      "field": "transcript",
+      "kind": "field",
+      "migration": "20260920000000_app_session_transcript_retired.up.sql",
+      "note": "epic memql#5396 (task memql#5398) replaced the flattened transcript with rows of the work spine -- one v1:work:step and one v1:work:observation per action -- and put the session's prose in the Library as one content-addressed file named by the row's new transcriptFileId. transcriptTruncated survives and is deliberately NOT stripped: it now says the transcript FILE does not hold the whole output."
+    },
+    {
+      "concept": "v1:worker:appSession",
+      "field": "transcriptBytes",
+      "kind": "field",
+      "migration": "20260920000000_app_session_transcript_retired.up.sql",
+      "note": "epic memql#5396 (task memql#5398) replaced the flattened transcript with rows of the work spine -- one v1:work:step and one v1:work:observation per action -- and put the session's prose in the Library as one content-addressed file named by the row's new transcriptFileId. transcriptTruncated survives and is deliberately NOT stripped: it now says the transcript FILE does not hold the whole output."
     },
     {
       "concept": "v1:worker:invocation",

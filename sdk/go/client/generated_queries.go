@@ -3001,6 +3001,29 @@ func DetectConflictsBuild(args DetectConflictsArgs) string {
 	return b.String()
 }
 
+// DevelopmentStoresFor -- The development stores attached to one live store.
+// A storefront shows the store it is bound to and the development store it is exercised against; without this read the two rows sit in one list with nothing saying which belongs to which.
+//
+// Bound concept: v1:shopify:store (machine-readable: BoundConcepts["developmentStoresFor"] in generated_concepts.go).
+type DevelopmentStoresForArgs struct {
+	StoreId string
+}
+
+// DevelopmentStoresFor calls the engine query developmentStoresFor.
+func (qc *QueryClient) DevelopmentStoresFor(ctx context.Context, args DevelopmentStoresForArgs) (*Result, error) {
+	call := DevelopmentStoresForBuild(args)
+	return qc.executeNamed(ctx, "developmentStoresFor", call)
+}
+
+func DevelopmentStoresForBuild(args DevelopmentStoresForArgs) string {
+	var b strings.Builder
+	b.WriteString("query developmentStoresFor(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // DeviceCodeByDeviceCodeHash -- Device-grant polling lookup by deviceCodeHash. Returns rows in every status so the token endpoint can emit the RFC-specified error rather than a generic invalid_grant.
 //
 // Bound concept: v1:identity:deviceCode (machine-readable: BoundConcepts["deviceCodeByDeviceCodeHash"] in generated_concepts.go).
@@ -4158,6 +4181,32 @@ func LibraryFileByIdBuild(args LibraryFileByIdArgs) string {
 	b.WriteString("query libraryFileById(")
 	b.WriteString("fileId: ")
 	b.WriteString(quoteMemQL(args.FileId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryFileBySha256 -- The caller's live file at one content digest -- the dedup read behind content-addressed storage (epic memql#5396, design D5).
+// `sha256` has been documented on the row as "a DEDUP HINT and an integrity check" since the file concept existed, and until now nothing read it that way: an app session that writes the same file content in two steps, or two sessions that read the same source file, would each have stored their own copy. This is what makes "two identical writes yield one file" true, and it is what makes a later branch from a recorded step cost no copy.
+// SCOPED TO THE CALLER, always. A digest is not an access key -- knowing one grants nothing -- so a cross-owner dedup would be a read of somebody else's bytes dressed as an optimisation, and two people who happen to hold the same file are two people who each own a copy.
+// Archived rows are EXCLUDED, for libraryFileByUploadedFrom's reason: reusing a row its owner threw away would resurrect it under a new reference, which is not a coherent reading of a deletion. A digest that matches only an archived file stores a fresh copy.
+// The hash is OPTIONAL on the row (a chunked upload lands with it absent and the analysis pass stamps it later), so a blank argument is guarded to nothing rather than matching every file that has not been hashed yet -- which would hand a caller somebody's unhashed upload as its own content.
+//
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["libraryFileBySha256"] in generated_concepts.go).
+type LibraryFileBySha256Args struct {
+	Sha256 string
+}
+
+// LibraryFileBySha256 calls the engine query libraryFileBySha256.
+func (qc *QueryClient) LibraryFileBySha256(ctx context.Context, args LibraryFileBySha256Args) (*Result, error) {
+	call := LibraryFileBySha256Build(args)
+	return qc.executeNamed(ctx, "libraryFileBySha256", call)
+}
+
+func LibraryFileBySha256Build(args LibraryFileBySha256Args) string {
+	var b strings.Builder
+	b.WriteString("query libraryFileBySha256(")
+	b.WriteString("sha256: ")
+	b.WriteString(quoteMemQL(args.Sha256))
 	b.WriteString(")")
 	return b.String()
 }

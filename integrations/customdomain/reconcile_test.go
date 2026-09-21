@@ -3,6 +3,7 @@ package customdomain
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -317,6 +318,113 @@ func TestARemovingRowDispatchesTheUnbindAndClosesTheWalk(t *testing.T) {
 	}
 	if out.Removed != 1 || !eng.ranMutation("markCustomDomainRemoved") {
 		t.Fatal("the walk was not closed at `removed`")
+	}
+}
+
+// ===========================================================================
+// A REMOVAL ONLY EVER ENDS AT `removed`
+// ===========================================================================
+
+// verified is a row that reached `issuing` the only legitimate way, so its
+// Ingress and Certificate may exist.
+func verified(r map[string]any) map[string]any {
+	r["verifiedAt"] = "2026-08-30T09:00:00Z"
+	return r
+}
+
+// THE BUG THIS PINS. A failed unbind was recorded through the ISSUANCE failure
+// mutation, which stamps `status: "issuing"` -- so a binding somebody had asked
+// to take down was written back onto the certificate step, and the very next
+// pass dispatched its BIND. On a cluster with an issuer that re-provisions a
+// domain its operator removed. Both failure shapes are pinned, because the
+// provisioner has two: a refusal it names, and a Go error when it never ran.
+func TestAFailedUnbindLeavesTheRowRemovingAndNeverWalksItBackToIssuing(t *testing.T) {
+	for name, prov := range map[string]*recordingProvisioner{
+		"a refusal the provisioner names": {out: Outcome{Reason: ReasonIssuanceFailed, Detail: "ingresses.networking.k8s.io is forbidden"}},
+		"a provisioner that did not run":  {err: errors.New("no route to the API server")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			eng := &fakeEngine{t: t, rows: []map[string]any{verified(row("d1", "www.acme.com", StatusRemoving))}}
+			rec := newTestReconciler(t, eng, &fakeResolver{}, prov)
+
+			out, err := rec.Run(context.Background())
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if len(prov.unbinds) != 1 {
+				t.Fatalf("unbind dispatched %d time(s), want 1", len(prov.unbinds))
+			}
+			if eng.ranMutation("recordCustomDomainIssuanceFailure") {
+				t.Fatal("a failed REMOVAL was recorded as a failed ISSUANCE, which stamps the row `issuing` -- the next pass would bind a domain somebody asked to take down")
+			}
+			if !eng.ranMutation("recordCustomDomainRemovalFailure") {
+				t.Fatal("the failed unbind reached no row at all, so a stuck removal would say nothing about why")
+			}
+			if out.Removed != 0 || eng.ranMutation("markCustomDomainRemoved") {
+				t.Fatal("a binding whose objects may still be applied was closed as removed")
+			}
+			if len(prov.binds) != 0 {
+				t.Fatal("a removal dispatched a bind")
+			}
+		})
+	}
+}
+
+// ...and says so under a reason of its own, carrying the cluster's words.
+func TestAFailedUnbindIsRecordedAsARemovalFailureWithWhatTheClusterSaid(t *testing.T) {
+	eng := &fakeEngine{t: t, rows: []map[string]any{verified(row("d1", "www.acme.com", StatusRemoving))}}
+	prov := &recordingProvisioner{out: Outcome{Reason: ReasonIssuanceFailed, Detail: "certificates.cert-manager.io is forbidden"}}
+	rec := newTestReconciler(t, eng, &fakeResolver{}, prov)
+
+	if _, err := rec.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var call string
+	for _, c := range eng.calls {
+		if strings.HasPrefix(c, "mutation recordCustomDomainRemovalFailure") {
+			call = c
+		}
+	}
+	if !strings.Contains(call, `failureReason: "removal_failed"`) {
+		t.Errorf("nothing is being issued on this path, so the row must not say issuance failed:\n  %s", call)
+	}
+	if !strings.Contains(call, "certificates.cert-manager.io is forbidden") {
+		t.Errorf("the cluster's own words did not reach the row:\n  %s", call)
+	}
+}
+
+// CANCELLING A DOMAIN STILL WAITING FOR ITS DNS RECORDS is the ordinary
+// removal, and it used to be the one that could not finish. The bind is
+// dispatched from `issuing` and nowhere else, and `issuing` is reached only
+// through MarkVerified -- so a binding with no verifiedAt has no Ingress and no
+// Certificate, and a cluster this node cannot reach must not hold it at
+// `removing`, still claiming a hostname only `removed` frees. Found on a local
+// cluster, whose ServiceAccount may not touch Ingresses at all.
+func TestABindingThatWasNeverVerifiedIsRemovedEvenWhenTheClusterCannotBeReached(t *testing.T) {
+	for name, prov := range map[string]*recordingProvisioner{
+		"forbidden":   {out: Outcome{Reason: ReasonIssuanceFailed, Detail: "ingresses.networking.k8s.io is forbidden"}},
+		"did not run": {err: errors.New("no route to the API server")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			eng := &fakeEngine{t: t, rows: []map[string]any{row("d1", "www.acme.com", StatusRemoving)}}
+			rec := newTestReconciler(t, eng, &fakeResolver{}, prov)
+
+			out, err := rec.Run(context.Background())
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			// STILL ATTEMPTED: it is idempotent, and it is what cleans up after
+			// a row the old bug bound without ever verifying.
+			if len(prov.unbinds) != 1 {
+				t.Fatalf("unbind dispatched %d time(s), want 1", len(prov.unbinds))
+			}
+			if out.Removed != 1 || !eng.ranMutation("markCustomDomainRemoved") {
+				t.Fatal("a binding with nothing provisioned was held at `removing` by a cluster it never touched")
+			}
+			if eng.ranMutation("recordCustomDomainRemovalFailure") || eng.ranMutation("recordCustomDomainIssuanceFailure") {
+				t.Fatal("a removal that finished still recorded a failure")
+			}
+		})
 	}
 }
 

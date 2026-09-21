@@ -326,6 +326,11 @@ func callMCPTool(ctx context.Context, eng Engine, role string, tier Tier, appSes
 	// The back-channel pair, dispatched before the role/tier machinery: their
 	// gate is the CREDENTIAL, not a role, and running them through the acting-
 	// role plumbing would invite a later edit to gate them on one.
+	//
+	// They also return BEFORE the recording below, which is the exclusion
+	// design D12 asks for: they are the session's own plumbing rather than
+	// its work, and a procedure lifted from a timeline containing them would
+	// try to replay them.
 	if isAppSessionTool(name) {
 		switch name {
 		case toolSubmit:
@@ -334,6 +339,23 @@ func callMCPTool(ctx context.Context, eng Engine, role string, tier Tier, appSes
 			return handleNextTask(ctx, eng, appSessionId)
 		}
 	}
+	// AN APP'S CALLS BACK INTO MEMQL ARE PART OF ITS RECORDING (epic
+	// memql#5396). Deferred so it records the RESULT the app actually
+	// received, including a failure: a recording that only kept the calls
+	// that worked would make every lifted procedure look more reliable than
+	// the session it came from. A no-op for every other caller, and for a
+	// node with no recorder wired.
+	//
+	// THE RECORDING CONTEXT IS BOUND HERE, before the derivations below. A
+	// deferred closure captures the VARIABLE, so writing `ctx` would hand the
+	// recorder whatever `ctx` had become by the time the tool returned --
+	// carrying the acting-agent role, the strict-unknown-args mark and the
+	// MCP-tool-execution mark, none of which belong on a write this package
+	// is not making on the caller's behalf. Harmless today and the kind of
+	// coupling that is only ever noticed once it breaks something.
+	recordCtx := ctx
+	result := errorResult("mcp tool surface: the tool returned nothing")
+	defer func() { recordAppSessionToolCall(recordCtx, appSessionId, name, args, result) }()
 	ctx = memql.WithActingAgentRole(ctx, role)
 	// Reject unknown mutation args at the MCP boundary instead of silently
 	// dropping them (memql#1633). Scoped to MCP calls so internal engine
@@ -349,35 +371,46 @@ func callMCPTool(ctx context.Context, eng Engine, role string, tier Tier, appSes
 
 	switch name {
 	case toolRunQuery, toolRunMutation:
-		return runNamedConstruct(ctx, eng, name, args)
+		result = runNamedConstruct(ctx, eng, name, args)
+		return result
 	case toolRunAutomation:
-		return handleRunAutomation(ctx, args)
+		result = handleRunAutomation(ctx, args)
+		return result
 	case toolDefine:
-		return handleDefine(ctx, eng, role, tier, args)
+		result = handleDefine(ctx, eng, role, tier, args)
+		return result
 	case toolStage:
-		return handleStage(ctx, eng, role, tier, args)
+		result = handleStage(ctx, eng, role, tier, args)
+		return result
 	case toolPromote:
-		return handlePromote(ctx, eng, role, tier, args)
+		result = handlePromote(ctx, eng, role, tier, args)
+		return result
 	case toolQuery:
-		return handleInlineQuery(ctx, eng, role, tier, args)
+		result = handleInlineQuery(ctx, eng, role, tier, args)
+		return result
 	case toolRunInlineAutomation:
-		return handleInlineAutomation(ctx, role, tier, args)
+		result = handleInlineAutomation(ctx, role, tier, args)
+		return result
 	default:
 		// A first-class @mcp-promoted query/mutation is called by its own name
 		// with its args directly; route it to the named-construct executor.
 		if kind, ok := eng.MCPPromotedFunctionKind(name); ok {
-			return runNamedConstructDirect(ctx, eng, kind, name, args)
+			result = runNamedConstructDirect(ctx, eng, kind, name, args)
+			return result
 		}
 		// A first-class @mcp-promoted automation is called by its own name with
 		// its input directly; route it to the automation runner.
 		if r := automationRunnerFromContext(ctx); r != nil && r.IsPromotedAutomation(name) {
-			return runAutomationVia(ctx, r, name, args, false)
+			result = runAutomationVia(ctx, r, name, args, false)
+			return result
 		}
 		raw, err := eng.ExecuteToolByName(ctx, name, args)
 		if err != nil {
-			return errorResult(fmt.Sprintf("tool %q failed: %v", name, err))
+			result = errorResult(fmt.Sprintf("tool %q failed: %v", name, err))
+			return result
 		}
-		return toolResultFromJSON(raw)
+		result = toolResultFromJSON(raw)
+		return result
 	}
 }
 

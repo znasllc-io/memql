@@ -1024,10 +1024,20 @@ async function composeSource(seed: FakeSeed): Promise<{ connection: FakeConnecti
       { role: "owner", userId: "u-me" },
     ),
   );
-  await click(await screen.findByRole("button", { name: /New deployable/ }));
-  const region = await screen.findByRole("region", { name: "New deployable" });
+  await click(await screen.findByRole("button", { name: /Add a deployable/ }));
+  const region = await screen.findByRole("region", { name: "Add a deployable" });
   await click(within(region).getByRole("radio", { name: /A repository/ }));
   return { connection, region };
+}
+
+/**
+ * An act on the wizard's FLOOR. Connecting is the repository step's forward
+ * act, and a wizard's forward act lives on its floor and nowhere else -- so
+ * that is where these tests look for it, and where they press it.
+ */
+function floorAct(name: string): HTMLButtonElement | null {
+  const hit = [...document.querySelectorAll(".os-actbar-acts button")].find((b) => (b.textContent ?? "").trim() === name);
+  return (hit as HTMLButtonElement | undefined) ?? null;
 }
 
 const WIDGET = repositoryFixture({ fullName: "acme/widget", private: true, visibility: "private" });
@@ -1038,6 +1048,9 @@ function personalSource(credentials: Row[], userId = "u-me") {
     credentials={credentials.map(credentialFromRow)}
     probe={{ reply: null, error: "", busy: false, probe: vi.fn(async () => {}), clear: vi.fn() }}
     tokenFormOpen={false} onTokenFormOpenChange={vi.fn()}
+    /* The connect is the page's: it is the step's forward act, and a wizard's
+       forward act lives on its floor. A step mounted alone gets an idle one. */
+    connect={{ busy: false, refusal: null, installUrl: "", connect: vi.fn(async () => false), learn: vi.fn(async () => false), clear: vi.fn() } as never}
   />, { userId });
 }
 
@@ -1076,7 +1089,9 @@ describe("personal repository connection lifecycle", () => {
     const view = render(personalSource([GRANT]));
     await screen.findByRole("button", { name: /widget/ });
     view.rerender(personalSource([GRANT], "other-user"));
-    expect(screen.getByRole("button", { name: "Connect GitHub" })).toBeTruthy();
+    // Mounted alone there is no floor to carry the act; the step says what
+    // connecting is for, which is the half of it that is the step's.
+    expect(screen.getByText(/Connect your GitHub account and pick from a list/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /widget/ })).toBeNull();
     expect(screen.queryByRole("link", { name: "Install on another organization" })).toBeNull();
   });
@@ -1092,10 +1107,10 @@ describe("the compose Source stop, with a connection", () => {
     const { connection, region } = await composeSource({
       credentials: [githubGrantRow({ id: "colleague-grant", ownerUserId: "u-colleague", login: "colleague" })],
     });
-    expect(within(region).getByRole("button", { name: "Connect GitHub" })).toBeTruthy();
+    await waitFor(() => expect(floorAct("Connect GitHub")).toBeTruthy());
     expect(connection.callsNamed("sourceRepositories")).toEqual([]);
     expect(within(region).queryByText("This connection reaches no repositories yet.")).toBeNull();
-    await click(within(region).getByRole("button", { name: "Use a token instead" }));
+    await click(within(region).getByRole("radio", { name: "A token" }));
     expect(within(region).queryByRole("option", { name: /colleague/ })).toBeNull();
   });
 
@@ -1117,7 +1132,10 @@ describe("the compose Source stop, with a connection", () => {
     const { region } = await composeSource({
       credentials: [GRANT], repositories: repositoriesReply({ reason }),
     });
-    expect(await within(region).findByRole("button", { name: "Reconnect GitHub" })).toBeTruthy();
+    // GITHUB'S OWN ANSWER ABOUT THE GRANT arrives on the repository read, inside
+    // the step -- so the step tells the page, and the floor offers the way back.
+    await waitFor(() => expect(floorAct("Reconnect GitHub")).toBeTruthy());
+    expect(within(region).getByText(/Your GitHub connection has lapsed/)).toBeTruthy();
     expect(within(region).queryByText("This connection reaches no repositories yet.")).toBeNull();
   });
 
@@ -1141,7 +1159,7 @@ describe("the compose Source stop, with a connection", () => {
     ]);
     // The token form is under it, closed: one answer on screen at a time.
     expect(within(region).queryByLabelText(URL_FIELD)).toBeNull();
-    expect(within(region).getByRole("button", { name: "Use a token instead" })).toBeTruthy();
+    expect(within(region).getByRole("radio", { name: "A token" })).toBeTruthy();
   });
 
   it("fills the URL, the credential and the branches from the one it was given", async () => {
@@ -1213,7 +1231,7 @@ describe("the compose Source stop, with a connection", () => {
     });
     await click(await within(region).findByRole("button", { name: /widget/ }));
 
-    await click(await within(region).findByRole("button", { name: /Review$/ }));
+    await click(await within(region).findByRole("button", { name: /^Review/ }));
     expect(await within(region).findByText("acme-storefront")).toBeTruthy();
     expect(within(region).getByText("web")).toBeTruthy();
     expect(within(region).getByText("clients/web")).toBeTruthy();
@@ -1247,16 +1265,19 @@ describe("the compose Source stop, without one", () => {
   it("offers Connect above the token form, and asks the cluster nothing until something is pressed", async () => {
     const { connection, region } = await composeSource({ credentials: [] });
 
-    expect(within(region).getByRole("button", { name: "Connect GitHub" })).toBeTruthy();
+    await waitFor(() => expect(floorAct("Connect GitHub")).toBeTruthy());
+    // THE TWO WAYS IN ARE ONE CHOICE, as equals, with GitHub chosen.
+    expect(within(region).getByRole("radio", { name: "GitHub" }).getAttribute("aria-checked")).toBe("true");
+    expect(within(region).getByRole("radio", { name: "A token" }).getAttribute("aria-checked")).toBe("false");
     // Beginning a connect mints a state row, so nothing asks whether this
     // cluster has an app until somebody presses something.
     expect(connection.callsNamed("githubConnectBegin")).toHaveLength(0);
     expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
     // The fold is closed, and one click away.
     expect(within(region).queryByLabelText(URL_FIELD)).toBeNull();
-    await click(within(region).getByRole("button", { name: "Use a token instead" }));
+    await click(within(region).getByRole("radio", { name: "A token" }));
     expect(within(region).getByLabelText(URL_FIELD)).toBeTruthy();
-    await click(within(region).getByRole("button", { name: "Hide the token form" }));
+    await click(within(region).getByRole("radio", { name: "GitHub" }));
     expect(within(region).queryByLabelText(URL_FIELD)).toBeNull();
   });
 
@@ -1264,7 +1285,7 @@ describe("the compose Source stop, without one", () => {
     const { region } = await composeSource({
       credentials: [githubGrantRow({ id: "cred-grant", status: "revoked" })],
     });
-    expect(within(region).getByRole("button", { name: "Reconnect GitHub" })).toBeTruthy();
+    await waitFor(() => expect(floorAct("Reconnect GitHub")).toBeTruthy());
     // A lapsed grant reads no repositories, so it is offered no picker.
     expect(within(region).queryByRole("button", { name: "Look again" })).toBeNull();
   });
@@ -1277,7 +1298,8 @@ describe("the compose Source stop, without one", () => {
       // does not exist.
       connectReason: "github_app_not_configured",
     });
-    await click(within(region).getByRole("button", { name: "Connect GitHub" }));
+    await waitFor(() => expect(floorAct("Connect GitHub")).toBeTruthy());
+    await click(floorAct("Connect GitHub")!);
 
     // The OS headline, the sentence for the answered code beneath it.
     const headline = await within(region).findByText("This cluster has no GitHub connection set up");
@@ -1289,7 +1311,7 @@ describe("the compose Source stop, without one", () => {
     // theirs, so the control is gone -- and the form is the stop, open, with
     // no fold to find it behind.
     expect(within(region).queryByRole("button", { name: "Connect GitHub" })).toBeNull();
-    expect(within(region).queryByRole("button", { name: "Use a token instead" })).toBeNull();
+    expect(within(region).queryByRole("radio", { name: "A token" })).toBeNull();
     expect(within(region).getByLabelText(URL_FIELD)).toBeTruthy();
   });
 });

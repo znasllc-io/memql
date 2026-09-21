@@ -48,11 +48,13 @@ func TestAppSessionWritesBorrowTheOwnersActor(t *testing.T) {
 	}
 }
 
-// TestTranscriptFlushStillStampsOrigin: the flush names only the session, so
-// there is no owner to borrow -- but it is @serverOnly all the same, and
-// forgetting the stamp on this one path would silently lose every transcript
-// while sessions themselves kept working.
-func TestTranscriptFlushStillStampsOrigin(t *testing.T) {
+// TestProgressWriteStillStampsOrigin: the progress write names only the
+// session, so there is no owner to borrow -- but it is @serverOnly all the
+// same, and forgetting the stamp on this one path would silently lose every
+// recording counter while sessions themselves kept working. Losing the
+// counter also loses the seq the MCP node allocates from, so every mcp step
+// would land at the seq of the session's first action.
+func TestProgressWriteStillStampsOrigin(t *testing.T) {
 	ctx := appSessionWriteContext(context.Background(), "")
 	if got := auth.OriginFromContext(ctx); got != auth.OriginInternal {
 		t.Fatalf("call origin = %v, want %v", got, auth.OriginInternal)
@@ -143,7 +145,7 @@ func TestStoreMethodsDoNotReturnAContext(t *testing.T) {
 	// compiling -- which is the point.
 	var _ interface {
 		CreateAppSession(context.Context, AppSessionRow) error
-		AppendAppSessionTranscript(context.Context, string, string, int, bool, string) error
+		RecordAppSessionProgress(context.Context, string, int, int, string) error
 		EndAppSession(context.Context, AppSessionRow) error
 	} = store
 }

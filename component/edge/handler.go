@@ -209,13 +209,8 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, site *Site) stri
 		return classifyServed(name, false)
 	}
 
-	// The last rung of D11's order, and the only place kind is consulted. A
-	// static site 404s so a mistyped path in a multi-page site is visible;
-	// an spa falls back so client-side routing works. A shopify_storefront
-	// IS a spa bundle -- design D4 says so in as many words -- so it takes
-	// the same fallback; without it every client-side storefront route
-	// (/products/x, /cart) 404s on a hard reload.
-	if site.Kind == "spa" || site.Kind == storefrontKind {
+	// The last rung of D11's order, and the only place the tail is decided.
+	if fallsBackToIndex(site) {
 		if _, err := fs.Stat(fsys, "index.html"); err == nil {
 			// The fallback serves a DOCUMENT, so it needs its hashes exactly
 			// as the root does. Without this every client-side route breaks
@@ -231,6 +226,48 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, site *Site) stri
 	http.NotFound(w, r)
 	return pathClassUnserved
 }
+
+// fallsBackToIndex answers the last rung of D11's resolution order: when a
+// request matched NO file in the bundle, does this site serve index.html or
+// 404?
+//
+// THE SITE DECIDES, AND THE KIND IS THE DEFAULT (memql#5535). Before this
+// function the kind decided outright -- static 404s so a mistyped path in a
+// multi-page site is visible, spa falls back so client-side routing survives
+// a hard reload, and a shopify_storefront took the fallback because the
+// kind's own description says it IS a spa bundle. That last one is where it
+// broke: the first storefront actually built was a multi-page prerendered
+// tree, and it declared kind "static" precisely to get the 404 back -- which
+// also gave up the store binding, the storefront block in its runtime
+// document, and the policy that admits Shopify. Neither tail is right for
+// every storefront, so the tail became a property of the SITE and the kind
+// enum stayed at exactly three values.
+//
+// EMPTY IS THE DEFAULT AND MEANS "ASK THE KIND", which is what every row
+// written before the field existed carries. AN UNRECOGNISED VALUE READS THE
+// SAME WAY, and that direction is deliberate: the enum is validated on the
+// write path, so anything else is a raw write that bypassed it, and reading
+// an unknown value as not_found would take a live site's every client-side
+// route dark on a typo. Fail toward what the site did yesterday.
+func fallsBackToIndex(site *Site) bool {
+	if site == nil {
+		return false
+	}
+	switch site.ResolutionTail {
+	case resolutionTailFallback:
+		return true
+	case resolutionTailNotFound:
+		return false
+	}
+	return site.Kind == "spa" || site.Kind == storefrontKind
+}
+
+// The two tails a site may name. A third state -- the empty string -- is the
+// absence of a choice, not a value, and is deliberately unnamed here.
+const (
+	resolutionTailFallback = "fallback"
+	resolutionTailNotFound = "not_found"
+)
 
 // resolveAsset walks D11's resolution order and returns the first name that
 // exists: the exact file, then <path>/index.html, then <path>.html.

@@ -96,13 +96,13 @@ describe("a missing part hides its control", () => {
     await waitFor(() => expect(barActs()).toEqual(["Discard", "Go live"]));
   });
 
-  it("with deploy withheld, New deployable is absent from the list", async () => {
+  it("with deploy withheld, Add a deployable is absent from the list", async () => {
     const seed: FakeSeed = { sites: [SHOP] };
     mount(fakeConnection(seed), seededAccessWithout("developer", "app:deployables/deploy"));
     await waitFor(() =>
       expect(document.querySelector("[data-os-livelist]")?.getAttribute("data-state")).toBe("live"),
     );
-    expect(screen.queryByRole("button", { name: /New deployable/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Add a deployable/ })).toBeNull();
   });
 });
 

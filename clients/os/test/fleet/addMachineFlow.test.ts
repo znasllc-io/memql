@@ -377,29 +377,45 @@ describe("the action bar follows the state", () => {
     expect(barFor(facts({ minting: true }), []).acts).toEqual([]);
   });
 
-  it("waits with Cancel, and names the long wait after ten minutes", () => {
+  // THE FLOOR'S TWO VERBS, the same on every add wizard: Cancel undoes the
+  // whole thing, Leave goes and everything stays. Cancel is a text action and
+  // Leave is the one button.
+  it("waits with Cancel and Leave, and names the long wait after ten minutes", () => {
     const bar = barFor(facts({ mint: MINT, mintedAt: NOW }), []);
     expect(bar.state).toBe("Waiting for studio-mac-mini");
     expect(bar.tone).toBe("busy");
-    expect(bar.acts.map((a) => a.id)).toEqual(["cancel"]);
+    expect(bar.acts.map((a) => [a.id, a.text === true])).toEqual([["cancel", true], ["leave", false]]);
     const long = facts({ mint: MINT, mintedAt: new Date(NOW.getTime() - LONG_WAIT_MS) });
     expect(waitedLong(long)).toBe(true);
     expect(barFor(long, []).detail).toMatch(/taking a while/);
   });
 
-  it("asks which of two things after Cancel on a minted token", () => {
+  // CANCEL REVOKES A LIVE CREDENTIAL, so it asks -- and it is its OWN question
+  // now. It used to be one question with three answers behind a single Cancel,
+  // which meant the way to leave WITHOUT cancelling was found by pressing
+  // Cancel.
+  it("asks before cancelling a minted token, because cancelling revokes it", () => {
     const bar = barFor(facts({ mint: MINT, cancelAsked: true }), []);
-    expect(bar.state).toBe("Leave?");
-    expect(bar.question).toMatch(/still works/);
-    expect(bar.acts.map((a) => a.id)).toEqual(["keepWaiting", "revokeAndLeave", "leaveKeepToken"]);
+    expect(bar.state).toBe("Cancel?");
+    expect(bar.question).toMatch(/token is revoked/);
+    expect(bar.acts.map((a) => [a.id, a.text === true])).toEqual([["keepWaiting", true], ["revokeAndLeave", false]]);
     expect(bar.acts.find((a) => a.id === "revokeAndLeave")?.tone).toBe("danger");
-    expect(bar.acts.find((a) => a.id === "leaveKeepToken")?.tone).toBe("primary");
   });
 
-  it("keeps the question open with the refusal when the revoke failed", () => {
+  it("asks once before leaving, for the one thing leaving costs here: the token is shown only on this page", () => {
+    const bar = barFor(facts({ mint: MINT, leaveAsked: true }), []);
+    expect(bar.state).toBe("Leave?");
+    expect(bar.question).toMatch(/keeps working/);
+    expect(bar.question).toMatch(/shown only here/);
+    expect(bar.acts.map((a) => [a.id, a.text === true])).toEqual([["keepWaiting", true], ["leaveKeepToken", false]]);
+  });
+
+  it("keeps the question open with the refusal when the revoke failed, and never traps anybody in it", () => {
     const bar = barFor(facts({ mint: MINT, cancelAsked: true, revokeError: "identity not found" }), []);
     expect(bar.question).toContain("identity not found");
-    expect(bar.acts.map((a) => a.id)).toContain("leaveKeepToken");
+    expect(bar.acts.map((a) => a.id)).toEqual(["keepWaiting", "leaveKeepToken", "revokeAndLeave"]);
+    // Still one button: the retry. The two ways out are text.
+    expect(bar.acts.filter((a) => a.text !== true).map((a) => a.id)).toEqual(["revokeAndLeave"]);
   });
 
   it("drops Cancel once connected and offers Open and Done, Done primary only when settled", () => {
@@ -410,6 +426,8 @@ describe("the action bar follows the state", () => {
       ["open", "quiet"],
       ["done", "quiet"],
     ]);
+    // One button; opening the machine is the text action beside it.
+    expect(pending.acts.map((a) => a.text === true)).toEqual([true, false]);
     expect(pending.acts[0]!.label).toBe("Open mini.local");
     const settled = barFor(facts({ mint: MINT, machine: m, beats: 2 }), checksFor(MAC, m, 2, NOW));
     expect(settled.state).toBe("Ready");
