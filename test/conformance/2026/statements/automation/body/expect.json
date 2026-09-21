@@ -11,6 +11,17 @@
       "verdict": "refuse_parse",
       "code": "body_empty",
       "message": "automation nothingToDo has no statement: an automation has at least one"
+    },
+    {
+      "file": "precondition-entries.memql",
+      "verdict": "load_ok",
+      "note": "a precondition block's body is `key: value` entries over a closed key set, not statements: the statement parser brace-skips the block and the automations loader reads check/literal/description by regex. The only other example in the tree is dsl/_reference/_automation.memql, which no loader and no gate reads."
+    },
+    {
+      "file": "precondition-without-check.memql",
+      "verdict": "refuse_load",
+      "message": "a `check:` boolean expression is required",
+      "note": "`check:` is what a precondition asserts. This is the refusal a grammar publishing <statement>* for the block would have caused: the statements brace-skip, check comes out empty, and the automation is refused for a reason the author never wrote."
     }
   ]
 }
