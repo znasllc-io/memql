@@ -117,8 +117,6 @@ const site: SiteRow = {
   accountId: "",
   packageId: "pkg-acme",
   packageDeployableName: "storefront",
-  storeDomain: "",
-  storefrontTokenRef: "",
   createdAt: "",
 } as unknown as SiteRow;
 

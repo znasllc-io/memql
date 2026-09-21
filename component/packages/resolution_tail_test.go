@@ -17,8 +17,7 @@ deployables:
     kind: shopify_storefront
     resolutionTail: not_found
     binding:
-      storeDomain: acme.myshopify.com
-      storefrontTokenRef: acme-storefront-token
+      store: acme.myshopify.com
   - name: docs
     path: clients/docs
     kind: static

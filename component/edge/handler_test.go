@@ -20,6 +20,7 @@ type staticResolver struct {
 
 func (s staticResolver) Resolve(context.Context, string) (*Site, error) { return s.site, nil }
 func (s staticResolver) Invalidate(string)                              {}
+func (s staticResolver) InvalidateAll()                                 {}
 
 var _ Resolver = staticResolver{}
 

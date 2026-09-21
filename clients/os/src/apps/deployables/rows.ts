@@ -332,24 +332,25 @@ export function bundleFormNote(form: BundleForm): string {
 // The Shopify binding
 // ---------------------------------------------------------------------------
 
-export interface StorefrontBinding {
-  storeDomain: string;
-  /**
-   * The NAME of a `v1:platform:globalSecret` row. The token itself is never
-   * stored on the site row and is never fetched here: the edge dereferences it
-   * at serve time into the site's runtime-config document, and that is the only
-   * place it is resolved.
-   */
-  storefrontTokenRef: string;
-}
-
-export function storefrontBinding(site: SiteRow): StorefrontBinding {
-  const b = site.binding;
-  return {
-    storeDomain: typeof b["storeDomain"] === "string" ? b["storeDomain"] : "",
-    storefrontTokenRef:
-      typeof b["storefrontTokenRef"] === "string" ? b["storefrontTokenRef"] : "",
-  };
+/**
+ * The `v1:shopify:store` row this storefront is bound to, or "" when it is
+ * bound to none (epic memql#5530, issue memql#5538).
+ *
+ * THE ROW IS THE RECORD AND THE BINDING ONLY NAMES IT. The binding used to
+ * carry `{storeDomain, storefrontTokenRef}` -- a COPY of two fields the store
+ * row already held, edited in two places at two authorization tiers. It names
+ * the store now, and the domain the page calls, the NAME of the secret holding
+ * its Storefront token, its scopes, its plan and its status are all read from
+ * the store. That is what makes an edit to a store reach every storefront
+ * bound to it with no second write.
+ *
+ * NOTHING HERE READS THE OLD SHAPE. Pre-release means no shim: a row still
+ * carrying the copy is one the migration converts, and a fallback read would
+ * keep the duplication alive in the one place a person looks at it.
+ */
+export function boundStoreId(site: SiteRow): string {
+  const v = site.binding["storeId"];
+  return typeof v === "string" ? v.trim() : "";
 }
 
 // ---------------------------------------------------------------------------

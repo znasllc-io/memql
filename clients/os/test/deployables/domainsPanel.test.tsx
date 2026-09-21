@@ -288,23 +288,51 @@ describe("the list", () => {
     expect(screen.queryByText("other.example.net")).toBeNull();
   });
 
-  // ROWS SURVIVE REMOVAL, and the list keeps them: what a cluster served, and
-  // when, is the audit, and a list that hid them would make it a fact only the
-  // database remembers.
-  it("keeps a removed binding visible with its terminal status", async () => {
+  // A DOMAIN SOMEBODY REMOVED OR CANCELLED LEAVES THE LIST. The row survives in
+  // the cluster -- what it served, and when, is the engine's to keep -- but the
+  // list is the names this deployable answers on, and the owner's word on a
+  // cancelled one sitting there was "it should remove the item from the list".
+  it("does not list a removed binding, or one the cluster is quietly taking down", async () => {
     const connection = fakeConnection({
       sites: [SHOP],
-      domains: [domainRow({ id: "cd-1", hostname: "gone.acme.com", status: "removed" })],
+      domains: [
+        domainRow({ id: "cd-1", hostname: "gone.acme.com", status: "removed" }),
+        domainRow({ id: "cd-2", hostname: "going.acme.com", status: "removing" }),
+        domainRow({ id: "cd-3", hostname: "www.acme.com", status: "verifying" }),
+      ],
     });
     await openShop(connection);
 
-    await findCard("gone.acme.com");
-    // Its adding is long over, so the page is the domain's own: titled by its
-    // name, no steps left to take, and the floor says what it is.
-    expect(screen.getByRole("heading", { name: "gone.acme.com" })).toBeTruthy();
-    expect(within(floor()).getByText("Removed")).toBeTruthy();
+    await findRow("www.acme.com");
+    expect(screen.queryByText("gone.acme.com")).toBeNull();
+    expect(screen.queryByText("going.acme.com")).toBeNull();
+  });
+
+  // ONLY `removed` FREES A HOSTNAME, so a removal the cluster could not finish
+  // is the one that stays: out of sight it would refuse that name to whoever
+  // added it again, with nothing on the page to say why.
+  it("keeps a removal the cluster could not finish, and says what it reported", async () => {
+    const connection = fakeConnection({
+      sites: [SHOP],
+      domains: [domainRow({
+        id: "cd-1", hostname: "stuck.acme.com", status: "removing", failureReason: "removal_failed",
+        failureDetail: "ingresses.networking.k8s.io is forbidden", lastCheckedAt: "2026-09-01T12:00:00Z",
+      })],
+    });
+    await openShop(connection);
+
+    const listed = await findRow("stuck.acme.com");
+    expect(within(listed).getByText(/Could not be removed yet/)).toBeTruthy();
+
+    await findCard("stuck.acme.com");
+    expect(screen.getByRole("heading", { name: "stuck.acme.com" })).toBeTruthy();
+    expect(within(floor()).getByText("Could not be removed yet")).toBeTruthy();
+    expect(floor().getAttribute("data-tone")).toBe("paused");
+    expect(screen.getByText(/could not take this domain down/)).toBeTruthy();
+    expect(screen.getByText("ingresses.networking.k8s.io is forbidden")).toBeTruthy();
+    // No steps to take and nothing to remove twice.
     expect(setupStates()).toEqual([]);
-    expect(within(floor()).queryByRole("button", { name: /^Remove/ })).toBeNull();
+    expect(within(floor()).queryByRole("button", { name: /^Remove|^Cancel/ })).toBeNull();
   });
 });
 
@@ -859,8 +887,14 @@ describe("removing a binding", () => {
 
     await click(within(floor()).getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(connection.callsNamed("removeCustomDomain")).toHaveLength(1));
-    await screen.findByRole("region", { name: /^Domains for / });
+    const list = await screen.findByRole("region", { name: /^Domains for / });
     expect(document.querySelector(".os-domain-page")).toBeNull();
+
+    // THE ITEM LEAVES THE LIST the moment the cluster says it is coming down --
+    // not two minutes later when the sweep has tidied up, and not never.
+    await emit(connection, CUSTOM_DOMAIN_CONCEPT, domainRow({ id: "cd-1", hostname: "www.acme.com", status: "removing" }));
+    await waitFor(() => expect(within(list).queryByText("www.acme.com")).toBeNull());
+    expect(within(list).getByText(/Cluster address/)).toBeTruthy();
   });
 
   it("confirms in surface, naming the hostname, and cancel is a no-op", async () => {
@@ -902,18 +936,27 @@ describe("removing a binding", () => {
     });
   });
 
+  // A ROW ALREADY ON THE REMOVAL PATH OFFERS NO SECOND REMOVAL. A quiet one is
+  // not listed at all, so there is nothing to press; the one that IS listed --
+  // a removal the cluster could not finish -- offers none either, because the
+  // sweep is already retrying and a second request would only rewrite the row.
   it("offers no remove on a row that is already on the removal path", async () => {
     const connection = fakeConnection({
       sites: [SHOP],
       domains: [
         domainRow({ id: "cd-1", hostname: "gone.acme.com", status: "removed" }),
         domainRow({ id: "cd-2", hostname: "going.acme.com", status: "removing" }),
+        domainRow({ id: "cd-3", hostname: "stuck.acme.com", status: "removing", failureReason: "removal_failed" }),
       ],
     });
     await openShop(connection);
 
-    await findCard("gone.acme.com");
-    expect(screen.queryByRole("button", { name: "Remove gone.acme.com" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Remove going.acme.com" })).toBeNull();
+    await findCard("stuck.acme.com");
+    expect(screen.queryByRole("button", { name: /^Remove/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Cancel/ })).toBeNull();
+    await backToDomains();
+    await findRow("stuck.acme.com");
+    expect(screen.queryByText("gone.acme.com")).toBeNull();
+    expect(screen.queryByText("going.acme.com")).toBeNull();
   });
 });

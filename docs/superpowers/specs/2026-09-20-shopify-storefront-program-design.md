@@ -335,6 +335,68 @@ previewing would be a real row in the one database. So every shopper-written
 concept in this program carries the `storeId` of the binding it was written
 through, and every storefront read filters on it.
 
+### D10 (derived) -- Nobody binds a storefront to a store they may not read
+
+Issue memql#5538 asked who may bind a storefront they own to a store they may
+not read, and what the edge -- which reads as the deployment -- is permitted to
+resolve. Both were decided and built in epic memql#5530.
+
+**Who may bind: nobody, past what they can read.** Two gates, and the second is
+the substantive one.
+
+- `updateSiteStoreBinding` carries
+  `@requiresCapability("execute", "app:deployables/store")`, seeded on OWNER
+  ALONE -- exactly the population the retired `app:stores` set admitted, and
+  the same population `@rowAuthz(clusterOwner)` on the store row serves. A part
+  seeded on developer too would put a control on a developer's screen that the
+  row tier then serves nothing into, which is memql#5216's empty-panel failure.
+- Beside it, a Go guard (`component/memql/platform_site_binding_guard.go`)
+  refuses a `binding` delta naming a store row the CALLER cannot read. It is Go
+  rather than DSL for the reason every guard in that package is: the question
+  is a cross-row read, and no mutation body can make one. It also refuses the
+  retired `{storeDomain, storefrontTokenRef}` shape outright rather than
+  ignoring it -- pre-release means no shim, and a write still carrying the copy
+  is a caller nobody migrated.
+
+**The store row's tier is UNCHANGED.** It stays `@rowAuthz(clusterOwner)`. A
+storefront's owner does not gain a read of it, and nothing was widened to make
+this work: the surface gate and the readability check together are the answer.
+
+**What the edge may resolve: the domain and the Storefront token reference, and
+nothing else.** The edge already reads the graph under a synthetic cluster-owner
+actor (`component/edge`'s `systemEdgeActor`), so it can read the store row. What
+it HOLDS is a three-field projection -- `id`, `domain`, `storefrontTokenRef` --
+and `adminTokenRef` and `webhookSecretRef` are not on it. The omission is the
+safety property rather than an economy: a credential reference the serving path
+was never handed cannot reach a response header, a served document or a log
+line. A test pins the field list, one rung earlier than the test that greps the
+served document.
+
+**An unresolvable store never takes a serving site dark.** No storefront block,
+no store named in the policy, and the bundle still serves -- the same answer a
+storefront nobody has bound yet already gets.
+
+### D11 (derived) -- A deploy may publish without being able to read the store
+
+The publish stage resolves the store a manifest NAMES under the CALLER's own
+actor, which is D10 applied to the deploy path. That refuses a first deploy by
+somebody who cannot read the store, correctly.
+
+It cannot refuse a REDEPLOY of an already-bound storefront, and the reason is
+measured: the auto-deploy feed borrows the package owner as a RANKLESS WRITER,
+so `actor.isClusterOwner == true` is false on every automatic run and the
+cluster-owner-tier store read answers zero rows. Fatal there would mean an armed
+source can never republish a storefront again -- a regression against the
+behaviour this epic replaced.
+
+So an unresolvable store is fatal only when NOTHING is bound yet. Otherwise the
+binding is kept, the bundle publishes, and the run records a non-fatal
+`deployable_store_unknown` saying the store is unchanged and why. The principle
+survives intact because it is about BINDING, which is a write: leaving a binding
+alone is not a privileged act. And the automatic path cannot silently serve the
+wrong merchant, because `bindingWord` puts the manifest's store in the plan
+fingerprint and a re-pointed manifest parks the run at the confirm gate.
+
 ## 5. The staging model
 
 In the owner's terms, then in the tree's.
@@ -367,7 +429,7 @@ delivers step 2 once and never again.
 | G1 | **CLOSED, memql#5534.** A storefront cannot reach Shopify. The policy the edge writes is the generic one for every kind: `connect-src 'self'` plus the site and identity origins; `img-src 'self' data: blob:`. A browser call to the Storefront API and every Shopify-hosted image are refused. Nothing in `component/edge/csp.go` or its tests names a store. | `policyForSite`, `component/edge/csp.go` | the whole product epic |
 | G2 | No preview, and no go-live guard. A draft site is `http.NotFound` for everybody; `status` and `binding` are written independently, so a site can go live bound to test data, or be exercised against the real store and take real orders. | the `switch` in `component/edge/handler.go`; no occurrence of "preview" in `component/edge` | section 5 entirely |
 | G3 | **Engine half CLOSED, memql#5535** -- the tail is the site's own choice, so a product may keep a multi-page bundle AND the storefront kind; the product half is memql-fylo#21. Runtime binding and build-time catalog are incompatible. The storefront bakes its catalog into prerendered pages; a bundle exercised against the development store and then promoted would serve the development store's products. The engine resolved this in its own design by making the kind an SPA -- `handler.go` gives it the `index.html` fallback because "a shopify_storefront IS a spa bundle" -- and the product declared `kind: static` to get the opposite behaviour. | `getStaticPaths` in `clients/storefront/src/pages/products/[handle].astro`; the resolution tail in `component/edge/handler.go` | Q1, and the product's catalog work |
-| G4 | Two records of one store. `site.binding` and `v1:shopify:store` both hold the domain and the Storefront token reference, edited in two places, at two authorization tiers (composite owner tier; cluster owner). | 2.1, 2.3 | D5, and the guard in G2 |
+| G4 | **CLOSED, epic memql#5530.** Two records of one store. `site.binding` and `v1:shopify:store` both held the domain and the Storefront token reference, edited in two places, at two authorization tiers (composite owner tier; cluster owner). The binding is `{storeId}` now and the edge resolves both through the store row; the tier answer is D10 below. | 2.1, 2.3 | D5, and the guard in G2 |
 | G5 | A shopper is nobody to MemQL. `createReview` is `@actor` and stamps `ownerUserId: actor.userId`; reviewspack ships no query, so nothing lists published reviews, and `@rowAuthz(owner=...)` would hide them from everybody but their author. OIDC federation is for operators. Unauthenticated routes are a declared allowlist (`component/server/unauthenticated_surface.go`). An anonymous wholesale applicant meets the same wall, and must be able to submit with NO JavaScript (2.8). | `examples/reviewspack/dsl/mutations.memql`; `docs/public/operate/auth/access-model.md` | both packs |
 | G6 | Packs have no delivery path. A pack's Go half "is compiled in via build tags ... there is no runtime loading of the Go half, by design" (`docs/public/build/building-a-pack.md`), and no image sets a pack's tag. The carrier route that once did is retiring (memql#2472). | 2.5 | both packs |
 | G7 | No application, enrollment or wholesale concept exists anywhere in the engine. Every primitive on both sides does: `company`, `companyContact`, `companyLocation`, `catalog`, `priceList`, `priceListPrice`, `quantityRule`, `draftOrder` mirrored; `approvalChain`, `creditLimit`, `quote`, `reorderList` native. The bridge between an applicant and an entitlement is what is missing. | `dsl/shopify/generated/`, `dsl/commerce/concepts.memql` | the wholesale channel |

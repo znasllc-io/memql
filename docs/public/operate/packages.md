@@ -57,10 +57,24 @@ deployables:
     build:                       # optional; these ARE the defaults
       command: "npm ci && npm run build"
       output: dist
+    resolutionTail: fallback     # optional; omitted means the kind decides
     binding:                     # shopify_storefront only
-      storeDomain: acme.myshopify.com
-      storefrontTokenRef: shopify-storefront-token
+      store: acme.myshopify.com  # the v1:shopify:store row this fronts
 ```
+
+**The binding NAMES a store; it does not describe one.** `store` is a
+`v1:shopify:store` row's myshopify.com domain, and the deploy resolves it to a
+row id and writes `{storeId}` onto the site. The domain the edge serves, the
+Storefront token reference and everything else about that store live on the row,
+so an edit to the store reaches every storefront bound to it with no second
+write -- and the manifest carries no secret and no copy. The domain is what the
+manifest names rather than the row id because a row id is a fact about one
+cluster's database, while the myshopify.com domain is the same identifier
+everywhere and one an operator can check by eye.
+
+A store is attached on the deployable's Store panel. A manifest naming a store
+this cluster does not have (or one you may not read) is refused at deploy with
+`deployable_store_unknown`, before anything is published.
 
 Two halves, and the asymmetry is deliberate:
 
@@ -149,7 +163,9 @@ somebody's mistake.
 | `package_manifest_invalid` | Unparseable, an unknown key, a missing name, an unknown `formatVersion`, or two deployables sharing a name |
 | `deployable_path_missing` | A declared `path` is not a directory in the tree |
 | `deployable_kind_unknown` | `kind` is a value nobody has heard of -- not one of the three live values, and not one of the known-but-unoffered ones below |
-| `deployable_binding_missing` | A storefront with no `binding`; also a never-deployed app whose placement names no hostname |
+| `deployable_binding_missing` | A storefront whose `binding` names no store. A manifest fact, decided offline |
+| `deployable_store_unknown` | A storefront naming a store this cluster has no row for, or one the caller may not read. Decided at publish, because it is a cluster read the offline analysis does not make. One code for both cases deliberately: separating them would answer "is this store on this cluster" for somebody outside the tier that decides who may look |
+| `deployable_hostname_unchosen` | A never-deployed app whose placement names no hostname. Split out of `deployable_binding_missing`, because its repair is choosing an address rather than editing the tree |
 | `dsl_domain_reserved` | A `dsl/<domain>/` whose name the engine already owns |
 | `dsl_refuses_boot` | The package's DSL does not survive the Init-grade gates; carries the construct-level errors |
 | `source_too_large` | Over the per-file, whole-tree or file-count cap |

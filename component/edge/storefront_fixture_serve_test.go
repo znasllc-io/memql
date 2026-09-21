@@ -50,9 +50,11 @@ func fixtureStorefrontSite() *Site {
 		Hostname: "fixture.example.com",
 		Status:   "live",
 		Kind:     storefrontKind,
-		Binding: map[string]any{
-			"storeDomain":        "fixture-store.myshopify.com",
-			"storefrontTokenRef": "fixture_storefront_token",
+		Binding:  map[string]any{"storeId": "fixture-store"},
+		Store: &BoundStore{
+			ID:                 "fixture-store",
+			Domain:             "fixture-store.myshopify.com",
+			StorefrontTokenRef: "fixture_storefront_token",
 		},
 	}
 }

@@ -1,6 +1,6 @@
-import type { ButtonTone } from "../../kit";
-import type { ActionBarTone } from "../../kit/ActionBar";
-import { isPositive } from "../../kit/measure";
+import type { ButtonTone } from "../../../kit";
+import type { ActionBarTone } from "../../../kit/ActionBar";
+import { isPositive } from "../../../kit/measure";
 import type { StoreHealth } from "./health";
 
 // The words this app says about a store, and the acts a state offers -- both

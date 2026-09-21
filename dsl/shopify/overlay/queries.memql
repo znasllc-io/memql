@@ -43,6 +43,24 @@ query store stores {
   shape     storeFull
 }
 
+/// The development stores attached to one live store.
+///
+/// A storefront shows the store it is bound to and the development store it
+/// is exercised against; without this read the two rows sit in one list with
+/// nothing saying which belongs to which.
+@actor
+query store developmentStoresFor {
+  args {
+    storeId  string!
+  }
+  filter    row => row.developmentOfStoreId == args.storeId
+                && row.isDevelopment == true
+                && actor.isClusterOwner == true
+  sort      "domain", "asc"
+  paginate  25
+  shape     storeFull
+}
+
 /// Any variant that is currently for sale, across every configured store.
 ///
 /// One row is the whole answer: the caller is asking "is there a catalog to

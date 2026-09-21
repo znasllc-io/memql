@@ -3376,6 +3376,8 @@ export interface CreateStoreArgs {
   protectedDataLevel?: string;
   plan?: string;
   ownerUserId?: string;
+  isDevelopment?: boolean;
+  developmentOfStoreId?: string;
 }
 
 export function buildCreateStore(args: CreateStoreArgs): string {
@@ -3391,6 +3393,8 @@ export function buildCreateStore(args: CreateStoreArgs): string {
   if (args.protectedDataLevel !== undefined) parts.push("protectedDataLevel: " + renderMemQLValue(args.protectedDataLevel));
   if (args.plan !== undefined) parts.push("plan: " + renderMemQLValue(args.plan));
   if (args.ownerUserId !== undefined) parts.push("ownerUserId: " + renderMemQLValue(args.ownerUserId));
+  if (args.isDevelopment !== undefined) parts.push("isDevelopment: " + renderMemQLValue(args.isDevelopment));
+  if (args.developmentOfStoreId !== undefined) parts.push("developmentOfStoreId: " + renderMemQLValue(args.developmentOfStoreId));
   return "mutation createStore(" + parts.join(", ") + ")";
 }
 
@@ -8670,6 +8674,32 @@ QueryClient.prototype.updateSiteStatus = function (this: QueryClient, args: Upda
   return this.executeNamed("updateSiteStatus", buildUpdateSiteStatus(args), opts);
 };
 
+/** Point a storefront deployable at the v1:shopify:store row it fronts, or clear the binding (epic memql#5530, issue memql#5538).
+ONE VALUE, AND IT IS A REFERENCE. The binding is written whole as {storeId} rather than merged, so the legacy {storeDomain, storefrontTokenRef} shape cannot survive a write: a read-merge would have kept the copy beside the reference and left two records of one store, which is the thing this epic exists to end. An empty storeId writes an empty object, which is the unbound state -- clearing must be expressible, for updateSiteSettings' reason.
+AUTHORIZATION IS TWO GATES, AND THE SECOND IS THE SUBSTANTIVE ONE. @requiresCapability names the surface: `app:deployables/store` is seeded on owner alone, which is exactly the population the retired Stores app admitted. Beside it, a Go guard refuses a binding naming a store row the CALLER CANNOT READ -- so the answer to "who may bind a storefront they own to a store they may not read" is nobody. That check needs a cross-row read no mutation body can make, which is why it sits with the hostname policy rather than here (component/memql/platform_site_binding_guard.go). */
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteStoreBinding"] in generated_concepts.ts).
+export interface UpdateSiteStoreBindingArgs {
+  siteId: string;
+  storeId?: string;
+}
+
+export function buildUpdateSiteStoreBinding(args: UpdateSiteStoreBindingArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  if (args.storeId !== undefined) parts.push("storeId: " + renderMemQLValue(args.storeId));
+  return "mutation updateSiteStoreBinding(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    updateSiteStoreBinding(args: UpdateSiteStoreBindingArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.updateSiteStoreBinding = function (this: QueryClient, args: UpdateSiteStoreBindingArgs = {} as UpdateSiteStoreBindingArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("updateSiteStoreBinding", buildUpdateSiteStoreBinding(args), opts);
+};
+
 /** Change a store's configuration. Read-merge: an argument left out keeps its stored value, so rotating one secret reference does not require re-supplying the other two. */
 // Bound concept: v1:shopify:store (machine-readable: BoundConcepts["updateStore"] in generated_concepts.ts).
 export interface UpdateStoreArgs {
@@ -8684,6 +8714,8 @@ export interface UpdateStoreArgs {
   plan?: string;
   scopesGranted?: string[];
   ownerUserId?: string;
+  isDevelopment?: boolean;
+  developmentOfStoreId?: string;
 }
 
 export function buildUpdateStore(args: UpdateStoreArgs): string {
@@ -8699,6 +8731,8 @@ export function buildUpdateStore(args: UpdateStoreArgs): string {
   if (args.plan !== undefined) parts.push("plan: " + renderMemQLValue(args.plan));
   if (args.scopesGranted !== undefined) parts.push("scopesGranted: " + renderMemQLValue(args.scopesGranted));
   if (args.ownerUserId !== undefined) parts.push("ownerUserId: " + renderMemQLValue(args.ownerUserId));
+  if (args.isDevelopment !== undefined) parts.push("isDevelopment: " + renderMemQLValue(args.isDevelopment));
+  if (args.developmentOfStoreId !== undefined) parts.push("developmentOfStoreId: " + renderMemQLValue(args.developmentOfStoreId));
   return "mutation updateStore(" + parts.join(", ") + ")";
 }
 

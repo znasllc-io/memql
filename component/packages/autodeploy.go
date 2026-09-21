@@ -111,10 +111,9 @@ func bindingWord(b *ManifestBinding) string {
 	if b == nil {
 		return ""
 	}
-	// The store domain and the token NAME. The name is not a secret and it is
-	// the thing that changed if a storefront was re-pointed at another
-	// credential, which is a change worth stopping for.
-	return b.StoreDomain + ">" + b.StorefrontTokenRef
+	// The store the manifest NAMES. Re-pointing a storefront at another
+	// merchant is the change most worth stopping an automatic deploy for.
+	return b.Store
 }
 
 // autoConfirm decides whether a parked auto-run may confirm itself.

@@ -1,5 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import type { Stop } from "../../src/kit";
 import { Wizard } from "../../src/kit/Wizard";
@@ -195,6 +197,28 @@ describe("side by side, when there is room", () => {
     expect(screen.getAllByText("One line, on the machine itself.")).toHaveLength(1);
   });
 
+  // THE ACCENTED NAME IS THE STEP ON THE STAGE. The accent was the state's
+  // ("waiting on you"), which is the open step nearly always -- and not when a
+  // step is answered and still showing. Found in a rendered add-a-deployable:
+  // with a repository chosen the stage said "Repository" and the rail lit
+  // "Review". jsdom resolves no colour, so this pins the two halves the fix
+  // rests on: the markup says which step is on the stage, and the stylesheet
+  // keys the accent on that rather than on the state alone.
+  it("marks the step on the stage in the rail, whatever state that step is in", () => {
+    mount({ layout: "split", open: "name", steps: STEPS.map((step) => (step.id === "name" ? { ...step, openable: true, body: <p>its name</p> } : step)) });
+    const aside = document.querySelector(".os-wizard-aside") as HTMLElement;
+    const open = [...aside.querySelectorAll(".os-rail > li")].filter((li) => li.getAttribute("data-open") === "true");
+    // One step is on the stage, and it is the answered one -- not the one waiting.
+    expect(open.map((li) => li.getAttribute("data-state"))).toEqual(["done"]);
+
+    const css = readFileSync(join(__dirname, "..", "..", "src", "styles", "index.css"), "utf8");
+    const split = '.os-wizard[data-layout="split"] .os-rail[data-scale="page"] .os-rail-stage';
+    // The step on the stage takes the accent...
+    expect(css).toContain(`${split}[data-open="true"]:is([data-state="done"], [data-state="complete"], [data-state="waiting"]) .os-rail-label {\n  color: var(--os-accent);`);
+    // ...and a step that is only NEXT gives it up. Its mark still says so.
+    expect(css).toContain(`${split}:is([data-state="open"], [data-state="current"]):not([data-open="true"]) .os-rail-label {\n  color: var(--os-ink);`);
+  });
+
   it("changes what the stage shows from the rail", () => {
     const { onOpen } = mount({ layout: "split" });
     fireEvent.click(within(document.querySelector(".os-wizard-aside") as HTMLElement).getByRole("button", { name: /^Connect/ }));
@@ -222,5 +246,56 @@ describe("side by side, when there is room", () => {
       />,
     );
     expect(document.activeElement).toBe(screen.getByLabelText("Domain to bind"));
+  });
+});
+
+// FOUND BY TYPING INTO A FRESHLY OPENED WIZARD IN A WIDE WINDOW and watching
+// nothing land. The arrangement is measured after the first commit, and going
+// side by side moves the open step's body to another place in the tree -- so
+// the field focused on mount was unmounted a moment later and took the cursor
+// with it.
+describe("the cursor, when the arrangement settles", () => {
+  const field = (layout: "stack" | "split") => (
+    <Wizard
+      layout={layout}
+      icon={<svg />}
+      title="Add a domain"
+      label="Adding a domain"
+      steps={[{ id: "domain", name: "Domain", state: "open", body: <input aria-label="Domain to bind" /> }, { id: "dns", name: "DNS", state: "ahead" }]}
+      open="domain"
+      onOpen={() => {}}
+      status={{ word: "Name the domain" }}
+    />
+  );
+
+  it("is put back in the first field after the wizard goes side by side", () => {
+    const view = render(field("stack"));
+    const before = screen.getByLabelText("Domain to bind");
+    expect(document.activeElement).toBe(before);
+    view.rerender(field("split"));
+    const after = screen.getByLabelText("Domain to bind");
+    // A different element: the body moved to the stage...
+    expect(after).not.toBe(before);
+    // ...and the cursor went with it.
+    expect(document.activeElement).toBe(after);
+  });
+
+  it("is never taken back once the person has touched the wizard", () => {
+    const view = render(
+      <>
+        {field("stack")}
+        <button type="button">elsewhere</button>
+      </>,
+    );
+    fireEvent.keyDown(screen.getByLabelText("Domain to bind"), { key: "a" });
+    const elsewhere = screen.getByRole("button", { name: "elsewhere" });
+    elsewhere.focus();
+    view.rerender(
+      <>
+        {field("split")}
+        <button type="button">elsewhere</button>
+      </>,
+    );
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "elsewhere" }));
   });
 });

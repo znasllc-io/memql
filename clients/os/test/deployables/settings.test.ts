@@ -27,22 +27,26 @@ describe("the manifest", () => {
     expect(deployables?.component.name).toBe("DeployablesApp");
   });
 
-  it("declares exactly Overview, Deployables, Logs and Settings, in that order (design D1)", () => {
+  it("declares exactly Overview, Deployables, Sources, Logs and Settings, in that order", () => {
     // Actions, Sites and Packages retired with the compose epic (memql#4885):
     // one list and one page replaced three sections and two mental models.
     // FOUR, not the three the compose restructure left: Logs is a shell
     // convention every app carries (epic memql#4895) and is not this app's to
     // drop. What retired is this app's own three readings of its subject --
     // Sites, Packages, Actions -- which became one.
-    expect(DEPLOYABLES_SECTION_IDS).toEqual(["map", "deployables", "logs", "settings"]);
-    expect(DEPLOYABLES_SECTIONS.map((s) => s.name)).toEqual(["Overview", "Deployables", "Logs", "Settings"]);
+    // SOURCES IS THE SECOND NOUN: a repository or a zip that produces
+    // deployables, with a life of its own. It used to be a header row inside
+    // the deployables list with its apps indented beneath it -- a tab is a
+    // different kind of thing, and a subset is a filter.
+    expect(DEPLOYABLES_SECTION_IDS).toEqual(["map", "deployables", "sources", "logs", "settings"]);
+    expect(DEPLOYABLES_SECTIONS.map((s) => s.name)).toEqual(["Overview", "Deployables", "Sources", "Logs", "Settings"]);
     // The gated one is offered to an admin and withheld below, so the window
     // nav genuinely differs by role -- the assertion the three-section version
     // of this file could not make, because it had nothing gated.
     installSeededAccess("reader");
-    expect(sectionsFor(deployables!).map((s) => s.id)).toEqual(["map", "deployables", "settings"]);
+    expect(sectionsFor(deployables!).map((s) => s.id)).toEqual(["map", "deployables", "sources", "settings"]);
     installSeededAccess("admin");
-    expect(sectionsFor(deployables!).map((s) => s.id)).toEqual(["map", "deployables", "logs", "settings"]);
+    expect(sectionsFor(deployables!).map((s) => s.id)).toEqual(["map", "deployables", "sources", "logs", "settings"]);
   });
 
   it("opens on the MAP", () => {
