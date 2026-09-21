@@ -1,0 +1,14 @@
+// wholesale pack tools -- what an agent may do with an application.
+//
+// ONE TOOL, AND IT IS A READ. An agent may ask what state an application is
+// in; it may not decide one. Approving somebody's trade account is a
+// Client principal's act with a named decider on the row, and a tool that
+// let an agent do it would put "the assistant approved it" into a log that
+// is supposed to say who did.
+
+@handler(type="function", name="wholesaleApplicationState")
+@executionTime("fast")
+@description("The derived state of one wholesale application, folded from its append-only decision log, and what is legal next.")
+tool wholesaleState {
+  applicationId  string  @required  @description("The application to fold.")
+}
