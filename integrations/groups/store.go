@@ -17,9 +17,20 @@ package groups
 //
 // The GUARDS are what bound this, and they are checked before anything here is
 // called: guards.go asks whether the CALLER may do what they asked, against
-// their own AccessContext. Running the write under an operator identity after
-// that check is the same division customdomain makes -- the caller's authority
-// decides, the engine's identity writes.
+// their own AccessContext, and the two account-lifecycle builtins are gated a
+// step earlier still, by the `@requiresCapability` the engine's builtin
+// executor enforces before their handlers run. Running the write under an
+// operator identity after that check is the same division customdomain makes
+// -- the caller's authority decides, the engine's identity writes.
+//
+// SO THE SYNTHETIC ACTOR STAYS, and swapping it for the caller's own is not
+// the safer choice it looks like: these rows are UNOWNED, so a write under a
+// caller's authority has no owned tier to pass through and fails the write
+// guard's owner comparison against an empty stored owner -- surfacing as a
+// WARN with the row silently not moving. What makes the synthetic actor safe
+// is that every entry point above it has already decided the caller may be
+// here; what would make it dangerous is an entry point that has not, which is
+// the thing to check when adding one.
 //
 // # The internal-origin stamp is load-bearing
 //
