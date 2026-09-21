@@ -136,10 +136,41 @@ func (p *exprPreparer) triggerFilter(t *TriggerConfig) error {
 	if err := p.checkCost("trigger filter", lam.Body); err != nil {
 		return err
 	}
+	if err := p.checkTriggerFilterAdmission(lam); err != nil {
+		return err
+	}
 	if err := p.checkTriggerFilterFields(t, lam); err != nil {
 		return err
 	}
 	t.FilterLambda = lam
+	return nil
+}
+
+// checkTriggerFilterAdmission refuses, at load, a trigger filter that calls a
+// construct (a query, a mutation, a logic, a builtin, ...): the tier manifest
+// refuses a construct call at tiers.PositionTriggerFilter (manifest.go's
+// inProcessKinds -- a construct call is the work of a statement, and a
+// trigger filter is not one), and EvalCondition refuses the same call at
+// fire time (construct_call_not_allowed, memql#5582) because
+// evaluateTriggerFilterV1 installs no memql.EvalOptions.Calls hook. Without
+// this check that refusal arrived once per matching event instead of once at
+// load: the automation loaded clean, memqllint said nothing, and every fire
+// logged a warning and did not run. This check needs no concept registry --
+// node-kind admission does not depend on a concept's declared fields -- so it
+// runs on every path that prepares a trigger filter, registry or none.
+//
+// The lambda was parsed from the compiled JSON's filter text (or, for an
+// authored file, from the struct-form rewriter's output), so the refused
+// node's span is a column of THAT text, not of the author's file -- the same
+// reason checkTriggerFilterFields clears it below.
+func (p *exprPreparer) checkTriggerFilterAdmission(lam *ast.LambdaExpr) error {
+	if err := memql.CheckPositionAdmission(lam, tiers.PositionTriggerFilter); err != nil {
+		var le *memql.LowerError
+		if errors.As(err, &le) {
+			le.Span = ast.Span{}
+		}
+		return fmt.Errorf("automation %q: trigger filter: %w", p.automation, err)
+	}
 	return nil
 }
 

@@ -108,7 +108,7 @@ var gateInputs = []struct {
 	{"component/mcp/icon.svg", ".", "TestEmbeddedFileCountsAreStable"},
 	{"dsl/agents/prompts/plannerAgent.tmpl", ".", "TestEmbeddedFileCountsAreStable"},
 	{"examples/referencepack/dsl/namespace.pin", ".", "TestEmbeddedFileCountsAreStable"},
-	{"examples/reviewspack/dsl/namespace.pin", ".", "TestEmbeddedFileCountsAreStable"},
+	{"packs/reviewspack/dsl/namespace.pin", ".", "TestEmbeddedFileCountsAreStable"},
 	{"integrations/integrations.json", ".", "TestEmbeddedFileCountsAreStable"},
 	// Not embedded either, and the newest of this shape (memql#3326).
 	// clients_allowlist_test.go sweeps `git ls-files clients` from the root

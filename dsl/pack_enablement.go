@@ -119,3 +119,76 @@ func SkipsBehavioralLoad(path string) bool {
 	}
 	return base != "concepts.memql"
 }
+
+// ---------------------------------------------------------------------------
+// DECLARED DEFAULTS (epic memql#5532, issue memql#5549)
+// ---------------------------------------------------------------------------
+//
+// A pack DECLARES what its enablement is when no v1:platform:packState row
+// governs it. Before this existed the answer was a flat "enabled", which is
+// right for a pack somebody linked in deliberately behind a build tag and
+// wrong for one that ships in the default build: "absence means enabled"
+// would switch a storefront pack's shopper write path and its public read on
+// for every cluster that ever upgrades, with no row anywhere saying so.
+//
+// THE DEFAULT'S DEFAULT IS STILL ENABLED. A pack that declares nothing
+// behaves exactly as it did, which is what makes this additive rather than a
+// change every existing pack has to be re-read against.
+//
+// A ROW ALWAYS WINS, in both directions -- see DisabledPackDomains in
+// component/memql. The row is the operator's explicit act and this is only
+// what governs in its absence.
+//
+// Registration is init()/Register-time and must land BEFORE app phase 3
+// folds the rows over it (app/engine.go anchors the storefront packs
+// immediately above loadPackEnablement for exactly that reason).
+
+var (
+	packDefaultsMu sync.RWMutex
+	packDefaults   = map[string]bool{}
+)
+
+// RegisterPackDefault declares a pack's enablement in the absence of a
+// v1:platform:packState row. An empty domain is ignored rather than stored
+// under "": a pack with no domain has nothing to govern.
+func RegisterPackDefault(domain string, enabled bool) {
+	trimmed := strings.TrimSpace(domain)
+	if trimmed == "" {
+		return
+	}
+	packDefaultsMu.Lock()
+	defer packDefaultsMu.Unlock()
+	packDefaults[trimmed] = enabled
+}
+
+// PackDefaultEnabled reports a pack's declared default. An UNDECLARED pack
+// answers true.
+func PackDefaultEnabled(domain string) bool {
+	packDefaultsMu.RLock()
+	defer packDefaultsMu.RUnlock()
+	enabled, declared := packDefaults[strings.TrimSpace(domain)]
+	return !declared || enabled
+}
+
+// PackDefaults returns every DECLARED default, copied.
+//
+// A declared true is kept rather than elided, because the module inventory
+// has to tell "this pack declared that it ships on" from "this pack declared
+// nothing" -- both load, and only one of them is a decision.
+func PackDefaults() map[string]bool {
+	packDefaultsMu.RLock()
+	defer packDefaultsMu.RUnlock()
+	out := make(map[string]bool, len(packDefaults))
+	for k, v := range packDefaults {
+		out[k] = v
+	}
+	return out
+}
+
+// ResetPackDefaultsForTest clears the declared defaults. Test seam only;
+// production packs declare once at Register and never withdraw.
+func ResetPackDefaultsForTest() {
+	packDefaultsMu.Lock()
+	defer packDefaultsMu.Unlock()
+	packDefaults = map[string]bool{}
+}

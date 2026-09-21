@@ -13,7 +13,7 @@ import (
 	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	memqldsl "github.com/znasllc-io/memql/dsl"
-	reviewspack "github.com/znasllc-io/memql/examples/reviewspack"
+	reviewspack "github.com/znasllc-io/memql/packs/reviewspack"
 )
 
 const uniqueDomain = "reviewspacktest"
@@ -92,14 +92,16 @@ func TestProviderOperatorCannotModerate(t *testing.T) {
 	}, 0); err == nil {
 		t.Fatal("expected provider refusal")
 	}
-	nodes, err := handler(context.Background(), map[string]any{
+	// A CLIENT PRINCIPAL GETS PAST THE FIRST GATE AND THEN NEEDS A REVIEW TO
+	// MODERATE. The capability reads the review to copy its storeId (design
+	// D9), so with no engine it refuses rather than appending a decision
+	// scoped to no store -- which would hide nothing while looking like it
+	// had. The provider-refusal above is the assertion this test is named
+	// for and it is unchanged; this half pins the new narrowing.
+	if _, err := handler(context.Background(), map[string]any{
 		"reviewId": "r1", "criterion": "spam", "principalKind": "client", "decidedBy": "user-1",
-	}, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(nodes) != 1 {
-		t.Fatalf("len=%d", len(nodes))
+	}, 0); err == nil {
+		t.Fatal("a decision against an unresolvable review must be refused, not scoped to no store")
 	}
 }
 
@@ -159,16 +161,36 @@ func TestPublicDisplayToggleIsData(t *testing.T) {
 			handler = c.Handler
 		}
 	}
-	hidden, err := handler(context.Background(), map[string]any{"publicDisplay": false}, 0)
+	// PER STORE (epic memql#5532, design D9). A toggle with no store is
+	// REFUSED rather than defaulted: the id used to be one literal for the
+	// whole cluster, so flipping reviews on for a live storefront also
+	// flipped them on for the development store a candidate was being
+	// exercised against, and for every other merchant this cluster serves.
+	if _, err := handler(context.Background(), map[string]any{"publicDisplay": true}, 0); err == nil {
+		t.Fatal("a display toggle naming no store must be refused")
+	}
+	hidden, err := handler(context.Background(),
+		map[string]any{"storeId": "store-live", "publicDisplay": false}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	shown, err := handler(context.Background(), map[string]any{"publicDisplay": true}, 0)
+	shown, err := handler(context.Background(),
+		map[string]any{"storeId": "store-live", "publicDisplay": true}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(hidden[0].Payload) == string(shown[0].Payload) {
 		t.Fatal("toggle did not change")
+	}
+	// Two stores are two rows, which is the whole point of the derived id.
+	other, err := handler(context.Background(),
+		map[string]any{"storeId": "store-dev", "publicDisplay": true}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if other[0].ID == shown[0].ID {
+		t.Fatalf("two stores share one settings row id (%s); a merchant could not "+
+			"show reviews live while hiding them under preview", other[0].ID)
 	}
 }
 

@@ -161,7 +161,7 @@ func TestBodiesOutputIsTheLanguage(t *testing.T) {
 // ahead of the flip: when it passes, the tree migration will load.
 func TestBodiesRewriteOfTheTreeIsTheLanguage(t *testing.T) {
 	roots := []string{"../../dsl", "../../examples/deploypack/dsl", "../../examples/referencepack/dsl",
-		"../../examples/reviewspack/dsl", "../../examples/shopifypack/dsl", "../../deploy/fleet/dsl"}
+		"../../packs/reviewspack/dsl", "../../examples/shopifypack/dsl", "../../deploy/fleet/dsl"}
 	checked := 0
 	for _, root := range roots {
 		files := map[string][]byte{}

@@ -4241,6 +4241,7 @@
         "previewBinding",
         "resolutionTail",
         "settings",
+        "shopperForms",
         "status",
         "systemOwned",
         "title"
@@ -4515,6 +4516,77 @@
         "name",
         "rank",
         "slug"
+      ]
+    },
+    {
+      "concept": "v1:reviews:moderationAction",
+      "file": "packs/reviewspack/dsl/concepts.memql",
+      "fields": [
+        "criterion",
+        "decidedBy",
+        "note",
+        "principalKind",
+        "reviewId",
+        "storeId"
+      ],
+      "required": [
+        "criterion",
+        "decidedBy",
+        "principalKind",
+        "reviewId",
+        "storeId"
+      ],
+      "enums": {
+        "criterion": [
+          "copyright",
+          "harassment",
+          "illegal",
+          "off_topic",
+          "profanity",
+          "spam"
+        ],
+        "principalKind": [
+          "client"
+        ]
+      }
+    },
+    {
+      "concept": "v1:reviews:review",
+      "file": "packs/reviewspack/dsl/concepts.memql",
+      "fields": [
+        "authorEmail",
+        "authorName",
+        "body",
+        "createdAtClient",
+        "imageAttachmentIds",
+        "ownerUserId",
+        "productHandle",
+        "productId",
+        "rating",
+        "siteId",
+        "storeId",
+        "title"
+      ],
+      "required": [
+        "body",
+        "ownerUserId",
+        "productHandle",
+        "storeId"
+      ]
+    },
+    {
+      "concept": "v1:reviews:reviewSettings",
+      "file": "packs/reviewspack/dsl/concepts.memql",
+      "fields": [
+        "criteriaText",
+        "ownerUserId",
+        "publicDisplay",
+        "storeId"
+      ],
+      "required": [
+        "ownerUserId",
+        "publicDisplay",
+        "storeId"
       ]
     },
     {

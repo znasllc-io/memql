@@ -1,0 +1,100 @@
+// reviews pack -- caller-scoped writes (memql#4139, epic memql#5532).
+//
+// Authz tier: composite owner. ownerUserId / decidedBy are stamped from
+// actor.userId. A cluster owner READS every merchant's reviews -- which is
+// what makes an operator surface possible at all -- and CANNOT rewrite
+// them, because the write guard ignores the second argument. "Provider
+// operators cannot moderate" is unchanged and is enforced where it always
+// was: the Go capability refuses a non-client principal.
+//
+// TWO WRITE PATHS AND THEY ARE DIFFERENT MUTATIONS. createReview is the
+// authenticated one -- an operator, an importer, a test -- and it names the
+// row id it is creating. submitReview is the SHOPPER one, reached only
+// through a declared shopper form, and it names no id because the shopper
+// cannot be trusted with one and the form registry refuses a field called
+// `id` outright.
+
+/// Create a review as an authenticated MemQL user. The operator and import
+/// path: the caller names the row id, and ownerUserId is the caller.
+@actor
+mutation review createReview {
+  args {
+    reviewId            string!
+    storeId             string!
+    productHandle       string!
+    productId           string
+    title               string
+    body                string!
+    rating              int
+    authorName          string
+    authorEmail         string
+    imageAttachmentIds  []string
+  }
+  insert {
+    accept { storeId, productHandle, productId, title, body, rating, authorName, authorEmail, imageAttachmentIds }
+    stamp {
+      id: args.reviewId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Create a review submitted by a SHOPPER through a declared shopper form
+/// (epic memql#5532, issues memql#5550 and memql#5551).
+///
+/// IT NAMES NO ROW ID, deliberately. The caller is a member of the public
+/// posting a plain HTML form, and `id` is one of the names
+/// component/memql/shopper_surface.go refuses as a form field -- a shopper
+/// who could choose a row id could overwrite another shopper's review. The
+/// engine derives one, exactly as createSpawnEvent and setGlobalSecret rely
+/// on it to.
+///
+/// storeId AND siteId ARRIVE STAMPED, not submitted. The bff applies them
+/// after the declared fields precisely so a form-supplied copy cannot win,
+/// and the edge resolved storeId from the binding in effect -- the preview
+/// binding when the submission was made while exercising a candidate.
+///
+/// ownerUserId IS THE MERCHANT. It stamps from actor.userId, and on this
+/// path the actor is the SITE OWNER under borrowed authority. The shopper
+/// is authorName and authorEmail: data on the row, never an identity.
+@actor
+mutation review submitReview {
+  args {
+    storeId        string!
+    siteId         string
+    productHandle  string!  @maxLength(200)
+    body           string!  @maxLength(4000)
+    title          string   @maxLength(200)
+    rating         int      @minimum(1) @maximum(5)
+    authorName     string   @maxLength(120)
+    authorEmail    string   @maxLength(320)
+  }
+  insert {
+    accept { storeId, siteId, productHandle, title, body, rating, authorName, authorEmail }
+    stamp {
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Create or flip the public display toggle for one store. Data, not
+/// source -- no rebuild. The id is derived from the store so there is
+/// exactly one row per store: a merchant must be able to show reviews on
+/// their live storefront while they are still hidden on the development
+/// store a candidate is being exercised against.
+@actor
+mutation reviewSettings setReviewDisplay {
+  args {
+    settingsId     string!
+    storeId        string!
+    publicDisplay  bool!
+    criteriaText   string
+  }
+  insert {
+    accept { storeId, publicDisplay, criteriaText }
+    stamp {
+      id: args.settingsId
+      ownerUserId: actor.userId
+    }
+  }
+}
