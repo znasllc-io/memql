@@ -742,7 +742,6 @@ rendered template is a Go text/template file named by `@templateFile`.
 <!-- corpus: 2026/examples/functions/prompts/prompt-syntax.memql -->
 ```memql
 @level("fast")
-@defaultProvider("chat54Mini")
 @templateFile("prompts/condenseConversation.tmpl")
 @description("Summarize older conversation messages into a rolling summary.")
 prompt condenseConversation {
@@ -750,6 +749,13 @@ prompt condenseConversation {
   previousSummary  string              @description("Prior rolling summary; empty on first compaction.")
 }
 ```
+
+> **`@defaultProvider` is an explicit pin, and this example does not use one.**
+> `@level` is how a prompt says how much intelligence it needs; the rules and
+> policies then decide which provider answers. A pin overrides all of that, and
+> pinning one to a paid provider is refused in this repository by
+> `TestNoPaidDefault` -- every concrete provider record here is federated, so a
+> pin naming one routes around the local-first rule the platform ships.
 
 > **Retired prompt forms** (both rejected at parse time):
 > - `func (Prompt) name(args any) { ... }` -- receiver-function wrapping.
