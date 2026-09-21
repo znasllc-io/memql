@@ -1029,9 +1029,26 @@ jobs:
       # with no entry in component/language/reserved.json fails this step. An
       # ADDITION never does: a gate that reports every change is one whose
       # output nobody reads, and the one signal that matters drowns.
-      - name: memqlbreaking (authoring-surface break classification)
+      #
+      # IT RUNS THE SCRIPT, NOT `make memqlbreaking`, AND THAT IS THE GATE.
+      # The make target reads the baseline out of the tree it is judging, so
+      # both sides of the comparison are editable by the change under test:
+      # deleting a name from the function catalog AND its entry from
+      # component/language/surface/2026.json, with no reservation, printed
+      # "SUCCESS: no breaks" and exited 0. The script extracts the BASE
+      # COMMIT's copies of the baseline and the ledger and holds this tree to
+      # those, so the lockstep edit hides nothing. Reverting this step to
+      # `make memqlbreaking` reopens the bypass and would read like a
+      # simplification; scripts/ci/memqlbreaking_base_test.go fails on it.
+      #
+      # BASE_SHA covers the three events this workflow runs on, in that order.
+      # An empty or all-zeros value (a first push to a ref) falls back to the
+      # committed baseline, announced on stderr, rather than failing the build.
+      - name: memqlbreaking (authoring-surface breaks against the base commit)
         if: ${{ env.RUN_DSL == 'true' }}
-        run: make memqlbreaking
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        run: bash scripts/ci/memqlbreaking-base.sh
       # Proto drift check (memql#928): regenerate the pinned-toolchain proto
       # bindings (component/grpc, component/node and component/bus -- bus was
       # normalized onto the pinned toolchain in memql#928 itself, so the
