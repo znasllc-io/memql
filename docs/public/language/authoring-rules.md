@@ -39,8 +39,19 @@ Right -- one bare insert. The target concept comes from the
 `mutation <Concept> <name>` signature; restating it is retired. The body
 reads the auth envelope to stamp the owner, so the mutation declares
 `@actor` ([#26](#26-reading-actor-requires-actor-2621)), and every key it
-writes is a field `v1:library:folder` declares -- a key the concept does not
-declare is refused at load.
+writes is a field `v1:library:folder` declares.
+
+**Write only declared fields -- and do not expect the load to make you.**
+Measured: a mutation writing a key its concept does not declare loads with
+NO diagnostic at all. A concept's schema is closed
+([#21b](#21b-nested-object-blocks-are-closed)), so the undeclared key is a
+WRITE-time failure, not a build-time one, and a read-merge update carries it
+into the merged payload it validates -- the class that makes a row unwritable
+on its next write (memql#5199 / memql#5209), invisible to CI because CI runs
+against a fresh database. That is why this example writes `name`,
+`ownerUserId` and `archived` and not the `status` an earlier revision showed:
+`v1:library:folder` declares no `status`, and nothing would have told the
+author so until a row refused to save.
 
 <!-- corpus: 2026/examples/authoring-rules/one-write/one-insert.memql -->
 ```memql
@@ -913,10 +924,10 @@ instead of silently stripping the field.
 
 **Rule.** A body's statements run in the order they are written. Nothing
 is reordered by dependency, so a name can only be read after the
-statement that binds it. The load refuses a name read before its
-statement, naming both lines, and a name bound nowhere, which catches a
-typo. Both are load refusals -- `[body_unknown_name]` for a name nothing
-binds, `[body_forward_reference]` for one bound later in the same body:
+statement that binds it. Both faults are load refusals.
+
+A name nothing binds at all, which is what catches a typo --
+`[body_unknown_name]`:
 
 <!-- corpus: 2026/examples/authoring-rules/order/name-read-before-bound.memql -->
 ```memql retired
@@ -935,6 +946,9 @@ logic bootstrapPerson {
 ```
 logic bootstrapPerson, line 6:6: `cehckUser` is not a statement name, a loop variable or a root here [body_unknown_name]
 ```
+
+A name read before the statement that binds it, naming both lines --
+`[body_forward_reference]`:
 
 <!-- corpus: 2026/examples/authoring-rules/order/forward-reference.memql -->
 ```memql retired
@@ -961,9 +975,9 @@ the old engine ran it, and comments every statement it moved.
 ## 14. Function naming: the construct name says what it does
 
 **Rule.** A construct is named for what it does, not for its kind --
-the declaration keyword already carries that: `libraryArtifacts`,
-`moveArtifactToFolder`, `isArchivedArtifact`, `isActiveRecord`,
-`indexArtifact`. No `query*` / `mutation*` / `logic*` / `spec*` /
+the declaration keyword already carries that: `libraryFolders`,
+`moveArtifactToFolder`, `isDrainableSendJob`, `isActiveRecord`,
+`indexFileOnCreate`. No `query*` / `mutation*` / `logic*` / `spec*` /
 `trait*` / `seed*` prefix -- settled in #2853, which measured 0 of 1091
 shipped declarations carrying one. (See naming-conventions.md.)
 Constructs live in one consolidated file per kind per namespace
@@ -971,16 +985,16 @@ Constructs live in one consolidated file per kind per namespace
 carries an individual construct's name.
 
 ```
-dsl/library/queries.memql       query folder activeFolders { ... }
-dsl/library/mutations.memql     mutation folder createFolder { ... }
+dsl/library/queries.memql       query folder libraryFolders { ... }
+dsl/library/mutations.memql     mutation folder createLibraryFolder { ... }
 dsl/deployment/specs.memql      spec actorEnvelope requiresOwner = actor => ...
 dsl/common/traits.memql         trait isActiveRecord = row => ...
-dsl/library/logic.memql         logic indexArtifact { ... }
+dsl/library/automations.memql   automation indexFileOnCreate { ... }
 ```
 
 The declaration keyword and the call kind are one word, `mutation`
-(D13 of the language freeze record): `mutation folder createFolder { ... }`
-declares it and `mutation createFolder(...)` calls it. The old declaration
+(D13 of the language freeze record): `mutation folder createLibraryFolder { ... }`
+declares it and `mutation createLibraryFolder(...)` calls it. The old declaration
 keyword `mutate` is refused at parse, and `memqlmigrate --rewrite=bodies`
 rewrites it.
 
@@ -1003,11 +1017,13 @@ if any `naming.*` warning is emitted. References resolve structurally:
 the dependency-tree validator (C3/#2043) fails a reference that does not
 exist at load time.
 
-An automation calls a logic construct by the name the file-top import
-gives it, with its kind and a named argument:
-`decide := logic indexArtifact(event: event)` resolves through
-`use library.logic.{ indexArtifact }`. The pun `logic indexArtifact ( event )`
-is retired ([#2](#2-function-call-arguments-are-named-not-an-object-literal)).
+An automation calls a logic construct by its kind and a named argument:
+`decide := logic releaseWorkspaceOnRunTerminal(event: event)` is how
+`dsl/workbench/automations.memql` reaches the logic of that name; a
+cross-domain one resolves through its file-top import,
+`use common.traits.{ isActiveRecord }`-style. The pun
+`logic releaseWorkspaceOnRunTerminal ( event )` is retired
+([#2](#2-function-call-arguments-are-named-not-an-object-literal)).
 
 Automations are event-triggered, not called by name, so they use
 verb-first names with no prefix (`indexFileOnCreate`,
@@ -1848,11 +1864,16 @@ func (Query) listPartitions(ctx any) (any, error) {
 **The procedural form is internal.** The struct-form rewriter emits a
 `func (Receiver) NAME(ctx any) (any, error) { return <expr>, nil }`
 shape for a query and a mutation, for the engine's parser, and authors
-never write it; `ctx` is not part of the author surface. A `func (Spec)` or
-`func (Shape)` block is a quieter shape: no loader's slicer recognises it, so
-it registers nothing and raises nothing at all -- the silent class
+never write it; `ctx` is not part of the author surface. **Most receivers are
+refused BY NAME** at load, with the message above -- `Query`, `Mutation`,
+`Logic`, `Shape`, `Tool`, `Prompt`, `Builtin`, `Policy` and `Provider`, all
+measured, and [#16](#16-shape-bodies-the-key-comes-from-the-paths-terminal-segment)
+shows the `func (Shape)` one. `func (Spec)` is the exception and the one to
+know about: written the way the legacy form was written, with its `bool`
+return, no loader slices it, so it registers nothing and raises nothing at
+all -- the silent class
 [7b](#7b-parking-a-declaration-with---detaches-the-annotations-above-it) is
-about. A logic's statements follow its `args { }`
+about. (`func (Seed)` measures the same way.) A logic's statements follow its `args { }`
 block and end with `return <expr>`, which returns the value directly,
 with no `ctx.output = ...`.
 
