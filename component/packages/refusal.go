@@ -195,6 +195,40 @@ const (
 	// so the SECOND click on a link is this code and not a second grant.
 	CodeConnectStateInvalid = "connect_state_invalid"
 
+	// The five below are raised while a cluster owner registers the cluster's
+	// GitHub App from the product (design record
+	// 2026-09-20-github-app-setup): by githubAppSetupBegin and githubAppRemove
+	// over the stream, and by the two identity routes the round trip to GitHub
+	// passes through. Catalogued here with connect_state_invalid, and for its
+	// reason.
+
+	// CodeGithubAppManagedByEnvironment: the deployment set
+	// MEMQL_GITHUB_APP_*, so the app is the operator's. The environment
+	// outranks stored rows everywhere they are read, so a registration made
+	// from the product would be written and then ignored -- refused instead,
+	// naming who does own it.
+	CodeGithubAppManagedByEnvironment = "github_app_managed_by_environment"
+	// CodeGithubAppSetupForbidden: the caller is not a cluster owner, or
+	// stopped being one between beginning a registration and GitHub sending
+	// them back. The app is the deployment's -- every person's grant is made
+	// against it -- so registering or removing one is an owner's act.
+	CodeGithubAppSetupForbidden = "github_app_setup_forbidden"
+	// CodeGithubAppSetupInvalid: the organization named is not something
+	// GitHub would accept as an account login. Refused before anything is
+	// written, because it becomes a path segment of the URL a form posts to.
+	CodeGithubAppSetupInvalid = "github_app_setup_invalid"
+	// CodeGithubAppSetupStateInvalid: the setup state was expired, replayed,
+	// never issued, or belongs to the Connect flow. connect_state_invalid's
+	// sibling, kept separate because the repair is different: start setting
+	// GitHub up again, rather than pressing Connect again.
+	CodeGithubAppSetupStateInvalid = "github_app_setup_state_invalid"
+	// CodeGithubAppSetupFailed: GitHub sent the owner back and the app could
+	// not be kept -- the one-time code was refused, the app came back asking
+	// for more than this cluster's manifest did, the cluster could not name
+	// its own domain, or the six values could not be stored. Nothing is
+	// half-registered: the stored values are all six or none.
+	CodeGithubAppSetupFailed = "github_app_setup_failed"
+
 	// -- reported, not fatal (D3, and the target model's D9) --
 
 	// CodeGoPackNotDeployable: a bff/ with a go.mod. Reported per-half and

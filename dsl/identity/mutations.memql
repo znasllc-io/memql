@@ -3245,6 +3245,8 @@ mutation githubConnectState createGithubConnectState {
     expiresAt   string!
     returnPath  string
     sourceIP    string
+    purpose       string
+    organization  string
   }
   insert {
     accept { userId, stateHash, expiresAt }
@@ -3252,6 +3254,8 @@ mutation githubConnectState createGithubConnectState {
       id: args.stateId
       returnPath: args.returnPath ?? ""
       sourceIP: args.sourceIP ?? ""
+      purpose: args.purpose ?? ""
+      organization: args.organization ?? ""
     }
   }
 }

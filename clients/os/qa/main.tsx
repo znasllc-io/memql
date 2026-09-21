@@ -200,6 +200,9 @@ const LISTS: FakeSeed = {
 const CONNECTED: FakeSeed = {
   ...LISTS,
   credentials: [githubGrantRow({ id: "cred-grant" })],
+  // The app's installation page, which is what puts "Install on another
+  // organization" under the picker's groups.
+  installUrl: "https://github.com/apps/memql/installations/new",
   repositories: repositoriesReply({
     repositories: [
       repositoryFixture({ fullName: "acme/storefront", private: true, visibility: "private" }),
@@ -208,6 +211,21 @@ const CONNECTED: FakeSeed = {
       repositoryFixture({ fullName: "octocat/dotfiles", installationId: "i-octocat" }),
     ],
   }),
+};
+
+/** A cluster with NO GitHub App, seen by somebody who may register one. Press
+ *  + and choose "A repository": the step asks the one question and the floor
+ *  says Set up GitHub. */
+const NO_APP_OWNER: FakeSeed = { ...LISTS, githubApp: { configured: false, canSetup: true } };
+
+/** The same cluster, seen by somebody who may not. */
+const NO_APP_MEMBER: FakeSeed = { ...LISTS, githubApp: { configured: false, canSetup: false } };
+
+/** A cluster whose app was registered from the product, with an account
+ *  connected through it: Settings > Sources ends in the GitHub App block. */
+const APP_FROM_HERE: FakeSeed = {
+  ...CONNECTED,
+  githubApp: { configured: true, source: "cluster", slug: "memql-on-memql-example-com", canSetup: true },
 };
 
 function settingsStore() {
@@ -240,9 +258,9 @@ function WindowBody({ fallback, children }: { fallback: string; children: ReactN
   );
 }
 
-function Lists({ section }: { section: "deployables" | "sources" }) {
+function Lists({ section }: { section: "deployables" | "sources" | "settings" }) {
   return (
-    <WindowBody fallback={section === "sources" ? "Sources" : "Deployables"}>
+    <WindowBody fallback={section === "sources" ? "Sources" : section === "settings" ? "Settings" : "Deployables"}>
       <DeployablesApp sectionId={section} navigate={() => {}} askContext={() => {}} store={settingsStore()} />
     </WindowBody>
   );
@@ -423,6 +441,12 @@ const VIEWS: Record<string, { seed: FakeSeed; role?: string; framed?: boolean; r
   // The same app with a GitHub account connected: press + and choose
   // "A repository" and the Repository step is the picker, not the invitation.
   connected: { seed: CONNECTED, framed: true, render: () => <Lists section="deployables" /> },
+  // The cluster's GitHub App, in each reading a surface has of it.
+  "github-owner": { seed: NO_APP_OWNER, framed: true, render: () => <Lists section="deployables" /> },
+  "github-member": { seed: NO_APP_MEMBER, role: "developer", framed: true, render: () => <Lists section="deployables" /> },
+  "settings-no-app": { seed: NO_APP_OWNER, framed: true, render: () => <Lists section="settings" /> },
+  "settings-no-app-member": { seed: NO_APP_MEMBER, role: "developer", framed: true, render: () => <Lists section="settings" /> },
+  "settings-app": { seed: APP_FROM_HERE, framed: true, render: () => <Lists section="settings" /> },
   overview: { seed: BOUND, render: () => <Overview site={siteFromRow(SHOP)} /> },
   // The preview section, in the five states worth judging as pixels.
   preview: { seed: PREVIEW_MEASURED, render: () => <PreviewPage site={siteFromRow(SHOP_PREVIEWING)} /> },

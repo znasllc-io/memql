@@ -11,39 +11,44 @@ import { RepositoryPicker } from "../../../sources/RepositoryPicker";
 import { returnPathFor } from "../../../sources/connectReturn";
 import type { RepositoryRow } from "../../../sources/repositories";
 import { credentialIsRevoked, githubGrantOf, type CredentialFeedStatus, type CredentialRow } from "../../../sources/rows";
+import { GithubAppOwnerField, OWN_ACCOUNT, SET_UP_SENTENCE, type GithubAppOwner } from "../../../sources/GithubAppSetup";
+import type { GithubAppActions } from "../../../sources/useGithubApp";
 import { useGithubConnect, useSourceRepositories, type GithubConnectActions } from "../../../sources/useGithubConnect";
 import type { SourceProbeHandle } from "../../../sources/useProbes";
 import { suggestName, type ComposeDraft } from "../../compose";
 import { NameField } from "./fields";
 import { TokenSourceForm } from "./TokenSourceForm";
 
-// The repository answer, in its three readings (epic memql#4915, design
-// sections A and C; the mount point Compose left for it in `Source.tsx`).
+// The repository answer, in its readings (epic memql#4915, design sections A
+// and C; the mount point Compose left for it in `Source.tsx`).
 //
 // ===========================================================================
 // THE SAME QUESTION, ANSWERED BY WHAT THIS PERSON ALREADY HAS
 // ===========================================================================
-// "Where does this come from" has one answer and three ways of giving it,
+// "Where does this come from" has one answer and several ways of giving it,
 // and which one a person sees is decided by what the cluster and they hold:
 //
 //   * a CONNECTION -- the picker is the answer. Choosing a repository fills
-//     the URL, the credential and the branch list at once, and the token form
-//     drops behind "Use a token instead".
-//   * NO connection, and a cluster that has a GitHub App -- Connect above,
-//     the same fold below it, closed.
-//   * NO GitHub App on this cluster -- the token form IS the stop, with the
-//     server's own sentence saying why. This is the reading every cluster
-//     without an app gets, and it is what this surface did before Connect
-//     existed.
+//     the URL, the credential and the branch list at once.
+//   * NO connection, and a cluster that has a GitHub App -- what connecting is
+//     for, and Connect GitHub on the floor.
+//   * NO GitHub App on this cluster -- said BEFORE anybody presses anything.
+//     A cluster owner is asked the one question registering an app has, with
+//     Set up GitHub on the floor; anybody else is told who can, and that a
+//     token works meanwhile (`GithubNotSetUp`).
+//   * no app, and NOBODY COULD SAY SO IN ADVANCE -- an engine that predates
+//     the status call. Connect is offered, the cluster refuses it, and the
+//     token form becomes the stop under the server's own sentence. This is
+//     what every cluster without an app got before the status existed.
 //
 // ===========================================================================
-// NOTHING IS ASKED OF THE CLUSTER UNTIL SOMEBODY HOLDS A CONNECTION
+// WHAT IS ASKED OF THE CLUSTER, AND WHEN
 // ===========================================================================
 // `githubConnectBegin` MINTS A STATE ROW, so it is never called to find out
-// whether this cluster has an app -- that is what makes the third reading a
-// consequence of a click rather than of opening the stop. A person with no
-// grant sees Connect and the fold, presses one of them, and learns from the
-// answer.
+// whether this cluster has an app. `githubAppStatus` is a READ and mints
+// nothing, so the page asks it as the wizard opens (`useGithubApp`) -- which is
+// what turned "press Connect and learn the cluster cannot" into a step that
+// knows before it offers.
 //
 // The picker's list, by contrast, is a READ, and it runs on its own the
 // moment a connected person opens this stop: the measure of this surface is
@@ -94,9 +99,32 @@ interface RepositorySourceProps {
    * nothing to press.
    */
   onConnectionNeed?: (need: ConnectionNeed) => void;
+  /**
+   * The cluster's GitHub App, read by the PAGE when the wizard opened -- so
+   * this step knows whether Connect can work BEFORE it offers it. Absent, or
+   * with a null status, means "not known", which is read as "there is an app":
+   * Connect is offered and a cluster with none refuses it in place, as it did
+   * before the status could be asked for (`useGithubApp`).
+   */
+  app?: GithubAppActions;
+  /** Whose GitHub account the app is registered under, held by the page
+   *  because the floor's Set up GitHub needs it. */
+  appOwner?: GithubAppOwner;
+  onAppOwner?: (owner: GithubAppOwner) => void;
 }
 
-export type ConnectionNeed = "" | "connect" | "reconnect";
+/**
+ * What the step needs before it can go on.
+ *
+ *   connect / reconnect -- this person's GitHub connection.
+ *   setup               -- the CLUSTER has no GitHub App, and this person may
+ *                          register one. The floor's act, like the other two.
+ *   unavailable         -- the cluster has none and this person may not. There
+ *                          is NO act for it (rule 12: absent, never disabled);
+ *                          the floor says why, and the token path is one choice
+ *                          away.
+ */
+export type ConnectionNeed = "" | "connect" | "reconnect" | "setup" | "unavailable";
 
 export function RepositorySource(props: RepositorySourceProps) {
   const { access } = useSession();
@@ -121,6 +149,7 @@ export function RepositorySource(props: RepositorySourceProps) {
 
 function PersonalRepositorySource({
   draft, onDraft, credentials, probe, tokenFormOpen, onTokenFormOpenChange, connect, onConnectionNeed,
+  app, appOwner = OWN_ACCOUNT, onAppOwner,
 }: RepositorySourceProps) {
   const install = useGithubConnect();
   const repositories = useSourceRepositories();
@@ -194,9 +223,22 @@ function PersonalRepositorySource({
 
   const method = tokenFormOpen ? "token" : "github";
 
+  // THE CLUSTER HAS NO APP, AND THIS TIME IT IS KNOWN BEFORE ANYBODY PRESSES.
+  // Only a status that ANSWERED "not configured" counts: null is "not known",
+  // and not known keeps Connect on offer (`useGithubApp`).
+  const appMissing = app?.status != null && !app.status.configured;
+  const maySetup = appMissing && app?.status?.canSetup === true;
+
   // Said on every change and WITHDRAWN on the way out: a need that outlived
   // its step would leave "Connect GitHub" on the floor of the step after it.
-  const need: ConnectionNeed = method !== "github" || noApp !== null || (connected && !reconnect) ? "" : grant === null ? "connect" : "reconnect";
+  const need: ConnectionNeed =
+    method !== "github" || noApp !== null
+      ? ""
+      : appMissing
+        ? maySetup ? "setup" : "unavailable"
+        : connected && !reconnect
+          ? ""
+          : grant === null ? "connect" : "reconnect";
   useEffect(() => {
     onConnectionNeed?.(need);
     return () => onConnectionNeed?.("");
@@ -232,7 +274,9 @@ function PersonalRepositorySource({
         </div>
       </Field>
 
-      {method === "token" ? (
+      {method === "github" && appMissing ? (
+        <GithubNotSetUp app={app!} maySetup={maySetup} owner={appOwner} onOwner={onAppOwner} />
+      ) : method === "token" ? (
         <>
           {/* NOT "ADVANCED". A pasted URL and a personal token are a legitimate
               first choice -- a host the app does not cover, an organization
@@ -281,6 +325,51 @@ function PersonalRepositorySource({
           {(connect.refusal ?? repositories.refusal) ? <ProblemNotice problem={(connect.refusal ?? repositories.refusal)!} tone={toneFor((connect.refusal ?? repositories.refusal)!.code)} /> : null}
         </>
       )}
+    </>
+  );
+}
+
+/**
+ * GitHub is chosen and the CLUSTER has no GitHub App.
+ *
+ * This used to be found out by pressing Connect: the cluster refused, and the
+ * step swapped itself for a notice telling a cluster owner to "ask an operator"
+ * -- the one person reading it who IS the operator. Now it is known when the
+ * wizard opens, so the step says what is true and offers what can be done.
+ *
+ * FOR A CLUSTER OWNER it is one question -- whose GitHub account the app is
+ * registered under -- and the act is the floor's, Set up GitHub, like every
+ * forward act in this wizard. GitHub asks the real question on its own page
+ * (it shows the app it is about to create); this only has to say what that
+ * trip is for and that it ends back here.
+ *
+ * FOR ANYBODY ELSE there is nothing to press (rule 12: absent, never
+ * disabled), so it says who can change it and what works meanwhile -- and the
+ * token is one choice away, in the row above.
+ */
+function GithubNotSetUp({ app, maySetup, owner, onOwner }: {
+  app: GithubAppActions;
+  maySetup: boolean;
+  owner: GithubAppOwner;
+  onOwner?: (owner: GithubAppOwner) => void;
+}) {
+  if (!maySetup) {
+    return (
+      <Caption>
+        This cluster is not linked to GitHub yet. A cluster owner sets that up once; until then, choose A token.
+      </Caption>
+    );
+  }
+  return (
+    <>
+      {/* "You come back to this step" is the wizard's own reassurance, the one
+          the Connect reading gives: leaving for GitHub does not lose what was
+          answered so far. */}
+      <Caption>{SET_UP_SENTENCE} You come back to this step.</Caption>
+      <GithubAppOwnerField owner={owner} onOwner={(next) => onOwner?.(next)} idPrefix="os-compose-github-app" />
+      {/* IN PLACE, in the tone the CODE asks for -- where the person was when
+          they asked. */}
+      {app.refusal ? <ProblemNotice problem={app.refusal} tone={toneFor(app.refusal.code)} /> : null}
     </>
   );
 }

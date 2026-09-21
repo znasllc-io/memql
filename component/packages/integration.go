@@ -49,6 +49,12 @@ type Integration struct {
 	// every node type that holds no worker streams, which is every one but
 	// the agent.
 	fleet Builder
+	// githubApp answers the cluster's GitHub App at each operation, injected by
+	// app/ for the reason workbench is: only app/ can see both this package
+	// and the resolver that knows where the app comes from (the environment,
+	// or the rows a cluster owner's registration wrote -- design record
+	// 2026-09-20-github-app-setup, D2). Nil reads the environment alone.
+	githubApp func() githubapp.Config
 
 	depsOnce sync.Once
 	deps     *Deps
@@ -61,6 +67,13 @@ type Integration struct {
 // one deploy disagree about where they built.
 func (i *Integration) SetWorkbench(runner workbenchRunner) {
 	i.workbench = runner
+}
+
+// SetGitHubAppSource installs where the cluster's GitHub App comes from. Called
+// once, from app/, before the first call that needs it; a later call is ignored
+// for SetWorkbench's reason -- Deps is built once.
+func (i *Integration) SetGitHubAppSource(source func() githubapp.Config) {
+	i.githubApp = source
 }
 
 // SetFleetBuilder installs the machine route (task memql#4904).
@@ -921,8 +934,14 @@ func (i *Integration) resolve() (*Deps, error) {
 		// mints against the same rate limit and make "was this cached" a
 		// question with two answers. Built even when the cluster has no app
 		// configured -- every call then answers github_app_not_configured,
-		// which is the operator's fact rather than a nil to remember.
+		// which is the cluster's fact rather than a nil to remember.
+		//
+		// WITH A SOURCE when app/ wired one, so an app registered from the
+		// product is seen by the next fetch rather than by the next restart.
 		gh := githubapp.FromEnv()
+		if i.githubApp != nil {
+			gh = githubapp.New(githubapp.Config{}, githubapp.WithConfigSource(i.githubApp))
+		}
 		s := &store{engine: i.engine, logger: i.logger, github: gh}
 		i.deps = &Deps{
 			Store:           s,
