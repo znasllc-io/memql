@@ -526,7 +526,7 @@ func (e *MemQLEngine) canReadStore(ctx context.Context, storeId string) (bool, e
 	if !e.canResolve() {
 		return false, ErrEngineNotInitialized
 	}
-	res, err := e.Execute(ctx, fmt.Sprintf("query storeById(storeId: %s)", langparserQuoteString(storeId)))
+	res, err := e.Execute(ctx, fmt.Sprintf("query storeById(storeId: %s)", languageParser.QuoteString(storeId)))
 	if err != nil {
 		return false, err
 	}
@@ -621,17 +621,15 @@ WHERE s.concept = 'v1:platform:site'
   AND s.payload->'binding'->>'storeDomain' = st.domain;
 ```
 
-Before writing this file, VERIFY the row id column and the canonical-id shape by reading
-one real row:
-
-```bash
-psql "postgres://memql:memql_dev@localhost:15434/memql" -c \
-  "select id, concept from \"MemoryNodes\" where concept='v1:shopify:store' limit 3;"
-```
-
-`split_part(st.id, ':', 4)` assumes `v1:shopify:store:<shortId>`. If the stored id is
-already bare, drop the `split_part` and use `st.id`. Adjust and say in the comment which
-one it is — do not leave both readings possible.
+VERIFIED against the shared throwaway database (`docker exec memql-throwaway-laneb psql
+-U memql -d memql`; `psql` is not on the host PATH): ids are stored CANONICAL
+(`v1:platform:site:site-shop-site-4165002`), so `split_part(id, ':', 4)` is the bare short
+id, which is the form `binding.storeId` carries and the form `query storeById` resolves on
+inbound. That database also holds a real `shopify_storefront` row whose binding is still
+`{"storeDomain": "example-store.myshopify.com", "storefrontTokenRef":
+"SHOPIFY_STOREFRONT_TOKEN"}`, which is the row this migration exists for. It holds NO
+`v1:shopify:store` rows, so the join matches nothing there — that is the idempotent case,
+not evidence the migration works. Say so if you report on it.
 
 Create the `.down.sql`:
 
