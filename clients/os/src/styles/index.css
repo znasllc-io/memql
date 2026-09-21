@@ -1592,7 +1592,17 @@ button:not(:disabled):active {
  * The list is its own CONTAINER so the narrow layout follows the width the
  * list actually has -- a half-width window, a split desk -- not the screen's. */
 .os-record-list { container: os-record-list / inline-size; min-width: 0; }
-.os-row.os-record-row { position: relative; width: 100%; display: grid; grid-template-columns: 28px minmax(0, 1fr) minmax(80px, 0.45fr) auto 14px; gap: 12px; align-items: center; border: 0; border-bottom: 1px solid var(--os-line); border-radius: 0; background: none; padding: 15px 4px; text-align: left; color: var(--os-ink); font: inherit; }
+/* THE STATE COLUMN HAS A FLOOR, SO THE MIDDLE COLUMN IS A COLUMN. Every row is
+ * its own grid, and with the state track at `auto` each row resolved its
+ * tracks around ITS OWN word: "Live" against "Not deployed" moved the quiet
+ * middle 50px, so where a deployable came from started at a different x on
+ * every line. Nobody saw it on a cluster whose rows all said "Live"; a list
+ * of eight with five different words was ragged from top to bottom. 8.5rem
+ * holds the longest word any of these lists says ("Nothing deployed", "Update
+ * available", "getting a certificate"), so every row resolves the same tracks.
+ * `auto` above it, so a longer word still fits -- on its own row. The word
+ * stays on the trailing edge: the track is wider, the state is not. */
+.os-row.os-record-row { position: relative; width: 100%; display: grid; grid-template-columns: 28px minmax(0, 1fr) minmax(80px, 0.45fr) minmax(8.5rem, auto) 14px; gap: 12px; align-items: center; border: 0; border-bottom: 1px solid var(--os-line); border-radius: 0; background: none; padding: 15px 4px; text-align: left; color: var(--os-ink); font: inherit; }
 button.os-row.os-record-row { cursor: pointer; }
 button.os-row.os-record-row:hover { background: var(--os-hover); }
 button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }
@@ -8480,6 +8490,19 @@ a.os-button {
 .os-wizard[data-layout="split"] .os-rail[data-scale="page"] .os-rail-chev {
   display: none;
 }
+/* THE ACCENTED NAME IS THE STEP ON THE STAGE. The accent was the STATE's -- a
+   step waiting on the person -- which is the open step nearly always, and not
+   when a step is answered and still showing: choose a repository and the
+   stage went on saying "Repository" while the rail lit "Review". Side by side
+   the name says WHERE YOU ARE and the mark says HOW FAR IT HAS GOT, so the
+   two can differ without either being wrong. A stopped or skipped step keeps
+   its own colour wherever the person is: that is news, not position. */
+.os-wizard[data-layout="split"] .os-rail[data-scale="page"] .os-rail-stage:is([data-state="open"], [data-state="current"]):not([data-open="true"]) .os-rail-label {
+  color: var(--os-ink);
+}
+.os-wizard[data-layout="split"] .os-rail[data-scale="page"] .os-rail-stage[data-open="true"]:is([data-state="done"], [data-state="complete"], [data-state="waiting"]) .os-rail-label {
+  color: var(--os-accent);
+}
 .os-wizard-mark {
   flex: none;
   align-self: flex-start;
@@ -8897,77 +8920,21 @@ a.os-button {
    panel reads as a table header stripped of its borders, which is a far heavier
    object than a two-word label should be. The heading scrolls with the rows it
    names now: nothing to paint, and nothing to explain. */
-.os-deploy-sectionhead {
-  margin: 14px 0 2px;
-  font-size: var(--os-text-xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--os-muted);
-}
-.os-livelist-row:first-child .os-deploy-sectionhead {
-  margin-top: 0;
-}
+
 
 /* The source's own line: disclosure, then the row. */
-.os-deploy-grouphead {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-.os-deploy-grouphead > :last-child {
-  flex: 1;
-  min-width: 0;
-}
+
+
 /* The group's disclosure: a LABELLED control, not a bare arrow. It reads
    "2 apps" with a chevron that turns, so what it does and what it will reveal
    are both on the control itself. Sized and bordered like a chip, because that
    is what it replaced and the row's rhythm should not move. */
-.os-deploy-disclose {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  height: 20px;
-  padding: 0 7px 0 4px;
-  border: 1px solid var(--os-line);
-  border-radius: 999px;
-  background: var(--os-plate);
-  color: var(--os-muted);
-  font: inherit;
-  font-size: var(--os-text-xs);
-  line-height: 1;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.os-deploy-disclose:hover {
-  border-color: var(--os-line-strong, var(--os-line));
-  background: var(--os-hover);
-  color: var(--os-text);
-}
-.os-deploy-disclose:focus-visible {
-  outline: 2px solid var(--os-accent);
-  outline-offset: 1px;
-}
-.os-deploy-disclose svg {
-  transition: transform 120ms ease;
-}
-.os-deploy-disclose[aria-expanded="true"] svg {
-  transform: rotate(90deg);
-}
+
+
 @media (prefers-reduced-motion: reduce) {
-  .os-deploy-disclose svg {
-    transition: none;
-  }
+  
 }
 
-.os-deploy-group-apps {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-left: 22px;
-  margin-top: 6px;
-}
 
 /* ---- the history line ---- */
 .os-deploy-history-line {

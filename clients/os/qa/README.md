@@ -7,7 +7,8 @@ value beside its own label, so the suite can be entirely green over a surface
 whose columns collide, whose action bar sits below the fold, or whose sentence
 disagrees with the number in it.
 
-This is that pass, for the storefront's Store surface (epic memql#5530).
+This is that pass, for the storefront's Store surface (epic memql#5530) and
+for the two Deployables lists and the add wizard that sits behind them.
 
 ## Running it
 
@@ -25,9 +26,18 @@ google-chrome --headless=new --disable-gpu --no-sandbox --hide-scrollbars \
   --screenshot=store.png "http://localhost:5199/?view=store&mode=dark"
 ```
 
-`view` is one of `overview`, `store`, `quiet`, `picker`, `readonly`, `hidden`;
-`mode` is `dark` or `light`. **Take at least one narrow capture** (`820,760`):
-two of the three real defects this harness found were invisible at 1400x900.
+`view` is one of `overview`, `store`, `quiet`, `picker`, `readonly`, `hidden`
+(the Store surface), or `list`, `sources`, `list-empty`, `sources-empty`,
+`connected` (the Deployables app, whole); `mode` is `dark` or `light`. **Take
+at least one narrow capture** (`820,760`): two of the first three real defects
+this harness found were invisible at 1400x900.
+
+The list views seed ONE OF EVERYTHING: a deployable of every origin (a named
+source, an uploaded zip, a Library zip, CI, built in, none) and a source in
+every state (review needed, update available, current, nothing deployed,
+archived). A development cluster has two built-in deployables and no source,
+so until these views existed neither list had been seen with the rows it was
+designed for. `connected` is the same app with a GitHub account connected.
 
 ## What it is, and what it is not
 
@@ -41,6 +51,12 @@ workspace's Store slot, which needs React's synthetic event system and so a
 real driver. Each view is rendered directly here, in the wrapper the page gives
 it. These captures judge LAYOUT, COLOUR, COPY and DENSITY; the navigation that
 reaches them is `test/deployables/store.test.tsx`'s.
+
+The Deployables views mount the WHOLE APP inside the window's own body (the
+trail row, then the content, as `chrome/WindowFrame` composes them), so a
+headless capture shows the list and a real browser can go on from it: a
+source's page, the add wizard, the Repository step as a picker. A wizard needs
+that bounded body -- its floor is only at the bottom of something that has one.
 
 ## Three things it gets wrong by default, all silent
 
@@ -65,7 +81,21 @@ reaches them is `test/deployables/store.test.tsx`'s.
 
 ## What it found
 
-Three defects, all invisible to 3,344 green cases: a pane that painted 800px of
-dead space beside a 600px stripe (DESIGN.md rule 9), a sentence that disagreed
-with its own number ("1 of the 3 scopes ... are not granted"), and a choice
-label with nested parentheses.
+On the Store surface, three defects, all invisible to 3,344 green cases: a pane
+that painted 800px of dead space beside a 600px stripe (DESIGN.md rule 9), a
+sentence that disagreed with its own number ("1 of the 3 scopes ... are not
+granted"), and a choice label with nested parentheses.
+
+On the two lists, the first time they were rendered with real rows:
+
+- **Five sources seeded, three listed.** The Sources list was a filter over the
+  deployables fold, where a source exists only if it has a row -- so a source
+  that had made nothing was nowhere, a search trimmed what a source was said to
+  have made, and one archived app filed its active source under archived.
+- **A ragged middle column.** Each row is its own grid and its state track was
+  `auto`, so where a deployable came from started at a different x on every
+  line (five different x down a list of eight). Invisible on a cluster whose
+  rows all say "Live".
+- **The rail lit the wrong step.** With a repository chosen the stage said
+  "Repository" and the rail's accent was on "Review".
+- "uploaded zip" on one tab and "Uploaded zip" on the other, for the same thing.

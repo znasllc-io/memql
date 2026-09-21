@@ -40,6 +40,10 @@ import { TRAFFIC_WINDOWS, type TrafficWindow } from "./traffic";
 export const DEPLOYABLES_SECTIONS: OsAppSection[] = [
   { id: "map", name: "Overview" },
   { id: "deployables", name: "Deployables" },
+  // THE SECOND NOUN. A source is a repository or a zip that produces
+  // deployables, with a life of its own; it used to be a header row inside the
+  // deployables list, with its apps indented beneath it.
+  { id: "sources", name: "Sources" },
   // The app's slice of the cluster's logs (epic memql#4895): the lines it
   // tagged and the lines about the things it owns. Admin-floored because
   // every read on the log store is (spec L3), and this is the ONE section
