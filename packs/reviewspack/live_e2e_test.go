@@ -61,6 +61,10 @@ func runScope() (merchantA, merchantB, storeLive, storeDev, handle string) {
 }
 
 func liveEngine(t *testing.T) *memql.MemQLEngine {
+	return liveEngineWithDisabled(t)
+}
+
+func liveEngineWithDisabled(t *testing.T, disabled ...string) *memql.MemQLEngine {
 	t.Helper()
 	dsn := dbtest.DSN()
 	probe := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
@@ -89,6 +93,11 @@ func liveEngine(t *testing.T) *memql.MemQLEngine {
 	const domain = reviewspack.Domain
 	memqldsl.RegisterTree(domain, reviewspack.Tree())
 	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
+
+	// The boot-time projection app phase 3 hands the DSL layer, here as a
+	// test seam: this is the ONE input that makes a pack mounted-inert.
+	memqldsl.SetDisabledPackDomains(disabled)
+	t.Cleanup(func() { memqldsl.SetDisabledPackDomains(nil) })
 
 	if _, err := memql.LoadUnifiedConcepts(nil); err != nil {
 		t.Fatalf("LoadUnifiedConcepts: %v", err)
@@ -215,4 +224,43 @@ func rowsOf(t *testing.T, eng *memql.MemQLEngine, ctx context.Context, query str
 // quote renders a MemQL string literal. The engine's own escaping, never Go's.
 func quote(s string) string {
 	return `"` + s + `"`
+}
+
+// A DISABLED PACK IS MOUNTED-INERT, and this is the property that makes
+// "storefront packs ship disabled" SAFE rather than merely quiet (epic
+// memql#5532, issue memql#5549). The record names it as acceptance for this
+// epic, and the generic predicate test in dsl/ covers the path rule rather
+// than the outcome -- so this asserts the outcome, for the pack that ships.
+//
+// CONCEPTS STAY, because schemas are declarative and inert: cross-domain
+// imports and @relationship targets keep resolving, and rows written before
+// the flip stay browsable. BEHAVIOUR GOES, so the shopper surface a disabled
+// pack declared reaches a construct that is not in the registry at all --
+// absent rather than present and refusing.
+func TestLiveE2E_ADisabledPackIsInert(t *testing.T) {
+	eng := liveEngineWithDisabled(t, reviewspack.Domain)
+	_, _, storeLive, _, handle := runScope()
+	ctx := asMerchant("user-reviews-inert")
+
+	// The BEHAVIOURAL half is gone: the shopper mutation the pack declares a
+	// form over is not loaded, so the write cannot happen at all.
+	_, err := eng.Execute(ctx, `submitReview(body: "x", productHandle: `+quote(handle)+
+		`, storeId: `+quote(storeLive)+`)`)
+	if err == nil {
+		t.Fatal("submitReview ran on a DISABLED pack: a mounted-inert pack must load no " +
+			"behavioural construct, so the shopper write path has nothing to reach")
+	}
+
+	// ...and so is the read behind the declared shopper read.
+	if _, err := eng.Execute(ctx,
+		`query reviewsForStore(storeId: `+quote(storeLive)+`)`); err == nil {
+		t.Fatal("a query on a DISABLED pack still resolved")
+	}
+
+	// The CONCEPT half stays, which is what keeps rows written before the
+	// flip browsable and cross-domain imports resolving.
+	if _, err := memoryNodes.DefaultRegistry().Get("v1:reviews:review"); err != nil {
+		t.Fatalf("a disabled pack's concepts must still load -- mounted-inert, not "+
+			"unmounted: %v", err)
+	}
 }
