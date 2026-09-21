@@ -1,0 +1,11 @@
+/// A trigger filter that calls a construct -- refused at load (memql#5582),
+/// not only once the trigger fires: a construct call is the work of a
+/// statement, and a trigger filter is not one.
+@trigger(event="node.updated", concept="v1:work:goal")
+@filter(row => mutation tfNoteGoal(goalId: row.id, note: "x"))
+automation tfConstructCallFilter {
+  args {
+    id  string
+  }
+  note := mutation tfNoteGoal(goalId: args.id, note: "changed")
+}

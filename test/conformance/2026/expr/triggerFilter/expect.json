@@ -243,6 +243,13 @@
       "code": "annotation_form",
       "message": "@filter on an automation takes an expression",
       "note": "An @filter with nothing in it is refused by its form. The lambda in a filled one is parsed at load, and a raw-text predicate is the retired spelling."
+    },
+    {
+      "file": "construct-call.memql",
+      "verdict": "refuse_load",
+      "code": "lower_refused",
+      "message": "`mutation tfNoteGoal(goalId: row.id, note: \"x\")` does not lower in a trigger filter: cannot be called from this position: a construct call is the work of a statement, and a trigger filter is not one -- a call there would read or write with no step of its own. Move the call into a step of the automation's body",
+      "note": "memql#5582: the tier manifest already refuses a construct call at this position (manifest.go's inProcessKinds), but nothing enforced it at load -- the automation loaded clean and the refusal only arrived at fire time (construct_call_not_allowed), once per matching event. This pins the load-time refusal PrepareExpressions now produces (component/automations/expressions_v1.go's checkTriggerFilterAdmission), worded to match EvalCondition's fire-time one."
     }
   ]
 }
