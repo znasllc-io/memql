@@ -160,9 +160,24 @@ func shopperRefusalDocument(refusal shopperRefusal) string {
     margin: 2rem 0 1.25rem;
   }
   a {
-    color: LinkText;
+    /* currentColor, NOT the LinkText system color. LinkText is the honest
+       reading of "choose no palette", and it is the one place that backfires:
+       the UA default blue against a dark Canvas is both harsh and low
+       contrast, and the page then reads as UNSTYLED -- which is the "this
+       shop is broken" impression the whole design is avoiding. The underline
+       carries the affordance instead, which is the accessible pattern anyway,
+       and the link still adopts the visitor's own theme. */
+    /* CanvasText rather than inherit: the link sits inside the muted
+       remedy paragraph, so inheriting made the page's ONE ACTION its
+       quietest element. Full strength plus the underline puts it second in
+       the hierarchy, behind the headline and ahead of the explanation,
+       which is the order a person reads it in. */
+    color: CanvasText;
     text-decoration-thickness: 1px;
-    text-underline-offset: 2px;
+    text-underline-offset: 3px;
+  }
+  a:hover {
+    text-decoration-thickness: 2px;
   }
   a:focus-visible {
     outline: 2px solid CanvasText;
