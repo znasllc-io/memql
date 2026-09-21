@@ -169,11 +169,18 @@ func (j *ModelJournal) lookup(ctx context.Context, ownerUserId, runId, requestHa
 // under the same synthetic cluster actor that WROTE those rows; a caller
 // context without it reads zero rows exactly as before.
 func (j *ModelJournal) readRun(ctx context.Context, ownerUserId, runId string) ([]map[string]any, error) {
+	return readModelCalls(ctx, j.store, ownerUserId, runId)
+}
+
+// readModelCalls is readRun's body as a package function, because the run
+// ceiling guard folds the SAME rows into the run's spend (runceilings.go) and
+// the two must not disagree about which query opens them.
+func readModelCalls(ctx context.Context, s *store, ownerUserId, runId string) ([]map[string]any, error) {
 	if strings.TrimSpace(ownerUserId) != "" {
-		return j.store.query(ownerActor(ctx, ownerUserId),
+		return s.query(ownerActor(ctx, ownerUserId),
 			"query "+call("workModelCallsForOwnerRun", map[string]any{"runId": runId}))
 	}
-	return j.store.queryInternal(ctx,
+	return s.queryInternal(ctx,
 		"query "+call("workModelCallsForRun", map[string]any{"runId": runId}))
 }
 

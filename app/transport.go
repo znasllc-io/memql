@@ -46,6 +46,11 @@ func (a *App) transportBase() {
 	// that blames the prompt.
 	a.wireModelCallJournal()
 
+	// The run-ceiling guard rides the SAME seam and is installed beside it,
+	// for the same reason: a run dispatched before the guard exists spends
+	// against ceilings nothing is reading (memql#5580).
+	a.wireRunCeilings()
+
 	// === gRPC Server ===
 	memqlGRPCAddr := strings.TrimSpace(os.Getenv("MEMQL_GRPC_ADDRESS"))
 	a.grpcServer = memqlgrpc.NewServer(memqlGRPCAddr, a.Logger)
