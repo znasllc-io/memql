@@ -152,7 +152,13 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // not have made.
 // materializeFile adds the Materializer's known execution template.
 // checkDeployableHealth adds the bounded website readiness sweep.
-const shippedAutomationCount = 60
+//
+// 60 -> 61 in epic memql#5531 (storefront preview): recordPreviewOrderObservation
+// is the FOURTH and only passive observation of a preview -- an order arriving
+// in the mirror under a store somebody is exercising a candidate against. One
+// added, none removed, which is what the count says and a diff of a list could
+// not have.
+const shippedAutomationCount = 61
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

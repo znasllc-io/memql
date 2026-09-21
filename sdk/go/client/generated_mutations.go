@@ -1118,6 +1118,30 @@ func CheckRecordBuild(args CheckRecordArgs) string {
 	return b.String()
 }
 
+// ClearSiteCandidate -- Withdraw the candidate version, leaving the deployable with only what it serves.
+// The plain inverse of setSiteCandidate, and its own act rather than an omitted argument -- see that mutation's note. It touches neither `bundleRef` nor `previewBinding`: withdrawing a candidate is not detaching a development store, and a person who withdraws one usually means to publish another against the same store.
+// Every preview grant naming the withdrawn version stops resolving, because a grant names the candidate it was issued for and the edge compares the two (component/edge/preview.go). So this is also how an operator ends every open preview of a version at once.
+//
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["clearSiteCandidate"] in generated_concepts.go).
+type ClearSiteCandidateArgs struct {
+	SiteId string
+}
+
+// ClearSiteCandidate calls the engine mutation clearSiteCandidate.
+func (qc *QueryClient) ClearSiteCandidate(ctx context.Context, args ClearSiteCandidateArgs) (*Result, error) {
+	call := ClearSiteCandidateBuild(args)
+	return qc.executeNamed(ctx, "clearSiteCandidate", call)
+}
+
+func ClearSiteCandidateBuild(args ClearSiteCandidateArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation clearSiteCandidate(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ClearWorkerConnectedNode -- Clear connectedNodeId on a worker registration when its stream closes. NOT @serverOnly, deliberately. Its caller is component/worker, which is not on call_origin.go's internal-origin allowlist and should not be: every context in that package descends from a worker's own inbound stream. The concept's owner tier is the gate instead -- the store stamps auth.ContextWithUserActor for the registration's owner, and the write guard refuses any other actor. The residue is that a signed-in person could clear the field on their OWN machine, which the next heartbeat re-stamps within one interval.
 //
 // Bound concept: v1:worker:registration (machine-readable: BoundConcepts["clearWorkerConnectedNode"] in generated_concepts.go).
@@ -8464,6 +8488,46 @@ func MoveLibraryFolderBuild(args MoveLibraryFolderArgs) string {
 	return b.String()
 }
 
+// PromoteSiteCandidate -- Promote the candidate: the version being exercised becomes the version that serves.
+// THE ROW FLIP `bundleRef` ALREADY WAS. `bundleRef := candidateRef`, `candidateRef := ""`, one write -- which is why rollback needs nothing new: updateSiteBundle pointed back at the previous version is still one row write, and the version this promotion replaced is still sitting under its own prefix in object storage.
+// THE CALLER NAMES THE VERSION IT IS PROMOTING, and that argument is the whole safety of this mutation. A mutation body cannot read the row's own stored field, so the candidate has to arrive as an argument; and an argument nobody checked would let a candidate republished between the reading and the click be promoted by surprise. So a Go guard refuses a `candidateRef` that is not the one STORED (component/memql/platform_site_candidate_guard.go) -- the same rule the work spine's approvals use, where an approval is a decision about one specific artifact and the hash is what stops it carrying to a modified one.
+// REFUSED WHILE THE SERVING BINDING NAMES A DEVELOPMENT STORE (issue memql#5546). Promoting is how a version reaches shoppers, and a deployable whose `binding` points at a development store has no shoppers to reach -- it would serve a catalog nobody can buy from and take orders into a store that is not the merchant's. The guard is Go because whether a store is a development store is a field on ANOTHER row (platform_site_golive_guard.go), and the refusal names the store and the act that clears it, so the OS can make the act ABSENT rather than draw it and have it fail.
+// AUTHORIZATION is @requiresCapability("execute", "app:deployables/publish") -- promotion sits with go live, pause and roll back rather than with preview, because it is the act that changes what the public is served.
+//
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["promoteSiteCandidate"] in generated_concepts.go).
+type PromoteSiteCandidateArgs struct {
+	SiteId       string
+	CandidateRef string
+	ArtifactId   string
+}
+
+// PromoteSiteCandidate calls the engine mutation promoteSiteCandidate.
+func (qc *QueryClient) PromoteSiteCandidate(ctx context.Context, args PromoteSiteCandidateArgs) (*Result, error) {
+	call := PromoteSiteCandidateBuild(args)
+	return qc.executeNamed(ctx, "promoteSiteCandidate", call)
+}
+
+func PromoteSiteCandidateBuild(args PromoteSiteCandidateArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation promoteSiteCandidate(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("candidateRef: ")
+	b.WriteString(quoteMemQL(args.CandidateRef))
+	if args.ArtifactId != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("artifactId: ")
+		b.WriteString(quoteMemQL(args.ArtifactId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // ProposeOverride -- Propose a healed OVERLAY override for a base construct (E4.2 / memql#2140). Writes a tier=overlay row with valid=false -- the repair loop proposes the heal, but it is INVISIBLE to resolution until human validation (E4.5) flips valid=true. Owned: ownerUserId is stamped from actor.userId so a caller can only propose overrides for their own constructs. tier is fixed to overlay (a base row can only be materialized by a system actor); the validateHealingBaseImmutable guard rejects any attempt to write tier=base here.
 //
 // Bound concept: v1:healing:healedOverride (machine-readable: BoundConcepts["proposeOverride"] in generated_concepts.go).
@@ -11061,6 +11125,36 @@ func RevokePasskeyIdentityBuild(args RevokePasskeyIdentityArgs) string {
 	return b.String()
 }
 
+// RevokeSitePreviewGrant -- End a preview (epic memql#5531). The plain inverse of opening one, and the ONE write here that is not @serverOnly -- it carries no credential and decides nothing the tier has not decided, so putting a Go hop in front of a timestamp would buy nothing (customDomain's `remove` draws the same line for the same reason).
+// A SOFT END. The row stays as the record that a preview was opened, by whom, against which version and which store -- which is the question asked after something unexpected turns up in a development store, and a deleted row answers it for nobody.
+// AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite -- the grant's own operator, or a cluster owner through the explicit escape, which is what lets an operator end a preview somebody else left open.
+//
+// Bound concept: v1:platform:sitePreviewGrant (machine-readable: BoundConcepts["revokeSitePreviewGrant"] in generated_concepts.go).
+type RevokeSitePreviewGrantArgs struct {
+	GrantId   string
+	RevokedAt string
+}
+
+// RevokeSitePreviewGrant calls the engine mutation revokeSitePreviewGrant.
+func (qc *QueryClient) RevokeSitePreviewGrant(ctx context.Context, args RevokeSitePreviewGrantArgs) (*Result, error) {
+	call := RevokeSitePreviewGrantBuild(args)
+	return qc.executeNamed(ctx, "revokeSitePreviewGrant", call)
+}
+
+func RevokeSitePreviewGrantBuild(args RevokeSitePreviewGrantArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation revokeSitePreviewGrant(")
+	b.WriteString("grantId: ")
+	b.WriteString(quoteMemQL(args.GrantId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("revokedAt: ")
+	b.WriteString(quoteMemQL(args.RevokedAt))
+	b.WriteString(")")
+	return b.String()
+}
+
 // RevokeSourceCredential -- Revoke a credential. The person's write, and an owned one: the write guard resolves the target row and admits its owner (or a cluster owner, through the explicit escape), so a caller cannot revoke a credential they do not hold. The row stays -- it is the audit history of what fetched under it -- and every source fetching under it refuses at its next fetch until it is switched.
 //
 // Bound concept: v1:platform:sourceCredential (machine-readable: BoundConcepts["revokeSourceCredential"] in generated_concepts.go).
@@ -12402,6 +12496,47 @@ func SetSenderIdentityStatusBuild(args SetSenderIdentityStatusArgs) string {
 	}
 	b.WriteString("status: ")
 	b.WriteString(quoteMemQL(args.Status))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SetSiteCandidate -- Publish a CANDIDATE VERSION beside the one that serves (epic memql#5531).
+// A candidate is a bundle version this deployable is not serving. Setting one changes NOTHING about what the public is served: the edge goes on serving `bundleRef` to every request that does not carry a preview grant, for a draft site and for a live one alike.
+// `candidateRef` IS STAMPED, NOT ACCEPTED, and clearSiteCandidate exists anyway. The stamp is what makes this mutation always write the value it was given; the separate clear is what makes "there is no candidate" expressible as an act a person takes deliberately, rather than as the side effect of omitting an argument. updateSiteAccount's note is the general form of the rule.
+// `artifactId` is accepted for updateSiteBundle's reason exactly: it is optional provenance, and an omitted accepted arg is DROPPED from the payload so the read-merge inherits what is stored.
+// A CANDIDATE MAY NOT EQUAL THE SERVING VERSION, which is a comparison against the PRIOR row and therefore Go (component/memql/platform_site_candidate_guard.go). A candidate that is already serving is not a candidate: there would be nothing to exercise, and promoting it would be a write that changes nothing while reading like a release.
+// AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite -- the row's owner, or a cluster owner through the explicit escape -- and @requiresCapability names the surface. `preview` rather than `publish` is the line this epic draws: preparing and exercising a version is one grant, making the public see it is another, and a person may hold the first without the second.
+//
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["setSiteCandidate"] in generated_concepts.go).
+type SetSiteCandidateArgs struct {
+	SiteId       string
+	CandidateRef string
+	ArtifactId   string
+}
+
+// SetSiteCandidate calls the engine mutation setSiteCandidate.
+func (qc *QueryClient) SetSiteCandidate(ctx context.Context, args SetSiteCandidateArgs) (*Result, error) {
+	call := SetSiteCandidateBuild(args)
+	return qc.executeNamed(ctx, "setSiteCandidate", call)
+}
+
+func SetSiteCandidateBuild(args SetSiteCandidateArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation setSiteCandidate(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("candidateRef: ")
+	b.WriteString(quoteMemQL(args.CandidateRef))
+	if args.ArtifactId != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("artifactId: ")
+		b.WriteString(quoteMemQL(args.ArtifactId))
+	}
 	b.WriteString(")")
 	return b.String()
 }
@@ -14949,6 +15084,39 @@ func UpdateSiteBundleBuild(args UpdateSiteBundleArgs) string {
 		}
 		b.WriteString("artifactId: ")
 		b.WriteString(quoteMemQL(args.ArtifactId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// UpdateSitePreviewBinding -- Point a storefront's CANDIDATE at the development store it is exercised against, or clear it (epic memql#5531, design D8).
+// The preview binding's twin is `binding`, and the two are separate fields for the reason the whole epic exists: `binding` is the store shoppers reach, and a version being exercised must never be able to reach it. Written whole as {storeId} rather than merged, for updateSiteStoreBinding's reason -- a read-merge would let a retired shape survive beside the reference. An empty storeId writes an empty object, the unbound state, so detaching a development store stays expressible.
+// THE STORE MUST BE A DEVELOPMENT STORE. v1:shopify:store.isDevelopment is a fact about somebody else's system, recorded on the store row when it is attached, and a preview binding naming a store without it is REFUSED -- that is the second direction of the go-live guard, and the reason it matters is that the failure it prevents is silent: a preview against the live store looks exactly like a preview, right up to the test payment landing in the merchant's real orders.
+// AUTHORIZATION is `app:deployables/store`, the same gate updateSiteStoreBinding carries and for the same reason -- this names a v1:shopify:store row, which is cluster-owner tier, and the Go guard beside it refuses a store the CALLER CANNOT READ whatever capability they hold. `preview` is deliberately not enough: preparing a version is one thing, choosing which of the cluster's stores it talks to is another.
+//
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSitePreviewBinding"] in generated_concepts.go).
+type UpdateSitePreviewBindingArgs struct {
+	SiteId  string
+	StoreId string
+}
+
+// UpdateSitePreviewBinding calls the engine mutation updateSitePreviewBinding.
+func (qc *QueryClient) UpdateSitePreviewBinding(ctx context.Context, args UpdateSitePreviewBindingArgs) (*Result, error) {
+	call := UpdateSitePreviewBindingBuild(args)
+	return qc.executeNamed(ctx, "updateSitePreviewBinding", call)
+}
+
+func UpdateSitePreviewBindingBuild(args UpdateSitePreviewBindingArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateSitePreviewBinding(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if args.StoreId != "" {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("storeId: ")
+		b.WriteString(quoteMemQL(args.StoreId))
 	}
 	b.WriteString(")")
 	return b.String()

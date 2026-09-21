@@ -293,6 +293,148 @@ query site siteById {
   shape   siteFull
 }
 
+// ---- Storefront preview (epic memql#5531) ----
+//
+// v1:platform:sitePreviewGrant and v1:platform:sitePreviewObservation both
+// declare @rowAuthz(owner="ownerUserId", clusterOwner), and every read below
+// STATES THAT TIER as a top-level conjunct on top of the declaration.
+//
+// THAT IS THE OPPOSITE OF WHAT sitesAll DOES, and the difference is the third
+// arm. v1:platform:site's tier carries `account="accountId"` as well, so a
+// restated `own || clusterOwner` there is a narrowing the declaration never
+// asked for -- it filtered a client's own people back out of their own sites.
+// These two concepts have no third arm: the conjunct is exactly the tier, so
+// stating it changes no result set and makes the scope legible in the filter
+// rather than only in the declaration. TestRowAuthzEnforcementLandGate is what
+// asks for it, and adjudicating it into tierDecidesTheRead instead would have
+// been wrong -- the tier does NOT decide identically for every caller here, it
+// decides differently for an owner and for an operator, which is the case that
+// entry's own note says is not a candidate.
+//
+// THE EDGE'S READ IS THE ONE TO BE CAREFUL WITH. sitePreviewGrantByToken turns
+// a cookie into a permission to see an unpublished version, so it filters on
+// the token DIGEST and on nothing else a caller supplies -- the edge asks it
+// under its own synthetic cluster-owner actor, which is what the second arm
+// admits. It is still only half the decision: the edge compares the grant's
+// candidateRef against the site's, and its expiry and revocation against the
+// clock, in component/edge/preview.go -- deliberately in Go rather than in this
+// filter, because "the candidate has not changed" is a comparison between two
+// rows, and `expiresAt > now` written here would be a freshness rule a reader
+// of this file could believe was the whole gate.
+
+/// Resolve a preview grant by the SHA-256 of the token presented, for the edge (issue memql#5545).
+///
+/// THE DIGEST IS THE ARGUMENT, never the token. The plain `mql_prv_<43>` exists in the operator's
+/// URL and cookie and nowhere else; the edge hashes what it was presented and asks this. So a read
+/// of the row -- by an operator, out of a backup, in a log -- hands nobody a working preview.
+///
+/// IT IS NOT THE WHOLE GATE, and the note above says why the rest is in Go. This answers "is there
+/// a grant for this digest"; whether it is expired, revoked, for THIS site, and for the candidate
+/// the site is currently carrying are four more questions, and three of them compare against
+/// something no filter can see.
+@unbounded("preview grant by token digest -- bounded to a single row; the digest is the credential and two rows cannot share one")
+@actor
+query sitePreviewGrant sitePreviewGrantByToken {
+  args {
+    tokenHash  string!
+  }
+  filter  row => row.tokenHash == args.tokenHash
+              && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape   sitePreviewGrantFull
+}
+
+/// Resolve one preview by its own row id -- what the probe and the OS's detail read resolve their
+/// target through, so the gate a probe runs behind admits the same people the list does.
+@unbounded("preview grant by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+query sitePreviewGrant sitePreviewGrantById {
+  args {
+    grantId  string!
+  }
+  filter  row => row.id == args.grantId
+              && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape   sitePreviewGrantFull
+}
+
+/// The previews open against one deployable, newest first -- what the Deployables page lists so an
+/// operator can see what is out there and end it.
+///
+/// EVERY GRANT, INCLUDING THE SPENT ONES. Expiry and revocation are shown rather than filtered,
+/// because the question this list answers after something unexpected lands in a development store
+/// is "who opened a preview of this, and when", and a filtered list answers it for the last half
+/// hour only. The OS draws the state; this read does not decide it.
+@actor
+query sitePreviewGrant sitePreviewGrantsForSite {
+  args {
+    siteId  string!
+  }
+  filter  row => row.siteId == args.siteId
+              && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape   sitePreviewGrantFull
+  sort    "row.createdAt", "desc"
+}
+
+/// Every preview that is still usable, cluster-wide -- what the passive order observation reads to
+/// decide whether an order arriving in the mirror belongs to anybody's exercise (issue memql#5547).
+///
+/// THE DEPLOYMENT'S READ, NOT A PERSON'S, and the conjunct says so: it filters on
+/// actor.isClusterOwner alone, so the only caller it answers for is the synthetic operator identity
+/// integrations/sitepreview stamps. The question -- is anybody previewing against this store -- is
+/// the cluster's rather than any operator's, and an owner-scoped read would answer it for one
+/// person's previews and silently miss everybody else's.
+///
+/// UNBOUNDED, AND THE REASON IS THE SWEEP'S. A paginated read would answer for the first page of
+/// open previews and quietly record nothing for the rest, which is `customDomainsToReconcile`'s
+/// reasoning exactly. The population is bounded by the thing itself: a preview lasts half an hour
+/// by default, so this is the handful open right now rather than every one ever issued.
+///
+/// BOTH ENDS ARE FILTERED HERE. `revokedAt == nil` and `expiresAt > now` are the two ways a preview
+/// stops being usable, and a caller re-checks them anyway -- the filter is what keeps the answer
+/// small, the Go check is what keeps it correct against a clock that moved between the read and the
+/// write.
+///
+/// NO SORT, and it is not an omission: a sort makes a query paginated, which is precisely what
+/// `@unbounded` is here to refuse. The caller indexes the answer by store and never reads it in
+/// order.
+@unbounded("every preview still usable right now -- bounded by the grant lifetime, and a sweep read that paginated would silently record nothing past its first page")
+@actor
+query sitePreviewGrant sitePreviewGrantsOpen {
+  filter  row => row.revokedAt == nil
+              && row.expiresAt > now
+              && actor.isClusterOwner == true
+  shape   sitePreviewGrantFull
+}
+
+/// What the engine observed during one exercise, oldest first -- the four steps in the order they
+/// happen, which is the order they are drawn in.
+@actor
+query sitePreviewObservation sitePreviewObservationsForGrant {
+  args {
+    grantId  string!
+  }
+  filter  row => row.grantId == args.grantId
+              && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape   sitePreviewObservationFull
+  sort    "observedAt", "asc"
+}
+
+/// Everything the engine has observed of any preview of one deployable, newest first.
+///
+/// The read behind the deployable page's preview panel: it shows the LAST exercise without the page
+/// having to know which grant that was, which matters because the grant that ran it may already
+/// have expired. An empty answer is "nobody has exercised this", which the OS draws as unmeasured
+/// rather than as four failures.
+@actor
+query sitePreviewObservation sitePreviewObservationsForSite {
+  args {
+    siteId  string!
+  }
+  filter  row => row.siteId == args.siteId
+              && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+  shape   sitePreviewObservationFull
+  sort    "observedAt", "desc"
+}
+
 // ---- Custom domains (epic memql#4805) ----
 //
 // v1:platform:customDomain is clusterOwner tier, so every read below states

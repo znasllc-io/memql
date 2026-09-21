@@ -9,6 +9,8 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // Options configures a Handler. APITarget names the bff's plain-HTTP address
@@ -35,6 +37,13 @@ type Options struct {
 	// handler built by a test: recording costs one nil check per request
 	// when it is absent. See requestlog.go for why it must not block.
 	RequestLog RequestRecorder
+	// PreviewExec resolves the v1:platform:sitePreviewGrant a request presents
+	// (epic memql#5531, issue memql#5545). NIL IS THE OFF SWITCH and it is the
+	// ordinary state for a handler built by a test: without one no request is
+	// ever a preview, so every existing test's expectations about what the
+	// public sees are untouched by this feature's existence. See preview.go for
+	// why it is separate from Resolver rather than folded into it.
+	PreviewExec PreviewExecutor
 }
 
 // Handler serves whichever site the request's Host names.
@@ -46,6 +55,10 @@ type Handler struct {
 	identityTarget string
 	secretResolver SecretResolver
 	requestLog     RequestRecorder
+	previewExec    PreviewExecutor
+	// previews caches resolved grants for previewCacheTTL and throttles the
+	// lastSeenAt write. Per replica, like hashCache beside it.
+	previews *previewCache
 	// hashCache holds one document's inline-script hash list per asset
 	// validator (scripthash.go). Same LRU as the bundle byte cache, and
 	// immutable for the same reason: the key names exact bytes, so a
@@ -71,6 +84,8 @@ func NewHandler(opts Options) *Handler {
 		identityTarget: opts.IdentityTarget,
 		secretResolver: opts.SecretResolver,
 		requestLog:     opts.RequestLog,
+		previewExec:    opts.PreviewExec,
+		previews:       newPreviewCache(),
 		hashCache:      newBundleCache(cspHashCacheBytes),
 	}
 }
@@ -127,6 +142,55 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // returns the path class of what it did -- the one fact the record needs that
 // cannot be read off the response.
 func (h *Handler) serve(w http.ResponseWriter, r *http.Request, site *Site) string {
+	// THE PREVIEW ENTRY POINTS, AHEAD OF EVERYTHING (epic memql#5531). They are
+	// answered by the edge ITSELF rather than proxied, and they sit above the
+	// status switch, so a link to a DRAFT deployable's preview is redeemable --
+	// which is the whole point, since a draft is 404 for everybody including
+	// its operator.
+	//
+	// THEY ARE ABOVE THE /_memql/ PROXY BRANCH TOO, deliberately. They share
+	// that prefix so the origin keeps ONE reserved namespace rather than two,
+	// but a preview has to work on a deployable whose apiProxy is off -- and
+	// with the proxy on, forwarding them to the bff would hand the token to a
+	// service that has no route for it.
+	switch r.URL.Path {
+	case memql.PreviewEnterPath:
+		h.servePreviewEnter(w, r, site)
+		return pathClassConfig
+	case memql.PreviewLeavePath:
+		h.servePreviewLeave(w, r)
+		return pathClassConfig
+	}
+
+	// IS THIS A PREVIEW? Answered once, here, and the answer becomes a SITE
+	// rather than a flag -- a copy carrying the candidate version and the
+	// preview binding (previewSite). Nothing below this line knows a preview is
+	// happening, which is design D7 made literal: the engine chooses a bundle
+	// and a binding and does nothing else differently.
+	grant := h.previewGrantFor(r, site)
+	if grant != nil {
+		// A PREVIEW IS REFUSED FOR A DEPLOYABLE THAT IS NOT DRAFT OR LIVE.
+		// `disabled` is a deliberate pause and `archived` is decommissioned; a
+		// preview that served through either would be a way to bring a site
+		// back that does not touch its status, and an operator reading the row
+		// would have no idea anything was being served.
+		if site.Status != siteStatusDraftValue && site.Status != siteStatusLiveValue {
+			grant = nil
+		}
+	}
+	if grant != nil {
+		h.notePreviewSeen(grant)
+		previewHeaders(w)
+		site = previewSite(site, grant)
+		// AND THE STATUS SWITCH IS SKIPPED, which is the one place a preview
+		// changes an answer -- a draft deployable is 404 for everybody, and an
+		// authorized operator being served its candidate is exactly what this
+		// epic is. It is skipped rather than widened so the switch below goes
+		// on naming WHAT SERVES for the public, which is the inversion
+		// memql#4794 made load-bearing.
+		return h.serveResolved(w, r, site)
+	}
+
 	// STATUS BEFORE ANY FILE LOOKUP. An unknown host and a draft site are both
 	// 404 -- neither exists as far as the internet is concerned. A DISABLED
 	// site is 503, deliberately: a deliberately paused site and a typo'd
@@ -154,6 +218,18 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, site *Site) stri
 		return pathClassUnserved
 	}
 
+	return h.serveResolved(w, r, site)
+}
+
+// serveResolved is everything after the status decision: the runtime document,
+// the proxies, and the bundle.
+//
+// IT IS THE WHOLE OF WHAT A PREVIEW SHARES WITH A PUBLIC REQUEST, and the split
+// exists so that sharing is structural rather than asserted. A preview reaches
+// it with a Site whose BundleRef is the candidate and whose Store is the
+// preview binding's, and from here there is no code path that can tell the
+// difference.
+func (h *Handler) serveResolved(w http.ResponseWriter, r *http.Request, site *Site) string {
 	// Cluster-wide identity discovery, ahead of the bundle lookup and for
 	// every site alike -- see runtimeconfig.go. Not a new entry in
 	// component/server.EdgePaths(): the edge's declared surface is exactly
@@ -262,6 +338,13 @@ func fallsBackToIndex(site *Site) bool {
 	return site.Kind == "spa" || site.Kind == storefrontKind
 }
 
+// The two site statuses a preview may be served under (epic memql#5531).
+// `disabled` and `archived` are deliberately absent -- see serve().
+const (
+	siteStatusDraftValue = "draft"
+	siteStatusLiveValue  = "live"
+)
+
 // The two tails a site may name. A third state -- the empty string -- is the
 // absence of a choice, not a value, and is deliberately unnamed here.
 const (
@@ -313,13 +396,31 @@ func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request, fsys fs.FS, 
 	//
 	// The file:// path hashes content because build timestamps can be preserved.
 
-	// Every mutable URL must reach this handler again after a release. Only
-	// a filename digest VERIFIED against its bytes earns immutable caching.
-	w.Header().Set("Cache-Control", "public, no-cache, must-revalidate")
-	if contentAddressedAsset(fsys, name) {
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		w.Header().Del("Pragma")
-		w.Header().Del("Expires")
+	// A PRIVATE RESPONSE IS NEVER WIDENED (epic memql#5531). A preview writes
+	// `no-store` before the response is built, and the two policies below would
+	// otherwise overwrite it -- `public, no-cache, must-revalidate` for a
+	// document, and `public, max-age=31536000, immutable` for a
+	// content-addressed asset, which also deletes the Pragma and Expires
+	// headers that came with it.
+	//
+	// THE CONSEQUENCE IS THE WHOLE REASON THE HEADER EXISTS: an unpublished
+	// version of somebody's storefront, storable by every shared cache between
+	// this cluster and the operator's browser, and for a year on any asset
+	// whose name carries a digest. The policy is set EARLY because it must
+	// cover the 304 path too, so the check belongs here rather than a reorder.
+	//
+	// It reads the header rather than taking a parameter, so the rule binds
+	// every caller of serveFile including any added later -- a `no-store`
+	// somebody sets anywhere upstream is honoured for the same reason.
+	if !alreadyPrivate(w) {
+		// Every mutable URL must reach this handler again after a release. Only
+		// a filename digest VERIFIED against its bytes earns immutable caching.
+		w.Header().Set("Cache-Control", "public, no-cache, must-revalidate")
+		if contentAddressedAsset(fsys, name) {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			w.Header().Del("Pragma")
+			w.Header().Del("Expires")
+		}
 	}
 	if hasETag {
 		w.Header().Set("ETag", etag)
@@ -365,4 +466,16 @@ func noCache(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Expires", "0")
+}
+
+// alreadyPrivate reports whether something upstream has already declared this
+// response uncacheable.
+//
+// `no-store` is the token tested rather than `private`, and the difference
+// matters: `private` permits a browser cache, which a preview is fine with, and
+// `no-store` is the one that forbids every store including the shared ones this
+// guards against. A caller that meant `private` did not mean "do not apply the
+// bundle's freshness policy".
+func alreadyPrivate(w http.ResponseWriter) bool {
+	return strings.Contains(strings.ToLower(w.Header().Get("Cache-Control")), "no-store")
 }

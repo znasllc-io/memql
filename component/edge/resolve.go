@@ -39,6 +39,40 @@ type Site struct {
 	// there is a store to look up at all without a second projection.
 	Binding map[string]any
 
+	// CandidateRef is the CANDIDATE VERSION: a published bundle version this
+	// deployable is NOT serving (epic memql#5531). Empty is the ordinary state.
+	//
+	// NOTHING READS IT ON THE PUBLIC PATH. It reaches the serving path only
+	// through previewSite (preview.go), which returns a COPY of this Site with
+	// the candidate substituted into BundleRef -- so every consumer downstream
+	// opens a bundle and builds a policy exactly as it always has, and there is
+	// no "is this a preview" branch anywhere below that one function. That is
+	// design D7 made literal: the engine chooses a bundle and a binding, and
+	// does nothing else differently.
+	CandidateRef string
+
+	// PreviewBinding is the site row's preview binding -- {storeId} naming the
+	// DEVELOPMENT store a candidate is exercised against (design D8). Carried
+	// as the raw object for Binding's reason: it is the id's arrival, and
+	// PreviewStore below is its resolution.
+	PreviewBinding map[string]any
+
+	// PreviewStore is the row PreviewBinding.storeId names, resolved, or nil.
+	//
+	// IT IS RESOLVED FOR EVERY STOREFRONT THAT HAS ONE, whether or not the
+	// request is a preview, because the Site is CACHED and a request cannot
+	// wait for a second lookup. That costs one extra read per cache fill on
+	// storefronts with a development store attached, and it buys the property
+	// that matters: a preview request is served from exactly the same cached
+	// value a public request is, so the two can never disagree about what this
+	// deployable is.
+	//
+	// IT NEVER REACHES A DOCUMENT OR A POLICY EXCEPT UNDER A VALID GRANT.
+	// previewSite is the only thing that moves it into Store, and
+	// TestTheRuntimeConfigNeverCarriesThePreviewBindingWithoutAGrant greps the
+	// SERVED document for it, the way the Admin token's absence is asserted.
+	PreviewStore *BoundStore
+
 	// Store is the row binding.storeId names, resolved. Nil for every kind
 	// that has no binding, for an unbound storefront, and for a storefront
 	// whose store cannot be read -- three states the serving path treats
@@ -324,6 +358,27 @@ func (r *resolver) Resolve(ctx context.Context, hostname string) (*Site, error) 
 						"component", "edge", "siteId", site.ID, "storeId", storeId, "err", serr)
 				} else {
 					site.Store = store
+				}
+			}
+			// THE PREVIEW BINDING'S STORE, resolved beside the serving one and
+			// cached with it (epic memql#5531). A second read on a cache fill
+			// for storefronts that have a development store attached, and it
+			// buys the property that matters: a preview request and a public
+			// request are served from the SAME cached value, so the two can
+			// never disagree about what this deployable is.
+			//
+			// A FAILED READ LEAVES THE SITE SERVABLE, exactly as the serving
+			// store's does, and the consequence is narrower: a preview whose
+			// store could not be read gets no storefront block and no store in
+			// its policy, which is what a storefront nobody has bound already
+			// gets. The public path is untouched either way.
+			if storeId := strings.TrimSpace(bindingStoreId(site.PreviewBinding)); storeId != "" {
+				store, serr := r.exec.StoreByID(ctx, storeId)
+				if serr != nil {
+					r.logger.Warn("edge: could not resolve the preview binding's store",
+						"component", "edge", "siteId", site.ID, "storeId", storeId, "err", serr)
+				} else {
+					site.PreviewStore = store
 				}
 			}
 		}

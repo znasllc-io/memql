@@ -448,6 +448,40 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "platform/mutations.memql", Name: "recordCustomDomainIssuingProgress"}: true,
 		{Path: "platform/mutations.memql", Name: "markCustomDomainLive"}:              true,
 		{Path: "platform/mutations.memql", Name: "markCustomDomainRemoved"}:           true,
+		// epic memql#5531, storefront preview. Three writes, and each is
+		// server-only for a DIFFERENT reason -- which is why they are listed
+		// together rather than under one sentence.
+		//
+		// createSitePreviewGrant is createCustomDomain's case exactly, twice
+		// over: the TOKEN DIGEST it writes is the stored form of a bearer
+		// credential for an unpublished version of somebody's storefront, and
+		// `expiresAt` is the only bound that credential has. A caller who picks
+		// the digest picks the token; a caller who picks the expiry picks the
+		// lifetime. Neither is a question about whose row it is, so actor.userId
+		// scoping does not reach it -- and that scoping is already done anyway,
+		// since ownerUserId is stamped from the actor and the composite owner
+		// tier decides the row. `sitePreviewOpen` is the reachable surface.
+		//
+		// touchSitePreviewGrant has NO CALLER TO SCOPE TO. The EDGE writes it,
+		// under its own synthetic cluster-owner actor, about a grant it resolved
+		// by token digest; it holds nobody's credential and never learns who is
+		// asking. Scoping it to the grant's owner would not help either: the
+		// property is that the deployment OBSERVED the preview being served,
+		// and a field its holder could write says what its writer wanted.
+		//
+		// recordSitePreviewObservation is the MEASUREMENT case, and it is the
+		// one actor scoping most obviously cannot fix. Its ownerUserId is
+		// stamped, so a caller could only ever write their own rows -- and a
+		// caller scoped perfectly to themselves could still write four green
+		// rows against a storefront nobody exercised, which is precisely what
+		// the surface reading them exists to rule out.
+		//
+		// revokeSitePreviewGrant is deliberately NOT here, for
+		// removeCustomDomain's reason: it writes one timestamp, carries no
+		// credential, and decides nothing the tier has not already decided.
+		{Path: "platform/mutations.memql", Name: "createSitePreviewGrant"}:       true,
+		{Path: "platform/mutations.memql", Name: "touchSitePreviewGrant"}:        true,
+		{Path: "platform/mutations.memql", Name: "recordSitePreviewObservation"}: true,
 
 		// The per-account front door (epic memql#5168). Every write on a door's
 		// walk is the reconciler's: what a client-reachable one would buy is the

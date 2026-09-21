@@ -33,11 +33,21 @@ import (
 	// `add` capability's availability depend on which replica a browser's
 	// stream landed on.
 	_ "github.com/znasllc-io/memql/integrations/customdomain"
+	// Storefront preview (epic memql#5531). On every node type for
+	// customdomain's reason exactly: the three builtins are declared in
+	// dsl/platform/builtins.memql, which every binary loads, so a capability
+	// present in the DSL and absent from the registry is a boot-time
+	// resolution failure -- and gating it by build tag would make whether an
+	// operator can open a preview depend on which replica their browser's
+	// stream landed on. It stays in integrations/ rather than component/,
+	// unlike sitePublish below, because it reaches the graph through named
+	// constructs alone and never touches component/edge's Publisher.
 	_ "github.com/znasllc-io/memql/integrations/database"
 	_ "github.com/znasllc-io/memql/integrations/deployversion"
 	_ "github.com/znasllc-io/memql/integrations/email"
 	_ "github.com/znasllc-io/memql/integrations/embedding"
 	_ "github.com/znasllc-io/memql/integrations/fileprocessor"
+	_ "github.com/znasllc-io/memql/integrations/sitepreview"
 	// Groups (epic memql#5165). On every node type for customdomain's
 	// reason: the five caller-facing verbs are reached from whichever node
 	// serves the OS shell's connection, and gating by build tag would make a

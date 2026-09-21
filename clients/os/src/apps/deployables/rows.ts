@@ -92,6 +92,21 @@ export interface SiteRow {
   deleted: boolean;
   binding: Record<string, unknown>;
   /**
+   * The CANDIDATE VERSION: a published bundle beside the one that serves
+   * (epic memql#5531). Empty is the ordinary state and means this deployable
+   * has nothing being exercised. Promotion copies it onto `bundleRef` and
+   * clears it, which is why rollback needs nothing new -- pointing the bundle
+   * back at the previous version is still one write.
+   */
+  candidateRef: string;
+  /**
+   * The store the CANDIDATE is exercised against -- {storeId} naming a
+   * DEVELOPMENT store, the same one-key shape `binding` carries. Separate
+   * from `binding` so a version being proved can never reach the store
+   * shoppers reach.
+   */
+  previewBinding: Record<string, unknown>;
+  /**
    * The key-values this app reads at load (epic memql#4906, decision P7),
    * merged by the edge into the deployable's runtime-config document. Plain
    * strings only -- a non-string on the row is a raw write that bypassed the
@@ -136,6 +151,8 @@ export function siteFromRow(raw: Row): SiteRow {
     // that did not touch the field.
     deleted: boolOr(row, "deleted", false),
     binding: objectOf(row, "binding"),
+    candidateRef: rowString(row, "candidateRef"),
+    previewBinding: objectOf(row, "previewBinding"),
     settings: stringMapOf(row, "settings"),
     accountId: rowString(row, "accountId"),
     packageId: rowString(row, "packageId"),
@@ -351,6 +368,26 @@ export function bundleFormNote(form: BundleForm): string {
 export function boundStoreId(site: SiteRow): string {
   const v = site.binding["storeId"];
   return typeof v === "string" ? v.trim() : "";
+}
+
+/**
+ * The DEVELOPMENT store this deployable's candidate is exercised against, or
+ * "" when none is attached (epic memql#5531).
+ *
+ * A SEPARATE READER, not a parameter on the one above, because the two answer
+ * different questions and confusing them is the failure the whole preview
+ * feature exists to prevent. One names the store shoppers reach; the other
+ * names the one a version is proved against, and a surface that read the wrong
+ * field would point a test payment at a merchant's real orders.
+ */
+export function previewStoreId(site: SiteRow): string {
+  const v = site.previewBinding["storeId"];
+  return typeof v === "string" ? v.trim() : "";
+}
+
+/** Whether this deployable has a version being exercised beside the one it serves. */
+export function hasCandidate(site: SiteRow): boolean {
+  return site.candidateRef.trim() !== "";
 }
 
 // ---------------------------------------------------------------------------

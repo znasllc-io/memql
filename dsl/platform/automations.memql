@@ -128,3 +128,33 @@ automation sweepAbandonedPackageDeployments {
 automation checkDeployableHealth {
   sweep := builtin siteHealthSweep()
 }
+
+/// The FOURTH observation of a storefront preview, and the only passive one (epic memql#5531,
+/// issue memql#5547): an order arrived in the mirror under a store somebody is exercising a
+/// candidate against.
+///
+/// IT FIRES ON EVERY MIRRORED ORDER, which during a backfill is thousands, and that is why the
+/// builtin's FIRST act is a map lookup rather than a read. A cluster with no preview open -- which
+/// is every cluster almost all of the time -- pays one query every thirty seconds and nothing per
+/// order. See integrations/sitepreview/order.go for the cache and its bound.
+///
+/// AN ORDER ON A STORE NOBODY IS PREVIEWING RECORDS NOTHING, and that is not a failure: it is the
+/// ordinary case, and a refusal per mirrored order would make a backfill's log unreadable.
+///
+/// WHY AN AUTOMATION AND NOT A HOOK IN THE CONNECTOR. The observation belongs to
+/// v1:platform:sitePreviewObservation, which is the preview feature's concept; putting the write in
+/// integrations/shopify would make the package that talks to Shopify own a platform row, and the
+/// module taxonomy is exactly the thing that keeps those separate. An automation is the seam that
+/// already exists for "something was written, and another part of the system cares".
+@trigger(event="node.created", concept="v1:shopify:order")
+automation recordPreviewOrderObservation {
+  args {
+    id       any
+    storeId  any
+  }
+
+  noted := builtin sitePreviewNoteOrder(
+    orderId: args.id ?? "",
+    storeId: args.storeId ?? ""
+  )
+}

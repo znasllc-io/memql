@@ -29,6 +29,11 @@ import { PageNavigationProvider } from "../src/kit/pageNavigation";
 import { TrailRow } from "../src/kit/TrailRow";
 import { DeployablePage } from "../src/apps/deployables/page/DeployablePage";
 import { ALL_PARTS, partsWithout } from "../src/apps/deployables/parts";
+import {
+  previewGrantRow,
+  previewObservationRow,
+  previewReadinessRow,
+} from "../test/deployables/harness";
 import { siteFromRow } from "../src/apps/deployables/rows";
 
 // The browser QA harness for the storefront's Store surface.
@@ -278,6 +283,136 @@ function Overview({ site }: { site: ReturnType<typeof siteFromRow> }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// THE PREVIEW SECTION (epic memql#5531)
+// ---------------------------------------------------------------------------
+// Four states, and the three that are not the happy path are the ones worth
+// capturing: a deployable with nothing being exercised, one whose preview
+// binding points at the store shoppers reach (the refusal), and one whose
+// checks have been run with only some of the four answering. jsdom can assert
+// each of those sentences and cannot see that the lane's store sits under the
+// version it belongs to rather than beside the other one's.
+
+/** The storefront with a candidate and a development store attached. */
+const SHOP_PREVIEWING = siteRow({
+  ...SHOP,
+  id: "site-shop",
+  candidateRef: "blob://sites/site-shop/v2/",
+  previewBinding: { storeId: "store-example-dev" },
+} as never);
+
+const READY_ROW = previewReadinessRow({
+  siteId: "site-shop",
+  hostname: "shop.memql.example.com",
+  bundleRef: "blob://sites/site-shop/v1/",
+  candidateRef: "blob://sites/site-shop/v2/",
+  hasCandidate: true,
+  storeId: "store-example",
+  storeDomain: "example.myshopify.com",
+  storeReadable: true,
+  previewStoreId: "store-example-dev",
+  previewStoreDomain: "example-dev.myshopify.com",
+  canPreview: true,
+  canPromote: true,
+  canGoLive: true,
+  previewRefusal: { code: "", message: "", remedy: "" },
+  promoteRefusal: { code: "", message: "", remedy: "" },
+} as never);
+
+/** Exercised: three of the four answered, the fourth has not happened yet. */
+const PREVIEW_MEASURED: FakeSeed = {
+  ...BOUND,
+  sites: [SHOP_PREVIEWING, DOCS, PLATFORM_SITE],
+  previewReadiness: { "site-shop": READY_ROW },
+  previewGrants: { "site-shop": [previewGrantRow({ id: "grant-1", lastSeenAt: new Date(Date.now() - 4 * 60_000).toISOString(), expiresAt: new Date(Date.now() + 22 * 60_000).toISOString() })] },
+  previewObservations: {
+    "site-shop": [
+      previewObservationRow({ kind: "checkout_url", detail: "checkout is hosted at example-dev.myshopify.com; the payment walk itself happens in a browser and is not something this cluster can observe", durationMs: 812 }),
+      previewObservationRow({ kind: "cart_accepted", detail: 'a cart accepted one line of "Canvas tote"', durationMs: 611 }),
+      previewObservationRow({ kind: "catalog_read", detail: 'read product "canvas-tote"', durationMs: 338 }),
+    ],
+  },
+};
+
+/** Nothing exercised yet: a candidate, a development store, and no measurement. */
+const PREVIEW_EMPTY: FakeSeed = {
+  ...BOUND,
+  sites: [SHOP_PREVIEWING, DOCS, PLATFORM_SITE],
+  previewReadiness: { "site-shop": READY_ROW },
+};
+
+/** A step that was asked and did not answer, beside two that did. */
+const PREVIEW_FAILING: FakeSeed = {
+  ...PREVIEW_MEASURED,
+  previewObservations: {
+    "site-shop": [
+      previewObservationRow({ kind: "cart_accepted", ok: false, failure: "the store refused the line: Not enough items available", durationMs: 604 }),
+      previewObservationRow({ kind: "catalog_read", detail: 'read product "canvas-tote" (its first variant is not available for sale)', durationMs: 341 }),
+    ],
+  },
+};
+
+/** The refusal: a preview binding pointed at the store shoppers reach. */
+const PREVIEW_REFUSED: FakeSeed = {
+  ...BOUND,
+  sites: [siteRow({ ...SHOP, id: "site-shop", candidateRef: "blob://sites/site-shop/v2/", previewBinding: { storeId: "store-example" } } as never), DOCS, PLATFORM_SITE],
+  previewReadiness: {
+    "site-shop": previewReadinessRow({
+      siteId: "site-shop",
+      hostname: "shop.memql.example.com",
+      bundleRef: "blob://sites/site-shop/v1/",
+      candidateRef: "blob://sites/site-shop/v2/",
+      hasCandidate: true,
+      storeId: "store-example",
+      storeDomain: "example.myshopify.com",
+      storeReadable: true,
+      previewStoreId: "store-example",
+      previewStoreDomain: "example.myshopify.com",
+      canPreview: false,
+      canPromote: true,
+      canGoLive: true,
+      previewRefusal: {
+        code: "preview_binding_is_not_development_store",
+        message: "the preview binding names example.myshopify.com, which is the store shoppers reach -- exercising a candidate against it would put test carts and test payments in the merchant's real store.",
+        remedy: "Point the preview binding at a development store. Shopify marks one on the store row as isDevelopment.",
+      },
+      promoteRefusal: { code: "", message: "", remedy: "" },
+    } as never),
+  },
+};
+
+/** Nothing being exercised at all: the state most deployables live in. */
+const PREVIEW_NONE: FakeSeed = {
+  ...BOUND,
+  previewReadiness: {
+    "site-shop": previewReadinessRow({
+      siteId: "site-shop",
+      hostname: "shop.memql.example.com",
+      bundleRef: "blob://sites/site-shop/v1/",
+      storeId: "store-example",
+      storeDomain: "example.myshopify.com",
+      storeReadable: true,
+    } as never),
+  },
+};
+
+function PreviewPage({ site }: { site: ReturnType<typeof siteFromRow> }) {
+  return (
+    <DeployablePage
+      site={site}
+      pkg={null}
+      credentials={[]}
+      viewerUserId="u-me"
+      nameOf={() => ""}
+      can={ALL_PARTS}
+      clusterDomain="memql.example.com"
+      onBack={() => {}}
+      onOpenSource={() => {}}
+      onOpenHistory={() => {}}
+    />
+  );
+}
+
 const VIEWS: Record<string, { seed: FakeSeed; role?: string; framed?: boolean; render: () => JSX.Element }> = {
   // The two lists. `framed` views bring their own window body, because the
   // app's wizard needs a floor and its pages publish to the window's trail.
@@ -289,6 +424,12 @@ const VIEWS: Record<string, { seed: FakeSeed; role?: string; framed?: boolean; r
   // "A repository" and the Repository step is the picker, not the invitation.
   connected: { seed: CONNECTED, framed: true, render: () => <Lists section="deployables" /> },
   overview: { seed: BOUND, render: () => <Overview site={siteFromRow(SHOP)} /> },
+  // The preview section, in the five states worth judging as pixels.
+  preview: { seed: PREVIEW_MEASURED, render: () => <PreviewPage site={siteFromRow(SHOP_PREVIEWING)} /> },
+  "preview-empty": { seed: PREVIEW_EMPTY, render: () => <PreviewPage site={siteFromRow(SHOP_PREVIEWING)} /> },
+  "preview-failing": { seed: PREVIEW_FAILING, render: () => <PreviewPage site={siteFromRow(SHOP_PREVIEWING)} /> },
+  "preview-refused": { seed: PREVIEW_REFUSED, render: () => <PreviewPage site={siteFromRow(siteRow({ ...SHOP, id: "site-shop", candidateRef: "blob://sites/site-shop/v2/", previewBinding: { storeId: "store-example" } } as never))} /> },
+  "preview-none": { seed: PREVIEW_NONE, render: () => <PreviewPage site={siteFromRow(SHOP)} /> },
   store: { seed: BOUND, render: () => <StorePane site={siteFromRow(SHOP)} canBind /> },
   quiet: { seed: QUIET, render: () => <StorePane site={siteFromRow(SHOP)} canBind /> },
   picker: { seed: UNBOUND, render: () => <StorePane site={siteFromRow(UNBOUND_SITE)} canBind /> },
@@ -337,6 +478,21 @@ function App() {
 // MODE is `data-theme` on the root (src/styles/tokens.css); `data-os-theme`
 // is the theme PACK, which is a different axis. Setting the wrong one renders
 // the system-preference branch and both captures come out identical.
+// A ONE-SHOT CAPTURE CANNOT SCROLL, and every surface long enough to be worth
+// judging has something below the fold. `?at=<text>` finds the first element
+// whose text starts with it and scrolls it to the top, after the virtual clock
+// has let the reads land -- so a section reached by scrolling can be captured
+// without a driver attached.
+const at = new URLSearchParams(window.location.search).get("at") ?? "";
+if (at !== "") {
+  window.setTimeout(() => {
+    const target = Array.from(document.querySelectorAll<HTMLElement>("h3, h4, .os-subhead")).find(
+      (el) => (el.textContent ?? "").trim().startsWith(at),
+    );
+    target?.scrollIntoView({ block: "start" });
+  }, 2500);
+}
+
 const mode = new URLSearchParams(window.location.search).get("mode") ?? "dark";
 document.documentElement.setAttribute("data-theme", mode);
 document.documentElement.setAttribute("data-os-theme", "graphite");
