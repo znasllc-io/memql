@@ -1458,37 +1458,29 @@ Two legacy forms are retired (both rejected at parse time):
 
 ### Calling a prompt
 
-**A prompt is not callable from a `.memql` body.** A statement's call names one
-of `query`, `mutation`, `logic`, `builtin`, `automation` and `action`, and none
-of those names a prompt; the only *bare* calls a body admits are catalog
-functions and the specs and traits it can see. So `si("<promptName>",
-<dataObject>)` — the blocking-LLM-call spelling this guide used to document — is
-refused at load, with `[body_call_unknown]` naming the call, and so is the
-`ai(...)` spelling some comments in the tree still point at:
-
-<!-- corpus: 2026/examples/memql/si/si-in-a-logic-body.memql -->
-```memql retired
-/// Ask the prompt the event names -- refused: no body calls a prompt.
-logic respondThroughPrompt {
-  args {
-    event  object!
-  }
-  answer := si(args.event.payload.promptTemplateId, args.event.payload.promptData)
-  return answer
-}
-```
+**A prompt is not callable from a `.memql` body, and there is no bare inference
+call either.** A statement's call names one of `query`, `mutation`, `logic`,
+`builtin`, `automation` and `action`, and none of those names a prompt; the
+only *bare* calls a body admits are catalog functions and the specs and traits
+it can see. The parser builds no inference node and the catalog holds no
+inference name, so `ai("<promptName>", <dataObject>)` — the blocking-LLM-call
+spelling some comments in the tree still point at — is refused at load, with
+`[body_call_unknown]` naming the call.
 
 A prompt is rendered and sent from **Go**: an integration binds the values the
 prompt's body declares — that body IS the input schema, validated before the
 template renders — builds a `core/airoute` request carrying the prompt's
 `@level`, and the router picks the provider ([Levels](#levels)). A prompt
 declares no OUTPUT schema, so what the reply is read as belongs to the calling
-integration, not to the construct. A body reaches that work through a **builtin
-that wraps it** — `agent` in `dsl/agents/builtins.memql` is the one the tree
-ships, and like every cross-namespace construct it comes in through a file-top
-import:
+integration, not to the construct. `MemQLEngine.InvokeAI` and the
+structured-output path beside it are that seam, and it is where every prompt
+this tree declares is used.
 
-<!-- corpus: 2026/examples/memql/si/agent-builtin.memql -->
+A body reaches that work through a **builtin that wraps it**. Two of the
+builtins `dsl/agents/builtins.memql` declares invoke an agent, and like every
+cross-namespace construct they come in through a file-top import:
+
+<!-- corpus: 2026/examples/memql/prompts/agent-builtin.memql -->
 ```memql
 use agents.builtins.{ agent }
 
@@ -1502,10 +1494,12 @@ logic askAssistant {
 }
 ```
 
-`agent(...)` opens a `v1:work:goal` and returns `{goalId, runId}` rather than
-the model's answer: it is agent-orchestrated, tool-using work that a run
-dispatcher claims on an agent node. `runAgentTurn`, beside it, runs the turn
-synchronously and returns the reply.
+`agent(name:, prompt:, partitionId:)` is ASYNCHRONOUS: it opens a
+`v1:work:goal` naming the `invokeAgent` template and returns `{goalId, runId}`
+rather than the model's answer, and a run dispatcher claims the goal on an
+agent node. `runAgentTurn(agentId:, prompt:)`, declared beside it, runs one
+agent turn in line and returns its reply — and answers only on an agent node,
+which it says rather than returning an empty reply.
 
 Prompt templates are rendered with Go's `text/template` package. When embedding structured data in a template that expects JSON, serialize it first (pass JSON-encoded strings in the data object) rather than passing raw maps, which would render in Go's internal map format.
 

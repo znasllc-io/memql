@@ -547,13 +547,14 @@ func TestPublishedExamplesMatchTheirCorpusCases(t *testing.T) {
 }
 
 // TestDocsCorpusFenceKindDecision pins the three-way decision the marker makes,
-// including the `retired` arm, which the pages now exercise end to end:
-// memql.md's "Calling a prompt" section shows the `si(...)` call a body cannot
-// make, and authoring-rules.md -- a rules-and-gotchas page, so showing wrong
-// code is its job -- carries 18 of the 19 retired fences in the tree. This test
-// came first and still earns its keep -- it pins the arm as a pure function
-// over (marker, verdict), including the pairs no page writes, so the answer
-// does not depend on a page continuing to show a refused form.
+// including the `retired` arm, which the pages still exercise end to end:
+// authoring-rules.md -- a rules-and-gotchas page, so showing wrong code is its
+// job -- carries all 18 retired fences in the tree, and is now the ONLY page
+// carrying one. That is what makes the rest of this comment load-bearing
+// rather than decorative: this test came first and still earns its keep -- it
+// pins the arm as a pure function over (marker, verdict), including the pairs
+// no page writes, so the answer does not depend on a page continuing to show a
+// refused form.
 func TestDocsCorpusFenceKindDecision(t *testing.T) {
 	for _, tc := range []struct {
 		marker, verdict string

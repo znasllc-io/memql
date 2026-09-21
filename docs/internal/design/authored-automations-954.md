@@ -53,7 +53,7 @@ authored automation needs already works for hand-authored DSL:
 - **Authoring guidance is solved.** `dsl/_reference/` skeletons + the 23 hard
   rules in `docs/public/language/authoring-rules.md`.
 - **The in-automation call surface is rich.** From an automation body you can
-  already reach `si()` (structured-output prompts), `similarTo()` (pgvector),
+  already reach `similarTo()` (pgvector),
   `embedChunk`, `webSearch`, `fetchUrl`, queries, mutations, sub-logic,
   sub-automations, sub-policies, `publishEvent`, webhooks, and control flow
   (parallel/foreach/switch).
@@ -135,13 +135,13 @@ blocks novel automations until their deps are added through another path).
 A green dry-run must be *trustworthy*. Fidelity tier:
 
 ```
-si() / similarTo()  -> REAL (metered)      # see the ACTUAL AI output / retrieval
+similarTo()          -> REAL (metered)      # see the ACTUAL retrieval
 webSearch / fetchUrl -> REAL (metered)
 mutations            -> ephemeral sandbox partition (real engine, throwaway data)
 webhooks / POST out  -> recorded + BLOCKED
 ```
 
-Green means logic, data shape, and real AI behavior are all verified, with zero
+Green means logic, data shape, and real external behavior are all verified, with zero
 prod impact. **Full sandbox-live** (everything real in a sandbox partition,
 webhooks fired at a capture sink) is retained as an **optional final staging
 pass** right before activation -- not run every iteration.

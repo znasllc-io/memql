@@ -709,9 +709,8 @@ These are names, not calls:
 ### AI
 
 **There is no AI function in the catalog above, and there is no bare AI call.**
-`si(promptName, data)` is what this page used to list here, and it does not
-exist -- neither does the `ai(promptName, data)` spelling some comments in the
-tree still point at. A body that writes either is refused at load with
+The `ai(promptName, data)` spelling some comments in the tree still point at
+does not exist. A body that writes it is refused at load with
 `body_call_unknown`, because the only bare calls a body admits are catalog
 functions and the specs and traits it can see. See
 [Calling a prompt](memql.md#calling-a-prompt).
