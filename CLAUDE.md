@@ -335,9 +335,15 @@ DSL all live here.
    underneath it, `mergeStateStatus` becomes `DIRTY` and does not resolve
    itself; rebase on `origin/main` and force-push. **`BEHIND`** is the strict
    status-check policy saying the base moved: `gh pr update-branch <n>` clears
-   it, then wait for CI on the new merge commit. `merge-as-owner.sh` refuses
-   `BEHIND` by name, because forcing it with `--admin` would land a tree CI
-   never tested against the current base.
+   it, then wait for CI on the new merge commit. **But `mergeStateStatus` is
+   ONE value and GitHub returns the STRONGEST blocker, so `BLOCKED` HIDES
+   `BEHIND`** -- and every PR here is blocked on a code-owner review its author
+   may not give, so a stale branch reads `BLOCKED` and that name is never seen.
+   `merge-as-owner.sh` therefore MEASURES the drift rather than reading it off
+   the state (`compare/<base>...<head>`, printed by `--check` as a `base` line)
+   and refuses on a non-zero count OR an unreadable comparison -- forcing
+   either with `--admin` lands a tree CI never tested against the current base,
+   which is the one thing `strict` exists to prevent.
 2. **Merging your own PR: the owner uses the BYPASS, never a settings change.**
    The ruleset requires a code-owner review and that requirement stays on, but
    **GitHub never lets a pull request's author approve it** -- there is no

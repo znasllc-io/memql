@@ -163,11 +163,13 @@ function report_pr() {
     log_step "Pull request ${REPO}#${PR}"
 
     local j
-    j="$(gh pr view "$PR" --repo "$REPO" --json state,title,author,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup 2>/dev/null)" \
+    j="$(gh pr view "$PR" --repo "$REPO" --json state,title,author,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,baseRefName,headRefName 2>/dev/null)" \
         || { log_error "cannot read ${REPO}#${PR}"; exit 5; }
 
     PR_STATE="$(printf '%s' "$j" | jq -r .state)"
     MERGE_STATE="$(printf '%s' "$j" | jq -r .mergeStateStatus)"
+    BASE_REF="$(printf '%s' "$j" | jq -r '.baseRefName // ""')"
+    HEAD_REF="$(printf '%s' "$j" | jq -r '.headRefName // ""')"
 
     printf '%s\n' "$j" | jq -r '
       "  title    : \(.title)",
@@ -177,6 +179,31 @@ function report_pr() {
       "  review   : \(.reviewDecision // "none")",
       "  checks   : \([.statusCheckRollup[]?|select(.conclusion=="SUCCESS")]|length) passed, \([.statusCheckRollup[]?|select(.conclusion=="FAILURE" or .conclusion=="TIMED_OUT")]|length) failed, \([.statusCheckRollup[]?|select((.status//.state)=="QUEUED" or (.status//.state)=="IN_PROGRESS")]|length) pending"
     '
+
+    # HOW FAR BEHIND THE BASE, ASKED DIRECTLY RATHER THAN READ OFF THE STATE.
+    #
+    # `mergeStateStatus` is one value and GitHub returns the STRONGEST blocker,
+    # so BLOCKED hides BEHIND. On this repository every pull request is blocked
+    # on a code-owner review its author may not give -- CODEOWNERS sends
+    # CLAUDE.md, app/, component/auth/ and .github/ to a lead team of one, who
+    # is the author -- which means BEHIND is a state nothing here ever reaches
+    # and the guard keyed on it never fires. The comparison below is a fact
+    # about two commits, and no stronger blocker can mask it.
+    BEHIND_KNOWN=no
+    BEHIND_BY=""
+    if [[ -n "$BASE_REF" && -n "$HEAD_REF" ]]; then
+        BEHIND_BY="$(gh api "repos/${REPO}/compare/${BASE_REF}...${HEAD_REF}" --jq '.behind_by' 2>/dev/null || true)"
+    fi
+    if [[ "$BEHIND_BY" =~ ^[0-9]+$ ]]; then
+        BEHIND_KNOWN=yes
+        if [[ "$BEHIND_BY" -gt 0 ]]; then
+            printf '  base     : %s (BEHIND by %s commit(s))\n' "$BASE_REF" "$BEHIND_BY"
+        else
+            printf '  base     : %s (up to date)\n' "$BASE_REF"
+        fi
+    else
+        printf '  base     : %s (comparison unavailable)\n' "${BASE_REF:-unknown}"
+    fi
 
     FAILED="$(printf '%s' "$j" | jq '[.statusCheckRollup[]?|select(.conclusion=="FAILURE" or .conclusion=="TIMED_OUT")]|length')"
     PENDING="$(printf '%s' "$j" | jq '[.statusCheckRollup[]?|select((.status//.state)=="QUEUED" or (.status//.state)=="IN_PROGRESS")]|length')"
@@ -299,14 +326,30 @@ function guard_readiness() {
     # reassurance, and then merge nothing, because the ordinary path cannot
     # satisfy a code-owner review the author is not allowed to give.
     #
-    #   BEHIND  -- the ruleset sets strict_required_status_checks_policy=true,
-    #              so a PR whose base has moved reads BEHIND, not BLOCKED. It
-    #              SHOULD be refused: forcing it with --admin would merge a tree
-    #              CI never tested against the current base, which is the one
-    #              thing `strict` exists to prevent. Update the branch instead.
+    #   BEHIND  -- the ruleset sets strict_required_status_checks_policy=true, so
+    #              a PR whose base has moved and is blocked by NOTHING ELSE
+    #              reads BEHIND. It SHOULD be refused: forcing it with --admin
+    #              would merge a tree CI never tested against the current base,
+    #              which is the one thing `strict` exists to prevent. Kept as
+    #              the name-level half of the pair; the measured check above is
+    #              what catches the far commoner case where BLOCKED hides it.
     #   UNKNOWN -- GitHub is still recomputing mergeability, which it does for a
     #              few seconds after anything lands on the base. Merging two
     #              pull requests back to back is how you meet it.
+    # The measured half of the pair below, and the one that actually fires here.
+    # It must refuse when the comparison could not be READ as well as when it
+    # comes back non-zero: an absent number read as zero is the bug restored,
+    # for the one case nobody writes a test for. Same fail-closed reasoning as
+    # the required-check intersection above.
+    if [[ "${BEHIND_KNOWN:-no}" != "yes" ]]; then
+        log_error "refusing: could not compare ${HEAD_REF:-this branch} against ${BASE_REF:-the base}, so whether CI ran against the current base is unknown. Absent is not zero -- re-run when the comparison is readable."
+        exit 3
+    fi
+    if [[ "$BEHIND_BY" -gt 0 ]]; then
+        log_error "refusing: this branch is ${BEHIND_BY} commit(s) BEHIND ${BASE_REF}. Run 'gh pr update-branch ${PR} --repo ${REPO}', wait for CI, then re-run -- merging now would land a tree CI never tested against the current base."
+        exit 3
+    fi
+
     case "$MERGE_STATE" in
         BEHIND)
             log_error "refusing: the base has moved and this branch is BEHIND it. Run 'gh pr update-branch ${PR} --repo ${REPO}', wait for CI, then re-run -- merging now would land a tree CI never tested against the current base."
