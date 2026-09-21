@@ -89,7 +89,8 @@ func AnalyzePackageDSL(logger *slog.Logger, root fs.FS) (PackageDSLResult, error
 
 	result := PackageDSLResult{Mounted: mounted, SkippedCore: skippedCore}
 	if msg, unread := memqldsl.UnreadRootManifest(root); unread {
-		result.UnreadRootManifest = &LintDiagnostic{File: dslfs.ManifestFile, Message: msg}
+		// A warning of its own: boot refuses nothing for it (lint_parity.go).
+		result.UnreadRootManifest = &LintDiagnostic{File: dslfs.ManifestFile, Message: msg, Severity: LintSeverityWarning}
 	}
 
 	concepts, conceptSkips, err := BuildUnifiedConcepts(logger, memqldsl.Tree())
@@ -100,10 +101,10 @@ func AnalyzePackageDSL(logger *slog.Logger, root fs.FS) (PackageDSLResult, error
 	// silently loses a concept at boot, taking every query, mutation and shape
 	// bound to it (memql#2909).
 	for _, cs := range conceptSkips {
-		result.Diagnostics = append(result.Diagnostics, LintDiagnostic{File: cs.File, Message: cs.String()})
+		result.Diagnostics = append(result.Diagnostics, LintDiagnostic{File: cs.File, Message: cs.String(), Severity: LintSeverityError})
 	}
 	if err != nil {
-		result.Diagnostics = append(result.Diagnostics, LintDiagnostic{Message: err.Error()})
+		result.Diagnostics = append(result.Diagnostics, LintDiagnostic{Message: err.Error(), Severity: LintSeverityError})
 		sortDiagnostics(result.Diagnostics)
 		return result, nil
 	}
@@ -118,11 +119,15 @@ func AnalyzePackageDSL(logger *slog.Logger, root fs.FS) (PackageDSLResult, error
 
 	if eng.loadReport != nil {
 		for _, s := range eng.loadReport.Skipped {
-			result.Diagnostics = append(result.Diagnostics, LintDiagnostic{File: s.File, Message: skipDiagnostic(s)})
+			result.Diagnostics = append(result.Diagnostics, LintDiagnostic{File: s.File, Message: skipDiagnostic(s), Severity: LintSeverityError})
 		}
 		for _, d := range eng.loadReport.Duplicates {
-			result.Diagnostics = append(result.Diagnostics, LintDiagnostic{Message: "duplicate construct: " + d.String()})
+			result.Diagnostics = append(result.Diagnostics, LintDiagnostic{Message: "duplicate construct: " + d.String(), Severity: LintSeverityError})
 		}
+		// Deliberately NO warnings here. Every diagnostic a package deploy
+		// reads means "this would refuse boot"; a deprecated form inside its
+		// window would not, and mixing the two would block a deploy on a
+		// courtesy (memql#5390).
 	}
 
 	// A hard Init error that is NOT the strict-boot aggregate is its own
@@ -130,7 +135,7 @@ func AnalyzePackageDSL(logger *slog.Logger, root fs.FS) (PackageDSLResult, error
 	// violation, a duplicate or empty concept. Those abort Init before the
 	// report gate, so they surface only through the returned error.
 	if initErr != nil && !strings.Contains(initErr.Error(), "strict DSL boot refused") {
-		result.Diagnostics = append(result.Diagnostics, LintDiagnostic{Message: initErr.Error()})
+		result.Diagnostics = append(result.Diagnostics, LintDiagnostic{Message: initErr.Error(), Severity: LintSeverityError})
 	}
 
 	sortDiagnostics(result.Diagnostics)
@@ -140,10 +145,19 @@ func AnalyzePackageDSL(logger *slog.Logger, root fs.FS) (PackageDSLResult, error
 	return result, nil
 }
 
+// sortDiagnostics orders diagnostics by file, then position, then message. An
+// error carries no position of its own, so errors keep their file-then-message
+// order and a file's positioned warnings follow them in source order.
 func sortDiagnostics(d []LintDiagnostic) {
 	sort.SliceStable(d, func(i, j int) bool {
 		if d[i].File != d[j].File {
 			return d[i].File < d[j].File
+		}
+		if d[i].Line != d[j].Line {
+			return d[i].Line < d[j].Line
+		}
+		if d[i].Column != d[j].Column {
+			return d[i].Column < d[j].Column
 		}
 		return d[i].Message < d[j].Message
 	})

@@ -15,6 +15,7 @@ import (
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
 	"github.com/znasllc-io/memql/cmd/memql-lsp/internal/position"
+	"github.com/znasllc-io/memql/component/language/deprecation"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/sense"
@@ -647,5 +648,123 @@ func TestLineEdits(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// deprecatedFormWorkspace is a bundle domain whose concept spells a field in
+// the deprecated `array(T)` form (memql#5390).
+var deprecatedFormWorkspace = map[string]string{
+	"depws/memql.toml":     "memql = \"1.0\"\nedition = \"2026\"\n",
+	"depws/concepts.memql": "/// A ticket.\nconcept ticket {\n  /// Tags.\n  tags  array(string)  @required\n  /// Note.\n  note  string\n}\n",
+}
+
+// echoedByClient is a published diagnostic as a code-action request carries it
+// back from a real client: glsp v0.2.2 decodes its code as nil
+// (languageline.go), so nothing may key on it.
+func echoedByClient(d protocol.Diagnostic) protocol.Diagnostic {
+	d.Code = nil
+	return d
+}
+
+// deprecatedFormQuickFix asks for the quick fixes at d as a client would, and
+// returns the one titled title.
+func deprecatedFormQuickFix(t *testing.T, s *server, uri protocol.DocumentUri, d protocol.Diagnostic, title string) protocol.CodeAction {
+	t.Helper()
+	quick := actionsOfKind(codeActions(t, s, uri, d.Range, []protocol.Diagnostic{echoedByClient(d)}, protocol.CodeActionKindQuickFix), protocol.CodeActionKindQuickFix)
+	if len(quick) != 1 || quick[0].Title != title {
+		t.Fatalf("want one quick fix %q, got %+v", title, quick)
+	}
+	return quick[0]
+}
+
+// A use of a deprecated form inside its window is published as a Warning with
+// the Deprecated tag, and its quick fix writes the replacement over the
+// spelling alone -- decided by the diagnostic's source, message and range,
+// since the client echoes no code.
+func TestCodeAction_DeprecatedArrayTypeRewritesToTheSlice(t *testing.T) {
+	root := writeWorkspace(t, deprecatedFormWorkspace)
+	s := workspaceServer(t, root)
+	uri, text, diags := openWorkspaceDoc(t, s, root, "depws/concepts.memql")
+
+	form, _ := deprecation.Lookup(deprecation.ArrayType)
+	d, ok := diagnosticWithCode(diags, deprecation.ArrayType)
+	if !ok {
+		t.Fatalf("no deprecated_array_type diagnostic was published: %+v", diags)
+	}
+	if d.Severity == nil || *d.Severity != protocol.DiagnosticSeverityWarning || d.Message != form.Warning() {
+		t.Errorf("published %+v, want a Warning with the form's warning", d)
+	}
+	if len(d.Tags) != 1 || d.Tags[0] != protocol.DiagnosticTagDeprecated {
+		t.Errorf("tags = %v, want [Deprecated]", d.Tags)
+	}
+
+	a := deprecatedFormQuickFix(t, s, uri, d, "Rewrite as `[]string`")
+	if a.IsPreferred == nil || !*a.IsPreferred || len(a.Diagnostics) != 1 {
+		t.Errorf("quick fix preferred=%v diagnostics=%d", a.IsPreferred, len(a.Diagnostics))
+	}
+	if r := a.Diagnostics[0]; diagnosticCode(r) != deprecation.ArrayType || r.Message != d.Message || r.Range != d.Range {
+		t.Errorf("the action resolves %+v, want the diagnostic as published, code restored", r)
+	}
+	edits := a.Edit.Changes[uri]
+	if len(edits) != 1 || edits[0].NewText != "[]string" || edits[0].Range != d.Range {
+		t.Fatalf("edits = %+v, want one edit writing []string over %+v", edits, d.Range)
+	}
+	got := applyEdits(t, text, a, uri)
+	if want := strings.Replace(text, "array(string)", "[]string", 1); got != want {
+		t.Fatalf("the quick fix wrote:\n%s\nwant:\n%s", got, want)
+	}
+	for _, left := range sense.New(nil).Diagnose(got, "") {
+		if left.Code == deprecation.ArrayType || left.Severity == sense.SeverityError {
+			t.Errorf("the rewritten document still reports %+v", left)
+		}
+	}
+}
+
+// Past its window the form is refused, and the refusal -- an Error carrying the
+// rule -- is tagged and fixed the same way. Only the release deciding changes.
+func TestCodeAction_ExpiredArrayTypeRewritesToTheSlice(t *testing.T) {
+	restore := deprecation.SetCurrent("0.25.0")
+	defer restore()
+	form, _ := deprecation.Lookup(deprecation.ArrayType)
+
+	root := writeWorkspace(t, deprecatedFormWorkspace)
+	s := workspaceServer(t, root)
+	uri, text, diags := openWorkspaceDoc(t, s, root, "depws/concepts.memql")
+	d, ok := diagnosticWithCode(diags, deprecation.ArrayType)
+	if !ok {
+		t.Fatalf("no deprecated_array_type diagnostic was published: %+v", diags)
+	}
+	if d.Severity == nil || *d.Severity != protocol.DiagnosticSeverityError || !strings.Contains(d.Message, form.Refusal()) || len(d.Tags) != 1 {
+		t.Errorf("published %+v, want a tagged Error carrying the refusal", d)
+	}
+	a := deprecatedFormQuickFix(t, s, uri, d, "Rewrite as `[]string`")
+	if got, want := applyEdits(t, text, a, uri), strings.Replace(text, "array(string)", "[]string", 1); got != want {
+		t.Fatalf("the quick fix wrote:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// A diagnostic that is not this server's warning about the use gets no
+// rewrite: another source, another message, or a range elsewhere.
+func TestCodeAction_DeprecatedFormFixNeedsItsOwnDiagnostic(t *testing.T) {
+	root := writeWorkspace(t, deprecatedFormWorkspace)
+	s := workspaceServer(t, root)
+	uri, _, diags := openWorkspaceDoc(t, s, root, "depws/concepts.memql")
+	d, ok := diagnosticWithCode(diags, deprecation.ArrayType)
+	if !ok {
+		t.Fatalf("no deprecated_array_type diagnostic was published: %+v", diags)
+	}
+	other := "another-linter"
+	elsewhere := d
+	elsewhere.Range = protocol.Range{Start: protocol.Position{Line: 5, Character: 2}, End: protocol.Position{Line: 5, Character: 6}}
+	for name, probe := range map[string]protocol.Diagnostic{
+		"another source":  func() protocol.Diagnostic { p := d; p.Source = &other; return p }(),
+		"another message": func() protocol.Diagnostic { p := d; p.Message = "something else"; return p }(),
+		"another range":   elsewhere,
+	} {
+		for _, a := range codeActions(t, s, uri, probe.Range, []protocol.Diagnostic{echoedByClient(probe)}, protocol.CodeActionKindQuickFix) {
+			if strings.HasPrefix(a.Title, "Rewrite as") {
+				t.Errorf("%s: offered %q", name, a.Title)
+			}
+		}
 	}
 }

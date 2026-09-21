@@ -22,7 +22,6 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
-	"sort"
 	"strings"
 
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -32,20 +31,41 @@ import (
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
-// LintDiagnostic is one init-time problem the engine-parity lint pass found.
-// File is the origin path in the DSL tree when the problem is attributable to
-// a single construct (a loader parse/register skip); it is empty for a
-// whole-tree error (an invalid @relationship type, a CQS or dependency-tree
-// violation, a duplicate concept) that aborts Init before the load report is
-// assembled.
+// LintDiagnostic is one init-time finding the engine-parity lint pass made.
+// File is the origin path in the DSL tree when the finding is attributable to
+// a single construct (a loader parse/register skip) or a single use; it is
+// empty for a whole-tree error (an invalid @relationship type, a CQS or
+// dependency-tree violation, a duplicate concept) that aborts Init before the
+// load report is assembled.
 type LintDiagnostic struct {
 	File    string
 	Message string
 	// Code is the refusal's stable rule id when it carries one (a lowering
-	// refusal's `lower_*`, an annotation's `annotation_*`), and empty
-	// otherwise. Message carries it too, in brackets at the end.
+	// refusal's `lower_*`, an annotation's `annotation_*`, a deprecated form's
+	// rule), and empty otherwise. Message carries it too, in brackets at the
+	// end.
 	Code string
+	// Severity is LintSeverityError for a finding boot refuses, and
+	// LintSeverityWarning for one that loads: a use of a deprecated language
+	// form still inside its window (memql#5390), whose Message is the form's
+	// warning. A caller deciding whether a tree mounts reads the errors only;
+	// an empty Severity is an error.
+	Severity string
+	// Line and Column place a warning in File, 1-based, the column counting
+	// runes; zero when the finding carries no position of its own (an error's
+	// Message says where it is).
+	Line, Column int
 }
+
+// The two severities a LintDiagnostic carries.
+const (
+	LintSeverityError   = "error"
+	LintSeverityWarning = "warning"
+)
+
+// IsWarning reports whether d is a finding that does not stop the tree
+// loading.
+func (d LintDiagnostic) IsWarning() bool { return d.Severity == LintSeverityWarning }
 
 // LintUnifiedTree mounts every product-domain directory found in root as an
 // overlay on the embedded core tree, then runs the engine's full init-time DSL
@@ -90,7 +110,7 @@ func LintUnifiedTree(logger *slog.Logger, root fs.FS) ([]LintDiagnostic, []strin
 		// round over a problem already measured (memql#2909).
 		var diags []LintDiagnostic
 		for _, cs := range conceptSkips {
-			diags = append(diags, LintDiagnostic{File: cs.File, Message: cs.String()})
+			diags = append(diags, LintDiagnostic{File: cs.File, Message: cs.String(), Severity: LintSeverityError})
 		}
 		return withUnreadRootManifest(diags, root), skippedCore, fmt.Errorf("loading concepts from merged tree: %w", err)
 	}
@@ -116,7 +136,7 @@ func LintUnifiedTree(logger *slog.Logger, root fs.FS) ([]LintDiagnostic, []strin
 	// concept at boot. A dropped concept is not a dropped property: every
 	// query, mutation and shape bound to it fails at runtime.
 	for _, cs := range conceptSkips {
-		diags = append(diags, LintDiagnostic{File: cs.File, Message: cs.String()})
+		diags = append(diags, LintDiagnostic{File: cs.File, Message: cs.String(), Severity: LintSeverityError})
 	}
 
 	// Per-construct skips + duplicate registrations from the load report.
@@ -126,10 +146,16 @@ func LintUnifiedTree(logger *slog.Logger, root fs.FS) ([]LintDiagnostic, []strin
 	// parse-phase skip).
 	if eng.loadReport != nil {
 		for _, s := range eng.loadReport.Skipped {
-			diags = append(diags, LintDiagnostic{File: s.File, Message: skipDiagnostic(s), Code: s.Code})
+			diags = append(diags, LintDiagnostic{File: s.File, Message: skipDiagnostic(s), Code: s.Code, Severity: LintSeverityError})
 		}
 		for _, d := range eng.loadReport.Duplicates {
-			diags = append(diags, LintDiagnostic{Message: "duplicate construct: " + d.String()})
+			diags = append(diags, LintDiagnostic{Message: "duplicate construct: " + d.String(), Severity: LintSeverityError})
+		}
+		// What loads but must still change: each use of a deprecated form
+		// inside its window (memql#5390), positioned, its message the form's
+		// warning word for word. Never a reason the tree does not mount.
+		for _, w := range eng.loadReport.WarningsSnapshot() {
+			diags = append(diags, LintDiagnostic{File: w.File, Line: w.Line, Column: w.Column, Message: w.Message, Code: w.Code, Severity: LintSeverityWarning})
 		}
 	}
 
@@ -140,16 +166,11 @@ func LintUnifiedTree(logger *slog.Logger, root fs.FS) ([]LintDiagnostic, []strin
 	// Init before the report gate, so they surface only through the returned
 	// error.
 	if initErr != nil && !strings.Contains(initErr.Error(), "strict DSL boot refused") {
-		diags = append(diags, LintDiagnostic{Message: initErr.Error()})
+		diags = append(diags, LintDiagnostic{Message: initErr.Error(), Severity: LintSeverityError})
 	}
 	diags = withUnreadRootManifest(diags, root)
 
-	sort.SliceStable(diags, func(i, j int) bool {
-		if diags[i].File != diags[j].File {
-			return diags[i].File < diags[j].File
-		}
-		return diags[i].Message < diags[j].Message
-	})
+	sortDiagnostics(diags)
 	return dedupeDiagnostics(diags), skippedCore, nil
 }
 
@@ -162,7 +183,7 @@ func LintUnifiedTree(logger *slog.Logger, root fs.FS) ([]LintDiagnostic, []strin
 // deploy must not either.
 func withUnreadRootManifest(diags []LintDiagnostic, root fs.FS) []LintDiagnostic {
 	if msg, unread := memqldsl.UnreadRootManifest(root); unread {
-		diags = append(diags, LintDiagnostic{File: dslfs.ManifestFile, Message: msg})
+		diags = append(diags, LintDiagnostic{File: dslfs.ManifestFile, Message: msg, Severity: LintSeverityError})
 	}
 	return diags
 }

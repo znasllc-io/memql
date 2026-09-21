@@ -27,6 +27,7 @@ verify anything here.
 | `functions/` | The function catalog (D10): every function and method an edition-2026 expression can call, one entry and one spelling each, with its signature, its tier and the retired spellings it replaces, plus the operator table (`Operators()`). The two evaluators, Sense and the generated docs read it. | ~6 files |
 | `tiers/` | The tier manifest (D11): every expression position, whether it pushes down to SQL (P) or runs in process (M), and the node kinds, catalog functions and predicate applications it admits (`Rules()`), plus the M tier's cost limits. | ~6 files |
 | `bodymigrate/` | The bodies rewrite, `memqlmigrate --rewrite=bodies` (epic memql#5370): the retired body forms carried into edition-2026 statements, with its own reader of those forms so it outlives the engine's. A library, as the expressions rewrite is (`parser.RewriteExpressions`), so the CLI, its Go-fixture mode and the logic corpus's run-time check all run one rewrite. Its declaration index covers only the files it is given; memqlmigrate adds the embedded tree. | ~3 files |
+| `deprecation/` | The deprecation window (D22, memql#5390). `window.go` is the arithmetic -- `Window`, `Tracker`, and `MinimumMinorReleases`, the floor of two minor releases pinned to `tiers.DeprecationWindowMinorReleases`; `forms.go` is the table it is applied to: every form in a window with its rule, spelling, replacement, migrator and the release that first warns, plus `Current()`, the release this process decides at. Whether a form still loads is `Form.RefusesAt(release)` and nothing else -- no flag anybody has to remember to flip -- and the release comes from `core/buildinfo`'s link-time stamp, which is empty in a build that was not cut from one, so a dev build and the language server warn and never refuse. A leaf: standard library only. | ~5 files |
 | `language.go` | The `Language` component: bundles the parser and compiler submodules under one lifecycle with their own env-configured loggers. Note that the *root* package is thin -- almost every consumer imports a sub-package directly, not this. | 2 files |
 
 ---
@@ -147,6 +148,15 @@ mistake this layout exists to prevent:
   the catalog, the manifest and `V1RetiredForms`; and
   `TestOperatorLevelsAreTheParsersPrecedence` holds the operator table's levels
   to the parser's table.
+- **Deprecated forms** live in `deprecation/`, and where a source spells one is
+  `parser.ScanDeprecatedUses` (`parser/deprecated_uses.go`), which the engine's
+  load (a warning plus `memql_dsl_deprecated_uses_total` while a form is inside
+  its window, a coded refusal after it), Sense and the language server all read.
+  RETIRED is not DEPRECATED: a retired form refuses at once and is listed in
+  `V1RetiredForms`; a deprecated one loads and warns until its window is spent
+  and is never listed there. The table is published in
+  [memql.md](../../docs/public/language/memql.md#forms-in-a-deprecation-window),
+  held to the registry by `TestDeprecationWindowTableMatchesTheRegistry`.
 
 ---
 
@@ -159,9 +169,9 @@ sub-packages -- `annotations/`, `ast/`, and `dslclause/` each carry a
 packages are separate modules precisely so a consumer can depend on the
 annotation registry or the AST types without dragging in the parser.
 
-`bodymigrate/`, `compiler/`, `dslspec/`, `functions/`, `pagination/`,
-`parser/` and `tiers/` are **not** separate modules -- they are packages
-inside `component/language`.
+`bodymigrate/`, `compiler/`, `deprecation/`, `dslspec/`, `functions/`,
+`pagination/`, `parser/` and `tiers/` are **not** separate modules -- they are
+packages inside `component/language`.
 
 ---
 

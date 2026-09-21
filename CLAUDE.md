@@ -370,10 +370,26 @@ DSL all live here.
 
    **Do not "fix" this by lowering `require_code_owner_review`** -- that removes
    the requirement for everyone, which is a different policy.
-3. **Pre-release -- no backwards-compat shims or deprecation windows.** When a
-   contract changes, fix both MemQL and the consumer at once and delete what is
-   no longer needed. No legacy adapters, fallback paths, or "keep working while
-   we migrate" layers.
+3. **Pre-release -- no backwards-compat shims or deprecation windows, EXCEPT in
+   the DSL.** For Go seams, wire contracts, gRPC messages, env vars and
+   everything else: when a contract changes, fix both MemQL and the consumer at
+   once and delete what is no longer needed. No legacy adapters, fallback paths,
+   or "keep working while we migrate" layers.
+
+   **The MemQL language is the carve-out, and has been since language 1.0 was
+   frozen** (memql#5385, memql#5390). The rule above works because both sides of
+   a Go contract sit in repositories this one can see; a `.memql` bundle does
+   not -- it is mounted at `MEMQL_DSL_PATH` from a product repo, and breaking it
+   in a minor breaks somebody else's deploy with no warning. So a public
+   language form leaves through a **deprecation window**: it keeps loading,
+   every load WARNS naming the replacement and the release it stops loading at,
+   every use is COUNTED on `memql_dsl_deprecated_uses_total{rule}`, and only
+   after at least two minor releases does it refuse. The forms currently in a
+   window, and both of their releases, are published in
+   [memql.md](docs/public/language/memql.md#forms-in-a-deprecation-window) and
+   held to the registry (`component/language/deprecation`) by a build gate.
+   Retiring a form outright is still right where nothing outside this repo could
+   have written it.
 4. **Stage files by explicit path** (`git add <file>`) -- never `git add -A` or
    `git add .`. The repo owner runs multiple Claude sessions against this
    working tree, and untracked files from another session must not get swept

@@ -5,6 +5,7 @@ import { Shell } from "../../src/chrome/Shell";
 import { StubAskTransport } from "../../src/ask/askController";
 import { LocalDesktopStore } from "../../src/system/store";
 import type { OsRuntimeConfig } from "../../src/cluster/config";
+import { appTileName } from "../appTile";
 import { installSeededAccess } from "../seededAccess";
 
 // The Settings suite renders the REAL shell against the REAL registry, for
@@ -63,7 +64,7 @@ export function renderShell({
 export function openFromLauncher(name: string) {
   fireEvent.click(screen.getByRole("button", { name: "Launcher" }));
   fireEvent.click(
-    within(screen.getByRole("dialog", { name: "Launcher" })).getByRole("button", { name }),
+    within(screen.getByRole("dialog", { name: "Launcher" })).getByRole("button", { name: appTileName(name) }),
   );
 }
 

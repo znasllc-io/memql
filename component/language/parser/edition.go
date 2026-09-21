@@ -43,6 +43,26 @@ const LanguageVersion = "1.0"
 // Edition is the edition this engine writes and the newest one it reads.
 const Edition = "2026"
 
+// EditionStatus is where Edition stands: "frozen" once the release that froze
+// it has shipped, "draft" while its authored surface may still change.
+//
+// The difference is a PROMISE, and the whole reason anything reports it. A
+// frozen edition keeps every form it accepts, with the same meaning, until a
+// new edition -- so a form leaves it only through the deprecation window
+// (component/language/deprecation) and a reservation afterwards
+// (component/language/reserved.json). A draft makes no such promise: a form
+// retired inside one is refused the moment it is retired. A surface that
+// printed the frozen guarantee without reading this would be making a draft's
+// readers a promise the cluster does not keep, which is why the languageStatus
+// builtin reports the status beside the edition and never on its own.
+//
+// The corpus manifest (test/conformance/<Edition>/manifest.json) is where the
+// status is DECIDED, and the release that flips it flips this constant in the
+// same change; TestEditionStatusMatchesTheCorpusManifest (test/conformance)
+// holds the two equal in both directions. It is a constant rather than a read
+// of that manifest because the engine never reads its test tree at run time.
+const EditionStatus = "frozen"
+
 // EditorRelease is the first release of MemQL for VS Code that carries
 // GrammarVersion (memql#5362; D25 of the design record above).
 //

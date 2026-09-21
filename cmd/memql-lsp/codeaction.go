@@ -86,6 +86,15 @@ func syntaxCode(code string) bool {
 // rewritableCode reports whether a quickfix may be offered on a diagnostic
 // with this code: a retired form, or a parse or lowering failure the region's
 // rewrite may clear. Rule 2 decides whether it does.
+//
+// A DEPRECATED form's rule is deliberately NOT here (memql#5390). This gate
+// opens the edition-2026 rewrite, langparser.PlanExpressions, and that codemod
+// does not touch `array(T)` -- the rewrite that does is `slice-syntax`, a
+// different one. Admitting the rule would offer "Rewrite to edition 2026" on a
+// diagnostic it cannot clear, which is worse than offering nothing: the author
+// runs it, the squiggle stays, and the next fix they are offered is one they
+// have learned not to trust. A deprecated form gets its own quick fix, which
+// writes the replacement over the spelling (deprecatedforms.go).
 func rewritableCode(code string) bool {
 	return code != "lex-error" && syntaxCode(code)
 }
@@ -113,12 +122,14 @@ func kindRequested(only []protocol.CodeActionKind, kind protocol.CodeActionKind)
 }
 
 // codeAction answers textDocument/codeAction with every action this server
-// offers: the language line's "Create memql.toml" quick fix (languageline.go)
-// and "Rewrite to edition 2026" (rewriteCodeActions). Each checks its own
-// diagnostics and the request's `only` filter, so a request collects exactly
-// the actions that apply to it.
+// offers: the language line's "Create memql.toml" quick fix (languageline.go),
+// "Rewrite to edition 2026" (rewriteCodeActions) and a deprecated form's
+// "Rewrite as `[]T`" (deprecatedforms.go). Each checks its own diagnostics and
+// the request's `only` filter, so a request collects exactly the actions that
+// apply to it.
 func (s *server) codeAction(_ *glsp.Context, params *protocol.CodeActionParams) (any, error) {
 	actions := append(s.languageLineCodeActions(params), s.rewriteCodeActions(params)...)
+	actions = append(actions, s.deprecatedFormCodeActions(params)...)
 	if len(actions) == 0 {
 		return nil, nil
 	}
