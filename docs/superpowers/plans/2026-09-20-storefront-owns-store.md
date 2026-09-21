@@ -1345,7 +1345,24 @@ git commit -m "Issue #5541: the storefront's store part replaces the app:stores 
 
 ---
 
-### Task 6: MemQL OS — the store is a connection on the storefront deployable (#5541, part 2)
+### Task 6: MemQL OS — the store moves to the storefront deployable (#5541, parts 2 and 3)
+
+**TASKS 6 AND 7 ARE ONE TASK, and Task 5's report is why.** `clients/os/test/seededAccess.ts`
+re-parses `dsl/rbac/seeds.memql` OFF DISK, so deleting the six `app:stores` seeds broke the
+OS suite the moment Task 5 landed, not when the registry entry goes: measured on the tree
+right after it, `test/settings/access.test.tsx` 8 failed, `test/system/rankLadder.test.tsx`
+2 failed, `test/settings/hiddenSurfaces.test.ts` 1 failed -- 11 cases. Two of those three
+are repaired by editing the test; the third
+(`hiddenSurfaces` "an owner shows nothing hidden") is repaired ONLY by deleting the
+registry entry, because the surface really is hidden from an owner until the app is gone.
+So building the new surface, deleting the old app and re-pointing the tests are one change
+with one green state at the end, and splitting them would mean committing a knowingly red
+OS suite twice. Do Task 6 and then Task 7's steps in the same session; one commit each is
+fine, two commits total.
+
+YOUR BASELINE IS RED. Before you change anything, run `cd clients/os && npx vitest run` and
+record which cases fail. Those 11 are Task 5's, not yours; anything else that is red is
+somebody's and worth saying so.
 
 **Files:**
 - Create: `clients/os/src/apps/deployables/store/rows.ts`, `health.ts`, `words.ts`, `useStore.ts`, `StorePanel.tsx`, `StorePicker.tsx`
@@ -1618,10 +1635,20 @@ directions — no seed names an app that is gone, and no manifest names a seed t
 
 - [ ] **Step 5: The capability sweep the design asks for**
 
+The sweep is for a RESOURCE NAME that still gates something, not for the string. Two
+deliberate PROSE mentions survive on purpose -- the rationale comments in
+`dsl/rbac/seeds.memql` and `component/auth/rbac_model.go` that explain why
+`app:deployables/store` is owner-only, which is the load-bearing part of Task 5. Do not
+delete them to satisfy a grep.
+
 ```bash
+# the real question: does any resource declaration, mirror entry or requires: still name it
+git grep -nE '(resourceType|requires):\s*"app:stores|"app:stores[^"]*":' -- . ':!docs/superpowers/specs'
+# and the broad one, read by eye -- every hit must be prose
 git grep -n "app:stores" -- . ':!docs/superpowers/specs'
 ```
-Expected: no output. The design record's own two mentions are history and stay.
+Expected: the first prints nothing; the second prints only the two rationale comments. The
+design record's own two mentions are history and stay.
 
 - [ ] **Step 6: Commit**
 
