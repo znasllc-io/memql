@@ -11647,15 +11647,17 @@ a.os-button {
   overflow-wrap: anywhere;
 }
 
-/* ---- stores: the Shopify connector's operator surface (memql#5012) ---- */
+/* ---- the store a storefront fronts, on its deployable (memql#5541) ---- */
 
 /* ===========================================================================
- * Stores (epic memql#5009 / memql#5012).
+ * The Store pane (epic memql#5530, issue memql#5541).
  *
- * Existing --os-* tokens only; not one raw colour. Nothing here restyles
- * another app's class: the status word is `.os-stores-status` rather than a
- * fourth tone bolted onto Deployables' `.os-deploy-status`, because that
- * class belongs to that app and only carries ok / warn.
+ * It was the Stores app's own block (epic memql#5009 / memql#5012). That app
+ * is gone and its function is re-homed on the storefront deployable, so this
+ * is renamed `.os-store-*` and keeps everything else: existing --os-* tokens
+ * only, not one raw colour, and the status word stays its own class rather
+ * than a fourth tone bolted onto Deployables' `.os-deploy-status`, which
+ * belongs to that surface and only carries ok / warn.
  * ======================================================================== */
 
 /* `.os-figure*` (src/kit/Measure.tsx) is deliberately ABSENT from
@@ -11665,30 +11667,15 @@ a.os-button {
  * here would be a second thing to keep in step with them.
  *
  * ---------------------------------------------------------------------------
- * The pane: the view owns its scroll, so the bar can be pinned
+ * NO PANE OR SCROLL RULES, and that is the change rather than an omission
  * ---------------------------------------------------------------------------
- * `.os-window-content` is the window's scroller, so anything inside it
- * scrolls -- including a bar that must not. Filling the height and scrolling
- * INSIDE is what lets the ActionBar sit on the window's bottom edge without
- * `position: fixed`, which would anchor to the CSS-transformed desk plate
- * rather than to the window. Same arrangement as `.os-deploy-pane` and
- * `.os-nexus-goals`; each app names its own, so no app can move another's. */
-.os-stores-pane {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-  margin: 0;
-}
-.os-stores-scroll {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 18px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
+ * This surface used to be an app and owned its own full-height flex pane so
+ * its ActionBar could sit on the window's bottom edge. It is a view INSIDE
+ * the deployable page now, so `.os-deploy-pane` owns the height and the
+ * scroller, and the only action bar in that window belongs to the
+ * deployable's own lifecycle -- which is DESIGN.md rule 12 rather than a
+ * layout convenience. Re-adding a pane rule here would put a second
+ * scroll column inside the first. */
 
 /* ---------------------------------------------------------------------------
  * The status word
@@ -11700,7 +11687,7 @@ a.os-button {
  * `neutral` is not a fourth colour: it is the muted ink a status this shell
  * has no copy for gets, so an unrecognised value reads as unrecognised
  * rather than borrowing the confidence of a green one. */
-.os-stores-status {
+.os-store-status {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -11712,20 +11699,20 @@ a.os-button {
   color: var(--os-muted);
   white-space: nowrap;
 }
-.os-stores-status[data-tone="ok"] {
+.os-store-status[data-tone="ok"] {
   color: var(--os-accent);
 }
-.os-stores-status[data-tone="warn"] {
+.os-store-status[data-tone="warn"] {
   color: var(--os-warn);
 }
-.os-stores-status[data-tone="danger"] {
+.os-store-status[data-tone="danger"] {
   color: var(--os-error);
 }
 
 /* ---------------------------------------------------------------------------
  * The list line
  * ------------------------------------------------------------------------ */
-.os-stores-subline {
+.os-store-subline {
   color: var(--os-muted);
   font-size: var(--os-text-sm);
   min-width: 0;
@@ -11735,17 +11722,17 @@ a.os-button {
 /* A line of prose inside a band -- the scopes sentence, the subscription
  * count. It is content rather than a caption, so it keeps the ink and the
  * app text size; `data-tone` is for the one line that reports a failure. */
-.os-stores-line {
+.os-store-line {
   margin: 0 0 8px;
   font-size: var(--os-text-base);
   color: var(--os-ink);
 }
-.os-stores-line[data-tone="danger"] {
+.os-store-line[data-tone="danger"] {
   color: var(--os-error);
 }
 
 /* A quiet aside beside a value -- "not observed yet", a drift total. */
-.os-stores-note {
+.os-store-note {
   color: var(--os-muted);
   font-size: var(--os-text-xs);
 }
@@ -11756,7 +11743,7 @@ a.os-button {
  * Two columns where there is room, one where there is not. `auto-fit` with a
  * min track rather than a media query: this form renders inside a WINDOW, and
  * a window's width is not the viewport's. */
-.os-stores-form {
+.os-store-form {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
   gap: 8px 12px;
@@ -11767,7 +11754,7 @@ a.os-button {
  * the acts that change this STORE's state, and reconciling subscriptions
  * changes no store's status -- it also runs for every ingesting store, which
  * is a scope the bar has no room to say. */
-.os-stores-bandact {
+.os-store-bandact {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -11784,16 +11771,65 @@ a.os-button {
  * that can be half a screen wide is the case where a table pushes the whole
  * pane sideways; the wrapper takes that instead, so the window body never
  * scrolls horizontally. */
-.os-stores-tablewrap {
+/* ---------------------------------------------------------------------------
+ * The identity line
+ * ---------------------------------------------------------------------------
+ * The store's domain is the one fact somebody opens this pane to check -- the
+ * identifier Shopify never changes, the one they can match against the
+ * Shopify admin, and the one that appears in the policy the edge serves. It
+ * is the only thing on this surface typeset with any weight, which is what
+ * keeps everything below it quiet. The state word sits on the same line
+ * because "which store, and is it ingesting" is one question. */
+.os-store-identity {
+  padding: 4px 0 6px;
+}
+.os-store-identity-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.os-store-identity-line > svg {
+  color: var(--os-accent);
+  flex-shrink: 0;
+}
+.os-store-identity-line > strong {
+  font-size: var(--os-text-lg);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.os-store-identity .os-store-note {
+  margin: 6px 0 0 28px;
+}
+
+/* The development stores paired to this one. A list rather than a table:
+ * there is at most a handful, each is two facts, and a table of two columns
+ * is furniture around them. */
+.os-store-devlist {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.os-store-devlist > li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: var(--os-text-sm);
+}
+
+.os-store-tablewrap {
   overflow-x: auto;
   margin: 4px 0 10px;
 }
-.os-stores-table {
+.os-store-table {
   width: 100%;
   border-collapse: collapse;
   font-size: var(--os-text-base);
 }
-.os-stores-table th {
+.os-store-table th {
   text-align: left;
   padding: 4px 14px 6px 0;
   font-size: var(--os-text-xs);
@@ -11803,27 +11839,27 @@ a.os-button {
   color: var(--os-muted);
   white-space: nowrap;
 }
-.os-stores-table td {
+.os-store-table td {
   padding: 5px 14px 5px 0;
   border-top: 1px solid var(--os-line);
   vertical-align: baseline;
 }
-.os-stores-table td:first-child {
+.os-store-table td:first-child {
   font-size: var(--os-text-sm);
 }
 /* The counters read down the column, so they are tabular and right-aligned
  * against each other -- a drift of 4 under a drift of 1,204 is the comparison
  * this table exists for. */
-.os-stores-table td:nth-child(3),
-.os-stores-table td:nth-child(4),
-.os-stores-table td:nth-child(5),
-.os-stores-table th:nth-child(3),
-.os-stores-table th:nth-child(4),
-.os-stores-table th:nth-child(5) {
+.os-store-table td:nth-child(3),
+.os-store-table td:nth-child(4),
+.os-store-table td:nth-child(5),
+.os-store-table th:nth-child(3),
+.os-store-table th:nth-child(4),
+.os-store-table th:nth-child(5) {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-.os-stores-table td:last-child {
+.os-store-table td:last-child {
   white-space: nowrap;
 }
 
@@ -14420,7 +14456,7 @@ a.os-button {
 /* Full-height app panes own their body spacing and scrolling. The window
  * supplies a definite, unpadded rectangle; no negative height compensation.
  * Retained hidden panes must not change the active page's layout. */
-.os-window-content:has(:is(.os-deploy-pane, .os-cluster-pane, .os-stores-pane, .os-action-pane, .os-mz, .os-nexus-goals, .os-nexus-list, .os-nexus-approvals, .os-nexus-run, .os-nexus-goalview, .os-nexus-automations):not([hidden] *)) {
+.os-window-content:has(:is(.os-deploy-pane, .os-cluster-pane, .os-action-pane, .os-mz, .os-nexus-goals, .os-nexus-list, .os-nexus-approvals, .os-nexus-run, .os-nexus-goalview, .os-nexus-automations):not([hidden] *)) {
   padding: 0;
   overflow: hidden;
 }

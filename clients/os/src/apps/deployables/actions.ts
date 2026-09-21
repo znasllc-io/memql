@@ -45,9 +45,16 @@ export interface CreateSiteInput {
   slug: string;
   kind: string;
   title: string;
-  /** Storefront only. */
-  storeDomain: string;
-  storefrontTokenRef: string;
+  /**
+   * Storefront only: the `v1:shopify:store` row this deployable fronts, or ""
+   * to create it unbound and attach a store from its Store pane afterwards.
+   *
+   * A NAME, NOT A COPY (epic memql#5530). This used to be two fields --
+   * the store's domain and the name of the secret holding its Storefront
+   * token -- written onto the site row, where they were a second record of a
+   * store the cluster already had. The site names the store now.
+   */
+  storeId: string;
 }
 
 export interface CreateSiteState {
@@ -104,13 +111,12 @@ export function useCreateSite(): CreateSiteState {
           bundleRef: `blob://sites/${siteId}/pending/`,
           status: "draft",
           title: omitBlank(input.title),
-          ...(input.kind === STOREFRONT_KIND
-            ? {
-                binding: {
-                  storeDomain: input.storeDomain.trim(),
-                  storefrontTokenRef: input.storefrontTokenRef.trim(),
-                },
-              }
+          // UNBOUND IS EXPRESSIBLE, and it is the ordinary first state: a
+          // storefront can be created before anybody has registered the store
+          // it will front, and its Store pane is where that is done. An empty
+          // binding object is what the engine's guard reads as unbound.
+          ...(input.kind === STOREFRONT_KIND && input.storeId.trim() !== ""
+            ? { binding: { storeId: input.storeId.trim() } }
             : {}),
         });
         setCreatedId(siteId);

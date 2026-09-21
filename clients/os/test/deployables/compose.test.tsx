@@ -21,6 +21,7 @@ import {
   click,
   emit,
   fakeConnection,
+  STORE,
   probeReply,
   withSession,
   zipReply,
@@ -1367,13 +1368,36 @@ describe("composition write failures and bindings", () => {
     await chooseSource(region,/Pushed by your CI/);
     await fill(NAME_FIELD,"Storefront");
     await choose("What kind of deployable this is","Shopify storefront");
-    expect(forwardAct("Continue")).toBeNull();
-    await fill("Shopify store domain","acme.myshopify.com");
-    await fill("Storefront token reference","acme-storefront-token");
+    // A STOREFRONT MAY BE CREATED UNBOUND (epic memql#5530). Registering a
+    // store needs a cluster owner and three cluster secrets; blocking the add
+    // on that would stop somebody who can create deployables from creating a
+    // storefront at all. So the forward act is reachable with no store
+    // chosen -- which it was NOT before this epic, when two free-text fields
+    // were required and were written onto the site row as a second record of
+    // a store the cluster already had.
     await fill("The name Storefront answers at","storefront");
     await click(await forward("Analyze"));
     const create=connection.callsNamed("createSite")[0] ?? "";
-    expect(create).toContain('storeDomain: "acme.myshopify.com"');
-    expect(create).toContain('storefrontTokenRef: "acme-storefront-token"');
+    expect(create).toContain('kind: "shopify_storefront"');
+    expect(create).not.toContain("storeDomain");
+    expect(create).not.toContain("storefrontTokenRef");
+  });
+
+  it("names the store a storefront fronts, and never copies it",async()=>{
+    const connection=fakeConnection({stores:[STORE]});
+    const {region}=await compose(connection);
+    await chooseSource(region,/Pushed by your CI/);
+    await fill(NAME_FIELD,"Storefront");
+    await choose("What kind of deployable this is","Shopify storefront");
+    await choose("The Shopify store this storefront fronts",/example\.myshopify\.com/);
+    await fill("The name Storefront answers at","storefront");
+    await click(await forward("Analyze"));
+    const create=connection.callsNamed("createSite")[0] ?? "";
+    // THE ROW ID, and nothing about the store beyond it. The domain and the
+    // Storefront token reference live on the store row and the edge resolves
+    // both through it, so a copy here would be the duplication this epic
+    // removed, re-created by the surface that creates deployables.
+    expect(create).toContain('storeId: "store-example"');
+    expect(create).not.toContain("myshopify.com");
   });
 });
