@@ -615,6 +615,9 @@ expr/triggerFilter/ternary-threshold.memql
 expr/triggerFilter/timestamp-call.memql
 expr/triggerFilter/urgent-or-high.memql
 negative/action/missing-required-capability-arg.memql
+negative/concept/nesting-too-deep.memql
+negative/logic/chain-too-long.memql
+negative/logic/nesting-too-deep.memql
 negative/mutate/two-write-blocks.memql
 negative/query/unknown-clause.memql
 negative/use/import-block.memql
