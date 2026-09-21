@@ -364,9 +364,9 @@ delivers step 2 once and never again.
 
 | | Gap | Evidence | Blocks |
 |---|---|---|---|
-| G1 | A storefront cannot reach Shopify. The policy the edge writes is the generic one for every kind: `connect-src 'self'` plus the site and identity origins; `img-src 'self' data: blob:`. A browser call to the Storefront API and every Shopify-hosted image are refused. Nothing in `component/edge/csp.go` or its tests names a store. | `policyForSite`, `component/edge/csp.go` | the whole product epic |
+| G1 | **CLOSED, memql#5534.** A storefront cannot reach Shopify. The policy the edge writes is the generic one for every kind: `connect-src 'self'` plus the site and identity origins; `img-src 'self' data: blob:`. A browser call to the Storefront API and every Shopify-hosted image are refused. Nothing in `component/edge/csp.go` or its tests names a store. | `policyForSite`, `component/edge/csp.go` | the whole product epic |
 | G2 | No preview, and no go-live guard. A draft site is `http.NotFound` for everybody; `status` and `binding` are written independently, so a site can go live bound to test data, or be exercised against the real store and take real orders. | the `switch` in `component/edge/handler.go`; no occurrence of "preview" in `component/edge` | section 5 entirely |
-| G3 | Runtime binding and build-time catalog are incompatible. The storefront bakes its catalog into prerendered pages; a bundle exercised against the development store and then promoted would serve the development store's products. The engine resolved this in its own design by making the kind an SPA -- `handler.go` gives it the `index.html` fallback because "a shopify_storefront IS a spa bundle" -- and the product declared `kind: static` to get the opposite behaviour. | `getStaticPaths` in `clients/storefront/src/pages/products/[handle].astro`; the resolution tail in `component/edge/handler.go` | Q1, and the product's catalog work |
+| G3 | **Engine half CLOSED, memql#5535** -- the tail is the site's own choice, so a product may keep a multi-page bundle AND the storefront kind; the product half is memql-fylo#21. Runtime binding and build-time catalog are incompatible. The storefront bakes its catalog into prerendered pages; a bundle exercised against the development store and then promoted would serve the development store's products. The engine resolved this in its own design by making the kind an SPA -- `handler.go` gives it the `index.html` fallback because "a shopify_storefront IS a spa bundle" -- and the product declared `kind: static` to get the opposite behaviour. | `getStaticPaths` in `clients/storefront/src/pages/products/[handle].astro`; the resolution tail in `component/edge/handler.go` | Q1, and the product's catalog work |
 | G4 | Two records of one store. `site.binding` and `v1:shopify:store` both hold the domain and the Storefront token reference, edited in two places, at two authorization tiers (composite owner tier; cluster owner). | 2.1, 2.3 | D5, and the guard in G2 |
 | G5 | A shopper is nobody to MemQL. `createReview` is `@actor` and stamps `ownerUserId: actor.userId`; reviewspack ships no query, so nothing lists published reviews, and `@rowAuthz(owner=...)` would hide them from everybody but their author. OIDC federation is for operators. Unauthenticated routes are a declared allowlist (`component/server/unauthenticated_surface.go`). An anonymous wholesale applicant meets the same wall, and must be able to submit with NO JavaScript (2.8). | `examples/reviewspack/dsl/mutations.memql`; `docs/public/operate/auth/access-model.md` | both packs |
 | G6 | Packs have no delivery path. A pack's Go half "is compiled in via build tags ... there is no runtime loading of the Go half, by design" (`docs/public/build/building-a-pack.md`), and no image sets a pack's tag. The carrier route that once did is retiring (memql#2472). | 2.5 | both packs |
@@ -413,6 +413,17 @@ Each is filed as an issue that blocks what it names.
   multi-page bundle can still 404; and is a public PKCE client accepted for
   this store's Customer Account API (UNVERIFIED). *Blocks the product's catalog,
   cart and account work, and the engine's resolution task.*
+
+  **The ENGINE half is decided and built (epic 1, memql#5535), and it does
+  not pre-empt the product half.** The tail became a property of the SITE
+  rather than of the kind: `v1:platform:site.resolutionTail`, ABSENT meaning
+  the kind decides exactly as before, `fallback` and `not_found` naming the
+  two tails for any kind. So a multi-page storefront bundle can 404 WITHOUT
+  declaring `kind: static` and giving up the binding, the storefront block
+  and the policy of G1 -- and a browser-rendered one needs no declaration at
+  all. `TestSiteKindEnumIsExactlyThreeValues` stands. Whichever way the
+  product answers Q1, and if it answers differently later, the engine serves
+  it and neither answer is a release.
 - **Q2 -- Who is a shopper to MemQL (owner).** A declared, narrowly scoped
   unauthenticated route per pack; or a Shopify customer as a verified,
   constrained principal; or the first for applying and the second for anything
@@ -435,11 +446,24 @@ Each is filed as an issue that blocks what it names.
   product task that writes DSL.*
 - **Q7 -- The path has never run end to end.** The storefront kind was verified
   here at the level of its model and its document contract only, and G1 shows
-  it could not have run. *Answered by the serving epic's fixture.*
-- **UNVERIFIED, to be settled by whoever implements G1:** the exact hosts a
-  storefront needs admitted -- the store domain for the Storefront API, the
-  image and media hosts, and the Customer Account API's authorization and
-  token endpoints.
+  it could not have run. *ANSWERED (epic 1, memql#5536): a fixture bundle is
+  published, served, and read in a browser. Two legs, because the cluster one
+  skips without a cluster -- `test/clustere2e/storefront_serving_test.go`
+  publishes it to a real cluster through the ordinary authorized path, and
+  `component/edge/storefront_fixture_serve_test.go` serves the same directory
+  through the real handler in the ordinary lane. Neither runs a browser, and
+  both say so.*
+- **SETTLED (epic 1, memql#5534).** The hosts a storefront needs admitted,
+  against Shopify's own reference storefront rather than by inference: the
+  bound store's origin from `binding.storeDomain`, plus the three fixed hosts
+  Hydrogen's `defaultDirectives` names -- `cdn.shopify.com` (assets, and the
+  client SDKs' own fetches), `shopify.com` (where the Customer Account API's
+  token exchange and GraphQL endpoints resolve; the AUTHORIZE step is a
+  navigation and needs no source), and `monorail-edge.shopifysvc.com` (the
+  analytics beacon). They reach `connect-src`, and the asset hosts also reach
+  `img-src` and a `media-src` that exists on no other kind. `script-src` is
+  NOT widened, and there is no wildcard. The operator table is
+  [the checklist's section 6](../../public/operate/shopify-storefront-checklist.md).
 
 ## 9. The seven epics
 

@@ -52,6 +52,25 @@ type Site struct {
 	// reads it to decide anything.
 	Account *SiteAccount
 
+	// ResolutionTail is what this site answers for a path matching NO file in
+	// its bundle: "fallback" (index.html), "not_found" (404), or EMPTY --
+	// which is the default and means Kind decides, exactly as it did before
+	// this field existed (memql#5535).
+	//
+	// EMPTY IS NOT A THIRD BEHAVIOUR, it is the absence of a choice. Every
+	// site row in every cluster carries no value today and must keep
+	// resolving as it always has, which is what makes the field additive; and
+	// an unrecognised value reads as empty rather than as 404, because a typo
+	// must not take a live site's every client-side route dark.
+	//
+	// It is a property of the SITE and not of the Kind, and that is the
+	// decision. The kind enum says a shopify_storefront IS a spa bundle,
+	// while the first storefront built was a multi-page prerendered tree that
+	// declared kind "static" precisely to get the 404 -- and thereby gave up
+	// the binding, the storefront block in its runtime document, and the
+	// policy that admits Shopify. Neither tail is right for every storefront.
+	ResolutionTail string
+
 	// Settings is the site row's runtime settings (epic memql#4906, P7): the
 	// plain string values a bundle reads at load, merged into the site's
 	// runtime-config document under `settings` by runtimeconfig.go. Empty

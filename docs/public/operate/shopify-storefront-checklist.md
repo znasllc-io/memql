@@ -129,7 +129,7 @@ already has, not a component to build.
       on a first-party-looking host.
 - [ ] `sitemap` and the `seo` fields on every resource are rendered. A
       headless storefront that does not is invisible to search.
-- [ ] `UrlRedirect` rows are re-applied by the SPA. The merchant maintains
+- [ ] `UrlRedirect` rows are re-applied by the storefront. The merchant maintains
       them in the Shopify admin and they are mirrored; nothing applies them
       automatically once the theme is gone.
 - [ ] Consent through the **Customer Privacy API**, and analytics wired
@@ -141,7 +141,109 @@ already has, not a component to build.
       `memql.description`, `.summary`, `.keywords` and `.blocks` are created
       with `public_read` storefront access.
 
-## 6. What headless loses from a Liquid theme
+## 6. What the edge admits
+
+A storefront bundle served by MemQL runs under a content security policy the
+edge writes for it. Before memql#5534 that policy was the generic one every
+site kind got, and it named no store at all -- so the browser's call to the
+Storefront API and every Shopify-hosted image were refused by the page's own
+policy before either reached the network, with a console violation naming an
+origin nobody had configured anywhere. Nothing in the bundle could fix it.
+
+A `shopify_storefront` site is now served this, and no other kind is:
+
+| Directive | Gains | Where it comes from |
+|---|---|---|
+| `connect-src` | `https://<storeDomain>` | the site's own `binding.storeDomain` |
+| | `https://cdn.shopify.com` | fixed; Shopify's asset CDN, which its client SDKs also fetch from |
+| | `https://shopify.com` | fixed; where the Customer Account API's OAuth token exchange and GraphQL endpoints resolve |
+| | `https://monorail-edge.shopifysvc.com` | fixed; Shopify's analytics beacon |
+| `img-src` | `https://cdn.shopify.com`, `https://<storeDomain>` | product and collection images |
+| `media-src` | `https://cdn.shopify.com`, `https://<storeDomain>` | Shopify-hosted video. The directive exists **only** on a storefront policy; every other kind falls back to `default-src 'self'` |
+
+The three fixed hosts are Shopify's own, taken from Hydrogen's default
+directives rather than guessed, and they are the same for every store. The
+variable one is the bound store, and it is read from the SITE ROW -- never
+from a header, a query parameter, or anything the bundle supplies. A bundle
+that could name a host in its own policy could name any host, which is the
+same as having no policy.
+
+- [ ] The binding's `storeDomain` is the host the storefront actually calls.
+      A malformed value is DROPPED from the policy rather than interpolated
+      into it, so a typo presents as "the store is refused", not as a broken
+      header.
+- [ ] Nothing in the storefront needs a **script** from a third party.
+      `script-src` stays `'self'` plus the document's own inline hashes and
+      is not widened for a storefront: admitting a third party's script host
+      is the one widening that runs somebody else's code inside the
+      storefront's origin, and nothing in the binding requires it.
+- [ ] Checkout is reached by NAVIGATING to `cart.checkoutUrl`. A navigation
+      is governed by neither `connect-src` nor `frame-src`, so nothing has to
+      be admitted for it -- and `frame-ancestors` stays `'none'`.
+- [ ] Any host the storefront reaches that is not in the table above -- a
+      review app's API, an email capture embed -- is a gap to close before
+      launch, not at launch. It appears in section 10's inventory.
+
+### The resolution tail
+
+What the edge answers for a path matching no file in the bundle is the
+site's own choice (memql#5535), declared as `resolutionTail` on the
+deployable, or in `memql-package.yaml`:
+
+| `resolutionTail` | The edge answers |
+|---|---|
+| omitted | whatever the `kind` says: `spa` and `shopify_storefront` fall back to `index.html`, `static` answers 404 |
+| `fallback` | `index.html`, so client-side routes survive a hard reload |
+| `not_found` | 404, so a mistyped path in a multi-page build is visible |
+
+- [ ] A storefront that renders its catalog in the BROWSER wants `fallback`,
+      or every product route 404s on a hard reload. That is the default, so
+      it needs no declaration.
+- [ ] A storefront that PRERENDERS its pages wants `not_found`, or a mistyped
+      path silently renders the home page and a crawler sees one page however
+      many the build emitted.
+
+Declaring `kind: static` to get the 404 is the wrong instrument and used to
+be the only one: it also gives up the store binding, the storefront block in
+the runtime document, and the policy above.
+
+## 7. Bound at runtime, never at build time
+
+The whole point of the runtime document is that ONE bundle serves more than
+one deployable. A storefront is exercised against a development store and
+then promoted to serve the real one, and the bundle does not change between
+those two events -- only the binding does.
+
+That only works if nothing about the store is baked in. A build step that
+prerenders the catalog from a store's products produces a bundle that is
+about THAT store, so the copy promoted to production serves the development
+store's products under the production store's name, and every page looks
+right.
+
+- [ ] The store's domain and Storefront token are read from
+      `GET /runtime-config.json` at load, from the `storefront` block. They
+      are never in the bundle, never in an environment variable baked at
+      build time, and never in a committed config file.
+- [ ] Products, collections and prices are fetched from the bound store at
+      RUNTIME. If pages are prerendered, what is prerendered is the SHELL --
+      the route, the layout, the parts that are the same for every store --
+      and the store's data arrives in the browser.
+- [ ] Anything else the storefront needs per-deployable is a `settings` key
+      on the site row, which the same document carries. Public by
+      construction: the document is served unauthenticated to every visitor,
+      so a value there is a value anybody can read.
+- [ ] Promotion is checked by pointing the SAME bundle at both stores and
+      confirming each serves its own catalog. A bundle that passes against
+      one store proves nothing about promotion.
+
+The Storefront token in that document is PUBLIC by Shopify's design --
+scoped to unauthenticated storefront operations, rate-limited per IP, and
+embedded in shipped client code by Shopify's own SDKs. The **Admin** token
+is the opposite kind of credential and never appears in any served byte;
+that is asserted by a test that greps the served document, and again by the
+cluster-e2e leg against a document a real cluster really served.
+
+## 8. What headless loses from a Liquid theme
 
 Each of these works only inside a theme. A headless storefront has no theme,
 so each needs a replacement or an explicit decision to go without.
@@ -150,11 +252,11 @@ so each needs a replacement or an explicit decision to go without.
 |---|---|
 | Theme app extensions, app blocks, app embeds | Call the app's own API, or embed its script directly. Most apps document a headless path; the ones that do not are the ones to find now rather than later. |
 | ScriptTags | There is no host page to inject into. Same answer: the app's API, or its embed. |
-| OS 2.0 sections and theme settings | Rebuilt in the SPA. Merchandising the merchant did by dragging sections becomes a content model somebody has to design. |
+| OS 2.0 sections and theme settings | Rebuilt in the storefront. Merchandising the merchant did by dragging sections becomes a content model somebody has to design. |
 | The password page | Rebuilt, if the store uses one. |
 | Liquid-rendered content blocks | Metaobjects with storefront access, or `v1:commerce:productContent` through the connector's push channel. |
 
-## 7. What headless KEEPS
+## 9. What headless KEEPS
 
 Worth stating, because the list above reads worse than the situation is:
 
@@ -168,7 +270,7 @@ Worth stating, because the list above reads worse than the situation is:
 - Policies, menus, pages, blogs, articles, metaobjects and SEO fields -- all
   available through the API and all mirrored.
 
-## 8. The app inventory
+## 10. The app inventory
 
 The connector cannot mirror another app's data. App-owned metafields lost
 public access on 2025-05-19, and an app's own database was never exposed.
@@ -188,7 +290,7 @@ is built:
 A row with no plan is the function that goes missing on launch day. "Not
 carried" is an acceptable answer; silence is not.
 
-## 9. What nobody can carry
+## 11. What nobody can carry
 
 Repeated here because the storefront is where it is felt:
 

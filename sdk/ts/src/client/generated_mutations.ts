@@ -3195,6 +3195,9 @@ export interface CreateSiteArgs {
   hostname: string;
   // Enum: spa | static | shopify_storefront
   kind?: string;
+  /** What the edge answers for a path that matches no file. Omitted means the kind decides, which is what every site row created before memql#5535 carries and what they must keep resolving as. It sits in accept{} rather than stamp{} for updateSiteBundle's artifactId reason: an omitted arg is dropped from the payload, so a `?? ""` here would write an explicit empty string and there would be no way to express "let the kind decide". */
+  // Enum: fallback | not_found
+  resolutionTail?: string;
   bundleRef: string;
   // Enum: draft | live | disabled
   status?: string;
@@ -3210,6 +3213,7 @@ export function buildCreateSite(args: CreateSiteArgs): string {
   parts.push("siteId: " + renderMemQLValue(args.siteId));
   parts.push("hostname: " + renderMemQLValue(args.hostname));
   if (args.kind !== undefined) parts.push("kind: " + renderMemQLValue(args.kind));
+  if (args.resolutionTail !== undefined) parts.push("resolutionTail: " + renderMemQLValue(args.resolutionTail));
   parts.push("bundleRef: " + renderMemQLValue(args.bundleRef));
   if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
   if (args.apiProxy !== undefined) parts.push("apiProxy: " + renderMemQLValue(args.apiProxy));
@@ -8583,6 +8587,34 @@ declare module "./query.js" {
 
 QueryClient.prototype.updateSiteBundle = function (this: QueryClient, args: UpdateSiteBundleArgs = {} as UpdateSiteBundleArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("updateSiteBundle", buildUpdateSiteBundle(args), opts);
+};
+
+/** Choose what the edge answers for a path that matches no file in this deployable's bundle (memql#5535) -- the LAST rung of the resolution order, and nothing above it.
+THREE VALUES, AND THE THIRD IS THE EMPTY ONE. "fallback" serves index.html, "not_found" answers 404, and "" HANDS THE DECISION BACK TO `kind` -- which is the state every row created before this field existed is in, and the one a person must be able to return a site to. That is why the arg is optional and stamped with `?? ""` rather than accepted: an accepted arg omitted by the caller is dropped from the payload and the read-merge re-saves whatever was there, so clearing the choice would be inexpressible. It is the exact inverse of createSite's reading of the same field, for the same reason updateSiteSettings and updateSiteBundle differ.
+WHY A SITE AND NOT A KIND. A shopify_storefront was given the spa fallback because the kind's own description says it IS a spa bundle; the first storefront actually built was a multi-page prerendered tree that declared kind: static precisely to get the 404 back, and thereby gave up the store binding, the storefront block in its runtime document and the policy that admits Shopify. Neither tail is right for every storefront, so the SITE says which it is.
+AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite, exactly as on updateSiteBundle and updateSiteSettings: the row's owner, or a cluster owner through the explicit escape, and a systemOwned row refused for both. */
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteResolutionTail"] in generated_concepts.ts).
+export interface UpdateSiteResolutionTailArgs {
+  siteId: string;
+  // Enum: fallback | not_found
+  resolutionTail?: string;
+}
+
+export function buildUpdateSiteResolutionTail(args: UpdateSiteResolutionTailArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  if (args.resolutionTail !== undefined) parts.push("resolutionTail: " + renderMemQLValue(args.resolutionTail));
+  return "mutation updateSiteResolutionTail(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    updateSiteResolutionTail(args: UpdateSiteResolutionTailArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.updateSiteResolutionTail = function (this: QueryClient, args: UpdateSiteResolutionTailArgs = {} as UpdateSiteResolutionTailArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("updateSiteResolutionTail", buildUpdateSiteResolutionTail(args), opts);
 };
 
 /** Replace a deployable's runtime settings (epic memql#4906, decision P7): the key-values the edge merges into the site's runtime-config document under `settings`, read by the bundle at load.

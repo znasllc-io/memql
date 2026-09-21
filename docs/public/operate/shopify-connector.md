@@ -17,7 +17,10 @@ MemQL, what happens next, and what to look at when it stops happening. The
 design record is
 [the connector design](../../superpowers/specs/2026-08-22-shopify-connector-complete-mirror-design.md);
 the storefront's side is
-[the storefront completeness checklist](shopify-storefront-checklist.md).
+[the storefront completeness checklist](shopify-storefront-checklist.md),
+whose sections 6 and 7 are the SERVING half: which hosts this cluster's edge
+admits for a storefront, where that list comes from, and why a storefront
+bundle may not bake store data in at build time.
 
 ---
 
@@ -467,6 +470,15 @@ a real one. It is the end-to-end proof, in the order things can break:
    [the storefront checklist](shopify-storefront-checklist.md): the Headless
    channel's tokens, a product query, a cart, and the hand-off to
    `cart.checkoutUrl`.
+8. **Serving.** If the storefront is served BY this cluster as a
+   `shopify_storefront` deployable, its content security policy is written
+   from the site's binding and admits the bound store, Shopify's asset CDN
+   and the Customer Account API host -- and nothing else. A storefront whose
+   calls and images are all refused with no status is almost always a policy
+   that does not name the store it is calling. The admitted set, and the rule
+   that a storefront bundle binds at RUNTIME rather than at build time, are
+   [What the edge admits](shopify-storefront-checklist.md#6-what-the-edge-admits)
+   and [Bound at runtime](shopify-storefront-checklist.md#7-bound-at-runtime-never-at-build-time).
 
 Record the results in the PR that changes the connector. A smoke nobody wrote
 down is a smoke nobody ran.

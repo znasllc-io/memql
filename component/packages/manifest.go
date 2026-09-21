@@ -86,6 +86,23 @@ type ManifestDeployable struct {
 	Kind    string           `yaml:"kind"    json:"kind"`
 	Build   *ManifestBuild   `yaml:"build,omitempty"   json:"build,omitempty"`
 	Binding *ManifestBinding `yaml:"binding,omitempty" json:"binding,omitempty"`
+	// ResolutionTail is what the edge answers for a path matching no file in
+	// this deployable's built output: "fallback" (index.html) or "not_found"
+	// (404). OMITTED means the kind decides, which is every manifest written
+	// before memql#5535 and the overwhelming majority after.
+	//
+	// IT IS HERE BECAUSE OTHERWISE THE CHOICE IS UNREACHABLE. A package
+	// deploy is the only way most sites are created, so a site field no
+	// manifest can declare is a field the product cannot use -- and the
+	// product this exists for is a multi-page prerendered storefront that
+	// declared `kind: static` precisely to get the 404 back, giving up the
+	// store binding and the policy that admits Shopify along with it.
+	//
+	// SET ON CREATE ONLY, like Kind and Binding: EnsureSite finds an existing
+	// site by (packageId, deployableName) and returns it untouched, so
+	// changing this in the manifest does not rewrite a deployed site's row.
+	// updateSiteResolutionTail is how an existing one is changed.
+	ResolutionTail string `yaml:"resolutionTail,omitempty" json:"resolutionTail,omitempty"`
 }
 
 // ManifestBuild overrides the defaults. The zero value IS the default pair, so
@@ -164,6 +181,7 @@ func ReadManifest(tree fs.FS) (*Manifest, error) {
 		d.Name = strings.TrimSpace(d.Name)
 		d.Path = strings.TrimSpace(d.Path)
 		d.Kind = strings.TrimSpace(d.Kind)
+		d.ResolutionTail = strings.TrimSpace(d.ResolutionTail)
 		if d.Name == "" {
 			return nil, refuse(CodeManifestInvalid,
 				"deployable #%d in %s has no name. Names identify a deployable across deploys -- they are how a redeploy finds the site it published last time.",
@@ -175,6 +193,18 @@ func ReadManifest(tree fs.FS) (*Manifest, error) {
 				ManifestName, d.Name)
 		}
 		seen[d.Name] = struct{}{}
+		// REFUSED HERE RATHER THAN IGNORED AT SERVE TIME. The edge reads an
+		// unrecognised tail as absent, deliberately -- a typo must not take a
+		// live site's every client-side route dark. But that is the rule for a
+		// row already written; a manifest is read BEFORE anything is created,
+		// and an author who wrote `resolutionTail: 404` deserves to be told so
+		// rather than to deploy a site that quietly falls back for the life of
+		// the package.
+		if !ValidResolutionTail(d.ResolutionTail) {
+			return nil, refuse(CodeManifestInvalid,
+				"deployable %q in %s declares resolutionTail %q. It is %q (serve index.html), %q (answer 404), or omitted, which lets the deployable's kind decide.",
+				d.Name, ManifestName, d.ResolutionTail, ResolutionTailFallback, ResolutionTailNotFound)
+		}
 	}
 
 	return &m, nil
@@ -202,4 +232,31 @@ func ValidKind(kind string) bool {
 		return true
 	}
 	return false
+}
+
+// Resolution tails a manifest may name, mirroring v1:platform:site.resolutionTail
+// exactly. The manifest cannot offer a tail the site row cannot hold.
+const (
+	ResolutionTailFallback = "fallback"
+	ResolutionTailNotFound = "not_found"
+)
+
+// ValidResolutionTail reports whether tail is one a site row can hold. THE
+// EMPTY STRING IS VALID and is the ordinary state: it means the kind decides,
+// which is what every manifest written before memql#5535 says by saying
+// nothing.
+func ValidResolutionTail(tail string) bool {
+	switch tail {
+	case "", ResolutionTailFallback, ResolutionTailNotFound:
+		return true
+	}
+	return false
+}
+
+// ResolutionTailIsSet reports whether tail names a tail at all, as opposed to
+// leaving the decision to the kind. The predicate exists so the one caller
+// that has to decide whether to write the argument reads as what it means,
+// rather than as a bare `!= ""` that a later reader could invert.
+func ResolutionTailIsSet(tail string) bool {
+	return tail == ResolutionTailFallback || tail == ResolutionTailNotFound
 }

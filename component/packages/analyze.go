@@ -85,12 +85,13 @@ func analyzeDeployables(tree fs.FS, manifest *Manifest, rep *Report) {
 	for _, d := range manifest.Deployables {
 		command, output := d.BuildPlanFor()
 		dr := DeployableReport{
-			Name:    d.Name,
-			Kind:    d.Kind,
-			Path:    d.Path,
-			Command: command,
-			Output:  output,
-			Binding: d.Binding,
+			Name:           d.Name,
+			Kind:           d.Kind,
+			Path:           d.Path,
+			Command:        command,
+			Output:         output,
+			Binding:        d.Binding,
+			ResolutionTail: d.ResolutionTail,
 		}
 
 		// THREE CASES FOR A KIND (design section B, D9), and the order is

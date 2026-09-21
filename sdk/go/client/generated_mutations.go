@@ -5924,8 +5924,11 @@ type CreateSiteArgs struct {
 	SiteId   string
 	Hostname string
 	// Enum: spa | static | shopify_storefront
-	Kind      string
-	BundleRef string
+	Kind string
+	// What the edge answers for a path that matches no file. Omitted means the kind decides, which is what every site row created before memql#5535 carries and what they must keep resolving as. It sits in accept{} rather than stamp{} for updateSiteBundle's artifactId reason: an omitted arg is dropped from the payload, so a `?? ""` here would write an explicit empty string and there would be no way to express "let the kind decide".
+	// Enum: fallback | not_found
+	ResolutionTail string
+	BundleRef      string
 	// Enum: draft | live | disabled
 	Status         string
 	ApiProxy       bool
@@ -5959,6 +5962,13 @@ func CreateSiteBuild(args CreateSiteArgs) string {
 		}
 		b.WriteString("kind: ")
 		b.WriteString(quoteMemQL(args.Kind))
+	}
+	if args.ResolutionTail != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("resolutionTail: ")
+		b.WriteString(quoteMemQL(args.ResolutionTail))
 	}
 	if b.Len() > 20 {
 		b.WriteString(", ")
@@ -14922,6 +14932,40 @@ func UpdateSiteBundleBuild(args UpdateSiteBundleArgs) string {
 		}
 		b.WriteString("artifactId: ")
 		b.WriteString(quoteMemQL(args.ArtifactId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// UpdateSiteResolutionTail -- Choose what the edge answers for a path that matches no file in this deployable's bundle (memql#5535) -- the LAST rung of the resolution order, and nothing above it.
+// THREE VALUES, AND THE THIRD IS THE EMPTY ONE. "fallback" serves index.html, "not_found" answers 404, and "" HANDS THE DECISION BACK TO `kind` -- which is the state every row created before this field existed is in, and the one a person must be able to return a site to. That is why the arg is optional and stamped with `?? ""` rather than accepted: an accepted arg omitted by the caller is dropped from the payload and the read-merge re-saves whatever was there, so clearing the choice would be inexpressible. It is the exact inverse of createSite's reading of the same field, for the same reason updateSiteSettings and updateSiteBundle differ.
+// WHY A SITE AND NOT A KIND. A shopify_storefront was given the spa fallback because the kind's own description says it IS a spa bundle; the first storefront actually built was a multi-page prerendered tree that declared kind: static precisely to get the 404 back, and thereby gave up the store binding, the storefront block in its runtime document and the policy that admits Shopify. Neither tail is right for every storefront, so the SITE says which it is.
+// AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite, exactly as on updateSiteBundle and updateSiteSettings: the row's owner, or a cluster owner through the explicit escape, and a systemOwned row refused for both.
+//
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteResolutionTail"] in generated_concepts.go).
+type UpdateSiteResolutionTailArgs struct {
+	SiteId string
+	// Enum: fallback | not_found
+	ResolutionTail string
+}
+
+// UpdateSiteResolutionTail calls the engine mutation updateSiteResolutionTail.
+func (qc *QueryClient) UpdateSiteResolutionTail(ctx context.Context, args UpdateSiteResolutionTailArgs) (*Result, error) {
+	call := UpdateSiteResolutionTailBuild(args)
+	return qc.executeNamed(ctx, "updateSiteResolutionTail", call)
+}
+
+func UpdateSiteResolutionTailBuild(args UpdateSiteResolutionTailArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateSiteResolutionTail(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if args.ResolutionTail != "" {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("resolutionTail: ")
+		b.WriteString(quoteMemQL(args.ResolutionTail))
 	}
 	b.WriteString(")")
 	return b.String()
