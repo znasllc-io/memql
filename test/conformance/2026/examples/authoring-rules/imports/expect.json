@@ -1,0 +1,12 @@
+{
+  "cases": [
+    { "file": "ambient-same-domain.memql", "verdict": "load_ok" },
+    { "file": "imported-trait.memql", "verdict": "load_ok" },
+    {
+      "file": "misspelled-trait.memql",
+      "verdict": "refuse_load",
+      "code": "lower_unknown_name",
+      "message": "`isNotDeletd` is not a spec, trait or catalog function known here"
+    }
+  ]
+}

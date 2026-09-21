@@ -1,0 +1,7 @@
+// REJECTED -- func (Shape), @template, and node("...") are retired.
+func (Shape) agentProfileFull {
+  @template({
+    node("id"),
+    node("name")
+  })
+}

@@ -36,29 +36,40 @@ exactly one `update` block. Two writes in one mutation is a
 parse-time error.
 
 Right -- one bare insert. The target concept comes from the
-`mutation <Concept> <name>` signature; restating it is retired.
+`mutation <Concept> <name>` signature; restating it is retired. The body
+reads the auth envelope to stamp the owner, so the mutation declares
+`@actor` ([#26](#26-reading-actor-requires-actor-2621)), and every key it
+writes is a field `v1:library:folder` declares -- a key the concept does not
+declare is refused at load.
 
+<!-- corpus: 2026/examples/authoring-rules/one-write/one-insert.memql -->
 ```memql
 use library.concepts.{ folder }
 
-mutation folder createFolder {
+@actor
+mutation folder createOneFolder {
   args { name string @required }
   insert {
     name: args.name
-    status: "active"
-    createdAt: now
-    createdBy: actor.userId
+    ownerUserId: actor.userId
+    archived: false
   }
 }
 ```
 
-Wrong -- two writes in one body. The parser rejects it.
+Wrong -- two writes in one body. The parser rejects it with
+`mutation body must contain exactly one write block -- one write per
+mutation (authoring-rules rule 1)`.
 
+<!-- corpus: 2026/examples/authoring-rules/one-write/two-inserts.memql -->
 ```memql retired
+use library.concepts.{ folder }
+
+@actor
 mutation folder createFolderAndGrantOwner {
   args { name string @required }
-  insert { ... }                  // ERROR -- only one write allowed
-  insert { ... }
+  insert { name: args.name }        // ERROR -- only one write allowed
+  insert { ownerUserId: actor.userId }
 }
 ```
 
@@ -78,13 +89,15 @@ The canonical worked example is **the Library index**: a to-do is one
 row, and the Library row that indexes it is a second, written by the
 automation that fires when the first lands:
 
+<!-- corpus: 2026/examples/authoring-rules/one-write/todo-and-index.memql -->
 ```memql
 use todos.concepts.{ todo }
+use library.mutations.{ createArtifact }
 
 // 1. The product calls this mutation: one row, the to-do.
 /// Create a to-do for the caller.
 @actor
-mutation todo createTodo {
+mutation todo createTodoItem {
   args {
     todoId                  string!
     title                   string!
@@ -107,7 +120,7 @@ mutation todo createTodo {
 //    its kind and passes named arguments.
 /// On to-do creation, promote it into the Library Records lens.
 @trigger(event="node.created", concept="v1:todos:todo")
-automation indexTodoOnCreate {
+automation indexTodoItemOnCreate {
   args {
     id any
     ownerUserId any
@@ -126,7 +139,7 @@ automation indexTodoOnCreate {
 }
 ```
 
-The product calls `createTodo` once. The automation takes care of the
+The product calls `createTodoItem` once. The automation takes care of the
 second write. The user gets one product action; the engine gets two
 atomic rows with clean audit trails.
 
@@ -158,7 +171,7 @@ spec or trait predicate. `sort` / `paginate` / etc. are neither, so the
 load refuses the body:
 
 ```
-logic listFoldersSorted: `sort(...)` is not a function or a predicate known here, so the expression fails when it runs: call a catalog function or a spec or trait the corpus declares [body_call_unknown]
+logic listFoldersSorted, line 6: `sort(...)` is not a function or a predicate known here, so the expression fails when it runs: call a catalog function or a spec or trait the corpus declares [body_call_unknown]
 ```
 
 If you put a directive inside a function body, the entire engine
@@ -167,12 +180,13 @@ refuses to start. The primary node crashes. Agent / planner / workbench
 
 **Wrong:**
 
+<!-- corpus: 2026/examples/authoring-rules/directives/sort-in-a-body.memql -->
 ```memql retired
-use library.queries.{ activeFolderIds }
+use library.queries.{ libraryFolders }
 
 // `sort` is a directive, not a function: the load refuses the body.
 logic listFoldersSorted {
-  folders := query activeFolderIds()
+  folders := query libraryFolders()
   return sort(folders, "name", "asc")
 }
 ```
@@ -189,8 +203,12 @@ The clause accepts an RFC3339 string, the bare word `latest`, or
 `args.<name> ?? latest` — the fallback is part of the caller-arg form
 rather than an option on it (memql#3028):
 
+<!-- corpus: 2026/examples/authoring-rules/directives/as-of-fallback.memql -->
 ```memql
-query deployment deploymentsForCluster {
+use cluster.concepts.{ deployment }
+use cluster.shapes.{ deploymentFull }
+
+query deployment deploymentsInCluster {
   args {
     clusterId  string!
     asOf       datetime
@@ -235,8 +253,10 @@ could not reach it at all.
 Note the value is validated as RFC3339 at call time, so a malformed
 instant is an error rather than a silent fall back to `latest`.
 
+<!-- corpus: 2026/examples/authoring-rules/directives/latest-per-folder.memql -->
 ```memql
 use library.concepts.{ artifact }
+use library.shapes.{ artifactFull }
 
 /// Latest artifact row filed under a folder.
 query artifact latestArtifactForFolder {
@@ -271,22 +291,28 @@ grammar: see [memql.md](memql.md#the-internal-query-form).
 `fn(key: value, key2: value2)`, and an empty call is `fn()`. Inside a
 body the call also names the construct's kind:
 
+<!-- corpus: 2026/examples/authoring-rules/calls/named-arguments.memql -->
 ```memql fragment
-rows := query folderArtifacts(folderId: "folder-123", kind: "document")
-created := mutation createFolder(folderId: "folder-123", name: "Inbox")
+  rows := query artifactsFiledInFolder(folderId: "folder-123", kind: "document")
+  created := mutation createLibraryFolder(folderId: "folder-123", name: "Inbox")
 ```
 
 This section used to document a bare-vs-quoted distinction between two
-spellings of an object-literal call (`createFolder({name: "Inbox"})`
-vs `createFolder({"name": "Inbox"})`). That premise is gone: an
+spellings of an object-literal call (`fn({name: "Inbox"})`
+vs `fn({"name": "Inbox"})`). That premise is gone: an
 argument list is not an object literal, so there is no key to quote.
 Each key is a bare name, matched by name against the callee's declared
 args. A quoted key is a parse error, not an alternate spelling:
 
+<!-- corpus: 2026/examples/authoring-rules/calls/object-literal-call.memql -->
 ```memql retired
-// Refused: object-literal call args are retired; this parses as
-// neither a named-arg call nor a valid expression.
-createFolder({"folderId": "folder-123", "name": "Inbox"})
+use library.mutations.{ createLibraryFolder }
+
+/// Refused: an argument list is not an object literal, so there is no key to quote.
+logic fileTheInbox {
+  created := mutation createLibraryFolder({"folderId": "folder-123", "name": "Inbox"})
+  return created
+}
 ```
 
 **The argument pun is retired.** A bare name in argument position,
@@ -320,12 +346,15 @@ rejects the annotation at load time:
 `@scope` is retired -- remove the annotation; every concept lives in the default partition post-#56
 ```
 
-**Retired form (rejected at load):**
+**Retired form, rejected at load with `[annotation_retired]`:**
 
+<!-- corpus: 2026/examples/authoring-rules/scope/concept-scope.memql -->
 ```memql retired
 // REJECTED -- concept-level @scope is gone.
 @scope("global")
-concept node { ... }
+concept node {
+  hostname  string!
+}
 ```
 
 Descriptions source from `///` doc comments first (#2634; the PREFERRED
@@ -337,11 +366,14 @@ IS its description, winning over `@description` when both are present --
 never concatenated; `@description` remains valid as the fallback form.
 
 The full concept-annotation author surface is `@description`,
-`@version`, `@namespace`, `@type`, and `@displayCard`. `@namespace`
-absent defaults to the containing `dsl/<domain>/` directory (#2614);
-write it only colon-scoped or pinned (`namespace.pin`), and NEVER move
-a `.memql` file between domain directories casually -- file location is
-id-bearing and the load guard errors on an unpinned mismatch -- see
+`@version`, `@type`, and `@displayCard`. **`@namespace` is retired too**
+(epic memql#5375) and refuses the load with `annotation_retired`: a
+concept's namespace is the containing `dsl/<domain>/` directory, or that
+directory's one-line `namespace.pin`, and the annotation could only restate
+one of those or silently disagree with it. `memqlmigrate
+--rewrite=attributes` strips it. NEVER move a `.memql` file between domain
+directories casually -- file location is id-bearing and the load guard
+errors on an unpinned mismatch -- see
 [#7](#7-annotations-on-concepts-where-to-put-new-ones).
 
 **A `use` path's leading segment is a NAMESPACE, not a directory**
@@ -462,11 +494,10 @@ add a new annotation, edit `component/database/memory-nodes/concept_parser.go`:
 3. Add the field to `Concept` struct in `concept.go`.
 4. Map it through in `ParseConceptMemQL()`.
 
-Existing concept annotations: `@description`, `@version`,
-`@namespace`, `@type`, `@displayCard`. Anything else is rejected at
-load with `unknown concept annotation @<name>`; `@scope` gets a
-dedicated retirement error (see
-[#3](#3-concept-scope-scope-is-retired-56)).
+Existing concept annotations: `@description`, `@version`, `@type`,
+`@displayCard`. Anything else is rejected at load with `unknown concept
+annotation @<name>`; `@scope` and `@namespace` each get a dedicated
+retirement error (see [#3](#3-concept-scope-scope-is-retired-56)).
 
 ---
 
@@ -476,6 +507,7 @@ dedicated retirement error (see
 `@` and `//` lines directly above it. A block comment ends that run, so
 annotations sitting above a parked declaration belong to **nothing**:
 
+<!-- corpus: 2026/examples/authoring-rules/preamble/detached-executor.memql -->
 ```memql retired
 @executor("integration.workbench.dispatchHost")
 @description("does real work")
@@ -500,9 +532,10 @@ its authorization is read from, and there the loader raises **nothing at all**.
 
 The same rule catches a **file header** that a banner comment detaches:
 
-```memql retired
+<!-- corpus: 2026/examples/authoring-rules/preamble/detached-file-header.memql -->
+```memql fragment
 @version("1.0.0")
-@namespace("knowledge")
+@scope("global")
 /* ------------------------- concepts ------------------------- */
 @description("A trained document.")
 concept document {
@@ -510,13 +543,18 @@ concept document {
 }
 ```
 
-`@version` and `@namespace` here belong to nothing, and the declarations below
-register under the defaults instead. A blank line between the header and the
-banner ends the run before the comment does — which is why the engine's own tree
-is unaffected, and it is the fix for this shape.
+**That file LOADS, with no diagnostic at all** -- which is why the block above is
+not marked as a refusal, and it is the whole danger. `@version` and `@scope` here
+belong to nothing, so the concept below registers under the defaults instead.
+`@scope` makes the point sharpest: written ON the concept it REFUSES the load
+(it is retired, [#3](#3-concept-scope-scope-is-retired-56)), and detached by the
+banner it raises nothing at all, because nothing reads it. A blank line between
+the header and the banner ends the run before the comment does — which is why
+the engine's own tree is unaffected, and it is the fix for this shape.
 
 **Park the annotations with the declaration**, inside the comment:
 
+<!-- corpus: 2026/examples/authoring-rules/preamble/parked-with-annotations.memql -->
 ```memql fragment
 /*
 @executor("integration.workbench.dispatchHost")
@@ -584,9 +622,10 @@ write chokepoint (memql#1709), so the first call creates and the rest
 overwrite, and "one row per person" is true by construction rather than
 by a read the writer hopes was fresh.
 
+<!-- corpus: 2026/examples/authoring-rules/singleton/saved-desktop.memql -->
 ```memql fragment
 @actor
-mutation desktop saveMyDesktop {
+mutation desktop saveOwnDesktop {
   args {
     revision  int!
     document  object!
@@ -699,15 +738,31 @@ ceilings).
 **Rule.** A value that depends on a condition is written `p ? a : b`:
 in a mutation value, a call's argument, a statement. `if` guards
 statements -- `if condition { ... }` -- and is not an expression, so it
-cannot stand where a value goes.
+cannot stand where a value goes. Right -- a call's argument:
 
+<!-- corpus: 2026/examples/authoring-rules/conditionals/ternary-value.memql -->
 ```memql fragment
 role: existingOwners.empty() ? "owner" : "reader"
 ```
 
+Wrong, in a mutation value. Both files are refused at parse:
+
+<!-- corpus: 2026/examples/authoring-rules/conditionals/if-at-value-position.memql -->
 ```memql retired
-role: if existingOwners.empty() { "owner" }             // refused: `if` is a statement
-role: cond(existingOwners.empty(), "owner", "reader")   // refused: cond() is retired
+/// Refused: `if` guards statements, so it cannot stand where a value goes.
+mutation folderRole recordRoleWithIf {
+  args { userId string! }
+  insert { role: if args.userId == "" { "owner" } }
+}
+```
+
+<!-- corpus: 2026/examples/authoring-rules/conditionals/cond-call.memql -->
+```memql retired
+/// Refused: cond(p, a, b) is retired in edition 2026 -- write p ? a : b.
+mutation folderRole recordRoleWithCond {
+  args { userId string! }
+  insert { role: cond(args.userId == "", "owner", "reader") }
+}
 ```
 
 `cond(p, a, b)` is retired: the parser refuses it with
@@ -860,26 +915,29 @@ instead of silently stripping the field.
 is reordered by dependency, so a name can only be read after the
 statement that binds it. The load refuses a name read before its
 statement, naming both lines, and a name bound nowhere, which catches a
-typo:
+typo. Both are load refusals -- `[body_unknown_name]` for a name nothing
+binds, `[body_forward_reference]` for one bound later in the same body:
 
-```memql fragment
-logic bootstrapUser {
+<!-- corpus: 2026/examples/authoring-rules/order/name-read-before-bound.memql -->
+```memql retired
+logic bootstrapPerson {
   args {
     userId string
   }
-  checkUser := query userById(userId: args.userId)
+  checkUser := query personById(userId: args.userId)
   if cehckUser.empty() {   // typo: cehckUser -> checkUser
-    mutation createUser(userId: args.userId)
+    mutation recordPerson(userId: args.userId)
   }
   return checkUser.count()
 }
 ```
 
 ```
-logic bootstrapUser, line 6:6: `cehckUser` is not a statement name, a loop variable or a root here [body_unknown_name]
+logic bootstrapPerson, line 6:6: `cehckUser` is not a statement name, a loop variable or a root here [body_unknown_name]
 ```
 
-```memql fragment
+<!-- corpus: 2026/examples/authoring-rules/order/forward-reference.memql -->
+```memql retired
 logic readsAhead {
   total := subtotal + 1
   subtotal := 2
@@ -972,16 +1030,17 @@ inside `insert { ... }` / `update { ... }` the enclosing block spells
 the write kind; the top-level bare form (accept/stamp with no write
 block) means insert.
 
+<!-- corpus: 2026/examples/authoring-rules/write-sugar/accept-stamp.memql -->
 ```memql fragment
-// Preferred -- the corpus form after the #2616 migration.
-insert {
-  accept { slug, name, rank, description }
-  stamp {
-    id: args.roleId ?? args.slug
-    predefined: args.predefined ?? false
-    active: args.active ?? true
+  // Preferred -- the corpus form after the #2616 migration.
+  insert {
+    accept { slug, name, rank, description }
+    stamp {
+      id: args.roleId ?? args.slug
+      predefined: args.predefined ?? false
+      active: args.active ?? true
+    }
   }
-}
 ```
 
 **All-or-nothing.** A write block never mixes loose `key: value`
@@ -1000,21 +1059,22 @@ runs into accept/stamp via `memqlmigrate --rewrite=accept-stamp`;
 blocks it cannot prove safe (comments worth keeping, nested object
 values, single mirrors) stay longhand deliberately.
 
+<!-- corpus: 2026/examples/authoring-rules/write-sugar/bare-mirrors.memql -->
 ```memql fragment
-// Longhand with bare mirrors -- still valid where the gate allows it.
-// This block stays longhand deliberately: the multi-line computed id
-// is exactly the shape the codemod refuses to reflow.
-insert {
-  id: "filed-" + hash(
-    canonicalId(args.artifactId, "artifact") + ":" +
-    canonicalId(args.folderId, "folder")
-  )
-  args.folderId
-  args.artifactId
-  kind: "document"
-  args.displayName
-  status: "active"
-}
+  // Longhand with bare mirrors -- still valid where the gate allows it.
+  // This block stays longhand deliberately: the multi-line computed id
+  // is exactly the shape the codemod refuses to reflow.
+  insert {
+    id: "filed-" + hash(
+      canonicalId(args.artifactId, "artifact") + ":" +
+      canonicalId(args.folderId, "folder")
+    )
+    args.folderId
+    args.artifactId
+    kind: "document"
+    args.displayName
+    status: "active"
+  }
 ```
 
 **Constraints.**
@@ -1059,12 +1119,13 @@ expression: the lambda parameter of rule
 [21c](#21c-a-predicate-names-its-receiver-the-lambda-parameter-and-bare-names)
 does not apply to it.
 
+<!-- corpus: 2026/examples/authoring-rules/shapes/agent-projection.memql -->
 ```memql
 use agents.concepts.{ agent }
 
 @row
 /// Full agent projection
-shape agent agentFull {
+shape agent agentProfileFull {
   row.id
   name
   description
@@ -1074,8 +1135,8 @@ shape agent agentFull {
 
 `include` is NOT a shape verb (memql#3621). It was documented for a
 long time and never implemented -- a body is a path list, so
-`include agentFull` parsed as two payload properties and projected two
-always-null keys. It is rejected at load now; repeat the paths, or drop
+`include agentProfileFull` parsed as two payload properties (`include` and
+`agentProfileFull`) and projected two always-null keys. It is rejected at load now; repeat the paths, or drop
 the body entirely and take the default projection over the bound
 concept (memql#2035).
 
@@ -1089,9 +1150,10 @@ key, and the declared kind must match the body (`actor.*` needs
 **Retired forms (rejected at parse time):** the receiver form and
 its template wrapper are gone --
 
+<!-- corpus: 2026/examples/authoring-rules/shapes/receiver-form.memql -->
 ```memql retired
 // REJECTED -- func (Shape), @template, and node("...") are retired.
-func (Shape) agentFull {
+func (Shape) agentProfileFull {
   @template({
     node("id"),
     node("name")
@@ -1115,17 +1177,24 @@ part of it (G1, `component/automations/args_binding.go`). A statement
 reads a declared arg as `args.<field>`, reads an earlier statement's
 value by its name, and passes every argument by name:
 
-```memql
-@trigger(event="node.created", concept="v1:knowledge:document")
-automation indexNewDocument {
+<!-- corpus: 2026/examples/authoring-rules/automations/index-new-document.memql -->
+```memql fragment
+@trigger(event="node.created", concept="v1:library:file")
+automation indexNewLibraryFile {
   args {
-    folderId     string @required
-    documentRef  string @required
+    id           string @required
+    ownerUserId  string @required
+    name         string @required
+    folderId     string
   }
-  title := logic composeTitle(folderId: args.folderId)
+  title := logic composeTitle(folderId: args.folderId ?? "")
   mutation createArtifact(
+    sourceConceptRef: args.id,
+    ownerUserId:      args.ownerUserId,
+    lens:             "artifact",
+    kind:             "file",
+    source:           "uploaded",
     folderId:         args.folderId,
-    sourceConceptRef: args.documentRef,
     title:            title
   )
 }
@@ -1165,22 +1234,36 @@ These spellings are gone:
 ## 18. Object-literal keys: unquoted identifiers only
 
 **Rule.** Inside a MemQL `{...}` literal a key is an unquoted name
-(`name:`, `folderId:`, `createdAt:`). Quoted keys (`"name":`) were
-accepted for JSON interop and are not written in new code.
+(`name:`, `folderId:`, `createdAt:`). Quoted keys (`"name":`) were once
+accepted for JSON interop; edition 2026 refuses them at parse, everywhere a
+`{...}` literal is written -- the write block included.
 
+<!-- corpus: 2026/examples/authoring-rules/write-sugar/unquoted-keys.memql -->
 ```memql fragment
-// Correct -- mutation write block
-insert {
-  name: args.name
-  folderId: args.folderId
-  active: true
-  metadata: { source: "import" }   // unquoted key in a nested map value
-}
+  // Correct -- mutation write block
+  insert {
+    name: args.name
+    folderId: args.folderId
+    active: true
+    metadata: { source: "import" }   // unquoted key in a nested map value
+  }
+```
 
-// Wrong -- unnecessary quotes on simple-identifier keys
-insert {
-  "name": args.name
-  metadata: { "source": "import" }
+Wrong -- unnecessary quotes on simple-identifier keys. The mutation
+parser refuses them too, so this file does not load:
+
+<!-- corpus: 2026/examples/authoring-rules/write-sugar/quoted-keys.memql -->
+```memql retired
+/// Refused -- unnecessary quotes on simple-identifier keys.
+@serverOnly
+mutation importedItem recordImportedItemQuoted {
+  args {
+    name  string!
+  }
+  insert {
+    "name": args.name
+    metadata: { "source": "import" }
+  }
 }
 ```
 
@@ -1189,7 +1272,7 @@ Where each parser stands:
 | Where the literal is | A quoted key |
 |---|---|
 | A map literal in an edition-2026 expression: a mutation value such as `metadata: { ... }`, a call's argument, a statement | refused: `map keys are unquoted names (authoring rule 18)` (`parseV1Map` in `component/language/parser/v1_expr.go`) |
-| The write block itself, `insert { ... }` / `update { ... }` | still accepted by the mutation parser (`component/memql/mutation_templates.go::parseObjectKey`); do not write one |
+| The write block itself, `insert { ... }` / `update { ... }` | refused there too -- the write block's values go through the same edition-2026 parser, so `"name": args.name` fails the file at parse. (This row read "still accepted by the mutation parser" until the corpus case above measured it.) |
 
 In an edition-2026 map literal a key is one name: a hyphenated key is an
 identifier there (`{ user-agent: args.ua }`), a dotted key is refused,
@@ -1291,32 +1374,32 @@ callers passing the same logical reference under different shapes
 (`"user-abc"` vs `"_system:v1:identity:user:user-abc"`) hash to
 different strings and produce duplicate rows with distinct ids.
 
-```memql retired
-// Wrong -- bare-vs-canonical input shape changes the derived id
-insert {
-  id: hash(args.folderId + ":" + args.userId)
-  ...
-}
+Wrong -- the bare-vs-canonical input shape changes the derived id:
 
-// Right -- canonicalId() collapses both forms to the same string, and
-// each part is hashed before joining so the composite cannot alias.
-// The second argument names an imported concept, as a string.
-insert {
-  id: hash(
-    hash(canonicalId(args.folderId, "folder")) +
-    hash(canonicalId(args.userId, "user"))
-  )
-  ...
-}
-
-// Wrong -- joining with a separator first. `hash(a + ":" + b)` aliases
-// whenever a part can contain the separator: ("chat", "k:1") and
-// ("chat:k", "1") derive one id, so two distinct rows collapse into one.
-// A canonicalId() part happens to be safe today only because its fixed
-// `v1:ns:concept:` prefix makes the split recoverable -- that is a
-// property of the data shape, not a constraint, and it stops holding the
-// moment a part is caller-supplied (memql#3009).
+<!-- corpus: 2026/examples/authoring-rules/ids/derived-ids.memql -->
+```memql fragment
+    id: hash(args.folderId + ":" + args.userId)
 ```
+
+Right -- `canonicalId()` collapses both spellings onto one string, and
+each part is hashed before joining so the composite cannot alias. The
+second argument names an imported concept, as a string:
+
+<!-- corpus: 2026/examples/authoring-rules/ids/derived-ids.memql -->
+```memql fragment
+    id: hash(
+      hash(canonicalId(args.folderId, "folder")) +
+      hash(canonicalId(args.userId, "user"))
+    )
+```
+
+Wrong again, a level down -- joining with a separator FIRST.
+`hash(a + ":" + b)` aliases whenever a part can contain the separator:
+`("chat", "k:1")` and `("chat:k", "1")` derive one id, so two distinct rows
+collapse into one. A `canonicalId()` part happens to be safe today only
+because its fixed `v1:ns:concept:` prefix makes the split recoverable -- that
+is a property of the data shape, not a constraint, and it stops holding the
+moment a part is caller-supplied (memql#3009).
 
 (Don't prefix the hash with the concept name -- `id: "folder-" + hash(...)`
 duplicates information already in the canonical id position, and
@@ -1380,43 +1463,44 @@ be met). Use it when `canonicalId()` will not resolve. Otherwise prefer
   empty case is exactly the class the two earlier formulations missed;
   saying "exactly when" here would be the third.
 
-  So where a hashed id is derived from a caller-supplied FK, constrain the
-  arg with an **allowlist** — pin the prefix to that concept's own
-  canonical form, and permit only characters a short id can contain:
+So where a hashed id is derived from a caller-supplied FK, constrain the
+arg with an **allowlist** — pin the prefix to that concept's own
+canonical form, and permit only characters a short id can contain:
 
-  ```memql fragment
-  deploymentId  string! @pattern("^(?:v[0-9]+:cluster:deployment:)?[A-Za-z0-9_.-]+$")
-  ```
+<!-- corpus: 2026/examples/authoring-rules/ids-separator/pinned-prefix.memql -->
+```memql fragment
+deploymentId  string! @pattern("^(?:v[0-9]+:cluster:deployment:)?[A-Za-z0-9_.-]+$")
+```
 
-  An allowlist rather than "not whitespace, not colon", for two reasons
-  found the hard way. A denylist has to enumerate `unicode.IsSpace`
-  exactly, and RE2's `[[:space:]]` is **ASCII only** while `shortId()`
-  trims with `strings.TrimSpace` — a guard written that way closes the
-  fork for U+0020 and leaves it open for U+00A0, U+2028 and four others.
-  And the `\x{...}` class that would enumerate them correctly **cannot be
-  authored**: the DSL lexer rejects `\x` escapes, so that pattern parses
-  as text and fails at load.
+An allowlist rather than "not whitespace, not colon", for two reasons
+found the hard way. A denylist has to enumerate `unicode.IsSpace`
+exactly, and RE2's `[[:space:]]` is **ASCII only** while `shortId()`
+trims with `strings.TrimSpace` — a guard written that way closes the
+fork for U+0020 and leaves it open for U+00A0, U+2028 and four others.
+And the `\x{...}` class that would enumerate them correctly **cannot be
+authored**: the DSL lexer rejects `\x` escapes, so that pattern parses
+as text and fails at load.
 
-  Pin the prefix to the concept. An unpinned `v<digits>:<lower>:<word>:`
-  accepts `v1:ns:Name:x`, which strips to the same short id as `x` — two
-  distinct arguments on one composite id, the §20 collision this section
-  is about, on the leading part instead of the trailing one.
+Pin the prefix to the concept. An unpinned `v<digits>:<lower>:<word>:`
+accepts `v1:ns:Name:x`, which strips to the same short id as `x` — two
+distinct arguments on one composite id, the §20 collision this section
+is about, on the leading part instead of the trailing one.
 
-  This is stricter than "is a fixed point", deliberately. It rejects
-  values whose `shortId` is a fixed point (`"v1:v1"`, `"v1:a:b:"`) and
-  that is the safe direction to be wrong in.
+This is stricter than "is a fixed point", deliberately. It rejects
+values whose `shortId` is a fixed point (`"v1:v1"`, `"v1:a:b:"`) and
+that is the safe direction to be wrong in.
 
-  That is one expression covering both halves of the residual class, and
-  it keeps the canonical form this section recommends. Prefer it to
-  making `shortId()` idempotent: the same primitive is the wire-egress
-  bare-ifier (memql#2441), so looping it to a fixpoint changes every id
-  handed to a client, and destroys more of a genuinely-bare colon-bearing
-  value. Landed in memql#2981; gated by
-  `TestDeploymentIDPatternClosesTheBareCanonicalFork`.
+That is one expression covering both halves of the residual class, and
+it keeps the canonical form this section recommends. Prefer it to
+making `shortId()` idempotent: the same primitive is the wire-egress
+bare-ifier (memql#2441), so looping it to a fixpoint changes every id
+handed to a client, and destroys more of a genuinely-bare colon-bearing
+value. Landed in memql#2981; gated by
+`TestDeploymentIDPatternClosesTheBareCanonicalFork`.
 
-  What holds without any constraint: every SHORT id this tree mints is
-  colon- and whitespace-free, so `shortId()` is exact for those and for
-  the canonical forms built around them.
+What holds without any constraint: every SHORT id this tree mints is
+colon- and whitespace-free, so `shortId()` is exact for those and for
+the canonical forms built around them.
 
 Compliant mutations (audit done 2026-05-06), in the cognition mutations
 file, since removed with that tree:
@@ -1474,15 +1558,17 @@ the **raw** arg — before `shortId()` runs — so a colon ban there would
 reject the exact shape the normalisation exists to support. Constraining
 the trailing part alone is both sufficient and compatible:
 
+<!-- corpus: 2026/examples/authoring-rules/ids-separator/constrained-trailing-part.memql -->
 ```memql fragment
-args {
-  deploymentId  string!                        // canonical or bare, normalised below
-  nodeType      string! @pattern("^[^:]+$")    // trailing part: no separator
-}
-insert {
-  id: hash(shortId(args.deploymentId) + ":" + args.nodeType)
-  ...
-}
+  args {
+    deploymentId  string!                        // canonical or bare, normalised below
+    nodeType      string! @pattern("^[^:]+$")    // trailing part: no separator
+  }
+  insert {
+    id: hash(shortId(args.deploymentId) + ":" + args.nodeType)
+    deploymentId: shortId(args.deploymentId)
+    args.nodeType
+  }
 ```
 
 This is not the only way to close it, and the choice is a trade rather
@@ -1507,13 +1593,14 @@ forbidding a character costs the caller nothing. Reach for construction
 when it is not -- the derivation memql#3009 landed, in a construct since
 removed with the cognition tree:
 
+<!-- corpus: 2026/examples/authoring-rules/ids-separator/per-part-hashing.memql -->
 ```memql fragment
-id: "utt-" + hash(
-  hash(args.partitionId) +
-  hash(canonicalId(args.participantId, "participant")) +
-  hash(args.action.type) +
-  hash(args.action.idempotencyKey)
-)
+    id: "utt-" + hash(
+      hash(args.partitionId) +
+      hash(canonicalId(args.participantId, "participant")) +
+      hash(args.action.type) +
+      hash(args.action.idempotencyKey)
+    )
 ```
 
 `hash()` is sha256-hex, so every part renders to exactly 64 characters
@@ -1646,15 +1733,20 @@ accepted and then silently thrown away. The identical annotation on a
 schema and keep it. `@default` on an args field is refused the same way
 (#991); apply a default in the body with `args.x ?? <default>`.
 
+<!-- corpus: 2026/examples/authoring-rules/args/description-on-args-field.memql -->
 ```memql retired
-query folder activeFolders {
+use library.concepts.{ folder }
+use library.shapes.{ libraryFolderFull }
+
+@actor
+query folder foldersUnderParent {
   args {
-    /// The owner whose folders to list.
-    ownerId string @required                        // correct
-    limit   number @description("page size")        // refused at load
+    /// The folder whose children to list.
+    parentFolderId string @required                 // correct
+    limit          number @description("page size") // refused at load
   }
-  filter  row => row.ownerId == args.ownerId && isActiveRecord(row)
-  shape   folderFull
+  filter  row => row.parentFolderId == args.parentFolderId && row.ownerUserId == actor.userId
+  shape   libraryFolderFull
 }
 ```
 
@@ -1665,36 +1757,41 @@ which strips the annotation; re-add the prose as a `///` comment.
 
 **Right:**
 
+<!-- corpus: 2026/examples/authoring-rules/args/right-forms.memql -->
 ```memql
 use library.concepts.{ artifact, folder }
+use library.shapes.{ libraryFolderFull }
 use common.traits.{ isActiveRecord }
 
 /// Insert a Library artifact
+@actor
 mutation artifact recordArtifact {
   args {
     folderId  string  @required
     title     string  @required
   }
   insert {
-    folderId:  args.folderId
-    title:     args.title
-    createdAt: now
-    createdBy: actor.userId
+    folderId:    args.folderId
+    title:       args.title
+    ownerUserId: actor.userId
+    createdAt:   now
+    createdBy:   actor.userId
   }
 }
 
-/// Active folders visible to caller
-query folder activeFolders {
+/// Active folders visible to the caller
+@actor
+query folder activeFoldersForCaller {
   args {
-    ownerId  string  @required
+    parentFolderId  string  @required
   }
-  filter  row => row.ownerId == args.ownerId && isActiveRecord(row)
-  shape   folderFull
+  filter  row => row.parentFolderId == args.parentFolderId && row.ownerUserId == actor.userId && isActiveRecord(row)
+  shape   libraryFolderFull
 }
 
 // A spec binds one concept or shape in its signature, and its lambda
 // names the row it reads. A spec takes no args.
-spec artifact isArchivedArtifact = row => row.archived == true
+spec artifact isArchivedIndexRow = row => row.archived == true
 ```
 
 **Policies take no args at all.** The live `policy` construct is an
@@ -1703,34 +1800,59 @@ that once carried `func (Policy)` bodies with `@tier` / `@audited`
 is retired, #984). A caller-context check is a context-spec applied to
 the actor in a filter, `requiresOwner(actor)`:
 
+<!-- corpus: 2026/examples/authoring-rules/args/policy-no-args.memql -->
 ```memql
-@primary("streamClaudeSonnet")
-@fallback("stream54Pro")
+@primary("claudeSonnet")
+@fallback("chat54Pro")
 /// Default chat policy for non-operator agents.
 policy balancedChat { }
 ```
 
-**Wrong (rejected at registration):**
+**Wrong -- `ctx` is not in scope in any struct-form body.** A mutation value
+is refused at load with `a mutation value reads ctx, which it does not bind`,
+and a logic body with `[body_unknown_name]`:
 
+<!-- corpus: 2026/examples/authoring-rules/args/ctx-in-a-body.memql -->
 ```memql retired
-// Legacy func (Spec) form — specs are struct-form now.
-func (Spec) example(ctx any) bool {
-  return true
-}
+use library.concepts.{ folder }
 
 // args.X is the only way to reach caller-passed fields.
-mutation folder example {
+@actor
+mutation folder nameFolderFromCtx {
   args { x string @required }
   insert {
-    field: ctx.x   // ctx is not in scope inside struct-form bodies
+    name: ctx.x   // ctx is not in scope inside struct-form bodies
+    ownerUserId: actor.userId
   }
+}
+
+// The same name, in a logic body: nothing binds `ctx` there either.
+logic titleFromCtx {
+  args { x string @required }
+  return ctx.x
+}
+```
+
+The legacy `func (Receiver)` wrapper is refused BY NAME for a query and a
+mutation (`legacy procedural form `func (Query) ...` is retired
+(memql#303)`):
+
+<!-- corpus: 2026/examples/authoring-rules/args/receiver-function.memql -->
+```memql retired
+// The legacy procedural form, refused by name.
+func (Query) listPartitions(ctx any) (any, error) {
+  return sort(concept=="v1:cluster:node", "name", "asc"), nil
 }
 ```
 
 **The procedural form is internal.** The struct-form rewriter emits a
 `func (Receiver) NAME(ctx any) (any, error) { return <expr>, nil }`
 shape for a query and a mutation, for the engine's parser, and authors
-never write it; `ctx` is not part of the author surface. A logic's statements follow its `args { }`
+never write it; `ctx` is not part of the author surface. A `func (Spec)` or
+`func (Shape)` block is a quieter shape: no loader's slicer recognises it, so
+it registers nothing and raises nothing at all -- the silent class
+[7b](#7b-parking-a-declaration-with---detaches-the-annotations-above-it) is
+about. A logic's statements follow its `args { }`
 block and end with `return <expr>`, which returns the value directly,
 with no `ctx.output = ...`.
 
@@ -1741,6 +1863,7 @@ with no `ctx.output = ...`.
 A nested block that declares sub-fields rejects undeclared keys, exactly as the
 top level always has (memql#3641):
 
+<!-- corpus: 2026/examples/authoring-rules/nested/closed-block.memql -->
 ```memql
 concept user {
   preferences {
@@ -1767,10 +1890,11 @@ rather than schema. It takes the typed spelling, because a block-bodied
 property accepts no annotation in either other position (memql#3623,
 memql#3692):
 
+<!-- corpus: 2026/examples/authoring-rules/nested/open-block.memql -->
 ```memql fragment
-metadata  object  @open {
-  knownKey  string
-}
+  metadata  object  @open {
+    knownKey  string
+  }
 ```
 
 Reach for a DECLARATION first. Nearly every block that had an undeclared key
@@ -1785,19 +1909,32 @@ was real, and the schema had simply stopped describing the row.
 lambda parameter, and every field is read through it (D1 of the
 [language freeze record](../../superpowers/specs/2026-09-13-dsl-v1-language-freeze-program-design.md)):
 
+<!-- corpus: 2026/examples/authoring-rules/predicates/filter-lambda.memql -->
 ```memql fragment
 filter  row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true) && (args.status == nil || row.status == args.status)
-spec sendJob isDrainableSendJob = row => row.status == "queued" || row.status == "running"
-spec actorEnvelope requiresOwner = actor => actor.role == "owner"
-trait isActiveRecord = row => row.active == true
+```
+
+<!-- corpus: 2026/examples/authoring-rules/predicates/predicate-declarations.memql -->
+```memql fragment
+spec sendJob sendJobIsDrainable = row => row.status == "queued" || row.status == "running"
+spec actorEnvelope callerHoldsOwnerRole = actor => actor.role == "owner"
+trait recordIsLive = row => row.active == true
+```
+
+<!-- corpus: 2026/examples/authoring-rules/predicates/trigger-filter.memql -->
+```memql fragment
 @filter(row => row.status == "archived")
 ```
 
-The lines are the edition-2026 spellings of `campaigns` and
+The lines are the edition-2026 spellings of the campaigns list read and
 `isDrainableSendJob` (`dsl/campaigns/`), `requiresOwner`
 (`dsl/deployment/specs.memql`), `isActiveRecord`
-(`dsl/common/traits.memql`) and an account automation's trigger filter
-(`dsl/accounts/automations.memql`).
+(`dsl/common/traits.memql`) and an automation's trigger filter. The three
+declarations carry DIFFERENT names here because the conformance case that
+holds them loads beside the shipped tree, and a second declaration of a name a
+shipped filter applies bare is not a shadow -- it makes every one of those
+filters ambiguous and refuses the whole tree. Renaming is the fix; there is no
+spelling that lets both declarations coexist under one name.
 
 - **The parameter is the author's name.** Any name that is not a
   reserved root will do, and `row` is the convention -- it is what
@@ -1840,9 +1977,18 @@ the row parameter is computed once per call, before the query runs, and
 bound as a parameter of the SQL. So an in-process function, arithmetic,
 `??` or a map literal is legal there on values that do not read the row:
 
+<!-- corpus: 2026/examples/authoring-rules/plan-constants/plan-constants.memql -->
 ```memql fragment
 filter  row => row.expiresAt < addDuration(now, "P1D")
+```
+
+<!-- corpus: 2026/examples/authoring-rules/plan-constants/plan-constants.memql -->
+```memql fragment
 filter  row => row.rank > args.floor * 2
+```
+
+<!-- corpus: 2026/examples/authoring-rules/plan-constants/plan-constants.memql -->
+```memql fragment
 filter  row => row.stage == (args.stage ?? "active")
 ```
 
@@ -1863,11 +2009,12 @@ the other way round, as `(args.x != nil && row.f == args.x)`. The
 observability window read is the tree's `||` case
 (`dsl/observability/queries.memql`):
 
+<!-- corpus: 2026/examples/authoring-rules/plan-constants/window-read.memql -->
 ```memql fragment
-filter  row => row.bucket == args.bucket
-            && row.windowStart >= args.windowStart
-            && row.windowStart < args.windowEnd
-            && ((args.codeReference != nil && row.codeReference == args.codeReference) || row.codeReference startsWith args.prefixes)
+  filter  row => row.bucket == args.bucket
+              && row.windowStart >= args.windowStart
+              && row.windowStart < args.windowEnd
+              && ((args.codeReference != nil && row.codeReference == args.codeReference) || row.codeReference startsWith args.prefixes)
 ```
 
 One consequence of the unset rule
@@ -1926,12 +2073,8 @@ the change. The gates, with their test names:
   lambda parameter both are
   read through `row` (rule 21c), and the intrinsic names -- `id`, `concept`,
   `type`, `createdAt`, `createdBy`, `provenance` -- are reserved field
-  names (rule 19), so the two can never collide:
-
-  ```memql fragment
-  filter  row => row.id == args.clusterId      // an intrinsic: the row's id column
-  filter  row => row.region == args.region     // a payload field
-  ```
+  names (rule 19), so the two can never collide. The two filters, side by
+  side, are at the end of this section.
 
   A spec or trait body reads through its own parameter the same way,
   `spec registration isRevoked = row => row.revoked == true`. Mutation
@@ -1947,11 +2090,8 @@ the change. The gates, with their test names:
   property called `id`, and the two compile to completely different
   `ORDER BY` expressions -- a table column vs `payload #>> '{id}'`.
 
-  ```memql fragment
-  sort  "row.createdAt", "desc"   // correct -- the row envelope
-  sort  "createdAt", "desc"       // rejected -- bare intrinsic
-  sort  "version", "desc"         // correct -- payload property, bare
-  ```
+  The three sort keys -- the correct pair and the refused one -- are at the
+  end of this section.
 
   `provenance` has no sort form: it is object-valued with no ordering, so
   `row.provenance` is rejected outright.
@@ -2026,6 +2166,40 @@ grammar:
   `"v1:ns:concept:"` prefix are rejected — name the imported concept,
   `canonicalId(x, "folder")`.
 
+**The spellings those two gates separate.** An intrinsic and a payload field
+are both read through the lambda parameter, and they cannot collide because
+the intrinsic names are reserved:
+
+<!-- corpus: 2026/examples/authoring-rules/intrinsics/intrinsic-and-payload.memql -->
+```memql fragment
+  filter  row => row.id == args.deploymentId      // an intrinsic: the row's id column
+```
+
+<!-- corpus: 2026/examples/authoring-rules/intrinsics/intrinsic-and-payload.memql -->
+```memql fragment
+  filter  row => row.region == args.region     // a payload field
+```
+
+A sort key has no lambda to read it through, so the intrinsic carries the
+`row.` prefix and a payload property stays bare:
+
+<!-- corpus: 2026/examples/authoring-rules/intrinsics/sort-keys.memql -->
+```memql fragment
+  sort  "row.createdAt", "desc"   // correct -- the row envelope
+```
+
+<!-- corpus: 2026/examples/authoring-rules/intrinsics/sort-keys.memql -->
+```memql fragment
+  sort  "version", "desc"         // correct -- payload property, bare
+```
+
+The third spelling, `sort "createdAt", "desc"`, is refused at load:
+`sort key names the row intrinsic "createdAt" bare -- write "row.createdAt";
+the bare spelling orders by a payload property of that name (memql#2786)`.
+It is quoted here rather than shown as a fenced example because the refusal
+carries no rule id, and a `retired` fence has to name one for a refusal the
+parser and the lint both accept.
+
 ---
 
 ## 23. List-returning queries must declare their bound
@@ -2058,31 +2232,39 @@ A query is list-returning when its `shape` projects a row set
 - **Unmarked list — VIOLATION.** None of the above. This is the set the
   rule targets.
 
+<!-- corpus: 2026/examples/authoring-rules/pagination/bounds.memql -->
 ```memql
-// Single-row read — exempt (row.id == equality).
+use library.concepts.{ folder }
+use library.shapes.{ libraryFolderFull }
+use agents.concepts.{ agentRole }
+use agents.shapes.{ agentRoleFull }
+use common.traits.{ isActiveRecord }
+
+// Single-row read -- exempt (row.id == equality).
 query folder folderMeta {
   args { folderId string @required }
   filter  row => row.id == args.folderId
-  shape   folderFull
+  shape   libraryFolderFull
 }
 
-// Bounded list — compliant (paginate window).
+// Bounded list -- compliant (paginate window).
 query folder firstTenFolders {
   filter  row => isActiveRecord(row)
   paginate 10
-  shape   folderFull
+  shape   libraryFolderFull
 }
 
-// Legitimate full-set read — compliant, marked + auditable.
-@unbounded("provider catalog is a small bounded set — never more than a handful of rows")
-query provider allProviders {
+// Legitimate full-set read -- compliant, marked + auditable.
+@unbounded("the agent-role catalog is a small bounded set -- never more than a handful of rows")
+query agentRole allAgentRoles {
   filter  row => isActiveRecord(row)
-  shape   providerFull
+  shape   agentRoleFull
 }
 
-// VIOLATION — list read with no bound. Pulls the whole table.
+// VIOLATION -- list read with no bound. Pulls the whole table.
 query widget allWidgets {
-  filter  row => row.ownerUserId == args.ownerUserId
+  args { kind string @required }
+  filter  row => row.kind == args.kind
   shape   widgetFull
 }
 ```
@@ -2136,6 +2318,7 @@ something other than a row array -- is not a filter. Write it as a
 the page `paginate` already read, and keeps the rows the expression is
 true for.
 
+<!-- corpus: 2026/examples/authoring-rules/refine/search-folder-artifacts.memql -->
 ```memql
 use library.concepts.{ artifact }
 use library.shapes.{ artifactFull }
@@ -2187,9 +2370,15 @@ first, then a bare string, then a positional number -- so an old diff
 showing it is not broken; it is simply not what to write. A duration
 string (`@cache("5m")`) is not a supported form.
 
+<!-- corpus: 2026/examples/authoring-rules/cache/cache-ttl.memql -->
 ```memql
+use agents.concepts.{ agentRole }
+use agents.shapes.{ agentRoleFull }
+use common.traits.{ isActiveRecord }
+
 @cache(300)
-query agentRole activeAgentRoles {
+@unbounded("the agent-role catalog is a small bounded set -- never more than a handful of rows")
+query agentRole activeAgentRoleCatalog {
   filter  row => isActiveRecord(row)
   shape   agentRoleFull
 }
@@ -2452,16 +2641,28 @@ rather than flagged: a product bundle mounts extra domains at boot via
 time. The rule is "if the tree can see it in another domain, name it" --
 never "every reference must resolve here".
 
-```memql fragment
-// dsl/worker/queries.memql -- `invocation` is ambient
-// (v1:worker:invocation), even though v1:observability:invocation
-// shares the trailing segment.
-query invocation invocationsForUser {
-  ...
+<!-- corpus: 2026/examples/authoring-rules/imports/ambient-same-domain.memql -->
+```memql
+// `invocation` is ambient: this domain declares it, even though
+// v1:observability:invocation shares the trailing segment. A cross-domain
+// name still needs its import.
+use work.concepts.{ run }
+
+@actor
+query invocation ownInvocations {
+  args {
+    runId  string
+  }
+  filter   row => row.ownerUserId == actor.userId && (args.runId == nil || row.runId == args.runId)
+  paginate 50
 }
 
-// Cross-domain names still need the import:
-use planner.concepts.{ plan }
+/// The runs behind them. `run` is another domain's, so it carries an import.
+@actor
+query run runsForCaller {
+  filter   row => row.ownerUserId == actor.userId
+  paginate 50
+}
 ```
 
 **Constraints.**
@@ -2507,10 +2708,23 @@ string `""` are one value, unset, when `==` or `!=` compares them. `!=`
 is the exact negation of `==`, so `!=` against a set value matches an
 unset field, and `!= ""` and `!= nil` are the "is set" test.
 
+<!-- corpus: 2026/examples/authoring-rules/unset/absent-values.memql -->
 ```memql fragment
 filter  row => row.deleted != true      // matches rows with no `deleted` key
+```
+
+<!-- corpus: 2026/examples/authoring-rules/unset/absent-values.memql -->
+```memql fragment
 filter  row => row.status == "active"   // does not match rows with no `status` key
+```
+
+<!-- corpus: 2026/examples/authoring-rules/unset/absent-values.memql -->
+```memql fragment
 filter  row => row.consumedAt != ""     // does not match rows with no `consumedAt` key
+```
+
+<!-- corpus: 2026/examples/authoring-rules/unset/absent-values.memql -->
+```memql fragment
 filter  row => row.consumedAt != nil    // the same test: nil and "" are one value
 ```
 
@@ -2606,17 +2820,28 @@ for every pair. Four results differ from before:
   ordered and not a member. It used to be cast, and `'abc'::numeric`
   failed the whole read with a Postgres error.
 
-**The trap this creates.** A misspelled field in a `!=` predicate is
-absent, so it matches every row:
+**The trap this creates -- and the half of it edition 2026 closed.** A field
+that is absent on a given ROW matches a `!=` predicate, so a predicate meant to
+exclude rows admits the ones that never carried the key. A misspelled field
+name used to reach the same place from the other side; it no longer does. The
+lowering resolves every `row.<field>` against the bound concept, so the file
+below is REFUSED at load as `[lower_unknown_field]`, naming the field and
+suggesting the one it meant:
 
-```memql fragment
-filter  row => row.delted != true       // typo -- matches everything, including deleted rows
+<!-- corpus: 2026/examples/authoring-rules/unset/misspelled-field.memql -->
+```memql retired
+@serverOnly
+query inviteToken liveTokensTypo {
+  filter  row => row.delted != true       // typo -- refused at load; it used to match every row
+  paginate 50
+}
 ```
 
-The failure direction is the dangerous one. The same typo in
-`== true` returns zero rows and someone notices immediately; in `!=` on
-an authorization- or deletion-scoped filter it quietly serves rows that
-were meant to be excluded.
+What survives is the row-level half, which no name check can see: a field the
+concept DOES declare and a given row simply does not carry. The failure
+direction is the dangerous one -- `== true` returns zero rows and somebody
+notices immediately, while `!=` on an authorization- or deletion-scoped filter
+quietly serves rows that were meant to be excluded.
 
 **What to do about it.** Prefer the trait over an inline predicate --
 `isNotDeleted(row)` rather than `row.deleted != true`. The conformance
@@ -2625,8 +2850,7 @@ gate already requires this wherever a trait exists (rule 22,
 
 **A misspelled field is caught before it ships**, and so is a misspelled
 trait in a `use` line. Three referential lanes cover those positions,
-each verified by injecting the typo into a shipped construct. A
-misspelled trait at a call site is the position they miss -- see below:
+each verified by injecting the typo into a shipped construct:
 
 | you misspell | reported as |
 |---|---|
@@ -2645,28 +2869,48 @@ section) -- so `make test` catches these two lanes but
 natural place to look. Row 3 is caught by both, since the cross-domain
 import gate (rule 25) also runs in `./dsl/...`.
 
-**A misspelled trait at the call site was the silent shape.** Row 3
-catches a name misspelled in the `use` line. It does not check that call
-sites match what was imported:
+**A misspelled trait at the call site was the silent shape, and is not any
+more.** Row 3 catches a name misspelled in the `use` line, and nothing checked
+that call sites matched what was imported -- a sibling conjunct spelled
+correctly kept the import "used", so nothing was orphaned and nothing was
+reported:
 
+<!-- corpus: 2026/examples/authoring-rules/imports/imported-trait.memql -->
 ```memql fragment
-use common.traits.{ isNotDeleted }        // correct
-
-filter  row => row.planId == args.planId && isNotDeletd(row)             // typo
-filter  row => row.ownerUserId == args.ownerUserId && isNotDeleted(row)  // a sibling keeps the import "used"
+  filter   row => row.ownerUserId == actor.userId && isNotDeleted(row)  // a sibling keeps the import "used"
 ```
 
-Measured on the pre-edition spelling (a bare `isNotDeletd` conjunct):
+Edition 2026 closed it at the position that was open. The filter's lowering
+resolves the predicate by name, so the typo is now a LOAD refusal,
+`[lower_unknown_name]`, naming the spelling and the file-top import to check:
+
+<!-- corpus: 2026/examples/authoring-rules/imports/misspelled-trait.memql -->
+```memql retired
+use common.traits.{ isNotDeleted }
+
+@actor
+query invocation invocationsForOneRun {
+  args {
+    runId  string!
+  }
+  filter   row => row.runId == args.runId && isNotDeletd(row)             // typo
+  paginate 50
+}
+```
+
+Measured on the PRE-EDITION spelling (a bare `isNotDeletd` conjunct):
 `memqllint`, `go test ./dsl/...` and the referential tests all stayed
 green. It surfaced only when the typo orphaned the import entirely
 (every call site misspelled), which reports the import as never
-referenced. A same-domain trait is the same hole with no import at all
-to orphan -- rule 25 (#2617) makes it ambient, so there is nothing for
+referenced. A same-domain trait was the same hole with no import at all
+to orphan -- rule 25 (#2617) makes it ambient, so there was nothing for
 the import lane to inspect.
 
-It does fail closed: on first call the query errors
-`unknown spec "isNotDeletd"` rather than quietly returning every row. A
-loud runtime error, not a build-time gate.
+Both are closed by the lowering rather than by the import lane, so a
+same-domain predicate and an imported one are refused the same way, and a
+product bundle at `MEMQL_DSL_PATH` gets the same verdict at strict boot. What
+the old shape fell back on -- a loud `unknown spec "isNotDeletd"` on first
+call -- is now unreachable, because the construct never loads.
 
 **What field validation structurally cannot see** is a field that is
 real and declared but scoped from the wrong source:
@@ -2688,8 +2932,13 @@ an optional object field, an optional arg, an untyped value -- write
 `.?` after it. The load requires `.?` there and refuses `.` with the
 `.?` spelling in the message:
 
+<!-- corpus: 2026/examples/authoring-rules/optional-member/optional-object.memql -->
 ```memql fragment
 filter  row => row.?lineage.originatingRunId == args.runId
+```
+
+<!-- corpus: 2026/examples/authoring-rules/optional-member/optional-object.memql -->
+```memql fragment
 @filter(row => row.?preferences.computerUseEnabled == false)
 ```
 
@@ -2721,8 +2970,19 @@ Two lexical traps in the same neighbourhood, both now refused.
 identifier, so it reached the comparison as the *string* `".5"` while
 `0.5` reached it as the float:
 
+<!-- corpus: 2026/examples/authoring-rules/lexical/leading-dot.memql -->
 ```memql retired
-filter  row => row.score > .5       // refused at load since memql#3624
+@serverOnly
+query scoreCard highScoresBadFraction {
+  filter  row => row.score > .5       // refused at parse since memql#3624
+  paginate 50
+}
+```
+
+Written with its leading digit it loads, and always did:
+
+<!-- corpus: 2026/examples/authoring-rules/lexical/fraction.memql -->
+```memql fragment
 filter  row => row.score > 0.5      // correct -- and always was
 ```
 
@@ -2738,8 +2998,13 @@ names in `dsl/install/actions.memql`), so `total-used` lexes as a single
 identifier. Before edition 2026 a filter compared against it and matched
 nothing, silently:
 
+<!-- corpus: 2026/examples/authoring-rules/lexical/hyphen-name.memql -->
 ```memql retired
-filter  remaining == total-used     // pre-edition: compared against the string "total-used"
+@serverOnly
+query scoreCard remainingMatchesBalance {
+  filter  row => row.remaining == row.total-used     // one name, not a subtraction
+  paginate 50
+}
 ```
 
 The lexer cannot tell a name from a subtraction -- only *position*
@@ -2750,12 +3015,17 @@ measured in memql#3624 and rejected, and the reasoning is recorded at
 `case '-'` in `component/language/parser/lexer.go`. The edition-2026
 parser does know position, so it closes the case there: in an
 expression a hyphenated name is refused
-(`` `row.total-used` reads as one name; write `row.total - used` (spaces) for subtraction ``),
+(`` `row.total-used` reads as one name; write `row.total - row.used` (spaces) for subtraction ``),
 while a named argument or a map key, which is never an expression, may
-still be hyphenated. Put spaces around a `-` you mean as an operator:
+still be hyphenated. Put spaces around a `-` you mean as an operator -- and
+write it in an IN-PROCESS position, because arithmetic over the row does not
+push down ([21d](#21d-a-subexpression-that-does-not-read-the-row-is-a-plan-constant)):
+a `filter` refuses it with `arithmetic over the row runs in process`, and
+`refine` is where it belongs:
 
+<!-- corpus: 2026/examples/authoring-rules/lexical/subtraction.memql -->
 ```memql fragment
-filter  row => row.remaining == row.total - row.used
+  refine  row => row.remaining == row.total - row.used
 ```
 
 | spelling | tokens | in an edition-2026 expression |
@@ -2807,11 +3077,30 @@ error at call time: `resolveProviderName` hands it through,
 `ChatStructuredProviderByName` misses, and the call falls through to the
 default provider -- so the prompt quietly runs on a model its author did
 not choose, leaving one INFO line on the structured path and nothing at
-all on the plain chat path.
+all on the plain chat path. `federationStrongest` is a shipped **policy**
+(`dsl/policies/policies.memql`), so `@defaultProvider("federationStrongest")`
+refuses boot with `prompt "...": @defaultProvider("federationStrongest") is
+not a declared provider`. That refusal carries no rule id, which is why the
+wrong spelling is quoted here rather than shown as a fenced example -- a
+`retired` fence has to name one for a refusal the parser and the lint both
+accept.
 
-```memql retired
-@defaultProvider("strongReasoning")     // WRONG -- that is a `policy`
-@defaultProvider("streamClaudeSonnet")  // right -- a `provider`
+Right -- `fleet` is a `provider` the tree declares. Note WHICH one: a pin is
+an explicit choice that wins over every rule (epic memql#5127), so pinning a
+prompt to a PAID vendor record routes around the shipped local-first chain and
+`TestNoPaidDefault` (`paid_default_gate_test.go`) fails the build on it. A pin
+that does not reopen the paid door is a local one, and the prompt keeps its
+`@level` either way:
+
+<!-- corpus: 2026/examples/authoring-rules/prompts/named-provider.memql -->
+```memql
+@description("Summarise one observability window")
+@defaultProvider("fleet")
+@level("fast")
+@templateFile("prompts/summariseWindow.tmpl")
+prompt summariseWindow {
+  windowEnd  string  @required
+}
 ```
 
 A `@disabled` provider is still **declared**, so pointing at one stays
@@ -2835,17 +3124,18 @@ fall through for `false`, `0`, `[]` or `{}` -- those are values. `??` is
 the only spelling: `coalesce(a, b)` is retired and refused, naming
 `a ?? b` and `memqlmigrate --rewrite=expressions`.
 
+<!-- corpus: 2026/examples/authoring-rules/coalesce/blank-coalescing.memql -->
 ```memql fragment
-// with the caller passing v:
-//   false   -> false        kept
-//   0       -> 0            kept
-//   []      -> []           kept
-//   {}      -> {}           kept
-//   ""      -> "DEFAULT"    replaced
-//   " "     -> "DEFAULT"    replaced   <-- the sharp edge
-//   "\t\n"  -> "DEFAULT"    replaced
-//   "value" -> "value"      kept
-insert { v: args.v ?? "DEFAULT" }
+  // with the caller passing v:
+  //   false   -> false        kept
+  //   0       -> 0            kept
+  //   []      -> []           kept
+  //   {}      -> {}           kept
+  //   ""      -> "DEFAULT"    replaced
+  //   " "     -> "DEFAULT"    replaced   <-- the sharp edge
+  //   "\t\n"  -> "DEFAULT"    replaced
+  //   "value" -> "value"      kept
+  insert { v: args.v ?? "DEFAULT" }
 ```
 
 `a ?? b ?? c` folds left to the first operand that is not blank, and the
@@ -3104,13 +3394,15 @@ every row.
 Right -- a prefix-scoped read that cannot widen (the read behind
 memql#4208, `dsl/observability/queries.memql`):
 
+<!-- corpus: 2026/examples/authoring-rules/startswith/prefix-scoped-read.memql -->
 ```memql fragment
-filter  row => row.bucket == args.bucket
-            && ((args.codeReference != nil && row.codeReference == args.codeReference) || row.codeReference startsWith args.prefixes)
+  filter  row => row.bucket == args.bucket
+              && ((args.codeReference != nil && row.codeReference == args.codeReference) || row.codeReference startsWith args.prefixes)
 ```
 
 Wrong -- expecting Go's `strings.HasPrefix(s, "")`:
 
+<!-- corpus: 2026/examples/authoring-rules/startswith/blank-prefix.memql -->
 ```memql fragment
 filter  row => row.codeReference startsWith args.prefix   // args.prefix == "" returns no rows, not every row
 ```
@@ -3158,6 +3450,7 @@ against a real Postgres, db-gated).
 A construct states who may CALL it. Two annotations, on a `query`, a `mutation` or
 a `logic`, and they answer different questions:
 
+<!-- corpus: 2026/examples/authoring-rules/gates/rank-and-capability.memql -->
 ```memql fragment
 @requiresRank("developer")                    // a FLOOR on the cluster's ladder
 @requiresCapability("update", "principal")    // a GRANT a role was given
@@ -3204,8 +3497,13 @@ actor themselves.
 named field holds the account a row belongs to, and reads *and writes* widen to
 "the owner, OR anyone whose group ties them to this row's account".
 
+<!-- corpus: 2026/examples/authoring-rules/gates/account-grant-one.memql -->
 ```memql fragment
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")   // one account
+```
+
+<!-- corpus: 2026/examples/authoring-rules/gates/account-grant-many.memql -->
+```memql fragment
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountIds")  // several
 ```
 

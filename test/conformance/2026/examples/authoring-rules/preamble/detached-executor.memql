@@ -1,0 +1,10 @@
+@executor("integration.workbench.dispatchHost")
+@description("does real work")
+/*
+builtin zzParked {
+  a string
+}
+*/
+builtin zzLive {          // <- loads with NO @executor
+  b string
+}

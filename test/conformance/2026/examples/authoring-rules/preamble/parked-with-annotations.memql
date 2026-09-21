@@ -1,0 +1,13 @@
+/*
+@executor("integration.workbench.dispatchHost")
+@description("does real work")
+builtin zzParked {
+  a string
+}
+*/
+
+@executor("integration.workbench.dispatchHost")
+@description("does real work")
+builtin zzDispatch {
+  b string
+}

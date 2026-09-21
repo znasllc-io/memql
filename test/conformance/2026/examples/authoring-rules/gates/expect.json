@@ -1,0 +1,7 @@
+{
+  "cases": [
+    { "file": "rank-and-capability.memql", "verdict": "load_ok" },
+    { "file": "account-grant-one.memql", "verdict": "load_ok" },
+    { "file": "account-grant-many.memql", "verdict": "load_ok" }
+  ]
+}

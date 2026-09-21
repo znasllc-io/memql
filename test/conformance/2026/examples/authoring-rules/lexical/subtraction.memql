@@ -1,0 +1,5 @@
+@serverOnly
+query scoreCard remainingIsConsistent {
+  paginate 50
+  refine  row => row.remaining == row.total - row.used
+}

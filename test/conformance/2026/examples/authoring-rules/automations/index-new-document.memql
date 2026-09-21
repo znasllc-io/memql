@@ -1,0 +1,22 @@
+use library.concepts.{ file }
+use library.mutations.{ createArtifact }
+
+@trigger(event="node.created", concept="v1:library:file")
+automation indexNewLibraryFile {
+  args {
+    id           string @required
+    ownerUserId  string @required
+    name         string @required
+    folderId     string
+  }
+  title := logic composeTitle(folderId: args.folderId ?? "")
+  mutation createArtifact(
+    sourceConceptRef: args.id,
+    ownerUserId:      args.ownerUserId,
+    lens:             "artifact",
+    kind:             "file",
+    source:           "uploaded",
+    folderId:         args.folderId,
+    title:            title
+  )
+}

@@ -1,0 +1,8 @@
+use identity.concepts.{ user }
+
+@requiresRank("developer")                    // a FLOOR on the cluster's ladder
+@requiresCapability("update", "principal")    // a GRANT a role was given
+query user principalById {
+  args { userId string! }
+  filter   row => row.id == args.userId
+}

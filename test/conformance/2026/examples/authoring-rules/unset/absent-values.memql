@@ -1,0 +1,23 @@
+@serverOnly
+query inviteToken liveTokens {
+  filter  row => row.deleted != true      // matches rows with no `deleted` key
+  paginate 50
+}
+
+@serverOnly
+query inviteToken activeTokens {
+  filter  row => row.status == "active"   // does not match rows with no `status` key
+  paginate 50
+}
+
+@serverOnly
+query inviteToken consumedTokens {
+  filter  row => row.consumedAt != ""     // does not match rows with no `consumedAt` key
+  paginate 50
+}
+
+@serverOnly
+query inviteToken consumedTokensAgain {
+  filter  row => row.consumedAt != nil    // the same test: nil and "" are one value
+  paginate 50
+}

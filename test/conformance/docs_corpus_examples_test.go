@@ -69,16 +69,17 @@ package conformance
 // body carries the indentation it has inside the file, which is what makes
 // "contiguous substring" mean what it says.
 //
-// # The covered set is a list, and the two pages it leaves out are named
+// # The covered set is a list, and nothing is left out of it
 //
 // docsCorpusCoverage below is the one place that says which pages this gate
-// holds. memql.md and authoring-rules.md are in it as `false`: they carry 47
-// and 55 fences and are the follow-up tasks. They are not silently absent --
-// a page under docs/public/language with a ```memql fence and no entry at all
-// fails this gate, so a new page cannot escape by being new, and turning one
-// of the two on is one word.
+// holds. Every page under docs/public/language that carries a ```memql fence
+// is in it, and every entry is now `true`: the two follow-ups the list was
+// written with -- memql.md and authoring-rules.md -- have landed. The list
+// stays because it is what makes a NEW page fail rather than pass silently:
+// a page with a fence and no entry at all fails this gate, so the decision to
+// cover it (or not yet) has to be written down.
 //
-// Both pages keep their existing cover meanwhile: TestDocsExamplesParse reads
+// Every page keeps its existing cover as well: TestDocsExamplesParse reads
 // every page in the tree regardless of this list, and nothing here weakens it.
 
 import (
@@ -100,8 +101,10 @@ var updateDocs = flag.Bool("update-docs", false,
 	"rewrite bare and retired ```memql fence bodies under docs/public/language from the corpus cases their markers name")
 
 // docsCorpusCoverage is THE list of pages this gate covers. Every page under
-// docs/public/language holding a ```memql fence appears here; the two that are
-// false are the follow-up tasks and are named rather than omitted.
+// docs/public/language holding a ```memql fence appears here, and a page this
+// list does not name fails the gate rather than being skipped -- which is what
+// a new page has to walk into. An entry set to false would be a page staged but
+// not yet held; there are none today.
 var docsCorpusCoverage = map[string]bool{
 	"first-program.md":      true,
 	"research-workflow.md":  true,
@@ -110,13 +113,7 @@ var docsCorpusCoverage = map[string]bool{
 	"specifications.md":     true,
 	"functions.md":          true,
 	"memql.md":              true,
-
-	// FOLLOW-UP (memql#5388). The mechanism already runs over this page --
-	// flipping it to true is the whole change -- but its fences carry no
-	// markers yet: 55 on authoring-rules.md, each needing a corpus case the
-	// engine loads. TestDocsExamplesParse keeps parsing it in the meantime,
-	// which is the cover it had before this gate existed.
-	"authoring-rules.md": false,
+	"authoring-rules.md":    true,
 }
 
 // docsCorpusRoot is where a marker's path is resolved from: this package's
@@ -549,11 +546,10 @@ func TestPublishedExamplesMatchTheirCorpusCases(t *testing.T) {
 	}
 }
 
-// TestDocsCorpusFenceKindDecision pins the three-way decision the marker makes,
-// including the `retired` arm, which no covered page exercises yet: memql.md
-// and authoring-rules.md are where the retired forms are shown, and they are
-// the follow-up. Without this, a third of the gate's answers would be code
-// nothing has run.
+// TestDocsCorpusFenceKindDecision pins the three-way decision the marker makes.
+// It predates any live `retired` fence and stays after them: the decision is a
+// pure function of (marker, verdict), and the pages exercise the arms they
+// happen to need rather than all of them.
 func TestDocsCorpusFenceKindDecision(t *testing.T) {
 	for _, tc := range []struct {
 		marker, verdict string

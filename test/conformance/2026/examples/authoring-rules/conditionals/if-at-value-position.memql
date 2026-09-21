@@ -1,0 +1,5 @@
+/// Refused: `if` guards statements, so it cannot stand where a value goes.
+mutation folderRole recordRoleWithIf {
+  args { userId string! }
+  insert { role: if args.userId == "" { "owner" } }
+}
