@@ -203,6 +203,22 @@ func (a *AttachmentEngineAdapter) Execute(ctx context.Context, query string) (an
 	return a.Engine.Execute(ctx, query)
 }
 
+// ShopperEngineAdapter wraps MemQLEngine to satisfy server.MemQLExecutor for
+// a pack's declared SHOPPER SURFACE (epic memql#5532, issue memql#5551).
+//
+// ITS OWN ADAPTER RATHER THAN A SHARED ONE, matching every other consumer
+// in this file, because the seam is where a future difference would land:
+// this is the only executor in the tree reached by an unauthenticated member
+// of the public, and a shared adapter would make narrowing it later a change
+// to everybody's path.
+type ShopperEngineAdapter struct {
+	Engine *memql.MemQLEngine
+}
+
+func (a *ShopperEngineAdapter) Execute(ctx context.Context, query string) (any, error) {
+	return a.Engine.Execute(ctx, query)
+}
+
 // ConvertExecuteResultToMap converts *memql.ExecuteResult to map[string]any
 // so that the cognition integration can access it uniformly.
 func ConvertExecuteResultToMap(result *memql.ExecuteResult) map[string]any {

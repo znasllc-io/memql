@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/httptls"
 	"github.com/znasllc-io/memql/core/logger"
@@ -1040,6 +1041,46 @@ func TrackingPaths() []string {
 // weaker than what the handler already enforces.
 func SitesBundlePaths() []string {
 	return pathsWithBase("/sites/")
+}
+
+// ShopperSurfacePaths declares the routes a pack's SHOPPER SURFACE mounts
+// under on the bff (epic memql#5532, issue memql#5551): POST /forms/ for
+// every form a loaded pack declares, GET /reads/ for every read. A hosted
+// site reaches them on its OWN origin at /_memql/forms/ and /_memql/reads/,
+// which the edge strips the marker from -- the same mapping "/artifacts"
+// already takes, and for the same reason: these are the bff's own roots,
+// not part of the "/memql" multiplexed API. Nothing about them speaks gRPC.
+//
+// PREFIXES, not exact paths, because the pack and the route are path
+// segments the handler parses out -- SitesBundlePaths' shape, for
+// SitesBundlePaths' reason.
+//
+// WHY HTTP AT ALL. A plain HTML form post is a form post or it is not one.
+// The first product's wholesale form is method="post" so a federal tax
+// identifier never reaches a query string, a browser history entry or an
+// access log, and its own comment forbids downgrading it to a JS submit
+// handler because the served policy is script-src 'self'. There is no gRPC
+// form of that conversation, exactly as there is none for /unsubscribe or a
+// tracking pixel: the other party dictates the wire, and here the other
+// party is a browser with no JavaScript and no MemQL identity at all. The
+// owner approved it by name (epic memql#5532, issue memql#5551).
+//
+// IN HandlerAuthorizedPaths(), NOT PublicPaths(), and the distinction is
+// the real one that list draws: the handler authorizes every request itself
+// and FAILS CLOSED WITH NO CREDENTIALS. A request carrying no edge stamp --
+// the shape a direct caller sends -- reaches no read and no write. Listing
+// it in PublicPaths() would make the verifier step aside for /forms/* on
+// every verifier-consuming node, which buys nothing the handler does not
+// already do and blesses anything mounted beneath the prefix later.
+//
+// AND CLASSIFIED servedButNotExternallyRouted in cmd/frontdoorpaths: the
+// bff serves these, and no front-door rule may exist for them, because the
+// edge is the only intended caller and a rule would publish an
+// unauthenticated write endpoint at api.<domain>. That is the inverted
+// pricing the generator's own package comment describes.
+func ShopperSurfacePaths() []string {
+	return append(pathsWithBase(memql.ShopperFormPathPrefix),
+		pathsWithBase(memql.ShopperReadPathPrefix)...)
 }
 
 // ArtifactPaths returns the paths the Library's two byte-bearing routes mount

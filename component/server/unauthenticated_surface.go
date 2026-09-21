@@ -124,6 +124,29 @@ func HandlerAuthorizedPaths() []string {
 	// token, or with one whose tag does not verify, renders the
 	// "not valid" page and performs no write. There is no unauthenticated
 	// path through the handler that reaches a mutation.
+	// POST /forms/{pack}/{name} + GET /reads/{pack}/{name} -- a pack's
+	// declared SHOPPER SURFACE (epic memql#5532, issue memql#5551). The
+	// caller is a member of the public posting a plain HTML form on a
+	// merchant's storefront, with no JavaScript and no MemQL identity, so
+	// this cannot be an ordinary authenticated route.
+	//
+	// It qualifies under the rule above: with no credentials it fails
+	// CLOSED, and "credentials" here means the edge's stamp naming a site
+	// and an owner. A request without one reaches no read and no write --
+	// readShopperStamp refuses before resolveSite is called, and resolveSite
+	// re-reads the site row UNDER the named owner, so a forged owner reads
+	// zero rows and refuses itself. There is no path through the handler
+	// that reaches a mutation on a request that failed a check it was
+	// configured to make.
+	//
+	// One qualification, and it is a real one rather than pedantry: the
+	// stamp is TRUSTED because the route is classified
+	// servedButNotExternallyRouted, so no front door rule reaches it and the
+	// edge is the only way in. That is a property of the generated ingress
+	// rather than of this code. If a rule for /forms/ is ever added, this
+	// entry stops being true -- which is why TestFrontDoorPathsAreNotStale
+	// and the classification map are where that change would be caught.
+	paths = append(paths, ShopperSurfacePaths()...)
 	paths = append(paths, UnsubscribePaths()...)
 	// GET /t/o/{token} + GET /t/c/{token} -- the campaign open- and
 	// click-tracking endpoints (memql#4823). Authorized by the HMAC-signed

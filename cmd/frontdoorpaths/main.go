@@ -290,6 +290,19 @@ var servedButNotExternallyRouted = map[string]declaration{
 		"Publishing an unauthenticated schema feed nobody dials is cost " +
 		"without benefit; route it the day an HTTP caller exists.",
 		server.ConceptAPIPaths},
+	"ShopperSurfacePaths": {"POST /forms/{pack}/{name} and GET /reads/{pack}/{name} -- a pack's " +
+		"declared shopper surface (epic memql#5532, issue memql#5551). The bff serves them and " +
+		"they are in HandlerAuthorizedPaths(), so this is the inverted pricing exactly: adding a " +
+		"rule here would not cost a 404, it would publish an UNAUTHENTICATED WRITE ENDPOINT at " +
+		"api.<domain> for every pack any cluster ever enables. The only intended caller is the " +
+		"EDGE, which reaches bff-http in-cluster and reaches it having applied the four controls " +
+		"this route depends on -- the per-site switch, the per-address rate limit, the size cap, " +
+		"and stamping the site, store and owner after stripping any copy the client sent. None of " +
+		"those exists on a request that arrived at the front door directly. The handler still " +
+		"fails closed without the stamp, which is what earns its place in " +
+		"HandlerAuthorizedPaths(); this classification is what keeps that a defence in depth " +
+		"rather than the only control.",
+		server.ShopperSurfacePaths},
 }
 
 // withheld returns every path subtracted from the union: the h2c catch-all, plus

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // shopper.go -- THE EDGE HALF OF THE SHOPPER WRITE PATH (epic memql#5532,
@@ -88,14 +90,15 @@ const (
 	defaultShopperRatePerMinute = 10
 )
 
-// Header names the edge stamps and the bff reads. Exported so the bff's
-// handler names the same constants rather than a second copy of the
-// strings -- a wire contract restated in two files is wrong before it
-// drifts.
+// The headers the edge stamps and the bff reads are declared ONCE, in
+// component/memql, because that is the one package both modules can import
+// -- component/server cannot reach component/edge. Aliased here so this
+// file reads as it did and so a reader sees immediately that the names are
+// not this package's to choose.
 const (
-	ShopperSiteHeader  = "X-Memql-Shopper-Site"
-	ShopperStoreHeader = "X-Memql-Shopper-Store"
-	ShopperOwnerHeader = "X-Memql-Shopper-Owner"
+	ShopperSiteHeader  = memql.ShopperSiteHeader
+	ShopperStoreHeader = memql.ShopperStoreHeader
+	ShopperOwnerHeader = memql.ShopperOwnerHeader
 )
 
 // shopperStampHeaders is every header this file controls. Used to STRIP

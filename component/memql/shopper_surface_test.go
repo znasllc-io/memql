@@ -172,11 +172,11 @@ func TestTheSurfaceIsSortedAndComplete(t *testing.T) {
 
 func TestAFieldWithNoBoundStillHasOne(t *testing.T) {
 	f := ShopperField{Name: "body"}
-	if f.effectiveMaxLength() != shopperFieldDefaultMaxLength {
+	if f.EffectiveMaxLength() != shopperFieldDefaultMaxLength {
 		t.Fatalf("an unbounded field must fall back to the package default, got %d",
-			f.effectiveMaxLength())
+			f.EffectiveMaxLength())
 	}
-	if (ShopperField{Name: "body", MaxLength: 10}).effectiveMaxLength() != 10 {
+	if (ShopperField{Name: "body", MaxLength: 10}).EffectiveMaxLength() != 10 {
 		t.Fatal("a declared bound must be honoured")
 	}
 }

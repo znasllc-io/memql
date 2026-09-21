@@ -65,6 +65,48 @@ import (
 // error that reaches a running cluster as a silently-dropped declaration is
 // a shopper surface nobody can find and nobody can audit.
 
+// ---------------------------------------------------------------------------
+// THE WIRE CONTRACT BETWEEN THE EDGE AND THE BFF
+// ---------------------------------------------------------------------------
+//
+// IT LIVES HERE BECAUSE THIS IS THE ONE PACKAGE BOTH SIDES CAN REACH.
+// component/server is its own module and cannot import component/edge (which
+// lives in the unsplit root module, outside that tier's replace directives) --
+// site_bundle_handler.go records the same constraint. The tree's existing
+// answer to that is a duplicated literal with a comment naming the other
+// side, which is how TrackingPaths and campaigns.TrackingOpenPath are kept
+// in step. A duplicated literal is wrong before it drifts, and both modules
+// already require component/memql, so the contract is declared once here and
+// imported by both.
+//
+// If these ever disagree the symptom is silent and ugly: the edge stamps a
+// header the bff does not read, the bff refuses every shopper request for
+// want of a site, and nothing anywhere names the cause.
+
+const (
+	// ShopperFormPathPrefix and ShopperReadPathPrefix are the marker-stripped
+	// roots the bff serves, which the edge reaches by stripping "/_memql"
+	// from "/_memql/forms/..." and "/_memql/reads/...".
+	ShopperFormPathPrefix = "/forms/"
+	ShopperReadPathPrefix = "/reads/"
+
+	// ShopperSiteHeader names the v1:platform:site row the request arrived
+	// on. It is a POINTER, never an assertion: the bff re-reads that row and
+	// re-checks everything about it, so the most a forged value can do is
+	// name a site that really does have its shopper surface on.
+	ShopperSiteHeader = "X-Memql-Shopper-Site"
+	// ShopperStoreHeader names the store the write belongs to -- the serving
+	// binding's, or the preview binding's when a grant is in force. The bff
+	// refuses a value that is neither, so this cannot aim a row at a store
+	// the site is not bound to.
+	ShopperStoreHeader = "X-Memql-Shopper-Store"
+	// ShopperOwnerHeader names the user whose authority the write borrows.
+	// IT IS SELF-CHECKING: the bff reads the site row UNDER THIS USER, and a
+	// user who does not own that site reads zero rows, so a forged owner
+	// refuses itself without any comparison being written down.
+	ShopperOwnerHeader = "X-Memql-Shopper-Owner"
+)
+
 // shopperFieldDefaultMaxLength bounds a declared field that names no bound
 // of its own.
 //
@@ -138,8 +180,9 @@ type ShopperField struct {
 	Description string
 }
 
-// effectiveMaxLength resolves the declared bound.
-func (f ShopperField) effectiveMaxLength() int {
+// EffectiveMaxLength resolves the declared bound. Exported because the
+// bff handler enforces it and lives in another module.
+func (f ShopperField) EffectiveMaxLength() int {
 	if f.MaxLength > 0 {
 		return f.MaxLength
 	}
