@@ -472,7 +472,7 @@ type engineCaller struct {
 	engine memql.IntegrationEngineAccess
 }
 
-// Call runs one named construct.
+// Call runs one named BUILTIN.
 //
 // ONE NODE OR NOTHING. Every construct an adapter calls is a builtin, and a
 // builtin replies with exactly one node; a reply with more would mean the
@@ -481,12 +481,38 @@ func (e *engineCaller) Call(ctx context.Context, construct string, args map[stri
 	if e == nil || e.engine == nil {
 		return nil, fmt.Errorf("wholesale: the pack has no engine handle, so %q cannot be called", construct)
 	}
+	result, err := e.engine.Execute(ctx, renderBuiltinCall(construct, args))
+	if err != nil {
+		return nil, fmt.Errorf("wholesale: %s: %w", construct, err)
+	}
+	rows := memql.MaterializeRows(result)
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("wholesale: %s answered no rows", construct)
+	}
+	return rows[0], nil
+}
+
+// renderBuiltinCall writes the invocation an adapter's construct becomes.
+//
+// THE `builtin ` KEYWORD IS LOAD-BEARING AND IT IS EASY TO LOSE. A bare
+// `name(args)` is the MUTATION form; a builtin is `builtin name(args)` and a
+// query is `query name(args)`. component/memql.ShopperCallPrefix is the
+// engine's own statement of exactly this, and the bff renders every declared
+// shopper route through it -- so this function asks that function rather than
+// spelling the keyword again, and the two cannot drift.
+//
+// Losing it is the kind of mistake a fake Caller cannot catch: every test in
+// this package would go on passing while provisioning failed at runtime
+// against a construct the engine could not resolve. renderBuiltinCall exists
+// as a named function so the rendered TEXT is assertable.
+func renderBuiltinCall(construct string, args map[string]any) string {
 	names := make([]string, 0, len(args))
 	for k := range args {
 		names = append(names, k)
 	}
 	sort.Strings(names)
 	var b strings.Builder
+	b.WriteString(memql.ShopperCallPrefix(memql.ShopperReadKindBuiltin))
 	b.WriteString(construct)
 	b.WriteByte('(')
 	for i, k := range names {
@@ -498,15 +524,7 @@ func (e *engineCaller) Call(ctx context.Context, construct string, args map[stri
 		b.WriteString(renderLiteral(args[k]))
 	}
 	b.WriteByte(')')
-	result, err := e.engine.Execute(ctx, b.String())
-	if err != nil {
-		return nil, fmt.Errorf("wholesale: %s: %w", construct, err)
-	}
-	rows := memql.MaterializeRows(result)
-	if len(rows) == 0 {
-		return nil, fmt.Errorf("wholesale: %s answered no rows", construct)
-	}
-	return rows[0], nil
+	return b.String()
 }
 
 // renderLiteral writes one argument as MemQL source.

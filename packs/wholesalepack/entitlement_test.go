@@ -381,3 +381,56 @@ func TestBothShippedAdaptersAreRegistered(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// The rendered call
+// ---------------------------------------------------------------------------
+
+// THE `builtin ` KEYWORD IS THE ONE THING A FAKE CALLER CANNOT CHECK.
+//
+// Every other test in this package satisfies itself with a fakeCaller, which
+// is right for the state machine and wrong for this: a bare `name(args)` is
+// the MUTATION form, and rendering an adapter's call that way would leave
+// every test here green while provisioning failed at runtime against a
+// construct the engine could not resolve. That is exactly how it was written
+// the first time.
+func TestABuiltinCallCarriesTheBuiltinKeyword(t *testing.T) {
+	got := renderBuiltinCall("shopifyProvisionWholesale", map[string]any{
+		"storeId":       "store-live",
+		"applicationId": "app-1",
+	})
+	const want = `builtin shopifyProvisionWholesale(applicationId: "app-1", storeId: "store-live")`
+	if got != want {
+		t.Fatalf("renderBuiltinCall:\n got %s\nwant %s", got, want)
+	}
+}
+
+// ARGUMENTS ARE SORTED, so the rendered text is a function of the arguments
+// rather than of Go's map iteration order -- which is what makes the
+// assertion above possible at all.
+func TestTheRenderedCallIsStable(t *testing.T) {
+	args := map[string]any{"b": "2", "a": "1", "c": 3, "d": true}
+	first := renderBuiltinCall("x", args)
+	for i := 0; i < 20; i++ {
+		if again := renderBuiltinCall("x", args); again != first {
+			t.Fatalf("unstable rendering:\n %s\n %s", first, again)
+		}
+	}
+	const want = `builtin x(a: "1", b: "2", c: 3, d: true)`
+	if first != want {
+		t.Fatalf("got %s, want %s", first, want)
+	}
+}
+
+// CALLER-SUPPLIED TEXT IS QUOTED BY THE ENGINE'S OWN ESCAPER. A company name
+// reaches this from a public form, so a quote or a backslash in it must not
+// change what is being asked.
+func TestCallerSuppliedTextIsEscaped(t *testing.T) {
+	got := renderBuiltinCall("x", map[string]any{"companyName": `Acme "Trading" \ Co`})
+	if strings.Contains(got, `Acme "Trading"`) {
+		t.Fatalf("an unescaped quote reached the rendered call: %s", got)
+	}
+	if !strings.HasPrefix(got, "builtin x(companyName: ") {
+		t.Fatalf("unexpected shape: %s", got)
+	}
+}
