@@ -55,6 +55,9 @@ func mergeGuardGhStub(t *testing.T, rulesetsJSON, rulesetJSON, prJSON string, co
 	ruleset := write("ruleset.json", rulesetJSON)
 	pr := write("pr.json", prJSON)
 	compare := write("compare.json", cmp)
+	// Every compare target the script asks for, so a test can assert WHICH two
+	// commits were compared and not merely that a comparison happened.
+	compareLog := filepath.Join(dir, "compare-targets")
 
 	stub := `#!/usr/bin/env bash
 # Minimal gh: dispatch on the sub-command, apply --jq with the real jq.
@@ -77,7 +80,7 @@ case "$sub" in
   api)
     target="${args[0]:-}"
     case "$target" in
-      *compare/*)  emit ` + shellQuote(compare) + ` ;;
+      *compare/*)  printf '%s\n' "$target" >> ` + shellQuote(compareLog) + `; emit ` + shellQuote(compare) + ` ;;
       *rulesets/*) emit ` + shellQuote(ruleset) + ` ;;
       *rulesets)   emit ` + shellQuote(rulesets) + ` ;;
       *)           echo '{}' ;;
@@ -141,7 +144,7 @@ func prRollupIn(state, checks string) string {
 	return `{
   "state":"OPEN","title":"t","author":{"login":"znas-io"},
   "mergeable":"MERGEABLE","mergeStateStatus":"` + state + `","reviewDecision":null,
-  "baseRefName":"main","headRefName":"topic",
+  "baseRefName":"main","headRefName":"topic","headRefOid":"0ddc0de0ddc0de0ddc0de0ddc0de0ddc0de0ddc0",
   "statusCheckRollup":[` + checks + `]
 }`
 }
@@ -378,5 +381,52 @@ func TestUnreadableBaseComparisonRefuses(t *testing.T) {
 	}
 	if !strings.Contains(out, "could not compare") {
 		t.Errorf("the refusal must announce which rule applied; output:\n%s", out)
+	}
+}
+
+// THE FORK HAZARD, and why the comparison is built from the OID.
+//
+// A fork pull request's `headRefName` is the FORK's branch name, and the
+// commonest one is `main`. `compare/main...main` resolves BOTH sides in this
+// repository and answers `behind_by: 0`, so a branch-name comparison measures
+// every such pull request as current no matter how stale it is -- fail-open,
+// in the one case nobody writes a test for, which is the same shape as the bug
+// the whole guard exists to close.
+//
+// Verified against the live API 2026-09-21: `compare/main...main` returns
+// `{"ahead_by":0,"behind_by":0}`.
+//
+// The oid names ONE commit, is the commit CI actually ran on, and cannot be
+// re-pointed between the read and the comparison.
+func TestBaseComparisonIsBuiltFromTheHeadOidNotTheBranchName(t *testing.T) {
+	// headRefName is `main` -- the fork case -- while the oid is a real,
+	// distinct commit. A comparison built from the name would ask
+	// `main...main` and be told zero.
+	forkish := `{
+  "state":"OPEN","title":"t","author":{"login":"somebody"},
+  "mergeable":"MERGEABLE","mergeStateStatus":"BLOCKED","reviewDecision":null,
+  "baseRefName":"main","headRefName":"main","headRefOid":"f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0",
+  "statusCheckRollup":[` + ciRequiredGreen + `]
+}`
+	stub := mergeGuardGhStub(t, rulesetsActive, requiresCIRequired, forkish,
+		`{"status":"diverged","ahead_by":1,"behind_by":9}`)
+	out, code := runMergeAsOwner(t, stub)
+
+	targets, err := os.ReadFile(filepath.Join(stub, "compare-targets"))
+	if err != nil {
+		t.Fatalf("the script never compared the head against the base at all: %v\n%s", err, out)
+	}
+	got := string(targets)
+	if !strings.Contains(got, "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0") {
+		t.Errorf("the comparison must name the head OID, not the branch name -- a fork branch "+
+			"called `main` compares against itself and answers zero. asked: %q", got)
+	}
+	if strings.Contains(got, "compare/main...main") {
+		t.Errorf("the script compared main against main, which is always zero commits behind "+
+			"itself. asked: %q", got)
+	}
+	if code != 3 {
+		t.Fatalf("a head 9 commits behind must be refused whatever its branch is called, "+
+			"got exit %d\n%s", code, out)
 	}
 }

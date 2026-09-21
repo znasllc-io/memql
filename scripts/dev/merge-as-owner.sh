@@ -163,13 +163,14 @@ function report_pr() {
     log_step "Pull request ${REPO}#${PR}"
 
     local j
-    j="$(gh pr view "$PR" --repo "$REPO" --json state,title,author,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,baseRefName,headRefName 2>/dev/null)" \
+    j="$(gh pr view "$PR" --repo "$REPO" --json state,title,author,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,baseRefName,headRefName,headRefOid 2>/dev/null)" \
         || { log_error "cannot read ${REPO}#${PR}"; exit 5; }
 
     PR_STATE="$(printf '%s' "$j" | jq -r .state)"
     MERGE_STATE="$(printf '%s' "$j" | jq -r .mergeStateStatus)"
     BASE_REF="$(printf '%s' "$j" | jq -r '.baseRefName // ""')"
     HEAD_REF="$(printf '%s' "$j" | jq -r '.headRefName // ""')"
+    HEAD_OID="$(printf '%s' "$j" | jq -r '.headRefOid // ""')"
 
     printf '%s\n' "$j" | jq -r '
       "  title    : \(.title)",
@@ -189,10 +190,16 @@ function report_pr() {
     # is the author -- which means BEHIND is a state nothing here ever reaches
     # and the guard keyed on it never fires. The comparison below is a fact
     # about two commits, and no stronger blocker can mask it.
+    # BY OID, NEVER BY BRANCH NAME. The head ref of a fork pull request is that
+    # FORK's branch name, and `compare/main...main` resolves both sides in THIS
+    # repository and answers `behind_by: 0` -- a fork PR branched from `main`
+    # would measure as current and merge. The oid names one commit, is the
+    # commit CI actually ran on, and cannot be re-pointed between this read and
+    # the comparison.
     BEHIND_KNOWN=no
     BEHIND_BY=""
-    if [[ -n "$BASE_REF" && -n "$HEAD_REF" ]]; then
-        BEHIND_BY="$(gh api "repos/${REPO}/compare/${BASE_REF}...${HEAD_REF}" --jq '.behind_by' 2>/dev/null || true)"
+    if [[ -n "$BASE_REF" && -n "$HEAD_OID" ]]; then
+        BEHIND_BY="$(gh api "repos/${REPO}/compare/${BASE_REF}...${HEAD_OID}" --jq '.behind_by' 2>/dev/null || true)"
     fi
     if [[ "$BEHIND_BY" =~ ^[0-9]+$ ]]; then
         BEHIND_KNOWN=yes
