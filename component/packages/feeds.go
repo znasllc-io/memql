@@ -22,6 +22,13 @@ const WebhookSourceEnv = "MEMQL_PACKAGES_WEBHOOK_SOURCE"
 
 const defaultWebhookSource = "github"
 
+// DefaultWebhookSource is defaultWebhookSource, exported for ONE reader: the
+// test in app/ that pins this name to the URL the cluster's GitHub App is told
+// to post to (component/identity/githubconnect.WebhookPath) and to the inbound
+// policy registered for it. Three modules spell it, none can import the others
+// downward, and a drift between them is a webhook nothing reads.
+const DefaultWebhookSource = defaultWebhookSource
+
 func webhookSource() string {
 	if v := strings.TrimSpace(envValue(WebhookSourceEnv)); v != "" {
 		return v
