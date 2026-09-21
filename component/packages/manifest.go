@@ -121,13 +121,22 @@ const (
 )
 
 // ManifestBinding is the per-kind connection to the system a deployable
-// fronts. Only shopify_storefront declares one, and it carries a token REF
-// rather than a token: the value names a v1:platform:globalSecret and is
-// resolved at serve time by the edge, which is the pattern the site concept's
-// own `binding` field already documents.
+// fronts. Only shopify_storefront declares one, and since epic memql#5530 it
+// NAMES the store rather than describing it: `store` is a v1:shopify:store
+// row's myshopify.com domain, which the pipeline resolves to a row id at
+// deploy and writes onto the site as {storeId}.
+//
+// WHY THE DOMAIN AND NOT THE ROW ID. A manifest is committed to a product's
+// repository and read by whoever deploys it; a row id is a fact about one
+// cluster's database and means nothing in another. The myshopify.com domain is
+// the one identifier Shopify never changes and the one an operator can check
+// by eye. It is not a hostname in the sense the manifest refuses -- that rule
+// is about THIS cluster's addresses, which are chosen at deploy.
+//
+// It still carries no secret. The Storefront token reference moved to the
+// store row with the domain; the manifest names neither.
 type ManifestBinding struct {
-	StoreDomain        string `yaml:"storeDomain,omitempty"        json:"storeDomain,omitempty"`
-	StorefrontTokenRef string `yaml:"storefrontTokenRef,omitempty" json:"storefrontTokenRef,omitempty"`
+	Store string `yaml:"store,omitempty" json:"store,omitempty"`
 }
 
 // ReadManifest reads and validates the manifest at the root of tree.

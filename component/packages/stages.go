@@ -422,6 +422,9 @@ type SitePublisher interface {
 	// then flips the site row -- so a failed publish leaves the site serving
 	// exactly what it was serving.
 	PublishBundle(ctx context.Context, siteId string, bundle edge.Bundle) (PublishResult, error)
+	// BindSiteToStore re-points an EXISTING site at the store its manifest
+	// names. Called only when the two differ.
+	BindSiteToStore(ctx context.Context, siteId, storeId string) error
 	// RepointSite points a site back at a bundle version that already exists.
 	// THE rollback operation, and it is the same write updateSiteBundle makes
 	// forward -- which is the whole reason bundles live under versioned
@@ -447,11 +450,35 @@ type EnsureSiteRequest struct {
 	DeployableName string
 	Kind           string
 	Hostname       string
-	Binding        *ManifestBinding
-	OwnerUserId    string
+	// StoreId is the v1:shopify:store row the manifest's `store` domain
+	// RESOLVED to on this cluster, never the domain itself: the site's
+	// binding is a reference, so the resolution happens once, in publish,
+	// and what reaches the row is already an id (epic memql#5530).
+	StoreId     string
+	OwnerUserId string
 	// ResolutionTail is the manifest's choice; empty means the kind decides,
 	// which is what createSite writes by omitting the argument entirely.
 	ResolutionTail string
+}
+
+// boundStoreId reads the store a site row is CURRENTLY bound to, out of its
+// `binding` object.
+//
+// It answers "" for every shape that is not {storeId: "<id>"} -- an absent
+// binding, an empty one, and the legacy {storeDomain, storefrontTokenRef}
+// that the migration rewrote. That is the right answer in each case rather
+// than a fallback: "" means "not bound to this store", which is exactly what
+// makes the comparison above write the reference.
+func boundStoreId(row map[string]any) string {
+	if row == nil {
+		return ""
+	}
+	binding, ok := row["binding"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	id, _ := binding["storeId"].(string)
+	return strings.TrimSpace(id)
 }
 
 func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]any, rep *Report, bundles map[string]edge.Bundle) ([]DeployableOutcome, error) {
@@ -511,6 +538,39 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 		hostname := rowString(byName[dep.Name], "hostname")
 		created := false
 		outcome := DeployableOutcome{Name: dep.Name}
+
+		// THE STORE IS RESOLVED HERE, before the first-deploy branch, so the
+		// refusal lands on a redeploy exactly as on a first deploy. A
+		// storefront whose store this cluster does not have is the same
+		// problem whether or not a site row already exists, and resolving
+		// inside the create branch would have let a redeploy quietly keep
+		// serving a store the manifest no longer names.
+		//
+		// Analyze already refused a storefront that names NO store, offline
+		// and fatally; this is the half that needs a cluster.
+		storeId := ""
+		if dep.Kind == KindStorefront && hasBinding(dep.Binding) {
+			named := strings.TrimSpace(dep.Binding.Store)
+			if d.Stores == nil {
+				// Nil is the ANSWER, not a gap -- Deps.Credentials' rule.
+				// Publishing unbound would put a storefront on a hostname
+				// with nothing behind it and report success.
+				return outcomes, refuseScoped(CodeDeployableStoreUnknown, dep.Name,
+					"deployable %q names store %q, and this cluster cannot resolve stores. Attach the store on the deployable's Store panel and deploy again.",
+					dep.Name, named)
+			}
+			resolved, serr := d.Stores(ctx, named)
+			if serr != nil {
+				return outcomes, serr
+			}
+			if strings.TrimSpace(resolved) == "" {
+				return outcomes, refuseScoped(CodeDeployableStoreUnknown, dep.Name,
+					"deployable %q names store %q, and this cluster has no store by that name you may read: either nothing here mirrors it, or it belongs to a tier you are not in. Attach the store on the deployable's Store panel, as somebody who may, and deploy again.",
+					dep.Name, named)
+			}
+			storeId = strings.TrimSpace(resolved)
+		}
+
 		if siteId == "" {
 			placement := req.Placements[dep.Name]
 			requested := strings.TrimSpace(placement.Hostname)
@@ -524,7 +584,7 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 				DeployableName: dep.Name,
 				Kind:           dep.Kind,
 				Hostname:       requested,
-				Binding:        dep.Binding,
+				StoreId:        storeId,
 				ResolutionTail: dep.ResolutionTail,
 				OwnerUserId:    rowString(pkg, "ownerUserId"),
 			})
@@ -535,6 +595,23 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 				return outcomes, berr
 			}
 			d.place(ctx, siteId, dep.Name, placement, &outcome)
+		} else if storeId != "" && storeId != boundStoreId(byName[dep.Name]) {
+			// A REDEPLOY RE-POINTS, and this is deliberately not "set on
+			// create only" like Kind and ResolutionTail.
+			//
+			// The manifest is the DECLARATION of what this storefront fronts.
+			// A manifest that says one store while the site serves another is
+			// a storefront quietly talking to the wrong merchant -- the source
+			// says acme, the shopper's browser is handed beta's catalog, and
+			// neither record disagrees with itself. Kind and the resolution
+			// tail are properties of a site somebody deployed; the store is
+			// the thing the source is ABOUT.
+			//
+			// The comparison costs no read: sitesForPackage already returned
+			// the row this write is about.
+			if berr := d.Publisher.BindSiteToStore(ctx, siteId, storeId); berr != nil {
+				return outcomes, berr
+			}
 		}
 
 		res, perr := d.Publisher.PublishBundle(ctx, siteId, bundle)

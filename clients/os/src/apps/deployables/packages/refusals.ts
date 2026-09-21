@@ -55,6 +55,16 @@ const COPY: Record<string, RefusalCopy> = {
     title: "A storefront has no store to talk to",
     next: "The binding lives in the manifest, beside the deployable it belongs to.",
   },
+  deployable_store_unknown: {
+    // THE OTHER SHAPE OF THE SAME SENTENCE, and the difference is where the
+    // repair is. Above, the manifest says nothing; here it names a store and
+    // this cluster has no such store you may read. One code covers "there is
+    // no such store" and "it is not yours to read", deliberately: separating
+    // them would answer what is on the cluster for somebody outside the tier
+    // that decides who may look.
+    title: "A storefront names a store this cluster does not have",
+    next: "Attach the store on the deployable's Store panel, then deploy again.",
+  },
   deployable_hostname_unchosen: {
     // THE OTHER HALF, and a placement problem rather than a manifest one: the
     // app is fine, nobody has said where it should live. The repair is on the

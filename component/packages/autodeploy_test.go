@@ -88,6 +88,24 @@ func TestThePlanFingerprintIgnoresTheSourceVersionAndNothingElseThatMatters(t *t
 		}
 	})
 
+	// THE CONTROL FOR "re-pointing a storefront parks an automatic deploy".
+	// bindingWord feeds the fingerprint, and it changed shape in epic
+	// memql#5530 -- with no case here, a bindingWord that started returning ""
+	// would leave every store change invisible to the gate, and the source
+	// that pushed it would deploy itself at another merchant without a click.
+	t.Run("a storefront pointed at another store", func(t *testing.T) {
+		tree := spaOnlyPackage()
+		tree[ManifestName] = file(strings.Replace(validManifest,
+			"store: acme.myshopify.com", "store: beta.myshopify.com", 1))
+		changed, aerr := Analyze(tree, Options{SourceVersion: "sha-aaa"})
+		if aerr != nil {
+			t.Fatalf("analyze: %v", aerr)
+		}
+		if PlanFingerprint(changed) == base {
+			t.Fatal("a storefront that now fronts a different merchant is a plan change")
+		}
+	})
+
 	t.Run("an app that became prebuilt", func(t *testing.T) {
 		tree := spaOnlyPackage()
 		tree["clients/web/dist/index.html"] = file("<!doctype html>")
