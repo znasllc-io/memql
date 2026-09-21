@@ -276,6 +276,22 @@ export interface FakeSeed {
   installUrl?: string;
   /** Fails the next `githubConnectBegin` with this server message. */
   connectError?: string;
+  /**
+   * What `githubAppStatus` answers. ABSENT ANSWERS NO ROW, which a surface reads
+   * as "not known" and treats as a cluster that has an app -- so every test
+   * written before the status existed sees exactly what it saw.
+   */
+  githubApp?: { configured: boolean; source?: string; slug?: string; installUrl?: string; canSetup?: boolean };
+  /** Fails `githubAppStatus` with this server message. */
+  githubAppError?: string;
+  /** What `githubAppSetupBegin` answers as the page to navigate to. */
+  appSetupUrl?: string;
+  /** What `githubAppSetupBegin` answers as its reason. Defaults to `ok`. */
+  appSetupReason?: string;
+  /** Fails the next `githubAppSetupBegin` with this server message. */
+  appSetupError?: string;
+  /** What `githubAppRemove` answers as its reason. Defaults to `ok`, removed. */
+  appRemoveReason?: string;
 }
 
 export interface FakeConnection {
@@ -541,6 +557,36 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
             installUrl: seed.installUrl ?? "",
           } as unknown as Row,
         ]);
+      }
+
+      // THE FLAGS AS TEXT, for `sourceCredentialRevoke`'s reason above: that is
+      // how a scalar boolean has reached this client on a builtin's reply row.
+      if (call === "builtin githubAppStatus()") {
+        if (seed.githubAppError !== undefined) throw new Error(seed.githubAppError);
+        const app = seed.githubApp;
+        if (app === undefined) return builtinReply("githubAppStatus", []);
+        return builtinReply("githubAppStatus", [
+          {
+            configured: app.configured ? "true" : "false",
+            source: app.source ?? (app.configured ? "environment" : ""),
+            slug: app.slug ?? (app.configured ? "memql-on-example" : ""),
+            installUrl: app.installUrl ?? "",
+            canSetup: app.canSetup ? "true" : "false",
+          } as unknown as Row,
+        ]);
+      }
+
+      if (call.startsWith("builtin githubAppSetupBegin(")) {
+        if (seed.appSetupError !== undefined) throw new Error(seed.appSetupError);
+        const reason = seed.appSetupReason ?? "ok";
+        return builtinReply("githubAppSetupBegin", [
+          { startUrl: reason === "ok" ? (seed.appSetupUrl ?? "") : "", reason } as unknown as Row,
+        ]);
+      }
+
+      if (call === "builtin githubAppRemove()") {
+        const reason = seed.appRemoveReason ?? "ok";
+        return builtinReply("githubAppRemove", [{ removed: reason === "ok" ? "true" : "false", reason } as unknown as Row]);
       }
 
       if (call.startsWith("builtin sourceRepositories(")) {

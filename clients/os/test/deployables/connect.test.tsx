@@ -23,6 +23,8 @@ import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import { RepositoryPicker } from "../../src/apps/deployables/sources/RepositoryPicker";
 import { useSourceRepositories } from "../../src/apps/deployables/sources/useGithubConnect";
+import { copyFor } from "../../src/apps/deployables/packages/refusals";
+import { APP_REGISTERED, ConnectReturnNotice } from "../../src/apps/deployables/sources/ConnectReturnNotice";
 import {
   CONNECT_RESULT_PARAM,
   captureConnectReturn,
@@ -297,6 +299,31 @@ describe("the return from GitHub", () => {
       expect(result).toEqual({ section: "deployables", reason });
       expect(connectSucceeded(result!)).toBe(["resultConnected", "resultReconnected"].includes(name));
     }
+
+    // THE SETUP TRIP'S OUTCOMES, none of which is a connection: even the good
+    // one only says the cluster now has an app, and this person's account is
+    // still to connect.
+    const setup = source("http/github_app_callback.go");
+    expect(valueIn(setup, "resultAppRegistered")).toBe(APP_REGISTERED);
+    for (const name of ["resultAppRegistered", "resultAppSetupStateInvalid", "resultAppSetupFailed", "resultAppManagedByEnv", "resultAppSetupNotAnOwner"]) {
+      const reason = valueIn(setup, name);
+      const result = readConnectReturn(`?connect=deployables&${param}=${reason}`);
+      expect(result).toEqual({ section: "deployables", reason });
+      expect(connectSucceeded(result!)).toBe(false);
+      // Every refusal among them has this build's own headline: a setup that
+      // failed under "This cluster refused" would be a fault with no repair.
+      if (reason !== APP_REGISTERED) expect(copyFor(reason), reason).not.toBeNull();
+    }
+  });
+
+  it("says what is left to do when a registration could not go on to connecting", () => {
+    render(<ConnectReturnNotice result={{ section: "deployables", reason: APP_REGISTERED }} />);
+    expect(screen.getByText("GitHub is set up for this cluster. Connect your account to choose its repositories.")).toBeTruthy();
+    cleanup();
+    // ...and a setup that failed says which trip did not finish.
+    render(<ConnectReturnNotice result={{ section: "deployables", reason: "github_app_setup_failed" }} />);
+    expect(screen.getByText("GitHub could not be set up")).toBeTruthy();
+    expect(screen.getByText("GitHub sent you back without setting this cluster up.")).toBeTruthy();
   });
 
   it("reopens Deployables once after the production reconnect redirect", async () => {
@@ -881,6 +908,76 @@ describe("Settings > Sources", () => {
     expect(connection.callsNamed("githubConnectBegin")).toHaveLength(1);
   });
 
+  // THE CLUSTER'S GITHUB APP, as this group meets it. The case above is what a
+  // cluster that cannot say in advance still gets; one that can is asked as
+  // the group opens.
+  it("offers a cluster owner Set up GitHub in place of a Connect that cannot work", async () => {
+    const assigned = stubNavigation();
+    const { connection } = mountSources({
+      credentials: [],
+      githubApp: { configured: false, canSetup: true },
+      appSetupUrl: "https://identity.example.test/auth/github/app/new?state=s1",
+    });
+    const group = await sourcesGroup();
+    const setUp = await within(group).findByRole("button", { name: "Set up GitHub" });
+    expect(within(group).queryByRole("button", { name: "Connect GitHub" })).toBeNull();
+
+    // An organization with no login has nothing to be registered under, so
+    // the act is ABSENT until there is one.
+    await click(within(group).getByRole("radio", { name: "An organization" }));
+    expect(within(group).queryByRole("button", { name: "Set up GitHub" })).toBeNull();
+    await click(within(group).getByRole("radio", { name: "Your account" }));
+
+    await click(within(group).getByRole("button", { name: "Set up GitHub" }));
+    expect(setUp).toBeTruthy();
+    await waitFor(() => expect(assigned).toEqual(["https://identity.example.test/auth/github/app/new?state=s1"]));
+    expect(connection.callsNamed("githubAppSetupBegin")).toEqual([
+      'builtin githubAppSetupBegin(returnPath: "/?connect=settings", organization: "")',
+    ]);
+  });
+
+  it("tells somebody who is not a cluster owner who can, and offers them nothing to press", async () => {
+    mountSources({ credentials: [], githubApp: { configured: false, canSetup: false } });
+    const group = await sourcesGroup();
+    expect(await within(group).findByText(/A cluster owner sets that up once; until then, add an access token below/)).toBeTruthy();
+    expect(within(group).queryByRole("button", { name: "Connect GitHub" })).toBeNull();
+    expect(within(group).queryByRole("button", { name: "Set up GitHub" })).toBeNull();
+    // The other way in is still here, and is what the sentence points at.
+    expect(within(group).getByRole("button", { name: "Add a credential" })).toBeTruthy();
+  });
+
+  it("shows a cluster owner which app the cluster uses, and removes one registered from here", async () => {
+    const { connection } = mountSources({
+      credentials: [],
+      githubApp: { configured: true, source: "cluster", slug: "memql-on-lab", canSetup: true },
+    });
+    const block = await screen.findByRole("region", { name: "GitHub App" });
+    const link = within(block).getByRole("link", { name: "memql-on-lab" });
+    expect(link.getAttribute("href")).toBe("https://github.com/apps/memql-on-lab");
+    expect(within(block).getByText(/registered from here/)).toBeTruthy();
+
+    // ARMED FIRST: the sentence says what stops working, and what removing
+    // does NOT do -- the app stays at GitHub.
+    await click(within(block).getByRole("button", { name: "Remove" }));
+    expect(connection.callsNamed("githubAppRemove")).toHaveLength(0);
+    expect(within(block).getByText(/stays at GitHub until it is deleted there/)).toBeTruthy();
+    await click(within(block).getAllByRole("button", { name: "Remove" }).at(-1)!);
+    await waitFor(() => expect(connection.callsNamed("githubAppRemove")).toHaveLength(1));
+    // ...and the status is read again, because the answer just changed.
+    await waitFor(() => expect(connection.callsNamed("githubAppStatus").length).toBeGreaterThan(1));
+  });
+
+  it("offers no Remove for an app the deployment's environment sets", async () => {
+    mountSources({
+      credentials: [],
+      githubApp: { configured: true, source: "environment", slug: "memql-ops", canSetup: false },
+    });
+    const block = await screen.findByRole("region", { name: "GitHub App" });
+    expect(within(block).getByText(/set by the deployment's environment/)).toBeTruthy();
+    // Absent, never disabled: it is not changed from here by anybody.
+    expect(within(block).queryByRole("button", { name: "Remove" })).toBeNull();
+  });
+
   it("shows the connected account, its reach, and where to install another", async () => {
     const { connection } = mountSources({
       credentials: [GRANT],
@@ -1314,15 +1411,18 @@ describe("the compose Source stop, without one", () => {
     h.connection = null;
   });
 
-  it("offers Connect above the token form, and asks the cluster nothing until something is pressed", async () => {
+  it("offers Connect above the token form, and mints nothing until something is pressed", async () => {
     const { connection, region } = await composeSource({ credentials: [] });
 
     await waitFor(() => expect(floorAct("Connect GitHub")).toBeTruthy());
     // THE TWO WAYS IN ARE ONE CHOICE, as equals, with GitHub chosen.
     expect(within(region).getByRole("radio", { name: "GitHub" }).getAttribute("aria-checked")).toBe("true");
     expect(within(region).getByRole("radio", { name: "A token" }).getAttribute("aria-checked")).toBe("false");
-    // Beginning a connect mints a state row, so nothing asks whether this
-    // cluster has an app until somebody presses something.
+    // Beginning a connect mints a state row, so it is never how the wizard
+    // finds out whether this cluster has an app. The status is a READ, asked
+    // once as the wizard opens -- and this fake answers it no row, which is
+    // "not known", which keeps Connect on offer.
+    expect(connection.callsNamed("githubAppStatus")).toHaveLength(1);
     expect(connection.callsNamed("githubConnectBegin")).toHaveLength(0);
     expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
     // The fold is closed, and one click away.
@@ -1365,6 +1465,120 @@ describe("the compose Source stop, without one", () => {
     expect(within(region).queryByRole("button", { name: "Connect GitHub" })).toBeNull();
     expect(within(region).queryByRole("radio", { name: "A token" })).toBeNull();
     expect(within(region).getByLabelText(URL_FIELD)).toBeTruthy();
+  });
+});
+
+// A CLUSTER WITH NO GITHUB APP, KNOWN BEFORE ANYBODY PRESSES. The reading
+// above -- press Connect, be refused -- is what an engine that cannot say in
+// advance still gets. One that can is asked as the wizard opens, and the step
+// offers what can actually be done.
+describe("the compose Source stop, on a cluster with no GitHub App", () => {
+  afterEach(() => {
+    restoreLocation?.();
+    h.connection = null;
+  });
+
+  const NO_APP_OWNER = { configured: false, canSetup: true };
+
+  it("offers a cluster owner Set up GitHub on the floor, and never Connect", async () => {
+    const assigned = stubNavigation();
+    const { connection, region } = await composeSource({
+      credentials: [],
+      githubApp: NO_APP_OWNER,
+      appSetupUrl: "https://identity.example.test/auth/github/app/new?state=s1",
+    });
+
+    await waitFor(() => expect(floorAct("Set up GitHub")).toBeTruthy());
+    expect(floorAct("Connect GitHub")).toBeNull();
+    expect(within(region).getByText(/This cluster is not linked to GitHub yet/)).toBeTruthy();
+    // ONE QUESTION: whose GitHub account the app is registered under. Their
+    // own is the default, and it asks for nothing more.
+    expect(within(region).getByRole("radio", { name: "Your account" }).getAttribute("aria-checked")).toBe("true");
+    expect(within(region).queryByLabelText("The organization's GitHub login")).toBeNull();
+    // Nothing has been minted by looking.
+    expect(connection.callsNamed("githubAppSetupBegin")).toHaveLength(0);
+
+    await click(floorAct("Set up GitHub")!);
+    await waitFor(() => expect(assigned).toEqual(["https://identity.example.test/auth/github/app/new?state=s1"]));
+    // The return path is THIS step, and an own-account registration names no
+    // organization -- sent empty rather than omitted, one call shape.
+    const call = connection.callsNamed("githubAppSetupBegin")[0]!;
+    expect(call).toContain(`returnPath: ${JSON.stringify(returnPathFor("deployables"))}`);
+    expect(call).toContain('organization: ""');
+  });
+
+  it("asks for the organization by login, and has no act until it is named", async () => {
+    const assigned = stubNavigation();
+    const { connection, region } = await composeSource({
+      credentials: [],
+      githubApp: NO_APP_OWNER,
+      appSetupUrl: "https://identity.example.test/auth/github/app/new?state=s2",
+    });
+    await waitFor(() => expect(floorAct("Set up GitHub")).toBeTruthy());
+
+    await click(within(region).getByRole("radio", { name: "An organization" }));
+    // ABSENT, never disabled: there is nothing to register the app under yet,
+    // and the floor says what it is waiting for.
+    expect(floorAct("Set up GitHub")).toBeNull();
+    expect(screen.getByText("Name the organization")).toBeTruthy();
+
+    await typeInto(within(region).getByLabelText("The organization's GitHub login") as HTMLInputElement, " acme-labs ");
+    await click(floorAct("Set up GitHub")!);
+    await waitFor(() => expect(assigned).toHaveLength(1));
+    expect(connection.callsNamed("githubAppSetupBegin")[0]).toContain('organization: "acme-labs"');
+  });
+
+  it("renders a refused setup in place, and navigates nowhere", async () => {
+    const assigned = stubNavigation();
+    const { region } = await composeSource({
+      credentials: [],
+      githubApp: NO_APP_OWNER,
+      appSetupReason: "github_app_setup_invalid",
+    });
+    await waitFor(() => expect(floorAct("Set up GitHub")).toBeTruthy());
+    await click(floorAct("Set up GitHub")!);
+
+    expect(await within(region).findByText("That is not a GitHub organization's login.")).toBeTruthy();
+    expect(assigned).toEqual([]);
+    // The act is still there: the person corrects the login and asks again.
+    expect(floorAct("Set up GitHub")).toBeTruthy();
+  });
+
+  it("offers somebody who is not a cluster owner no act at all, and says who can", async () => {
+    const { connection, region } = await composeSource({
+      credentials: [],
+      githubApp: { configured: false, canSetup: false },
+    });
+
+    expect(await within(region).findByText(/A cluster owner sets that up once; until then, choose A token/)).toBeTruthy();
+    // Rule 12: absent, never disabled. Not Connect, which cannot work, and not
+    // Set up, which is not theirs.
+    expect(floorAct("Connect GitHub")).toBeNull();
+    expect(floorAct("Set up GitHub")).toBeNull();
+    expect(within(region).queryByRole("radio", { name: "Your account" })).toBeNull();
+    expect(connection.callsNamed("githubConnectBegin")).toHaveLength(0);
+    // THE TOKEN IS ONE CHOICE AWAY, and the step is an ordinary one again.
+    await click(within(region).getByRole("radio", { name: "A token" }));
+    expect(within(region).getByLabelText(URL_FIELD)).toBeTruthy();
+    expect(within(region).queryByText(/not linked to GitHub/)).toBeNull();
+  });
+
+  it("offers Connect as ever on a cluster that has one", async () => {
+    const { region } = await composeSource({
+      credentials: [],
+      githubApp: { configured: true, source: "cluster", slug: "memql-on-example", canSetup: true },
+    });
+    await waitFor(() => expect(floorAct("Connect GitHub")).toBeTruthy());
+    expect(floorAct("Set up GitHub")).toBeNull();
+    expect(within(region).queryByText(/not linked to GitHub/)).toBeNull();
+  });
+
+  it("keeps Connect on offer when the status could not be read", async () => {
+    // "Did not answer" is not "no app": reading it that way would take Connect
+    // away from every cluster whose status read merely failed.
+    const { region } = await composeSource({ credentials: [], githubAppError: "unknown builtin githubAppStatus" });
+    await waitFor(() => expect(floorAct("Connect GitHub")).toBeTruthy());
+    expect(within(region).queryByText(/not linked to GitHub/)).toBeNull();
   });
 });
 

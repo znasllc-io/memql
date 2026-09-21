@@ -264,6 +264,16 @@ surface in the shell that read as a single thought.
   button, not a button in the step. The step says what it needs (a first
   connection, a fresh one, nothing) because only the step has GitHub's own
   answer about the grant; the page draws the act.
+- **A step knows before it offers.** An act that cannot work is not offered and
+  then taken back. The Repository step used to offer Connect GitHub on every
+  cluster and learn from the refusal that this one had no GitHub App -- then
+  swap itself for a notice telling a cluster owner to ask an operator. It asks
+  first now, with a read that writes nothing, and offers what can be done:
+  Connect where there is an app, Set up GitHub where there is none and this
+  person may register one, and for anybody else no act at all -- the step says
+  who can, and the other way in is one choice away. "Not known" is not "no":
+  when the question goes unanswered the old offer stands, and the refusal
+  still lands in place.
 - **The orb names the subject.** The gate wears the MemQL mark, because what is
   being set up there is the cluster. An add wears the thing being added: a
   globe, a machine, a rocket. Same circle, same theme tokens.
