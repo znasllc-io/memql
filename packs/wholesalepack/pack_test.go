@@ -162,3 +162,21 @@ func TestPackShipsDisabled(t *testing.T) {
 			"collects is a named person's business contact details")
 	}
 }
+
+// wholesaleTree is the pack's own embedded subtree, for the tests that read
+// its declarations back.
+func wholesaleTree(t *testing.T) fs.FS {
+	t.Helper()
+	return wholesalepack.Tree()
+}
+
+// newTestProvider builds a provider with no engine, which is enough to ask
+// it what capabilities it exposes.
+func newTestProvider(t *testing.T) memql.IntegrationProvider {
+	t.Helper()
+	p, err := wholesalepack.NewProvider(memql.PluginContext{Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+	return p
+}
