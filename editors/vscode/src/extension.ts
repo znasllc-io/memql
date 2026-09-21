@@ -502,6 +502,12 @@ export function activate(context: ExtensionContext): MemqlExtensionApi {
     const trustGranted = workspace.onDidGrantWorkspaceTrust(() => {
       trustGranted.dispose();
       registerRuntimeSurface(context);
+      // The language reference is registered OUTSIDE this gate, so a panel may
+      // already be open -- bound, when it opened, over a host that had no
+      // ConnectionManager to subscribe to. This is the moment that changed,
+      // and nothing else is in a position to tell it. A no-op when no panel is
+      // open, which is the ordinary case.
+      LanguageReferencePanel.connectionSurfaceChanged();
     });
     context.subscriptions.push(trustGranted);
   }
@@ -530,13 +536,15 @@ export function activate(context: ExtensionContext): MemqlExtensionApi {
  * surface exists (and, in an untrusted window, before it may ever exist), so a
  * value read now would be `undefined` forever.
  *
- * THE ONE GAP, stated rather than hidden: a panel opened in an untrusted
- * window subscribes to nothing, because there is no ConnectionManager to
- * subscribe to. Granting trust and connecting therefore does not refresh a
- * panel that is already open -- running the command again does, since `open()`
- * re-points the deps and re-reads. In a trusted window, which is every window
- * that can connect at all, the manager exists from activation and the panel
- * follows every connect, disconnect and cluster switch.
+ * A PANEL OPENED BEFORE THE CONNECTION SURFACE EXISTS still follows it
+ * afterwards, and that takes two things rather than one. `onDidChangeConnection`
+ * here returns a no-op unsubscribe while `connections` is undefined -- there is
+ * nothing to subscribe to -- so binding it once would leave an untrusted
+ * window's panel deaf for the rest of its life. `open()` re-subscribes on every
+ * invocation, and the workspace-trust listener above calls
+ * `LanguageReferencePanel.connectionSurfaceChanged()` for the panel nobody is
+ * about to re-open. Between them, a panel follows every connect, disconnect and
+ * cluster switch in every window.
  */
 function registerLanguageReference(context: ExtensionContext): void {
   context.subscriptions.push(
@@ -572,7 +580,10 @@ function languageClusterReader(): LanguageClusterReader | undefined {
     name: state.clusterName,
     edition: connections?.edition,
     grammarVersion: connections?.grammarVersion,
-    executeNamed: (name, call) => query.executeNamed(name, call),
+    // `options` carries the panel's read deadline through as the SDK's own
+    // QueryCallOptions.signal, which is what lets a page give up on a cluster
+    // that takes the call and never answers.
+    executeNamed: (name, call, options) => query.executeNamed(name, call, options),
   };
 }
 

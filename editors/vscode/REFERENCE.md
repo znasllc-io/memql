@@ -76,14 +76,20 @@ and prints the edition, status and grammar version this extension was *built*
 against -- which is the language its bundled server is giving you completion
 and diagnostics in. It is not an empty pane and it is not a spinner.
 
+**And it is not a spinner when a cluster goes quiet either.** The two reads are
+given 20 seconds. On expiry the page names the call that did not answer, says
+the cluster may still be working on it, repeats what the extension knows on its
+own, and offers **Try again** -- which is the state a read that is refused
+outright reaches too.
+
 **It is the one MemQL command that is not gated on workspace trust.** It reads
 no credential and opens no connection of its own: in a restricted folder it
 shows the pinned language and says why there is no cluster to ask. Everything
 under [the five views](#the-five-views-and-which-question-each-answers) stays
-gated. One consequence worth knowing: a panel opened in a restricted window
-does not refresh by itself when you later trust the workspace and connect --
-run the command again. In a trusted window it follows every connect,
-disconnect and cluster switch on its own.
+gated. A panel opened in a restricted folder still follows the cluster once you
+trust the workspace: trusting it re-binds the panel, and so does re-running the
+command. In every window it then follows every connect, disconnect and cluster
+switch on its own.
 
 ## The five views, and which question each answers
 

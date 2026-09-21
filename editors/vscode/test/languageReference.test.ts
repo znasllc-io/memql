@@ -218,6 +218,30 @@ test("the copied vocabulary names the language it describes, and separates on ta
 // Search
 // -----------------------------------------------------------------------------
 
+test("only a production is counted against a count that says productions", () => {
+  // THE DEFECT THIS FAILS AGAINST: the counter counted every `data-search`
+  // item, and the grammar's own comment blocks are searchable without being
+  // productions -- so a term matching only the header read "1 of 126
+  // productions" with no production on the screen at all.
+  const html = page();
+  assert.equal((html.match(/data-search="/g) ?? []).length, 8, "searchable items");
+  assert.equal(
+    (html.match(/data-tally/g) ?? []).length,
+    7,
+    "the grammar's header comment is being counted as a production",
+  );
+
+  const script = languageReferenceScript();
+  assert.ok(
+    script.includes("hasAttribute('data-tally')"),
+    "the counter counts every filterable item again, comments included",
+  );
+  // The no-match line keys on what is VISIBLE rather than on what is counted:
+  // a term matching only the comment leaves something on screen, and "nothing
+  // matches" printed above it would be the page arguing with itself.
+  assert.ok(script.includes("none.hidden = shown !== 0"), "the no-match line follows the tally");
+});
+
 /**
  * Every searchable item's index, as the BROWSER sees it.
  *
@@ -342,6 +366,35 @@ test("a name that looks like markup renders as text, everywhere it appears", () 
   assert.equal(html.includes('onerror="1"'), false, "a raw quote survived into data-search");
 });
 
+test("an ampersand survives as an ampersand, and cannot become a tag by a second pass", () => {
+  // `&` IS THE CASE THE FIRST ROUND MISSED, and the language is full of it:
+  // `<expr-7>` is written `<expr-6> { "&&" <expr-6> }`. Two claims here, and
+  // the second is the one that bites: an entity is escaped as text, so a
+  // description that literally reads `&lt;b&gt;` renders those nine characters
+  // rather than a bold tag somebody typed their way into.
+  const html = page({
+    vocabulary: vocabularyArtifact([
+      {
+        kind: "operator",
+        name: "&&",
+        signature: "a && b",
+        description: "Both. Written &lt;b&gt; by nobody, and A&B by somebody.",
+      },
+    ]),
+  });
+  assert.ok(html.includes("&amp;&amp;"), "the operator's name did not render escaped");
+  assert.ok(html.includes("a &amp;&amp; b"), "the signature did not render escaped");
+  assert.ok(html.includes("A&amp;B"), "a bare ampersand in prose did not render escaped");
+  assert.ok(
+    html.includes("&amp;lt;b&amp;gt;"),
+    "an entity in the text was passed through, so a description can smuggle a tag",
+  );
+  assert.equal(html.includes("&lt;b&gt;"), false, "the text's own entity reached the page live");
+  // And in the search index, which is the same string a second time.
+  const index = indexes(html).find((candidate) => candidate.includes("a && b"));
+  assert.ok(index !== undefined, "the index lost the ampersands on the way through the attribute");
+});
+
 test("the grammar's angle brackets survive as text", () => {
   const html = page();
   assert.ok(html.includes("&lt;file&gt;"), "a production name did not render escaped");
@@ -362,6 +415,23 @@ test("the page names the edition, its status and the grammar version", () => {
   assert.ok(html.includes("frozen"), "no status");
   assert.ok(html.includes("2026.09-example-0123abcd"), "no grammar version");
   assert.match(html, /Read from the cluster local/);
+});
+
+test("only a frozen edition gets the badge that reads as good news", () => {
+  // THE DEFECT THIS FAILS AGAINST: any non-empty status went into the
+  // accent-coloured badge, so a future `draft` would have been printed in the
+  // colour this page uses for "the forms you are writing keep loading" -- which
+  // is precisely what a draft edition does not promise.
+  const frozen = page();
+  assert.ok(frozen.includes(`<span class="badge ok">frozen</span>`), "frozen lost its badge");
+
+  const draft = page({ identity: languageIdentity({ pin: { ...PIN, status: "draft" } }) });
+  assert.ok(draft.includes(`<span class="badge">draft</span>`), "draft did not render plainly");
+  assert.equal(
+    draft.includes(`<span class="badge ok">draft</span>`),
+    false,
+    "a draft edition is being printed as good news",
+  );
 });
 
 test("the status is WITHHELD for an edition this extension does not record", () => {
@@ -454,12 +524,39 @@ test("a failed read shows the failure, names the language, and offers the retry"
   });
   assert.match(html, /memqlGrammar\(\) could not be read: stream closed/);
   // Not a spinner: the header still says which cluster and which language, and
-  // the body says what came back.
-  assert.match(html, /answered with neither artifact/);
+  // the body says what came back. "Neither came back" rather than "answered
+  // with neither", because a timed-out read lands here too and a cluster that
+  // never answered has not answered with anything.
+  assert.match(html, /Neither artifact came back from local/);
   assert.ok(html.includes("2026.09-example-0123abcd"));
   // A dropped socket is a failure the next attempt succeeds at; without this
   // the only retry is closing the tab.
   assert.equal(html.match(/data-act="reload"/g)?.length, 1, "exactly one Try again");
+});
+
+test("a cluster that answered with nothing still leaves the reader the extension's own language", () => {
+  // The identity block is describing the CLUSTER here, correctly -- it is what
+  // was asked. Without this line the reader is left with a failure and nothing
+  // about the language their editor is giving them completion in right now,
+  // which is the one thing still true when a read times out or is refused.
+  const html = page({
+    grammar: undefined,
+    vocabulary: undefined,
+    pin: PIN,
+    error: "memqlGrammar() did not answer within 20s, so the read was given up.",
+    loading: false,
+  });
+  assert.match(
+    html,
+    /built against edition 2026 \(frozen\), grammar 2026\.09-example-0123abcd/,
+  );
+  // And not on a page that has the artifacts: there it would be noise beside
+  // the cluster's own answer.
+  assert.equal(
+    page({ pin: PIN }).includes("What this extension knows on its own is unchanged"),
+    false,
+    "the fallback is printed over a page that got its artifacts",
+  );
 });
 
 test("a successful read offers no retry, and a disconnected page offers none either", () => {

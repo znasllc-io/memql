@@ -40,6 +40,7 @@ import {
   type GrammarArtifact,
   type GrammarBlock,
   type LanguageIdentity,
+  type LanguagePin,
   type VocabularyArtifact,
   type VocabularyEntry,
 } from "../state/languageReference.js";
@@ -48,6 +49,17 @@ import {
 export interface LanguageReferenceInput {
   /** Which language this is, and on whose authority. */
   identity: LanguageIdentity;
+  /**
+   * This extension's own pin, for the case where a cluster was asked and did
+   * not answer.
+   *
+   * The identity block then rightly describes the CLUSTER -- it is the thing
+   * that was asked -- so the reader would otherwise be left with a failure and
+   * nothing at all about the language their editor is currently giving them
+   * completion in. Optional, because a page that has both artifacts has no use
+   * for it.
+   */
+  pin?: LanguagePin | undefined;
   /** The cluster's grammar, when one has been read. */
   grammar?: GrammarArtifact | undefined;
   /** The cluster's vocabulary, when one has been read. */
@@ -77,6 +89,16 @@ export const COPY_VOCABULARY = "copyVocabulary";
 export const SEARCH_MESSAGE = "search";
 /** The message the page posts from its "Select Cluster" button. */
 export const SELECT_CLUSTER = "selectCluster";
+/**
+ * The message the page posts from "Try again".
+ *
+ * A CONSTANT like the other four, and for the reason they are: the button that
+ * emits it and the handler that answers it live in different modules, and a
+ * pair of bare literals that must agree is a pair that can silently disagree.
+ * The failure is a button that does nothing, on the page whose whole job at
+ * that moment is to offer a way out.
+ */
+export const RELOAD = "reload";
 
 export function renderLanguageReferencePage(input: LanguageReferenceInput): string {
   return `<h1>MemQL language reference</h1>
@@ -94,12 +116,20 @@ ${bodyHtml(input)}`;
  * either way. An edition whose status this extension cannot state gets the
  * sentence saying so rather than a blank row, because a missing status and a
  * draft edition look identical as an absence.
+ *
+ * THE BADGE READS THE VALUE. `badge ok` is the accent-coloured one, and it
+ * means "the forms you are writing keep loading" -- which is what FROZEN says
+ * and what every other status does not. A badge that turned any non-empty
+ * value green would print `draft` as good news, and a draft edition is the one
+ * whose forms may not be there next month.
  */
 function identityHtml(identity: LanguageIdentity): string {
   const status =
     identity.status === ""
       ? `<span class="lr-unstated">not stated</span>`
-      : `<span class="badge ok">${escapeHtml(identity.status)}</span>`;
+      : `<span class="badge${identity.status === "frozen" ? " ok" : ""}">${escapeHtml(
+          identity.status,
+        )}</span>`;
   const rows: string[] = [
     fact("edition", identity.edition === "" ? "not stated" : identity.edition, ""),
     fact("status", "", `${status} <span class="lr-note">${escapeHtml(identity.statusNote)}</span>`),
@@ -138,7 +168,7 @@ function retryHtml(input: LanguageReferenceInput): string {
   if (input.error === "" && (input.grammar !== undefined || input.vocabulary !== undefined)) {
     return "";
   }
-  return `<div class="actions"><button class="secondary" type="button" data-act="reload">Try again</button></div>`;
+  return `<div class="actions"><button class="secondary" type="button" data-act="${RELOAD}">Try again</button></div>`;
 }
 
 /**
@@ -162,9 +192,30 @@ ${vocabularyHtml(vocabulary)}`;
       input.identity.cluster,
     )}...</p>`;
   }
+  // "Neither came back" rather than "answered with neither", because this is
+  // also the sentence a TIMED-OUT read lands on -- and a cluster that never
+  // answered has not answered with anything.
   return `<h2>Grammar and vocabulary</h2>
 <p class="lr-pending">${escapeHtml(
-    `${input.identity.cluster} answered with neither artifact. Both are served by the memqlGrammar() and memqlVocabulary() builtins; a cluster that has them will answer, and one too old to have them refuses the call by name.`,
+    `Neither artifact came back from ${input.identity.cluster}. Both are served by the memqlGrammar() and memqlVocabulary() builtins; a cluster that has them answers, and one too old to have them refuses the call by name.`,
+  )}</p>
+${pinFallbackHtml(input.pin)}`;
+}
+
+/**
+ * What the extension knows, for a page that asked a cluster and got nothing.
+ *
+ * The identity block above describes the CLUSTER, because the cluster is what
+ * was asked -- so without this the reader is left with a failure and nothing
+ * about the language their editor is giving them completion in RIGHT NOW,
+ * which is the one thing still true when a read times out or is refused.
+ */
+function pinFallbackHtml(pin: LanguagePin | undefined): string {
+  if (pin === undefined || pin.edition === "") return "";
+  const status = pin.status === "" ? "" : ` (${pin.status})`;
+  const grammar = pin.grammarVersion === "" ? "" : `, grammar ${pin.grammarVersion}`;
+  return `<p class="lr-note">${escapeHtml(
+    `What this extension knows on its own is unchanged: it was built against edition ${pin.edition}${status}${grammar}, and that is what its own completion, diagnostics and highlighting speak.`,
   )}</p>`;
 }
 
@@ -244,11 +295,21 @@ ${empty(
 </div>`;
 }
 
-/** One production (or one of the cluster's own comments) as searchable text. */
+/**
+ * One production, or one of the cluster's own comments, as searchable text.
+ *
+ * BOTH ARE FILTERABLE (`data-search`) AND ONLY A PRODUCTION IS COUNTED
+ * (`data-tally`). The grammar carries two comment blocks -- its header and a
+ * note under the annotations banner -- and counting them against a total that
+ * says "126 productions" made a search matching only the header read "1 of 126
+ * productions" with no production on screen. A count has to count what its
+ * label claims.
+ */
 function blockHtml(block: GrammarBlock): string {
   const text = block.lines.join("\n");
   const index = searchIndex([block.name, text]);
-  return `<pre class="lr-production" data-search="${escapeHtml(index)}">${escapeHtml(text)}</pre>`;
+  const tally = block.name === "" ? "" : " data-tally";
+  return `<pre class="lr-production" data-search="${escapeHtml(index)}"${tally}>${escapeHtml(text)}</pre>`;
 }
 
 /** The vocabulary pane, grouped by the kinds the cluster named. */
@@ -291,7 +352,10 @@ function entryHtml(entry: VocabularyEntry): string {
     entry.description === ""
       ? `<p class="lr-desc lr-unstated">This cluster carries no description for it.</p>`
       : `<p class="lr-desc">${escapeHtml(entry.description)}</p>`;
-  return `<div class="lr-entry" data-search="${escapeHtml(index)}">
+  // Every entry is countable -- the label says "entries" and an entry is what
+  // this is -- so `data-tally` rides alongside `data-search` here, where the
+  // grammar puts it on productions only.
+  return `<div class="lr-entry" data-search="${escapeHtml(index)}" data-tally>
 <div class="lr-entry-head"><code class="lr-name data">${escapeHtml(
     entry.name,
   )}</code>${signature}${tier}</div>
@@ -437,11 +501,19 @@ export function languageReferenceScript(): string {
   function applyFilter() {
     const term = search === null ? '' : search.value.trim().toLowerCase();
     for (const scope of document.querySelectorAll('[data-scope]')) {
+      // TWO TALLIES, deliberately. Everything filterable carries data-search;
+      // only what the counter's noun names carries data-tally. The grammar's
+      // own comment blocks are the difference: they filter, and they are not
+      // productions.
       let shown = 0;
+      let counted = 0;
       for (const item of scope.querySelectorAll('[data-search]')) {
         const hit = term === '' || item.dataset.search.includes(term);
         item.hidden = !hit;
-        if (hit) shown += 1;
+        if (hit) {
+          shown += 1;
+          if (item.hasAttribute('data-tally')) counted += 1;
+        }
       }
       for (const group of scope.querySelectorAll('[data-group]')) {
         const visible = group.querySelectorAll('[data-search]:not([hidden])').length;
@@ -452,17 +524,22 @@ export function languageReferenceScript(): string {
         const groupCount = group.querySelector('[data-group-count]');
         if (groupCount) {
           const groupTotal = groupCount.dataset.total;
-          groupCount.textContent = term === '' ? groupTotal : visible + ' of ' + groupTotal;
+          const groupShown = group.querySelectorAll('[data-tally]:not([hidden])').length;
+          groupCount.textContent = term === '' ? groupTotal : groupShown + ' of ' + groupTotal;
         }
       }
       const counter = scope.querySelector('[data-count]');
       if (counter) {
         const total = counter.dataset.total;
         const noun = counter.dataset.noun;
-        counter.textContent = term === '' ? total + ' ' + noun : shown + ' of ' + total + ' ' + noun;
+        counter.textContent = term === '' ? total + ' ' + noun : counted + ' of ' + total + ' ' + noun;
       }
       const none = scope.querySelector('[data-empty]');
       if (none) {
+        // Keyed on what is VISIBLE, not on what is counted: a term that
+        // matches only the grammar's header comment leaves something on the
+        // screen, and "nothing matches" printed above it would be a page
+        // arguing with itself.
         none.hidden = shown !== 0;
         const termEl = none.querySelector('[data-term]');
         if (termEl) termEl.textContent = search === null ? '' : search.value.trim();
