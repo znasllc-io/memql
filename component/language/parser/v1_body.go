@@ -742,6 +742,12 @@ func (p *Parser) parseV1Block(kind, construct, what string) ([]ast.BodyStatement
 	if !p.check(TokenBraceOpen) {
 		return nil, p.v1Expected(fmt.Sprintf("`{` to open the %s block", what))
 	}
+	// Each block is a level down (nesting_bound.go). A logic's own body is
+	// not a level, so a body nests MaxNestingDepth blocks.
+	if err := p.enterNesting(siteBody); err != nil {
+		return nil, err
+	}
+	defer p.leaveNesting()
 	p.v1Take()
 	stmts, err := p.parseV1Statements(kind, construct)
 	if err != nil {

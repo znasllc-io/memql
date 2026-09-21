@@ -1701,6 +1701,13 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 			"badge_grant_restricted: operator grants cannot manage credentials, sessions, or cluster state; use a full user session")
 	}
 
+	// The wire bound on DSL source is checked before any handler lexes it:
+	// tokenising an oversized source is the allocation that kills the pod, so
+	// no handler may be the one to find out. See source_size.go.
+	if requestId, err := oversizedDSLSource(envelope); err != nil {
+		return s.sendQueryError(s.normalizeRequestId(envelope, requestId), envelope.GetMessageId(), codes.InvalidArgument, err.Error())
+	}
+
 	payload := envelope.GetPayload()
 
 	switch payload := payload.(type) {
