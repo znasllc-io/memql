@@ -358,11 +358,27 @@ test("a cluster that never answers is given up on, and the page says what it kno
   await new Promise((resolve) => setTimeout(resolve, 40));
   assert.ok(sawSignal, "the read was made with no AbortSignal, so no deadline can reach it");
 
-  // It names the call and the time it was given, rather than the SDK's bare
-  // "aborted" -- which would read as something the reader did.
-  assert.match(panel.html, /memqlGrammar\(\) did not answer within 5ms, so the read was given up/);
-  assert.match(panel.html, /memqlVocabulary\(\) did not answer within 5ms/);
-  assert.match(panel.html, /The cluster may still be working on it/);
+  // It names the calls and the time they were given, rather than the SDK's
+  // bare "aborted" -- which would read as something the reader did. Both share
+  // one deadline, so both expiring is ONE piece of news: saying "the cluster
+  // may still be working on it" twice reads as two separate events.
+  assert.match(
+    panel.html,
+    /Neither memqlGrammar\(\) nor memqlVocabulary\(\) answered within 5ms, so the read was given up\. The cluster may still be working on them\./,
+  );
+  assert.equal(
+    panel.html.split("so the read was given up").length - 1,
+    1,
+    "the deadline's sentence is printed more than once for one expiry",
+  );
+
+  // And the sentence about what a cluster WOULD answer is not printed under an
+  // error that says it did not: the error is the explanation.
+  assert.equal(
+    panel.html.includes("a cluster that has them answers"),
+    false,
+    "the page explains what a cluster would do directly under an error saying it did not",
+  );
   assert.equal(
     panel.html.includes("Reading the grammar and the vocabulary"),
     false,

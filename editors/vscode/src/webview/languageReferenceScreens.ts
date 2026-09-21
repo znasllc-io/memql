@@ -195,9 +195,18 @@ ${vocabularyHtml(vocabulary)}`;
   // "Neither came back" rather than "answered with neither", because this is
   // also the sentence a TIMED-OUT read lands on -- and a cluster that never
   // answered has not answered with anything.
+  //
+  // The second sentence -- what a cluster WOULD do -- is printed only when
+  // nothing else explains the absence. Under an error the error is the
+  // explanation, and "a cluster that has them answers" directly beneath
+  // "did not answer within 20s" is the page arguing with itself.
+  const why =
+    input.error === ""
+      ? " Both are served by the memqlGrammar() and memqlVocabulary() builtins; a cluster that has them answers, and one too old to have them refuses the call by name."
+      : "";
   return `<h2>Grammar and vocabulary</h2>
 <p class="lr-pending">${escapeHtml(
-    `Neither artifact came back from ${input.identity.cluster}. Both are served by the memqlGrammar() and memqlVocabulary() builtins; a cluster that has them answers, and one too old to have them refuses the call by name.`,
+    `Neither artifact came back from ${input.identity.cluster}.${why}`,
   )}</p>
 ${pinFallbackHtml(input.pin)}`;
 }

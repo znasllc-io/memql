@@ -327,7 +327,7 @@ export class LanguageReferencePanel {
     this.loading = false;
     this.grammar = typeof grammar === "string" ? undefined : grammar;
     this.vocabulary = typeof vocabulary === "string" ? undefined : vocabulary;
-    this.error = [grammar, vocabulary].filter((v): v is string => typeof v === "string").join(" ");
+    this.error = readFailure(grammar, vocabulary, deadlineMs);
     // The artifacts state the edition and grammar version they were RENDERED
     // from, which is the pair the header should name once they are on screen.
     this.cluster = clusterLanguage(reader.name, reader, this.grammar, this.vocabulary);
@@ -446,9 +446,31 @@ function failure(name: string, err: unknown): string {
  * which is the whole reason the deadline exists.
  */
 function timedOut(name: string, deadlineMs: number): string {
+  return `${name}() did not answer within ${deadlineText(deadlineMs)}, so the read was given up. The cluster may still be working on it.`;
+}
+
+function deadlineText(deadlineMs: number): string {
   const seconds = Math.round(deadlineMs / 1000);
-  const time = seconds >= 1 ? `${seconds}s` : `${deadlineMs}ms`;
-  return `${name}() did not answer within ${time}, so the read was given up. The cluster may still be working on it.`;
+  return seconds >= 1 ? `${seconds}s` : `${deadlineMs}ms`;
+}
+
+/**
+ * The two reads' failures as ONE sentence.
+ *
+ * Joining the per-call sentences says "the cluster may still be working on it"
+ * twice when both deadlines expire, which reads as two separate pieces of news
+ * about one event. Both expired is the common case -- they share a deadline --
+ * so it gets its own sentence naming both calls.
+ */
+function readFailure(grammar: unknown, vocabulary: unknown, deadlineMs: number): string {
+  const both = [grammar, vocabulary].every((v) => typeof v === "string");
+  const expiry = timedOut(GRAMMAR_NAME, deadlineMs);
+  if (both && grammar === expiry && vocabulary === timedOut(VOCABULARY_NAME, deadlineMs)) {
+    return `Neither ${GRAMMAR_NAME}() nor ${VOCABULARY_NAME}() answered within ${deadlineText(
+      deadlineMs,
+    )}, so the read was given up. The cluster may still be working on them.`;
+  }
+  return [grammar, vocabulary].filter((v): v is string => typeof v === "string").join(" ");
 }
 
 /** A CSP nonce, from a CSPRNG: a predictable one is one an injection can carry. */
