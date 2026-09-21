@@ -799,6 +799,46 @@ mutation customDomain recordCustomDomainIssuanceFailure {
   }
 }
 
+/// The unbind did not go through. The row STAYS `removing`, carrying the typed reason and what the
+/// cluster said, and the next pass tries again.
+///
+/// ITS OWN MUTATION, AND THE REASON IS A BUG THIS REPLACED. A failed unbind used to be recorded
+/// through `recordCustomDomainIssuanceFailure`, which stamps `status: "issuing"` -- correct for the
+/// one caller it was written for, and wrong for this one: a binding somebody had asked to take DOWN
+/// was written back onto the certificate step, and the very next pass dispatched the BIND for it. On
+/// a cluster with an issuer that re-applies the Ingress and Certificate of a domain its operator
+/// removed, and if its DNS still points here it walks to `live` again -- the exact outcome
+/// `removeCustomDomain` promises cannot happen ("an operator removing a binding because it is being
+/// abused should not have to wait for kubectl"). Found by cancelling a domain on a local cluster,
+/// whose ServiceAccount may not touch Ingresses at all, where it showed as a removal that reappeared
+/// on "Certificate" two minutes later with Ownership and DNS drawn as verified -- neither had been.
+///
+/// A removal only ever ends at `removed`. It does not walk anywhere else, whatever the cluster says.
+///
+/// actor.userId scoping is not the fix and there is nobody to scope to: the caller is the
+/// reconciliation sweep, running under the engine's own operator identity, so actor.userId is empty
+/// for every legitimate caller and a self-scoped filter would match nothing. The concept's
+/// clusterOwner tier is the access decision. What @serverOnly adds over it is the WIRE -- without it
+/// this becomes a typed SDK method whose only use is to tell the Domains panel that a removal
+/// failed, about a cluster nobody asked.
+@serverOnly
+mutation customDomain recordCustomDomainRemovalFailure {
+  args {
+    domainId       string!
+    failureReason  string!
+    failureDetail  string
+    lastCheckedAt  datetime!
+  }
+  update {
+    accept { failureReason, lastCheckedAt }
+    stamp {
+      id:             args.domainId
+      status:         "removing"
+      failureDetail:  args.failureDetail ?? ""
+    }
+  }
+}
+
 /// The objects are applied and the certificate is not Ready yet. The ordinary state for the first
 /// minute of an HTTP-01 order, and NOT a failure: it writes no failureReason, so the panel shows
 /// `issuing` with a plain note rather than something a person should go and fix.
