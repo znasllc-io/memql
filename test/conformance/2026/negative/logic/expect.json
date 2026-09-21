@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "file": "chain-too-long.memql",
+      "verdict": "refuse_parse",
+      "code": "expression_chain_too_long",
+      "message": "the expression chain is too long (more than 4096 links): bind its parts to names and combine them in separate statements",
+      "note": "A chain is built in a loop, so the parser never recurses while reading one -- but the tree it builds is as tall as the chain, and every walk over it recurses. MaxExpressionChain (4096) bounds the links on any path from a node to a leaf; this file holds 4097 member reads. The file is deliberately large: the bound is three orders of magnitude above the longest chain in the shipped tree (8 links), so nothing smaller reaches it."
+    },
+    {
+      "file": "nesting-too-deep.memql",
+      "verdict": "refuse_parse",
+      "code": "nesting_too_deep",
+      "message": "the body nests too deeply (more than 256 levels): split the body into smaller logic calls",
+      "note": "The same bound as negative/concept, with the remedy a BODY earns. A statement block is a level and a logic's own body is not, so a body holds 256 blocks and is refused at the 257th."
+    }
+  ]
+}
