@@ -1,7 +1,12 @@
 package app
 
 import (
+	"context"
+	"time"
+
+	"github.com/znasllc-io/memql/component/identity/githubconnect"
 	"github.com/znasllc-io/memql/component/packages"
+	"github.com/znasllc-io/memql/component/packages/githubapp"
 	"github.com/znasllc-io/memql/integrations/workbench"
 )
 
@@ -43,6 +48,53 @@ func (a *App) wirePackageBuildSurface() {
 	pkgs.SetWorkbench(wb)
 	a.Logger.Info("packages: build surface bound to the workbench",
 		"remote", workbenchRemoteEnabled())
+}
+
+// githubAppReadTimeout bounds one read of the six rows. The client asks for the
+// app's configuration from methods that carry no context of their own
+// (Configured, InstallURL), so the read gets one here -- and a store that does
+// not answer in this long is answered as "no app right now", which the next
+// call corrects.
+const githubAppReadTimeout = 5 * time.Second
+
+// wirePackageGitHubApp tells the packages pipeline where the cluster's GitHub
+// App comes from (design record 2026-09-20-github-app-setup, D2).
+//
+// WIRED HERE FOR THE REASON THE BUILD SURFACE IS. component/packages reads five
+// of the app's six values and component/identity/githubconnect owns the rule
+// for where all six come from -- the environment, or the rows a cluster
+// owner's registration wrote, never a mix. Only app/ can see both, and one
+// rule with two readers is the point: a fetch that resolved the app differently
+// from the Connect button that granted it would mint under an app the grant
+// was never made for.
+//
+// NO BUILD TAG, like its neighbour: every node type that can fetch, poll or
+// probe needs to see a registration without a restart.
+func (a *App) wirePackageGitHubApp() {
+	pkgs := a.lookupPackagesIntegration()
+	if pkgs == nil || a.engine == nil {
+		return
+	}
+	resolver := &githubconnect.Resolver{Rows: githubconnect.RowReader{
+		Variable: a.engine.ResolveSystemVariable,
+		Secret:   a.engine.ResolveSystemSecret,
+	}}
+	pkgs.SetGitHubAppSource(func() githubapp.Config {
+		ctx, cancel := context.WithTimeout(context.Background(), githubAppReadTimeout)
+		defer cancel()
+		cfg, _ := resolver.Current(ctx)
+		// FIVE OF THE SIX. The webhook secret is deliberately not this
+		// package's to hold: nothing in it verifies a delivery, and a second
+		// reader of a signing secret is a second place it can be logged
+		// (githubapp/config.go).
+		return githubapp.Config{
+			AppId:         cfg.AppID,
+			Slug:          cfg.AppSlug,
+			ClientId:      cfg.ClientID,
+			ClientSecret:  cfg.ClientSecret,
+			PrivateKeyB64: cfg.PrivateKeyB64,
+		}
+	})
 }
 
 // lookupPackagesIntegration recovers the materialized packages plug-in, or nil.

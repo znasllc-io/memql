@@ -2338,6 +2338,8 @@
         "consumedAt",
         "consumedFromIP",
         "expiresAt",
+        "organization",
+        "purpose",
         "returnPath",
         "sourceIP",
         "stateHash",

@@ -42,6 +42,34 @@ type Handler struct {
 	engine Engine
 	logger *slog.Logger
 	now    func() time.Time
+	// registered answers a source this cluster REGISTERED FOR ITSELF at
+	// runtime -- see SetRegisteredSource. Nil on a node that wired none, which
+	// leaves resolution exactly as it was.
+	registered RegisteredSource
+}
+
+// RegisteredSource resolves one source name to its policy, or (_, false) when
+// the name is not one it answers for.
+//
+// It is the tier between the environment and the connectors, for a sender that
+// is neither: not pinned by an operator at deploy time, and not a connector's
+// tenant, but something the cluster itself set up while running and holds the
+// secret for. The cluster's GitHub App, when a cluster owner registers it from
+// the product, is the case it exists for -- GitHub generates the webhook secret
+// during that registration, so no environment could have carried it.
+//
+// A function rather than an import, because this module sits below whatever
+// knows the answer (component/identity, for GitHub) and must not reach up for
+// it; app/ wires the two together (SetRegisteredSource).
+type RegisteredSource func(ctx context.Context, name string) (SourceConfig, bool)
+
+// SetRegisteredSource installs the runtime tier. Called once, from app/, before
+// the route serves; a second call replaces the first, and nil removes it.
+func (h *Handler) SetRegisteredSource(resolve RegisteredSource) {
+	if h == nil {
+		return
+	}
+	h.registered = resolve
 }
 
 // NewHandler builds the receiver. A nil logger is tolerated (discarding).
@@ -210,6 +238,25 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) resolveSource(ctx context.Context, name string) (SourceConfig, bool) {
 	if src, ok := h.cfg.Sources[name]; ok {
 		return src, true
+	}
+	// THE REGISTERED TIER, after the environment and before the connectors.
+	// After, for the reason above: an operator's statement about a name is not
+	// something a row written from a browser takes over. Before, because a
+	// source the cluster registered for itself is a more specific claim on a
+	// name than a connector's prefix match.
+	//
+	// THE SAME FAIL-CLOSED RULE as the connector tier below, applied here
+	// rather than trusted to the resolver: a policy that names a verifying
+	// scheme and carries no secret is DROPPED, never admitted unverified.
+	if h.registered != nil {
+		if src, ok := h.registered(ctx, name); ok {
+			if src.Scheme != SchemeNone && src.Secret == "" {
+				h.logger.Error("inbound receiver: registered source has no resolvable secret, refusing with 404", "source", name)
+				return SourceConfig{}, false
+			}
+			src.Name = name
+			return src, true
+		}
 	}
 	src, ok := memqlsync.SourceFor(ctx, name)
 	if !ok {

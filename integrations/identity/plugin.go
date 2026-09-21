@@ -1,6 +1,9 @@
 package identity
 
-import "github.com/znasllc-io/memql/component/memql"
+import (
+	"github.com/znasllc-io/memql/component/identity/githubconnect"
+	"github.com/znasllc-io/memql/component/memql"
+)
 
 // init self-registers the identity integration as a plug-in. Always on.
 func init() {
@@ -12,6 +15,14 @@ func init() {
 		// rather than an error, and a reason a client renders is not a record
 		// an operator can read. A node without any of the three still gets
 		// every delegation capability.
-		return NewIdentityIntegrationWithEngine(pctx.Engine, pctx.BunDB, pctx.Logger), nil
+		integration := NewIdentityIntegrationWithEngine(pctx.Engine, pctx.BunDB, pctx.Logger)
+		// The row readers, so githubConnectBegin and githubAppStatus see an app
+		// a cluster owner registered from the product. The environment still
+		// answers first; see githubconnect.Resolve.
+		integration.SetGitHubAppRows(githubconnect.RowReader{
+			Variable: pctx.ResolveSystemVariable,
+			Secret:   pctx.ResolveSystemSecret,
+		})
+		return integration, nil
 	})
 }

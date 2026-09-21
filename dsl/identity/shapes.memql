@@ -594,6 +594,8 @@ shape githubConnectState githubConnectStateFull {
   consumedAt
   consumedFromIP
   sourceIP
+  purpose
+  organization
   row.createdAt
 }
 

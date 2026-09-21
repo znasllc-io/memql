@@ -28,6 +28,7 @@ import (
 	"github.com/a-h/templ"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/abuse"
+	"github.com/znasllc-io/memql/component/identity/githubconnect"
 	webtempl "github.com/znasllc-io/memql/component/identity/web/templ"
 )
 
@@ -225,6 +226,13 @@ type Server struct {
 	// dynamically-registered (RFC 7591) v1:identity:oauthClient rows.
 	// Nil keeps the static-only behaviour (tests / engine-less binaries).
 	Store *identity.Store
+
+	// GitHubOAuthBaseURL is where the GitHub App setup page posts its
+	// manifest. Empty means https://github.com, which is the shipped
+	// configuration; it is a field only so a test can point the form at a
+	// server it owns, and there is no configuration path that sets it (the
+	// http package's GitHubClient, for the same reason).
+	GitHubOAuthBaseURL string
 
 	// Phase 7: PAT management for the /me/tokens page. Wired by the
 	// integration layer once the engine is up. Nil leaves the routes
@@ -452,6 +460,14 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	// Unauthenticated callers fall through to handleAuthorize (the
 	// consent/login page), unchanged.
 	mux.HandleFunc("GET /authorize", wrap(preAuth(s.handleAuthorize)))
+	// THE GITHUB APP SETUP PAGE (design record 2026-09-20-github-app-setup, D4;
+	// owner-approved HTTP exception, CLAUDE.md). It lives HERE rather than beside
+	// the GitHub callbacks in component/identity/http because it is a page --
+	// it needs the layout, the brand and this package's policy machinery -- and
+	// on identity's own route table for the callback's reason: declared in
+	// component/server it would route to the bff. No preAuth: a signed-in
+	// browser is exactly who opens it, and the state is what admits it.
+	mux.HandleFunc("GET "+githubconnect.AppSetupStartPath, wrap(s.handleGitHubAppSetupStart))
 	mux.HandleFunc("GET /check-email", wrap(s.handleCheckEmail))
 
 	// The device-bound magic-link flow (memql#4302, design D8). Four routes,

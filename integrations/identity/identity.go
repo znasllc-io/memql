@@ -9,10 +9,12 @@
 package identity
 
 import (
+	"context"
 	"log/slog"
 
 	"github.com/uptrace/bun"
 
+	"github.com/znasllc-io/memql/component/identity/githubconnect"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -35,6 +37,26 @@ type IdentityIntegration struct {
 	// not be written" reaches a person as connect_state_invalid and reaches
 	// nobody else at all. Nil on a node whose factory had none.
 	logger *slog.Logger
+	// githubApp answers this cluster's GitHub App when a call arrives, from
+	// the environment or from the rows a cluster owner's registration wrote
+	// (design record 2026-09-20-github-app-setup, D2). Nil reads the
+	// environment alone, which is what a node with no row readers can do.
+	githubApp *githubconnect.Resolver
+}
+
+// SetGitHubAppRows hands over the two instance-wide row readers, so GitHub
+// Connect can see an app that was registered from the product rather than set
+// in the deployment. Called once, by the plug-in factory.
+func (i *IdentityIntegration) SetGitHubAppRows(rows githubconnect.RowReader) {
+	if i == nil {
+		return
+	}
+	i.githubApp = &githubconnect.Resolver{Rows: rows}
+}
+
+// githubAppConfig is the one place this package asks which app the cluster has.
+func (i *IdentityIntegration) githubAppConfig(ctx context.Context) (githubconnect.Config, githubconnect.Source) {
+	return i.githubApp.Current(ctx)
 }
 
 // NewIdentityIntegration creates an identity integration.
@@ -96,6 +118,34 @@ func (i *IdentityIntegration) Capabilities() []memql.IntegrationCapability {
 			ArgsSchema: map[string]string{
 				"returnPath": "string?",
 			},
+		},
+		{
+			Name: "githubAppStatus",
+			Description: "Whether this cluster has a GitHub App, which tier it resolved from " +
+				"(the environment, or a registration made from the product), and whether the " +
+				"caller could register one. Any signed-in caller; answers no credential.",
+			Handler:    i.handleGithubAppStatus,
+			ArgsSchema: map[string]string{},
+		},
+		{
+			Name: "githubAppSetupBegin",
+			Description: "Begin registering this cluster's GitHub App from a manifest: write a " +
+				"short-lived setup state bound to the caller and answer the URL of the page that " +
+				"posts the manifest to GitHub. Cluster-owner only; audited. The manifest is " +
+				"composed server-side from the cluster's own domain and is never an argument.",
+			Handler: i.handleGithubAppSetupBegin,
+			ArgsSchema: map[string]string{
+				"returnPath":   "string?",
+				"organization": "string?",
+			},
+		},
+		{
+			Name: "githubAppRemove",
+			Description: "Remove the GitHub App registered from the product by clearing its six " +
+				"stored values. Cluster-owner only; audited. Refused when the deployment's " +
+				"environment set the app. Does not delete the app at GitHub.",
+			Handler:    i.handleGithubAppRemove,
+			ArgsSchema: map[string]string{},
 		},
 		{
 			Name:        "revokeDelegation",

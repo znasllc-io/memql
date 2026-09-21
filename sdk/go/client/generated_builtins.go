@@ -1254,6 +1254,81 @@ func ForkRunBuild(args ForkRunArgs) string {
 	return b.String()
 }
 
+// GithubAppRemove -- Remove the GitHub App this cluster registered from the product. CLUSTER OWNER ONLY.
+// It clears the six stored values, so Connect is absent again and every source fetching under a grant answers github_app_not_configured until an app is registered. It does NOT delete the app at GitHub -- GitHub offers no call for that, and the owner's next step, if they want it gone there too, is the app's own settings page.
+// Refused with github_app_managed_by_environment when the deployment set the values: there is nothing stored to clear, and clearing rows would change nothing about what the cluster uses.
+type GithubAppRemoveArgs struct {
+}
+
+// GithubAppRemove calls the engine builtin githubAppRemove.
+func (qc *QueryClient) GithubAppRemove(ctx context.Context, args GithubAppRemoveArgs) (*Result, error) {
+	call := GithubAppRemoveBuild(args)
+	return qc.executeNamed(ctx, "githubAppRemove", call)
+}
+
+func GithubAppRemoveBuild(args GithubAppRemoveArgs) string {
+	_ = args
+	return "builtin githubAppRemove()"
+}
+
+// GithubAppSetupBegin -- Begin registering this cluster's GitHub App. CLUSTER OWNER ONLY.
+// It writes a short-lived state row (purpose `app_setup`) bound to the caller and answers `{startUrl, reason}`: navigate the browser to startUrl, a page on the identity service whose one job is to post this cluster's manifest to GitHub. GitHub shows the owner the app it is about to create; they confirm; GitHub redirects back to the identity service, which exchanges the code for the app's credentials, seals them, and sends the browser on to install the app.
+// THE MANIFEST IS NEVER AN ARGUMENT. It is composed on the server from this cluster's own domain -- the callback URL, the webhook URL, the two read permissions -- so nothing a browser sends can ask GitHub for a wider app than Connect uses, or point its callback somewhere else.
+// Reasons a caller can see:
+//
+//	ok                                -- startUrl is set; navigate to it.   github_app_managed_by_environment -- the deployment set MEMQL_GITHUB_APP_*; the app is the                                        operator's, and rows written here would be ignored.   github_app_setup_forbidden        -- the caller is not a cluster owner.   github_app_setup_invalid          -- `organization` is not a GitHub organization login.   connect_state_invalid             -- the state row could not be written; retry.
+type GithubAppSetupBeginArgs struct {
+	// Where in MemQL OS to land when the round trip finishes -- a same-origin path, validated on the way in and again on the way out exactly as githubConnectBegin's is.
+	ReturnPath string
+	// The GitHub organization to register the app under, by login. Absent or empty registers it under the account of whoever is signed in to GitHub in that browser.
+	Organization string
+}
+
+// GithubAppSetupBegin calls the engine builtin githubAppSetupBegin.
+func (qc *QueryClient) GithubAppSetupBegin(ctx context.Context, args GithubAppSetupBeginArgs) (*Result, error) {
+	call := GithubAppSetupBeginBuild(args)
+	return qc.executeNamed(ctx, "githubAppSetupBegin", call)
+}
+
+func GithubAppSetupBeginBuild(args GithubAppSetupBeginArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin githubAppSetupBegin(")
+	if args.ReturnPath != "" {
+		b.WriteString("returnPath: ")
+		b.WriteString(quoteMemQL(args.ReturnPath))
+	}
+	if args.Organization != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("organization: ")
+		b.WriteString(quoteMemQL(args.Organization))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// GithubAppStatus -- Say whether this cluster has a GitHub App, where it came from, and whether the caller could register one.
+// It exists so a surface can know BEFORE anybody presses Connect. The only way to learn "this cluster has no app" used to be a refused githubConnectBegin, so the Source stop offered a button and then took it back.
+// It answers `{configured, source, slug, installUrl, canSetup}`:
+//
+//	configured -- true when all six values resolve, from one tier.   source     -- "environment" (the deployment set them; the product shows the app and changes                 nothing), "cluster" (registered from the product; replaceable and removable                 here), or "" when there is no app.   slug       -- the app's URL slug, which is public: it is the last segment of the app's own                 page on github.com. Empty when there is no app.   installUrl -- where the app is installed on another account. Empty when there is no app.   canSetup   -- the caller is a cluster owner AND the environment is not the one deciding.
+//
+// Never a credential: not the client secret, not the key, not the webhook secret, and not the app id or client id either, which nothing in a browser needs.
+type GithubAppStatusArgs struct {
+}
+
+// GithubAppStatus calls the engine builtin githubAppStatus.
+func (qc *QueryClient) GithubAppStatus(ctx context.Context, args GithubAppStatusArgs) (*Result, error) {
+	call := GithubAppStatusBuild(args)
+	return qc.executeNamed(ctx, "githubAppStatus", call)
+}
+
+func GithubAppStatusBuild(args GithubAppStatusArgs) string {
+	_ = args
+	return "builtin githubAppStatus()"
+}
+
 // GithubConnectBegin -- Begin GitHub Connect: answer the URL the browser navigates to, with a server-held state bound to the signed-in caller.
 // THE FLOW STARTS OVER THE STREAM, NOT OVER HTTP (epic memql#4912, decision C4). The callback is the only HTTP surface this feature has; everything a signed-in person does goes through the stream like every other call, which is what keeps the state bound to a caller the engine has already authenticated.
 // It answers `{authorizeUrl, reason, installUrl}` and never an error a client has to parse. Three reasons a caller can see:

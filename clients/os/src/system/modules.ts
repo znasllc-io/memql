@@ -42,16 +42,24 @@ export const MODULE_NAMES: Record<ModuleId, string> = {
  * deployment: the Set up group names the variables instead of offering a
  * button.
  *
- * The ENGINE decides which through each lane's `configurableFrom`, and this
- * map only knows which Settings section to open for the ones that are. So a
- * module whose lane is `deployment` maps to null here and the group reads
- * the engine's answer, never this map, when deciding whether to offer an act.
+ * `app` is the app whose section it is, because not every module is
+ * configured from Settings: the cluster's GitHub App is registered from
+ * DEPLOYABLES, in the Sources group of its own settings (engine design record
+ * 2026-09-20-github-app-setup), beside the connection it exists to make
+ * possible. `place` is how that app's settings are said in words, for an actor
+ * who cannot be sent there with a button.
+ *
+ * The engine's manifest says the same thing from its side, per lane, as
+ * `configurableFrom`. This map is what the SHELL knows: which window to open.
  */
-export const MODULE_SETTINGS_SECTION: Record<ModuleId, { section: string; name: string } | null> = {
-  ai: { section: "providers", name: "Doors" },
-  email: { section: "integrations", name: "Integrations" },
+export const MODULE_SETTINGS_SECTION: Record<
+  ModuleId,
+  { app: string; place: string; section: string; name: string } | null
+> = {
+  ai: { app: "settings", place: "Settings", section: "providers", name: "Doors" },
+  email: { app: "settings", place: "Settings", section: "integrations", name: "Integrations" },
   storage: null,
-  githubApp: null,
+  githubApp: { app: "deployables", place: "Deployables settings", section: "settings", name: "Sources" },
   campaigns: null,
   workbench: null,
   localApps: null,

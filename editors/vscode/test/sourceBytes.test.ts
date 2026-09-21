@@ -15,7 +15,7 @@
 // carried two of them in panelKey()'s template literal. The survey behind this
 // epic's design record used grep, grep skipped that file, and the record --
 // brainstormed, approved and committed -- states "all six webview panels".
-// There are SEVEN files and NINE panel classes. The wrong count then
+// There were SEVEN files and NINE panel classes. The wrong count then
 // propagated into four issue bodies before anyone re-derived it. A design
 // record is read as settled fact by everyone downstream, so a silent skip can
 // become a specification error nobody thinks to check.

@@ -864,6 +864,18 @@ concept accountEntitlement {
 // Postgres advisory lock, and every outcome is audited.
 // githubConnectStateByHash is registered in
 // component/memql/rowauthz_undeclared_gate_test.go naming memql#4913.
+//
+// ONE ROW SHAPE, TWO FLOWS, AND `purpose` IS WHAT KEEPS THEM APART (design
+// record 2026-09-20-github-app-setup, D4). Registering the cluster's GitHub App
+// from the product is the same round trip -- begun over the stream by a
+// signed-in caller, finished by a browser GitHub redirected -- so it keeps its
+// state in the same row and spends it under the same advisory lock, rather than
+// growing a second copy of the exactly-once discipline to drift from this one.
+// What must never happen is one flow's state being spent by the other's
+// callback: a connect state finishing a registration would let anybody who can
+// press Connect replace the cluster's app. So the consume is told which purpose
+// it is spending and treats a row of any other purpose as a state it has never
+// seen. Blank means `connect`, which is every row written before this field.
 // @no-displayCard: single-use credential row -- a secret digest plus a user id
 //   and a TTL, the same reasoning as v1:identity:enrolmentToken and
 //   v1:identity:workerPairingCode.
@@ -874,6 +886,8 @@ concept githubConnectState {
   expiresAt       datetime!  @description("Absolute expiry. Ten minutes from issue: longer than any human takes to authorize and install an app, and short enough that a state value left in a browser history is worthless. The consume refuses a row past this even when consumedAt is empty.")
   consumedAt      datetime   @description("Stamped when the callback completes the flow. Single-use: a row with a non-empty consumedAt is dead, and the SECOND click on a callback URL is connect_state_invalid rather than a second grant. Written under a Postgres advisory lock (component/identity/store_githubconnect.go), because a browser redirect can be replayed and two identity replicas would otherwise both read 'not consumed'.")
   consumedFromIP  string     @description("Source IP the callback arrived from. Audit signal, and the one that distinguishes a person finishing their own connect from somebody replaying a URL they found.")
+  purpose         string     @description("Which flow this state belongs to: blank or `connect` for a person connecting their GitHub account, `app_setup` for a cluster owner registering the cluster's GitHub App. The consume names the purpose it is spending and refuses a row of any other, so a state minted by one flow can never finish the other.")
+  organization    string     @description("For an `app_setup` state only: the GitHub organization the app is to be registered under, or blank for the person's own account. Held here rather than carried in the URL of the page that posts the manifest, so where the form posts is decided by what the begin call validated and not by a query string.")
   sourceIP        string     @description("IP the begin call came from. Audit signal; deliberately NOT compared against consumedFromIP, because a person who starts on wifi and finishes on a mobile network is the ordinary case and refusing it would break the flow for a threat this row's TTL and single-use already bound.")
 
   @relationship(type="parent", field="userId", target=user, direction="outgoing")
