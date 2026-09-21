@@ -18,8 +18,10 @@ import { holds } from "../../system/roles";
 //             their plain inverses
 //   domains   bind or remove a client's own domain
 //   store     attach or change the Shopify store a storefront fronts
+//   preview   publish a candidate version, exercise it against a development
+//             store, open and end a preview
 //
-// FIVE OF THEM ARE SEEDED ON OWNER AND DEVELOPER; `store` IS OWNER ALONE
+// SIX OF THEM ARE SEEDED ON OWNER AND DEVELOPER; `store` IS OWNER ALONE
 // (memql#5541). It took over from the retired `app:stores` capabilities, and
 // those were owner-only because v1:shopify:store is @rowAuthz(clusterOwner):
 // a developer holding the part would be drawn the control and then served no
@@ -36,9 +38,12 @@ import { holds } from "../../system/roles";
 //
 // IT REPLACES `canWrite`, which was rank >= 200 and one answer for every act.
 // A person granted `deploy` and not `publish` can push a build and cannot
-// take a site live, which one boolean could not say.
+// take a site live, which one boolean could not say. `preview` draws the same
+// line one step earlier (epic memql#5531): a person may prepare a candidate
+// version and exercise it end to end against a development store, and still
+// not be able to put it in front of a shopper.
 
-export const DEPLOYABLE_PARTS = ["sources", "deploy", "publish", "retire", "domains", "store"] as const;
+export const DEPLOYABLE_PARTS = ["sources", "deploy", "publish", "retire", "domains", "store", "preview"] as const;
 
 export type DeployablePart = (typeof DEPLOYABLE_PARTS)[number];
 
@@ -58,6 +63,7 @@ export const NO_PARTS: PartsHeld = Object.freeze({
   retire: false,
   domains: false,
   store: false,
+  preview: false,
 });
 
 /** Every part held: what the seeds give an owner. */
@@ -68,6 +74,7 @@ export const ALL_PARTS: PartsHeld = Object.freeze({
   retire: true,
   domains: true,
   store: true,
+  preview: true,
 });
 
 /** `ALL_PARTS` minus the named ones, for a surface or a test that withholds some. */

@@ -112,6 +112,12 @@ func (a *App) mountEdgeEndpoints() {
 		// its binding NAMES, at serve time (memql#4345), and that one field is
 		// the only reason the serving path may touch the secret store at all.
 		SecretResolver: a.engine.ResolveSystemSecret,
+		// The preview-grant seam (epic memql#5531). The SAME executor the
+		// resolver uses, deliberately -- one engine adapter, one synthetic
+		// actor -- but handed over as its own narrow interface, because a grant
+		// is REVOCABLE and must never end up cached with the site: the
+		// resolver's cache is keyed by hostname and a revoke names none.
+		PreviewExec: previewExecutorOf(executor),
 	})
 
 	a.handleRoute("/", handler)
@@ -257,4 +263,18 @@ func (e edgeRequestRecorder) Record(r edge.RequestRecord) {
 		Bytes:      r.Bytes,
 		DurationNs: r.DurationNs,
 	})
+}
+
+// previewExecutorOf narrows the edge's engine executor to the preview seam.
+//
+// A TYPE ASSERTION RATHER THAN A SECOND CONSTRUCTOR, and a failed one is nil
+// rather than a fatal: a build whose executor does not serve previews simply
+// never honours one, and every request gets the public answer. That is the
+// right failure for a feature that grants sight of an unpublished version --
+// absent, never open.
+func previewExecutorOf(executor edge.QueryExecutor) edge.PreviewExecutor {
+	if pe, ok := executor.(edge.PreviewExecutor); ok {
+		return pe
+	}
+	return nil
 }

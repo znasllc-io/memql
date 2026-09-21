@@ -3426,6 +3426,115 @@ func SiteHostnameCheckBuild(args SiteHostnameCheckArgs) string {
 	return b.String()
 }
 
+// SitePreviewNoteOrder -- Record that an order reached the mirror under a store a preview is open against -- the FOURTH and only passive observation (issue memql#5547).
+// IT IS NOT A PROBE. Nothing here makes an order happen: the connector mirrors orders because that is its job, and this notices. The engine's honest claim about a test payment ends here -- the payment itself happened in a browser on Shopify's hosted checkout, and the row this writes says an order ARRIVED rather than that a payment succeeded.
+// AN ORDER ON A STORE NOBODY IS PREVIEWING RECORDS NOTHING and answers a count. That is the overwhelmingly common case -- every order on every live store -- and treating it as a refusal would fill a backfill's log with one line per order.
+// EVERY OPEN PREVIEW OF THAT STORE GETS THE OBSERVATION. Two operators can be exercising one development store, and nothing in an order says which of them placed it; Shopify has no idea MemQL has previews at all. Attributing it to one would be a guess presented as a fact.
+// Called by the recordPreviewOrderObservation automation and by nothing else. Returns {recorded, storeId, orderId}.
+type SitePreviewNoteOrderArgs struct {
+	// The v1:shopify:store the order was mirrored under.
+	StoreId string
+	// The mirrored order, for the observation's detail.
+	OrderId string
+}
+
+// SitePreviewNoteOrder calls the engine builtin sitePreviewNoteOrder.
+func (qc *QueryClient) SitePreviewNoteOrder(ctx context.Context, args SitePreviewNoteOrderArgs) (*Result, error) {
+	call := SitePreviewNoteOrderBuild(args)
+	return qc.executeNamed(ctx, "sitePreviewNoteOrder", call)
+}
+
+func SitePreviewNoteOrderBuild(args SitePreviewNoteOrderArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin sitePreviewNoteOrder(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if args.OrderId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("orderId: ")
+		b.WriteString(quoteMemQL(args.OrderId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// SitePreviewOpen -- Open a short-lived preview of a deployable's candidate version, on the deployable's OWN origin (issue memql#5545).
+// THE URL COMES BACK ONCE. The token exists in this reply, in the operator's address bar for one navigation, and as a cookie thereafter; only its SHA-256 is stored, so nothing can ever read it back -- not an operator, not a support session, not a backup.
+// THE ORIGIN IS THE DEPLOYABLE'S OWN, and that is a requirement rather than a convenience: a storefront's cookies, its cart and Shopify's checkout return all assume that origin, so a preview served from anywhere else would fail in ways that say nothing about the candidate.
+// FOUR GATES RUN BEFORE ANYTHING IS MINTED, in the order a person would ask them: is there a deployable I can see, is it one this applies to (a systemOwned site is exempt from the whole axis), is there a candidate to preview, and is there a DEVELOPMENT store to preview it against. The last is the second direction of the go-live guard, and the failure it prevents is silent: a preview pointed at the live store looks exactly like a preview until a test payment lands in the merchant's real orders.
+// Returns {grantId, siteId, hostname, candidateRef, previewStoreId, previewStoreDomain, expiresAt, ttlMinutes, url}.
+type SitePreviewOpenArgs struct {
+	// The deployable to preview.
+	SiteId string
+}
+
+// SitePreviewOpen calls the engine builtin sitePreviewOpen.
+func (qc *QueryClient) SitePreviewOpen(ctx context.Context, args SitePreviewOpenArgs) (*Result, error) {
+	call := SitePreviewOpenBuild(args)
+	return qc.executeNamed(ctx, "sitePreviewOpen", call)
+}
+
+func SitePreviewOpenBuild(args SitePreviewOpenArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin sitePreviewOpen(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SitePreviewProbe -- Run the three things the engine can ACTIVELY observe of a preview and record each on the grant (issue memql#5547): the development store answers a catalog read, a cart accepts a line, a checkoutUrl comes back.
+// THE FOURTH IS PASSIVE AND IS NOT RUN HERE. An order arriving in the mirror under the development store's storeId is observed by the connector doing its ordinary job, and recorded by the automation that watches for it.
+// THE PAYMENT IS NOT OBSERVED AT ALL. It happens in a browser on Shopify's hosted checkout, and no request this cluster makes can witness it; the test that does is the product's. `checkoutUrl` coming back is the last thing this cluster can honestly say.
+// IT CREATES A CART on the development store, which is the thing being observed rather than a side effect -- and is why the preview binding is held to a development store before this can run. Nothing is paid for and no order is placed.
+// THREE ROWS EVERY TIME, failures included. A step that did not answer gets a row saying why; a step nobody ran gets NO row, which is what lets a surface draw "unmeasured" as something other than a failure.
+type SitePreviewProbeArgs struct {
+	// The preview to record the observations on.
+	GrantId string
+}
+
+// SitePreviewProbe calls the engine builtin sitePreviewProbe.
+func (qc *QueryClient) SitePreviewProbe(ctx context.Context, args SitePreviewProbeArgs) (*Result, error) {
+	call := SitePreviewProbeBuild(args)
+	return qc.executeNamed(ctx, "sitePreviewProbe", call)
+}
+
+func SitePreviewProbeBuild(args SitePreviewProbeArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin sitePreviewProbe(")
+	b.WriteString("grantId: ")
+	b.WriteString(quoteMemQL(args.GrantId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SitePreviewReadiness -- What is legal for a deployable right now, in the guard's own words (issue memql#5546).
+// THIS EXISTS SO AN ILLEGAL ACT CAN BE ABSENT RATHER THAN DISABLED. MemQL OS hides what a person cannot do rather than drawing it greyed out (DESIGN.md rule 12), and an absent control needs the refusal to be knowable BEFORE the click -- which no client-side reasoning can manage, because whether the bound store is a development store is a field on a row the browser cannot read.
+// IT DECIDES NOTHING. Every act it describes is still refused by the Go guard wired beside executeWrite if it is attempted anyway; a check only one caller runs is not a check. The two answer in literally the same words because they call the same function (component/sitepreview).
+// A STORE THE CALLER CANNOT READ IS A REFUSAL, not an answer. `storeReadable` false means nobody could say whether the storefront is pointed at real money, and a storefront may not go in front of shoppers on an unanswered question.
+// Returns {siteId, hostname, kind, status, storefront, bundleRef, candidateRef, hasCandidate, storeId, storeDomain, storeReadable, storeIsDevelopment, previewStoreId, previewStoreDomain, canPreview, canPromote, canGoLive, previewRefusal, promoteRefusal, goLiveRefusal}; each refusal is {code, message, remedy}.
+type SitePreviewReadinessArgs struct {
+	// The deployable to ask about.
+	SiteId string
+}
+
+// SitePreviewReadiness calls the engine builtin sitePreviewReadiness.
+func (qc *QueryClient) SitePreviewReadiness(ctx context.Context, args SitePreviewReadinessArgs) (*Result, error) {
+	call := SitePreviewReadinessBuild(args)
+	return qc.executeNamed(ctx, "sitePreviewReadiness", call)
+}
+
+func SitePreviewReadinessBuild(args SitePreviewReadinessArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin sitePreviewReadiness(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // SitePublishFromArtifact -- Deploy a Library zip artifact to one of the caller's hosted sites (memql#4345). The caller must own the site (or be a cluster owner) AND own the artifact, which must be a Library file whose MIME type is a zip. The bundle is read from object storage and validated -- index.html at the ROOT for spa and shopify_storefront, plus the same per-file (25 MB), whole-bundle (500 MB) and file-count (20000) limits POST /sites/{id}/bundles enforces -- then written under a new content-addressed version prefix before bundleRef is flipped, so a failed publish leaves the site serving exactly what it was serving. artifactId is stamped on the site row as provenance and the attempt is recorded on the security audit log. Returns {siteId, artifactId, fileId, version, bundleRef, fileCount, totalBytes}. Rollback is unchanged: updateSiteBundle pointed back at an earlier version's bundleRef.
 type SitePublishFromArtifactArgs struct {
 	// The v1:platform:site row to publish to.
@@ -3640,6 +3749,32 @@ func SourceRepositoriesBuild(args SourceRepositoriesArgs) string {
 		}
 		b.WriteString("page: ")
 		b.WriteString(fmt.Sprintf("%v", args.Page))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// StorefrontProbe -- Ask one store's Storefront API the three questions a storefront preview can answer (epic memql#5531, issue memql#5547): does the catalog read, does a cart accept a line, does a checkoutUrl come back.
+// IT CREATES A CART, and saying so is part of the contract rather than a footnote. That is the thing being observed, which is why it is pointed at a DEVELOPMENT store by a guard one level up (component/sitepreview) rather than being safe to run anywhere. Nothing is paid for and no order is placed; the payment walk happens in a browser on Shopify's hosted checkout and is not something this cluster can observe at all.
+// IT WRITES NOTHING. The observation rows these results become are written by `sitePreviewProbe`, which calls this and owns v1:platform:sitePreviewObservation. The split is the module taxonomy: the call to Shopify lives in the package this repository classifies as the one that talks to Shopify, and the rows live with the concept that declares them.
+// The reply never carries the checkout URL -- only its host. An observation row is readable by every operator the composite tier admits, and a checkout URL is a live cart somebody else could pay from.
+type StorefrontProbeArgs struct {
+	// The store to ask. The only configured store when omitted.
+	StoreId string
+}
+
+// StorefrontProbe calls the engine builtin storefrontProbe.
+func (qc *QueryClient) StorefrontProbe(ctx context.Context, args StorefrontProbeArgs) (*Result, error) {
+	call := StorefrontProbeBuild(args)
+	return qc.executeNamed(ctx, "storefrontProbe", call)
+}
+
+func StorefrontProbeBuild(args StorefrontProbeArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin storefrontProbe(")
+	if args.StoreId != "" {
+		b.WriteString("storeId: ")
+		b.WriteString(quoteMemQL(args.StoreId))
 	}
 	b.WriteString(")")
 	return b.String()

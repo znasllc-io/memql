@@ -98,6 +98,24 @@ type writeMeta struct {
 	// those inherits the stored hostname through the read-merge, and the
 	// user policy would refuse a value the user never supplied.
 	priorHostname string
+	// The three prior v1:platform:site fields the preview guard judges against
+	// (epic memql#5531). Each is captured for the reason priorHostname is: the
+	// merged payload has already overwritten the stored value by the time any
+	// guard runs, and every ordinary write inherits all three through the
+	// read-merge -- so judging the merged value would refuse a rename on any
+	// deployable that has ever had a candidate.
+	//
+	// priorCandidateRef is the load-bearing one: a promotion NAMES the version
+	// it is promoting, and this is what the name is checked against, so a
+	// candidate republished between the reading and the click is refused rather
+	// than promoted by surprise.
+	priorBundleRef      string
+	priorCandidateRef   string
+	priorBindingStoreId string
+	// priorKind is v1:platform:site.kind, which decides whether the go-live
+	// guard has a question to ask at all -- an spa or a static site has no
+	// store binding and is never refused by it.
+	priorKind string
 	// priorAccountDomain is the prior row's v1:accounts:account `domain`
 	// (empty when absent), captured so the domain walk's reset can tell a
 	// write that CHANGES the client's domain from one that inherited it
@@ -850,6 +868,16 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			// policy can tell "this write is choosing a hostname" from "this
 			// write inherited one through the read-merge".
 			meta.priorHostname = stringFromAny(priorPayload["hostname"])
+			// Capture the PRIOR serving version, candidate and store binding
+			// (epic memql#5531) for the reason above them: a promotion is
+			// checked against the candidate that is STORED, and a go-live is
+			// judged against the binding the row actually carries.
+			meta.priorBundleRef = stringFromAny(priorPayload["bundleRef"])
+			meta.priorCandidateRef = stringFromAny(priorPayload["candidateRef"])
+			meta.priorKind = stringFromAny(priorPayload["kind"])
+			if b, ok := priorPayload["binding"].(map[string]any); ok {
+				meta.priorBindingStoreId = stringFromAny(b[bindingStoreIdKey])
+			}
 			// Capture the PRIOR client domain (epic memql#5165) for the
 			// reason above it: the walk's reset is a comparison against
 			// the stored value, which the merged payload has already
@@ -1287,6 +1315,19 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		// store in the cluster and the edge would serve that store's Storefront
 		// token under their hostname. See platform_site_binding_guard.go.
 		if err := e.validateSiteStoreBinding(ctx, payload, actor, e.canReadStore); err != nil {
+			return nil, meta, err
+		}
+		// The candidate version, the preview binding and the go-live guard
+		// (epic memql#5531), beside the five above and for their reason: every
+		// rule it carries is a comparison against the PRIOR row or against a
+		// DIFFERENT row, and a mutation body can make neither. LAST of the six,
+		// deliberately -- it is the only one that reads a second concept, and
+		// it short-circuits before that read when the write touches none of its
+		// fields, which is every ordinary publish, rename and settings edit.
+		// See component/memql/platform_site_preview_guard.go.
+		if err := e.validateSitePreview(ctx, payload, meta.priorExisted, meta.priorSystemOwned,
+			meta.priorStatus, meta.priorKind, meta.priorBundleRef, meta.priorCandidateRef,
+			meta.priorBindingStoreId, actor); err != nil {
 			return nil, meta, err
 		}
 	}

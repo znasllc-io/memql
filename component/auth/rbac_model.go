@@ -225,6 +225,15 @@ var appPartGrants = map[string][]Role{
 	"app:deployables/publish": {RoleOwner, RoleDeveloper},
 	"app:deployables/retire":  {RoleOwner, RoleDeveloper},
 	"app:deployables/domains": {RoleOwner, RoleDeveloper},
+	// Publishing a CANDIDATE version and exercising it against a development
+	// store (epic memql#5531). Owner and developer, and the line between this
+	// part and `publish` is the one that epic draws: preparing and proving a
+	// storefront changes nothing about what the public is served, while
+	// PROMOTING is what makes the public see it -- so a person may hold the
+	// first without the second. Setting the preview BINDING is not in here: it
+	// names a v1:shopify:store row, so it carries `store` like every other act
+	// that does.
+	"app:deployables/preview": {RoleOwner, RoleDeveloper},
 	// OWNER ONLY (memql#5541). This part took over from the retired
 	// app:stores set, which was seeded on owner and nobody else because
 	// v1:shopify:store is @rowAuthz(clusterOwner): a developer holding the

@@ -140,6 +140,27 @@ export interface FakeSeed {
   addDomainError?: string;
   /** Fails the next `removeCustomDomain` with this server message. */
   removeDomainError?: string;
+  /**
+   * The `sitePreviewReadiness` answer (epic memql#5531), keyed by site id.
+   *
+   * ABSENT IS NOT "NO". A site with no entry gets a readiness whose booleans
+   * are all false because the ENGINE said so, which is what a deployable with
+   * no candidate and no development store actually resolves to -- so the
+   * default fixture is the honest empty state rather than an error.
+   */
+  previewReadiness?: Record<string, Row>;
+  previewReadinessError?: string;
+  /** `sitePreviewObservationsForSite` rows, newest first, keyed by site id. */
+  previewObservations?: Record<string, Row[]>;
+  previewObservationsError?: string;
+  /** `sitePreviewGrantsForSite` rows, newest first, keyed by site id. */
+  previewGrants?: Record<string, Row[]>;
+  /** What `sitePreviewOpen` answers, or the refusal it throws. */
+  previewOpenResult?: Row;
+  previewOpenError?: string;
+  previewProbeError?: string;
+  setCandidateError?: string;
+  promoteError?: string;
   /** v1:platform:package rows `packagesAll` answers with. */
   packages?: Row[];
   /** v1:platform:packageDeployment rows, keyed by packageId. */
@@ -389,6 +410,46 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         return builtinReply("packageRestore", []);
       }
 
+      // THE PREVIEW READS AND WRITES (epic memql#5531). The readiness is a
+      // BUILTIN and the two lists are SHAPED QUERIES, and the fake answers
+      // each in its own wire shape for the reason the store arm below gives:
+      // a fake that answered flat rows to a builtin would pass every test
+      // against a shape the engine never sends.
+      if (call.startsWith("builtin sitePreviewReadiness(")) {
+        if (seed.previewReadinessError !== undefined) throw new Error(seed.previewReadinessError);
+        const id = /siteId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        const row = seed.previewReadiness?.[id] ?? previewReadinessRow({ siteId: id });
+        return builtinReply("sitePreviewReadiness", [row]);
+      }
+      if (call.startsWith("builtin sitePreviewOpen(")) {
+        if (seed.previewOpenError !== undefined) throw new Error(seed.previewOpenError);
+        return builtinReply("sitePreviewOpen", [seed.previewOpenResult ?? OPENED_PREVIEW]);
+      }
+      if (call.startsWith("builtin sitePreviewProbe(")) {
+        if (seed.previewProbeError !== undefined) throw new Error(seed.previewProbeError);
+        return builtinReply("sitePreviewProbe", [{ id: "probe", recorded: 3 } as unknown as Row]);
+      }
+      if (call.startsWith("query sitePreviewObservationsForSite(")) {
+        if (seed.previewObservationsError !== undefined) throw new Error(seed.previewObservationsError);
+        const id = /siteId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        return rowsResult(seed.previewObservations?.[id] ?? []);
+      }
+      if (call.startsWith("query sitePreviewGrantsForSite(")) {
+        const id = /siteId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        return rowsResult(seed.previewGrants?.[id] ?? []);
+      }
+      if (call.startsWith("mutation setSiteCandidate(") || call.startsWith("mutation clearSiteCandidate(")) {
+        if (seed.setCandidateError !== undefined) throw new Error(seed.setCandidateError);
+        return rowsResult([]);
+      }
+      if (call.startsWith("mutation promoteSiteCandidate(")) {
+        if (seed.promoteError !== undefined) throw new Error(seed.promoteError);
+        return rowsResult([]);
+      }
+      if (call.startsWith("mutation revokeSitePreviewGrant(") || call.startsWith("mutation updateSitePreviewBinding(")) {
+        return rowsResult([]);
+      }
+
       // THE STORE READS (epic memql#5530). All three are SHAPED queries, so
       // they answer through `rows()` and never through a bundle envelope --
       // the same reading the app makes, which is what keeps the fake honest
@@ -621,6 +682,8 @@ export function siteRow(over: Partial<Row> & { id: string }): Row {
     systemOwned: false,
     deleted: false,
     binding: {},
+    candidateRef: "",
+    previewBinding: {},
     settings: {},
     createdAt: "2026-08-01T00:00:00Z",
     ...over,
@@ -984,3 +1047,91 @@ export function domainRow(over: Partial<Row> & { id: string }): Row {
     ...over,
   };
 }
+
+/**
+ * A `sitePreviewReadiness` answer (epic memql#5531).
+ *
+ * THE DEFAULT IS THE HONEST EMPTY STATE and not a permissive one: no
+ * candidate, no store attached, nothing legal, and the refusals the engine
+ * would actually give. A fixture that defaulted every boolean to true would
+ * make the absence cases -- which are most of this surface -- impossible to
+ * write by accident.
+ */
+export function previewReadinessRow(over: Partial<Row> & { siteId: string }): Row {
+  return {
+    hostname: "example.memql.example.com",
+    kind: "shopify_storefront",
+    status: "live",
+    storefront: true,
+    bundleRef: "blob://sites/example/v1/",
+    candidateRef: "",
+    hasCandidate: false,
+    storeId: "",
+    storeDomain: "",
+    storeReadable: false,
+    storeIsDevelopment: false,
+    previewStoreId: "",
+    previewStoreDomain: "",
+    canPreview: false,
+    canPromote: false,
+    canGoLive: true,
+    previewRefusal: {
+      code: "no_preview_binding",
+      message: "this storefront has no development store on its preview binding, so there is nothing to exercise a candidate against.",
+      remedy: "Attach a development store to the preview binding first.",
+    },
+    promoteRefusal: {
+      code: "no_candidate_version",
+      message: "this deployable has no candidate version, so there is nothing to promote.",
+      remedy: "Publish a version and set it as the candidate first.",
+    },
+    goLiveRefusal: { code: "", message: "", remedy: "" },
+    ...over,
+  } as unknown as Row;
+}
+
+/** One `sitePreviewObservationsForSite` row. */
+export function previewObservationRow(over: Partial<Row> & { kind: string }): Row {
+  return {
+    id: `obs-${String(over.kind)}`,
+    grantId: "grant-1",
+    siteId: "site-shop",
+    storeId: "store-example-dev",
+    observedAt: "2026-09-20T12:00:00Z",
+    ok: true,
+    detail: "",
+    failure: "",
+    durationMs: 120,
+    ...over,
+  } as unknown as Row;
+}
+
+/** One `sitePreviewGrantsForSite` row, open by default. */
+export function previewGrantRow(over: Partial<Row> & { id: string }): Row {
+  return {
+    siteId: "site-shop",
+    ownerUserId: "u-me",
+    candidateRef: "blob://sites/example/v2/",
+    previewStoreId: "store-example-dev",
+    issuedAt: "2026-09-20T12:00:00Z",
+    // Far enough out that the clock a test runs on cannot expire it.
+    expiresAt: "2099-01-01T00:00:00Z",
+    revokedAt: "",
+    lastSeenAt: "",
+    ...over,
+  } as unknown as Row;
+}
+
+/** What `sitePreviewOpen` answers: the one-time link and what it opens. */
+export const OPENED_PREVIEW: Row = {
+  id: "grant-new",
+  grantId: "grant-new",
+  siteId: "site-shop",
+  hostname: "shop.memql.example.com",
+  candidateRef: "blob://sites/example/v2/",
+  previewStoreId: "store-example-dev",
+  previewStoreDomain: "example-dev.myshopify.com",
+  expiresAt: "2099-01-01T00:00:00Z",
+  ttlMinutes: 30,
+  url: "https://shop.memql.example.com/_memql/preview?grant=mql_prv_TEST",
+} as unknown as Row;
