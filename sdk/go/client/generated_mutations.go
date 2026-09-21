@@ -5924,8 +5924,11 @@ type CreateSiteArgs struct {
 	SiteId   string
 	Hostname string
 	// Enum: spa | static | shopify_storefront
-	Kind      string
-	BundleRef string
+	Kind string
+	// What the edge answers for a path that matches no file. Omitted means the kind decides, which is what every site row created before memql#5535 carries and what they must keep resolving as. It sits in accept{} rather than stamp{} for updateSiteBundle's artifactId reason: an omitted arg is dropped from the payload, so a `?? ""` here would write an explicit empty string and there would be no way to express "let the kind decide".
+	// Enum: fallback | not_found
+	ResolutionTail string
+	BundleRef      string
 	// Enum: draft | live | disabled
 	Status         string
 	ApiProxy       bool
@@ -5959,6 +5962,13 @@ func CreateSiteBuild(args CreateSiteArgs) string {
 		}
 		b.WriteString("kind: ")
 		b.WriteString(quoteMemQL(args.Kind))
+	}
+	if args.ResolutionTail != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("resolutionTail: ")
+		b.WriteString(quoteMemQL(args.ResolutionTail))
 	}
 	if b.Len() > 20 {
 		b.WriteString(", ")
@@ -6319,17 +6329,20 @@ func CreateSpawnEventBuild(args CreateSpawnEventArgs) string {
 //
 // Bound concept: v1:shopify:store (machine-readable: BoundConcepts["createStore"] in generated_concepts.go).
 type CreateStoreArgs struct {
-	StoreId            string
-	Domain             string
-	Name               string
-	AppClientId        string
-	AdminTokenRef      string
-	StorefrontTokenRef string
-	WebhookSecretRef   string
-	ApiVersion         string
-	ProtectedDataLevel string
-	Plan               string
-	OwnerUserId        string
+	StoreId              string
+	Domain               string
+	Name                 string
+	AppClientId          string
+	AdminTokenRef        string
+	StorefrontTokenRef   string
+	WebhookSecretRef     string
+	ApiVersion           string
+	ProtectedDataLevel   string
+	Plan                 string
+	OwnerUserId          string
+	IsDevelopment        bool
+	IsDevelopmentSet     bool // set true to send isDevelopment; required because zero-value bool is ambiguous
+	DevelopmentOfStoreId string
 }
 
 // CreateStore calls the engine mutation createStore.
@@ -6410,6 +6423,20 @@ func CreateStoreBuild(args CreateStoreArgs) string {
 		}
 		b.WriteString("ownerUserId: ")
 		b.WriteString(quoteMemQL(args.OwnerUserId))
+	}
+	if args.IsDevelopmentSet {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("isDevelopment: ")
+		b.WriteString(fmt.Sprintf("%v", args.IsDevelopment))
+	}
+	if args.DevelopmentOfStoreId != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("developmentOfStoreId: ")
+		b.WriteString(quoteMemQL(args.DevelopmentOfStoreId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -14927,6 +14954,40 @@ func UpdateSiteBundleBuild(args UpdateSiteBundleArgs) string {
 	return b.String()
 }
 
+// UpdateSiteResolutionTail -- Choose what the edge answers for a path that matches no file in this deployable's bundle (memql#5535) -- the LAST rung of the resolution order, and nothing above it.
+// THREE VALUES, AND THE THIRD IS THE EMPTY ONE. "fallback" serves index.html, "not_found" answers 404, and "" HANDS THE DECISION BACK TO `kind` -- which is the state every row created before this field existed is in, and the one a person must be able to return a site to. That is why the arg is optional and stamped with `?? ""` rather than accepted: an accepted arg omitted by the caller is dropped from the payload and the read-merge re-saves whatever was there, so clearing the choice would be inexpressible. It is the exact inverse of createSite's reading of the same field, for the same reason updateSiteSettings and updateSiteBundle differ.
+// WHY A SITE AND NOT A KIND. A shopify_storefront was given the spa fallback because the kind's own description says it IS a spa bundle; the first storefront actually built was a multi-page prerendered tree that declared kind: static precisely to get the 404 back, and thereby gave up the store binding, the storefront block in its runtime document and the policy that admits Shopify. Neither tail is right for every storefront, so the SITE says which it is.
+// AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite, exactly as on updateSiteBundle and updateSiteSettings: the row's owner, or a cluster owner through the explicit escape, and a systemOwned row refused for both.
+//
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteResolutionTail"] in generated_concepts.go).
+type UpdateSiteResolutionTailArgs struct {
+	SiteId string
+	// Enum: fallback | not_found
+	ResolutionTail string
+}
+
+// UpdateSiteResolutionTail calls the engine mutation updateSiteResolutionTail.
+func (qc *QueryClient) UpdateSiteResolutionTail(ctx context.Context, args UpdateSiteResolutionTailArgs) (*Result, error) {
+	call := UpdateSiteResolutionTailBuild(args)
+	return qc.executeNamed(ctx, "updateSiteResolutionTail", call)
+}
+
+func UpdateSiteResolutionTailBuild(args UpdateSiteResolutionTailArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateSiteResolutionTail(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if args.ResolutionTail != "" {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("resolutionTail: ")
+		b.WriteString(quoteMemQL(args.ResolutionTail))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // UpdateSiteSettings -- Replace a deployable's runtime settings (epic memql#4906, decision P7): the key-values the edge merges into the site's runtime-config document under `settings`, read by the bundle at load.
 // A REPLACE, NOT A MERGE, and the whole object is the argument. `settings` is stamped from the required arg rather than accepted, so an empty object is written as an empty object and clearing every setting is expressible -- an accepted optional arg would be dropped from the payload when omitted and the read-merge would re-save whatever was there (updateSiteAccount's reasoning). The editor sends the map it shows, so what a person sees is what the row holds.
 // The shape half is here: an object. The half that decides -- every key of the identifier form [A-Za-z][A-Za-z0-9_]{0,63} and not ending in `Ref`, every value a plain string within MEMQL_SITE_SETTINGS_MAX_VALUE_LENGTH, at most MEMQL_SITE_SETTINGS_MAX_KEYS keys, and the systemOwned refusal -- is the Go guard beside the status guard (component/memql/platform_site_settings_guard.go), because a mutation body cannot see an object's keys. NOT A PLACE FOR A SECRET: the document is served to every visitor.
@@ -14988,21 +15049,56 @@ func UpdateSiteStatusBuild(args UpdateSiteStatusArgs) string {
 	return b.String()
 }
 
+// UpdateSiteStoreBinding -- Point a storefront deployable at the v1:shopify:store row it fronts, or clear the binding (epic memql#5530, issue memql#5538).
+// ONE VALUE, AND IT IS A REFERENCE. The binding is written whole as {storeId} rather than merged, so the legacy {storeDomain, storefrontTokenRef} shape cannot survive a write: a read-merge would have kept the copy beside the reference and left two records of one store, which is the thing this epic exists to end. An empty storeId writes an empty object, which is the unbound state -- clearing must be expressible, for updateSiteSettings' reason.
+// AUTHORIZATION IS TWO GATES, AND THE SECOND IS THE SUBSTANTIVE ONE. @requiresCapability names the surface: `app:deployables/store` is seeded on owner alone, which is exactly the population the retired Stores app admitted. Beside it, a Go guard refuses a binding naming a store row the CALLER CANNOT READ -- so the answer to "who may bind a storefront they own to a store they may not read" is nobody. That check needs a cross-row read no mutation body can make, which is why it sits with the hostname policy rather than here (component/memql/platform_site_binding_guard.go).
+//
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteStoreBinding"] in generated_concepts.go).
+type UpdateSiteStoreBindingArgs struct {
+	SiteId  string
+	StoreId string
+}
+
+// UpdateSiteStoreBinding calls the engine mutation updateSiteStoreBinding.
+func (qc *QueryClient) UpdateSiteStoreBinding(ctx context.Context, args UpdateSiteStoreBindingArgs) (*Result, error) {
+	call := UpdateSiteStoreBindingBuild(args)
+	return qc.executeNamed(ctx, "updateSiteStoreBinding", call)
+}
+
+func UpdateSiteStoreBindingBuild(args UpdateSiteStoreBindingArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateSiteStoreBinding(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if args.StoreId != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("storeId: ")
+		b.WriteString(quoteMemQL(args.StoreId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // UpdateStore -- Change a store's configuration. Read-merge: an argument left out keeps its stored value, so rotating one secret reference does not require re-supplying the other two.
 //
 // Bound concept: v1:shopify:store (machine-readable: BoundConcepts["updateStore"] in generated_concepts.go).
 type UpdateStoreArgs struct {
-	StoreId            string
-	Name               string
-	AppClientId        string
-	AdminTokenRef      string
-	StorefrontTokenRef string
-	WebhookSecretRef   string
-	ApiVersion         string
-	ProtectedDataLevel string
-	Plan               string
-	ScopesGranted      []string
-	OwnerUserId        string
+	StoreId              string
+	Name                 string
+	AppClientId          string
+	AdminTokenRef        string
+	StorefrontTokenRef   string
+	WebhookSecretRef     string
+	ApiVersion           string
+	ProtectedDataLevel   string
+	Plan                 string
+	ScopesGranted        []string
+	OwnerUserId          string
+	IsDevelopment        bool
+	IsDevelopmentSet     bool // set true to send isDevelopment; required because zero-value bool is ambiguous
+	DevelopmentOfStoreId string
 }
 
 // UpdateStore calls the engine mutation updateStore.
@@ -15085,6 +15181,20 @@ func UpdateStoreBuild(args UpdateStoreArgs) string {
 		}
 		b.WriteString("ownerUserId: ")
 		b.WriteString(quoteMemQL(args.OwnerUserId))
+	}
+	if args.IsDevelopmentSet {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("isDevelopment: ")
+		b.WriteString(fmt.Sprintf("%v", args.IsDevelopment))
+	}
+	if args.DevelopmentOfStoreId != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("developmentOfStoreId: ")
+		b.WriteString(quoteMemQL(args.DevelopmentOfStoreId))
 	}
 	b.WriteString(")")
 	return b.String()

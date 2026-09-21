@@ -1,0 +1,345 @@
+import { createRoot } from "react-dom/client";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+
+import "../src/styles/index.css";
+import { Panel } from "../src/kit";
+import { setRoleLadder } from "../src/system/roles";
+import { SEEDED_LADDER } from "../test/seededLadder";
+import {
+  DEV_STORE,
+  DOCS,
+  PLATFORM_SITE,
+  SHOP,
+  STORE,
+  fakeConnection,
+  githubGrantRow,
+  repositoriesReply,
+  repositoryFixture,
+  siteRow,
+  storeHealthRow,
+  domainStateRow,
+  withSession,
+  type FakeSeed,
+} from "../test/deployables/harness";
+import { installQaConnection } from "./connectionShim";
+import { StorePanel } from "../src/apps/deployables/store/StorePanel";
+import { DeployablesApp } from "../src/apps/deployables/DeployablesApp";
+import { LocalDeployablesSettingsStore } from "../src/apps/deployables/settings";
+import { PageNavigationProvider } from "../src/kit/pageNavigation";
+import { TrailRow } from "../src/kit/TrailRow";
+import { DeployablePage } from "../src/apps/deployables/page/DeployablePage";
+import { ALL_PARTS, partsWithout } from "../src/apps/deployables/parts";
+import { siteFromRow } from "../src/apps/deployables/rows";
+
+// The browser QA harness for the storefront's Store surface.
+//
+// clients/os/DESIGN.md: "the acceptance for any surface change under these
+// rules is rendered screenshots, both modes, empty and populated -- not the
+// diff." jsdom performs no layout, resolves no custom property and never puts
+// a value beside its own label, so a suite can be entirely green over a
+// surface whose columns collide, whose action bar is below the fold, or whose
+// value begins with the verb its own label already supplied.
+//
+// IT MOUNTS THE REAL COMPONENTS OVER THE SUITE'S OWN FIXTURE CONNECTION.
+// `test/deployables/harness.tsx` is imported rather than re-implemented, so a
+// screenshot cannot disagree with what the tests assert. `vitest`'s `vi` is
+// shimmed for the same reason -- a second copy of the fake is a second thing
+// to keep in step.
+//
+// WHAT IT DOES NOT DO: it does not click. The Store pane is reached in the
+// product by clicking the workspace's Store slot, which needs React's
+// synthetic event system and therefore a real driver; here each view is
+// rendered directly, in the wrapper the page gives it. So these captures judge
+// LAYOUT, COLOUR, COPY and DENSITY, and say nothing about the navigation that
+// reaches them -- which is what `test/deployables/store.test.tsx` is for.
+
+// A MODULE THAT FAILS TO LOAD LEAVES A BLANK PAGE AND A SILENT CONSOLE, so
+// the harness reports its own state in the TITLE -- which `--dump-dom` and a
+// one-shot headless capture can both read without a debugger attached. The
+// first failure here was `test/seededAccess.ts` reading the seeds with
+// node:fs, which is an unresolved import rather than a thrown error and so
+// reached no error handler at all.
+document.title = "loaded";
+window.addEventListener("error", (e) => { document.title = "ERR: " + e.message; });
+window.addEventListener("unhandledrejection", (e) => { document.title = "REJ: " + String(e.reason); });
+
+setRoleLadder(SEEDED_LADDER);
+
+const BOUND: FakeSeed = {
+  sites: [SHOP],
+  stores: [STORE, DEV_STORE],
+  storeHealth: [
+    storeHealthRow({
+      storeId: "store-example",
+      domain: "example.myshopify.com",
+      scopesMissing: ["read_inventory"],
+      scopesNeeded: ["read_products", "read_orders", "read_inventory"],
+      domains: [
+        domainStateRow({ concept: "v1:shopify:product", driftLast: 12, lagSeconds: 4, outboxDepth: 0, lastAppliedAt: "2026-09-20T18:40:00Z" }),
+        domainStateRow({ concept: "v1:shopify:order", phase: "backfilling", driftLast: 3, lagSeconds: 61, outboxDepth: 7, lastAppliedAt: "2026-09-20T18:12:00Z" }),
+        domainStateRow({ concept: "v1:shopify:customer", lastError: "shopify: 429 from the Admin API" }),
+      ],
+      // `costBucket` is a TOP-LEVEL key of the report and `subscriptions`
+      // lives under `health` -- that is what the Go handler emits and what
+      // readStoreHealth reads. Nesting the bucket rendered it as absent, which
+      // is the honest answer to a fixture that never gave it one.
+      costBucket: { currentlyAvailable: 1840, maximumAvailable: 2000, restoreRate: 100 },
+      health: {
+        subscriptions: { existing: 11, desired: 12, at: "2026-09-20T03:15:00Z", failed: ["orders/edited"] },
+      },
+    }),
+  ],
+};
+
+/** Nothing measured yet: no bucket, no reconcile, no domain. */
+const QUIET: FakeSeed = {
+  sites: [SHOP],
+  stores: [STORE],
+  storeHealth: [storeHealthRow({ storeId: "store-example", domain: "example.myshopify.com" })],
+};
+
+const UNBOUND_SITE = siteRow({
+  id: "site-unbound",
+  hostname: "new.memql.example.com",
+  kind: "shopify_storefront",
+  status: "draft",
+  bundleRef: "blob://sites/site-unbound/pending/",
+  binding: {},
+});
+
+const UNBOUND: FakeSeed = { sites: [UNBOUND_SITE], stores: [STORE, DEV_STORE] };
+
+// ---------------------------------------------------------------------------
+// THE TWO LISTS (Deployables and Sources), populated
+// ---------------------------------------------------------------------------
+//
+// A cluster somebody develops on has two built-in deployables and no source,
+// so neither list has ever been SEEN with the rows it was designed for: an
+// origin on a row, "3 apps, 2 deployed", Review needed beside Update available.
+// These seeds are those rows. One of every origin a deployable can have, and
+// one of every state word a source can carry.
+
+function packageRow(over: Record<string, unknown> & { id: string; name: string }) {
+  return {
+    ownerUserId: "u-me",
+    sourceKind: "repo",
+    repoUrl: `https://github.com/acme/${over.name}`,
+    repoRef: "main",
+    credentialId: "",
+    artifactId: "",
+    deployedVersion: "aaaaaaaaaaaaaaaaaaaa",
+    latestKnownVersion: "aaaaaaaaaaaaaaaaaaaa",
+    updateAvailable: false,
+    status: "active",
+    createdAt: "2026-09-01T10:00:00Z",
+    ...over,
+  };
+}
+
+const ACME = packageRow({
+  id: "pkg-acme",
+  name: "acme",
+  repoUrl: "https://github.com/acme/storefront",
+  declares: [{ name: "storefront", kind: "spa" }, { name: "admin", kind: "spa" }, { name: "reports", kind: "static" }],
+});
+const WIDGETS = packageRow({ id: "pkg-widgets", name: "widgets-co", repoUrl: "https://github.com/acme/widgets", updateAvailable: true, latestKnownVersion: "bbbbbbbbbbbbbbbbbbbb" });
+const BROCHURE = packageRow({ id: "pkg-brochure", name: "", sourceKind: "artifact", repoUrl: "", repoRef: "", artifactId: "artifact-zip" });
+const LEGACY = packageRow({ id: "pkg-legacy", name: "legacy-portal", repoUrl: "https://github.com/acme/legacy-portal", status: "archived" });
+const FRESH = packageRow({ id: "pkg-fresh", name: "field-notes", repoUrl: "https://github.com/acme/field-notes", deployedVersion: "" });
+
+const LIST_SITES = [
+  siteRow({ id: "site-store", hostname: "store.memql.example.com", bundleRef: "blob://sites/site-store/v2/", packageId: "pkg-acme", packageDeployableName: "storefront" }),
+  siteRow({ id: "site-admin", hostname: "admin.memql.example.com", status: "disabled", bundleRef: "blob://sites/site-admin/v2/", packageId: "pkg-acme", packageDeployableName: "admin" }),
+  siteRow({ id: "site-widget", hostname: "widgets.memql.example.com", packageId: "pkg-widgets", packageDeployableName: "widgets" }),
+  siteRow({ id: "site-brochure", hostname: "brochure.memql.example.com", kind: "static", bundleRef: "blob://sites/site-brochure/v1/", packageId: "pkg-brochure", packageDeployableName: "brochure" }),
+  siteRow({ id: "site-marketing", hostname: "marketing.memql.example.com", kind: "static", status: "draft", bundleRef: "blob://sites/site-marketing/pending/", title: "Marketing" }),
+  SHOP,
+  DOCS,
+  PLATFORM_SITE,
+];
+
+const PARKED = {
+  id: "dep-parked",
+  packageId: "pkg-acme",
+  sourceVersion: "cccccccccccccccccccc",
+  status: "awaiting_confirm",
+  report: {
+    name: "acme",
+    formatVersion: 1,
+    deployables: [
+      { name: "storefront", kind: "spa", path: "clients/web", buildPlan: "already built: dist", output: "dist", prebuilt: true },
+      { name: "reports", kind: "static", path: "clients/reports", buildPlan: "already built: out", output: "out", prebuilt: true },
+    ],
+    dslDomains: [],
+    problems: [],
+    ok: true,
+  },
+  dslVersion: "",
+  deployables: [],
+  snapshotArtifactId: "",
+  buildLogTail: "",
+  error: null,
+  requestedBy: "u-me",
+  startedAt: "2026-09-01T13:00:00Z",
+  finishedAt: "",
+  createdAt: "2026-09-01T13:00:00Z",
+};
+
+const LISTS: FakeSeed = {
+  sites: LIST_SITES,
+  packages: [ACME, WIDGETS, BROCHURE, LEGACY, FRESH] as never,
+  awaitingConfirm: [PARKED] as never,
+};
+
+/** A GitHub account already connected, so the Repository step is its picker. */
+const CONNECTED: FakeSeed = {
+  ...LISTS,
+  credentials: [githubGrantRow({ id: "cred-grant" })],
+  repositories: repositoriesReply({
+    repositories: [
+      repositoryFixture({ fullName: "acme/storefront", private: true, visibility: "private" }),
+      repositoryFixture({ fullName: "acme/widgets" }),
+      repositoryFixture({ fullName: "acme/field-notes" }),
+      repositoryFixture({ fullName: "octocat/dotfiles", installationId: "i-octocat" }),
+    ],
+  }),
+};
+
+function settingsStore() {
+  const data = new Map<string, string>();
+  return new LocalDeployablesSettingsStore({
+    getItem: (k) => data.get(k) ?? null,
+    setItem: (k, v) => void data.set(k, v),
+  });
+}
+
+/**
+ * THE WINDOW'S BODY, as `chrome/WindowFrame` composes it: the one trail row,
+ * then the content. A list judged without the trail row above it is judged at
+ * the wrong height, and a wizard judged outside a bounded body has no floor --
+ * its action bar is only at the bottom of something that has a bottom.
+ */
+function WindowBody({ fallback, children }: { fallback: string; children: ReactNode }) {
+  const content = useRef<HTMLDivElement>(null);
+  return (
+    <div className="os-window" style={{ position: "fixed", inset: 0, display: "flex", flexDirection: "column" }}>
+      <div className="os-window-body">
+        <PageNavigationProvider root={content} trail={[]}>
+          <TrailRow fallback={fallback} />
+          <div ref={content} className="os-window-content" data-os-window-content>
+            {children}
+          </div>
+        </PageNavigationProvider>
+      </div>
+    </div>
+  );
+}
+
+function Lists({ section }: { section: "deployables" | "sources" }) {
+  return (
+    <WindowBody fallback={section === "sources" ? "Sources" : "Deployables"}>
+      <DeployablesApp sectionId={section} navigate={() => {}} askContext={() => {}} store={settingsStore()} />
+    </WindowBody>
+  );
+}
+
+/** The pane wrapper `DeployablePage` gives the Store view, verbatim. */
+function StorePane({ site, canBind }: { site: ReturnType<typeof siteFromRow>; canBind: boolean }) {
+  return (
+    <div className="os-deploy-pane deployable-workspace">
+      <div className="os-deploy-scroll">
+        <Panel label={`Store for ${site.hostname}`}>
+          <StorePanel
+            site={site}
+            canBind={canBind}
+            trail={[{ label: "Deployables" }, { label: site.hostname }, { label: "Store" }]}
+            back={{ label: site.hostname, onSelect: () => {} }}
+          />
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+function Overview({ site }: { site: ReturnType<typeof siteFromRow> }) {
+  return (
+    <DeployablePage
+      site={site}
+      pkg={null}
+      credentials={[]}
+      viewerUserId="u-me"
+      nameOf={() => ""}
+      can={ALL_PARTS}
+      clusterDomain="memql.example.com"
+      onBack={() => {}}
+      onOpenSource={() => {}}
+      onOpenHistory={() => {}}
+    />
+  );
+}
+
+const VIEWS: Record<string, { seed: FakeSeed; role?: string; framed?: boolean; render: () => JSX.Element }> = {
+  // The two lists. `framed` views bring their own window body, because the
+  // app's wizard needs a floor and its pages publish to the window's trail.
+  list: { seed: LISTS, framed: true, render: () => <Lists section="deployables" /> },
+  sources: { seed: LISTS, framed: true, render: () => <Lists section="sources" /> },
+  "list-empty": { seed: {}, framed: true, render: () => <Lists section="deployables" /> },
+  "sources-empty": { seed: {}, framed: true, render: () => <Lists section="sources" /> },
+  // The same app with a GitHub account connected: press + and choose
+  // "A repository" and the Repository step is the picker, not the invitation.
+  connected: { seed: CONNECTED, framed: true, render: () => <Lists section="deployables" /> },
+  overview: { seed: BOUND, render: () => <Overview site={siteFromRow(SHOP)} /> },
+  store: { seed: BOUND, render: () => <StorePane site={siteFromRow(SHOP)} canBind /> },
+  quiet: { seed: QUIET, render: () => <StorePane site={siteFromRow(SHOP)} canBind /> },
+  picker: { seed: UNBOUND, render: () => <StorePane site={siteFromRow(UNBOUND_SITE)} canBind /> },
+  readonly: { seed: BOUND, role: "reader", render: () => <StorePane site={siteFromRow(SHOP)} canBind={false} /> },
+  hidden: {
+    seed: BOUND,
+    role: "reader",
+    render: () => (
+      <DeployablePage
+        site={siteFromRow(SHOP)}
+        pkg={null}
+        credentials={[]}
+        viewerUserId="u-me"
+        nameOf={() => ""}
+        can={partsWithout("store")}
+        clusterDomain="memql.example.com"
+        onBack={() => {}}
+        onOpenSource={() => {}}
+        onOpenHistory={() => {}}
+      />
+    ),
+  },
+};
+
+function App() {
+  const params = new URLSearchParams(window.location.search);
+  const name = params.get("view") ?? "store";
+  const view = VIEWS[name] ?? VIEWS.store;
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    installQaConnection(fakeConnection(view.seed));
+    setReady(true);
+  }, [name]);
+
+  if (!ready) return null;
+  // THE PROVIDERS ARE THE SUITE'S OWN. `withSession` installs the session, the
+  // shell provider and the role's seeded capability set together -- these
+  // surfaces read all three (a Logs action opens another app, and `useOs`
+  // throws outside its provider), and a harness that wired them itself would
+  // be a second reading of the access model beside the one the tests use.
+  if (view.framed) return withSession(view.render(), { role: view.role ?? "owner", userId: "u-me" });
+  return <div className="os-window-content">{withSession(view.render(), { role: view.role ?? "owner" })}</div>;
+}
+
+// MODE is `data-theme` on the root (src/styles/tokens.css); `data-os-theme`
+// is the theme PACK, which is a different axis. Setting the wrong one renders
+// the system-preference branch and both captures come out identical.
+const mode = new URLSearchParams(window.location.search).get("mode") ?? "dark";
+document.documentElement.setAttribute("data-theme", mode);
+document.documentElement.setAttribute("data-os-theme", "graphite");
+document.documentElement.style.colorScheme = mode;
+
+createRoot(document.getElementById("root")!).render(<App />);

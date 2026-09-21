@@ -2,8 +2,12 @@ import { localCockpitInstall } from "./localInstall";
 import { useEffect, useState } from "react";
 
 import { useSession } from "../../../chrome/access";
-import { Caption, CopyField, Head, Panel, stopIsReachable, type Stop } from "../../../kit";
-import { ActionBar, type Act } from "../../../kit/ActionBar";
+import { Monitor } from "lucide-react";
+
+import { Caption, CopyField, stopIsReachable, type Stop } from "../../../kit";
+import type { Act } from "../../../kit/ActionBar";
+import { useNow } from "../../../kit/useNow";
+import { Wizard } from "../../../kit/Wizard";
 import { openStopFor, waitedLong, type ActId, type StopId } from "./flow";
 import { uninstallCommand, workerClusterUrl } from "./install";
 import { ChecksStop } from "./stops/Checks";
@@ -81,44 +85,51 @@ export function AddMachinePage({
     label: act.label,
     tone: act.tone,
     busy: act.busy,
+    text: act.text,
     onAct: () => run(act.id),
   }));
 
+  // HOW LONG THE CLUSTER HAS BEEN LISTENING, beside the words that say it is.
+  // "Waiting" with no figure cannot tell a moment from ten minutes, and ten
+  // minutes is when the Connect step starts naming what usually went wrong.
+  // Its own clock, by the second: the flow's `now` ticks every fifteen, and a
+  // counter that jumps 0:15 at a time reads as one that has stalled.
+  const tick = useNow(phase === "waiting" ? 1000 : 60_000);
+  const waited = phase === "waiting" && facts.mintedAt !== null ? elapsed(tick.getTime() - facts.mintedAt.getTime()) : undefined;
+
   return (
-    <div className="os-deploy-pane os-fleet-addpage" data-os-page-context={JSON.stringify({ page: "Add a machine", phase, step: openStop })}>
-      <div className="os-deploy-scroll">
-        <Panel label="Add a machine">
-          {/* Keep credential cancellation and successful completion on the same back action. */}
-          <Head title="Add a machine" back={{ label: "Machines", onSelect: () => phase === "connected" ? run("done") : flow.cancel() }} />
-
-          <ol className="fleet-install-trail" aria-label="Adding a machine">
-            {drawn.map((stop, index) => <li key={stop.id} data-state={stop.state}>
-              <button type="button" disabled={!stop.openable} aria-current={stop.id === openStop ? "step" : undefined} aria-expanded={stop.id === openStop} onClick={() => setOverride(stop.id)}>
-                <span className="fleet-step-number" aria-hidden>{(stop.state === "done" || stop.state === "complete") ? "✓" : index + 1}</span>
-                <span><strong>{stop.name}</strong><small>{stop.state === "ahead" ? "Not reached" : (stop.state === "done" || stop.state === "complete") ? "Complete" : stop.state === "current" ? "Listening" : stop.state === "open" ? "Waiting on you" : stop.answer}</small></span>
-              </button>
-            </li>)}
-          </ol>
-          {phase === "waiting" || phase === "connected" ? <p className="fleet-install-status" role="status">{stops.find(stop => stop.id === "connect")?.answer || stops.find(stop => stop.id === "connect")?.sentence}</p> : null}
-          <div className="fleet-install-current">{drawn.find(stop => stop.id === openStop)?.body}</div>
-
-        </Panel>
-      </div>
-
-      <ActionBar state={bar.state} detail={bar.detail} tone={bar.tone} acts={acts}>
-        {bar.question === "" ? null : (
-          <div className="os-actbar-confirm os-fleet-leave">
-            <p className="os-fleet-leave-question">{bar.question}</p>
-            {/* THE UNINSTALL LINE, HERE (D12). A person who already ran the
-                install has a worker on that machine retrying with a token
-                about to be revoked; a registration that never happens has no
-                machine page to get the line from. */}
+    <Wizard
+      className="os-fleet-addpage"
+      icon={<Monitor aria-hidden />}
+      title="Add a machine"
+      lead="Connect a computer to this cluster so it can run work for it."
+      /* GOING BACK IS LEAVING, NOT CANCELLING. With a token waiting to be used
+         it asks the Leave question -- the token is shown only here -- and
+         never revokes anything; before the mint there is nothing to keep, so
+         it simply goes. */
+      back={{ label: "Machines", onSelect: () => (phase === "connected" ? run("done") : phase === "waiting" ? flow.askLeave() : flow.cancel()) }}
+      label="Adding a machine"
+      steps={drawn}
+      open={openStop}
+      onOpen={setOverride}
+      status={{ word: bar.state, detail: bar.detail, tone: bar.tone, meta: waited }}
+      acts={acts}
+      context={{ page: "Add a machine", phase, step: openStop }}
+      confirm={bar.question === "" ? null : (
+        <div className="os-actbar-confirm os-fleet-leave">
+          <p className="os-fleet-leave-question">{bar.question}</p>
+          {/* THE UNINSTALL LINE, WITH THE QUESTION THAT REVOKES (D12). A person
+              who already ran the install has a worker on that machine retrying
+              with a token about to be revoked; a registration that never
+              happens has no machine page to get the line from. Leaving keeps
+              the token, so that question has nothing to uninstall. */}
+          {facts.cancelAsked ? <>
             <Caption>If you already ran the install on the machine, this removes it again:</Caption>
             <CopyField value={uninstallCommand(flow.draft.platform, { userLocal: flow.draft.userLocal, localTest: localCockpitInstall(config.domain), clusterUrl: workerClusterUrl(config.domain) })} label="the uninstall command" />
-          </div>
-        )}
-      </ActionBar>
-    </div>
+          </> : null}
+        </div>
+      )}
+    />
   );
 
   function run(id: ActId): void {
@@ -128,6 +139,9 @@ export function AddMachinePage({
         return;
       case "mint":
         void flow.mint();
+        return;
+      case "leave":
+        flow.askLeave();
         return;
       case "keepWaiting":
         flow.keepWaiting();
@@ -199,4 +213,11 @@ export function AddMachinePage({
         );
     }
   }
+}
+
+
+/** m:ss, for a wait measured in minutes. */
+function elapsed(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }

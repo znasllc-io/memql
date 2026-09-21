@@ -444,6 +444,7 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "platform/mutations.memql", Name: "recordCustomDomainCheck"}:           true,
 		{Path: "platform/mutations.memql", Name: "markCustomDomainVerified"}:          true,
 		{Path: "platform/mutations.memql", Name: "recordCustomDomainIssuanceFailure"}: true,
+		{Path: "platform/mutations.memql", Name: "recordCustomDomainRemovalFailure"}:  true,
 		{Path: "platform/mutations.memql", Name: "recordCustomDomainIssuingProgress"}: true,
 		{Path: "platform/mutations.memql", Name: "markCustomDomainLive"}:              true,
 		{Path: "platform/mutations.memql", Name: "markCustomDomainRemoved"}:           true,

@@ -322,6 +322,38 @@ export function DeployablesApp({
         />
       </DeployablesSettingsProvider>
     );
+  // THE SAME SECTION ON ITS OTHER ROOT. Every page either list opens is the
+  // same page, so this is a second INSTANCE rather than a second component --
+  // with its own view state, so drilling into a source here does not move the
+  // Deployables tab off whatever it was showing. It takes no open request and
+  // no connect return: those are addressed to Deployables, which is where the
+  // map sends people and where GitHub sends them back.
+  const sourcesContent =
+    snapshot.state === "disconnected" ? null : (
+      <DeployablesSettingsProvider value={{ settings, update, toggleSource }}>
+        <DeployablesSection
+          root="sources"
+          active={sectionId === "sources"}
+          navigation={navigation}
+          connectResult={null}
+          sites={measuredSource}
+          packages={packages}
+          parked={parked}
+          feedError={snapshot.error || packageSnapshot.error || parkedSnapshot.error}
+          density={settings.density}
+          selectedSiteId=""
+          onSelectSite={() => {}}
+          viewerUserId={viewerUserId}
+          can={can}
+          isClusterOwner={isClusterOwner}
+          clusterDomain={config.domain}
+          credentials={credentialRows}
+          credentialFeed={{ state: credentialSnapshot.state, error: credentialSnapshot.error, retry: reseedCredentials }}
+          onAsk={askContext}
+          onReseed={reseedAll}
+        />
+      </DeployablesSettingsProvider>
+    );
   const mapContent = (
     <MapSection
       sites={snapshot.rows}
@@ -346,7 +378,8 @@ export function DeployablesApp({
     <RetainedSection active={sectionId === "settings"}>{settingsContent}</RetainedSection>
     <RetainedSection active={sectionId === "logs"}>{logsContent}</RetainedSection>
     <RetainedSection active={sectionId === "deployables"}>{deployablesContent}</RetainedSection>
-    <RetainedSection active={!["settings", "logs", "deployables"].includes(sectionId)}>{mapContent}</RetainedSection>
+    <RetainedSection active={sectionId === "sources"}>{sourcesContent}</RetainedSection>
+    <RetainedSection active={!["settings", "logs", "deployables", "sources"].includes(sectionId)}>{mapContent}</RetainedSection>
   </ActivePane>;
 }
 

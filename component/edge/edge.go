@@ -7,19 +7,21 @@ package edge
 //
 // # Why this runs under a synthetic actor
 //
-// The bound concept declares @rowAuthz(clusterOwner), and its named query
-// carries an explicit actor.isClusterOwner==true conjunct on top of that
-// declared tier -- so a caller without a cluster-owner actor is refused
-// TWICE: once by the textual conjunct, once by the engine's own row-authz
-// enforcement on the read path. The edge is a service, not a user, so
-// SiteByHostname stamps a synthetic cluster-owner identity onto the ctx it
-// hands the engine.
+// Every concept this file reads declares @rowAuthz(clusterOwner), and every
+// named query it issues carries an explicit actor.isClusterOwner==true
+// conjunct on top of that declared tier -- so a caller without a
+// cluster-owner actor is refused TWICE: once by the textual conjunct, once by
+// the engine's own row-authz enforcement on the read path. The edge is a
+// service, not a user, so each read stamps a synthetic cluster-owner identity
+// onto the ctx it hands the engine.
 //
 // This mirrors component/campaigns/worker.go's systemCampaignsActor
 // precedent exactly, including the reasoning: the identity is only as
 // powerful as what it is asked to do, not as powerful as the role it
-// carries. The scope of that power here is bounded to ONE named query over
-// ONE concept -- nothing in this file reaches anything else.
+// carries. The scope of that power here is bounded to the named reads below
+// -- v1:platform:site, v1:platform:customDomain, v1:platform:accountFrontDoor
+// and, since epic memql#5530, the v1:shopify:store a storefront's binding
+// NAMES. Nothing in this file reaches anything else.
 
 import (
 	"context"
@@ -39,10 +41,10 @@ type Engine interface {
 	Execute(ctx context.Context, query string) (any, error)
 }
 
-// systemEdgeActor is the engine's own operator identity for the one
-// clusterOwner-tier read this package issues. A synthetic cluster owner,
-// scoped by what it is used for: one named query over one concept. Never
-// used for anything else.
+// systemEdgeActor is the engine's own operator identity for the
+// clusterOwner-tier reads this package issues. A synthetic cluster owner,
+// scoped by what it is used for: the handful of named queries in this file.
+// Never used for anything else.
 const systemEdgeActor = "system:edge"
 
 // engineExecutor is the QueryExecutor that asks the live engine.
@@ -190,6 +192,42 @@ func (e *engineExecutor) SiteForAccountFrontDoor(ctx context.Context, hostname s
 	return site, nil
 }
 
+// StoreByID resolves the v1:shopify:store row a storefront's binding names
+// (epic memql#5530, issue memql#5538), under the same synthetic cluster-owner
+// actor the site reads use -- see the file-level note for why, and note that
+// storeById's own filter carries `actor.isClusterOwner == true` written out on
+// top of the concept's declared @rowAuthz(clusterOwner) tier, so a caller
+// without one is refused twice.
+//
+// THREE FIELDS OF A ROW THAT CARRIES MORE. `adminTokenRef` and
+// `webhookSecretRef` are deliberately NOT projected: the Admin API token is
+// the credential that can read orders and customers and mutate the store, and
+// the serving path cannot leak a reference it was never handed. Only
+// `storefrontTokenRef` comes across, because the runtime-config document
+// resolves it -- Shopify designs that one to be published to the shopper's own
+// browser.
+//
+// A miss (zero rows) is (nil, nil): a store that is gone is not a query
+// failure, it is a storefront with nothing to talk to, and the resolver
+// depends on that distinction to keep serving the bundle.
+func (e *engineExecutor) StoreByID(ctx context.Context, storeId string) (*BoundStore, error) {
+	ctx = systemActorContext(ctx)
+	q := fmt.Sprintf("query storeById(storeId: %s)", langparser.QuoteString(storeId))
+	res, err := e.engine.Execute(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("edge: query storeById %q: %w", storeId, err)
+	}
+	rows := memql.MaterializeRows(res)
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return &BoundStore{
+		ID:                 memql.BareShortId(rowString(rows[0], "id")),
+		Domain:             rowString(rows[0], "domain"),
+		StorefrontTokenRef: rowString(rows[0], "storefrontTokenRef"),
+	}, nil
+}
+
 // systemActorContext stamps the synthetic cluster-owner identity onto ctx.
 //
 // It sets the same three surfaces auth.ContextWithUserActor sets for a real
@@ -221,16 +259,19 @@ func systemActorContext(ctx context.Context) context.Context {
 // bare helper).
 func siteFromRow(r map[string]any) *Site {
 	return &Site{
-		ID:          memql.BareShortId(rowString(r, "id")),
-		Hostname:    rowString(r, "hostname"),
-		Kind:        rowString(r, "kind"),
-		BundleRef:   rowString(r, "bundleRef"),
-		Status:      rowString(r, "status"),
-		Title:       rowString(r, "title"),
-		APIProxy:    rowBool(r, "apiProxy"),
-		SystemOwned: rowBool(r, "systemOwned"),
-		Binding:     rowObject(r, "binding"),
-		Settings:    rowStringMap(r, "settings"),
+		ID:       memql.BareShortId(rowString(r, "id")),
+		Hostname: rowString(r, "hostname"),
+		Kind:     rowString(r, "kind"),
+		// Absent on every row written before memql#5535, which is the
+		// default and means Kind decides -- see Site.ResolutionTail.
+		ResolutionTail: rowString(r, "resolutionTail"),
+		BundleRef:      rowString(r, "bundleRef"),
+		Status:         rowString(r, "status"),
+		Title:          rowString(r, "title"),
+		APIProxy:       rowBool(r, "apiProxy"),
+		SystemOwned:    rowBool(r, "systemOwned"),
+		Binding:        rowObject(r, "binding"),
+		Settings:       rowStringMap(r, "settings"),
 	}
 }
 

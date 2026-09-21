@@ -127,6 +127,7 @@ export function Rail({
   label,
   openStop,
   onOpenStop,
+  scale,
 }: {
   stops: readonly Stop[];
   /** Read bottom-up: a rollback. The DOM order never changes. */
@@ -145,6 +146,13 @@ export function Rail({
    */
   openStop?: string;
   onOpenStop?: (stopId: string) => void;
+  /**
+   * PAGE SCALE. The rail was sized for a desk widget and for a page where it
+   * is one part among several. In a wizard it is the page's SPINE -- the only
+   * structure there is -- so the marks, the names and the rhythm step up to
+   * the content size. Same element, same states, same colours.
+   */
+  scale?: "page";
 }) {
   const collapsible = openStop !== undefined && onOpenStop !== undefined;
   const ordered = reversed ? [...stops].reverse() : stops;
@@ -164,7 +172,7 @@ export function Rail({
   }
 
   return (
-    <ol className="os-rail" data-reversed={reversed ? "true" : "false"} aria-label={label}>
+    <ol className="os-rail" data-reversed={reversed ? "true" : "false"} data-scale={scale} aria-label={label}>
       {ordered.map((stop) => {
         // A stop with nothing behind it is never a disclosure -- not one that
         // cannot be reached yet, and not one that is finished. A chevron

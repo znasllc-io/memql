@@ -243,14 +243,37 @@ func (r *Reconciler) provision(ctx context.Context, b Binding, out *PassResult) 
 // wrote `removing`, and liveCustomDomainByHostname filters on `status=="live"`,
 // so the edge stopped answering at that write. This is the cleanup, and its
 // failure is loud but not urgent.
+//
+// A REMOVAL ONLY EVER ENDS AT `removed`. A failed unbind used to be recorded
+// through RecordIssuanceFailure, whose mutation stamps `status: "issuing"` --
+// so a binding somebody had asked to take down was written back onto the
+// certificate step and the next pass dispatched its BIND. It stays `removing`
+// now, under its own typed reason, and the next pass tries the unbind again.
+//
+// A BINDING THAT WAS NEVER VERIFIED HAS NOTHING TO TAKE AWAY, so a cluster that
+// cannot be reached must not hold it. The bind is dispatched from `issuing`
+// and nowhere else, and `issuing` is reached only through MarkVerified, which
+// stamps verifiedAt: no verifiedAt, no Ingress and no Certificate. Cancelling
+// a domain still waiting for its DNS records is the ORDINARY removal -- most
+// bindings that come down never served -- and on a cluster whose node may not
+// touch Ingresses at all (a local one, or one not wired for issuance) it sat
+// at `removing` forever while still claiming its hostname, since only
+// `removed` frees one. The unbind is still ATTEMPTED, because it is idempotent
+// and costs one call, and it is what cleans up after a row the old bug bound
+// without verifying; what changes is that its failure cannot hold the walk.
 func (r *Reconciler) unprovision(ctx context.Context, b Binding, out *PassResult) error {
 	now := r.now()
 	res, err := r.provisioner.Unbind(ctx, r.request(b))
+	reason, detail := res.Reason, res.Detail
 	if err != nil {
-		return r.store.RecordIssuanceFailure(ctx, b.ID, ReasonIssuanceFailed, err.Error(), now)
+		reason, detail = ReasonRemovalFailed, err.Error()
 	}
-	if res.Reason != "" {
-		return r.store.RecordIssuanceFailure(ctx, b.ID, res.Reason, res.Detail, now)
+	if reason != "" && strings.TrimSpace(b.VerifiedAt) != "" {
+		// The provisioner names its refusals in the issuance vocabulary,
+		// because issuing is what it was written for. On this path nothing is
+		// being issued, so the row says what actually failed and the detail
+		// keeps the provisioner's own words.
+		return r.store.RecordRemovalFailure(ctx, b.ID, ReasonRemovalFailed, detail, now)
 	}
 	if err := r.store.MarkRemoved(ctx, b.ID, now); err != nil {
 		return err

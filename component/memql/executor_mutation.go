@@ -1280,6 +1280,15 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		if err := e.validateSiteSettings(ctx, payload, meta.priorSystemOwned, actor); err != nil {
 			return nil, meta, err
 		}
+		// The storefront binding (epic memql#5530, issue memql#5538), beside the
+		// four above and for their reason: whether the caller may read the store
+		// row the binding NAMES is a cross-row question, and no mutation body can
+		// ask it. Without it a site owner could bind their own deployable to any
+		// store in the cluster and the edge would serve that store's Storefront
+		// token under their hostname. See platform_site_binding_guard.go.
+		if err := e.validateSiteStoreBinding(ctx, payload, actor, e.canReadStore); err != nil {
+			return nil, meta, err
+		}
 	}
 
 	// v1:platform:package tracks ONE source ONCE (2026-09-05 design, D8):

@@ -105,7 +105,7 @@ func captureStore(t *testing.T) []string {
 		Deployables: []DeployableReport{{
 			Name: "storefront", Kind: KindStorefront, Path: "clients/web",
 			BuildPlan: DefaultBuildCommand, Command: DefaultBuildCommand, Output: "dist",
-			Binding: &ManifestBinding{StoreDomain: "acme.myshopify.com", StorefrontTokenRef: "acme-token"},
+			Binding: &ManifestBinding{Store: "acme.myshopify.com"},
 		}},
 		DslDomains: []DslDomainReport{{Domain: "acme", Constructs: map[string]int{"concept": 3}, Files: 2}},
 		GoPacks:    []GoPackReport{{Path: "bff", Module: "github.com/acme/bff", Note: awkwardText}},
