@@ -24,6 +24,7 @@ import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settin
 import { RepositoryPicker } from "../../src/apps/deployables/sources/RepositoryPicker";
 import { useSourceRepositories } from "../../src/apps/deployables/sources/useGithubConnect";
 import {
+  CONNECT_RESULT_PARAM,
   captureConnectReturn,
   clearParkedConnectReturn,
   connectSucceeded,
@@ -277,15 +278,21 @@ describe("the return from GitHub", () => {
   it("accepts the identity callback's actual wire marker and outcomes", () => {
     // Read the producer's constants so this contract cannot quietly drift
     // back to a frontend-only fixture such as github_connect=ok.
-    const callback = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../../../component/identity/http/github_callback.go"), "utf8");
-    const value = (name: string) => {
-      const match = callback.match(new RegExp(`${name}\\s*=\\s*"([^"\\n]+)"`));
+    const here = dirname(fileURLToPath(import.meta.url));
+    const source = (path: string) => readFileSync(join(here, "../../../../component/identity", path), "utf8");
+    const valueIn = (text: string, name: string) => {
+      const match = text.match(new RegExp(`${name}\\s*=\\s*"([^"\\n]+)"`));
       expect(match, `identity callback constant ${name}`).not.toBeNull();
       return match![1]!;
     };
-    const param = value("githubConnectResultParam");
+    // ONE MARKER FOR BOTH TRIPS, composed in one place on the identity side
+    // (github_return.go) because two of its packages send somebody back.
+    const param = valueIn(source("github_return.go"), "GithubResultParam");
+    expect(param).toBe(CONNECT_RESULT_PARAM);
+
+    const callback = source("http/github_callback.go");
     for (const name of ["resultConnected", "resultReconnected", "resultInstalled", "resultStateInvalid", "resultExchangeFailed"]) {
-      const reason = value(name);
+      const reason = valueIn(callback, name);
       const result = readConnectReturn(`?connect=deployables&${param}=${reason}`);
       expect(result).toEqual({ section: "deployables", reason });
       expect(connectSucceeded(result!)).toBe(["resultConnected", "resultReconnected"].includes(name));

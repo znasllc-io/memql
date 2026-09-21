@@ -70,10 +70,9 @@ import (
 // whatever grant the handler could be talked into.
 
 const (
-	// githubConnectResultParam is the query key the OS reads on the way back.
-	// A STABLE TOKEN, not prose: the OS owns the wording, and a token is what
-	// an operator greps for in the audit trail.
-	githubConnectResultParam = "github"
+	// The query key the OS reads these from is identity.GithubResultParam. The
+	// values below are STABLE TOKENS, not prose: the OS owns the wording, and a
+	// token is what an operator greps for in the audit trail.
 
 	// resultConnected / resultReconnected distinguish the first grant from a
 	// replacement, so the OS can say "Connected as @octocat" or "Reconnected".
@@ -349,29 +348,10 @@ func (s *Server) redirectToOS(w http.ResponseWriter, r *http.Request, returnPath
 }
 
 func (s *Server) osReturnURL(r *http.Request, returnPath, result string) string {
-	base := s.osOrigin(r)
-	path := identity.SafeRelativeRedirect(returnPath)
-	if path == "" {
-		path = "/"
-	}
-	if base == "" {
-		// Same-origin fallback. This service does not serve the OS, so the
-		// person lands on a 404 rather than on a page -- but a redirect to an
-		// origin this cluster cannot name would be worse: it would be a
-		// redirect to whatever the empty string composes into.
-		return path + resultQuery(path, result)
-	}
-	return strings.TrimRight(base, "/") + path + resultQuery(path, result)
-}
-
-// resultQuery appends the marker, respecting a return path that already
-// carries a query string of its own.
-func resultQuery(path, result string) string {
-	sep := "?"
-	if strings.Contains(path, "?") {
-		sep = "&"
-	}
-	return sep + githubConnectResultParam + "=" + url.QueryEscape(result)
+	// Composed in ONE place for both surfaces that end a GitHub round trip
+	// (identity.GithubReturnURL), which is also where the return path is
+	// re-validated.
+	return identity.GithubReturnURL(s.osOrigin(r), returnPath, result)
 }
 
 // osOrigin names MemQL OS for this cluster, or "" when it cannot be named.

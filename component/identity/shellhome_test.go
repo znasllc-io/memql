@@ -1,6 +1,9 @@
 package identity
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // The post-login landing is the MemQL OS shell (epic memql#4984). It was the
 // portal until that epic retired it, and these cases are the portal ones with
@@ -38,5 +41,30 @@ func TestDefaultPostLoginLandingNeverAdmin(t *testing.T) {
 	}
 	if got := DefaultPostLoginLanding("acme.example", ""); got != "https://os.acme.example/" {
 		t.Fatalf("DefaultPostLoginLanding = %q, want the shell origin", got)
+	}
+}
+
+// ClusterDomainFor follows ShellHomeURL's two rules in ShellHomeURL's order, so
+// a page naming the shell and an app naming its homepage describe one cluster.
+func TestClusterDomainForAgreesWithShellHomeURL(t *testing.T) {
+	for _, tc := range []struct{ settings, base, want string }{
+		{"lab.example.com", "https://identity.other.example.com", "lab.example.com"},
+		{".lab.example.com.", "", "lab.example.com"},
+		{"", "https://identity.memql.localhost", "memql.localhost"},
+		{"", "https://identity.memql.localhost:8443/", "memql.localhost"},
+		{"", "https://login.example.com", ""},
+		{"", "", ""},
+		{"", "::not a url", ""},
+	} {
+		got := ClusterDomainFor(tc.settings, tc.base)
+		if got != tc.want {
+			t.Errorf("ClusterDomainFor(%q, %q) = %q, want %q", tc.settings, tc.base, got, tc.want)
+		}
+		// THE AGREEMENT: wherever a domain can be named, the shell is on it.
+		if got != "" {
+			if home := ShellHomeURL(tc.settings, tc.base); !strings.Contains(home, "os."+got) {
+				t.Errorf("the shell is at %q and the domain is %q", home, got)
+			}
+		}
 	}
 }
