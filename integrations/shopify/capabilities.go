@@ -36,7 +36,7 @@ func (i *Integration) IntegrationName() string { return ConnectorName }
 func (i *Integration) Connector() *Connector { return i.connector }
 
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
-	return []memql.IntegrationCapability{
+	base := []memql.IntegrationCapability{
 		{
 			Name:        "ensureSubscriptions",
 			Description: "Register every mirrored webhook topic for every ingesting store at the pinned API version, update the ones that drifted, and remove ours that the allowlist no longer wants. Records the outcome on each store's health. Safe to run on boot and daily.",
@@ -125,6 +125,13 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 	}
+	// THE WHOLESALE WRITES ARE APPENDED RATHER THAN LISTED HERE (epic
+	// memql#5533). They are the only capabilities in this connector that
+	// create B2B objects in a merchant's live store and change what
+	// somebody pays, and wholesale_capabilities.go carries the argument for
+	// each of them beside the code. Folding them into this list would put
+	// five one-line entries here and the reasoning three files away.
+	return append(base, i.wholesaleCapabilities()...)
 }
 
 func (i *Integration) handleEnsureSubscriptions(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
