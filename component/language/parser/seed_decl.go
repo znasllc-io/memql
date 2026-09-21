@@ -103,6 +103,11 @@ func (p *Parser) parseSeedDecl(attrs []*ast.Attribute) (*ast.SeedDecl, error) {
 // as the top-level body. No field-name validation here -- the loader
 // validates against the target concept's schema.
 func (p *Parser) parseSeedBlock() (*ast.SeedBlock, error) {
+	// A nested block is a level down (nesting_bound.go).
+	if err := p.enterNesting(siteDeclaration); err != nil {
+		return nil, err
+	}
+	defer p.leaveNesting()
 	if err := p.expect(TokenBraceOpen); err != nil {
 		return nil, err
 	}
