@@ -189,7 +189,12 @@
 .deployable-preview h3 { font: 500 var(--os-text-base) var(--os-font); margin: 0; }
 
 .preview-lanes { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; border: 1px solid var(--os-line); border-radius: 12px; overflow: hidden; background: var(--os-plate); }
-.preview-lane { display: grid; grid-template-columns: 22px 92px minmax(0,1fr) minmax(0,1.35fr); align-items: center; gap: 12px; padding: 14px 16px; font-size: var(--os-text-sm); }
+/* THE VERSION COLUMN IS SIZED TO A VERSION, not to a share of the row. At
+   `minmax(0,1fr)` a seven-character hash sat in a 500px cell and the store --
+   the fact the lane exists to put beside it -- started two thirds of the way
+   across the window, with nothing between them. They are ONE statement ("this
+   version talks to that store") and they have to read as one. */
+.preview-lane { display: grid; grid-template-columns: 22px 92px minmax(7ch,max-content) minmax(0,1fr); align-items: center; gap: 12px 16px; padding: 14px 16px; font-size: var(--os-text-sm); }
 .preview-lane + .preview-lane { border-top: 1px solid var(--os-line); }
 .preview-lane-mark { width: 9px; height: 9px; border-radius: 50%; justify-self: center; }
 /* Filled: this version is what the public is served. */
@@ -214,6 +219,11 @@
 .preview-link-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .preview-link-open { display: inline-flex; align-items: center; gap: 7px; color: var(--os-accent); font-size: var(--os-text-sm); }
 
+/* A SUBHEAD NEEDS AIR ABOVE IT. The section's own gap is for peers; these two
+   blocks start a new subject after a row of controls, and flush against them
+   they read as part of the same group -- which the pixels said and no
+   assertion could. */
+.preview-watched, .preview-open { margin-top: 10px; }
 .preview-watched { display: grid; gap: 8px; }
 .preview-watched .os-subhead { margin: 0; }
 .preview-observations { list-style: none; margin: 0; padding: 0; display: grid; }

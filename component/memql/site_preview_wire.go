@@ -16,19 +16,6 @@ import (
 // link that falls through to the SPA fallback and renders the SERVING version,
 // which looks exactly like "the candidate did not publish".
 
-// wire.go -- the three spellings the edge and the mint must agree on, in ONE
-// place (epic memql#5531, issue memql#5545).
-//
-// The path, the query parameter and the cookie name are a protocol between two
-// packages that never call each other: integrations/sitepreview composes the
-// URL an operator opens, and component/edge is what answers it. Spelled twice
-// they would drift, and the drift is the worst kind to diagnose -- a preview
-// link that 404s into the SPA fallback and renders the serving version, which
-// looks exactly like "the candidate did not publish".
-//
-// TestThePreviewWireIsSpelledOnce reads both callers against these, rather than
-// asserting the constants against copies of themselves.
-
 const (
 	// PreviewEnterPath is where a preview link lands. It sits UNDER /_memql/ so the
 	// origin keeps one reserved prefix rather than two -- but the edge answers

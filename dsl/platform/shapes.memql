@@ -377,7 +377,6 @@ shape modelEvidence modelEvidenceFull {
 /// it cannot be presented -- but projecting it would put the one stored artifact of a bearer token
 /// onto every screen and into every log line that renders a grant, for no reader who needs it. The
 /// edge FILTERS on it and never reads it back, which is the whole of what the serving path requires.
-@description("A storefront preview grant, without the token digest")
 @row
 shape sitePreviewGrant sitePreviewGrantFull {
   row.id
@@ -393,7 +392,6 @@ shape sitePreviewGrant sitePreviewGrantFull {
 }
 
 /// One of the four things the engine can observe of a preview.
-@description("A storefront preview observation")
 @row
 shape sitePreviewObservation sitePreviewObservationFull {
   row.id

@@ -172,6 +172,34 @@ describe("the two lanes", () => {
     expect(within(section).getByRole("button", { name: /Attach a development store/ })).toBeTruthy();
   });
 
+  it("does not call the live store a development store just because the preview binding names it", async () => {
+    // THE SENTENCE MUST NOT CONTRADICT THE NOTICE BENEATH IT. The lane's blurb
+    // was a constant -- "development store" under whatever was bound -- so the
+    // one case the guard exists for rendered a label asserting the very thing
+    // the refusal two lines below denies. Only a rendered page shows that, so
+    // this is the assertion that keeps it fixed.
+    const { section } = await openPreview({
+      sites: [siteRow({ ...SHOP, id: "site-shop", candidateRef: "blob://sites/site-shop/v2/", previewBinding: { storeId: "store-example" } } as never)],
+      stores: [STORE],
+      previewReadiness: {
+        "site-shop": previewReadinessRow({
+          siteId: "site-shop",
+          candidateRef: "blob://sites/site-shop/v2/",
+          hasCandidate: true,
+          storeId: "store-example",
+          storeDomain: "example.myshopify.com",
+          storeReadable: true,
+          previewStoreId: "store-example",
+          previewStoreDomain: "example.myshopify.com",
+          canPreview: false,
+        } as never),
+      },
+    });
+    const candidate = section.querySelectorAll<HTMLElement>(".preview-lane")[1]!;
+    expect(within(candidate).getByText(/not a development store/)).toBeTruthy();
+    expect(within(candidate).queryByText("development store")).toBeNull();
+  });
+
   it("does not draw a store the caller cannot read as though nothing were bound", async () => {
     // Hiding a real misconfiguration behind a state that looks deliberate is
     // the failure this rules out -- the same rule the Store slot follows.

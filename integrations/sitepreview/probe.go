@@ -10,6 +10,7 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // probe.go -- the three things the engine can ACTIVELY observe of a preview
@@ -184,13 +185,19 @@ func stepFromPayload(v any) stepResult {
 	if s, ok := m["failure"].(string); ok {
 		out.Failure = s
 	}
+	// SATURATE, and the answer is named rather than assumed (core/num). A bare
+	// int(x) from a float64 is implementation-defined out of range and answers
+	// with the integer indefinite value on amd64, so a nonsense duration on the
+	// wire would land on the row as a hugely NEGATIVE one -- which the OS would
+	// then print beside "answered" as though something had been measured.
+	// Clamping keeps a wrong number wrong in the direction a reader can see.
 	switch n := m["durationMs"].(type) {
 	case float64:
-		out.DurationMs = int(n)
+		out.DurationMs = num.ClampFloat64(n)
 	case int:
 		out.DurationMs = n
 	case int64:
-		out.DurationMs = int(n)
+		out.DurationMs = num.ClampInt64(n)
 	}
 	return out
 }

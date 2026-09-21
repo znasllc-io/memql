@@ -15,6 +15,7 @@ import {
   shortRef,
   type ObservationKind,
   type PreviewObservationRow,
+  type PreviewReadiness,
   type PreviewRefusal,
 } from "./rows";
 import {
@@ -126,6 +127,7 @@ export function PreviewSection({
             storeId={mine?.storeId ?? ""}
             readable={mine?.storeReadable ?? false}
             blurb="the store shoppers reach"
+            attach="store"
             storefront={mine?.storefront ?? false}
             onOpenStore={onOpenStore}
           />
@@ -138,56 +140,48 @@ export function PreviewSection({
           ) : (
             <strong className="os-mono">{shortRef(site.candidateRef)}</strong>
           )}
+          {/* THE LANE SAYS WHAT THE STORE IS, NOT WHAT THE SLOT IS FOR. It said
+              "development store" under whatever was bound, so a preview binding
+              pointed at the live store was LABELLED a development store on the
+              same screen as the refusal explaining that it is not one -- a
+              sentence contradicting its own notice, which is a class of defect
+              only a rendered page shows. The lane carries the warning now. */}
           <StoreLine
             domain={mine?.previewStoreDomain ?? ""}
             storeId={mine?.previewStoreId ?? ""}
-            readable={mine?.previewStoreId !== "" && mine?.previewStoreDomain !== ""}
-            blurb="development store"
+            readable={mine !== null && mine.previewStoreId !== "" && mine.previewStoreDomain !== ""}
+            blurb={previewStoreBlurb(mine)}
+            attach="development store"
             storefront={mine?.storefront ?? false}
             onOpenStore={onOpenStore}
           />
         </li>
       </ol>
 
-      {/* THE CANDIDATE'S OWN CONTROLS, under the lane they act on. */}
+      {/* ONE ACT LINE, UNDER THE LANES THEY ACT ON. Two stacked rows of buttons
+          with a sentence between them read as two unrelated groups, which is
+          what this was before the pixels said so -- and rule 5 asks for one
+          control line. Primary LAST, as the action bar orders its own. */}
       {can.preview && !site.systemOwned ? (
         <CandidateControls
           site={site}
           versions={versions}
           busy={writes.busy}
+          canPreview={mine !== null && mine.canPreview}
+          canCheck={open.length > 0 && mine !== null && mine.storefront}
           onSet={(ref) => void writes.setCandidate(site.id, ref)}
           onClear={() => void writes.clearCandidate(site.id)}
+          onOpen={() => void writes.openPreview(site.id)}
+          onCheck={() => {
+            const newest = open[0];
+            if (newest !== undefined) void writes.runChecks(newest.id);
+          }}
         />
       ) : null}
 
       {/* THE REFUSAL, WHERE THE ACT WOULD HAVE BEEN. */}
       {mine !== null && site.candidateRef !== "" && !mine.canPreview ? (
         <RefusalNotice refusal={mine.previewRefusal} onOpenStore={onOpenStore} storefront={mine.storefront} />
-      ) : null}
-
-      {can.preview && mine !== null && mine.canPreview && !site.systemOwned ? (
-        <div className="preview-acts">
-          <Button
-            tone="primary"
-            busy={writes.busy === "open"}
-            busyLabel="Opening"
-            onClick={() => void writes.openPreview(site.id)}
-          >
-            Open a preview
-          </Button>
-          {open.length > 0 && mine.storefront ? (
-            <Button
-              busy={writes.busy === "checks"}
-              busyLabel="Checking"
-              onClick={() => {
-                const newest = open[0];
-                if (newest !== undefined) void writes.runChecks(newest.id);
-              }}
-            >
-              Run the checks
-            </Button>
-          ) : null}
-        </div>
       ) : null}
 
       {writes.error !== "" ? (
@@ -250,13 +244,17 @@ function StoreLine({
   storeId,
   readable,
   blurb,
+  attach,
   storefront,
   onOpenStore,
 }: {
   domain: string;
   storeId: string;
   readable: boolean;
+  /** What this store IS, in a reader's words. Never what the slot is for. */
   blurb: string;
+  /** What to invite when nothing is bound, which IS what the slot is for. */
+  attach: string;
   storefront: boolean;
   onOpenStore: () => void;
 }) {
@@ -265,7 +263,7 @@ function StoreLine({
     return (
       <button type="button" className="preview-lane-store preview-lane-store-empty" onClick={onOpenStore}>
         <ShoppingBag size={13} aria-hidden />
-        Attach a {blurb === "development store" ? "development store" : "store"}
+        Attach a {attach}
       </button>
     );
   }
@@ -278,19 +276,48 @@ function StoreLine({
   );
 }
 
-/** Set or withdraw the candidate. */
+/**
+ * What to call the store on the CANDIDATE lane.
+ *
+ * It is the one label on this surface that must not be assumed. A preview
+ * binding pointed at the store shoppers reach is the exact situation the guard
+ * refuses, and calling it a development store on the way past would be the
+ * screen asserting the thing the notice beneath it denies.
+ */
+function previewStoreBlurb(mine: PreviewReadiness | null): string {
+  if (mine === null || mine.previewStoreId === "") return "development store";
+  if (mine.previewStoreId === mine.storeId) return "the store shoppers reach — not a development store";
+  return "development store";
+}
+
+/**
+ * The candidate's own acts, on one line: withdraw it, open a preview of it, run
+ * the checks against it.
+ *
+ * THEY ARE ONE LINE BECAUSE THEY ARE ONE SUBJECT -- the version being exercised
+ * -- and rule 5 asks for one control line. An act whose part or whose state
+ * does not permit it is ABSENT from the line rather than drawn inert.
+ */
 function CandidateControls({
   site,
   versions,
   busy,
+  canPreview,
+  canCheck,
   onSet,
   onClear,
+  onOpen,
+  onCheck,
 }: {
   site: SiteRow;
   versions: readonly string[];
   busy: string;
+  canPreview: boolean;
+  canCheck: boolean;
   onSet: (ref: string) => void;
   onClear: () => void;
+  onOpen: () => void;
+  onCheck: () => void;
 }) {
   const [picked, setPicked] = useState("");
   const [byHand, setByHand] = useState(false);
@@ -298,12 +325,24 @@ function CandidateControls({
 
   if (site.candidateRef !== "") {
     return (
-      <div className="preview-acts">
-        <Button busy={busy === "candidate"} busyLabel="Withdrawing" onClick={onClear}>
-          Withdraw the candidate
-        </Button>
+      <>
+        <div className="preview-acts">
+          <Button busy={busy === "candidate"} busyLabel="Withdrawing" onClick={onClear}>
+            Withdraw the candidate
+          </Button>
+          {canCheck ? (
+            <Button busy={busy === "checks"} busyLabel="Checking" onClick={onCheck}>
+              Run the checks
+            </Button>
+          ) : null}
+          {canPreview ? (
+            <Button tone="primary" busy={busy === "open"} busyLabel="Opening" onClick={onOpen}>
+              Open a preview
+            </Button>
+          ) : null}
+        </div>
         <Caption>Withdrawing ends every preview of it. Nothing the public sees changes.</Caption>
-      </div>
+      </>
     );
   }
 
@@ -451,6 +490,7 @@ function ObservationRow({ kind, row }: { kind: ObservationKind; row: PreviewObse
   const ok = measured && row.ok;
   const state = !measured ? "unmeasured" : ok ? "answered" : "failed";
   const word = !measured ? "not measured yet" : ok ? "answered" : "did not answer";
+  const said = !measured ? words.blurb : ok ? row.detail : row.failure;
   return (
     <li className="preview-observation" data-state={state}>
       <span className="preview-observation-mark" aria-hidden>
@@ -459,7 +499,11 @@ function ObservationRow({ kind, row }: { kind: ObservationKind; row: PreviewObse
       <span className="preview-observation-label">{words.label}</span>
       <span className="preview-observation-said">
         <strong>{word}</strong>
-        <small>{measured ? (ok ? row.detail || words.blurb : row.failure) : words.blurb}</small>
+        {/* A MEASURED ROW SHOWS THE ENGINE'S OWN WORDS OR NOTHING. Falling back
+            to the blurb would put a question ("whether a cart accepts a line")
+            under an answer ("answered"), which reads as a surface that did not
+            know what it measured. */}
+        {said !== "" ? <small>{said}</small> : null}
       </span>
       <span className="preview-observation-took">
         {measured && row.durationMs > 0 ? `${row.durationMs} ms` : ""}
@@ -543,13 +587,26 @@ export function publishedVersions(runs: readonly DeploymentRow[], site: SiteRow)
   return out;
 }
 
+/**
+ * How long a preview has left, in the largest unit that reads.
+ *
+ * MINUTES ALONE DO NOT SCALE, which the pixels said and no test could: a grant
+ * far enough out reads "38015623 minutes left", which is not a duration
+ * anybody can hold. A preview is half an hour by default and capped at four,
+ * so minutes cover every real case -- but a fixture, a clock skew or a
+ * configuration nobody expected must not produce a number that reads as a
+ * rendering bug.
+ */
 function expiryWord(at: string): string {
   const ms = Date.parse(at);
   if (!Number.isFinite(ms)) return "expiry unknown";
   const mins = Math.round((ms - Date.now()) / 60000);
   if (mins <= 0) return "expired";
-  if (mins === 1) return "1 minute left";
-  return `${mins} minutes left`;
+  if (mins < 60) return mins === 1 ? "1 minute left" : `${mins} minutes left`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return hours === 1 ? "1 hour left" : `${hours} hours left`;
+  const days = Math.round(hours / 24);
+  return days === 1 ? "1 day left" : `${days} days left`;
 }
 
 function relative(at: string): string {

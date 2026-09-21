@@ -782,6 +782,16 @@ mutation site updateSitePreviewBinding {
 /// field the wire carried. The builtin runs under the CALLER's own context, so `actor.userId` here
 /// IS the person who asked.
 ///
+/// SCOPING TO actor.userId IS NOT THE FIX, AND IT IS ALREADY DONE. The stamp above is exactly that
+/// scoping -- the row is the caller's and the composite owner tier decides it -- and this mutation
+/// is @serverOnly anyway, because ownership is not the property in question. What has to hold is
+/// that the TOKEN DIGEST was minted rather than supplied and that `expiresAt` was computed rather
+/// than chosen. A caller who picks the digest picks the token, and a caller who picks the expiry
+/// picks the only bound a bearer credential has. Neither is a question about whose row it is, so no
+/// amount of actor scoping answers it; only the Go frame that minted the token knows, which is why
+/// `sitePreviewOpen` is the one way in (customDomain's createCustomDomain draws the same line for
+/// the same reason).
+///
 /// `candidateRef` and `previewStoreId` are COPIED, not referenced, and the copy is the mechanism.
 /// The edge compares the copy against the site row's live value and refuses a grant whose candidate
 /// has moved, which is what makes withdrawing a candidate end every open preview of it.
@@ -814,6 +824,13 @@ mutation sitePreviewGrant createSitePreviewGrant {
 /// asset under it, and a write per asset would put the graph in the serving path of a page --
 /// component/edge/preview.go holds the value for previewSeenThrottle before writing again. The
 /// field is evidence that a URL was used, not a request counter, and it says so.
+///
+/// actor.userId SCOPING COULD NOT BE THE FIX HERE, because the writer is not a person. The EDGE
+/// writes this, under its own synthetic cluster-owner actor, about a grant it has just resolved by
+/// token digest -- it holds nobody's credential and never learns who is asking, so there is no
+/// caller to scope to. And scoping it to the grant's own owner would not help either: the property
+/// that matters is that the value was OBSERVED by the deployment rather than asserted by anybody,
+/// and a field the grant's holder could write is a field that says what its writer wanted it to say.
 @serverOnly
 mutation sitePreviewGrant touchSitePreviewGrant {
   args {
@@ -859,6 +876,15 @@ mutation sitePreviewGrant revokeSitePreviewGrant {
 /// not, a cluster owner sees both sets through the tier's second arm and the other person sees their
 /// own. Attributing the row to the grant's owner instead would mean a caller naming somebody else as
 /// the author of a measurement, which is the guarantee the tier exists to make impossible.
+///
+/// SCOPING TO actor.userId IS ALREADY DONE AND IS NOT WHAT BARS THIS FROM THE WIRE. `ownerUserId` is
+/// stamped from the actor, so the composite owner tier decides the row and a caller could only ever
+/// write their own. What actor scoping cannot establish is the thing this row CLAIMS: that a store
+/// answered, that a cart took a line, that a checkout address came back, and how long each took.
+/// Those are MEASUREMENTS, and a measurement a client can write is not one -- a caller scoped
+/// perfectly to themselves could still write four green rows against a storefront nobody exercised,
+/// and the surface that reads them exists precisely to say whether that happened. So the writer has
+/// to be the frame that did the measuring, which is what @serverOnly names.
 ///
 /// `ok` IS REQUIRED AND `failure` IS THE WHY. A row here is an answer either way; a step nobody ran
 /// has NO ROW, which is the third state and the one the OS draws as unmeasured. Writing a row to

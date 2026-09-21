@@ -95,12 +95,20 @@ export function previewObservationFromRow(row: Row): PreviewObservationRow {
   };
 }
 
-/** What each observation is called, and what it means, in a reader's words. */
+/**
+ * What each observation is called, and WHAT IT WOULD ASK, in a reader's words.
+ *
+ * THE BLURB IS A QUESTION, NOT A CLAIM, and the difference is the one this
+ * surface cannot afford to blur. It is shown beneath "not measured yet", so a
+ * blurb in the past tense -- "an order arrived back in MemQL" -- reads as the
+ * very fact the row above it is saying nobody has established. A measured row
+ * shows the engine's own detail instead and never this.
+ */
 export const OBSERVATION_WORDS: Readonly<Record<ObservationKind, { label: string; blurb: string }>> = {
-  catalog_read: { label: "Catalog", blurb: "the store answered a product read" },
-  cart_accepted: { label: "Cart", blurb: "a cart accepted a line" },
-  checkout_url: { label: "Checkout", blurb: "a checkout address came back" },
-  order_mirrored: { label: "Order", blurb: "an order arrived back in MemQL" },
+  catalog_read: { label: "Catalog", blurb: "whether the store answers a product read" },
+  cart_accepted: { label: "Cart", blurb: "whether a cart accepts a line" },
+  checkout_url: { label: "Checkout", blurb: "whether a checkout address comes back" },
+  order_mirrored: { label: "Order", blurb: "whether an order finds its way back to MemQL" },
 };
 
 /**

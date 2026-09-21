@@ -18,8 +18,6 @@ import (
 // digest would be a preview that never resolves, and the symptom -- a link that
 // silently serves the public site -- says nothing about the cause.
 
-// token.go -- the preview credential.
-//
 // A preview URL is a BEARER CREDENTIAL for an unpublished version of somebody's
 // storefront. Everything about its shape follows from that one sentence, and
 // each choice below has a twin somewhere else in this tree rather than being
