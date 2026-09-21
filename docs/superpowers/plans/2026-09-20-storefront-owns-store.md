@@ -1019,7 +1019,7 @@ git commit -m "Issue #5538: the edge resolves a storefront's domain and token re
 - Consumes: the `{storeId}` binding shape from Task 2; `BoundStore` is NOT used here.
 - Produces: `ManifestBinding{Store string}` (yaml/json key `store`);
   `CodeDeployableStoreUnknown = "deployable_store_unknown"`;
-  `DeployableReport.StoreId string` (the resolved row id);
+  `type StoreResolver func(ctx context.Context, domain string) (string, error)` + `Deps.Stores`;
   `Publisher.BindSiteToStore(ctx context.Context, siteId, storeId string) error`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -1028,11 +1028,13 @@ Create `component/packages/store_binding_test.go` with four cases. Use `validMan
 from `fixtures_test.go` as the control in each, exactly as `analyze_test.go:170-174` does:
 
 1. `TestAStorefrontManifestNamesItsStoreRatherThanCopyingIt` — a manifest whose binding is
-   `{store: acme.myshopify.com}` analyzes clean and the report carries the resolved
-   `StoreId`.
-2. `TestAManifestNamingAnUnknownStoreIsRefused` — the store resolver answers nothing;
-   expect `RefusalCode(err) == CodeDeployableStoreUnknown`, and the message names the
-   store and says where to attach one.
+   `{store: acme.myshopify.com}` analyzes clean OFFLINE and the report carries the
+   declaration (`Binding.Store`). Add a negative control in the same test: `Analyze` is
+   handed no `Deps` at all and still answers, which is the D12 property.
+2. `TestAManifestNamingAnUnknownStoreIsRefused` — drive `d.publish()` with a `Stores`
+   resolver that answers `""`; expect `RefusalCode(err) == CodeDeployableStoreUnknown`, and
+   the message names the store and says where to attach one. NOT an `Analyze` test:
+   `Analyze` stays offline and never resolves anything.
 3. `TestARedeployKeepsItsBinding` — drive `d.publish()` twice against a stub publisher
    with an existing site row; assert `EnsureSite` is called once and `BindSiteToStore` is
    called zero times when the manifest's store is unchanged.
@@ -1093,22 +1095,64 @@ In `component/packages/refusal.go`, beside `CodeDeployableBindingMissing`:
 	CodeDeployableStoreUnknown = "deployable_store_unknown"
 ```
 
-- [ ] **Step 5: Resolve the store during analyze**
+- [ ] **Step 5: Resolve the store at PUBLISH, never in `Analyze`**
 
-`Analyze` needs a reader. Add a `StoreByDomain func(ctx context.Context, domain string) (string, error)` to
-the `Deps` struct beside the other injected seams (returning the bare row id, `""` for a
-miss), wire it in `component/packages/production.go` to a `query storeByDomain(...)`
-executed under the CALLER's context, and call it from `analyzeDeployables` for every
-storefront. On `""`, raise `CodeDeployableStoreUnknown` (fatal). On a hit, set
-`DeployableReport.StoreId`.
+**`Analyze` MUST STAY OFFLINE.** Its own doc comment is the constraint: "Nothing here
+writes, fetches, or reaches a cluster. That is D12: 'this DSL would refuse boot' is an
+answer produced here, offline, before a pod is ever asked to run it."
+(`component/packages/analyze.go:46-49`). Resolving a store row is a cluster read, so it
+does not belong there and `Analyze`'s signature does not change.
 
-Note: the read runs under the caller, not the deployment. That is the same answer Task 2
-gave — a caller who may not read the store may not bind a storefront to it — and the
-refusal message says so.
+So the work splits, and the split is the honest one:
+
+- **`Analyze` carries the DECLARATION.** `DeployableReport.Binding` already travels from
+  the manifest into the report untouched (`analyze.go:93`); with `ManifestBinding{Store}`
+  that is the store's myshopify.com domain, which is what the confirm gate should show
+  ("Fronts acme.myshopify.com"). `CodeDeployableBindingMissing` stays exactly where it is,
+  for a storefront that names no store at all — a manifest fact, checkable offline.
+  Do NOT add `DeployableReport.StoreId`.
+- **`publish` carries the RESOLUTION.** Add to the `Deps` struct, beside `Credentials` and
+  `Roles` (which exist for exactly this reason — a cluster read a stage needs and the
+  pipeline injects):
+
+  ```go
+  	// Stores resolves the v1:shopify:store row a storefront's manifest NAMES,
+  	// by its myshopify.com domain, to the bare row id (epic memql#5530, issue
+  	// memql#5540). Returns "" for a miss.
+  	//
+  	// It runs under the CALLER's actor, deliberately, which is the same answer
+  	// updateSiteStoreBinding's Go guard gives: a caller who may not read a
+  	// store may not bind a storefront to it. A store is cluster-owner-tier, so
+  	// resolving under the deployment instead would let anyone who can deploy a
+  	// package point a storefront at any merchant on the cluster.
+  	//
+  	// NIL IS A REFUSAL, NOT A GAP, as it is for Credentials: a storefront
+  	// deployed on a node that cannot resolve stores is refused by name rather
+  	// than published unbound.
+  	Stores StoreResolver
+  ```
+
+  with `type StoreResolver func(ctx context.Context, domain string) (string, error)` beside
+  `CredentialResolver`, wired in `component/packages/production.go` to
+  `query storeByDomain(domain: ...)` reading the bare `id` off the one row it returns.
+
+  Call it in `stages.go`'s `publish`, for every storefront deployable, BEFORE the
+  `siteId == ""` branch — so the refusal lands whether this is a first deploy or a
+  redeploy. On `""` or a nil resolver, `refuseScoped(CodeDeployableStoreUnknown, dep.Name, ...)`.
+
+- **The OS copy.** Add `deployable_store_unknown` to
+  `clients/os/src/apps/deployables/packages/refusals.ts` beside `deployable_binding_missing`,
+  and to `STOP_FOR_CODE` in `clients/os/src/apps/deployables/page/rail.ts` mapped to
+  `"whatItIs"`, which is where its sibling `deployable_binding_missing` already goes. The
+  sentence names the Store panel as the repair.
+  `clients/os/src/apps/deployables/packages/ReportView.tsx:115-116` renders
+  `d.binding?.storeDomain` as "Fronts {storeDomain}"; it becomes `d.binding?.store`. Its
+  row type is `clients/os/src/apps/deployables/packages/rows.ts:259`.
 
 - [ ] **Step 6: Write `{storeId}` on create, re-point on redeploy**
 
-`EnsureSiteRequest.Binding *ManifestBinding` becomes `StoreId string`.
+`EnsureSiteRequest.Binding *ManifestBinding` becomes `StoreId string`, filled by `publish`
+from the `Stores` resolution rather than from the manifest.
 `enginePublisher.EnsureSite` writes `, binding: {"storeId": "<id>"}` when `StoreId != ""`
 (still `json.Marshal` of a `map[string]string`, so quoting is handled).
 
