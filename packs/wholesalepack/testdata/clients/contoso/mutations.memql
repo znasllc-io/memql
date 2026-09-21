@@ -1,0 +1,20 @@
+// Contoso's own write. The pack ships no mutation for this and should not:
+// opening a review is Contoso's step, not a wholesale concept.
+
+@actor
+mutation contosoReview openContosoReview {
+  args {
+    reviewId       string!
+    applicationId  string!
+    storeId        string!
+    assignedRepId  string
+    chainId        string
+  }
+  insert {
+    accept { applicationId, storeId, assignedRepId, chainId }
+    stamp {
+      id: args.reviewId
+      ownerUserId: actor.userId
+    }
+  }
+}

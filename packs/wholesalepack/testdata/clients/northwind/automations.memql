@@ -1,0 +1,20 @@
+// Northwind's WHOLE process, in one automation.
+//
+// The owner approves; the buyer is entitled. Nothing else happens, and
+// nothing in the pack had to be told that this is the shape Northwind
+// wants -- the automation triggers on the pack's own concept and calls the
+// pack's own builtin, both of which are public surface.
+
+use wholesale.builtins.{ wholesaleProvisionEntitlement }
+
+/// When the owner approves, entitle the buyer. That is Northwind's entire
+/// approval process: one person's decision, acted on immediately.
+@trigger(event="node.created", concept="v1:wholesale:applicationDecision")
+@filter(row => row.transition == "approve")
+automation northwindGrantOnApproval {
+  args {
+    applicationId  any
+    transition     any
+  }
+  granted := builtin wholesaleProvisionEntitlement(applicationId: args.applicationId)
+}
