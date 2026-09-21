@@ -98,10 +98,16 @@ type ManifestDeployable struct {
 	// declared `kind: static` precisely to get the 404 back, giving up the
 	// store binding and the policy that admits Shopify along with it.
 	//
-	// SET ON CREATE ONLY, like Kind and Binding: EnsureSite finds an existing
-	// site by (packageId, deployableName) and returns it untouched, so
-	// changing this in the manifest does not rewrite a deployed site's row.
+	// SET ON CREATE ONLY, like Kind: EnsureSite finds an existing site by
+	// (packageId, deployableName) and returns it untouched, so changing this
+	// in the manifest does not rewrite a deployed site's row.
 	// updateSiteResolutionTail is how an existing one is changed.
+	//
+	// BINDING IS NO LONGER IN THIS SENTENCE (epic memql#5530). A redeploy
+	// re-points a storefront whose manifest now names a different store,
+	// because the store is what the source is ABOUT rather than a property of
+	// a site somebody deployed -- a manifest saying one store while the site
+	// serves another is a storefront quietly talking to the wrong merchant.
 	ResolutionTail string `yaml:"resolutionTail,omitempty" json:"resolutionTail,omitempty"`
 }
 
