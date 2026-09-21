@@ -1424,11 +1424,21 @@ request beside the router would be an import cycle.
 
 **Every resolution is a decision record.** `v1:router:call` carries `level`,
 `requestedLevel`, `servedLevel`, `servedModel`, `servedEffort`, `degraded`,
-`rule`, `policy`, `door`, `considered`, `touches`, `minContextTokens` and
-`machineOwnerUserId`, read through `routerDecisionsRecent` and never broadcast
+`rule`, `policy`, `door`, `considered`, `touches`, `minContextTokens`,
+`machineOwnerUserId`, `callerKind` and `cacheKind`, read through
+`routerDecisionsRecent` and never broadcast
 (the volume argument that excludes `v1:worker:invocation`). `considered` is KEPT
 ON SUCCESS as well as on a refusal: a rule is falsifiable only if the decisions
 it made can be read, and what a chain did not pick is half of that.
+`callerKind` is what makes an empty `userId` an ANSWER rather than a gap
+(memql#5581) -- `system` is the cluster's own sweep or seed, `unattributed` is a
+Go call site that stamped no caller -- derived from the context and routed on by
+nothing. `cacheKind` names the cache that answered, when one did: the exact-hash
+cache sits AFTER the resolution (its key folds in the resolved provider), so a
+hit is a decision with no provider call, and its row carries REAL ZEROS for
+every token and cost. ABSENT means a provider answered. The rows are written
+through one bounded queue and one writer, so the ledger costs a node one
+goroutine and at most one concurrent write; a full queue drops and counts.
 `servedModel` / `servedEffort` are what the SURFACE REPORTED, as distinct from
 `model`, which is what the chain resolved; both are EMPTY when it said nothing,
 because a value copied from the request would record as measured something

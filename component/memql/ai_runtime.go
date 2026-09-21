@@ -35,6 +35,14 @@ type aiRuntime struct {
 	// default this epic deletes.
 	resolve func(context.Context, airoute.ResolveRequest) (ResolvedProvider, error)
 
+	// recordCacheServed writes the decision record for a call a CACHE
+	// answered (memql#5581, ai_cache_record.go). A FUNCTION for the same
+	// reason resolve above is one -- this type is built before the engine
+	// finishes wiring. Nil IS a working state, unlike a nil resolve: the
+	// answer is served either way, and an unrecordable cache hit must not
+	// become a failed call.
+	recordCacheServed func(context.Context, airoute.ResolveRequest, airoute.Resolution, string, time.Time)
+
 	// semantic is the optional vector (similarity) cache layer (5.9). It
 	// sits AFTER the exact-hash cache: exact-hash check first (cheap),
 	// then a semantic nearest-neighbour lookup on exact-miss for ENABLED
@@ -122,7 +130,7 @@ func (r *aiRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data a
 	// wakes. The old branch reconstructed that shape here from a registry
 	// miss, and could only ever produce it for a `fleet:` name -- a shut app
 	// door or an exhausted chain fell through to a generic error.
-	req, err := requestForPrompt(prompt, invocation, airoute.ModalityChat, text)
+	req, err := requestForPrompt(ctx, prompt, invocation, airoute.ModalityChat, text)
 	if err != nil {
 		return nil, err
 	}
@@ -155,6 +163,13 @@ func (r *aiRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data a
 	if ttl > 0 && r.cache != nil {
 		cacheKey = buildAICacheKey(invocation.TemplateId, providerName, text)
 		if cached, ok := r.cache.get(cacheKey); ok {
+			// THE DECISION THAT CHOSE THIS ANSWER IS RECORDED (memql#5581).
+			// The resolution above really happened -- a rule matched, a chain
+			// was walked, a door was taken -- and before this it was thrown
+			// away with the stack frame, so a warm page wrote no ledger rows
+			// and was indistinguishable from an idle cluster. The row names
+			// the cache and carries real zeros for every token and cost.
+			r.noteCacheServed(ctx, req, resolution, airoute.CacheKindExact, startTime)
 			// Emit completion finished event for cached result
 			r.publishEvent(events.TopicAICompletionFinished, events.KindAICompletionFinished, map[string]any{
 				"templateId": invocation.TemplateId,
@@ -176,6 +191,7 @@ func (r *aiRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data a
 	semanticEnabled := namespace != "" && r.semantic.Enabled(namespace)
 	if semanticEnabled {
 		if cached, ok := r.semantic.Lookup(ctx, namespace, text); ok {
+			r.noteCacheServed(ctx, req, resolution, airoute.CacheKindSemantic, startTime)
 			r.publishEvent(events.TopicAICompletionFinished, events.KindAICompletionFinished, map[string]any{
 				"templateId": invocation.TemplateId,
 				"provider":   providerName,
@@ -255,6 +271,18 @@ func (r *aiRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data a
 		r.semantic.Store(ctx, namespace, text, result)
 	}
 	return result, nil
+}
+
+// noteCacheServed records the decision behind an answer a cache served.
+//
+// Nil-safe on BOTH the runtime and the seam: a runtime built without a
+// recorder serves the same answer and writes no row, which is the pre-5581
+// behaviour and a working one.
+func (r *aiRuntime) noteCacheServed(ctx context.Context, req airoute.ResolveRequest, resolution airoute.Resolution, cacheKind string, startedAt time.Time) {
+	if r == nil || r.recordCacheServed == nil {
+		return
+	}
+	r.recordCacheServed(ctx, req, resolution, cacheKind, startedAt)
 }
 
 func (r *aiRuntime) cacheTTL(invocation *AIInvocation) time.Duration {

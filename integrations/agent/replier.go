@@ -484,6 +484,19 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	if strings.TrimSpace(msg.ScopeId) != "" {
 		domains = ensureDomain(domains, "recent-chat")
 	}
+	// THE TURN'S FOOTPRINT, ON THE DECISION RECORD (memql#5581).
+	// v1:router:call.touches is documented as "a work step's footprint union,
+	// or an agent turn's knowledge-domain concept ids", and until now NO call
+	// site set it: every row carried an empty list, so a @when(touches=...)
+	// rule could not have matched anything an operator wrote it for. This is
+	// the agent-turn half, set HERE rather than beside routerReq above because
+	// the domain set is not complete until the auto-attaches have run.
+	//
+	// Copied rather than aliased: the request travels onto a decision record
+	// that outlives this slice, and `domains` is handed to retrieval below.
+	if len(domains) > 0 {
+		routerReq.Touches = append([]string(nil), domains...)
+	}
 	if len(domains) > 0 {
 		if query := latestUserQuery(msg); query != "" {
 			ragStart := time.Now()

@@ -40,6 +40,16 @@ func (r *Router) ResolveFor(ctx context.Context, req ResolveRequest) (memql.Reso
 			req.UserId = strings.TrimSpace(access.UserId)
 		}
 	}
+	// AND WHAT KIND OF CALLER IT WAS (memql#5581), from the same context and
+	// by the same belt-and-braces argument. The engine seam fills this for
+	// every call that reaches a model through it; a request built OUTSIDE the
+	// engine -- the agent replier builds its own -- arrives here without one,
+	// and a blank caller kind on the decision record is exactly the ambiguity
+	// the field exists to remove. CallerKindFromContext never answers "", so
+	// an unattributed request is RECORDED as unattributed rather than blank.
+	if strings.TrimSpace(req.CallerKind) == "" {
+		req.CallerKind = auth.CallerKindFromContext(ctx)
+	}
 
 	var client any
 	var resolved Resolved
@@ -102,3 +112,10 @@ func (r *Router) ResolveFor(ctx context.Context, req ResolveRequest) (memql.Reso
 // change on either side is discovered in app/ -- at the one call that installs
 // the resolver, in a build-tagged file that not every lane compiles.
 var _ memql.AIResolver = (*Router)(nil)
+
+// Compile-time proof that the cache-hit half of the seam is satisfied too
+// (memql#5581). It is a SEPARATE interface from AIResolver, so without this
+// line a signature change would be discovered as a cache hit that silently
+// stopped being recorded -- the exact failure shape the ledger exists to
+// prevent.
+var _ memql.AICacheRecorder = (*Router)(nil)

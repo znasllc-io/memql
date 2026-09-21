@@ -5167,6 +5167,12 @@ export interface RecordRouterCallArgs {
   requestId: string;
   agentId?: string;
   userId?: string;
+  /** What kind of caller made this call: user | system | connector | anonymous | unattributed. */
+  // Enum: user | system | connector | anonymous | unattributed
+  callerKind?: string;
+  /** Which cache answered, when one did. Absent means a provider answered. */
+  // Enum: exact | semantic
+  cacheKind?: string;
   promptName?: string;
   policyName?: string;
   vendor: string;
@@ -5228,6 +5234,8 @@ export function buildRecordRouterCall(args: RecordRouterCallArgs): string {
   parts.push("requestId: " + renderMemQLValue(args.requestId));
   if (args.agentId !== undefined) parts.push("agentId: " + renderMemQLValue(args.agentId));
   if (args.userId !== undefined) parts.push("userId: " + renderMemQLValue(args.userId));
+  if (args.callerKind !== undefined) parts.push("callerKind: " + renderMemQLValue(args.callerKind));
+  if (args.cacheKind !== undefined) parts.push("cacheKind: " + renderMemQLValue(args.cacheKind));
   if (args.promptName !== undefined) parts.push("promptName: " + renderMemQLValue(args.promptName));
   if (args.policyName !== undefined) parts.push("policyName: " + renderMemQLValue(args.policyName));
   parts.push("vendor: " + renderMemQLValue(args.vendor));
