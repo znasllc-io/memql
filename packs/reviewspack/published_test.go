@@ -13,10 +13,11 @@ import (
 // the exclusion and the bound are exercised as decisions over rows rather
 // than over an engine envelope.
 type fixtureReader struct {
-	settings map[string][]map[string]any // storeId -> rows
-	reviews  map[string][]map[string]any // storeId|handle -> rows
-	moder    map[string][]map[string]any // storeId -> rows
-	asked    []string
+	settings   map[string][]map[string]any // storeId -> rows
+	reviews    map[string][]map[string]any // storeId|handle -> rows
+	moder      map[string][]map[string]any // storeId -> rows
+	asked      []string
+	askedAbout []string
 }
 
 func (f *fixtureReader) Rows(_ context.Context, query string, args map[string]string) ([]map[string]any, error) {
@@ -24,12 +25,33 @@ func (f *fixtureReader) Rows(_ context.Context, query string, args map[string]st
 	switch query {
 	case "reviewSettingsForStore":
 		return f.settings[args["storeId"]], nil
-	case "reviewsForProduct":
+	case "publishedReviewsForProduct":
 		return f.reviews[args["storeId"]+"|"+args["productHandle"]], nil
-	case "moderationActionsForStore":
-		return f.moder[args["storeId"]], nil
 	}
 	return nil, nil
+}
+
+// RowsWithList records the ids the moderation read was ASKED ABOUT, which is
+// what makes "bounded by the caller's list" assertable rather than claimed.
+func (f *fixtureReader) RowsWithList(_ context.Context, query string, args map[string]string,
+	_ string, list []string) ([]map[string]any, error) {
+	f.asked = append(f.asked, query)
+	f.askedAbout = append(f.askedAbout, list...)
+	if query != "moderationActionsForReviews" {
+		return nil, nil
+	}
+	var out []map[string]any
+	within := map[string]struct{}{}
+	for _, id := range list {
+		within[id] = struct{}{}
+	}
+	for _, row := range f.moder[args["storeId"]] {
+		id, _ := row["reviewId"].(string)
+		if _, ok := within[id]; ok {
+			out = append(out, row)
+		}
+	}
+	return out, nil
 }
 
 func publishedFrom(t *testing.T, p *Provider, args map[string]any) map[string]any {
@@ -81,7 +103,7 @@ func TestPublicDisplayOffPublishesNothingAndReadsNoReviews(t *testing.T) {
 		t.Fatalf("count = %v, want 0", out["count"])
 	}
 	for _, q := range eng.asked {
-		if q == "reviewsForProduct" {
+		if q == "publishedReviewsForProduct" {
 			t.Fatal("the gate must run FIRST: a store with reviews off must not read every review " +
 				"and then discard them")
 		}
@@ -219,5 +241,45 @@ func TestTheReviewsPackShipsDisabled(t *testing.T) {
 		t.Fatal("a storefront pack must ship disabled: enabling it publishes a write endpoint " +
 			"and a public read on every deployable whose shopperForms is on, which is an " +
 			"operator's decision rather than an upgrade's")
+	}
+}
+
+// THE MODERATION READ IS ASKED ONLY ABOUT THE REVIEWS IN PLAY. A read of the
+// whole store's decisions would have to be complete or risk letting a
+// moderated review through; bounding it by the caller's list is what makes
+// completeness cheap.
+func TestTheModerationReadIsBoundedByTheReviewsInPlay(t *testing.T) {
+	eng := &fixtureReader{
+		settings: map[string][]map[string]any{"store-live": {{"publicDisplay": true}}},
+		reviews:  map[string][]map[string]any{"store-live|boot": reviewRows("r1", "r2")},
+		moder: map[string][]map[string]any{"store-live": {
+			{"reviewId": "r2", "criterion": "spam"},
+			{"reviewId": "elsewhere", "criterion": "spam"},
+		}},
+	}
+	out := publishedFrom(t, &Provider{reader: eng}, map[string]any{
+		"storeId": "store-live", "productHandle": "boot"})
+
+	if out["count"].(float64) != 1 {
+		t.Fatalf("count = %v, want 1", out["count"])
+	}
+	if len(eng.askedAbout) != 2 {
+		t.Fatalf("the moderation read was asked about %v, want exactly the two reviews in play",
+			eng.askedAbout)
+	}
+}
+
+// A product with no reviews costs no moderation read at all.
+func TestNoCandidatesCostsNoModerationRead(t *testing.T) {
+	eng := &fixtureReader{
+		settings: map[string][]map[string]any{"store-live": {{"publicDisplay": true}}},
+	}
+	publishedFrom(t, &Provider{reader: eng}, map[string]any{
+		"storeId": "store-live", "productHandle": "boot"})
+
+	for _, q := range eng.asked {
+		if q == "moderationActionsForReviews" {
+			t.Fatal("a product with no reviews must not ask about moderation")
+		}
 	}
 }

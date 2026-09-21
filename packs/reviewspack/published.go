@@ -85,13 +85,24 @@ func (p *Provider) publishedForProduct(ctx context.Context, args map[string]any,
 		return p.publishedNode(storeID, handle, []PublishedReview{})
 	}
 
-	rows, err := p.rowsFor(ctx, "reviewsForProduct",
+	rows, err := p.rowsFor(ctx, "publishedReviewsForProduct",
 		map[string]string{"storeId": storeID, "productHandle": handle})
 	if err != nil {
 		return nil, err
 	}
 
-	hidden, err := p.hiddenReviewIDs(ctx, storeID)
+	// THE MODERATION READ IS BOUNDED BY THE REVIEWS IN PLAY, not by a page
+	// size. It must be COMPLETE for what it is asked about -- a truncated
+	// answer is a moderated review rendered on a storefront, which is the one
+	// failure this pack exists to prevent -- so it is asked about exactly the
+	// ids being considered rather than about the whole store.
+	candidates := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if id := strings.TrimSpace(asString(row["id"])); id != "" {
+			candidates = append(candidates, id)
+		}
+	}
+	hidden, err := p.hiddenReviewIDs(ctx, storeID, candidates)
 	if err != nil {
 		return nil, err
 	}
@@ -152,8 +163,14 @@ func (p *Provider) publicDisplayOn(ctx context.Context, storeID string) (bool, e
 // the pack deliberately has no "approve" criterion to weigh against them.
 // If a client ever needs reinstatement it is a new criterion and a new
 // decision, which is what append-only means.
-func (p *Provider) hiddenReviewIDs(ctx context.Context, storeID string) (map[string]struct{}, error) {
-	rows, err := p.rowsFor(ctx, "moderationActionsForStore", map[string]string{"storeId": storeID})
+func (p *Provider) hiddenReviewIDs(ctx context.Context, storeID string, reviewIDs []string) (map[string]struct{}, error) {
+	if len(reviewIDs) == 0 {
+		// NO CANDIDATES, NO READ. An empty list would match nothing anyway,
+		// and asking is a query per product page with nothing on it.
+		return map[string]struct{}{}, nil
+	}
+	rows, err := p.reader.RowsWithList(ctx, "moderationActionsForReviews",
+		map[string]string{"storeId": storeID}, "reviewIds", reviewIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -175,6 +192,13 @@ func (p *Provider) hiddenReviewIDs(ctx context.Context, storeID string) (map[str
 // a function over values.
 type rowReader interface {
 	Rows(ctx context.Context, query string, args map[string]string) ([]map[string]any, error)
+	// RowsWithList is Rows plus ONE list-valued argument, which the
+	// moderation read needs and no other read here does. A second method
+	// rather than a variadic map[string]any: every other argument in this
+	// pack is a string, and widening the common case to `any` would move the
+	// quoting decision from one place to every call site.
+	RowsWithList(ctx context.Context, query string, args map[string]string,
+		listName string, list []string) ([]map[string]any, error)
 }
 
 // engineRowReader is the production implementation.
@@ -183,6 +207,16 @@ type engineRowReader struct {
 }
 
 func (e *engineRowReader) Rows(ctx context.Context, query string, args map[string]string) ([]map[string]any, error) {
+	return e.rows(ctx, query, args, "", nil)
+}
+
+func (e *engineRowReader) RowsWithList(ctx context.Context, query string, args map[string]string,
+	listName string, list []string) ([]map[string]any, error) {
+	return e.rows(ctx, query, args, listName, list)
+}
+
+func (e *engineRowReader) rows(ctx context.Context, query string, args map[string]string,
+	listName string, list []string) ([]map[string]any, error) {
 	if e == nil || e.engine == nil {
 		return nil, fmt.Errorf("reviews: the pack has no engine handle")
 	}
@@ -204,6 +238,20 @@ func (e *engineRowReader) Rows(ctx context.Context, query string, args map[strin
 		// QuoteString, never Go quoting: it is the engine's own literal
 		// escaping, and a product handle is caller-supplied text.
 		b.WriteString(langparser.QuoteString(args[k]))
+	}
+	if listName != "" {
+		if len(names) > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(listName)
+		b.WriteString(": [")
+		for i, v := range list {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(langparser.QuoteString(v))
+		}
+		b.WriteString("]")
 	}
 	b.WriteByte(')')
 

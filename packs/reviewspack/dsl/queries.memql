@@ -12,6 +12,7 @@
 // storefront rendering reviews a merchant had switched off.
 
 use reviews.concepts.{ review, moderationAction, reviewSettings }
+use reviews.shapes.{ reviewFull, reviewPublic, moderationActionFull, reviewSettingsFull }
 
 @description("Every review for one product on one store, newest first -- the merchant's own list, including reviews a moderation decision hides. The operator read behind a moderation screen; the public read is the reviewsPublishedForProduct builtin.")
 @actor
@@ -22,6 +23,7 @@ query review reviewsForProduct {
   }
   filter  row => row.storeId == args.storeId && row.productHandle == args.productHandle
   sort    "row.createdAt", "desc"
+  shape   reviewFull
 }
 
 @description("One review by id. The read moderation resolves its subject through, so a caller who cannot read a review cannot record a decision against it either.")
@@ -32,17 +34,19 @@ query review reviewById {
     reviewId  string!
   }
   filter  row => row.id == args.reviewId
+  shape   reviewFull
 }
 
-@description("Every review on one store, newest first. The merchant's moderation queue.")
+@description("This store's reviews, newest first -- the merchant's moderation queue. A bounded first page with a keyset cursor, because a busy store's queue is the one list here that grows without limit.")
 @actor
 query review reviewsForStore {
   args {
     storeId  string!
-    limit    int
   }
   filter  row => row.storeId == args.storeId
   sort    "row.createdAt", "desc"
+  paginate 50
+  shape   reviewFull
 }
 
 @description("Every moderation decision recorded against one review, newest first. Append-only, so this IS the decision history -- there is no undo-by-overwrite to reconstruct.")
@@ -53,17 +57,19 @@ query moderationAction moderationActionsForReview {
   }
   filter  row => row.reviewId == args.reviewId
   sort    "row.createdAt", "desc"
+  shape   moderationActionFull
 }
 
-@description("Every moderation decision on one store, newest first -- what the public read excludes, readable as a list.")
+@description("Which of these reviews carry a moderation decision. THE PUBLIC READ SUBTRACTS THIS, so it must be COMPLETE for the reviews it is asked about -- a truncated answer here is a moderated review rendered on a storefront, which is the one failure this pack exists to prevent. So it is bounded by the CALLER'S LIST rather than by a page size: the public read passes the ids it is considering, which is one product's reviews on one store.")
+@unbounded("moderation decisions for a caller-supplied list of review ids -- bounded by that list, and a page size here would silently let a moderated review through")
 @actor
-query moderationAction moderationActionsForStore {
+query moderationAction moderationActionsForReviews {
   args {
-    storeId  string!
-    limit    int
+    storeId    string!
+    reviewIds  []string!
   }
-  filter  row => row.storeId == args.storeId
-  sort    "row.createdAt", "desc"
+  filter  row => row.storeId == args.storeId && row.reviewId in args.reviewIds
+  shape   moderationActionFull
 }
 
 @description("This store's reviews settings. One row per store, so this answers at most one.")
@@ -74,4 +80,17 @@ query reviewSettings reviewSettingsForStore {
   }
   filter  row => row.storeId == args.storeId
   sort    "row.createdAt", "desc"
+  shape   reviewSettingsFull
+}
+
+@description("THE PUBLIC PROJECTION: this store's reviews for one product, newest first, WITHOUT the shopper's email. The reviewsPublishedForProduct builtin reads through this rather than through reviewsForProduct, so the address never reaches the code path whose output is served to an unauthenticated browser -- an omission in a Go struct is one refactor away from being undone, and a shape is not.")
+@actor
+query review publishedReviewsForProduct {
+  args {
+    storeId        string!
+    productHandle  string!
+  }
+  filter  row => row.storeId == args.storeId && row.productHandle == args.productHandle
+  sort    "row.createdAt", "desc"
+  shape   reviewPublic
 }

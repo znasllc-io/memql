@@ -149,6 +149,38 @@ func TestAClientSuppliedStampIsStripped(t *testing.T) {
 	}
 }
 
+// AND THE STRIP IS WHAT CLOSES THE CASE `Set` DOES NOT.
+//
+// This test exists because the one above passes without the strip: the stamp
+// is written with Set, which replaces, so a client-supplied site or owner is
+// overwritten whether or not it was deleted first. The STORE header is
+// different -- it is set only when there IS a store, so on an UNBOUND
+// storefront nothing overwrites it and the client's own value would ride
+// through to the bff untouched.
+//
+// That is the hole the strip closes, and without this case the strip could
+// be deleted with every test still green.
+func TestAForgedStoreCannotRideThroughAnUnboundStorefront(t *testing.T) {
+	up := newShopperUpstream(t)
+	h := shopperHandler(t, shopperSite(func(s *Site) { s.Store = nil }), up.server.URL)
+
+	req := httptest.NewRequest(http.MethodPost, "/_memql/forms/reviews/review", strings.NewReader("body=nice"))
+	req.Host = "shop.example.com"
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set(ShopperStoreHeader, "store-somebody-elses")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if up.hits != 1 {
+		t.Fatalf("upstream hits = %d, want 1", up.hits)
+	}
+	if up.store != "" {
+		t.Fatalf("a client-supplied store survived to the bff on an unbound storefront: %q. "+
+			"Nothing overwrites that header when there is no store, so the strip is the only "+
+			"thing standing between a forged value and the write path", up.store)
+	}
+}
+
 // PROPERTY 4a: SIZE CAPPED, before the hop.
 func TestAnOversizeBodyIsRefusedBeforeTheHop(t *testing.T) {
 	up := newShopperUpstream(t)
