@@ -1,0 +1,49 @@
+use library.concepts.{ artifact, folder }
+use library.shapes.{ artifactFull }
+use common.traits.{ isActiveRecord }
+
+query artifact artifactsFiledUnder {
+  args { folderId string @required }
+  filter row => row.folderId == args.folderId && isActiveRecord(row)
+  shape artifactFull
+}
+
+@actor
+mutation folder addLibraryFolder {
+  args {
+    folderId string @required
+    name string @required
+  }
+  insert {
+    id: args.folderId
+    name: args.name
+    ownerUserId: actor.userId
+    createdAt: now
+  }
+}
+
+spec artifact artifactArchived = row => row.archived == true
+
+@row
+shape artifact artifactCard { row.id  title }
+
+@trigger(event="node.created", concept="v1:library:file")
+automation noteFileArrival {
+  args { id any }
+  publish "docs.fileArrived" { fileId: args.id }
+}
+
+@primary("fleet:strongest")
+@fallback("app:*")
+@fallback("federation:cheapest")
+policy localThenVendor { }
+
+@when(level="reasoning")
+@policy("federationStrongest")
+@precedence(100)
+@onUnavailable("park")
+rule parkOnReasoning { }
+
+@level("fast")
+@templateFile("prompts/summariseDoc.tmpl")
+prompt summariseDoc { title string  content string! }

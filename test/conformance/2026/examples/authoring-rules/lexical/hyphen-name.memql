@@ -1,0 +1,5 @@
+@serverOnly
+query scoreCard remainingMatchesBalance {
+  filter  row => row.remaining == row.total-used     // one name, not a subtraction
+  paginate 50
+}

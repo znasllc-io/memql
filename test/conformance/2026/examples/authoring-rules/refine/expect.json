@@ -1,0 +1,5 @@
+{
+  "cases": [
+    { "file": "search-folder-artifacts.memql", "verdict": "load_ok" }
+  ]
+}

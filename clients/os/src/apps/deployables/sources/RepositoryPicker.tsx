@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button, Caption, Chip, Chips, Input, Row as ListRow, Subhead, useNow } from "../../../kit";
 import { formatFreshness } from "../../../kit/format";
@@ -66,6 +66,31 @@ export function RepositoryPicker({
   const shown = repositoryCount(groups);
   const total = page.repositories.length;
 
+  // COMING BACK FROM GITHUB IS THE ASK. Installing the app on another
+  // organization happens in another tab, on github.com, and nothing tells
+  // this list it happened -- so the person returned to the same list they
+  // left and had to know that "Look again" was the next thing to press. Once
+  // the link has been followed, the next time this tab is looked at the list
+  // is read again, once. Not on every focus: a read is a call to GitHub under
+  // this person's token, and only following the link is a reason to expect a
+  // different answer.
+  const awaitingInstall = useRef(false);
+  const lookAgain = useRef(onLookAgain);
+  lookAgain.current = onLookAgain;
+  useEffect(() => {
+    const onReturn = () => {
+      if (!awaitingInstall.current || document.visibilityState !== "visible") return;
+      awaitingInstall.current = false;
+      lookAgain.current();
+    };
+    document.addEventListener("visibilitychange", onReturn);
+    window.addEventListener("focus", onReturn);
+    return () => {
+      document.removeEventListener("visibilitychange", onReturn);
+      window.removeEventListener("focus", onReturn);
+    };
+  }, []);
+
   return (
     <div className="os-deploy-publish">
       {/* THE REFUSAL FIRST, and above the list rather than instead of it: a
@@ -93,7 +118,7 @@ export function RepositoryPicker({
       ) : null}
 
       {groups.length === 0 && refusal ? null : groups.length === 0 ? (
-        <EmptyPicker total={total} searching={search.trim() !== ""} installUrl={installUrl} />
+        <EmptyPicker total={total} searching={search.trim() !== ""} installUrl={installUrl} onFollow={() => { awaitingInstall.current = true; }} />
       ) : (
         groups.map((group) => (
           <div className="os-files-group" key={group.owner} role="group" aria-label={group.owner}>
@@ -161,6 +186,16 @@ export function RepositoryPicker({
             Read more
           </Button>
         ) : null}
+        {/* ANOTHER ORGANIZATION IS ANOTHER GROUP IN THIS LIST, so the way to
+            add one is here, under the groups, and not only on a settings page.
+            It used to be offered when the list was EMPTY and nowhere else in
+            the wizard: somebody with one organization connected, looking for a
+            repository in a second, was shown a complete-looking list and no
+            way to make it longer. TEXT, not a third button on this row: it
+            leaves the product, and the row's one act is reading again. An
+            empty list keeps it as its own control (`EmptyPicker`), where it is
+            the only thing to do. */}
+        {total > 0 ? <InstallLink installUrl={installUrl} text onFollow={() => { awaitingInstall.current = true; }} /> : null}
       </div>
     </div>
   );
@@ -256,10 +291,12 @@ function EmptyPicker({
   total,
   searching,
   installUrl,
+  onFollow,
 }: {
   total: number;
   searching: boolean;
   installUrl: string;
+  onFollow: () => void;
 }) {
   if (searching) {
     return <Caption>No repository here matches that. {total} were read.</Caption>;
@@ -273,7 +310,7 @@ function EmptyPicker({
           control the card renders at 214px -- one link, two shapes,
           depending only on which surface you reached it from. */}
       <div className="os-form-row">
-        <InstallLink installUrl={installUrl} />
+        <InstallLink installUrl={installUrl} onFollow={onFollow} />
       </div>
     </>
   );
@@ -287,10 +324,23 @@ function EmptyPicker({
  * when a URL is in hand -- a cluster with no GitHub App has none, and a link
  * to nowhere is worse than no link.
  */
-export function InstallLink({ installUrl }: { installUrl: string }) {
+export function InstallLink({ installUrl, text = false, onFollow }: {
+  installUrl: string;
+  /** Draw it as a text link, for a row that already has its one button. */
+  text?: boolean;
+  /** Told when the link is followed, so a list can read again on the way back. */
+  onFollow?: () => void;
+}) {
   if (installUrl === "") return null;
   return (
-    <a className="os-button" data-tone="quiet" href={installUrl} target="_blank" rel="noreferrer noopener">
+    <a
+      className={text ? "os-link" : "os-button"}
+      data-tone={text ? undefined : "quiet"}
+      href={installUrl}
+      target="_blank"
+      rel="noreferrer noopener"
+      onClick={onFollow}
+    >
       Install on another organization
     </a>
   );

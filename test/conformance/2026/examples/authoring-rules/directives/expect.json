@@ -1,0 +1,12 @@
+{
+  "cases": [
+    { "file": "as-of-fallback.memql", "verdict": "load_ok" },
+    { "file": "latest-per-folder.memql", "verdict": "load_ok" },
+    {
+      "file": "sort-in-a-body.memql",
+      "verdict": "refuse_load",
+      "code": "body_call_unknown",
+      "message": "`sort(...)` is not a function or a predicate known here"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+/// Decide what to index for a newly created Library artifact.
+logic indexArtifact {
+  args {
+    event object!
+  }
+  return args.event.payload.id ?? ""
+}
+
+/// Promote a newly created Library artifact into its lens.
+@trigger(event="node.created", concept="v1:library:artifact")
+automation indexArtifactOnCreate {
+  decide := logic indexArtifact(event: event)
+}

@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "file": "provider-base.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "provider-model.memql",
+      "verdict": "load_ok"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "cases": [
+    { "file": "detached-file-header.memql", "verdict": "load_ok" },
+    { "file": "parked-with-annotations.memql", "verdict": "load_ok" },
+    {
+      "file": "detached-executor.memql",
+      "verdict": "refuse_load",
+      "message": "@executor is required for builtin functions"
+    }
+  ]
+}

@@ -51,7 +51,7 @@ The words a top-level declaration opens with. One section of the [grammar](gramm
 | `spec` | `spec <bound-name> <name> = <lambda>` | Atomic boolean predicate over one bound concept or shape: `spec <bound> <name> = row => <predicate>`, applied as `name(row)`. Over an @actor shape the parameter is `actor` and the predicate evaluates in process; over a row it pushes down to SQL. |
 | `tool` | `tool <name> { ... }` | AI-callable tool definition. Body is the input-schema field list; @handler wires it to a query/function. |
 | `trait` | `trait <name> = <lambda>` | Concept-agnostic boolean predicate (same runtime contract as spec): `trait <name> = row => <predicate>`, applied as `name(row)` to a row of any concept. |
-| `use` | `use <dotted-path> "{" <name> { "," <name> } "}"` | File-top cross-file import: `use <domain>.<construct>.{ a, b }` pulls named constructs (concepts/shapes/specs/...) into local scope. |
+| `use` | `use <dotted-path> "{" <import-name> { "," <import-name> } "}"` | File-top cross-file import: `use <domain>.<construct>.{ a, b }` pulls named constructs (concepts/shapes/specs/...) into local scope. |
 
 ## Annotations
 
@@ -167,7 +167,7 @@ The reserved words that are not constructs: the statements of a body, the clause
 | `publish` | `"publish" <string> "{" <map-entry> { "," <map-entry> } "}"` | Publish statement, in an automation: `publish "<topic>" { key: value, ... }` puts an event on the bus. A logic may not publish (D14): publish from the automation that calls it. |
 | `refine` | `"refine" <lambda>` | Query clause: `refine row => <predicate>`, a predicate the database cannot run, applied in process to each page `paginate` reads, so a page may come back short. Requires paginate; never with count. |
 | `retry` | `"retry" "(" <number> ")"` | Trailing clause of a construct call: `<call> retry(n)` runs a failed call up to n more times. Written after `on surface(...)` and before `on error continue`. |
-| `return` | `"return" ( <construct-call> | <expression> )` | End the body with a value: `return <expr>`, or `return <call>` for what the call returns. A logic's last statement is its return; an automation's return is its run's outcome. |
+| `return` | `"return" [ <construct-call> | <expression> ]` | End the body: `return <expr>`, or `return <call>` for what the call returns. The VALUE IS OPTIONAL -- a bare `return` ends the body with none, which is what an automation writes to leave early out of an `if` branch. A logic's last statement is its return; an automation's return is its run's outcome. |
 | `shape` | `"shape" <name>` | Query clause: names the projection shape for the result -- `shape <name>`. (Also the `shape` construct keyword and the `<expr> with shape(...)` expression.) |
 | `sort` | `"sort" <string> { "," <string> }` | Query clause: order the result -- `sort "row.createdAt", "desc"`. Payload keys are bare; row intrinsics take the row. namespace. |
 | `stamp` | `"stamp" "{" ( <map-entry> [ "," ] )* "}"` | Write-block sugar: `stamp { key: value, ... }` carries the server-set fields beside an accept{} list. Nested inside insert{}/update{} (or top-level with accept, which means insert). |
@@ -286,7 +286,7 @@ The context accessors the parser recognises and the builtins resolved from the i
 | Name | Written | What it means |
 |---|---|---|
 | `actor` | `actor()` | Access the resolved auth context (userId, role, identityId, isClusterOwner, partitions). |
-| `ai` | `ai(templateId string, data object, provider? string)` | Invoke an AI prompt template with the given data. |
+| `ai` | `ai(templateId string, data object)` | Call a named prompt with a data object and return {prompt, reply}. Written as a builtin call, `builtin ai(templateId: ..., data: ...)`, in a logic or automation body. The prompt's @level and the routing rules choose the model, so the call never names one. |
 | `children` | `children(concept string)` | Retrieve child nodes of the current node for a given concept. |
 | `embed` | `embed(text string, model? string)` | Generate an embedding vector for text using the configured provider. |
 | `event` | `event()` | Access the trigger event data in an automation. |

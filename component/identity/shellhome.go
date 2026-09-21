@@ -53,6 +53,30 @@ func ShellHomeURL(clusterDomain, identityBaseURL string) string {
 	return u.String()
 }
 
+// ClusterDomainFor names the cluster's apex domain, by ShellHomeURL's two
+// rules in ShellHomeURL's order: the /setup wizard's value wins, otherwise the
+// identity BaseURL's host with its `identity.` label removed. Empty means it
+// cannot be named, and a caller composing URLs from it must not guess.
+//
+// A function rather than a second copy of those rules, because the two have to
+// agree: a page that named the shell at one domain and an app's homepage at
+// another would be describing two clusters.
+func ClusterDomainFor(clusterDomain, identityBaseURL string) string {
+	if d := strings.Trim(strings.TrimSpace(clusterDomain), "."); d != "" {
+		return d
+	}
+	u, err := url.Parse(strings.TrimSpace(identityBaseURL))
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	const prefix = "identity."
+	host := u.Hostname()
+	if !strings.HasPrefix(host, prefix) {
+		return ""
+	}
+	return strings.TrimPrefix(host, prefix)
+}
+
 // DefaultPostLoginLanding is the happy-path dest after setup or a bare /login
 // revisit. Never /admin/. /me is the same-origin fallback when the shell origin
 // cannot be named.

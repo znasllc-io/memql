@@ -1,0 +1,10 @@
+use agents.concepts.{ agentRole }
+use agents.shapes.{ agentRoleFull }
+use common.traits.{ isActiveRecord }
+
+@cache(300)
+@unbounded("the agent-role catalog is a small bounded set -- never more than a handful of rows")
+query agentRole activeAgentRoleCatalog {
+  filter  row => isActiveRecord(row)
+  shape   agentRoleFull
+}

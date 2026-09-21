@@ -1,0 +1,14 @@
+/// The first person to claim a folder owns it; everybody after them reads it.
+logic assignFolderRole {
+  args {
+    folderId  string!
+    userId    string!
+  }
+  existingOwners := query folderOwners(folderId: args.folderId)
+  granted := mutation recordFolderRole(
+    folderId: args.folderId,
+    userId:   args.userId,
+    role: existingOwners.empty() ? "owner" : "reader"
+  )
+  return granted
+}

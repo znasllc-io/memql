@@ -1,0 +1,33 @@
+use library.concepts.{ artifact, folder }
+use library.shapes.{ libraryFolderFull }
+use common.traits.{ isActiveRecord }
+
+/// Insert a Library artifact
+@actor
+mutation artifact recordArtifact {
+  args {
+    folderId  string  @required
+    title     string  @required
+  }
+  insert {
+    folderId:    args.folderId
+    title:       args.title
+    ownerUserId: actor.userId
+    createdAt:   now
+    createdBy:   actor.userId
+  }
+}
+
+/// Active folders visible to the caller
+@actor
+query folder activeFoldersForCaller {
+  args {
+    parentFolderId  string  @required
+  }
+  filter  row => row.parentFolderId == args.parentFolderId && row.ownerUserId == actor.userId && isActiveRecord(row)
+  shape   libraryFolderFull
+}
+
+// A spec binds one concept or shape in its signature, and its lambda
+// names the row it reads. A spec takes no args.
+spec artifact isArchivedIndexRow = row => row.archived == true

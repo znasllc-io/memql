@@ -1,0 +1,4 @@
+// The legacy procedural form, refused by name.
+func (Query) listPartitions(ctx any) (any, error) {
+  return sort(concept=="v1:cluster:node", "name", "asc"), nil
+}

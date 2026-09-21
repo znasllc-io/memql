@@ -28,9 +28,10 @@ google-chrome --headless=new --disable-gpu --no-sandbox --hide-scrollbars \
 
 `view` is one of `overview`, `store`, `quiet`, `picker`, `readonly`, `hidden`
 (the Store surface), or `list`, `sources`, `list-empty`, `sources-empty`,
-`connected` (the Deployables app, whole); `mode` is `dark` or `light`. **Take
-at least one narrow capture** (`820,760`): two of the first three real defects
-this harness found were invisible at 1400x900.
+`connected`, `github-owner`, `github-member`, `settings-no-app`,
+`settings-no-app-member`, `settings-app` (the Deployables app, whole); `mode`
+is `dark` or `light`. **Take at least one narrow capture** (`820,760`): two of
+the first three real defects this harness found were invisible at 1400x900.
 
 The list views seed ONE OF EVERYTHING: a deployable of every origin (a named
 source, an uploaded zip, a Library zip, CI, built in, none) and a source in
@@ -38,6 +39,16 @@ every state (review needed, update available, current, nothing deployed,
 archived). A development cluster has two built-in deployables and no source,
 so until these views existed neither list had been seen with the rows it was
 designed for. `connected` is the same app with a GitHub account connected.
+
+The `github-*` and `settings-*` views are the cluster's GitHub App in each
+reading a surface has of it: a cluster with none seen by somebody who may
+register one (`github-owner`, `settings-no-app`) and by somebody who may not
+(`github-member`, `settings-no-app-member`), and one registered from the
+product with an account connected through it (`settings-app`). For the two
+`github-*` views press + and choose "A repository". Their first rendered pass
+found what the suite could not: the group's own sentence still opening with
+"Connect GitHub" directly above the part saying it cannot work, and a bare
+Remove that did not say of what.
 
 ## What it is, and what it is not
 

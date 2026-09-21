@@ -1,0 +1,14 @@
+use library.concepts.{ folder }
+use library.shapes.{ libraryFolderFull }
+use common.traits.{ isNotDeleted }
+
+@description("Live folders, optionally narrowed to a creator")
+query folder activeFolders {
+  args {
+    userId  string
+  }
+  filter  row => isNotDeleted(row)
+              && row.archived != true
+              && (args.userId == nil || row.createdBy == args.userId)
+  shape   libraryFolderFull
+}

@@ -1,0 +1,7 @@
+/// Matches the tickets that are still open. Switched off: not loaded while @disabled stays.
+@disabled
+spec ticket isOpenTicketBothHalves = row => row.status == "open"
+
+/// The same condition, unbound so any concept's row can be asked it. Switched off with it.
+@disabled
+trait isOpenRowBothHalves = row => row.status == "open"

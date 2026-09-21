@@ -1,0 +1,11 @@
+use deployment.concepts.{ deployment }
+
+/// Deployment history for a cluster, at the caller's instant or the latest one.
+query deployment deploymentsForClusterAt {
+  args {
+    clusterId  string!
+    asOf       datetime
+  }
+  filter  row => row.clusterId == args.clusterId
+  asOf    args.asOf ?? latest
+}

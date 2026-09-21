@@ -1,0 +1,16 @@
+{
+  "cases": [
+    { "file": "fraction.memql", "verdict": "load_ok" },
+    { "file": "subtraction.memql", "verdict": "load_ok" },
+    {
+      "file": "leading-dot.memql",
+      "verdict": "refuse_parse",
+      "message": "a number cannot start with '.'"
+    },
+    {
+      "file": "hyphen-name.memql",
+      "verdict": "refuse_parse",
+      "message": "`row.total-used` reads as one name; write `row.total - row.used` (spaces) for subtraction"
+    }
+  ]
+}

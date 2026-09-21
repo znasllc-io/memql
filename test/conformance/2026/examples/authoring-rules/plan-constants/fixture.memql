@@ -1,0 +1,7 @@
+/// A queued item the plan-constant examples read.
+concept queuedItem {
+  expiresAt  datetime
+  rank       int
+  stage      enum("active", "held", "done")
+  bucket     string
+}

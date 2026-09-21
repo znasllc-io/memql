@@ -1,0 +1,5 @@
+@serverOnly
+query scoreCard highScores {
+  filter  row => row.score > 0.5      // correct -- and always was
+  paginate 50
+}

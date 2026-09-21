@@ -1,0 +1,12 @@
+/// A world: the top-level container the examples domain is built around.
+concept world {
+  title   string!
+  status  enum("active", "retired")!
+}
+
+/// Active worlds, newest first.
+query world activeWorlds {
+  filter   row => row.status == "active"
+  sort     "row.createdAt", "desc"
+  paginate 50
+}

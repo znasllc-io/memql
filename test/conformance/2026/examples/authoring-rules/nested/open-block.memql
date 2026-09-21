@@ -1,0 +1,6 @@
+concept importSummary {
+  name      string!
+  metadata  object  @open {
+    knownKey  string
+  }
+}

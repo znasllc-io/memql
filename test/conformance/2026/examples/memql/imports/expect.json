@@ -1,0 +1,6 @@
+{
+  "cases": [
+    { "file": "alias.memql", "verdict": "load_ok" },
+    { "file": "use-imports.memql", "verdict": "load_ok" }
+  ]
+}

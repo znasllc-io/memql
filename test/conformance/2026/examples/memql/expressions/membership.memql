@@ -1,0 +1,12 @@
+/// A module of a world, tagged with the topics it covers.
+concept module {
+  worldId  string!
+  status   enum("active", "pending", "retired")!
+  topics   []string
+}
+
+/// Modules that are live or on their way, and cover filters.
+query module filterModules {
+  filter row => row.status in ["active", "pending"] && "filters" in row.topics
+  paginate 50
+}

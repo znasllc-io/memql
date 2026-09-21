@@ -349,12 +349,21 @@ const retiredReceiverFormRef = "memql#303 retired the author-facing procedural s
 func retiredReceiverGateExempt(rel string) bool {
 	switch rel {
 	case "docs/public/language/authoring-rules.md":
-		// The canonical authoring reference, and the two hits are the
+		// The canonical authoring reference, and the hits are the
 		// counter-examples it exists to publish: a `func (Shape)` block under
 		// "Retired forms (rejected at parse time)" carrying `// REJECTED --`,
-		// and a `func (Spec)` block under "**Wrong (rejected at
-		// registration):**". A rule against a form cannot be stated without
-		// showing the form.
+		// and a `func (Query)` block under section 21 showing the wrapper the
+		// parser refuses by name. A rule against a form cannot be stated
+		// without showing the form.
+		return true
+	case "test/conformance/2026/examples/authoring-rules/shapes/receiver-form.memql",
+		"test/conformance/2026/examples/authoring-rules/args/receiver-function.memql":
+		// The two blocks above, as the conformance cases that hold them
+		// (memql#5388): each is a `refuse_parse` / `refuse_load` case whose
+		// expect.json names the refusal, so the retired form is written here
+		// for the engine to be run against it. Exempting the page and not its
+		// cases would leave the page's claim unchecked, which is the whole
+		// thing the corpus marker exists to fix.
 		return true
 	case "docs/internal/design/dsl-syntax-audit-964.md":
 		// A syntax AUDIT: its whole subject is which spellings are live and

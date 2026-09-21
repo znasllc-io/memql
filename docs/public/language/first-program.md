@@ -19,6 +19,7 @@ Save this as `reading.memql` in its own workspace folder, or open the checked-in
 [example](../../../examples/reading-list/reading.memql). Use a separate folder
 from the engine's core DSL to keep your tutorial definitions distinct.
 
+<!-- corpus: 2026/examples/first-program/reading-list.memql -->
 ```memql
 /// A reading-list item owned by the signed-in person.
 @rowAuthz(owner="ownerUserId")

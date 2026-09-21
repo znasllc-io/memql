@@ -1,0 +1,9 @@
+@extends("openai")
+@model("gpt-5.4-mini")
+/// OpenAI GPT-5.4 Mini - balanced cost/latency chat (non-streaming)
+provider chat54Mini {
+  params {
+    contextWindow        128000
+    maxCompletionTokens  16384
+  }
+}

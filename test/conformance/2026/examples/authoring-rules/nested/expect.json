@@ -1,0 +1,6 @@
+{
+  "cases": [
+    { "file": "closed-block.memql", "verdict": "load_ok" },
+    { "file": "open-block.memql", "verdict": "load_ok" }
+  ]
+}

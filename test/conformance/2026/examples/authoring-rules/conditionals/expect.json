@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "file": "ternary-value.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "if-at-value-position.memql",
+      "verdict": "refuse_parse",
+      "message": "expected an expression after `:`, got `if`"
+    },
+    {
+      "file": "cond-call.memql",
+      "verdict": "refuse_parse",
+      "message": "cond(p, a, b) is retired in edition 2026: write p ? a : b",
+      "code": "retired_cond_call"
+    }
+  ]
+}

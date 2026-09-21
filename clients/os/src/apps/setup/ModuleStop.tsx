@@ -1,4 +1,4 @@
-import { Button, Caption, moduleActFor, useAppReach } from "../../kit";
+import { Button, Caption, moduleActFor, useReach } from "../../kit";
 import type { ModuleId } from "../../system/modules";
 import type { Verdict } from "../../system/readinessFold";
 
@@ -20,11 +20,11 @@ export function ModuleStop({
   id: ModuleId;
   verdict: Verdict | null;
 }) {
-  const reach = useAppReach("settings");
+  const reach = useReach();
   const act = moduleActFor({
     id,
     verdict,
-    sections: reach.sections,
+    sectionsOf: reach.sectionsOf,
     canOpenWindows: reach.canOpenWindows,
   });
 
@@ -39,13 +39,13 @@ export function ModuleStop({
         </>
       ) : act.kind === "open" ? (
         <div className="os-setup-stop-act">
-          <Button tone="primary" onClick={() => reach.open(act.section, actIntent(id))}>
+          <Button tone="primary" onClick={() => reach.open(act.app, act.section, actIntent(id))}>
             Open {act.name}
           </Button>
         </div>
-      ) : (
-        <Caption>Settings, under {act.name}.</Caption>
-      )}
+      ) : act.kind === "words" ? (
+        <Caption>{act.place}, under {act.name}.</Caption>
+      ) : null}
     </div>
   );
 }

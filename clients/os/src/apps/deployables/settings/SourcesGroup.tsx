@@ -11,6 +11,8 @@ import { AddCredential, cardName } from "../sources/CredentialField";
 import { ConnectedAccountCard } from "../sources/ConnectedAccountCard";
 import { ConnectReturnNotice } from "../sources/ConnectReturnNotice";
 import { ConnectGitHub } from "../sources/ConnectGitHub";
+import { GithubAppBlock, GithubAppMissing } from "../sources/GithubAppSetup";
+import { useGithubApp } from "../sources/useGithubApp";
 import { returnPathFor, type ConnectReturn } from "../sources/connectReturn";
 import { SOURCE_HOST } from "../sources/probe";
 import { bare, usePeopleNames } from "../people";
@@ -142,6 +144,13 @@ export function SourcesGroup({
   // state is unreachable on the surface built to show it. See `LookedUp`.
   const lookup = useSourceRepositories();
   const returnPath = returnPathFor(SETTINGS_SECTION);
+  // THE CLUSTER'S GITHUB APP, read as this group opens. Connect needs one, so
+  // on a cluster that has none it is not offered: an owner is asked the one
+  // question registering an app has, and anybody else is told who can. A null
+  // status is "not known" and keeps everything below exactly as it was
+  // (`useGithubApp`).
+  const githubApp = useGithubApp();
+  const appMissing = githubApp.status !== null && !githubApp.status.configured;
 
   // THE CONNECTION IS READ OFF THE FEED THE LIST RENDERS, never a second
   // subscription: a card saying "connected as @octocat" beside a list that
@@ -223,8 +232,15 @@ export function SourcesGroup({
   return (
     <fieldset className="os-field-group">
       <legend>Sources</legend>
+      {/* WHAT THIS GROUP OFFERS, which depends on the cluster. On one with no
+          GitHub App the usual sentence opened with something nobody here could
+          do, directly above the part that said so. */}
       <Caption>
-        Connect GitHub to choose repositories, or add a stored access token.
+        {!appMissing
+          ? "Connect GitHub to choose repositories, or add a stored access token."
+          : githubApp.status?.canSetup === true
+            ? "Set up GitHub to choose repositories from a list, or add a stored access token."
+            : "Add a stored access token to fetch private repositories."}
       </Caption>
 
       {/* THE ANSWER FROM GITHUB, ON THE SURFACE THAT ASKED. A successful
@@ -233,12 +249,20 @@ export function SourcesGroup({
           has no toasts. Only a refusal has something to add. */}
       <ConnectReturnNotice result={connectResult} />
 
+      {/* NO APP: said once, above whatever this person holds. A grant made
+          against an app that is gone stays listed below -- it is the history
+          of what fetched under it -- and neither Connect nor Reconnect is
+          offered beside it, because neither can work. */}
+      {appMissing ? <GithubAppMissing app={githubApp} returnPath={returnPath} /> : null}
+
       {grant === null ? (
-        <ConnectGitHub
-          busy={connect.busy}
-          refusal={connect.refusal}
-          onConnect={() => void connect.connect(returnPath)}
-        />
+        appMissing ? null : (
+          <ConnectGitHub
+            busy={connect.busy}
+            refusal={connect.refusal}
+            onConnect={() => void connect.connect(returnPath)}
+          />
+        )
       ) : (
         <>
           <ConnectedAccountCard
@@ -265,7 +289,7 @@ export function SourcesGroup({
             remoteRevoked={disconnect.remoteRevoked}
             onDisconnect={() => void disconnect.revoke(grant.id)}
           />
-          {credentialIsRevoked(grant) ? (
+          {credentialIsRevoked(grant) && !appMissing ? (
             /* The copy for `reconnect_required` sends a person to
                "Settings > Sources", so the control it names has to be here --
                a sentence pointing at a button that does not exist is worse
@@ -347,6 +371,12 @@ export function SourcesGroup({
           />
         </section>
       ) : null}
+
+      {/* THE CLUSTER'S OWN HALF, LAST, and an owner's only: which app every
+          connection above was made through, and taking it away. It is the
+          least-visited thing in this group, so it sits beneath everything a
+          person comes here for. */}
+      {isClusterOwner ? <GithubAppBlock app={githubApp} /> : null}
     </fieldset>
   );
 }

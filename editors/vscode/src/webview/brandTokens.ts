@@ -25,7 +25,7 @@
 // WHAT VS CODE DOES NOT ALLOW, stated so nobody re-litigates it:
 //   - No bundled fonts. A webview under `default-src 'none'` loads no font
 //     files, and shipping Inter/JetBrains Mono/Squada One in the VSIX for
-//     seven panels is weight without leverage -- the editor already renders a
+//     eight panels is weight without leverage -- the editor already renders a
 //     good UI face (--vscode-font-family) and the USER'S chosen editor
 //     monospace (--vscode-editor-font-family), which is the two-voice split.
 //     Squada One (display moments) has no equivalent here; weight and size

@@ -1,0 +1,7 @@
+use library.queries.{ libraryFolders }
+
+// `sort` is a directive, not a function: the load refuses the body.
+logic listFoldersSorted {
+  folders := query libraryFolders()
+  return sort(folders, "name", "asc")
+}

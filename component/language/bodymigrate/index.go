@@ -120,12 +120,30 @@ func (ix *Index) has(name, kind string) bool { return ix.kinds[name][kind] }
 // exprFunctions are the names a bare call means as an expression, not a
 // construct: the expression catalog, retired spellings included, since the
 // rewrite may run before or after epic 2's.
+//
+// `ai` IS NOT AMONG THEM, and its absence is the migration half of restoring
+// the call. `ai` is a BUILTIN now (dsl/agents/builtins.memql), so a bare
+// `ai(...)` in a retired body is a construct call that has lost its kind word,
+// exactly like a bare `createFolder(...)`: kindOf resolves it against the
+// index -- which covers the engine's embedded tree -- and the rewrite writes
+// the kind back, or refuses naming what it cannot carry. Measured on the
+// legacy spelling `ai("docSummary", { ... })`:
+//
+//	listed here    `ai("docSummary", { ... })`   emitted back unchanged --
+//	               the one spelling a body refuses (`body_call_unknown`)
+//	not listed     refused, "builtin ai: the positional argument
+//	               \"docSummary\" has no name" -- the builtin takes its
+//	               arguments by name, and the author is told so
+//
+// The second is the honest answer: the legacy call was positional and the
+// builtin is not, so there is a real edit to make and the rewrite says what it
+// is instead of producing a file that loads nowhere.
 var exprFunctions = map[string]bool{
 	"concat": true, "coalesce": true, "cond": true, "first": true, "last": true, "lower": true,
 	"upper": true, "trim": true, "hash": true, "shortId": true, "canonicalId": true, "toString": true,
 	"addDuration": true, "daysBetween": true, "contains": true, "error": true, "var": true,
 	"exists": true, "len": true, "count": true, "timestamp": true, "includes": true, "field": true,
-	"ai": true, "node": true, "children": true, "parent": true, "similar": true, "embed": true,
+	"node": true, "children": true, "parent": true, "similar": true, "embed": true,
 	"systemVar": true, "secret": true, "systemSecret": true, "case": true, "default": true,
 	"append": true,
 }

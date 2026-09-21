@@ -1,0 +1,20 @@
+use cluster.concepts.{ deployment }
+use cluster.shapes.{ deploymentFull }
+
+/// Newest deployments first -- the row envelope, through `row.`.
+@serverOnly
+query deployment newestDeployments {
+  filter   row => row.provider != ""
+  sort  "row.createdAt", "desc"   // correct -- the row envelope
+  paginate 50
+  shape    deploymentFull
+}
+
+/// Highest version first -- a payload property, bare.
+@serverOnly
+query deployment deploymentsByVersion {
+  filter   row => row.provider != ""
+  sort  "version", "desc"         // correct -- payload property, bare
+  paginate 50
+  shape    deploymentFull
+}

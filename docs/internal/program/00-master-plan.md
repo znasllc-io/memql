@@ -17,7 +17,7 @@ state (the working doc that captured that analysis, `05-current-state-map.md`,
 was deleted once its substance was folded in here and elsewhere).
 
 **Epics**
-1. [SI → AI rename](01-epic-si-to-ai-rename.md)
+1. SI → AI rename (no surviving epic doc)
 2. [Platform / plugin architecture](02-epic-platform-plugin.md)
 3. Decouple the product from core (no surviving epic doc)
 

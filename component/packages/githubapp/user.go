@@ -156,10 +156,11 @@ func (c *Client) InstallationRepositories(ctx context.Context, userToken string,
 // somebody else must approve. The caller matches on the REQUESTER's login to
 // find the ones that belong to the person asking.
 func (c *Client) PendingInstallationRequests(ctx context.Context) ([]InstallationRequest, error) {
-	if !c.Configured() {
+	cfg := c.config()
+	if !cfg.Configured() {
 		return nil, ErrNotConfigured
 	}
-	assertion, err := c.appJWT(c.now())
+	assertion, err := c.appJWT(cfg, c.now())
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +253,8 @@ func (c *Client) DirectoryNames(ctx context.Context, bearer, owner, repo, ref, d
 // GitHub answers this endpoint with HTTP 200 AND an error object, which is why
 // the body is read on success rather than only on a status.
 func (c *Client) RefreshUserToken(ctx context.Context, refreshToken string) (TokenSet, error) {
-	if !c.Configured() {
+	cfg := c.config()
+	if !cfg.Configured() {
 		return TokenSet{}, ErrNotConfigured
 	}
 	if strings.TrimSpace(refreshToken) == "" {
@@ -265,8 +267,8 @@ func (c *Client) RefreshUserToken(ctx context.Context, refreshToken string) (Tok
 	form := url.Values{
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {refreshToken},
-		"client_id":     {c.cfg.ClientId},
-		"client_secret": {c.cfg.ClientSecret},
+		"client_id":     {cfg.ClientId},
+		"client_secret": {cfg.ClientSecret},
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.oauthBase+"/login/oauth/access_token", strings.NewReader(form.Encode()))
@@ -322,14 +324,15 @@ func (c *Client) RefreshUserToken(ctx context.Context, refreshToken string) (Tok
 // authorization". A 404 is SUCCESS: it means no such grant exists, which is
 // the state the call was trying to reach.
 func (c *Client) RevokeGrant(ctx context.Context, userToken string) error {
-	if !c.Configured() {
+	cfg := c.config()
+	if !cfg.Configured() {
 		return ErrNotConfigured
 	}
 	body, merr := json.Marshal(map[string]string{"access_token": userToken})
 	if merr != nil {
 		return merr
 	}
-	endpoint := "/applications/" + url.PathEscape(c.cfg.ClientId) + "/grant"
+	endpoint := "/applications/" + url.PathEscape(cfg.ClientId) + "/grant"
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.apiBase+endpoint, strings.NewReader(string(body)))
 	if err != nil {
 		return err
@@ -337,7 +340,7 @@ func (c *Client) RevokeGrant(ctx context.Context, userToken string) error {
 	req.Header.Set("Accept", acceptJSON)
 	req.Header.Set("X-GitHub-Api-Version", apiVersion)
 	req.Header.Set("User-Agent", userAgent)
-	req.SetBasicAuth(c.cfg.ClientId, c.cfg.ClientSecret)
+	req.SetBasicAuth(cfg.ClientId, cfg.ClientSecret)
 
 	resp, derr := c.http.Do(req)
 	if derr != nil {

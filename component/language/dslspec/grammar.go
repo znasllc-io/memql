@@ -78,9 +78,26 @@ func BNF() string {
 		parser.Edition, parser.GrammarVersion)
 
 	b.WriteString("(* ---- A file ---- *)\n")
-	b.WriteString(production("file", `<use>* <declaration>*`))
+	// The leading <declaration-annotation>* is the DETACHED file header
+	// (authoring-rules 7b): the loader slices declarations by header and walks
+	// back over the CONTIGUOUS `@` and `//` run above each one, so a run a
+	// banner comment separates from the first declaration belongs to nothing
+	// and is dropped -- the file still loads. Comments are not tokens, so at
+	// token level that run cannot be told apart from the first declaration's
+	// own preamble, and this is the narrowest true statement of it: any
+	// declaration annotation may open a file. It is stated HERE and nowhere
+	// else on purpose. The loader ignores such a run wherever it appears, but
+	// publishing that rule at <declaration> would let any annotation precede
+	// any declaration and leave every per-receiver annotation production
+	// decorative -- a grammar that steers a model nowhere.
+	b.WriteString(production("file", `<declaration-annotation>* <use>* <declaration>*`))
 	b.WriteString(production("use", constructSignature(spec, "use")))
 	b.WriteString(production("dotted-path", `<name> { "." <name> } "."`))
+	// `<source> as <local>` is the per-name import alias (memql#3802), which is
+	// what lets one file reference two same-named concepts. The parser reads
+	// it on every imported name (parseUseDeclaration), so it belongs on the
+	// name rather than on the clause.
+	b.WriteString(production("import-name", `<name> [ "as" <name> ]`))
 	b.WriteString(production("declaration", joinAlternatives(declarationAlternatives(spec))))
 	b.WriteString("\n")
 
@@ -190,6 +207,22 @@ func declarationAlternatives(spec *Spec) []string {
 	var out []string
 	for _, c := range sortedConstructs(spec) {
 		out = append(out, "<"+c.Keyword+">")
+	}
+	return out
+}
+
+// declarationAnnotationAlternatives names the per-construct annotation
+// production of every construct that has one -- the union that is "an
+// annotation heading a declaration", whichever declaration it turns out to
+// head. A construct whose receiver the registry does not know contributes
+// nothing, exactly as it contributes no production to emit.
+func declarationAnnotationAlternatives(spec *Spec) []string {
+	var out []string
+	for _, c := range sortedConstructs(spec) {
+		if len(annotations.ByReceiver[c.AnnotationReceiver]) == 0 {
+			continue
+		}
+		out = append(out, "<"+c.Keyword+"-annotation>")
 	}
 	return out
 }
@@ -431,6 +464,10 @@ func annotationProduction(spec *Spec) string {
 	if names := annotations.ByReceiver[string(annotations.ConceptBody)]; len(names) > 0 {
 		b.WriteString(production("concept-body-annotation", annotationAlternation(names)))
 	}
+	// The union above, for the ONE place a declaration's annotation is read
+	// without knowing which declaration it is on: the detached file header
+	// <file> opens with.
+	b.WriteString(production("declaration-annotation", joinAlternatives(declarationAnnotationAlternatives(spec))))
 	for _, r := range fieldReceiverNames() {
 		if names := annotations.ByReceiver[r.receiver]; len(names) > 0 {
 			b.WriteString(production(r.production, annotationAlternation(names)))

@@ -227,18 +227,28 @@ export function canConfigure(role: string): boolean {
 export type ModuleAct =
   | { kind: "none" }
   | { kind: "deployment"; variables: string[] }
-  | { kind: "open"; section: string; name: string }
-  | { kind: "words"; name: string };
+  | { kind: "open"; app: string; section: string; name: string }
+  | { kind: "words"; place: string; name: string }
+  /** The group is drawn ON the page that configures the module. */
+  | { kind: "here"; name: string };
+
+/** One page of one app: where a Set up group says it is drawn. */
+export interface SetupPlace {
+  app: string;
+  section: string;
+}
 
 export function moduleActFor(args: {
   id: ModuleId;
   verdict: Verdict | null;
-  /** The Settings sections THIS actor may reach. */
-  sections: readonly string[];
+  /** The sections of an app THIS actor may reach (`useReach`). */
+  sectionsOf: (appId: string) => readonly string[];
   /** Whether there is a window to open into at all. */
   canOpenWindows: boolean;
+  /** Where the asking surface is drawn, when it is a page of an app. */
+  here?: SetupPlace;
 }): ModuleAct {
-  const { id, verdict, sections, canOpenWindows } = args;
+  const { id, verdict, sectionsOf, canOpenWindows, here } = args;
   // A module that is SET UP needs no act. Saying where it would be
   // configured, to somebody looking at a row that says "Set up", is an
   // instruction with nothing behind it -- and a column of them beside every
@@ -268,12 +278,46 @@ export function moduleActFor(args: {
   // Asked of the REGISTRY rather than restated here: a literal copy of
   // "providers is owner-only" would be a second place for that rule to live,
   // and the section's own manifest is the first.
-  const reachable = sections.includes(target.section);
-  if (reachable && canOpenWindows) return { kind: "open", section: target.section, name: target.name };
+  // ALREADY THERE. A module configured from the page this group is drawn on
+  // -- Deployables' settings carry both the group and the Sources it points at
+  // -- gets WORDS that say where to look. "Open Sources" on the page that holds
+  // Sources is a button that goes nowhere, which is the thing the last arm of
+  // this function exists to refuse.
+  if (here !== undefined && here.app === target.app && here.section === target.section) {
+    return { kind: "here", name: target.name };
+  }
+  const reachable = sectionsOf(target.app).includes(target.section);
+  if (reachable && canOpenWindows) {
+    return { kind: "open", app: target.app, section: target.section, name: target.name };
+  }
   // No window to open into, or a section this actor cannot reach, so the
   // destination is named in words. A button that could not go anywhere would
   // be worse than a sentence that says where to look.
-  return { kind: "words", name: target.name };
+  return { kind: "words", place: target.place, name: target.name };
+}
+
+/**
+ * The shell's reach, for a surface that does not know in advance WHICH app it
+ * will hand off to: a module's home is data (`MODULE_SETTINGS_SECTION`), and a
+ * hook cannot be called once per row of it. Null-shell-safe, like
+ * `useAppReach` below and for its reason.
+ */
+export function useReach(): {
+  sectionsOf: (appId: string) => string[];
+  canOpenWindows: boolean;
+  open: (appId: string, section: string, payload?: Record<string, unknown>) => void;
+} {
+  const os = useOsIfPresent();
+  return {
+    sectionsOf: (appId) => {
+      const app = os?.registry.apps.find((a) => a.id === appId) ?? null;
+      return app === null ? [] : sectionsFor(app).map((sec) => sec.id);
+    },
+    canOpenWindows: os !== null && os.layout !== "phone",
+    open: (appId, section, payload) => {
+      os?.actions.openApp(appId, section, payload);
+    },
+  };
 }
 
 /**
@@ -307,16 +351,20 @@ export function SetupGroup({
   requires,
   wants,
   readiness,
+  here,
 }: {
   app: string;
   requires: readonly ModuleId[];
   wants: readonly ModuleId[];
   /** Injected so the group is testable without a session feed; apps pass useSession().readiness. */
   readiness: Readiness | undefined;
+  /** The page this group is drawn on, so a module configured ON it is pointed
+   *  at in words rather than with a button that opens where they already are. */
+  here?: SetupPlace;
 }) {
   const { access } = useSession();
   const role = access?.role ?? "";
-  const reach = useAppReach("settings");
+  const reach = useReach();
   if (!canConfigure(role)) return null;
   const ids = Array.from(new Set([...requires, ...wants]));
   if (ids.length === 0) return null;
@@ -338,8 +386,9 @@ export function SetupGroup({
             const act = moduleActFor({
               id,
               verdict: v,
-              sections: reach.sections,
+              sectionsOf: reach.sectionsOf,
               canOpenWindows: reach.canOpenWindows,
+              here,
             });
             return (
               <div key={id} className="os-setup-row">
@@ -361,10 +410,12 @@ export function SetupGroup({
                   </span>
                 ) : act.kind === "open" ? (
                   <span className="os-setup-act">
-                    <Button onClick={() => reach.open(act.section)}>Open {act.name}</Button>
+                    <Button onClick={() => reach.open(act.app, act.section)}>Open {act.name}</Button>
                   </span>
+                ) : act.kind === "here" ? (
+                  <span className="os-setup-act os-caption">Below, under {act.name}</span>
                 ) : (
-                  <span className="os-setup-act os-caption">Settings, under {act.name}</span>
+                  <span className="os-setup-act os-caption">{act.place}, under {act.name}</span>
                 )}
               </div>
             );

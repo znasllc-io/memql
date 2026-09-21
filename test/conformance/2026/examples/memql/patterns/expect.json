@@ -1,0 +1,7 @@
+{
+  "cases": [
+    { "file": "date-range.memql", "verdict": "load_ok" },
+    { "file": "nested-field.memql", "verdict": "load_ok" },
+    { "file": "unprocessed.memql", "verdict": "load_ok" }
+  ]
+}

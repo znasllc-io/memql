@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { refusalStopForCode } from "../../src/apps/deployables/page/rail";
-import { SERVER_SENTENCE_ONLY, copyFor, knownCodes } from "../../src/apps/deployables/packages/refusals";
+import { SERVER_SENTENCE_ONLY, copyFor, knownCodes, toneFor } from "../../src/apps/deployables/packages/refusals";
 
 // Every refusal code the engine can emit has a home in this build: copy in
 // the table, or an explicit listing as "the server's sentence is the whole
@@ -252,8 +252,36 @@ describe("refusal copy coverage", () => {
     expect(copyFor("installation_pending")?.next).toBe("");
     expect(copyFor("github_app_not_configured")?.title).toBe("This cluster has no GitHub connection set up");
     expect(copyFor("github_app_not_configured")?.next).toContain("token instead");
-    expect(copyFor("github_app_not_configured")?.next).toContain("operator");
+    // WHO CAN CHANGE IT, by the name this product gives them. It said "ask an
+    // operator" once, to a cluster owner, who is the operator.
+    expect(copyFor("github_app_not_configured")?.next).toContain("cluster owner");
+    expect(copyFor("github_app_not_configured")?.next).not.toContain("operator");
     expect(copyFor("connect_state_invalid")?.title).toBe("That sign-in link is no longer valid");
     expect(copyFor("connect_state_invalid")?.next).toContain("Connect GitHub");
+  });
+
+  it("carries the five codes of registering the cluster's GitHub App", () => {
+    // Pinned for what each one must NOT be mistaken for. The state code is not
+    // connect_state_invalid's copy: its repair is to set GitHub up again, and
+    // "Start again from Connect GitHub" would send an owner to a control that
+    // is not on the page.
+    expect(copyFor("github_app_setup_state_invalid")?.next).toContain("Set up GitHub");
+    expect(copyFor("github_app_setup_state_invalid")?.next).not.toContain("Connect GitHub");
+    expect(copyFor("github_app_managed_by_environment")?.title).toBe("This cluster's GitHub link is set by its deployment");
+    expect(copyFor("github_app_setup_forbidden")?.next).toContain("token instead");
+    expect(copyFor("github_app_setup_invalid")?.next).toContain("login");
+    // The leftover at GitHub is the one thing the owner cannot see from here.
+    expect(copyFor("github_app_setup_failed")?.next).toContain("delete it there");
+
+    // ONE FAULT, FOUR NEXT STEPS.
+    expect(toneFor("github_app_setup_failed")).toBe("error");
+    for (const code of [
+      "github_app_managed_by_environment",
+      "github_app_setup_forbidden",
+      "github_app_setup_invalid",
+      "github_app_setup_state_invalid",
+    ]) {
+      expect(toneFor(code), code).toBe("warn");
+    }
   });
 });

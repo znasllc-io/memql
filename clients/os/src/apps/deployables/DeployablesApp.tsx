@@ -432,6 +432,10 @@ function DeployablesSettingsSection({
         requires={DEPLOYABLES_REQUIRES}
         wants={DEPLOYABLES_WANTS}
         readiness={readiness}
+        /* THIS PAGE, so the GitHub App -- configured in the Sources group
+           further down it -- is pointed at in words, not with a button that
+           opens the page somebody is already reading. */
+        here={{ app: "deployables", section: "settings" }}
       />
       <Panel label="Deployables settings">
         <fieldset className="os-field-group">

@@ -1,0 +1,32 @@
+/// Who may act on one folder, one row per person.
+concept folderRole {
+  folderId  string!
+  userId    string!
+  role      enum("owner", "reader")!
+}
+
+/// Every role row already written for a folder.
+@serverOnly
+query folderRole folderOwners {
+  args {
+    folderId  string  @required
+  }
+  filter   row => row.folderId == args.folderId && row.role == "owner"
+  paginate 50
+}
+
+/// Record one person's role on one folder.
+@serverOnly
+mutation folderRole recordFolderRole {
+  args {
+    folderId  string  @required
+    userId    string  @required
+    role      enum("owner", "reader")  @required
+  }
+  insert {
+    id: hash(hash(args.folderId) + hash(args.userId))
+    args.folderId
+    args.userId
+    args.role
+  }
+}

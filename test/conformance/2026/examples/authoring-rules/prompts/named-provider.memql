@@ -1,0 +1,7 @@
+@description("Summarise one observability window")
+@defaultProvider("fleet")
+@level("fast")
+@templateFile("prompts/summariseWindow.tmpl")
+prompt summariseWindow {
+  windowEnd  string  @required
+}
