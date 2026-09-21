@@ -103,15 +103,25 @@ export function StorePanel({ site, canBind, trail, back }: StorePanelProps) {
   const report = healthFor(health.all, storeId);
   const name = siteName(site);
 
-  const title = "Store";
+  // THE PICKER REPLACES THE PANEL RATHER THAN SITTING INSIDE IT. Choosing
+  // what a live storefront talks to is the whole of what somebody is doing
+  // while they do it; a picker beside the store it is about invites a
+  // comparison that the list already makes.
+  const choosing = picking || (store === null && storeId === "" && canBind);
+
+  // ONE PRIMARY ACTION, AND NOT WHILE IT IS BEING TAKEN (DESIGN.md rule 1).
+  // While the picker is open the Head carries navigation and nothing else: a
+  // "Change store" control standing over the surface that changes the store
+  // is an act offered a second time, and Re-read and Logs are about a store
+  // the person is in the middle of replacing.
   const head = (
-    <Head title={title} breadcrumbs={trail} back={back}>
-      {store === null || !canBind ? null : (
+    <Head title="Store" breadcrumbs={trail} back={back}>
+      {choosing || store === null || !canBind ? null : (
         <Button tone="quiet" onClick={() => setPicking(true)} ariaLabel={`Change the store ${name} fronts`}>
           Change store
         </Button>
       )}
-      {store === null ? null : (
+      {choosing || store === null ? null : (
         <Button
           tone="quiet"
           onClick={() => {
@@ -123,7 +133,7 @@ export function StorePanel({ site, canBind, trail, back }: StorePanelProps) {
           <RefreshCw size={13} aria-hidden /> Re-read
         </Button>
       )}
-      {store === null ? null : (
+      {choosing || store === null ? null : (
         <OpenLogsButton
           iconOnly
           subject={store.id}
@@ -134,11 +144,7 @@ export function StorePanel({ site, canBind, trail, back }: StorePanelProps) {
     </Head>
   );
 
-  // THE PICKER REPLACES THE PANEL RATHER THAN SITTING INSIDE IT. Choosing
-  // what a live storefront talks to is the whole of what somebody is doing
-  // while they do it; a picker beside the store it is about invites a
-  // comparison that the list already makes.
-  if (picking || (store === null && storeId === "" && canBind)) {
+  if (choosing) {
     return (
       <>
         {head}
