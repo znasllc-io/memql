@@ -709,23 +709,28 @@ These are names, not calls:
 ### AI
 
 **There is no AI function in the catalog above, and there is no bare AI call.**
-The `ai(promptName, data)` spelling some comments in the tree still point at
-does not exist. A body that writes it is refused at load with
-`body_call_unknown`, because the only bare calls a body admits are catalog
-functions and the specs and traits it can see. See
-[Calling a prompt](memql.md#calling-a-prompt).
+A bare `ai(promptName, data)` is refused at load with `body_call_unknown`,
+because the only bare calls a body admits are catalog functions and the specs
+and traits it can see — and `ai` is deliberately not one of them. A catalog
+function is admitted at every in-process position, a trigger filter included,
+which for a model call would be one call per matching event with nothing
+journalling it.
 
 AI work is reached from a body the way every other Go-backed capability is:
 through a `builtin` call, with named arguments and a file-top import of the
-domain that declares it (`use agents.builtins.{ agent }`).
+domain that declares it (`use agents.builtins.{ ai }`). See
+[Calling a prompt](memql.md#calling-a-prompt).
 
 | Builtin | Description | Called as |
 |---------|-------------|-----------|
+| `ai` | Calls one named prompt with a data object and returns `{prompt, reply}`. Synchronous; the prompt's `@level` and the routing rules choose the model, so the call never names one | `builtin ai(templateId: "docSummary", data: { content: args.content })` |
 | `agent` | Opens a `v1:work:goal` naming the `invokeAgent` template and returns `{goalId, runId}`; a run dispatcher claims it on an agent node | `builtin agent(name: "assistant", prompt: args.question, partitionId: "system")` |
 | `runAgentTurn` | Runs one agent turn in line and returns its reply. Answers only on an agent node | `builtin runAgentTurn(agentId: args.agentId, prompt: args.question)` |
 
-Both are declared in `dsl/agents/builtins.memql`, which is where their full
-field lists live.
+All three are declared in `dsl/agents/builtins.memql`, which is where their
+full field lists live. All three are construct calls, so they belong in a
+statement: a query filter, a `refine`, a sort and a spec or trait body all
+refuse them, which is what keeps a model call out of a per-row position.
 
 ---
 

@@ -282,7 +282,7 @@ The context accessors the parser recognises and the builtins resolved from the i
 | Name | Written | What it means |
 |---|---|---|
 | `actor` | `actor()` | Access the resolved auth context (userId, role, identityId, isClusterOwner, partitions). |
-| `ai` | `ai(templateId string, data object, provider? string)` | Invoke an AI prompt template with the given data. |
+| `ai` | `ai(templateId string, data object)` | Call a named prompt with a data object and return {prompt, reply}. Written as a builtin call, `builtin ai(templateId: ..., data: ...)`, in a logic or automation body. The prompt's @level and the routing rules choose the model, so the call never names one. |
 | `children` | `children(concept string)` | Retrieve child nodes of the current node for a given concept. |
 | `embed` | `embed(text string, model? string)` | Generate an embedding vector for text using the configured provider. |
 | `event` | `event()` | Access the trigger event data in an automation. |

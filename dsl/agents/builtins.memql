@@ -1,9 +1,9 @@
-// Builtins in the agents namespace. Today: one builtin (`agent`)
-// that asynchronously invokes a DSL-registered agent. See
-// dsl/_reference/_agent.memql for the agent primitive itself and its
-// migration breadcrumb -- the `agent X { ... }` DSL primitive this
-// planned was retired, not shipped; the runtime invocation surface
-// (this builtin) stays as-is.
+// Builtins in the agents namespace: the two ways a body reaches a model
+// (`agent`, in the background, and `ai`, in line), plus the ones the
+// Assistant's own tools are built on. See dsl/_reference/_agent.memql
+// for the agent primitive itself and its migration breadcrumb -- the
+// `agent X { ... }` DSL primitive it planned was retired, not shipped;
+// the runtime invocation surface (these builtins) stays as-is.
 
 // ---- builtin agent --------------------------------------------------
 //
@@ -16,10 +16,10 @@
 // Callable from any DSL context that supports builtin calls --
 // automations, logic functions, policies. NEVER blocks.
 //
-// For blocking AI work from DSL, use `ai("promptName", args)` --
-// that's the synchronous structured-output path. `agent()` is for
-// agent-orchestrated, tool-using, planner-tracked work; `ai()` is
-// for one-shot LLM calls with no tools.
+// For blocking AI work from DSL, use `builtin ai(templateId:, data:)`
+// -- the synchronous named-prompt path, declared below in this
+// file. `agent()` is for agent-orchestrated, tool-using work that runs
+// in the background; `ai()` is for one-shot prompt calls with no tools.
 //
 // Args:
 //   name     The agent's registry name (e.g. "assistant" --
@@ -74,6 +74,87 @@ builtin runAgentTurn {
   prompt   string!
   scopeId  string
   requireFile bool
+}
+
+// ---- builtin ai -------------------------------------------------------
+//
+// Call a NAMED prompt with a data object, and answer with what the model
+// said. The one-shot counterpart to `runAgentTurn` above: no agent, no
+// tools, no run -- one prompt, rendered and sent.
+//
+// RESTORED, not new. MemQL had an `ai()` expression and lost both of its
+// front ends BY ACCIDENT: the projection form lived only in a hand-written
+// parser a replacement never re-implemented, and the form that actually ran
+// was a string match in shape steps, deleted with the legacy body grammar.
+// `ai(` appears nowhere in parser.V1RetiredForms, the list naming every
+// deliberately retired spelling with its replacement, so nobody decided it.
+// Everything under the seam kept working the whole time, and three surfaces
+// went on advertising the call to authors and models.
+//
+// WHAT THE CALL IS, in the layer below: resolve the prompt by name, validate
+// `data` against the prompt's own body (that body IS the input schema),
+// render the template, route by the prompt's @level through core/airoute,
+// serve from the exact-render cache when one is warm, and journal the call so
+// a work run can replay it. None of that is re-implemented in the executor.
+//
+// NO PROVIDER ARGUMENT, and the published vocabulary was changed to match
+// rather than the other way round. A level plus the rules decide (epic
+// memql#5127); a model or provider named at a call site is a release every
+// time the fleet changes, and it would be a routing decision written where no
+// rule can see it. The pin that survives is `@defaultProvider` ON THE PROMPT,
+// checked at load -- and `TestNoPaidDefault` refuses one naming a federated
+// provider, which is every concrete provider record this repo ships.
+//
+// NO @sdk -- and that absence IS the wire decision, in the words
+// dsl/platform/builtins.memql already uses. This is a body primitive; a
+// generated client method for it would be a button marked "spend money on a
+// provider" with no row, no run and no owner in the path.
+//
+// NO @requiresCapability, deliberately, though the call does spend money. The
+// caller it exists for is an automation or a logic under an authored or
+// system actor -- CLIENT origin, role writer -- so the only resource that
+// fits the act (`execute construct`, seeded to owner and developer as "run
+// inline DSL") would refuse exactly that caller while leaving a cluster owner
+// free to spend: a gate that costs the feature and buys nothing. The spending
+// gate is real, it is in Go, and no annotation reaches it -- ai_guard.go's
+// identical-request breaker and process-wide rate ceiling sit on the
+// transport every provider client is built from, and component/work/budget.go
+// applies the run's ceilings when the call is inside a run.
+//
+// REFUSES BY NAME, never with an empty reply, for runAgentTurn's reason: an
+// unreachable runtime, an unknown prompt and a data object that does not fit
+// the schema are deployment or authoring facts, and an empty answer is
+// indistinguishable from a model that had nothing to say.
+//
+// A STATEMENT, AND NOWHERE ELSE. A builtin call is a construct call, and the
+// tier manifest admits a construct call in a logic body and a step argument
+// only -- so a query filter, a `refine`, a sort, and a spec or trait body all
+// refuse this, and the query filter names it `lower_refused` at load
+// (test/conformance/2026/negative/ai/). That is what keeps a model call out of
+// a per-row position, where a page of a hundred rows would be a hundred calls.
+// The same reasoning is why `ai` is a BUILTIN rather than a catalog function:
+// a catalog function is admitted at every in-process position, a trigger
+// filter included, which would be a model call per matching event with no
+// statement journalling it (component/language/tiers/ai_builtin_position_test.go).
+//
+// Args:
+//   templateId  The prompt to call, by name -- a `prompt X { ... }`
+//               declared anywhere in the loaded tree.
+//   data        The object whose fields the prompt's body declares.
+//               Required, and `{}` when the prompt declares none: an
+//               omitted argument would be refused one layer down as a
+//               missing FIELD, which reads as the prompt being wrong.
+//
+// Returns one MemoryNode whose payload is
+//   { prompt: string, reply: any }
+// `reply` is the key `runAgentTurn` already uses for the model's words, so a
+// body reads one key name across both.
+
+@executor("integration.agents.invokePrompt")
+@description("Call a named prompt with a data object and return {prompt, reply}. Resolves the prompt, validates the data against the prompt's own body, renders it, and routes by the prompt's @level -- so the call names a prompt and never a model. Synchronous, and the one-shot counterpart to runAgentTurn: no agent, no tools, no run. Refuses by name when the AI runtime is unreachable, the prompt is unknown, or the data does not fit the schema.")
+builtin ai {
+  templateId  string!
+  data        object!
 }
 
 // ---- builtin requestUserFeedback -------------------------------------

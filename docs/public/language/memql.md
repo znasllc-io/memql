@@ -1458,27 +1458,61 @@ Two legacy forms are retired (both rejected at parse time):
 
 ### Calling a prompt
 
-**A prompt is not callable from a `.memql` body, and there is no bare inference
-call either.** A statement's call names one of `query`, `mutation`, `logic`,
-`builtin`, `automation` and `action`, and none of those names a prompt; the
-only *bare* calls a body admits are catalog functions and the specs and traits
-it can see. The parser builds no inference node and the catalog holds no
-inference name, so `ai("<promptName>", <dataObject>)` — the blocking-LLM-call
-spelling some comments in the tree still point at — is refused at load, with
-`[body_call_unknown]` naming the call.
+**A body calls a prompt through the `ai` builtin, and only from a statement.**
+There is no bare inference call: a statement's call names one of `query`,
+`mutation`, `logic`, `builtin`, `automation` and `action`, and the only *bare*
+calls a body admits are catalog functions and the specs and traits it can see.
+`ai` is none of those — it is a `builtin`, declared in
+`dsl/agents/builtins.memql` — so it is written with its kind, and its arguments
+by name, and it comes in through a file-top import like every other
+cross-namespace construct:
 
-A prompt is rendered and sent from **Go**: an integration binds the values the
-prompt's body declares — that body IS the input schema, validated before the
-template renders — builds a `core/airoute` request carrying the prompt's
-`@level`, and the router picks the provider ([Levels](#levels)). A prompt
-declares no OUTPUT schema, so what the reply is read as belongs to the calling
-integration, not to the construct. `MemQLEngine.InvokeAI` and the
-structured-output path beside it are that seam, and it is where every prompt
-this tree declares is used.
+<!-- corpus: 2026/examples/memql/prompts/ai-builtin.memql -->
+```memql
+use agents.builtins.{ ai }
 
-A body reaches that work through a **builtin that wraps it**. Two of the
-builtins `dsl/agents/builtins.memql` declares invoke an agent, and like every
-cross-namespace construct they come in through a file-top import:
+/// Summarise one document by calling the `docSummary` prompt and returning what it said.
+logic summariseDocument {
+  args {
+    title    string
+    content  string!
+  }
+  said := builtin ai(templateId: "docSummary", data: { title: args.title ?? "Untitled", content: args.content })
+  return said
+}
+```
+
+`ai(templateId:, data:)` is SYNCHRONOUS, and it answers with
+`{prompt, reply}` — `reply` being what the model said. What the call does is
+one engine seam, `MemQLEngine.InvokeAI`: resolve the prompt by name, validate
+`data` against the prompt's body (that body IS the input schema, checked before
+the template renders), render, build a `core/airoute` request carrying the
+prompt's `@level` and take what the router returns ([Levels](#levels)), serve
+from the exact-render cache when one is warm, and journal the call so a work
+run can replay it.
+
+**The call names a prompt and never a model.** There is no provider argument: a
+level plus the routing rules decide, and a provider named at a call site is a
+routing decision no rule can see. The one pin is `@defaultProvider` on the
+prompt itself.
+
+**It is refused everywhere but a statement.** A model call in a query filter,
+a `refine`, a sort, or a spec or trait body would be one call per row examined
+— so a page of a hundred rows would be a hundred calls, charged to whoever
+opened the screen. A `builtin` call is a construct call, which the tier manifest
+([Where each expression runs](#where-each-expression-runs)) refuses in every
+position but a logic body and a step argument; in a query filter the refusal is
+`[lower_refused]` at load. This is also why there is **no per-row projection
+form**: a prompt called once per row of a result is a different feature with a
+different budget, not this one.
+
+A prompt declares no OUTPUT schema, so what the reply is read as belongs to the
+caller. Where a *shape* is required — routing, classification, suggestion — Go
+uses the structured-output path beside `InvokeAI` instead, and that path has no
+DSL spelling.
+
+Two builtins beside `ai` reach a model through an **agent** rather than a bare
+prompt, and they are what to use when the work needs tools:
 
 <!-- corpus: 2026/examples/memql/prompts/agent-builtin.memql -->
 ```memql
