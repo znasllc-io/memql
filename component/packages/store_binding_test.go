@@ -227,3 +227,96 @@ func TestARedeployRePointsABindingTheManifestChanged(t *testing.T) {
 		t.Fatalf("re-pointing is a write to the existing site, never a second one: %v", pub.created)
 	}
 }
+
+// AN UNRESOLVABLE STORE IS FATAL ONLY WHEN NOTHING IS BOUND YET.
+//
+// This is the case the auto-deploy feed is in on EVERY automatic run. It
+// borrows the package owner as a rankless writer (Deps.Roles), so
+// `actor.isClusterOwner == true` is false and the cluster-owner-tier
+// storeByDomain read answers zero rows. Fatal here would mean an armed source
+// can never republish a storefront again -- something it could do before this
+// epic, when a redeploy never read a store at all.
+//
+// It is safe because the manifest's store CANNOT have changed on that path:
+// `bindingWord` puts it in the plan fingerprint, and a changed one parks the
+// run at the confirm gate for a person. And it is not silent: the outcome
+// carries a non-fatal problem saying the store is unchanged and why.
+func TestARedeployWhoseStoreCannotBeResolvedKeepsItsBindingAndPublishes(t *testing.T) {
+	pub := &fakePublisher{}
+	engine := &recordingEngine{rows: map[string][]map[string]any{
+		"query sitesForPackage": {{
+			"id":                    "v1:platform:site:storefront",
+			"hostname":              "shop.example.com",
+			"packageDeployableName": "storefront",
+			"binding":               map[string]any{"storeId": "v1:shopify:store:acme"},
+		}},
+	}}
+	d := &Deps{
+		Store:     &store{engine: engine},
+		Publisher: pub,
+		Logger:    discardLogger(),
+		// Reads nothing: the caller is not a cluster owner.
+		Stores: storeIdFor(map[string]string{}),
+	}
+	req := DeployRequest{
+		PackageId:  "v1:platform:package:abc",
+		Placements: map[string]Placement{"storefront": {Hostname: "shop.example.com"}},
+	}
+	outcomes, err := d.publish(
+		context.Background(), req, map[string]any{},
+		storefrontOnlyReport("acme.myshopify.com"), map[string]edge.Bundle{"storefront": {}},
+	)
+	if err != nil {
+		t.Fatalf("a redeploy of a bound storefront was refused for a store it does not change: %v", err)
+	}
+	if len(pub.published) != 1 {
+		t.Fatalf("the bundle must still publish: %v", pub.published)
+	}
+	if len(pub.bound) != 0 {
+		t.Fatalf("nothing resolved, so nothing may be re-pointed: %v", pub.bound)
+	}
+	// NOT SILENT. The run records why the store is unchanged.
+	if len(outcomes) != 1 || outcomes[0].Refusal == nil {
+		t.Fatalf("the outcome carries no note about the unresolved store: %+v", outcomes)
+	}
+	note := outcomes[0].Refusal
+	if note.Fatal {
+		t.Errorf("the note is fatal, which would refuse the run it is attached to: %+v", note)
+	}
+	if note.Code != CodeDeployableStoreUnknown {
+		t.Errorf("note code = %q, want %q", note.Code, CodeDeployableStoreUnknown)
+	}
+	for _, want := range []string{"acme.myshopify.com", "unchanged"} {
+		if !strings.Contains(note.Message, want) {
+			t.Errorf("the note does not say %q: %s", want, note.Message)
+		}
+	}
+}
+
+// THE REACHABLE POSITIVE for the case above: with NOTHING bound, the same
+// unresolvable store refuses. Without this, the test above would pass against
+// a `publish` that had simply stopped resolving stores at all.
+func TestAnUnboundStorefrontWhoseStoreCannotBeResolvedIsStillRefused(t *testing.T) {
+	pub := &fakePublisher{}
+	engine := &recordingEngine{rows: map[string][]map[string]any{"query sitesForPackage": nil}}
+	d := &Deps{
+		Store:     &store{engine: engine},
+		Publisher: pub,
+		Logger:    discardLogger(),
+		Stores:    storeIdFor(map[string]string{}),
+	}
+	req := DeployRequest{
+		PackageId:  "v1:platform:package:abc",
+		Placements: map[string]Placement{"storefront": {Hostname: "shop.example.com"}},
+	}
+	_, err := d.publish(
+		context.Background(), req, map[string]any{},
+		storefrontOnlyReport("acme.myshopify.com"), map[string]edge.Bundle{"storefront": {}},
+	)
+	if RefusalCode(err) != CodeDeployableStoreUnknown {
+		t.Fatalf("a storefront with no store and none resolvable must refuse; got %v", err)
+	}
+	if len(pub.published) != 0 {
+		t.Errorf("nothing may publish after that refusal: %v", pub.published)
+	}
+}

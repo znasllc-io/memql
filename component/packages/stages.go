@@ -539,36 +539,68 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 		created := false
 		outcome := DeployableOutcome{Name: dep.Name}
 
-		// THE STORE IS RESOLVED HERE, before the first-deploy branch, so the
-		// refusal lands on a redeploy exactly as on a first deploy. A
-		// storefront whose store this cluster does not have is the same
-		// problem whether or not a site row already exists, and resolving
-		// inside the create branch would have let a redeploy quietly keep
-		// serving a store the manifest no longer names.
+		// THE STORE IS RESOLVED HERE, before the first-deploy branch, so a
+		// redeploy re-points rather than quietly keeping a store the manifest
+		// no longer names.
 		//
 		// Analyze already refused a storefront that names NO store, offline
 		// and fatally; this is the half that needs a cluster.
+		//
+		// =====================================================================
+		// AN UNRESOLVABLE STORE IS FATAL ONLY WHEN NOTHING IS BOUND YET
+		// =====================================================================
+		// The read runs under the CALLER's actor, deliberately: a caller who
+		// may not read a store may not bind a storefront to one. But leaving a
+		// binding ALONE is not a privileged act -- the binding already exists,
+		// somebody who could read that store made it, and this run is
+		// publishing bytes rather than changing it. Refusing the whole deploy
+		// because the deployer cannot read a row the deploy does not touch
+		// punishes a bundle update for an authorization fact about something
+		// else.
+		//
+		// IT IS ALSO A REGRESSION IF IT IS FATAL, and a measured one. The
+		// auto-deploy feed borrows the package owner as a RANKLESS WRITER (see
+		// Deps.Roles), so `actor.isClusterOwner == true` is false and
+		// storeByDomain answers zero rows for every automatic run. Fatal here
+		// means an armed source can never republish a storefront again, which
+		// it could before this epic -- and the manifest's store cannot have
+		// changed on that path anyway, because `bindingWord` puts it in the
+		// plan fingerprint and a changed one parks the run at the confirm gate
+		// (autodeploy.go).
+		//
+		// So: refuse when the site is unbound and we cannot resolve -- a
+		// storefront serving nothing and reporting success is the failure this
+		// guards. Otherwise keep the binding, RECORD IT NON-FATALLY on the
+		// outcome, and publish. The note is what stops it being silent.
 		storeId := ""
+		var storeNote *Problem
 		if dep.Kind == KindStorefront && hasBinding(dep.Binding) {
 			named := strings.TrimSpace(dep.Binding.Store)
-			if d.Stores == nil {
-				// Nil is the ANSWER, not a gap -- Deps.Credentials' rule.
-				// Publishing unbound would put a storefront on a hostname
-				// with nothing behind it and report success.
-				return outcomes, refuseScoped(CodeDeployableStoreUnknown, dep.Name,
-					"deployable %q names store %q, and this cluster cannot resolve stores. Attach the store on the deployable's Store panel and deploy again.",
-					dep.Name, named)
-			}
-			resolved, serr := d.Stores(ctx, named)
+			bound := boundStoreId(byName[dep.Name])
+			resolved, serr := resolveNamedStore(ctx, d.Stores, named)
 			if serr != nil {
 				return outcomes, serr
 			}
-			if strings.TrimSpace(resolved) == "" {
+			switch {
+			case resolved != "":
+				storeId = resolved
+			case bound == "":
+				// Nothing to fall back on. Publishing here would put a
+				// storefront on a hostname with nothing behind it and report
+				// success.
 				return outcomes, refuseScoped(CodeDeployableStoreUnknown, dep.Name,
 					"deployable %q names store %q, and this cluster has no store by that name you may read: either nothing here mirrors it, or it belongs to a tier you are not in. Attach the store on the deployable's Store panel, as somebody who may, and deploy again.",
 					dep.Name, named)
+			default:
+				storeNote = &Problem{
+					Code:  CodeDeployableStoreUnknown,
+					Scope: dep.Name,
+					Fatal: false,
+					Message: fmt.Sprintf(
+						"deployable %q names store %q, which this run could not resolve, so its store is unchanged -- it still fronts the one it was bound to. Either nothing here mirrors that name, or it belongs to a tier this caller is not in.",
+						dep.Name, named),
+				}
 			}
-			storeId = strings.TrimSpace(resolved)
 		}
 
 		if siteId == "" {
@@ -612,6 +644,10 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 			if berr := d.Publisher.BindSiteToStore(ctx, siteId, storeId); berr != nil {
 				return outcomes, berr
 			}
+		}
+
+		if storeNote != nil {
+			outcome.Refusal = storeNote
 		}
 
 		res, perr := d.Publisher.PublishBundle(ctx, siteId, bundle)
@@ -682,4 +718,25 @@ func marshalActiveSet(set map[string]string) ([]byte, error) {
 		set = map[string]string{}
 	}
 	return json.MarshalIndent(set, "", "  ")
+}
+
+// resolveNamedStore asks the injected resolver for the row id of the store a
+// manifest NAMES, answering "" when there is none to be had.
+//
+// A NIL RESOLVER ANSWERS "" RATHER THAN ERRORING, which is the change this
+// helper exists to make honest. `Deps.Credentials`' rule is that nil is an
+// answer rather than a gap, and the answer here is "this run cannot resolve
+// stores" -- which is exactly the same fact as "this caller cannot read that
+// store", and gets the same treatment from the caller: fatal when nothing is
+// bound yet, a recorded note when something is.
+func resolveNamedStore(ctx context.Context, resolve StoreResolver, named string) (string, error) {
+	named = strings.TrimSpace(named)
+	if named == "" || resolve == nil {
+		return "", nil
+	}
+	resolved, err := resolve(ctx, named)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(resolved), nil
 }
