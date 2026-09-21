@@ -57,6 +57,28 @@ function viewTransform(): string {
   return document.querySelector("[data-os-map-view]")?.getAttribute("transform") ?? "";
 }
 
+// The identity transform: what the view carries before anything moves it, and
+// what a frame of no measurable size leaves it at.
+const UNMOVED = "translate(0 0) scale(1)";
+
+// Wait for the FIT, which is not on screen when the host node is.
+//
+// findBy* resolves the moment the node renders; the fit -- the transform
+// computed from the measured frame rect -- is applied by a later effect, so a
+// test that mocks a frame rect and samples the transform straight after the
+// findBy reads it BEFORE the fit lands. On a fast machine the effect usually
+// wins that race and the test passes; on a loaded CI runner it does not, and
+// the failure reads as "expected translate(0 0) scale(1) not to be
+// translate(0 0) scale(1)", which looks like nonsense rather than a race.
+//
+// Only the tests that mock getBoundingClientRect need this. The others leave
+// the frame at zero size, where there is no fit to wait for and UNMOVED is the
+// correct answer.
+async function fitted(): Promise<string> {
+  await waitFor(() => expect(viewTransform()).not.toBe(UNMOVED));
+  return viewTransform();
+}
+
 beforeEach(() => {
   h.connection = null;
 });
@@ -155,7 +177,7 @@ describe("steering", () => {
     const connection = fakeConnection({ sites: [SHOP] });
     mount(connection);
     await screen.findByLabelText("Host shop.memql.example.com");
-    expect(viewTransform()).toBe("translate(0 0) scale(1)");
+    expect(viewTransform()).toBe(UNMOVED);
 
     fireEvent.keyDown(canvas(), { key: "ArrowRight" });
     expect(viewTransform()).toBe("translate(-48 0) scale(1)");
@@ -163,7 +185,7 @@ describe("steering", () => {
     expect(viewTransform()).toBe("translate(-48 -48) scale(1)");
     fireEvent.keyDown(canvas(), { key: "ArrowLeft" });
     fireEvent.keyDown(canvas(), { key: "ArrowUp" });
-    expect(viewTransform()).toBe("translate(0 0) scale(1)");
+    expect(viewTransform()).toBe(UNMOVED);
   });
 
   it("zooms with + and -, and 0 puts it back", async () => {
@@ -178,7 +200,7 @@ describe("steering", () => {
 
     fireEvent.keyDown(canvas(), { key: "+" });
     fireEvent.keyDown(canvas(), { key: "0" });
-    expect(viewTransform()).toBe("translate(0 0) scale(1)");
+    expect(viewTransform()).toBe(UNMOVED);
   });
 
   it("leaves wheel scrolling to the app without moving or zooming the map", async () => {
@@ -209,7 +231,7 @@ describe("steering", () => {
     try {
       mount(fakeConnection({ sites: [SHOP] }));
       await screen.findByLabelText("Host shop.memql.example.com");
-      const wide = viewTransform();
+      const wide = await fitted();
       expect(resize).toBeTypeOf("function");
       frameWidth = 500;
       act(() => resize?.());
@@ -234,8 +256,7 @@ describe("steering", () => {
     try {
       mount(fakeConnection({ sites: [SHOP] }));
       await screen.findByLabelText("Host shop.memql.example.com");
-      const initial = viewTransform();
-      expect(initial).not.toBe("translate(0 0) scale(1)");
+      const initial = await fitted();
       await click(screen.getByRole("button", { name: "Zoom in" }));
       expect(viewTransform()).not.toBe(initial);
       await click(screen.getByRole("button", { name: "Zoom out" }));
