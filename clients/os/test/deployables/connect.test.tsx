@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { useOs } from "../../src/chrome/state";
 import { ConnectReturnDispatcher } from "../../src/apps/deployables/sources/ConnectReturnDispatcher";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -580,6 +580,49 @@ describe("the repository picker", () => {
   it("offers no link at all on a cluster with no GitHub App", () => {
     renderPicker({ page: repositoryPageFrom(repositoriesReply({})), installUrl: "" });
     expect(screen.queryByRole("link", { name: "Install on another organization" })).toBeNull();
+    cleanup();
+    // With repositories listed, too: a link to nowhere is worse than no link.
+    renderPicker({ installUrl: "" });
+    expect(screen.queryByRole("link", { name: "Install on another organization" })).toBeNull();
+  });
+
+  // ANOTHER ORGANIZATION IS ANOTHER GROUP IN THIS LIST. The link was offered
+  // when the list was EMPTY and nowhere else in the wizard, so somebody with
+  // one organization connected, looking for a repository in a second, was
+  // shown a complete-looking list and no way to make it longer.
+  it("offers another organization under a list that already has some, as text beside the one button", () => {
+    renderPicker({ installUrl: "https://github.com/apps/memql/installations/new" });
+    const link = screen.getByRole("link", { name: "Install on another organization" });
+    expect(link.getAttribute("href")).toBe("https://github.com/apps/memql/installations/new");
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noreferrer noopener");
+    // ON THE ROW THAT READS AGAIN, because reading again is what follows it...
+    const row = link.closest(".os-refresh-row") as HTMLElement;
+    expect(within(row).getByRole("button", { name: "Look again" })).toBeTruthy();
+    // ...and NOT a second button there: it leaves the product, and the row has
+    // its one act already.
+    expect(link.classList.contains("os-button")).toBe(false);
+    expect(link.classList.contains("os-link")).toBe(true);
+  });
+
+  it("reads the list again when the person comes back from GitHub, once, and only after following the link", async () => {
+    const { onLookAgain } = renderPicker({ installUrl: "https://github.com/apps/memql/installations/new" });
+    // Looking at the tab is not a reason to call GitHub...
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
+    expect(onLookAgain).not.toHaveBeenCalled();
+
+    // ...having gone to install the app somewhere is. jsdom follows no link,
+    // so the navigation is stopped and only the click is kept.
+    const link = screen.getByRole("link", { name: "Install on another organization" });
+    link.addEventListener("click", (e) => e.preventDefault());
+    await click(link);
+    expect(onLookAgain).not.toHaveBeenCalled();
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
+    expect(onLookAgain).toHaveBeenCalledTimes(1);
+
+    // ONCE. The next look at the tab is just somebody looking at the tab.
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
+    expect(onLookAgain).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the last good list when a read is refused, because a refusal is not a zero", () => {

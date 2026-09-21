@@ -200,6 +200,9 @@ const LISTS: FakeSeed = {
 const CONNECTED: FakeSeed = {
   ...LISTS,
   credentials: [githubGrantRow({ id: "cred-grant" })],
+  // The app's installation page, which is what puts "Install on another
+  // organization" under the picker's groups.
+  installUrl: "https://github.com/apps/memql/installations/new",
   repositories: repositoriesReply({
     repositories: [
       repositoryFixture({ fullName: "acme/storefront", private: true, visibility: "private" }),

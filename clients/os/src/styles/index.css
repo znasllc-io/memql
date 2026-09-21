@@ -1353,6 +1353,13 @@ button:not(:disabled):active {
   gap: 10px;
   flex-wrap: wrap;
 }
+/* A link on this row is part of its sentence -- "read just now", read again,
+ * or go and add to what there is to read -- so it is set at the caption's
+ * size. An anchor inherits the PANE's size otherwise, and stood a step larger
+ * than the words and the button it sits between. */
+.os-refresh-row .os-link {
+  font-size: var(--os-text-sm);
+}
 
 /* The clipboard fallback. Monospace because the report is aligned text, and
  * a proportional font would break the columns it was written with. */
