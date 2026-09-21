@@ -16,10 +16,20 @@ MemQL edition 2026 is frozen, and this release is the editor that speaks it.
   `memqlVocabulary()`. Both are generated from the same tables this extension's
   highlighting and completion are generated from, so what a cluster tells a
   model it accepts and what the editor offers you cannot drift apart.
-- **No change to how the extension behaves.** Highlighting, completion,
+- **And you can now read both without leaving the editor.** **MemQL: Show
+  Language Reference** opens the connected cluster's grammar and vocabulary in
+  one tab: a single search filters both, and a copy action puts either whole
+  artifact on the clipboard for handing to a model. It names the edition it is
+  showing, whether that edition is frozen, and the grammar version -- and with
+  no cluster connected it says so and shows the edition and grammar version
+  this extension itself was built against, which is the language its own
+  completion and diagnostics speak. It is the one MemQL command that works in a
+  folder you have not trusted, because it reads no credential and opens no
+  connection.
+- **No change to the language features.** Highlighting, completion,
   diagnostics, hover and signature help are as they were in 0.5.1; the language
   server, TextMate grammar and language configuration regenerate byte-identical
-  against the frozen edition. Upgrade for the freeze, not for a fix.
+  against the frozen edition.
 
 ## 0.5.1
 

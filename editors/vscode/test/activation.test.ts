@@ -106,6 +106,13 @@ test('the runtime commands are registered, so a cluster can be selected and conn
     'memql.data.open',
     'memql.runs.refresh',
     'memql.runs.execute',
+    // Not a runtime command at all (memql#5388): it is registered outside the
+    // trust gate, and activationGates.test.ts is what asserts that it is the
+    // ONLY one an untrusted window gets. It is named here as well because
+    // "outside the gate" has to mean "in both branches" -- a trusted window
+    // takes the other path through activate(), and a reference that only
+    // appeared in restricted folders would be the same defect upside down.
+    'memql.language.showReference',
   ]) {
     assert.ok(recorded.commands.includes(id), `${id} was not registered`);
   }

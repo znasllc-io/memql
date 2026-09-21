@@ -3,10 +3,10 @@
 //
 // TWO LAYERS, because neither alone is enough.
 //
-// The SOURCE SWEEP is the complete one. There are seven `*Panel.ts` files and
-// NINE panel classes in them (automationPanel.ts and runPanel.ts each hold
-// two), and driving all nine through a render test would mean constructing
-// nine different dependency sets -- so the coverage would quietly become
+// The SOURCE SWEEP is the complete one. There are eight `*Panel.ts` files and
+// TEN panel classes in them (automationPanel.ts and runPanel.ts each hold
+// two), and driving all ten through a render test would mean constructing ten
+// different dependency sets -- so the coverage would quietly become
 // "whichever panels were cheap to build". A sweep asks the question of every
 // panel that exists, including the one added next month.
 //
@@ -68,7 +68,7 @@ function panelFiles(): { name: string; text: string }[] {
     .map((name) => ({ name, text: fs.readFileSync(path.join(PANEL_DIR, name), "latin1") }));
 }
 
-test("the sweep sees every panel file, and there are seven of them", () => {
+test("the sweep sees every panel file, and there are eight of them", () => {
   // A COUNT, deliberately. Every other assertion in this file is a loop over
   // whatever panelFiles() returns, so a sweep that silently returned nothing
   // -- a renamed directory, a changed suffix, a decode that dropped a file --
@@ -84,6 +84,11 @@ test("the sweep sees every panel file, and there are seven of them", () => {
       "connectionPanel.ts",
       "constructPanel.ts",
       "deploymentPanel.ts",
+      // The language reference (memql#5388's editor half). It is the one panel
+      // registered OUTSIDE the workspace-trust gate, which changes nothing
+      // here: the appearance setting is the person's editor preference and
+      // applies to every document this extension renders, trusted or not.
+      "languageReferencePanel.ts",
       "runPanel.ts",
     ],
     "ADDED OR REMOVED A PANEL? Update this list, and make sure the new panel stamps ${currentBodyThemeAttr()} on its <body> and calls onAppearanceChange(). test/brandCoverage.test.ts carries the same list for the brand block.",
