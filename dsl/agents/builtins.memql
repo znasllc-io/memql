@@ -110,16 +110,27 @@ builtin runAgentTurn {
 // generated client method for it would be a button marked "spend money on a
 // provider" with no row, no run and no owner in the path.
 //
-// NO @requiresCapability, deliberately, though the call does spend money. The
-// caller it exists for is an automation or a logic under an authored or
-// system actor -- CLIENT origin, role writer -- so the only resource that
-// fits the act (`execute construct`, seeded to owner and developer as "run
-// inline DSL") would refuse exactly that caller while leaving a cluster owner
-// free to spend: a gate that costs the feature and buys nothing. The spending
-// gate is real, it is in Go, and no annotation reaches it -- ai_guard.go's
-// identical-request breaker and process-wide rate ceiling sit on the
-// transport every provider client is built from, and component/work/budget.go
-// applies the run's ceilings when the call is inside a run.
+// NO @requiresCapability, and not for the tempting reason. A capability here
+// would not be a spending control, because it would not run on the path that
+// spends: INTERNAL ORIGIN PASSES THE CAPABILITY GATE UNCONDITIONALLY, and a
+// SHIPPED automation's body runs under internal origin (the executor stamps it
+// when the source came from the registered tree). So a capability would be
+// invisible to every automation in dsl/ -- the caller that actually makes the
+// calls -- and would reach only caller-submitted source: an authored
+// construct, an inline automation, a bundle dry-run. That branch is about
+// AUTHORING trust, not money, and it already has its own gate; adding
+// `execute construct` (owner and developer only) would mean no authored
+// automation may call a prompt, which is a product decision nobody asked for
+// dressed as a budget control.
+//
+// WHAT ACTUALLY BOUNDS THE SPEND is `ai_guard.go` and nothing else: its
+// identical-request breaker and process-wide rate ceiling sit on the transport
+// every provider client is built from, so a runaway is caught before a vendor
+// request regardless of who called. IN PARTICULAR A RUN'S CEILINGS DO NOT
+// APPLY -- the call is journalled on the run, but nothing reads the journal to
+// enforce one (`component/work.CheckCeilings` has no production caller). An
+// operator who sets a goal's costCeiling expecting it to bound prompt calls is
+// bounding nothing.
 //
 // REFUSES BY NAME, never with an empty reply, for runAgentTurn's reason: an
 // unreachable runtime, an unknown prompt and a data object that does not fit

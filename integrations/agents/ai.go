@@ -82,29 +82,40 @@ package agents
 // be a button marked "spend money on a provider" with no row, no run and no
 // owner in the path.
 //
-// NO @requiresCapability, and this is the part worth being explicit about,
-// because the call does spend money.
+// NO @requiresCapability, and the reason is not the one it is tempting to
+// write. A capability gate here would not be a spending control, because it
+// would not run on the path that spends.
 //
-//   - The caller this builtin exists for is an automation or a logic running
-//     under an authored or system actor, whose origin is CLIENT and whose
-//     role is writer. The only resource that fits the act -- `execute
-//     construct`, seeded to owner and developer as "run inline DSL" -- would
-//     therefore refuse exactly the caller the builtin is for, on every
-//     ordinary automation, while a cluster owner kept the ability to spend.
-//     That is a gate that costs the feature and buys nothing.
-//   - The spending gate is real, it is elsewhere, and it is deliberately not
-//     authorable. ai_guard.go's identical-request breaker and process-wide
-//     rate ceiling sit on the RoundTripper every provider client is built
-//     from, so they catch a runaway before a vendor request regardless of who
-//     called; component/work/budget.go applies the run's ceilings when the
-//     call is inside a run; and the router records every resolution on
-//     v1:router:call. "Mechanism stays in Go, and that is the boundary to
-//     defend" -- a kill switch a policy can author around is not a kill
-//     switch, and an annotation here would suggest the spending decision is
-//     authorable when it is not.
+//   - INTERNAL ORIGIN PASSES THE CAPABILITY GATE UNCONDITIONALLY
+//     (component/memql/requires_capability.go), and a SHIPPED automation's
+//     body runs under internal origin: automations/executor.go's
+//     originForSource stamps internal when the source came from the registered
+//     tree. So a capability on this builtin would be invisible to every
+//     automation in dsl/ -- which is the caller that actually makes the calls.
+//   - What it WOULD reach is the untrusted branch of that same rule:
+//     caller-submitted source -- an authored construct, an inline automation,
+//     a bundle dry-run -- which originForSource deliberately holds at CLIENT
+//     origin. That branch already has a trust gate, and it is about AUTHORING
+//     rather than about money. Adding `execute construct` (owner and developer
+//     only, seeded as "run inline DSL") would mean no authored automation may
+//     call a prompt, which is a product decision nobody asked for, dressed as
+//     a budget control.
 //   - It matches every neighbour in dsl/agents/builtins.memql, which is the
 //     answer to the obvious objection: runAgentTurn drives a whole tool loop
 //     and carries no capability annotation either.
+//
+// WHAT ACTUALLY BOUNDS THE SPEND, stated plainly because the honest answer is
+// smaller than it looks: `ai_guard.go` and nothing else. Its identical-request
+// breaker and its process-wide rate ceiling sit on the RoundTripper every
+// provider client is built from, so they catch a runaway before a vendor
+// request regardless of who called.
+//
+// IN PARTICULAR, A RUN'S CEILINGS DO NOT APPLY. The call IS journalled -- the
+// seam in ai_runtime.go records it on the run -- but nothing reads the journal
+// to enforce a ceiling: component/work.CheckCeilings has NO production caller,
+// only tests. An operator who sets a goal's costCeiling expecting it to bound
+// prompt calls is bounding nothing, and a comment here promising otherwise
+// would be worse than silence.
 //
 // ===========================================================================
 // WHAT IT ANSWERS WITH, AND WHAT IT REFUSES
