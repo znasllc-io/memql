@@ -224,3 +224,54 @@ describe("side by side, when there is room", () => {
     expect(document.activeElement).toBe(screen.getByLabelText("Domain to bind"));
   });
 });
+
+// FOUND BY TYPING INTO A FRESHLY OPENED WIZARD IN A WIDE WINDOW and watching
+// nothing land. The arrangement is measured after the first commit, and going
+// side by side moves the open step's body to another place in the tree -- so
+// the field focused on mount was unmounted a moment later and took the cursor
+// with it.
+describe("the cursor, when the arrangement settles", () => {
+  const field = (layout: "stack" | "split") => (
+    <Wizard
+      layout={layout}
+      icon={<svg />}
+      title="Add a domain"
+      label="Adding a domain"
+      steps={[{ id: "domain", name: "Domain", state: "open", body: <input aria-label="Domain to bind" /> }, { id: "dns", name: "DNS", state: "ahead" }]}
+      open="domain"
+      onOpen={() => {}}
+      status={{ word: "Name the domain" }}
+    />
+  );
+
+  it("is put back in the first field after the wizard goes side by side", () => {
+    const view = render(field("stack"));
+    const before = screen.getByLabelText("Domain to bind");
+    expect(document.activeElement).toBe(before);
+    view.rerender(field("split"));
+    const after = screen.getByLabelText("Domain to bind");
+    // A different element: the body moved to the stage...
+    expect(after).not.toBe(before);
+    // ...and the cursor went with it.
+    expect(document.activeElement).toBe(after);
+  });
+
+  it("is never taken back once the person has touched the wizard", () => {
+    const view = render(
+      <>
+        {field("stack")}
+        <button type="button">elsewhere</button>
+      </>,
+    );
+    fireEvent.keyDown(screen.getByLabelText("Domain to bind"), { key: "a" });
+    const elsewhere = screen.getByRole("button", { name: "elsewhere" });
+    elsewhere.focus();
+    view.rerender(
+      <>
+        {field("split")}
+        <button type="button">elsewhere</button>
+      </>,
+    );
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "elsewhere" }));
+  });
+});
