@@ -433,6 +433,15 @@ func (p *enginePublisher) EnsureSite(ctx context.Context, req EnsureSiteRequest)
 		b.WriteString(", binding: ")
 		b.Write(raw)
 	}
+	// OMITTED WHEN EMPTY, never written as "". createSite accepts this field
+	// rather than stamping it, so an omitted argument is dropped from the
+	// payload and the row carries no value -- which is the state that means
+	// "the kind decides". Passing an explicit empty string would write one,
+	// and the enum would refuse it.
+	if ResolutionTailIsSet(req.ResolutionTail) {
+		b.WriteString(", resolutionTail: ")
+		b.WriteString(langparser.QuoteString(req.ResolutionTail))
+	}
 	b.WriteString(")")
 
 	// createSite runs under the CALLER's actor, never stamped: ownerUserId is

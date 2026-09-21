@@ -1,10 +1,11 @@
 import { AddButton } from "../../kit/AddButton";
+import { RecordList, RecordRow } from "../../kit/RecordRow";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { ActivityTarget } from "../../kit/SemanticActivity";
 import { ArrowUpRight, Box, ChevronRight, Cpu, History, Info, Monitor, SlidersHorizontal, Terminal, Wrench } from "lucide-react";
 import type { OsAppProps } from "../../system/registry";
-import { Button, EmptyState, Refine, Head, Notice, ProvenanceDot, Select, formatBytes, formatFreshness, useNow } from "../../kit";
+import { Button, EmptyState, Refine, Head, Notice, ProvenanceDot, formatBytes, formatFreshness, useNow } from "../../kit";
 import { IconButton } from "../../kit/IconButton";
 import { InfoDetail } from "../../kit/InfoDetail";
 import { useLiveView } from "../../live/liveView";
@@ -45,14 +46,23 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
     setRemoved(previous => [...previous, id]);
     if (selectionRef.current.machineId === id) select({ machineId: "", view: "equipment" });
   }, [select]);
-  // A disappearing selection returns to equipment, never another machine's editor.
-  const machine = selection.machineId ? machines.find(m => m.id === selection.machineId) : machines[0];
+  // NO MACHINE SELECTED IS THE LIST, NOT "PICK THE FIRST ONE". An empty
+  // `machineId` used to select `machines[0]` on sight, so this section was
+  // always INSIDE a machine and a dropdown in the Head was the only way to
+  // reach another. That is what made "Machines" in the trail a crumb with
+  // nowhere to go: there was no machines list for it to name. Now the empty
+  // selection is the list, a row opens a machine, and the crumb goes home.
+  //
+  // A disappearing selection still returns to the list, never to another
+  // machine's editor.
+  const machine = selection.machineId ? machines.find(m => m.id === selection.machineId) : undefined;
   useEffect(() => {
-    if (!selection.machineId && machine) select({ machineId: machine.id, view: "equipment" });
-    else if (selection.machineId && !machine && settled && feedState === "live" && !snapshot?.error) {
+    if (selection.machineId && !machine && settled && feedState === "live" && !snapshot?.error) {
       select({ machineId: "", view: "equipment" });
     }
   }, [selection.machineId, machine?.id, settled, feedState, snapshot?.error, select]);
+  const toList = useCallback(() => select({ machineId: "", view: "equipment" }), [select]);
+  const shown = machines.filter(m => machineName(m).toLowerCase().includes(machineSearch.toLowerCase()));
   const request = intent?.payload.addMachine;
   const wants = typeof request === "object" && request !== null && !Array.isArray(request);
   useEffect(() => {
@@ -75,15 +85,29 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
     <div ref={scrollRoot} className="fleet-home" hidden={flow.active}>
     <div className="fleet-workspace" data-os-page-context={JSON.stringify({ page: "Machines", machineId: machine?.id, machine: machine ? machineName(machine) : undefined, view: VIEW_NAMES[selection.view], search: machineSearch || undefined })}>
       <div className="fleet-workspace-header">
-      <Head title="Machines" navigation={selection.view === "equipment" || !machine} meta={<span className="fleet-feed-label">{snapshot?.error && machines.length === 0 ? "Unavailable" : settled ? `${machines.length} ${machines.length === 1 ? "machine" : "machines"}` : "Connecting"}</span>}>
-        {machines.length ? <Select id="fleet-selected-machine" label="Selected machine" value={machine?.id ?? ""} onChange={id => select({ machineId: id, view: "equipment" })}>
-          {!machine ? <option value="">Choose a machine</option> : null}
-          {machines.map(m => <option key={m.id} value={m.id}>{machineName(m)} · {isRevoked(m) ? "Revoked" : isWorkerOnline(m, now) ? "Online" : "Offline"}</option>)}
-        </Select> : null}
-        <Refine iconOnly label="Find machines" placeholder="Search machines" search={machineSearch} onSearch={setMachineSearch}>
-          <div className="fleet-machine-results">{machines.filter(m => machineName(m).toLowerCase().includes(machineSearch.toLowerCase())).map(m => <button type="button" className="fleet-reading-link" key={m.id} onClick={() => select({ machineId: m.id, view: "equipment" })}>{machineName(m)}<ChevronRight size={14} aria-hidden /></button>)}
-          {!machines.some(m => machineName(m).toLowerCase().includes(machineSearch.toLowerCase())) ? <EmptyState icon={Monitor} title="No matching machines">{machines.length ? "Try another machine name." : "Connect a machine to find it here."}</EmptyState> : null}</div>
-        </Refine>
+      {/* THE HEAD OWNS THE TRAIL on the list and on Equipment; every other
+          machine view publishes its own from the inspector heading below.
+          With a real list behind it, "Machines" is a link home and Back has
+          somewhere to go. The machine's own crumb stays plain on Equipment:
+          it leads to this very page, and a crumb that goes nowhere is not a
+          link.
+
+          NO MACHINE DROPDOWN. It existed because there was no list; there is
+          one now, and two ways to pick a machine is one too many. */}
+      <Head title="Machines"
+        breadcrumbs={machine ? [{ label: "Machines", onSelect: toList }, { label: machineName(machine) }, { label: VIEW_NAMES.equipment }] : undefined}
+        back={machine ? { label: "Machines", onSelect: toList } : undefined}
+        navigation={selection.view === "equipment" || !machine}
+        meta={<span className="fleet-feed-label">{snapshot?.error && machines.length === 0 ? "Unavailable" : settled ? `${machines.length} ${machines.length === 1 ? "machine" : "machines"}` : "Connecting"}</span>}>
+        {/* ON THE LIST the search narrows the rows beneath it (DESIGN.md rule 2:
+            a filter is a question asked of the content). Inside a machine it
+            keeps its results, which are the quick way across to another.
+            ALWAYS RENDERED, machines or none: it is the target the window's own
+            Search Fleet control focuses, and that control is there either way. */}
+        {machine ? <Refine iconOnly label="Find machines" placeholder="Search machines" search={machineSearch} onSearch={setMachineSearch}>
+          <div className="fleet-machine-results">{shown.map(m => <button type="button" className="fleet-reading-link" key={m.id} onClick={() => select({ machineId: m.id, view: "equipment" })}>{machineName(m)}<ChevronRight size={14} aria-hidden /></button>)}
+          {!shown.length ? <EmptyState icon={Monitor} title="No matching machines">{machines.length ? "Try another machine name." : "Connect a machine to find it here."}</EmptyState> : null}</div>
+        </Refine> : <Refine iconOnly label="Find machines" placeholder="Search machines" search={machineSearch} onSearch={setMachineSearch} />}
         <AddButton label="Add a machine" onClick={() => flow.start({})} />
       </Head>
       {machine ? <nav className="fleet-local-tabs" aria-label="Machine views">{(Object.keys(VIEW_NAMES) as MachineView[]).map(view => <button key={view} type="button" aria-current={selection.view === view ? "page" : undefined} onClick={() => select({ machineId: machine.id, view })}>{VIEW_NAMES[view]}</button>)}</nav> : null}
@@ -103,7 +127,7 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
                   {sessions.sessions.filter(session => session.workerId === item.machineId).slice(0, 5).map(session => <button type="button" className="fleet-session-link" key={session.id} onClick={() => onOpenSession?.(session.id)}>{session.app} · {session.runId || session.id}<span>{session.status}</span></button>)}
                   {!sessions.loading && !sessions.error && !sessions.sessions.some(session => session.workerId === item.machineId) ? <EmptyState icon={History} title="No recent work">App sessions will appear here when an app runs on this machine.</EmptyState> : null}
                 </section></> : <div className="fleet-inspector">
-                  <Head title={VIEW_NAMES[item.view]} breadcrumbs={[{ label: "Machines", onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }, { label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }, { label: VIEW_NAMES[item.view] }]} back={{ label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }}>
+                  <Head title={VIEW_NAMES[item.view]} breadcrumbs={[{ label: "Machines", onSelect: toList }, { label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }, { label: VIEW_NAMES[item.view] }]} back={{ label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }}>
                     {item.view === "apps" ? <MachineAppsHelp /> : null}
                     {item.view === "apps" || item.view === "activity" ? <IconButton label="App sessions" onClick={() => navigate("apps", { fromContent: true })}><History size={16} aria-hidden /></IconButton> : null}
                   </Head>
@@ -111,13 +135,49 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
                 </div>}
               </div>;
             })
-            : <EmptyEquipment onConnect={() => flow.start({})} showRevoked={showRevoked} />}
+            : machines.length === 0 ? <EmptyEquipment onConnect={() => flow.start({})} showRevoked={showRevoked} />
+            : <MachineList machines={shown} now={now} searching={machineSearch !== ""} onOpen={id => select({ machineId: id, view: "equipment" })} />}
         </main>
 
 
       </div>
     </div></div>
   </>);
+}
+
+// THE MACHINES, AS A LIST -- on the kit's `RecordRow`, the same row the
+// Deployables list draws. The name stands over where the machine is (its host
+// and platform), the quiet middle says what it is doing, and the state is one
+// word with a dot: Online, Offline or Revoked. A row opens its machine.
+function MachineList({ machines, now, searching, onOpen }: {
+  machines: readonly MachineRow[]; now: Date; searching: boolean; onOpen: (id: string) => void;
+}) {
+  if (machines.length === 0) return <EmptyState icon={Monitor} title="No matching machines">{searching ? "Try another machine name." : "Connect a machine to find it here."}</EmptyState>;
+  return <RecordList label="Machines">
+    {machines.map(m => {
+      const revoked = isRevoked(m);
+      const online = !revoked && isWorkerOnline(m, now);
+      const name = machineName(m);
+      const calls = m.activeCount;
+      // Where it is, when that says more than its name already did -- the
+      // Deployables row does the same with a hostname that repeats the name.
+      const platform = [m.os, m.arch].filter(Boolean).join(" ");
+      const where = [m.hostname && m.hostname !== name ? m.hostname : "", platform].filter(Boolean).join(" \u00b7 ");
+      return <RecordRow key={m.id}
+        icon={<Monitor size={18} aria-hidden />}
+        name={name}
+        secondary={where || undefined}
+        state={revoked ? "Revoked" : online ? "Online" : "Offline"}
+        tone={online ? "accent" : "muted"}
+        current={online}
+        dim={revoked}
+        label={`Open ${name}, ${revoked ? "revoked" : online ? "online" : "offline"}`}
+        onOpen={() => onOpen(m.id)}>
+        {calls > 0 ? <span>{calls} active {calls === 1 ? "call" : "calls"}</span> : null}
+        <span>seen {formatFreshness(m.lastSeenAt, now)}</span>
+      </RecordRow>;
+    })}
+  </RecordList>;
 }
 
 function EmptyEquipment({ onConnect, showRevoked }: { onConnect: () => void; showRevoked: boolean }) {

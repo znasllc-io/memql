@@ -1,7 +1,24 @@
 /* Deployables only. Theme packs continue to own the palette and type scale. */
 .deployable-workspace, .deployable-journey, .deployable-source-view, .deployable-overview { container-type: inline-size; }
-.deployable-workspace .os-panel, .deployable-journey .os-panel, .deployable-source-view .os-panel { width: 100%; max-width: 1080px; margin-inline: auto; }
-.deployable-workspace .os-deploy-scroll, .deployable-journey .os-deploy-scroll, .deployable-source-view .os-deploy-scroll { padding: 24px 28px; }
+/* EVERY VIEW TAKES THE WINDOW, ON THE LIST'S OWN GUTTERS (rule 9). The list
+   ran edge to edge and everything it opened did not: a deployable's page sat
+   in a centred 1080px column, its source and history in 760px, its settings in
+   900px -- so a click on a row moved the title 65px to the right at the default
+   window size and 250px in a maximised one, with the margins painted empty.
+   One left edge and one right edge now, the same as the list that led here.
+
+   WIDTH IS FOR WHAT NEEDS IT, which is the other half of the rule. Lists, the
+   composition and the rails take the room; a sentence keeps a readable measure
+   and a field keeps a field's width (below) -- a select box stretched across a
+   monitor is not using the space, it is filling it. */
+.deployable-workspace .os-panel, .deployable-source-view .os-panel { width: 100%; }
+.deployable-workspace .os-deploy-scroll, .deployable-source-view .os-deploy-scroll { padding: 18px 20px 28px; }
+.deployable-workspace .os-form-field, .deployable-workspace .os-field,
+.deployable-source-view .os-form-field, .deployable-source-view .os-field,
+.deployable-settings .os-form-field, .deployable-settings .os-field { max-width: 34rem; }
+/* A field that follows a list is a different question, so it stands off from it. */
+.deployable-workspace .os-stop-body > .os-record-section ~ .os-form-field { margin-top: 14px; }
+.deployable-workspace .os-caption, .deployable-source-view .os-caption, .deployable-workspace .os-notice, .deployable-source-view .os-notice { max-width: 84ch; }
 .deployable-workspace-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 12px 0 20px; }
 .deployable-composition { display: grid; grid-template-columns: minmax(0,.9fr) minmax(185px,1fr) minmax(0,1fr); gap: 32px; align-items: center; padding: 10px 0 32px; }
 .deployable-piece-label { display: flex; align-items: center; gap: 5px; color: var(--os-muted); font-size: var(--os-text-sm); margin-bottom: 12px; }
@@ -45,11 +62,9 @@
 .deployable-dialog-body { font-size: var(--os-text-base); }
 .deployable-dialog .os-stop-body { margin: 0; padding: 0; }
 .deployable-dialog .os-fact, .deployable-dialog code { overflow-wrap: anywhere; }
-.deployable-journey-current { max-width: 710px; margin-inline: auto; }
 .deployable-journey-current h3 { font-size: var(--os-text-lg); font-weight: 500; margin: 0 0 12px; }
 .deployable-journey-current .os-stop-body { padding: 0; margin: 0; }
 .deployable-journey-current > .os-caption { margin-bottom: 18px; }
-.deployable-source-view .os-panel { max-width: 760px; }
 
 @container (max-width: 780px) {
   .deployable-composition { grid-template-columns: 1fr 1fr; gap: 24px; }
@@ -60,7 +75,7 @@
   .deployable-slot > svg:last-child { display: none; }
 }
 @container (max-width: 480px) {
-  .deployable-workspace .os-deploy-scroll, .deployable-journey .os-deploy-scroll { padding: 18px 16px; }
+  .deployable-workspace .os-deploy-scroll { padding: 18px 16px; }
   .deployable-composition { grid-template-columns: 1fr; gap: 23px; }
   .deployable-source-piece::after { width: 1px; height: 24px; left: 50%; top: 100%; }
   .deployable-object { width: 100%; max-width: 320px; justify-self: center; }
@@ -72,8 +87,8 @@
 @media (pointer: coarse) { .deployable-source-piece, .deployable-slot, .deployable-piece-chip { min-height: 44px; } }
 
 @container (max-width: 480px) {
-  .deployable-workspace .os-head, .deployable-journey .os-head { flex-wrap: wrap; }
-  .deployable-workspace .os-head-actions, .deployable-journey .os-head-actions { margin-left: 0; }
+  .deployable-workspace .os-head { flex-wrap: wrap; }
+  .deployable-workspace .os-head-actions { margin-left: 0; }
 }
 
 @container (max-width: 360px) {
@@ -108,8 +123,7 @@
 .deployable-list-chevron { color: var(--os-muted); }
 .deployable-overview[data-density="compact"] .deployable-list-row { padding-block: 9px; }
 .deployable-overview .os-archive-toggle { border: 0; margin-top: 14px; padding: 0; }
-.deployable-workspace .os-panel, .deployable-journey .os-panel, .deployable-source-view .os-panel { border: 0; border-radius: 0; box-shadow: none; padding: 0; background: none; }
-.deployable-workspace .os-deploy-scroll, .deployable-journey .os-deploy-scroll, .deployable-source-view .os-deploy-scroll { padding: 20px; }
+.deployable-workspace .os-panel, .deployable-source-view .os-panel { border: 0; border-radius: 0; box-shadow: none; padding: 0; background: none; }
 .deployable-workspace-heading { margin: 8px 0 18px; }
 .deployable-object { box-shadow: none; border-radius: 14px; padding: 16px; gap: 10px; }
 .deployable-object-body { padding: 0; gap: 8px; }
@@ -117,7 +131,7 @@
 .deployable-source-piece { padding: 16px; border-radius: 10px; gap: 6px; }
 .deployable-source-piece > svg:first-child { margin-bottom: 4px; }
 .deployable-reading-tools { justify-content: flex-end; }
-.deployable-settings { max-width: 900px; margin-inline: auto; width: 100%; }
+.deployable-settings { width: 100%; }
 .deployable-settings > .os-panel { border: 0; padding: 0; background: none; }
 .deployable-settings .os-field-group { padding-block: 18px; border: 0; border-bottom: 1px solid var(--os-line); }
 .deployable-settings .os-caption { max-width: 65ch; }

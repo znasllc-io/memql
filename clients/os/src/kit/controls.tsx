@@ -976,7 +976,22 @@ export function Head({ title, meta, children, breadcrumbs, back, navigation = tr
   /** Secondary headings leave window return navigation with the page heading. */
   navigation?: boolean;
 }) {
-  const { root, trail } = usePageNavigation(navigation);
+  const { root, trail, hosted } = usePageNavigation(navigation, { title, breadcrumbs, back });
+  // INSIDE A WINDOW the frame draws the one trail row (`kit/TrailRow`), back
+  // button first, and this heading only PUBLISHES where it is. It draws no
+  // breadcrumbs and no back arrow of its own -- which is what makes a second
+  // trail impossible rather than merely discouraged: a heading handed an
+  // explicit `breadcrumbs` prop used to draw them whether or not it was the
+  // window's primary heading, and that is how Fleet came to show two.
+  if (hosted) return (
+    <div ref={root} className="os-head">
+      <h3 className="os-settings-title">{title}</h3>
+      {meta !== undefined && meta !== null ? <span className="os-head-meta">{meta}</span> : null}
+      {children ? <div className="os-head-actions">{children}</div> : null}
+    </div>
+  );
+  // OUTSIDE ONE -- a section rendered on its own -- there is no row to publish
+  // to, so the heading keeps its inline navigation and still works alone.
   const local = breadcrumbs ?? (back ? [back, { label: title }] : trail.length ? [{ label: title }] : []);
   const items = [...trail, ...local].filter((item, index, all) => index === 0 || item.label !== all[index - 1]?.label);
   const destination = back ?? trail.at(-1);

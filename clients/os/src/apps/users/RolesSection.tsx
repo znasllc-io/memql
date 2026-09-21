@@ -46,11 +46,7 @@ export function RolesSection({
     if (role === null) {
       return (
         <div className="os-app-stack">
-          <Head title="Role">
-            <Button tone="quiet" onClick={() => setView({ kind: "list" })}>
-              Roles
-            </Button>
-          </Head>
+          <Head title="Role" back={{ label: "Roles", onSelect: () => setView({ kind: "list" }) }} />
           <Notice tone="warn" sentence="This role is not in the catalog this window holds." />
         </div>
       );

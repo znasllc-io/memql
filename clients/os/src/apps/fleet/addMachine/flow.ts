@@ -67,9 +67,12 @@ export interface FlowFacts {
   machine: MachineRow | null;
   /** Heartbeats heard since the registration first appeared. */
   beats: number;
-  /** Whether Cancel has been pressed while a token exists and the person has
-   *  not yet answered which of two things to do. */
+  /** Whether Cancel has been pressed while a token exists, and is waiting for
+   *  its answer: cancelling REVOKES a live credential, so it asks first. */
   cancelAsked: boolean;
+  /** Whether Leave has been pressed while waiting, and is waiting for its
+   *  answer. Optional so a caller that never asks need not say so. */
+  leaveAsked?: boolean;
   /** The revoke's refusal, verbatim, or "". */
   revokeError: string;
   revoking: boolean;
@@ -528,13 +531,15 @@ export function openStopFor(stops: readonly FlowStop[]): StopId {
 // The action bar (D6, interface rule 12)
 // ---------------------------------------------------------------------------
 
-export type ActId = "cancel" | "mint" | "keepWaiting" | "revokeAndLeave" | "leaveKeepToken" | "open" | "done";
+export type ActId = "cancel" | "mint" | "leave" | "keepWaiting" | "revokeAndLeave" | "leaveKeepToken" | "open" | "done";
 
 export interface FlowAct {
   id: ActId;
   label: string;
   tone: "quiet" | "primary" | "danger";
   busy?: boolean;
+  /** A text action rather than a button: the way out beside the one act. */
+  text?: boolean;
 }
 
 export interface FlowBar {
@@ -565,7 +570,10 @@ export function barFor(facts: FlowFacts, checks: readonly Check[]): FlowBar {
   if (phase === "describe") {
     const canMint = facts.connected && name !== "";
     return {
-      state: facts.mintError === "" ? "Describe the machine" : "The token was not minted",
+      // THE SAME TWO WORDS EVERY WIZARD USES. What is still needed while the
+      // step cannot go forward, and "Ready to ..." the moment it can -- so the
+      // words change at the same instant the forward act appears beside them.
+      state: facts.mintError !== "" ? "The token was not minted" : canMint ? "Ready to mint" : "Describe the machine",
       detail:
         facts.mintError !== ""
           ? "nothing was created; mint again"
@@ -573,11 +581,11 @@ export function barFor(facts: FlowFacts, checks: readonly Check[]): FlowBar {
             ? "a token can only be minted over a live connection to the cluster"
             : name === ""
               ? "a name, and which operating system it runs"
-              : "then mint the token the install command carries",
+              : `a token for ${name}, carried by the install command`,
       tone: "none",
       question: "",
       acts: [
-        { id: "cancel", label: "Cancel", tone: "quiet" },
+        { id: "cancel", label: "Cancel", tone: "quiet", text: true },
         // ABSENT, NEVER DISABLED (rule 12): a mint with no name is refused by
         // the engine, so it is not offered until there is one.
         ...(canMint ? [{ id: "mint" as const, label: "Mint a token", tone: "primary" as const }] : []),
@@ -585,20 +593,48 @@ export function barFor(facts: FlowFacts, checks: readonly Check[]): FlowBar {
     };
   }
 
+  // THE FLOOR HAS TWO VERBS, and they are the ones every add wizard uses:
+  //
+  //   CANCEL   undoes the whole thing. A token exists by now, so that means
+  //            REVOKING it -- a credential nobody will use should not stay
+  //            live -- and it asks first.
+  //   LEAVE    goes, and everything stays: the token keeps working, and the
+  //            machine appears in Machines by itself when the install
+  //            finishes. It asks ONCE too, for the one thing leaving costs
+  //            here and nowhere else: the token is shown only on this page.
+  //
+  // This was one question with three answers ("Keep waiting", "Revoke the
+  // token and leave", "Leave, keep the token") behind a single Cancel, so the
+  // way to leave WITHOUT cancelling was found by pressing Cancel.
   if (phase === "waiting") {
     if (facts.cancelAsked) {
       return {
-        state: "Leave?",
+        state: "Cancel?",
         detail: "",
         tone: "paused",
         question:
           facts.revokeError === ""
-            ? "The token you copied still works: if the install finishes later, the machine appears in Machines on its own. Revoke it if it is not going to be used -- a credential nobody will use should not stay live."
-            : `The token was not revoked: ${facts.revokeError}. It is still live; you can leave and keep it, or try again.`,
+            ? `Cancel adding ${label}? The token is revoked, so the install command stops working.`
+            : `The token was not revoked: ${facts.revokeError}. It is still live; try again, or leave and keep it.`,
         acts: [
-          { id: "keepWaiting", label: "Keep waiting", tone: "quiet" },
-          { id: "revokeAndLeave", label: "Revoke the token and leave", tone: "danger", busy: facts.revoking },
-          { id: "leaveKeepToken", label: "Leave, keep the token", tone: "primary" },
+          { id: "keepWaiting", label: "Keep waiting", tone: "quiet", text: true },
+          // A REFUSED REVOKE MUST NOT TRAP ANYBODY. The token is still live and
+          // the cluster will not take it back, so going with it is offered
+          // right here rather than two questions away.
+          ...(facts.revokeError === "" ? [] : [{ id: "leaveKeepToken" as const, label: "Leave, keep the token", tone: "quiet" as const, text: true }]),
+          { id: "revokeAndLeave", label: "Revoke the token and cancel", tone: "danger", busy: facts.revoking },
+        ],
+      };
+    }
+    if (facts.leaveAsked === true) {
+      return {
+        state: "Leave?",
+        detail: "",
+        tone: "paused",
+        question: `The token keeps working: if the install finishes later, ${label} appears in Machines on its own. The token and the command are shown only here, so copy them first.`,
+        acts: [
+          { id: "keepWaiting", label: "Stay", tone: "quiet", text: true },
+          { id: "leaveKeepToken", label: "Leave", tone: "primary" },
         ],
       };
     }
@@ -609,7 +645,10 @@ export function barFor(facts: FlowFacts, checks: readonly Check[]): FlowBar {
         : "run the command on the machine; this moves on by itself the moment it registers",
       tone: "busy",
       question: "",
-      acts: [{ id: "cancel", label: "Cancel", tone: "quiet" }],
+      acts: [
+        { id: "cancel", label: "Cancel", tone: "quiet", text: true },
+        { id: "leave", label: "Leave", tone: "quiet" },
+      ],
     };
   }
 
@@ -629,9 +668,10 @@ export function barFor(facts: FlowFacts, checks: readonly Check[]): FlowBar {
     tone: settled ? "live" : stopped ? "paused" : "busy",
     question: "",
     acts: [
-      { id: "open", label: `Open ${shown}`, tone: "quiet" },
-      // Leaving remains possible, but only completed checks earn Done.
-      { id: "done", label: settled ? "Done" : "Leave setup", tone: settled ? "primary" : "quiet" },
+      { id: "open", label: `Open ${shown}`, tone: "quiet", text: true },
+      // Leaving remains possible, but only completed checks earn Done. The
+      // machine is registered by now, so there is nothing left to cancel.
+      { id: "done", label: settled ? "Done" : "Leave", tone: settled ? "primary" : "quiet" },
     ],
   };
 }

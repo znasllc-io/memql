@@ -887,11 +887,17 @@ describe("Where it lives", () => {
     expect(connection.callsNamed("updateSiteAccount")[0]).toContain('siteId: "site-store"');
   });
 
-  it("mounts the Domains content for a cluster owner only", async () => {
+  // THE ADDRESS IS FOR EVERYBODY; BINDING A DOMAIN IS FOR A CLUSTER OWNER. The
+  // domains list always shows the cluster address -- it was always on this stop
+  // -- while the Add control and the add form are absent for somebody who does
+  // not hold the `domains` part.
+  it("lists the cluster address for everybody and offers binding to a cluster owner only", async () => {
     const { page } = await mountAndOpen(WITH_PACKAGE, "store.memql.example.com", { role: "admin" });
     await openStop(page, "Where it lives");
-    expect(within(page).queryByText("Domains")).toBeNull();
-    expect(within(page).queryByLabelText("Domain to bind")).toBeNull();
+    const list = screen.getByRole("region", { name: /^Domains for / });
+    expect(within(list).getByText(/Cluster address/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Add a domain" })).toBeNull();
+    expect(screen.queryByLabelText("Domain to bind")).toBeNull();
   });
 });
 

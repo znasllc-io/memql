@@ -55,7 +55,7 @@ describe("the manifest", () => {
   it("gates Logs at admin and nothing else", () => {
     // The app itself admits every signed-in user, because the concept's
     // composite tier means everyone has deployables of their own to read, and
-    // the WRITE half is gated inside the section -- New deployable renders for
+    // the WRITE half is gated inside the section -- Add a deployable renders for
     // rank >= 200 -- exactly as Sites gated publishing rather than the list.
     //
     // Logs is the one gated section, and the compose restructure did not

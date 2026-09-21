@@ -1,5 +1,5 @@
 import type { LocalCockpitInstall } from "../localInstall";
-import { Caption, Switch, ChoiceStack, Field, Input, Notice, type ChoiceOption } from "../../../../kit";
+import { Caption, Switch, Field, Input, Notice, type ChoiceOption } from "../../../../kit";
 import { InfoDetail } from "../../../../kit/InfoDetail";
 import type { Draft } from "../flow";
 import { INSTALL_PLATFORMS, INSTALL_PLATFORM_LABEL, type InstallPlatform } from "../install";
@@ -57,14 +57,20 @@ export function MachineStop({
           onEnter={onMint}
         />
       </Field>
-      <ChoiceStack
-        name="fleet-add-platform"
-        label="Operating system"
-        voice="prose"
-        value={draft.platform}
-        onChange={(next) => onDraft({ platform: next as InstallPlatform })}
-        options={PLATFORMS}
-      />
+      {/* THE CHOICE ROW, not the choice stack. The stack is for options that
+          each need a sentence; "macOS" and "Linux" explain themselves, and as
+          two full-width cards they were the heaviest thing in a form whose
+          first question is the name above them. */}
+      <Field label="Operating system">
+        <div className="os-choice-row" role="radiogroup" aria-label="Operating system">
+          {PLATFORMS.map((option) => (
+            <button key={option.value} type="button" role="radio" className="os-choice" aria-checked={draft.platform === option.value}
+              onClick={() => onDraft({ platform: option.value })}>
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </Field>
 
       <div className="fleet-install-options">
         <div><Switch disabled={localTest !== null} checked={draft.userLocal ?? false} onChange={(userLocal) => onDraft({ userLocal })}>Install for my account only</Switch>
