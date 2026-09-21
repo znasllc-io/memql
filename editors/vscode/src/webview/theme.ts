@@ -7,8 +7,8 @@
 // cmd/memql-lsp/vscodeimportrule_test.go means: it wires VS Code's API to
 // logic that lives elsewhere and carries none of its own.
 //
-// WHY EVERY PANEL GOES THROUGH IT. Nine panel classes render nine documents.
-// If each read the setting for itself, "high contrast wins" would be nine
+// WHY EVERY PANEL GOES THROUGH IT. Ten panel classes render ten documents.
+// If each read the setting for itself, "high contrast wins" would be ten
 // separate implementations of one rule, and the panel that forgot it would be
 // the one an operator using high contrast opened. One resolver, one reading of
 // it, stamped once per render.

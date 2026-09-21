@@ -59,6 +59,8 @@ import { headActionFor, railFor, type ComposeInput, type HeadAction, type RailPr
 import type { PartsHeld } from "../parts";
 import { ManifestPreview } from "./stops/compose/ManifestPreview";
 import { returnPathFor } from "../sources/connectReturn";
+import { OWN_ACCOUNT, organizationOf, ownerIsNamed, type GithubAppOwner } from "../sources/GithubAppSetup";
+import { useGithubApp } from "../sources/useGithubApp";
 import { useGithubConnect } from "../sources/useGithubConnect";
 import type { ConnectionNeed } from "./stops/compose/RepositorySource";
 import { ComposeSourceDetailStep, ComposeSourceKindStep, SOURCE_DETAIL_NAME, SOURCE_KIND_LABEL } from "./stops/compose/Source";
@@ -198,6 +200,12 @@ export function ComposePage(props: ComposePageProps) {
   // What the repository step says it needs before it can go on. The step says
   // it, because only the step has GitHub's own answer about the grant.
   const [connectionNeed, setConnectionNeed] = useState<ConnectionNeed>("");
+  // THE CLUSTER'S GITHUB APP, asked for as the wizard opens, so the repository
+  // step knows whether Connect can work before it offers it. Held here with the
+  // connect, and for its reason: when the cluster has none, registering one is
+  // that step's forward act, and the floor is this page's.
+  const githubApp = useGithubApp();
+  const [appOwner, setAppOwner] = useState<GithubAppOwner>(OWN_ACCOUNT);
 
   const probe = useSourceProbe();
   const zipProbe = useArtifactProbe();
@@ -553,6 +561,9 @@ export function ComposePage(props: ComposePageProps) {
             onTokenFormOpenChange={setTokenFormOpen}
             connect={githubConnect}
             onConnectionNeed={setConnectionNeed}
+            app={githubApp}
+            appOwner={appOwner}
+            onAppOwner={setAppOwner}
             duplicateOf={duplicate}
           />
         );
@@ -664,12 +675,29 @@ export function ComposePage(props: ComposePageProps) {
   // the person's connections are still being read, because the step has not
   // mounted the part of itself that could say so.
   const needsGithub = !sourceLocked && journeyStop === "sourceDetail" && draft.choice === "repo" && connectionNeed !== "";
+  // An organization is named by its login, and until one is typed there is
+  // nothing to register the app under -- so the act is ABSENT (rule 12), and the
+  // floor says what it is waiting for.
+  const ownerNamed = ownerIsNamed(appOwner);
+  const githubActs: Act[] =
+    connectionNeed === "setup"
+      ? ownerNamed
+        ? [{
+            label: "Set up GitHub", tone: "primary", busy: githubApp.busy,
+            onAct: () => void githubApp.setup(returnPathFor("deployables"), organizationOf(appOwner)),
+          }]
+        : []
+      // NO ACT when the cluster has no app and this person may not give it one:
+      // the step says who can, and A token is one choice away.
+      : connectionNeed === "unavailable"
+        ? []
+        : [{
+            label: connectionNeed === "reconnect" ? "Reconnect GitHub" : "Connect GitHub", tone: "primary", busy: githubConnect.busy,
+            onAct: () => void githubConnect.connect(returnPathFor("deployables")),
+          }];
   const journeyActs: Act[] = !held && !finished && (
     needsGithub
-      ? [{
-          label: connectionNeed === "reconnect" ? "Reconnect GitHub" : "Connect GitHub", tone: "primary", busy: githubConnect.busy,
-          onAct: () => void githubConnect.connect(returnPathFor("deployables")),
-        }]
+      ? githubActs
     : journeyStop === "source" ? []
     : journeyStop === "sourceDetail" && path === "handmade" && sourceDone && phase === "composing"
       ? [{ label: "Continue", tone: "primary", onAct: () => chooseStop("whatItIs") }]
@@ -766,6 +794,14 @@ export function ComposePage(props: ComposePageProps) {
             ? { word: "Not connected to GitHub", detail: "connect to pick from your repositories, or choose A token" }
             : connectionNeed === "reconnect"
               ? { word: "GitHub connection lapsed", detail: "reconnect to pick from your repositories, or choose A token" }
+            : connectionNeed === "setup"
+              ? ownerNamed
+                ? { word: "GitHub is not set up", detail: "set it up once for this cluster, or choose A token" }
+                : { word: "Name the organization", detail: "by its GitHub login, or register the app under your own account" }
+            // The STEP says who can change it; said again here it was one
+            // sentence twice on one screen. The floor says what goes on.
+            : connectionNeed === "unavailable"
+              ? { word: "GitHub is not set up", detail: "choose A token to go on" }
               : tokenFormOpen
                 ? { word: "Describe the repository", detail: "its URL, and a token if it is private" }
                 : { word: "Choose a repository", detail: "then the branch to follow, and what to call it" };

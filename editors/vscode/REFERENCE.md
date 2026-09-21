@@ -19,6 +19,77 @@ Cockpit uses). Works fully offline against local files -- no cluster, no auth.
   icon, a CodeLens and a status-bar item saying which constructs in this file
   the cluster does not know, or knows in an older version, plus the actions
   that change that. See [Training](#training-what-the-cluster-knows-about-the-file-you-are-editing).
+- The **language reference** -- the connected cluster's own grammar and
+  vocabulary, in a tab, searchable and copyable. See
+  [The language reference](#the-language-reference).
+
+## The language reference
+
+**MemQL: Show Language Reference** opens the two artifacts a MemQL cluster
+generates about its own language, side by side with your file:
+
+| Artifact | Answers | Served by |
+|---|---|---|
+| **Grammar** | What may be written -- every production, in EBNF | `memqlGrammar()` |
+| **Vocabulary** | What each written thing means -- every construct, annotation, keyword, operator, field type, function and builtin, with how it is written and what it does | `memqlVocabulary()` |
+
+**Both come from the cluster, and that is the point.** They are rendered at the
+moment they are asked for, from the parser, the annotation registry and the
+function catalog the cluster itself reads with -- so they describe the language
+that cluster accepts today. A committed page describes the language as it was
+when somebody last regenerated the page, and a drifted grammar does not fail
+loudly: it teaches a form the parser refuses, and the failure reads as "the
+model is bad at MemQL".
+
+**The page says which language it is showing**, in three facts above the
+artifacts:
+
+- the **edition** (`2026`) -- the coarse label a tree declares as
+  `edition = "2026"`;
+- that edition's **status** -- `frozen` or `draft`. A frozen edition's forms
+  keep loading: a public form leaves only through a deprecation window. The
+  status is not on the wire, so it is read from this extension's own record of
+  the edition, and it is **withheld** when the cluster speaks a different
+  edition from the one this extension records -- that fact is the one on the
+  page you cannot check against the artifacts below it;
+- the **grammar version** -- the fine label that moves on every change to the
+  authored surface inside an edition.
+
+**Search filters both artifacts at once.** A grammar production matches on its
+name and every line of its right-hand side; a vocabulary entry matches on its
+name, how it is written, what it means, and its kind. Filtering happens in the
+page, so the box stays where it is and keeps the caret. When nothing matches,
+the page says what a term is matched against rather than only that there were
+no results.
+
+**Copy takes the whole artifact, never the filtered view.** Both exist to be
+handed to a model -- as grammar-in-prompt, or as the grammar a constrained
+decoder is held to -- and a model given three productions out of a hundred and
+fifty does not write less MemQL; it writes MemQL shaped like the fragment it
+was shown. The copied vocabulary is tab-separated with a header naming the
+edition and grammar version, because a block of text pasted into a prompt has
+nothing else to carry that.
+
+**With no cluster it says so, and shows what the extension knows.** There is no
+bundled copy of either artifact, so a disconnected panel states that plainly
+and prints the edition, status and grammar version this extension was *built*
+against -- which is the language its bundled server is giving you completion
+and diagnostics in. It is not an empty pane and it is not a spinner.
+
+**And it is not a spinner when a cluster goes quiet either.** The two reads are
+given 20 seconds. On expiry the page names the call that did not answer, says
+the cluster may still be working on it, repeats what the extension knows on its
+own, and offers **Try again** -- which is the state a read that is refused
+outright reaches too.
+
+**It is the one MemQL command that is not gated on workspace trust.** It reads
+no credential and opens no connection of its own: in a restricted folder it
+shows the pinned language and says why there is no cluster to ask. Everything
+under [the five views](#the-five-views-and-which-question-each-answers) stays
+gated. A panel opened in a restricted folder still follows the cluster once you
+trust the workspace: trusting it re-binds the panel, and so does re-running the
+command. In every window it then follows every connect, disconnect and cluster
+switch on its own.
 
 ## The five views, and which question each answers
 

@@ -34,6 +34,11 @@ listing is not assumed by these instructions.
 - Live diagnostics and cross-reference checks.
 - Context-aware completion, hover, signature help, and go-to-definition.
 - Snippet completions and edition rewrite code actions.
+- **MemQL: Show Language Reference** — the connected cluster's own grammar and
+  vocabulary in one searchable tab, with a copy action for handing either to a
+  model. With no cluster it names the edition, that edition's status and the
+  grammar version this extension was built against.
+  [Details](REFERENCE.md#the-language-reference)
 
 Open a folder of `.memql` files. The bundled `memql-lsp` server uses the same
 MemQL Sense implementation as the engine. No cluster or credentials are needed

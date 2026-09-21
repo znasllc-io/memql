@@ -12,6 +12,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/identity/githubconnect"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -163,6 +164,26 @@ type GithubConnectStateRow struct {
 	ConsumedAt     time.Time // zero = not consumed
 	ConsumedFromIP string
 	SourceIP       string
+	// Purpose is which flow minted the state: githubconnect.PurposeConnect
+	// (or blank, which every row written before the field existed is) or
+	// githubconnect.PurposeAppSetup.
+	Purpose string
+	// Organization is, for an app-setup state, the GitHub organization the
+	// app is to be registered under; blank is the person's own account.
+	Organization string
+}
+
+// IsFor reports whether the row belongs to `purpose`. Blank on the row means
+// connect: the field is newer than the flow.
+func (r *GithubConnectStateRow) IsFor(purpose string) bool {
+	if r == nil {
+		return false
+	}
+	have := strings.TrimSpace(r.Purpose)
+	if have == "" {
+		have = githubconnect.PurposeConnect
+	}
+	return have == strings.TrimSpace(purpose)
 }
 
 // HashConnectState digests the plaintext state value the way every writer and
@@ -185,6 +206,10 @@ type GithubConnectStateSeed struct {
 	ReturnPath string
 	SourceIP   string
 	ExpiresAt  time.Time
+	// Purpose and Organization: see GithubConnectStateRow. Blank purpose is a
+	// connect state, which is what every caller before app setup wrote.
+	Purpose      string
+	Organization string
 }
 
 // CreateGithubConnectState writes the row a later callback will consume.
@@ -213,13 +238,15 @@ func (s *Store) CreateGithubConnectState(ctx context.Context, seed GithubConnect
 
 	stateId := "v1:identity:githubConnectState:" + id.NewShortId()
 	query := fmt.Sprintf(
-		`mutation createGithubConnectState(stateId: %s, userId: %s, stateHash: %s, expiresAt: %s, returnPath: %s, sourceIP: %s)`,
+		`mutation createGithubConnectState(stateId: %s, userId: %s, stateHash: %s, expiresAt: %s, returnPath: %s, sourceIP: %s, purpose: %s, organization: %s)`,
 		langparser.QuoteString(stateId),
 		langparser.QuoteString(userId),
 		langparser.QuoteString(seed.StateHash),
 		langparser.QuoteString(seed.ExpiresAt.UTC().Format(time.RFC3339)),
 		langparser.QuoteString(SafeRelativeRedirect(seed.ReturnPath)),
 		langparser.QuoteString(seed.SourceIP),
+		langparser.QuoteString(strings.TrimSpace(seed.Purpose)),
+		langparser.QuoteString(strings.TrimSpace(seed.Organization)),
 	)
 	// INTERNAL ORIGIN: createGithubConnectState is @serverOnly, and the engine
 	// refuses such a construct unless the context carries it -- so without
@@ -266,13 +293,28 @@ func (s *Store) LookupGithubConnectState(ctx context.Context, stateHash string) 
 // person pasted it into -- and the two identity replicas that would both serve
 // it share nothing but the database.
 func (s *Store) ConsumeGithubConnectState(ctx context.Context, stateHash, consumedFromIP string) (*GithubConnectStateRow, error) {
+	return s.ConsumeGithubConnectStateFor(ctx, stateHash, consumedFromIP, githubconnect.PurposeConnect)
+}
+
+// ConsumeGithubConnectStateFor is ConsumeGithubConnectState for a named flow.
+//
+// A ROW OF ANOTHER PURPOSE IS A STATE THIS CALLER HAS NEVER SEEN. The Connect
+// callback and the app-setup callback share this row shape and this lock, and
+// what must never happen is one spending the other's: a connect state finishing
+// a registration would let anybody who can press Connect replace the cluster's
+// app, and a setup state finishing a connect would land a grant from a flow
+// that was never a connect. So the purpose is checked INSIDE the critical
+// section, beside the other three refusals, and a mismatch is answered exactly
+// as an unknown digest is -- and leaves the row UNSPENT, for the callback it
+// does belong to.
+func (s *Store) ConsumeGithubConnectStateFor(ctx context.Context, stateHash, consumedFromIP, purpose string) (*GithubConnectStateRow, error) {
 	var row *GithubConnectStateRow
 	err := s.withGithubConnectGate(ctx, stateHash, func(ctx context.Context) error {
 		found, err := s.LookupGithubConnectState(ctx, stateHash)
 		if err != nil {
 			return fmt.Errorf("identity.store: consume github connect state: re-read: %w", err)
 		}
-		if found == nil {
+		if found == nil || !found.IsFor(purpose) {
 			return ErrGithubConnectStateNotFound
 		}
 		if !found.ConsumedAt.IsZero() {
@@ -315,6 +357,8 @@ func firstGithubConnectStateRow(nodes []*memqlv1.MemoryNode) *GithubConnectState
 		ConsumedAt:     g.time("consumedAt"),
 		ConsumedFromIP: g.str("consumedFromIP"),
 		SourceIP:       g.str("sourceIP"),
+		Purpose:        g.str("purpose"),
+		Organization:   g.str("organization"),
 	}
 }
 

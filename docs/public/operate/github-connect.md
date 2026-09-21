@@ -17,8 +17,9 @@ Deployables ask me for a token".
 
 A person connects GitHub once, anywhere in the product, and from then on picks a
 repository from a list instead of typing a URL and pasting a token. The pasted
-token stays, behind "Use a token instead", for a host this is not, or an
-organization that will not install an app.
+token stays, as the other answer to the same question ("A token" beside
+"GitHub"), for a host this is not, or an organization that will not install an
+app.
 
 **It is a connection, not a sign-in.** Nothing here changes who a person IS in
 this cluster. Connecting writes one `v1:platform:sourceCredential` row that the
@@ -27,12 +28,108 @@ routes and the role ladder are untouched. A cluster can use
 [OIDC federation](auth/oidc-federation.md) for sign-in, GitHub Connect for
 sources, both, or neither.
 
-Unset, Connect is simply absent: the Source stop offers the token path alone and
-says why.
+Connect needs the cluster to have a **GitHub App**. A cluster owner registers one
+from the product in a single trip to GitHub
+([Registering the app from the product](#registering-the-app-from-the-product));
+an operator can instead register one by hand and set it in the deployment
+([Creating the GitHub App](#creating-the-github-app)). Until one of them has,
+Connect is not offered: the surfaces say the cluster is not linked to GitHub yet,
+who can change that, and offer the token path meanwhile.
+
+---
+
+## Registering the app from the product
+
+**Who:** a cluster owner. **Where:** the Repository step of Add a deployable, or
+Deployables -> Settings -> Sources. **What it takes:** one press here and one on
+GitHub.
+
+On a cluster with no GitHub App, those two surfaces do not offer Connect GitHub
+-- it could not work. A cluster owner is offered **Set up GitHub** instead, with
+the one question registering an app has: whose GitHub account it is registered
+under, **your account** or **an organization** (named by its login; you must be
+able to create apps for it). Everybody else is told a cluster owner sets it up,
+and is offered the token path.
+
+What happens when it is pressed:
+
+1. The cluster mints a single-use setup state, bound to that owner, good for ten
+   minutes, and sends the browser to a page on the identity service
+   (`GET /auth/github/app/new`). That page exists for one reason: GitHub's
+   manifest flow begins with a browser form POST to github.com, and both MemQL OS
+   and the identity pages forbid cross-origin form posts by policy. It carries a
+   policy of its own that allows a post to `github.com` and nothing else.
+2. The page posts the cluster's **manifest** to GitHub. GitHub shows the app it is
+   about to create and lets the owner edit one thing, its name. The default is
+   "MemQL on `<your domain>`". App names are unique across all of GitHub, so on a
+   domain many clusters share -- the local default above all -- GitHub may say
+   the name is taken; change it on that page and carry on. The name is only what
+   people read on the authorization screen.
+3. GitHub sends the browser back (`GET /auth/github/app/callback`) with a
+   one-time code. The cluster exchanges it, once, for the six values an operator
+   would otherwise have copied out of a settings page, and stores them.
+4. The browser is sent straight on to the new app's **installation page**, so the
+   owner chooses which account and repositories it may read, authorizes, and
+   lands back where they started -- connected, with their repositories listed.
+   Registering and connecting are one trip.
+
+**The manifest is the cluster's, and nothing a browser sends can change it.** It
+is composed from `MEMQL_DOMAIN` on the identity node and is exactly the
+registration the manual steps below describe: contents read and metadata read
+(decision C8), authorization requested during installation, installable on any
+account, the callback the cluster derives for itself. What comes back is checked
+against it: an app carrying any permission the manifest did not ask for is
+refused and its credentials are not kept.
+
+**Where the six values live.** In the two instance-wide stores every node already
+reads, under the same six names the deployment would use: the app id, slug and
+client id as `v1:platform:globalVariable` rows, and the client secret, webhook
+secret and private key as `v1:platform:globalSecret` rows sealed under
+`MEMQL_MASTER_KEY`. No restart is needed; nodes notice within seconds. The
+`githubApp` readiness module reads the same names and reports the cluster as set
+up.
+
+**The environment wins, whole.** If ANY `MEMQL_GITHUB_APP_*` value is set in the
+deployment, the deployment owns the app: the stored rows are not read, not even
+to fill a gap, and Set up GitHub is refused with
+`github_app_managed_by_environment`. A half-set environment stays the boot
+refusal it always was rather than being quietly completed from rows.
+
+**The webhook.** On a domain GitHub can reach, the app is registered with its
+webhook active, pointed at `https://api.<domain>/inbound/github` and subscribed
+to pushes, and the bff admits that source using the app's own stored webhook
+secret -- none of the `MEMQL_INBOUND_SOURCE_GITHUB_*` lines below are needed for
+an app registered this way. On a name that can never resolve publicly
+(`*.localhost`, `*.local`, `*.test`, `*.internal`, a bare host, an IP address)
+the webhook is registered **off**, with an inert placeholder address, and the
+ten-minute poll notices pushes instead. See [Locally](#locally).
+
+**Removing it.** Deployables -> Settings -> Sources -> GitHub App -> Remove, for
+an app registered from the product. It clears the six stored values, so every
+GitHub connection on the cluster stops fetching until an app is set up again and
+each person reconnects. It does **not** delete the app at GitHub, and earlier
+versions of the sealed rows remain in the store's history like any rotated
+secret. If you are removing an app because its credentials may have leaked,
+**delete it at GitHub** -- that is what makes them worthless. An app set by the
+deployment has no Remove; it is changed where the cluster is deployed.
+
+Every registration and removal writes an audit event (category `configuration`)
+naming who did it and the app's slug. No credential is ever logged, audited or
+returned to a client: `githubAppStatus` answers whether there is an app, where
+it came from and its slug, and nothing else.
+
+If the trip fails part-way, nothing is half-kept on the cluster -- the stored
+values are all six or none. GitHub may nevertheless have created the app before
+the cluster failed to keep it, and app names are unique across GitHub, so delete
+the leftover there before trying again.
 
 ---
 
 ## Creating the GitHub App
+
+This is the manual path, for an operator who wants the app's credentials in the
+deployment rather than in the cluster's own stores. An app made this way and one
+registered from the product are the same app.
 
 One app per cluster is the simple choice; one app across several clusters also
 works, because a GitHub App accepts several callback URLs. See
@@ -48,7 +145,7 @@ under Settings -> Developer settings -> GitHub Apps):
 | **Homepage URL** | `https://os.<domain>` |
 | **Callback URL** | `https://identity.<domain>/auth/github/callback` |
 | **Request user authorization (OAuth) during installation** | **checked** |
-| **Setup URL** | `https://identity.<domain>/auth/github/callback` (the same route) |
+| **Setup URL** | leave empty -- GitHub disables it once the box above is checked, and sends the post-install landing to the Callback URL instead |
 | **Redirect on update** | checked |
 | **Webhook -> Active** | checked |
 | **Webhook URL** | `https://api.<domain>/inbound/github` |
@@ -64,9 +161,9 @@ capability that needs more -- an agent opening a pull request -- requests it as
 its own permission change, which GitHub then surfaces to every installation for
 re-approval.
 
-The callback URL and the setup URL are the same route on purpose: it serves the
-OAuth return and the post-install landing alike, and tells them apart by the
-query GitHub sends.
+There is one route on purpose. With authorization requested during installation
+GitHub sends the post-install landing to the callback URL as well, and the route
+tells the two apart by the query GitHub sends.
 
 Then, on the app's page:
 
@@ -169,11 +266,21 @@ default branch and last push. Choosing one runs the probe under the grant, fills
 the ref picker with the repository's branches (default first), and previews what
 the manifest says the package contains -- all before Analyze runs.
 
-**Not connected, app configured:** Connect GitHub, with "Use a token instead"
-folded below it.
+**Not connected, app configured:** what connecting is for, with Connect GitHub
+as the step's forward act and "A token" as the other choice beside "GitHub".
 
-**Not connected, no app:** the URL-and-token form is the whole stop, with the
-sentence saying this cluster has no GitHub connection set up.
+**No app, cluster owner:** the sentence saying this cluster is not linked to
+GitHub yet, the one question (your account, or an organization), and Set up
+GitHub -- on the wizard's floor, or beside the question in Settings.
+
+**No app, anybody else:** the same sentence naming who can change it, and no
+act. The token path is one choice away.
+
+Both are known before anybody presses anything: the surfaces ask
+`githubAppStatus`, a read that writes nothing, as they open. A cluster that
+cannot answer it keeps the older behaviour -- Connect is offered, the cluster
+refuses it, and the URL-and-token form becomes the whole stop under the
+sentence saying why.
 
 Every refusal renders in place, with the product's headline above and the
 server's own sentence beneath:
@@ -183,8 +290,13 @@ server's own sentence beneath:
 | `reconnect_required` | GitHub refused the grant itself -- the tokens are spent, or the person revoked the authorization at GitHub. One click to repair, and never read as "private, or not there" |
 | `repository_not_installed` | The grant is good and the app is not installed on that repository. An installation link, not another credential |
 | `installation_pending` | An organization owner has not approved the installation yet, named by organization |
-| `github_app_not_configured` | The six values are absent. An operator's condition, and the surface says so rather than implying somebody mistyped something |
+| `github_app_not_configured` | The cluster has no GitHub App. The cluster's condition, and the surface says so -- and who can change it -- rather than implying somebody mistyped something |
 | `connect_state_invalid` | The connect link was expired, replayed, or never issued |
+| `github_app_managed_by_environment` | The deployment sets `MEMQL_GITHUB_APP_*`, so the app is not registered or removed from the product |
+| `github_app_setup_forbidden` | The caller is not a cluster owner -- or stopped being one between pressing Set up GitHub and GitHub sending them back |
+| `github_app_setup_invalid` | The organization named is not something GitHub accepts as a login |
+| `github_app_setup_state_invalid` | The setup link was expired, replayed, never issued, or belongs to the Connect flow |
+| `github_app_setup_failed` | GitHub sent the owner back and the app could not be kept: the one-time code was refused, the app asked for more than the manifest did, or the values could not be stored. Nothing is half-kept |
 
 ---
 
@@ -244,10 +356,17 @@ The callback works: `identity.memql.localhost` is served over TLS by the local
 front door, and GitHub will redirect a browser to it because the redirect
 happens in the person's own browser, not from GitHub's network.
 
+Registering the app from the product works too, for the same reason: every
+redirect in that trip happens in the owner's own browser, and the one call the
+cluster makes -- exchanging the code -- goes out to GitHub, not in from it.
+
 **Webhooks do not**, because GitHub cannot reach a laptop. The polling fallback
 covers it: every ten minutes, each repo-sourced package's upstream head is
 compared against what is deployed. So an update cue appears within ten minutes
-locally instead of within seconds. Nothing else differs.
+locally instead of within seconds. Nothing else differs. An app registered from
+the product on such a domain is created with its webhook off for exactly this
+reason; if the cluster later moves to a public domain, turn the webhook on in
+the app's settings at GitHub and point it at `https://api.<domain>/inbound/github`.
 
 ---
 
