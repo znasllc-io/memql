@@ -43,6 +43,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -437,4 +438,67 @@ func stateOf(t *testing.T, eng *memql.MemQLEngine, ctx context.Context, appID st
 	rows := wsRows(t, eng, ctx,
 		`query decisionsForApplication(applicationId: `+wsQuote(appID)+`)`)
 	return wholesalepack.FoldState(rows)
+}
+
+// THE TWO-CLIENT TEST, BOOTED (epic memql#5533, issue memql#5560).
+//
+// twoclients_test.go proves both fixture domains PARSE and that their
+// concepts REGISTER, which is what it can do without a database. This
+// mounts both over the unedited pack and BOOTS AN ENGINE, which this
+// repository does strictly: one skipped construct refuses the boot and
+// names it.
+//
+// WHAT THAT CATCHES, MEASURED RATHER THAN ASSUMED. Each of these was
+// introduced into the northwind fixture and the result recorded:
+//
+//	`use wholesale.builtins.{ noSuchBuiltin }`   -> CAUGHT, boot refused
+//	@trigger(concept="v1:wholesale:noSuchConcept") -> not caught
+//	`builtin wholesaleProvisionEntitlementTypo(...)` in a body -> not caught
+//
+// So this asserts the one that matters most for section 7 and does not
+// pretend to the other two: A CLIENT MAY DEPEND ONLY ON WHAT THE PACK
+// EXPORTS. An import of a name the pack does not declare refuses the boot,
+// which is exactly "could this client express its process over the pack's
+// public surface" turned into a failure.
+//
+// The two it does not catch are covered where they can be:
+// TestBothClientsReachOnlyTheDeclaredSurface checks every imported
+// wholesale.* name against the pack's declarations, and
+// TestEveryConstructAnAdapterCallsIsDeclared does the same for the names
+// the pack's own Go calls. A trigger naming a concept nobody declares is a
+// gap in the ENGINE's automation loading rather than in this pack, and is
+// worth its own issue rather than a claim here that is not true.
+
+func TestLiveE2E_BothFixtureClientsBootOverTheUneditedPack(t *testing.T) {
+	for _, client := range []string{"northwind", "contoso"} {
+		dir := filepath.Join("testdata", "clients", client)
+		memqldsl.RegisterTree(client, os.DirFS(dir))
+		t.Cleanup(func() { memqldsl.UnregisterTree(client) })
+	}
+
+	// A STRICT BOOT WITH BOTH CLIENTS MOUNTED. If either fixture's
+	// automation is invalid -- a trigger on a concept the pack does not
+	// declare, a call to a builtin it does not ship, an args field the
+	// payload cannot bind -- this refuses and names it.
+	eng := liveWholesaleEngine(t)
+
+	// AND THE PACK'S OWN CONSTRUCTS STILL RESOLVE with two clients laid
+	// over it, which is the whole claim: neither client displaced anything.
+	merchant, storeLive, _ := wholesaleScope()
+	ctx := asSiteOwner(merchant)
+	openApplications(t, eng, ctx, storeLive, wholesalepack.AdapterCustomerTag)
+	submit(t, eng, ctx, storeLive, "Both clients mounted", "buyer@both.example")
+	if rows := wsRows(t, eng, ctx,
+		`query applicationsForStore(storeId: `+wsQuote(storeLive)+`)`); len(rows) != 1 {
+		t.Fatalf("the pack's own write answered %d rows with two clients mounted", len(rows))
+	}
+
+	// THE CLIENTS' OWN CONCEPTS ARE REACHABLE TOO, which is what an
+	// @relationship into the pack's namespace having bound looks like from
+	// the outside.
+	for _, id := range []string{"v1:northwind:northwindTaxDetail", "v1:contoso:contosoReview"} {
+		if _, err := memoryNodes.DefaultRegistry().Get(id); err != nil {
+			t.Fatalf("%q must be registered after a boot with both clients: %v", id, err)
+		}
+	}
 }
