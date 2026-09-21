@@ -1,9 +1,10 @@
 @base
-@vendor("OpenAI")
-provider openai {
+@vendor("Anthropic")
+provider anthropic {
   auth {
-    identityProviderId  env("MEMQL_AI_OPENAI_IDENTITY_PROVIDER_ID")
-    serviceAccountId    env("MEMQL_AI_OPENAI_SERVICE_ACCOUNT_ID")
-    identityTokenFile   env("MEMQL_AI_OPENAI_IDENTITY_TOKEN_FILE")
+    federationRuleId   env("MEMQL_AI_ANTHROPIC_FEDERATION_RULE_ID")
+    organizationId     env("MEMQL_AI_ANTHROPIC_ORGANIZATION_ID")
+    serviceAccountId   env("MEMQL_AI_ANTHROPIC_SERVICE_ACCOUNT_ID")
+    identityTokenFile  env("MEMQL_AI_ANTHROPIC_IDENTITY_TOKEN_FILE")
   }
 }

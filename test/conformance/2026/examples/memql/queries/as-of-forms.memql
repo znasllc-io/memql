@@ -1,6 +1,6 @@
 use cluster.concepts.{ node }
 
-/// Every node the cluster holds right now.
+/// The cluster's healthy nodes, as they stand right now.
 query node liveNodes {
   asOf latest
   filter  row => row.health == "healthy"

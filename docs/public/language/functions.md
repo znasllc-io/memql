@@ -708,10 +708,25 @@ These are names, not calls:
 
 ### AI
 
-| Function | Description | Example |
-|----------|-------------|---------|
-| `si(promptName, data)` | Blocking LLM call through a named prompt | `si("consolidateMemory", {episodes: cluster})` |
-| `agent("name", "prompt", partitionId)` | Async agent invocation through the planner | see `dsl/agents/builtins.memql` |
+**There is no AI function in the catalog above, and there is no bare AI call.**
+`si(promptName, data)` is what this page used to list here, and it does not
+exist -- neither does the `ai(promptName, data)` spelling some comments in the
+tree still point at. A body that writes either is refused at load with
+`body_call_unknown`, because the only bare calls a body admits are catalog
+functions and the specs and traits it can see. See
+[Calling a prompt](memql.md#calling-a-prompt).
+
+AI work is reached from a body the way every other Go-backed capability is:
+through a `builtin` call, with named arguments and a file-top import of the
+domain that declares it (`use agents.builtins.{ agent }`).
+
+| Builtin | Description | Called as |
+|---------|-------------|-----------|
+| `agent` | Opens a `v1:work:goal` naming the `invokeAgent` template and returns `{goalId, runId}`; a run dispatcher claims it on an agent node | `builtin agent(name: "assistant", prompt: args.question, partitionId: "system")` |
+| `runAgentTurn` | Runs one agent turn in line and returns its reply. Answers only on an agent node | `builtin runAgentTurn(agentId: args.agentId, prompt: args.question)` |
+
+Both are declared in `dsl/agents/builtins.memql`, which is where their full
+field lists live.
 
 ---
 
@@ -727,7 +742,6 @@ rendered template is a Go text/template file named by `@templateFile`.
 <!-- corpus: 2026/examples/functions/prompts/prompt-syntax.memql -->
 ```memql
 @level("fast")
-@defaultProvider("chat54Mini")
 @templateFile("prompts/condenseConversation.tmpl")
 @description("Summarize older conversation messages into a rolling summary.")
 prompt condenseConversation {
@@ -735,6 +749,13 @@ prompt condenseConversation {
   previousSummary  string              @description("Prior rolling summary; empty on first compaction.")
 }
 ```
+
+> **`@defaultProvider` is an explicit pin, and this example does not use one.**
+> `@level` is how a prompt says how much intelligence it needs; the rules and
+> policies then decide which provider answers. A pin overrides all of that, and
+> pinning one to a paid provider is refused in this repository by
+> `TestNoPaidDefault` -- every concrete provider record here is federated, so a
+> pin naming one routes around the local-first rule the platform ships.
 
 > **Retired prompt forms** (both rejected at parse time):
 > - `func (Prompt) name(args any) { ... }` -- receiver-function wrapping.

@@ -254,9 +254,9 @@ func docsCorpusCompare(t *testing.T, where, marker, casePath, verdict, body stri
 // sentence the failure ends with when they do not.
 //
 // It is separate from the comparison so the three-way decision can be tested
-// without a page (TestDocsCorpusFenceKindDecision). The `retired` arm has no
-// live example among the covered pages today, and an arm that never fires is
-// an arm nothing has ever checked.
+// without a page (TestDocsCorpusFenceKindDecision), including the pairs no page
+// writes -- an arm that fires only when some page happens to show a refused
+// form is an arm that stops being checked the day that page changes.
 func docsCorpusKindAgrees(marker, verdict string) string {
 	switch marker {
 	case "", "fragment":
@@ -546,10 +546,13 @@ func TestPublishedExamplesMatchTheirCorpusCases(t *testing.T) {
 	}
 }
 
-// TestDocsCorpusFenceKindDecision pins the three-way decision the marker makes.
-// It predates any live `retired` fence and stays after them: the decision is a
-// pure function of (marker, verdict), and the pages exercise the arms they
-// happen to need rather than all of them.
+// TestDocsCorpusFenceKindDecision pins the three-way decision the marker makes,
+// including the `retired` arm, which memql.md now exercises end to end: its
+// "Calling a prompt" section shows the `si(...)` call a body cannot make, over
+// a refuse_load case. This test came first and still earns its keep -- it pins
+// the arm as a pure function over (marker, verdict), including the pairs no
+// page writes, so the answer does not depend on a page continuing to show a
+// refused form.
 func TestDocsCorpusFenceKindDecision(t *testing.T) {
 	for _, tc := range []struct {
 		marker, verdict string
