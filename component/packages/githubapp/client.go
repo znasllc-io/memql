@@ -3,6 +3,7 @@ package githubapp
 import (
 	"context"
 	"crypto/rsa"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -103,18 +104,33 @@ func StatusOf(err error) int {
 // sweeping thirty packages on one node hits the same installation repeatedly,
 // and each mint is a round trip and a rate-limit unit.
 type Client struct {
-	cfg       Config
+	cfg Config
+	// source, when set, answers the app's configuration AT EACH OPERATION and
+	// cfg is never read (design record 2026-09-20-github-app-setup, D2).
+	//
+	// The configuration used to be a fact fixed at boot, and everything this
+	// client derives from it was cached on that assumption: the parsed key
+	// behind a sync.Once, the installation tokens for the life of the process.
+	// A cluster owner can now register the app from the product while this
+	// process is running, so "which app" is asked per operation -- and what was
+	// derived from a DIFFERENT app is dropped the moment the answer changes
+	// (adopt). Without that, a node would go on signing with the key of an app
+	// that was replaced, and hand out its installation tokens until they
+	// expired.
+	source    func() Config
 	http      *http.Client
 	apiBase   string
 	oauthBase string
 	now       func() time.Time
 
-	keyOnce sync.Once
-	key     *rsa.PrivateKey
-	keyErr  error
-
-	mu     sync.Mutex
-	tokens map[int64]cachedToken
+	// mu guards everything DERIVED from the configuration: the parsed key and
+	// the installation tokens, and the fingerprint of the app they came from.
+	mu          sync.Mutex
+	derivedFrom [sha256.Size]byte
+	keyParsed   bool
+	key         *rsa.PrivateKey
+	keyErr      error
+	tokens      map[int64]cachedToken
 }
 
 // cachedToken is one installation token and when it stops working.
@@ -148,6 +164,15 @@ func WithOAuthBase(base string) Option {
 }
 func WithClock(now func() time.Time) Option { return func(c *Client) { c.now = now } }
 
+// WithConfigSource makes the client ask for the app's configuration at each
+// operation instead of holding the one it was built with. What a production
+// node wires, so an app registered from the product is seen without a restart;
+// the function is expected to be cheap (the resolver behind it remembers its
+// answer for a few seconds).
+func WithConfigSource(source func() Config) Option {
+	return func(c *Client) { c.source = source }
+}
+
 // New builds a client over cfg. An UNCONFIGURED cfg builds a usable client
 // whose every call answers ErrNotConfigured -- rather than a nil client the
 // caller has to remember to check, which is the shape that produces a
@@ -170,8 +195,42 @@ func New(cfg Config, opts ...Option) *Client {
 // FromEnv is New over ConfigFromEnv -- what a production node wires.
 func FromEnv(opts ...Option) *Client { return New(ConfigFromEnv(), opts...) }
 
+// config answers the app's configuration for ONE operation. Every method reads
+// it once, at its top, and works from that value -- so a registration landing
+// mid-call cannot give one request the client id of one app and the key of
+// another.
+func (c *Client) config() Config {
+	if c == nil {
+		return Config{}
+	}
+	if c.source == nil {
+		return c.cfg
+	}
+	cfg := c.source()
+	c.adopt(cfg)
+	return cfg
+}
+
+// adopt drops what was derived from a different app.
+//
+// The fingerprint is a digest of the two values the derived state depends on:
+// the app id an installation token belongs to, and the key it was minted with.
+// A digest rather than the strings themselves, so comparing configurations
+// never makes a second copy of the private key to keep alive.
+func (c *Client) adopt(cfg Config) {
+	fingerprint := sha256.Sum256([]byte(cfg.AppId + "\x00" + cfg.PrivateKeyB64))
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if fingerprint == c.derivedFrom {
+		return
+	}
+	c.derivedFrom = fingerprint
+	c.keyParsed, c.key, c.keyErr = false, nil, nil
+	c.tokens = map[int64]cachedToken{}
+}
+
 // Configured reports whether this client can do anything at all.
-func (c *Client) Configured() bool { return c != nil && c.cfg.Configured() }
+func (c *Client) Configured() bool { return c != nil && c.config().Configured() }
 
 // Missing names the absent configuration values, for the operator sentence
 // behind github_app_not_configured. Nil is treated as "everything", because a
@@ -180,16 +239,20 @@ func (c *Client) Missing() []string {
 	if c == nil {
 		return Config{}.Missing()
 	}
-	return c.cfg.Missing()
+	return c.config().Missing()
 }
 
 // InstallURL is where a person installs the app on another account. Empty when
 // the slug is absent, so a caller renders no link rather than a broken one.
 func (c *Client) InstallURL() string {
-	if c == nil || strings.TrimSpace(c.cfg.Slug) == "" {
+	if c == nil {
 		return ""
 	}
-	return c.oauthBase + "/apps/" + url.PathEscape(c.cfg.Slug) + "/installations/new"
+	slug := strings.TrimSpace(c.config().Slug)
+	if slug == "" {
+		return ""
+	}
+	return c.oauthBase + "/apps/" + url.PathEscape(slug) + "/installations/new"
 }
 
 // ---------------------------------------------------------------------------

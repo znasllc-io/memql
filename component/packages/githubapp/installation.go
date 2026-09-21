@@ -26,10 +26,11 @@ import (
 // difference between repository_not_installed and a 404 the fetcher would have
 // to read as "private, or not there".
 func (c *Client) InstallationForRepo(ctx context.Context, owner, repo string) (int64, error) {
-	if !c.Configured() {
+	cfg := c.config()
+	if !cfg.Configured() {
 		return 0, ErrNotConfigured
 	}
-	assertion, err := c.appJWT(c.now())
+	assertion, err := c.appJWT(cfg, c.now())
 	if err != nil {
 		return 0, err
 	}
@@ -61,7 +62,8 @@ func (c *Client) InstallationForRepo(ctx context.Context, owner, repo string) (i
 // installation, so keeping it anywhere a second process could read it would
 // widen its blast radius without shortening its life.
 func (c *Client) InstallationToken(ctx context.Context, installationId int64) (string, error) {
-	if !c.Configured() {
+	cfg := c.config()
+	if !cfg.Configured() {
 		return "", ErrNotConfigured
 	}
 	if installationId == 0 {
@@ -76,7 +78,7 @@ func (c *Client) InstallationToken(ctx context.Context, installationId int64) (s
 		return cached.token, nil
 	}
 
-	assertion, err := c.appJWT(now)
+	assertion, err := c.appJWT(cfg, now)
 	if err != nil {
 		return "", err
 	}

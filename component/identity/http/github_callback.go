@@ -114,7 +114,9 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg := s.Cfg.GitHubApp
+	// ASKED NOW, not read off the boot-time config: a cluster owner can
+	// register the app while this process is running (Server.GitHubApp).
+	cfg, _ := s.gitHubApp(r.Context())
 	if !cfg.Configured() {
 		// 404 rather than a redirect: on a cluster with no GitHub App this
 		// route does not exist, and saying so is both honest and quieter than

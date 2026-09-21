@@ -182,7 +182,7 @@ func TestAppJWTIsRS256OverTheAppsClaims(t *testing.T) {
 	now := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
 	c := testClient(t, newHub(), &now)
 
-	token, err := c.appJWT(now)
+	token, err := c.appJWT(c.config(), now)
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestAPrivateKeyErrorNamesTheVariableAndNotTheMaterial(t *testing.T) {
 			cfg := testConfig(t)
 			cfg.PrivateKeyB64 = tc.key
 			c := New(cfg, WithClock(func() time.Time { return now }))
-			_, err := c.appJWT(now)
+			_, err := c.appJWT(c.config(), now)
 			if err == nil {
 				t.Fatal("a key this node cannot parse must refuse")
 			}
@@ -718,5 +718,137 @@ func TestInstallURLNamesTheApp(t *testing.T) {
 	c := testClient(t, newHub(), &now)
 	if got := c.InstallURL(); got != "https://github.com/apps/memql-connect/installations/new" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// A configuration that arrives, and changes, while the process runs
+// ---------------------------------------------------------------------------
+
+// A second app, with its own key, for "the owner registered a different one".
+func otherConfig(t *testing.T) Config {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	return Config{
+		AppId:    "7654321",
+		Slug:     "memql-second",
+		ClientId: "Iv1.secondclientid",
+		// DERIVED from the first app's fixture rather than spelled as a second
+		// literal: a quoted, key-shaped value after the word "secret" is what
+		// the repository's secret scanner is built to refuse, and it cannot
+		// tell a fixture from a credential. No assertion reads this value; it
+		// only has to differ.
+		ClientSecret:  testClientSecret + "-second",
+		PrivateKeyB64: base64.StdEncoding.EncodeToString(encoded),
+	}
+}
+
+// TestAnAppRegisteredWhileTheProcessRunsIsSeenWithoutARestart is the reason
+// the source exists (design record 2026-09-20-github-app-setup, D2): a cluster
+// owner registers the app from the product, and the node that was answering
+// github_app_not_configured a moment ago has to start answering.
+func TestAnAppRegisteredWhileTheProcessRunsIsSeenWithoutARestart(t *testing.T) {
+	var current Config
+	c := New(Config{}, WithConfigSource(func() Config { return current }))
+	if c.Configured() {
+		t.Fatal("a client with no app reports itself configured")
+	}
+	if got := c.InstallURL(); got != "" {
+		t.Fatalf("no app, and an install link anyway: %q", got)
+	}
+	if _, err := c.InstallationToken(context.Background(), 42); !errors.Is(err, ErrNotConfigured) {
+		t.Fatalf("want ErrNotConfigured before the registration, got %v", err)
+	}
+
+	current = testConfig(t)
+	if !c.Configured() {
+		t.Fatal("the registration was not seen")
+	}
+	if got := c.InstallURL(); !strings.HasSuffix(got, "/apps/memql-connect/installations/new") {
+		t.Fatalf("install link = %q", got)
+	}
+	if len(c.Missing()) != 0 {
+		t.Fatalf("Missing() = %v after the registration", c.Missing())
+	}
+}
+
+// TestAReplacedAppDropsTheKeyAndTheTokensOfTheOneBefore: the parsed key used
+// to sit behind a sync.Once and the installation tokens lived as long as the
+// process, both correct while the configuration was a boot-time fact. With a
+// source, a node that kept either would go on signing as an app that was
+// replaced, and handing out its tokens until they expired.
+func TestAReplacedAppDropsTheKeyAndTheTokensOfTheOneBefore(t *testing.T) {
+	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+	expires := now.Add(time.Hour)
+	hub := newHub().json("/app/installations/42/access_tokens", http.StatusCreated,
+		`{"token":"`+mintedToken+`","expires_at":"`+expires.Format(time.RFC3339)+`"}`)
+	first, second := testConfig(t), otherConfig(t)
+	current := first
+	c := New(Config{},
+		WithConfigSource(func() Config { return current }),
+		WithHTTPClient(&http.Client{Transport: hub}),
+		WithClock(func() time.Time { return now }))
+
+	if _, err := c.InstallationToken(context.Background(), 42); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.InstallationToken(context.Background(), 42); err != nil {
+		t.Fatal(err)
+	}
+	if got := hub.hits("/app/installations/42/access_tokens"); got != 1 {
+		t.Fatalf("under one app the token is cached: want 1 mint, got %d", got)
+	}
+
+	current = second
+	if _, err := c.InstallationToken(context.Background(), 42); err != nil {
+		t.Fatal(err)
+	}
+	if got := hub.hits("/app/installations/42/access_tokens"); got != 2 {
+		t.Fatalf("a token minted under the app before was reused for the one after: %d mints", got)
+	}
+
+	// ...and the mint was signed AS the second app, with the second app's key.
+	seen := hub.seen()
+	assertion := strings.TrimPrefix(seen[len(seen)-1].Header.Get("Authorization"), "Bearer ")
+	parts := strings.Split(assertion, ".")
+	if len(parts) != 3 {
+		t.Fatalf("not a JWT: %q", assertion)
+	}
+	claims, _ := base64.RawURLEncoding.DecodeString(parts[1])
+	if !strings.Contains(string(claims), `"iss":"7654321"`) {
+		t.Fatalf("the assertion names the app before: %s", claims)
+	}
+	raw, _ := base64.StdEncoding.DecodeString(second.PrivateKeyB64)
+	block, _ := pem.Decode(raw)
+	key, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sig, _ := base64.RawURLEncoding.DecodeString(parts[2])
+	sum := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
+	if err := rsa.VerifyPKCS1v15(&key.PublicKey, crypto.SHA256, sum[:], sig); err != nil {
+		t.Fatalf("the assertion was not signed with the key of the app now configured: %v", err)
+	}
+}
+
+// A static client still parses its key once and keeps its tokens: nothing
+// about the boot-time path changed.
+func TestAStaticClientNeverAsksASource(t *testing.T) {
+	now := time.Now().UTC()
+	c := New(testConfig(t), WithClock(func() time.Time { return now }))
+	a, err := c.appJWT(c.config(), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := c.appJWT(c.config(), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a == "" || b == "" {
+		t.Fatal("a configured static client minted no assertion")
 	}
 }

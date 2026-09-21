@@ -43,18 +43,18 @@ const (
 // and the installation-token mint -- and for nothing else. It is never cached:
 // signing is cheap next to a round trip, and a cached assertion is one more
 // secret with a lifetime to reason about.
-func (c *Client) appJWT(now time.Time) (string, error) {
-	if !c.cfg.Configured() {
+func (c *Client) appJWT(cfg Config, now time.Time) (string, error) {
+	if !cfg.Configured() {
 		return "", ErrNotConfigured
 	}
-	key, err := c.privateKey()
+	key, err := c.privateKey(cfg)
 	if err != nil {
 		return "", err
 	}
 	claims, merr := json.Marshal(map[string]any{
 		"iat": now.Add(-jwtBackdate).Unix(),
 		"exp": now.Add(jwtLifetime).Unix(),
-		"iss": c.cfg.AppId,
+		"iss": cfg.AppId,
 	})
 	if merr != nil {
 		return "", merr
@@ -70,7 +70,9 @@ func (c *Client) appJWT(now time.Time) (string, error) {
 
 func base64url(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
 
-// privateKey decodes and parses the app's key ONCE per client.
+// privateKey decodes and parses the app's key ONCE PER APP: the result is kept
+// until adopt sees a different configuration, which is the only thing that can
+// make it wrong.
 //
 // Every error here names the SHAPE of the failure and never the material: a
 // base64 error carries a byte offset, pem.Decode carries nothing at all, and
@@ -81,33 +83,36 @@ func base64url(b []byte) string { return base64.RawURLEncoding.EncodeToString(b)
 // Both PKCS#1 and PKCS#8 are accepted because GitHub's download button hands
 // out the first and every conversion tool in the world produces the second;
 // refusing one would be refusing a key that is correct.
-func (c *Client) privateKey() (*rsa.PrivateKey, error) {
-	c.keyOnce.Do(func() {
-		raw, err := base64.StdEncoding.DecodeString(c.cfg.PrivateKeyB64)
-		if err != nil {
-			c.keyErr = fmt.Errorf("%s is not base64: %v", EnvPrivateKeyB64, err)
-			return
-		}
-		block, _ := pem.Decode(raw)
-		if block == nil {
-			c.keyErr = fmt.Errorf("%s does not decode to a PEM block -- it is the app's private key file, base64-encoded whole", EnvPrivateKeyB64)
-			return
-		}
-		if key, perr := x509.ParsePKCS1PrivateKey(block.Bytes); perr == nil {
-			c.key = key
-			return
-		}
-		parsed, perr := x509.ParsePKCS8PrivateKey(block.Bytes)
-		if perr != nil {
-			c.keyErr = fmt.Errorf("%s is neither a PKCS#1 nor a PKCS#8 private key: %v", EnvPrivateKeyB64, perr)
-			return
-		}
-		key, ok := parsed.(*rsa.PrivateKey)
-		if !ok {
-			c.keyErr = fmt.Errorf("%s is a %T; a GitHub App signs with RSA", EnvPrivateKeyB64, parsed)
-			return
-		}
-		c.key = key
-	})
+func (c *Client) privateKey(cfg Config) (*rsa.PrivateKey, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.keyParsed {
+		return c.key, c.keyErr
+	}
+	c.key, c.keyErr = parsePrivateKey(cfg.PrivateKeyB64)
+	c.keyParsed = true
 	return c.key, c.keyErr
+}
+
+func parsePrivateKey(privateKeyB64 string) (*rsa.PrivateKey, error) {
+	raw, err := base64.StdEncoding.DecodeString(privateKeyB64)
+	if err != nil {
+		return nil, fmt.Errorf("%s is not base64: %v", EnvPrivateKeyB64, err)
+	}
+	block, _ := pem.Decode(raw)
+	if block == nil {
+		return nil, fmt.Errorf("%s does not decode to a PEM block -- it is the app's private key file, base64-encoded whole", EnvPrivateKeyB64)
+	}
+	if key, perr := x509.ParsePKCS1PrivateKey(block.Bytes); perr == nil {
+		return key, nil
+	}
+	parsed, perr := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if perr != nil {
+		return nil, fmt.Errorf("%s is neither a PKCS#1 nor a PKCS#8 private key: %v", EnvPrivateKeyB64, perr)
+	}
+	key, ok := parsed.(*rsa.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("%s is a %T; a GitHub App signs with RSA", EnvPrivateKeyB64, parsed)
+	}
+	return key, nil
 }

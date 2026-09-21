@@ -23,6 +23,7 @@ import (
 	"github.com/znasllc-io/memql/component/identity/devicecode"
 	"github.com/znasllc-io/memql/component/identity/emailsender"
 	"github.com/znasllc-io/memql/component/identity/enrolment"
+	"github.com/znasllc-io/memql/component/identity/githubconnect"
 	httpidentity "github.com/znasllc-io/memql/component/identity/http"
 	"github.com/znasllc-io/memql/component/identity/invitation"
 	"github.com/znasllc-io/memql/component/identity/magiclink"
@@ -264,6 +265,15 @@ func (a *App) integrationsIdentity() {
 	// configuration problem reported to everybody except the operator.
 	httpSrv.OIDCLookup = httpSrv.DefaultOIDCLookup
 	httpSrv.OIDCSignIn = httpSrv.DefaultOIDCSignIn
+	// THE CLUSTER'S GITHUB APP, ASKED PER REQUEST (design record
+	// 2026-09-20-github-app-setup, D2). cfg.GitHubApp is the environment at
+	// boot; a cluster owner can now register the app while this process runs,
+	// and the callback that lands their first grant arrives seconds later --
+	// on this replica or the other one. The environment still answers first.
+	httpSrv.GitHubApp = &githubconnect.Resolver{Rows: githubconnect.RowReader{
+		Variable: a.engine.ResolveSystemVariable,
+		Secret:   a.engine.ResolveSystemSecret,
+	}}
 	svc.SetHTTPMounter(httpSrv)
 
 	// Phase 3 + Phase 6: web UI. Phase 6 swaps the static
