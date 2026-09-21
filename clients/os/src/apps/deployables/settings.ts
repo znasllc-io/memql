@@ -26,7 +26,7 @@ import { TRAFFIC_WINDOWS, type TrafficWindow } from "./traffic";
  * NO SECTION CARRIES A ROLE. `v1:platform:site` and `v1:platform:package`
  * declare the composite tier, so every signed-in person has deployables and
  * sources of their own to read and the engine decides how far the list
- * reaches. The write half -- New deployable, and every act on the page -- is
+ * reaches. The write half -- Add a deployable, and every act on the page -- is
  * gated INSIDE the section at rank >= 200, exactly as Sites gated publishing
  * rather than the list; that gate is presentation over the Go hostname policy
  * and the engine's own write guards, never the boundary.

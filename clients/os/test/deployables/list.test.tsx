@@ -525,8 +525,8 @@ describe("a deploy waiting for you", () => {
   it("separates the address from availability", async () => {
     mount(fakeConnection(WITH_PACKAGE));
     const row = (await screen.findByText("storefront")).closest(".os-row") as HTMLElement;
-    expect(within(row).getByText("store.memql.example.com").closest(".deployable-list-identity")).not.toBeNull();
-    expect(within(row).getByText("Unknown").closest(".deployable-list-state")).not.toBeNull();
+    expect(within(row).getByText("store.memql.example.com").closest(".os-record-identity")).not.toBeNull();
+    expect(within(row).getByText("Unknown").closest(".os-record-state")).not.toBeNull();
   });
 
   it("clears the mark when the run moves on, on its own event", async () => {
@@ -646,19 +646,19 @@ describe("show archived", () => {
 });
 
 // ---------------------------------------------------------------------------
-// New deployable: the compose seam
+// Add a deployable: the compose seam
 // ---------------------------------------------------------------------------
 
-describe("New deployable", () => {
+describe("Add a deployable", () => {
   it("replaces the list in place, and Back returns to it", async () => {
     mount(fakeConnection(WITH_PACKAGE));
     await screen.findByText("storefront");
 
-    await click(screen.getByRole("button", { name: /New deployable/ }));
-    const compose = await screen.findByRole("region", { name: "New deployable" });
-    // The Head's title becomes "New deployable"; the list is gone, not
+    await click(screen.getByRole("button", { name: /Add a deployable/ }));
+    const compose = await screen.findByRole("region", { name: "Add a deployable" });
+    // The Head's title becomes "Add a deployable"; the list is gone, not
     // pushed below a modal (design D4).
-    expect(within(compose).getByRole("heading", { name: "New deployable" })).toBeTruthy();
+    expect(within(compose).getByRole("heading", { name: "Add a deployable" })).toBeTruthy();
     expect(screen.queryByText("storefront")).toBeNull();
 
     // The rail is the form: Source is the open stop and carries the caption.
@@ -695,7 +695,7 @@ describe("New deployable", () => {
     for (const role of ["developer", "owner"]) {
       const view = mount(fakeConnection(WITH_PACKAGE), { role });
       await screen.findByText("storefront");
-      expect(screen.getByRole("button", { name: /New deployable/ })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /Add a deployable/ })).toBeTruthy();
       view.unmount();
     }
   });
@@ -704,9 +704,9 @@ describe("New deployable", () => {
     for (const role of ["admin", "reader"]) {
       const view = mount(fakeConnection(WITH_PACKAGE), { role });
       await screen.findByText("storefront");
-      expect(screen.queryByRole("button", { name: /New deployable/ })).toBeNull();
+      expect(screen.queryByRole("button", { name: /Add a deployable/ })).toBeNull();
       // ...and the empty state does not tell them to use a control they do not have.
-      expect(screen.queryByText(/New deployable is where one starts/)).toBeNull();
+      expect(screen.queryByText(/Add a deployable from|Add one from the Deployables section/)).toBeNull();
       view.unmount();
     }
   });

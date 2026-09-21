@@ -6,6 +6,7 @@ import { AddButton } from "../../kit/AddButton";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ActivePane } from "./paneActivity";
 import { Archive, ArrowUpCircle, ChevronRight, GitBranch, Globe, ShoppingBag } from "lucide-react";
+import { RecordRow } from "../../kit/RecordRow";
 
 import type { OsAppProps } from "../../system/registry";
 import { useDeployablesSettings } from "./settingsContext";
@@ -79,7 +80,7 @@ import { DEPLOYABLE_KINDS, kindLabel } from "./targets";
 //       |                          |
 //       |   --select a source--> Source
 //       |
-//       '-- New deployable -----> Compose
+//       '-- Add a deployable -----> Compose
 //
 // Compose already worked this way; everything else joins it.
 //
@@ -394,7 +395,7 @@ export function DeployablesSection({
 
     const filtered = filterIsNarrowing(filter);
     return (
-      <div className="os-app-stack os-deployables-list deployable-overview" data-density={density}>
+      <div className="os-app-stack os-deployables-list deployable-overview os-record-list" data-density={density}>
         <Head title="Deployables" meta={!feedError && list?.snapshot.state === "live" ? listedCount : undefined}>
           <Refine iconOnly
             search={filter.search}
@@ -448,15 +449,17 @@ export function DeployablesSection({
               ))}
             </Select>
           </Refine>
-          {/* "New", not "New deployable": the Head directly beside it reads
-              Deployables, so the noun was said twice on one line. The
-              ACCESSIBLE name keeps the full phrase, because a screen reader
-              reaching this button out of context has no Head to read it
-              against. */}
+          {/* THE SAME WORDS AS THE PAGE IT OPENS. The button draws a plus and
+              nothing else -- the Head beside it already says Deployables --
+              so the phrase lives in its ACCESSIBLE name, where a screen reader
+              reaching it out of context has no Head to read it against. It is
+              "Add a deployable" because the wizard it opens is titled that,
+              the way "Add a machine" and "Add a domain" open theirs: an act
+              keeps its name through the whole flow. */}
           {/* `deploy`, because composing ENDS in a deploy: a person holding
               only `sources` has nothing to reach here that is theirs. */}
           {can.deploy ? (
-            <AddButton label="New deployable" className="deployable-new" onClick={() => setView({ kind: "compose" })} />
+            <AddButton label="Add a deployable" className="deployable-new" onClick={() => setView({ kind: "compose" })} />
           ) : null}
         </Head>
 
@@ -508,7 +511,7 @@ export function DeployablesSection({
           emptyText={emptyText}
           emptyContent={<EmptyState icon={Globe} title={showArchived ? "No archived deployables" : filtered ? "No matching deployables" : "No deployables yet"}
             action={filtered ? <Button onClick={() => setFilter(DEFAULT_LIST_FILTER)}>Clear filters</Button> : undefined}>
-            {showArchived ? "Archived apps will appear here. Restore one to bring it back offline." : filtered ? "Try a different search or clear the filters." : can.deploy ? "Use New deployable to add a repository, built files or a CI pipeline." : "Apps shared with your account will appear here."}
+            {showArchived ? "Archived apps will appear here. Restore one to bring it back offline." : filtered ? "Try a different search or clear the filters." : can.deploy ? "Add a deployable from a repository, built files or a CI pipeline." : "Apps shared with your account will appear here."}
           </EmptyState>}
           renderRow={(group, tick) => (
             <GroupLine
@@ -683,22 +686,29 @@ function DeployableLine({
   const state = row.disabled ? "Inactive" : site ? siteStateWord(site) : row.parked ? "Review needed" : "Not deployed";
   const name = row.name;
   const client = accountNameFrom(accounts, site?.accountId ?? "");
-  return <button type="button" className="os-row deployable-list-row" data-current={state === "Live" || undefined}
-    data-dim={site?.status === "disabled" || archived || row.disabled || undefined} data-open={open || undefined} onClick={onOpen}>
-    <span className="deployable-list-icon">{site?.kind === "shopify_storefront" ? <ShoppingBag size={18} aria-hidden /> : <Globe size={18} aria-hidden />}</span>
-    <span className="deployable-list-identity"><span className="os-row-name">{name}</span>
-      <span className="os-deploy-address">{row.hostname === name ? kindLabel(row.kind) : row.hostname || "No address yet"}</span>
-    </span>
-    <span className="deployable-list-summary">
-      {client ? <span>{client}</span> : null}
-      {deployedBy ? <span className="os-deploy-by" data-os-deployed-by>{site || row.parked ? "deployed" : "added"} by {deployedBy}</span> : null}
-      {traffic?.lastServedAt ? <span title={`${traffic.requests.toLocaleString()} requests over the last week`}>served {formatFreshness(traffic.lastServedAt, now)}</span> : null}
-    </span>
-    <span className="deployable-list-state"><span className="deployable-status" data-tone={state === "Live" ? "accent" : state === "Unavailable" ? "warn" : "muted"} title={site?.status === "live" ? healthExplanation(site, now.getTime()) : undefined}>{state}</span>
+  // THE KIT'S ROW, NOT A LOCAL ONE. This list is where `RecordRow` came from:
+  // it was drawn here by hand and styled in composition.css under
+  // `.deployable-overview`, so no other app could use it. It is the kit's now,
+  // and this list is its first customer rather than its only copy.
+  return <RecordRow
+    icon={site?.kind === "shopify_storefront" ? <ShoppingBag size={18} aria-hidden /> : <Globe size={18} aria-hidden />}
+    name={name}
+    secondary={row.hostname === name ? kindLabel(row.kind) : row.hostname || "No address yet"}
+    state={state}
+    tone={state === "Live" ? "accent" : state === "Unavailable" ? "warn" : "muted"}
+    stateTitle={site?.status === "live" ? healthExplanation(site, now.getTime()) : undefined}
+    stateExtra={<>
       {waiting && state !== "Review needed" ? <span className="os-deploy-waiting">Review needed</span> : null}
       {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
-    </span>
-    {row.pkg ? <AttentionMarker appId="deployables" target={updateTarget(row.pkg.id)} /> : null}
-    <ChevronRight size={14} aria-hidden className="deployable-list-chevron" />
-  </button>;
+    </>}
+    trailing={row.pkg ? <AttentionMarker appId="deployables" target={updateTarget(row.pkg.id)} /> : null}
+    current={state === "Live"}
+    dim={site?.status === "disabled" || archived || row.disabled}
+    open={open}
+    onOpen={onOpen}
+  >
+    {client ? <span>{client}</span> : null}
+    {deployedBy ? <span className="os-deploy-by" data-os-deployed-by>{site || row.parked ? "deployed" : "added"} by {deployedBy}</span> : null}
+    {traffic?.lastServedAt ? <span title={`${traffic.requests.toLocaleString()} requests over the last week`}>served {formatFreshness(traffic.lastServedAt, now)}</span> : null}
+  </RecordRow>;
 }

@@ -28,6 +28,7 @@ import { LiveStop } from "./stops/Live";
 import { SourceStop } from "./stops/Source";
 import { WhatItIsStop } from "./stops/WhatItIs";
 import { WhereItLivesStop } from "./stops/WhereItLives";
+import { DomainWizard } from "./stops/Domains";
 import { useBundleFlip } from "./useBundleFlip";
 
 // The deployable page (epic memql#4937, design sections C and D): ONE head,
@@ -136,10 +137,17 @@ export function DeployablePage({
   // open one closes it. Cleared when the deployable changes, so a stop opened
   // on one is never carried onto another.
   const [detail, setDetail] = useState<WorkspaceDetail | null>(null);
+  // WHICH PART OF "Addresses and client" IS OPEN. The domains list, one
+  // binding's setup, or the add form -- each its OWN view with its own Head, so
+  // the trail names the real depth and a list never shares a scroll column
+  // with the detail it opened (DESIGN.md rule 11). The state lives HERE rather
+  // than in the stop because the Head that owns the trail is drawn here.
+  const [domainView, setDomainView] = useState<{ kind: "list" } | { kind: "domain"; id: string } | { kind: "add" }>({ kind: "list" });
   const [confirming, setConfirming] = useState(false);
   const [typed, setTyped] = useState("");
   useEffect(() => {
     setDetail(null);
+    setDomainView({ kind: "list" });
     setConfirming(false);
     setTyped("");
   }, [site.id]);
@@ -279,6 +287,8 @@ export function DeployablePage({
             accounts={accounts}
             canBindDomain={can.domains}
             clusterDomain={clusterDomain}
+            onOpenDomain={(id) => setDomainView({ kind: "domain", id })}
+            onAddDomain={() => setDomainView({ kind: "add" })}
           />
         );
       case "build":
@@ -289,6 +299,23 @@ export function DeployablePage({
         return null;
     }
   };
+
+  if (detail === "whereItLives" && domainView.kind !== "list") {
+    const toAddresses = () => setDomainView({ kind: "list" });
+    // ONE SURFACE FOR A DOMAIN, whether it is being added or come back to: the
+    // wizard opens on the name, or on the binding at whatever stage the
+    // cluster has walked it to. It owns the whole pane -- its bar is the
+    // window's floor, so it cannot sit inside a page that already has one.
+    return <DomainWizard
+      key={domainView.kind === "domain" ? domainView.id : "add"}
+      site={site}
+      name={name}
+      domainId={domainView.kind === "domain" ? domainView.id : ""}
+      trail={[{ label: backLabel, onSelect: onBack }, { label: name, onSelect: () => { setDomainView({ kind: "list" }); setDetail(null); } }, { label: "Addresses and client", onSelect: toAddresses }]}
+      back={{ label: "Addresses and client", onSelect: toAddresses }}
+      onLeave={toAddresses}
+    />;
+  }
 
   if (detail === "whereItLives") {
     const stage = railFor(rail).stages.find(stage => stage.id === "whereItLives");

@@ -1024,8 +1024,8 @@ async function composeSource(seed: FakeSeed): Promise<{ connection: FakeConnecti
       { role: "owner", userId: "u-me" },
     ),
   );
-  await click(await screen.findByRole("button", { name: /New deployable/ }));
-  const region = await screen.findByRole("region", { name: "New deployable" });
+  await click(await screen.findByRole("button", { name: /Add a deployable/ }));
+  const region = await screen.findByRole("region", { name: "Add a deployable" });
   await click(within(region).getByRole("radio", { name: /A repository/ }));
   return { connection, region };
 }
@@ -1213,7 +1213,7 @@ describe("the compose Source stop, with a connection", () => {
     });
     await click(await within(region).findByRole("button", { name: /widget/ }));
 
-    await click(await within(region).findByRole("button", { name: /Review$/ }));
+    await click(await within(region).findByRole("button", { name: /^Review/ }));
     expect(await within(region).findByText("acme-storefront")).toBeTruthy();
     expect(within(region).getByText("web")).toBeTruthy();
     expect(within(region).getByText("clients/web")).toBeTruthy();

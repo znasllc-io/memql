@@ -4,7 +4,7 @@ import { accountNameFrom, type AccountRow } from "../../../accounts/rows";
 import { Caption } from "../../../../kit";
 import { useAccountPeople } from "../../../accounts/useAccounts";
 import { useSiteAccount } from "../../actions";
-import { liveUrlFor, type SiteRow } from "../../rows";
+import type { SiteRow } from "../../rows";
 import { DomainsContent } from "./Domains";
 
 // The Where-it-lives stop: the address, the client, and a cluster owner's
@@ -22,33 +22,53 @@ export function WhereItLivesStop({
   accounts,
   canBindDomain,
   clusterDomain,
+  onOpenDomain,
+  onAddDomain,
 }: {
   site: SiteRow;
   accounts: AccountRow[];
   /** The `domains` part (epic memql#5289): binding or removing a client's own domain. */
   canBindDomain: boolean;
   clusterDomain: string;
+  /** A domain row was opened: the page shows that binding's setup. */
+  onOpenDomain: (domainId: string) => void;
+  /** The list's Add control: the page shows the add form. */
+  onAddDomain: () => void;
 }) {
   const tie = useSiteAccount();
-  const url = liveUrlFor(site.hostname);
 
   return (
     <div className="os-stop-body">
-      {/* The address is CONTENT, and it is the link: the one thing on the
-          page whose text is the thing it opens. The client chip sits beside
-          it (epic memql#4800, D5) because "who is this for" is the same class
-          of fact as "where is it"; a site with no client renders exactly as
-          it did before -- AccountChip draws nothing for an empty name. */}
-      <p className="os-stop-address">
-        {url === "" ? (
-          <code className="os-mono">{site.hostname || "--"}</code>
-        ) : (
-          <a className="os-mono" href={url} target="_blank" rel="noreferrer noopener">
-            {site.hostname}
-          </a>
-        )}
-        <AccountChip name={accountNameFrom(accounts, site.accountId)} />
-      </p>
+      {/* THE ADDRESS IS IN THE DOMAINS LIST, as its first row. It used to stand
+          alone here as a bare link while "Domains" below listed only the custom
+          ones, so a seeded deployable read "No custom domains" with its own
+          domain a few lines above. One list now, every name it answers on.
+
+          EVERYBODY SEES THE LIST, because everybody could always see the
+          address. What the `domains` part (epic memql#5289) decides is whether
+          a binding can be ADDED.
+
+          A SEEDED DEPLOYABLE TAKES BINDINGS LIKE ANY OTHER. What is fixed on
+          MemQL OS or the VS Code site is the SITE ROW -- its own address, its
+          status, its settings, which are re-seeded at boot and refuse a write.
+          A binding is a separate record that points at the site, and none of
+          the custom-domain policy's rules (component/memql/
+          platform_custom_domain_policy.go) names a seeded site. So the
+          built-in address is shown fixed, and Add is offered beside it. */}
+      <DomainsContent
+        site={site}
+        domain={clusterDomain}
+        bindings={canBindDomain}
+        editable={canBindDomain}
+        onOpenDomain={onOpenDomain}
+        onAdd={onAddDomain}
+        // WHO IT IS FOR sits beside WHERE IT IS, as it always did (epic
+        // memql#4800, D5): the same class of fact. It is not the picker said
+        // twice -- a client this reader cannot see still shows here by id,
+        // which the picker alone does not make plain. AccountChip draws
+        // nothing for an empty name, so a site with no client is unchanged.
+        addressFacts={<AccountChip name={accountNameFrom(accounts, site.accountId)} />}
+      />
 
       {/* The client picker. Presentation over engine truth: an account is a
           record with no read effect, so setting one changes who the work is
@@ -87,12 +107,6 @@ export function WhereItLivesStop({
         />
       )}
 
-      {/* Binding a client's own domain is the `domains` part (epic memql#5289),
-          seeded on owner and developer and grantable by name; the engine's
-          capability gate on customDomainAdd / removeCustomDomain and the three
-          Go guards are the authority, and rendering it is the presentation
-          half. */}
-      {canBindDomain ? <DomainsContent site={site} domain={clusterDomain} /> : null}
     </div>
   );
 }

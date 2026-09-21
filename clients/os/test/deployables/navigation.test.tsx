@@ -47,51 +47,57 @@ describe("shared shell navigation", () => {
     await click(await screen.findByLabelText(/^Deployable shop.memql.example.com/));
     await click(await screen.findByRole("button", { name: /^Cluster address/ }));
     expect(screen.queryByRole("dialog", { name: "Addresses and client" })).toBeNull();
+    // The add form is the page the domains list's Add control opens.
+    await click(screen.getByRole("button", { name: "Add a domain" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
     const input = screen.getByRole("textbox", { name: "Domain to bind" });
     fireEvent.change(input, { target: { value: "www.acme.com" } });
     setVisible(false);
     setVisible(true);
     expect(screen.getByRole("textbox", { name: "Domain to bind" })).toBe(input);
     expect((input as HTMLInputElement).value).toBe("www.acme.com");
+    // Back walks the real depth: the add form, the addresses, the deployable.
+    await click(screen.getByRole("button", { name: "Back to Addresses and client" }));
+    expect(screen.getByRole("region", { name: /^Domains for / })).toBeTruthy();
     await click(screen.getByRole("button", { name: "Back to Storefront" }));
     expect(screen.getByRole("region", { name: "Deployable shop.memql.example.com" })).toBeTruthy();
   });
 
   it("shows the landing with no Back on an explicit same-tab click", async () => {
     const { go } = mount();
-    await click(await screen.findByRole("button", { name: /New deployable/ }));
+    await click(await screen.findByRole("button", { name: /Add a deployable/ }));
     expect(screen.getByRole("button", { name: "Back to Deployables" })).toBeTruthy();
     go("deployables");
-    expect(screen.queryByRole("region", { name: "New deployable" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Add a deployable" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Back to Deployables" })).toBeNull();
-    expect(screen.getByRole("button", { name: /New deployable/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Add a deployable/ })).toBeTruthy();
   });
 
   it("retains an unfinished source form across peer tabs and resumes it from New", async () => {
     const { go } = mount();
-    await click(await screen.findByRole("button", { name: /New deployable/ }));
-    const draft = screen.getByRole("region", { name: "New deployable" });
+    await click(await screen.findByRole("button", { name: /Add a deployable/ }));
+    const draft = screen.getByRole("region", { name: "Add a deployable" });
     await click(within(draft).getByRole("radio", { name: /A repository/ }));
     await click(within(draft).getByRole("button", { name: "Use a token instead" }));
     const input = within(draft).getByRole("textbox", { name: "The repository this deployable is built from" });
     fireEvent.change(input, { target: { value: "https://github.com/acme/unfinished" } });
     go("settings");
-    expect(screen.queryByRole("region", { name: "New deployable" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Add a deployable" })).toBeNull();
     go("deployables");
     expect(screen.queryByRole("button", { name: "Back to Deployables" })).toBeNull();
-    await click(screen.getByRole("button", { name: /New deployable/ }));
+    await click(screen.getByRole("button", { name: /Add a deployable/ }));
     expect(screen.getByRole("textbox", { name: "The repository this deployable is built from" })).toBe(input);
     expect((input as HTMLInputElement).value).toBe("https://github.com/acme/unfinished");
   });
 
   it("restores the nested origin on contextual Back", async () => {
     const { go } = mount();
-    await click(await screen.findByRole("button", { name: /New deployable/ }));
-    const draft = screen.getByRole("region", { name: "New deployable" });
+    await click(await screen.findByRole("button", { name: /Add a deployable/ }));
+    const draft = screen.getByRole("region", { name: "Add a deployable" });
     go("logs", "content");
-    expect(screen.queryByRole("region", { name: "New deployable" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Add a deployable" })).toBeNull();
     go("deployables", "back");
-    expect(screen.getByRole("region", { name: "New deployable" })).toBe(draft);
+    expect(screen.getByRole("region", { name: "Add a deployable" })).toBe(draft);
     expect(screen.getByRole("button", { name: "Back to Deployables" })).toBeTruthy();
   });
 
