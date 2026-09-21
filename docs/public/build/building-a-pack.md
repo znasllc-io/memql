@@ -204,12 +204,20 @@ the always-compiled package body. That single rule decides where a pack loads.
 
 ## Storefront packs: in the default build, governed by a row
 
-Build-tag gating above is one of **two** delivery paths, and it is the wrong
-one for a pack a customer's cluster is meant to run. No published image sets a
-pack's tag -- the engine images are built with `BUILD_TAGS=<node type>` and
-nothing else -- so a tag-gated pack could reach a running cluster only through
-a carrier binary, and that route is retiring (memql#2472). A pack behind a tag
-nobody sets is a pack nobody has.
+Build-tag gating above is one of **two** delivery paths, and which tag a pack
+names decides whether it ships at all. The engine images are built with
+`BUILD_TAGS=<node type>` and nothing else, so:
+
+- a pack gated on its **own name** (`referencepack`, `shopifypack`) reaches
+  nothing, because no image sets that tag. It could once arrive through a
+  carrier binary, and that route is retiring (memql#2472). A pack behind a tag
+  nobody sets is a pack nobody has;
+- a pack gated on a **node type** does ship, to that node. `examples/deploypack`
+  is `//go:build identity` plus an unconditional anchor, which is how the
+  deploy lifecycle automations reach the node that writes deployment records.
+
+Neither gives what a customer-facing pack needs: presence on **every** node,
+with its reach changeable by an operator rather than by a release.
 
 **A storefront pack lives under `packs/` and links into every binary, with no
 tag at all** (epic memql#5532). Its reach is then governed by

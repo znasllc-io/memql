@@ -67,10 +67,15 @@ See [Component vs integration vs pack](docs/public/concepts/component-integratio
 `dsl/todos`, `dsl/calendar`, `dsl/campaigns` are **core**. Packs cannot shadow them.
 `memql.RegisterPlugin` is the Go registration primitive. It is not a fourth runtime.
 
-**A pack has TWO delivery paths and only one of them reaches a customer.** A
-build tag (`examples/`) is how a teaching pack stays out of every image; no
-published image sets one, so a tag-gated pack is a pack nobody has. A
-**storefront pack** lives under `packs/`, links into every binary with no tag,
+**A pack has TWO delivery paths, and which tag it names decides whether it
+ships.** A pack gated on its OWN NAME (`referencepack`, `shopifypack`) reaches
+nothing -- no published image sets those, because the images are built with
+`BUILD_TAGS=<node type>` and nothing else. A pack gated on a NODE TYPE does
+ship, to that node: `examples/deploypack` is `//go:build identity` plus an
+unconditional anchor, which is how the deploy lifecycle automations reach the
+node that writes deployment records. What a tag cannot give is a pack on EVERY
+node whose reach an operator can change without a release. A **storefront
+pack** lives under `packs/`, links into every binary with no tag,
 and is governed by `v1:platform:packState` -- whose absence now means **the
 pack's declared default** (`dsl.RegisterPackDefault`) rather than a flat
 "enabled". A pack that declares nothing still defaults to enabled; a storefront
@@ -109,8 +114,9 @@ MemQL/
 │                      DEFAULT is heard before the rows are folded over it. A
 │                      storefront pack ships DISABLED, because enabling one
 │                      publishes a shopper write endpoint and a public read.
-│                      examples/ still holds the TEACHING packs, which stay
-│                      build-tag-gated and reach no cluster
+│                      examples/ keeps the tag-gated packs: the two teaching
+│                      ones, which no image loads, and deploypack, which the
+│                      identity node does load through its own node-type tag
 ├── component/         Core Go components (memql, grpc, events, database,
 │   │                  server, auth, edge, language, ...)
 │   ├── bus/           Channel-based inter-component communication
