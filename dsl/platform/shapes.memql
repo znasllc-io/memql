@@ -85,6 +85,7 @@ shape site siteFull {
   ownerUserId
   hostname
   kind
+  resolutionTail
   bundleRef
   status
   apiProxy

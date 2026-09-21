@@ -49,8 +49,8 @@ export interface ComposeDraft {
   name: string;
   /** The kind a HAND-MADE deployable takes. A package's kinds come from its manifest. */
   kind: string;
-  storeDomain?: string;
-  storefrontTokenRef?: string;
+  /** Storefront only: the store row this deployable will front, or "". */
+  storeId?: string;
 }
 
 export const EMPTY_DRAFT: ComposeDraft = {
@@ -152,7 +152,12 @@ export function sourceReady(
   probeParked: boolean,
   duplicate: PackageRow | null = null,
 ): boolean {
-  const bindingReady = draft.kind !== "shopify_storefront" || Boolean(draft.storeDomain?.trim() && draft.storefrontTokenRef?.trim());
+  // A STOREFRONT MAY BE CREATED UNBOUND. Registering a store needs a cluster
+  // owner and three cluster secrets; blocking the whole add on that would
+  // make somebody who can create deployables unable to create a storefront at
+  // all. Unbound is a real state the Store pane then resolves, and the
+  // deployable is a draft until somebody publishes it either way.
+  const bindingReady = true;
   switch (draft.choice) {
     case "repo":
       return draft.repoUrl.trim() !== "" && draft.name.trim() !== "" && !probeParked && duplicate === null;

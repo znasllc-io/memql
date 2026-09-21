@@ -125,6 +125,46 @@ notices remain visible.
 Fleet and Deployables adopt this composition first. Other apps can reuse these
 components as their overview data is added, without changing their workflows.
 
+### A tab is a different kind of thing; a subset is a filter
+
+An app's section tabs are its NOUNS. Fleet's are machines, policies, the model
+library; Deployables' are **deployables** and **sources**. A slice of one noun
+-- standalone ones, the ones from a zip, the live ones -- is a question asked of
+a list, and belongs behind `Refine` (rule 2), not on a tab.
+
+Deployables used to draw both nouns in one list: a source was a row with its
+apps indented beneath it, then a "Standalone" heading over the rest. A tree
+inside a list, with two row types and an order that followed origin rather than
+anything a person was looking for; the owner's word was "I really hate that
+combined list". Two lists now, in one row language (`RecordRow`):
+
+- **Deployables** is every deployable, flat. A row is there because it has an
+  address of its own. Where it came from is a FACT ON THE ROW (the source's
+  name, "Zip", "CI", "Built in") and a facet in Refine -- never a heading over
+  it and an indent.
+- **Sources** is every repository or zip that produces deployables: what it is
+  called and where it lives, how much it produced, and the one state word a
+  person might have to act on (Review needed, then Update available, then the
+  quiet ones). Its page lists its apps, including the ones it declares and has
+  not deployed, and carries the act its state asks for on its bar.
+- **Every source is on it, and each is summarised by everything it made.** A
+  source whose analysis was refused has made nothing and is still a source:
+  this tab is where somebody looks for it to try again. A search is asked of
+  the SOURCE (its name, where it lives, what it made) and never trims the
+  summary of one it kept; archived is the source's own status, not one of its
+  apps'. The list has its own fold for this (`foldSources`): read as a filter
+  over the deployables list's answer it inherited that list's questions, and
+  showed three of five seeded sources.
+- **What belongs to the source is said on the source, once.** A run parked at a
+  source's gate is "Review needed" on that source's row and on its page's bar,
+  with Review beside it -- not repeated on every deployable the source made.
+- The trail keeps the way in: `Deployables > storefront`, or
+  `Sources > acme/storefront > admin` when that is how the person got there.
+
+One component draws both (`DeployablesSection` with a `root`), because every
+page either list opens is the same page. Two instances, so drilling into a
+source does not move the other tab off whatever it was showing.
+
 ### One trail row, and the window draws it
 
 Every window carries exactly one trail row (`kit` `TrailRow`), drawn by the
@@ -199,6 +239,31 @@ surface in the shell that read as a single thought.
   is measured (`kit/useWide`), not left to a container query. **Width is for
   what needs it:** records, tables and commands take the pane; a sentence
   keeps a readable measure and a field keeps a field's width.
+- **Side by side, the accented name is the step on the stage.** The mark says
+  how far a step has got; the name says where the person is. They are the same
+  step nearly always, and not when an answered step is still showing -- choose
+  a repository and the stage went on saying "Repository" while the rail lit
+  "Review". A stopped step keeps its own colour wherever the person is.
+- **One question a step.** A step that asks three things is three steps. The
+  add-a-deployable wizard's Source step used to be the kind of source, then
+  two loose buttons (connect GitHub, or use a token), then a second stack of
+  cards about updates, with a picker and three fields arriving in between --
+  the owner's word was "overcrowded". It is two steps now: **Source** is the
+  choice and nothing else, and the step after it is NAMED BY THE ANSWER
+  (Repository, Zip, Your CI) and holds what that answer needs. Alternatives
+  that answer one question are ONE choice -- GitHub or a token is a choice
+  row, not a button with a second button beneath it -- and a question that
+  only makes sense once another is answered (what happens when something newer
+  lands) waits until it is.
+- **A step that is one choice is answered by choosing.** There is no Continue
+  to press after the only thing on the page has been answered: the wizard
+  moves on to the step the answer names, and the answered step folds to a line
+  that can be opened again to choose differently.
+- **A step's forward act is on the floor even when it leaves the wizard.**
+  "Connect GitHub" is the Repository step's forward act, so it is the floor's
+  button, not a button in the step. The step says what it needs (a first
+  connection, a fresh one, nothing) because only the step has GitHub's own
+  answer about the grant; the page draws the act.
 - **The orb names the subject.** The gate wears the MemQL mark, because what is
   being set up there is the cluster. An add wears the thing being added: a
   globe, a machine, a rocket. Same circle, same theme tokens.

@@ -138,6 +138,8 @@ const FAILURE_SENTENCES: Record<string, string> = {
     "This cluster is not set up to issue certificates, so the domain cannot be served over HTTPS. An operator sets an ACME issuer for the cluster; everything else about this binding is ready.",
   issuance_failed:
     "The certificate could not be issued. The detail below is what the cluster reported.",
+  removal_failed:
+    "The cluster could not take this domain down yet, so its name is still held. It tries again by itself; the detail below is what it reported.",
 };
 
 export function failureSentence(reason: string): string {
@@ -231,6 +233,29 @@ export function isRecordAtFault(record: DnsRecord, reason: string): boolean {
   if (fault === "") return false;
   if (fault === "TXT") return record.kind === "TXT";
   return record.kind !== "TXT";
+}
+
+/**
+ * Whether a binding belongs in a deployable's list of domains.
+ *
+ * A DOMAIN SOMEBODY CANCELLED LEAVES THE LIST, at once. The list used to keep
+ * every row the concept keeps -- `removing` and `removed` included -- on the
+ * argument that what a cluster served, and when, is an audit worth showing. It
+ * is worth KEEPING, and the engine keeps it; but a list of the names a
+ * deployable answers on is not where it is read. The owner cancelled a domain
+ * and watched it sit there: "it should remove the item from the list."
+ *
+ * So the list is what answers, or is on its way to answering. `removed` is
+ * history. `removing` is the cluster tidying up, which is its business and not
+ * a row for a person to watch -- UNLESS the tidying has failed. That one stays,
+ * and says so, because only `removed` frees a hostname: a removal stuck out of
+ * sight would refuse that name to whoever tried to add it again, with nothing
+ * on the page to say why.
+ */
+export function isListedDomain(d: DomainRow): boolean {
+  if (d.status === "removed") return false;
+  if (d.status === "removing") return d.failureReason !== "";
+  return true;
 }
 
 /** Sorts a site's bindings: the ones needing attention first, removed last. */

@@ -42,9 +42,10 @@ describe("the permissions self-view (memql#4744)", () => {
     // being a reimplementation of `hiddenSurfaces`.
     //
     // A HIDDEN APP IS THE WHOLE ANSWER -- its sections are not enumerated
-    // under it. Listing "Stores -- Stores" beneath a hidden "Stores" pads the
-    // table with rows that all say the same thing and buries the informative
-    // case: a section gated ABOVE an app the person can otherwise open.
+    // under it. Listing "Users -- Invitations" beneath a hidden "Users" pads
+    // the table with rows that all say the same thing and buries the
+    // informative case: a section gated ABOVE an app the person can
+    // otherwise open.
     const opens = (resource?: string) => resource === undefined || roleOpens("admin", resource);
     const gated = [
       ...OS_REGISTRY.apps.flatMap((app) =>
@@ -63,10 +64,15 @@ describe("the permissions self-view (memql#4744)", () => {
     // trail are owner-floored because the engine is (row admission returns
     // ZERO ROWS rather than an error there, so a section is the only
     // mechanism that can stop the trail reading as "nothing happened").
+    //
+    // `Stores` was a fourth until epic memql#5530 deleted the app. Three are
+    // still three, so the floor holds without it; Data origins is named here
+    // in its place because it is the one the comment above already argues
+    // for and the list had never actually asserted.
     expect(gated).toContain("Settings -- Integrations");
     expect(gated).toContain("Settings -- Doors");
     expect(gated).toContain("Cluster -- Audit trail");
-    expect(gated).toContain("Stores");
+    expect(gated).toContain("Cluster -- Data origins");
   });
 
   it("names the resource when a section is what hid the surface", () => {

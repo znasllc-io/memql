@@ -4235,6 +4235,7 @@
         "ownerUserId",
         "packageDeployableName",
         "packageId",
+        "resolutionTail",
         "settings",
         "status",
         "systemOwned",
@@ -4251,6 +4252,10 @@
           "shopify_storefront",
           "spa",
           "static"
+        ],
+        "resolutionTail": [
+          "fallback",
+          "not_found"
         ],
         "status": [
           "archived",
@@ -7235,8 +7240,10 @@
         "adminTokenRef",
         "apiVersion",
         "appClientId",
+        "developmentOfStoreId",
         "domain",
         "health",
+        "isDevelopment",
         "name",
         "ownerUserId",
         "plan",

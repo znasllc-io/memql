@@ -21,6 +21,7 @@ import {
   click,
   emit,
   fakeConnection,
+  STORE,
   probeReply,
   withSession,
   zipReply,
@@ -123,7 +124,7 @@ async function chooseSource(region: HTMLElement, name: RegExp): Promise<void> {
  */
 async function chooseRepository(region: HTMLElement): Promise<void> {
   await chooseSource(region, /A repository/);
-  await click(within(region).getByRole("button", { name: "Use a token instead" }));
+  await click(within(region).getByRole("radio", { name: "A token" }));
 }
 
 /** Follow the wizard to its address step without writing anything. */
@@ -157,6 +158,16 @@ async function blur(label: string): Promise<void> {
 async function choose(label: string, option: string | RegExp): Promise<void> {
   await click(screen.getByLabelText(label));
   await click(await screen.findByRole("option", { name: option }));
+}
+
+/**
+ * A source's page, from the Sources tab. An app a source declares and has not
+ * deployed, and a run parked at its gate, are facts about the SOURCE -- so its
+ * page is where they are reached, not a row wedged into the deployables list.
+ */
+async function openSourcePage(name: string): Promise<HTMLElement> {
+  await click(await screen.findByRole("button", { name: (label) => label.startsWith(`Open ${name},`) }));
+  return screen.findByRole("region", { name: /^Source / });
 }
 
 function railStates(region: HTMLElement): (string | null)[] {
@@ -334,8 +345,9 @@ describe("the compose flow: the Source stop's probe", () => {
     expect(await within(region).findByText("private, or not there")).toBeTruthy();
     expect(within(region).getByLabelText(CREDENTIAL_FIELD)).toBeTruthy();
     // A definite answer ABOUT THE REPOSITORY parks the flow: the rail stops
-    // at Source and Analyze is out of reach.
-    expect(railStates(region)[0]).toBe("stopped");
+    // at the Repository step -- the one that holds the URL it is about -- and
+    // Analyze is out of reach. The choice above it stays answered.
+    expect(railStates(region).slice(0, 2)).toEqual(["complete", "stopped"]);
     await fill(NAME_FIELD, "storefront");
     expect(forwardAct("Analyze")).toBeNull();
   });
@@ -535,10 +547,10 @@ describe("the compose flow: a zip in Files", () => {
     await fill(NAME_FIELD, "Landing page");
 
     // Build reads SKIPPED before anything runs: a built site IS its output.
-    expect(railStates(region)[3]).toBe("skipped");
+    expect(railStates(region)[4]).toBe("skipped");
     await click(within(region).getByRole("button", { name: /^Build/ }));
     expect(within(region).getByText("its built output is in the source")).toBeTruthy();
-    await click(within(region).getByRole("button", { name: /^Source/ }));
+    await click(within(region).getByRole("button", { name: /^Zip/ }));
     await openAddresses();
 
     // A GENERATED ADDRESS, for when it should say nothing about what it
@@ -648,7 +660,7 @@ describe("the compose flow: pushed by your CI", () => {
     // the Live step as the fact it became.
     expect(within(region).getAllByText("marketing.memql.example.com").length).toBeGreaterThan(0);
     expect(document.querySelector(".os-actbar-word")?.textContent).toBe("Waiting for CI");
-    expect(railStates(region)[4]).toBe("open");
+    expect(railStates(region)[5]).toBe("open");
     // Nothing is deployed from here: the Live stop is what waits.
     expect(forwardAct("Deploy")).toBeNull();
     expect(within(region).getByText(/Waiting for the first push from your CI/)).toBeTruthy();
@@ -1020,7 +1032,7 @@ describe("the compose flow: what the run answers", () => {
     expect(await within(region).findByText("no memql-package.yaml at the root of acme/storefront")).toBeTruthy();
     // What it is is where a manifest refusal belongs, and every stop after it
     // is unreached.
-    expect(railStates(region)).toEqual(["complete", "stopped", "pending", "pending", "pending"]);
+    expect(railStates(region)).toEqual(["complete", "complete", "stopped", "pending", "pending", "pending"]);
     // ...and the one forward act is Retry, on the bar beside Cancel -- so
     // leaving a stopped flow is as reachable as trying it again.
     expect(forwardAct("Retry")).toBeTruthy();
@@ -1035,8 +1047,9 @@ describe("the compose flow: leaving and coming back", () => {
   it("lands on the same rail, with the report in place", async () => {
         // A window that was closed mid-compose: the run is parked, and the list's
     // "will serve" row is how somebody finds it again.
-    mount(fakeConnection({ packages: [ACME], awaitingConfirm: [parkedRun("pkg-acme")], sites: [] }));
-    await click(await screen.findByText("storefront"));
+    mount(fakeConnection({ packages: [ACME], awaitingConfirm: [parkedRun("pkg-acme")], sites: [] }), { section: "sources" });
+    await openSourcePage("acme");
+    await click(within(document.querySelector(".os-actbar") as HTMLElement).getByRole("button", { name: "Review" }));
 
     // THE TITLE NAMES THE SOURCE. Reopening a gate for a source added days ago
     // is not adding a new deployable, and calling it one is what made the
@@ -1044,7 +1057,7 @@ describe("the compose flow: leaving and coming back", () => {
     const region = await screen.findByRole("region", { name: "Deploy acme" });
     expect(within(region).getByText("acme/storefront at main")).toBeTruthy();
     expect(within(region).getByText("clients/web")).toBeTruthy();
-    expect(railStates(region)).toEqual(["complete", "complete", "open", "skipped", "pending"]);
+    expect(railStates(region)).toEqual(["complete", "complete", "complete", "open", "skipped", "pending"]);
     await openAddresses();
     expect(await forward("Deploy")).toBeTruthy();
   });
@@ -1065,9 +1078,12 @@ describe("what the compose flow does not do", () => {
     // offered one -- and the pasted URL is still a legitimate first answer
     // rather than something behind "Advanced": one plain control, in the
     // surface, saying what it does.
-    expect(within(region).getByRole("button", { name: "Connect GitHub" })).toBeTruthy();
+    // ON THE FLOOR, where every step's forward act is -- and the two ways in
+    // are one choice in the step, as equals.
+    await waitFor(() => expect(forwardAct("Connect GitHub")).toBeTruthy());
+    expect(within(region).getByRole("radio", { name: "GitHub" }).getAttribute("aria-checked")).toBe("true");
     expect(within(region).queryByLabelText(URL_FIELD)).toBeNull();
-    await click(within(region).getByRole("button", { name: "Use a token instead" }));
+    await click(within(region).getByRole("radio", { name: "A token" }));
     expect(within(region).getByLabelText(URL_FIELD)).toBeTruthy();
   });
 
@@ -1146,7 +1162,7 @@ describe("a private repository whose build output is committed", () => {
     await waitFor(() =>
       expect((document.querySelector(".os-actbar")?.textContent ?? "")).toContain("in place at shop.memql.example.com"),
     );
-    expect(railStates(region)).toEqual(["complete", "complete", "complete", "skipped", "open"]);
+    expect(railStates(region)).toEqual(["complete", "complete", "complete", "complete", "skipped", "open"]);
     // The addresses are facts now, and the one that landed is the run's own.
     expect(within(region).queryByLabelText("The name storefront answers at")).toBeNull();
     expect(within(region).getAllByText("shop.memql.example.com").length).toBeGreaterThan(0);
@@ -1179,8 +1195,9 @@ describe("a gate opened for one app", () => {
       packages: [{ ...ACME, declares: [{ name: "storefront", kind: "spa" }, { name: "web", kind: "spa" }] }],
       sites: [],
     });
-    mount(connection);
-    await click((await screen.findByText("web")).closest("button"));
+    mount(connection, { section: "sources" });
+    const page = await openSourcePage("acme");
+    await click((await within(page).findByText("web")).closest("button"));
 
     // NAMED FROM THE CLICK. Both facts are known before anything runs -- the
     // app from the row, the source from the row's package. Composing the
@@ -1325,8 +1342,9 @@ describe("a source this cluster already tracks", () => {
 describe("composition write failures and bindings", () => {
   it("keeps activation available when enabling the app is refused, without starting analysis", async () => {
     const connection = fakeConnection({ packages: [{...ACME, declares:[{name:"storefront",kind:"spa"}], disabledDeployables:["storefront"]}], enableDeployablesError:"Activation was refused" });
-    mount(connection);
-    await click((await screen.findByText("storefront")).closest("button"));
+    mount(connection, { section: "sources" });
+    const page = await openSourcePage("acme");
+    await click((await within(page).findByText("storefront")).closest("button"));
     await click(await forward("Activate"));
     expect(await screen.findByText("Activation was refused")).toBeTruthy();
     expect(forwardAct("Activate")).toBeTruthy();
@@ -1367,13 +1385,36 @@ describe("composition write failures and bindings", () => {
     await chooseSource(region,/Pushed by your CI/);
     await fill(NAME_FIELD,"Storefront");
     await choose("What kind of deployable this is","Shopify storefront");
-    expect(forwardAct("Continue")).toBeNull();
-    await fill("Shopify store domain","acme.myshopify.com");
-    await fill("Storefront token reference","acme-storefront-token");
+    // A STOREFRONT MAY BE CREATED UNBOUND (epic memql#5530). Registering a
+    // store needs a cluster owner and three cluster secrets; blocking the add
+    // on that would stop somebody who can create deployables from creating a
+    // storefront at all. So the forward act is reachable with no store
+    // chosen -- which it was NOT before this epic, when two free-text fields
+    // were required and were written onto the site row as a second record of
+    // a store the cluster already had.
     await fill("The name Storefront answers at","storefront");
     await click(await forward("Analyze"));
     const create=connection.callsNamed("createSite")[0] ?? "";
-    expect(create).toContain('storeDomain: "acme.myshopify.com"');
-    expect(create).toContain('storefrontTokenRef: "acme-storefront-token"');
+    expect(create).toContain('kind: "shopify_storefront"');
+    expect(create).not.toContain("storeDomain");
+    expect(create).not.toContain("storefrontTokenRef");
+  });
+
+  it("names the store a storefront fronts, and never copies it",async()=>{
+    const connection=fakeConnection({stores:[STORE]});
+    const {region}=await compose(connection);
+    await chooseSource(region,/Pushed by your CI/);
+    await fill(NAME_FIELD,"Storefront");
+    await choose("What kind of deployable this is","Shopify storefront");
+    await choose("The Shopify store this storefront fronts",/example\.myshopify\.com/);
+    await fill("The name Storefront answers at","storefront");
+    await click(await forward("Analyze"));
+    const create=connection.callsNamed("createSite")[0] ?? "";
+    // THE ROW ID, and nothing about the store beyond it. The domain and the
+    // Storefront token reference live on the store row and the edge resolves
+    // both through it, so a copy here would be the duplication this epic
+    // removed, re-created by the surface that creates deployables.
+    expect(create).toContain('storeId: "store-example"');
+    expect(create).not.toContain("myshopify.com");
   });
 });

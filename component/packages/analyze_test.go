@@ -40,7 +40,7 @@ func TestValidPackageAnalyzesClean(t *testing.T) {
 	if !strings.Contains(front.BuildPlan, DefaultBuildCommand) {
 		t.Fatalf("build plan should name the command: %q", front.BuildPlan)
 	}
-	if front.Binding == nil || front.Binding.StorefrontTokenRef != "acme-storefront-token" {
+	if front.Binding == nil || front.Binding.Store != "acme.myshopify.com" {
 		t.Fatalf("storefront binding not carried: %+v", front.Binding)
 	}
 
@@ -153,11 +153,20 @@ func TestEachManifestRuleRefusesWithItsCatalogedCode(t *testing.T) {
 			want: CodeDeployableBindingMissing,
 		},
 		{
-			name: "a storefront with half a binding",
+			// THE BINDING BLOCK IS PRESENT AND NAMES NOTHING. There is one
+			// field now, so "half a binding" no longer exists as a shape --
+			// but an empty `store:` still does, and it is the same manifest
+			// fact: this storefront says nothing about what it fronts.
+			//
+			// A storefront naming a store this CLUSTER does not have is a
+			// different answer entirely (deployable_store_unknown) and is not
+			// testable here: Analyze resolves nothing, which is the point.
+			// store_binding_test.go drives that one through publish.
+			name: "a storefront whose binding names no store",
 			mutate: func(p fstest.MapFS) {
 				p[ManifestName] = file("formatVersion: 1\nname: acme\ndeployables:\n" +
 					"  - name: w\n    path: clients/web\n    kind: shopify_storefront\n" +
-					"    binding: {storeDomain: acme.myshopify.com}\n")
+					"    binding: {store: \"\"}\n")
 			},
 			want: CodeDeployableBindingMissing,
 		},
