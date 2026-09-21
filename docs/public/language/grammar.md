@@ -28,9 +28,10 @@ Edition `2026`, grammar version `2026.09-before-write-error-accessor-77cda60c`.
    { x } zero or more, x* zero or more, ( a | b ) a choice. *)
 
 (* ---- A file ---- *)
-<file>                ::= <use>* <declaration>*
-<use>                 ::= "use" <dotted-path> "{" <name> { "," <name> } "}"
+<file>                ::= <declaration-annotation>* <use>* <declaration>*
+<use>                 ::= "use" <dotted-path> "{" <import-name> { "," <import-name> } "}"
 <dotted-path>         ::= <name> { "." <name> } "."
+<import-name>         ::= <name> [ "as" <name> ]
 <declaration>         ::= <action> | <automation> | <builtin> | <capability>
                         | <concept> | <logic> | <mutation> | <policy> | <prompt>
                         | <provider> | <query> | <rule> | <seed> | <shape> | <spec>
@@ -108,7 +109,7 @@ Edition `2026`, grammar version `2026.09-before-write-error-accessor-77cda60c`.
 <switch-statement>    ::= "switch" <expression> "{" { "case" <literal> { "," <literal> } "{" <statement>* "}" } [ "default" "{" <statement>* "}" ] "}"
 <parallel-statement>  ::= "parallel" "{" { "branch" <name> "{" <statement>* "}" } "}" [ "wait" "any" ] [ <trailing-clause> ]
 <publish-statement>   ::= "publish" <string> "{" <map-entry> { "," <map-entry> } "}"
-<return-statement>    ::= "return" ( <construct-call> | <expression> )
+<return-statement>    ::= "return" [ <construct-call> | <expression> ]
 
 (* ---- Annotations ---- *)
 (* Which annotation is legal where is this production set; which ARGUMENT
@@ -149,6 +150,14 @@ Edition `2026`, grammar version `2026.09-before-write-error-accessor-77cda60c`.
                         | "@requiresConfirmation" ) [ <annotation-args> ]
 <trait-annotation>    ::= ( "@description" | "@disabled" ) [ <annotation-args> ]
 <concept-body-annotation> ::= ( "@relationship" ) [ <annotation-args> ]
+<declaration-annotation> ::= <action-annotation> | <automation-annotation>
+                        | <builtin-annotation> | <capability-annotation>
+                        | <concept-annotation> | <logic-annotation>
+                        | <mutation-annotation> | <policy-annotation>
+                        | <prompt-annotation> | <provider-annotation>
+                        | <query-annotation> | <rule-annotation> | <seed-annotation>
+                        | <shape-annotation> | <spec-annotation> | <tool-annotation>
+                        | <trait-annotation>
 <concept-field-annotation> ::= ( "@description" | "@internal" | "@maxLength" | "@maximum"
                         | "@minLength" | "@minimum" | "@open" | "@pattern" | "@pii"
                         | "@required" | "@secret" | "@serverSet" | "@variant" ) [ <annotation-args> ]

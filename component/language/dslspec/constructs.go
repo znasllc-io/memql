@@ -278,7 +278,7 @@ func constructCatalog() []Construct {
 			Doc:                "File-top cross-file import: `use <domain>.<construct>.{ a, b }` pulls named constructs (concepts/shapes/specs/...) into local scope.",
 			AnnotationReceiver: "",
 			ConceptInSignature: false,
-			Signature:          `<dotted-path> "{" <name> { "," <name> } "}"`,
+			Signature:          `<dotted-path> "{" <import-name> { "," <import-name> } "}"`,
 			BodyForm:           BodyFormImport,
 		},
 	}
