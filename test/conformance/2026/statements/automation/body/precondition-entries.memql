@@ -1,0 +1,12 @@
+@trigger(schedule="0 0 * * * *")
+automation preconditionEntries {
+  args {
+    count any
+  }
+  precondition hasCount {
+    check: args.count != nil
+    literal: count
+    description: "Run only when the event carried a count."
+  }
+  publish "things.counted" { count: args.count ?? 0 }
+}

@@ -1,0 +1,7 @@
+@trigger(schedule="0 0 * * * *")
+automation preconditionWithoutCheck {
+  precondition assertsNothing {
+    description: "A precondition block that asserts nothing."
+  }
+  publish "things.counted" { count: 0 }
+}
