@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/language/deprecation"
 	"github.com/znasllc-io/memql/component/language/parser"
 
 	"github.com/znasllc-io/memql/core/repowalk"
@@ -96,50 +97,78 @@ func (Query) queryListPartitions(args any) (any, error) {
 	}
 }
 
-func TestArraySyntaxRule_FlagsArrayCall(t *testing.T) {
-	src := `
-@description("deprecated")
-@input {
-  names  array(string)
-}
-func (Prompt) foo(args any) {}
-`
-	diags := arraySyntaxRule(src)
-	if len(diags) == 0 {
-		t.Fatalf("expected deprecation hint for array(string), got none")
+// A use of a deprecated form still inside its window is a Warning
+// (memql#5390): the form's rule is the code, its warning the message -- word
+// for word what a load says -- and the range is the spelling as written.
+func TestDeprecatedFormsRule_WarnsOnTheArrayType(t *testing.T) {
+	src := "/// A ticket.\nconcept ticket {\n  /// Names.\n  names  array(string)\n}\n"
+	diags := deprecatedFormsRule(src)
+	if len(diags) != 1 {
+		t.Fatalf("want one warning for array(string), got %+v", diags)
 	}
-	if diags[0].Code != "deprecated-array-syntax" {
-		t.Errorf("code = %q, want deprecated-array-syntax", diags[0].Code)
+	form, _ := deprecation.Lookup(deprecation.ArrayType)
+	d := diags[0]
+	if d.Code != "deprecated_array_type" || d.Severity != SeverityWarning || d.Message != form.Warning() {
+		t.Errorf("got code %q severity %v message %q; want %q, SeverityWarning, %q", d.Code, d.Severity, d.Message, "deprecated_array_type", form.Warning())
 	}
-	if diags[0].Severity != SeverityHint {
-		t.Errorf("severity = %v, want SeverityHint", diags[0].Severity)
-	}
-}
-
-func TestArraySyntaxRule_IgnoresStringLiteralContaining_array(t *testing.T) {
-	src := `
-@description("the array(T) syntax is deprecated")
-func (Query) q(args any) (any, error) {
-  return concept==v1:foo:bar, nil
-}
-`
-	diags := arraySyntaxRule(src)
-	if len(diags) != 0 {
-		t.Fatalf("expected no hints (only string literal mentions array()); got %v", diags)
+	if want := (Range{Start: Position{Line: 4, Column: 10}, End: Position{Line: 4, Column: 23}}); d.Range != want {
+		t.Errorf("range = %+v, want %+v (the spelling as written)", d.Range, want)
 	}
 }
 
-func TestArraySyntaxRule_FlagsMigratedSliceShouldNotFire(t *testing.T) {
-	src := `
-@description("migrated")
-@input {
-  names  []string
+func TestDeprecatedFormsRule_IgnoresStringLiteralContainingArray(t *testing.T) {
+	src := "/// The array(T) syntax is deprecated.\n@description(\"the array(T) syntax is deprecated\")\nconcept ticket {\n  // tags array(string)\n  note string\n}\n"
+	if diags := deprecatedFormsRule(src); len(diags) != 0 {
+		t.Fatalf("expected no warning (only a string and comments mention array()); got %v", diags)
+	}
 }
-func (Prompt) foo(args any) {}
-`
-	diags := arraySyntaxRule(src)
-	if len(diags) != 0 {
-		t.Fatalf("migrated source should not fire hint; got %v", diags)
+
+func TestDeprecatedFormsRule_MigratedSliceDoesNotFire(t *testing.T) {
+	src := "/// A ticket.\nconcept ticket {\n  /// Names.\n  names  []string\n}\n"
+	if diags := deprecatedFormsRule(src); len(diags) != 0 {
+		t.Fatalf("migrated source should not warn; got %v", diags)
+	}
+}
+
+// Past its window the form is the parser's to refuse, as a retired form is:
+// the rule says nothing, and Diagnose reports the refusal as an Error carrying
+// the rule and naming the replacement. Nothing about the table changes between
+// this test and the one above -- only the release deciding.
+func TestDeprecatedFormsRule_ExpiredFormIsTheParsersRefusal(t *testing.T) {
+	restore := deprecation.SetCurrent("0.25.0")
+	defer restore()
+	form, _ := deprecation.Lookup(deprecation.ArrayType)
+
+	src := "/// A ticket.\nconcept ticket {\n  /// Names.\n  names  array(string)\n}\n"
+	if diags := deprecatedFormsRule(src); len(diags) != 0 {
+		t.Fatalf("a form past its window is not a warning; got %+v", diags)
+	}
+	var refused []Diagnostic
+	for _, d := range New(nil).Diagnose(src, "") {
+		if d.Code == deprecation.ArrayType {
+			refused = append(refused, d)
+		}
+	}
+	if len(refused) != 1 || refused[0].Severity != SeverityError || !strings.Contains(refused[0].Message, form.Refusal()) {
+		t.Fatalf("want one Error carrying the refusal, got %+v", refused)
+	}
+	if want := (Range{Start: Position{Line: 4, Column: 10}, End: Position{Line: 4, Column: 23}}); refused[0].Range != want {
+		t.Errorf("range = %+v, want %+v", refused[0].Range, want)
+	}
+}
+
+// The warning needs no vocabulary: a registry-less service -- a workspace whose
+// build failed -- still says where the file spells a deprecated form.
+func TestDiagnose_DeprecatedFormWarnsWithoutAVocabulary(t *testing.T) {
+	src := "/// A ticket.\nconcept ticket {\n  /// Names.\n  names  array(string)\n}\n"
+	var got []Diagnostic
+	for _, d := range New(nil).Diagnose(src, "") {
+		if d.Code == deprecation.ArrayType {
+			got = append(got, d)
+		}
+	}
+	if len(got) != 1 || got[0].Severity != SeverityWarning {
+		t.Fatalf("want one deprecated_array_type Warning from a registry-less Diagnose, got %+v", got)
 	}
 }
 

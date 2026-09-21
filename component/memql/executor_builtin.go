@@ -120,6 +120,9 @@ func (e *MemQLEngine) initBuiltinExecutorHandlers() error {
 		BuiltinExecutorProviderFederationSet: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateProviderFederationSetExpression(ctx, args)
 		},
+		BuiltinExecutorLanguageStatus: func(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			return e.evaluateLanguageStatusExpression(ctx)
+		},
 	}
 
 	if e.functions != nil {

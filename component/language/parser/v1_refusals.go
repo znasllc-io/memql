@@ -15,6 +15,15 @@ package parser
 // on rather than on the wording. The table is data (V1RetiredForms) so the
 // language server can offer the replacement and the docs can list the forms
 // without restating them.
+//
+// RETIRED IS NOT DEPRECATED. A retired form, listed here, refuses the moment it
+// is retired, and the tree is migrated in the same change. A DEPRECATED form is
+// the gentler promise a frozen edition makes (D22): it keeps loading with a
+// warning naming its replacement, its uses are counted, and it refuses only
+// after a window of at least two minor releases. Those forms are
+// component/language/deprecation; where a source spells one, and the
+// RetiredFormError-shaped refusal of one past its window, are
+// deprecated_uses.go.
 
 import (
 	"fmt"

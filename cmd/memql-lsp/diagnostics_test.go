@@ -9,6 +9,7 @@ import (
 	glsp "github.com/tliron/glsp"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
+	"github.com/znasllc-io/memql/component/language/deprecation"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/sense"
 )
@@ -52,6 +53,27 @@ func TestToLSPDiagnostic(t *testing.T) {
 	}
 	if got.Source == nil || *got.Source != lsName {
 		t.Error("source should be memql-lsp")
+	}
+	if got.Tags != nil {
+		t.Errorf("a diagnostic about no deprecated form carries no tag, got %v", got.Tags)
+	}
+}
+
+// A diagnostic whose code is a deprecated form's rule -- the warning on a use
+// inside its window, or the refusal of one past it -- carries the Deprecated
+// tag, which an editor draws as a strike-through (memql#5390).
+func TestToLSPDiagnostic_DeprecatedFormIsTagged(t *testing.T) {
+	form, _ := deprecation.Lookup(deprecation.ArrayType)
+	for _, severity := range []sense.Severity{sense.SeverityWarning, sense.SeverityError} {
+		got := toLSPDiagnostic("  tags array(string)", sense.Diagnostic{
+			Range:    sense.Range{Start: sense.Position{Line: 1, Column: 8}, End: sense.Position{Line: 1, Column: 21}},
+			Severity: severity,
+			Message:  form.Warning(),
+			Code:     form.Rule,
+		})
+		if len(got.Tags) != 1 || got.Tags[0] != protocol.DiagnosticTagDeprecated {
+			t.Errorf("severity %d: tags = %v, want [Deprecated]", severity, got.Tags)
+		}
 	}
 }
 

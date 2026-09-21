@@ -1,0 +1,111 @@
+// wholesale pack -- reads (epic memql#5533, issues memql#5555 and
+// memql#5556).
+//
+// THE STATE OF AN APPLICATION IS NOT A QUERY, and it cannot be. An
+// application's state is a fold over its append-only decision log, and a
+// filter cannot make a cross-concept read -- so the fold is the Go builtin
+// wholesaleApplicationState, and these queries are what it folds. Putting
+// the fold in every caller instead is how a trade desk ends up showing an
+// application as submitted after somebody rejected it.
+//
+// NONE OF THESE IS A PUBLIC READ. The pack declares a shopper FORM and no
+// shopper READ (shapes.memql says why), so every query here answers under
+// the caller's own actor at the composite owner tier: a merchant reads
+// their own applications, a cluster owner reads every merchant's, and
+// nobody else reads any.
+
+use wholesale.concepts.{ application, applicationDecision, entitlement, wholesaleSettings }
+use wholesale.shapes.{ applicationFull, applicationDecisionFull, entitlementFull, wholesaleSettingsFull }
+use wholesale.shapes.{ wholesaleStorePlan }
+use shopify.overlay.concepts.{ store }
+
+@description("One application by id. The read a decision resolves its subject through, so a caller who cannot read an application cannot record a decision against it either -- which is the same narrowing reviewspack's moderation path carries, and for the same reason: a decision naming an application nobody can read would be a row scoped to no store.")
+@unbounded("application by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+query application applicationById {
+  args {
+    applicationId  string!
+  }
+  filter  row => row.id == args.applicationId
+  shape   applicationFull
+}
+
+@description("This store's applications, newest first -- the merchant's queue. A bounded first page with a keyset cursor, because a trade desk's inbox is the one list here that grows without limit.")
+@actor
+query application applicationsForStore {
+  args {
+    storeId  string!
+  }
+  filter  row => row.storeId == args.storeId
+  sort    "row.createdAt", "desc"
+  paginate 50
+  shape   applicationFull
+}
+
+@description("Every decision recorded against one application, newest first. Append-only, so this IS the history -- there is no undo-by-overwrite to reconstruct, and the reason an application was refused is still here after it was approved.")
+@actor
+query applicationDecision decisionsForApplication {
+  args {
+    applicationId  string!
+  }
+  filter  row => row.applicationId == args.applicationId
+  sort    "row.createdAt", "desc"
+  shape   applicationDecisionFull
+}
+
+@description("The decisions against a caller-supplied list of applications. THE STATE FOLD SUBTRACTS FROM THIS, so it must be COMPLETE for the applications it is asked about -- a truncated answer here is an application shown as submitted after somebody rejected it. So it is bounded by the CALLER'S LIST rather than by a page size: the state fold passes the ids it is considering, which is one page of one store's queue.")
+@actor
+query applicationDecision decisionsForApplications {
+  args {
+    storeId         string!
+    applicationIds  []string!
+  }
+  filter  row => row.storeId == args.storeId && row.applicationId in args.applicationIds
+  sort    "row.createdAt", "desc"
+  shape   applicationDecisionFull
+}
+
+@description("The entitlement granted against one application. One row per application at a derived id, so this answers at most one -- newest version first, which is the current state.")
+@actor
+query entitlement entitlementForApplication {
+  args {
+    applicationId  string!
+  }
+  filter  row => row.applicationId == args.applicationId
+  sort    "row.createdAt", "desc"
+  shape   entitlementFull
+}
+
+@description("This store's entitlements, newest first -- what this merchant has granted and what is still pending a push that failed. A bounded first page, because an entitlement is one per approved application and those accumulate.")
+@actor
+query entitlement entitlementsForStore {
+  args {
+    storeId  string!
+  }
+  filter  row => row.storeId == args.storeId
+  sort    "row.createdAt", "desc"
+  paginate 50
+  shape   entitlementFull
+}
+
+@description("This store's wholesale settings. One row per store, so this answers at most one.")
+@actor
+query wholesaleSettings wholesaleSettingsForStore {
+  args {
+    storeId  string!
+  }
+  filter  row => row.storeId == args.storeId
+  sort    "row.createdAt", "desc"
+  shape   wholesaleSettingsFull
+}
+
+@description("The bound store's plan, through the pack's own narrow projection. THIS READ ANSWERING NOTHING IS ORDINARY: v1:shopify:store is @rowAuthz(clusterOwner) and epic memql#5530's D10 left that tier unchanged, so a merchant reads no rows here. What an unknown plan MEANS is each adapter's to say -- shopifyB2B refuses, because it cannot establish the catalog ceiling it has to respect; customerTag proceeds, because it needs no plan at all. That difference is what plan-independence is.")
+@unbounded("store by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+query store storePlanById {
+  args {
+    storeId  string!
+  }
+  filter  row => row.id == args.storeId
+  shape   wholesaleStorePlan
+}

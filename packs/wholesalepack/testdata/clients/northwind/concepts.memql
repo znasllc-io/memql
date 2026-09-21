@@ -1,0 +1,29 @@
+// FIXTURE CLIENT ONE -- Northwind (epic memql#5533, issue memql#5560).
+//
+// Northwind approves on ONE OWNER'S SAY. There is no chain, no threshold
+// and nobody to notify: the owner reads the application and decides. That
+// is a whole process, and the pack must not make it feel like a special
+// case of a bigger one.
+//
+// Northwind also collects an EIN, because it is a US distributor and has
+// to. THAT FIELD IS HERE, NOT ON THE PACK'S APPLICATION. It is a concept of
+// Northwind's own, in Northwind's own domain, with an @relationship to the
+// pack's application -- typed, queryable, and invisible to every other
+// client. A `metadata` blob on v1:wholesale:application would have taken
+// this field, and then the next client's, and the pack's schema would have
+// drifted toward whoever asked first.
+
+use wholesale.concepts.{ application }
+
+@version("1.0.0")
+@description("Northwind's own field on a wholesale application: the federal tax identifier a US distributor is required to collect. Northwind's, not the pack's -- the next client will not collect one.")
+@displayCard(primary="ein", secondary="applicationId")
+@rowAuthz(owner="ownerUserId", clusterOwner)
+concept northwindTaxDetail {
+  ownerUserId    string!  @description("The merchant this detail belongs to.")
+  applicationId  string!  @description("The v1:wholesale:application this is about.")
+  storeId        string!  @description("The store, copied from the application it relates to (design D9).")
+  ein            string!  @description("The applicant's federal Employer Identification Number, as they typed it. Unverified.")
+
+  @relationship(type="references", field="applicationId", target=application, direction="outgoing")
+}

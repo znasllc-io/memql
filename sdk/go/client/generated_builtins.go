@@ -1643,6 +1643,21 @@ func IntegrationStatusBuild(args IntegrationStatusArgs) string {
 	return b.String()
 }
 
+// LanguageStatus -- The MemQL line this cluster speaks, the forms it deprecates, and where the DSL it loaded still spells one. ONE row: language, edition, status (frozen or draft), grammarVersion, editorRelease, deprecationWindowMinors, and forms[] with rule, spelling, replacement, migrator, deprecatedIn, refusedFrom (a floor, not a date), state (deprecated | refused) and uses[] (file, line, column, text). The uses are the answering node's last load; every mesh node mounts the same tree, so any of them answers for the cluster.
+type LanguageStatusArgs struct {
+}
+
+// LanguageStatus calls the engine builtin languageStatus.
+func (qc *QueryClient) LanguageStatus(ctx context.Context, args LanguageStatusArgs) (*Result, error) {
+	call := LanguageStatusBuild(args)
+	return qc.executeNamed(ctx, "languageStatus", call)
+}
+
+func LanguageStatusBuild(args LanguageStatusArgs) string {
+	_ = args
+	return "builtin languageStatus()"
+}
+
 // LibraryAddArtifactLabel -- Add a label to a Library artifact index row. Idempotent -- a label already present is left alone and nothing is written. artifactId is the v1:library:artifact row id; the load + write-back run under a synthetic actor derived from the row's own ownerUserId, so a caller can only ever label an artifact they own.
 type LibraryAddArtifactLabelArgs struct {
 	ArtifactId string
@@ -3322,6 +3337,112 @@ func ShopifyFetchProductBuild(args ShopifyFetchProductArgs) string {
 	return b.String()
 }
 
+// ShopifyProvisionWholesale -- Create or find one buyer's B2B account: a company stamped with the MemQL application id, its location, the buyer as a company contact, and an ACTIVE catalog with a price list. Idempotent -- a second call for one application finds the first company rather than making a twin. Refuses BEFORE creating anything when the store is below Plus and already holds its three company-location catalogs, answering {status: refused, reason} rather than an error so the caller can tell a ceiling from an outage.
+type ShopifyProvisionWholesaleArgs struct {
+	// The store to provision on.
+	StoreId string
+	// The MemQL application this grant came from. Becomes the company's externalId, which is what makes a retry find the first company.
+	ApplicationId string
+	// The business being entitled.
+	CompanyName string
+	// The applicant's email. The customer who becomes the company contact; created when the store has none.
+	BuyerEmail string
+	// The applicant's name, split on the last space into the two fields Shopify wants.
+	BuyerName string
+	// Defaults to '<company> wholesale'.
+	CatalogTitle string
+	// Whole-number percentage off published prices. Zero creates the price list with no adjustment, which is somewhere for the merchant to put real per-variant prices.
+	PercentOff int
+	// The price list currency.
+	CurrencyCode string
+}
+
+// ShopifyProvisionWholesale calls the engine builtin shopifyProvisionWholesale.
+func (qc *QueryClient) ShopifyProvisionWholesale(ctx context.Context, args ShopifyProvisionWholesaleArgs) (*Result, error) {
+	call := ShopifyProvisionWholesaleBuild(args)
+	return qc.executeNamed(ctx, "shopifyProvisionWholesale", call)
+}
+
+func ShopifyProvisionWholesaleBuild(args ShopifyProvisionWholesaleArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin shopifyProvisionWholesale(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("applicationId: ")
+	b.WriteString(quoteMemQL(args.ApplicationId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("companyName: ")
+	b.WriteString(quoteMemQL(args.CompanyName))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("buyerEmail: ")
+	b.WriteString(quoteMemQL(args.BuyerEmail))
+	if args.BuyerName != "" {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("buyerName: ")
+		b.WriteString(quoteMemQL(args.BuyerName))
+	}
+	if args.CatalogTitle != "" {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("catalogTitle: ")
+		b.WriteString(quoteMemQL(args.CatalogTitle))
+	}
+	if args.PercentOff != 0 {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("percentOff: ")
+		b.WriteString(fmt.Sprintf("%v", args.PercentOff))
+	}
+	if args.CurrencyCode != "" {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("currencyCode: ")
+		b.WriteString(quoteMemQL(args.CurrencyCode))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyRevokeWholesale -- End a B2B entitlement by setting its catalog to DRAFT. DELETES NOTHING: the company, its location, its contact, the price list and every order placed under them are untouched, because revoking trade terms is ending a discount rather than erasing a customer -- and deleting a company would take its order history's association with it.
+type ShopifyRevokeWholesaleArgs struct {
+	// The store.
+	StoreId string
+	// The encoded refs a provision returned. Opaque to the pack, which never parses it.
+	Reference string
+}
+
+// ShopifyRevokeWholesale calls the engine builtin shopifyRevokeWholesale.
+func (qc *QueryClient) ShopifyRevokeWholesale(ctx context.Context, args ShopifyRevokeWholesaleArgs) (*Result, error) {
+	call := ShopifyRevokeWholesaleBuild(args)
+	return qc.executeNamed(ctx, "shopifyRevokeWholesale", call)
+}
+
+func ShopifyRevokeWholesaleBuild(args ShopifyRevokeWholesaleArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin shopifyRevokeWholesale(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("reference: ")
+	b.WriteString(quoteMemQL(args.Reference))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ShopifyRunComplianceJobs -- Run the queued privacy jobs whose hold has elapsed: export a customer's data to the Library, scrub a redacted customer's PII across every version, purge a redacted shop's whole mirror. Every action is audited; shop/redact re-checks reachability first so a reverted uninstall does not cost the mirror.
 type ShopifyRunComplianceJobsArgs struct {
 }
@@ -3355,6 +3476,101 @@ func ShopifyStoreHealthBuild(args ShopifyStoreHealthArgs) string {
 		b.WriteString("storeId: ")
 		b.WriteString(quoteMemQL(args.StoreId))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyTagWholesaleCustomer -- The plan-independent grant: add one tag to the buyer's customer record. Writes the tag and NOTHING else -- what the tag does is the merchant's own automatic discount, which this connector deliberately does not create on their behalf. Refuses when no customer on the store has that email, because a tag on an account that does not exist entitles nobody.
+type ShopifyTagWholesaleCustomerArgs struct {
+	// The store.
+	StoreId string
+	// The customer to tag.
+	BuyerEmail string
+	// Defaults to memql-wholesale. Prefixed with ours so this connector never removes a tag somebody else put there.
+	Tag string
+}
+
+// ShopifyTagWholesaleCustomer calls the engine builtin shopifyTagWholesaleCustomer.
+func (qc *QueryClient) ShopifyTagWholesaleCustomer(ctx context.Context, args ShopifyTagWholesaleCustomerArgs) (*Result, error) {
+	call := ShopifyTagWholesaleCustomerBuild(args)
+	return qc.executeNamed(ctx, "shopifyTagWholesaleCustomer", call)
+}
+
+func ShopifyTagWholesaleCustomerBuild(args ShopifyTagWholesaleCustomerArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin shopifyTagWholesaleCustomer(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("buyerEmail: ")
+	b.WriteString(quoteMemQL(args.BuyerEmail))
+	if args.Tag != "" {
+		if b.Len() > 36 {
+			b.WriteString(", ")
+		}
+		b.WriteString("tag: ")
+		b.WriteString(quoteMemQL(args.Tag))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyUntagWholesaleCustomer -- The plan-independent revoke: remove that one tag from the buyer's customer record.
+type ShopifyUntagWholesaleCustomerArgs struct {
+	// The store.
+	StoreId string
+	// The customer to untag.
+	BuyerEmail string
+	// Defaults to memql-wholesale.
+	Tag string
+}
+
+// ShopifyUntagWholesaleCustomer calls the engine builtin shopifyUntagWholesaleCustomer.
+func (qc *QueryClient) ShopifyUntagWholesaleCustomer(ctx context.Context, args ShopifyUntagWholesaleCustomerArgs) (*Result, error) {
+	call := ShopifyUntagWholesaleCustomerBuild(args)
+	return qc.executeNamed(ctx, "shopifyUntagWholesaleCustomer", call)
+}
+
+func ShopifyUntagWholesaleCustomerBuild(args ShopifyUntagWholesaleCustomerArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin shopifyUntagWholesaleCustomer(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	if b.Len() > 38 {
+		b.WriteString(", ")
+	}
+	b.WriteString("buyerEmail: ")
+	b.WriteString(quoteMemQL(args.BuyerEmail))
+	if args.Tag != "" {
+		if b.Len() > 38 {
+			b.WriteString(", ")
+		}
+		b.WriteString("tag: ")
+		b.WriteString(quoteMemQL(args.Tag))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyWholesaleCatalogHeadroom -- How many more company-location catalogs this store may hold: -1 on Plus, which is unlimited, and otherwise three minus what it already has. Since 2026-04-02 companies, payment terms, volume pricing and up to three catalogs are available BELOW Plus, so the ceiling is real and this is what lets an adapter REPORT it rather than discover it at the fourth grant, in a merchant's live store.
+type ShopifyWholesaleCatalogHeadroomArgs struct {
+	// The store to measure.
+	StoreId string
+}
+
+// ShopifyWholesaleCatalogHeadroom calls the engine builtin shopifyWholesaleCatalogHeadroom.
+func (qc *QueryClient) ShopifyWholesaleCatalogHeadroom(ctx context.Context, args ShopifyWholesaleCatalogHeadroomArgs) (*Result, error) {
+	call := ShopifyWholesaleCatalogHeadroomBuild(args)
+	return qc.executeNamed(ctx, "shopifyWholesaleCatalogHeadroom", call)
+}
+
+func ShopifyWholesaleCatalogHeadroomBuild(args ShopifyWholesaleCatalogHeadroomArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin shopifyWholesaleCatalogHeadroom(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
 	b.WriteString(")")
 	return b.String()
 }

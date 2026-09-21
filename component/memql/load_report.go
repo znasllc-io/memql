@@ -67,16 +67,25 @@ type QuarantinedConstruct struct {
 // is built per engine.Init and stored on the engine so the post-Init
 // re-hydration path can record quarantines onto the same ledger.
 //
-// Concurrency: Skipped / Duplicates / Registered are written only during
-// the single-threaded engine.Init load sequence. Quarantined can be
-// appended later from the live authoring-promote propagation subscriber
-// (a runtime goroutine), so every mutator takes mu.
+// Concurrency: Skipped / Duplicates / Registered / Warnings are written
+// only during the single-threaded engine.Init load sequence. Quarantined
+// can be appended later from the live authoring-promote propagation
+// subscriber (a runtime goroutine), so every mutator takes mu.
 type LoadReport struct {
 	mu          sync.Mutex
 	Registered  map[string]int         // group ("shapes", "functions", ...) -> count registered
 	Skipped     []baseloader.Skip      // parse/register drops from every unified loader
 	Duplicates  []DuplicateConstruct   // same-registry name collisions (S5 / #2360)
 	Quarantined []QuarantinedConstruct // durable-bundle re-hydration failures (does NOT fail boot)
+	// Warnings is what the load found that does not fail it: today, each use
+	// of a deprecated language form that still loads (memql#5390). Excluded
+	// from HasProblems -- a deprecated form loads until its window is spent.
+	Warnings []baseloader.Warning
+
+	// deprecatedUses is every use of a deprecated form the load's sources
+	// spell, whatever release its window stands at
+	// (MemQLEngine.DeprecatedUses).
+	deprecatedUses []DeprecatedUseRecord
 }
 
 // newLoadReport builds an empty report ready for the load sequence.
@@ -144,6 +153,31 @@ func (r *LoadReport) SetDuplicates(dups []DuplicateConstruct) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.Duplicates = dups
+}
+
+// AddWarning records one finding that does not fail the load. Does NOT
+// affect the strict-boot decision (see HasProblems).
+func (r *LoadReport) AddWarning(w baseloader.Warning) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.Warnings = append(r.Warnings, w)
+}
+
+// WarningsSnapshot returns a copy of the warnings recorded so far, in the
+// order they were recorded. Nil-safe.
+func (r *LoadReport) WarningsSnapshot() []baseloader.Warning {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.Warnings) == 0 {
+		return nil
+	}
+	return append([]baseloader.Warning(nil), r.Warnings...)
 }
 
 // AddQuarantine records a durable-bundle re-hydration failure. Does NOT
@@ -223,6 +257,9 @@ func (r *LoadReport) Detail() string {
 // logSummary emits the boot summary: one healthy Info line when the tree
 // loaded clean, or an Error line plus the per-problem detail when it did
 // not. Called at the tail of engine.Init after the strict-boot decision.
+// Both lines count the warnings: a tree that loads clean may still use a
+// deprecated form a later release refuses, and each use has its own WARN
+// line.
 func (r *LoadReport) logSummary(logger *slog.Logger) {
 	if logger == nil || r == nil {
 		return
@@ -232,6 +269,7 @@ func (r *LoadReport) logSummary(logger *slog.Logger) {
 	skipped := len(r.Skipped)
 	dups := len(r.Duplicates)
 	quarantined := len(r.Quarantined)
+	warnings := len(r.Warnings)
 	r.mu.Unlock()
 
 	if skipped == 0 && dups == 0 {
@@ -240,7 +278,8 @@ func (r *LoadReport) logSummary(logger *slog.Logger) {
 			"registered", registered,
 			"skipped", 0,
 			"duplicates", 0,
-			"quarantined", quarantined)
+			"quarantined", quarantined,
+			"warnings", warnings)
 		return
 	}
 	logger.Error("DSL load report: DEGRADED -- constructs were dropped at load",
@@ -249,6 +288,7 @@ func (r *LoadReport) logSummary(logger *slog.Logger) {
 		"skipped", skipped,
 		"duplicates", dups,
 		"quarantined", quarantined,
+		"warnings", warnings,
 		"detail", r.Detail())
 }
 
