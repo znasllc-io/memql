@@ -101,6 +101,16 @@ func Diff(old, now Surface, res Reservations) []Finding {
 	fs = append(fs, diffItems("annotation", old.Annotations, now.Annotations, res.Annotations)...)
 	fs = append(fs, diffItems("function", old.Functions, now.Functions, res.Functions)...)
 	fs = append(fs, diffShapes(old.Shapes, now.Shapes)...)
+	SortFindings(fs)
+	return fs
+}
+
+// SortFindings orders a report: what stops loading first, what changed meaning
+// next, what a client reads last, and alphabetically within each. It is its
+// own function because a run that also holds the tree to the BASE COMMIT's
+// ledger appends DiffLedger's findings to these, and two orderings of one
+// report is two reports.
+func SortFindings(fs []Finding) {
 	sort.SliceStable(fs, func(i, j int) bool {
 		if categoryRank[fs[i].Category] != categoryRank[fs[j].Category] {
 			return categoryRank[fs[i].Category] < categoryRank[fs[j].Category]
@@ -110,7 +120,6 @@ func Diff(old, now Surface, res Reservations) []Finding {
 		}
 		return fs[i].Was < fs[j].Was
 	})
-	return fs
 }
 
 // diffEdition reports the edition move.

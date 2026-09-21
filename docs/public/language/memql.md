@@ -107,7 +107,11 @@ What it means in practice:
   on evidence rather than on a guess about who still writes it. Only then may it
   go -- and its name is reserved forever, so it can never come back meaning
   something else. A bundle still carrying the old spelling would otherwise load
-  under the new meaning and quietly do the new thing.
+  under the new meaning and quietly do the new thing. In CI the comparison is
+  against the **base commit's** copy of the surface baseline and the reservation
+  ledger rather than the branch's own, so editing
+  `component/language/surface/2026.json` in the same change as the removal hides
+  nothing: the reservation is what clears the gate.
 - **The corpus is the language.** `test/conformance/2026/` holds a case per
   construct, attribute, expression position and refusal, and its manifest reads
   `"status": "frozen"`. A bug is not fixed until its case is there.
