@@ -109,11 +109,7 @@ export function GroupsSection({
     if (group === null) {
       return (
         <div className="os-app-stack">
-          <Head title="Group">
-            <Button tone="quiet" onClick={() => setView({ kind: "list" })}>
-              Groups
-            </Button>
-          </Head>
+          <Head title="Group" back={{ label: "Groups", onSelect: () => setView({ kind: "list" }) }} />
           <Notice
             tone="warn"
             sentence="This group is not in the list this window holds."
@@ -141,11 +137,7 @@ export function GroupsSection({
   if (view.kind === "new") {
     return (
       <div className="os-app-stack">
-        <Head title="New group">
-          <Button tone="quiet" onClick={() => setView({ kind: "list" })}>
-            Groups
-          </Button>
-        </Head>
+        <Head title="New group" back={{ label: "Groups", onSelect: () => setView({ kind: "list" }) }} />
         <NewGroupForm
           accounts={accounts}
           actions={actions}

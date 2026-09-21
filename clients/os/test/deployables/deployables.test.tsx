@@ -606,12 +606,18 @@ describe("the Source stop", () => {
     expect(within(screen.getByRole("dialog")).getByText("uploaded bundle")).toBeTruthy();
     expect(within(page).getByText("artifact-zip")).toBeTruthy();
     expect(within(page).getByText("Deployed from the Library.")).toBeTruthy();
-    // The storefront's binding is What-it-is, not Source -- and exactly one
-    // stop is open at a time, so reading the other means opening it.
+    // THE STORE IS NOT A BUILD FACT AND IS NO LONGER ON WHAT-IT-IS (epic
+    // memql#5530). It used to be two Facts there -- the store's domain and
+    // the name of the secret holding its Storefront token -- on the stop that
+    // reports what DEPLOYING would do. Both moved to the Store pane, which is
+    // where the store is read and changed.
     await openStop(page, "What it is");
-    // It names the secret and NEVER fetches its value.
-    expect(within(screen.getByRole("dialog")).getByText("example.myshopify.com")).toBeTruthy();
-    expect(within(page).getByText("shopify-storefront-token")).toBeTruthy();
+    expect(within(screen.getByRole("dialog")).queryByText("example.myshopify.com")).toBeNull();
+    expect(within(page).queryByText("EXAMPLE_STOREFRONT_TOKEN")).toBeNull();
+    // AND NOTHING ANYWHERE FETCHES A SECRET'S VALUE. The panel that does show
+    // the three references shows their NAMES; this is the control that says
+    // so for the whole surface, and it is why the assertion survived the move
+    // rather than going with the two Facts above.
     expect(connection.calls.some((c) => c.toLowerCase().includes("secret"))).toBe(false);
   });
 
@@ -887,11 +893,17 @@ describe("Where it lives", () => {
     expect(connection.callsNamed("updateSiteAccount")[0]).toContain('siteId: "site-store"');
   });
 
-  it("mounts the Domains content for a cluster owner only", async () => {
+  // THE ADDRESS IS FOR EVERYBODY; BINDING A DOMAIN IS FOR A CLUSTER OWNER. The
+  // domains list always shows the cluster address -- it was always on this stop
+  // -- while the Add control and the add form are absent for somebody who does
+  // not hold the `domains` part.
+  it("lists the cluster address for everybody and offers binding to a cluster owner only", async () => {
     const { page } = await mountAndOpen(WITH_PACKAGE, "store.memql.example.com", { role: "admin" });
     await openStop(page, "Where it lives");
-    expect(within(page).queryByText("Domains")).toBeNull();
-    expect(within(page).queryByLabelText("Domain to bind")).toBeNull();
+    const list = screen.getByRole("region", { name: /^Domains for / });
+    expect(within(list).getByText(/Cluster address/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Add a domain" })).toBeNull();
+    expect(screen.queryByLabelText("Domain to bind")).toBeNull();
   });
 });
 

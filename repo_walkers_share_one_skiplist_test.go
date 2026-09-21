@@ -42,6 +42,7 @@ var walkerExemptions = map[string]string{
 	"scripts/k3d/up_rendered_manifest_test.go":          "copies deploy/k8s, a narrow subtree with no nested checkout -- and a COPY must skip nothing, or it renders a tree the repository does not have",
 	"test/dslconformance/callgraph_contract_test.go":    "walks the DSL tree",
 	"cmd/shopifyschema/shopify_schema_drift_test.go":    "walks the two GENERATED directories and the t.TempDir() they were just regenerated into -- a byte-for-byte comparison that must account for every file in both, so it can skip nothing",
+	"test/clustere2e/storefront_serving_test.go":        "walks testdata/storefront-fixture to PACK IT INTO A ZIP -- a narrow fixture subtree that is not an ancestor of .claude, and a bundle that skipped a file would publish a tree the repository does not have",
 }
 
 // TestRepoWalkersShareOneSkipList is the memql#3678 gate.

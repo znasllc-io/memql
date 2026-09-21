@@ -1,0 +1,277 @@
+/*
+  storefront.css -- the fixture's whole visual system.
+
+  THE MATERIAL IS INSTRUMENT PAPER. One hue family for the ground and the
+  ink, so the page reads as a single sheet rather than as widgets arranged on
+  one; hairlines rather than boxes; and exactly two saturated colors, each
+  reserved for a state a reading can be in.
+
+  THREE READING STATES, AND THEY MUST NOT COLLAPSE INTO TWO. `measured` is a
+  value this page actually read. `halted` is a check that ran and refused,
+  and it carries its own remedy. `unmeasured` is a check that has not run --
+  which is neither of the others, and is the state the page loads in. A
+  design that painted unmeasured like halted would report every fresh load as
+  a failure; one that painted it like measured would report zero as a
+  finding. (clients/os/SUPERVISED-VISUAL-COMPOSITION.md: never turn missing
+  measurements into invented facts.)
+*/
+
+:root {
+  color-scheme: light dark;
+
+  --paper: #edeff1;
+  --paper-sunk: #e4e7ea;
+  --ink: #1b2127;
+  --ink-quiet: #5a646d;
+  --rule: #c9cfd4;
+
+  /* Reserved, each for one state. Never decorative. */
+  --measured: #0f6e5c;
+  --halted: #8a2f1e;
+  --unmeasured: #6b757d;
+
+  --focus: #1f5fa8;
+
+  --step: 1.25;
+  --t-base: 1rem;
+  --t-sm: calc(var(--t-base) / var(--step));
+  --t-lg: calc(var(--t-base) * var(--step));
+  --t-xl: calc(var(--t-lg) * var(--step));
+
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* Monospace ONLY for readings. They are a numeric register to be compared
+     down a column, not small labels dressed up as data. */
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #12171b;
+    --paper-sunk: #171d22;
+    --ink: #dde3e7;
+    --ink-quiet: #97a2ab;
+    --rule: #2c353d;
+    --measured: #4cb79f;
+    --halted: #e0806a;
+    --unmeasured: #7b868f;
+    --focus: #7fb2ec;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: clamp(1.5rem, 5vw, 4rem) 1rem;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: var(--t-base);
+  line-height: 1.5;
+}
+
+.card {
+  max-width: 42rem;   /* holds body text under 80 characters */
+  margin: 0 auto;
+}
+
+/* --- head ---------------------------------------------------------------- */
+
+h1 {
+  margin: 0 0 1.25rem;
+  font-size: var(--t-xl);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.subject {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.15rem 1.25rem;
+  margin: 0 0 2rem;
+  font-size: var(--t-sm);
+}
+
+.subject dt { color: var(--ink-quiet); }
+
+.subject dd {
+  margin: 0;
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+}
+
+/* --- the ledger ---------------------------------------------------------- */
+
+.ledger {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--rule);
+}
+
+/* minmax(0, ...) on both outer tracks, not max-content: a long reading --
+   "loaded from cdn.shopify.com" is the ordinary case -- sizes a max-content
+   track past the card and is clipped at the edge, which loses the end of the
+   very value the row exists to report. */
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) 1fr minmax(0, max-content);
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.7rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+/* The dot leader. A report idiom: it ties a label to its reading across the
+   gap so the eye does not have to travel unaided, and it is drawn rather
+   than typed so it never breaks a screen reader's line. */
+.what { overflow-wrap: anywhere; }
+
+.leader {
+  align-self: center;
+  height: 1px;
+  min-width: 1.5rem;
+  background-image: radial-gradient(circle, var(--rule) 1px, transparent 1px);
+  background-size: 5px 1px;
+  background-repeat: repeat-x;
+  background-position: 0 center;
+}
+
+.reading {
+  font-family: var(--mono);
+  font-size: var(--t-sm);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+/* The three states, told by COLOR AND WORDING TOGETHER -- never by color
+   alone, which would leave the distinction unavailable to anyone who cannot
+   see it and to a grayscale screenshot in a bug report. */
+.reading.measured   { color: var(--measured); }
+.reading.halted     { color: var(--halted); }
+.reading.unmeasured { color: var(--unmeasured); font-style: italic; }
+
+/* A halted row explains itself where it halted, not in a banner somewhere
+   else. The remedy is part of the reading. */
+.remedy {
+  grid-column: 1 / -1;
+  margin: 0.4rem 0 0;
+  padding-left: 0;
+  font-size: var(--t-sm);
+  color: var(--ink-quiet);
+  max-width: 60ch;
+}
+
+/* --- evidence ------------------------------------------------------------ */
+
+.evidence { margin: 1.75rem 0 0; }
+
+.evidence h2 {
+  margin: 0 0 0.75rem;
+  font-size: var(--t-base);
+  font-weight: 600;
+}
+
+.items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: grid;
+  grid-template-columns: 3.5rem 1fr max-content;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.item img {
+  width: 3.5rem;
+  height: 3.5rem;
+  object-fit: cover;
+  background: var(--paper-sunk);
+  border-radius: 2px;
+}
+
+/* A product with no image gets a held space, not a collapsed row: the
+   absence is a fact about the store, and the column stays aligned. */
+.item .noimage {
+  width: 3.5rem;
+  height: 3.5rem;
+  background: var(--paper-sunk);
+  border-radius: 2px;
+}
+
+.item .price {
+  font-family: var(--mono);
+  font-size: var(--t-sm);
+}
+
+.empty {
+  margin: 0;
+  padding: 1.25rem 0;
+  color: var(--ink-quiet);
+  font-size: var(--t-sm);
+}
+
+/* --- foot ---------------------------------------------------------------- */
+
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+button {
+  font: inherit;
+  font-size: var(--t-sm);
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--ink);
+  border-radius: 2px;
+  padding: 0.35rem 0.85rem;
+  cursor: pointer;
+}
+
+button:hover { background: var(--paper-sunk); }
+
+button[aria-busy="true"] { color: var(--ink-quiet); border-color: var(--rule); cursor: default; }
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.note {
+  margin: 0;
+  flex: 1 1 18rem;
+  font-size: var(--t-sm);
+  color: var(--ink-quiet);
+}
+
+/* THE ONE ORCHESTRATED MOMENT: a reading settles into place as its check
+   answers, in the order the checks answer. It runs ONCE per check and
+   nothing on this page loops or pulses -- a perpetual animation would be
+   motion that reports no event. */
+@keyframes settle {
+  from { opacity: 0; transform: translateY(-0.2rem); }
+  to   { opacity: 1; transform: none; }
+}
+
+.reading.measured, .reading.halted { animation: settle 180ms ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .reading.measured, .reading.halted { animation: none; }
+}
+
+@media (max-width: 30rem) {
+  .row { grid-template-columns: 1fr max-content; }
+  .leader { display: none; }
+  .item { grid-template-columns: 2.5rem 1fr; }
+  .item img, .item .noimage { width: 2.5rem; height: 2.5rem; }
+  .item .price { grid-column: 2; }
+}
