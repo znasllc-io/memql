@@ -22,13 +22,21 @@ package main
 //
 // # Append-only, and how to un-reserve
 //
-// Append-only is the rule, not a mechanism: nothing here stops a line being
-// deleted. What the rule buys is that un-reserving is a VISIBLE edit to a
-// committed file with a readme saying what the file is for, rather than an
-// absence nobody sees. That is the escape hatch, stated so the next reader does
-// not have to decide whether one exists: if a reserved name really is the same
-// thing coming back, delete its entry in the same change that brings it back,
-// and the reviewer reads one line instead of nothing.
+// Un-reserving is the escape hatch, stated so the next reader does not have to
+// decide whether one exists: if a reserved name really is the same thing coming
+// back, delete its entry in the same change that brings it back, and the
+// reviewer reads one line instead of nothing.
+//
+// Everything else here only grows, and with a BASE LEDGER (-base-reserved) that
+// is a mechanism rather than a rule: DiffLedger reports an entry the base commit
+// held that this tree has dropped while the name did NOT come back. The hatch is
+// exactly the carve-out -- a name that is back on the surface is the sentence
+// above, and produces nothing. What is left is pure erasure: the name stays gone
+// AND the record that it was ever spent goes with it, which is the same
+// edit-both-sides move -base-reserved's sibling flag exists to close. It lands
+// on the MEANING axis because the hazard a reservation exists to prevent is a
+// spent word coming back meaning something else, and erasing the entry is that
+// break's enabling move rather than a break of its own.
 //
 // # Why there is no shapes section
 //
@@ -96,6 +104,59 @@ func LoadReservations(path string) (Reservations, error) {
 		r.Functions = map[string]string{}
 	}
 	return r, nil
+}
+
+// DiffLedger holds this tree's ledger to the one the BASE COMMIT carried, and
+// reports every reservation that was erased rather than spent.
+//
+// It is the other half of holding a change to the base commit. The surface
+// baseline answers "was this name on the surface before?"; the ledger answers
+// "was this name already spent?". Both questions are asked of files the change
+// itself may edit, so both have to be read from the side the change cannot
+// rewrite -- which is what -base-reserved supplies.
+//
+// The one carve-out is the documented hatch: a name that is BACK on the head's
+// surface is a name genuinely returning, and deleting its entry in that same
+// change is how the ledger says so. This function is silent there, and so is
+// the resurrection check, which is the hatch working as reserved.json's readme
+// describes it.
+//
+// base and head are compared section by section, because a name may legitimately
+// be an annotation and a function at once.
+func DiffLedger(base, head Reservations, now Surface) []Finding {
+	var fs []Finding
+	sections := []struct {
+		kind       string
+		base, head map[string]string
+		surface    map[string]Item
+	}{
+		{"annotation", base.Annotations, head.Annotations, now.Annotations},
+		{"construct", base.Constructs, head.Constructs, now.Constructs},
+		{"function", base.Functions, head.Functions, now.Functions},
+	}
+	for _, s := range sections {
+		for _, name := range sortedKeys(s.base) {
+			if _, stillReserved := s.head[name]; stillReserved {
+				continue
+			}
+			if _, cameBack := s.surface[name]; cameBack {
+				continue // the hatch: the same thing genuinely returning
+			}
+			fs = append(fs, Finding{
+				Category: CategoryMeaning,
+				Name:     name,
+				Was:      s.base[name],
+				Detail: fmt.Sprintf("the %s %q was reserved in %s at the base commit and this change drops that "+
+					"entry, while the name has NOT come back on the surface. The reservation is the only record "+
+					"that the word is spent; without it the name is free to be given to something else later, and "+
+					"a bundle still carrying the old spelling would load under the new meaning and do the new "+
+					"thing silently. Put the entry back. Deleting one is how a name genuinely RETURNS -- in the "+
+					"same change that brings it back -- and that case is reported by neither this line nor the "+
+					"resurrection check.", s.kind, name, ReservedPath),
+			})
+		}
+	}
+	return fs
 }
 
 // LoadSurface reads a captured surface. Nil maps are normalised to empty ones,
