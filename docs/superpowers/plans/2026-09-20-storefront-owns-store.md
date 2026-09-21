@@ -850,6 +850,21 @@ In `component/edge/edge.go`, implement it beside `SiteByHostname`, under
 doc comment must say that it deliberately does not project `adminTokenRef` or
 `webhookSecretRef`.
 
+VERIFIED: the edge binary DOES carry the shopify DSL domain. `dsl/embed.go:54`'s
+`//go:embed` line names `all:shopify` and carries no build tag, so every node type embeds
+the whole tree and `query storeById` is registered on the edge exactly as on the bff. You
+do not need to move the query, mount anything, or add a build-tagged registration.
+
+`storeById`'s filter is `row.id == args.storeId && actor.isClusterOwner == true`
+(`dsl/shopify/overlay/queries.memql`), and `systemActorContext` stamps
+`auth.RoleOwner`, which is what `AccessContext.IsClusterOwner()` reads. Both the
+hand-written conjunct and the concept's `@rowAuthz(clusterOwner)` therefore admit it. Pin
+that with a test in the shape of the existing
+`TestEngineExecutorRunsUnderASyntheticClusterOwnerActor` (`component/edge/edge_test.go:44`)
+— capture the ctx in a fake engine and assert `IsClusterOwner()`. Without it, a StoreByID
+that quietly ran under no actor would read zero rows and every storefront would serve no
+store, while a stub-driven test kept passing.
+
 VERIFIED insertion point: `resolver.Resolve` in `component/edge/resolve.go` builds the
 site inside a `r.sf.Do(key, func() (any, error) {...})` closure that tries three lookups in
 order (`SiteByHostname`, then `SiteForCustomDomain`, then `SiteForAccountFrontDoor`) and
