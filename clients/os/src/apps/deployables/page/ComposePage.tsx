@@ -384,7 +384,7 @@ export function ComposePage(props: ComposePageProps) {
 
     const address = addresses[""] ?? EMPTY_ADDRESS;
     const siteId = await createSite.create(
-      { slug: address.slug, kind: draft.kind, title: draft.name.trim(), storeDomain: draft.storeDomain ?? "", storefrontTokenRef: draft.storefrontTokenRef ?? "" },
+      { slug: address.slug, kind: draft.kind, title: draft.name.trim(), storeId: draft.storeId ?? "" },
       clusterDomain,
     );
     if (siteId === "") return;

@@ -3001,6 +3001,29 @@ func DetectConflictsBuild(args DetectConflictsArgs) string {
 	return b.String()
 }
 
+// DevelopmentStoresFor -- The development stores attached to one live store.
+// A storefront shows the store it is bound to and the development store it is exercised against; without this read the two rows sit in one list with nothing saying which belongs to which.
+//
+// Bound concept: v1:shopify:store (machine-readable: BoundConcepts["developmentStoresFor"] in generated_concepts.go).
+type DevelopmentStoresForArgs struct {
+	StoreId string
+}
+
+// DevelopmentStoresFor calls the engine query developmentStoresFor.
+func (qc *QueryClient) DevelopmentStoresFor(ctx context.Context, args DevelopmentStoresForArgs) (*Result, error) {
+	call := DevelopmentStoresForBuild(args)
+	return qc.executeNamed(ctx, "developmentStoresFor", call)
+}
+
+func DevelopmentStoresForBuild(args DevelopmentStoresForArgs) string {
+	var b strings.Builder
+	b.WriteString("query developmentStoresFor(")
+	b.WriteString("storeId: ")
+	b.WriteString(quoteMemQL(args.StoreId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // DeviceCodeByDeviceCodeHash -- Device-grant polling lookup by deviceCodeHash. Returns rows in every status so the token endpoint can emit the RFC-specified error rather than a generic invalid_grant.
 //
 // Bound concept: v1:identity:deviceCode (machine-readable: BoundConcepts["deviceCodeByDeviceCodeHash"] in generated_concepts.go).

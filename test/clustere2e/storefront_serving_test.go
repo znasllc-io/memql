@@ -40,13 +40,20 @@ package clustere2e
 // https://<the site>/ in a browser is what proves that, and it is what the
 // fixture bundle is designed to be read in.
 //
+// THE SITE NAMES A STORE ROW, IT DOES NOT DESCRIBE ONE (epic memql#5530,
+// issue memql#5538). This test creates a v1:shopify:store first and binds the
+// site to it by id; the myshopify.com domain and the Storefront token
+// reference the edge serves are read off THAT row, through the resolver, at
+// serve time. So what is exercised here is the resolution -- the one thing a
+// unit test with a hand-built Site cannot cover.
+//
 // THE TOKEN IS NOT SEEDED. Resolving storefrontTokenRef needs a
 // v1:platform:globalSecret holding an encrypted value, and nothing a client
-// may call writes one -- so the served document's storefrontToken is EMPTY
-// here, which is the documented honest answer for a ref that resolves to
-// nothing, and the stub is called with a synthetic token it does not check.
-// What is asserted about the token is what this leg can honestly assert: the
-// field is present, and it is not the Admin token.
+// may call writes one -- so the STORE ROW names a reference that resolves to
+// nothing and the served document's storefrontToken is EMPTY here, which is
+// the documented honest answer, and the stub is called with a synthetic token
+// it does not check. What is asserted about the token is what this leg can
+// honestly assert: the field is present, and it is not the Admin token.
 // component/edge/runtimeconfig_test.go covers the resolution itself.
 //
 // PREREQUISITES, ALL SKIPPED GRACEFULLY WHEN ABSENT:
@@ -338,10 +345,26 @@ func TestStorefrontServing_TheBoundStoreIsReachableUnderTheServedPolicy(t *testi
 
 	hostname := fmt.Sprintf("clustere2e-store-%s.example.com", strings.ToLower(id.NewShortId()))
 	siteID := "v1:platform:site:" + id.NewShortId()
+	storeID := id.NewShortId()
 
 	conns := openConnections(ctx, t, tok, 1)
 	defer conns[0].Close()
 	qc := memqlclient.NewQueryClient(conns[0].Dispatcher())
+
+	// THE STORE ROW COMES FIRST, because the site names it rather than
+	// describing it. Cluster-owner tier, like the site itself -- the same
+	// token authorizes both.
+	if _, err := qc.CreateStore(ctx, memqlclient.CreateStoreArgs{
+		StoreId: storeID,
+		Domain:  storeHost,
+		Name:    "clustere2e storefront fixture store",
+		// NAMES A SECRET THAT DOES NOT EXIST, deliberately: see the file
+		// header. The document's honest answer is an empty token, and that is
+		// what is asserted.
+		StorefrontTokenRef: "clustere2e_storefront_token_absent",
+	}); err != nil {
+		t.Fatalf("createStore (needs a CLUSTER OWNER token): %v", err)
+	}
 
 	if _, err := qc.CreateSite(ctx, memqlclient.CreateSiteArgs{
 		SiteId:    siteID,
@@ -350,13 +373,10 @@ func TestStorefrontServing_TheBoundStoreIsReachableUnderTheServedPolicy(t *testi
 		BundleRef: "",
 		Status:    "live",
 		Title:     "clustere2e storefront fixture",
-		Binding: map[string]any{
-			"storeDomain": storeHost,
-			// NAMES A SECRET THAT DOES NOT EXIST, deliberately: see the file
-			// header. The document's honest answer is an empty token, and
-			// that is what is asserted.
-			"storefrontTokenRef": "clustere2e_storefront_token_absent",
-		},
+		// ONE VALUE, AND IT IS A REFERENCE. The domain the policy admits and
+		// the token reference the document resolves are read off the store
+		// row above, by the edge, at serve time.
+		Binding: map[string]any{"storeId": storeID},
 	}); err != nil {
 		t.Fatalf("createSite (needs a CLUSTER OWNER token): %v", err)
 	}
@@ -503,7 +523,10 @@ func TestStorefrontServing_TheBoundStoreIsReachableUnderTheServedPolicy(t *testi
 		BundleRef:      "",
 		Status:         "live",
 		Title:          "clustere2e storefront fixture, 404 tail",
-		Binding:        map[string]any{"storeDomain": storeHost},
+		// THE SAME STORE, NAMED AGAIN. Two deployables bound to one store is
+		// exactly what a reference makes cheap and a copy made a second place
+		// to edit.
+		Binding: map[string]any{"storeId": storeID},
 	}); err != nil {
 		t.Fatalf("createSite for the not_found tail: %v", err)
 	}

@@ -59,9 +59,20 @@ Pure state machines live in `src/system/` (tested without React); chrome
 in `src/chrome/`; the app/widget contracts in `src/system/registry.ts`;
 the shared kit in `src/kit/`. Every app is real: Settings, Fleet, Users,
 Deployables, Training, Files (#4721), Accounts (#4800), Campaigns
-(#4827), the Materializer (#4977), and the three operator surfaces the
-portal was the only home for -- Concepts, Cluster and Stores (epic
-memql#5009) -- the last stub went with Files, and `StubApp` with it.
+(#4827), the Materializer (#4977), and the operator surfaces the portal
+was the only home for -- Concepts and Cluster (epic memql#5009) -- the
+last stub went with Files, and `StubApp` with it.
+
+**Stores was a third, and it is gone** (epic memql#5530). Everything about
+a storefront is configured on its deployable, and the store it fronts was
+the one thing that was not: the site's `binding` carried a COPY of the
+store's domain and its Storefront token reference, edited at a different
+authorization tier from the `v1:shopify:store` row that also held them. The
+binding names the store now, and the store is read and changed on the
+storefront's own Store pane in Deployables, behind `execute
+app:deployables/store`. The per-domain acts -- backfill, pause, retry,
+discard -- never lived in Stores either; they belong to every connector and
+are still in Cluster > Data origins.
 
 ## Right-click belongs to the shell
 

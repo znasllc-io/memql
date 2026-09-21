@@ -21,6 +21,15 @@ type stubExec struct {
 	// first two answers.
 	doors     map[string]*Site
 	doorCalls int
+	// store is what StoreByID answers with for ANY id -- the resolver only
+	// ever asks for the one its site's binding names, so keying a map by id
+	// would add a lookup and prove nothing extra. storeCalls counts the read
+	// so a test can prove it is cached with the site, and not made at all for
+	// a kind that has no binding. storeErr makes it FAIL, which is a
+	// different answer from a miss.
+	store      *BoundStore
+	storeErr   error
+	storeCalls int
 }
 
 func (s *stubExec) SiteByHostname(_ context.Context, hostname string) (*Site, error) {
@@ -36,6 +45,14 @@ func (s *stubExec) SiteForCustomDomain(_ context.Context, hostname string) (*Sit
 func (s *stubExec) SiteForAccountFrontDoor(_ context.Context, hostname string) (*Site, error) {
 	s.doorCalls++
 	return s.doors[hostname], nil
+}
+
+func (s *stubExec) StoreByID(_ context.Context, _ string) (*BoundStore, error) {
+	s.storeCalls++
+	if s.storeErr != nil {
+		return nil, s.storeErr
+	}
+	return s.store, nil
 }
 
 func TestResolveFindsTheSiteForAHostname(t *testing.T) {

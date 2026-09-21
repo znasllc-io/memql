@@ -131,9 +131,11 @@ rather than a code change.
 
 ---
 
-## Step 3 -- enter the store in MemQL
+## Step 3 -- attach the store to its storefront
 
-The console's Stores surface → Add a store. It asks for:
+MemQL OS → Deployables → the storefront → **Store** → Attach a store.
+Everything about a storefront is configured on its deployable, so attaching the
+store it talks to is done there rather than in an app of its own. It asks for:
 
 | Field | What it is |
 |---|---|
@@ -150,6 +152,21 @@ The console's Stores surface → Add a store. It asks for:
 by the console and returned to a browser; a token on it would be a token on a
 screen. Create the secret first (the console's Secrets surface, or
 `memql env`), then name it here.
+
+**A store row and a site binding are one record.** The storefront's binding
+NAMES this row -- `binding: {storeId}` on `v1:platform:site` -- and does not
+copy it. The edge resolves the myshopify.com domain and the Storefront token
+reference through the store at serve time, so an edit here reaches every
+storefront bound to it with no second write, and there is no second place to
+keep in step. It used to carry its own `{storeDomain, storefrontTokenRef}`,
+which meant one store was recorded twice, edited in two places, at two
+authorization tiers.
+
+**Binding is a cluster owner's act, and the rule is narrow.** Attaching a
+store needs `execute` on `app:deployables/store`, which the owner role holds;
+beside it, the engine refuses a binding that names a store the caller cannot
+read. A store is cluster-owner-tier, so binding a storefront to one you may
+not read would publish that store's Storefront token under your own hostname.
 
 ### The environment seed
 
@@ -171,6 +188,22 @@ them; the variables are then never read again. **Editing them later changes
 nothing** -- the row is the configuration. That is deliberate: an env var that
 silently overrode a row would make the console's view of a store a lie, and
 would do it only on the nodes carrying the variable.
+
+---
+
+### The development store
+
+A storefront is exercised against a **development store** before it serves
+shoppers. It is attached exactly like any other store -- a second
+`v1:shopify:store` row -- and mirrored like any other, so an order placed
+against it lands in the mirror under that store's own `storeId` and is already
+excluded from every read scoped to the live one. Two fields say what it is:
+`isDevelopment`, and `developmentOfStoreId` naming the live store it stands in
+for. Attach it from the same panel, under Development store.
+
+It is not a store this program provisions, and specifically not a Shopify store
+created with generated test data -- such a store cannot be transferred to a
+merchant.
 
 ---
 
@@ -321,7 +354,7 @@ vendor's own `Retry-After` where one is given.
 - Bulk queries are exempt from the bucket. At most five run per shop at once,
   they must finish within ten days, and the signed result URL is valid for
   one week -- past that the runner restarts the operation.
-- The store's current bucket is on the MemQL OS Stores app.
+- The store's current bucket is on the storefront's Store panel.
 
 ---
 
@@ -409,16 +442,17 @@ boundary.
 
 ## Operating it
 
-### The Stores page
+### The storefront's Store panel
 
-MemQL OS → Stores. Per store: status, the granted scopes against the
-allowlist's needs, the protected-data level, the last subscription reconcile
-and what it changed, the cost bucket, and every domain's sync state with its
-drift counters.
+MemQL OS → Deployables → the storefront → **Store**. Per store: status, the
+granted scopes against the allowlist's needs, the protected-data level, the
+last subscription reconcile and what it changed, the cost bucket, and every
+domain's sync state with its drift counters. The development store paired to
+it, when there is one, reads beneath.
 
 Backfilling, reconciling and pausing an individual DOMAIN are not here: they
 belong to every connector, so the **Data origins** surface owns them and this
-page does not repeat the same three buttons. What is here is what is
+panel does not repeat the same three buttons. What is here is what is
 Shopify's alone -- the credentials, the scopes, the subscriptions, the cost
 bucket, and the per-STORE pause, which is a different switch: it stops
 ingestion for one merchant while their deliveries keep being staged.
@@ -448,8 +482,10 @@ a real one. It is the end-to-end proof, in the order things can break:
 1. **Install.** Create the custom-distribution app on the dev store with the
    scopes above. Note the Admin token, the Storefront token and the webhook
    secret.
-2. **Configure.** Seal the three secrets, add the store in MemQL OS, and
-   confirm the Stores app shows `configured` with no missing scopes.
+2. **Configure.** Seal the three secrets, attach the store on the storefront
+   deployable, and confirm its Store panel shows `configured` with no missing
+   scopes. Mark it a development store if that is what it is, and name the
+   live store it stands in for.
 3. **Subscriptions.** Run `shopifyEnsureSubscriptions()`. The store's health
    should show `created` equal to the desired count and `failed` empty.
    Cross-check in the Shopify admin that the subscriptions point at

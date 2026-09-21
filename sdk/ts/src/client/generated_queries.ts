@@ -2980,6 +2980,29 @@ QueryClient.prototype.detectConflicts = function (this: QueryClient, args: Detec
   return this.executeNamed("detectConflicts", buildDetectConflicts(args), opts);
 };
 
+/** The development stores attached to one live store.
+A storefront shows the store it is bound to and the development store it is exercised against; without this read the two rows sit in one list with nothing saying which belongs to which. */
+// Bound concept: v1:shopify:store (machine-readable: BoundConcepts["developmentStoresFor"] in generated_concepts.ts).
+export interface DevelopmentStoresForArgs {
+  storeId: string;
+}
+
+export function buildDevelopmentStoresFor(args: DevelopmentStoresForArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  return "query developmentStoresFor(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    developmentStoresFor(args: DevelopmentStoresForArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.developmentStoresFor = function (this: QueryClient, args: DevelopmentStoresForArgs = {} as DevelopmentStoresForArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("developmentStoresFor", buildDevelopmentStoresFor(args), opts);
+};
+
 /** Device-grant polling lookup by deviceCodeHash. Returns rows in every status so the token endpoint can emit the RFC-specified error rather than a generic invalid_grant. */
 // Bound concept: v1:identity:deviceCode (machine-readable: BoundConcepts["deviceCodeByDeviceCodeHash"] in generated_concepts.ts).
 export interface DeviceCodeByDeviceCodeHashArgs {

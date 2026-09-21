@@ -574,6 +574,34 @@ mutation site updateSiteResolutionTail {
   }
 }
 
+/// Point a storefront deployable at the v1:shopify:store row it fronts, or clear the binding
+/// (epic memql#5530, issue memql#5538).
+///
+/// ONE VALUE, AND IT IS A REFERENCE. The binding is written whole as {storeId} rather than merged,
+/// so the legacy {storeDomain, storefrontTokenRef} shape cannot survive a write: a read-merge would
+/// have kept the copy beside the reference and left two records of one store, which is the thing
+/// this epic exists to end. An empty storeId writes an empty object, which is the unbound state --
+/// clearing must be expressible, for updateSiteSettings' reason.
+///
+/// AUTHORIZATION IS TWO GATES, AND THE SECOND IS THE SUBSTANTIVE ONE.
+/// @requiresCapability names the surface: `app:deployables/store` is seeded on owner alone, which
+/// is exactly the population the retired Stores app admitted. Beside it, a Go guard refuses a
+/// binding naming a store row the CALLER CANNOT READ -- so the answer to "who may bind a storefront
+/// they own to a store they may not read" is nobody. That check needs a cross-row read no mutation
+/// body can make, which is why it sits with the hostname policy rather than here
+/// (component/memql/platform_site_binding_guard.go).
+@requiresCapability("execute", "app:deployables/store")
+mutation site updateSiteStoreBinding {
+  args {
+    siteId   string!
+    storeId  string
+  }
+  update {
+    id:      args.siteId
+    binding: { storeId: args.storeId ?? "" }
+  }
+}
+
 /// Soft-delete a site by stamping deleted=true (memql#3717). The time-series row survives for
 /// history; isNotDeleted on siteByHostname/sitesAll/siteById is what actually stops the edge
 /// resolving a deleted site's hostname -- this mutation only flips the flag. A systemOwned row

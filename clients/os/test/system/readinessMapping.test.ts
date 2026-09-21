@@ -80,10 +80,12 @@ describe("the readiness mapping (design record section 5.1)", () => {
     expect(OS_REGISTRY.widgets.find((w) => w.id === "ask")?.needs).toEqual(["ai"]);
   });
 
-  // A store row, a source, a deployable and a folder are CONTENT, not
-  // configuration: these apps keep the empty states they have.
+  // A client, a deployable and a folder are CONTENT, not configuration:
+  // these apps keep the empty states they have. (`stores` was in this list
+  // until epic memql#5530 deleted the app and re-homed its function on the
+  // storefront deployable, which is Deployables and declares its own.)
   it("apps that declare nothing declare nothing", () => {
-    for (const id of ["stores", "accounts", "bin", "cluster", "concepts", "settings"]) {
+    for (const id of ["accounts", "bin", "cluster", "concepts", "settings"]) {
       const a = app(id);
       expect(a.needs ?? []).toEqual([]);
       expect(a.wants ?? []).toEqual([]);
