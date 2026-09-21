@@ -875,7 +875,9 @@ describe("Settings > Sources", () => {
     expect(await within(group).findByText("This cluster has no GitHub connection set up")).toBeTruthy();
     // The sentence for the answered code, beneath.
     expect(within(group).getByText("This cluster has no GitHub App configured.")).toBeTruthy();
-    expect(within(group).getByText(/ask an operator to set up the GitHub App/)).toBeTruthy();
+    // WHO CAN CHANGE IT, by the name this product gives them -- it said "ask
+    // an operator" once, to a cluster owner.
+    expect(within(group).getByText(/A cluster owner sets GitHub up in Settings > Sources/)).toBeTruthy();
     expect(connection.callsNamed("githubConnectBegin")).toHaveLength(1);
   });
 
