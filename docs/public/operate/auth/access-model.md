@@ -303,6 +303,51 @@ middleware (`component/identity/verifier`). On each gRPC stream open:
    legacy auth path did. The identity-issued JWT no longer carries a
    `partitions` claim.
 
+### A shopper is nobody, and reaches exactly what a pack declared
+
+A **shopper** -- a member of the public on a hosted storefront -- has no user
+row, no session, no bearer and no actor. Not even an anonymous one: the
+anonymous tier (`@rowAuthz(public)`, epic memql#4541) publishes a whole
+CONCEPT, and the rows a shopper writes are owned by the merchant so they can
+be moderated. So reach is declared **per route** instead (epic memql#5532,
+issue memql#5550).
+
+A pack names, in Go at registration time, the forms a shopper may post and the
+reads a shopper may make. Nothing it did not name is reachable, on that pack or
+any other, at any setting. The routes are
+`POST /_memql/forms/{pack}/{name}` and `GET /_memql/reads/{pack}/{name}` on a
+deployable's **own origin**, and four things stand in front of them:
+
+1. **`site.shopperForms`**, off by default and off on every row written before
+   the field existed. A site that did not ask for a public endpoint does not
+   have one, and asking for one gets a 404 rather than a 403 -- the absence is
+   the answer.
+2. **A rate limit** per address per site, and a **size cap**, both refusing at
+   the edge before the request reaches the bff.
+3. **No front-door rule.** The bff route is classified
+   `servedButNotExternallyRouted`, so nothing at `api.<domain>` reaches it and
+   the edge is the only way in.
+4. **The declaration itself**, which bounds what a reachable request may name.
+
+**The write borrows the site owner's authority** (`auth.ContextWithUserActor`,
+the campaigns pattern). The merchant owns what is written through their
+storefront; the shopper's name and email are fields on the row, never an
+identity, and are never verified. A cluster-owned site -- one with no owner --
+is refused outright rather than run under a synthetic actor.
+
+**The owner the edge names is self-checking.** The bff re-reads the site row
+*under* that user, and `v1:platform:site` is composite-owner tier, so a user
+who does not own the site reads zero rows. A forged owner refuses itself, with
+no comparison written down to get wrong. The store is checked the same way: it
+must be the site's own binding or its preview binding, so a stamp cannot aim a
+row at somebody else's store.
+
+**What this does NOT do:** it does not authenticate the shopper, and nothing
+here should be read as doing so. A route that needs to know *which buyer* is
+asking -- their own quotes, their own credit limit -- needs a verified Shopify
+customer as a constrained principal, which is recorded as the answer for that
+case and is not built. Anything reachable this way is reachable by anyone.
+
 ### The unauthenticated HTTP surface is declared, not inherited
 
 The verifier middleware is installed with `server.PublicPaths()`, an

@@ -11,6 +11,7 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // published.go -- THE PUBLIC READ THE PACK LACKED (epic memql#5532, issue
@@ -112,7 +113,7 @@ func (p *Provider) publishedForProduct(ctx context.Context, args map[string]any,
 			ProductHandle:   asString(row["productHandle"]),
 			Title:           asString(row["title"]),
 			Body:            asString(row["body"]),
-			Rating:          asInt(row["rating"]),
+			Rating:          asRating(row["rating"]),
 			AuthorName:      asString(row["authorName"]),
 			CreatedAt:       asString(row["createdAt"]),
 			CreatedAtClient: asString(row["createdAtClient"]),
@@ -241,8 +242,31 @@ func (p *Provider) publishedNode(storeID, handle string, reviews []PublishedRevi
 	}}, nil
 }
 
+// clampLimit resolves how many reviews to return.
+//
+// narrowing: DEFAULT -- the default is defaultPublishedLimit and the site has
+// one, so saturating is worse than useless here: MaxInt fed to a read cap
+// removes the cap, which is precisely the unbounded public read the number
+// exists to prevent. A value past maxPublishedLimit is clamped DOWN to it
+// afterwards, which is a policy bound rather than a narrowing.
 func clampLimit(v any) int {
-	n := asInt(v)
+	n := 0
+	switch t := v.(type) {
+	case int:
+		n = t
+	case int64:
+		n = num.Int64Or(t, defaultPublishedLimit)
+	case float64:
+		n = num.Float64Or(t, defaultPublishedLimit)
+	case json.Number:
+		parsed, err := t.Int64()
+		if err != nil {
+			return defaultPublishedLimit
+		}
+		n = num.Int64Or(parsed, defaultPublishedLimit)
+	default:
+		return defaultPublishedLimit
+	}
 	if n <= 0 {
 		return defaultPublishedLimit
 	}
@@ -252,33 +276,27 @@ func clampLimit(v any) int {
 	return n
 }
 
-// asInt narrows a decoded payload number.
+// asRating narrows a review's star rating.
 //
-// It answers ZERO for anything it cannot read, and every caller here treats
-// zero as "not given" -- clampLimit falls back to the default and a rating
-// of zero is omitted from the projection. Stated rather than left implicit,
-// because core/num exists precisely so a bare int() conversion in a float64
-// arm does not become an implementation-defined answer out of range.
-func asInt(v any) int {
+// narrowing: ZERO -- this caller already reads 0 as "not given": the
+// projection omits a zero rating entirely (`omitempty`), and the concept
+// bounds a real one to 1-5. A rating that cannot be read is absent, which is
+// the honest answer; saturating would render a review as five stars because
+// its payload was malformed.
+func asRating(v any) int {
 	switch t := v.(type) {
 	case int:
 		return t
 	case int64:
-		if t > 1<<31 || t < -(1<<31) {
-			return 0
-		}
-		return int(t)
+		return num.Int64OrZero(t)
 	case float64:
-		if t > 1<<31 || t < -(1<<31) || t != t {
-			return 0
-		}
-		return int(t)
+		return num.Float64OrZero(t)
 	case json.Number:
-		n, err := t.Int64()
-		if err != nil || n > 1<<31 || n < -(1<<31) {
+		parsed, err := t.Int64()
+		if err != nil {
 			return 0
 		}
-		return int(n)
+		return num.Int64OrZero(parsed)
 	default:
 		return 0
 	}

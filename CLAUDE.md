@@ -67,6 +67,20 @@ See [Component vs integration vs pack](docs/public/concepts/component-integratio
 `dsl/todos`, `dsl/calendar`, `dsl/campaigns` are **core**. Packs cannot shadow them.
 `memql.RegisterPlugin` is the Go registration primitive. It is not a fourth runtime.
 
+**A pack has TWO delivery paths and only one of them reaches a customer.** A
+build tag (`examples/`) is how a teaching pack stays out of every image; no
+published image sets one, so a tag-gated pack is a pack nobody has. A
+**storefront pack** lives under `packs/`, links into every binary with no tag,
+and is governed by `v1:platform:packState` -- whose absence now means **the
+pack's declared default** (`dsl.RegisterPackDefault`) rather than a flat
+"enabled". A pack that declares nothing still defaults to enabled; a storefront
+pack declares FALSE, and a row always wins over a declaration in both
+directions. **A shopper reaches a pack only through what it DECLARES**
+(`component/memql/shopper_surface.go`): named forms and reads, on a deployable
+whose `shopperForms` is on, under the site owner's borrowed authority, every
+row stamped with the `storeId` of the binding it arrived through.
+[building-a-pack.md](docs/public/build/building-a-pack.md).
+
 ```
 MemQL/
 ├── app/               Phased service bootstrap (Go). Build() orchestrator +
@@ -88,6 +102,15 @@ MemQL/
 │   │                  mirror of integrations/. The engine carries exactly one
 │   └── os/            MemQL OS -- the desktop shell and the graphical ops
 │                      console, served by component/edge as a site row
+├── packs/             Storefront packs in the DEFAULT BUILD, governed by
+│                      v1:platform:packState (epic memql#5532). No build tag:
+│                      app/anchor_storefront_packs.go mounts them on every node
+│                      type, above loadPackEnablement so a pack's DECLARED
+│                      DEFAULT is heard before the rows are folded over it. A
+│                      storefront pack ships DISABLED, because enabling one
+│                      publishes a shopper write endpoint and a public read.
+│                      examples/ still holds the TEACHING packs, which stay
+│                      build-tag-gated and reach no cluster
 ├── component/         Core Go components (memql, grpc, events, database,
 │   │                  server, auth, edge, language, ...)
 │   ├── bus/           Channel-based inter-component communication
@@ -645,6 +668,7 @@ dictates the wire (a browser, a mail client, a probe, a third-party webhook).
 | **One-click unsubscribe** | `GET+POST /unsubscribe` (bff only) | Here the third party is the RECIPIENT'S MAIL CLIENT (memql#3348); RFC 8058 is a contract with Gmail / Outlook / Yahoo. The GET/POST split is load-bearing: mail clients PREFETCH links, so a GET with the side effect unsubscribes people who never clicked. Authorization is an HMAC-signed token carrying (owner, recipient, campaign), verified before any row is read. `HandlerAuthorizedPaths()` + `SelfAuthenticatedPaths()` |
 | **Campaign open/click tracking** | `GET /t/o/{token}`, `GET /t/c/{token}` (bff only) | The RECIPIENT'S MAIL CLIENT again (memql#4823, owner-approved under program P3): a pixel is an `<img src>` it fetches and a tracked link is one a reader follows, so both are GETs. Authorization is an HMAC over the unsubscribe key ring under a DIFFERENT context string, and the click destination lives INSIDE the signed payload, which is what makes the redirect open-redirect-proof. Neither ever shows a human a failure: the pixel always answers the 1x1 GIF and a bad click token renders the same "link is not valid" page a bad unsubscribe link gets. **The token must be a SINGLE PATH SEGMENT** -- `SelfAuthenticatedPaths()`' exemption is bounded to one segment, so a token containing `/` is 401'd before the handler runs (base64url, never standard base64). `server.TrackingPaths()` -> `HandlerAuthorizedPaths()` + `SelfAuthenticatedPaths()`; the literals must agree with `campaigns.TrackingOpenPath` / `TrackingClickPath` |
 | **Library artifacts** | `POST /artifacts`, `GET /artifacts/{id}/content`, plus the chunked-session family `POST /artifacts/uploads`, `GET /artifacts/uploads/{id}`, `PUT /artifacts/uploads/{id}/chunks/{n}`, `POST /artifacts/uploads/{id}/complete` (bff only) | Upload is the multipart reasoning (memql#4341, D1); the session family (memql#4782, owner-approved) stages 16 MiB chunks against Azure block blobs -- replica-agnostic, resumable via the inventory `GET`, verified at `complete` -- which is byte transport and exactly what HTTP is for. `GET .../content` STREAMS through the bff after re-resolving the row under the caller's actor, honoring single-range `Range` (206), never a redirect: there are no signed URLs, and a redirect would move authorization from the graph to whoever holds a URL. All are ordinary AUTHENTICATED routes, so they appear in none of the three aggregates; `server.ArtifactPaths()` routes them. Caps: `MEMQL_LIBRARY_MAX_UPLOAD_BYTES` (default 4 GiB, per file) and `MEMQL_LIBRARY_USER_QUOTA_BYTES` (default 100 GiB, per user) |
+| **Shopper forms** | `POST /forms/{pack}/{name}`, `GET /reads/{pack}/{name}` (bff only) | A member of the PUBLIC posting a plain HTML form on a hosted storefront, with no JavaScript and no MemQL identity (epic memql#5532, owner-approved). The first storefront's wholesale form is `method="post"` so a federal tax identifier never reaches a query string, and its served policy is `script-src 'self'`, so a JS submit handler is not available to it -- there is no gRPC form of that conversation, exactly as there is none for `/unsubscribe`. **A shopper is nobody to MemQL**: reach is declared PER ROUTE by a pack (`component/memql/shopper_surface.go`) and nothing undeclared is reachable. Reached ONLY through the edge at `/_memql/forms/*` on a deployable's own origin, which owns the per-site switch (`site.shopperForms`, off by default), the per-address rate limit, the size cap and the stamp -- site, store and owner, stripped then set. `HandlerAuthorizedPaths()` + **`servedButNotExternallyRouted`**, so no front-door rule exists and the edge is the only way in. The stamp is a POINTER, not an assertion: the bff re-reads the site row UNDER the named owner, and the composite-owner tier means a forged owner reads zero rows and refuses itself. The write runs under that owner's borrowed authority and every row carries the `storeId` of the binding it arrived through -- the PREVIEW binding under a grant, which is design D9 falling out of D7 |
 
 ### The front door's HOST set is generated too (memql#3767)
 
