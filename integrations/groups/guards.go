@@ -7,13 +7,25 @@ package groups
 // whole security argument of this package: the caller's authority decides, the
 // engine's identity writes, and nothing in between can widen the first.
 //
-// # Why a builtin has to do this in Go
+// # Where a builtin's caller gate lives, and it is TWO PLACES
 //
-// A builtin's annotation set carries no `@requiresRank` and no
-// `@requiresCapability` -- the floor has to live in the handler. That is the
-// same conclusion component/logstore and integrations/work reached, and it is
-// why the codes below are constants rather than sentences: they are the
-// contract the OS keys its copy on, so a refusal that reworded would still be
+// A builtin's annotation set carries no `@requiresRank`, so an actor-RANK
+// floor has to live in the handler -- the conclusion component/logstore and
+// integrations/work reached. It DOES carry `@requiresCapability` (epic
+// memql#5288): the builtin executor asks that question itself, before the
+// handler runs, because a top-level builtin call returns from the engine's own
+// branch before the plan-level refusal does.
+//
+// So the five person-facing verbs check their capability HERE, where the same
+// pass also reads the rank rule and the target's row; and the two
+// account-lifecycle builtins -- groupEnsureForAccount, groupArchiveForAccount
+// -- declare theirs in dsl/identity/builtins.memql, because the engine's gate
+// passes INTERNAL ORIGIN and their only callers are the engine itself. Nothing
+// in this package is gated by the absence of `@sdk`, which is a generator
+// marker with no engine effect.
+//
+// The codes below are constants rather than sentences because they are the
+// contract the OS keys its copy on: a refusal that reworded would still be
 // recognised and one that renamed would not.
 //
 // # The rank rule, and its one asymmetry

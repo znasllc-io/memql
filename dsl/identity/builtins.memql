@@ -189,14 +189,37 @@ builtin groupMemberRemove {
   userId   string!
 }
 
+// ---- The account lifecycle's two (epic memql#5165, D5) ----
+//
+// THESE TWO CARRY THEIR GATE AS AN ANNOTATION, and the reason is the one epic
+// memql#5288 established: a top-level builtin call returns from the engine's
+// own branch before the plan-level refusal runs, so the builtin executor asks
+// the question itself (component/memql/requires_capability.go,
+// refuseBuiltinBelowRequiredCapability). It runs BEFORE the handler, which is
+// what makes a refusal say nothing about whether the named account exists.
+//
+// THE ABSENCE OF @sdk IS NOT A GATE. It is a generator marker with no engine
+// effect -- it keeps a name out of sdk/go and sdk/ts and out of nothing else.
+// The capability below is what decides who may drive these, and
+// component/memql/group_account_builtin_capability_test.go pins both halves.
+//
+// INTERNAL ORIGIN PASSES, which is the point rather than a loophole. Every
+// caller in this tree is the engine -- the ensureAccountGroup and
+// archiveAccountGroup automations (dsl/accounts/automations.memql) and the
+// seed materializer's boot backfill -- and trusted server-side Go stamped for
+// one call is not a principal. A gate that refused them would leave an
+// archived account's people still holding its groups.
+
+@requiresCapability("create", "group")
 @executor("integration.groups.groupEnsureForAccount")
-@description("Ensure the account-kind group for one account exists, at the derived id acct-<accountShortId> (D5). Called by the ensureAccountGroup automation on account creation and by the seed materializer's boot backfill for every active account -- so it must be idempotent, and it is: a re-run on an account that already has an active group writes nothing. NOT @sdk: this is the engine placing a row, never a person, and a caller-reachable version would let anyone mint the one group an account's whole membership hangs on. Returns {accountId, groupId, created}.")
+@description("Ensure the account-kind group for one account exists, at the derived id acct-<accountShortId> (D5). Requires `create` on `group`, the verb groupCreate checks, because this writes a group row -- and the account-KIND one groupCreate itself refuses to mint. Called by the ensureAccountGroup automation on account creation and by the seed materializer's boot backfill for every active account -- so it must be idempotent, and it is: a re-run on an account that already has an active group writes nothing. NOT @sdk: this is the engine placing a row, never a person. Returns {accountId, groupId, created}.")
 builtin groupEnsureForAccount {
   accountId  string!
 }
 
+@requiresCapability("update", "group")
 @executor("integration.groups.groupArchiveForAccount")
-@description("Archive every group tied to one account and remove their memberships -- the archiveAccountGroup cascade (epic memql#5165, D5). BOTH KINDS, not just the account-kind one: a custom group tied to an archived account grants access to a client that is gone, so leaving it active would mean the archive changed what the screens show and not what the people can reach. NOT @sdk -- the cascade is the engine's, and a caller-reachable version would let anyone empty every group of any account in one call. Returns {accountId, groupsArchived, membershipsRemoved}.")
+@description("Archive every group tied to one account and remove their memberships -- the archiveAccountGroup cascade (epic memql#5165, D5). Requires `update` on `group`, the same verb groupArchive checks, because this is that archive taken over every group one account has. BOTH KINDS, not just the account-kind one: a custom group tied to an archived account grants access to a client that is gone, so leaving it active would mean the archive changed what the screens show and not what the people can reach. NOT @sdk -- the cascade is the engine's. Returns {accountId, groupsArchived, membershipsRemoved}.")
 builtin groupArchiveForAccount {
   accountId  string!
 }
