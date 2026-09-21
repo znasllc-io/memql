@@ -91,7 +91,7 @@ function mount(
 }
 
 /**
- * Open New deployable, and answer with the compose region plus its render.
+ * Open Add a deployable, and answer with the compose region plus its render.
  *
  * The RENDER comes back because a couple of cases mount TWICE in one test (a
  * cluster owner and then an admin, say), and RTL's cleanup runs between
@@ -103,8 +103,8 @@ async function compose(
   opts: { role?: string; capabilities?: EffectiveCapability[] } = {},
 ): Promise<{ region: HTMLElement; view: ReturnType<typeof render> }> {
   const view = mount(connection, opts);
-  await click(await screen.findByRole("button", { name: /New deployable/ }));
-  return { region: await screen.findByRole("region", { name: "New deployable" }), view };
+  await click(await screen.findByRole("button", { name: /Add a deployable/ }));
+  return { region: await screen.findByRole("region", { name: "Add a deployable" }), view };
 }
 
 async function chooseSource(region: HTMLElement, name: RegExp): Promise<void> {
@@ -132,7 +132,7 @@ async function openAddresses(): Promise<void> {
   if (continueButton) await click(continueButton);
   const chooseAddresses = forwardAct("Choose addresses");
   if (chooseAddresses) await click(chooseAddresses);
-  else await click(screen.getByRole("button", { name: /Address$/ }));
+  else await click(screen.getByRole("button", { name: /^Address/ }));
 }
 
 /** Type into a field by its accessible name, the way a person would. */
@@ -536,9 +536,9 @@ describe("the compose flow: a zip in Files", () => {
 
     // Build reads SKIPPED before anything runs: a built site IS its output.
     expect(railStates(region)[3]).toBe("skipped");
-    await click(within(region).getByRole("button", { name: /Build$/ }));
+    await click(within(region).getByRole("button", { name: /^Build/ }));
     expect(within(region).getByText("its built output is in the source")).toBeTruthy();
-    await click(within(region).getByRole("button", { name: /Source$/ }));
+    await click(within(region).getByRole("button", { name: /^Source/ }));
     await openAddresses();
 
     // A GENERATED ADDRESS, for when it should say nothing about what it
@@ -550,6 +550,12 @@ describe("the compose flow: a zip in Files", () => {
     expect(field.value).toMatch(/^[a-z]+-[a-z]+$/);
 
     await fill("The name Landing page answers at", "landing");
+    // THE FLOOR'S TWO VERBS AND ITS ONE BUTTON. Nothing is written before
+    // Analyze, so the way out is CANCEL -- and it is a text action: the button
+    // is what happens next.
+    const floorNow = () => [...document.querySelectorAll(".os-actbar-acts button")].map((b) => [(b.textContent ?? "").trim(), b.classList.contains("os-actbar-text")]);
+    await waitFor(() => expect(forwardAct("Analyze")).toBeTruthy());
+    expect(floorNow()).toEqual([["Cancel", true], ["Analyze", false]]);
     await click(forwardAct("Analyze"));
 
     const create = connection.callsNamed("createSite")[0] ?? "";
@@ -560,6 +566,8 @@ describe("the compose flow: a zip in Files", () => {
     expect(connection.callsNamed("sitePublishFromArtifact")).toHaveLength(0);
 
     await waitFor(() => expect(forwardAct("Deploy")).toBeTruthy());
+    // The draft exists now, so going would KEEP it: the word is Leave.
+    expect(floorNow()).toEqual([["Leave", true], ["Deploy", false]]);
     await click(forwardAct("Deploy"));
     expect(connection.callsNamed("sitePublishFromArtifact")[0]).toContain('artifactId: "artifact-zip"');
     // THE OUTCOME IS THE BAR'S NOW, not a notice in the panel: it used to be
@@ -569,6 +577,8 @@ describe("the compose flow: a zip in Files", () => {
       expect((document.querySelector(".os-actbar")?.textContent ?? "")).toContain("in place at landing.memql.example.com, not live yet"),
     );
     expect((document.querySelector(".os-actbar-word")?.textContent ?? "").trim()).toBe("Built");
+    // Finished: going live is the button, and Done is the text beside it.
+    expect(floorNow()).toEqual([["Done", true], ["Go live", false]]);
   });
 
   it("says what a zip that is NEITHER is, and does not continue", async () => {
@@ -634,7 +644,9 @@ describe("the compose flow: pushed by your CI", () => {
     // CHOSEN ONCE: the address is now a fact, not a field. Editing a slug
     // `createSite` has already claimed would change nothing.
     expect(within(region).queryByLabelText("The name Marketing site answers at")).toBeNull();
-    expect(within(region).getByText("marketing.memql.example.com")).toBeTruthy();
+    // It reads on the Address step's own line as that step's answer, and at
+    // the Live step as the fact it became.
+    expect(within(region).getAllByText("marketing.memql.example.com").length).toBeGreaterThan(0);
     expect(document.querySelector(".os-actbar-word")?.textContent).toBe("Waiting for CI");
     expect(railStates(region)[4]).toBe("open");
     // Nothing is deployed from here: the Live stop is what waits.
@@ -1074,7 +1086,7 @@ describe("what the compose flow does not do", () => {
 // ---------------------------------------------------------------------------
 
 describe("a private repository whose build output is committed", () => {
-  it("goes New deployable -> published, with its token pasted once", async () => {
+  it("goes Add a deployable -> published, with its token pasted once", async () => {
     const secret = "github_pat_" + "11PRIVATE" + "0123456789";
     const connection = fakeConnection({
       sourceProbe: {
@@ -1151,7 +1163,7 @@ describe("a private repository whose build output is committed", () => {
 // ---------------------------------------------------------------------------
 //
 // Reported with a screenshot: deploying the `web` app that had been skipped
-// opened a page titled "New deployable" whose What-it-is read "2 apps, 1 MemQL
+// opened a page titled "Add a deployable" whose What-it-is read "2 apps, 1 MemQL
 // domain" and listed `storefront` beside `web`. The source had been added days
 // earlier and storefront was serving; the page read as though the whole source
 // were being added again.
@@ -1172,10 +1184,10 @@ describe("a gate opened for one app", () => {
 
     // NAMED FROM THE CLICK. Both facts are known before anything runs -- the
     // app from the row, the source from the row's package. Composing the
-    // title from the RUN is what called this "New deployable" for as long as
+    // title from the RUN is what called this "Add a deployable" for as long as
     // the analysis took.
     expect(await screen.findByRole("region", { name: "Deploy web from acme" })).toBeTruthy();
-    expect(screen.queryByRole("region", { name: "New deployable" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Add a deployable" })).toBeNull();
     expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
 
     await click(await forward("Analyze"));

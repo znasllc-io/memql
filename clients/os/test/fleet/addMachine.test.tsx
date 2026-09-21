@@ -471,15 +471,27 @@ describe("cancel after a mint asks which of two things", () => {
     expect(h.chat).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps the token and leaves without revoking", async () => {
+  // THE FLOOR'S TWO VERBS. While the cluster listens there is ONE button, and
+  // it is Leave; Cancel is the text action beside it.
+  it("waits with one button on the floor: Leave, and Cancel as text beside it", async () => {
     mount(fakeConnection());
     await describeAndMint();
-    await click(within(bar()).getByRole("button", { name: "Cancel" }));
+    expect(within(bar()).getAllByRole("button").map((b) => b.textContent)).toEqual(["Cancel", "Leave"]);
+    expect(bar().querySelectorAll(".os-button")).toHaveLength(1);
+    expect(bar().querySelector(".os-button")?.textContent).toBe("Leave");
+    expect(bar().querySelector(".os-actbar-text")?.textContent).toBe("Cancel");
+  });
+
+  it("leaves with the token kept, after saying the one thing leaving costs here", async () => {
+    mount(fakeConnection());
+    await describeAndMint();
+    await click(within(bar()).getByRole("button", { name: "Leave" }));
     expect(within(bar()).getByText("Leave?")).toBeTruthy();
-    expect(screen.getByText(/still works/)).toBeTruthy();
-    // The uninstall line is offered right here, for a person who already ran the install.
-    expect((screen.getByLabelText("the uninstall command") as HTMLInputElement).value).toBe(uninstallCommand("mac"));
-    await click(within(bar()).getByRole("button", { name: "Leave, keep the token" }));
+    expect(screen.getByText(/keeps working/)).toBeTruthy();
+    expect(screen.getByText(/shown only here/)).toBeTruthy();
+    // Nothing is revoked by leaving, so there is nothing to uninstall.
+    expect(screen.queryByLabelText("the uninstall command")).toBeNull();
+    await click(within(bar()).getByRole("button", { name: "Leave" }));
     expect(h.revoke).not.toHaveBeenCalled();
     expect(screen.getByRole("heading", { name: "Machines" })).toBeTruthy();
   });
@@ -488,7 +500,11 @@ describe("cancel after a mint asks which of two things", () => {
     mount(fakeConnection());
     await describeAndMint();
     await click(within(bar()).getByRole("button", { name: "Cancel" }));
-    await click(within(bar()).getByRole("button", { name: "Revoke the token and leave" }));
+    expect(within(bar()).getByText("Cancel?")).toBeTruthy();
+    expect(screen.getByText(/token is revoked/)).toBeTruthy();
+    // The uninstall line is offered right here, for a person who already ran the install.
+    expect((screen.getByLabelText("the uninstall command") as HTMLInputElement).value).toBe(uninstallCommand("mac"));
+    await click(within(bar()).getByRole("button", { name: "Revoke the token and cancel" }));
     await settle();
     expect(h.revoke).toHaveBeenCalledTimes(1);
     expect(h.revoke.mock.calls[0]?.[1]).toBe(IDENTITY);
@@ -500,20 +516,32 @@ describe("cancel after a mint asks which of two things", () => {
     mount(fakeConnection());
     await describeAndMint();
     await click(within(bar()).getByRole("button", { name: "Cancel" }));
-    await click(within(bar()).getByRole("button", { name: "Revoke the token and leave" }));
+    await click(within(bar()).getByRole("button", { name: "Revoke the token and cancel" }));
     await settle();
     expect(screen.getByText(/identity not found/)).toBeTruthy();
     expect(within(bar()).getByRole("button", { name: "Leave, keep the token" })).toBeTruthy();
     expect(screen.getByRole("region", { name: "Add a machine" })).toBeTruthy();
   });
 
-  it("goes back to waiting on Keep waiting, and the Head's arrow asks the same question", async () => {
+  it("goes back to waiting on Keep waiting", async () => {
+    mount(fakeConnection());
+    await describeAndMint();
+    await click(within(bar()).getByRole("button", { name: "Cancel" }));
+    await click(within(bar()).getByRole("button", { name: "Keep waiting" }));
+    expect(within(bar()).getByText("Waiting for studio-mac-mini")).toBeTruthy();
+    expect(h.revoke).not.toHaveBeenCalled();
+  });
+
+  // GOING BACK IS LEAVING, NOT CANCELLING: the arrow never revokes anything,
+  // and it asks the same question the Leave button does.
+  it("asks the Leave question from the Head's arrow, and stays on Stay", async () => {
     mount(fakeConnection());
     await describeAndMint();
     await click(screen.getByRole("button", { name: "Back to Machines" }));
     expect(within(bar()).getByText("Leave?")).toBeTruthy();
-    await click(within(bar()).getByRole("button", { name: "Keep waiting" }));
+    await click(within(bar()).getByRole("button", { name: "Stay" }));
     expect(within(bar()).getByText("Waiting for studio-mac-mini")).toBeTruthy();
+    expect(h.revoke).not.toHaveBeenCalled();
   });
 
   it("drops Cancel once the machine has connected", async () => {
@@ -523,7 +551,7 @@ describe("cancel after a mint asks which of two things", () => {
     emit(connection, arrival());
     await settle();
     expect(within(bar()).queryByRole("button", { name: "Cancel" })).toBeNull();
-    await click(within(bar()).getByRole("button", { name: "Leave setup" }));
+    await click(within(bar()).getByRole("button", { name: "Leave" }));
     expect(screen.getByRole("heading", { name: "Machines" })).toBeTruthy();
   });
 });
