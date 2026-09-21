@@ -1431,12 +1431,11 @@ Operator-facing detail — the six shipped rules, how to add your own, and how t
 
 ### Prompts
 
-AI prompt templates with input schemas and default providers live in `dsl/<namespace>/prompts.memql`. Struct form — the body is a bare input-schema field list:
+AI prompt templates and their input schemas live in `dsl/<namespace>/prompts.memql`. Struct form — the body is a bare input-schema field list, and `@level` is how the prompt says how much intelligence its call needs:
 
 <!-- corpus: 2026/examples/memql/routing/prompt-input.memql -->
 ```memql
 @level("fast")
-@defaultProvider("chat54Mini")
 @templateFile("prompts/planStep.tmpl")
 /// Choose the next step for an in-flight run
 prompt planStep {
@@ -1449,7 +1448,7 @@ prompt planStep {
 
 Logic prompts (routing / suggest / classification) use the structured-output path (`ChatStructuredProvider.CallChatStructured`); prose prompts (agent replies to users) use regular chat.
 
-**`@level` is required** (see [Levels](#levels) above): a prompt with no level refuses to load, because a guessed level is a routing decision nobody wrote. **`@defaultProvider` survives as an explicit PIN** — it rides the request's explicit-provider field and still wins over every rule — which is why the rule that it may not name a policy still holds.
+**`@level` is required** (see [Levels](#levels) above): a prompt with no level refuses to load, because a guessed level is a routing decision nobody wrote. **`@defaultProvider` survives as an explicit PIN** — it rides the request's explicit-provider field and still wins over every rule — which is why the rule that it may not name a policy still holds. A pin is an override, not the ordinary way to choose: in this repository `TestNoPaidDefault` refuses a prompt pinned to a federated provider, and every concrete provider record shipped here is federated, so a pin naming one routes around the local-first rule the platform ships.
 
 **The body must cover the template, and `@defaultProvider` must name a real provider** (memql#3616). The input schema compiles with `additionalProperties: false` and is validated **before** the template renders, so a variable the `.tmpl` reads but the body omits is a field no caller can ever supply — the load refuses rather than registering a schema that cannot serve its own template. Likewise `@defaultProvider` must name a declared `provider`, never a `policy` slug: a dangling name does not error at call time, it silently falls through to the default provider. A `@disabled` provider still counts as declared. See [authoring rule 28](authoring-rules.md).
 

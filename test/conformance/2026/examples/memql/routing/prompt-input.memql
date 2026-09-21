@@ -1,5 +1,4 @@
 @level("fast")
-@defaultProvider("chat54Mini")
 @templateFile("prompts/planStep.tmpl")
 /// Choose the next step for an in-flight run
 prompt planStep {
