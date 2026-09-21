@@ -11,6 +11,8 @@ import {
   flipOutcomeSentence,
   isFlippable,
   noSwitchSentence,
+  packBarDetail,
+  packOffReading,
   readinessForModule,
   readinessNodeLines,
 } from "./rows";
@@ -125,6 +127,9 @@ export function ModuleDetail({
             <Fact label="State" value={module.state || "unstated"} mono />
             <Fact label="What it is" value={module.description} />
             <Fact label="Engine says" value={module.stateDetail} />
+            {flippable && !enabled && packOffReading(module.stateDetail) !== "" ? (
+              <Fact label="Why it is off" value={packOffReading(module.stateDetail)} />
+            ) : null}
             <Fact label="Code" value={module.codeReference} mono />
             <Fact
               label="Answered by"
@@ -225,11 +230,7 @@ export function ModuleDetail({
 
       <ActionBar
         state={barState(module.state, flippable, enabled)}
-        detail={
-          flippable
-            ? "A flip is recorded now and read by each node at its NEXT BOOT. Nothing running changes until they restart."
-            : module.stateDetail
-        }
+        detail={flippable ? packBarDetail(module.stateDetail) : module.stateDetail}
         tone={barTone(module.state)}
         acts={confirming ? [] : acts}
       >

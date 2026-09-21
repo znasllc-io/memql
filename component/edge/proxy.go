@@ -62,15 +62,44 @@ func (h *Handler) serveAPI(w http.ResponseWriter, r *http.Request, site *Site) {
 		return
 	}
 
-	target, err := url.Parse(h.apiTarget)
-	if err != nil {
-		h.logger.Error("edge: MEMQL_EDGE_API_TARGET is not a URL",
-			"component", "edge", "target", h.apiTarget, "err", err)
+	proxy := h.newBFFProxy(site, nil)
+	if proxy == nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	proxy := &httputil.ReverseProxy{
+	// ReverseProxy handles the WebSocket upgrade itself when the request
+	// carries Upgrade/Connection -- it detects a 101 and switches to a raw
+	// byte pipe. TestAPIProxyPreservesTheUpgradeHeaders proves it rather than
+	// trusting it, because a plain GET test would pass while every WebSocket
+	// silently died.
+	proxy.ServeHTTP(w, r)
+}
+
+// newBFFProxy builds the reverse proxy to the bff, optionally applying a
+// caller's `stamp` to the outbound request AFTER the shared rewrite.
+//
+// ONE BUILDER FOR BOTH CALLERS (serveAPI and the shopper surface), because
+// the rewrite is a contract with the bff -- the marker swap, X-Forwarded,
+// the site's own Host, the WebSocket subprotocols -- and a second copy of a
+// contract is wrong before it drifts. `stamp` runs LAST so it can delete a
+// header the shared rewrite copied through, which is exactly what the
+// shopper stamp does.
+//
+// Returns nil when MEMQL_EDGE_API_TARGET is not a URL; the caller decides
+// what a person sees, because the two callers owe them different answers.
+func (h *Handler) newBFFProxy(site *Site, stamp func(*httputil.ProxyRequest)) *httputil.ReverseProxy {
+	target, err := url.Parse(h.apiTarget)
+	if err != nil {
+		h.logger.Error("edge: MEMQL_EDGE_API_TARGET is not a URL",
+			"component", "edge", "target", h.apiTarget, "err", err)
+		return nil
+	}
+	siteID := ""
+	if site != nil {
+		siteID = site.ID
+	}
+	return &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
 			pr.Out.URL.Path = upstreamPath(pr.In.URL.Path)
@@ -81,20 +110,16 @@ func (h *Handler) serveAPI(w http.ResponseWriter, r *http.Request, site *Site) {
 			pr.SetXForwarded()
 			pr.Out.Host = pr.In.Host
 			copyWebsocketSubprotocols(pr)
+			if stamp != nil {
+				stamp(pr)
+			}
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
 			h.logger.Error("edge: proxying to the API failed",
-				"component", "edge", "site", site.ID, "err", err)
+				"component", "edge", "site", siteID, "err", err)
 			http.Error(w, "upstream unavailable", http.StatusBadGateway)
 		},
 	}
-
-	// ReverseProxy handles the WebSocket upgrade itself when the request
-	// carries Upgrade/Connection -- it detects a 101 and switches to a raw
-	// byte pipe. TestAPIProxyPreservesTheUpgradeHeaders proves it rather than
-	// trusting it, because a plain GET test would pass while every WebSocket
-	// silently died.
-	proxy.ServeHTTP(w, r)
 }
 
 // bffRootPrefixes are the bff route roots that are NOT under its "/memql"
@@ -113,7 +138,17 @@ func (h *Handler) serveAPI(w http.ResponseWriter, r *http.Request, site *Site) {
 // A LIST RATHER THAN A CONSTANT because the rule is one rule over a set, and
 // the day a second bff root reappears the alternative is a second
 // `strings.HasPrefix` pair somebody has to notice is the same test twice.
-var bffRootPrefixes = []string{"/artifacts"}
+//   - "/forms" and "/reads" -- the SHOPPER SURFACE (epic memql#5532, issue
+//     memql#5551). A pack's declared forms and reads are served at the bff's
+//     own root, not under "/memql", because they are not part of the
+//     multiplexed API: nothing about them speaks gRPC, and the caller is a
+//     browser posting an ordinary HTML form with no MemQL identity at all.
+//     Marker-stripped like "/artifacts" rather than swapped, so
+//     "/_memql/forms/reviews/review" reaches the bff as
+//     "/forms/reviews/review". A hosted site's OWN /forms page is untouched:
+//     this rule only ever applies to a path that already carried the
+//     "/_memql" marker, which is the one prefix a bundle may not claim.
+var bffRootPrefixes = []string{"/artifacts", "/forms", "/reads"}
 
 // isBffRootPath reports whether a marker-stripped path addresses one of the
 // bff's own roots.

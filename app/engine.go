@@ -65,6 +65,13 @@ func (a *App) engineAndBus() {
 	// This ordering is the whole mechanism -- moving Init above this call
 	// would load every pack's behavioral constructs before the node knows
 	// which packs the instance has switched off.
+	// The storefront packs are linked in HERE, immediately above the
+	// packState read, because RegisterPackDefault has to be heard before the
+	// rows are folded over the declarations (epic memql#5532, issue
+	// memql#5549). Anchoring below this line would leave reviews' declared
+	// default unheard and ship it ENABLED -- silently.
+	a.anchorStorefrontPacks()
+
 	a.loadPackEnablement()
 
 	if err := a.engine.Init(a.registry); err != nil {

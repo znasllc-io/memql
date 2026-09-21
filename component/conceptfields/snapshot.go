@@ -16,6 +16,23 @@ const DefaultSnapshotPath = "component/conceptfields/concept-fields.snapshot.jso
 const (
 	DefaultDSLRoot       = "dsl"
 	DefaultMigrationsDir = "component/database/memory-nodes/migrations"
+
+	// DefaultPackGlob finds every STOREFRONT PACK's DSL tree (epic
+	// memql#5532, issue memql#5549).
+	//
+	// PACKS ARE SNAPSHOTTED BECAUSE THEY SHIP NOW. While a pack lived under
+	// examples/ behind a build tag no published image set, its concepts
+	// could hold no rows on any cluster and there was nothing for this gate
+	// to protect. Linking the storefront packs into the default build makes
+	// their rows as real as any core concept's, so dropping a field from
+	// v1:reviews:review would brick stored rows exactly as dropping one
+	// from a core concept would -- silently, because CI's db-tests run on a
+	// fresh database.
+	//
+	// A GLOB RATHER THAN A LIST, so the wholesale pack and whatever follows
+	// it are covered the day they land rather than the day somebody
+	// remembers this file.
+	DefaultPackGlob = "packs/*/dsl"
 )
 
 // readme is emitted into the file itself.

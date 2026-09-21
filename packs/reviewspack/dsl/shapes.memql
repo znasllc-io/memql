@@ -1,0 +1,72 @@
+// reviews pack -- projections (epic memql#5532, issue memql#5553).
+//
+// A CONCEPT FIELD IS NOT A READABLE FIELD. A query with no shape answers the
+// graph bundle, whose payload fields sit one level down -- so a caller
+// reading `row.body` off it gets "" and no error, which is the failure mode
+// this file exists to remove. Every read in this pack names a shape.
+//
+// TWO PROJECTIONS OF ONE CONCEPT, and the difference between them is a
+// security property rather than tidiness: reviewPublic omits authorEmail,
+// so the shopper's address never reaches the read whose output is served to
+// an unauthenticated browser. The Go half also declines to project it, and
+// that belt-and-braces is deliberate -- the DSL half is what makes the
+// omission survive somebody later writing a second caller.
+
+use reviews.concepts.{ review, moderationAction, reviewSettings }
+
+@description("A review as its MERCHANT sees it, including the shopper's email so they can reply. Never served to a storefront.")
+@row
+shape review reviewFull {
+  row.id
+  ownerUserId
+  storeId
+  siteId
+  productHandle
+  productId
+  title
+  body
+  rating
+  authorName
+  authorEmail
+  imageAttachmentIds
+  createdAtClient
+  row.createdAt
+}
+
+@description("A review as a STOREFRONT may render it. authorEmail is absent, and its absence is the point: it exists so a merchant can reply, not so the internet can harvest it, and this is the projection behind the one read an unauthenticated browser reaches.")
+@row
+shape review reviewPublic {
+  row.id
+  storeId
+  productHandle
+  title
+  body
+  rating
+  authorName
+  createdAtClient
+  row.createdAt
+}
+
+@description("A moderation decision, whole. Append-only, so a row is a decision and this is all of it.")
+@row
+shape moderationAction moderationActionFull {
+  row.id
+  reviewId
+  storeId
+  criterion
+  decidedBy
+  principalKind
+  note
+  row.createdAt
+}
+
+@description("One store's reviews settings.")
+@row
+shape reviewSettings reviewSettingsFull {
+  row.id
+  ownerUserId
+  storeId
+  publicDisplay
+  criteriaText
+  row.createdAt
+}

@@ -1002,6 +1002,7 @@ var BoundConcepts = map[string]string{
 	"updateSitePreviewBinding":                         "v1:platform:site",
 	"updateSiteResolutionTail":                         "v1:platform:site",
 	"updateSiteSettings":                               "v1:platform:site",
+	"updateSiteShopperForms":                           "v1:platform:site",
 	"updateSiteStatus":                                 "v1:platform:site",
 	"updateSiteStoreBinding":                           "v1:platform:site",
 	"updateStore":                                      "v1:shopify:store",

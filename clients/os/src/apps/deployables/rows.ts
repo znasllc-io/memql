@@ -87,6 +87,9 @@ export interface SiteRow {
   title: string;
   notes: string;
   apiProxy: boolean;
+  /** The shopper surface: a pack's declared forms and reads on this
+   *  deployable's own origin. Off by default; absent reads as off. */
+  shopperForms: boolean;
   /** Blocks deletion. The MemQL OS row; it does NOT branch the serving path. */
   systemOwned: boolean;
   deleted: boolean;
@@ -145,6 +148,7 @@ export function siteFromRow(raw: Row): SiteRow {
     title: rowString(row, "title"),
     notes: rowString(row, "notes"),
     apiProxy: boolOr(row, "apiProxy", false),
+    shopperForms: boolOr(row, "shopperForms", false),
     systemOwned: boolOr(row, "systemOwned", false),
     // `deleted` DEFAULTS FALSE on the concept, so absent is not deleted --
     // reading absent as deleted would empty the list on the first folded event

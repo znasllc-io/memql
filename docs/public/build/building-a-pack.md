@@ -202,6 +202,167 @@ the always-compiled package body. That single rule decides where a pack loads.
 
 ---
 
+## Storefront packs: in the default build, governed by a row
+
+Build-tag gating above is one of **two** delivery paths, and which tag a pack
+names decides whether it ships at all. The engine images are built with
+`BUILD_TAGS=<node type>` and nothing else, so:
+
+- a pack gated on its **own name** (`referencepack`, `shopifypack`) reaches
+  nothing, because no image sets that tag. It could once arrive through a
+  carrier binary, and that route is retiring (memql#2472). A pack behind a tag
+  nobody sets is a pack nobody has;
+- a pack gated on a **node type** does ship, to that node. `examples/deploypack`
+  is `//go:build identity` plus an unconditional anchor, which is how the
+  deploy lifecycle automations reach the node that writes deployment records.
+
+Neither gives what a customer-facing pack needs: presence on **every** node,
+with its reach changeable by an operator rather than by a release.
+
+**A storefront pack lives under `packs/` and links into every binary, with no
+tag at all** (epic memql#5532). Its reach is then governed by
+`v1:platform:packState` rather than by which binary happened to link it, which
+is what makes "enable reviews on this cluster" one operator act instead of a
+release.
+
+```go
+// packs/mypack/pack.go -- no build tag, no init(); Register is called from
+// app/anchor_storefront_packs.go, which every node type runs.
+func Register(domain string) {
+    memqldsl.RegisterTree(domain, Tree())
+    memqldsl.RegisterPackDefault(domain, DefaultEnabled) // false, for a storefront pack
+    registerShopperSurface()                             // see below
+    memql.BindPluginToPack(domain, domain)
+    memql.RegisterPluginForContract(domain, ContractVersion, NewProvider)
+}
+```
+
+**A storefront pack ships DISABLED**, and that is a decision rather than
+caution. `v1:platform:packState` absence used to mean *enabled*; it now means
+**the pack's declared default**, and a pack that declares nothing still
+defaults to enabled, so nothing that predates the declaration changed. A
+storefront pack declares `false` because enabling one publishes a write
+endpoint and a public read on every deployable whose `shopperForms` is on --
+an operator's decision, not an upgrade's. A `packState` **row always wins**
+over a declared default, in both directions.
+
+A disabled pack is **mounted-inert**: its concepts still load so imports and
+relationships resolve and its existing rows stay browsable, and every
+behavioural construct is skipped. A flip takes effect as each node restarts.
+Operators see all of this at **Cluster > Modules**, which names why a pack is
+off -- ships-disabled, or switched off by somebody -- and what enabling it
+would publish.
+
+**Register the default before the rows are read.** `app/engine.go` anchors the
+storefront packs immediately above `loadPackEnablement()` for exactly this
+reason: a declared default heard after the rows have been folded over it is a
+default that did nothing, and the pack ships enabled with nothing saying so.
+
+**Packs are snapshotted.** `make concept-snapshot` covers `packs/*/dsl` as well
+as `dsl/`, because a pack in the default build holds rows that dropping a field
+would brick -- silently, since CI's db-tests run on a fresh database.
+
+---
+
+## How a shopper writes to a pack
+
+A shopper is **nobody to MemQL**: no user row, no session, no bearer, no actor
+-- not even an anonymous one. `@rowAuthz(public)` exists and is the wrong
+instrument here, because it publishes a whole **concept**; a review is owned by
+the merchant so it can be moderated, and a wholesale application is somebody's
+tax identifier.
+
+So reach is declared **per route**. A pack names the forms a shopper may post
+and the reads a shopper may make, in Go, at registration time
+(`component/memql/shopper_surface.go`). Everything the pack did not name is
+exactly as unreachable as it was.
+
+```go
+memql.RegisterShopperForm(memql.ShopperForm{
+    Pack: Domain, Name: "review", Construct: "submitReview",
+    Fields: []memql.ShopperField{
+        {Name: "productHandle", Required: true, MaxLength: 200},
+        {Name: "body", Required: true, MaxLength: 4000},
+        {Name: "rating", Numeric: true, MaxLength: 2},
+    },
+    RedirectOK: "/reviews/thank-you", RedirectError: "/reviews/problem",
+})
+```
+
+A declared form is reachable at `POST /_memql/forms/{pack}/{name}` on the
+site's own origin, and a declared read at `GET /_memql/reads/{pack}/{name}`.
+It takes `application/x-www-form-urlencoded` and multipart from a **plain HTML
+form with no JavaScript** -- which is the requirement that shapes the whole
+path: the first storefront's wholesale form is `method="post"` so a federal tax
+identifier never reaches a query string, and its served policy is
+`script-src 'self'`, so a JS submit handler is not available to it.
+
+**What declaring one costs.** Four controls stand in front of it and none of
+them is the registry:
+
+| Control | Where | What it decides |
+|---|---|---|
+| `site.shopperForms` | the site row, off by default | whether this deployable has the endpoint at all |
+| rate limit | the edge, per address per site | how often one visitor may post |
+| size cap | the edge and the bff | `MEMQL_SHOPPER_FORM_MAX_BYTES`, 64 KiB by default |
+| not externally routed | `cmd/frontdoorpaths` | the bff route has no front-door rule, so the edge is the only way in |
+
+The registry's job is the one nothing else can do: it bounds **what** a
+reachable request may name.
+
+**The write runs under the SITE OWNER'S borrowed authority.** The merchant owns
+what is written through their storefront; the shopper is data on the row --
+their name and email are fields, never an identity. This is the campaigns
+pattern (`auth.ContextWithUserActor`), and it means a pack's shopper mutation
+is an ordinary `@actor` mutation. A `@serverOnly` construct is deliberately out
+of reach.
+
+**The owner header is self-checking.** The bff re-reads the site row *under*
+the named user, and `v1:platform:site` is composite-owner tier, so a user who
+does not own that site reads zero rows. A forged owner refuses itself.
+
+**Every shopper-written row carries its store.** `storeId` is stamped
+server-side from the binding the write arrived through -- the **preview**
+binding when the submission was made while exercising a candidate version --
+and `storeId`, `siteId`, `ownerUserId` and the row intrinsics are **refused as
+declared field names**. A form that could supply its own `storeId` could aim a
+row at a store the shopper is not on, which is exactly the preview-versus-live
+confusion the field exists to prevent. Every storefront read filters on it.
+
+**A refusal answers 303 to the page the pack declared**, with `?reason=` naming
+what happened, so it renders in the merchant's own design and language. Only
+the refusals the edge must make before a declaration is in hand -- rate
+limited, too large, surface off -- are engine-rendered pages.
+
+---
+
+## The storefront-pack convention
+
+`reviewspack` and the wholesale pack ship **concepts, mutations, queries, tools
+and builtins, and no automations and no logic**. `deploypack` and
+`referencepack` ship both, so this is a choice the storefront packs made rather
+than a rule of the platform.
+
+The reason is [decision D6](../concepts/component-integration-pack.md): a pack
+is **nouns and invariants**; the client's process is theirs. Two clients with
+different approval processes must both be able to express theirs without
+editing the pack, so who approves, in what order and what is notified attaches
+from the client's own repository:
+
+```memql fragment
+use reviews.concepts.{ review }
+
+@trigger(event="node.created", concept="v1:reviews:review")
+automation notifyOnReview { ... }
+```
+
+Client-specific fields are a **related concept**, not a blob: the client
+declares its own concept in its own domain with an `@relationship` to the
+pack's, which keeps it typed and queryable and keeps the pack's schema from
+drifting toward one client.
+
+---
+
 ## A guided tour of the reference pack
 
 The reference pack at [`examples/referencepack/`](../../../examples/referencepack)
@@ -386,8 +547,12 @@ pack is the substrate they call into.
 Beyond the two teaching examples above, the engine tree carries two shipped
 packs worth reading as real worked examples:
 
-- `examples/reviewspack` (memql#4139) -- the client-agnostic reviews product
-  feature. A pack with no integration half: no external system sits behind it.
+- `packs/reviewspack` (memql#4139, promoted by epic memql#5532) -- the
+  client-agnostic reviews pack, and the worked example of everything the two
+  sections above describe: it is in the default build under `packState`, it
+  ships disabled, it declares a shopper form and a shopper read, and every row
+  it writes carries the store it was written against. A pack with no external
+  system behind it.
 - `examples/shopifypack` (memql#4138) -- the Shopify product feature (console
   views for shop, secrets, sync), layered on the `integrations/shopify`
   integration. The pair is the canonical worked example of the

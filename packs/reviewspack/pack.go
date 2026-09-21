@@ -32,6 +32,15 @@ const integrationName = "reviews"
 // PrincipalClient is the only expressible decidedBy kind.
 const PrincipalClient = "client"
 
+// DefaultEnabled is what this pack ships as when no v1:platform:packState
+// row governs it (epic memql#5532, issue memql#5549).
+//
+// FALSE, and the reason is the shopper surface rather than anything about
+// reviews: enabling this pack publishes a write endpoint and a public read
+// on every deployable whose shopperForms is on. That is a decision an
+// operator makes, not one an upgrade makes for them.
+const DefaultEnabled = false
+
 // ClosedCriteria is the closed moderation enum. No "other", no sentiment.
 var ClosedCriteria = []string{"spam", "profanity", "harassment", "off_topic", "illegal", "copyright"}
 
@@ -48,7 +57,20 @@ func Tree() fs.FS {
 }
 
 // Provider is the pack's IntegrationProvider.
-type Provider struct{}
+//
+// IT HOLDS THE ENGINE, which the pack did not need until it gained a public
+// read (issue memql#5553). Two of its capabilities now READ the graph
+// before they write or answer -- moderation copies the storeId off the
+// review it is acting on, and the public read consults this store's
+// publicDisplay before it returns anything -- and neither question can be
+// asked from a mutation body.
+type Provider struct {
+	engine memql.IntegrationEngineAccess
+	// reader is the narrow row read published.go decides over. Separate
+	// from engine above so the gate, the exclusion and the bound are
+	// testable as functions over rows rather than over an engine envelope.
+	reader rowReader
+}
 
 func (p *Provider) IntegrationName() string { return integrationName }
 
@@ -77,10 +99,24 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "setPublicDisplay",
-			Description: "Flip the public display toggle at runtime (data, not source).",
+			Description: "Flip one store's public display toggle at runtime (data, not source).",
 			Handler:     p.setPublicDisplay,
 			ArgsSchema: map[string]string{
+				"storeId":       "string (required) - the store this toggle is for",
 				"publicDisplay": "bool (required)",
+			},
+		},
+		{
+			Name: "publishedForProduct",
+			Description: "The public read: reviews a storefront may render for one product, " +
+				"gated on this store's publicDisplay and excluding every review a moderation " +
+				"decision hides.",
+			Handler: p.publishedForProduct,
+			ArgsSchema: map[string]string{
+				"storeId":       "string (required) - the store to read",
+				"productHandle": "string (required) - the product",
+				"siteId":        "string (optional) - provenance",
+				"limit":         "integer (optional) - default 50",
 			},
 		},
 	}
@@ -106,7 +142,7 @@ func ValidCriterion(criterion string) error {
 	return fmt.Errorf("reviews: criterion %q is not in the closed enum", criterion)
 }
 
-func (p *Provider) recordModerationAction(_ context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+func (p *Provider) recordModerationAction(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	if err := ClientMayModerate(asString(args["principalKind"])); err != nil {
 		return nil, err
 	}
@@ -118,8 +154,24 @@ func (p *Provider) recordModerationAction(_ context.Context, args map[string]any
 	if reviewID == "" || decidedBy == "" {
 		return nil, fmt.Errorf("reviews: reviewId and decidedBy are required")
 	}
+	// THE STORE IS READ OFF THE REVIEW, never supplied (design D9, issue
+	// memql#5552). A decision must be scoped to the same store its subject
+	// is on, or a read scoped to one store would go on showing a review the
+	// other store's merchant had already hidden -- and an argument for it
+	// would be a way to record a decision against somebody else's store.
+	//
+	// The read runs under the CALLER'S own actor, so a caller who cannot
+	// read the review cannot moderate it either. That is a narrowing this
+	// capability did not have before and it is the right one: the previous
+	// version would happily append a decision naming a review id that did
+	// not exist.
+	storeID, err := p.storeOfReview(ctx, reviewID)
+	if err != nil {
+		return nil, err
+	}
 	payload, err := json.Marshal(map[string]any{
 		"reviewId":      reviewID,
+		"storeId":       storeID,
 		"criterion":     asString(args["criterion"]),
 		"decidedBy":     decidedBy,
 		"principalKind": PrincipalClient,
@@ -166,17 +218,59 @@ func (p *Provider) setPublicDisplay(_ context.Context, args map[string]any, _ in
 	if !ok {
 		return nil, fmt.Errorf("reviews: publicDisplay must be a bool")
 	}
-	payload, err := json.Marshal(map[string]any{"publicDisplay": on})
+	// PER STORE (design D9). The id used to be the literal
+	// "reviews:settings:display" -- one row for the whole cluster -- which
+	// meant a merchant flipping reviews on for their live storefront also
+	// flipped them on for the development store a candidate was being
+	// exercised against, and for every other merchant this cluster serves.
+	storeID := strings.TrimSpace(asString(args["storeId"]))
+	if storeID == "" {
+		return nil, fmt.Errorf("reviews: storeId is required; a display toggle is per store")
+	}
+	payload, err := json.Marshal(map[string]any{
+		"storeId":       storeID,
+		"publicDisplay": on,
+	})
 	if err != nil {
 		return nil, err
 	}
 	return []memorynodes.MemoryNode{{
-		ID:        "reviews:settings:display",
+		ID:        SettingsRowID(storeID),
 		Concept:   "v1:reviews:reviewSettings",
 		Type:      memorynodes.NodeTypeObject,
 		CreatedAt: time.Now().UTC(),
 		Payload:   payload,
 	}}, nil
+}
+
+// SettingsRowID derives the one settings row id for a store.
+//
+// DERIVED RATHER THAN GENERATED, so the row is a singleton per store and a
+// second flip is a new VERSION of one logical row rather than a second row
+// the read would have to choose between.
+func SettingsRowID(storeID string) string {
+	return "reviews:settings:" + strings.TrimSpace(storeID)
+}
+
+// storeOfReview reads the store a review belongs to, under the caller's own
+// actor.
+func (p *Provider) storeOfReview(ctx context.Context, reviewID string) (string, error) {
+	rows, err := p.rowsFor(ctx, "reviewById", map[string]string{"reviewId": reviewID})
+	if err != nil {
+		return "", fmt.Errorf("reviews: resolving the review being moderated: %w", err)
+	}
+	if len(rows) == 0 {
+		// REFUSED, not defaulted. A decision against a review nobody can
+		// read is a row scoped to no store, which every storefront read
+		// would then miss -- so it would hide nothing while looking like it
+		// had.
+		return "", fmt.Errorf("reviews: review %q is not readable by this caller, so it cannot be moderated", reviewID)
+	}
+	storeID := strings.TrimSpace(asString(rows[0]["storeId"]))
+	if storeID == "" {
+		return "", fmt.Errorf("reviews: review %q carries no storeId", reviewID)
+	}
+	return storeID, nil
 }
 
 // ExportedFile is one image in an export. Bytes are required.
@@ -244,13 +338,27 @@ func asString(v any) string {
 
 // NewProvider builds the pack IntegrationProvider.
 func NewProvider(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
-	_ = pctx
-	return &Provider{}, nil
+	return &Provider{engine: pctx.Engine, reader: &engineRowReader{engine: pctx.Engine}}, nil
 }
 
 // Register wires the pack into the engine registries.
+//
+// FOUR REGISTRATIONS NOW, and the two new ones are what promote this from
+// an example to a pack a cluster can actually serve (epic memql#5532):
+//
+//   - RegisterPackDefault(domain, false) -- storefront packs ship DISABLED.
+//     Reviews carries a shopper write path and a public read, and "absence
+//     of a packState row means enabled" would switch both on for every
+//     cluster that ever upgrades, with no row anywhere saying so. An
+//     operator enables it in Cluster > Modules.
+//   - RegisterShopperForm / RegisterShopperRead -- the declared shopper
+//     surface. NOTHING ELSE on this pack is reachable without a bearer, and
+//     these two are reachable only on a deployable whose shopperForms is
+//     on.
 func Register(domain string) {
 	memqldsl.RegisterTree(domain, Tree())
+	memqldsl.RegisterPackDefault(domain, DefaultEnabled)
+	registerShopperSurface()
 	// Bind the Go half to the pack domain so a v1:platform:packState
 	// disable skips the factory and the module inventory folds this
 	// integration under its pack row (memql#4183). Contract packs register

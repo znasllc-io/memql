@@ -89,6 +89,7 @@ shape site siteFull {
   bundleRef
   status
   apiProxy
+  shopperForms
   systemOwned
   title
   notes

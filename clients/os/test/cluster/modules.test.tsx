@@ -13,6 +13,7 @@ vi.mock("../../src/live/connection", () => ({
 }));
 
 const { ModulesSection } = await import("../../src/apps/cluster/modules/ModulesSection");
+const { packBarDetail, packOffReading } = await import("../../src/apps/cluster/modules/rows");
 const { fakeConnection, withSession } = await import("./harness");
 import type { SessionFacts } from "../../src/chrome/access";
 
@@ -318,5 +319,44 @@ describe("the cluster-wide readiness column", () => {
     mount(fakeConnection({}, { modules: MODULES }), "owner", readiness);
     await screen.findByText("referencepack");
     expect(screen.queryByText(/Partly set up|Not set up|Not reported/)).toBeNull();
+  });
+});
+
+// ===========================================================================
+// WHY A PACK IS OFF IS TWO DIFFERENT FACTS (epic memql#5532, issue memql#5549)
+// ===========================================================================
+
+describe("a pack's off state", () => {
+  it("tells a pack that ships disabled from one an operator switched off", () => {
+    expect(
+      packOffReading(
+        "no v1:platform:packState row; this pack ships DISABLED and stays mounted-inert " +
+          "until an operator enables it",
+      ),
+    ).toContain("has not been switched on");
+
+    expect(packOffReading("set by an operator in v1:platform:packState; reason: not needed")).toBe(
+      "An operator switched this off for this instance.",
+    );
+  });
+
+  it("says nothing when the engine said nothing this build recognises", () => {
+    expect(packOffReading("")).toBe("");
+    expect(packOffReading("some future wording")).toBe("");
+  });
+
+  it("puts what a flip DOES before when it lands", () => {
+    const detail =
+      "no v1:platform:packState row; when enabled, publishes 2 shopper route(s) on any " +
+      "deployable whose shopperForms is on: form reviews/review, read reviews/published";
+    const bar = packBarDetail(detail);
+
+    expect(bar.indexOf("publishes 2 shopper route")).toBeLessThan(bar.indexOf("NEXT BOOT"));
+    expect(bar).toContain("Nothing running changes until they restart");
+  });
+
+  it("still says when a flip lands for a pack the engine described with nothing", () => {
+    expect(packBarDetail("")).toContain("NEXT BOOT");
+    expect(packBarDetail("   ")).toContain("NEXT BOOT");
   });
 });

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/memql"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 // pack_enablement.go is the boot half of per-instance pack enablement
@@ -39,17 +40,26 @@ func (a *App) loadPackEnablement() {
 		return
 	}
 
-	disabled := memql.DisabledPackDomainsFromStates(states)
+	// Folded over the packs' DECLARED DEFAULTS, not over a flat "absence
+	// means enabled" (epic memql#5532, issue memql#5549). A storefront
+	// pack ships disabled, so the rows and the declarations have to be
+	// read together -- and the anchor that registers those declarations
+	// runs immediately above this call in app/engine.go for that reason.
+	disabled := memql.DisabledPackDomains(states, memqldsl.PackDefaults())
 	a.disabledPackDomains = make(map[string]struct{}, len(disabled))
 	for _, d := range disabled {
 		a.disabledPackDomains[d] = struct{}{}
 	}
 	a.engine.SetDisabledPackDomains(disabled)
 
+	// SAYS BOTH HALVES, because "disabled by packState" is no longer the
+	// only way a pack ends up off and reporting it as though it were would
+	// send an operator looking for a row that does not exist.
 	if len(disabled) > 0 {
-		a.Logger.Info("packs disabled by v1:platform:packState; loading mounted-inert",
+		a.Logger.Info("packs loading mounted-inert; concepts load, behavioural constructs do not",
 			"component", memql.ComponentName,
-			"disabledPacks", disabled)
+			"disabledPacks", disabled,
+			"declaredDefaults", memqldsl.PackDefaults())
 	}
 }
 

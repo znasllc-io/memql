@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 
-import { Button, Caption, Fact, Facts, Input } from "../../../../kit";
+import { Button, Caption, Fact, Facts, Input, Switch } from "../../../../kit";
 import { useOsConnection } from "../../../../live/connection";
 import { ProblemNotice } from "../../packages/ReportView";
-import { saveSiteSettings } from "../../packages/calls";
+import { saveShopperForms, saveSiteSettings } from "../../packages/calls";
 import type { SiteRow } from "../../rows";
 import {
   SETTINGS_KEY_FORM,
@@ -130,6 +130,8 @@ export function RuntimeSettingsPanel({ site, canEdit }: { site: SiteRow; canEdit
 
   return (
     <section className="os-report-part">
+      <ShopperFormsControl site={site} canEdit={canEdit} />
+
       <h4 className="os-report-heading">Settings</h4>
       <Caption>{NOT_A_SECRET}</Caption>
 
@@ -216,3 +218,87 @@ function newRow(): SettingRow {
 }
 
 export { SETTINGS_KEY_FORM };
+
+// ===========================================================================
+// THE PUBLIC FORM ENDPOINT
+// ===========================================================================
+// A true on/off setting, so it is a switch (SUPERVISED-VISUAL-COMPOSITION:
+// "suitable true on/off settings use switches").
+//
+// THE CONSEQUENCE IS STATED BEFORE THE CLICK, not after it and not in a
+// tooltip. Turning this on puts an endpoint on this deployable's own address
+// that anybody on the internet may post to -- which is the single most
+// material thing on this panel, and the person deciding is owed it while
+// they are looking at the control rather than in a refusal or in
+// documentation. That is the same rule the settings editor above keeps about
+// secrets, applied to the other write on this stop.
+//
+// WHAT IT DOES NOT DECIDE IS SAID TOO, because the obvious reading of a
+// switch called "public form endpoint" is that it opens one. It does not: a
+// pack DECLARES which forms and reads exist, in Go, and a cluster that has
+// enabled no pack publishes nothing at any setting of this switch. Leaving
+// that out would make an operator believe they had opened something they had
+// not, which is the worse direction of the two.
+//
+// IT IS LIVE, unlike the pack switch in Cluster > Modules: the edge reads
+// this off the site row it resolves per request, so there is no restart
+// sentence to write and none is written. Saying "takes effect at next boot"
+// here because a sibling control says it there would be a false promise in
+// the reassuring direction.
+
+const SHOPPER_FORMS_CONSEQUENCE =
+  "Puts a form endpoint on this deployable's own address that anyone can post to. What can be posted is fixed by the packs this cluster runs -- with none enabled, nothing is published. Submissions are rate limited per visitor and size capped, and each one is recorded against the store this deployable is bound to.";
+
+function ShopperFormsControl({ site, canEdit }: { site: SiteRow; canEdit: boolean }) {
+  const connection = useOsConnection();
+  const [busy, setBusy] = useState(false);
+  const [refusal, setRefusal] = useState("");
+
+  // NO LOCAL DRAFT. v1:platform:site broadcasts `updated`, so the row comes
+  // back on the feed this page already reads -- and a local optimistic flag
+  // would show the switch on while the cluster had refused the write.
+  const on = site.shopperForms;
+
+  async function flip(next: boolean) {
+    const query = connection?.query ?? null;
+    if (query === null) {
+      setRefusal("Not connected to the cluster, so nothing was written.");
+      return;
+    }
+    setBusy(true);
+    setRefusal("");
+    try {
+      await saveShopperForms(query, site.id, next);
+    } catch (err: unknown) {
+      setRefusal(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="os-report-part">
+      <h4 className="os-report-heading">Public form endpoint</h4>
+      <Caption>{SHOPPER_FORMS_CONSEQUENCE}</Caption>
+      {canEdit ? (
+        <Switch checked={on} disabled={busy} onChange={(next) => void flip(next)}>
+          Accept form submissions from visitors
+        </Switch>
+      ) : (
+        // A CONTROL THAT WOULD ONLY REFUSE IS ABSENT, not drawn disabled
+        // (DESIGN.md rule 12). The state is still reported, because reading
+        // what a deployable does is not the same permission as changing it.
+        <Fact
+          label="Form submissions"
+          value={on ? "Accepted from visitors" : "Not accepted"}
+        />
+      )}
+      {refusal === "" ? null : (
+        <ProblemNotice
+          problem={{ code: "shopper_forms_refused", message: refusal }}
+          tone="error"
+        />
+      )}
+    </div>
+  );
+}
