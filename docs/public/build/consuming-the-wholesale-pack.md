@@ -38,6 +38,13 @@ Four concepts, and you will write against three of them:
 | `v1:wholesale:entitlement` | What was granted, to whom, through which adapter | The pack, through `wholesaleProvisionEntitlement` |
 | `v1:wholesale:wholesaleSettings` | Per-store: applications open, adapter, intro copy | You, through `wholesaleSetSettings` |
 
+**Call the builtins, not the mutations.** The pack ships both: the builtin
+makes the cross-row checks a mutation body cannot -- is this store open, what
+store is this application on, is this transition legal -- and then calls the
+matching mutation to write. Calling a mutation directly skips every one of
+those checks. The declared shopper route names the builtin, so the public
+path cannot skip them at all.
+
 **An application has no state field.** Its state — `submitted`, `approved`,
 `rejected`, `revoked` — is folded from its decision log by
 `wholesaleApplicationState`. That is deliberate: an application whose state was
@@ -117,6 +124,13 @@ wholesaleRecordDecision(
   note: "vouched for by the rep"
 )
 ```
+
+**`decidedBy` says who you are acting as; the row records who actually
+called.** The argument exists so the pack can refuse a Provider principal,
+which is what `principalKind` is checked against. The stored `decidedBy` is
+the actor, because a caller-supplied decider on an append-only log is a way
+to attribute somebody else's approval to them permanently, with no later
+write able to correct it.
 
 Four things the pack guarantees here, so you do not have to:
 
