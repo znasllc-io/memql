@@ -261,6 +261,10 @@ const STOP_FOR_CODE: Readonly<Record<string, StopId>> = {
   deployable_path_missing: "whatItIs",
   deployable_kind_unknown: "whatItIs",
   deployable_binding_missing: "whatItIs",
+  // The store a manifest names and this cluster does not have goes to the same
+  // stop as the binding it belongs to: both are questions about WHAT this
+  // deployable is, and the Store panel is where either is answered.
+  deployable_store_unknown: "whatItIs",
   // ...but a MISSING ADDRESS belongs where addresses are chosen. The two were
   // one code, so one of them always sent a person to the wrong stop.
   deployable_hostname_unchosen: "whereItLives",

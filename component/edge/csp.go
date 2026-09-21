@@ -82,9 +82,31 @@ func policyForSite(r *http.Request, site *Site, env func(string) string, scriptH
 	if scriptHashes != "" {
 		scriptSrc += " " + scriptHashes
 	}
+
+	// THE STOREFRONT ARM, AND IT IS ADDITIVE ONLY (memql#5534). storefrontSources
+	// returns its zero value for every kind but shopify_storefront, and the zero
+	// value appends nothing to any directive -- so the spa and static policies
+	// are byte-identical to what this cluster already serves, which is what
+	// TestNonStorefrontPoliciesAreUnchangedByTheStorefrontArm pins. Why these
+	// hosts, where they come from, and what is deliberately NOT widened are all
+	// in csp_storefront.go.
+	//
+	// MEDIA-SRC APPEARS ONLY FOR A STOREFRONT. Every other kind has no such
+	// directive and falls back to default-src 'self', exactly as before; adding
+	// an empty one everywhere would change every policy in the cluster to say
+	// the same thing in more bytes.
+	sf := storefrontSources(site)
+	connectSrc = sf.join(connectSrc, sf.connect)
+	imgSrc := sf.join("img-src 'self' data: blob:", sf.img)
+	mediaSrc := ""
+	if len(sf.media) > 0 {
+		mediaSrc = sf.join("media-src 'self'", sf.media) + "; "
+	}
+
 	return "default-src 'self'; " +
 		connectSrc + "; " +
-		"img-src 'self' data: blob:; " +
+		imgSrc + "; " +
+		mediaSrc +
 		"style-src 'self' 'unsafe-inline'; " +
 		scriptSrc + "; " +
 		"frame-ancestors 'none'; " +

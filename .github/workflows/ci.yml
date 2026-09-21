@@ -207,6 +207,18 @@ jobs:
               # sweeps `git ls-files` reads files without naming them, so the
               # absence of a mention was evidence, not proof.
               - '.memql/runs.json'
+              # The fixture storefront bundle (memql#5536). It is HTML, CSS and
+              # JavaScript, and a Go test in component/edge SERVES IT: the same
+              # directory the cluster-e2e leg publishes, through the real
+              # handler, asserting the fixture's document names files the bundle
+              # actually carries and that the policy it is served under names
+              # its bound store. That test names the DIRECTORY, not the files,
+              # so the coverage guard's mention-scan could not see the link --
+              # and its own note applies, that a test reading a tree reads files
+              # without naming them. Deleting storefront.css reds
+              # TestTheFixtureBundleServesItsOwnAssets, which is the evidence
+              # that this is a routing case and not an exemption: it was run.
+              - 'test/clustere2e/testdata/storefront-fixture/**'
               # The three paths that were allow-listed as "no gate reads it"
               # until memql#3451 made that claim checkable and it turned out to
               # be false of each. All three are read by a Go test in

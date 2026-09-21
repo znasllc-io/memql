@@ -408,6 +408,12 @@ mutation site createSite {
     siteId       string!
     hostname     string!  @maxLength(253) @pattern("^[a-z0-9][a-z0-9.-]*[a-z0-9]$")
     kind         enum("spa", "static", "shopify_storefront")
+    /// What the edge answers for a path that matches no file. Omitted means the kind decides,
+    /// which is what every site row created before memql#5535 carries and what they must keep
+    /// resolving as. It sits in accept{} rather than stamp{} for updateSiteBundle's artifactId
+    /// reason: an omitted arg is dropped from the payload, so a `?? ""` here would write an
+    /// explicit empty string and there would be no way to express "let the kind decide".
+    resolutionTail enum("fallback", "not_found")
     bundleRef    string!
     status       enum("draft", "live", "disabled")
     apiProxy     boolean
@@ -417,7 +423,7 @@ mutation site createSite {
     binding      object
   }
   insert {
-    accept { hostname, bundleRef, artifactId, binding }
+    accept { hostname, bundleRef, artifactId, binding, resolutionTail }
     stamp {
       id:          args.siteId
       ownerUserId: actor.userId
@@ -534,6 +540,65 @@ mutation site updateSiteSettings {
   update {
     id:       args.siteId
     settings: args.settings
+  }
+}
+
+/// Choose what the edge answers for a path that matches no file in this deployable's bundle
+/// (memql#5535) -- the LAST rung of the resolution order, and nothing above it.
+///
+/// THREE VALUES, AND THE THIRD IS THE EMPTY ONE. "fallback" serves index.html, "not_found"
+/// answers 404, and "" HANDS THE DECISION BACK TO `kind` -- which is the state every row created
+/// before this field existed is in, and the one a person must be able to return a site to. That is
+/// why the arg is optional and stamped with `?? ""` rather than accepted: an accepted arg omitted
+/// by the caller is dropped from the payload and the read-merge re-saves whatever was there, so
+/// clearing the choice would be inexpressible. It is the exact inverse of createSite's reading of
+/// the same field, for the same reason updateSiteSettings and updateSiteBundle differ.
+///
+/// WHY A SITE AND NOT A KIND. A shopify_storefront was given the spa fallback because the kind's
+/// own description says it IS a spa bundle; the first storefront actually built was a multi-page
+/// prerendered tree that declared kind: static precisely to get the 404 back, and thereby gave up
+/// the store binding, the storefront block in its runtime document and the policy that admits
+/// Shopify. Neither tail is right for every storefront, so the SITE says which it is.
+///
+/// AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite, exactly as on
+/// updateSiteBundle and updateSiteSettings: the row's owner, or a cluster owner through the
+/// explicit escape, and a systemOwned row refused for both.
+mutation site updateSiteResolutionTail {
+  args {
+    siteId          string!
+    resolutionTail  enum("fallback", "not_found")
+  }
+  update {
+    id:             args.siteId
+    resolutionTail: args.resolutionTail ?? ""
+  }
+}
+
+/// Point a storefront deployable at the v1:shopify:store row it fronts, or clear the binding
+/// (epic memql#5530, issue memql#5538).
+///
+/// ONE VALUE, AND IT IS A REFERENCE. The binding is written whole as {storeId} rather than merged,
+/// so the legacy {storeDomain, storefrontTokenRef} shape cannot survive a write: a read-merge would
+/// have kept the copy beside the reference and left two records of one store, which is the thing
+/// this epic exists to end. An empty storeId writes an empty object, which is the unbound state --
+/// clearing must be expressible, for updateSiteSettings' reason.
+///
+/// AUTHORIZATION IS TWO GATES, AND THE SECOND IS THE SUBSTANTIVE ONE.
+/// @requiresCapability names the surface: `app:deployables/store` is seeded on owner alone, which
+/// is exactly the population the retired Stores app admitted. Beside it, a Go guard refuses a
+/// binding naming a store row the CALLER CANNOT READ -- so the answer to "who may bind a storefront
+/// they own to a store they may not read" is nobody. That check needs a cross-row read no mutation
+/// body can make, which is why it sits with the hostname policy rather than here
+/// (component/memql/platform_site_binding_guard.go).
+@requiresCapability("execute", "app:deployables/store")
+mutation site updateSiteStoreBinding {
+  args {
+    siteId   string!
+    storeId  string
+  }
+  update {
+    id:      args.siteId
+    binding: { storeId: args.storeId ?? "" }
   }
 }
 
@@ -757,6 +822,46 @@ mutation customDomain recordCustomDomainIssuanceFailure {
     stamp {
       id:             args.domainId
       status:         "issuing"
+      failureDetail:  args.failureDetail ?? ""
+    }
+  }
+}
+
+/// The unbind did not go through. The row STAYS `removing`, carrying the typed reason and what the
+/// cluster said, and the next pass tries again.
+///
+/// ITS OWN MUTATION, AND THE REASON IS A BUG THIS REPLACED. A failed unbind used to be recorded
+/// through `recordCustomDomainIssuanceFailure`, which stamps `status: "issuing"` -- correct for the
+/// one caller it was written for, and wrong for this one: a binding somebody had asked to take DOWN
+/// was written back onto the certificate step, and the very next pass dispatched the BIND for it. On
+/// a cluster with an issuer that re-applies the Ingress and Certificate of a domain its operator
+/// removed, and if its DNS still points here it walks to `live` again -- the exact outcome
+/// `removeCustomDomain` promises cannot happen ("an operator removing a binding because it is being
+/// abused should not have to wait for kubectl"). Found by cancelling a domain on a local cluster,
+/// whose ServiceAccount may not touch Ingresses at all, where it showed as a removal that reappeared
+/// on "Certificate" two minutes later with Ownership and DNS drawn as verified -- neither had been.
+///
+/// A removal only ever ends at `removed`. It does not walk anywhere else, whatever the cluster says.
+///
+/// actor.userId scoping is not the fix and there is nobody to scope to: the caller is the
+/// reconciliation sweep, running under the engine's own operator identity, so actor.userId is empty
+/// for every legitimate caller and a self-scoped filter would match nothing. The concept's
+/// clusterOwner tier is the access decision. What @serverOnly adds over it is the WIRE -- without it
+/// this becomes a typed SDK method whose only use is to tell the Domains panel that a removal
+/// failed, about a cluster nobody asked.
+@serverOnly
+mutation customDomain recordCustomDomainRemovalFailure {
+  args {
+    domainId       string!
+    failureReason  string!
+    failureDetail  string
+    lastCheckedAt  datetime!
+  }
+  update {
+    accept { failureReason, lastCheckedAt }
+    stamp {
+      id:             args.domainId
+      status:         "removing"
       failureDetail:  args.failureDetail ?? ""
     }
   }

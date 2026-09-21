@@ -256,7 +256,7 @@ export interface ReportDeployable {
   command?: string;
   output: string;
   prebuilt: boolean;
-  binding?: { storeDomain?: string; storefrontTokenRef?: string };
+  binding?: { store?: string };
   problem?: ReportProblem;
 }
 
