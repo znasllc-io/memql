@@ -19,7 +19,7 @@ const { appSessionRow, delegationPolicyRow, fakeConnection, withSession } = awai
 type Conn = ReturnType<typeof fakeConnection>;
 
 // Fleet -> Apps (epic memql#5009): the delegation policy, the delegated runs
-// and one run's transcript.
+// and one run's recording.
 
 async function click(el: Element) {
   await act(async () => {
@@ -228,9 +228,7 @@ describe("the delegated runs list", () => {
   });
 });
 
-describe("one run's transcript", () => {
-  const LINES = "step 1\n  indented   spaces\nstep 2\n";
-
+describe("one run's recording", () => {
   function withDetail(over: Record<string, unknown> = {}) {
     return fakeConnection({
       appSessionsForUser: [appSessionRow({ id: "v1:worker:appSession:a" })],
@@ -240,8 +238,10 @@ describe("one run's transcript", () => {
           id: "v1:worker:appSession:a",
           workspace: "/Users/ana/memql-workspaces/run-a",
           prompt: "Fix the failing test",
-          transcript: LINES,
-          transcriptBytes: LINES.length,
+          sessionRunId: "v1:work:run:rec",
+          recordedSteps: 12,
+          droppedActions: 0,
+          transcriptFileId: "v1:library:file:t1",
           transcriptTruncated: false,
           ...over,
         }),
@@ -252,7 +252,7 @@ describe("one run's transcript", () => {
   async function openRun(connection: Conn) {
     mount(connection);
     await click(await screen.findByRole("button", { name: /Claude Code/ }));
-    return screen.findByLabelText("Run transcript");
+    return screen.findByText("Recording");
   }
 
   it("REPLACES the list rather than stacking a second Head under it", async () => {
@@ -265,29 +265,41 @@ describe("one run's transcript", () => {
     expect(screen.queryByRole("list", { name: "Delegated runs" })).toBeNull();
   });
 
-  it("renders the transcript VERBATIM in a pre and states the byte count", async () => {
-    const pre = await openRun(withDetail());
-    // Byte for byte, whitespace and all -- never parsed, prettified or
-    // re-wrapped.
-    expect(pre.textContent).toBe(LINES);
-    expect(pre.tagName).toBe("PRE");
-    expect(screen.getByText(/kept$/)).toBeTruthy();
+  it("names the recording run, the actions counted and the transcript file", async () => {
+    await openRun(withDetail());
+    expect(screen.getByText("v1:work:run:rec")).toBeTruthy();
+    expect(screen.getByText("v1:library:file:t1")).toBeTruthy();
+    expect(screen.getByText(/Every action this app took is a step of the run above/)).toBeTruthy();
   });
 
-  it("SAYS a truncated transcript is truncated and points at the artifacts", async () => {
-    await openRun(
-      withDetail({
-        transcriptTruncated: true,
-        transcriptBytes: 1048576,
-        producedArtifactIds: ["v1:library:artifact:full-transcript"],
-      }),
-    );
+  // A lost action has to be said out loud. Anything lifted from an incomplete
+  // recording is incomplete, and a count nobody reads is a count that lets
+  // that happen quietly.
+  it("SAYS SO when the recording lost actions", async () => {
+    await openRun(withDetail({ droppedActions: 3 }));
+    expect(screen.getByText(/Some of this run's actions were not recorded/)).toBeTruthy();
+    expect(screen.getByText(/anything built from this recording is incomplete/)).toBeTruthy();
+  });
+
+  // The opposite state must be quiet: a complete recording that warned about
+  // itself would train a reader to ignore the warning.
+  it("says nothing about lost actions when none were lost", async () => {
+    await openRun(withDetail());
+    expect(screen.queryByText(/were not recorded/)).toBeNull();
+  });
+
+  // "Nothing recorded this" and "it recorded nothing" are different facts,
+  // and only one of them is about the run.
+  it("distinguishes a run nothing recorded from one that recorded nothing", async () => {
+    await openRun(withDetail({ sessionRunId: "", recordedSteps: undefined }));
+    expect(screen.getByText(/Nothing recorded this run/)).toBeTruthy();
+    expect(screen.getByText(/not the same as a run that did nothing/)).toBeTruthy();
+  });
+
+  it("SAYS a shortened transcript is shortened", async () => {
+    await openRun(withDetail({ transcriptTruncated: true }));
     // A transcript that simply stopped would read as a run that stopped.
-    expect(
-      screen.getByText(/This is a shortened transcript/),
-    ).toBeTruthy();
-    expect(screen.getByText(/complete transcript is in your Library/)).toBeTruthy();
-    expect(screen.getByText("v1:library:artifact:full-transcript")).toBeTruthy();
+    expect(screen.getByText(/The saved transcript is shortened/)).toBeTruthy();
   });
 
   it("does NOT poll a finished run, and offers to re-read it instead", async () => {
@@ -334,8 +346,8 @@ describe("one run's transcript", () => {
           appSessionRow({
             id: "v1:worker:appSession:a",
             status: "ended",
-            transcript: LINES,
-            transcriptBytes: LINES.length,
+            sessionRunId: "v1:work:run:rec",
+            recordedSteps: 12,
           }),
         ]),
       );

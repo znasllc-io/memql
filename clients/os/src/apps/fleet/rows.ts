@@ -780,13 +780,24 @@ export interface AppSessionRow {
   endedAt: string;
 }
 
-/** One session in full -- the detail read's extra fields, transcript included. */
+/** One session in full -- the detail read's extra fields, the recording included. */
 export interface AppSessionDetailRow extends AppSessionRow {
   workspace: string;
   prompt: string;
   inputArtifactIds: string[];
-  transcript: string;
-  transcriptBytes: Figure;
+  /** The v1:work:run holding this session's recorded actions. Empty when
+   *  nothing recorded it -- a node with no recorder, or a session that
+   *  predates the recording -- which is not the same as a session that did
+   *  nothing. */
+  sessionRunId: string;
+  /** The Library file holding the session's prose. Empty while the session
+   *  runs, and empty afterwards when the Library write failed. */
+  transcriptFileId: string;
+  /** Actions recorded, and actions LOST. Figures, not numbers: an absent
+   *  count is a session nothing recorded, and 0 is a session that recorded
+   *  and found nothing to record. */
+  recordedSteps: Figure;
+  droppedActions: Figure;
   transcriptTruncated: boolean;
   producedArtifactIds: string[];
   appSessionRef: string;
@@ -855,12 +866,17 @@ export function appSessionDetailFromRow(raw: Row): AppSessionDetailRow {
     workspace: rowString(row, "workspace"),
     prompt: rowString(row, "prompt"),
     inputArtifactIds: stringList(row, "inputArtifactIds"),
-    // VERBATIM. Never trimmed, never re-wrapped, never parsed -- the engine
-    // drops out-of-order and duplicate chunks (component/worker/session.go),
-    // so what arrived is what there is, and anything this client did to it
-    // would be a second account of somebody's run.
-    transcript: rowString(row, "transcript"),
-    transcriptBytes: figureFrom(row, "transcriptBytes"),
+    // THE RECORDING, not the prose (epic memql#5396). The transcript used to
+    // be a bounded string on this row with every chunk flattened into it and
+    // the stream and sequence discarded; what an app DID is now one
+    // v1:work:step per action in sessionRunId, and the prose is one Library
+    // file. An absent count reads as unmeasured rather than as zero, because
+    // "nothing recorded this" and "it recorded and there was nothing" are
+    // different answers about a run.
+    sessionRunId: rowString(row, "sessionRunId"),
+    transcriptFileId: rowString(row, "transcriptFileId"),
+    recordedSteps: figureFrom(row, "recordedSteps"),
+    droppedActions: figureFrom(row, "droppedActions"),
     transcriptTruncated: row["transcriptTruncated"] === true,
     producedArtifactIds: stringList(row, "producedArtifactIds"),
     appSessionRef: rowString(row, "appSessionRef"),

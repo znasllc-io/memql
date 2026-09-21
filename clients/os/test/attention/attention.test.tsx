@@ -11,6 +11,7 @@ import { packageFromRow } from "../../src/apps/deployables/packages/rows";
 import { OS_REGISTRY } from "../../src/apps/registry";
 import { rowsResult, withSession } from "../deployables/harness";
 import type { AttentionChange } from "../../src/attention/model";
+import { NO_PARTS } from "../../src/apps/deployables/parts";
 import { SourceView } from "../../src/apps/deployables/page/SourceView";
 import { SharedPackagesProvider, usePackages } from "../../src/apps/deployables/packages/usePackages";
 
@@ -104,7 +105,7 @@ describe("shared attention", () => {
     const pkg = packageFromRow({ id: "never-deployed", name: "New source", status: "active", sourceKind: "repo", latestKnownVersion: "new-head", updateAvailable: true });
     function UndeployedSource() {
       usePublishAttention("source", packageAttention(pkg));
-      return <><AttentionMarker appId="deployables" /><SourceView pkg={pkg} apps={[]} credentials={[]} can={{ deploy: false, sources: false, retire: false, domains: false, publish: false }} onBack={() => {}} onOpenHistory={() => {}} onOpenApp={() => {}} onOpenDeclared={() => {}} attempts={0} deployedBy="" /></>;
+      return <><AttentionMarker appId="deployables" /><SourceView pkg={pkg} apps={[]} credentials={[]} can={NO_PARTS} onBack={() => {}} onOpenHistory={() => {}} onOpenApp={() => {}} onOpenDeclared={() => {}} attempts={0} deployedBy="" /></>;
     }
     render(wrap(<UndeployedSource />));
     await screen.findAllByRole("img", { name: "Unseen change" });

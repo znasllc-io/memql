@@ -10,9 +10,11 @@ import (
 
 	memqlgrpc "github.com/znasllc-io/memql/component/grpc"
 	"github.com/znasllc-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/server"
 	"github.com/znasllc-io/memql/component/worker"
 	"github.com/znasllc-io/memql/component/workjournal"
 	agentworker "github.com/znasllc-io/memql/integrations/agent/worker"
+	"github.com/znasllc-io/memql/integrations/work"
 )
 
 // setupWorkerService stands up the WorkerService gRPC surface, the
@@ -170,6 +172,23 @@ func (a *App) setupCockpitAppExecutor(
 	if minter != nil {
 		runner.Minter = minter
 	}
+
+	// THE RECORDING (epic memql#5396). Without these two the session still
+	// runs and simply records nothing, which is what it did before -- so the
+	// wiring IS the feature here, exactly as the app door's is below. A
+	// registered seam with no implementation behind it is green and inert.
+	runner.Recorder = work.NewSessionWriter(a.engine, a.Logger)
+	uploader, bucket := a.resolveBlobStore()
+	runner.Contents = &appSessionContentStore{
+		engine:   a.engine,
+		store:    server.NewEngineLibraryStore(&AttachmentEngineAdapter{Engine: a.engine}),
+		uploader: uploader,
+		bucket:   bucket,
+		logger:   a.Logger,
+	}
+	a.Logger.Info("app session recording: every action an app takes is a work-spine step",
+		"contents_stored", uploader != nil && strings.TrimSpace(bucket) != "",
+	)
 
 	exec, err := agentworker.NewCockpitAppExecutor(
 		a.Logger, dispatcher, runner, &agentworker.EngineStore{Engine: a.engine},

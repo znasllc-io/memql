@@ -1,18 +1,17 @@
 import { GitBranch } from "lucide-react";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef } from "react";
 
 import { useSession } from "../../../../../chrome/access";
 import { bare } from "../../../people";
-import { Button, Caption, EmptyState, Field, Notice, RefreshButton, Select, Subhead } from "../../../../../kit";
+import { Caption, EmptyState, Field, Notice, RefreshButton, Select } from "../../../../../kit";
 import { toneFor } from "../../../packages/refusals";
 import { ProblemNotice } from "../../../packages/ReportView";
 import { shortRepo } from "../../../packages/rows";
-import { ConnectGitHub } from "../../../sources/ConnectGitHub";
 import { RepositoryPicker } from "../../../sources/RepositoryPicker";
 import { returnPathFor } from "../../../sources/connectReturn";
 import type { RepositoryRow } from "../../../sources/repositories";
 import { credentialIsRevoked, githubGrantOf, type CredentialFeedStatus, type CredentialRow } from "../../../sources/rows";
-import { useGithubConnect, useSourceRepositories } from "../../../sources/useGithubConnect";
+import { useGithubConnect, useSourceRepositories, type GithubConnectActions } from "../../../sources/useGithubConnect";
 import type { SourceProbeHandle } from "../../../sources/useProbes";
 import { suggestName, type ComposeDraft } from "../../compose";
 import { NameField } from "./fields";
@@ -68,10 +67,36 @@ interface RepositorySourceProps {
   credentials: readonly CredentialRow[];
   credentialFeed?: CredentialFeedStatus;
   probe: SourceProbeHandle;
-  /** The fold's state, held by the page so it survives a stop re-render. */
+  /**
+   * Which of the two ways in is chosen -- held by the page, so the choice
+   * survives everything that re-renders this step (a probe answering, a
+   * credential arriving on its feed) rather than flipping back under somebody
+   * mid-sentence. `true` is the token.
+   */
   tokenFormOpen: boolean;
   onTokenFormOpenChange: (open: boolean) => void;
+  /**
+   * The connect, held by the PAGE. Connecting is this step's forward act, and a
+   * wizard's forward act lives on its floor and nowhere else -- so the page
+   * that draws the floor owns the call, and this step only says what it is for
+   * and renders what came back.
+   */
+  connect: GithubConnectActions;
+  /**
+   * What this step needs before it can go on, said to the page that draws the
+   * floor: nothing, a first connection, or a fresh one.
+   *
+   * THE STEP SAYS IT RATHER THAN THE PAGE WORKING IT OUT, because only the
+   * step knows all of it. A grant that looks fine on its card can still have
+   * been refused by GitHub (`reconnect_required`, `credential_revoked`), and
+   * that answer arrives here, on the repository read. A page that judged by
+   * the card alone would show a lapsed connection's sentence over a floor with
+   * nothing to press.
+   */
+  onConnectionNeed?: (need: ConnectionNeed) => void;
 }
+
+export type ConnectionNeed = "" | "connect" | "reconnect";
 
 export function RepositorySource(props: RepositorySourceProps) {
   const { access } = useSession();
@@ -95,9 +120,8 @@ export function RepositorySource(props: RepositorySourceProps) {
 }
 
 function PersonalRepositorySource({
-  draft, onDraft, credentials, probe, tokenFormOpen, onTokenFormOpenChange,
+  draft, onDraft, credentials, probe, tokenFormOpen, onTokenFormOpenChange, connect, onConnectionNeed,
 }: RepositorySourceProps) {
-  const connect = useGithubConnect();
   const install = useGithubConnect();
   const repositories = useSourceRepositories();
 
@@ -168,6 +192,16 @@ function PersonalRepositorySource({
     void probe.probe(repo.url, grantId);
   }
 
+  const method = tokenFormOpen ? "token" : "github";
+
+  // Said on every change and WITHDRAWN on the way out: a need that outlived
+  // its step would leave "Connect GitHub" on the floor of the step after it.
+  const need: ConnectionNeed = method !== "github" || noApp !== null || (connected && !reconnect) ? "" : grant === null ? "connect" : "reconnect";
+  useEffect(() => {
+    onConnectionNeed?.(need);
+    return () => onConnectionNeed?.("");
+  }, [need, onConnectionNeed]);
+
   if (noApp !== null) {
     return (
       <>
@@ -183,7 +217,31 @@ function PersonalRepositorySource({
 
   return (
     <>
-      {connected && !reconnect ? (
+      {/* ONE QUESTION, ASKED AS ONE. This step used to open on a "Connect
+          GitHub" button with a "Use a token instead" button beneath it --
+          two loose controls wedged between two stacks of choice cards, the
+          second of which unfolded a form with a "Hide the token form" button
+          at its foot. They were always the two answers to a single question,
+          so they are one choice now, in the shell's choice row: neither
+          needs a card's sentence to be understood, and the line beneath says
+          what the chosen one does. */}
+      <Field label="How this cluster reaches it">
+        <div className="os-choice-row" role="radiogroup" aria-label="How this cluster reaches it">
+          <button type="button" role="radio" className="os-choice" aria-checked={method === "github"} onClick={() => onTokenFormOpenChange(false)}>GitHub</button>
+          <button type="button" role="radio" className="os-choice" aria-checked={method === "token"} onClick={() => onTokenFormOpenChange(true)}>A token</button>
+        </div>
+      </Field>
+
+      {method === "token" ? (
+        <>
+          {/* NOT "ADVANCED". A pasted URL and a personal token are a legitimate
+              first choice -- a host the app does not cover, an organization
+              that will not install one, or a preference -- and it stands
+              beside GitHub as an equal rather than behind a disclosure. */}
+          <Caption>Paste a repository URL, and for a private one a token you hold.</Caption>
+          <TokenSourceForm draft={draft} onDraft={onDraft} credentials={credentials} probe={probe} />
+        </>
+      ) : connected && !reconnect ? (
         <>
           <RepositoryPicker
             page={repositories.page}
@@ -201,7 +259,7 @@ function PersonalRepositorySource({
             onLookAgain={() => void repositories.read(grantId, 1)}
             onReadMore={() => void repositories.read(grantId, repositories.page.nextPage)}
           />
-          {draft.repoUrl !== "" && !tokenFormOpen ? (
+          {draft.repoUrl !== "" ? (
             <>
               <RefField draft={draft} onDraft={onDraft} branches={probe.reply?.branches ?? []} />
               <NameField draft={draft} onDraft={onDraft} label="Call it" placeholderFrom={suggestName(draft, "")} />
@@ -209,73 +267,21 @@ function PersonalRepositorySource({
           ) : null}
         </>
       ) : (
-        <ConnectGitHub
-          label={grant === null ? "Connect GitHub" : "Reconnect GitHub"}
-          caption={
-            grant === null
-              ? "Pick repositories from a list instead of pasting a URL and a token."
-              : "Reconnect your GitHub account to choose its repositories."
-          }
-          busy={connect.busy}
-          refusal={connect.refusal ?? repositories.refusal}
-          onConnect={() => void connect.connect(returnPath)}
-        />
+        <>
+          {/* NOT CONNECTED: what connecting is FOR, and nothing to press here.
+              The act is on the floor, where every step's forward act is. */}
+          <Caption>
+            {grant === null
+              ? "Connect your GitHub account and pick from a list of your repositories. You come back to this step."
+              : "Your GitHub connection has lapsed. Reconnect to pick from your repositories; you come back to this step."}
+          </Caption>
+          {/* IN PLACE, NEVER A TOAST, and in the tone the CODE asks for
+              (`toneFor`): a refusal to connect is rendered where the person
+              was when they asked. */}
+          {(connect.refusal ?? repositories.refusal) ? <ProblemNotice problem={(connect.refusal ?? repositories.refusal)!} tone={toneFor((connect.refusal ?? repositories.refusal)!.code)} /> : null}
+        </>
       )}
-
-      <TokenFold open={tokenFormOpen} onOpenChange={onTokenFormOpenChange}>
-        <TokenSourceForm draft={draft} onDraft={onDraft} credentials={credentials} probe={probe} />
-      </TokenFold>
     </>
-  );
-}
-
-/**
- * "Use a token instead": the disclosure, in `ZipPicker`'s shape.
- *
- * NOT "ADVANCED". A pasted URL and a personal token are a legitimate first
- * choice -- a host the app does not cover, an organization that will not
- * install one, or a preference -- and calling that advanced would be a
- * judgement about the person rather than a fact about the choice. It is
- * always present, never inside a menu, and closed by default because the
- * surface above it is the answer this cluster recommends.
- *
- * STATE-LIFTED for `ZipPicker`'s reason: the page owns it, so the fold
- * survives everything that re-renders this stop -- a probe answering, a
- * credential arriving on its feed -- rather than closing under somebody
- * mid-sentence.
- */
-function TokenFold({
-  open,
-  onOpenChange,
-  children,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  children: ReactNode;
-}) {
-  if (!open) {
-    return (
-      <div className="os-form-row">
-        <Button tone="quiet" onClick={() => onOpenChange(true)}>
-          Use a token instead
-        </Button>
-        <Caption>Paste a repository URL, and for a private one a token you hold.</Caption>
-      </div>
-    );
-  }
-  return (
-    <div className="os-files-group">
-      <Subhead>A URL and a token</Subhead>
-      {children}
-      <div className="os-form-row">
-        {/* THE LABEL SAYS WHAT A CLICK DOES, which is the shell's rule for
-            every control that toggles a thing (DESIGN.md rule 3's reasoning,
-            applied to a disclosure). */}
-        <Button tone="quiet" onClick={() => onOpenChange(false)}>
-          Hide the token form
-        </Button>
-      </div>
-    </div>
   );
 }
 

@@ -1,6 +1,7 @@
 import { AttentionMarker, AttentionDestination } from "../attention/Attention";
 import { visiblePageContext, visiblePageLabel } from "../kit/pageContext";
 import { PageNavigationProvider } from "../kit/pageNavigation";
+import { TrailRow } from "../kit/TrailRow";
 import { WindowSearchContext, useWindowSearchHost } from "../kit/windowSearch";
 import { useDraggable } from "@dnd-kit/core";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -235,6 +236,15 @@ export function WindowFrame({
         {!sections.some(section => section.name.toLowerCase().includes(searchQuery.toLowerCase())) ? <p>No destinations match.</p> : null}
       </dialog>
       <div className="os-window-body">
+        {/* THE ONE TRAIL ROW sits UNDER the section tabs, in the same place in
+            every window (it is drawn after the nav below). The order is the
+            hierarchy: the tabs choose the section, the trail is depth within
+            it. Drawn above them it read as though "Deployables > MemQL OS"
+            outranked the Deployables tab that is that crumb's own parent.
+            The provider spans both so the row can hear the heading that
+            publishes from inside the app body; it renders no element of its
+            own, so the body's column layout is what it was plus a row. */}
+        <PageNavigationProvider root={content} trail={(win.sectionTrail ?? []).map(id => ({ label: sections.find(section => section.id === id)?.name ?? id, onSelect: () => actions.navigateSection(win.id, id, "back") }))}>
         {destinations.length > 1 ? (
           <nav className="os-window-nav" aria-label={`${manifest.name} sections`}>
             {destinations.map((section, index) => (
@@ -262,6 +272,7 @@ export function WindowFrame({
             {destinations.length > 2 ? <select className="os-window-more-nav" aria-label={`More ${manifest.name} sections`} value={destinations.slice(2).some(s => s.id === (current?.parent ?? current?.id)) ? current?.parent ?? current?.id : ""} onChange={event => { if (event.target.value) actions.navigateSection(win.id, event.target.value); }}><option value="">More…</option>{destinations.slice(2).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select> : null}
           </nav>
         ) : null}
+        <TrailRow fallback={current?.name ?? manifest.name} />
         <div ref={content} className="os-window-content" data-os-window-content>
           {/* THE REFUSED SURFACE (epic memql#4832, D6).
               A window can be open on an app this actor's rank does not clear,
@@ -303,7 +314,7 @@ export function WindowFrame({
                focused-window guess does not. Keyed by window so one window's
                fault never carries into another's. */
             <WindowErrorBoundary key={win.id} app={manifest.id} section={current?.id ?? ""}>
-              <WindowSearchContext.Provider value={searchHost}><PageNavigationProvider root={content} trail={(win.sectionTrail ?? []).map(id => ({ label: sections.find(section => section.id === id)?.name ?? id, onSelect: () => actions.navigateSection(win.id, id, "back") }))}><AttentionDestination appId={manifest.id} sectionId={current?.id ?? ""} visible={!hidden}><Body
+              <WindowSearchContext.Provider value={searchHost}><AttentionDestination appId={manifest.id} sectionId={current?.id ?? ""} visible={!hidden}><Body
                 sectionId={current?.id ?? ""}
                 navigation={win.sectionNavigation}
                 windowVisible={!hidden}
@@ -311,10 +322,11 @@ export function WindowFrame({
                 askContext={(tag) => openAsk(tag)}
                 intent={win.intent}
                 consumeIntent={(intentId) => actions.consumeWindowIntent(win.id, intentId)}
-              /></AttentionDestination></PageNavigationProvider></WindowSearchContext.Provider>
+              /></AttentionDestination></WindowSearchContext.Provider>
             </WindowErrorBoundary>
           )}
         </div>
+        </PageNavigationProvider>
       </div>
       {menu ? <ContextMenu x={menu.x} y={menu.y} label={`${manifest.name} window actions`} onClose={() => setMenu(null)} entries={[
         ...(ownDesk && ownDesk.windows.length > 1 ? [{ id: "swap", label: "Swap sides", onSelect: () => actions.swapSides(ownDesk.id) }] : []),

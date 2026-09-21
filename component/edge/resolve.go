@@ -4,6 +4,7 @@ package edge
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -26,13 +27,24 @@ type Site struct {
 	// as the untyped object the row stores (memql#4345). Empty for every kind
 	// that has none (spa, static).
 	//
-	// For kind="shopify_storefront" it holds {storeDomain,
-	// storefrontTokenRef}. NOTE WHAT IS NOT IN IT: the token itself. The ref
-	// NAMES a v1:platform:globalSecret row and runtimeconfig.go resolves it at
-	// SERVE time -- so the credential lives in the secret store, and anyone
-	// reading the site row (or this cached copy of it) sees only the name of
-	// the thing they would have to be allowed to read.
+	// For kind="shopify_storefront" it holds exactly {storeId}, which NAMES a
+	// v1:shopify:store row (epic memql#5530, issue memql#5538). It used to
+	// hold {storeDomain, storefrontTokenRef} -- the same two values that store
+	// row already held, edited in two places at two authorization tiers -- and
+	// that duplication is what the binding stopped being.
+	//
+	// NOTHING DOWNSTREAM READS THIS FIELD. It is the id's arrival, and Store
+	// below is its resolution; the policy and the runtime-config document both
+	// read Store. Keeping the raw object is what lets the resolver see whether
+	// there is a store to look up at all without a second projection.
 	Binding map[string]any
+
+	// Store is the row binding.storeId names, resolved. Nil for every kind
+	// that has no binding, for an unbound storefront, and for a storefront
+	// whose store cannot be read -- three states the serving path treats
+	// alike, because the answer in all three is the same: serve the bundle,
+	// serve no storefront block, and name no store in the policy.
+	Store *BoundStore
 
 	// Account is the account whose reserved front door this request arrived
 	// through, or nil (epic memql#5168, design D4).
@@ -52,6 +64,25 @@ type Site struct {
 	// reads it to decide anything.
 	Account *SiteAccount
 
+	// ResolutionTail is what this site answers for a path matching NO file in
+	// its bundle: "fallback" (index.html), "not_found" (404), or EMPTY --
+	// which is the default and means Kind decides, exactly as it did before
+	// this field existed (memql#5535).
+	//
+	// EMPTY IS NOT A THIRD BEHAVIOUR, it is the absence of a choice. Every
+	// site row in every cluster carries no value today and must keep
+	// resolving as it always has, which is what makes the field additive; and
+	// an unrecognised value reads as empty rather than as 404, because a typo
+	// must not take a live site's every client-side route dark.
+	//
+	// It is a property of the SITE and not of the Kind, and that is the
+	// decision. The kind enum says a shopify_storefront IS a spa bundle,
+	// while the first storefront built was a multi-page prerendered tree that
+	// declared kind "static" precisely to get the 404 -- and thereby gave up
+	// the binding, the storefront block in its runtime document, and the
+	// policy that admits Shopify. Neither tail is right for every storefront.
+	ResolutionTail string
+
 	// Settings is the site row's runtime settings (epic memql#4906, P7): the
 	// plain string values a bundle reads at load, merged into the site's
 	// runtime-config document under `settings` by runtimeconfig.go. Empty
@@ -61,6 +92,33 @@ type Site struct {
 	// slipped one past it must not put a number where a bundle reads a
 	// string.
 	Settings map[string]string
+}
+
+// BoundStore is the v1:shopify:store row as the SERVING PATH sees it: the
+// three fields it needs and not one more (epic memql#5530, issue memql#5538).
+//
+// The store row also holds adminTokenRef and webhookSecretRef. Neither is
+// here, and the omission is the safety property rather than an economy: a
+// credential reference the edge was never handed cannot reach a response
+// header, a served document or a log line.
+// TestTheBoundStoreCarriesOnlyWhatTheServingPathNeeds pins the field list so
+// adding one is a decision.
+//
+// It is resolved at SITE-RESOLUTION time, under the same synthetic
+// cluster-owner actor the site read uses, and cached with the site. That is
+// what makes "an edit to the store reaches the site with no second write"
+// true: the site row is never rewritten, and the store's own event flushes
+// the cache.
+type BoundStore struct {
+	// ID is the bare v1:shopify:store row id -- what binding.storeId names.
+	ID string
+	// Domain is the myshopify.com host: the Storefront API origin, and the one
+	// source admitted into connect-src / img-src / media-src.
+	Domain string
+	// StorefrontTokenRef NAMES a v1:platform:globalSecret row. The edge
+	// resolves it at serve time into the runtime-config document, and that is
+	// still the only place it is dereferenced.
+	StorefrontTokenRef string
 }
 
 // SiteAccount is the account behind a reserved front door, as the served page
@@ -96,12 +154,22 @@ type QueryExecutor interface {
 	// attached (epic memql#5168, design D4/F). A miss is (nil, nil), exactly
 	// like the two above.
 	SiteForAccountFrontDoor(ctx context.Context, hostname string) (*Site, error)
+	// StoreByID resolves the v1:shopify:store row a storefront binding names
+	// (epic memql#5530, issue memql#5538). Returns (nil, nil) for a miss -- a
+	// store that is gone is not an error, it is a storefront with nothing to
+	// talk to, and the resolver depends on that distinction to leave the
+	// bundle serving.
+	StoreByID(ctx context.Context, storeId string) (*BoundStore, error)
 }
 
 // Resolver maps a request Host to a Site.
 type Resolver interface {
 	Resolve(ctx context.Context, hostname string) (*Site, error)
 	Invalidate(hostname string)
+	// InvalidateAll drops every cached resolution -- what a v1:shopify:store
+	// event triggers, since that row carries no hostname to evict by. See the
+	// implementation for why flushing beats a reverse index.
+	InvalidateAll()
 }
 
 type entry struct {
@@ -112,6 +180,14 @@ type entry struct {
 type resolver struct {
 	exec QueryExecutor
 	ttl  time.Duration
+
+	// logger is where a failed BOUND-STORE read goes. It is the only thing in
+	// this file that has something to say and no caller to say it to: a store
+	// that cannot be read is deliberately not an error (the bundle keeps
+	// serving), so without a line here the condition would be invisible.
+	// Defaulted rather than taken as a parameter, so NewResolver's signature
+	// -- which app/transport_edge.go wires -- is unchanged.
+	logger *slog.Logger
 
 	mu    sync.RWMutex
 	cache map[string]entry
@@ -142,7 +218,7 @@ type resolver struct {
 // served from, and this cache lives on every edge replica, so the TTL is the
 // backstop behind the change-feed invalidation in Task 9.
 func NewResolver(exec QueryExecutor, ttl time.Duration) Resolver {
-	return &resolver{exec: exec, ttl: ttl, cache: map[string]entry{}}
+	return &resolver{exec: exec, ttl: ttl, cache: map[string]entry{}, logger: slog.Default()}
 }
 
 // normalizeHost strips the port and lowercases. A Host header carries a port
@@ -224,6 +300,34 @@ func (r *resolver) Resolve(ctx context.Context, hostname string) (*Site, error) 
 			}
 		}
 
+		// THE BOUND STORE (epic memql#5530, issue memql#5538), resolved with
+		// the site and cached with it.
+		//
+		// Here rather than in siteFromRow because it is a SECOND read, and here
+		// rather than per-request because the policy is built on every asset
+		// response. Caching it with the site is what makes the TTL and the
+		// invalidation apply to both: a store event flushes this map
+		// (InvalidateAll), which is how an edit to a store reaches every site
+		// bound to it without the site row being written at all.
+		//
+		// A FAILED STORE READ LEAVES THE SITE SERVABLE. The bundle is not the
+		// store's to take down: an unreadable store means no storefront block
+		// and no store named in the policy, which is what a storefront nobody
+		// has bound yet already gets. It is LOGGED rather than returned, because
+		// the alternative is a live storefront going dark over a row it merely
+		// references.
+		if site != nil && site.Kind == storefrontKind {
+			if storeId := strings.TrimSpace(bindingStoreId(site.Binding)); storeId != "" {
+				store, serr := r.exec.StoreByID(ctx, storeId)
+				if serr != nil {
+					r.logger.Warn("edge: could not resolve the bound store",
+						"component", "edge", "siteId", site.ID, "storeId", storeId, "err", serr)
+				} else {
+					site.Store = store
+				}
+			}
+		}
+
 		// A MISS IS CACHED TOO. Without this, a scanner walking random hostnames
 		// drives one database query per request -- an amplifier pointed at the
 		// database, reachable by anyone who can resolve the wildcard.
@@ -247,5 +351,18 @@ func (r *resolver) Invalidate(hostname string) {
 	key := normalizeHost(hostname)
 	r.mu.Lock()
 	delete(r.cache, key)
+	r.mu.Unlock()
+}
+
+// InvalidateAll drops every cached resolution.
+//
+// It is what a v1:shopify:store event triggers. The cache is keyed by HOSTNAME
+// and a store row carries none, so there is no entry to evict by name -- the
+// edge would need a reverse index from store to site to do better, and a store
+// edit is an operator act measured in ones per day while the cache is a 30s
+// TTL over a handful of hostnames. Flushing it is cheaper than the index.
+func (r *resolver) InvalidateAll() {
+	r.mu.Lock()
+	r.cache = map[string]entry{}
 	r.mu.Unlock()
 }

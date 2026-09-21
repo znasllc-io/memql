@@ -73,6 +73,29 @@ concept store {
   /// Set when the store was purged under shop/redact. The row stays as the
   /// audit record that a purge happened.
   redactedAt          datetime
+  /// True when this store is a DEVELOPMENT store -- the one a storefront is
+  /// exercised against before it serves shoppers (design D8). It is attached
+  /// and mirrored like any other store: a second row, its own storeId, and
+  /// every mirrored row it produces already excluded from every read scoped
+  /// to the live one. Not a thing this program provisions and specifically
+  /// not a Shopify store created with generated test data, which cannot be
+  /// transferred to a merchant.
+  ///
+  /// The flag is on the STORE rather than on the site, because what makes a
+  /// store a development store is a fact about somebody else's system, and
+  /// because the go-live guard has to be able to ask it of the store a site
+  /// names rather than of the site.
+  isDevelopment       bool
+  /// The live store this development store stands in for, when it stands in
+  /// for one. Empty on a live store, and empty on a development store nobody
+  /// has paired yet -- an absence that means "not paired", never "live".
+  ///
+  /// It is what lets a storefront show the development store beside the store
+  /// it is bound to: without it two rows sit in one list with nothing saying
+  /// which belongs to which.
+  developmentOfStoreId  string
+
+  @relationship(type="references", as="developmentOf", field="developmentOfStoreId", target=store, direction="outgoing")
 }
 
 /// One queued Shopify privacy request.

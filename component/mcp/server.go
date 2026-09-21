@@ -91,6 +91,13 @@ type Server struct {
 	// Executor + the dry-run sandbox). nil-safe: those tools report unavailable.
 	autoRunner AutomationRunner
 
+	// appRecorder records an app session's calls back into MemQL as steps of
+	// its recording run (epic memql#5396). Injected from the app bootstrap
+	// over integrations/work's SessionWriter -- the SAME writer the replica
+	// holding the session uses. nil-safe: a node without it serves the tools
+	// and records nothing, which is what it did before.
+	appRecorder AppSessionRecorder
+
 	writeMu sync.Mutex
 	out     io.Writer // the active connection's output, for proactive notifications
 
@@ -113,6 +120,10 @@ type Server struct {
 // SetAutomationRunner injects the automation runner the MCP node's app bootstrap
 // builds (Phase 4 #1534). Wired before the server starts serving.
 func (s *Server) SetAutomationRunner(r AutomationRunner) { s.autoRunner = r }
+
+// SetAppSessionRecorder injects the recorder an app session's tool calls are
+// written through (epic memql#5396). Wired before the server starts serving.
+func (s *Server) SetAppSessionRecorder(r AppSessionRecorder) { s.appRecorder = r }
 
 // NewServer constructs an MCP protocol head. name/version populate the
 // MCP serverInfo block; engine is the in-process engine handle (may be nil in
@@ -399,6 +410,7 @@ func (s *Server) handleToolsCall(ctx context.Context, id json.RawMessage, params
 	// automation runner for run_automation + @mcp automations (Phase 4 #1534).
 	ctx = withMCPSession(ctx, s.cfg.ActingUser, s.session)
 	ctx = withMCPAutomationRunner(ctx, s.autoRunner)
+	ctx = withMCPAppSessionRecorder(ctx, s.appRecorder)
 
 	// Bound the engine execution: a slow/blocked tool must not hang the HTTP
 	// request (and hold the per-session mutex) forever (#1594). callMCPTool runs

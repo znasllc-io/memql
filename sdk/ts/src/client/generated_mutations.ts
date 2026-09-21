@@ -1266,7 +1266,7 @@ export interface CreateArtifactArgs {
   lens: string;
   // Enum: document | generated_output | note | todo | calendar_event | memory | live_source | file
   kind: string;
-  // Enum: uploaded | exported | workbench_generated | computer_use | agent_generated | derived | user_created | live
+  // Enum: uploaded | exported | workbench_generated | computer_use | agent_generated | derived | user_created | live | app_session
   source: string;
   title: string;
   summary?: string;
@@ -2374,7 +2374,7 @@ export interface CreateLibraryFileArgs {
   size: number;
   sha256?: string;
   blobUrl: string;
-  // Enum: uploaded | exported | agent_generated | derived
+  // Enum: uploaded | exported | agent_generated | derived | app_session
   source: string;
   // Enum: markdown | document | pdf | spreadsheet | image | text | conversation | other
   format?: string;
@@ -3195,6 +3195,9 @@ export interface CreateSiteArgs {
   hostname: string;
   // Enum: spa | static | shopify_storefront
   kind?: string;
+  /** What the edge answers for a path that matches no file. Omitted means the kind decides, which is what every site row created before memql#5535 carries and what they must keep resolving as. It sits in accept{} rather than stamp{} for updateSiteBundle's artifactId reason: an omitted arg is dropped from the payload, so a `?? ""` here would write an explicit empty string and there would be no way to express "let the kind decide". */
+  // Enum: fallback | not_found
+  resolutionTail?: string;
   bundleRef: string;
   // Enum: draft | live | disabled
   status?: string;
@@ -3210,6 +3213,7 @@ export function buildCreateSite(args: CreateSiteArgs): string {
   parts.push("siteId: " + renderMemQLValue(args.siteId));
   parts.push("hostname: " + renderMemQLValue(args.hostname));
   if (args.kind !== undefined) parts.push("kind: " + renderMemQLValue(args.kind));
+  if (args.resolutionTail !== undefined) parts.push("resolutionTail: " + renderMemQLValue(args.resolutionTail));
   parts.push("bundleRef: " + renderMemQLValue(args.bundleRef));
   if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
   if (args.apiProxy !== undefined) parts.push("apiProxy: " + renderMemQLValue(args.apiProxy));
@@ -3372,6 +3376,8 @@ export interface CreateStoreArgs {
   protectedDataLevel?: string;
   plan?: string;
   ownerUserId?: string;
+  isDevelopment?: boolean;
+  developmentOfStoreId?: string;
 }
 
 export function buildCreateStore(args: CreateStoreArgs): string {
@@ -3387,6 +3393,8 @@ export function buildCreateStore(args: CreateStoreArgs): string {
   if (args.protectedDataLevel !== undefined) parts.push("protectedDataLevel: " + renderMemQLValue(args.protectedDataLevel));
   if (args.plan !== undefined) parts.push("plan: " + renderMemQLValue(args.plan));
   if (args.ownerUserId !== undefined) parts.push("ownerUserId: " + renderMemQLValue(args.ownerUserId));
+  if (args.isDevelopment !== undefined) parts.push("isDevelopment: " + renderMemQLValue(args.isDevelopment));
+  if (args.developmentOfStoreId !== undefined) parts.push("developmentOfStoreId: " + renderMemQLValue(args.developmentOfStoreId));
   return "mutation createStore(" + parts.join(", ") + ")";
 }
 
@@ -8585,6 +8593,34 @@ QueryClient.prototype.updateSiteBundle = function (this: QueryClient, args: Upda
   return this.executeNamed("updateSiteBundle", buildUpdateSiteBundle(args), opts);
 };
 
+/** Choose what the edge answers for a path that matches no file in this deployable's bundle (memql#5535) -- the LAST rung of the resolution order, and nothing above it.
+THREE VALUES, AND THE THIRD IS THE EMPTY ONE. "fallback" serves index.html, "not_found" answers 404, and "" HANDS THE DECISION BACK TO `kind` -- which is the state every row created before this field existed is in, and the one a person must be able to return a site to. That is why the arg is optional and stamped with `?? ""` rather than accepted: an accepted arg omitted by the caller is dropped from the payload and the read-merge re-saves whatever was there, so clearing the choice would be inexpressible. It is the exact inverse of createSite's reading of the same field, for the same reason updateSiteSettings and updateSiteBundle differ.
+WHY A SITE AND NOT A KIND. A shopify_storefront was given the spa fallback because the kind's own description says it IS a spa bundle; the first storefront actually built was a multi-page prerendered tree that declared kind: static precisely to get the 404 back, and thereby gave up the store binding, the storefront block in its runtime document and the policy that admits Shopify. Neither tail is right for every storefront, so the SITE says which it is.
+AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite, exactly as on updateSiteBundle and updateSiteSettings: the row's owner, or a cluster owner through the explicit escape, and a systemOwned row refused for both. */
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteResolutionTail"] in generated_concepts.ts).
+export interface UpdateSiteResolutionTailArgs {
+  siteId: string;
+  // Enum: fallback | not_found
+  resolutionTail?: string;
+}
+
+export function buildUpdateSiteResolutionTail(args: UpdateSiteResolutionTailArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  if (args.resolutionTail !== undefined) parts.push("resolutionTail: " + renderMemQLValue(args.resolutionTail));
+  return "mutation updateSiteResolutionTail(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    updateSiteResolutionTail(args: UpdateSiteResolutionTailArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.updateSiteResolutionTail = function (this: QueryClient, args: UpdateSiteResolutionTailArgs = {} as UpdateSiteResolutionTailArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("updateSiteResolutionTail", buildUpdateSiteResolutionTail(args), opts);
+};
+
 /** Replace a deployable's runtime settings (epic memql#4906, decision P7): the key-values the edge merges into the site's runtime-config document under `settings`, read by the bundle at load.
 A REPLACE, NOT A MERGE, and the whole object is the argument. `settings` is stamped from the required arg rather than accepted, so an empty object is written as an empty object and clearing every setting is expressible -- an accepted optional arg would be dropped from the payload when omitted and the read-merge would re-save whatever was there (updateSiteAccount's reasoning). The editor sends the map it shows, so what a person sees is what the row holds.
 The shape half is here: an object. The half that decides -- every key of the identifier form [A-Za-z][A-Za-z0-9_]{0,63} and not ending in `Ref`, every value a plain string within MEMQL_SITE_SETTINGS_MAX_VALUE_LENGTH, at most MEMQL_SITE_SETTINGS_MAX_KEYS keys, and the systemOwned refusal -- is the Go guard beside the status guard (component/memql/platform_site_settings_guard.go), because a mutation body cannot see an object's keys. NOT A PLACE FOR A SECRET: the document is served to every visitor.
@@ -8638,6 +8674,32 @@ QueryClient.prototype.updateSiteStatus = function (this: QueryClient, args: Upda
   return this.executeNamed("updateSiteStatus", buildUpdateSiteStatus(args), opts);
 };
 
+/** Point a storefront deployable at the v1:shopify:store row it fronts, or clear the binding (epic memql#5530, issue memql#5538).
+ONE VALUE, AND IT IS A REFERENCE. The binding is written whole as {storeId} rather than merged, so the legacy {storeDomain, storefrontTokenRef} shape cannot survive a write: a read-merge would have kept the copy beside the reference and left two records of one store, which is the thing this epic exists to end. An empty storeId writes an empty object, which is the unbound state -- clearing must be expressible, for updateSiteSettings' reason.
+AUTHORIZATION IS TWO GATES, AND THE SECOND IS THE SUBSTANTIVE ONE. @requiresCapability names the surface: `app:deployables/store` is seeded on owner alone, which is exactly the population the retired Stores app admitted. Beside it, a Go guard refuses a binding naming a store row the CALLER CANNOT READ -- so the answer to "who may bind a storefront they own to a store they may not read" is nobody. That check needs a cross-row read no mutation body can make, which is why it sits with the hostname policy rather than here (component/memql/platform_site_binding_guard.go). */
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteStoreBinding"] in generated_concepts.ts).
+export interface UpdateSiteStoreBindingArgs {
+  siteId: string;
+  storeId?: string;
+}
+
+export function buildUpdateSiteStoreBinding(args: UpdateSiteStoreBindingArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  if (args.storeId !== undefined) parts.push("storeId: " + renderMemQLValue(args.storeId));
+  return "mutation updateSiteStoreBinding(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    updateSiteStoreBinding(args: UpdateSiteStoreBindingArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.updateSiteStoreBinding = function (this: QueryClient, args: UpdateSiteStoreBindingArgs = {} as UpdateSiteStoreBindingArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("updateSiteStoreBinding", buildUpdateSiteStoreBinding(args), opts);
+};
+
 /** Change a store's configuration. Read-merge: an argument left out keeps its stored value, so rotating one secret reference does not require re-supplying the other two. */
 // Bound concept: v1:shopify:store (machine-readable: BoundConcepts["updateStore"] in generated_concepts.ts).
 export interface UpdateStoreArgs {
@@ -8652,6 +8714,8 @@ export interface UpdateStoreArgs {
   plan?: string;
   scopesGranted?: string[];
   ownerUserId?: string;
+  isDevelopment?: boolean;
+  developmentOfStoreId?: string;
 }
 
 export function buildUpdateStore(args: UpdateStoreArgs): string {
@@ -8667,6 +8731,8 @@ export function buildUpdateStore(args: UpdateStoreArgs): string {
   if (args.plan !== undefined) parts.push("plan: " + renderMemQLValue(args.plan));
   if (args.scopesGranted !== undefined) parts.push("scopesGranted: " + renderMemQLValue(args.scopesGranted));
   if (args.ownerUserId !== undefined) parts.push("ownerUserId: " + renderMemQLValue(args.ownerUserId));
+  if (args.isDevelopment !== undefined) parts.push("isDevelopment: " + renderMemQLValue(args.isDevelopment));
+  if (args.developmentOfStoreId !== undefined) parts.push("developmentOfStoreId: " + renderMemQLValue(args.developmentOfStoreId));
   return "mutation updateStore(" + parts.join(", ") + ")";
 }
 

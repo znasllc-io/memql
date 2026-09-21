@@ -736,6 +736,10 @@ mutation appSession createAppSession {
     kind           enum("run", "open", "attach")!
     runId          string
     stepId         string
+    /// v1:work:run.id this session's actions are recorded into. It is the subrun the delegating
+    /// step's childRunId points at; the MCP node reads it off this row to write an `mcp` step into
+    /// the same run from a different replica.
+    sessionRunId   string
     workspace      string
     prompt         string
     inputArtifactIds  array
@@ -762,15 +766,17 @@ mutation appSession createAppSession {
     args.kind
     runId: args.runId ?? ""
     stepId: args.stepId ?? ""
+    sessionRunId: args.sessionRunId ?? ""
     status: "starting"
     workspace: args.workspace ?? ""
     prompt: args.prompt ?? ""
     inputArtifactIds: args.inputArtifactIds ?? []
     responseSchema: args.responseSchema ?? ""
     result: {}
-    transcript: ""
-    transcriptBytes: 0
+    transcriptFileId: ""
     transcriptTruncated: false
+    recordedSteps: 0
+    droppedActions: 0
     usage: {}
     billing: "unknown"
     mcpEndpoint: args.mcpEndpoint ?? ""
@@ -780,46 +786,57 @@ mutation appSession createAppSession {
   }
 }
 
-// ---- mutations/v1/worker/appendAppSessionTranscript.memql ----
+// ---- mutations/v1/worker/recordAppSessionProgress.memql ----
 
-// appendAppSessionTranscript
-// ==========================
+// recordAppSessionProgress
+// ========================
 //
-// Flushes the accumulated transcript onto a live session row. The
-// engine holds the buffer and writes the whole bounded string rather
-// than one row-write per chunk: a chatty run emits thousands of
-// chunks a minute, and a write each would saturate the engine to
-// deliver text nobody is reading between flushes.
+// Advances a live session's RECORDING counters (epic memql#5396). It
+// replaced appendAppSessionTranscript, which flushed the whole bounded
+// transcript string onto the row every two seconds; the prose is now one
+// content-addressed Library file written at end, and what a live reader
+// needs from the row is how far the recording has got.
 //
-// `transcriptTruncated` and `transcriptBytes` travel with it so a
-// reader can see that truncation happened and by how much. A
-// transcript that stops without saying why reads as a run that
-// stopped.
+// IT IS ALSO THE SEQ ALLOCATOR. Two writers put steps into one recording
+// run -- the replica holding the session, and the MCP node when the app
+// calls back into MemQL -- and a run's step order is what a client sorts
+// by. Each writer reads `recordedSteps`, takes it as its step's seq, and
+// writes it back incremented through here. The session row is the only
+// state both replicas can see, which is the same reasoning `submit` rests
+// on: the alternative is a NodeService hop whose failure mode is a step
+// nobody recorded.
+//
+// `droppedActions` counts the action events the chunk layer refused as
+// out-of-order or duplicate. It is written so the LOSS IS VISIBLE: a
+// procedure lifted from an incomplete recording would otherwise be lifted
+// as if it were complete.
 
-/// Flush the accumulated transcript onto a live app-session row.
+/// Advance a live app-session row's recording counters, and allocate the next step seq.
 ///
-/// @serverOnly because the transcript is EVIDENCE. It is what a later reader consults to answer
-/// what an agent did on somebody's computer, and a wire-reachable write would let the owner of a
-/// run rewrite that record after the fact -- including the run whose behaviour is the reason
-/// anybody is reading it.
+/// @serverOnly because the recording is EVIDENCE. It is what a later reader consults to answer what
+/// an agent did on somebody's computer, and a wire-reachable write would let the owner of a run
+/// rewrite that record after the fact -- including the run whose behaviour is the reason anybody is
+/// reading it.
 ///
 /// actor.userId scoping is not the fix: the person best placed to edit the record is its owner, so
-/// self-scoping admits precisely the write that must not happen. The engine appends from chunks it
-/// received on the stream; nothing else may.
+/// self-scoping admits precisely the write that must not happen. The engine counts what it
+/// received on the stream and what it wrote; nothing else may.
 @serverOnly
-mutation appSession appendAppSessionTranscript {
+mutation appSession recordAppSessionProgress {
   args {
     sessionId      string!
-    transcript     string
-    transcriptBytes  int
-    transcriptTruncated  bool
+    recordedSteps  int
+    droppedActions  int
     status         enum("starting", "running")
   }
   update {
+    // NOT `?? 0`. A caller advancing only the drop count must not reset the
+    // step allocator to zero, which would hand the next two steps the same
+    // seq -- the read-merge keeps whatever it does not name, and naming a
+    // default here is what would break it.
+    args.recordedSteps
+    args.droppedActions
     id: args.sessionId
-    transcript: args.transcript ?? ""
-    transcriptBytes: args.transcriptBytes ?? 0
-    transcriptTruncated: args.transcriptTruncated ?? false
     status: args.status ?? "running"
   }
 }
@@ -838,7 +855,7 @@ mutation appSession appendAppSessionTranscript {
 
 /// Drive an app session to a terminal status with its reported usage.
 ///
-/// @serverOnly for the same reason as the transcript flush, plus one of its own: this write carries
+/// @serverOnly for the same reason as the progress write, plus one of its own: this write carries
 /// `billing` and `usage`, which feed the plan's spend rollup and the AI ledger. A wire-reachable
 /// version would let a caller declare their own run subscription-covered and its token count zero,
 /// which is the one write that can make the dollar ceiling stop working.
@@ -854,9 +871,12 @@ mutation appSession endAppSession {
     exitCode       int
     usage          object
     billing        enum("metered", "subscription", "unknown")
-    transcript     string
-    transcriptBytes  int
+    /// v1:library:file.id of the session's prose, written at end. Empty when the Library write
+    /// failed, which is logged and never fails the session.
+    transcriptFileId  string
     transcriptTruncated  bool
+    recordedSteps  int
+    droppedActions  int
     producedArtifactIds  array
     appSessionRef  string
     errorMessage   string
@@ -872,9 +892,13 @@ mutation appSession endAppSession {
     exitCode: args.exitCode ?? 0
     usage: args.usage ?? {}
     billing: args.billing ?? "unknown"
-    transcript: args.transcript ?? ""
-    transcriptBytes: args.transcriptBytes ?? 0
+    transcriptFileId: args.transcriptFileId ?? ""
     transcriptTruncated: args.transcriptTruncated ?? false
+    // NOT `?? 0`, for recordAppSessionProgress's reason: the end carries the
+    // counters only when the recorder had them, and defaulting would report a
+    // recorded session as having recorded nothing.
+    args.recordedSteps
+    args.droppedActions
     producedArtifactIds: args.producedArtifactIds ?? []
     appSessionRef: args.appSessionRef ?? ""
     errorMessage: args.errorMessage ?? ""

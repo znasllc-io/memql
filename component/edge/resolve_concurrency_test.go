@@ -52,6 +52,12 @@ func (b *blockingExec) SiteForAccountFrontDoor(_ context.Context, _ string) (*Si
 	return nil, nil
 }
 
+// The bound-store read. Nothing here is a storefront, so this is never
+// reached; it exists to satisfy QueryExecutor.
+func (b *blockingExec) StoreByID(_ context.Context, _ string) (*BoundStore, error) {
+	return nil, nil
+}
+
 // Concurrent misses for ONE hostname must collapse to a single query. This
 // is the same shape as integrations/cognition's cache-miss singleflight
 // groups (e.g. recentUtterSF / spaceInfoSF in prompt_context_cache.go):
