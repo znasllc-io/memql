@@ -15,6 +15,7 @@
   },
   "memql": {
     "edition": "2026",
+    "status": "frozen",
     "grammarVersion": "2026.09-before-write-error-accessor-77cda60c"
   },
   "categories": [
@@ -375,6 +376,10 @@
       {
         "command": "memql.clusters.refreshReleases",
         "title": "MemQL: Check For New Releases"
+      },
+      {
+        "command": "memql.language.showReference",
+        "title": "MemQL: Show Language Reference"
       }
     ],
     "menus": {

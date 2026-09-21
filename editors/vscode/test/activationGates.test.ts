@@ -67,7 +67,19 @@ activate(context);
 
 test('an untrusted workspace registers no runtime surface', () => {
   assert.deepEqual(recorded.treeViews, []);
-  assert.deepEqual(recorded.commands, []);
+  // EXACTLY ONE command, and it is the one that is not part of the runtime
+  // surface (memql#5388). "MemQL: Show Language Reference" reads no credential
+  // and opens no connection: with no cluster it shows the edition, that
+  // edition's status and the grammar version this extension was BUILT against
+  // -- the language its bundled server is already giving this window
+  // completion and diagnostics in. A restricted folder is where somebody is
+  // most likely to be reading `.memql` with nothing connected, so gating it
+  // would take the reference away from the window that needs it most.
+  //
+  // A deepEqual rather than an `includes`: the value of this case is the
+  // ABSENCE of everything else, and a second command appearing here is a
+  // runtime surface that has escaped the gate.
+  assert.deepEqual(recorded.commands, ['memql.language.showReference']);
   assert.deepEqual(recorded.watched, []);
   assert.equal(recorded.fileDecorationProviders, 0);
 
