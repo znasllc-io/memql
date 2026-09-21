@@ -1,0 +1,36 @@
+// Contoso's process: a review, then a chain, then an entitlement.
+//
+// TWO automations where Northwind has one, triggering on the SAME pack
+// concepts and calling the SAME pack builtin. Neither client had to edit
+// the pack, and neither had to know the other existed.
+
+use contoso.mutations.{ openContosoReview }
+use wholesale.builtins.{ wholesaleProvisionEntitlement }
+
+/// A new application opens a review and puts it in front of a rep. Contoso
+/// entitles nobody at this point -- the chain has not decided yet.
+@trigger(event="node.created", concept="v1:wholesale:application")
+automation contosoOpenReviewOnApplication {
+  args {
+    id       any
+    storeId  any
+  }
+  opened := mutation openContosoReview(
+    reviewId: args.id,
+    applicationId: args.id,
+    storeId: args.storeId
+  )
+}
+
+/// When the chain has said yes and the decision is recorded, entitle the
+/// buyer. The trigger and the builtin are the pack's; the threshold, the
+/// ordering and the rep are Contoso's.
+@trigger(event="node.created", concept="v1:wholesale:applicationDecision")
+@filter(row => row.transition == "approve")
+automation contosoGrantAfterChain {
+  args {
+    applicationId  any
+    transition     any
+  }
+  granted := builtin wholesaleProvisionEntitlement(applicationId: args.applicationId)
+}

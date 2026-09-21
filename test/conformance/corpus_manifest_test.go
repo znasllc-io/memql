@@ -34,3 +34,21 @@ func TestCorpusManifestMatchesTheEngine(t *testing.T) {
 			langparser.Edition, vm.Status)
 	}
 }
+
+// The status a cluster REPORTS for its edition -- the languageStatus builtin,
+// and MemQL OS's Settings -> Language, which prints the frozen guarantee only
+// under a frozen edition -- is parser.EditionStatus, a constant, because the
+// engine never reads its test tree at run time.
+//
+// The corpus manifest is where the status is DECIDED, so the two move in one
+// change and this holds them equal in BOTH directions: a cluster can never
+// call a draft edition frozen, and never call a frozen one draft. The first
+// would promise operators a stability the language is not offering; the second
+// would tell them to migrate away from forms nothing is going to refuse.
+func TestEditionStatusMatchesTheCorpusManifest(t *testing.T) {
+	vm := readCorpusManifest(t, os.DirFS("."), langparser.Edition)
+	if langparser.EditionStatus != vm.Status {
+		t.Errorf("parser.EditionStatus is %q and %s/manifest.json says %q; flip both in the same change",
+			langparser.EditionStatus, langparser.Edition, vm.Status)
+	}
+}

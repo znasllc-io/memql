@@ -411,6 +411,21 @@ While we are below `1.0.0`:
   same time. No backwards-compat shims, no deprecation windows — fix
   both ends and delete what is no longer needed (see the branch
   workflow notes in [CLAUDE.md](CLAUDE.md)).
+- **The MemQL language is the one exception, and it is counted in
+  MINOR releases.** Since language 1.0 was frozen (memql#5385,
+  memql#5390) a public `.memql` form does not disappear in a minor: it
+  enters a **deprecation window** in which it still loads, every load
+  warns naming the replacement and the release it stops loading at,
+  every use is counted on `memql_dsl_deprecated_uses_total{rule}`, and
+  only after **at least two minor releases** does it refuse. The rule
+  above holds for every other contract because both of its ends live in
+  repositories this one can see; a product's DSL bundle is mounted at
+  `MEMQL_DSL_PATH` from a repo it cannot. A patch release never closes
+  a window — the count is in minors, so `0.25.0` and `0.25.9` are the
+  same point in one. The forms currently in a window, with both of
+  their releases, are published in
+  [docs/public/language/memql.md](docs/public/language/memql.md#forms-in-a-deprecation-window)
+  and held to `component/language/deprecation` by a build gate.
 - **Patch bumps** are bug fixes that keep the contract identical.
 - MemQL versions **independently** from the other platform repos. The
   engine may reach `0.14` while memql-cockpit is at `0.10`; that is

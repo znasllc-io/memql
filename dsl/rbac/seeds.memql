@@ -515,6 +515,17 @@ seed capability cap-owner-read-app-settings-cluster { roleSlug: "owner"  verb: "
 seed capability cap-developer-read-app-settings-cluster { roleSlug: "developer"  verb: "read"  resourceType: "app:settings/cluster"  predefined: true }
 @description("admin: open the cluster section of the settings app -- reproduces the OS registry floor min admin (memql#5300).")
 seed capability cap-admin-read-app-settings-cluster { roleSlug: "admin"  verb: "read"  resourceType: "app:settings/cluster"  predefined: true }
+// Settings -> Language (memql#5390): the MemQL line the cluster speaks and
+// where its DSL still spells a deprecated form. Beside Cluster and on the same
+// three roles, because it is the same kind of engineering fact; the
+// languageStatus builtin declares this resource, so these rows are also the
+// builtin's gate.
+@description("owner: open the language section of the settings app, and call languageStatus (memql#5390).")
+seed capability cap-owner-read-app-settings-language { roleSlug: "owner"  verb: "read"  resourceType: "app:settings/language"  predefined: true }
+@description("developer: open the language section of the settings app, and call languageStatus (memql#5390).")
+seed capability cap-developer-read-app-settings-language { roleSlug: "developer"  verb: "read"  resourceType: "app:settings/language"  predefined: true }
+@description("admin: open the language section of the settings app, and call languageStatus (memql#5390).")
+seed capability cap-admin-read-app-settings-language { roleSlug: "admin"  verb: "read"  resourceType: "app:settings/language"  predefined: true }
 @description("owner: open the benchmarks section of the settings app -- reproduces the OS registry floor min admin (memql#5300).")
 seed capability cap-owner-read-app-settings-benchmarks { roleSlug: "owner"  verb: "read"  resourceType: "app:settings/benchmarks"  predefined: true }
 @description("developer: open the benchmarks section of the settings app -- reproduces the OS registry floor min admin (memql#5300).")

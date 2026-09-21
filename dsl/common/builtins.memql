@@ -620,6 +620,31 @@ builtin automationGraph { }
 @requiresCapability("read", "app:cluster/automations")
 builtin automationLoopStops { }
 
+// ---- The language this cluster speaks (memql#5390) ----
+//
+// The read behind MemQL OS's Settings -> Language, and @sdk for the reason
+// automationGraph is: a typed method keeps that section from hand-building a
+// call string. It reads no row -- the line, the edition and its status are
+// language constants, the forms are the deprecation table, and the uses are
+// what the answering node's last load found -- so there is no tier to gate it
+// and the capability IS the wall, enforced before the executor runs.
+//
+// @requiresCapability rather than @requiresRank because a BUILTIN's annotation
+// set carries no rank floor. The resource is the same name the OS section's
+// `requires:` asks for, seeded on owner, developer and admin, so the engine
+// refuses the read to exactly the people the shell hides the section from.
+
+/// The MemQL line this cluster speaks, the forms it deprecates, and where the DSL it loaded still
+/// spells one. ONE row: language, edition, status (frozen or draft), grammarVersion, editorRelease,
+/// deprecationWindowMinors, and forms[] with rule, spelling, replacement, migrator, deprecatedIn,
+/// refusedFrom (a floor, not a date), state (deprecated | refused) and uses[] (file, line, column,
+/// text). The uses are the answering node's last load; every mesh node mounts the same tree, so any
+/// of them answers for the cluster.
+@sdk
+@executor("languageStatus")
+@requiresCapability("read", "app:settings/language")
+builtin languageStatus { }
+
 // ---- Local models on the fleet (epic memql#4676) ----
 //
 // Here with the other registry-projecting readers; the row SHAPES live in

@@ -1,0 +1,103 @@
+// wholesale pack -- projections (epic memql#5533, issue memql#5555).
+//
+// A CONCEPT FIELD IS NOT A READABLE FIELD. A query with no shape answers
+// the graph bundle, whose payload fields sit one level down -- so a caller
+// reading `row.companyName` off it gets "" and no error, which is the
+// failure mode this file exists to remove. Every read in this pack names a
+// shape.
+//
+// THERE IS NO PUBLIC PROJECTION OF AN APPLICATION, and the absence is a
+// decision rather than an omission. reviewspack ships two projections of
+// its review because one of them is served to an unauthenticated browser;
+// nothing in THIS pack ever is. An application is a named person's business
+// contact details against a named company, and the pack declares a shopper
+// FORM with no matching shopper READ -- a shopper may submit one and may
+// not read one back, not even their own. Reading their own would need the
+// verified Shopify customer principal that issue memql#5550 recorded as the
+// answer for a buyer's own data and deliberately did not build; when a
+// client needs it, it is an addition here rather than a rewrite, because
+// reach is declared per route.
+
+use wholesale.concepts.{ application, applicationDecision, entitlement, wholesaleSettings }
+use shopify.overlay.concepts.{ store }
+
+// THE PACK'S ONE CROSS-DOMAIN READ, AND IT IS DELIBERATELY THREE FIELDS.
+//
+// An adapter has to know what the bound store can do -- native B2B is
+// available below Plus since 2026-04-02, but with at most three catalogs
+// (the connector record, 1.3), and an adapter that discovered that ceiling
+// at the fourth grant would discover it in a merchant's live store.
+//
+// shopify.overlay ALREADY SHIPS storeFull and this does not use it. That
+// shape projects adminTokenRef, storefrontTokenRef and webhookSecretRef,
+// and epic memql#5530's D10 settled what holding those is worth: "a
+// credential reference the serving path was never handed cannot reach a
+// response header, a served document or a log line". The same reasoning
+// applies one tier up. This pack never needs a credential reference, so it
+// declares a projection that cannot carry one -- the omission is the
+// safety property rather than an economy.
+//
+// The store row is @rowAuthz(clusterOwner) and D10 left that tier
+// UNCHANGED, so this read ANSWERING NOTHING is the ordinary case for a
+// merchant rather than a fault. entitlement.go's storePlan treats it as
+// such, and each adapter says for itself what an unknown plan means for it.
+@description("What this pack needs to know about a bound store: which plan it is on and whether it is a development store. NOT its credentials -- storeFull projects three token references and this projection exists so the wholesale pack can never hold one.")
+@row
+shape store wholesaleStorePlan {
+  row.id
+  plan
+  isDevelopment
+}
+
+@description("An application as its MERCHANT sees it, whole. The only projection of this concept, because the only reader is the merchant it was addressed to.")
+@row
+shape application applicationFull {
+  row.id
+  ownerUserId
+  storeId
+  siteId
+  companyName
+  applicantName
+  applicantEmail
+  row.createdAt
+}
+
+@description("A decision, whole. Append-only, so a row is a decision and this is all of it.")
+@row
+shape applicationDecision applicationDecisionFull {
+  row.id
+  applicationId
+  storeId
+  transition
+  decidedBy
+  principalKind
+  note
+  row.createdAt
+}
+
+@description("An entitlement, whole. row.createdAt is the version clock, so on a revoked row it is WHEN it was revoked -- which is why the concept carries no revokedAt of its own.")
+@row
+shape entitlement entitlementFull {
+  row.id
+  ownerUserId
+  applicationId
+  storeId
+  buyerEmail
+  adapter
+  state
+  reference
+  error
+  row.createdAt
+}
+
+@description("One store's wholesale settings.")
+@row
+shape wholesaleSettings wholesaleSettingsFull {
+  row.id
+  ownerUserId
+  storeId
+  applicationsOpen
+  entitlementAdapter
+  introText
+  row.createdAt
+}

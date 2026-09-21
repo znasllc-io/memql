@@ -1355,6 +1355,25 @@ QueryClient.prototype.integrationStatus = function (this: QueryClient, args: Int
   return this.executeNamed("integrationStatus", buildIntegrationStatus(args), opts);
 };
 
+/** The MemQL line this cluster speaks, the forms it deprecates, and where the DSL it loaded still spells one. ONE row: language, edition, status (frozen or draft), grammarVersion, editorRelease, deprecationWindowMinors, and forms[] with rule, spelling, replacement, migrator, deprecatedIn, refusedFrom (a floor, not a date), state (deprecated | refused) and uses[] (file, line, column, text). The uses are the answering node's last load; every mesh node mounts the same tree, so any of them answers for the cluster. */
+export interface LanguageStatusArgs {
+}
+
+export function buildLanguageStatus(args: LanguageStatusArgs): string {
+  void args;
+  return "builtin languageStatus()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    languageStatus(args?: LanguageStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.languageStatus = function (this: QueryClient, args: LanguageStatusArgs = {} as LanguageStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("languageStatus", buildLanguageStatus(args), opts);
+};
+
 /** Add a label to a Library artifact index row. Idempotent -- a label already present is left alone and nothing is written. artifactId is the v1:library:artifact row id; the load + write-back run under a synthetic actor derived from the row's own ownerUserId, so a caller can only ever label an artifact they own. */
 export interface LibraryAddArtifactLabelArgs {
   artifactId: string;
@@ -2572,6 +2591,74 @@ QueryClient.prototype.shopifyFetchProduct = function (this: QueryClient, args: S
   return this.executeNamed("shopifyFetchProduct", buildShopifyFetchProduct(args), opts);
 };
 
+/** Create or find one buyer's B2B account: a company stamped with the MemQL application id, its location, the buyer as a company contact, and an ACTIVE catalog with a price list. Idempotent -- a second call for one application finds the first company rather than making a twin. Refuses BEFORE creating anything when the store is below Plus and already holds its three company-location catalogs, answering {status: refused, reason} rather than an error so the caller can tell a ceiling from an outage. */
+export interface ShopifyProvisionWholesaleArgs {
+  /** The store to provision on. */
+  storeId: string;
+  /** The MemQL application this grant came from. Becomes the company's externalId, which is what makes a retry find the first company. */
+  applicationId: string;
+  /** The business being entitled. */
+  companyName: string;
+  /** The applicant's email. The customer who becomes the company contact; created when the store has none. */
+  buyerEmail: string;
+  /** The applicant's name, split on the last space into the two fields Shopify wants. */
+  buyerName?: string;
+  /** Defaults to '<company> wholesale'. */
+  catalogTitle?: string;
+  /** Whole-number percentage off published prices. Zero creates the price list with no adjustment, which is somewhere for the merchant to put real per-variant prices. */
+  percentOff?: number;
+  /** The price list currency. */
+  currencyCode?: string;
+}
+
+export function buildShopifyProvisionWholesale(args: ShopifyProvisionWholesaleArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("applicationId: " + renderMemQLValue(args.applicationId));
+  parts.push("companyName: " + renderMemQLValue(args.companyName));
+  parts.push("buyerEmail: " + renderMemQLValue(args.buyerEmail));
+  if (args.buyerName !== undefined) parts.push("buyerName: " + renderMemQLValue(args.buyerName));
+  if (args.catalogTitle !== undefined) parts.push("catalogTitle: " + renderMemQLValue(args.catalogTitle));
+  if (args.percentOff !== undefined) parts.push("percentOff: " + renderMemQLValue(args.percentOff));
+  if (args.currencyCode !== undefined) parts.push("currencyCode: " + renderMemQLValue(args.currencyCode));
+  return "builtin shopifyProvisionWholesale(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyProvisionWholesale(args: ShopifyProvisionWholesaleArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyProvisionWholesale = function (this: QueryClient, args: ShopifyProvisionWholesaleArgs = {} as ShopifyProvisionWholesaleArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyProvisionWholesale", buildShopifyProvisionWholesale(args), opts);
+};
+
+/** End a B2B entitlement by setting its catalog to DRAFT. DELETES NOTHING: the company, its location, its contact, the price list and every order placed under them are untouched, because revoking trade terms is ending a discount rather than erasing a customer -- and deleting a company would take its order history's association with it. */
+export interface ShopifyRevokeWholesaleArgs {
+  /** The store. */
+  storeId: string;
+  /** The encoded refs a provision returned. Opaque to the pack, which never parses it. */
+  reference: string;
+}
+
+export function buildShopifyRevokeWholesale(args: ShopifyRevokeWholesaleArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("reference: " + renderMemQLValue(args.reference));
+  return "builtin shopifyRevokeWholesale(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyRevokeWholesale(args: ShopifyRevokeWholesaleArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyRevokeWholesale = function (this: QueryClient, args: ShopifyRevokeWholesaleArgs = {} as ShopifyRevokeWholesaleArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyRevokeWholesale", buildShopifyRevokeWholesale(args), opts);
+};
+
 /** Run the queued privacy jobs whose hold has elapsed: export a customer's data to the Library, scrub a redacted customer's PII across every version, purge a redacted shop's whole mirror. Every action is audited; shop/redact re-checks reachability first so a reverted uninstall does not cost the mirror. */
 export interface ShopifyRunComplianceJobsArgs {
 }
@@ -2610,6 +2697,84 @@ declare module "./query.js" {
 
 QueryClient.prototype.shopifyStoreHealth = function (this: QueryClient, args: ShopifyStoreHealthArgs = {} as ShopifyStoreHealthArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("shopifyStoreHealth", buildShopifyStoreHealth(args), opts);
+};
+
+/** The plan-independent grant: add one tag to the buyer's customer record. Writes the tag and NOTHING else -- what the tag does is the merchant's own automatic discount, which this connector deliberately does not create on their behalf. Refuses when no customer on the store has that email, because a tag on an account that does not exist entitles nobody. */
+export interface ShopifyTagWholesaleCustomerArgs {
+  /** The store. */
+  storeId: string;
+  /** The customer to tag. */
+  buyerEmail: string;
+  /** Defaults to memql-wholesale. Prefixed with ours so this connector never removes a tag somebody else put there. */
+  tag?: string;
+}
+
+export function buildShopifyTagWholesaleCustomer(args: ShopifyTagWholesaleCustomerArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("buyerEmail: " + renderMemQLValue(args.buyerEmail));
+  if (args.tag !== undefined) parts.push("tag: " + renderMemQLValue(args.tag));
+  return "builtin shopifyTagWholesaleCustomer(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyTagWholesaleCustomer(args: ShopifyTagWholesaleCustomerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyTagWholesaleCustomer = function (this: QueryClient, args: ShopifyTagWholesaleCustomerArgs = {} as ShopifyTagWholesaleCustomerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyTagWholesaleCustomer", buildShopifyTagWholesaleCustomer(args), opts);
+};
+
+/** The plan-independent revoke: remove that one tag from the buyer's customer record. */
+export interface ShopifyUntagWholesaleCustomerArgs {
+  /** The store. */
+  storeId: string;
+  /** The customer to untag. */
+  buyerEmail: string;
+  /** Defaults to memql-wholesale. */
+  tag?: string;
+}
+
+export function buildShopifyUntagWholesaleCustomer(args: ShopifyUntagWholesaleCustomerArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  parts.push("buyerEmail: " + renderMemQLValue(args.buyerEmail));
+  if (args.tag !== undefined) parts.push("tag: " + renderMemQLValue(args.tag));
+  return "builtin shopifyUntagWholesaleCustomer(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyUntagWholesaleCustomer(args: ShopifyUntagWholesaleCustomerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyUntagWholesaleCustomer = function (this: QueryClient, args: ShopifyUntagWholesaleCustomerArgs = {} as ShopifyUntagWholesaleCustomerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyUntagWholesaleCustomer", buildShopifyUntagWholesaleCustomer(args), opts);
+};
+
+/** How many more company-location catalogs this store may hold: -1 on Plus, which is unlimited, and otherwise three minus what it already has. Since 2026-04-02 companies, payment terms, volume pricing and up to three catalogs are available BELOW Plus, so the ceiling is real and this is what lets an adapter REPORT it rather than discover it at the fourth grant, in a merchant's live store. */
+export interface ShopifyWholesaleCatalogHeadroomArgs {
+  /** The store to measure. */
+  storeId: string;
+}
+
+export function buildShopifyWholesaleCatalogHeadroom(args: ShopifyWholesaleCatalogHeadroomArgs): string {
+  const parts: string[] = [];
+  parts.push("storeId: " + renderMemQLValue(args.storeId));
+  return "builtin shopifyWholesaleCatalogHeadroom(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyWholesaleCatalogHeadroom(args: ShopifyWholesaleCatalogHeadroomArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyWholesaleCatalogHeadroom = function (this: QueryClient, args: ShopifyWholesaleCatalogHeadroomArgs = {} as ShopifyWholesaleCatalogHeadroomArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyWholesaleCatalogHeadroom", buildShopifyWholesaleCatalogHeadroom(args), opts);
 };
 
 /** Run an ad-hoc ShopifyQL analytics query for questions the mirror cannot answer. Requires read_reports and protected-customer-data Level 2 approval; refused below that with a reason naming the level, which Shopify's own 403 does not. */
