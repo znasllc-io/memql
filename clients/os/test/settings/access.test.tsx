@@ -263,20 +263,20 @@ describe("by person: the matrix", () => {
     expect(rowFor("app:deployables").textContent).toContain("developer role");
     expect(rowFor("app:deployables").querySelector('[data-state="on"]')).not.toBeNull();
     // A resource the role lacks says so, from the role.
-    expect(rowFor("app:stores").querySelector('[data-state="off"]')).not.toBeNull();
+    expect(rowFor("app:cluster/origins").querySelector('[data-state="off"]')).not.toBeNull();
     // The scope line names the role and the groups.
     expect(screen.getByText(/Ada Lovelace holds the Developer role and is in no group\./)).toBeTruthy();
   });
 
   it("names the group an answer came through", async () => {
     const state = freshState({
-      grantsBySubject: { "group:g-acme": [grantRow({ id: "grant-g", subjectKind: "group", subjectId: "g-acme", resource: "app:stores", verb: "read", effect: "allow" })] },
+      grantsBySubject: { "group:g-acme": [grantRow({ id: "grant-g", subjectKind: "group", subjectId: "g-acme", resource: "app:cluster/origins", verb: "read", effect: "allow" })] },
       memberships: { "u-ada": [{ id: "m-1", groupId: "g-acme", userId: "u-ada", status: "active", origin: "added", createdAt: "" } as Row] },
     });
     mount(state);
     await pickSubject("Ada Lovelace");
     await waitFor(() => {
-      expect(rowFor("app:stores").textContent).toContain("allowed, through Acme by you");
+      expect(rowFor("app:cluster/origins").textContent).toContain("allowed, through Acme by you");
     });
     expect(screen.getByText(/is in Acme\./)).toBeTruthy();
   });
@@ -314,20 +314,20 @@ describe("by person: the matrix", () => {
     const off = onGrantWritten(written);
     mount(state);
     await pickSubject("Ada Lovelace");
-    await waitFor(() => expect(rowFor("app:stores").querySelector('[data-state="off"]')).not.toBeNull());
+    await waitFor(() => expect(rowFor("app:cluster/origins").querySelector('[data-state="off"]')).not.toBeNull());
 
     // The re-read after the write answers the new grant.
-    state.grantsBySubject["user:u-ada"] = [grantRow({ id: "grant-new", resource: "app:stores", verb: "read", effect: "allow" })];
+    state.grantsBySubject["user:u-ada"] = [grantRow({ id: "grant-new", resource: "app:cluster/origins", verb: "read", effect: "allow" })];
     await act(async () => {
-      fireEvent.click(within(rowFor("app:stores")).getByRole("button", { name: "Allow Stores to Ada Lovelace" }));
+      fireEvent.click(within(rowFor("app:cluster/origins")).getByRole("button", { name: "Allow Data origins to Ada Lovelace" }));
     });
 
-    await waitFor(() => expect(rowFor("app:stores").textContent).toContain("allowed, by you"));
+    await waitFor(() => expect(rowFor("app:cluster/origins").textContent).toContain("allowed, by you"));
     const set = state.calls.find((c) => c.name === "grantSet");
     expect(set?.call).toContain('subjectKind: "user"');
     expect(set?.call).toContain('subjectId: "u-ada"');
     expect(set?.call).toContain('verb: "read"');
-    expect(set?.call).toContain('resourceType: "app:stores"');
+    expect(set?.call).toContain('resourceType: "app:cluster/origins"');
     expect(set?.call).toContain('effect: "allow"');
     expect(written).toHaveBeenCalled();
     off();
@@ -339,13 +339,13 @@ describe("by person: the matrix", () => {
     });
     mount(state);
     await pickSubject("Ada Lovelace");
-    await waitFor(() => expect(rowFor("app:stores").querySelector('[data-state="off"]')).not.toBeNull());
+    await waitFor(() => expect(rowFor("app:cluster/origins").querySelector('[data-state="off"]')).not.toBeNull());
     await act(async () => {
-      fireEvent.click(within(rowFor("app:stores")).getByRole("button", { name: "Allow Stores to Ada Lovelace" }));
+      fireEvent.click(within(rowFor("app:cluster/origins")).getByRole("button", { name: "Allow Data origins to Ada Lovelace" }));
     });
     const refusal = await screen.findByText("They rank above you");
-    // Beside the row: the notice's row follows the Stores row.
-    expect(refusal.closest("tr")?.previousElementSibling).toBe(rowFor("app:stores"));
+    // Beside the row: the notice's row follows the Data origins row.
+    expect(refusal.closest("tr")?.previousElementSibling).toBe(rowFor("app:cluster/origins"));
     expect(screen.getByText(/u-ada ranks 300/)).toBeTruthy();
   });
 
@@ -362,13 +362,13 @@ describe("by app: who holds it", () => {
   it("lists the roles that hold it and everyone granted it by name", async () => {
     const state = freshState({
       grantsByResource: {
-        "app:stores": [grantRow({ id: "grant-1", resource: "app:stores", verb: "read", effect: "allow" })],
+        "app:cluster/origins": [grantRow({ id: "grant-1", resource: "app:cluster/origins", verb: "read", effect: "allow" })],
       },
     });
     mount(state);
     fireEvent.click(screen.getByRole("radio", { name: "By app" }));
     const trigger = await screen.findByLabelText("App or part");
-    await waitFor(() => chooseOption(trigger, "Stores"));
+    await waitFor(() => chooseOption(trigger, "Cluster: Data origins"));
     await waitFor(() => expect(screen.getByText("By role: Owner.")).toBeTruthy());
     const list = screen.getByRole("list", { name: "Granted by name" });
     expect(within(list).getByText("Ada Lovelace")).toBeTruthy();
@@ -382,11 +382,11 @@ describe("by app: who holds it", () => {
     // can look up, and this list is the one place it could leak.
     const state = freshState({
       grantsByResource: {
-        "app:stores": [grantRow({ id: "grant-x", subjectId: "u-ghost", resource: "app:stores", verb: "read", effect: "allow" })],
+        "app:cluster/origins": [grantRow({ id: "grant-x", subjectId: "u-ghost", resource: "app:cluster/origins", verb: "read", effect: "allow" })],
       },
     });
     mount(state);
-    const list = await pickResource("Stores");
+    const list = await pickResource("Cluster: Data origins");
     expect(within(list).getByText("Not on this roster")).toBeTruthy();
     expect(list.textContent).not.toContain("u-ghost");
     // The act's label says the same thing, for the same reason.
@@ -398,11 +398,11 @@ describe("by app: who holds it", () => {
     // (`checkGrantAuthority`), so the act would only ever be refused.
     const state = freshState({
       grantsByResource: {
-        "app:stores": [grantRow({ id: "grant-me", subjectId: "u-me", resource: "app:stores", verb: "read", effect: "allow" })],
+        "app:cluster/origins": [grantRow({ id: "grant-me", subjectId: "u-me", resource: "app:cluster/origins", verb: "read", effect: "allow" })],
       },
     });
     mount(state);
-    const list = await pickResource("Stores");
+    const list = await pickResource("Cluster: Data origins");
     expect(within(list).getByText("you")).toBeTruthy();
     expect(within(list).queryByRole("button", { name: /^Revoke/ })).toBeNull();
     expect(screen.getByText(/Nobody revokes their own grant/)).toBeTruthy();
@@ -413,11 +413,11 @@ describe("by app: who holds it", () => {
     // even when the viewer is in it, so the act stays.
     const state = freshState({
       grantsByResource: {
-        "app:stores": [grantRow({ id: "grant-g", subjectKind: "group", subjectId: "g-acme", resource: "app:stores", verb: "read", effect: "allow" })],
+        "app:cluster/origins": [grantRow({ id: "grant-g", subjectKind: "group", subjectId: "g-acme", resource: "app:cluster/origins", verb: "read", effect: "allow" })],
       },
     });
     mount(state);
-    const list = await pickResource("Stores");
+    const list = await pickResource("Cluster: Data origins");
     expect(within(list).getByRole("button", { name: "Revoke allow for Acme" })).toBeTruthy();
     expect(screen.queryByText(/Nobody revokes their own grant/)).toBeNull();
   });
@@ -459,22 +459,22 @@ describe("a canonical viewer id against bare subjects", () => {
 
   it("names the group an answer came through, and the viewer who granted it", async () => {
     const state = freshState({
-      grantsBySubject: { "group:g-acme": [grantRow({ id: "grant-g", subjectKind: "group", subjectId: "g-acme", resource: "app:stores", verb: "read", effect: "allow" })] },
+      grantsBySubject: { "group:g-acme": [grantRow({ id: "grant-g", subjectKind: "group", subjectId: "g-acme", resource: "app:cluster/origins", verb: "read", effect: "allow" })] },
       memberships: { "u-ada": [{ id: "m-1", groupId: "g-acme", userId: "u-ada", status: "active", origin: "added", createdAt: "" } as Row] },
     });
     mount(state, "owner", CANONICAL_ME);
     await pickSubject("Ada Lovelace");
-    await waitFor(() => expect(rowFor("app:stores").textContent).toContain("allowed, through Acme by you"));
+    await waitFor(() => expect(rowFor("app:cluster/origins").textContent).toContain("allowed, through Acme by you"));
   });
 
   it("keeps the viewer's own grant out of the by-app view's acts", async () => {
     const state = freshState({
       grantsByResource: {
-        "app:stores": [grantRow({ id: "grant-me", subjectId: "u-me", resource: "app:stores", verb: "read", effect: "allow" })],
+        "app:cluster/origins": [grantRow({ id: "grant-me", subjectId: "u-me", resource: "app:cluster/origins", verb: "read", effect: "allow" })],
       },
     });
     mount(state, "owner", CANONICAL_ME);
-    const list = await pickResource("Stores");
+    const list = await pickResource("Cluster: Data origins");
     expect(within(list).getByText("you")).toBeTruthy();
     expect(within(list).queryByRole("button", { name: /^Revoke/ })).toBeNull();
   });

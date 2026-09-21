@@ -3,13 +3,16 @@ import { describe, expect, it } from "vitest";
 import { FIXTURE_TOKEN } from "./harness";
 import {
   DOMAIN_SETUP_STEPS,
-  domainSetupStep,
   domainFingerprint,
   domainFromRow,
+  domainSetupStep,
+  domainSteps,
   failureSentence,
   isApex,
   isKnownFailure,
+  isListedDomain,
   isRecordAtFault,
+  isWaitingReason,
   recordsFor,
   sortDomains,
   statusLabel,
@@ -259,5 +262,62 @@ describe("projection", () => {
     expect(d.hostname).toBe("www.acme.com");
     expect(d.token).toBe("tok");
     expect(d.failureDetail).toBe("resolves to 1.2.3.4");
+  });
+});
+
+// A DOMAIN SOMEBODY CANCELLED LEAVES THE LIST. The owner cancelled one and
+// watched it sit there as "removing": the list is the names a deployable
+// answers on, or is on its way to answering, and neither history nor the
+// cluster's tidying-up is that.
+describe("what belongs in a deployable's list of domains", () => {
+  it("lists every binding that answers or is on its way to", () => {
+    for (const status of ["pending_dns", "verifying", "issuing", "live"]) {
+      expect(isListedDomain(domain({ status }))).toBe(true);
+    }
+  });
+
+  it("drops a removed binding, and one the cluster is quietly taking down", () => {
+    expect(isListedDomain(domain({ status: "removed" }))).toBe(false);
+    expect(isListedDomain(domain({ status: "removing" }))).toBe(false);
+  });
+
+  // ONLY `removed` FREES A HOSTNAME. A removal stuck out of sight would refuse
+  // that name to whoever tried to add it again, with nothing on the page to
+  // say why -- so the one removal that stays listed is the one that failed.
+  it("keeps a removal the cluster could not finish, because its name is still held", () => {
+    expect(isListedDomain(domain({ status: "removing", failureReason: "removal_failed" }))).toBe(true);
+  });
+
+  it("says what a failed removal is, in a sentence of its own", () => {
+    expect(failureSentence("removal_failed")).toMatch(/could not take this domain down/);
+    expect(isKnownFailure("removal_failed")).toBe(true);
+    // It is a stop, not a wait: nothing a person publishes will unstick it.
+    expect(isWaitingReason("removal_failed")).toBe(false);
+  });
+});
+
+describe("the setup, as steps", () => {
+  it("waits on a record nobody has had the chance to create, rather than stopping on it", () => {
+    const steps = domainSteps(domain({ status: "verifying", failureReason: "dns_token_missing" }), true);
+    expect(steps.map((s) => s.state)).toEqual(["current", "waiting", "ahead", "ahead"]);
+    expect(steps[0]!.answer).toBe("Waiting for the TXT record");
+  });
+
+  // SAID ON THE LINE, because the owner asked the moment they saw it: both
+  // records are created in the same place and checked in the same pass.
+  it("says why the DNS records can be opened while ownership is still waiting", () => {
+    const steps = domainSteps(domain({ status: "pending_dns" }), true);
+    expect(steps[1]!.state).toBe("waiting");
+    expect(steps[1]!.answer).toMatch(/Can be created now/);
+  });
+
+  it("stops on a reason the sweep cannot outwait", () => {
+    const steps = domainSteps(domain({ status: "issuing", failureReason: "no_acme_issuer" }), true);
+    expect(steps.map((s) => s.state)).toEqual(["done", "done", "stopped", "ahead"]);
+  });
+
+  it("leaves the last step to the person when the domain is ready and the deployable is not live", () => {
+    expect(domainSteps(domain({ status: "live" }), false).map((s) => s.state)).toEqual(["done", "done", "done", "open"]);
+    expect(domainSteps(domain({ status: "live" }), true).map((s) => s.state)).toEqual(["done", "done", "done", "done"]);
   });
 });

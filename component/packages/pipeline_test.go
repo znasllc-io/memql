@@ -127,6 +127,10 @@ type fakePublisher struct {
 	created   []string
 	published []string
 	repointed []string
+	// bound records every BindSiteToStore as "<siteId> -> <storeId>", which is
+	// how the redeploy cases assert that an unchanged manifest writes nothing
+	// and a changed one writes exactly once.
+	bound     []string
 	snapshots int
 	// stored is what StoreSnapshot kept, keyed by the ref it minted, so a
 	// retry test can read back exactly the bytes the earlier run fetched.
@@ -155,6 +159,11 @@ func (p *fakePublisher) PublishBundle(_ context.Context, siteId string, bundle e
 	}
 	p.published = append(p.published, siteId)
 	return PublishResult{SiteId: siteId, BundleRef: "blob://sites/x/v1/", Version: "v1"}, nil
+}
+
+func (p *fakePublisher) BindSiteToStore(_ context.Context, siteId, storeId string) error {
+	p.bound = append(p.bound, siteId+" -> "+storeId)
+	return nil
 }
 
 func (p *fakePublisher) RepointSite(_ context.Context, siteId, bundleRef string) error {
@@ -226,7 +235,18 @@ func newHarness(t *testing.T, tree fs.FS, pkgRow map[string]any) *harness {
 		Roller:    h.roller,
 		Publisher: h.publisher,
 		Auditor:   h.auditor,
-		Now:       func() time.Time { return time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC) },
+		// THE CLUSTER HAS THE STORE THE FIXTURE NAMES. validPackage's
+		// storefront declares `store: acme.myshopify.com`, and a publish
+		// refuses a storefront whose store it cannot resolve -- so without
+		// this every end-to-end case in this file would be measuring the
+		// store refusal instead of what it is named for.
+		Stores: func(_ context.Context, domain string) (string, error) {
+			if domain == "acme.myshopify.com" {
+				return "v1:shopify:store:acme", nil
+			}
+			return "", nil
+		},
+		Now: func() time.Time { return time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC) },
 		NewId: func(concept string) string {
 			n++
 			return concept + ":fixed" + string(rune('0'+n))

@@ -463,23 +463,39 @@ func sitesAllIds(t *testing.T, ctx context.Context, eng *MemQLEngine) map[string
 // value is the one memql#4344 adds. And `binding` is an `object` arg: it is the
 // only structured argument createSite takes, so it is the one whose shape a
 // unit test cannot vouch for.
+//
+// THE BINDING NAMES A STORE ROW NOW (epic memql#5530). It used to carry a COPY
+// of the store's domain and its Storefront token reference, and this test used
+// to assert both round-tripped. Both are on v1:shopify:store, the edge resolves
+// them through it at serve time, and the guard beside the hostname policy
+// REFUSES the retired shape outright -- so the write below is made as a cluster
+// owner against a store row this test seeds, which is the only shape that is
+// legal at all.
 func TestSiteCreateAcceptsAShopifyStorefrontWithItsBinding(t *testing.T) {
 	eng, db, _ := sharedReadMergeEngine(t)
 	t.Setenv(memqlDomainEnv, siteTestDomain)
 
 	slug := "shop-" + uniqueSuffix("site")
 	id := "site-shop-" + uniqueSuffix("site")
-	ctx := userSiteCtx("user-site-shop-" + uniqueSuffix("site"))
+	storeId := "store-" + uniqueSuffix("site")
+	// A CLUSTER OWNER, because v1:shopify:store is @rowAuthz(clusterOwner) and
+	// the guard admits only a store the CALLER can read.
+	ctx := systemSiteCtx()
+
+	if _, err := runSiteMutation(t, ctx, eng, "createStore", map[string]any{
+		"storeId":            storeId,
+		"domain":             "example-store.myshopify.com",
+		"storefrontTokenRef": "SHOPIFY_STOREFRONT_TOKEN",
+	}); err != nil {
+		t.Fatalf("seeding the store this storefront fronts: %v", err)
+	}
 
 	storedId, err := createSiteRaw(t, ctx, eng, map[string]any{
 		"siteId":    id,
 		"hostname":  slug + "." + siteTestDomain,
 		"kind":      "shopify_storefront",
 		"bundleRef": "blob://sites/" + id + "/v1/",
-		"binding": map[string]any{
-			"storeDomain":        "example-store.myshopify.com",
-			"storefrontTokenRef": "SHOPIFY_STOREFRONT_TOKEN",
-		},
+		"binding":   map[string]any{"storeId": storeId},
 	})
 	if err != nil {
 		t.Fatalf("a shopify_storefront site was refused: %v", err)
@@ -493,12 +509,51 @@ func TestSiteCreateAcceptsAShopifyStorefrontWithItsBinding(t *testing.T) {
 	if !ok {
 		t.Fatalf("binding did not round-trip as an object: %#v", payload["binding"])
 	}
-	if got := stringFromAny(binding["storeDomain"]); got != "example-store.myshopify.com" {
-		t.Fatalf("binding.storeDomain = %q", got)
+	if got := stringFromAny(binding["storeId"]); got != storeId {
+		t.Fatalf("binding.storeId = %q, want %q -- the binding NAMES the store row; "+
+			"the domain and the Storefront token reference live on it", got, storeId)
 	}
-	if got := stringFromAny(binding["storefrontTokenRef"]); got != "SHOPIFY_STOREFRONT_TOKEN" {
-		t.Fatalf("binding.storefrontTokenRef = %q -- it NAMES a v1:platform:globalSecret; the "+
-			"Storefront token itself is never stored on the site row", got)
+	// AND NOTHING ELSE. A copy beside the reference would be the duplication
+	// this epic removed, re-created by the one mutation that writes a binding.
+	if len(binding) != 1 {
+		t.Fatalf("binding carries %d keys, want exactly storeId: %#v", len(binding), binding)
+	}
+
+	// THE RETIRED SHAPE IS REFUSED, and by the same caller that just
+	// succeeded -- so the refusal is about the SHAPE rather than about who
+	// asked. Pre-release means no shim: a write still carrying the copy is a
+	// caller nobody migrated.
+	if _, err := createSiteRaw(t, ctx, eng, map[string]any{
+		"siteId":    "site-legacy-" + uniqueSuffix("site"),
+		"hostname":  "legacy-" + uniqueSuffix("site") + "." + siteTestDomain,
+		"kind":      "shopify_storefront",
+		"bundleRef": "blob://sites/legacy/v1/",
+		"binding": map[string]any{
+			"storeDomain":        "example-store.myshopify.com",
+			"storefrontTokenRef": "SHOPIFY_STOREFRONT_TOKEN",
+		},
+	}); err == nil {
+		t.Fatal("the retired {storeDomain, storefrontTokenRef} binding was accepted")
+	} else if !strings.Contains(err.Error(), "storeId") {
+		t.Errorf("the refusal does not say what to write instead: %v", err)
+	}
+
+	// A STORE THE CALLER CANNOT READ IS REFUSED. This is the substantive half
+	// of the tier reconciliation (issue memql#5538): binding a storefront to a
+	// store you may not read would publish that store's Storefront token under
+	// your own hostname, because the edge resolves it into a document served
+	// unauthenticated to every visitor.
+	userCtx := userSiteCtx("user-site-shop-" + uniqueSuffix("site"))
+	if _, err := createSiteRaw(t, userCtx, eng, map[string]any{
+		"siteId":    "site-unreadable-" + uniqueSuffix("site"),
+		"hostname":  "unreadable-" + uniqueSuffix("site") + "." + siteTestDomain,
+		"kind":      "shopify_storefront",
+		"bundleRef": "blob://sites/unreadable/v1/",
+		"binding":   map[string]any{"storeId": storeId},
+	}); err == nil {
+		t.Fatal("a non-owner bound a storefront to a cluster-owner-tier store")
+	} else if !strings.Contains(err.Error(), storeId) {
+		t.Errorf("the refusal does not name the store it refused: %v", err)
 	}
 
 	// A kind the concept does not declare is refused, which is what makes the

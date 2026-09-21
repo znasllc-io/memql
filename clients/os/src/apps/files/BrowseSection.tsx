@@ -37,6 +37,7 @@ import {
   SortControl,
   type RefineChip,
 } from "../../kit";
+import type { Breadcrumb } from "../../kit/Breadcrumbs";
 import { useMachines } from "../../live/machines";
 import type { LiveView } from "../../live/liveView";
 import type { LiveCollectionHandle } from "../../live/useLiveCollection";
@@ -629,6 +630,31 @@ export function BrowseSection({
       ? folderNameOf(filter.folderId)
       : PLACE_TITLE[filter.place];
 
+  // WHERE THE FOLDER SITS, for the window's trail row. The Head named only the
+  // open folder, so three levels down the trail read "Invoices" -- the same
+  // word it would read for a root folder of that name -- and the way back up
+  // was the rail alone. Folders nest (`parentFolderId`), so the depth is real
+  // and the trail says it: the place, every ancestor, then this folder. Each
+  // ancestor opens itself; the place clears the folder.
+  //
+  // The walk is BOUNDED and remembers what it has seen. `parentFolderId` is
+  // data, and a cycle in it must cost a short trail rather than a hung page.
+  const headTrail = ((): Breadcrumb[] | undefined => {
+    if (searching || filter.folderId === "" || filter.folderId === null) return undefined;
+    const chain: string[] = [];
+    const seen = new Set<string>();
+    for (let id: string = filter.folderId; id !== "" && !seen.has(id) && chain.length < 32;) {
+      seen.add(id);
+      chain.unshift(id);
+      id = tree.byId.get(id)?.folder.parentFolderId ?? "";
+    }
+    return [
+      { label: PLACE_TITLE[filter.place], onSelect: () => patch({ folderId: "" }) },
+      ...chain.slice(0, -1).map((folderId) => ({ label: folderNameOf(folderId), onSelect: () => patch({ folderId }) })),
+      { label: folderNameOf(filter.folderId) },
+    ];
+  })();
+
   // The Refine chips: every active facet, removable in place (rule 2).
   const refineChips: RefineChip[] = [];
   if (filter.kind !== "all") {
@@ -705,7 +731,7 @@ export function BrowseSection({
           and count, the quiet sort, one Refine affordance, the Upload
           primary. The nine-control strip this replaces is the reason rule 2
           exists. */}
-      <Head title={headTitle} meta={listedCount}>
+      <Head title={headTitle} breadcrumbs={headTrail} meta={listedCount}>
         <SortControl
           ascending={filter.sortAscending}
           onToggle={() => patch({ sortAscending: !filter.sortAscending })}

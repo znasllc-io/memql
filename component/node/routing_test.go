@@ -392,3 +392,41 @@ func TestSourceCredentialRowsReachABrowserOnAnotherNode(t *testing.T) {
 		t.Error("control failed: an unlisted concept forwarded, so the checks above prove nothing")
 	}
 }
+
+// TestStoreWritesReachEveryEdgeReplica is the site-invalidation rule's
+// counterpart for the row a storefront is BOUND TO (epic memql#5530, issue
+// memql#5538).
+//
+// THE SITE RULE CANNOT COVER FOR THIS ONE, which is the whole reason it
+// exists. Since the binding NAMES a v1:shopify:store row rather than copying
+// its domain and Storefront token reference, re-pointing a store or rotating
+// its token reference writes the STORE row and nothing else -- no site write
+// accompanies it. Without this rule every edge replica keeps serving the old
+// origin in its Content-Security-Policy, and the old reference in its
+// runtime-config document, until its own TTL backstop expires independently.
+// component/edge's invalidation subscriber is the consumer.
+func TestStoreWritesReachEveryEdgeReplica(t *testing.T) {
+	rules := defaultRoutingRules()
+	for _, topic := range []string{
+		"graph.node.created.v1:shopify:store",
+		"graph.node.updated.v1:shopify:store",
+	} {
+		d := evaluateRouting(rules, topic)
+		// else-if, so a MISSING rule reports once: with no rule at all both
+		// fields are zero, and a second line blaming the target type would
+		// send a reader looking for a rule that is simply not there.
+		if !d.Forward {
+			t.Errorf("%s does not forward: every edge replica but the writer's would keep serving the old store", topic)
+		} else if !d.Broadcast {
+			t.Errorf("%s forwards to one node type (%q) rather than broadcasting -- every edge replica holds its own resolver cache", topic, d.TargetType)
+		}
+	}
+
+	// THE MIRRORED CATALOG MUST NOT RIDE THIS RULE. A connector sync writes
+	// product and order rows in bulk, and forwarding those would flush every
+	// edge replica's resolver cache once per row -- so the pattern names the
+	// store concept exactly, with no wildcard on the concept segment.
+	if d := evaluateRouting(rules, "graph.node.updated.v1:shopify:product"); d.Forward {
+		t.Error("graph.node.updated.v1:shopify:product forwards; a catalog sync would flush every edge cache row by row")
+	}
+}

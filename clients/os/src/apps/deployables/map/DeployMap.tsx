@@ -106,7 +106,7 @@ export function DeployMap({
             ? "Loading from the cluster"
             : behind
               ? "Not connected to the cluster, so there is nothing to draw."
-              : "No deployables to map yet. New deployable, on the Deployables section, is where one starts."}
+              : "No deployables to map yet. Add one from the Deployables section."}
         </Caption>
       </div>
     );

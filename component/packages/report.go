@@ -113,6 +113,10 @@ type DeployableReport struct {
 	// never carries one.
 	Binding *ManifestBinding `json:"binding,omitempty"`
 
+	// ResolutionTail is the manifest's choice of what a path matching no file
+	// answers, carried through to EnsureSite. Empty means the kind decides.
+	ResolutionTail string `json:"resolutionTail,omitempty"`
+
 	// Problem, when set, is this deployable's own refusal. The package as a
 	// whole is refused too -- a declared deployable that cannot deploy is not
 	// a partial success -- but the problem is recorded here as well so the OS

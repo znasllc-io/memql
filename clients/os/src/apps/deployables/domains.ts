@@ -138,6 +138,8 @@ const FAILURE_SENTENCES: Record<string, string> = {
     "This cluster is not set up to issue certificates, so the domain cannot be served over HTTPS. An operator sets an ACME issuer for the cluster; everything else about this binding is ready.",
   issuance_failed:
     "The certificate could not be issued. The detail below is what the cluster reported.",
+  removal_failed:
+    "The cluster could not take this domain down yet, so its name is still held. It tries again by itself; the detail below is what it reported.",
 };
 
 export function failureSentence(reason: string): string {
@@ -233,6 +235,29 @@ export function isRecordAtFault(record: DnsRecord, reason: string): boolean {
   return record.kind !== "TXT";
 }
 
+/**
+ * Whether a binding belongs in a deployable's list of domains.
+ *
+ * A DOMAIN SOMEBODY CANCELLED LEAVES THE LIST, at once. The list used to keep
+ * every row the concept keeps -- `removing` and `removed` included -- on the
+ * argument that what a cluster served, and when, is an audit worth showing. It
+ * is worth KEEPING, and the engine keeps it; but a list of the names a
+ * deployable answers on is not where it is read. The owner cancelled a domain
+ * and watched it sit there: "it should remove the item from the list."
+ *
+ * So the list is what answers, or is on its way to answering. `removed` is
+ * history. `removing` is the cluster tidying up, which is its business and not
+ * a row for a person to watch -- UNLESS the tidying has failed. That one stays,
+ * and says so, because only `removed` frees a hostname: a removal stuck out of
+ * sight would refuse that name to whoever tried to add it again, with nothing
+ * on the page to say why.
+ */
+export function isListedDomain(d: DomainRow): boolean {
+  if (d.status === "removed") return false;
+  if (d.status === "removing") return d.failureReason !== "";
+  return true;
+}
+
 /** Sorts a site's bindings: the ones needing attention first, removed last. */
 export function sortDomains(rows: DomainRow[]): DomainRow[] {
   const rank = (d: DomainRow): number => {
@@ -255,4 +280,125 @@ export function domainSetupStep(d: DomainRow): number {
   if (d.status === "issuing") return 2;
   if (d.failureReason === "dns_not_pointing") return 1;
   return 0;
+}
+
+// ---------------------------------------------------------------------------
+// The setup, as steps -- what the add wizard and a binding's own page both draw
+// ---------------------------------------------------------------------------
+
+export type DomainStepId = "ownership" | "dns" | "certificate" | "serving";
+
+/** A subset of the rail's closed state set; see kit/Rail. */
+export type DomainStepState = "done" | "current" | "open" | "waiting" | "stopped" | "ahead";
+
+export interface DomainSetupStepReading {
+  id: DomainStepId;
+  name: string;
+  state: DomainStepState;
+  /** The step's one line: what it settled as, or what it is waiting for. */
+  answer: string;
+}
+
+/**
+ * WAITING FOR A RECORD IS NOT A FAILURE, and the server's vocabulary makes it
+ * easy to draw as one. `dns_token_missing` and `dns_not_pointing` arrive in
+ * `failureReason`, so the first thing a person saw after binding a domain was
+ * a stopped step and a problem sentence -- for the ordinary state of a record
+ * they had not had the chance to create yet. Those two mean "not there yet",
+ * and the sweep will look again; only a reason the sweep cannot outwait is a
+ * stop.
+ */
+export function isWaitingReason(reason: string): boolean {
+  return reason === "" || reason === "dns_token_missing" || reason === "dns_not_pointing";
+}
+
+/**
+ * The four stages of a binding, read off its row.
+ *
+ * `siteLive` is the deployable's own status, which is a different fact from
+ * the domain's: a binding finishes ITS setup when the certificate is ready,
+ * and whether a visitor gets anything is decided by the deployable. A finished
+ * binding on a deployable that is not live is `open` -- the next thing that
+ * happens is the person's, and it is not on this page.
+ */
+export function domainSteps(d: DomainRow, siteLive: boolean): DomainSetupStepReading[] {
+  const at = domainSetupStep(d);
+  const blocked = !isWaitingReason(d.failureReason);
+  const stateAt = (index: number): DomainStepState => {
+    if (index < at) return "done";
+    if (index > at) {
+      // THE DNS RECORDS CAN BE READ BEFORE OWNERSHIP PASSES. They are created
+      // in the same place as the ownership record, and making somebody wait
+      // for one check before showing them the next record costs a second trip
+      // to their DNS provider.
+      return index === 1 ? "waiting" : "ahead";
+    }
+    return blocked ? "stopped" : "current";
+  };
+  const live = d.status === "live";
+  return [
+    {
+      id: "ownership",
+      name: "Ownership",
+      state: live ? "done" : stateAt(0),
+      answer: at > 0 ? "Verified" : blocked ? "Needs attention" : "Waiting for the TXT record",
+    },
+    {
+      id: "dns",
+      name: "DNS",
+      state: live ? "done" : stateAt(1),
+      // SAID ON THE LINE, because the owner asked the moment they saw it: "we
+      // are on Ownership, yet I can click DNS -- is that on purpose?" It is.
+      // One sweep runs the ownership lookup and then the pointing lookup
+      // (integrations/customdomain/reconcile.go `verify`), and reports the
+      // first record it cannot find. Neither record depends on the other
+      // EXISTING, so creating both in one visit is the fast path: the next
+      // pass finds both and walks straight to the certificate.
+      answer: at > 1 ? "Points at this cluster" : at === 1 ? (blocked ? "Needs attention" : "Waiting for the records to point here") : blocked ? "" : "Can be created now; checked together with ownership",
+    },
+    {
+      id: "certificate",
+      name: "Certificate",
+      state: live ? "done" : stateAt(2),
+      answer: at > 2 ? "Issued" : at === 2 ? (blocked ? "Needs attention" : "Being issued") : "",
+    },
+    {
+      id: "serving",
+      name: "Serving",
+      state: live ? (siteLive ? "done" : "open") : "ahead",
+      answer: live ? (siteLive ? `https://${d.hostname}` : "Ready. The deployable is not live yet") : "",
+    },
+  ];
+}
+
+export interface DomainSetupReading {
+  word: string;
+  detail: string;
+  tone: "busy" | "live" | "paused" | "none";
+}
+
+/**
+ * The setup in one line, for the bar on the window's bottom edge.
+ *
+ * It says WHOSE TURN IT IS. While a record is outstanding the turn is shared --
+ * the person creates it, the cluster looks for it -- and the sentence names
+ * both halves so that neither is mistaken for the whole.
+ */
+export function domainSetupReading(d: DomainRow, siteLive: boolean): DomainSetupReading {
+  if (d.status === "live") {
+    return siteLive
+      ? { word: "Serving", detail: `${d.hostname} is verified and has its certificate`, tone: "live" }
+      : { word: "Ready", detail: "make the deployable live to serve it at this domain", tone: "none" };
+  }
+  if (!isWaitingReason(d.failureReason)) {
+    return { word: "Needs attention", detail: "the open step says what the cluster reported", tone: "paused" };
+  }
+  const at = domainSetupStep(d);
+  if (at === 0) {
+    return { word: "Waiting for the ownership record", detail: "create it at your DNS provider; this keeps checking if you leave", tone: "busy" };
+  }
+  if (at === 1) {
+    return { word: "Waiting for DNS to point here", detail: "a change can take a while to spread; this keeps checking if you leave", tone: "busy" };
+  }
+  return { word: "Getting a certificate", detail: "nothing for you to do; this moves on by itself", tone: "busy" };
 }
