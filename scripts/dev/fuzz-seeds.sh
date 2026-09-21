@@ -109,6 +109,10 @@ function seed_lexer() {
 	# A bidi override inside an identifier.
 	write_seed "$d" rtl '"row.‮abc"'
 	write_seed "$d" tab-indent '"query\tq\t{\t}"'
+	# A dotted path the lexer FUSES into ONE identifier token: 4096 segments
+	# in a single token, which is the shape the chain bound counts
+	# (component/language/parser/chain_bound.go).
+	write_seed "$d" long-dotted-path "\"args$(repeat '.a' 4096)\""
 	# Operators with no operands, including the maximal-munch traps.
 	write_seed "$d" only-operators '"&&||!==>=<=??"'
 	# The `=>` glyph's tokenisation, three ways.
@@ -177,6 +181,22 @@ function seed_parser_expressions() {
 	# meets first, because it is what every pre-edition query looked like.
 	write_seed "$d" retired-headerless-filter '"row.status == args.status"'
 	write_seed "$d" replacement-lambda-filter '"row => row.status == args.status"'
+
+	# Both sides of the chain bound (MaxExpressionChain, 4096, in
+	# component/language/parser/chain_bound.go). A chain is built in a LOOP,
+	# so the parser never recurses while reading one and the nesting bound
+	# does not see it -- but the tree is as tall as the chain and every walk
+	# over it recurses. The seed AT the bound is the one that matters most:
+	# this target parses, prints and re-parses, so it exercises the recursive
+	# printer and the recursive dump over a tree 4096 nodes tall. The seed one
+	# link PAST it must be refused, which is the fuzzer starting beside the
+	# refusal path. The numbers are the bound; if the constant moves, move
+	# them with it.
+	local chain_at chain_past
+	chain_at="$(repeat '.a' 4096)"
+	chain_past="$(repeat '.a' 4097)"
+	write_seed "$d" chain-at-the-bound "\"args${chain_at}\""
+	write_seed "$d" chain-past-the-bound "\"args${chain_past}\""
 }
 
 # -----------------------------------------------------------------

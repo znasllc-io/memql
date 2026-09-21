@@ -1,0 +1,523 @@
+// The nesting bound, in a statement body: each block is a level, and a
+// logic's own body is not one, so this nests 257 -- one past the bound.
+logic nestingPastTheBoundInABody {
+  args {
+    a any
+  }
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  if args.a {
+  x := 1
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  return 1
+}
