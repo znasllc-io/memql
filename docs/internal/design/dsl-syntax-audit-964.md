@@ -413,8 +413,8 @@ event: event } } }`. Annotations: `@enabled`, `@trigger(event="...",
 concept="v1:ns:name", partition="*")` OR `@trigger(schedule="0 30 2 * * *")`,
 `@description`, `@filter`. Real automations are uniformly thin delegators — every
 body is `step run { logic X { event: event } }`; the work lives in the logic.
-The `if`/`parallel`/`foreach`/`switch`/`publishEvent`/`webhook`/sub-automation/
-`si()` step types appear ONLY in the stale/"Proposed" `docs/public/language/functions.md`
+The `if`/`parallel`/`foreach`/`switch`/`publishEvent`/`webhook`/sub-automation
+step types appear ONLY in the stale/"Proposed" `docs/public/language/functions.md`
 — no real automation uses them.
 
 Canonical real shape (`dsl/identity/automations.memql:236`):

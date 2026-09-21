@@ -1,0 +1,15 @@
+use cluster.concepts.{ deploymentNodeSpec }
+
+/// The same spec, with the allowlist that closes the fork on the LEADING part.
+@serverOnly
+mutation deploymentNodeSpec pinNodeSpecStrictly {
+  args {
+    deploymentId  string! @pattern("^(?:v[0-9]+:cluster:deployment:)?[A-Za-z0-9_.-]+$")
+    nodeType      string! @pattern("^[^:]+$")
+  }
+  insert {
+    id: hash(shortId(args.deploymentId) + ":" + args.nodeType)
+    deploymentId: shortId(args.deploymentId)
+    args.nodeType
+  }
+}

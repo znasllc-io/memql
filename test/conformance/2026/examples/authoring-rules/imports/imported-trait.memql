@@ -1,0 +1,7 @@
+use common.traits.{ isNotDeleted }
+
+@actor
+query invocation liveInvocationsForCaller {
+  filter   row => row.ownerUserId == actor.userId && isNotDeleted(row)  // a sibling keeps the import "used"
+  paginate 50
+}

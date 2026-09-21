@@ -73,6 +73,7 @@ The dotted path maps to a file on disk (`library.concepts` →
 `dsl/library/concepts.memql`); the brace list names the constructs
 pulled into local scope:
 
+<!-- corpus: 2026/examples/functions/basics/imports.memql -->
 ```memql fragment
 use library.concepts.{ artifact, folder }
 use library.shapes.{ artifactFull }
@@ -98,6 +99,7 @@ Builtins are declared in the DSL like every other construct -- in
 is the input schema; the implementation is the Go integration named
 by `@executor`:
 
+<!-- corpus: 2026/examples/functions/basics/builtin-check-permission.memql -->
 ```memql
 @executor("integration.auth.checkPermission")
 @args(profile="object")
@@ -178,8 +180,11 @@ directives, and a `shape` projection.
 
 ### Syntax
 
+<!-- corpus: 2026/examples/functions/queries/query-syntax.memql -->
 ```memql
 use library.concepts.{ artifact }
+use library.shapes.{ artifactFull }
+use common.traits.{ isActiveRecord, statusIsActive }
 
 @description("Get live document artifacts filed under a folder")
 query artifact activeDocumentArtifacts {
@@ -218,16 +223,21 @@ argument is unset (left out, null or `""`) and the predicate alone when it is
 set. It replaces the retired `when(args.x) { ... }` guard, and under `||` the
 form is `args.x != nil && <predicate>`:
 
+<!-- corpus: 2026/examples/functions/queries/query-optional-filter.memql -->
 ```memql
-@description("Active folders, optionally narrowed to a creator")
+use library.concepts.{ folder }
+use library.shapes.{ libraryFolderFull }
+use common.traits.{ isNotDeleted }
+
+@description("Live folders, optionally narrowed to a creator")
 query folder activeFolders {
   args {
     userId  string
   }
-  filter  row => isActiveRecord(row)
-              && statusIsActive(row)
+  filter  row => isNotDeleted(row)
+              && row.archived != true
               && (args.userId == nil || row.createdBy == args.userId)
-  shape   folderFull
+  shape   libraryFolderFull
 }
 ```
 
@@ -239,7 +249,11 @@ activeFolders(userId: "u-1")        -- Creator filter applied
 
 ### Sorting and Pagination
 
+<!-- corpus: 2026/examples/functions/queries/query-sort-paginate.memql -->
 ```memql
+use work.concepts.{ run }
+use work.shapes.{ workRunFull }
+
 query run latestRunForGoal {
   args {
     goalId  string  @required
@@ -264,8 +278,12 @@ A `count` clause makes the query return the cardinality of the
 matching set as a self-describing `{count: N}` aggregate computed
 server-side, instead of the rows themselves:
 
+<!-- corpus: 2026/examples/functions/queries/query-count.memql -->
 ```memql
-query user userCount {
+use identity.concepts.{ user }
+use common.traits.{ isActiveRecord }
+
+query user activeUserCount {
   filter  row => isActiveRecord(row)
   count
 }
@@ -299,10 +317,12 @@ Mutations write exactly one row of their signature-bound concept.
 
 ### Syntax
 
+<!-- corpus: 2026/examples/functions/mutations/mutation-syntax.memql -->
 ```memql
 use library.concepts.{ folder }
 
 @description("Create a Library folder")
+@actor
 mutation folder createFolder {
   args {
     folderId  string  @required
@@ -311,7 +331,6 @@ mutation folder createFolder {
   insert {
     id:          args.folderId
     name:        args.name
-    status:      "active"
     ownerUserId: actor.userId
     createdAt:   now
   }
@@ -320,7 +339,9 @@ mutation folder createFolder {
 
 The write target comes from the signature -- the body never restates
 the concept id, and the named-write form (`insert <concept> { ... }`)
-is rejected (`TestNoRetiredBindingForms`).
+is rejected (`TestNoRetiredBindingForms`). Reading the authenticated caller
+is a declared capability: a body that names `actor.*` carries a bare `@actor`
+annotation or the load fails ([reserved identifiers](reserved.md#3-actor-envelope-fields)).
 
 ### Args Annotations and Defaults
 
@@ -337,13 +358,14 @@ it; `@description` on an args field is refused at load.
 > `@default` is NOT a substitute -- it is never applied on insert
 > either (memql#2960):
 
+<!-- corpus: 2026/examples/functions/mutations/mutation-defaults.memql -->
 ```memql fragment
-insert {
-  id:      args.guideId
-  kind:    args.kind ?? "walkthrough"
-  version: args.version ?? 1
-  active:  args.active ?? true
-}
+  insert {
+    id:      args.guideId
+    kind:    args.kind ?? "walkthrough"
+    version: args.version ?? 1
+    active:  args.active ?? true
+  }
 ```
 
 `a ?? b ?? c` takes the first operand that is set, and the last one
@@ -367,10 +389,13 @@ language -- statements, names and scope, trailing clauses -- is specified in
 
 ### One statement (the common case)
 
+<!-- corpus: 2026/examples/functions/logic/logic-one-statement.memql -->
 ```memql
+use workbench.queries.{ workspaceForRun }
+
 /// Pure decide for the workspace-release sweep: every v1:workbench:workspace
 /// of the updated run.
-logic releaseWorkspaceOnRunTerminal {
+logic workspacesForTerminalRun {
   args {
     event object!
   }
@@ -389,7 +414,11 @@ and the `return` is the logic's value. A branch of an `if` runs at most once and
 shares the scope around it, so each branch may bind the same name and the
 statement after the `if` reads whichever one ran:
 
+<!-- corpus: 2026/examples/functions/logic/logic-several-statements.memql -->
 ```memql
+use identity.queries.{ userById }
+use agents.queries.{ agentById, assistantAgentForUser }
+
 /// Resolve the agent to act as: the owner's preferred assistant, or their default one.
 logic resolveActingAgent {
   args {
@@ -428,12 +457,17 @@ call of an `automation` or an `action`.
 
 ### Event-Triggered
 
+<!-- corpus: 2026/examples/functions/automations/automation-event.memql -->
 ```memql
+use workbench.logic.{ runIsTerminal, releaseWorkspaceOnRunTerminal }
+use workbench.mutations.{ releaseWorkspace }
+use workbench.builtins.{ workbenchTeardownDirectory }
+
 /// When a run reaches a terminal status, release its workbench workspace and
 /// tear down its on-disk directory.
 @trigger(event="graph.node.updated.v1:work:run")
 @filter(row => row.status != "running" && row.status != "compiling" && row.status != "waiting")
-automation releaseWorkspaceOnRunTerminal {
+automation releaseWorkspaceOnTerminalRun {
   args {
     id any
     status any
@@ -471,10 +505,14 @@ event, the live `run_automation` path, and the `run_automation` dry-run preview
 `@trigger(schedule="...")` takes a six-field cron expression
 (sec min hour dom mon dow):
 
+<!-- corpus: 2026/examples/functions/automations/automation-schedule.memql -->
 ```memql
+use cluster.logic.{ pruneStaleClusterNodes }
+use cluster.mutations.{ updateNodeHealth }
+
 /// Every 10 min: mark departed cluster nodes as health='stopped'.
 @trigger(schedule="0 */10 * * * *")
-automation pruneStaleClusterNodes {
+automation pruneStaleClusterNodesOnSchedule {
   decide := logic pruneStaleClusterNodes(event: event)
   for node in decide {
     mutation updateNodeHealth(
@@ -493,11 +531,25 @@ its `args` block and before its first statement. A precondition is a
 **deterministic boolean check** (no LLM) evaluated at the start of the run --
 after the trigger fires, but **before any statement runs**.
 
+<!-- corpus: 2026/examples/functions/automations/automation-precondition.memql -->
 ```memql
+use forge.mutations.{ advanceRequest }
+
+/// Decide the status a submitted request moves to, from the submitter's role.
+logic routeStatus {
+  args {
+    submitterRole any
+  }
+  role := args.submitterRole ?? ""
+  return role == "owner" ? "queued" : "needs_validation"
+}
+
 @trigger(event="node.created", concept="v1:forge:request")
-automation routeRequest {
+@filter(row => args.firstVersion == true)
+automation routeRequestWithPrecondition {
   args {
     id            any
+    firstVersion  bool
     submitterRole any
   }
   precondition hasId {
@@ -509,6 +561,14 @@ automation routeRequest {
   mutation advanceRequest(requestId: args.id, status: decide)
 }
 ```
+
+The `@filter` there is not part of the precondition mechanism -- it is loop
+protection, and it is here because the example needs it to load.
+`advanceRequest` writes the same concept the trigger fires on, so without a
+filter the write re-triggers the automation and the load is refused naming the
+cycle (`loop_cycle`). Narrowing the trigger to a request's first version is the
+filter the refusal itself suggests, and it is what the shipped `recordRouted`
+automation does. Do not copy it as precondition ceremony.
 
 The `check` expression is an automation condition, written in the same
 expression language as every other. It reads only the roots -- `args.<field>`
@@ -648,10 +708,29 @@ These are names, not calls:
 
 ### AI
 
-| Function | Description | Example |
-|----------|-------------|---------|
-| `si(promptName, data)` | Blocking LLM call through a named prompt | `si("consolidateMemory", {episodes: cluster})` |
-| `agent("name", "prompt", partitionId)` | Async agent invocation through the planner | see `dsl/agents/builtins.memql` |
+**There is no AI function in the catalog above, and there is no bare AI call.**
+A bare `ai(promptName, data)` is refused at load with `body_call_unknown`,
+because the only bare calls a body admits are catalog functions and the specs
+and traits it can see — and `ai` is deliberately not one of them. A catalog
+function is admitted at every in-process position, a trigger filter included,
+which for a model call would be one call per matching event with nothing
+journalling it.
+
+AI work is reached from a body the way every other Go-backed capability is:
+through a `builtin` call, with named arguments and a file-top import of the
+domain that declares it (`use agents.builtins.{ ai }`). See
+[Calling a prompt](memql.md#calling-a-prompt).
+
+| Builtin | Description | Called as |
+|---------|-------------|-----------|
+| `ai` | Calls one named prompt with a data object and returns `{prompt, reply}`. Synchronous; the prompt's `@level` and the routing rules choose the model, so the call never names one | `builtin ai(templateId: "docSummary", data: { content: args.content })` |
+| `agent` | Opens a `v1:work:goal` naming the `invokeAgent` template and returns `{goalId, runId}`; a run dispatcher claims it on an agent node | `builtin agent(name: "assistant", prompt: args.question, partitionId: "system")` |
+| `runAgentTurn` | Runs one agent turn in line and returns its reply. Answers only on an agent node | `builtin runAgentTurn(agentId: args.agentId, prompt: args.question)` |
+
+All three are declared in `dsl/agents/builtins.memql`, which is where their
+full field lists live. All three are construct calls, so they belong in a
+statement: a query filter, a `refine`, a sort and a spec or trait body all
+refuse them, which is what keeps a model call out of a per-row position.
 
 ---
 
@@ -664,15 +743,23 @@ rendered template is a Go text/template file named by `@templateFile`.
 
 ### Syntax
 
+<!-- corpus: 2026/examples/functions/prompts/prompt-syntax.memql -->
 ```memql
-@defaultProvider("chat54Mini")
-@templateFile("prompts/consolidateMemory.tmpl")
+@level("fast")
+@templateFile("prompts/condenseConversation.tmpl")
 @description("Summarize older conversation messages into a rolling summary.")
-prompt consolidateMemory {
+prompt condenseConversation {
   entries          []object  @required @description("Conversation messages, oldest first.")
   previousSummary  string              @description("Prior rolling summary; empty on first compaction.")
 }
 ```
+
+> **`@defaultProvider` is an explicit pin, and this example does not use one.**
+> `@level` is how a prompt says how much intelligence it needs; the rules and
+> policies then decide which provider answers. A pin overrides all of that, and
+> pinning one to a paid provider is refused in this repository by
+> `TestNoPaidDefault` -- every concrete provider record here is federated, so a
+> pin naming one routes around the local-first rule the platform ships.
 
 > **Retired prompt forms** (both rejected at parse time):
 > - `func (Prompt) name(args any) { ... }` -- receiver-function wrapping.
@@ -707,6 +794,7 @@ Anthropic are the supported vendors). Struct form, consolidated in
 
 ### Syntax
 
+<!-- corpus: 2026/examples/functions/providers/provider-model.memql -->
 ```memql
 @extends("openai")
 @model("gpt-5.4-mini")
@@ -722,6 +810,7 @@ provider chat54Mini {
 Base providers carry vendor-level auth and type; children inherit via
 `@extends`:
 
+<!-- corpus: 2026/examples/functions/providers/provider-base.memql -->
 ```memql
 @base
 @vendor("Anthropic")
@@ -761,11 +850,14 @@ Tools are the AI-callable surface over queries, mutations, and
 builtins, declared in `dsl/<namespace>/tools.memql`. The body is the
 tool's input schema; `@handler` binds it to the operation it runs:
 
+<!-- corpus: 2026/examples/functions/tools/tool-syntax.memql -->
 ```memql
+use calendar.queries.{ findEvents }
+
 @handler(type="query", query="query findEvents(title: args.title)")
 @executionTime("fast")
 @description("Find the caller's calendar events by exact title.")
-tool calendarFind {
+tool calendarFindByTitle {
   title  string  @required @description("Exact event title to look up.")
 }
 ```
@@ -794,6 +886,7 @@ path's terminal segment.
 The bound concept is named by the signature `shape <Concept> <name>`
 (resolved through the file-top concept import):
 
+<!-- corpus: 2026/examples/functions/shapes/shape-row.memql -->
 ```memql
 use library.concepts.{ folder }
 
@@ -802,7 +895,7 @@ use library.concepts.{ folder }
 shape folder folderCard {
   row.id
   name
-  description
+  parentFolderId
   row.createdAt
 }
 ```
@@ -816,6 +909,7 @@ Project the engine envelope; no signature concept. Closed field set:
 `actor.config.<key>` is retired -- read config through the bare
 reserved `config.<key>`, #2623):
 
+<!-- corpus: 2026/examples/functions/shapes/shape-actor.memql -->
 ```memql
 @description("Actor identity envelope")
 @actor
@@ -857,7 +951,12 @@ Every shape is validated against the concept it binds (memql#3621):
 
 Struct queries reference a shape by name in their `shape` clause:
 
+<!-- corpus: 2026/examples/functions/queries/query-shape-usage.memql -->
 ```memql
+use library.concepts.{ artifact }
+use library.shapes.{ artifactFull }
+use common.traits.{ isActiveRecord }
+
 query artifact folderArtifacts {
   args {
     folderId  string  @required

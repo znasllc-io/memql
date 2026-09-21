@@ -1,0 +1,12 @@
+use work.concepts.{ run }
+use work.shapes.{ workRunFull }
+
+query run latestRunForGoal {
+  args {
+    goalId  string  @required
+  }
+  filter  row => row.goalId == args.goalId
+  sort    "row.createdAt", "desc"
+  paginate 1
+  shape   workRunFull
+}

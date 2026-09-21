@@ -1,0 +1,6 @@
+@level("reasoning")
+@templateFile("prompts/emitConstruct.tmpl")
+/// Emit a construct from an approved design
+prompt emitConstruct {
+  design  object  @required  @description("The approved design to emit a construct from.")
+}

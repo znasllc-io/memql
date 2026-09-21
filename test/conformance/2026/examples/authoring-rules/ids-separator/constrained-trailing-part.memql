@@ -1,0 +1,15 @@
+use cluster.concepts.{ deploymentNodeSpec }
+
+/// One node type's spec inside a deployment, at a hashed composite id.
+@serverOnly
+mutation deploymentNodeSpec pinNodeSpec {
+  args {
+    deploymentId  string!                        // canonical or bare, normalised below
+    nodeType      string! @pattern("^[^:]+$")    // trailing part: no separator
+  }
+  insert {
+    id: hash(shortId(args.deploymentId) + ":" + args.nodeType)
+    deploymentId: shortId(args.deploymentId)
+    args.nodeType
+  }
+}

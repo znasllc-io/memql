@@ -1,0 +1,12 @@
+use cluster.concepts.{ deployment }
+use cluster.shapes.{ deploymentFull }
+
+query deployment deploymentsInCluster {
+  args {
+    clusterId  string!
+    asOf       datetime
+  }
+  filter  row => row.clusterId == args.clusterId
+  shape   deploymentFull
+  asOf    args.asOf ?? latest
+}

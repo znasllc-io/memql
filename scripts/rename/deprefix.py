@@ -8,7 +8,7 @@ slot-kind + enclosing concept). This codemod removes the now-redundant
 kind prefix from every declared construct NAME and migrates the mutation
 header keyword from the noun `mutation` to the verb `mutate`.
 
-Unlike scripts/rename/si_to_ai.py (a fixed curated token map), the
+Unlike a fixed curated token map, the
 de-prefix is a TRANSFORM: strip the kind prefix from the declared name
 and lower-case the first remaining letter. The script:
 

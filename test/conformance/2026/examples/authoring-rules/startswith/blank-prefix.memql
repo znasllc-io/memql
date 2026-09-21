@@ -1,0 +1,11 @@
+use observability.concepts.{ codeMetric }
+
+/// One prefix, not a list -- and a blank one selects nothing.
+@serverOnly
+query codeMetric metricsUnderOnePrefix {
+  args {
+    prefix  string!
+  }
+  filter  row => row.codeReference startsWith args.prefix   // args.prefix == "" returns no rows, not every row
+  paginate 200
+}

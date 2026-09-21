@@ -1,0 +1,15 @@
+use observability.concepts.{ codeMetric }
+
+/// A prefix-scoped read that cannot widen: neither an empty list nor a list of
+/// blanks turns it into a cluster-wide scan.
+@serverOnly
+query codeMetric metricsUnderPrefixes {
+  args {
+    bucket         string!
+    codeReference  string
+    prefixes       []string
+  }
+  filter  row => row.bucket == args.bucket
+              && ((args.codeReference != nil && row.codeReference == args.codeReference) || row.codeReference startsWith args.prefixes)
+  paginate 200
+}

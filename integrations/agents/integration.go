@@ -28,9 +28,10 @@
 //     id==<runId> for lifecycle progression.
 //   - Direct query via workRunsForGoal to read current state + outcome.
 //
-// For blocking AI work from DSL, use `ai("promptName", args)` -- the
-// synchronous structured-output path. `agent()` is for agent-
-// orchestrated, planner-tracked work; `ai()` is for one-shot LLM calls.
+// For blocking AI work from DSL, use `builtin ai(templateId:, data:)` -- the
+// synchronous named-prompt path, whose executor is ai.go in this package.
+// `agent()` is for agent-orchestrated work that runs in the background;
+// `ai()` is for one-shot prompt calls with no tools and no run behind them.
 package agents
 
 import (
@@ -84,12 +85,16 @@ func New(agents *memql.AgentRegistry, engine memql.IntegrationEngineAccess) *Int
 // IntegrationName implements memql.IntegrationProvider.
 func (i *Integration) IntegrationName() string { return "agents" }
 
-// Capabilities implements memql.IntegrationProvider. Exposes two
-// capabilities:
+// Capabilities implements memql.IntegrationProvider. The two a reader
+// usually arrives looking for:
 //
 //   - `invoke`        -- the agent() builtin's async dispatch path.
-//   - `ensureForGoal` -- the Assistant's agent-factory tool
-//     backing builtin (see factory.go).
+//   - `invokePrompt`  -- the ai() builtin: one named prompt, called and
+//     answered in line (see ai.go).
+//
+// The rest back the Assistant's own tools: `ensureForGoal` (factory.go),
+// `askSpecialist`, `requestUserFeedback`, `produceArtifact`, plus
+// `runAgentTurn`, which the work spine's templates call.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
 		{
@@ -100,6 +105,18 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"name":        "string",
 				"prompt":      "string",
 				"partitionId": "string",
+			},
+		},
+		{
+			// The `ai` builtin: call a NAMED prompt from a body. See ai.go for
+			// the name, the dropped provider argument, the executor's home and
+			// why it carries no capability gate.
+			Name:        invokePromptCapName,
+			Description: "Call a named prompt with a data object and return {prompt, reply}. Wraps MemQLEngine.InvokeAI, which resolves the prompt, validates the data against the prompt's own body, renders it, routes by its @level through core/airoute, caches and journals the call. SYNCHRONOUS. Refuses by name -- unreachable runtime, unknown prompt, data that does not fit the schema -- and never answers with an empty reply.",
+			Handler:     i.handleInvokePrompt,
+			ArgsSchema: map[string]string{
+				"templateId": "string (required) -- the prompt to call, by name",
+				"data":       "object (required) -- the fields the prompt's body declares; `{}` when it declares none",
 			},
 		},
 		{

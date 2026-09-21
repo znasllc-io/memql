@@ -1,0 +1,8 @@
+@description("Actor identity envelope")
+@actor
+shape actorEnvelope {
+  actor.userId
+  actor.role
+  actor.identityId
+  actor.isClusterOwner
+}

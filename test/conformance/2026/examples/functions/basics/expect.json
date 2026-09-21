@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "file": "builtin-check-permission.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "imports.memql",
+      "verdict": "load_ok"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "cases": [
+    { "file": "reading-list.memql", "verdict": "load_ok", "note": "The whole tutorial file shown on docs/public/language/first-program.md, held byte-identical to examples/reading-list/reading.memql by TestPublishedExamplesMatchTheirCorpusCases." }
+  ]
+}

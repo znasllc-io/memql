@@ -1,0 +1,5 @@
+{
+  "cases": [
+    { "file": "derived-ids.memql", "verdict": "load_ok" }
+  ]
+}

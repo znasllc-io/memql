@@ -1,0 +1,6 @@
+concept user {
+  preferences {
+    theme               enum("light", "dark", "system")
+    computerUseEnabled  bool
+  }
+}

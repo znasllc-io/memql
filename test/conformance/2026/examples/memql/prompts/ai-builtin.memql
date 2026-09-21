@@ -1,0 +1,11 @@
+use agents.builtins.{ ai }
+
+/// Summarise one document by calling the `docSummary` prompt and returning what it said.
+logic summariseDocument {
+  args {
+    title    string
+    content  string!
+  }
+  said := builtin ai(templateId: "docSummary", data: { title: args.title ?? "Untitled", content: args.content })
+  return said
+}

@@ -1,0 +1,22 @@
+/// A walkthrough guide, used here to show a body-applied default.
+concept guide {
+  kind     string
+  version  int
+  active   bool
+}
+
+@description("Create a guide, defaulting every optional field in the body")
+mutation guide createGuide {
+  args {
+    guideId  string  @required
+    kind     string
+    version  int
+    active   bool
+  }
+  insert {
+    id:      args.guideId
+    kind:    args.kind ?? "walkthrough"
+    version: args.version ?? 1
+    active:  args.active ?? true
+  }
+}

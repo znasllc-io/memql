@@ -1,0 +1,6 @@
+{
+  "cases": [
+    { "file": "event-trigger.memql", "verdict": "load_ok" },
+    { "file": "filter-annotation.memql", "verdict": "load_ok" }
+  ]
+}

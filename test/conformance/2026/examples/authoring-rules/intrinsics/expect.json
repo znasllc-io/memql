@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "file": "intrinsic-and-payload.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "sort-keys.memql",
+      "verdict": "load_ok"
+    }
+  ]
+}

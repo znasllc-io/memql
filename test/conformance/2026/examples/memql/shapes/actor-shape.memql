@@ -1,0 +1,9 @@
+@actor
+/// Caller envelope projection: authenticated actor, role, and now.
+shape callerEnvelope {
+  actor.userId
+  actor.role
+  actor.identityId
+  actor.isClusterOwner
+  actor.now
+}

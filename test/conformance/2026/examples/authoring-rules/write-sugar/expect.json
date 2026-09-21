@@ -1,0 +1,12 @@
+{
+  "cases": [
+    { "file": "accept-stamp.memql", "verdict": "load_ok" },
+    { "file": "bare-mirrors.memql", "verdict": "load_ok" },
+    { "file": "unquoted-keys.memql", "verdict": "load_ok" },
+    {
+      "file": "quoted-keys.memql",
+      "verdict": "refuse_parse",
+      "message": "map keys are unquoted names (authoring rule 18)"
+    }
+  ]
+}

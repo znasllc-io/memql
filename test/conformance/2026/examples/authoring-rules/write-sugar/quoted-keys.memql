@@ -1,0 +1,11 @@
+/// Refused -- unnecessary quotes on simple-identifier keys.
+@serverOnly
+mutation importedItem recordImportedItemQuoted {
+  args {
+    name  string!
+  }
+  insert {
+    "name": args.name
+    metadata: { "source": "import" }
+  }
+}

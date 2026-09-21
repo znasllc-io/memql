@@ -1,0 +1,5 @@
+{
+  "cases": [
+    { "file": "index-new-document.memql", "verdict": "load_ok" }
+  ]
+}

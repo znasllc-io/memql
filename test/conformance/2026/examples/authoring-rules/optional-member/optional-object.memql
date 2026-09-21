@@ -1,0 +1,30 @@
+use agents.concepts.{ agent }
+use identity.concepts.{ user }
+use library.mutations.{ createArtifact }
+
+/// Agents a run produced, read through an object block that may be absent.
+@serverOnly
+query agent agentsFromRun {
+  args {
+    runId  string!
+  }
+  filter  row => row.?lineage.originatingRunId == args.runId
+  paginate 50
+}
+
+/// Note the users who have never turned computer use on.
+@trigger(event="node.updated", concept="v1:identity:user")
+@filter(row => row.?preferences.computerUseEnabled == false)
+automation noteComputerUseOff {
+  args {
+    id  any
+  }
+  noted := mutation createArtifact(
+    sourceConceptRef: args.id,
+    ownerUserId:      args.id,
+    lens:             "record",
+    kind:             "note",
+    source:           "agent_generated",
+    title:            "computer use is off"
+  )
+}

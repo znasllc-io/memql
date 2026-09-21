@@ -1,0 +1,8 @@
+/// Route a submitted request by the submitter's role.
+logic submittedRequestStatus {
+  args {
+    submitterRole any
+  }
+  role := args.submitterRole ?? ""
+  return role == "owner" ? "queued" : role == "admin" || role == "writer" ? "needs_approval" : "needs_validation"
+}

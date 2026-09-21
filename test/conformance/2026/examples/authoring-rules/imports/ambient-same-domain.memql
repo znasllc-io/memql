@@ -1,0 +1,20 @@
+// `invocation` is ambient: this domain declares it, even though
+// v1:observability:invocation shares the trailing segment. A cross-domain
+// name still needs its import.
+use work.concepts.{ run }
+
+@actor
+query invocation ownInvocations {
+  args {
+    runId  string
+  }
+  filter   row => row.ownerUserId == actor.userId && (args.runId == nil || row.runId == args.runId)
+  paginate 50
+}
+
+/// The runs behind them. `run` is another domain's, so it carries an import.
+@actor
+query run runsForCaller {
+  filter   row => row.ownerUserId == actor.userId
+  paginate 50
+}

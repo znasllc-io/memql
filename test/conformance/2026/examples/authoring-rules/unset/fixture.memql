@@ -1,0 +1,7 @@
+/// A token row the unset examples read.
+concept inviteToken {
+  ownerUserId  string!
+  deleted      bool
+  status       enum("active", "revoked")
+  consumedAt   datetime
+}

@@ -1,0 +1,29 @@
+{
+  "cases": [
+    {
+      "file": "right-forms.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "policy-no-args.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "description-on-args-field.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_retired",
+      "message": "@description on an args field is retired"
+    },
+    {
+      "file": "ctx-in-a-body.memql",
+      "verdict": "refuse_load",
+      "message": "`ctx` is not a statement name, a loop variable or a root here",
+      "code": "body_unknown_name"
+    },
+    {
+      "file": "receiver-function.memql",
+      "verdict": "refuse_load",
+      "message": "legacy procedural form `func (Query) ...` is retired"
+    }
+  ]
+}

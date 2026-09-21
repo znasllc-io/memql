@@ -1,0 +1,7 @@
+/// Compose the title a filed document is indexed under.
+logic composeTitle {
+  args {
+    folderId  string!
+  }
+  return "Filed under " + args.folderId
+}

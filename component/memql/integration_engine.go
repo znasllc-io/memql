@@ -12,12 +12,19 @@ import (
 // streaming, MemQL function execution, AI prompt invocation, and prompt
 // rendering.
 //
-// AI invocation (InvokeAI) is exposed here because the cognition integration
-// drives score-based agent routing from Go with dynamic per-utterance
-// context (participants, recent turns, scoring signals). Expressing that in
-// the DSL would require building a query string every turn; calling
-// InvokeAI directly is cleaner. The DSL `ai()` form is still the right
-// choice inside shape() projection contexts.
+// AI invocation (InvokeAI) is exposed here because an integration drives model
+// calls from Go with context it assembles itself, and expressing that in the
+// DSL would mean building a query string every turn.
+//
+// It is ALSO the seam the DSL's own `ai` builtin calls
+// (integrations/agents/ai.go), so this is one call with two front doors. The
+// DSL one is a STATEMENT and nothing else: `builtin ai(templateId:
+// "docSummary", data: { ... })`, written with its kind and its arguments by
+// name. There is NO projection form -- a prompt called once per row of a result
+// is a different feature with a different budget, so a query filter, a
+// `refine`, a sort and a spec or trait body all refuse the call, and a query
+// filter names it `lower_refused` at load. See docs/public/language/memql.md,
+// "Calling a prompt".
 type IntegrationEngineAccess interface {
 	// RegisterIntegration registers an IntegrationProvider, making its
 	// capabilities callable as builtin functions from the MemQL DSL.
@@ -29,12 +36,16 @@ type IntegrationEngineAccess interface {
 	// streaming completes.
 	Execute(ctx context.Context, query string) (*ExecuteResult, error)
 
-	// InvokeAI runs a prompt template by ID with the given data map,
-	// routing through the engine's AI provider registry (including cache
-	// and provider-override plumbing). Equivalent to `ai("<id>", {...data})`
-	// in the DSL, but callable from Go without having to build and parse
-	// a query string. The DSL form is only valid inside shape() projection
-	// contexts; InvokeAI is the top-level equivalent for integration code.
+	// InvokeAI runs a prompt by name with the given data map: it resolves the
+	// prompt, validates the data against the prompt's own body (that body IS
+	// the input schema), renders the template, routes by the prompt's @level
+	// through core/airoute, serves from the exact-render cache when one is
+	// warm, and journals the call.
+	//
+	// The DSL's `builtin ai(templateId:, data:)` is a thin wrapper around this
+	// exact method, so the two agree by construction rather than by
+	// maintenance. Go callers use it directly when they assemble the data
+	// themselves; a .memql body calls the builtin.
 	InvokeAI(ctx context.Context, templateId string, data map[string]any) (any, error)
 
 	// InvokeAIStructured renders a prompt template and invokes its

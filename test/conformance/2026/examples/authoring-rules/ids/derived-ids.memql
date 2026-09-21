@@ -1,0 +1,36 @@
+use identity.concepts.{ user }
+use library.concepts.{ folder }
+
+/// Wrong -- the bare and the canonical spelling of one reference derive two ids.
+@actor
+mutation filing fileFolderForUserUnnormalised {
+  args {
+    folderId  string!
+    userId    string!
+  }
+  insert {
+    id: hash(args.folderId + ":" + args.userId)
+    args.folderId
+    args.userId
+    ownerUserId: actor.userId
+  }
+}
+
+/// Right -- canonicalId() collapses both spellings onto one string, and each
+/// part is hashed before joining so the composite cannot alias.
+@actor
+mutation filing fileFolderForUser {
+  args {
+    folderId  string!
+    userId    string!
+  }
+  insert {
+    id: hash(
+      hash(canonicalId(args.folderId, "folder")) +
+      hash(canonicalId(args.userId, "user"))
+    )
+    args.folderId
+    args.userId
+    ownerUserId: actor.userId
+  }
+}

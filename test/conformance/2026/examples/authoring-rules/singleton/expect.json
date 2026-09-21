@@ -1,0 +1,5 @@
+{
+  "cases": [
+    { "file": "saved-desktop.memql", "verdict": "load_ok" }
+  ]
+}

@@ -1,0 +1,13 @@
+use notes.concepts.{ note }
+
+/// The caller's notes whose body mentions q, in any letter case.
+@actor
+query note notesMentioning {
+  args {
+    q  string!
+  }
+  filter   row => row.ownerUserId == actor.userId
+  sort     "row.createdAt", "desc"
+  paginate 50
+  refine   row => lower(row.body).includes(lower(args.q))
+}

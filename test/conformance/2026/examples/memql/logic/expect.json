@@ -1,0 +1,6 @@
+{
+  "cases": [
+    { "file": "collections.memql", "verdict": "load_ok" },
+    { "file": "sweep.memql", "verdict": "load_ok" }
+  ]
+}

@@ -1,0 +1,15 @@
+use library.concepts.{ artifact }
+use library.shapes.{ artifactFull }
+use common.traits.{ isActiveRecord }
+
+/// Artifacts in a folder whose title contains a search term, any case.
+query artifact searchFolderArtifacts {
+  args {
+    folderId  string!
+    q         string!
+  }
+  filter   row => row.folderId == args.folderId && isActiveRecord(row)
+  paginate 50
+  refine   row => lower(row.title).includes(lower(args.q))
+  shape    artifactFull
+}

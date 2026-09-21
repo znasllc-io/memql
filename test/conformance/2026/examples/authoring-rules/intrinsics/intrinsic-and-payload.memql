@@ -1,0 +1,23 @@
+use cluster.concepts.{ deployment }
+use cluster.shapes.{ deploymentFull }
+
+/// One deployment by its row id.
+@serverOnly
+query deployment deploymentByRowId {
+  args {
+    deploymentId  string!
+  }
+  filter  row => row.id == args.deploymentId      // an intrinsic: the row's id column
+  shape   deploymentFull
+}
+
+/// Every deployment in a region.
+@serverOnly
+query deployment deploymentsInRegion {
+  args {
+    region  string!
+  }
+  filter  row => row.region == args.region     // a payload field
+  paginate 50
+  shape   deploymentFull
+}

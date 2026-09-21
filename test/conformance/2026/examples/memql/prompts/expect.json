@@ -1,0 +1,6 @@
+{
+  "cases": [
+    { "file": "agent-builtin.memql", "verdict": "load_ok" },
+    { "file": "ai-builtin.memql", "verdict": "load_ok" }
+  ]
+}

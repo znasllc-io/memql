@@ -38,6 +38,7 @@ Use the core Library builtin to search by meaning with the caller's ownership
 checks. The result carries file titles, short matched snippets, and artifact IDs.
 This needs indexed Files and compatible embedding configuration.
 
+<!-- corpus: 2026/examples/research-workflow/brief.memql -->
 ```memql fragment
 /// Search indexed Files by meaning, scoped to the current caller.
 @actor
@@ -62,6 +63,7 @@ Pass that evidence to a configured agent. Its model route, system instructions,
 and tools remain the agent's configuration; this function assembles the request
 and extracts the reply. The execution must reach an agent node.
 
+<!-- corpus: 2026/examples/research-workflow/brief.memql -->
 ```memql fragment
 /// Run a configured agent with the question and retrieved passages.
 logic draftResearchAnswer {
@@ -91,6 +93,7 @@ Choose the TTL in seconds at the query declaration. Writes to the concept
 invalidate dependent cached reads. This annotation caches saved drafts, not
 model responses or embedding calls.
 
+<!-- corpus: 2026/examples/research-workflow/brief.memql -->
 ```memql fragment
 /// Read your saved drafts; TTL is in seconds, writes invalidate the cache.
 @actor
@@ -113,6 +116,7 @@ The request mutation creates a row. Its event supplies typed arguments to the
 automation. Named results connect the steps, a branch handles missing evidence,
 and the final mutation saves another version of the same brief.
 
+<!-- corpus: 2026/examples/research-workflow/brief.memql -->
 ```memql fragment
 /// A request becomes a saved draft. Updates do not retrigger this create event.
 @actor

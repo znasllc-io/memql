@@ -1,0 +1,17 @@
+use library.concepts.{ folder }
+
+// args.X is the only way to reach caller-passed fields.
+@actor
+mutation folder nameFolderFromCtx {
+  args { x string @required }
+  insert {
+    name: ctx.x   // ctx is not in scope inside struct-form bodies
+    ownerUserId: actor.userId
+  }
+}
+
+// The same name, in a logic body: nothing binds `ctx` there either.
+logic titleFromCtx {
+  args { x string @required }
+  return ctx.x
+}

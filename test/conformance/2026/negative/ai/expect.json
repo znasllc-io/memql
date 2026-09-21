@@ -1,0 +1,10 @@
+{
+  "cases": [
+    {
+      "file": "query-filter.memql",
+      "verdict": "refuse_load",
+      "message": "does not lower in a query filter",
+      "code": "lower_refused"
+    }
+  ]
+}

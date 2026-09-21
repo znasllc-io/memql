@@ -1,0 +1,16 @@
+{
+  "cases": [
+    {
+      "file": "name-read-before-bound.memql",
+      "verdict": "refuse_load",
+      "code": "body_unknown_name",
+      "message": "`cehckUser` is not a statement name"
+    },
+    {
+      "file": "forward-reference.memql",
+      "verdict": "refuse_load",
+      "code": "body_forward_reference",
+      "message": "reads `subtotal`, which is bound on line 3"
+    }
+  ]
+}
