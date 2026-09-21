@@ -280,8 +280,13 @@ func operatorVocabulary() []VocabularyEntry {
 
 // fieldTypeVocabulary projects the field-type table. A deprecated spelling
 // stays listed and SAYS SO with its replacement: a reader who meets `array` in
-// an old file needs to be told what it is and what to write instead, which is
-// the opposite of the grammar's answer (the grammar must not OFFER it).
+// an old file needs to be told what it is and what to write instead.
+//
+// The GRAMMAR lists it too, and cannot say that -- a syntax rule has nowhere
+// to put "deprecated", and a grammar that left the spelling out would refuse
+// the 43 files that write it. That is the division of labour between the two
+// generated pages: the grammar says what derives, the vocabulary says what to
+// write.
 func fieldTypeVocabulary(spec *Spec) []VocabularyEntry {
 	var out []VocabularyEntry
 	for _, ft := range spec.FieldTypes {
