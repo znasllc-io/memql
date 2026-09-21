@@ -850,11 +850,50 @@ In `component/edge/edge.go`, implement it beside `SiteByHostname`, under
 doc comment must say that it deliberately does not project `adminTokenRef` or
 `webhookSecretRef`.
 
-In the resolver's site-load path (the function that builds a `*Site` before caching it),
-after `siteFromRow`, add: when `site.Kind == storefrontKind`, read
-`rowObject(r, "binding")["storeId"]`; if non-empty, call `StoreByID` and set `site.Store`.
-A `StoreByID` error is LOGGED and leaves `Store` nil — it must not fail the whole
-resolution, or an unreadable store takes a serving site dark.
+VERIFIED insertion point: `resolver.Resolve` in `component/edge/resolve.go` builds the
+site inside a `r.sf.Do(key, func() (any, error) {...})` closure that tries three lookups in
+order (`SiteByHostname`, then `SiteForCustomDomain`, then `SiteForAccountFrontDoor`) and
+then writes `r.cache[key] = entry{site: site, at: time.Now()}`. Add the store resolution
+BETWEEN the third lookup and that cache write, so the resolved store is cached with the
+site and all three resolution paths get it:
+
+```go
+		// THE BOUND STORE (epic memql#5530, issue memql#5538), resolved with
+		// the site and cached with it.
+		//
+		// Here rather than in siteFromRow because it is a SECOND read, and
+		// here rather than per-request because the policy is built on every
+		// asset response. Caching it with the site is what makes the TTL and
+		// the invalidation apply to both: a store event flushes this map
+		// (InvalidateAll), which is how an edit to a store reaches every site
+		// bound to it without the site row being written at all.
+		//
+		// A FAILED STORE READ LEAVES THE SITE SERVABLE. The bundle is not the
+		// store's to take down: an unreadable store means no storefront block
+		// and no store named in the policy, which is what a storefront nobody
+		// has bound yet already gets.
+		if site != nil && site.Kind == storefrontKind {
+			if id := strings.TrimSpace(bindingStoreId(site.Binding)); id != "" {
+				store, serr := r.exec.StoreByID(ctx, id)
+				if serr != nil {
+					// Logged, not returned. See above.
+					slog.Warn("edge: could not resolve the bound store", "siteId", site.ID, "storeId", id, "error", serr)
+				} else {
+					site.Store = store
+				}
+			}
+		}
+```
+
+`bindingStoreId(map[string]any) string` is the one accessor that replaces `bindingString`;
+put it in `runtimeconfig.go` where `bindingString` was, with a comment saying the binding
+carries exactly one key now. Use the package's existing logger idiom rather than a bare
+`slog` import if `component/edge` already threads one (check `handler.go`'s `Options`).
+
+Real type names in that file, so you do not guess: the cache is
+`cache map[string]entry` and its value type is `type entry struct { site *Site; at time.Time }`.
+`Resolver` is an INTERFACE (`Resolve`, `Invalidate`) — add `InvalidateAll()` to it as well
+as to the `resolver` struct, or the subscriber cannot call it.
 
 - [ ] **Step 5: Add `InvalidateAll`**
 
@@ -870,13 +909,10 @@ In `component/edge/resolve.go`, beside `Invalidate`:
 // over a handful of hostnames. Flushing it is cheaper than the index.
 func (r *resolver) InvalidateAll() {
 	r.mu.Lock()
-	r.cache = map[string]cacheEntry{}
+	r.cache = map[string]entry{}
 	r.mu.Unlock()
 }
 ```
-
-Match the real field/type names in the file; `cacheEntry` above is a placeholder for
-whatever the cache's value type actually is.
 
 Widen the `invalidator` interface in `component/edge/invalidation_subscriber.go`:
 
