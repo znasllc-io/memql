@@ -296,11 +296,13 @@ export function StorePicker({
 /**
  * The row id a domain gets.
  *
- * DERIVED, NOT RANDOM. Every mirrored row is scoped by store id, and a random
- * id would let the same Shopify store be attached twice under two rows whose
- * mirrors then diverge. `createStore` refuses a duplicate id, so deriving it
- * turns "this store is already registered" into a refusal instead of a second
- * record of one store -- which is the failure this whole epic is about.
+ * DERIVED, NOT RANDOM, and the reason is this epic's own. Every mirrored row
+ * is scoped by store id, so the same Shopify store registered twice under two
+ * random ids is two mirrors of one merchant, diverging from the moment the
+ * second one starts. A derived id lands the second registration on the SAME
+ * ROW -- an insert at an id that already has one is a new version of it, not a
+ * refusal -- so registering a store that is already registered updates it
+ * instead of forking it.
  */
 function slugOf(domain: string): string {
   const base = domain
