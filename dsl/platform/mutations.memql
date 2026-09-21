@@ -408,6 +408,12 @@ mutation site createSite {
     siteId       string!
     hostname     string!  @maxLength(253) @pattern("^[a-z0-9][a-z0-9.-]*[a-z0-9]$")
     kind         enum("spa", "static", "shopify_storefront")
+    /// What the edge answers for a path that matches no file. Omitted means the kind decides,
+    /// which is what every site row created before memql#5535 carries and what they must keep
+    /// resolving as. It sits in accept{} rather than stamp{} for updateSiteBundle's artifactId
+    /// reason: an omitted arg is dropped from the payload, so a `?? ""` here would write an
+    /// explicit empty string and there would be no way to express "let the kind decide".
+    resolutionTail enum("fallback", "not_found")
     bundleRef    string!
     status       enum("draft", "live", "disabled")
     apiProxy     boolean
@@ -417,7 +423,7 @@ mutation site createSite {
     binding      object
   }
   insert {
-    accept { hostname, bundleRef, artifactId, binding }
+    accept { hostname, bundleRef, artifactId, binding, resolutionTail }
     stamp {
       id:          args.siteId
       ownerUserId: actor.userId
@@ -534,6 +540,37 @@ mutation site updateSiteSettings {
   update {
     id:       args.siteId
     settings: args.settings
+  }
+}
+
+/// Choose what the edge answers for a path that matches no file in this deployable's bundle
+/// (memql#5535) -- the LAST rung of the resolution order, and nothing above it.
+///
+/// THREE VALUES, AND THE THIRD IS THE EMPTY ONE. "fallback" serves index.html, "not_found"
+/// answers 404, and "" HANDS THE DECISION BACK TO `kind` -- which is the state every row created
+/// before this field existed is in, and the one a person must be able to return a site to. That is
+/// why the arg is optional and stamped with `?? ""` rather than accepted: an accepted arg omitted
+/// by the caller is dropped from the payload and the read-merge re-saves whatever was there, so
+/// clearing the choice would be inexpressible. It is the exact inverse of createSite's reading of
+/// the same field, for the same reason updateSiteSettings and updateSiteBundle differ.
+///
+/// WHY A SITE AND NOT A KIND. A shopify_storefront was given the spa fallback because the kind's
+/// own description says it IS a spa bundle; the first storefront actually built was a multi-page
+/// prerendered tree that declared kind: static precisely to get the 404 back, and thereby gave up
+/// the store binding, the storefront block in its runtime document and the policy that admits
+/// Shopify. Neither tail is right for every storefront, so the SITE says which it is.
+///
+/// AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite, exactly as on
+/// updateSiteBundle and updateSiteSettings: the row's owner, or a cluster owner through the
+/// explicit escape, and a systemOwned row refused for both.
+mutation site updateSiteResolutionTail {
+  args {
+    siteId          string!
+    resolutionTail  enum("fallback", "not_found")
+  }
+  update {
+    id:             args.siteId
+    resolutionTail: args.resolutionTail ?? ""
   }
 }
 

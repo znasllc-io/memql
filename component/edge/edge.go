@@ -221,16 +221,19 @@ func systemActorContext(ctx context.Context) context.Context {
 // bare helper).
 func siteFromRow(r map[string]any) *Site {
 	return &Site{
-		ID:          memql.BareShortId(rowString(r, "id")),
-		Hostname:    rowString(r, "hostname"),
-		Kind:        rowString(r, "kind"),
-		BundleRef:   rowString(r, "bundleRef"),
-		Status:      rowString(r, "status"),
-		Title:       rowString(r, "title"),
-		APIProxy:    rowBool(r, "apiProxy"),
-		SystemOwned: rowBool(r, "systemOwned"),
-		Binding:     rowObject(r, "binding"),
-		Settings:    rowStringMap(r, "settings"),
+		ID:       memql.BareShortId(rowString(r, "id")),
+		Hostname: rowString(r, "hostname"),
+		Kind:     rowString(r, "kind"),
+		// Absent on every row written before memql#5535, which is the
+		// default and means Kind decides -- see Site.ResolutionTail.
+		ResolutionTail: rowString(r, "resolutionTail"),
+		BundleRef:      rowString(r, "bundleRef"),
+		Status:         rowString(r, "status"),
+		Title:          rowString(r, "title"),
+		APIProxy:       rowBool(r, "apiProxy"),
+		SystemOwned:    rowBool(r, "systemOwned"),
+		Binding:        rowObject(r, "binding"),
+		Settings:       rowStringMap(r, "settings"),
 	}
 }
 

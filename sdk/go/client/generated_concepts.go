@@ -986,6 +986,7 @@ var BoundConcepts = map[string]string{
 	"updateSenderIdentity":                             "v1:campaigns:senderIdentity",
 	"updateSiteAccount":                                "v1:platform:site",
 	"updateSiteBundle":                                 "v1:platform:site",
+	"updateSiteResolutionTail":                         "v1:platform:site",
 	"updateSiteSettings":                               "v1:platform:site",
 	"updateSiteStatus":                                 "v1:platform:site",
 	"updateStore":                                      "v1:shopify:store",

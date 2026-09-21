@@ -449,6 +449,9 @@ type EnsureSiteRequest struct {
 	Hostname       string
 	Binding        *ManifestBinding
 	OwnerUserId    string
+	// ResolutionTail is the manifest's choice; empty means the kind decides,
+	// which is what createSite writes by omitting the argument entirely.
+	ResolutionTail string
 }
 
 func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]any, rep *Report, bundles map[string]edge.Bundle) ([]DeployableOutcome, error) {
@@ -522,6 +525,7 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 				Kind:           dep.Kind,
 				Hostname:       requested,
 				Binding:        dep.Binding,
+				ResolutionTail: dep.ResolutionTail,
 				OwnerUserId:    rowString(pkg, "ownerUserId"),
 			})
 			if err != nil {
