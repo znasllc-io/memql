@@ -67,6 +67,11 @@ type Handler struct {
 	// hashSF coalesces concurrent misses on that cache, the way blob.go and
 	// resolve.go already guard their own cold paths.
 	hashSF hashGroup
+	// shopperRate is the per-(site, address) token bucket in front of the
+	// shopper surface (shopper.go). Built once here rather than lazily on
+	// first use, because a lazy build on a public, unauthenticated path is a
+	// data race with a public trigger.
+	shopperRate *shopperBucket
 }
 
 var _ http.Handler = (*Handler)(nil)
@@ -87,6 +92,7 @@ func NewHandler(opts Options) *Handler {
 		previewExec:    opts.PreviewExec,
 		previews:       newPreviewCache(),
 		hashCache:      newBundleCache(cspHashCacheBytes),
+		shopperRate:    newShopperBucket(shopperRatePerMinute()),
 	}
 }
 
@@ -237,6 +243,22 @@ func (h *Handler) serveResolved(w http.ResponseWriter, r *http.Request, site *Si
 	if r.URL.Path == runtimeConfigPath {
 		h.serveRuntimeConfig(w, r, site)
 		return pathClassConfig
+	}
+
+	// THE SHOPPER SURFACE, above the /_memql/ proxy branch because it shares
+	// that marker (epic memql#5532, issue memql#5551). It must be ABOVE:
+	// these paths would otherwise be forwarded to the bff as ordinary
+	// authenticated API calls, arriving with no stamp, no rate limit and no
+	// size cap -- and the bff would refuse them, so the failure would look
+	// like the feature not working rather than like a routing mistake.
+	//
+	// BELOW the preview substitution, equally deliberately, and that is what
+	// makes design D9 free: `site` is already the preview copy when a grant
+	// is in force, so site.Store IS the store this write belongs to.
+	if strings.HasPrefix(r.URL.Path, shopperFormPrefix) ||
+		strings.HasPrefix(r.URL.Path, shopperReadPrefix) {
+		h.serveShopperSurface(w, r, site)
+		return pathClassProxy
 	}
 
 	if strings.HasPrefix(r.URL.Path, apiPrefix) {
