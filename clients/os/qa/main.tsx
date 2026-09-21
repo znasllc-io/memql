@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import "../src/styles/index.css";
 import { Panel } from "../src/kit";
@@ -7,9 +7,14 @@ import { setRoleLadder } from "../src/system/roles";
 import { SEEDED_LADDER } from "../test/seededLadder";
 import {
   DEV_STORE,
+  DOCS,
+  PLATFORM_SITE,
   SHOP,
   STORE,
   fakeConnection,
+  githubGrantRow,
+  repositoriesReply,
+  repositoryFixture,
   siteRow,
   storeHealthRow,
   domainStateRow,
@@ -18,6 +23,10 @@ import {
 } from "../test/deployables/harness";
 import { installQaConnection } from "./connectionShim";
 import { StorePanel } from "../src/apps/deployables/store/StorePanel";
+import { DeployablesApp } from "../src/apps/deployables/DeployablesApp";
+import { LocalDeployablesSettingsStore } from "../src/apps/deployables/settings";
+import { PageNavigationProvider } from "../src/kit/pageNavigation";
+import { TrailRow } from "../src/kit/TrailRow";
 import { DeployablePage } from "../src/apps/deployables/page/DeployablePage";
 import { ALL_PARTS, partsWithout } from "../src/apps/deployables/parts";
 import { siteFromRow } from "../src/apps/deployables/rows";
@@ -100,6 +109,140 @@ const UNBOUND_SITE = siteRow({
 
 const UNBOUND: FakeSeed = { sites: [UNBOUND_SITE], stores: [STORE, DEV_STORE] };
 
+// ---------------------------------------------------------------------------
+// THE TWO LISTS (Deployables and Sources), populated
+// ---------------------------------------------------------------------------
+//
+// A cluster somebody develops on has two built-in deployables and no source,
+// so neither list has ever been SEEN with the rows it was designed for: an
+// origin on a row, "3 apps, 2 deployed", Review needed beside Update available.
+// These seeds are those rows. One of every origin a deployable can have, and
+// one of every state word a source can carry.
+
+function packageRow(over: Record<string, unknown> & { id: string; name: string }) {
+  return {
+    ownerUserId: "u-me",
+    sourceKind: "repo",
+    repoUrl: `https://github.com/acme/${over.name}`,
+    repoRef: "main",
+    credentialId: "",
+    artifactId: "",
+    deployedVersion: "aaaaaaaaaaaaaaaaaaaa",
+    latestKnownVersion: "aaaaaaaaaaaaaaaaaaaa",
+    updateAvailable: false,
+    status: "active",
+    createdAt: "2026-09-01T10:00:00Z",
+    ...over,
+  };
+}
+
+const ACME = packageRow({
+  id: "pkg-acme",
+  name: "acme",
+  repoUrl: "https://github.com/acme/storefront",
+  declares: [{ name: "storefront", kind: "spa" }, { name: "admin", kind: "spa" }, { name: "reports", kind: "static" }],
+});
+const WIDGETS = packageRow({ id: "pkg-widgets", name: "widgets-co", repoUrl: "https://github.com/acme/widgets", updateAvailable: true, latestKnownVersion: "bbbbbbbbbbbbbbbbbbbb" });
+const BROCHURE = packageRow({ id: "pkg-brochure", name: "", sourceKind: "artifact", repoUrl: "", repoRef: "", artifactId: "artifact-zip" });
+const LEGACY = packageRow({ id: "pkg-legacy", name: "legacy-portal", repoUrl: "https://github.com/acme/legacy-portal", status: "archived" });
+const FRESH = packageRow({ id: "pkg-fresh", name: "field-notes", repoUrl: "https://github.com/acme/field-notes", deployedVersion: "" });
+
+const LIST_SITES = [
+  siteRow({ id: "site-store", hostname: "store.memql.example.com", bundleRef: "blob://sites/site-store/v2/", packageId: "pkg-acme", packageDeployableName: "storefront" }),
+  siteRow({ id: "site-admin", hostname: "admin.memql.example.com", status: "disabled", bundleRef: "blob://sites/site-admin/v2/", packageId: "pkg-acme", packageDeployableName: "admin" }),
+  siteRow({ id: "site-widget", hostname: "widgets.memql.example.com", packageId: "pkg-widgets", packageDeployableName: "widgets" }),
+  siteRow({ id: "site-brochure", hostname: "brochure.memql.example.com", kind: "static", bundleRef: "blob://sites/site-brochure/v1/", packageId: "pkg-brochure", packageDeployableName: "brochure" }),
+  siteRow({ id: "site-marketing", hostname: "marketing.memql.example.com", kind: "static", status: "draft", bundleRef: "blob://sites/site-marketing/pending/", title: "Marketing" }),
+  SHOP,
+  DOCS,
+  PLATFORM_SITE,
+];
+
+const PARKED = {
+  id: "dep-parked",
+  packageId: "pkg-acme",
+  sourceVersion: "cccccccccccccccccccc",
+  status: "awaiting_confirm",
+  report: {
+    name: "acme",
+    formatVersion: 1,
+    deployables: [
+      { name: "storefront", kind: "spa", path: "clients/web", buildPlan: "already built: dist", output: "dist", prebuilt: true },
+      { name: "reports", kind: "static", path: "clients/reports", buildPlan: "already built: out", output: "out", prebuilt: true },
+    ],
+    dslDomains: [],
+    problems: [],
+    ok: true,
+  },
+  dslVersion: "",
+  deployables: [],
+  snapshotArtifactId: "",
+  buildLogTail: "",
+  error: null,
+  requestedBy: "u-me",
+  startedAt: "2026-09-01T13:00:00Z",
+  finishedAt: "",
+  createdAt: "2026-09-01T13:00:00Z",
+};
+
+const LISTS: FakeSeed = {
+  sites: LIST_SITES,
+  packages: [ACME, WIDGETS, BROCHURE, LEGACY, FRESH] as never,
+  awaitingConfirm: [PARKED] as never,
+};
+
+/** A GitHub account already connected, so the Repository step is its picker. */
+const CONNECTED: FakeSeed = {
+  ...LISTS,
+  credentials: [githubGrantRow({ id: "cred-grant" })],
+  repositories: repositoriesReply({
+    repositories: [
+      repositoryFixture({ fullName: "acme/storefront", private: true, visibility: "private" }),
+      repositoryFixture({ fullName: "acme/widgets" }),
+      repositoryFixture({ fullName: "acme/field-notes" }),
+      repositoryFixture({ fullName: "octocat/dotfiles", installationId: "i-octocat" }),
+    ],
+  }),
+};
+
+function settingsStore() {
+  const data = new Map<string, string>();
+  return new LocalDeployablesSettingsStore({
+    getItem: (k) => data.get(k) ?? null,
+    setItem: (k, v) => void data.set(k, v),
+  });
+}
+
+/**
+ * THE WINDOW'S BODY, as `chrome/WindowFrame` composes it: the one trail row,
+ * then the content. A list judged without the trail row above it is judged at
+ * the wrong height, and a wizard judged outside a bounded body has no floor --
+ * its action bar is only at the bottom of something that has a bottom.
+ */
+function WindowBody({ fallback, children }: { fallback: string; children: ReactNode }) {
+  const content = useRef<HTMLDivElement>(null);
+  return (
+    <div className="os-window" style={{ position: "fixed", inset: 0, display: "flex", flexDirection: "column" }}>
+      <div className="os-window-body">
+        <PageNavigationProvider root={content} trail={[]}>
+          <TrailRow fallback={fallback} />
+          <div ref={content} className="os-window-content" data-os-window-content>
+            {children}
+          </div>
+        </PageNavigationProvider>
+      </div>
+    </div>
+  );
+}
+
+function Lists({ section }: { section: "deployables" | "sources" }) {
+  return (
+    <WindowBody fallback={section === "sources" ? "Sources" : "Deployables"}>
+      <DeployablesApp sectionId={section} navigate={() => {}} askContext={() => {}} store={settingsStore()} />
+    </WindowBody>
+  );
+}
+
 /** The pane wrapper `DeployablePage` gives the Store view, verbatim. */
 function StorePane({ site, canBind }: { site: ReturnType<typeof siteFromRow>; canBind: boolean }) {
   return (
@@ -135,7 +278,16 @@ function Overview({ site }: { site: ReturnType<typeof siteFromRow> }) {
   );
 }
 
-const VIEWS: Record<string, { seed: FakeSeed; role?: string; render: () => JSX.Element }> = {
+const VIEWS: Record<string, { seed: FakeSeed; role?: string; framed?: boolean; render: () => JSX.Element }> = {
+  // The two lists. `framed` views bring their own window body, because the
+  // app's wizard needs a floor and its pages publish to the window's trail.
+  list: { seed: LISTS, framed: true, render: () => <Lists section="deployables" /> },
+  sources: { seed: LISTS, framed: true, render: () => <Lists section="sources" /> },
+  "list-empty": { seed: {}, framed: true, render: () => <Lists section="deployables" /> },
+  "sources-empty": { seed: {}, framed: true, render: () => <Lists section="sources" /> },
+  // The same app with a GitHub account connected: press + and choose
+  // "A repository" and the Repository step is the picker, not the invitation.
+  connected: { seed: CONNECTED, framed: true, render: () => <Lists section="deployables" /> },
   overview: { seed: BOUND, render: () => <Overview site={siteFromRow(SHOP)} /> },
   store: { seed: BOUND, render: () => <StorePane site={siteFromRow(SHOP)} canBind /> },
   quiet: { seed: QUIET, render: () => <StorePane site={siteFromRow(SHOP)} canBind /> },
@@ -178,6 +330,7 @@ function App() {
   // surfaces read all three (a Logs action opens another app, and `useOs`
   // throws outside its provider), and a harness that wired them itself would
   // be a second reading of the access model beside the one the tests use.
+  if (view.framed) return withSession(view.render(), { role: view.role ?? "owner", userId: "u-me" });
   return <div className="os-window-content">{withSession(view.render(), { role: view.role ?? "owner" })}</div>;
 }
 
