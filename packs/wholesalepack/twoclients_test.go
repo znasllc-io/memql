@@ -349,3 +349,58 @@ func importedWholesaleNames(t *testing.T, client string) []string {
 	}
 	return out
 }
+
+// TestAClientCollectsItsOwnFieldWithoutEditingThePack is the OTHER HALF of
+// the section 7 question, and it could not be asked until the shopper-form
+// extension existed (design record 2026-09-21).
+//
+// The test above asks whether two clients can express different PROCESSES.
+// It passed while neither fixture could collect a single FIELD from a
+// shopper -- northwind declared a concept carrying an EIN, with the
+// relationship the design prescribes, and nothing in the engine could ever
+// write a row of it. That is the gap this asserts is closed.
+func TestAClientCollectsItsOwnFieldWithoutEditingThePack(t *testing.T) {
+	before := fingerprintPackTree(t)
+
+	mountFixtureClients(t)
+
+	// THE ANNOTATION HAS TO BE LEGAL DSL IN A REAL CLIENT TREE. parseTree
+	// runs the same parse a bundle mounted at MEMQL_DSL_PATH gets, so an
+	// annotation the registry refused on a mutation receiver would fail
+	// here rather than at somebody's boot.
+	parseTree(t, clientNorthwind, os.DirFS(filepath.Join("testdata", "clients", clientNorthwind)))
+
+	// AND THE FIELD IT CARRIES HAS TO BE THE ONE THE CONCEPT DECLARES.
+	// northwindTaxDetail.ein existed with nothing able to write it; this is
+	// the assertion that a path now exists from a shopper's form post to
+	// that field.
+	northwind := readClientSource(t, clientNorthwind)
+	if !strings.Contains(northwind, `@shopperFormExtension(pack="wholesale", form="application")`) {
+		t.Error("northwind does not extend the pack's own application form")
+	}
+	if !strings.Contains(northwind, "ein") {
+		t.Error("northwind's extension does not carry the EIN its concept declares")
+	}
+
+	if after := fingerprintPackTree(t); after != before {
+		t.Fatalf("the pack's tree changed to let a client collect its own field\n"+
+			"  before: %s\n  after:  %s", before, after)
+	}
+}
+
+// AND CONTOSO STILL DECLARES NONE, which is what keeps the fixture honest.
+// A seam every client must use is not a seam, it is a required step; the
+// second client collects no tax identifier and says so by declaring
+// nothing at all.
+func TestTheSecondClientDeclaresNoExtension(t *testing.T) {
+	contoso := readClientSource(t, clientContoso)
+	if strings.Contains(contoso, "shopperFormExtension") {
+		t.Error("contoso declares a shopper-form extension; it is the fixture that collects " +
+			"NO client-specific field, and the argument for keeping the EIN out of the pack")
+	}
+	northwind := readClientSource(t, clientNorthwind)
+	if !strings.Contains(northwind, "shopperFormExtension") {
+		t.Error("northwind declares no shopper-form extension, so nothing writes the EIN its " +
+			"own concept carries -- which is the gap the extension seam closed")
+	}
+}

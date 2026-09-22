@@ -334,7 +334,7 @@ func TestIllegalTransitionIsRefusedAgainstTheLog(t *testing.T) {
 func TestAbsentSettingsRefuseASubmission(t *testing.T) {
 	p := &Provider{reader: &fixtureReader{}, writer: &fakeWriter{}}
 	_, err := p.submitApplication(context.Background(), map[string]any{
-		"storeId": "store-live", "companyName": "Acme",
+		"submissionId": "sub-1", "storeId": "store-live", "companyName": "Acme",
 		"applicantName": "Sam", "applicantEmail": "sam@example.com",
 	}, 0)
 	if err == nil {
@@ -349,7 +349,7 @@ func TestClosedApplicationsRefuseASubmission(t *testing.T) {
 		},
 	}}
 	if _, err := p.submitApplication(context.Background(), map[string]any{
-		"storeId": "store-live", "companyName": "Acme",
+		"submissionId": "sub-1", "storeId": "store-live", "companyName": "Acme",
 		"applicantName": "Sam", "applicantEmail": "sam@example.com",
 	}, 0); err == nil {
 		t.Fatal("a closed store must refuse a submission")
@@ -368,7 +368,7 @@ func TestTheGateIsPerStore(t *testing.T) {
 		},
 	}}
 	if _, err := p.submitApplication(context.Background(), map[string]any{
-		"storeId": "store-live", "companyName": "Acme",
+		"submissionId": "sub-1", "storeId": "store-live", "companyName": "Acme",
 		"applicantName": "Sam", "applicantEmail": "sam@example.com",
 	}, 0); err != nil {
 		t.Fatalf("submitApplication: %v", err)
@@ -378,7 +378,7 @@ func TestTheGateIsPerStore(t *testing.T) {
 		t.Fatalf("storeId = %v", wrote["storeId"])
 	}
 	if _, err := p.submitApplication(context.Background(), map[string]any{
-		"storeId": "store-dev", "companyName": "Acme",
+		"submissionId": "sub-2", "storeId": "store-dev", "companyName": "Acme",
 		"applicantName": "Sam", "applicantEmail": "sam@example.com",
 	}, 0); err == nil {
 		t.Fatal("the development store is closed and must refuse")
@@ -399,7 +399,7 @@ func TestTheMinimumAnApplicationNeedsToBeOne(t *testing.T) {
 	}}
 	for _, missing := range []string{"companyName", "applicantName", "applicantEmail"} {
 		args := map[string]any{
-			"storeId": "store-live", "companyName": "Acme",
+			"submissionId": "sub-1", "storeId": "store-live", "companyName": "Acme",
 			"applicantName": "Sam", "applicantEmail": "sam@example.com",
 		}
 		delete(args, missing)
@@ -469,5 +469,53 @@ func TestUnknownAdapterIsRefusedWhenSettingsAreWritten(t *testing.T) {
 		"entitlementAdapter": AdapterShopifyB2B,
 	}, 0); err != nil {
 		t.Fatalf("a registered adapter must be accepted: %v", err)
+	}
+}
+
+// THE ROW IS WRITTEN AT THE SUBMISSION ID (design record 2026-09-21, D4).
+//
+// It was engine-derived before this seam, which left the new application's
+// id known to nobody -- and a client extension has to relate its own row to
+// THIS application. The receipt still carries no row id, deliberately: the
+// id travels DOWN from the bff into both constructs rather than back out of
+// this one.
+func TestTheApplicationIsWrittenAtTheSubmissionId(t *testing.T) {
+	writer := &fakeWriter{}
+	p := &Provider{writer: writer, reader: &fixtureReader{
+		settings: map[string][]map[string]any{
+			"store-live": {{"storeId": "store-live", "applicationsOpen": true}},
+		},
+	}}
+	if _, err := p.submitApplication(context.Background(), map[string]any{
+		"submissionId": "sub-abc", "storeId": "store-live", "companyName": "Acme",
+		"applicantName": "Sam", "applicantEmail": "sam@example.com",
+	}, 0); err != nil {
+		t.Fatalf("submitApplication: %v", err)
+	}
+	wrote := writer.only(t, "createApplicationRow")
+	if wrote["applicationId"] != "sub-abc" {
+		t.Fatalf("applicationId = %v, want sub-abc -- a client extension relates to this id",
+			wrote["applicationId"])
+	}
+}
+
+// A submission that reaches the construct without one is a caller that is
+// not the bff, and it is refused rather than written at a derived id
+// nothing can point at.
+func TestASubmissionWithNoSubmissionIdIsRefused(t *testing.T) {
+	writer := &fakeWriter{}
+	p := &Provider{writer: writer, reader: &fixtureReader{
+		settings: map[string][]map[string]any{
+			"store-live": {{"storeId": "store-live", "applicationsOpen": true}},
+		},
+	}}
+	if _, err := p.submitApplication(context.Background(), map[string]any{
+		"storeId": "store-live", "companyName": "Acme",
+		"applicantName": "Sam", "applicantEmail": "sam@example.com",
+	}, 0); err == nil {
+		t.Fatal("an application with no submission id was written")
+	}
+	if writer.count("createApplicationRow") != 0 {
+		t.Fatal("a row was written for a submission carrying no id")
 	}
 }

@@ -167,6 +167,10 @@ var (
 		{Name: "filter", Type: "expression", Doc: "The trigger filter as a keyword: a lambda of one parameter over the triggering row, filter=row => <predicate>. The standalone @filter(...) annotation is the usual spelling and sets the same filter."},
 		{Name: "on", Type: "string", Doc: "A synonym for event=: on=<concept>.<created|updated|deleted>, with the concept named through the file's `use` import, folds to the same graph.node.<action>.<concept> pattern event= names (resolved by the automation loader and the concept resolver). A later epic retires the synonyms (D15/D17)."},
 	}
+	shopperFormExtensionKeys = []ArgSpec{
+		{Name: "pack", Type: "string", Doc: "The pack whose declared shopper form this mutation extends, e.g. \"wholesale\"."},
+		{Name: "form", Type: "string", Doc: "The form's route name on that pack, e.g. \"application\"."},
+	}
 	loopKeys = []ArgSpec{
 		{Name: "maxDepth", Type: "int", Doc: "The most runs of this automation one causal chain may hold. An integer from 1 to the depth cap (MEMQL_AUTOMATION_MAX_CHAIN_DEPTH, default 16)."},
 		{Name: "until", Type: "expression", Doc: "The convergence predicate: a lambda of one parameter over the triggering row, until=row => row.status == \"done\". The automation's @filter must hold its negation as a top-level conjunct, which is what stops the loop."},
@@ -271,6 +275,8 @@ var placementTable = concat(
 		{Receiver: Mutation, Name: "requiresRank", Forms: FormString, Example: `@requiresRank("admin")`},
 		{Receiver: Mutation, Name: "scrubPii", Forms: FormFlag, Example: "@scrubPii"},
 		{Receiver: Mutation, Name: "serverOnly", Forms: FormFlag, Example: "@serverOnly"},
+		{Receiver: Mutation, Name: "shopperFormExtension", Forms: FormKeywords, Keys: shopperFormExtensionKeys,
+			Example: `@shopperFormExtension(pack="wholesale", form="application")`},
 	},
 
 	// ---- Logic ----------------------------------------------------------
@@ -478,6 +484,7 @@ var Docs = map[string]string{
 	"appendFields":       "On an update mutation: append the named array-typed payload fields' elements to the stored array instead of replacing it wholesale, so a single-writer mutation can accumulate list items (e.g. attach one id). Format: @appendFields(\"attachmentIds\").",
 	"addToSet":           docAddToSet,
 	"removeFromSet":      docRemoveFromSet,
+	"shopperFormExtension": "On a mutation: this construct is ONE CLIENT DOMAIN'S ADDITION to a shopper form a PACK declares -- the fields that client collects which the pack does not know about, and the concept they are stored on. It ADDS FIELDS TO AN EXISTING PUBLIC ROUTE and never opens one: putting an endpoint on a hosted site's origin stays the privilege of Go compiled into the engine. The field list is this mutation's own args block MINUS the server-stamped names (storeId, siteId, submissionId), which the body declares so it can write them. The bff validates the pack's fields and these together BEFORE anything is written, runs the pack's construct first so the pack's own gate decides, then this mutation with the same stamped submission id. Legal on a MUTATION alone -- a logic may call builtins, and a public form pointed at one would reach them under the site owner's borrowed authority. At most one extension per form. Format: @shopperFormExtension(pack=\"wholesale\", form=\"application\").",
 	"createOnly":         "On an insert (create-or-upsert) mutation: write the named payload fields ONLY when creating the row. If the target id already exists, the fields are dropped from the delta before the engine read-merge, so the stored value is preserved rather than clobbered -- making a deterministic-id re-stage idempotent for lifecycle fields another writer owns after creation (e.g. stageOutboundRequest seeds status but must not reset a row the outbound worker moved to sent). The inverse of @mergeFields/@appendFields: only valid on insert-kind mutations. Format: @createOnly(\"status\", \"attempts\"). See fylo#63.",
 	"noUnset":            docNoUnset,
 	"scrubPii":           "On an update mutation (the hard-delete / data-deletion path): after the partial payload merges, zero EVERY field the bound concept marks @pii. The field set is derived from the schema, so a newly-annotated PII field is scrubbed automatically with no change to the mutation. Bare flag, no arguments. See memql#1711.",

@@ -10,9 +10,25 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/id"
 )
+
+// shopperExtensionWriteFailures counts submissions whose pack row was
+// written and whose client row was not (design record 2026-09-21, D5).
+//
+// A COUNTER RATHER THAN A REFUSAL, because the request succeeded from the
+// shopper's point of view and did so deliberately. This is the signal that
+// says a trade desk is looking at applications missing their client fields,
+// which is otherwise visible only to whoever opens one.
+var shopperExtensionWriteFailures = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "memql_shopper_extension_write_failed_total",
+	Help: "Shopper submissions whose pack row was written and whose client extension row was not.",
+}, []string{"pack", "form"})
 
 // shopper_handler.go -- THE BFF HALF OF THE SHOPPER SURFACE (epic
 // memql#5532, issue memql#5551).
@@ -216,6 +232,11 @@ func (h *ShopperHandler) serveForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// THE EXTENSION, IF A CLIENT DOMAIN DECLARED ONE (design record
+	// 2026-09-21). It may be nil, and nil is the overwhelmingly common
+	// case: a route nobody extends behaves exactly as it did.
+	ext := memql.ShopperExtensionFor(pack, name)
+
 	stamp, stamped := readShopperStamp(r)
 	if !stamped {
 		http.NotFound(w, r)
@@ -244,12 +265,41 @@ func (h *ShopperHandler) serveForm(w http.ResponseWriter, r *http.Request) {
 		h.redirect(w, r, form.RedirectError, shopperReasonInvalid)
 		return
 	}
+	// THE EXTENSION'S FIELDS ARE VALIDATED HERE, BEFORE ANY WRITE, and the
+	// ordering is the whole of what D5 rests on. A declared field that
+	// fails its own rule must refuse the submission with NO row of either
+	// kind -- otherwise "the application stands when the client's row
+	// fails" would also cover a plain typo, and a shopper correcting one
+	// would leave a second application behind every time.
+	var extArgs map[string]any
+	if ext != nil {
+		var extBad string
+		extArgs, extBad = shopperArgs(ext.Fields, r.PostForm.Get)
+		if extBad != "" {
+			h.redirect(w, r, form.RedirectError, shopperReasonInvalid)
+			return
+		}
+	}
+
+	// ONE SUBMISSION, ONE ID, minted HERE because this is the only place
+	// that knows the two constructs are halves of one request. The pack's
+	// construct uses it as the row id it creates; the extension's mutation
+	// points at it.
+	//
+	// It does not travel BACK from the pack's construct, and that is
+	// deliberate: a pack's write capability answers with a receipt that
+	// carries no row id, at length and on purpose
+	// (packs/wholesalepack/reader.go). The id travels DOWN into both
+	// instead, which needs nothing from the pack but a declared argument.
+	submissionID := id.NewShortId()
+
 	// STAMPED LAST so nothing a caller sent can reach these keys, whatever
 	// the declaration said. The registry already refuses a field with one of
 	// these names; this is the second half of that, at the only place it
 	// could still go wrong.
 	args["storeId"] = stamp.storeID
 	args["siteId"] = site.ID
+	args["submissionId"] = submissionID
 
 	call, err := dslCall(memql.ShopperCallPrefix(form.Kind)+form.Construct, args)
 	if err != nil {
@@ -271,7 +321,71 @@ func (h *ShopperHandler) serveForm(w http.ResponseWriter, r *http.Request) {
 		h.redirect(w, r, form.RedirectError, shopperReasonFailed)
 		return
 	}
+
+	// THE CLIENT'S OWN ROW, after the pack's and only if the pack's
+	// succeeded. A refusal above ends the request: the pack holds the gate
+	// -- wholesale's applicationsOpen lives inside its construct -- so a
+	// client row written past a refusal would be a row about an application
+	// that does not exist.
+	if ext != nil {
+		h.runExtension(ctx, ext, extArgs, stamp, site, submissionID)
+	}
 	h.redirect(w, r, form.RedirectOK, "")
+}
+
+// runExtension writes the client's own fields, and NEVER changes what the
+// shopper is told (design record 2026-09-21, D5 -- the owner's answer).
+//
+// A failure here leaves the pack's row standing and still answers the
+// success page. The reasoning the owner accepted: the trade desk gets an
+// application it can act on with its client fields visibly blank, and a
+// person emails the applicant for the missing one. The alternative sends
+// somebody who has just typed seventeen fields to an error page, from
+// which they resubmit -- and the pack has no dedupe on applications, so one
+// business becomes two rows, one with fields and one without. That is a
+// worse outcome from the same fault.
+//
+// It is also the stance the pack itself already takes one level up: when
+// entitlement provisioning fails, "the application STAYS APPROVED -- an
+// approval is a decision somebody made, and a push that failed is not a
+// reason to undo it".
+//
+// The failure is not silent. It is an ERROR log carrying the submission id,
+// which is the id of the pack row that is now missing its companion, plus a
+// counter an operator can alert on.
+func (h *ShopperHandler) runExtension(ctx context.Context, ext *memql.ShopperExtension,
+	extArgs map[string]any, stamp shopperStamp, site *ShopperSite, submissionID string) {
+	if extArgs == nil {
+		extArgs = map[string]any{}
+	}
+	// The SAME stamps, for the same reasons. The extension's row carries the
+	// store it was written against (design D9) exactly as the pack's does,
+	// or a client row written under preview would be visible to the live
+	// storefront's reads.
+	extArgs["storeId"] = stamp.storeID
+	extArgs["siteId"] = site.ID
+	extArgs["submissionId"] = submissionID
+
+	call, err := dslCall(ext.Construct, extArgs)
+	if err != nil {
+		h.logExtensionFailure(ext, submissionID, err)
+		return
+	}
+	// THE SAME BORROWED AUTHORITY the pack's construct ran under, and never
+	// internal origin. A client's mutation reached from a public form is
+	// exactly as privileged as a pack's, which is to say: the merchant's
+	// own authority, and no @serverOnly construct within reach.
+	if _, err := h.engine.Execute(ctx, call); err != nil {
+		h.logExtensionFailure(ext, submissionID, err)
+	}
+}
+
+func (h *ShopperHandler) logExtensionFailure(ext *memql.ShopperExtension, submissionID string, err error) {
+	shopperExtensionWriteFailures.WithLabelValues(ext.Pack, ext.Form).Inc()
+	h.logger.Error("shopper surface: the client's own fields were not written, and the pack's row stands",
+		"component", "server", "pack", ext.Pack, "form", ext.Form,
+		"domain", ext.Domain, "construct", ext.Construct,
+		"submissionId", submissionID, "err", err)
 }
 
 func (h *ShopperHandler) serveRead(w http.ResponseWriter, r *http.Request) {

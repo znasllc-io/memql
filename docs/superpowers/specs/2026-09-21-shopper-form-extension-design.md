@@ -232,7 +232,12 @@ mutation applicationDetail recordFyloApplicationDetail {
 ```
 
 `@required` / `@maxLength` / `@enum` / `@minimum` / `@maximum` already mean what
-`ShopperField` needs, so the extension introduces no second vocabulary. An `int`
+`ShopperField` needs, so the extension introduces no second vocabulary.
+
+`submissionId` joins the reserved names, so the same refusal that stops a pack
+offering `storeId` stops either offering this. The loader skips every reserved
+name when it derives the field list, which is what lets the body declare them
+and the form never see them. An `int`
 arg maps to `ShopperField.Numeric`, which is what makes a form's `"5"` reach a
 `@minimum` as a number.
 
@@ -258,6 +263,7 @@ Load refusals, each naming the domain and the construct:
 | 3 | the target is not a mutation (D2) |
 | 4 | a field carries a server-stamped name (`id`, `ownerUserId`) |
 | 5 | the declaring domain IS the pack being extended -- a pack adding a field to its own form declares it, rather than extending itself |
+| 6 | a field the PACK already declares -- two declarations consuming one input name is ambiguous about whose rule applies, and the client reads the pack's value through the relationship it declares |
 
 Refusal 1 has a consequence worth stating: a pack that is **disabled** declares
 no forms, so an extension naming its route refuses the load. That is correct

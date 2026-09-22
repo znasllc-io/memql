@@ -194,6 +194,12 @@ type Function struct {
 	// hover, and populated by annotations every allow-list refused, so the
 	// only value any of them ever held was the zero value.
 
+	// ShopperFormExtension is the route this mutation adds its own fields
+	// to -- `@shopperFormExtension(pack="wholesale", form="application")`.
+	// Nil on every construct that declares none, which is nearly all of
+	// them (design record 2026-09-21).
+	ShopperFormExtension *ShopperFormExtensionDecl
+
 	// Audit indicates all calls should be logged (mutations only)
 	Audit bool
 
@@ -260,6 +266,12 @@ func (f *Function) clone() *Function {
 		// everywhere -- a gate that parsed, validated and gated nothing.
 		RequiresRank:       f.RequiresRank,
 		RequiresCapability: f.RequiresCapability,
+		// LISTED FOR THE REASON DIRECTLY ABOVE: the registry hands out
+		// clones, so an unlisted field is a field every registered construct
+		// loses. An extension that parsed and then vanished from the clone
+		// would be a form silently not collecting a client's fields, which
+		// is the exact failure this seam was built to end.
+		ShopperFormExtension: f.ShopperFormExtension,
 		CacheTTL:           f.CacheTTL,
 		MCPPromoted:        f.MCPPromoted,
 		LatestMode:         f.LatestMode,

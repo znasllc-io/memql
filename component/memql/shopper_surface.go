@@ -105,6 +105,18 @@ const (
 	// user who does not own that site reads zero rows, so a forged owner
 	// refuses itself without any comparison being written down.
 	ShopperOwnerHeader = "X-Memql-Shopper-Owner"
+
+	// ShopperSubmissionIDArg is the argument name the bff stamps one
+	// freshly-minted id into, on BOTH the pack's construct and the client
+	// extension's mutation (design record 2026-09-21, D4).
+	//
+	// DECLARED BY THE CONSTRUCT, NEVER BY THE FORM. It is in
+	// reservedShopperFieldNames, so a declaration offering it to a shopper
+	// is refused -- a shopper who could choose it could point their own row
+	// at somebody else's submission. A pack's shopper construct declares it
+	// in its args block and uses it as the row id it creates, which is what
+	// gives a client extension something to relate to.
+	ShopperSubmissionIDArg = "submissionId"
 )
 
 // shopperFieldDefaultMaxLength bounds a declared field that names no bound
@@ -151,6 +163,8 @@ var reservedShopperFieldNames = map[string]string{
 	"createdAt":   "a row intrinsic",
 	"createdBy":   "a row intrinsic; a caller that can set it can forge provenance",
 	"submittedAt": "stamped from the server clock, never the shopper's",
+	"submissionId": "minted per POST by the bff and stamped into both constructs, so one " +
+		"submission has one id (design record 2026-09-21, D4)",
 	"actor":       "a reserved engine root",
 	"now":         "a reserved engine root",
 	"partition":   "a reserved engine root",
@@ -455,6 +469,15 @@ func ShopperSurface() []ShopperSurfaceEntry {
 		out = append(out, ShopperSurfaceEntry{Pack: r.Pack, Name: r.Name, Kind: "read",
 			Construct: r.Construct, Description: r.Description})
 	}
+	// EXTENSIONS ARE PART OF THE SURFACE. An operator asking what the public
+	// can reach on this cluster must be told about the client's fields too:
+	// they arrive on the same public endpoint and are written by the same
+	// request, so an inventory that omitted them would understate exactly the
+	// half nobody audited (design record 2026-09-21).
+	for _, e := range shopperExtensions {
+		out = append(out, ShopperSurfaceEntry{Pack: e.Pack, Name: e.Form, Kind: "extension",
+			Construct: e.Construct, Description: e.Description})
+	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Pack != out[j].Pack {
 			return out[i].Pack < out[j].Pack
@@ -484,4 +507,5 @@ func ResetShopperSurfaceForTest() {
 	defer shopperMu.Unlock()
 	shopperForms = map[string]ShopperForm{}
 	shopperReads = map[string]ShopperRead{}
+	shopperExtensions = map[string]ShopperExtension{}
 }
