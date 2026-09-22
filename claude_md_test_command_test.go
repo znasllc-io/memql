@@ -17,7 +17,7 @@ import (
 //
 // The defect is the same one memql#4032 fixed in CLAUDE.md: `go test ./...`
 // (and its `-v`/`-cover`/subtree variants like `./component/...`) reads as
-// universal and resolves inside the root module only, in this 49-module
+// universal and resolves inside the root module only, in this 51-module
 // workspace -- so it silently never compiles component/memql,
 // component/database, or component/language, and the contributor who ran it
 // sees `ok` and reports the change verified. The probe that motivated this
@@ -84,7 +84,7 @@ func TestFrontDoorDocsDoNotTeachSingleModuleTestSweep(t *testing.T) {
 // # The defect this closes
 //
 // CLAUDE.md said "go test ./..." in three places. This is a multi-module
-// workspace -- go.work lists 49 modules -- and a relative pattern resolves
+// workspace -- go.work lists 51 modules -- and a relative pattern resolves
 // inside whichever module owns the directory it is rooted at, so `./...` never
 // leaves the root module. Measured at the time of the fix: 64 packages, of which
 // `component/memql`, `component/database` and `component/language` -- the engine,

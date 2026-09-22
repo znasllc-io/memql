@@ -237,7 +237,7 @@ MEMQL_REQUIRE_DB=1 make test   # ...and make a missing database a FAILURE, not a
 ```
 
 **Do NOT verify with `go test ./...`. It does not run the engine** (memql#4032).
-This is a multi-module workspace -- `go.work` lists 49 modules -- and a relative
+This is a multi-module workspace -- `go.work` lists 51 modules -- and a relative
 pattern resolves inside whichever module owns the directory it is rooted at.
 Measured:
 

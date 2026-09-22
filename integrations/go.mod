@@ -159,6 +159,8 @@ replace github.com/znasllc-io/memql/component/node/gen => ../component/node/gen
 
 replace github.com/znasllc-io/memql/component/planner => ../component/planner
 
+replace github.com/znasllc-io/memql/component/procedure => ../component/procedure
+
 replace github.com/znasllc-io/memql/component/provenance => ../component/provenance
 
 replace github.com/znasllc-io/memql/component/router => ../component/router

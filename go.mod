@@ -183,6 +183,8 @@ replace github.com/znasllc-io/memql/component/metrics => ./component/metrics
 
 replace github.com/znasllc-io/memql/component/planner => ./component/planner
 
+replace github.com/znasllc-io/memql/component/procedure => ./component/procedure
+
 replace github.com/znasllc-io/memql/component/provenance => ./component/provenance
 
 replace github.com/znasllc-io/memql/component/secret => ./component/secret
