@@ -11389,6 +11389,20 @@ a.os-button {
   font-size: var(--os-text-base);
   color: var(--os-ink);
   line-height: 1.5;
+  /* A SENTENCE KEEPS A SENTENCE'S MEASURE (DESIGN.md rule 9): the measure
+   * belongs to the thing, and a line of prose the width of a maximised window
+   * is ~180 characters -- far enough that the eye loses the line it was on
+   * coming back. The LIST beside it still takes the whole pane, which is the
+   * other half of the same rule; capping the page to fix this would be the
+   * mistake rule 9 names. */
+  max-width: 80ch;
+}
+
+/* The same measure for the caption under the node list, which grew a third
+ * sentence when a stopped node's rows started being removed (memql#5325). */
+.os-cluster-readiness ~ .os-caption,
+.os-cluster-fact + .os-caption {
+  max-width: 80ch;
 }
 
 /* One readiness line: a Subhead and what it says, grouped so the notice under

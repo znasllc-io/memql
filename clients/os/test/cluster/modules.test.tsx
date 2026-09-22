@@ -293,6 +293,44 @@ describe("the cluster-wide readiness column", () => {
     expect(within(rows[1] as HTMLElement).getByText("Catching up")).toBeTruthy();
     expect(within(rows[1] as HTMLElement).getByText(/last checked 3h ago/)).toBeTruthy();
     expect(within(rows[2] as HTMLElement).getByText(/the fleet could not be read/)).toBeTruthy();
+    // Every row carries its exact reported moment, so an operator comparing
+    // two nodes that both read "3h ago" has something to compare.
+    for (const row of rows) {
+      expect(row.getAttribute("title")).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    }
+  });
+
+  // memql#5325: a stopped node's rows are REMOVED, not merely uncounted, so
+  // the list is the cluster rather than every pod that ever booted. The
+  // caption is the only place a person is told that, and without it a short
+  // list after a rollout is indistinguishable from a list that is hiding
+  // something.
+  it("says that a stopped node is gone from the list, not just uncounted", async () => {
+    const readiness = {
+      loaded: true,
+      state: "live" as const,
+      reseed: () => {},
+      of: (id: string) =>
+        id === "storage"
+          ? {
+              module: "storage",
+              state: "configured" as const,
+              core: true,
+              disagreement: [],
+              nodes: [{ nodeId: "agent-a", nodeType: "agent", state: "configured" as const, reportedAt: new Date().toISOString() }],
+              lanes: [],
+              unknown: [],
+              stale: [],
+              aside: [],
+            }
+          : null,
+    };
+    mount(fakeConnection({}, { modules: MODULES }), "owner", readiness);
+    await click(await screen.findByText("storage"));
+
+    expect(await screen.findByText("Across the cluster")).toBeTruthy();
+    expect(screen.getByText(/A node that has stopped is not here at all/)).toBeTruthy();
+    expect(screen.getByText(/this\s+list is the cluster now, not every pod that has ever run/)).toBeTruthy();
   });
 
   it("draws no cluster reading in the detail of a module readiness does not know", async () => {
