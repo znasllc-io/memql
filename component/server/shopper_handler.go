@@ -299,7 +299,7 @@ func (h *ShopperHandler) serveForm(w http.ResponseWriter, r *http.Request) {
 	// could still go wrong.
 	args["storeId"] = stamp.storeID
 	args["siteId"] = site.ID
-	args["submissionId"] = submissionID
+	args[memql.ShopperSubmissionIDArg] = submissionID
 
 	call, err := dslCall(memql.ShopperCallPrefix(form.Kind)+form.Construct, args)
 	if err != nil {
@@ -364,7 +364,7 @@ func (h *ShopperHandler) runExtension(ctx context.Context, ext *memql.ShopperExt
 	// storefront's reads.
 	extArgs["storeId"] = stamp.storeID
 	extArgs["siteId"] = site.ID
-	extArgs["submissionId"] = submissionID
+	extArgs[memql.ShopperSubmissionIDArg] = submissionID
 
 	call, err := dslCall(ext.Construct, extArgs)
 	if err != nil {
