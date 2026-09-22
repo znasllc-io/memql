@@ -92,6 +92,17 @@ func (s *store) query(ctx context.Context, q string) ([]map[string]any, error) {
 	return memqlRows(res), nil
 }
 
+// callerUserId is the authenticated caller, or "" when there is none -- which
+// is what an automation's system actor looks like, and why the gates that use
+// it treat a blank caller as "not a person acting" rather than as a refusal.
+func callerUserId(ctx context.Context) string {
+	ac, ok := auth.AccessFromContext(ctx)
+	if !ok || ac == nil {
+		return ""
+	}
+	return ac.UserId
+}
+
 // --- call-string construction --------------------------------------------
 
 // call renders a construct call. STRINGS GO THROUGH langparser.QuoteString,

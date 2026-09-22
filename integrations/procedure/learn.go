@@ -246,15 +246,29 @@ func (i *Integration) handleLearnFromRun(ctx context.Context, args map[string]an
 	if runId == "" {
 		return nil, fmt.Errorf("procedure.learnFromRun: runId is required")
 	}
+	// THE GATE. @serverOnly is refused on a builtin at parse, so the check
+	// lives here (dsl/procedure/builtins.memql records why). The run is read
+	// under the CALLER's own actor: the composite owner tier means a caller
+	// who does not own it reads zero rows, and the refusal below is what
+	// turns that silence into an answer.
 	run, err := i.runById(ctx, runId)
 	if err != nil {
 		return nil, err
 	}
 	if run == nil {
-		return nil, fmt.Errorf("procedure.learnFromRun: run %s not found, or not readable as its owner", runId)
+		return nil, fmt.Errorf("procedure.learnFromRun: run %s is not readable as the caller -- "+
+			"learning runs on the owner's own corpus", runId)
+	}
+	owner := strings.TrimSpace(str(run, "ownerUserId"))
+	if caller := callerUserId(ctx); caller != "" && owner != "" && caller != owner {
+		// Belt and braces over the row tier: a cluster owner CAN read another
+		// person's run, and learning from it would write a procedure into
+		// their catalog under their name.
+		return nil, fmt.Errorf("procedure.learnFromRun: run %s belongs to another person; "+
+			"a procedure is learned from its owner's corpus and filed in their catalog", runId)
 	}
 	k := corpusKey{
-		OwnerUserId:   str(run, "ownerUserId"),
+		OwnerUserId:   owner,
 		GoalSignature: str(run, "goalSignature"),
 		Level:         levelArg(args),
 	}
@@ -283,7 +297,15 @@ func (i *Integration) handleLearnFromRun(ctx context.Context, args map[string]an
 func (i *Integration) handleMineCorpus(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	owner := strings.TrimSpace(argString(args, "ownerUserId"))
 	if owner == "" {
-		return nil, fmt.Errorf("procedure.mineCorpus: ownerUserId is required -- every read runs as that person")
+		return nil, fmt.Errorf("procedure.mineCorpus: ownerUserId is required -- every read runs as that person, " +
+			"and a blank one reads zero rows and no error, which looks exactly like a corpus with nothing to learn")
+	}
+	// THE GATE, as above: this builtin cannot carry @serverOnly, so a caller
+	// may only mine their OWN corpus. The sweep that drives it for everybody
+	// is an automation running as the cluster, which carries no caller.
+	if caller := callerUserId(ctx); caller != "" && caller != owner {
+		return nil, fmt.Errorf("procedure.mineCorpus: a person mines their own corpus; " +
+			"the fleet-wide sweep is the scheduled automation, not this call")
 	}
 	k := corpusKey{
 		OwnerUserId:   owner,
