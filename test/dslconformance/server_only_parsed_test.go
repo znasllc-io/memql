@@ -248,6 +248,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// rows keep their composite owner tier, which is what decides who can
 		// READ what this writes.
 		{Path: "accounts/mutations.memql", Name: "recordAccountDomainCheck"}: true,
+		// The successful first-claim coordinator writes the reserved self row
+		// before a completed owner session exists. Only it may associate the
+		// verified claim user after mandatory passkey completion, under the
+		// database claim lock; ordinary forms cannot choose the owner.
+		{Path: "accounts/mutations.memql", Name: "configureClusterAccount"}: true,
 
 		// epic memql#5165, D2. Both group writers, and the argument is the
 		// concept's shape rather than the caller's: v1:identity:group and

@@ -22,6 +22,7 @@ export const DEPLOYMENT_CONCEPT = "v1:platform:packageDeployment";
 export interface PackageRow {
   id: string;
   ownerUserId: string;
+  accountId: string;
   name: string;
   sourceKind: string;
   repoUrl: string;
@@ -75,6 +76,7 @@ export function packageFromRow(row: Row): PackageRow {
   return {
     id: rowString(flat, "id"),
     ownerUserId: rowString(flat, "ownerUserId"),
+    accountId: rowString(flat, "accountId"),
     name: rowString(flat, "name"),
     sourceKind: rowString(flat, "sourceKind"),
     repoUrl: rowString(flat, "repoUrl"),
@@ -108,6 +110,7 @@ export function packageFromRow(row: Row): PackageRow {
 export function packageFingerprint(p: PackageRow): string {
   return [
     p.name,
+    p.accountId,
     p.sourceKind,
     p.repoUrl,
     p.repoRef,

@@ -722,7 +722,7 @@ concept enrolmentToken {
 /// app's door -- and still grants no rows, because the rows a person then sees are decided by the
 /// tier of each concept, and a group with no account ties them to nothing.
 @displayCard(primary="name", secondary="description", status="status")
-@rowAuthz(owner="ownerUserId", rankVisible, unowned="admin", clusterOwner)
+@rowAuthz(owner="ownerUserId", rankVisible, unowned="admin", clusterOwner, account="accountId")
 concept group {
   ownerUserId  string   @description("ALWAYS EMPTY: this is the deployment's row, not a principal's (D2). Present so the owned tier reads at all -- an ABSENT owner key is denied at every rank, and only a PRESENT-and-empty one is the deliberate statement of cluster ownership that `unowned=\"admin\"` then makes readable. Nothing writes a value here, and a row that carried one would be readable by that principal alone.")
   name         string!  @description("Display name of the group, as a person would say it. For the group the automation makes per account this is the account's own name; for a custom group it is whatever the operator called it.")
@@ -765,8 +765,9 @@ concept group {
 /// a person, not a row that person owns. Written only by integrations/groups, never by a mutation
 /// a caller can reach.
 @displayCard(primary="userId", secondary="origin", status="status")
-@rowAuthz(owner="ownerUserId", rankVisible, unowned="admin", clusterOwner)
+@rowAuthz(owner="ownerUserId", rankVisible, unowned="admin", clusterOwner, account="accountId")
 concept groupMembership {
+  accountId    string   @description("Organization inherited from the membership group. Absent on historic rows until repaired from their group; empty for a custom group with no organization. Never supplied by a client.")
   ownerUserId  string   @description("ALWAYS EMPTY (D2). See v1:identity:group.ownerUserId for why the field is present and never written.")
   groupId      string!  @description("The v1:identity:group this membership is in.")
   userId       string!  @description("The v1:identity:user who is a member. NOT the row's owner: a member who owned their own membership row could insert one, which is the whole reason this concept is unowned.")

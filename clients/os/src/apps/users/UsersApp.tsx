@@ -51,7 +51,7 @@ import { useRoleCatalog } from "./useRoles";
 // broadcasts.
 //
 // All of it is PRESENTATION. `searchUsers` and `pendingUserInvitations` carry
-// their own gates, `groupsAll` declares `@requiresRank("admin")`,
+// their own gates, `groupsAll` is filtered to authorized organizations,
 // integrations/groups checks the caller's capability and rank in Go, and row
 // admission gates the subscriptions. Hiding a control here is a courtesy to
 // the person reading, never the boundary.
@@ -91,8 +91,11 @@ export function UsersApp({
   const viewerRole = access?.role ?? "";
   const viewerUserId = access?.userId ?? "";
 
-  const users = usePeople();
-  const invites = useInvites();
+  // A scoped group manager reads people through groupPeople on the opened
+  // group, never through the cluster directory or invitation roster.
+  const operator = access?.everyAccount === true;
+  const users = usePeople(operator);
+  const invites = useInvites(operator);
   const groups = useGroups();
   const accounts = useAccountOptions();
   const catalog = useRoleCatalog();
@@ -203,6 +206,8 @@ export function UsersApp({
   if (sectionId === "roles") {
     return (
       <RolesSection
+        createForAccountId={intent?.payload["createRole"] === true && typeof intent?.payload["accountId"] === "string" ? intent.payload["accountId"] : ""}
+        onOpened={consume}
         catalog={catalog}
         people={people}
         accounts={accounts}

@@ -192,6 +192,12 @@ func (s *Server) finishBootstrapLocked(ctx context.Context, row *identity.Bootst
 	if owner == nil && s.OnUserProvisioned != nil {
 		s.OnUserProvisioned(ctx, row.UserID, row.Settings.BootstrapEmail, row.EmailVerified)
 	}
+	// Complete the existing self organization before sealing the claim or
+	// issuing a session. All steps in this builtin are idempotent; a failure
+	// resumes under the same claim lock and passkey proof on another replica.
+	if err := s.Store.ConfigureBootstrapOrganization(ctx, row); err != nil {
+		return err
+	}
 	if row.Local {
 		if err := s.Store.SetUserSignInPolicy(ctx, row.UserID, identity.SignInPolicyPasskeyOnly); err != nil {
 			return err

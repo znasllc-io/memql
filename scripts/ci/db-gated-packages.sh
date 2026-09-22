@@ -177,6 +177,7 @@ readonly DB_GATED_TREES=(
 	"component/memql"
 	"component/automations"
 	"component/backup"
+	"component/campaigns"
 	"component/database"
 	"component/grpc"
 	"component/identity"

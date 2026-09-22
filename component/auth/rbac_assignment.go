@@ -247,3 +247,33 @@ func roleScope(slug string) string {
 	}
 	return strings.TrimSpace(cat.Scope(normalizeSlug(slug)))
 }
+
+// RoleAccountScope is the organization boundary declared by the installed role.
+// Its value is configuration, never an account id supplied by a request.
+func RoleAccountScope(role Role) string { return roleScope(string(role)) }
+
+// IsClusterOperator excludes account-scoped roles regardless of their rank.
+func IsClusterOperator(role Role) bool {
+	return RoleAccountScope(role) == "" && RoleRank(role) >= RoleRank(RoleAdmin) && RoleRank(RoleAdmin) > 0
+}
+
+// ScopedRoleMayUse bounds grants as well as role capabilities: a grant is not
+// permission to turn an organization administrator into a cluster operator.
+func ScopedRoleMayUse(role Role, resource string) bool {
+	if RoleAccountScope(role) == "" {
+		return true
+	}
+	for _, prefix := range []string{"app:cluster", "app:concepts", "app:logs", "app:setup"} {
+		if resource == prefix || strings.HasPrefix(resource, prefix+"/") {
+			return false
+		}
+	}
+	if strings.HasPrefix(resource, "app:settings/") && resource != "app:settings/access" {
+		return false
+	}
+	switch resource {
+	case ResourcePrincipal, ResourceRole, ResourceAdmission, ResourceDeployment, ResourceConstruct:
+		return false
+	}
+	return true
+}

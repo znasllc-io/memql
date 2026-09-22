@@ -110,6 +110,12 @@ func productionStatements(t *testing.T) []string {
 	if _, err := s.UserRole(ctx, "u-1"); err != nil {
 		t.Fatalf("UserRole: %v", err)
 	}
+	setup := &setupGraph{stubEngine: newStub()}
+	setup.users["owner"] = map[string]any{"id": "owner", "role": "owner"}
+	if err := New(setup, nil).ConfigureSelfAccount(SystemActorContext(ctx), awkward, "owner"); err != nil {
+		t.Fatalf("ConfigureSelfAccount: %v", err)
+	}
+	rec.calls = append(rec.calls, setup.writes...)
 	return rec.calls
 }
 

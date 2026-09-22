@@ -312,6 +312,28 @@ builtin groupEnsureForAccount {
   accountId  string!
 }
 
+/// Ownership completion calls this after the required passkey succeeds, while
+/// holding the cross-replica claim lock. Reuses self and its derived group.
+@executor("integration.groups.configureSelfAccount")
+@description("Configure the cluster organization and ensure its claiming owner belongs to its membership group. Internal ownership completion only; retries preserve unrelated account details and grant no new role.")
+builtin configureSelfAccount {
+  name         string!
+  ownerUserId  string!
+}
+
+@executor("integration.groups.groupEnsureOperatorMembership")
+@description("Ensure a global cluster operator belongs to the configured cluster organization. Internal lifecycle only, checked by the handler; scoped client roles never join the cluster organization. Idempotent, grants no role.")
+builtin groupEnsureOperatorMembership {
+  userId  string!
+}
+
+@sdk
+@executor("integration.groups.groupPeople")
+@description("List up to 100 active people already in this group's organization. Requires group management permission and membership of that organization; never enumerates unrelated users.")
+builtin groupPeople {
+  groupId  string!
+}
+
 @requiresCapability("update", "group")
 @executor("integration.groups.groupArchiveForAccount")
 @description("Archive every group tied to one account and remove their memberships -- the archiveAccountGroup cascade (epic memql#5165, D5). Requires `update` on `group`, the same verb groupArchive checks, because this is that archive taken over every group one account has. BOTH KINDS, not just the account-kind one: a custom group tied to an archived account grants access to a client that is gone, so leaving it active would mean the archive changed what the screens show and not what the people can reach. NOT @sdk -- the cascade is the engine's. Returns {accountId, groupsArchived, membershipsRemoved}.")

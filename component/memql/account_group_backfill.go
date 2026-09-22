@@ -83,6 +83,16 @@ func (m *SeedMaterializer) reconcileAccountGroups(ctx context.Context) (AccountG
 			report.Created++
 		}
 	}
+	users, err := m.listUserIds(sweepCtx)
+	if err != nil {
+		return report, err
+	}
+	for _, userID := range users {
+		_, err := m.engine.Execute(sweepCtx, fmt.Sprintf(`builtin groupEnsureOperatorMembership(userId: %s)`, langparser.QuoteString(userID)))
+		if err != nil {
+			report.Errors = append(report.Errors, fmt.Sprintf("operator %s: %v", userID, err))
+		}
+	}
 	return report, nil
 }
 

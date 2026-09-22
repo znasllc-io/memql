@@ -14765,3 +14765,5 @@ a.os-button {
 
 .os-icon-button:has(> .os-attention-dot) { position: relative; }
 .os-icon-button[data-os-setup]:has(> .os-attention-dot) .os-dot { right: auto; left: 3px; }
+
+.os-wizard-marks { display: flex; gap: .5rem; align-items: center; }

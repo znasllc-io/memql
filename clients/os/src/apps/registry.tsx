@@ -226,6 +226,7 @@ const deployables: OsAppManifest = {
   wants: DEPLOYABLES_WANTS,
   settingsSection: "settings",
   logsSection: "logs",
+  attentionChanges: [{ id: "deployables:organization", revision: "organization-1", sectionId: "deployables", label: "Organization ownership for sources and deployables" }],
   component: DeployablesApp,
 };
 
@@ -383,30 +384,9 @@ const training: OsAppManifest = {
 // its five siblings are: the gear and the manifest must offer the same set,
 // and a second copy of the list is one that can disagree.
 //
-// `roles: { min: "admin" }` -- AND IT IS A MIRROR, NOT THE GATE (epic
-// memql#4832 D6, memql#4837).
-//
-// This manifest carried NO role until now, and the reasoning was sound at the
-// time: gating here would have been "presentation pretending to be
-// authorization", because a launcher filter is the only thing this file can
-// do and its own predicate says so.
-//
-// What changed is that there is now something real to mirror. The accounts
-// constructs declare `@requiresRank("admin")`, which the ENGINE enforces, so
-// a person below that rank is refused server-side whether or not this line
-// exists. Both halves are permanent and neither stands in for the other:
-// hiding an app somebody cannot reach beats letting them open it and read a
-// refusal, and that is a different job from refusing it.
-//
-// `admin` is rank >= 200 = {admin, developer, owner}, which is the set
-// memql#4837 spells out. The issue's title says "developer-and-above" and
-// means the same set -- that was the OS ladder's way of saying it, back when
-// developer sat BELOW admin. `min: "developer"` would read like the issue and
-// lock out every admin.
-//
-// `TestAppManifestMirrorsTheEngineFloor` (component/auth) fails the build if
-// this value and the DSL floor ever disagree, which is the whole point of
-// calling it a mirror.
+// App access is explicitly granted. The shared account-options query is also
+// available to organization members creating their work in other apps; the
+// engine filters those rows to their authorized organizations.
 //
 // NOT always-docked. That is the Bin's distinction (#4784); this is an
 // ordinary app that opens from the launcher like every other one.
@@ -418,6 +398,7 @@ const accounts: OsAppManifest = {
   sections: ACCOUNTS_SECTIONS,
   settingsSection: "settings",
   logsSection: "logs",
+  attentionChanges: [{ id: "accounts:organization-membership", revision: "organization-1", sectionId: "accounts", label: "Organizations, membership and scoped app access" }],
   component: AccountsApp,
 };
 
@@ -559,6 +540,7 @@ const campaigns: OsAppManifest = {
   wants: CAMPAIGNS_WANTS,
   settingsSection: "settings",
   logsSection: "logs",
+  attentionChanges: [{ id: "campaigns:organization", revision: "organization-1", sectionId: "campaigns", label: "Choose the organization for every campaign" }],
   component: CampaignsApp,
 };
 

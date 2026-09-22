@@ -87,13 +87,12 @@ var migratedConstructs = []migratedConstruct{
 	},
 	{
 		file: "accounts/queries.memql", name: "clientAccountsAll",
-		annotation: `@requiresRank("admin")`,
-		why: "the owner-check conjunct is DROPPED and the concept's tier decides. The floor " +
-			"predates this epic and is unchanged",
+		annotation: `@actor`,
+		why:        "organization membership is enforced by the engine; this shared picker is available to authorized members below admin rank",
 	},
 	{
 		file: "accounts/queries.memql", name: "clientAccountById",
-		annotation: `@requiresRank("admin")`,
+		annotation: `@actor`,
 		why:        "as clientAccountsAll",
 	},
 }

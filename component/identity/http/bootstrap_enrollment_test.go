@@ -19,6 +19,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/uptrace/bun/driver/pgdriver"
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/magiclink"
@@ -55,10 +56,12 @@ func bootstrapTestDB(t *testing.T) *sql.DB {
 type bootstrapEngine struct {
 	mu sync.Mutex
 	passkeyStubEngine
-	settings map[string]any
-	users    int
-	consumed bool
-	fail     string
+	settings          map[string]any
+	users             int
+	consumed          bool
+	organization      string
+	organizationOwner string
+	fail              string
 }
 
 func (e *bootstrapEngine) Execute(ctx context.Context, q string) (*memqlengine.ExecuteResult, error) {
@@ -68,6 +71,12 @@ func (e *bootstrapEngine) Execute(ctx context.Context, q string) (*memqlengine.E
 		return nil, errors.New("injected persistence failure")
 	}
 	switch {
+	case strings.HasPrefix(q, "builtin configureSelfAccount("):
+		if !auth.OriginFromContext(ctx).IsInternal() {
+			return nil, errors.New("organization setup must be internal")
+		}
+		e.organization = extractField(q, "name")
+		e.organizationOwner = extractField(q, "ownerUserId")
 	case strings.Contains(q, "clusterSettingsCurrent("):
 		if e.settings == nil {
 			return e.nodes()
@@ -86,7 +95,7 @@ func (e *bootstrapEngine) Execute(ctx context.Context, q string) (*memqlengine.E
 		e.byCredentialId[cred] = map[string]any{"id": extractField(q, "identityId"), "userId": extractField(q, "userId"), "active": true, "credentials": map[string]any{"credentialId": cred, "publicKey": extractField(q, "publicKey"), "signCount": float64(0), "backupEligible": true, "backupState": true}}
 	case strings.HasPrefix(q, "mutation createClusterSettings(") || strings.HasPrefix(q, "mutation updateClusterSettings("):
 		e.settings = map[string]any{"id": "cluster"}
-		for _, key := range []string{"clusterDomain", "bootstrapEmail", "bootstrapFirstName", "bootstrapLastName", "bootstrappedAt"} {
+		for _, key := range []string{"brandName", "clusterDomain", "bootstrapEmail", "bootstrapFirstName", "bootstrapLastName", "bootstrappedAt"} {
 			e.settings[key] = extractField(q, key)
 		}
 	case strings.Contains(q, "magicLinkRequestById("):
@@ -108,6 +117,7 @@ func bootstrapServers(t *testing.T, provider string) (*Server, *Server, *bootstr
 	first := newPasskeyTestServer(t, &e.passkeyStubEngine)
 	second := newPasskeyTestServer(t, &e.passkeyStubEngine)
 	for _, s := range []*Server{first, second} {
+		s.Logger = slog.Default()
 		s.Cfg.DeployProvider = provider
 		s.Store = &identity.Store{Engine: e, DirectDB: func() *sql.DB { return db }}
 		s.ChallengeBackend = nil
@@ -119,7 +129,7 @@ func beginBootstrap(t *testing.T, s *Server, verified bool) string {
 	release, err := s.Store.AcquireBootstrapGate(context.Background())
 	require.NoError(t, err)
 	defer release()
-	token, err := s.Store.BeginBootstrapEnrollmentLocked(context.Background(), s.Cfg, identity.ClusterSettingsRow{ClusterDomain: "test", BootstrapEmail: "owner@example.test", BootstrapFirstName: "Ada", BootstrapLastName: "Owner"}, nil, verified)
+	token, err := s.Store.BeginBootstrapEnrollmentLocked(context.Background(), s.Cfg, identity.ClusterSettingsRow{ClusterDomain: "test", BrandName: "Example Organization", BootstrapEmail: "owner@example.test", BootstrapFirstName: "Ada", BootstrapLastName: "Owner"}, nil, verified)
 	require.NoError(t, err)
 	return token
 }
@@ -165,7 +175,7 @@ func TestBootstrapLocalWizardSkipsEmailAndRequiresRealPasskeyAcrossReplicas(t *t
 	}
 	require.NoError(t, json.Unmarshal(page.Body.Bytes(), &data))
 	require.True(t, data.Data.Local)
-	form := url.Values{"owner_first_name": {"Ada"}, "owner_last_name": {"Owner"}, "owner_email": {"owner@example.test"}, "domain": {"test"}}
+	form := url.Values{"owner_first_name": {"Ada"}, "owner_last_name": {"Owner"}, "owner_email": {"owner@example.test"}, "domain": {"test"}, "brand_name": {"Example Organization"}}
 	post := httptest.NewRequest("POST", "https://identity.test/setup", strings.NewReader(form.Encode()))
 	post.Header = get.Header.Clone()
 	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -199,6 +209,8 @@ func TestBootstrapLocalWizardSkipsEmailAndRequiresRealPasskeyAcrossReplicas(t *t
 	done := bootstrapRegister(t, second, token, true, WebAuthnRegisterFinishRequest{ChallengeId: challenge.ChallengeId, Credential: a.create(challenge.CreationOptions.Response.Challenge.String())})
 	require.Equal(t, 200, done.Code, done.Body.String())
 	require.Equal(t, 1, e.users)
+	require.Equal(t, "Example Organization", e.organization)
+	require.Equal(t, e.user["id"], e.organizationOwner)
 	require.NotEmpty(t, e.settings["bootstrappedAt"])
 	require.Contains(t, strings.Join(e.mutations, "\n"), `policy: "passkey_only"`)
 	require.NotContains(t, strings.Join(e.mutations, "\n"), "mutation createIdentityMagicLink")
@@ -211,9 +223,9 @@ func TestBootstrapLocalWizardSkipsEmailAndRequiresRealPasskeyAcrossReplicas(t *t
 
 func TestBootstrapHostedEmailOnlyNeverCreatesOwnerOrSession(t *testing.T) {
 	first, second, e := bootstrapServers(t, "azure")
-	_, err := first.Store.BeginBootstrapEnrollmentLocked(context.Background(), first.Cfg, identity.ClusterSettingsRow{ClusterDomain: "test", BootstrapEmail: "owner@example.test", BootstrapFirstName: "Ada", BootstrapLastName: "Owner"}, nil, false)
+	_, err := first.Store.BeginBootstrapEnrollmentLocked(context.Background(), first.Cfg, identity.ClusterSettingsRow{ClusterDomain: "test", BrandName: "Example Organization", BootstrapEmail: "owner@example.test", BootstrapFirstName: "Ada", BootstrapLastName: "Owner"}, nil, false)
 	require.Error(t, err)
-	e.settings = map[string]any{"id": "cluster", "bootstrapEmail": "owner@example.test", "bootstrapFirstName": "Ada", "bootstrapLastName": "Owner", "clusterDomain": "test", "bootstrappedAt": ""}
+	e.settings = map[string]any{"id": "cluster", "bootstrapEmail": "owner@example.test", "bootstrapFirstName": "Ada", "bootstrapLastName": "Owner", "clusterDomain": "test", "brandName": "Example Organization", "bootstrappedAt": ""}
 	verifier := &magiclink.Verifier{Cfg: first.Cfg, Store: first.Store}
 	res, err := verifier.Finish(context.Background(), magiclink.FinishInput{RequestId: "request"})
 	require.NoError(t, err)
@@ -242,6 +254,8 @@ func TestBootstrapHostedEmailOnlyNeverCreatesOwnerOrSession(t *testing.T) {
 	done := bootstrapRegister(t, second, token, true, WebAuthnRegisterFinishRequest{ChallengeId: challenge.ChallengeId, Credential: a.create(challenge.CreationOptions.Response.Challenge.String())})
 	require.Equal(t, 200, done.Code, done.Body.String())
 	require.Equal(t, 1, e.users)
+	require.Equal(t, "Example Organization", e.organization)
+	require.Equal(t, e.user["id"], e.organizationOwner)
 	require.NotEmpty(t, e.settings["bootstrappedAt"])
 }
 
@@ -319,4 +333,28 @@ func TestBootstrapCompetingLocalPasskeysCreateOnlyOneOwner(t *testing.T) {
 	codes := []int{<-results, <-results}
 	require.ElementsMatch(t, []int{http.StatusOK, http.StatusConflict}, codes)
 	require.Equal(t, 1, e.users)
+}
+
+func TestBootstrapOrganizationFailureDoesNotSealOrIssueSessionAndResumesAcrossReplica(t *testing.T) {
+	first, second, e := bootstrapServers(t, "docker-local")
+	token := beginBootstrap(t, first, false)
+	begin := bootstrapRegister(t, first, token, false, map[string]string{})
+	require.Equal(t, 200, begin.Code, begin.Body.String())
+	challenge := decodeBegin(t, begin)
+	a := newHTTPSoftwareAuthenticator(t)
+	e.fail = "configureSelfAccount"
+	failed := bootstrapRegister(t, second, token, true, WebAuthnRegisterFinishRequest{ChallengeId: challenge.ChallengeId, Credential: a.create(challenge.CreationOptions.Response.Challenge.String())})
+	require.NotEqual(t, 200, failed.Code)
+	require.Empty(t, failed.Result().Cookies())
+	require.Empty(t, e.settings["bootstrappedAt"])
+	require.Empty(t, e.organization)
+	require.Equal(t, 1, e.users)
+	e.fail = ""
+	resumed := bootstrapRegister(t, first, token, true, map[string]string{})
+	require.Equal(t, 200, resumed.Code, resumed.Body.String())
+	require.Equal(t, 1, e.users)
+	require.Equal(t, "Example Organization", e.organization)
+	require.Equal(t, e.user["id"], e.organizationOwner)
+	require.NotEmpty(t, e.settings["bootstrappedAt"])
+	require.NotEmpty(t, resumed.Result().Cookies())
 }

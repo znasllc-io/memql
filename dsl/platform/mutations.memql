@@ -383,19 +383,10 @@ mutation inboundRequest updateInboundRequestStatus {
 /// TestDeclaredOwnerFieldsAreServerStamped refuses, and an exemption here would be false, because
 /// the field genuinely is not forgeable.
 ///
-/// The one thing the body cannot say is that a write made AS THE DEPLOYMENT produces the
-/// deployment's row rather than a person's -- the seeded portal is site #1 and must land
-/// CLUSTER-OWNED (an empty ownerUserId), and `ownerUserId: actor.userId` would otherwise stamp
-/// "system:seedMaterializer" onto it, twice over, since the materializer re-writes the row on every
-/// boot. So executeWrite UNDOES this stamp -- and only this stamp, matched against the caller's own
-/// id -- when the writer is privileged (cluster owner, internal origin, or a system actor). See
-/// component/memql/platform_site_hostname_policy.go.
-///
-/// That is a NARROWING and never a widening, which is why it does not reopen what the gate above
-/// protects: the Go step can only turn the caller's own id into EMPTY, which matches nobody
-/// (sameRowAuthzOwner refuses an empty owner outright), and it can never name a third party. A
-/// cluster owner hands a site over, or takes one back, by re-running this mutation on the id -- the
-/// read-merge makes that an update and the cluster-owner write escape admits it.
+/// Synthetic deployment actors leave system sites unowned. Real people keep
+/// ownerUserId, including cluster owners and callers forwarded through the
+/// package pipeline. Internal origin admits server-only operations; it never
+/// erases the authenticated person's attribution.
 ///
 /// HOSTNAME. The args field carries the SHAPE half (@maxLength + a lowercase-DNS @pattern), which is
 /// all a mutation body can express. The half that decides -- <slug>.<domain> against the domain THIS
@@ -406,6 +397,7 @@ mutation inboundRequest updateInboundRequestStatus {
 mutation site createSite {
   args {
     siteId       string!
+    accountId    string
     hostname     string!  @maxLength(253) @pattern("^[a-z0-9][a-z0-9.-]*[a-z0-9]$")
     kind         enum("spa", "static", "shopify_storefront")
     /// What the edge answers for a path that matches no file. Omitted means the kind decides,
@@ -423,7 +415,7 @@ mutation site createSite {
     binding      object
   }
   insert {
-    accept { hostname, bundleRef, artifactId, binding, resolutionTail }
+    accept { hostname, bundleRef, artifactId, binding, resolutionTail, accountId }
     stamp {
       id:          args.siteId
       ownerUserId: actor.userId
@@ -446,11 +438,10 @@ mutation site createSite {
 /// are dropped, mutation_templates.go) and the read-merge inherits the stored value -- `args.artifactId ??
 /// ""` would put an explicit empty string in the delta and blank the provenance on every rollback.
 ///
-/// AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite, not anything in this body:
-/// the write guard resolves the target row and admits its OWNER only, and the cluster-owner path is
-/// the separate, explicit escape in rowAuthzWriteEscape. So a user publishes to their own site, an
-/// operator publishes to any, and a cross-user write is refused before the merge -- which is why the
-/// guard reads the PRIOR row rather than the merged payload.
+/// AUTHORIZATION resolves the prior site and checks current rights in its organization. Shared
+/// edits preserve the original owner and record the current writer on the new version. Package
+/// publication also checks the target site's deploy/publish permission before external effects;
+/// a grant on its source package's organization does not grant rights in another organization.
 mutation site updateSiteBundle {
   args {
     siteId     string!
@@ -1760,7 +1751,8 @@ mutation syncState setSyncPaused {
 //
 // The SECOND group is what a PERSON does: create a package, archive one,
 // archive a site. Those are ordinary caller-scoped mutations gated by the
-// composite tier, because they act on the caller's own rows.
+// organization boundary and action permissions. Shared edits preserve the
+// original owner; creating a package stamps its authenticated creator.
 //
 // A @serverOnly writer WITHOUT the stamp is refused on every call with only a
 // WARN to show for it, so the two halves of each pipeline write -- this
@@ -1794,7 +1786,7 @@ mutation package createPackage {
     credentialId  string
     artifactId    string
     autoDeploy    boolean
-    /// The v1:accounts:account this package is for. Absent means untied.
+    /// Owning organization. If omitted, the engine resolves an authorized default; it refuses an ambiguous choice.
     accountId     string
   }
   insert {

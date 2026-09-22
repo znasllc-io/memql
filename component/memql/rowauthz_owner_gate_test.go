@@ -123,6 +123,22 @@ func TestDeclaredOwnerFieldsAreServerStamped(t *testing.T) {
 			}
 			continue
 		}
+		// memql#5598: ownership completion runs before a completed owner
+		// session exists. Only the internal claim coordinator can supply the
+		// principal verified by passkey. Keep this exemption mutation-specific:
+		// a second writable mutation or loss of @serverOnly must fail here.
+		if r.Concept == "v1:accounts:account" && len(r.WritableBy) == 1 && r.WritableBy[0] == "configureClusterAccount" && len(r.StampedBy) == 1 && r.StampedBy[0] == "createClientAccount" {
+			trusted := false
+			for _, fn := range registry.List() {
+				if fn.Name == "configureClusterAccount" {
+					trusted = fn.ServerOnly && fn.BoundConcept == r.Concept
+				}
+			}
+			if trusted {
+				passed++
+				continue
+			}
+		}
 		if reason, exempt := ownerGateExemptions[r.Concept]; exempt {
 			seenExempt[r.Concept] = true
 			t.Logf("KNOWN (exempt): %s.%s -- %s\n    tracked: %s",

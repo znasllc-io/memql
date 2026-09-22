@@ -117,11 +117,18 @@ func dataPlaneRole(access *auth.AccessContext) auth.Role {
 // the query exactly as the executor will, and reads the call origin and the
 // ambient actor envelope off this context to do it.
 //
-// The engine is consulted for classification ONLY when the role cannot write.
-// A role holding create-on-data may run anything the data plane exposes, so
-// there is nothing a classification could change -- which also means the extra
-// parse this costs is paid only by the roles that are actually constrained.
+// Organization-only requests defer to the engine's target-specific checks.
+// Other requests keep the coarse global check, excluding grants attached to
+// organizations so a client grant cannot authorize unrelated personal data.
 func (s *streamSession) allowDataPlaneAccess(ctx context.Context, query string) (bool, string) {
+	// Organization resources have target-specific read/create/update checks
+	// in the executor. A flattened deny from another organization must not
+	// stop those checks from running, nor may an update-only grant be treated
+	// as missing create authority. The classifier proves that the complete
+	// request is covered; mixed or unscoped requests keep the coarse gate.
+	if s.service != nil && s.service.engine != nil && s.service.engine.OrganizationDataPlaneEnforced(ctx, query) {
+		return true, ""
+	}
 	access, _ := auth.AccessFromContext(ctx)
 	role := dataPlaneRole(access)
 
@@ -132,18 +139,24 @@ func (s *streamSession) allowDataPlaneAccess(ctx context.Context, query string) 
 	// the role this gate decides on.
 	subject, _ := auth.SubjectFromContext(ctx)
 	subject.Role = role
+	capable := func(verb string) bool {
+		if s.service != nil && s.service.engine != nil {
+			return s.service.engine.GlobalDataCapable(ctx, verb)
+		}
+		return auth.CapableFor(ctx, subject, verb, auth.ResourceData)
+	}
 
 	// The read half. Every role in the shipped model holds read-on-data, so
 	// this refuses nobody today; it is here because "may this actor read at
 	// all" is a real question the model answers, and a role authored without
 	// the grant (custom roles, v1:rbac:role) must be refused here rather than
 	// read silently.
-	if !auth.CapableFor(ctx, subject, auth.VerbRead, auth.ResourceData) {
+	if !capable(auth.VerbRead) {
 		return false, fmt.Sprintf("permission denied: role %q holds no read capability on the data plane", role)
 	}
 
 	// The write half -- the reason this file exists.
-	if auth.CapableFor(ctx, subject, auth.VerbCreate, auth.ResourceData) {
+	if capable(auth.VerbCreate) {
 		return true, ""
 	}
 	if s.service == nil || s.service.engine == nil {

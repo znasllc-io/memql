@@ -182,7 +182,7 @@ func (e *MemQLEngine) evaluateBuiltinFunctionExpression(ctx context.Context, exp
 	// mutation and logic entry points ask. Internal origin passes here for
 	// the reason it passes there: an automation driving packageDeploy on a
 	// person's behalf is trusted Go, not a principal.
-	if err := e.refuseBuiltinBelowRequiredCapability(ctx, expr.Name); err != nil {
+	if err := e.refuseBuiltinBelowRequiredCapability(ctx, expr.Name, expr.Args); err != nil {
 		return nil, err
 	}
 	handler, ok := e.builtinExecutorHandlers[expr.Executor]

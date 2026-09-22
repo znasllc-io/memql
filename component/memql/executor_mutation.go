@@ -794,6 +794,9 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// stamped", and an update whose delta never mentioned the owner stamped
 	// nothing. See the pipeline case in site_owner_stamp_pipeline_update_test.go.
 	_, deltaNamedOwner := payload["ownerUserId"]
+	var organizationOwnerField string
+	var organizationOwner any
+	var organizationOwnerPresent bool
 
 	id := strings.TrimSpace(mutation.ID)
 	if id != "" {
@@ -831,8 +834,26 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		if err := guardRowAuthzWrite(ctx, conceptMeta.Name, id, priorPayload, existed, requirePrior); err != nil {
 			return nil, meta, err
 		}
+		if existed {
+			if err := e.validateOrganizationSensitiveChanges(ctx, conceptMeta.Name, priorPayload, payload); err != nil {
+				return nil, meta, err
+			}
+			if err := e.validateOrganizationTransfer(ctx, conceptMeta.Name, id, priorPayload, payload); err != nil {
+				return nil, meta, err
+			}
+		}
 
 		if existed {
+			// Organization collaboration changes the editor, not the original
+			// owning principal. Capture before merge and restore after every
+			// actor stamp below; accounts themselves use their governed claim
+			// writer and legacy untied rows keep their existing contract.
+			if organizationOwnedConcept(conceptMeta.Name) && strings.TrimSpace(stringFromAny(priorPayload["accountId"])) != "" {
+				if decl := rowAuthzDeclFor(conceptMeta.Name); decl != nil && decl.Owner != "" {
+					organizationOwnerField = decl.Owner
+					organizationOwner, organizationOwnerPresent = priorPayload[decl.Owner]
+				}
+			}
 			// Capture the PRIOR status before the delta overwrites it
 			// (#1158) so executeUpdate can surface it as oldStatus.
 			meta.priorStatus, _ = priorPayload["status"].(string)
@@ -921,6 +942,14 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		return nil, meta, fmt.Errorf("update(): no existing row for concept %q id %q (use insert() to create)", conceptName, id)
 	}
 
+	if err := e.validateOrganizationOwnership(ctx, conceptName, payload, meta.priorExisted); err != nil {
+		return nil, meta, err
+	}
+	if !meta.priorExisted {
+		if err := e.validateOrganizationSensitiveChanges(ctx, conceptMeta.Name, nil, payload); err != nil {
+			return nil, meta, err
+		}
+	}
 	beforeWriteIncomingStatus := payload["status"]
 	if err := e.applyBeforeWrite(ctx, conceptName, id, meta.priorExisted, payload); err != nil {
 		return nil, meta, err
@@ -989,6 +1018,13 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// canonicalizeRelationshipFields, while the stamped value is still the
 	// bare actor id the comparison expects.
 	undoNonPrincipalOwnerStamp(ctx, conceptMeta.Name, payload)
+	if organizationOwnerField != "" {
+		if organizationOwnerPresent {
+			payload[organizationOwnerField] = organizationOwner
+		} else {
+			delete(payload, organizationOwnerField)
+		}
+	}
 
 	// Annotation-driven PII scrub (memql#1711). A mutation tagged
 	// @scrubPii (the hard-delete / data-deletion path) clears EVERY field

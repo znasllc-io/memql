@@ -6,6 +6,7 @@ import { Users } from "lucide-react";
 import { AccountChip, AccountPicker } from "../accounts/AccountPicker";
 import { accountNameFrom } from "../accounts/rows";
 import { useAccountOptions } from "../accounts/tie";
+import { organizationChosen, useDefaultOrganization } from "../accounts/organization";
 import type { UploadProvider } from "../../items/upload";
 import {
   Button,
@@ -650,20 +651,25 @@ function subscriptionNote(recipients: RecipientRow[]): string {
 // ---------------------------------------------------------------------------
 
 export function AudienceForm({
+  initialAccountId = "",
   writes,
   onDone,
 }: {
+  initialAccountId?: string;
   writes: CampaignWrites;
   onDone: (createdId: string) => void;
 }) {
   const accounts = useAccountOptions();
+  const defaultAccountId = useDefaultOrganization(accounts);
   const create = writes.createAudience;
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [accountId, setAccountId] = useState("");
+  const [pickedAccountId, setAccountId] = useState("");
+
+  const accountId = pickedAccountId || initialAccountId || defaultAccountId;
 
   async function submit() {
-    if (name.trim() === "") return;
+    if (name.trim() === "" || !organizationChosen(accounts, accountId)) return;
     const id = await create.create({ name, description, accountId });
     if (id !== "") onDone(id);
   }
@@ -689,10 +695,11 @@ export function AudienceForm({
             onChange={setDescription}
           />
         </Field>
-        <Field label="Client">
+        <Field label="Organization">
           <AccountPicker
             id="os-audience-new-account"
-            label="Client this audience is for"
+            label="Organization this audience is for"
+            required
             value={accountId}
             onChange={setAccountId}
             accounts={accounts}
@@ -713,7 +720,7 @@ export function AudienceForm({
           busy={create.busy}
           busyLabel="Creating"
           onClick={submit}
-          disabled={name.trim() === ""}
+          disabled={name.trim() === "" || !organizationChosen(accounts, accountId)}
         >
           Create audience
         </Button>

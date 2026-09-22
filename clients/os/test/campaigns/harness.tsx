@@ -71,6 +71,7 @@ function fakeSubscriptions(): FakeSubscriptions {
 
 export interface FakeSeed {
   campaigns?: Row[];
+  accounts?: Row[];
   audiences?: Row[];
   templates?: Row[];
   senderIdentities?: Row[];
@@ -142,7 +143,7 @@ export function fakeConnection(seed: FakeSeed = {}) {
 
       // The Accounts tie surface's own read, because the campaign form mounts
       // an AccountPicker.
-      clientAccountsAll: vi.fn(async () => rowsResult([])),
+      clientAccountsAll: vi.fn(async () => rowsResult(seed.accounts ?? [{ id: "self", name: "Operator organization", status: "active" }])),
 
       // TYPED ARGS, so `.mock.calls[0][0]` is a record rather than `never` --
       // a test that asserts WHICH arguments a write received cannot do it
@@ -180,7 +181,7 @@ export function fakeConnection(seed: FakeSeed = {}) {
 
 export type FakeConnection = ReturnType<typeof fakeConnection>;
 
-export function withSession(children: ReactNode, overrides: { role?: string; readiness?: Readiness } = {}) {
+export function withSession(children: ReactNode, overrides: { role?: string; readiness?: Readiness; accountIds?: string[]; everyAccount?: boolean } = {}) {
   const config: OsRuntimeConfig = { ...UNKNOWN_RUNTIME_CONFIG, domain: "memql.example.com" };
   return (
     <SessionProvider
@@ -191,6 +192,8 @@ export function withSession(children: ReactNode, overrides: { role?: string; rea
           role: overrides.role ?? "owner",
           roleName: "",
           rank: 0,
+          everyAccount: overrides.everyAccount ?? (overrides.role === undefined || overrides.role === "owner"),
+          accountIds: overrides.accountIds ?? ["self"],
         },
         config,
         readiness: overrides.readiness ?? readiness(true, [verdict("email", "configured"), verdict("campaigns", "configured", false)]),
@@ -226,7 +229,7 @@ export function campaignRow(over: Partial<Row> & { id: string }): Row {
     failedCount: 0,
     skippedCount: 0,
     lastError: "",
-    accountId: "",
+    accountId: "self",
     senderIdentityId: "",
     trackOpens: true,
     trackClicks: true,
@@ -241,7 +244,7 @@ export function audienceRow(over: Partial<Row> & { id: string }): Row {
     name: "Newsletter",
     description: "",
     status: "active",
-    accountId: "",
+    accountId: "self",
     createdAt: "2026-08-01T00:00:00Z",
     ...over,
   };
@@ -255,7 +258,7 @@ export function templateRow(over: Partial<Row> & { id: string }): Row {
     textBody: "Hello {{displayName}},",
     htmlBody: "",
     status: "ready",
-    accountId: "",
+    accountId: "self",
     createdAt: "2026-08-01T00:00:00Z",
     ...over,
   };
@@ -267,7 +270,7 @@ export function senderRow(over: Partial<Row> & { id: string }): Row {
     address: "news@acme.com",
     fromName: "Acme News",
     replyTo: "",
-    accountId: "",
+    accountId: "self",
     status: "active",
     notes: "",
     createdAt: "2026-08-01T00:00:00Z",
@@ -280,7 +283,7 @@ export function ruleRow(over: Partial<Row> & { id: string }): Row {
     ownerUserId: "v1:identity:user:me",
     name: "Tell the owner about new admins",
     description: "",
-    accountId: "",
+    accountId: "self",
     triggerConcept: "v1:identity:user",
     eventKind: "created",
     condition: "",

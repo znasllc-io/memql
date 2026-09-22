@@ -6,6 +6,7 @@ import { FileText } from "lucide-react";
 import { AccountChip, AccountPicker } from "../accounts/AccountPicker";
 import { accountNameFrom } from "../accounts/rows";
 import { useAccountOptions } from "../accounts/tie";
+import { organizationChosen, useDefaultOrganization } from "../accounts/organization";
 import {
   Button,
   EmptyState,
@@ -220,6 +221,7 @@ export function TemplateEditor({
   template,
   audiences,
   campaigns,
+  initialAccountId = "",
   writes,
   onDone,
   onDirtyChange,
@@ -227,11 +229,13 @@ export function TemplateEditor({
   template?: TemplateRow;
   audiences: ReturnType<typeof audienceProjection>;
   campaigns: CampaignRow[];
+  initialAccountId?: string;
   writes: CampaignWrites;
   onDone: (createdId: string) => void;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const accounts = useAccountOptions();
+  const defaultAccountId = useDefaultOrganization(accounts);
   const editing = template !== undefined;
   const write = editing ? writes.updateTemplate : writes.createTemplate;
   const textArea = useRef<HTMLTextAreaElement | null>(null);
@@ -256,18 +260,21 @@ export function TemplateEditor({
     );
   }, [draft, template, onDirtyChange]);
 
-  const ready =
+  const accountId = draft.accountId || (template === undefined ? (initialAccountId || defaultAccountId) : "");
+
+  const ready = organizationChosen(accounts, accountId) &&
     draft.name.trim() !== "" &&
     draft.subject.trim() !== "" &&
     (draft.status !== "ready" || draft.textBody.trim() !== "" || draft.htmlBody.trim() !== "");
 
   async function submit() {
+    if (!ready) return;
     if (editing && template) {
-      const ok = await writes.updateTemplate.update(template.id, draft);
+      const ok = await writes.updateTemplate.update(template.id, { ...draft, accountId });
       if (ok) onDone(template.id);
       return;
     }
-    const id = await writes.createTemplate.create(draft);
+    const id = await writes.createTemplate.create({ ...draft, accountId });
     if (id !== "") onDone(id);
   }
 
@@ -322,11 +329,12 @@ export function TemplateEditor({
             placeholder="What we shipped in August"
           />
         </Field>
-        <Field label="Client">
+        <Field label="Organization">
           <AccountPicker
             id="os-template-account"
-            label="Client this template is for"
-            value={draft.accountId}
+            label="Organization this template is for"
+            required
+            value={accountId}
             onChange={(v) => setDraft({ ...draft, accountId: v })}
             accounts={accounts}
           />

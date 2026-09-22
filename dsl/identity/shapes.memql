@@ -619,6 +619,7 @@ shape group groupFull {
 @row
 shape groupMembership groupMembershipFull {
   row.id
+  accountId
   groupId
   userId
   origin

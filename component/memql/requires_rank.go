@@ -90,6 +90,9 @@ func (e *MemQLEngine) refuseBelowRequiredRank(ctx context.Context, fn *Function,
 			"%q requires the %q role or above and this call carries no caller identity",
 			name, required)
 	}
+	if auth.RoleAccountScope(ac.Role) != "" && floor >= ladder.rankOf("admin") {
+		return fmt.Errorf("%q requires a cluster role; your role is scoped to one organization", name)
+	}
 	if ladder.rankOf(string(ac.Role)) >= floor {
 		return nil
 	}

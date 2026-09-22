@@ -249,6 +249,8 @@ func stripComments(src string) string {
 
 const osAppRegistryPath = "../../clients/os/src/apps/registry.tsx"
 
+// Account pickers are membership-scoped reads available outside the Accounts app.
+// The Accounts administration floor is mirrored by its create action.
 // appFloorMirrors maps an OS app id to the DSL file whose constructs that app
 // calls, and the floor both must state.
 //
@@ -264,7 +266,7 @@ var appFloorMirrors = []struct {
 	dslFile   string
 	construct string
 }{
-	{appID: "accounts", dslFile: "../../dsl/accounts/queries.memql", construct: "clientAccountsAll"},
+	{appID: "accounts", dslFile: "../../dsl/accounts/mutations.memql", construct: "createClientAccount"},
 }
 
 // TestAppManifestMirrorsTheEngineFloor pins the roles that may OPEN an app

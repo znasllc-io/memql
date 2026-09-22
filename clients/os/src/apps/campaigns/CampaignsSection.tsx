@@ -12,6 +12,7 @@ import { Send } from "lucide-react";
 
 import { AccountChip, AccountPicker } from "../accounts/AccountPicker";
 import { useAccountOptions } from "../accounts/tie";
+import { organizationChosen, useDefaultOrganization } from "../accounts/organization";
 import { accountNameFrom } from "../accounts/rows";
 import {
   Button,
@@ -884,6 +885,7 @@ export function CampaignForm({
     audienceId: string;
     templateId: string;
     senderIdentityId: string;
+    accountId?: string;
   };
   audiences: AudienceRow[];
   templates: TemplateRow[];
@@ -893,6 +895,7 @@ export function CampaignForm({
   onDone: (createdId: string) => void;
 }) {
   const accounts = useAccountOptions();
+  const defaultAccountId = useDefaultOrganization(accounts);
   const editing = campaign !== undefined;
   const write = editing ? writes.updateCampaign : writes.createCampaign;
   const [draft, setDraft] = useState(() => ({
@@ -902,7 +905,7 @@ export function CampaignForm({
     fromName: campaign?.fromName ?? "",
     replyTo: campaign?.replyTo ?? "",
     scheduledAt: campaign?.scheduledAt ?? "",
-    accountId: campaign?.accountId ?? "",
+    accountId: campaign?.accountId ?? initial?.accountId ?? "",
     senderIdentityId: campaign?.senderIdentityId ?? initial?.senderIdentityId ?? "",
     trackOpens: campaign?.trackOpens ?? trackByDefault,
     trackClicks: campaign?.trackClicks ?? trackByDefault,
@@ -911,17 +914,25 @@ export function CampaignForm({
   useEffect(() => {
     if (!initial || campaign) return;
     setDraft((previous) => ({ ...previous, ...initial }));
-  }, [initial?.audienceId, initial?.templateId, initial?.senderIdentityId, campaign]);
+  }, [initial?.audienceId, initial?.templateId, initial?.senderIdentityId, initial?.accountId, campaign]);
 
-  const ready = draft.name.trim() !== "" && draft.audienceId !== "" && draft.templateId !== "";
+  const accountId = draft.accountId || (campaign === undefined ? defaultAccountId : "");
+
+  const ready = organizationChosen(accounts, accountId) &&
+    draft.name.trim() !== "" &&
+    audiences.some((a) => a.id === draft.audienceId && a.accountId === accountId) &&
+    templates.some((t) => t.id === draft.templateId && t.accountId === accountId) &&
+    ((accountId === "self" && draft.senderIdentityId === "") ||
+      senders.some((s) => s.id === draft.senderIdentityId && s.accountId === accountId));
 
   async function submit() {
+    if (!ready) return;
     if (editing && campaign) {
-      const ok = await writes.updateCampaign.update(campaign.id, draft);
+      const ok = await writes.updateCampaign.update(campaign.id, { ...draft, accountId });
       if (ok) onDone(campaign.id);
       return;
     }
-    const id = await writes.createCampaign.create(draft);
+    const id = await writes.createCampaign.create({ ...draft, accountId });
     if (id !== "") onDone(id);
   }
 
@@ -930,13 +941,23 @@ export function CampaignForm({
   // ALREADY naming one keeps it (the value is on the draft and the option is
   // synthesized below), so an edit never silently re-points a campaign.
   const pickable = {
-    audiences: audiences.filter((a) => a.status !== "archived" || a.id === draft.audienceId),
-    templates: templates.filter((t) => t.status !== "archived" || t.id === draft.templateId),
-    senders: senders.filter((s) => s.status !== "disabled" || s.id === draft.senderIdentityId),
+    audiences: audiences.filter((a) => a.accountId === accountId && (a.status !== "archived" || a.id === draft.audienceId)),
+    templates: templates.filter((t) => t.accountId === accountId && (t.status !== "archived" || t.id === draft.templateId)),
+    senders: senders.filter((s) => s.accountId === accountId && (s.status !== "disabled" || s.id === draft.senderIdentityId)),
   };
 
   return (
     <Panel label={editing ? "Edit campaign" : "New campaign"}>
+      <Field label="Organization">
+          <AccountPicker
+            id="os-campaign-account"
+            label="Organization this campaign is for"
+            required
+            value={accountId}
+            onChange={(v) => setDraft({ ...draft, accountId: v, audienceId: "", templateId: "", senderIdentityId: "" })}
+            accounts={accounts}
+          />
+        </Field>
       <div className="os-campaign-form">
         <Field label="Name">
           <Input
@@ -986,7 +1007,7 @@ export function CampaignForm({
             value={draft.senderIdentityId}
             onChange={(v) => setDraft({ ...draft, senderIdentityId: v })}
           >
-            <option value="">This cluster's default mailbox</option>
+            <option value="" disabled={accountId !== "self"}>{accountId === "self" ? "This cluster's default mailbox" : "Choose an organization mailbox"}</option>
             {pickable.senders.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.address}
@@ -1003,15 +1024,7 @@ export function CampaignForm({
             onChange={(v) => setDraft({ ...draft, replyTo: v })}
           />
         </Field>
-        <Field label="Client">
-          <AccountPicker
-            id="os-campaign-account"
-            label="Client this campaign is for"
-            value={draft.accountId}
-            onChange={(v) => setDraft({ ...draft, accountId: v })}
-            accounts={accounts}
-          />
-        </Field>
+
       </div>
 
       <div className="os-campaign-tracking">

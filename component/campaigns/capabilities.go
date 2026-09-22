@@ -36,12 +36,9 @@ import (
 //     could not write the job, and making the job writable by it would
 //     mean making it writable by anyone.
 //
-// The authorization is the FIRST read. `campaignById` is owned-tier, so
-// it returns a row only to its owner; a caller who cannot read the
-// campaign gets "not found" and nothing further happens. Every value that
-// ends up on the send job -- owner, audience, template -- is copied off
-// THAT row rather than taken from an argument, so the job can only ever
-// name a user the caller could already act as.
+// Actions read the campaign under the caller's identity and require update
+// permission on data in its organization. Job owner, audience and template
+// come from that persisted row. Shared read access alone cannot send mail.
 
 // IntegrationName identifies the provider.
 func (w *Worker) IntegrationName() string { return "campaigns" }
@@ -162,8 +159,8 @@ func (w *Worker) handleStartSend(ctx context.Context, args map[string]any, _ int
 		return nil, fmt.Errorf("campaigns.startSend: no caller identity; a send is always started by somebody")
 	}
 
-	// THE AUTHORIZATION. Owned-tier read under the CALLER's own context:
-	// a campaign the caller does not own is simply not found.
+	// Read under the caller's context; preflight also requires organization
+	// update permission before creating a job.
 	campaign, found, err := w.store.CampaignByID(ctx, campaignID)
 	if err != nil {
 		return nil, fmt.Errorf("campaigns.startSend: %w", err)
@@ -245,9 +242,8 @@ func (w *Worker) handleScheduleSend(ctx context.Context, args map[string]any, _ 
 		return nil, fmt.Errorf("campaigns.scheduleSend: no caller identity; a send is always scheduled by somebody")
 	}
 
-	// THE AUTHORIZATION, identical to startSend's: an owned-tier read under
-	// the caller's own context. A campaign the caller does not own is simply
-	// not found, and every value that reaches the job is copied off that row.
+	// Read under the caller's context, then apply the same organization
+	// update permission check as startSend before creating a job.
 	campaign, found, err := w.store.CampaignByID(ctx, campaignID)
 	if err != nil {
 		return nil, fmt.Errorf("campaigns.scheduleSend: %w", err)
@@ -348,6 +344,9 @@ func sendableStatus(op, status string) error {
 //
 // Returns the recipient count the send will work through.
 func (w *Worker) preflight(ctx context.Context, op string, campaign Campaign) (int, error) {
+	if err := w.requireSendAuthority(ctx, campaign.AccountID); err != nil {
+		return 0, err
+	}
 	if reason := w.cfg.RequireUnsubscribe(); reason != "" {
 		return 0, fmt.Errorf("campaigns.%s: %s", op, reason)
 	}
@@ -376,6 +375,9 @@ func (w *Worker) preflight(ctx context.Context, op string, campaign Campaign) (i
 	}
 	if !found {
 		return 0, fmt.Errorf("campaigns.%s: template %q is not readable", op, campaign.TemplateID)
+	}
+	if err := w.validateCampaignOrganization(ctx, campaign, tmpl); err != nil {
+		return 0, fmt.Errorf("campaigns.%s: %w", op, err)
 	}
 	// `ready` is an operator asserting the copy is finished. Refusing a
 	// draft is the cheapest guard there is against the single most

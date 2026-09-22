@@ -25,13 +25,9 @@
 //
 //   scheduleSend Same preflight, same two writes -- and one more reason
 //                (memql#3459). "Which campaigns are due?" cannot be asked of
-//                v1:campaigns:campaign at all: the owned tier injects
-//                `row.ownerUserId == actor.userId` into every read and has no
-//                cluster-owner bypass, so no clock-driven scan over an
-//                operator's rows is expressible. The schedule therefore has
-//                to be recorded on the engine's own clusterOwner-tier job
-//                row, which only Go holding a campaign it already read under
-//                the caller's actor may write.
+//                a caller-scoped campaign read. The scheduler scans the
+//                engine's own clusterOwner-tier job rows, then revalidates
+//                the campaign under its recorded owner's current authority.
 //
 //   pauseSend    Same two-writes problem, campaign plus job.
 //   resumeSend
@@ -59,13 +55,12 @@
 //                service-account credential for an automation to present,
 //                for no property this does not already have.
 //
-// AUTHORIZATION IS THE FIRST READ, in every one of the campaign-scoped
-// three. `campaignById` is owned-tier, so it returns a row only to its
-// owner; a caller who cannot read the campaign gets "not found" and
-// nothing further happens. Every value that reaches the send job -- the
-// owner, the audience, the template -- is copied off THAT row rather than
-// taken from an argument, so a caller can only ever start a send as a
-// user they could already act as.
+// Campaign actions first read under the caller's identity, then require
+// update permission on data in the campaign's organization and access to the
+// Campaigns app there. Shared read access alone cannot send mail. Parent
+// resources must agree on organization; the worker rechecks the recorded
+// owner's current authority before each delivery. Job owner, audience and
+// template are copied from the persisted campaign, never caller overrides.
 //
 // WHICH OF THESE ARE @sdk, AND WHY (memql#4239). @sdk is a statement about the
 // PUBLIC CLIENT SURFACE -- `make sdk-gen` emits a typed Go + TypeScript method
@@ -73,7 +68,7 @@
 // effect, and every builtin here is reachable on the wire by name with or
 // without it. The four campaign-scoped actions carry it. They are the
 // operator's own verbs on their own campaign, the portal's buttons already
-// drive them, and their authorization is the owned-tier read above, so a
+// drive them, and their authorization includes the organization action gate above, so a
 // typed method advertises nothing a caller could not already do to a row
 // they own. The other three do not carry it, for two different reasons:
 // suppress and recordFeedback are admin-gated writes to the cluster-wide
@@ -82,18 +77,18 @@
 // ingestFeedback is the automation's door, and its argument is a staged
 // inbound row id no client holds.
 
-@description("Preflight and start a campaign send. Refuses -- rather than partially sending -- when no email sender is registered on the node, when one-click unsubscribe is not configured (MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET / _BASE_URL), when the template is not marked ready, or when the audience is empty or at the MEMQL_CAMPAIGNS_MAX_AUDIENCE ceiling. Authorization is the owned-tier read of the campaign: a caller who cannot read it cannot start it. Returns the recipient count the send will work through.")
+@description("Preflight and start a campaign send. Refuses -- rather than partially sending -- when no email sender is registered on the node, when one-click unsubscribe is not configured (MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET / _BASE_URL), when the template is not marked ready, or when the audience is empty or at the MEMQL_CAMPAIGNS_MAX_AUDIENCE ceiling. Requires a readable campaign and update permission on data in its organization. Returns the recipient count the send will work through.")
 @sdk
 @executor("integration.campaigns.startSend")
 builtin campaignStartSend {
-  campaignId  string!  @description("The campaign to send. The caller must own it.")
+  campaignId  string!  @description("The campaign to send. The caller needs update permission in its organization.")
 }
 
-@description("Commit a campaign to a time and enqueue the send job that will fire at it (memql#3459). Runs the SAME preflight as campaignStartSend -- sender registered, one-click unsubscribe configured, template marked ready, audience non-empty and inside the ceiling -- because the whole value of scheduling is finding out now rather than at 3am. The job it writes is inert: it sits in the 'scheduled' status until the drain worker sees that the campaign's scheduledAt has passed, and the campaign row is the authority on that time, so moving the date with updateCampaign moves the send. A time in the past is refused; use campaignStartSend to send now. Authorization is the owned-tier read of the campaign, exactly as for starting one by hand.")
+@description("Commit a campaign to a time and enqueue the send job that will fire at it (memql#3459). Runs the SAME preflight as campaignStartSend -- sender registered, one-click unsubscribe configured, template marked ready, audience non-empty and inside the ceiling -- because the whole value of scheduling is finding out now rather than at 3am. The job it writes is inert: it sits in the 'scheduled' status until the drain worker sees that the campaign's scheduledAt has passed, and the campaign row is the authority on that time, so moving the date with updateCampaign moves the send. A time in the past is refused; use campaignStartSend to send now. Requires the same organization update permission as starting one by hand.")
 @sdk
 @executor("integration.campaigns.scheduleSend")
 builtin campaignScheduleSend {
-  campaignId   string!  @description("The campaign to schedule. The caller must own it.")
+  campaignId   string!  @description("The campaign to schedule. The caller needs update permission in its organization.")
   scheduledAt  string!  @description("When the send should begin, RFC 3339 (e.g. 2026-08-14T09:00:00Z). Interpreted as an instant, not a local wall clock -- a value with no offset is read as UTC.")
 }
 
@@ -101,14 +96,14 @@ builtin campaignScheduleSend {
 @sdk
 @executor("integration.campaigns.pauseSend")
 builtin campaignPauseSend {
-  campaignId  string!  @description("The campaign to pause. The caller must own it.")
+  campaignId  string!  @description("The campaign to pause. The caller needs update permission in its organization.")
 }
 
 @description("Resume a paused campaign send. Does not re-stamp startedAt: the gap between startedAt and completedAt is how long the run took, and resetting it on resume would erase the pause it exists to reveal.")
 @sdk
 @executor("integration.campaigns.resumeSend")
 builtin campaignResumeSend {
-  campaignId  string!  @description("The campaign to resume. The caller must own it.")
+  campaignId  string!  @description("The campaign to resume. The caller needs update permission in its organization.")
 }
 
 @description("Add an address to the CLUSTER-WIDE do-not-mail list, which outranks every audience and is consulted at the point of send. Admin or cluster owner only: the list spans every operator in the deployment, so adding to it is deployment policy rather than an owner-scoped action. The address is digested server-side and never stored -- the row keeps the digest and the domain, so 'which domains are bouncing' stays answerable while 'who unsubscribed' does not.")

@@ -1073,3 +1073,8 @@ func ledgerRow(recipientID, status string, attempts int, next time.Time) map[str
 
 // cursorOf exposes the inbound pagination cursor to a fake engine.
 func cursorOf(ctx context.Context) string { return memql.CursorFromContext(ctx) }
+
+func (e *fakeEngine) OrganizationCapable(ctx context.Context, account, verb, resource string) bool {
+	subject, ok := auth.SubjectFromContext(ctx)
+	return ok && auth.CapableFor(ctx, subject, verb, resource)
+}

@@ -233,7 +233,7 @@ function matches(row: DeployableListRow, filter: ListFilter): boolean {
   // A will-serve row has no status yet, so a status facet leaves it out: it
   // is none of draft, live or disabled, and claiming one would be a guess.
   if (filter.status !== "" && (row.site?.status ?? "") !== filter.status) return false;
-  const accountId = row.site?.accountId ?? "";
+  const accountId = row.site?.accountId ?? row.pkg?.accountId ?? "";
   if (filter.accountId === ACCOUNT_NONE && accountId !== "") return false;
   if (filter.accountId !== ACCOUNT_ANY && filter.accountId !== ACCOUNT_NONE && accountId !== filter.accountId) return false;
   if (filter.source !== "" && sourceOf(row) !== filter.source) return false;

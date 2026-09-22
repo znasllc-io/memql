@@ -209,7 +209,7 @@ func TestPreflightRefusesADisabledIdentity(t *testing.T) {
 	}
 	w := identityWorker(t, engine)
 
-	_, err := w.preflight(context.Background(), "startSend", campaignWithIdentity("si-retired"))
+	_, err := w.preflight(importCtx(), "startSend", campaignWithIdentity("si-retired"))
 	if err == nil {
 		t.Fatal("preflight accepted a campaign naming a disabled identity")
 	}

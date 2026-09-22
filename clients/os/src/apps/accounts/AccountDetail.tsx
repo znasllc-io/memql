@@ -507,7 +507,6 @@ function PeopleBand({
     );
   }
 
-  const first = people.groups[0];
   return (
     <article className="os-account-band" data-state={people.people === 0 ? "empty" : "ready"}>
       <header className="os-account-band-head">
@@ -527,13 +526,11 @@ function PeopleBand({
       ) : (
         <ul className="os-account-band-rows" aria-label="Groups for this client">
           {people.groups.map((group) => (
-            <li key={group.id}>{group.name}</li>
+            <li key={group.id}>{onOpenGroup ? <Button onClick={() => onOpenGroup(group.id)}>{group.name}</Button> : group.name}</li>
           ))}
         </ul>
       )}
-      {first === undefined || onOpenGroup === undefined ? null : (
-        <Button onClick={() => onOpenGroup(first.id)}>Open in Users</Button>
-      )}
+      <p className="os-caption">Open a group to manage membership, organization roles and app access.</p>
     </article>
   );
 }

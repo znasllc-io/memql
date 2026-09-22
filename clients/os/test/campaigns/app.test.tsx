@@ -820,6 +820,7 @@ describe("a refused activation", () => {
     fireEvent.click(await screen.findByRole("button", { name: "New rule" }));
     fireEvent.change(screen.getByLabelText("Rule name"), { target: { value: "Welcome new users" } });
     chooseOption(screen.getByLabelText("The kind of thing that fires this rule"), "user (identity)");
+    await waitFor(() => expect(screen.getByLabelText("Organization this rule is for").textContent).toContain("Operator organization"));
     chooseOption(screen.getByLabelText("Template to send"), "Welcome");
     await act(async () => {
       fireEvent.click(screen.getByText("Create rule"));
@@ -1024,6 +1025,7 @@ describe("guided campaign preparation", () => {
     expect((screen.getByLabelText("Campaign name") as HTMLInputElement).value).toBe("September newsletter");
     expect((screen.getByRole("checkbox", { name: "Count who opens it" }) as HTMLInputElement).checked).toBe(false);
     expect(conn.query.createCampaign).not.toHaveBeenCalled();
+    await waitFor(() => expect((screen.getByRole("button", { name: "Create campaign" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole("button", { name: "Create campaign" }));
     await waitFor(() => expect(conn.query.createCampaign).toHaveBeenCalledWith(expect.objectContaining({ name: "September newsletter", audienceId: "a1", templateId: "t1", trackOpens: false })));
     expect(conn.query.campaignStartSend).not.toHaveBeenCalled();

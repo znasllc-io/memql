@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -80,7 +81,7 @@ func TestNativeSetupCrossReplicaCSRFAndOrigin(t *testing.T) {
 	}{
 		{"https://evil.test", result.CSRF, 403}, {"https://os.example.test", "", 403}, {"https://os.example.test", result.CSRF, 200},
 	} {
-		r := httptest.NewRequest("POST", "/setup", strings.NewReader("domain=example.test&owner_email=owner%40example.test&owner_first_name=First&owner_last_name=Last"))
+		r := httptest.NewRequest("POST", "/setup", strings.NewReader("domain=example.test&brand_name=Example&owner_email=owner%40example.test&owner_first_name=First&owner_last_name=Last"))
 		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		r.Header.Set("Accept", NativeMediaType)
 		r.Header.Set("Origin", tc.origin)
@@ -125,7 +126,7 @@ func TestNativeSetupDeliveryFailureIsNotSuccess(t *testing.T) {
 		return IssueMagicLinkResult{}, errors.New("mail unavailable")
 	}
 	// Handler-level test isolates the delivery outcome from the CSRF test above.
-	r := httptest.NewRequest("POST", "/setup", strings.NewReader("domain=example.test&owner_email=a%40example.test&owner_first_name=A&owner_last_name=B"))
+	r := httptest.NewRequest("POST", "/setup", strings.NewReader("domain=example.test&brand_name=Example&owner_email=a%40example.test&owner_first_name=A&owner_last_name=B"))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	r.Header.Set("Accept", NativeMediaType)
 	w := httptest.NewRecorder()
@@ -134,4 +135,29 @@ func TestNativeSetupDeliveryFailureIsNotSuccess(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	_ = mux
+}
+
+func TestSetupRequiresOrganizationBeforeAnySettingsOrEnrollmentWrite(t *testing.T) {
+	for _, name := range []string{"", "   ", strings.Repeat("x", 201)} {
+		t.Run(fmt.Sprint(len(name)), func(t *testing.T) {
+			s, _ := nativeTestServer(t)
+			s.PersistClusterSettings = func(context.Context, ClusterSettingsInput) error {
+				t.Fatal("invalid organization reached persistence")
+				return nil
+			}
+			s.IssueMagicLink = func(context.Context, IssueMagicLinkInput) (IssueMagicLinkResult, error) {
+				t.Fatal("invalid organization sent verification")
+				return IssueMagicLinkResult{}, nil
+			}
+			form := url.Values{"domain": {"example.test"}, "brand_name": {name}, "owner_email": {"ada@example.test"}, "owner_first_name": {"Ada"}, "owner_last_name": {"Owner"}}
+			r := httptest.NewRequest("POST", "/setup", strings.NewReader(form.Encode()))
+			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			r.Header.Set("Accept", NativeMediaType)
+			w := httptest.NewRecorder()
+			s.handleSetupPost(w, r)
+			if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "Organization name") {
+				t.Fatal(w.Code, w.Body.String())
+			}
+		})
+	}
 }

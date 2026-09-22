@@ -127,6 +127,9 @@ func (e *MemQLEngine) readFloorAdmits(ctx context.Context, floor string) bool {
 	ac, _ := auth.AccessFromContext(ctx)
 	role := ""
 	if ac != nil {
+		if auth.RoleAccountScope(ac.Role) != "" {
+			return false
+		}
 		role = string(ac.Role)
 	}
 	ladder := e.rankLadder(ctx)

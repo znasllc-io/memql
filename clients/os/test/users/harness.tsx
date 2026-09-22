@@ -98,6 +98,7 @@ export interface FakeQuery {
   clientAccountsAll: ReturnType<typeof vi.fn>;
   revokeAuthSession: ReturnType<typeof vi.fn>;
   groupsAll: ReturnType<typeof vi.fn>;
+  groupPeople: ReturnType<typeof vi.fn>;
   membersOfGroup: ReturnType<typeof vi.fn>;
   groupsForUser: ReturnType<typeof vi.fn>;
   groupsForAccount: ReturnType<typeof vi.fn>;
@@ -127,6 +128,7 @@ export interface FakeSeed {
   pendingUserInvitations?: Row[];
   sessionsForSubjectAdmin?: Row[];
   groupsAll?: Row[];
+  groupPeople?: Row[];
   activeRoles?: Row[];
   activeCapabilities?: Row[];
   clientAccountsAll?: Row[];
@@ -180,6 +182,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       // answered only the old shape would leave every group surface reading an
       // empty list, which is a completely plausible answer and is what makes
       // that kind of miss survive review.
+      groupPeople: vi.fn(async (_args: Record<string, unknown>) => rowsResult(seed.groupPeople ?? [])),
       groupsAll: vi.fn(async (_args: Record<string, unknown>) => rowsResult(seed.groupsAll ?? [])),
       membersOfGroup: vi.fn(async (args: Record<string, unknown>) => {
         const groupId = typeof args["groupId"] === "string" ? args["groupId"] : "";
@@ -365,6 +368,7 @@ export function withSession(
           userId: overrides.userId ?? "v1:identity:user:me",
           primaryEmail: "owner@example.com",
           role: overrides.role ?? "owner",
+          everyAccount: ["owner", "admin", "developer"].includes(overrides.role ?? "owner"),
           roleName: "",
           rank: 0,
         },

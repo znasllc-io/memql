@@ -1,5 +1,5 @@
 import { AddButton } from "../../kit/AddButton";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Shield } from "lucide-react";
 
 import { Button, Chip, Head, Notice, RankMark, Row as ListRow } from "../../kit";
@@ -28,7 +28,11 @@ export function RolesSection({
   actions,
   viewerRole,
   onOpenPerson,
+  createForAccountId = "",
+  onOpened,
 }: {
+  createForAccountId?: string;
+  onOpened?: () => void;
   catalog: RoleCatalog;
   people: readonly PersonRow[];
   accounts: readonly AccountRow[];
@@ -37,6 +41,13 @@ export function RolesSection({
   onOpenPerson: (userId: string) => void;
 }) {
   const [view, setView] = useState<RolesView>({ kind: "list" });
+  const [initialAccountId, setInitialAccountId] = useState("");
+  useEffect(() => {
+    if (!createForAccountId) return;
+    setInitialAccountId(createForAccountId);
+    setView({ kind: "new" });
+    onOpened?.();
+  }, [createForAccountId, onOpened]);
   const ladder = useMemo(() => ladderDescending(catalog.roles), [catalog.roles]);
 
   const mayCreate = roleHolds(catalog.grants, viewerRole, "create", "role");
@@ -68,6 +79,8 @@ export function RolesSection({
   if (view.kind === "new") {
     return (
       <NewRolePage
+        key={initialAccountId}
+        initialAccountId={initialAccountId}
         catalog={catalog}
         accounts={accounts}
         actions={actions}
@@ -85,7 +98,7 @@ export function RolesSection({
             roleCreate checks, and a New role button for somebody who does not
             hold it is a form whose every submission is refused. */}
         {mayCreate ? (
-          <AddButton onClick={() => setView({ kind: "new" })} label="New role" />
+          <AddButton onClick={() => { setInitialAccountId(""); setView({ kind: "new" }); }} label="New role" />
         ) : null}
       </Head>
 

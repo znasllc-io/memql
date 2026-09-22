@@ -134,11 +134,10 @@ func subscriptionReadContext(ctx context.Context, access *auth.AccessContext) co
 // (streamSession.currentAccess); caching what they outrank alongside it is the
 // same granularity and the same staleness, which is the honest place to put
 // it: a role change reaches both facts together, on the next stream.
-// The ACCOUNT GRANT rides the same context and the same argument (epic
-// memql#5165). Without its memo installed here, a member of Acme's group
-// would read Acme's campaign on load and receive no live event for it --
-// the same "correct on load, frozen after" shape, arriving through the same
-// disjunct-declines-to-widen rule.
+// The account memo also retains the receiving engine. Organization-bound
+// events replace its membership snapshot per admission, so revocation on
+// another replica takes effect without reconnecting the stream. Other account
+// labels retain their original sharing contract (epic memql#5165).
 //
 // The name still says Rank because it is the CALLER's cached per-stream
 // context and renaming it would touch every call site for no behaviour; what
@@ -152,6 +151,16 @@ func (e *MemQLEngine) SubscriptionRankContext(ctx context.Context) context.Conte
 }
 
 func AdmitSubscriptionRow(ctx context.Context, access *auth.AccessContext, conceptName, id string, payload []byte) SubscriptionAdmission {
+	// Organization membership can be revoked on a different replica while
+	// this stream remains open. Resolve it for this event, not from the
+	// stream's original membership snapshot. The memo remains shared by all
+	// checks within this admission; unrelated concepts keep their rank cache.
+	if ctx != nil && HasOrganizationBoundary(conceptName) {
+		if memo, _ := ctx.Value(accountScopeMemoKey{}).(*accountScopeMemo); memo != nil && memo.engine != nil {
+			ctx = context.WithValue(ctx, accountScopeMemoKey{}, &accountScopeMemo{engine: memo.engine})
+			ctx = auth.ContextWithGrantMemo(ctx)
+		}
+	}
 	switch rowAuthzAdmits(subscriptionReadContext(ctx, access), conceptName, id, payload) {
 	case rowAuthzAdmit:
 		return SubscriptionAdmit

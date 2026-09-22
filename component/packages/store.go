@@ -15,10 +15,8 @@ import (
 	"github.com/znasllc-io/memql/core/num"
 )
 
-// Engine is the ONLY engine surface the pipeline needs -- one method, the same
-// narrow seam component/sitepublish and every other Go component in this tree
-// uses. Narrow on purpose: a test fakes the named calls it cares about and
-// nothing else.
+// Engine resolves named graph operations and current action authority for
+// each organization targeted by the pipeline.
 type Engine interface {
 	Execute(ctx context.Context, query string) (*memql.ExecuteResult, error)
 }
@@ -629,17 +627,6 @@ func (s *store) writeAsCaller(ctx context.Context, query string) error {
 		return fmt.Errorf("%s: %w", firstToken(query), err)
 	}
 	return nil
-}
-
-// setSiteAccount points a freshly created site at the client it is FOR. The
-// same updateSiteAccount the site detail's account picker issues, under the
-// caller's actor, so v1:platform:site's composite write guard admits the row's
-// owner (or a cluster owner) and refuses everyone else -- exactly as it does
-// from the page.
-func (s *store) setSiteAccount(ctx context.Context, siteId, accountId string) error {
-	return s.writeAsCaller(ctx, fmt.Sprintf(
-		"mutation updateSiteAccount(siteId: %s, accountId: %s)",
-		langparser.QuoteString(siteId), langparser.QuoteString(accountId)))
 }
 
 // addCustomDomain binds a client's own domain to a freshly created site. The

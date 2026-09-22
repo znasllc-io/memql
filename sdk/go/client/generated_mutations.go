@@ -581,7 +581,7 @@ func ArchiveArtifactBuild(args ArchiveArtifactArgs) string {
 	return b.String()
 }
 
-// ArchiveAudience -- Archive an audience: keep it (and every delivery record naming it) readable, but drop it out of the campaign editor's picker. Owned -- ownerUserId is re-stamped from actor.userId, and the engine's row-authz write guard refuses the update outright when the target row's owner is somebody else.
+// ArchiveAudience -- Archive an audience: keep it (and every delivery record naming it) readable, but drop it out of the campaign editor's picker. Authorized organization peers may archive it; the engine preserves its original owner and records the current writer on the new version.
 //
 // Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["archiveAudience"] in generated_concepts.go).
 type ArchiveAudienceArgs struct {
@@ -5129,7 +5129,7 @@ type CreatePackageArgs struct {
 	ArtifactId    string
 	AutoDeploy    bool
 	AutoDeploySet bool // set true to send autoDeploy; required because zero-value bool is ambiguous
-	// The v1:accounts:account this package is for. Absent means untied.
+	// Owning organization. If omitted, the engine resolves an authorized default; it refuses an ambiguous choice.
 	AccountId string
 }
 
@@ -5939,14 +5939,14 @@ func CreateSenderIdentityBuild(args CreateSenderIdentityArgs) string {
 // status and systemOwned are caller-settable (default "draft" / false, the ordinary operator-created site) so the SeedMaterializer can pass "live" / true for the portal seed (dsl/platform/seeds.memql, memql#3711) -- the platform's own console has to resolve the moment the cluster boots, and it must not be deletable by an operator who does not realize it is how sites get managed at all.
 // `createdAt` / `createdBy` are NEVER authored here -- both are reserved payload fields (component/database/memory-nodes/constants.go) the engine stamps intrinsically from `now` / the caller's actor (component/database/memory-nodes/concept.go). An earlier version of this mutation stamped them explicitly in `stamp{}`, which every write refused at the reserved-field guard in executor_mutation.go with "mutation payload ... declares reserved field" -- silently, because nothing exercised this mutation against a live boot until memql#3714's edge verification found the portal's own seed failing with exactly that error on every fresh cluster (memql#3714b).
 // OWNERSHIP (memql#4344). `ownerUserId` is STAMPED from actor.userId and is deliberately NOT an arg. A concept declaring an owner tier over a caller-supplied field records a guarantee nothing provides -- and reads as safe, so an auditor seeing the tier stops looking; that is what TestDeclaredOwnerFieldsAreServerStamped refuses, and an exemption here would be false, because the field genuinely is not forgeable.
-// The one thing the body cannot say is that a write made AS THE DEPLOYMENT produces the deployment's row rather than a person's -- the seeded portal is site #1 and must land CLUSTER-OWNED (an empty ownerUserId), and `ownerUserId: actor.userId` would otherwise stamp "system:seedMaterializer" onto it, twice over, since the materializer re-writes the row on every boot. So executeWrite UNDOES this stamp -- and only this stamp, matched against the caller's own id -- when the writer is privileged (cluster owner, internal origin, or a system actor). See component/memql/platform_site_hostname_policy.go.
-// That is a NARROWING and never a widening, which is why it does not reopen what the gate above protects: the Go step can only turn the caller's own id into EMPTY, which matches nobody (sameRowAuthzOwner refuses an empty owner outright), and it can never name a third party. A cluster owner hands a site over, or takes one back, by re-running this mutation on the id -- the read-merge makes that an update and the cluster-owner write escape admits it.
+// Synthetic deployment actors leave system sites unowned. Real people keep ownerUserId, including cluster owners and callers forwarded through the package pipeline. Internal origin admits server-only operations; it never erases the authenticated person's attribution.
 // HOSTNAME. The args field carries the SHAPE half (@maxLength + a lowercase-DNS @pattern), which is all a mutation body can express. The half that decides -- <slug>.<domain> against the domain THIS cluster serves, the [a-z0-9-]{3,40} slug, the reserved labels, cluster-wide uniqueness, and the cluster-owner exemption for a custom hostname -- is the same Go guard, for the same reason the systemOwned-delete refusal is: none of it is expressible here, and a UI-only check is not a check.
 //
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["createSite"] in generated_concepts.go).
 type CreateSiteArgs struct {
-	SiteId   string
-	Hostname string
+	SiteId    string
+	AccountId string
+	Hostname  string
 	// Enum: spa | static | shopify_storefront
 	Kind string
 	// What the edge answers for a path that matches no file. Omitted means the kind decides, which is what every site row created before memql#5535 carries and what they must keep resolving as. It sits in accept{} rather than stamp{} for updateSiteBundle's artifactId reason: an omitted arg is dropped from the payload, so a `?? ""` here would write an explicit empty string and there would be no way to express "let the kind decide".
@@ -5975,6 +5975,13 @@ func CreateSiteBuild(args CreateSiteArgs) string {
 	b.WriteString("mutation createSite(")
 	b.WriteString("siteId: ")
 	b.WriteString(quoteMemQL(args.SiteId))
+	if args.AccountId != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accountId: ")
+		b.WriteString(quoteMemQL(args.AccountId))
+	}
 	if b.Len() > 20 {
 		b.WriteString(", ")
 	}
@@ -7451,7 +7458,7 @@ func EnablePackageDeployablesBuild(args EnablePackageDeployablesArgs) string {
 }
 
 // EnqueueCampaignSend -- ENGINE: enqueue a send run. One row per campaign, id = the campaign's bare short id, so a restart lands on the same timeline rather than accumulating runs.
-// campaignOwnerUserId is the field that decides whose authority the worker borrows, so it is worth being explicit about where it comes from: the `campaignStartSend` builtin reads the campaign row UNDER THE CALLER'S OWN ACTOR and copies the owner off that row. A caller can therefore only ever enqueue a job naming a user they could already act as -- the owned-tier read IS the authorization. Nothing in this mutation's arguments is trusted to say who owns anything.
+// campaignOwnerUserId is the field that decides whose authority the worker borrows, so it is worth being explicit about where it comes from: the `campaignStartSend` builtin reads the campaign row UNDER THE CALLER'S OWN ACTOR and copies the owner off that row. A caller can therefore only ever enqueue a job only after a readable campaign and organization update permission have been verified. Nothing in this mutation's arguments is trusted to say who owns anything.
 // `status` exists so ONE mutation covers both ways a job is created (memql#3459): 'queued' for a send starting now, 'scheduled' for one committed to a time. It defaults to 'queued' via ?? rather than being required, so every existing caller is unchanged and the shortest spelling is still the one that sends now. A 'scheduled' job is inert until the worker promotes it.
 // clusterOwner tier, so no actor and no owner stamp: these rows have no owner, and reaching them at all requires the engine's own operator identity.
 //
@@ -15073,7 +15080,7 @@ func UpdateSiteAccountBuild(args UpdateSiteAccountArgs) string {
 
 // UpdateSiteBundle -- Point a site at a different bundle version. THE deploy operation, and THE rollback operation -- they are the same write in opposite directions, which is the whole reason bundles are stored under versioned prefixes rather than overwritten.
 // `artifactId` is optional provenance: sitePublishFromArtifact passes the v1:library:artifact the bundle came out of, and CI publishing through POST /sites/{id}/bundles passes nothing. It sits in accept{} rather than stamp{} precisely so an omitted arg is OMITTED FROM THE PAYLOAD (missing args are dropped, mutation_templates.go) and the read-merge inherits the stored value -- `args.artifactId ?? ""` would put an explicit empty string in the delta and blank the provenance on every rollback.
-// AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite, not anything in this body: the write guard resolves the target row and admits its OWNER only, and the cluster-owner path is the separate, explicit escape in rowAuthzWriteEscape. So a user publishes to their own site, an operator publishes to any, and a cross-user write is refused before the merge -- which is why the guard reads the PRIOR row rather than the merged payload.
+// AUTHORIZATION resolves the prior site and checks current rights in its organization. Shared edits preserve the original owner and record the current writer on the new version. Package publication also checks the target site's deploy/publish permission before external effects; a grant on its source package's organization does not grant rights in another organization.
 //
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteBundle"] in generated_concepts.go).
 type UpdateSiteBundleArgs struct {

@@ -120,6 +120,7 @@ function fakeSubscriptions(): FakeSubscriptions {
 }
 
 export interface FakeSeed {
+  accounts?: Row[];
   sites?: Row[];
   sitesError?: string;
   /** The v1:shopify:store rows `stores()` and `storeById()` answer with. */
@@ -336,6 +337,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
     executeNamed: vi.fn(async (_name: string, call: string) => {
       calls.push(call);
 
+      if (call.startsWith("query clientAccountsAll(")) return rowsResult(seed.accounts ?? [{ id: "self", name: "Operator organization", status: "active" }]);
       if (call === "query sitesAll()") { if (seed.sitesError) throw new Error(seed.sitesError); return rowsResult(sites); }
       if (call.startsWith("query searchUsers(")) {
         if (seed.peopleError !== undefined) throw new Error(seed.peopleError);
@@ -697,6 +699,8 @@ export function withSession(
           userId: overrides.userId ?? "u-me",
           primaryEmail: "owner@example.com",
           role: role,
+          everyAccount: ["owner", "admin", "developer"].includes(role),
+          accountIds: ["self"],
           roleName: "",
           rank: 0,
         },

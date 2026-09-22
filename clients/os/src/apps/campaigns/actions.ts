@@ -141,7 +141,7 @@ export function useCreateCampaign(): CreateCampaignState {
       fromName: omitBlank(facts.fromName),
       replyTo: omitBlank(facts.replyTo),
       scheduledAt: omitBlank(facts.scheduledAt),
-      accountId: omitBlank(facts.accountId),
+      accountId: facts.accountId.trim(),
       senderIdentityId: omitBlank(facts.senderIdentityId),
       trackOpens: facts.trackOpens,
       trackClicks: facts.trackClicks,
@@ -176,7 +176,7 @@ export function useUpdateCampaign(): UpdateCampaignState {
         fromName: omitBlank(facts.fromName),
         replyTo: omitBlank(facts.replyTo),
         scheduledAt: omitBlank(facts.scheduledAt),
-        accountId: omitBlank(facts.accountId),
+        accountId: facts.accountId.trim(),
         senderIdentityId: omitBlank(facts.senderIdentityId),
         trackOpens: facts.trackOpens,
         trackClicks: facts.trackClicks,
@@ -353,7 +353,7 @@ export function useCreateAudience(): CreateAudienceState {
         audienceId,
         name: facts.name.trim(),
         description: omitBlank(facts.description),
-        accountId: omitBlank(facts.accountId),
+        accountId: facts.accountId.trim(),
       });
       return audienceId;
     },
@@ -584,7 +584,7 @@ export function useCreateTemplate(): CreateTemplateState {
       subject: facts.subject.trim(),
       textBody: facts.textBody,
       htmlBody: omitBlank(facts.htmlBody),
-      accountId: omitBlank(facts.accountId),
+      accountId: facts.accountId.trim(),
     });
     return templateId;
   }, "");
@@ -608,7 +608,7 @@ export function useUpdateTemplate(): UpdateTemplateState {
         textBody: facts.textBody,
         htmlBody: omitBlank(facts.htmlBody),
         status: omitBlank(facts.status),
-        accountId: omitBlank(facts.accountId),
+        accountId: facts.accountId.trim(),
       });
       return true;
     },
@@ -641,7 +641,7 @@ export function useCreateSender(): CreateSenderState {
       address: facts.address.trim(),
       fromName: facts.fromName.trim(),
       replyTo: omitBlank(facts.replyTo),
-      accountId: omitBlank(facts.accountId),
+      accountId: facts.accountId.trim(),
       notes: omitBlank(facts.notes),
     });
     return senderIdentityId;
@@ -661,7 +661,7 @@ export function useUpdateSender(): UpdateSenderState {
         address: facts.address.trim(),
         fromName: facts.fromName.trim(),
         replyTo: omitBlank(facts.replyTo),
-        accountId: omitBlank(facts.accountId),
+        accountId: facts.accountId.trim(),
         notes: omitBlank(facts.notes),
       });
       return true;
@@ -756,7 +756,7 @@ export function useCreateRule(): CreateRuleState {
       condition: omitBlank(facts.condition),
       templateId: facts.templateId,
       recipientMode: facts.recipientMode,
-      accountId: omitBlank(facts.accountId),
+      accountId: facts.accountId.trim(),
       senderIdentityId: omitBlank(facts.senderIdentityId),
       ...modeFields(facts),
     });
@@ -784,7 +784,7 @@ export function useUpdateRule(): UpdateRuleState {
         condition: omitBlank(facts.condition),
         templateId: facts.templateId,
         recipientMode: facts.recipientMode,
-        accountId: omitBlank(facts.accountId),
+        accountId: facts.accountId.trim(),
         senderIdentityId: omitBlank(facts.senderIdentityId),
         ...modeFields(facts),
       });

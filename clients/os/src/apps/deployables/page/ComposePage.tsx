@@ -4,13 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 
 import { Rocket } from "lucide-react";
 
-import { Caption, Notice, useLiveView, type Stop } from "../../../kit";
+import { Caption, Field, Notice, useLiveView, type Stop } from "../../../kit";
 import type { Act } from "../../../kit/ActionBar";
 import { ActivityTarget } from "../../../kit/SemanticActivity";
 import { Wizard } from "../../../kit/Wizard";
-import { SELF_ACCOUNT_ID } from "../../accounts/rows";
+import { AccountPicker } from "../../accounts/AccountPicker";
+import { organizationChosen, useDefaultOrganization } from "../../accounts/organization";
 import { useAccountOptions } from "../../accounts/tie";
-import { useCreateSite, usePublish, useSiteAccount } from "../actions";
+import { useCreateSite, usePublish } from "../actions";
 import { useAddDomain } from "../domainActions";
 import { hostnameFor } from "../hostname";
 import { useNewPackage, usePackageActions, useSiteLifecycle } from "../packages/actions";
@@ -48,7 +49,6 @@ import {
   type ComposeDraft,
   type ComposePath,
   type ComposePhase,
-  accountOrSelf,
 } from "./compose";
 import { everyOtherAppSkipped } from "../packages/calls";
 import { BuildStop } from "./stops/Build";
@@ -56,7 +56,7 @@ import { CiHandoff } from "./stops/compose/CiHandoff";
 import { Rail } from "./RailView";
 import "../composition.css";
 import { headActionFor, railFor, type ComposeInput, type HeadAction, type RailProblem, type RailStage } from "./rail";
-import type { PartsHeld } from "../parts";
+import { partsForOrganization, type PartsHeld } from "../parts";
 import { ManifestPreview } from "./stops/compose/ManifestPreview";
 import { returnPathFor } from "../sources/connectReturn";
 import { OWN_ACCOUNT, organizationOf, ownerIsNamed, type GithubAppOwner } from "../sources/GithubAppSetup";
@@ -170,7 +170,7 @@ export interface ComposePageProps {
 }
 
 export function ComposePage(props: ComposePageProps) {
-  const { clusterDomain, can, isClusterOwner, credentials, onBack, backLabel = "Deployables", parked, placed, only, source, packages } = props;
+  const { clusterDomain, can: globalCan, isClusterOwner, credentials, onBack, backLabel = "Deployables", parked, placed, only, source, packages } = props;
 
   const [draft, setDraft] = useState<ComposeDraft>(() => props.connectResult ? { ...EMPTY_DRAFT, choice: "repo" } : EMPTY_DRAFT);
   const [addresses, setAddresses] = useState<Record<string, AddressDraft>>({});
@@ -211,12 +211,15 @@ export function ComposePage(props: ComposePageProps) {
   const zipProbe = useArtifactProbe();
   const checks = useAddressChecks();
   const accounts = useAccountOptions();
+  const defaultAccountId = useDefaultOrganization(accounts);
+  const [pickedAccountId, setAccountId] = useState("");
+  const sourceAccountId = parked?.pkg.accountId || source?.accountId || pickedAccountId || defaultAccountId;
+  const can = partsForOrganization(sourceAccountId, globalCan, source || parked || created.packageId || created.siteId ? "update" : "create");
 
   const newPackage = useNewPackage();
   const pkgActions = usePackageActions();
   const createSite = useCreateSite();
   const publish = usePublish();
-  const tie = useSiteAccount();
   const addDomain = useAddDomain();
   const lifecycle = useSiteLifecycle();
 
@@ -258,7 +261,7 @@ export function ComposePage(props: ComposePageProps) {
         : null,
     [draft.choice, draft.repoUrl, draft.repoRef, packages, parked, source, probe.reply?.defaultBranch],
   );
-  const sourceDone = parked !== undefined || source !== undefined || sourceReady(draft, zip, probeParked, duplicate);
+  const sourceDone = parked !== undefined || source !== undefined || (organizationChosen(accounts, sourceAccountId) && sourceReady(draft, zip, probeParked, duplicate));
 
   // THE OFF-LIST, read off the source row (D5). `activated` answers the click
   // before the row's own broadcast does.
@@ -293,8 +296,13 @@ export function ComposePage(props: ComposePageProps) {
       let changed = false;
       const next = { ...held };
       for (const app of apps) {
-        if (next[app] !== undefined) continue;
-        next[app] = seedAddress();
+        if (next[app] !== undefined && (next[app]!.accountId !== "" || sourceAccountId === "")) continue;
+        if (next[app] !== undefined) {
+          next[app] = { ...next[app]!, accountId: sourceAccountId };
+          changed = true;
+          continue;
+        }
+        next[app] = { ...seedAddress(), accountId: sourceAccountId };
         changed = true;
       }
       return changed ? next : held;
@@ -303,7 +311,7 @@ export function ComposePage(props: ComposePageProps) {
     // event, and keying on its identity would re-run this for a report
     // naming exactly the same apps.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appsKey]);
+  }, [appsKey, apps.length, sourceAccountId]);
 
   // DEPLOYING ONE DECLARED APP, and nothing else.
   //
@@ -351,7 +359,7 @@ export function ComposePage(props: ComposePageProps) {
 
   const action = actionFor(phase, readyToAnalyze, readyToDeploy);
   const busy =
-    newPackage.busy || pkgActions.busy || createSite.busy || publish.busy || tie.busy || addDomain.busy || lifecycle.busy;
+    newPackage.busy || pkgActions.busy || createSite.busy || publish.busy || addDomain.busy || lifecycle.busy;
 
   const outcomes: readonly DeployableOutcome[] = run?.deployables ?? [];
   const placementsLocked =
@@ -384,11 +392,7 @@ export function ComposePage(props: ComposePageProps) {
         autoDeploy: draft.choice === "repo" && draft.autoDeploy === true,
         credentialId: draft.choice === "repo" ? draft.credentialId.trim() : "",
         artifactId: draft.choice === "zip" ? draft.artifactId : "",
-        // THE SOURCE IS THE CLUSTER'S OWN (memql#5303, D12). It is registered
-        // here, before the run parks and the Where-it-lives stop can ask
-        // about a client, so there is no pick to honour yet; the per-app
-        // placement is where a client is chosen, and it ties the SITE.
-        accountId: SELF_ACCOUNT_ID,
+        accountId: sourceAccountId,
       });
       if (id === "") return;
       setCreated((held) => ({ ...held, packageId: id }));
@@ -401,18 +405,11 @@ export function ComposePage(props: ComposePageProps) {
 
     const address = addresses[""] ?? EMPTY_ADDRESS;
     const siteId = await createSite.create(
-      { slug: address.slug, kind: draft.kind, title: draft.name.trim(), storeId: draft.storeId ?? "" },
+      { slug: address.slug, kind: draft.kind, title: draft.name.trim(), storeId: draft.storeId ?? "", accountId: address.accountId },
       clusterDomain,
     );
     if (siteId === "") return;
     setCreated((held) => ({ ...held, siteId }));
-    // THE TWO HALVES, applied exactly as the pipeline applies a placement's:
-    // the same two calls, under the same actor, so the same guards decide.
-    // Either being refused leaves the deployable created, and says so rather
-    // than reading as a failed create. The client half always runs: a site
-    // nobody tied to a client is the cluster's own (memql#5303, D12), the
-    // same default `placementsFrom` sends for a package's apps.
-    await tie.setAccount(siteId, accountOrSelf(address.accountId));
     if (address.ownDomain.trim() !== "") await addDomain.add(siteId, address.ownDomain.trim());
   }
 
@@ -546,6 +543,10 @@ export function ComposePage(props: ComposePageProps) {
     switch (stage.id) {
       case "source":
         return (
+          <>
+          <Field label="Organization">
+            <AccountPicker id="compose-source-organization" label="Source organization" required value={sourceAccountId} accounts={accounts} disabled={sourceLocked} onChange={setAccountId} />
+          </Field>
           <ComposeSourceDetailStep
             draft={draft}
             onDraft={(patch) => setDraft((held) => ({ ...held, ...patch }))}
@@ -566,6 +567,7 @@ export function ComposePage(props: ComposePageProps) {
             onAppOwner={setAppOwner}
             duplicateOf={duplicate}
           />
+          </>
         );
       case "whatItIs":
         // THE PREVIEW STANDS IN UNTIL THE REPORT EXISTS, and never beside it.
@@ -805,7 +807,7 @@ export function ComposePage(props: ComposePageProps) {
               : tokenFormOpen
                 ? { word: "Describe the repository", detail: "its URL, and a token if it is private" }
                 : { word: "Choose a repository", detail: "then the branch to follow, and what to call it" };
-  const word = detailNeeds !== null ? detailNeeds.word : finished && draft.choice === "ci" ? "Waiting for CI" : composePhaseWord(phase, {
+  const word = !sourceLocked && !organizationChosen(accounts, sourceAccountId) ? "Choose an organization" : detailNeeds !== null ? detailNeeds.word : finished && draft.choice === "ci" ? "Waiting for CI" : composePhaseWord(phase, {
     inactive, archivedSource, declared: source !== undefined, wentLive, choice: draft.choice, moreToAnswer: action !== null && action.disabled,
   });
   const detail = detailNeeds !== null ? detailNeeds.detail : finished
@@ -892,14 +894,6 @@ export function ComposePage(props: ComposePageProps) {
               sentence="This deployable was not created."
               next="Nothing was written. The name may already be taken -- this cluster's own answer is below."
               detail={createSite.error}
-            />
-          )}
-          {tie.error === "" ? null : (
-            <Notice
-              tone="warn"
-              sentence="It was created, but not tied to that client."
-              next="Set the client on the deployable's own page. Nothing else was affected."
-              detail={tie.error}
             />
           )}
           {addDomain.error === "" ? null : (

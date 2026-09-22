@@ -54,7 +54,7 @@ function draft(over: Partial<ComposeDraft> = {}): ComposeDraft {
 }
 
 function address(over: Partial<AddressDraft> = {}): AddressDraft {
-  return { ...EMPTY_ADDRESS, ...over };
+  return { ...EMPTY_ADDRESS, accountId: "self", ...over };
 }
 
 function reply(over: Partial<SourceProbeReply> = {}): SourceProbeReply {
@@ -294,15 +294,10 @@ describe("the wire form of a placement", () => {
     });
   });
 
-  // THE CLUSTER'S OWN ACCOUNT IS THE DEFAULT, NOT NOBODY (memql#5303, design
-  // 2026-09-11-app-access-grants D12). A placement whose client half was left
-  // blank ties the app to `self`, the singleton the cluster's own group
-  // grants -- so two people on one cluster see each other's deployables from
-  // the day they are made. A picked client wins, and a skipped app is asked
-  // nothing and sends nothing.
-  it("ties an app to the cluster's own account unless a client was picked", () => {
-    const blank = placementsFrom(["web"], { web: address({ slug: "web" }) }, DOMAIN);
-    expect(blank["web"]!.accountId).toBe("self");
+  it("preserves explicit ownership and never assigns blank work to the operator", () => {
+    const blank = placementsFrom(["web"], { web: address({ slug: "web", accountId: "" }) }, DOMAIN);
+    expect(blank["web"]!.accountId).toBe("");
+    expect(addressReady(address({ slug: "web", accountId: "" }), DOMAIN)).toBe(false);
 
     const picked = placementsFrom(["web"], { web: address({ slug: "web", accountId: "acct-acme" }) }, DOMAIN);
     expect(picked["web"]!.accountId).toBe("acct-acme");
@@ -466,6 +461,7 @@ describe("one source, once (2026-09-05, D8)", () => {
   const pkg = (over: Partial<PackageRow>): PackageRow => ({
     id: "pkg-1",
     ownerUserId: "u-me",
+    accountId: "self",
     name: "acme",
     sourceKind: "repo",
     repoUrl: "https://github.com/acme/widget",

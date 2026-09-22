@@ -117,7 +117,7 @@ QueryClient.prototype.campaignImportRecipients = function (this: QueryClient, ar
 
 /** Pause a running campaign send. The delivery ledger is untouched, so resuming continues exactly where it stopped -- 'where it stopped' is the set of recipients with no delivery row, not a cursor that could go stale. */
 export interface CampaignPauseSendArgs {
-  /** The campaign to pause. The caller must own it. */
+  /** The campaign to pause. The caller needs update permission in its organization. */
   campaignId: string;
 }
 
@@ -139,7 +139,7 @@ QueryClient.prototype.campaignPauseSend = function (this: QueryClient, args: Cam
 
 /** Resume a paused campaign send. Does not re-stamp startedAt: the gap between startedAt and completedAt is how long the run took, and resetting it on resume would erase the pause it exists to reveal. */
 export interface CampaignResumeSendArgs {
-  /** The campaign to resume. The caller must own it. */
+  /** The campaign to resume. The caller needs update permission in its organization. */
   campaignId: string;
 }
 
@@ -181,9 +181,9 @@ QueryClient.prototype.campaignRetireEmailRule = function (this: QueryClient, arg
   return this.executeNamed("campaignRetireEmailRule", buildCampaignRetireEmailRule(args), opts);
 };
 
-/** Commit a campaign to a time and enqueue the send job that will fire at it (memql#3459). Runs the SAME preflight as campaignStartSend -- sender registered, one-click unsubscribe configured, template marked ready, audience non-empty and inside the ceiling -- because the whole value of scheduling is finding out now rather than at 3am. The job it writes is inert: it sits in the 'scheduled' status until the drain worker sees that the campaign's scheduledAt has passed, and the campaign row is the authority on that time, so moving the date with updateCampaign moves the send. A time in the past is refused; use campaignStartSend to send now. Authorization is the owned-tier read of the campaign, exactly as for starting one by hand. */
+/** Commit a campaign to a time and enqueue the send job that will fire at it (memql#3459). Runs the SAME preflight as campaignStartSend -- sender registered, one-click unsubscribe configured, template marked ready, audience non-empty and inside the ceiling -- because the whole value of scheduling is finding out now rather than at 3am. The job it writes is inert: it sits in the 'scheduled' status until the drain worker sees that the campaign's scheduledAt has passed, and the campaign row is the authority on that time, so moving the date with updateCampaign moves the send. A time in the past is refused; use campaignStartSend to send now. Requires the same organization update permission as starting one by hand. */
 export interface CampaignScheduleSendArgs {
-  /** The campaign to schedule. The caller must own it. */
+  /** The campaign to schedule. The caller needs update permission in its organization. */
   campaignId: string;
   /** When the send should begin, RFC 3339 (e.g. 2026-08-14T09:00:00Z). Interpreted as an instant, not a local wall clock -- a value with no offset is read as UTC. */
   scheduledAt: string;
@@ -206,9 +206,9 @@ QueryClient.prototype.campaignScheduleSend = function (this: QueryClient, args: 
   return this.executeNamed("campaignScheduleSend", buildCampaignScheduleSend(args), opts);
 };
 
-/** Preflight and start a campaign send. Refuses -- rather than partially sending -- when no email sender is registered on the node, when one-click unsubscribe is not configured (MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET / _BASE_URL), when the template is not marked ready, or when the audience is empty or at the MEMQL_CAMPAIGNS_MAX_AUDIENCE ceiling. Authorization is the owned-tier read of the campaign: a caller who cannot read it cannot start it. Returns the recipient count the send will work through. */
+/** Preflight and start a campaign send. Refuses -- rather than partially sending -- when no email sender is registered on the node, when one-click unsubscribe is not configured (MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET / _BASE_URL), when the template is not marked ready, or when the audience is empty or at the MEMQL_CAMPAIGNS_MAX_AUDIENCE ceiling. Requires a readable campaign and update permission on data in its organization. Returns the recipient count the send will work through. */
 export interface CampaignStartSendArgs {
-  /** The campaign to send. The caller must own it. */
+  /** The campaign to send. The caller needs update permission in its organization. */
   campaignId: string;
 }
 
@@ -831,7 +831,7 @@ QueryClient.prototype.editDocument = function (this: QueryClient, args: EditDocu
   return this.executeNamed("editDocument", buildEditDocument(args), opts);
 };
 
-/** The CALLER's resolved capability set, with provenance: one entry per (verb, resource) the cluster knows -- every pair any role holds, plus every pair a grant naming the caller adds -- each `allow` or `deny` and `source` naming the level that answered: `role` (inherited), `group` (a group the caller is in) or `user` (a grant on the caller). Takes no subject, so nobody can name anybody else; every signed-in person reads their own, which is why it carries no admin floor. This is the one read MemQL OS decides its desktop from. Returns {ok, role, userId, entries: [{verb, resource, effect, source}]}. */
+/** The CALLER's resolved capability set, with provenance: one entry per (verb, resource) the cluster knows -- every pair any role holds, plus every pair a grant naming the caller adds -- each `allow` or `deny` and `source` naming the level that answered: `role` (inherited), `group` (a group the caller is in) or `user` (a grant on the caller). Takes no subject, so nobody can name anybody else; every signed-in person reads their own, which is why it carries no admin floor. This is the one read MemQL OS decides its desktop from. Returns {ok, role, userId, entries: [{verb, resource, effect, source}], organizationEntries: [{accountId, verb, resource, effect}]}. Global entries retain their existing meaning. Organization entries report target-specific app and data permissions for authorized finite memberships; app discovery may admit a root app available in any organization, while actions must authorize their selected organization. Global operators keep global entries and an empty organizationEntries list. */
 export interface EffectiveCapabilitiesForActorArgs {
 }
 
@@ -1261,6 +1261,27 @@ declare module "./query.js" {
 
 QueryClient.prototype.groupMemberRemove = function (this: QueryClient, args: GroupMemberRemoveArgs = {} as GroupMemberRemoveArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("groupMemberRemove", buildGroupMemberRemove(args), opts);
+};
+
+/** List up to 100 active people already in this group's organization. Requires group management permission and membership of that organization; never enumerates unrelated users. */
+export interface GroupPeopleArgs {
+  groupId: string;
+}
+
+export function buildGroupPeople(args: GroupPeopleArgs): string {
+  const parts: string[] = [];
+  parts.push("groupId: " + renderMemQLValue(args.groupId));
+  return "builtin groupPeople(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    groupPeople(args: GroupPeopleArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.groupPeople = function (this: QueryClient, args: GroupPeopleArgs = {} as GroupPeopleArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("groupPeople", buildGroupPeople(args), opts);
 };
 
 /** Rename a group or change its description. Requires `update` on `group`. Refuses `group_not_active` on an archived group -- an archived group grants nothing, and editing one reads as reviving it. Returns {groupId, name, description}. */

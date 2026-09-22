@@ -773,7 +773,6 @@
         "status"
       ],
       "required": [
-        "campaignId",
         "email",
         "ownerUserId",
         "recipientId",
@@ -2383,6 +2382,7 @@
       "concept": "v1:identity:groupMembership",
       "file": "identity/concepts.memql",
       "fields": [
+        "accountId",
         "addedBy",
         "groupId",
         "origin",

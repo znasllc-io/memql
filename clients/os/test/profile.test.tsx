@@ -35,7 +35,7 @@ describe("accessFromSummary", () => {
     // `groups` rides through unchanged (epic memql#5165, section H): an empty
     // list is "not reported" as well as "none", and this layer must not turn
     // either into a claim of its own.
-    expect(accessFromSummary(summary)).toEqual({ ...ACCESS, groups: [] });
+    expect(accessFromSummary(summary)).toEqual({ ...ACCESS, groups: [], accountIds: [], everyAccount: false });
   });
 
   it("KEEPS THE ROLE when there is no email", () => {
@@ -55,6 +55,8 @@ describe("accessFromSummary", () => {
       roleName: "Owner",
       rank: 400,
       groups: [],
+      accountIds: [],
+      everyAccount: false,
     });
   });
 
@@ -75,6 +77,8 @@ describe("accessFromSummary", () => {
       roleName: "",
       rank: 0,
       groups: [],
+      accountIds: [],
+      everyAccount: false,
     });
   });
 

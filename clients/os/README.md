@@ -19,8 +19,12 @@ and all subsequent local interactive sign-in uses passkeys; its contact email is
 not verified. `azure`, absent and unknown values retain hosted verification:
 email first, then mandatory passkey registration. Neither email verification nor
 an enrollment grant is an owner session. After both required steps, the existing
-`CoreGate` still controls inference
-onboarding and retains its owner/developer admission rules.
+`CoreGate` still controls inference onboarding and retains its owner/developer
+admission rules. Organization name is required; setup configures the existing
+`self` account, stamps its owner, and ensures its account group and owner
+membership before sealing the claim or issuing a session. Every step is
+idempotent under the same claim lock. The optional “Title in organization” is
+profile text (`primaryRole`), never an authorization role.
 
 The Identity app contains your profile, passkeys, sessions, personal access
 tokens, and sign-in policy. Email verification, invitations, recovery, and
@@ -1017,8 +1021,7 @@ rules rather than repetitions of the five before it.
   fill it -- `groupsForAccount`, then `membersOfGroup` per group -- and it
   counts DISTINCT people, because somebody in two of a client's groups is one
   person and summing memberships would report a number nobody could reconcile.
-  It does NOT count the standing staff: developer rank and above reach every
-  client's work by rule with no rows anywhere, so including them would mean
+  It does NOT synthesize memberships for standing cluster operators, so including them would mean
   this band deciding who the cluster's staff are, on a screen about a client.
   Opening it hands off to Users on the group by intent rather than listing
   members here -- membership is managed on the group's own page, and a members
@@ -1040,15 +1043,16 @@ rules rather than repetitions of the five before it.
   are in it, because a domain that became proven is what a person would call a
   change.
 
-- **THE TIE PICKER FALLS BACK TO MyAccess, AND ONLY WHEN THE READ IS EMPTY.**
-  A client-rank person cannot read `v1:accounts:account` at all, so
-  `useAccountOptions` answers nothing for them -- and a picker with no options
-  would let a Member of Acme tie their campaign to nobody, landing their work
-  where their colleagues cannot see it. What they CAN be told is which groups
-  they are in, because MyAccess tells them as part of who they are, and each
-  group carries the client's id and NAME so the option is nameable without a
-  second read that would be refused for the same reason the first one was. It
-  is a fallback, never a merge: a caller who can read accounts gets the rows.
+- **ORGANIZATION OWNERSHIP IS ENFORCED BY THE ENGINE.** Campaigns and
+  deployables require one organization. The UI defaults from authoritative
+  `MyAccess.everyAccount/accountIds`: operators use `self`, a client with one
+  authorized organization uses that organization, and multiple memberships
+  require an explicit choice. The engine independently resolves the default,
+  checks current membership and app grants, verifies references belong to the
+  same organization, and stamps the persisted `accountId`. Creating or owning
+  a row does not bypass another organization's boundary. Group grants do not
+  grant cluster administration. See [Organization ownership](../../docs/public/operate/auth/organization-ownership.md)
+  for the full resource audit and existing-data policy.
 
 - **THE LEDGER IS AN ON-DEMAND READ, AND ALL FOUR BANDS ARE, DELIBERATELY.**
   Three of the four rolled-up concepts DO broadcast (`v1:platform:site`,
@@ -1072,7 +1076,7 @@ rules rather than repetitions of the five before it.
 - **THE FIRST-RUN CARD IS GATED ON A ROW, NOT ON A FLAG.** It renders when
   `v1:accounts:account:self` carries no `configuredAt`, read off the feed the
   list already holds rather than through a second by-id read -- one source of
-  truth for the row that decides whether a form or a list renders. Saving is
+  truth for the row that decides whether a form or a list renders. First-owner setup configures this same row; older installations can save
   an ordinary `updateClientAccount`, which stamps the field, so the answer
   lives in the cluster and the card is gone for everybody at once. Nothing is
   remembered in this browser, and no other OS surface gains a prompt: a

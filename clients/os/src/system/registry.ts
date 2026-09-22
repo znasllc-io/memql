@@ -7,7 +7,7 @@ import type { ComponentType, ReactNode } from "react";
 
 import type { ModuleId } from "./modules";
 import { isModuleId } from "./modules";
-import { holds } from "./roles";
+import { availableInAnyOrganization, holds } from "./roles";
 
 // WHAT A MANIFEST ASKS OF THE PERSON (epic memql#5289, design D10): a
 // capability RESOURCE, named. `requires: "app:<id>"` on an app or widget,
@@ -31,7 +31,8 @@ export const OPEN_VERB = "read";
 /** Whether the effective set opens a surface naming `resource`. Absent = every signed-in person. */
 export function accessAdmits(resource?: AccessResource): boolean {
   if (resource === undefined) return true;
-  return holds(OPEN_VERB, resource);
+  return holds(OPEN_VERB, resource) ||
+    ((resource === "app:campaigns" || resource === "app:deployables") && availableInAnyOrganization(OPEN_VERB, resource));
 }
 
 export interface OsAppSection {

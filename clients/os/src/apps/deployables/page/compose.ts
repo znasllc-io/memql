@@ -1,4 +1,3 @@
-import { SELF_ACCOUNT_ID } from "../../accounts/rows";
 import { hostnameFor, validateSlug } from "../hostname";
 import { normalizeHostname } from "../domains";
 import { generateNickname } from "../packages/nickname";
@@ -68,7 +67,7 @@ export const EMPTY_DRAFT: ComposeDraft = {
 export interface AddressDraft {
   /** The hostname LABEL. The domain half is the cluster's. */
   slug: string;
-  /** The client this app is for; "" leaves it untied. */
+  /** The organization owning this app; required before creation. */
   accountId: string;
   /** The client's own domain, bound after the site exists. Cluster owners only. */
   ownDomain: string;
@@ -183,7 +182,7 @@ export function sourceReady(
  */
 export function addressReady(address: AddressDraft, clusterDomain: string): boolean {
   const slug = address.slug.trim();
-  if (slug === "") return false;
+  if (slug === "" || address.accountId.trim() === "") return false;
   if (validateSlug(slug, clusterDomain) !== "") return false;
   if (address.ownDomain.trim() !== "" && normalizeHostname(address.ownDomain) === "") return false;
   return true;
@@ -258,18 +257,7 @@ export function placementsComplete(
   });
 }
 
-/**
- * The wire form of the addresses: hostnames composed, the own domain
- * normalized, and the client half DEFAULTED.
- *
- * An unanswered ownDomain stays blank and is omitted on the wire, exactly as
- * `createSite`'s own omitBlank does. The client half is different (memql#5303,
- * design 2026-09-11-app-access-grants D12): an app nobody tied to a client is
- * the CLUSTER'S OWN, so a blank picker sends `self` -- the singleton the
- * cluster's own group grants -- and the site lands where the people on this
- * cluster can see it rather than where only its creator can. A picked client
- * wins. A skipped app is asked nothing and sends nothing, including this.
- */
+/** Explicit organization ownership travels with every placement. Skipped apps carry none. */
 export function placementsFrom(
   apps: readonly string[],
   addresses: Readonly<Record<string, AddressDraft>>,
@@ -285,22 +273,12 @@ export function placementsFrom(
     const skipped = held.skip === true;
     out[app] = {
       hostname: skipped ? "" : hostnameFor(held.slug, clusterDomain),
-      accountId: skipped ? "" : accountOrSelf(held.accountId),
+      accountId: skipped ? "" : held.accountId.trim(),
       ownDomain: normalizeHostname(held.ownDomain),
       ...(held.skip === true ? { skip: true } : {}),
     };
   }
   return out;
-}
-
-/**
- * The client a deployable is tied to: the one picked, else the cluster's own
- * (D12). One spelling of the default, shared by the package path's placements
- * and the hand-made path's site tie.
- */
-export function accountOrSelf(accountId: string): string {
-  const picked = accountId.trim();
-  return picked === "" ? SELF_ACCOUNT_ID : picked;
 }
 
 /**

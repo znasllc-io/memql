@@ -1,3 +1,5 @@
+import { useAccountOptions } from "../../accounts/tie";
+import { accountNameFrom } from "../../accounts/rows";
 import { AvailableVersion } from "./AvailableVersion";
 import { GitBranch, History } from "lucide-react";
 
@@ -88,6 +90,7 @@ export function SourceView({
    */
   deployedBy: string;
 }) {
+  const accounts = useAccountOptions();
   const label = sourceLabel(pkg);
   const live = apps.filter((a) => siteStateWord(a) === "Live").length;
   // Declared by the manifest and never deployed -- the difference between what
@@ -131,6 +134,7 @@ export function SourceView({
           <div className="deployable-source-access"><CredentialChip pkg={pkg} credentials={credentials} /></div>
           {pkg.updateAvailable ? <Caption>A newer version is available: {shortVersion(pkg.latestKnownVersion)}. Open an app to review and deploy it.</Caption> : null}
           <Facts>
+            <Fact label="Organization" value={accountNameFrom(accounts, pkg.accountId)} />
             {pkg.sourceKind === "repo" ? <Fact label="Repository" value={pkg.repoUrl} /> : <Fact label="ZIP in Files" value={pkg.artifactId} />}
             {pkg.sourceKind === "repo" ? <Fact label="Tracking" value={pkg.repoRef === "" ? "default branch" : pkg.repoRef} /> : null}
             <Fact label="Deployed" value={pkg.deployedVersion === "" ? "" : shortVersion(pkg.deployedVersion)} mono />

@@ -176,7 +176,6 @@ func captureStore(t *testing.T) []string {
 	// publish stage makes after the site exists. The hostname is remote text
 	// -- a person types it -- so it carries the four control bytes; the
 	// guard behind the call refuses it, which is the point of the call.
-	_ = s.setSiteAccount(ctx, "v1:platform:site:ghi", "v1:accounts:account:acme")
 	_ = s.addCustomDomain(ctx, "v1:platform:site:ghi", awkwardText)
 
 	// The off-list (2026-09-05): a LIST literal of manifest names, the shape

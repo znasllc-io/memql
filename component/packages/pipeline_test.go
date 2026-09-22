@@ -124,6 +124,8 @@ func (r *fakeRoller) Roll(context.Context, string) error {
 }
 
 type fakePublisher struct {
+	ensured   []EnsureSiteRequest
+	ensureErr error
 	created   []string
 	published []string
 	repointed []string
@@ -146,6 +148,10 @@ type fakePublisher struct {
 }
 
 func (p *fakePublisher) EnsureSite(_ context.Context, req EnsureSiteRequest) (string, string, bool, error) {
+	if p.ensureErr != nil {
+		return "", "", false, p.ensureErr
+	}
+	p.ensured = append(p.ensured, req)
 	p.created = append(p.created, req.DeployableName)
 	return "v1:platform:site:" + req.DeployableName, req.Hostname, true, nil
 }
@@ -554,13 +560,10 @@ func TestANotOfferedTargetDeploysTheRestOfThePackage(t *testing.T) {
 // Placements (epic memql#4885, D8)
 // ---------------------------------------------------------------------------
 
-// TestPlacementsStampTheAccountAndBindTheDomainAfterTheSiteExists is D8: the
-// pipeline runs the account write and the domain binding itself, AFTER the
-// site row exists and is bound to the package, as two ordinary calls under
-// the caller's actor -- the same updateSiteAccount and customDomainAdd the
-// page would issue, so the guards behind them decide exactly as they do
-// from the page. No client-side follow-up writes.
-func TestPlacementsStampTheAccountAndBindTheDomainAfterTheSiteExists(t *testing.T) {
+// The chosen organization travels in the create request. Only the optional
+// DNS binding follows creation, so a site never appears under a default
+// organization before a second mutation moves it to the intended client.
+func TestPlacementsCreateSiteWithAccountBeforeBindingDomain(t *testing.T) {
 	h := newHarness(t, spaOnlyPackage(), ownerPackage())
 	out, err := Deploy(context.Background(), h.deps, DeployRequest{
 		PackageId: "v1:platform:package:abc",
@@ -580,16 +583,19 @@ func TestPlacementsStampTheAccountAndBindTheDomainAfterTheSiteExists(t *testing.
 
 	stmts := h.engine.statements()
 	bind := statementIndex(stmts, `mutation recordSitePackageOrigin(siteId: "v1:platform:site:storefront"`)
-	account := statementIndex(stmts, `mutation updateSiteAccount(siteId: "v1:platform:site:storefront", accountId: "v1:accounts:account:acme")`)
 	domain := statementIndex(stmts, `builtin customDomainAdd(siteId: "v1:platform:site:storefront", hostname: "shop.acme.com")`)
 	closed := statementIndex(stmts, "mutation closePackageDeployment")
-	if bind < 0 || account < 0 || domain < 0 || closed < 0 {
+	if bind < 0 || domain < 0 || closed < 0 {
 		t.Fatalf("want the bind, the account write, the domain binding and the close, got %v", stmts)
 	}
-	// After the site exists and is bound; account, then domain; and before
-	// the row closes, so the outcome that lands on it can say what happened.
-	if !(bind < account && account < domain && domain < closed) {
-		t.Fatalf("want bind(%d) < account(%d) < domain(%d) < close(%d)", bind, account, domain, closed)
+	// DNS binding follows site creation and package provenance, before closing.
+	if !(bind < domain && domain < closed) {
+		t.Fatalf("want bind(%d) < domain(%d) < close(%d)", bind, domain, closed)
+	}
+	for _, req := range h.publisher.ensured {
+		if req.DeployableName == "storefront" && req.AccountId != "v1:accounts:account:acme" {
+			t.Fatal("site was created without its organization")
+		}
 	}
 	// The docs placement named neither, so neither call was made for it.
 	for _, forbidden := range []string{
@@ -600,10 +606,9 @@ func TestPlacementsStampTheAccountAndBindTheDomainAfterTheSiteExists(t *testing.
 			t.Fatalf("a placement naming no account and no domain must issue neither call: %s", forbidden)
 		}
 	}
-	// Exactly once each: a redeploy finds the site and never re-asks, so
-	// the two writes belong to the first deploy alone.
-	if n := strings.Count(strings.Join(stmts, "\n"), "mutation updateSiteAccount("); n != 1 {
-		t.Fatalf("want one account write, got %d", n)
+	// No account follow-up writes; the domain binding runs once.
+	if n := strings.Count(strings.Join(stmts, "\n"), "mutation updateSiteAccount("); n != 0 {
+		t.Fatalf("organization must be atomic with create, found %d followup writes", n)
 	}
 	if n := strings.Count(strings.Join(stmts, "\n"), "builtin customDomainAdd("); n != 1 {
 		t.Fatalf("want one domain binding, got %d", n)
@@ -681,25 +686,6 @@ func TestARefusedDomainIsRecordedWithoutFailingThePublish(t *testing.T) {
 		t.Fatalf("the refusal must land on the deployment row; statements: %v", h.engine.statements())
 	}
 
-	// The account write is recorded the same way on its sibling field.
-	h = newHarness(t, spaOnlyPackage(), ownerPackage())
-	h.engine.fail = map[string]error{"mutation updateSiteAccount": errors.New("row authz: not the owner")}
-	out, err = Deploy(context.Background(), h.deps, DeployRequest{
-		PackageId:  "v1:platform:package:abc",
-		Actor:      mayDeployDsl(),
-		Confirmed:  true,
-		Placements: map[string]Placement{"docs": {Hostname: "docs.example.com", AccountId: "v1:accounts:account:acme"}, "storefront": {Hostname: "shop.example.com"}},
-	})
-	if err != nil || out.Status != StatusSucceeded {
-		t.Fatalf("a refused account write must not fail the deploy: %v (%+v)", err, out)
-	}
-	for _, o := range out.Deployables {
-		if o.Name == "docs" {
-			if o.AccountRefusal == nil || o.AccountRefusal.Code != CodeDeployableAccountRefused || o.AccountRefusal.Fatal || o.AccountId != "" {
-				t.Fatalf("want a non-fatal %s on the docs outcome, got %+v", CodeDeployableAccountRefused, o)
-			}
-		}
-	}
 }
 
 // A placement with neither an account nor a domain is exactly today's first

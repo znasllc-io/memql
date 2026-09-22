@@ -46,7 +46,7 @@ func TestDeliveryIdDerivationMatchesTheMutation(t *testing.T) {
 	block := mutationBlock(t, src, "mutation delivery recordCampaignDelivery")
 
 	idExpr := collapsedExprAt(t, block, "id:")
-	const want = `id: hash( hash(canonicalId(args.campaignId, "campaign")) + ` +
+	const want = `id: hash( hash(canonicalId(args.campaignId ?? args.emailRuleId ?? "", "campaign")) + ` +
 		`hash(canonicalId(args.recipientId, "recipient")) )`
 	if idExpr != want {
 		t.Fatalf("recordCampaignDelivery's derived id has changed.\n got: %s\nwant: %s\n\n"+
@@ -96,6 +96,21 @@ func TestDeliveryIdDerivationMatchesTheMutation(t *testing.T) {
 			t.Errorf("for (%q, %q) the mutation derives %s and deliveryRowID derives %s -- every "+
 				"engagement event for this pair would reference a delivery row that does not exist",
 				pair[0], pair[1], got, want)
+		}
+	}
+	// Rule sends retain the original per-rule identity, including the no-rule
+	// recipient-only case, while omitting the false campaign relationship.
+	for _, ruleID := range []string{"rule-1", ""} {
+		args := map[string]any{"recipientId": "rec-1"}
+		if ruleID != "" {
+			args["emailRuleId"] = ruleID
+		}
+		got, err := memql.EvalExpr(context.Background(), expr, memql.MapScope{"args": args}, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := deliveryRowID(ruleID, "rec-1"); got != want {
+			t.Errorf("rule %q id = %v, want existing ledger id %s", ruleID, got, want)
 		}
 	}
 	const pinned = "9314634c0d8d2e9e189563b1974d63bc197561262375106aac19b00aeb615773"

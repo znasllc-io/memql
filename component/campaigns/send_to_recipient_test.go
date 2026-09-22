@@ -210,7 +210,11 @@ func TestSendToRecipientReadsTheRecipientByIdAndNeverScans(t *testing.T) {
 		t.Errorf("the recipient was not read by id exactly once.\ncalls:\n%s",
 			strings.Join(callsWithPrefix(engine, "query "), "\n"))
 	}
-	for _, scan := range []string{"query audiences(", "query emailRuleById", "query audienceRosterForSend"} {
+	// The rule is a bounded ownership check, never a recipient search.
+	if len(callsWithPrefix(engine, "query emailRuleById")) != 1 {
+		t.Fatal("email rule organization was not checked")
+	}
+	for _, scan := range []string{"query audiences(", "query audienceRosterForSend"} {
 		if len(callsWithPrefix(engine, scan)) != 0 {
 			t.Errorf("%s was issued. Nothing on this path needs the audience itself any more: the "+
 				"audience was a SEARCH KEY for the recipient, never a check, and the query's own tier "+

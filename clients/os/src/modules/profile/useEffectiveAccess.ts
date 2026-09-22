@@ -7,6 +7,7 @@ import {
   onGrantWritten,
   setEffectiveCapabilities,
   type EffectiveCapability,
+  type OrganizationCapability,
 } from "../../system/roles";
 
 /**
@@ -78,7 +79,7 @@ export function useEffectiveAccess(): number {
           // keep-what-you-hold direction on a later one.
           return;
         }
-        setEffectiveCapabilities(entries);
+        setEffectiveCapabilities(entries, organizationEntriesFrom(row!));
         setEpoch(effectiveAccessEpoch());
       } catch {
         // A refused or dropped read keeps the set already held; see above.
@@ -124,4 +125,20 @@ export function entriesFrom(row: Record<string, unknown>): EffectiveCapability[]
     });
   }
   return out;
+}
+
+/** The same response carries organization decisions without flattening denials
+ * from different organizations into one misleading global action permission. */
+export function organizationEntriesFrom(row: Record<string, unknown>): OrganizationCapability[] {
+  const flat = flatten(row);
+  if (!boolOr(flat, "ok", false) || !Array.isArray(flat["organizationEntries"])) return [];
+  return flat["organizationEntries"].flatMap((item: unknown) => {
+    if (item === null || typeof item !== "object") return [];
+    const entry = item as Record<string, unknown>;
+    const accountId = typeof entry["accountId"] === "string" ? entry["accountId"].trim() : "";
+    const verb = typeof entry["verb"] === "string" ? entry["verb"].trim() : "";
+    const resource = typeof entry["resource"] === "string" ? entry["resource"].trim() : "";
+    if (!accountId || !verb || !resource) return [];
+    return [{ accountId, verb, resource, effect: entry["effect"] === "allow" ? "allow" as const : "deny" as const }];
+  });
 }

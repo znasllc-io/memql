@@ -643,11 +643,10 @@ describe("the compose flow: pushed by your CI", () => {
     expect(create).toContain('hostname: "marketing.memql.example.com"');
     expect(create).toContain('status: "draft"');
     expect(create).toContain("/pending/");
-    // ...and tied to the cluster's own account, through the same call the
-    // site detail's picker makes, because no client was picked (memql#5303,
-    // D12).
-    await waitFor(() => expect(connection.callsNamed("updateSiteAccount")).toHaveLength(1));
-    expect(connection.callsNamed("updateSiteAccount")[0]).toContain('accountId: "self"');
+    // Ownership is part of the create, so no untied row exists between two writes.
+    expect(create).toContain('accountId: "self"');
+    expect(create).not.toContain("ownerUserId");
+    expect(connection.callsNamed("updateSiteAccount")).toHaveLength(0);
 
     expect(await within(region).findByText(/^POST https:\/\/api\.memql\.example\.com\/sites\/[^/]+\/bundles$/)).toBeTruthy();
     expect(

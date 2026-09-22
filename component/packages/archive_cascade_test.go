@@ -1,6 +1,7 @@
 package packages
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -22,7 +23,7 @@ import (
 
 func archiveHarness(t *testing.T, sites ...map[string]any) (*Integration, *recordingEngine) {
 	t.Helper()
-	engine := &recordingEngine{rows: map[string][]map[string]any{
+	engine := &recordingEngine{allowOrganizationActions: true, rows: map[string][]map[string]any{
 		"query packageById":     {ownerPackageDeclaring("storefront", "docs")},
 		"query sitesForPackage": sites,
 		"builtin customDomainReleaseForSite": {{
@@ -452,5 +453,16 @@ func TestArchiveAndDeleteAcceptTheLabel(t *testing.T) {
 	}
 	if !hasCall(jengine.statements(), "mutation setSiteStatus(") {
 		t.Fatal("the label confirmed and nothing was archived")
+	}
+}
+
+func TestPackageArchiveChecksSiteAuthorityBeforeReleasingDomains(t *testing.T) {
+	i, engine := archiveHarness(t, packageSite("storefront", "storefront.example.com", "live"))
+	engine.allowOrganizationActions = false
+	if _, err := i.handleArchivePackage(context.Background(), map[string]any{"packageId": "abc", "confirmName": ownerPackage()["name"]}, 0); err == nil {
+		t.Fatal("source archive ignored target site authority")
+	}
+	if engine.sawStatement("builtin customDomainReleaseForSite(") || engine.sawStatement("mutation deleteSite(") {
+		t.Fatal("refused site retirement performed a destructive side effect")
 	}
 }

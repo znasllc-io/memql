@@ -1,3 +1,7 @@
+import { useSessionIfPresent } from "../../chrome/access";
+import { useGroupPeople } from "./useGroupPeople";
+import { useOsIfPresent } from "../../chrome/state";
+import { holds } from "../../system/roles";
 import { useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { UserRound } from "lucide-react";
@@ -39,7 +43,7 @@ import type { RoleCatalog } from "./useRoles";
 
 export function GroupPage({
   group,
-  people,
+  people: clusterPeople,
   invitations,
   accounts,
   catalog,
@@ -76,20 +80,28 @@ export function GroupPage({
     [members.snapshot],
   );
 
+  const os = useOsIfPresent();
+  const canUpdate = holds("update", "group");
+  const operator = useSessionIfPresent()?.access?.everyAccount === true;
+  const scopedPeople = useGroupPeople(!operator && canUpdate ? group.id : "", members.snapshot.version);
+  const people = operator ? clusterPeople : scopedPeople.people;
   const account = accounts.find((a) => a.id === group.accountId) ?? null;
 
   // THE STANDING STAFF (epic memql#5165, D6) ARE A RULE, NOT ROWS.
-  // Developer rank and above are members of every account-kind group by rule,
+  // Global operator roles are members of every account-kind group by rule,
   // and no query returns those memberships -- so this band is drawn from the
   // ROSTER this window already holds, and it carries no controls: there is
   // nothing to remove, because there is no row to remove.
-  const developerRank = catalog.roles.find((r) => r.slug === "developer")?.rank ?? Number.MAX_SAFE_INTEGER;
+  const operatorRank = catalog.roles.find((r) => r.slug === "admin")?.rank ?? Number.MAX_SAFE_INTEGER;
   const standing = useMemo(
     () =>
       group.kind !== "account"
         ? []
-        : people.filter((person) => (roleRungOf(person.role)?.rank ?? -1) >= developerRank),
-    [people, group.kind, developerRank],
+        : people.filter((person) => {
+          const role = catalog.roles.find((r) => r.slug === person.role || r.aliases.includes(person.role));
+          return role !== undefined && role.accountId === "" && (roleRungOf(person.role)?.rank ?? -1) >= operatorRank;
+        }),
+    [people, group.kind, operatorRank, catalog.roles],
   );
 
   // People invited into this group who have not arrived. They come from the
@@ -103,7 +115,7 @@ export function GroupPage({
   const accountStillActive = account !== null && !accountIsArchived(account);
 
   const acts: Act[] = [];
-  if (!archived) {
+  if (!archived && canUpdate) {
     acts.push({ label: renaming ? "Cancel" : "Rename", onAct: () => setRenaming((held) => !held) });
     // ARCHIVE IS ABSENT, NOT DISABLED, for an account-kind group whose client
     // is still active (rule 12, and the engine's own `group_account_active`).
@@ -120,12 +132,22 @@ export function GroupPage({
         <Head title={group.name} meta={group.kind === "account" ? "A client's group" : undefined} back={{ label: "Groups", onSelect: onBack }}>
 
           {account === null ? null : <AccountChip name={accountName(account)} />}
-          {archived ? null : (
+          {archived || !canUpdate ? null : (
             <Button tone="primary" onClick={() => setAdding((held) => !held)}>
               {adding ? "Done" : "Add people"}
             </Button>
           )}
         </Head>
+
+        {group.accountId ? (
+          <Panel label="Organization access">
+            <p className="os-caption">Membership gives access to this organization’s work. Apps and actions must also be granted by a cluster operator. An organization administrator uses a role scoped to this organization, never the cluster Admin role.</p>
+            {os && holds("read", "app:settings/access") ? <Button onClick={() => os.actions.openApp("settings", "access", { groupId: group.id })}>Manage app access</Button> : null}
+            {os && holds("create", "role") ? <Button onClick={() => os.actions.openApp("users", "roles", { accountId: group.accountId, createRole: true })}>Create organization role</Button> : null}
+          </Panel>
+        ) : null}
+
+        {scopedPeople.error ? <Notice tone="warn" sentence="Organization people could not be read." detail={scopedPeople.error}><Button onClick={scopedPeople.reload}>Retry</Button></Notice> : null}
 
         {adding ? (
           <Panel label="Add people to this group">
@@ -174,10 +196,11 @@ export function GroupPage({
               return (
                 <ListRow
                   icon={<UserRound size={16} aria-hidden />}
-                  name={person ? personName(person) : membership.userId}
-                  onOpen={person ? () => onOpenPerson(person.id) : undefined}
+                  name={person && operator
+                    ? <Button tone="quiet" onClick={() => onOpenPerson(person.id)}>{personName(person)}</Button>
+                    : person ? personName(person) : membership.userId}
                   state={
-                    archived ? null : (
+                    archived || !canUpdate ? null : (
                       <Button
                         onClick={() => void actions.groupMemberRemove(group.id, membership.userId)}
                         busy={actions.busyKey === membership.userId}

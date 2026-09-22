@@ -880,7 +880,7 @@ describe("Where it lives", () => {
 
   it("writes the tie through updateSiteAccount and inserts nothing locally", async () => {
     // Tied to a client this reader cannot see: the picker keeps the id in
-    // place, and choosing "No client" is a change. The write is the same
+    // place, and choosing the operator organization is a change. The write is the same
     // call the detail panel made; the Select is the kit's own, so the choice
     // goes through its listbox.
     const tied = siteRow({ ...STORE, id: "site-store", accountId: "acct-1" });
@@ -888,9 +888,10 @@ describe("Where it lives", () => {
     await openStop(page, "Where it lives");
     expect(within(screen.getByRole("region", { name: "Addresses for store.memql.example.com" })).getByText("acct-1")).toBeTruthy();
     await click(within(page).getByLabelText("The client this deployable is for"));
-    await click(await screen.findByRole("option", { name: "No client" }));
+    await click(await screen.findByRole("option", { name: "Operator organization" }));
     await waitFor(() => expect(connection.callsNamed("updateSiteAccount")).toHaveLength(1));
     expect(connection.callsNamed("updateSiteAccount")[0]).toContain('siteId: "site-store"');
+    expect(connection.callsNamed("updateSiteAccount")[0]).toContain('accountId: "self"');
   });
 
   // THE ADDRESS IS FOR EVERYBODY; BINDING A DOMAIN IS FOR A CLUSTER OWNER. The

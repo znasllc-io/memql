@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/registration"
@@ -789,6 +790,10 @@ func (s *Server) handleSetupPost(w http.ResponseWriter, r *http.Request) {
 		InternalDomains:           strings.TrimSpace(r.PostForm.Get("internal_domains")),
 		InternalDefaultRole:       strings.TrimSpace(r.PostForm.Get("internal_default_role")),
 		AccessRequestNotifyEmails: strings.TrimSpace(r.PostForm.Get("access_request_notify_emails")),
+	}
+	if in.BrandName == "" || utf8.RuneCountInString(in.BrandName) > 200 {
+		s.renderError(w, r, http.StatusBadRequest, "Organization name is required and must be at most 200 characters.")
+		return
 	}
 	if in.Domain == "" {
 		s.renderError(w, r, http.StatusBadRequest, "Cluster domain is required.")

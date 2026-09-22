@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
+import type { OsAppProps } from "../../system/registry";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check } from "lucide-react";
 
 import { Caption, Chip, Field, Head, Notice, Panel, Select, Subhead } from "../../kit";
@@ -84,7 +85,7 @@ export const ACCESS_SECTION_RESOURCE = "app:settings/access";
 
 type View = "subject" | "resource";
 
-export function AccessSection() {
+export function AccessSection({ intent, consumeIntent }: Pick<OsAppProps, "intent" | "consumeIntent"> = {}) {
   const { access, accessEpoch } = useSession();
   const { registry } = useOs();
   // BARE, ONCE, AT THE SOURCE: the session's spelling is the token's, and
@@ -100,6 +101,13 @@ export function AccessSection() {
   const [view, setView] = useState<View>("subject");
   const [subjectKey, setSubjectKey] = useState("");
   const [resourceKey, setResourceKey] = useState("");
+  useEffect(() => {
+    const groupId = intent?.payload["groupId"];
+    if (typeof groupId !== "string" || !groupId || !intent) return;
+    setView("subject");
+    setSubjectKey(`group:${groupId}`);
+    consumeIntent?.(intent.id);
+  }, [intent, consumeIntent]);
 
   const subject = useMemo<Subject | null>(() => subjectFromKey(subjectKey, roster.people, roster.groups), [subjectKey, roster.people, roster.groups]);
   const subjectGrants = useSubjectGrants(subject);

@@ -70,10 +70,9 @@ func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any,
 		return nil, errors.New("campaigns.sendToRecipient: no email sender is registered on this node")
 	}
 
-	// AUTHORIZATION IS THE READS. The template and the recipient are both
-	// composite-tier and both are read under the CALLER's own actor, so this
-	// can only ever mail somebody on a list the caller can see, with copy the
-	// caller can see.
+	// Resolve both resources under the caller's identity. After checking that
+	// they share an organization, require update permission there before mail
+	// can leave; visibility alone grants no sending authority.
 	tmpl, found, err := w.store.TemplateByID(ctx, templateID)
 	if err != nil {
 		return nil, fmt.Errorf("campaigns.sendToRecipient: %w", err)
@@ -95,6 +94,19 @@ func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any,
 		return nil, fmt.Errorf("campaigns.sendToRecipient: recipient %q is not readable", recipientID)
 	}
 
+	if err := w.requireSendAuthority(ctx, recipient.AccountID); err != nil {
+		return nil, err
+	}
+	if !sameOrganization(tmpl.AccountID, recipient.AccountID) {
+		return nil, errors.New("campaigns.sendToRecipient: template and recipient must belong to the same organization")
+	}
+	if emailRuleID != "" {
+		rows, err := w.store.rows(ctx, call("query", "emailRuleById", arg{"emailRuleId", emailRuleID}))
+		if err != nil || len(rows) != 1 || !sameOrganization(recipient.AccountID, str(rows[0], "accountId")) {
+			return nil, errors.New("campaigns.sendToRecipient: email rule must be readable and belong to the recipient's organization")
+		}
+	}
+
 	// A SYNTHETIC campaign, and it is what makes every downstream piece work
 	// unchanged. The renderer, the identity resolver and the unsubscribe
 	// minter all take a Campaign; building one from the rule (or from
@@ -107,6 +119,7 @@ func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any,
 	// ledger both answer "which rule mailed this person". With no rule it is
 	// empty, and the ledger row is filed under the recipient alone.
 	campaign := Campaign{
+		AccountID:        recipient.AccountID,
 		ID:               emailRuleID,
 		OwnerUserID:      ownerUserID,
 		Name:             strings.TrimSpace(tmpl.Subject),
@@ -203,22 +216,14 @@ func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any,
 
 // recordLoneDelivery ledgers one outcome.
 //
-// # The rule id is stamped HERE, from an explicit argument
-//
-// On this path the synthetic campaign's id happens to BE the rule id, so
-// `d.CampaignID` would have carried it by accident. It is passed separately
-// anyway, because that coincidence is a property of one line in the caller
-// and not a thing the ledger should depend on: change what the synthetic
-// campaign id holds and the answer to "which rule mailed this person" would
-// change with it, silently and in a row somebody audits.
-//
-// It is left EMPTY by every other writer in this package, which is what makes
-// the field mean something -- an ordinary campaign delivery carrying a rule
-// id would be a false attribution, and there is no reader that could tell.
+// The synthetic campaign carries a rendering identity, not a relationship to
+// a persisted campaign. Only emailRuleId is stored for a rule send; pretending
+// it is campaignId would point at the wrong concept and fail organization
+// validation after the message has already left.
 //
 // # One row per (rule, recipient), and that is history rather than safety
 //
-// The delivery id derives from (campaignId, recipientId), so a rule that
+// The delivery id derives from (emailRuleId, recipientId), so a rule that
 // fires twice for the same person writes a new VERSION of one row rather than
 // two rows. On the campaign path that derivation IS the idempotency
 // mechanism; here nothing reads the ledger to decide whether to send -- an
@@ -231,7 +236,7 @@ func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any,
 // error the caller retries. Logged loudly instead, because an unrecorded send
 // is invisible everywhere else.
 func (w *Worker) recordLoneDelivery(ctx context.Context, campaign Campaign, recipient Recipient, emailRuleID string, d Delivery) {
-	d.CampaignID = campaign.ID
+	d.CampaignID = "" // This synthetic send has no campaign relationship.
 	d.RecipientID = recipient.ID
 	d.Email = recipient.Email
 	d.EmailRuleID = emailRuleID

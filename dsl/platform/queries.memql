@@ -209,15 +209,9 @@ query inboundRequest inboundRequestByDedupeKey {
 /// Resolve a request Host to the site that answers it. The edge's hot path -- called once per
 /// cache miss, not once per request.
 ///
-/// The caller term is the COMPOSITE tier's own predicate, written out (memql#4344). It used to be a
-/// bare `actor.isClusterOwner==true`, which under the composite tier would narrow the query to
-/// cluster owners ALONE and leave a user unable to resolve their own deployable -- the admin gate is
-/// one BRANCH of the tier now, not the whole of it. The engine ANDs this same term in from the
-/// concept's declaration; restating it is what the land gate asks for, so that a reader of the query
-/// can see the scope without resolving the concept (TestRowAuthzEnforcementLandGate). It is an
-/// OWNERSHIP floor rather than a fail-open selection: a false admin gate leaves exactly the caller's
-/// own rows. The edge still reads every site because it calls this under a synthetic cluster-owner
-/// actor (component/edge's systemEdgeActor), which the second branch admits.
+/// The engine applies the site's organization boundary and app permissions. The edge resolves
+/// every served site under its synthetic routing actor; ordinary callers see only authorized
+/// organization sites or legacy untied rows admitted by their existing owner rules.
 // @cache(30) REASON (memql#4534): TWO LAYERS, deliberately aligned. The edge
 // resolver keeps its own per-replica host -> site map in front of this read
 // (component/edge/resolve.go, TTL from MEMQL_EDGE_SITE_CACHE_TTL_SECONDS,
@@ -239,12 +233,12 @@ query site siteByHostname {
   }
   filter  row => row.hostname == args.hostname
               && isNotDeleted(row)
-              && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+
   shape   siteFull
 }
 
-/// The deployables this caller may see: their OWN sites, or every site in the cluster when the
-/// caller is a cluster owner. The Deployables app's primary screen.
+/// The deployables within this caller's current organization and app scope, with standing
+/// access for cluster operators. The Deployables app's primary screen.
 ///
 /// ARCHIVED ROWS ARE EXCLUDED HERE and listed by sitesArchived instead (epic memql#4794, D10). The
 /// exclusion is written out rather than folded into a trait, because it is the one conjunct whose
@@ -258,9 +252,9 @@ query site siteByHostname {
 /// is what decides how far "all" reaches for a given actor.
 ///
 /// NO CALLER TERM, DELIBERATELY (memql#5303, design 2026-09-11-app-access-grants D4 / D12). The
-/// tier `@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")` is the whole answer for
-/// every caller -- their own rows, every row for a cluster owner, and the rows tied to an account
-/// whose group they are in. This read used to restate the tier's first two arms as
+/// declaration and the engine's strict organization boundary decide the authorized rows.
+/// Ownership alone does not bypass organization membership for ordinary callers.
+/// This read used to restate the tier's first two arms as
 /// `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)`, and an AND with that conjunct can
 /// never be widened by the third: a member of Acme's group was admitted to Acme's sites by the tier
 /// and then filtered back out by the query, so the list showed the tie to nobody. The engine ANDs
@@ -748,8 +742,8 @@ query syncState syncStatesAll {
 // NO CALLER TERM ON THE READS THE APP AND THE BUILTINS MAKE (memql#5303,
 // design 2026-09-11-app-access-grants D4 / D12). Both concepts declare
 // `@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")`, and
-// that tier is the whole answer for every caller: own rows, every row for a
-// cluster owner, and the rows tied to an account whose group the caller is in.
+// the engine also enforces current organization membership and app permissions.
+// Ownership alone does not bypass that boundary for an ordinary caller.
 // These reads used to restate the first two arms as
 // `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)`, exactly as
 // v1:platform:site's did (memql#4344) -- and an AND with that conjunct cannot
@@ -808,7 +802,7 @@ query package packagesByRepoUrl {
   }
   filter  row => row.repoUrl == args.repoUrl
               && statusIsActive(row)
-              && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+
   sort    "name", "asc"
   shape   packageFull
 }
@@ -820,7 +814,7 @@ query package packagesByRepoUrl {
 query package packagesTrackingRepos {
   filter    row => row.sourceKind == "repo"
                 && statusIsActive(row)
-                && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+
   sort      "name", "asc"
   paginate  200
   shape     packageFull

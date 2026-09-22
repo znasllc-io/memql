@@ -39,7 +39,7 @@ import (
 //	    EMPTY ownerUserId means, and the SeedMaterializer runs that same
 //	    mutation under a synthetic actor on every boot. "A write made as the
 //	    DEPLOYMENT produces the deployment's row" is conditional on the actor's
-//	    ROLE, and a mutation body has no way to ask. So the stamp is UNDONE
+//	    synthetic identity, which a mutation body cannot inspect. The stamp is UNDONE
 //	    here, and only ever undone -- see applySiteOwnerStamp.
 //	 2. WHICH HOSTNAMES A USER MAY CLAIM. A user's site is `<slug>.<domain>` for
 //	    the domain THIS cluster serves; the slug is bounded, cluster-unique and
@@ -254,58 +254,19 @@ func siteWritePrivileged(ctx context.Context, actor string) bool {
 	return isSystemActor(identity, actor)
 }
 
-// applySiteOwnerStamp UNDOES createSite's `ownerUserId: actor.userId` stamp
-// when the writer is the DEPLOYMENT rather than a person, leaving the row
-// cluster-owned.
-//
-// # It only ever narrows, and that is what makes it safe to have at all
-//
-// createSite stamps the owner in its own stamp{} block, because a concept
-// declaring an owner tier over a CALLER-SUPPLIED field records a guarantee
-// nothing provides -- TestDeclaredOwnerFieldsAreServerStamped refuses exactly
-// that, and an exemption would be false here since the field genuinely is not
-// forgeable. So the arg does not exist and this step cannot introduce one.
-//
-// What it does is DELETE the stamp, and only when the stamped value is the
-// caller's OWN id -- so the outcome is either "the caller owns it" or "nobody
-// does". An empty ownerUserId matches nobody (sameRowAuthzOwner refuses an
-// empty owner outright), so the row becomes reachable through the cluster-owner
-// branch alone. There is no path here that names a third party, which is the
-// property the owner gate is actually about.
-//
-// # Why it has to exist
-//
-// The seeded OS site must land CLUSTER-OWNED: it is the
-// platform's row, not any operator's, and it is how sites are managed at all.
-// The SeedMaterializer runs createSite for it under a synthetic actor, and
-// re-runs it on EVERY boot (memql#4705), so without this the OS site would be
-// owned by "system:seedMaterializer" -- a value that is not a user and that a
-// caller could, in principle, be issued.
-//
-// The same rule then answers the operator case for free: a cluster owner
-// creating a site creates the DEPLOYMENT's site, and hands one over (or takes
-// it back) by re-running createSite on the id, which the read-merge makes an
-// update and the cluster-owner write escape admits.
-//
-// # The self-match is what keeps an operator from stealing a user's site
-//
-// A cluster owner running updateSiteBundle against a USER's site arrives here
-// with the merged payload carrying that user's ownerUserId. It is not the
-// caller's own id, so nothing is deleted and the row stays the user's. Only the
-// value createSite just stamped -- the caller's own -- is undone.
-//
-// Runs BESIDE stampRowAuthzOwner in executeWrite, which is to say BEFORE
-// canonicalizeRelationshipFields. That ordering is load-bearing in the other
-// direction too: the stamped value is still the BARE caller id here, which is
-// what the comparison below expects; after canonicalisation it would be
-// `v1:identity:user:<id>` and a raw comparison would stop matching.
+// applySiteOwnerStamp leaves human creator attribution intact, including real
+// cluster owners and borrowed actors carried across internal pipeline calls.
+// Only explicitly synthetic deployment actors create unowned system sites.
+// A privileged call origin or an owner role does not make a person synthetic.
+// Updates whose delta does not name the owner preserve the stored principal.
 func applySiteOwnerStamp(ctx context.Context, payload map[string]any, priorExisted bool, actor string, deltaNamedOwner bool) error {
 	if payload == nil {
 		return nil
 	}
 	stamped := strings.TrimSpace(stringFromAny(payload["ownerUserId"]))
 
-	if siteWritePrivileged(ctx, actor) {
+	access, _ := auth.AccessFromContext(ctx)
+	if access != nil && access.Synthetic {
 		if priorExisted && !deltaNamedOwner {
 			// A PRIVILEGED UPDATE WHOSE DELTA NEVER NAMED THE OWNER. The
 			// merged payload carries the STORED owner, not a fresh stamp, so

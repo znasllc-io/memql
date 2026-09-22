@@ -1,3 +1,4 @@
+import { holds } from "../../system/roles";
 import { AddButton } from "../../kit/AddButton";
 import { useEffect, useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -154,14 +155,14 @@ export function GroupsSection({
   return (
     <div className="os-app-stack">
       <Head title="Groups" meta={count === 0 ? undefined : `${count}`}>
-        <AddButton onClick={() => setView({ kind: "new" })} label="New group" />
+        {holds("create", "group") ? <AddButton onClick={() => setView({ kind: "new" })} label="New group" /> : null}
       </Head>
 
       {groups.snapshot.error ? (
         <Notice
           tone="error"
           sentence="This cluster did not return its groups."
-          next="Reading them is admin and above; the engine decides that, not this window."
+          next="Your organization scope and granted group permissions determine which groups you can read."
         >
           <Button onClick={groups.reseed}>Try again</Button>
         </Notice>

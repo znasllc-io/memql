@@ -105,6 +105,8 @@ export interface WizardStatus {
 export interface WizardProps {
   /** What is being added, drawn in the orb. The first-run gate wears the MemQL mark; an add wears its subject. */
   icon: ReactNode;
+  /** Optional companion mark, in a matching orb immediately before the subject. */
+  leadingIcon?: ReactNode;
   /** The same words as the control that opened this: "Add a domain". */
   title: string;
   /** One sentence on what adding this does. Optional, and never a second title. */
@@ -142,6 +144,7 @@ export const SPLIT_AT = 760;
 
 export function Wizard({
   icon,
+  leadingIcon,
   title,
   lead,
   breadcrumbs,
@@ -255,9 +258,10 @@ export function Wizard({
           {split ? (
             <>
               <div className="os-wizard-aside">
-                <span className="os-wizard-mark" aria-hidden>
-                  {icon}
-                </span>
+                <div className="os-wizard-marks" aria-hidden>
+                  {leadingIcon ? <span className="os-wizard-mark">{leadingIcon}</span> : null}
+                  <span className="os-wizard-mark">{icon}</span>
+                </div>
                 <Head title={title} breadcrumbs={breadcrumbs} back={back} />
                 {lead ? <p className="os-wizard-lead">{lead}</p> : null}
                 {steps.length > 0 ? rail : null}
@@ -279,9 +283,10 @@ export function Wizard({
             </>
           ) : (
             <>
-              <span className="os-wizard-mark" aria-hidden>
-                {icon}
-              </span>
+              <div className="os-wizard-marks" aria-hidden>
+                {leadingIcon ? <span className="os-wizard-mark">{leadingIcon}</span> : null}
+                <span className="os-wizard-mark">{icon}</span>
+              </div>
               <Head title={title} breadcrumbs={breadcrumbs} back={back} />
               {lead ? <p className="os-wizard-lead">{lead}</p> : null}
               {notices}

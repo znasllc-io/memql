@@ -75,6 +75,17 @@ func (i *Integration) handleGroupEnsureForAccount(ctx context.Context, args map[
 		return nil, err
 	}
 	if existing != nil && existing.Status == StatusActive {
+		// The boot seed uses a placeholder name. Ownership setup names the
+		// existing organization; keep its derived group in step without
+		// replacing the group or disturbing any memberships.
+		name := strings.TrimSpace(rowString(account, "name"))
+		if name != "" && existing.Name != name && existing.Kind == KindAccount && existing.AccountID == accountID {
+			existing.Name = name
+			existing.Description = "Everyone who works on " + name + "."
+			if err := i.store.WriteGroup(ctx, *existing); err != nil {
+				return nil, err
+			}
+		}
 		return i.node("groupEnsureForAccount", map[string]any{
 			"accountId": accountID, "groupId": existing.ID, "created": false,
 		})

@@ -9,9 +9,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"net/mail"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // LocalPasskeyOnly is an operator declaration, never a property of an HTTP
@@ -94,8 +97,8 @@ func (s *Store) BootstrapEnrollment(ctx context.Context, token string, cfg Confi
 // rotates enrollment authority without replacing the reserved profile or proof.
 func (s *Store) BeginBootstrapEnrollmentLocked(ctx context.Context, cfg Config, settings ClusterSettingsRow, oauth map[string]string, verified bool) (string, error) {
 	email, emailErr := mail.ParseAddress(settings.BootstrapEmail)
-	if emailErr != nil || email.Address != settings.BootstrapEmail || settings.ClusterDomain == "" || settings.BootstrapFirstName == "" || settings.BootstrapLastName == "" {
-		return "", errors.New("valid owner details and installation domain are required")
+	if emailErr != nil || email.Address != settings.BootstrapEmail || strings.TrimSpace(settings.BrandName) == "" || utf8.RuneCountInString(settings.BrandName) > 200 || settings.ClusterDomain == "" || settings.BootstrapFirstName == "" || settings.BootstrapLastName == "" {
+		return "", errors.New("valid owner details, organization name and installation domain are required")
 	}
 	switch settings.RegistrationMode {
 	case "", "open", "invite_only", "waitlist":
@@ -171,4 +174,17 @@ func (s *Store) SaveBootstrapEnrollmentLocked(ctx context.Context, row *Bootstra
 		return ErrBootstrapEnrollment
 	}
 	return nil
+}
+
+// ConfigureBootstrapOrganization is the organization write in verified claim
+// completion. The caller holds the shared claim lock and has persisted the
+// attestation and real owner; the groups handler independently verifies that
+// owner and performs resumable writes to the reserved self account.
+func (s *Store) ConfigureBootstrapOrganization(ctx context.Context, row *BootstrapEnrollment) error {
+	if row == nil || len(row.Proof) == 0 || row.UserID == "" || (!row.Local && !row.EmailVerified) {
+		return ErrBootstrapEnrollment
+	}
+	ctx = auth.ContextWithInternalOrigin(ContextWithSystemCredentialActor(ctx))
+	_, err := s.Engine.Execute(ctx, "builtin configureSelfAccount(name: "+langparser.QuoteString(row.Settings.BrandName)+", ownerUserId: "+langparser.QuoteString(row.UserID)+")")
+	return err
 }

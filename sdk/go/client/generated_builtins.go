@@ -126,7 +126,7 @@ func CampaignImportRecipientsBuild(args CampaignImportRecipientsArgs) string {
 
 // CampaignPauseSend -- Pause a running campaign send. The delivery ledger is untouched, so resuming continues exactly where it stopped -- 'where it stopped' is the set of recipients with no delivery row, not a cursor that could go stale.
 type CampaignPauseSendArgs struct {
-	// The campaign to pause. The caller must own it.
+	// The campaign to pause. The caller needs update permission in its organization.
 	CampaignId string
 }
 
@@ -147,7 +147,7 @@ func CampaignPauseSendBuild(args CampaignPauseSendArgs) string {
 
 // CampaignResumeSend -- Resume a paused campaign send. Does not re-stamp startedAt: the gap between startedAt and completedAt is how long the run took, and resetting it on resume would erase the pause it exists to reveal.
 type CampaignResumeSendArgs struct {
-	// The campaign to resume. The caller must own it.
+	// The campaign to resume. The caller needs update permission in its organization.
 	CampaignId string
 }
 
@@ -187,9 +187,9 @@ func CampaignRetireEmailRuleBuild(args CampaignRetireEmailRuleArgs) string {
 	return b.String()
 }
 
-// CampaignScheduleSend -- Commit a campaign to a time and enqueue the send job that will fire at it (memql#3459). Runs the SAME preflight as campaignStartSend -- sender registered, one-click unsubscribe configured, template marked ready, audience non-empty and inside the ceiling -- because the whole value of scheduling is finding out now rather than at 3am. The job it writes is inert: it sits in the 'scheduled' status until the drain worker sees that the campaign's scheduledAt has passed, and the campaign row is the authority on that time, so moving the date with updateCampaign moves the send. A time in the past is refused; use campaignStartSend to send now. Authorization is the owned-tier read of the campaign, exactly as for starting one by hand.
+// CampaignScheduleSend -- Commit a campaign to a time and enqueue the send job that will fire at it (memql#3459). Runs the SAME preflight as campaignStartSend -- sender registered, one-click unsubscribe configured, template marked ready, audience non-empty and inside the ceiling -- because the whole value of scheduling is finding out now rather than at 3am. The job it writes is inert: it sits in the 'scheduled' status until the drain worker sees that the campaign's scheduledAt has passed, and the campaign row is the authority on that time, so moving the date with updateCampaign moves the send. A time in the past is refused; use campaignStartSend to send now. Requires the same organization update permission as starting one by hand.
 type CampaignScheduleSendArgs struct {
-	// The campaign to schedule. The caller must own it.
+	// The campaign to schedule. The caller needs update permission in its organization.
 	CampaignId string
 	// When the send should begin, RFC 3339 (e.g. 2026-08-14T09:00:00Z). Interpreted as an instant, not a local wall clock -- a value with no offset is read as UTC.
 	ScheduledAt string
@@ -215,9 +215,9 @@ func CampaignScheduleSendBuild(args CampaignScheduleSendArgs) string {
 	return b.String()
 }
 
-// CampaignStartSend -- Preflight and start a campaign send. Refuses -- rather than partially sending -- when no email sender is registered on the node, when one-click unsubscribe is not configured (MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET / _BASE_URL), when the template is not marked ready, or when the audience is empty or at the MEMQL_CAMPAIGNS_MAX_AUDIENCE ceiling. Authorization is the owned-tier read of the campaign: a caller who cannot read it cannot start it. Returns the recipient count the send will work through.
+// CampaignStartSend -- Preflight and start a campaign send. Refuses -- rather than partially sending -- when no email sender is registered on the node, when one-click unsubscribe is not configured (MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET / _BASE_URL), when the template is not marked ready, or when the audience is empty or at the MEMQL_CAMPAIGNS_MAX_AUDIENCE ceiling. Requires a readable campaign and update permission on data in its organization. Returns the recipient count the send will work through.
 type CampaignStartSendArgs struct {
-	// The campaign to send. The caller must own it.
+	// The campaign to send. The caller needs update permission in its organization.
 	CampaignId string
 }
 
@@ -1068,7 +1068,7 @@ func EditDocumentBuild(args EditDocumentArgs) string {
 	return b.String()
 }
 
-// EffectiveCapabilitiesForActor -- The CALLER's resolved capability set, with provenance: one entry per (verb, resource) the cluster knows -- every pair any role holds, plus every pair a grant naming the caller adds -- each `allow` or `deny` and `source` naming the level that answered: `role` (inherited), `group` (a group the caller is in) or `user` (a grant on the caller). Takes no subject, so nobody can name anybody else; every signed-in person reads their own, which is why it carries no admin floor. This is the one read MemQL OS decides its desktop from. Returns {ok, role, userId, entries: [{verb, resource, effect, source}]}.
+// EffectiveCapabilitiesForActor -- The CALLER's resolved capability set, with provenance: one entry per (verb, resource) the cluster knows -- every pair any role holds, plus every pair a grant naming the caller adds -- each `allow` or `deny` and `source` naming the level that answered: `role` (inherited), `group` (a group the caller is in) or `user` (a grant on the caller). Takes no subject, so nobody can name anybody else; every signed-in person reads their own, which is why it carries no admin floor. This is the one read MemQL OS decides its desktop from. Returns {ok, role, userId, entries: [{verb, resource, effect, source}], organizationEntries: [{accountId, verb, resource, effect}]}. Global entries retain their existing meaning. Organization entries report target-specific app and data permissions for authorized finite memberships; app discovery may admit a root app available in any organization, while actions must authorize their selected organization. Global operators keep global entries and an empty organizationEntries list.
 type EffectiveCapabilitiesForActorArgs struct {
 }
 
@@ -1535,6 +1535,26 @@ func GroupMemberRemoveBuild(args GroupMemberRemoveArgs) string {
 	}
 	b.WriteString("userId: ")
 	b.WriteString(quoteMemQL(args.UserId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// GroupPeople -- List up to 100 active people already in this group's organization. Requires group management permission and membership of that organization; never enumerates unrelated users.
+type GroupPeopleArgs struct {
+	GroupId string
+}
+
+// GroupPeople calls the engine builtin groupPeople.
+func (qc *QueryClient) GroupPeople(ctx context.Context, args GroupPeopleArgs) (*Result, error) {
+	call := GroupPeopleBuild(args)
+	return qc.executeNamed(ctx, "groupPeople", call)
+}
+
+func GroupPeopleBuild(args GroupPeopleArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin groupPeople(")
+	b.WriteString("groupId: ")
+	b.WriteString(quoteMemQL(args.GroupId))
 	b.WriteString(")")
 	return b.String()
 }

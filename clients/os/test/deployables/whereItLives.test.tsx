@@ -70,7 +70,7 @@ describe("who can see this deployable", () => {
     // Not "visible to nobody else": that would be a claim about a tie which
     // does not exist, and an untied deployable is the ordinary case.
     const view = mount(fakeConnection({}), "");
-    await screen.findByText("Client");
+    await screen.findByText("Organization");
     expect(screen.queryByText(/Visible to/)).toBeNull();
     view.unmount();
   });

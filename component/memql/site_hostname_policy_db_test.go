@@ -30,16 +30,9 @@ import (
 // where every other domain-shaped value in the cluster comes from.
 const siteTestDomain = "policy-test.example"
 
-// userSiteCtx is an ordinary authenticated caller: a person with a deployable,
-// not an operator.
-//
-// A DEVELOPER, not a writer, since epic memql#5288: creating a package and
-// setting a site's status are the `sources` and `publish` parts of
-// Deployables, seeded on owner and developer only, and a writer is refused
-// by the capability gate before any row is touched. What these files
-// measure -- the row's owner against a stranger against a cluster owner --
-// is a tier question the developer rank leaves exactly as it was: a
-// developer is not a cluster owner, and no row here carries an account tie.
+// userSiteCtx is a cluster developer, used by hostname and attribution tests.
+// Organization-isolation tests below use ordinary members instead: cluster
+// operators intentionally have standing access to every organization.
 func userSiteCtx(userId string) context.Context {
 	ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{
 		UserId: userId,
@@ -48,12 +41,48 @@ func userSiteCtx(userId string) context.Context {
 	return auth.ContextWithToken(ctx, &auth.TokenInfo{Subject: userId})
 }
 
+// installSiteOrganizationCapabilities admits ordinary members to the exact app
+// actions exercised below, so a cross-organization refusal tests row scope.
+func installSiteOrganizationCapabilities(t *testing.T, extra ...auth.VerbResource) {
+	t.Helper()
+	grants := map[auth.VerbResource]bool{
+		{Verb: auth.VerbRead, Resource: auth.ResourceData}:            true,
+		{Verb: auth.VerbCreate, Resource: auth.ResourceData}:          true,
+		{Verb: auth.VerbUpdate, Resource: auth.ResourceData}:          true,
+		{Verb: auth.VerbRead, Resource: "app:deployables"}:            true,
+		{Verb: auth.VerbExecute, Resource: "app:deployables/sources"}: true,
+		{Verb: auth.VerbExecute, Resource: "app:deployables/publish"}: true,
+		{Verb: auth.VerbExecute, Resource: "app:deployables/retire"}:  true,
+	}
+	for _, permission := range extra {
+		grants[permission] = true
+	}
+	auth.SetCapabilityCatalog(&capabilityFake{
+		ranks:  map[string]int{"owner": 400, "developer": 300, "admin": 200, "user": 100, "writer": 100, "viewer": 50},
+		grants: map[string]map[auth.VerbResource]bool{"owner": grants, "developer": grants, "user": grants, "writer": grants},
+	})
+	t.Cleanup(func() { auth.SetCapabilityCatalog(nil) })
+}
+
+func siteOrganizationMemberCtx(t *testing.T, eng *MemQLEngine, userID, accountID string) context.Context {
+	t.Helper()
+	seedPrincipal(t, eng, userID, auth.RoleWriter)
+	if err := organizationInsert(t, eng, groupSeedCtx(), conceptAccountsAccount, accountID, map[string]any{"name": accountID, "status": "active", "domainStatus": "unverified"}); err != nil {
+		t.Fatalf("seed organization: %v", err)
+	}
+	seedGroup(t, eng, "group-"+accountID, accountID, "account", accountID)
+	seedMembership(t, eng, "group-"+accountID, userID, "active")
+	return rankActorCtx(userID, auth.RoleWriter)
+}
+
 // systemSiteCtx is the SeedMaterializer's shape: a `system:` actor carrying a
 // cluster-owner AccessContext (systemActorContext, memql#3711).
 func systemSiteCtx() context.Context {
 	ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{
-		UserId: "system:site-policy-test",
-		Role:   auth.RoleOwner,
+		UserId:    "system:site-policy-test",
+		Role:      auth.RoleOwner,
+		Synthetic: true,
+		Unranked:  true,
 	})
 	return auth.ContextWithToken(ctx, &auth.TokenInfo{Subject: "system:site-policy-test"})
 }
@@ -198,14 +227,11 @@ func TestSiteCreateLetsAClusterOwnerUseACustomHostname(t *testing.T) {
 			"Refusing this would make the cluster unable to host anything but <slug>.<domain>", err)
 	}
 
-	// And it lands CLUSTER-OWNED: a write made as the deployment produces the
-	// deployment's row, which is the same rule that keeps the seeded portal
-	// out of any individual operator's hands.
+	// A real operator remains the recorded owner. Only synthetic seed actors
+	// create unowned system sites.
 	payload := latestPayload(t, ctx, db, conceptPlatformSite, storedId)
-	if owner := strings.TrimSpace(stringFromAny(payload["ownerUserId"])); owner != "" {
-		t.Fatalf("a cluster owner's site landed owned by %q, want CLUSTER-OWNED (empty). The Go "+
-			"step undoes createSite's self-stamp for a deployment writer -- if it stopped, the "+
-			"seeded portal would be owned by the seed materializer too", owner)
+	if owner := strings.TrimSpace(stringFromAny(payload["ownerUserId"])); BareShortId(owner) != root {
+		t.Fatalf("a real cluster owner lost persisted attribution: %q, want %q", owner, root)
 	}
 }
 
@@ -290,21 +316,22 @@ func TestSiteUpdateOfItsOwnHostnameIsNotADuplicate(t *testing.T) {
 	}
 }
 
-// CROSS-USER WRITES. updateSiteBundle IS the deploy and the rollback, so a
-// cross-user write is one person republishing another's storefront. Refused by
-// guardRowAuthzWrite against the composite tier -- owner-only, with the
-// cluster-owner path as the separate standing escape.
+// CROSS-ORGANIZATION WRITES. A member with the required app grants may
+// publish their organization's deployable, but cannot republish another's.
 func TestSiteCrossUserWritesAreRefusedThroughTheMutationPath(t *testing.T) {
 	eng, _, _ := sharedReadMergeEngine(t)
 	t.Setenv(memqlDomainEnv, siteTestDomain)
 
 	slug := "cross-" + uniqueSuffix("site")
 	id := "site-cross-" + uniqueSuffix("site")
-	ownerCtx := userSiteCtx("user-site-owner-" + uniqueSuffix("site"))
-	strangerCtx := userSiteCtx("user-site-stranger-" + uniqueSuffix("site"))
+	installSiteOrganizationCapabilities(t)
+	accountID := "account-owner-" + uniqueSuffix("site")
+	ownerCtx := siteOrganizationMemberCtx(t, eng, "user-site-owner-"+uniqueSuffix("site"), accountID)
+	strangerCtx := siteOrganizationMemberCtx(t, eng, "user-site-stranger-"+uniqueSuffix("site"), "account-stranger-"+uniqueSuffix("site"))
 
 	if _, err := createSiteRaw(t, ownerCtx, eng, map[string]any{
 		"siteId":    id,
+		"accountId": accountID,
 		"hostname":  slug + "." + siteTestDomain,
 		"bundleRef": "blob://sites/" + id + "/v1/",
 	}); err != nil {
@@ -321,7 +348,7 @@ func TestSiteCrossUserWritesAreRefusedThroughTheMutationPath(t *testing.T) {
 	} {
 		t.Run(tc.mutation, func(t *testing.T) {
 			if _, err := runSiteMutation(t, strangerCtx, eng, tc.mutation, tc.args); err == nil {
-				t.Fatalf("%s succeeded against another user's deployable", tc.mutation)
+				t.Fatalf("%s succeeded against another organization's deployable", tc.mutation)
 			}
 		})
 	}
@@ -338,9 +365,8 @@ func TestSiteCrossUserWritesAreRefusedThroughTheMutationPath(t *testing.T) {
 	}
 }
 
-// THE READ SIDE. A user sees their own deployables; a cluster owner sees every
-// one. This is what the composite tier buys and what a plain owner= tier or a
-// plain clusterOwner tier each get wrong in opposite directions.
+// THE READ SIDE. A member sees their organization's deployables; a cluster
+// owner sees every organization. Membership and standing access both matter.
 func TestSitesAllScopesToTheCallerAndOpensForAClusterOwner(t *testing.T) {
 	eng, _, _ := sharedReadMergeEngine(t)
 	t.Setenv(memqlDomainEnv, siteTestDomain)
@@ -350,18 +376,21 @@ func TestSitesAllScopesToTheCallerAndOpensForAClusterOwner(t *testing.T) {
 	mineId := "site-mine-" + uniqueSuffix("site")
 	theirsId := "site-theirs-" + uniqueSuffix("site")
 
-	me := userSiteCtx("user-site-me-" + uniqueSuffix("site"))
-	them := userSiteCtx("user-site-them-" + uniqueSuffix("site"))
+	installSiteOrganizationCapabilities(t)
+	mineAccount := "account-mine-" + uniqueSuffix("site")
+	theirsAccount := "account-theirs-" + uniqueSuffix("site")
+	me := siteOrganizationMemberCtx(t, eng, "user-site-me-"+uniqueSuffix("site"), mineAccount)
+	them := siteOrganizationMemberCtx(t, eng, "user-site-them-"+uniqueSuffix("site"), theirsAccount)
 
 	storedMine, err := createSiteRaw(t, me, eng, map[string]any{
-		"siteId": mineId, "hostname": mineSlug + "." + siteTestDomain,
+		"siteId": mineId, "accountId": mineAccount, "hostname": mineSlug + "." + siteTestDomain,
 		"bundleRef": "blob://sites/" + mineId + "/v1/",
 	})
 	if err != nil {
 		t.Fatalf("create mine: %v", err)
 	}
 	storedTheirs, err := createSiteRaw(t, them, eng, map[string]any{
-		"siteId": theirsId, "hostname": theirsSlug + "." + siteTestDomain,
+		"siteId": theirsId, "accountId": theirsAccount, "hostname": theirsSlug + "." + siteTestDomain,
 		"bundleRef": "blob://sites/" + theirsId + "/v1/",
 	})
 	if err != nil {
@@ -472,6 +501,8 @@ func sitesAllIds(t *testing.T, ctx context.Context, eng *MemQLEngine) map[string
 // owner against a store row this test seeds, which is the only shape that is
 // legal at all.
 func TestSiteCreateAcceptsAShopifyStorefrontWithItsBinding(t *testing.T) {
+	// Reach the store row ownership guard with explicit app action authority.
+	installSiteOrganizationCapabilities(t, auth.VerbResource{Verb: auth.VerbExecute, Resource: "app:deployables/store"})
 	eng, db, _ := sharedReadMergeEngine(t)
 	t.Setenv(memqlDomainEnv, siteTestDomain)
 

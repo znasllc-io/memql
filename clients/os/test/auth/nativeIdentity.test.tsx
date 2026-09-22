@@ -41,11 +41,14 @@ it("walks through all existing setup choices and submits only on verification", 
   const submit = vi.fn();
   render(<OwnershipWizard data={{ PrefillDomain: "example.test" }} busy={false} error="" submit={submit} />);
   expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
-  for (const [label, value] of [["First name", "Ada"], ["Last name", "Lovelace"], ["Owner email", "ada@example.test"], ["Phone number (optional)", "+1555010100"], ["Role at organization (optional)", "Engineer"], ["Date of birth (optional)", "1990-01-01"]]) {
+  for (const [label, value] of [["First name", "Ada"], ["Last name", "Lovelace"], ["Owner email", "ada@example.test"], ["Phone number (optional)", "+1555010100"], ["Date of birth (optional)", "1990-01-01"]]) {
     fireEvent.change(screen.getByLabelText(label!), { target: { value } });
   }
+  fireEvent.click(screen.getByRole("combobox", { name: "Title in organization (optional)" }));
+  fireEvent.click(screen.getByRole("option", { name: "Engineer" }));
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-  fireEvent.change(screen.getByLabelText("Organization name (optional)"), { target: { value: "Example" } });
+  expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+  fireEvent.change(screen.getByLabelText("Organization name"), { target: { value: "Example" } });
   fireEvent.change(screen.getByLabelText("Internal email domains (comma-separated)"), { target: { value: "example.test" } });
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   fireEvent.change(screen.getByLabelText("Approved email domains (comma-separated)"), { target: { value: "partner.test" } });
@@ -73,7 +76,7 @@ it("requires the server's revocation warning and keeps unknown sessions distinct
 });
 
 it("requires allowed domains before choosing domain-restricted registration", () => {
-  render(<OwnershipWizard data={{ PrefillOwnerFirstName: "Ada", PrefillOwnerLastName: "Lovelace", PrefillOwnerEmail: "ada@example.test", PrefillDomain: "example.test", PrefillMode: "domain_restricted" }} busy={false} error="" submit={vi.fn()} />);
+  render(<OwnershipWizard data={{ PrefillOwnerFirstName: "Ada", PrefillOwnerLastName: "Lovelace", PrefillOwnerEmail: "ada@example.test", PrefillDomain: "example.test", PrefillOrgName: "Example", PrefillMode: "domain_restricted" }} busy={false} error="" submit={vi.fn()} />);
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
@@ -84,7 +87,7 @@ it("requires allowed domains before choosing domain-restricted registration", ()
 
 it("local setup requires a passkey and never offers an email verification action", () => {
   const submit = vi.fn();
-  render(<OwnershipWizard data={{ Local: true, PrefillOwnerFirstName: "Ada", PrefillOwnerLastName: "Owner", PrefillOwnerEmail: "ada@example.test", PrefillDomain: "test" }} busy={false} error="" submit={submit} />);
+  render(<OwnershipWizard data={{ Local: true, PrefillOwnerFirstName: "Ada", PrefillOwnerLastName: "Owner", PrefillOwnerEmail: "ada@example.test", PrefillDomain: "test", PrefillOrgName: "Example" }} busy={false} error="" submit={submit} />);
   expect(screen.getByText(/Contact information only/)).toBeTruthy();
   for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   expect(screen.queryByRole("button", { name: "Send verification link" })).toBeNull();
@@ -124,4 +127,16 @@ it("explicitly requests first-party passkey sign-in when no OAuth client is in s
   vi.stubGlobal("fetch", fetcher);
   expect(await loginWithPasskey(config, {})).toBe("/");
   expect(JSON.parse(fetcher.mock.calls[0]?.[1].body)).toEqual({ firstParty: true });
+});
+
+
+it("preserves custom profile titles without treating them as authorization roles", () => {
+  const submit = vi.fn();
+  render(<OwnershipWizard data={{ Local: true, PrefillOwnerFirstName: "Ada", PrefillOwnerLastName: "Owner", PrefillOwnerEmail: "ada@example.test", PrefillDomain: "test", PrefillOrgName: "Example", PrefillOwnerPrimaryRole: "Chief Researcher" }} busy={false} error="" submit={submit} />);
+  expect(screen.getByLabelText("Your title")).toHaveProperty("value", "Chief Researcher");
+  fireEvent.change(screen.getByLabelText("Your title"), { target: { value: "Community steward" } });
+  for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue to passkey" }));
+  expect(submit).toHaveBeenCalledWith("/setup", expect.objectContaining({ owner_primary_role: "Community steward", brand_name: "Example" }));
+  expect(submit.mock.calls[0]?.[1]).not.toHaveProperty("role");
 });

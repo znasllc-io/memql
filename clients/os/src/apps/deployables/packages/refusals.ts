@@ -23,6 +23,14 @@ export interface RefusalCopy {
 }
 
 const COPY: Record<string, RefusalCopy> = {
+  organization_required: {
+    title: "An organization is required",
+    next: "Choose the organization that owns this deployable before publishing it.",
+  },
+  organization_forbidden: {
+    title: "This organization does not permit the action",
+    next: "",
+  },
   package_manifest_missing: {
     title: "This source has no package manifest",
     next: "A package is a tree with memql-package.yaml at its root, describing what to deploy. Add one and try again.",

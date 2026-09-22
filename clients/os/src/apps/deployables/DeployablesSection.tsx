@@ -1,3 +1,4 @@
+import { AccountChip } from "../accounts/AccountPicker";
 import { AttentionMarker } from "../../attention/Attention";
 import { updateTarget } from "./attention";
 import type { ConnectReturn } from "./sources/connectReturn";
@@ -54,7 +55,8 @@ import {
 } from "./list";
 import { runIsScopedToApp, sourceLabel, type DeploymentRow, type PackageRow } from "./packages/rows";
 import { ComposePage } from "./page/ComposePage";
-import type { PartsHeld } from "./parts";
+import { partsForOrganization, type PartsHeld } from "./parts";
+import { availableInAnyOrganization } from "../../system/roles";
 import { DeployablePage } from "./page/DeployablePage";
 import { HistoryView } from "./page/HistoryView";
 import { SourceView } from "./page/SourceView";
@@ -190,11 +192,12 @@ export function DeployablesSection({
       setLanding(navigation.origin === "peer");
     }
   }, [active, navigation?.revision, navigation?.origin, openRequest?.revision, openRequest?.siteId]);
+  const canOpenCompose = can.deploy || availableInAnyOrganization("execute", "app:deployables/deploy");
   // OAuth is a full-page return. Resume the repository step once; the
   // live credential feed decides whether this account actually connected.
   useLayoutEffect(() => {
-    if (connectResult && can.deploy) setView({ kind: "compose", connectResult });
-  }, [connectResult, can.deploy]);
+    if (connectResult && canOpenCompose) setView({ kind: "compose", connectResult });
+  }, [connectResult, canOpenCompose]);
   // WHAT WAS JUST DELETED, so the list can say what happened to it. The name
   // is free the instant the row is stamped; the domains come down on the
   // reconciliation sweep's own schedule, and this says so rather than implying
@@ -338,7 +341,7 @@ export function DeployablesSection({
       if (pkg === null) return renderList();
       const apps = siteRows.filter((s) => s.packageId === pkg.id);
       if (view.kind === "history") {
-        return <HistoryView pkg={pkg} can={can} app={siteRows.find(s => s.id === view.siteId)}
+        return <HistoryView pkg={pkg} can={partsForOrganization(pkg.accountId, can)} app={siteRows.find(s => s.id === view.siteId)}
           backLabel={view.returnTo?.kind === "history" ? "App history" : undefined}
           onOpenSourceHistory={() => setView({ kind: "history", packageId: pkg.id, returnTo: view })}
           onBack={() => setView(view.returnTo ?? (view.siteId ? { kind: "deployable", siteId: view.siteId } : { kind: "source", packageId: pkg.id }))} />;
@@ -348,7 +351,7 @@ export function DeployablesSection({
           pkg={pkg}
           apps={apps}
           credentials={credentials}
-          can={can}
+          can={partsForOrganization(pkg.accountId, can)}
           backLabel={view.fromSite ? (siteRows.find(s => s.id === view.fromSite)?.title || "Deployable") : ROOT_LABEL[root]}
           onBack={() => view.fromSite ? setView({ kind: "deployable", siteId: view.fromSite }) : backToList()}
           onOpenHistory={() => setView({ kind: "history", packageId: pkg.id, returnTo: view })}
@@ -378,7 +381,7 @@ export function DeployablesSection({
           credentials={credentials}
           viewerUserId={viewerUserId}
           nameOf={nameOf}
-          can={can}
+          can={partsForOrganization(site.accountId, can)}
           clusterDomain={clusterDomain}
           onAsk={onAsk}
           onBack={() => view.from ? setView({ kind: "source", packageId: view.from }) : backToList()}
@@ -443,7 +446,7 @@ export function DeployablesSection({
       ? "No archived deployables."
       : filterIsNarrowing(filter)
         ? "No matching deployables. Clear the filters to see everything."
-        : can.deploy
+        : canOpenCompose
           ? "No deployables yet. Add a repository, upload built files or connect your CI."
           : "No deployables are available to this account.";
 
@@ -517,7 +520,7 @@ export function DeployablesSection({
               keeps its name through the whole flow. */}
           {/* `deploy`, because composing ENDS in a deploy: a person holding
               only `sources` has nothing to reach here that is theirs. */}
-          {can.deploy ? (
+          {canOpenCompose ? (
             <AddButton label="Add a deployable" className="deployable-new" onClick={() => setView({ kind: "compose" })} />
           ) : null}
         </Head>
@@ -577,7 +580,7 @@ export function DeployablesSection({
               {showArchived ? "Archived sources will appear here." : filtered ? "Try a different search." : "A source is a repository or a zip that declares one or more apps. Add a deployable from one and it is listed here, with everything it produced."}
             </EmptyState>}
             renderRow={(group, tick) => (
-              <SourceLine group={group} tick={tick} onOpen={() => setView({ kind: "source", packageId: group.pkg!.id })} />
+              <SourceLine accounts={accounts} group={group} tick={tick} onOpen={() => setView({ kind: "source", packageId: group.pkg!.id })} />
             )}
           />
         ) : (
@@ -591,7 +594,7 @@ export function DeployablesSection({
             emptyText={emptyText}
             emptyContent={<EmptyState icon={Globe} title={showArchived ? "No archived deployables" : filtered ? "No matching deployables" : "No deployables yet"}
               action={filtered ? <Button onClick={() => setFilter(DEFAULT_LIST_FILTER)}>Clear filters</Button> : undefined}>
-              {showArchived ? "Archived apps will appear here. Restore one to bring it back offline." : filtered ? "Try a different search or clear the filters." : can.deploy ? "Add a deployable from a repository, built files or a CI pipeline." : "Apps shared with your account will appear here."}
+              {showArchived ? "Archived apps will appear here. Restore one to bring it back offline." : filtered ? "Try a different search or clear the filters." : canOpenCompose ? "Add a deployable from a repository, built files or a CI pipeline." : "Apps shared with your account will appear here."}
             </EmptyState>}
             renderRow={(row, tick) => (
               <DeployableLine
@@ -655,7 +658,7 @@ function newestParked(
  * ONE SOURCE, as a row: what it is called and where it lives, how much it
  * produced, and the one thing about it a person might have to act on.
  */
-function SourceLine({ group, tick, onOpen }: { group: DeployableListGroup; tick: ArrivalKind | null; onOpen: () => void }) {
+function SourceLine({ group, tick, onOpen, accounts }: { accounts: AccountRow[]; group: DeployableListGroup; tick: ArrivalKind | null; onOpen: () => void }) {
   const pkg = group.pkg!;
   const { apps, deployed } = sourceSummary(group);
   const state = sourceStateWord(group);
@@ -676,6 +679,7 @@ function SourceLine({ group, tick, onOpen }: { group: DeployableListGroup; tick:
   >
     {/* A sentence when there is nothing to count: "0 apps" reads as a result,
         and a source that has made nothing has not been asked yet. */}
+    <AccountChip name={accountNameFrom(accounts, pkg.accountId)} />
     <span>{apps === 0 ? (pkg.status === "archived" ? "No apps" : "No apps yet") : `${apps} app${apps === 1 ? "" : "s"}, ${deployed} deployed`}</span>
   </RecordRow>;
 }
@@ -712,7 +716,7 @@ function DeployableLine({
   const archived = site?.status === "archived" || row.pkg?.status === "archived";
   const state = row.disabled ? "Inactive" : site ? siteStateWord(site) : row.parked ? "Review needed" : "Not deployed";
   const name = row.name;
-  const client = accountNameFrom(accounts, site?.accountId ?? "");
+  const client = accountNameFrom(accounts, site?.accountId ?? row.pkg?.accountId ?? "");
   // THE KIT'S ROW, NOT A LOCAL ONE. This list is where `RecordRow` came from:
   // it was drawn here by hand and styled in composition.css under
   // `.deployable-overview`, so no other app could use it. It is the kit's now,

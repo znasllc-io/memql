@@ -101,6 +101,15 @@ automation ensureAccountGroup {
   ensure := builtin groupEnsureForAccount(accountId: args.id)
 }
 
+/// Keep the same derived group when a company is renamed. The builtin writes
+/// nothing when the name already matches, and never adds permissions.
+@trigger(event="node.updated", concept="v1:accounts:account")
+@filter(row => row.status == "active")
+automation refreshAccountGroup {
+  args { id any }
+  ensure := builtin groupEnsureForAccount(accountId: args.id)
+}
+
 /// Archive an account's groups when the account is archived, and remove their
 /// memberships.
 ///

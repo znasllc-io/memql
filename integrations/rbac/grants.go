@@ -191,10 +191,16 @@ func (i *Integration) handleGrantRevoke(ctx context.Context, args map[string]any
 func (i *Integration) handleEffectiveCapabilities(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	subject, ok := componentAuth.SubjectFromContext(ctx)
 	if !ok {
-		return effectiveNodes("", "", nil, codeGrantCallerNotPermitted), nil
+		return effectiveNodes("", "", nil, nil, codeGrantCallerNotPermitted), nil
 	}
 	decisions := componentAuth.EffectiveCapabilities(ctx, subject)
-	return effectiveNodes(string(subject.Role), memql.BareShortId(subject.UserId), decisions, ""), nil
+	organizationEntries := []memql.OrganizationCapability{}
+	if resolver, ok := i.engine.(interface {
+		ResolveOrganizationCapabilities(context.Context, []componentAuth.Decision) []memql.OrganizationCapability
+	}); ok {
+		organizationEntries = resolver.ResolveOrganizationCapabilities(ctx, decisions)
+	}
+	return effectiveNodes(string(subject.Role), memql.BareShortId(subject.UserId), decisions, organizationEntries, ""), nil
 }
 
 // ---------------------------------------------------------------------
@@ -511,7 +517,7 @@ func grantNodes(d grantDecision) []memorynodes.MemoryNode {
 // effectiveNodes renders the effective set as one node: the caller's role and
 // id, and one entry per pair -- `effect` in the grant vocabulary (allow /
 // deny) and `source` naming the level that answered (role / group / user).
-func effectiveNodes(role, userId string, decisions []componentAuth.Decision, code string) []memorynodes.MemoryNode {
+func effectiveNodes(role, userId string, decisions []componentAuth.Decision, organizationEntries []memql.OrganizationCapability, code string) []memorynodes.MemoryNode {
 	entries := make([]map[string]any, 0, len(decisions))
 	for _, d := range decisions {
 		effect := componentAuth.GrantDeny
@@ -533,11 +539,12 @@ func effectiveNodes(role, userId string, decisions []componentAuth.Decision, cod
 		return entries[a]["verb"].(string) < entries[b]["verb"].(string)
 	})
 	payload, _ := json.Marshal(map[string]any{
-		"ok":      code == "",
-		"code":    code,
-		"role":    role,
-		"userId":  userId,
-		"entries": entries,
+		"ok":                  code == "",
+		"code":                code,
+		"role":                role,
+		"userId":              userId,
+		"entries":             entries,
+		"organizationEntries": organizationEntries,
 	})
 	return []memorynodes.MemoryNode{{
 		ID:        "integration:rbac:effectiveCapabilities",
