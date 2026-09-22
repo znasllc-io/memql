@@ -11215,50 +11215,6 @@ func RevokeSourceCredentialBuild(args RevokeSourceCredentialArgs) string {
 	return b.String()
 }
 
-// RevokeWorker -- Revoke a worker registration.
-//
-// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["revokeWorker"] in generated_concepts.go).
-type RevokeWorkerArgs struct {
-	RegistrationId string
-	RevokedAt      string
-	RevokedBy      string
-	RevokeReason   string
-}
-
-// RevokeWorker calls the engine mutation revokeWorker.
-func (qc *QueryClient) RevokeWorker(ctx context.Context, args RevokeWorkerArgs) (*Result, error) {
-	call := RevokeWorkerBuild(args)
-	return qc.executeNamed(ctx, "revokeWorker", call)
-}
-
-func RevokeWorkerBuild(args RevokeWorkerArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation revokeWorker(")
-	b.WriteString("registrationId: ")
-	b.WriteString(quoteMemQL(args.RegistrationId))
-	if b.Len() > 22 {
-		b.WriteString(", ")
-	}
-	b.WriteString("revokedAt: ")
-	b.WriteString(quoteMemQL(args.RevokedAt))
-	if args.RevokedBy != "" {
-		if b.Len() > 22 {
-			b.WriteString(", ")
-		}
-		b.WriteString("revokedBy: ")
-		b.WriteString(quoteMemQL(args.RevokedBy))
-	}
-	if args.RevokeReason != "" {
-		if b.Len() > 22 {
-			b.WriteString(", ")
-		}
-		b.WriteString("revokeReason: ")
-		b.WriteString(quoteMemQL(args.RevokeReason))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
 // RevokeWorkerTokenIdentity -- Revoke (deactivate) a worker_token identity row.
 //
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["revokeWorkerTokenIdentity"] in generated_concepts.go).

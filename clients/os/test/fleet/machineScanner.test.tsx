@@ -179,7 +179,14 @@ const noWrites = {
   actionError: "",
   rename: vi.fn(async () => true),
   setOperatorLabels: vi.fn(async () => true),
-  revoke: vi.fn(async () => true),
+  // A removal answers with a RECEIPT rather than a boolean (epic memql#5327,
+  // design D2): the registration and the credential are two writes and either
+  // can land alone, so the surface has to be able to say which did.
+  revoke: vi.fn(async () => ({
+    credentialState: "revoked" as const,
+    alreadyRevoked: false,
+    sentence: "Removed. The machine is out of the fleet and its credential no longer connects.",
+  })),
   setSharing: vi.fn(async () => true),
 };
 

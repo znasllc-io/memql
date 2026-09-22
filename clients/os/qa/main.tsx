@@ -35,6 +35,14 @@ import {
   previewReadinessRow,
 } from "../test/deployables/harness";
 import { siteFromRow } from "../src/apps/deployables/rows";
+import { MachineDetail } from "../src/apps/fleet/machines/MachineDetail";
+import { machineFromRow } from "../src/apps/fleet/rows";
+import { MachinesProvider } from "../src/live/machines";
+import {
+  fakeConnection as fleetConnection,
+  machineRow as fleetMachineRow,
+  withSession as fleetSession,
+} from "../test/fleet/harness";
 import { OriginsSection } from "../src/apps/cluster/origins/OriginsSection";
 import {
   dataOriginRow as clusterOriginRow,
@@ -470,6 +478,37 @@ const VIEWS: Record<
   "settings-no-app": { seed: NO_APP_OWNER, framed: true, render: () => <Lists section="settings" /> },
   "settings-no-app-member": { seed: NO_APP_MEMBER, role: "developer", framed: true, render: () => <Lists section="settings" /> },
   "settings-app": { seed: APP_FROM_HERE, framed: true, render: () => <Lists section="settings" /> },
+  // The Fleet's machine detail. `fleet-healthy` is the control: nothing
+  // should sit above the facts on a machine with nothing wrong with it.
+  "fleet-healthy": {
+    connect: () => fleetConnection({}),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <MachinePane over={{ credentialExpiresAt: "2026-12-20T00:00:00Z", clockSkewMs: 40 }} />,
+  },
+  "fleet-expiring": {
+    connect: () => fleetConnection({}),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <MachinePane over={{ credentialExpiresAt: "2026-09-28T09:00:00Z", clockSkewMs: 40 }} />,
+  },
+  "fleet-expired": {
+    connect: () => fleetConnection({}),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <MachinePane over={{ credentialExpiresAt: "2026-09-01T09:00:00Z" }} />,
+  },
+  // BOTH AT ONCE, which is the density question: two advisories plus the
+  // facts, with the rename field above them.
+  "fleet-skewed": {
+    connect: () => fleetConnection({}),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <MachinePane over={{ credentialExpiresAt: "2026-09-26T09:00:00Z", clockSkewMs: -212000 }} />,
+  },
+  // A machine whose cockpit stamps no timestamps and whose token never
+  // expires -- the pre-D4 fleet, where both new facts read as absences.
+  "fleet-silent": {
+    connect: () => fleetConnection({}),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <MachinePane over={{ credentialExpiresAt: "", rttAt: "", rttMs: 0 }} />,
+  },
   overview: { seed: BOUND, render: () => <Overview site={siteFromRow(SHOP)} /> },
   // The preview section, in the five states worth judging as pixels.
   preview: { seed: PREVIEW_MEASURED, render: () => <PreviewPage site={siteFromRow(SHOP_PREVIEWING)} /> },
@@ -588,6 +627,60 @@ function booksHealth(name: string, over: Record<string, unknown> = {}) {
   } as never);
 }
 
+// ---------------------------------------------------------------------------
+// The Fleet's machine detail (epic memql#5327)
+// ---------------------------------------------------------------------------
+//
+// THREE THINGS THIS EPIC PUT ON THE PAGE, and every one of them is a sentence
+// rather than a figure -- which is exactly the class jsdom cannot judge. A
+// warning that wraps onto four lines, a fact whose value runs past its own
+// label, or a red panel sitting above a green one all pass 3,492 assertions.
+//
+// `healthy` is the CONTROL, and it is the view to read first: the whole
+// design is that these warnings are ABSENT almost always, so a capture that
+// shows an unbroken machine is what says the page is not now covered in
+// advisories. The other three are one state each of the thing that can be
+// wrong.
+
+const FLEET_NOW = new Date("2026-09-22T12:00:00Z");
+
+function fleetMachine(over: Record<string, unknown>) {
+  return machineFromRow(
+    fleetMachineRow({
+      id: "v1:worker:registration:studio",
+      displayName: "Studio mini",
+      name: "studio.local",
+      version: "1.4.2",
+      buildTag: "computeruse",
+      labels: { "model:llama3.1:8b": "ctx=131072" },
+      operatorLabels: { "room": "studio" },
+      concurrency: { HEADLESS: 4 },
+      activeCount: 1,
+      rttMs: 34,
+      rttAt: "2026-09-22T11:59:30Z",
+      lastSeenAt: "2026-09-22T11:59:52Z",
+      ...over,
+    }),
+  );
+}
+
+function MachinePane({ over }: { over: Record<string, unknown> }) {
+  const machine = fleetMachine(over);
+  const writes = {
+    busyId: "",
+    actionError: "",
+    rename: async () => true,
+    setOperatorLabels: async () => true,
+    revoke: async () => null,
+    setSharing: async () => true,
+  };
+  return (
+    <div className="os-window-content">
+      <MachineDetail machine={machine} writes={writes} now={FLEET_NOW} view="details" />
+    </div>
+  );
+}
+
 function OriginsPane() {
   return (
     <div className="os-window-content">
@@ -637,6 +730,17 @@ if (at !== "") {
       (el) => (el.textContent ?? "").trim().startsWith(at),
     );
     target?.scrollIntoView({ block: "start" });
+  }, 2500);
+}
+
+// A ONE-SHOT CAPTURE CANNOT CLICK EITHER, and a <details> is shut until
+// somebody does. `?open=1` opens every one on the page once the reads have
+// landed, so a facts list -- the densest thing on a machine detail, and the
+// place a long value runs past its own label -- can be judged as pixels
+// without a driver attached.
+if (new URLSearchParams(window.location.search).get("open") === "1") {
+  window.setTimeout(() => {
+    for (const el of document.querySelectorAll("details")) el.open = true;
   }, 2500);
 }
 

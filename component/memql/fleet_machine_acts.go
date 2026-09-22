@@ -28,6 +28,12 @@ package memql
 // check, and the not-found and not-yours refusals are the same sentence --
 // which is also what stops either one being an existence oracle for other
 // people's machines.
+//
+// AND THEN THEY PART COMPANY ON EXACTLY ONE THING. Removal falls back to the
+// cluster-wide read for a cluster owner, because offboarding somebody's laptop
+// is an operator act the Fleet's operator view already implies. Sharing does
+// not, because what that write contains is a person's consent. See
+// machineToRevoke.
 
 import (
 	"context"
@@ -63,7 +69,7 @@ func (e *MemQLEngine) evaluateFleetRevokeMachineExpression(ctx context.Context, 
 		return nil, fmt.Errorf("engine is nil")
 	}
 	registrationId := strings.TrimSpace(stringArg(args, "registrationId"))
-	machine, err := e.modelPullMachineFor(ctx, registrationId)
+	machine, err := e.machineToRevoke(ctx, registrationId)
 	if err != nil {
 		return nil, err
 	}
@@ -135,6 +141,66 @@ func (e *MemQLEngine) evaluateFleetRevokeMachineExpression(ctx context.Context, 
 		"revokedAt":         now.Format(time.RFC3339),
 		"sentence":          sentence,
 	})
+}
+
+// machineToRevoke resolves the machine a removal names: through the caller's
+// OWN machines first, and through the cluster-wide read only for a cluster
+// owner.
+//
+// REMOVAL KEEPS THE CLUSTER-OWNER ARM AND SHARING DOES NOT, which is the one
+// place these two acts part company (epic memql#5327). The registration
+// concept declares @rowAuthz(owner="ownerUserId", clusterOwner), and for
+// REMOVAL the second arm is right: offboarding somebody's laptop is an
+// operator act, the Fleet's operator view already lists every machine in the
+// cluster, and withdrawing that would be a capability lost to a fix for a
+// different problem. For SHARING it is wrong, because the content of that
+// write is a person's consent and nobody else's to give.
+//
+// THE OWNED READ RUNS FIRST AND UNCONDITIONALLY, so an ordinary user's
+// refusal is produced with no cross-owner read happening at all -- and a
+// machine that is not theirs answers exactly as a made-up id does.
+func (e *MemQLEngine) machineToRevoke(ctx context.Context, registrationId string) (modelPullMachine, error) {
+	machine, ownErr := e.modelPullMachineFor(ctx, registrationId)
+	if ownErr == nil {
+		return machine, nil
+	}
+	if !rowAuthzIsClusterOwner(ctx) {
+		return modelPullMachine{}, ownErr
+	}
+	// The operator path. allWorkersWithStatus gates ITSELF on
+	// actor.isClusterOwner, so this read answers nothing for anybody else --
+	// the check above is what keeps a non-owner's refusal cheap and identical,
+	// not what makes this safe.
+	call, err := langparser.RenderCall("allWorkersWithStatus", map[string]any{})
+	if err != nil {
+		return modelPullMachine{}, fmt.Errorf("fleetRevokeMachine: render the operator read: %w", err)
+	}
+	res, err := e.Execute(ctx, call)
+	if err != nil {
+		return modelPullMachine{}, fmt.Errorf("fleetRevokeMachine: read the cluster's machines: %w", err)
+	}
+	want := trimConceptPrefix(registrationId)
+	for _, row := range modelPullRows(res.OutputPayload()) {
+		rowId := mapString(row, "id")
+		if rowId != registrationId && trimConceptPrefix(rowId) != want {
+			continue
+		}
+		return modelPullMachine{
+			RegistrationId:  registrationId,
+			OwnerUserId:     mapString(row, "ownerUserId"),
+			IdentityId:      mapString(row, "identityId"),
+			DisplayName:     mapString(row, "displayName"),
+			Name:            mapString(row, "name"),
+			ConnectedNodeId: mapString(row, "connectedNodeId"),
+			LastSeenAt:      mapString(row, "lastSeenAt"),
+			RevokedAt:       mapString(row, "revokedAt"),
+		}, nil
+	}
+	// THE OWNED REFUSAL, not an operator-flavoured one. A cluster owner who
+	// names an id that exists nowhere and one who names a machine that does
+	// not exist get the same sentence -- and it is the sentence everybody else
+	// gets too.
+	return modelPullMachine{}, ownErr
 }
 
 // revokeWorkerCredential deactivates the worker-token identity bound to a

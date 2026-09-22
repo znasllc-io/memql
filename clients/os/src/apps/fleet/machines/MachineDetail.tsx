@@ -10,13 +10,20 @@ import { formatFreshness, formatMoment } from "../../../kit/format";
 import { uninstallCommand, workerClusterUrl, type InstallPlatform } from "../addMachine/install";
 import { roundTripFigure } from "../addMachine/flow";
 import { isWorkerOnline } from "../online";
-import { computerUseStatus, hasRoundTrip, machineName, type MachineRow } from "../rows";
+import {
+  computerUseStatus,
+  formatClockOffset,
+  hasRoundTrip,
+  machineName,
+  type MachineRow,
+} from "../rows";
+import { CredentialHealth } from "./CredentialHealth";
 import { HardwareGroup } from "./HardwareGroup";
 import { LabelEditor } from "./LabelEditor";
 import { ModelsGroup } from "./ModelsGroup";
 import { SharingGroup } from "./SharingGroup";
 import { useMachineInference } from "./useMachineInference";
-import type { MachineWrites } from "./useMachineWrites";
+import type { MachineWrites, RemovalReceipt } from "./useMachineWrites";
 
 // One machine, in full: what it reported, what its owner set, what it can
 // run, and what has run on it.
@@ -46,6 +53,15 @@ export function MachineDetail({
       {view === "all" || view === "details" ? <>
       <RenameField machine={machine} busy={busy} rename={writes.rename} />
 
+      {/* ABOVE the facts, and only when there is something to say. The two
+          things it warns about -- a credential about to expire, a clock far
+          enough out to have decided `online` under the old rule -- are both
+          facts a reader would otherwise meet AFTER the machine had stopped
+          working, inside a collapsed section. Everything it reports is on the
+          list below too; this is the half that goes looking for the reader
+          rather than waiting to be found. */}
+      <CredentialHealth machine={machine} now={now} />
+
       <details className="fleet-machine-facts"><summary>Connection, permissions & registration</summary>
       <Facts>
         <Fact label="Reported name" value={machine.name} mono />
@@ -65,6 +81,35 @@ export function MachineDetail({
           label="Round trip"
           value={hasRoundTrip(machine) ? roundTripFigure(machine, now) : "not measured -- this cockpit does not answer pings"}
           title={machine.rttAt || undefined}
+        />
+        {/* THE MACHINE'S OWN CLOCK against the cluster's (epic memql#5327,
+            design D6). Nothing routes on it and nothing is timed by it -- the
+            cluster stamps lastSeenAt from its own clock -- but the difference
+            used to decide `online`, so a machine that once read offline while
+            it was connected has an explanation here instead of a mystery.
+            ABSENT IS "not reported", never zero: a measured zero means the
+            clocks agree, which is a different answer. */}
+        <Fact
+          label="Clock offset"
+          value={
+            machine.clockSkewKnown
+              ? formatClockOffset(machine.clockSkewMs)
+              : "not reported -- this cockpit does not timestamp its heartbeats"
+          }
+        />
+        {/* THE CREDENTIAL'S DEADLINE (design D4), mirrored onto the
+            registration so this page can say it without reading the
+            credential table. EMPTY MEANS NO EXPIRY -- every token minted
+            before expiry existed -- and saying "does not expire" is the true
+            reading rather than a blank that looks like a missing value. */}
+        <Fact
+          label="Credential expires"
+          value={
+            machine.credentialExpiresAt === ""
+              ? "does not expire"
+              : formatMoment(machine.credentialExpiresAt)
+          }
+          title={machine.credentialExpiresAt || undefined}
         />
         <Fact label="Calls in flight" value={String(machine.activeCount)} />
         <Fact label="Registered" value={formatMoment(machine.registeredAt)} />
@@ -292,7 +337,13 @@ function RemoveControl({
   const [reason, setReason] = useState("");
   const [userLocal, setUserLocal] = useState(false);
   const [purge, setPurge] = useState(false);
-  useEffect(() => { setUserLocal(false); setPurge(false); }, [machine.id]);
+  // The receipt from the last removal on THIS machine (epic memql#5327,
+  // design D2). It is held rather than discarded because a removal is two
+  // writes and either can land alone: "removed, and its credential could not
+  // be revoked" is a different outcome from "removed", and the person who
+  // just removed a stolen laptop is the one who needs to know which they got.
+  const [receipt, setReceipt] = useState<RemovalReceipt | null>(null);
+  useEffect(() => { setUserLocal(false); setPurge(false); setReceipt(null); }, [machine.id]);
   const label = machineName(machine);
   const uninstall = uninstallCommand(platformOf(machine), { userLocal, localTest, purge: localTest !== null && purge, clusterUrl: workerClusterUrl(config.domain) });
   // The registration does not report its installation path. Ask rather than
@@ -324,14 +375,41 @@ function RemoveControl({
     </>
   );
 
-  if (machine.revokedAt) {
+  // THE RECEIPT IS ENOUGH ON ITS OWN, and that is not a convenience.
+  //
+  // A removal's own answer comes back before the row does: the write lands,
+  // the engine answers, and the revoked row arrives moments later on the
+  // subscription. Gating this branch on `machine.revokedAt` alone would put
+  // the "Remove this machine" button back on screen for that gap -- after a
+  // removal the operator has already performed -- and a partial receipt would
+  // never be seen at all on a page they close in between.
+  if (machine.revokedAt !== "" || receipt !== null) {
+    // THE RECEIPT OUTRANKS THE ROW while this page is open. The row says the
+    // machine was removed; the receipt says whether its CREDENTIAL went with
+    // it. Rendering the standing sentence over a partial result is how the
+    // finding this closes happened the first time: an operator was told the
+    // whole job was done.
+    const partial = receipt !== null && receipt.credentialState !== "revoked";
     return (
       <div className="os-fleet-revoked">
-        <p className="os-caption">
-          Revoked {formatMoment(machine.revokedAt)}
-          {machine.revokeReason ? ` -- ${machine.revokeReason}` : ""}. The registration row is kept
-          as audit history and its credential can never be used again.
-        </p>
+        {partial ? (
+          <Notice
+            tone={receipt.credentialState === "revoke_failed" ? "warn" : "info"}
+            sentence={receipt.sentence}
+            next={
+              receipt.credentialState === "revoke_failed"
+                ? "Revoke the credential from Settings > Credentials before treating this machine as gone."
+                : undefined
+            }
+          />
+        ) : (
+          <p className="os-caption">
+            {machine.revokedAt !== ""
+              ? `Removed ${formatMoment(machine.revokedAt)}${machine.revokeReason ? ` -- ${machine.revokeReason}` : ""}.`
+              : "Removed."}{" "}
+            The registration row is kept as audit history and its credential no longer connects.
+          </p>
+        )}
         {uninstallControls}
       </div>
     );
@@ -352,11 +430,23 @@ function RemoveControl({
   }
 
   return (
-    <div className="os-fleet-confirm" role="group" aria-label={`Remove ${label}`}>
+    // THE REGION AND THE ACTION MUST NOT SHARE A NAME. The button inside is
+    // `Remove <machine>` -- the action keeps that name from "Remove this
+    // machine" all the way through -- so the region is named for the STATE it
+    // puts the page in. Two controls answering to one accessible name is a
+    // screen reader saying "Remove Studio mini, group" and then "Remove Studio
+    // mini, button", which is the same phrase twice for two different things.
+    <div className="os-fleet-confirm" role="group" aria-label={`Removing ${label}`}>
+      {/* WHAT THIS SENTENCE SAYS IS NOW TRUE. It has always claimed the token
+          stops working immediately; until epic memql#5327 the shell made one
+          call, which revoked the registration and left the credential active,
+          so the machine kept its stream and could come back. One act does both
+          now, and the cluster ends the live stream from whichever replica is
+          holding it. */}
       <p className="os-fleet-confirm-line">
-        Remove <strong>{label}</strong>? Its worker token stops working immediately and it can no
-        longer take calls. The registration stays as audit history; pairing it again means minting
-        a new token.
+        Remove <strong>{label}</strong>? Its connection ends within seconds and its token stops
+        working, so it can neither take calls nor reconnect. The registration stays as audit
+        history; pairing it again means a new token.
       </p>
       {uninstallControls}
       <label className="os-sr-only" htmlFor={`fleet-revoke-reason-${machine.id}`}>
@@ -374,17 +464,21 @@ function RemoveControl({
         <Button
           tone="danger"
           busy={busy}
-          busyLabel="Revoking..."
+          busyLabel="Removing..."
           onClick={() => {
-            void revoke(machine.id, reason).then((ok) => {
+            void revoke(machine.id, reason).then((result) => {
               // The confirm stays open on a refusal, with the error beside
-              // it: closing would leave an operator believing a revocation
-              // happened that did not.
-              if (ok) setConfirming(false);
+              // it: closing would leave an operator believing a removal
+              // happened that did not. A receipt -- even a partial one -- is
+              // a removal that happened, so it closes and reports.
+              if (result !== null) {
+                setReceipt(result);
+                setConfirming(false);
+              }
             });
           }}
         >
-          Revoke {label}
+          Remove {label}
         </Button>
         <Button disabled={busy} onClick={() => setConfirming(false)}>
           Keep it

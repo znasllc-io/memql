@@ -6322,34 +6322,6 @@ QueryClient.prototype.revokeSourceCredential = function (this: QueryClient, args
   return this.executeNamed("revokeSourceCredential", buildRevokeSourceCredential(args), opts);
 };
 
-/** Revoke a worker registration. */
-// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["revokeWorker"] in generated_concepts.ts).
-export interface RevokeWorkerArgs {
-  registrationId: string;
-  revokedAt: string;
-  revokedBy?: string;
-  revokeReason?: string;
-}
-
-export function buildRevokeWorker(args: RevokeWorkerArgs): string {
-  const parts: string[] = [];
-  parts.push("registrationId: " + renderMemQLValue(args.registrationId));
-  parts.push("revokedAt: " + renderMemQLValue(args.revokedAt));
-  if (args.revokedBy !== undefined) parts.push("revokedBy: " + renderMemQLValue(args.revokedBy));
-  if (args.revokeReason !== undefined) parts.push("revokeReason: " + renderMemQLValue(args.revokeReason));
-  return "mutation revokeWorker(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    revokeWorker(args: RevokeWorkerArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.revokeWorker = function (this: QueryClient, args: RevokeWorkerArgs = {} as RevokeWorkerArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("revokeWorker", buildRevokeWorker(args), opts);
-};
-
 /** Revoke (deactivate) a worker_token identity row. */
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["revokeWorkerTokenIdentity"] in generated_concepts.ts).
 export interface RevokeWorkerTokenIdentityArgs {

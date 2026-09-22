@@ -13,7 +13,7 @@ vi.mock("../../src/live/connection", () => ({
 }));
 
 const { MachinesProvider } = await import("../../src/live/machines");
-const { fakeConnection, machineRow, MachinesWithFlow, withSession } = await import("./harness");
+const { fakeConnection, machineRow, MachinesWithFlow, rowsResult, withSession } = await import("./harness");
 
 type Conn = ReturnType<typeof fakeConnection>;
 
@@ -196,33 +196,76 @@ describe("the machines directory", () => {
     expect(screen.getByText("row authz refused")).toBeTruthy();
   });
 
-  it("asks an in-surface confirm that NAMES the machine before revoking", async () => {
+  it("asks an in-surface confirm that NAMES the machine, then removes it in ONE act", async () => {
     const connection = fakeConnection({ myWorkersWithStatus: [LIVE] });
     mount(connection);
     await click(await screen.findByText("Studio mini"));
 
     await click(screen.getByRole("button", { name: "Remove this machine" }));
     // Nothing has been written yet -- the confirm is a step, not a label.
-    expect(connection.query.revokeWorker).not.toHaveBeenCalled();
-    expect(screen.getByRole("group", { name: "Remove Studio mini" })).toBeTruthy();
+    expect(connection.query.fleetRevokeMachine).not.toHaveBeenCalled();
+    expect(screen.getByRole("group", { name: "Removing Studio mini" })).toBeTruthy();
     // The machine's half of the act is right there: the uninstall line for
     // its platform (design record 2026-09-08-cockpit-install-wizard, D12).
     expect((screen.getByLabelText("the uninstall command") as HTMLInputElement).value).toContain("uninstall-mac.sh");
 
     await type(screen.getByLabelText("Reason (optional)") as HTMLInputElement, "returned it");
-    await click(screen.getByRole("button", { name: "Revoke Studio mini" }));
+    await click(screen.getByRole("button", { name: "Remove Studio mini" }));
 
-    expect(connection.query.revokeWorker).toHaveBeenCalledWith(
-      expect.objectContaining({
-        registrationId: "v1:worker:registration:live",
-        revokedBy: "v1:identity:user:me",
-        revokeReason: "returned it",
-      }),
+    // ONE CALL, AND IT IS THE BUILTIN (epic memql#5327, design D2). This used
+    // to render `revokeWorker`, which revoked the registration ROW and left
+    // the credential active -- so a machine an operator had "removed" kept its
+    // stream and could re-register. The shell composing two calls instead
+    // would own the window between them.
+    expect(connection.query.fleetRevokeMachine).toHaveBeenCalledWith({
+      registrationId: "v1:worker:registration:live",
+      reason: "returned it",
+    });
+    expect(connection.query.fleetRevokeMachine).toHaveBeenCalledTimes(1);
+  });
+
+  it("never sends revokedBy or revokedAt -- the engine stamps both", async () => {
+    // THE RECORD OF WHO REMOVED A MACHINE MUST NOT BE WRITABLE BY WHOEVER IS
+    // HOLDING THE KEYBOARD (epic memql#5327, design D2), which is the rule
+    // sharing already follows. The old call sent both fields from the browser.
+    const connection = fakeConnection({ myWorkersWithStatus: [LIVE] });
+    mount(connection);
+    await click(await screen.findByText("Studio mini"));
+    await click(screen.getByRole("button", { name: "Remove this machine" }));
+    await click(screen.getByRole("button", { name: "Remove Studio mini" }));
+
+    const args = connection.query.fleetRevokeMachine.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(Object.keys(args).sort()).toEqual(["registrationId"]);
+  });
+
+  it("says so when the registration went but the credential did not", async () => {
+    // A REMOVAL IS TWO WRITES AND EITHER CAN LAND ALONE (design D2). The
+    // engine revokes the row first, because that is the write the mesh
+    // broadcasts and the one that ends the live stream; if the credential
+    // write then fails, the machine is out of the fleet with a token that
+    // still exists. Telling somebody removing a stolen laptop that the whole
+    // job was done is the failure this epic closes -- so the partial outcome
+    // is on screen, with its repair.
+    const connection = fakeConnection({ myWorkersWithStatus: [LIVE] });
+    connection.query.fleetRevokeMachine.mockResolvedValue(
+      rowsResult([
+        {
+          machineId: "v1:worker:registration:live",
+          registrationState: "revoked",
+          credentialState: "revoke_failed",
+          alreadyRevoked: false,
+          sentence:
+            "Removed from the fleet, but its credential could not be revoked. The machine cannot be routed to, and it will be disconnected -- but revoke the credential from Settings before trusting that it cannot reconnect.",
+        },
+      ]),
     );
-    // revokedAt is a timestamp this client stamps; assert it is one rather
-    // than pinning a clock.
-    const args = connection.query.revokeWorker.mock.calls[0]?.[0] as { revokedAt: string };
-    expect(Number.isNaN(Date.parse(args.revokedAt))).toBe(false);
+    mount(connection);
+    await click(await screen.findByText("Studio mini"));
+    await click(screen.getByRole("button", { name: "Remove this machine" }));
+    await click(screen.getByRole("button", { name: "Remove Studio mini" }));
+
+    expect(await screen.findByText(/could not be revoked/)).toBeTruthy();
+    expect(screen.getByText(/Settings > Credentials/)).toBeTruthy();
   });
 
   it.each([false, true])("offers the correct uninstall location when revoked=%s", async (revoked) => {
@@ -238,7 +281,7 @@ describe("the machines directory", () => {
     expect(command()).toContain("--user-local");
     await click(screen.getByRole("radio", { name: /System installation/ }));
     expect(command()).not.toContain("--user-local");
-    expect(connection.query.revokeWorker).not.toHaveBeenCalled();
+    expect(connection.query.fleetRevokeMachine).not.toHaveBeenCalled();
   });
 
   it("renders the reported local apps, marking only the runnable ones", async () => {

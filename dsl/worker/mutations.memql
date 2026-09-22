@@ -278,6 +278,20 @@ mutation registration refreshWorkerRegistration {
 // out-of-band so any in-flight calls fail with worker_disconnected.
 
 /// Revoke a worker registration.
+///
+/// @serverOnly SINCE epic memql#5327 (design D2), and the reason is that this mutation is HALF AN
+/// ACT. Removing a machine is a registration revoke AND a credential revoke; MemQL OS rendered
+/// only this one, so the row was excluded from routing while the token stayed active -- the
+/// machine kept its stream, kept heartbeating onto a revoked row, and could re-register the moment
+/// a new row appeared.
+///
+/// actor.userId scoping is not the fix and never was: the caller IS the owner on the ordinary
+/// path, and a cluster owner offboarding somebody else's machine is a legitimate call this row's
+/// tier already admits. What is wrong is that half the act is REACHABLE ON ITS OWN. The builtin
+/// fleetRevokeMachine does both writes in one call, row first -- the order matters, because the
+/// registration write is the one the mesh broadcasts and the one that ends the live stream -- and
+/// is this mutation's only renderer.
+@serverOnly
 mutation registration revokeWorker {
   args {
     registrationId  string!

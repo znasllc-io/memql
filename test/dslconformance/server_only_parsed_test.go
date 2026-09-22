@@ -1103,6 +1103,19 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// caller's OWN machines -- the modelPullMachineFor precedent -- and is
 		// this mutation's only renderer.
 		{Path: "worker/mutations.memql", Name: "setWorkerSharing"}: true,
+		// epic memql#5327, design D2. revokeWorker is HALF AN ACT: removing a
+		// machine is a registration revoke AND a credential revoke, and MemQL
+		// OS rendered only this one -- so the row left routing while the token
+		// stayed live, the machine kept its stream, and it could re-register.
+		//
+		// CALLER-SCOPING IS NOT THE FIX. The caller IS the owner on the
+		// ordinary path, and a cluster owner offboarding somebody else's
+		// machine is a legitimate call this row's composite tier already
+		// admits -- so a self-scoped filter would both fail to close the hole
+		// and take away an operator capability. What is wrong is that half the
+		// act was reachable on its own. fleetRevokeMachine does both writes in
+		// one call and is this mutation's only renderer.
+		{Path: "worker/mutations.memql", Name: "revokeWorker"}: true,
 		// epic memql#5327, design D5. Writes the SHA-256 of a plaintext its
 		// caller minted one instant earlier and will hand to exactly one
 		// machine over a live stream. A client-callable form would either

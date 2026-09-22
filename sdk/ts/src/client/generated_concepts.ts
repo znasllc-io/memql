@@ -734,7 +734,6 @@ export const BoundConcepts = {
   revokePasskeyIdentity: "v1:identity:identity",
   revokeSitePreviewGrant: "v1:platform:sitePreviewGrant",
   revokeSourceCredential: "v1:platform:sourceCredential",
-  revokeWorker: "v1:worker:registration",
   revokeWorkerTokenIdentity: "v1:identity:identity",
   roleBySlug: "v1:rbac:role",
   rotateAuthSession: "v1:identity:authSession",
