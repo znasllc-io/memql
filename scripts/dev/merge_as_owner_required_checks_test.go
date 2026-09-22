@@ -34,9 +34,16 @@ import (
 //
 // `pr merge` is answered, not performed: reaching it at all is the signal a
 // test wants, and a stub that could merge would be a stub that can do damage.
-func mergeGuardGhStub(t *testing.T, rulesetsJSON, rulesetJSON, prJSON string) string {
+// compareJSON is optional and defaults to a branch that is level with its base,
+// because every test written before the staleness guard existed assumes one --
+// and the interesting cases are the two that are not level.
+func mergeGuardGhStub(t *testing.T, rulesetsJSON, rulesetJSON, prJSON string, compareJSON ...string) string {
 	t.Helper()
 	dir := t.TempDir()
+	cmp := `{"status":"ahead","ahead_by":1,"behind_by":0}`
+	if len(compareJSON) > 0 {
+		cmp = compareJSON[0]
+	}
 	write := func(name, body string) string {
 		p := filepath.Join(dir, name)
 		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
@@ -47,6 +54,10 @@ func mergeGuardGhStub(t *testing.T, rulesetsJSON, rulesetJSON, prJSON string) st
 	rulesets := write("rulesets.json", rulesetsJSON)
 	ruleset := write("ruleset.json", rulesetJSON)
 	pr := write("pr.json", prJSON)
+	compare := write("compare.json", cmp)
+	// Every compare target the script asks for, so a test can assert WHICH two
+	// commits were compared and not merely that a comparison happened.
+	compareLog := filepath.Join(dir, "compare-targets")
 
 	stub := `#!/usr/bin/env bash
 # Minimal gh: dispatch on the sub-command, apply --jq with the real jq.
@@ -69,6 +80,7 @@ case "$sub" in
   api)
     target="${args[0]:-}"
     case "$target" in
+      *compare/*)  printf '%s\n' "$target" >> ` + shellQuote(compareLog) + `; emit ` + shellQuote(compare) + ` ;;
       *rulesets/*) emit ` + shellQuote(ruleset) + ` ;;
       *rulesets)   emit ` + shellQuote(rulesets) + ` ;;
       *)           echo '{}' ;;
@@ -132,6 +144,7 @@ func prRollupIn(state, checks string) string {
 	return `{
   "state":"OPEN","title":"t","author":{"login":"znas-io"},
   "mergeable":"MERGEABLE","mergeStateStatus":"` + state + `","reviewDecision":null,
+  "baseRefName":"main","headRefName":"topic","headRefOid":"0ddc0de0ddc0de0ddc0de0ddc0de0ddc0de0ddc0",
   "statusCheckRollup":[` + checks + `]
 }`
 }
@@ -289,5 +302,131 @@ func TestGuardStillMergesACleanPullRequest(t *testing.T) {
 	}
 	if !strings.Contains(out, "STUB-MERGE-INVOKED") {
 		t.Errorf("the script did not reach the merge; output:\n%s", out)
+	}
+}
+
+// THE BUG THIS PINS, and the reason the BEHIND guard above was never once
+// reached on this repository.
+//
+// `mergeStateStatus` is ONE value, and GitHub returns the strongest blocker it
+// finds: BLOCKED outranks BEHIND. Every pull request here is blocked on a
+// code-owner review its author may not give -- CODEOWNERS routes the paths a
+// session actually touches (CLAUDE.md, app/, component/auth/, .github/) to
+// @znasllc-io/human-lead-developers, whose only member is the author. So a
+// stale branch reads BLOCKED, never BEHIND, the case above matches nothing,
+// and merge_pr reaches for --admin and lands a tree CI never tested against
+// the current base. That is exactly what strict_required_status_checks_policy
+// exists to prevent, and the bypass walks straight through it.
+//
+// Observed 2026-09-21: #5589 sat 16 commits behind main with 29/29 green, and
+// `merge-as-owner.sh --pr=5589 --check` reported `MERGEABLE (BLOCKED)` with no
+// mention of the drift.
+//
+// The fix cannot read mergeStateStatus at all for this question. It compares
+// the head against the base directly, which is a fact rather than a summary.
+func TestGuardRefusesAStaleBranchGitHubReportsAsBlocked(t *testing.T) {
+	behind := `{"status":"diverged","ahead_by":3,"behind_by":16}`
+	stub := mergeGuardGhStub(t, rulesetsActive, requiresCIRequired,
+		prRollupIn("BLOCKED", ciRequiredGreen), behind)
+	out, code := runMergeAsOwner(t, stub)
+
+	if code != 3 {
+		t.Fatalf("a branch 16 commits behind its base must be refused with exit 3 even though "+
+			"GitHub reports BLOCKED rather than BEHIND; merging it lands a tree CI never tested "+
+			"against the current base. exit=%d\n%s", code, out)
+	}
+	if strings.Contains(out, "STUB-MERGE-INVOKED") {
+		t.Fatalf("the script merged a stale branch through the admin bypass:\n%s", out)
+	}
+	if !strings.Contains(out, "update-branch") {
+		t.Errorf("the refusal must say what to do next; output:\n%s", out)
+	}
+	if !strings.Contains(out, "16") {
+		t.Errorf("the refusal must name how far behind the branch is -- 'behind' and '16 commits "+
+			"behind' are different sizes of problem; output:\n%s", out)
+	}
+}
+
+// THE CONTROL, and the file's own standard: without it, "refuse every BLOCKED
+// pull request" would satisfy the test above and break the script's whole
+// purpose. A BLOCKED pull request whose branch is LEVEL with its base is the
+// ordinary case here, and it must still merge through the bypass.
+func TestGuardStillMergesABlockedPullRequestThatIsCurrent(t *testing.T) {
+	level := `{"status":"ahead","ahead_by":3,"behind_by":0}`
+	stub := mergeGuardGhStub(t, rulesetsActive, requiresCIRequired,
+		prRollupIn("BLOCKED", ciRequiredGreen), level)
+	out, code := runMergeAsOwner(t, stub)
+
+	if code != 0 {
+		t.Fatalf("a BLOCKED pull request level with its base must still merge through the bypass "+
+			"-- that is the script's entire purpose. exit=%d\n%s", code, out)
+	}
+	if !strings.Contains(out, "STUB-MERGE-INVOKED") {
+		t.Fatalf("the script did not reach the merge:\n%s", out)
+	}
+}
+
+// FAIL CLOSED, for the same reason the required-check intersection does. A
+// comparison that cannot be read yields no number, and treating "no number" as
+// zero would restore the bug for every case where the API call fails -- which
+// is the case a reader would never think to test.
+func TestUnreadableBaseComparisonRefuses(t *testing.T) {
+	stub := mergeGuardGhStub(t, rulesetsActive, requiresCIRequired,
+		prRollupIn("BLOCKED", ciRequiredGreen), `{}`)
+	out, code := runMergeAsOwner(t, stub)
+
+	if code != 3 {
+		t.Fatalf("an unreadable base comparison must refuse: absent is not zero, and reading it "+
+			"as zero reinstates the stale merge. exit=%d\n%s", code, out)
+	}
+	if !strings.Contains(out, "could not compare") {
+		t.Errorf("the refusal must announce which rule applied; output:\n%s", out)
+	}
+}
+
+// THE FORK HAZARD, and why the comparison is built from the OID.
+//
+// A fork pull request's `headRefName` is the FORK's branch name, and the
+// commonest one is `main`. `compare/main...main` resolves BOTH sides in this
+// repository and answers `behind_by: 0`, so a branch-name comparison measures
+// every such pull request as current no matter how stale it is -- fail-open,
+// in the one case nobody writes a test for, which is the same shape as the bug
+// the whole guard exists to close.
+//
+// Verified against the live API 2026-09-21: `compare/main...main` returns
+// `{"ahead_by":0,"behind_by":0}`.
+//
+// The oid names ONE commit, is the commit CI actually ran on, and cannot be
+// re-pointed between the read and the comparison.
+func TestBaseComparisonIsBuiltFromTheHeadOidNotTheBranchName(t *testing.T) {
+	// headRefName is `main` -- the fork case -- while the oid is a real,
+	// distinct commit. A comparison built from the name would ask
+	// `main...main` and be told zero.
+	forkish := `{
+  "state":"OPEN","title":"t","author":{"login":"somebody"},
+  "mergeable":"MERGEABLE","mergeStateStatus":"BLOCKED","reviewDecision":null,
+  "baseRefName":"main","headRefName":"main","headRefOid":"f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0",
+  "statusCheckRollup":[` + ciRequiredGreen + `]
+}`
+	stub := mergeGuardGhStub(t, rulesetsActive, requiresCIRequired, forkish,
+		`{"status":"diverged","ahead_by":1,"behind_by":9}`)
+	out, code := runMergeAsOwner(t, stub)
+
+	targets, err := os.ReadFile(filepath.Join(stub, "compare-targets"))
+	if err != nil {
+		t.Fatalf("the script never compared the head against the base at all: %v\n%s", err, out)
+	}
+	got := string(targets)
+	if !strings.Contains(got, "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0") {
+		t.Errorf("the comparison must name the head OID, not the branch name -- a fork branch "+
+			"called `main` compares against itself and answers zero. asked: %q", got)
+	}
+	if strings.Contains(got, "compare/main...main") {
+		t.Errorf("the script compared main against main, which is always zero commits behind "+
+			"itself. asked: %q", got)
+	}
+	if code != 3 {
+		t.Fatalf("a head 9 commits behind must be refused whatever its branch is called, "+
+			"got exit %d\n%s", code, out)
 	}
 }
