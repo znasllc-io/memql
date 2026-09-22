@@ -7,12 +7,15 @@ package reviewspack_test
 // exclusion and bound are right as decisions over rows. Three things they
 // cannot reach, and all three are assumptions the rest of the epic rests on:
 //
-//	PROOF 1 -- submitReview WRITES A ROW WITHOUT NAMING AN ID. The shopper
-//	  mutation stamps no `id` because `id` is one of the names the shopper
-//	  surface refuses as a form field, so the engine must derive one. Every
-//	  other mutation in the pack names its id; this is the only one that does
-//	  not, and "the engine derives one" was read off createSpawnEvent rather
-//	  than measured here.
+//	PROOF 1 -- THE SHOPPER NAMES NO ID AND THE ROW IS WRITTEN AT THE ONE THE
+//	  BFF STAMPED. `id` is among the names the shopper surface refuses as a
+//	  form field, so a shopper cannot choose where their row lands. What
+//	  supplies one is the submission id the bff mints per POST and stamps
+//	  beside storeId and siteId (design record 2026-09-21, D4) -- and the
+//	  row must be written AT it, because that is the id a client's
+//	  @shopperFormExtension relates its own row to. It used to be engine-
+//	  derived and therefore known to nobody, which is why an extension had
+//	  nothing to point at.
 //
 //	PROOF 2 -- A ROW WRITTEN UNDER ONE storeId IS INVISIBLE UNDER ANOTHER,
 //	  through the real query and the real row-authz gate rather than through
@@ -34,6 +37,7 @@ import (
 	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -126,19 +130,22 @@ func TestLiveE2E_TheShopperPathWritesAndScopesByStore(t *testing.T) {
 	// ---- PROOF 1: a shopper write with NO id ------------------------------
 	//
 	// The arguments are exactly what component/server/shopper_handler.go
-	// builds: the pack's declared fields, plus the stamped storeId and
-	// siteId, under the site owner's actor.
-	write := func(ctx context.Context, storeID, handle, body string) {
+	// builds: the pack's declared fields, plus the three it stamps --
+	// storeId, siteId and the submission id it mints for this POST -- under
+	// the site owner's actor.
+	write := func(ctx context.Context, storeID, handle, body, submissionID string) {
 		t.Helper()
 		call := `submitReview(authorEmail: "sam@example.com", authorName: "Sam", body: ` + quote(body) +
 			`, productHandle: ` + quote(handle) +
-			`, rating: 5, siteId: "site-reviews-e2e", storeId: ` + quote(storeID) + `)`
+			`, rating: 5, siteId: "site-reviews-e2e", storeId: ` + quote(storeID) +
+			`, submissionId: ` + quote(submissionID) + `)`
 		if _, err := eng.Execute(ctx, call); err != nil {
 			t.Fatalf("submitReview: %v\n  call: %s", err, call)
 		}
 	}
-	write(asMerchant(merchantA), storeLive, handle, "Live store review")
-	write(asMerchant(merchantA), storeDev, handle, "Written while previewing")
+	liveSubmission := "sub-live-" + handle
+	write(asMerchant(merchantA), storeLive, handle, "Live store review", liveSubmission)
+	write(asMerchant(merchantA), storeDev, handle, "Written while previewing", "sub-dev-"+handle)
 
 	// ---- PROOF 2: storeId scopes the read ---------------------------------
 	live := rowsOf(t, eng, asMerchant(merchantA),
@@ -158,11 +165,21 @@ func TestLiveE2E_TheShopperPathWritesAndScopesByStore(t *testing.T) {
 			"readable where it was written", len(dev))
 	}
 
-	// ---- PROOF 1 (continued): the engine derived an id --------------------
+	// ---- PROOF 1 (continued): the row IS the submission -------------------
+	//
+	// Not merely "it has an id": it has THE id the bff stamped. That is the
+	// whole of what lets a client's related row point at this one, and an
+	// engine-derived id would satisfy the weaker check while breaking the
+	// thing the check exists for.
 	id, _ := live[0]["id"].(string)
 	if id == "" {
-		t.Fatal("submitReview wrote a row with no id. The shopper mutation names none on " +
-			"purpose -- `id` is refused as a form field -- so the engine must derive one")
+		t.Fatal("submitReview wrote a row with no id. The shopper names none on purpose -- " +
+			"`id` is refused as a form field -- so the bff's submission id is what supplies one")
+	}
+	if !strings.HasSuffix(id, liveSubmission) {
+		t.Fatalf("the review landed at id %q, which does not carry the submission id %q it was "+
+			"written under. A client extension relates its own row to that id, so a row written "+
+			"anywhere else is a row nothing can find", id, liveSubmission)
 	}
 
 	// ---- PROOF 4: THE PUBLIC PROJECTION OMITS THE SHOPPER'S EMAIL --------
@@ -244,8 +261,11 @@ func TestLiveE2E_ADisabledPackIsInert(t *testing.T) {
 
 	// The BEHAVIOURAL half is gone: the shopper mutation the pack declares a
 	// form over is not loaded, so the write cannot happen at all.
+	// A COMPLETE call, so the refusal is "the construct is not loaded" and
+	// not "an argument is missing" -- an inert pack has to be what stops
+	// this, and a call the loader would reject anyway proves nothing.
 	_, err := eng.Execute(ctx, `submitReview(body: "x", productHandle: `+quote(handle)+
-		`, storeId: `+quote(storeLive)+`)`)
+		`, storeId: `+quote(storeLive)+`, submissionId: "sub-inert")`)
 	if err == nil {
 		t.Fatal("submitReview ran on a DISABLED pack: a mounted-inert pack must load no " +
 			"behavioural construct, so the shopper write path has nothing to reach")

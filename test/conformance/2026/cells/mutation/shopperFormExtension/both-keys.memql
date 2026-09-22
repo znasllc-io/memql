@@ -1,0 +1,13 @@
+/// Record a client's own field from a shopper form a pack declares.
+@shopperFormExtension(pack="wholesale", form="application")
+mutation clientDetail recordClientDetail {
+  args {
+    submissionId  string!
+    taxId         string
+  }
+  insert {
+    id: args.submissionId
+    submissionId: args.submissionId
+    taxId: args.taxId
+  }
+}

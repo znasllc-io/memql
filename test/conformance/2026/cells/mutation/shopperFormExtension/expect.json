@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "file": "both-keys.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "a-string-instead-of-keywords.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@shopperFormExtension on a mutation takes keyword arguments"
+    },
+    {
+      "file": "missing-the-form-key.memql",
+      "verdict": "refuse_load",
+      "message": "requires both pack= and form="
+    }
+  ]
+}

@@ -167,6 +167,7 @@ var (
 	AttrUseProvider          = ast.AttrUseProvider
 	AttrUseBuiltin           = ast.AttrUseBuiltin
 	AttrTrigger              = ast.AttrTrigger
+	AttrShopperFormExtension = ast.AttrShopperFormExtension
 	AttrVersion              = ast.AttrVersion
 	FunctionTypeAutomation   = ast.FunctionTypeAutomation
 	FunctionTypeBuiltin      = ast.FunctionTypeBuiltin

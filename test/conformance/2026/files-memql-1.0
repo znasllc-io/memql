@@ -173,6 +173,9 @@ cells/mutation/scrubPii/with-true.memql
 cells/mutation/scrubPii/written-bare.memql
 cells/mutation/serverOnly/with-true.memql
 cells/mutation/serverOnly/written-bare.memql
+cells/mutation/shopperFormExtension/a-string-instead-of-keywords.memql
+cells/mutation/shopperFormExtension/both-keys.memql
+cells/mutation/shopperFormExtension/missing-the-form-key.memql
 cells/policy/description/a-string.memql
 cells/policy/description/with-no-value.memql
 cells/policy/fallback/a-string.memql

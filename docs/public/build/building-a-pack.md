@@ -334,6 +334,86 @@ what happened, so it renders in the merchant's own design and language. Only
 the refusals the edge must make before a declaration is in hand -- rate
 limited, too large, surface off -- are engine-rendered pages.
 
+**One submission, one id.** The bff mints a `submissionId` per POST and stamps
+it beside `storeId` and `siteId`. A pack's shopper construct **declares it in
+its args block and writes the row at it** -- it is reserved as a field name, so
+a shopper can never supply one. Before this the row id was engine-derived and
+known to nobody, which left a client's related row with nothing to point at.
+
+### A client's own fields: `@shopperFormExtension`
+
+A pack declares the minimum its concept needs to be what it is, and no field
+beyond it. The first client collects an EIN and the next will not, so a client
+declares its own concept with an `@relationship` to the pack's row -- typed and
+queryable, where a `metadata` blob on the pack would take every client's fields
+in turn.
+
+Getting a shopper's value *into* that concept is the extension. A client's DSL
+domain adds fields to a form the pack already declares, and names the mutation
+that stores them:
+
+```memql
+@shopperFormExtension(pack="wholesale", form="application")
+mutation applicationDetail recordFyloApplicationDetail {
+  args {
+    submissionId  string!            // stamped; never offered to a shopper
+    storeId       string!            // stamped
+    ein           string   @maxLength(20)
+    address       string!  @maxLength(200)
+  }
+  insert {
+    accept { ein, address }
+    stamp {
+      id:            args.submissionId
+      applicationId: args.submissionId
+      storeId:       args.storeId
+      ownerUserId:   actor.userId
+    }
+  }
+}
+```
+
+**It adds fields to a route; it never opens one.** Putting a public endpoint on
+a merchant's origin stays the privilege of Go compiled into the engine. An
+extension therefore inherits the pack's gate -- wholesale's `applicationsOpen`
+lives inside the pack's own construct -- along with its rate limit, its size
+cap and its redirect pages, rather than re-implementing any of them.
+
+**The field list is the args block minus the stamped names.** Derived, not
+restated, so the two cannot drift. The rules are the ones a pack's own fields
+pass: reserved names refused, and a name the pack already declares refused too
+-- the client reads the pack's value through the relationship instead.
+
+**What the bff does with it**, in this order:
+
+1. validates the pack's fields **and** the extension's -- a failure in either
+   refuses the submission with no row of either kind written;
+2. mints the submission id;
+3. runs the pack's construct, so the pack's own gate decides;
+4. runs the extension's mutation with the same stamps.
+
+**A failed extension write leaves the pack's row standing** and still answers
+the success page (`memql_shopper_extension_write_failed_total{pack,form}` plus
+an Error log naming the submission id). A trade desk gets an application with
+its client fields visibly blank rather than no application at all -- and the
+shopper is not sent to an error page from which they resubmit, since the pack
+has no dedupe and one business would become two rows.
+
+Legal on a **mutation** alone: a logic may call builtins, and a public form
+pointed at one would reach them under the site owner's borrowed authority.
+**At most one extension per form.** Refusals are load-time, on the
+`LoadReport`, so strict boot rejects them -- a form the pack does not declare
+is a misspelling and is refused by name.
+
+**An extension whose pack is DISABLED is inert, not refused.** A storefront
+pack ships disabled, so that is the state of a freshly installed cluster, and
+refusing would mean a product that extends a pack cannot boot until somebody
+enables the pack -- on a cluster that will not start. The extension is
+skipped, named in the boot log, and live as soon as the `packState` row is
+flipped and the nodes restart.
+Full reasoning:
+[the design record](../../superpowers/specs/2026-09-21-shopper-form-extension-design.md).
+
 ---
 
 ## The storefront-pack convention

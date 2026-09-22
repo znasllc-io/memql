@@ -142,7 +142,7 @@ Edition `2026`, grammar version `2026.09-before-write-error-accessor-77cda60c`.
                         | "@description" | "@disabled" | "@mcp" | "@mergeFields"
                         | "@noUnset" | "@public" | "@removeFromSet"
                         | "@requiresCapability" | "@requiresRank" | "@scrubPii"
-                        | "@serverOnly" ) [ <annotation-args> ]
+                        | "@serverOnly" | "@shopperFormExtension" ) [ <annotation-args> ]
 <policy-annotation>   ::= ( "@description" | "@fallback" | "@primary" ) [ <annotation-args> ]
 <prompt-annotation>   ::= ( "@defaultProvider" | "@description" | "@disabled" | "@level"
                         | "@templateFile" ) [ <annotation-args> ]

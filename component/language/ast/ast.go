@@ -950,6 +950,16 @@ const (
 	// could never be written -- rejected at load time).
 	AttrCreateOnly = "createOnly"
 
+	// AttrShopperFormExtension marks a mutation as one client domain's
+	// addition to a shopper form a PACK declares -- the fields the pack
+	// does not know about, and where they are stored
+	// (@shopperFormExtension(pack="wholesale", form="application")).
+	//
+	// It ADDS FIELDS TO AN EXISTING ROUTE and never opens one: only a Go
+	// pack may put a public endpoint on a merchant's origin. See the design
+	// record docs/superpowers/specs/2026-09-21-shopper-form-extension-design.md.
+	AttrShopperFormExtension = "shopperFormExtension"
+
 	// @noUnset("a", "b") declares the named payload fields ONE-WAY: a
 	// write may set them, and may change one non-empty value to another,
 	// but may never take a stored non-empty value back to empty. On the

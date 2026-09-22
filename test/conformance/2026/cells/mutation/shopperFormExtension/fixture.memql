@@ -1,0 +1,6 @@
+/// A client's own detail on a form a pack declares: the row this cell's cases write.
+concept clientDetail {
+  ownerUserId  string
+  submissionId string
+  taxId        string
+}

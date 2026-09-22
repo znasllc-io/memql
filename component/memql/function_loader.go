@@ -636,6 +636,17 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 				return nil, fmt.Errorf("function %q: %w", expectedName, err)
 			}
 
+			// @shopperFormExtension: the route this mutation adds its own
+			// fields to (design record 2026-09-21). Only the SHAPE is read
+			// here -- whether the route exists, and whether anything else
+			// already extends it, needs the pack registry and every other
+			// construct, so it is asked once at boot by
+			// registerShopperExtensions.
+			shopperExtension, err := mutationShopperFormExtension(funcDef)
+			if err != nil {
+				return nil, fmt.Errorf("function %q: %w", expectedName, err)
+			}
+
 			tmpl.MergeFields = mergeFields
 			tmpl.AppendFields = appendFields
 			tmpl.AddToSetFields = addToSetFields
@@ -643,6 +654,7 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 			tmpl.CreateOnlyFields = createOnlyFields
 			tmpl.NoUnsetFields = noUnsetFields
 			tmpl.ScrubPii = scrubPii
+			fn.ShopperFormExtension = shopperExtension
 			fn.MutationTemplate = tmpl
 			fn.ExprSource = extractExpressionFromContent(content)
 

@@ -3,8 +3,7 @@ package app
 import (
 	"github.com/znasllc-io/memql/component/memql"
 	memqldsl "github.com/znasllc-io/memql/dsl"
-	"github.com/znasllc-io/memql/packs/reviewspack"
-	"github.com/znasllc-io/memql/packs/wholesalepack"
+	"github.com/znasllc-io/memql/packs/anchor"
 )
 
 // anchor_storefront_packs.go links the STOREFRONT PACKS into the default
@@ -42,18 +41,25 @@ import (
 // declaration unheard and reviews would ship ENABLED -- the exact outcome
 // the default exists to prevent, arriving silently.
 func (a *App) anchorStorefrontPacks() {
-	reviewspack.Register(reviewspack.Domain)
+	// THE REGISTRATION ITSELF LIVES IN packs/anchor, and it is idempotent.
+	// It has to be: the offline package analyzer needs an engine carrying
+	// these packs too (a product's DSL imports their concepts), and a node
+	// runs that analyzer IN-PROCESS for the Deployables pipeline. Two
+	// callers, one process, and dsl.RegisterTree panics on a second
+	// registration -- so both go through one sync.Once rather than either
+	// having to know about the other.
+	//
 	// THE WHOLESALE PACK JOINS ON THE SAME TERMS (epic memql#5533). No build
 	// tag, disabled by default, reach governed by packState -- and it is
-	// anchored here rather than in its own file for the reason this file
-	// exists at all: a reader asking "which packs does a default image
+	// anchored with reviews rather than in its own file for the reason this
+	// file exists at all: a reader asking "which packs does a default image
 	// carry?" must be able to answer it from one place.
-	wholesalepack.Register(wholesalepack.Domain)
+	anchor.Storefront()
 	if a != nil && a.Logger != nil {
 		a.Logger.Info("storefront packs linked into this build; reach is governed by "+
 			"v1:platform:packState",
 			"component", memql.ComponentName,
-			"packs", []string{reviewspack.Domain, wholesalepack.Domain},
+			"packs", anchor.Domains(),
 			"defaults", memqldsl.PackDefaults())
 	}
 }

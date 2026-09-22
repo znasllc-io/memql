@@ -45,6 +45,7 @@ One table per family of constructs, and one for the fields a construct declares.
 | [`@requiresRank`](#requiresrank) | string | string | string |  |
 | [`@scrubPii`](#scrubpii) |  | flag |  |  |
 | [`@serverOnly`](#serveronly) | flag | flag |  |  |
+| [`@shopperFormExtension`](#shopperformextension) |  | keywords |  |  |
 | [`@template`](#template) |  |  |  | flag |
 | [`@trigger`](#trigger) |  |  |  | keywords |
 | [`@unbounded`](#unbounded) | string |  |  |  |
@@ -172,6 +173,7 @@ The fields of its `args` block take the annotations under [args field](#args-fie
 | [`@requiresRank`](#requiresrank) | one string | `@requiresRank("admin")` |
 | [`@scrubPii`](#scrubpii) | no arguments | `@scrubPii` |
 | [`@serverOnly`](#serveronly) | no arguments | `@serverOnly` |
+| [`@shopperFormExtension`](#shopperformextension) | keyword arguments | `@shopperFormExtension(pack="wholesale", form="application")` |
 
 The fields of its `args` block take the annotations under [args field](#args-field).
 
@@ -1105,6 +1107,21 @@ Bars the construct from client-originated calls while leaving server-side Go fre
 | [concept field](#concept-field) | no arguments | `@serverSet` |
 
 The field is stamped server-side (createdAt, createdBy, status, ...): never accepted from a mutation's caller args, but projected like any other field. Emitted as x-serverSet (memql#2035).
+
+### @shopperFormExtension
+
+| On | Written as | Example |
+|---|---|---|
+| [mutation](#mutation) | keyword arguments | `@shopperFormExtension(pack="wholesale", form="application")` |
+
+`@shopperFormExtension` takes these keys, each written as `key=value`.
+
+| Key | Type | Meaning |
+|---|---|---|
+| `pack` | string | The pack whose declared shopper form this mutation extends, e.g. "wholesale". |
+| `form` | string | The form's route name on that pack, e.g. "application". |
+
+On a mutation: this construct is ONE CLIENT DOMAIN'S ADDITION to a shopper form a PACK declares -- the fields that client collects which the pack does not know about, and the concept they are stored on. It ADDS FIELDS TO AN EXISTING PUBLIC ROUTE and never opens one: putting an endpoint on a hosted site's origin stays the privilege of Go compiled into the engine. The field list is this mutation's own args block MINUS the server-stamped names (storeId, siteId, submissionId), which the body declares so it can write them. The bff validates the pack's fields and these together BEFORE anything is written, runs the pack's construct first so the pack's own gate decides, then this mutation with the same stamped submission id. Legal on a MUTATION alone -- a logic may call builtins, and a public form pointed at one would reach them under the site owner's borrowed authority. At most one extension per form. Format: @shopperFormExtension(pack="wholesale", form="application").
 
 ### @sideEffect
 

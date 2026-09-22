@@ -231,6 +231,37 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 		}
 	}
 
+	// Register every client domain's shopper-form extension against the
+	// packs' declared forms (design record 2026-09-21). HERE for the reason
+	// the tool-handler pass above runs here: this is the first point where
+	// the pack registry (written at init) and every loaded construct are
+	// both in hand. A refusal lands on the report, so strict boot refuses
+	// it exactly as it refuses a construct that failed to parse -- an
+	// extension that silently failed to register would be a form quietly
+	// not collecting a client's fields, which is the failure this seam
+	// exists to end.
+	for _, extErr := range registerShopperExtensions(functionRegistry) {
+		report.AddSkip(baseloader.Skip{
+			Component: "memql.shopperExtensionRegistration",
+			Keyword:   "mutation",
+			Phase:     "resolve",
+			Err:       extErr.Error(),
+		})
+		// Logger is promoted through the embedded *component.Component, so
+		// the two-part guard is required: a Component-less engine panics on
+		// the bare check (#2674).
+		if e.Component != nil && e.Logger != nil {
+			e.Logger.Error("shopper form extension does not resolve",
+				"component", "memql.engine", "error", extErr)
+		}
+	}
+
+	if inert := ShopperExtensionsInert(); len(inert) > 0 && e.Component != nil && e.Logger != nil {
+		e.Logger.Info("shopper form extensions are waiting on a pack to be enabled; "+
+			"a client's own fields will not be collected until it is",
+			"component", "memql.engine", "extensions", inert)
+	}
+
 	e.tools = toolRegistry
 
 	// Boot self-check (memql#1156): a capability tool missing from the

@@ -222,7 +222,20 @@ func (p *Provider) submitApplication(ctx context.Context, args map[string]any, _
 	// ownerUserId from the actor, the engine's own way of saying who owns a
 	// row. Every concept here is @rowAuthz(owner="ownerUserId",
 	// clusterOwner), so a row written any other way is owned by nobody.
+	// THE ROW ID IS THE SUBMISSION ID THE BFF MINTED (design record
+	// 2026-09-21, D4). It was derived by the engine until this seam
+	// existed, which left the new row's id known to nobody -- and a client
+	// extension has to relate its own row to THIS application. It travels
+	// DOWN from the handler into both constructs rather than back out of
+	// this one, so `confirm` below still answers a receipt and still
+	// carries no row id.
+	applicationID := trimmed(args["submissionId"])
+	if applicationID == "" {
+		return nil, fmt.Errorf("wholesale: submissionId is required; it is minted per " +
+			"submission and stamped by the bff, and it is the id this application is written at")
+	}
 	if err := p.write(ctx, "createApplicationRow", map[string]any{
+		"applicationId":  applicationID,
 		"storeId":        storeID,
 		"siteId":         trimmed(args["siteId"]),
 		"companyName":    company,

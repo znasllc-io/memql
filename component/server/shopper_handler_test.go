@@ -17,6 +17,10 @@ type shopperRecordingExecutor struct {
 	calls []string
 	actor []string
 	err   error
+	// errForCall fails ONE call rather than all of them, which is what an
+	// extension's partial-write test needs: the pack's construct succeeds
+	// and the client's does not (design record 2026-09-21, D5).
+	errForCall func(n int, query string) error
 }
 
 func (e *shopperRecordingExecutor) Execute(ctx context.Context, query string) (any, error) {
@@ -26,6 +30,11 @@ func (e *shopperRecordingExecutor) Execute(ctx context.Context, query string) (a
 		userID = ac.UserId
 	}
 	e.actor = append(e.actor, userID)
+	if e.errForCall != nil {
+		if err := e.errForCall(len(e.calls)-1, query); err != nil {
+			return nil, err
+		}
+	}
 	if e.err != nil {
 		return nil, e.err
 	}

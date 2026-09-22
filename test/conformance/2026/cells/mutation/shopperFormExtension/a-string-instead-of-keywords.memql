@@ -1,0 +1,13 @@
+/// The route named as a bare string rather than as pack= and form=.
+@shopperFormExtension("wholesale")
+mutation clientDetail recordClientDetail {
+  args {
+    submissionId  string!
+    taxId         string
+  }
+  insert {
+    id: args.submissionId
+    submissionId: args.submissionId
+    taxId: args.taxId
+  }
+}

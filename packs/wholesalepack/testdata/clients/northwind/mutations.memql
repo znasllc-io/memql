@@ -1,0 +1,45 @@
+// Northwind's own write, reached from the PACK's own shopper form.
+//
+// This file is the half of the section 7 claim that did not exist until the
+// shopper-form extension did (design record 2026-09-21). The concept beside
+// it declared an EIN and an @relationship to the pack's application, exactly
+// as the design prescribes -- and nothing could ever write a row of it. A
+// pack declares its shopper form in Go; a client repository ships no Go; and
+// the bff drops an undeclared input by design. So "client-specific fields
+// are a related concept, not a blob" was true of the SCHEMA and false of
+// every path a field could actually travel.
+//
+// @shopperFormExtension is that path. It adds Northwind's fields to the
+// route the pack already opened -- it does not open one, and could not: a
+// public endpoint on a merchant's origin stays the privilege of Go compiled
+// into the engine.
+//
+// THE THREE STAMPED NAMES ARE DECLARED AND NEVER OFFERED. submissionId and
+// storeId are in the args block so this body can write them, and the
+// registry refuses either as a field a shopper may send. submissionId is
+// the id the bff minted for this submission and the id the pack wrote its
+// application at, which is what makes the @relationship point at a row that
+// exists.
+//
+// siteId is deliberately NOT declared: it is provenance, and the
+// application this row relates to already carries it. A field this concept
+// does not have is a field it does not take.
+
+@actor
+@shopperFormExtension(pack="wholesale", form="application")
+mutation northwindTaxDetail recordNorthwindTaxDetail {
+  args {
+    submissionId  string!
+    storeId       string!
+    ein           string!  @maxLength(20)
+  }
+  insert {
+    accept { ein }
+    stamp {
+      id:            args.submissionId
+      applicationId: args.submissionId
+      storeId:       args.storeId
+      ownerUserId:   actor.userId
+    }
+  }
+}

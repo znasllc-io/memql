@@ -60,6 +60,7 @@ mutation review createReview {
 @actor
 mutation review submitReview {
   args {
+    submissionId   string!
     storeId        string!
     siteId         string
     productHandle  string!  @maxLength(200)
@@ -72,6 +73,7 @@ mutation review submitReview {
   insert {
     accept { storeId, siteId, productHandle, title, body, rating, authorName, authorEmail }
     stamp {
+      id: args.submissionId
       ownerUserId: actor.userId
     }
   }

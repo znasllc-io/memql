@@ -40,6 +40,7 @@ use wholesale.concepts.{ application, applicationDecision, entitlement, wholesal
 @actor
 mutation application createApplicationRow {
   args {
+    applicationId   string!
     storeId         string!
     siteId          string
     companyName     string!  @maxLength(200)
@@ -49,6 +50,7 @@ mutation application createApplicationRow {
   insert {
     accept { storeId, siteId, companyName, applicantName, applicantEmail }
     stamp {
+      id: args.applicationId
       ownerUserId: actor.userId
     }
   }
