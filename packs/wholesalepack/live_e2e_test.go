@@ -59,6 +59,7 @@ import (
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/id"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 	wholesalepack "github.com/znasllc-io/memql/packs/wholesalepack"
 )
@@ -187,11 +188,20 @@ func openApplications(t *testing.T, eng *memql.MemQLEngine, ctx context.Context,
 		`entitlementAdapter: `+wsQuote(adapter)+`, storeId: `+wsQuote(storeID)+`)`)
 }
 
-func submit(t *testing.T, eng *memql.MemQLEngine, ctx context.Context, storeID, company, email string) {
+// submit stands in for component/server/shopper_handler.go: the pack's
+// declared fields plus the three it stamps -- storeId, siteId, and the
+// submission id it mints for this POST (design record 2026-09-21, D4).
+//
+// It RETURNS the submission id, because the application is written AT it and
+// that is what a client's @shopperFormExtension relates its own row to.
+func submit(t *testing.T, eng *memql.MemQLEngine, ctx context.Context, storeID, company, email string) string {
 	t.Helper()
+	submissionID := "sub-" + id.NewShortId()
 	wsExec(t, eng, ctx, `builtin wholesaleSubmitApplication(applicantEmail: `+wsQuote(email)+
 		`, applicantName: "Sam Rivers", companyName: `+wsQuote(company)+
-		`, siteId: "site-wholesale-e2e", storeId: `+wsQuote(storeID)+`)`)
+		`, siteId: "site-wholesale-e2e", storeId: `+wsQuote(storeID)+
+		`, submissionId: `+wsQuote(submissionID)+`)`)
+	return submissionID
 }
 
 // ---------------------------------------------------------------------------
@@ -206,7 +216,8 @@ func TestLiveE2E_TheApplicationLifecycle(t *testing.T) {
 	// BEFORE any settings row exists. This endpoint is reachable by the
 	// public, so "fail closed" is measured rather than asserted.
 	if _, err := eng.Execute(ctx, `builtin wholesaleSubmitApplication(applicantEmail: "a@b.c"`+
-		`, applicantName: "A", companyName: "Acme", storeId: `+wsQuote(storeLive)+`)`); err == nil {
+		`, applicantName: "A", companyName: "Acme", storeId: `+wsQuote(storeLive)+
+		`, submissionId: "sub-no-settings")`); err == nil {
 		t.Fatal("a store with NO wholesale settings accepted an application: absent " +
 			"settings must be closed, because a merchant who has never touched them has " +
 			"not asked the internet for their customers' business details")
@@ -215,7 +226,7 @@ func TestLiveE2E_TheApplicationLifecycle(t *testing.T) {
 	openApplications(t, eng, ctx, storeLive, wholesalepack.AdapterCustomerTag)
 
 	// ---- PROOF 1: a builtin's nodes are persisted ----------------------
-	submit(t, eng, ctx, storeLive, "Acme Trading", "sam@acme.example")
+	liveSubmission := submit(t, eng, ctx, storeLive, "Acme Trading", "sam@acme.example")
 	live := wsRows(t, eng, ctx, `query applicationsForStore(storeId: `+wsQuote(storeLive)+`)`)
 	if len(live) != 1 {
 		t.Fatalf("applicationsForStore returned %d rows, want 1 -- every write this pack "+
@@ -223,6 +234,14 @@ func TestLiveE2E_TheApplicationLifecycle(t *testing.T) {
 			"the pack works and every fixture-backed test still passes", len(live))
 	}
 	appID, _ := live[0]["id"].(string)
+	// AND IT IS THE SUBMISSION. Not merely "it has an id": a client's
+	// @shopperFormExtension relates its own row to the id the bff stamped,
+	// so an application written anywhere else is one nothing can find
+	// (design record 2026-09-21, D4).
+	if !strings.HasSuffix(appID, liveSubmission) {
+		t.Fatalf("the application landed at id %q, which does not carry the submission id %q "+
+			"it was written under", appID, liveSubmission)
+	}
 	if appID == "" {
 		t.Fatalf("the application carries no id; the engine must derive one because a "+
 			"shopper may not choose one: %+v", live[0])
@@ -243,7 +262,7 @@ func TestLiveE2E_TheApplicationLifecycle(t *testing.T) {
 	// queue must not show it. This is what keeps an application submitted
 	// while exercising a candidate version out of the live store's inbox.
 	openApplications(t, eng, ctx, storeDev, wholesalepack.AdapterCustomerTag)
-	submit(t, eng, ctx, storeDev, "Written while previewing", "dev@acme.example")
+	_ = submit(t, eng, ctx, storeDev, "Written while previewing", "dev@acme.example")
 	if again := wsRows(t, eng, ctx,
 		`query applicationsForStore(storeId: `+wsQuote(storeLive)+`)`); len(again) != 1 {
 		t.Fatalf("the live store's queue returned %d applications after one was written "+
@@ -313,7 +332,7 @@ func TestLiveE2E_ApprovalProvisionsAndAFailedPushKeepsTheApproval(t *testing.T) 
 	ctx := asSiteOwner(merchant)
 
 	openApplications(t, eng, ctx, storeLive, wholesalepack.AdapterCustomerTag)
-	submit(t, eng, ctx, storeLive, "Northwind Supply", "buyer@northwind.example")
+	_ = submit(t, eng, ctx, storeLive, "Northwind Supply", "buyer@northwind.example")
 	rows := wsRows(t, eng, ctx, `query applicationsForStore(storeId: `+wsQuote(storeLive)+`)`)
 	if len(rows) != 1 {
 		t.Fatalf("want 1 application, got %d", len(rows))
@@ -388,8 +407,11 @@ func TestLiveE2E_ADisabledWholesalePackIsInert(t *testing.T) {
 	merchant, storeLive, _ := wholesaleScope()
 	ctx := asSiteOwner(merchant)
 
+	// A COMPLETE call, so the refusal is "the construct is not loaded" rather
+	// than "an argument is missing". An inert pack has to be what stops this.
 	if _, err := eng.Execute(ctx, `builtin wholesaleSubmitApplication(applicantEmail: "a@b.c"`+
-		`, applicantName: "A", companyName: "Acme", storeId: `+wsQuote(storeLive)+`)`); err == nil {
+		`, applicantName: "A", companyName: "Acme", storeId: `+wsQuote(storeLive)+
+		`, submissionId: "sub-inert")`); err == nil {
 		t.Fatal("the shopper write ran on a DISABLED pack: a mounted-inert pack loads no " +
 			"behavioural construct, so the declared form has nothing to reach")
 	}
@@ -487,7 +509,7 @@ func TestLiveE2E_BothFixtureClientsBootOverTheUneditedPack(t *testing.T) {
 	merchant, storeLive, _ := wholesaleScope()
 	ctx := asSiteOwner(merchant)
 	openApplications(t, eng, ctx, storeLive, wholesalepack.AdapterCustomerTag)
-	submit(t, eng, ctx, storeLive, "Both clients mounted", "buyer@both.example")
+	_ = submit(t, eng, ctx, storeLive, "Both clients mounted", "buyer@both.example")
 	if rows := wsRows(t, eng, ctx,
 		`query applicationsForStore(storeId: `+wsQuote(storeLive)+`)`); len(rows) != 1 {
 		t.Fatalf("the pack's own write answered %d rows with two clients mounted", len(rows))
