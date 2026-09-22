@@ -50,13 +50,13 @@ func TestNodeAt_IndexesIntoAnArray(t *testing.T) {
 }
 
 func TestNodeEqual_AHoleEqualsOnlyTheSameHole(t *testing.T) {
-	if !Hole("h1", "string").Equal(Hole("h1", "string")) {
+	if !HoleNode("h1", "string").Equal(HoleNode("h1", "string")) {
 		t.Fatal("the same hole must equal itself")
 	}
-	if Hole("h1", "string").Equal(Hole("h2", "string")) {
+	if HoleNode("h1", "string").Equal(HoleNode("h2", "string")) {
 		t.Fatal("two templates open at different positions are different templates")
 	}
-	if Hole("h1", "string").Equal(Lit("x")) {
+	if HoleNode("h1", "string").Equal(Lit("x")) {
 		t.Fatal("a hole is not a literal")
 	}
 }

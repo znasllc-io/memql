@@ -54,6 +54,11 @@ type Action struct {
 	EffectDigest string
 	Key          string
 	Seq          int
+	// ResultValue is the step's trimmed result, carried through from the row
+	// so that Classify can see a later literal EQUAL an earlier result. The
+	// digests answer "is this the same action"; only the value answers "where
+	// did this argument come from".
+	ResultValue any
 }
 
 // NodeKind is what a node in an argument tree is.
@@ -105,8 +110,11 @@ func Obj(m map[string]*Node) *Node {
 	return &Node{Kind: KindObject, Keys: keys, Kids: kids}
 }
 
-// Hole builds a hole node.
-func Hole(id, typ string) *Node { return &Node{Kind: KindHole, HoleId: id, HoleType: typ} }
+// HoleNode builds a hole node. It is HoleNode rather than Hole because Hole
+// is the CLASSIFIED hole in generalize.go -- a position plus what explains it
+// -- and the two are different enough that sharing a name would be a bug
+// waiting for a reader in a hurry.
+func HoleNode(id, typ string) *Node { return &Node{Kind: KindHole, HoleId: id, HoleType: typ} }
 
 // Equal reports structural equality. A hole equals only a hole with the same
 // id: two templates open at different positions are different templates.

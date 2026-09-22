@@ -54,22 +54,22 @@ func AntiUnify(a, b *Node, next holeNamer) (*Node, int) {
 		if present == nil {
 			present = b
 		}
-		return Hole(next(), typeOf(present)), present.Size()
+		return HoleNode(next(), typeOf(present)), present.Size()
 	}
 	if a.Kind != b.Kind {
-		return Hole(next(), "mixed"), maxInt(a.Size(), b.Size())
+		return HoleNode(next(), "mixed"), maxInt(a.Size(), b.Size())
 	}
 	switch a.Kind {
 	case KindLit:
 		if a.Lit == b.Lit {
 			return Lit(a.Lit), 0
 		}
-		return Hole(next(), "string"), 1
+		return HoleNode(next(), "string"), 1
 	case KindHole:
 		if a.HoleId == b.HoleId {
-			return Hole(a.HoleId, a.HoleType), 0
+			return HoleNode(a.HoleId, a.HoleType), 0
 		}
-		return Hole(next(), "mixed"), 1
+		return HoleNode(next(), "mixed"), 1
 	case KindObject:
 		return antiUnifyObject(a, b, next)
 	default:
@@ -89,9 +89,9 @@ func antiUnifyObject(a, b *Node, next holeNamer) (*Node, int) {
 			g, d := AntiUnify(av, bv, next)
 			m[k], dist = g, dist+d
 		case aok:
-			m[k], dist = Hole(next(), typeOf(av)), dist+av.Size()
+			m[k], dist = HoleNode(next(), typeOf(av)), dist+av.Size()
 		default:
-			m[k], dist = Hole(next(), typeOf(bv)), dist+bv.Size()
+			m[k], dist = HoleNode(next(), typeOf(bv)), dist+bv.Size()
 		}
 	}
 	return Obj(m), dist
@@ -118,11 +118,11 @@ func antiUnifyArray(a, b *Node, next holeNamer) (*Node, int) {
 				ai++
 				bi++
 			case ai < untilA:
-				kids = append(kids, Hole(next(), typeOf(a.Kids[ai])))
+				kids = append(kids, HoleNode(next(), typeOf(a.Kids[ai])))
 				dist += a.Kids[ai].Size()
 				ai++
 			default:
-				kids = append(kids, Hole(next(), typeOf(b.Kids[bi])))
+				kids = append(kids, HoleNode(next(), typeOf(b.Kids[bi])))
 				dist += b.Kids[bi].Size()
 				bi++
 			}

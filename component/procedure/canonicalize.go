@@ -41,6 +41,7 @@ func Canonicalize(steps []Step) []Action {
 			Args:         canonicalizeArgs(s.Input),
 			ResultDigest: s.ResultDigest,
 			EffectDigest: s.EffectDigest,
+			ResultValue:  s.ResultValue,
 			Key:          s.Key,
 			Seq:          s.Seq,
 		})
