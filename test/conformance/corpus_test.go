@@ -83,6 +83,7 @@ import (
 	"github.com/znasllc-io/memql/core/component"
 	"github.com/znasllc-io/memql/core/dslfs"
 	memqldsl "github.com/znasllc-io/memql/dsl"
+	"github.com/znasllc-io/memql/packs/anchor"
 )
 
 const (
@@ -1346,6 +1347,14 @@ func corpusProbeBatch(runs []*corpusRun) error {
 // corpusProbeEngine mounts the fixtures and boots an engine over them. The
 // returned stop restores the global tree and concept registry.
 func corpusProbeEngine(tree fs.FS) (*memql.MemQLEngine, func(), error) {
+	// THE STOREFRONT PACKS, for the reason cmd/memqllint gives for the
+	// connectors: a pass whose claim is "this loads on a real engine" has to
+	// model the engine that loads it. Every published image links reviews and
+	// wholesale with no build tag, so a cell exercising @shopperFormExtension
+	// needs the form it extends to exist -- and a cell that could only ever
+	// be refused would test the refusal rather than the annotation.
+	// Idempotent, so every cell in the run shares one registration.
+	anchor.Storefront()
 	_, _, unmount := memqldsl.MountOverlayDomains(corpusQuiet, tree)
 	stop := func() {
 		unmount()

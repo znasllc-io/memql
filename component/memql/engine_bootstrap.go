@@ -256,6 +256,12 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 		}
 	}
 
+	if inert := ShopperExtensionsInert(); len(inert) > 0 && e.Component != nil && e.Logger != nil {
+		e.Logger.Info("shopper form extensions are waiting on a pack to be enabled; "+
+			"a client's own fields will not be collected until it is",
+			"component", "memql.engine", "extensions", inert)
+	}
+
 	e.tools = toolRegistry
 
 	// Boot self-check (memql#1156): a capability tool missing from the

@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -133,6 +134,7 @@ func registerShopperExtensions(functions *FunctionRegistry) []error {
 	sort.Slice(declared, func(i, j int) bool { return declared[i].Name < declared[j].Name })
 
 	var problems []error
+	var inert []string
 	for _, fn := range declared {
 		ext, err := shopperExtensionFromFunction(fn)
 		if err != nil {
@@ -140,11 +142,35 @@ func registerShopperExtensions(functions *FunctionRegistry) []error {
 			continue
 		}
 		if err := RegisterShopperExtension(ext); err != nil {
+			// AN INERT PACK IS NOT A PROBLEM. A storefront pack ships
+			// disabled, so this is the state a freshly installed cluster is
+			// in, and refusing the load would mean a product that extends a
+			// pack cannot boot until the pack is enabled -- on a cluster
+			// that will not start.
+			if errors.Is(err, errShopperPackInert) {
+				inert = append(inert, fn.Name+" -> "+ext.Pack+"/"+ext.Form)
+				continue
+			}
 			problems = append(problems, err)
 		}
 	}
+	if len(inert) > 0 {
+		// Reported, never silent: an operator who enabled a pack and still
+		// sees no client fields needs this line to exist.
+		sort.Strings(inert)
+		shopperExtensionsInert = inert
+	} else {
+		shopperExtensionsInert = nil
+	}
 	return problems
 }
+
+// shopperExtensionsInert names the extensions skipped because their pack
+// declares no shopper form on this cluster. Read by the boot log.
+var shopperExtensionsInert []string
+
+// ShopperExtensionsInert reports extensions waiting on a pack to be enabled.
+func ShopperExtensionsInert() []string { return append([]string(nil), shopperExtensionsInert...) }
 
 func describeFunctionKind(kind string) string {
 	if strings.TrimSpace(kind) == "" {

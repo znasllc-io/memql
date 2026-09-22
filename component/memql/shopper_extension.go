@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -106,9 +107,14 @@ func RegisterShopperExtension(ext ShopperExtension) error {
 	ext.Form = strings.TrimSpace(ext.Form)
 	ext.Construct = strings.TrimSpace(ext.Construct)
 
-	if !shopperNamePattern.MatchString(ext.Domain) {
-		return fmt.Errorf("shopper extension: Domain %q is not a single lowerCamelCase "+
-			"identifier (%s)", ext.Domain, shopperNamePattern)
+	// THE DOMAIN IS NOT HELD TO shopperNamePattern, and that is deliberate.
+	// That pattern bounds a PATH SEGMENT on a public origin, which is why it
+	// is narrower than an identifier needs to be. An extension adds no route,
+	// so its domain is never addressed from outside and never appears in a
+	// URL -- it is a DSL namespace, and holding a namespace to a URL's rules
+	// would refuse names the loader itself accepts.
+	if ext.Domain == "" {
+		return fmt.Errorf("shopper extension: no declaring domain")
 	}
 	// The route halves, the field names and the reserved-name refusals are
 	// the SAME rules a pack's own declaration passes. Sharing the function
@@ -127,17 +133,36 @@ func RegisterShopperExtension(ext ShopperExtension) error {
 	defer shopperMu.Unlock()
 
 	key := shopperKey(ext.Pack, ext.Form)
-	// REFUSAL 1. Resolved against the LIVE registry, so a DISABLED pack --
-	// which declares no forms, because its Register never runs the
-	// behavioural half -- refuses its extensions too. That is correct
-	// rather than awkward: an extension of a route nobody serves is a
-	// declaration whose author believes something false, and the remedy is
-	// the packState row the operator already controls.
 	form, declared := shopperForms[key]
 	if !declared {
-		return fmt.Errorf("shopper extension declared by %q names the form %s, which no "+
-			"loaded pack declares. A pack this cluster has DISABLED declares nothing, so "+
-			"check v1:platform:packState for %q before the spelling", ext.Domain, key, ext.Pack)
+		// A DISABLED PACK IS NOT A TYPO, AND THE DIFFERENCE HAD TO BE DRAWN.
+		//
+		// This refused outright at first, on the reasoning that an extension
+		// of a route nobody serves is a declaration whose author believes
+		// something false. That is true of a misspelling and false of the
+		// ordinary case, and the ordinary case is unbootable: a storefront
+		// pack ships DISABLED, so a product whose DSL extends one would
+		// refuse boot -- and an operator cannot enable a pack on a cluster
+		// that will not start. The conformance corpus found this by being
+		// an environment with the packs at their shipped default, which is
+		// what every new cluster is.
+		//
+		// A disabled pack is MOUNTED-INERT: its concepts load so imports and
+		// relationships resolve, and every behavioural construct is skipped.
+		// An extension is a behavioural construct attached to a behavioural
+		// surface, so it is inert on exactly the same terms.
+		//
+		// THE DISCRIMINATOR IS WHETHER THE PACK DECLARES ANY FORM AT ALL.
+		// A disabled pack declares none, because its Register never runs the
+		// half that declares them. A pack that is live and declaring forms,
+		// none of them this one, is somebody's spelling mistake -- and that
+		// still refuses, loudly, which is what the refusal was for.
+		if shopperFormsDeclaredForLocked(ext.Pack) == 0 {
+			return errShopperPackInert
+		}
+		return fmt.Errorf("shopper extension declared by %q names the form %s. The pack %q is "+
+			"loaded and declares forms, but not that one -- check the spelling against them",
+			ext.Domain, key, ext.Pack)
 	}
 	// REFUSAL 2, naming BOTH domains: the operator has to know which two
 	// declarations to reconcile, and one name sends them looking for the
@@ -162,6 +187,28 @@ func RegisterShopperExtension(ext ShopperExtension) error {
 	}
 	shopperExtensions[key] = ext
 	return nil
+}
+
+// errShopperPackInert says the named pack is not declaring any shopper form
+// on this cluster, so the extension has nothing to attach to YET.
+//
+// NOT A LOAD FAILURE. It is the same state a disabled pack's own tools and
+// mutations are in, and it resolves itself the moment an operator flips the
+// packState row and the nodes restart -- which is exactly how a pack is
+// meant to be turned on.
+var errShopperPackInert = errors.New("the pack declares no shopper form on this cluster")
+
+// shopperFormsDeclaredForLocked counts a pack's declared forms. Callers hold
+// shopperMu.
+func shopperFormsDeclaredForLocked(pack string) int {
+	n := 0
+	prefix := strings.TrimSpace(pack) + "/"
+	for key := range shopperForms {
+		if strings.HasPrefix(key, prefix) {
+			n++
+		}
+	}
+	return n
 }
 
 // ShopperExtensionFor resolves the extension attached to a form, or nil.

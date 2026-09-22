@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -75,18 +76,42 @@ func TestShopperExtensionIsAbsentForARouteNobodyExtended(t *testing.T) {
 	}
 }
 
-// REFUSAL 1. An extension of a route nobody serves is a declaration whose
-// author believes something false -- and a DISABLED pack declares no forms,
-// so this is also what a cluster sees when reviews is switched off.
-func TestShopperExtensionRefusesAnUndeclaredForm(t *testing.T) {
+// REFUSAL 1, THE TYPO HALF. The pack is loaded and declaring forms, and
+// this names none of them.
+func TestShopperExtensionRefusesAMisspelledFormOnALivePack(t *testing.T) {
 	ResetShopperSurfaceForTest()
+	declareWholesaleForm(t)
+
+	ext := fyloExtension()
+	ext.Form = "aplication" // one letter short
+	err := RegisterShopperExtension(ext)
+	if err == nil {
+		t.Fatal("an extension naming a form its live pack does not declare was accepted")
+	}
+	if errors.Is(err, errShopperPackInert) {
+		t.Fatal("a misspelling was reported as an inert pack; the two must stay distinguishable")
+	}
+	if !strings.Contains(err.Error(), "wholesale/aplication") {
+		t.Errorf("the refusal does not name the route it could not find: %v", err)
+	}
+}
+
+// THE OTHER HALF, AND IT IS THE ORDINARY CASE. A storefront pack ships
+// DISABLED, so this is the state of every freshly installed cluster. It
+// must not be a load failure: an operator cannot enable a pack on a cluster
+// that refuses to start.
+func TestShopperExtensionOfADisabledPackIsInertRatherThanRefused(t *testing.T) {
+	ResetShopperSurfaceForTest() // no pack declares anything: the shipped default
 
 	err := RegisterShopperExtension(fyloExtension())
 	if err == nil {
-		t.Fatal("an extension of an undeclared form was accepted")
+		t.Fatal("the extension registered against a pack that declares no form")
 	}
-	if !strings.Contains(err.Error(), "wholesale/application") {
-		t.Errorf("the refusal does not name the route it could not find: %v", err)
+	if !errors.Is(err, errShopperPackInert) {
+		t.Fatalf("a disabled pack produced a hard refusal, which would stop the node booting: %v", err)
+	}
+	if got := ShopperExtensionFor("wholesale", "application"); got != nil {
+		t.Error("an inert extension was registered anyway; it must attach to nothing until the pack is on")
 	}
 }
 

@@ -1,0 +1,15 @@
+/// A pack named with no form. Both keys are required and neither has a
+/// default: a guessed form would attach a client's fields to whichever route
+/// the engine picked, and the guess is wrong on the first cluster serving two.
+@shopperFormExtension(pack="wholesale")
+mutation clientDetail recordClientDetail {
+  args {
+    submissionId  string!
+    taxId         string
+  }
+  insert {
+    id: args.submissionId
+    submissionId: args.submissionId
+    taxId: args.taxId
+  }
+}

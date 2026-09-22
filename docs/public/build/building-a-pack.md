@@ -402,8 +402,15 @@ has no dedupe and one business would become two rows.
 Legal on a **mutation** alone: a logic may call builtins, and a public form
 pointed at one would reach them under the site owner's borrowed authority.
 **At most one extension per form.** Refusals are load-time, on the
-`LoadReport`, so strict boot rejects them -- including an extension naming a
-form whose pack this cluster has **disabled**, which declares no forms at all.
+`LoadReport`, so strict boot rejects them -- a form the pack does not declare
+is a misspelling and is refused by name.
+
+**An extension whose pack is DISABLED is inert, not refused.** A storefront
+pack ships disabled, so that is the state of a freshly installed cluster, and
+refusing would mean a product that extends a pack cannot boot until somebody
+enables the pack -- on a cluster that will not start. The extension is
+skipped, named in the boot log, and live as soon as the `packState` row is
+flipped and the nodes restart.
 Full reasoning:
 [the design record](../../superpowers/specs/2026-09-21-shopper-form-extension-design.md).
 
