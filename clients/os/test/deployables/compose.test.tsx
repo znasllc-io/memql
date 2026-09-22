@@ -1406,7 +1406,7 @@ describe("composition write failures and bindings", () => {
     await chooseSource(region,/Pushed by your CI/);
     await fill(NAME_FIELD,"Storefront");
     await choose("What kind of deployable this is","Shopify storefront");
-    await choose("The Shopify store this storefront fronts",/example\.myshopify\.com/);
+    await choose("The Shopify store this storefront fronts","example.myshopify.com");
     await fill("The name Storefront answers at","storefront");
     await click(await forward("Analyze"));
     const create=connection.callsNamed("createSite")[0] ?? "";

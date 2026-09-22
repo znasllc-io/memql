@@ -169,7 +169,7 @@ describe("a storefront with no store", () => {
     const page = await openDeployable("new.memql.example.com");
     await click(storeSlot(page));
     const pane = await screen.findByRole("region", { name: "Store for new.memql.example.com" });
-    expect(await within(pane).findByText(/example\.myshopify\.com/)).toBeTruthy();
+    expect(await within(pane).findByText("example.myshopify.com")).toBeTruthy();
   });
 
   it("names the store rather than copying it", async () => {
@@ -178,7 +178,18 @@ describe("a storefront with no store", () => {
     const page = await openDeployable("new.memql.example.com");
     await click(storeSlot(page));
     const pane = await screen.findByRole("region", { name: "Store for new.memql.example.com" });
-    await click(await within(pane).findByRole("radio", { name: /example\.myshopify\.com/ }));
+    // THE LABEL, THEN THE CHOICE IT NAMES. A choice's accessible name is its
+    // label AND its description -- the domain, then "Example Shop · live ·
+    // Shopify Plus" -- so asking findByRole for a `name` means matching PART
+    // of a longer string, and every spelling of that (an unanchored
+    // /example\.myshopify\.com/, a `.includes`) reads to a scanner as a URL
+    // check with arbitrary hosts free to sit either side of it. Both spellings
+    // were tried and each raised its own alert. The domain is a WHOLE text
+    // node -- ChoiceStack renders the label in its own span inside the button
+    // that carries role="radio" -- so matching it exactly and walking up to
+    // the choice asserts the same thing with nothing partial anywhere in it.
+    const label = await within(pane).findByText("example.myshopify.com");
+    await click(label.closest<HTMLElement>('[role="radio"]'));
     await click(within(pane).getByRole("button", { name: "Attach" }));
     const call = connection.callsNamed("updateSiteStoreBinding")[0] ?? "";
     expect(call).toContain('storeId: "store-example"');
