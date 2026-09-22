@@ -119,6 +119,13 @@ type sqlReadinessRowPurger struct {
 	db *bun.DB
 }
 
+// staged-data: MUST-NOT-GATE -- a staged row omitted here becomes PERMANENTLY
+// UNPRUNABLE, exactly as component/identity/authactivity/prune.go's delete is.
+// This purge and the sweep below are the ONLY things that ever remove a
+// v1:platform:moduleReadiness row -- the DSL has no delete mutation -- so a row
+// the gate hides is a row nothing will remove again: it belongs to a pod that
+// no longer exists, no read will ever return it, and the growth this file
+// exists to stop resumes silently while the counter reports work being done.
 func (p sqlReadinessRowPurger) purgeForNode(ctx context.Context, nodeId string) (int64, error) {
 	// The blank guard comes FIRST, before the nil-db shortcut, so it is a
 	// refusal on every build rather than only on one with a database: a blank
@@ -139,6 +146,15 @@ func (p sqlReadinessRowPurger) purgeForNode(ctx context.Context, nodeId string) 
 	return rowsAffected(res), nil
 }
 
+// staged-data: MUST-NOT-GATE -- the unprunable-row bug above, and a second one
+// this statement has and the per-node purge does not. Its sub-select takes the
+// LATEST version of each v1:cluster:node row to read that node's current
+// health. Gated, "latest" would mean latest-among-visible: a hidden newer
+// version reading `healthy` leaves an older `stopped` one deciding, and the
+// sweep deletes the readiness rows of a node that is serving right now. That
+// heals on the node's next pass (at most one safety-net period) but it is a
+// live node's rows removed on evidence the gate manufactured, which is a
+// different and worse failure than leaving a dead pod's rows behind.
 func (p sqlReadinessRowPurger) purgeForStoppedNodes(ctx context.Context) (int64, error) {
 	if p.db == nil {
 		return 0, nil
