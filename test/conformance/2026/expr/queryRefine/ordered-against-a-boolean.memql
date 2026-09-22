@@ -1,0 +1,12 @@
+/// Open tickets compared against a boolean with an ordering operator.
+///
+/// A TYPE RULE, and the reason it is pinned here rather than only in a filter
+/// (memql#5522): booleans have no order, so the comparison means nothing
+/// wherever it is written. Before this case the SQL lowering refused it in a
+/// `filter` while the in-process evaluator answered `false` on every row of a
+/// `refine`, silently -- one source text reading two ways.
+query ticket qrOrderedAgainstABoolean {
+  filter row => row.status == "open"
+  paginate 50
+  refine row => row.urgent > true
+}

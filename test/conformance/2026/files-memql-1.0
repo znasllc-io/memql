@@ -616,11 +616,13 @@ expr/queryRefine/lineage-plan-unset.memql
 expr/queryRefine/lowered-title.memql
 expr/queryRefine/map-literal-member.memql
 expr/queryRefine/mean-call.memql
+expr/queryRefine/mixed-membership-list.memql
 expr/queryRefine/negated-priority.memql
 expr/queryRefine/not-urgent.memql
 expr/queryRefine/not-value-equals-e.memql
 expr/queryRefine/open-and-urgent.memql
 expr/queryRefine/open-or-held-and-urgent.memql
+expr/queryRefine/ordered-against-a-boolean.memql
 expr/queryRefine/owned-by-the-caller.memql
 expr/queryRefine/refine-after-paginate.memql
 expr/queryRefine/refine-without-paginate.memql

@@ -213,6 +213,22 @@ func (p *exprPreparer) checkTriggerFilterFields(t *TriggerConfig, lam *ast.Lambd
 		}
 		return fmt.Errorf("automation %q: trigger filter: %w", p.automation, err)
 	}
+	// The TYPE RULES (memql#5522). A trigger filter is the other in-process
+	// position over a typed row, so it is held to the same two rules a query
+	// filter's lowering holds an author to -- a boolean has no order and one
+	// `in` tests one type, wherever the expression is written.
+	if err := memql.CheckTypeRules(lam, concept, tiers.PositionTriggerFilter); err != nil {
+		// The lambda was parsed from the compiled JSON's filter text, so the
+		// refused node's span is a column of THAT text, not of the author's
+		// file. An authoring diagnostic positions a LowerError by its span,
+		// and a position that cannot be established is omitted rather than
+		// guessed -- the diagnostic then anchors at the construct.
+		var le *memql.LowerError
+		if errors.As(err, &le) {
+			le.Span = ast.Span{}
+		}
+		return fmt.Errorf("automation %q: trigger filter: %w", p.automation, err)
+	}
 	return nil
 }
 

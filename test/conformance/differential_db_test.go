@@ -230,10 +230,19 @@ func TestDifferentialLane(t *testing.T) {
 	eng, stop := laneEngine(t, db, tree)
 	defer stop()
 
-	refused := map[string]string{}
+	// The refusal carries its CODE, not only its text. The code is what the
+	// accept-parity arm below scopes on: a TYPE RULE says the expression is
+	// wrong and must be refused on both sides, while every other refusal says
+	// the node has no SQL form -- which is exactly what a refine clause
+	// exists to evaluate in process.
+	type laneRefusal struct {
+		why  string
+		code string
+	}
+	refused := map[string]laneRefusal{}
 	if rep := eng.LoadReport(); rep != nil {
 		for _, s := range rep.Skipped {
-			refused[s.Name] = fmt.Sprintf("%s (%s)", s.Err, s.Phase)
+			refused[s.Name] = laneRefusal{why: fmt.Sprintf("%s (%s)", s.Err, s.Phase), code: s.Code}
 		}
 	}
 
@@ -259,9 +268,42 @@ func TestDifferentialLane(t *testing.T) {
 			t.Errorf("the two evaluators disagree: %s", line)
 		}
 	}
+	// PER CODE, not a total. A single counter cannot say whether both type
+	// rules are actually reached, and an arm that only ever exercises one of
+	// them is half-untested while reading as fully green -- the summary below
+	// prints the breakdown so a reader can see which rules this run held.
+	typeRulesPaired := map[string]int{}
+	var formRefusals int
 	for _, x := range exprs {
-		if why, isRefused := refused[x.query]; isRefused {
-			t.Logf("differential: %s: `%s` does not lower, so there is no SQL to compare: %s", x.source, x.lambda, why)
+		if r, isRefused := refused[x.query]; isRefused {
+			// ACCEPT PARITY (memql#5522). D7 holds the two evaluators equal on
+			// what they ANSWER; this holds them equal on what they ACCEPT, for
+			// the refusals where that is the right question.
+			//
+			// A TYPE RULE is a fact about the language -- a boolean has no
+			// order, one `in` tests one type -- so it is true wherever the
+			// expression is written, and an in-process path that answers one
+			// is applying a different language from the one the author was
+			// refused by. Measured before it was fixed: `row.value in [1, "1"]`
+			// was refused in a filter and answered TRUE for both the stored
+			// number and the stored string in a refine.
+			//
+			// Every OTHER refusal stays a skip, and deliberately. The generic
+			// code covers "no form at this position" -- an in-process function,
+			// arithmetic over the row -- and demanding a matching in-process
+			// refusal for those would refuse the expressions refine exists for.
+			if memql.IsTypeRuleCode(r.code) {
+				if err := laneCheckTypeRules(x); err == nil {
+					report(fmt.Sprintf("%s: `%s`: the SQL lowering refuses it as a type rule (%s) and the "+
+						"in-process check ACCEPTS it -- one source text, two languages: %s",
+						x.source, x.lambda, r.code, r.why))
+					continue
+				}
+				typeRulesPaired[r.code]++
+				continue
+			}
+			formRefusals++
+			t.Logf("differential: %s: `%s` does not lower, so there is no SQL to compare: %s", x.source, x.lambda, r.why)
 			continue
 		}
 		conceptID := "v1:" + x.domain + ":" + x.concept
@@ -292,8 +334,32 @@ func TestDifferentialLane(t *testing.T) {
 	for _, nodes := range written {
 		rowCount += len(nodes)
 	}
-	t.Logf("differential lane (generator seed %d): %d expressions (%d lowered, %d refused at load) over %d rows of %d concepts: %d comparisons, %d disagreements",
-		laneGeneratorSeed, len(exprs), lowered, len(exprs)-lowered, rowCount, len(written), compared, len(disagreements))
+	paired, pairedTotal := 0, 0
+	pairedBreakdown := make([]string, 0, len(typeRulesPaired))
+	for _, code := range memql.TypeRuleCodes() {
+		n := typeRulesPaired[code]
+		pairedBreakdown = append(pairedBreakdown, fmt.Sprintf("%s=%d", code, n))
+		pairedTotal += n
+		if n > 0 {
+			paired++
+		}
+	}
+	t.Logf("differential lane (generator seed %d): %d expressions (%d lowered, %d refused at load: "+
+		"%d type rules PAIRED against the in-process check [%s], %d with no SQL form) over %d rows "+
+		"of %d concepts: %d comparisons, %d disagreements",
+		laneGeneratorSeed, len(exprs), lowered, len(exprs)-lowered, pairedTotal,
+		strings.Join(pairedBreakdown, " "), formRefusals, rowCount, len(written), compared,
+		len(disagreements))
+	// EVERY type rule must be reached by something, or the arm that pairs it
+	// is asserting nothing. The corpus carries a case per rule for exactly
+	// this reason (test/conformance/2026/expr/typeRules/), so a zero here is
+	// either a missing case or a rule whose refusal stopped carrying its code
+	// -- both of which make this lane quietly stop checking a language rule.
+	if paired != len(memql.TypeRuleCodes()) {
+		t.Errorf("the accept-parity arm reached %d of %d type rules [%s] -- a rule nothing "+
+			"refuses is a rule this lane is not holding either evaluator to",
+			paired, len(memql.TypeRuleCodes()), strings.Join(pairedBreakdown, " "))
+	}
 	for _, d := range disagreements {
 		t.Log("DIFFERENTIAL: " + d)
 	}
@@ -502,6 +568,26 @@ func laneSelect(eng *memql.MemQLEngine, lane string, x *laneExpr) (map[string]bo
 		}
 	}
 	return out, nil
+}
+
+// laneCheckTypeRules asks the IN-PROCESS load gate about the same expression
+// the SQL lowering refused.
+//
+// It calls what a refine clause's load calls (memql.CheckTypeRules, via the
+// bare-expression form), against the same bound concept, so a disagreement
+// here is a disagreement the loader would have -- not an artefact of the lane
+// asking a question nothing else asks.
+//
+// The concept is resolved from the registry rather than passed: a nil concept
+// makes every field-typed side undecidable, which would let a real divergence
+// (`row.flag > 1` over a declared boolean) read as agreement.
+func laneCheckTypeRules(x *laneExpr) error {
+	lam, err := langparser.ParseV1Lambda(x.lambda)
+	if err != nil {
+		return err
+	}
+	concept, _ := memoryNodes.Get("v1:" + x.domain + ":" + x.concept)
+	return memql.CheckTypeRules(lam, concept, tiers.PositionQueryRefine)
 }
 
 // laneEvaluate answers the expression over one stored row in process.
