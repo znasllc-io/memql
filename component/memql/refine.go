@@ -291,7 +291,16 @@ func validateRefineIn(fn *Function, refine *RefineExpression, lookup func(string
 	if walkErr != nil {
 		return walkErr
 	}
-	return CheckConditionFields(lam, concept, tiers.PositionQueryRefine)
+	if err := CheckConditionFields(lam, concept, tiers.PositionQueryRefine); err != nil {
+		return err
+	}
+	// The TYPE RULES (memql#5522). A refine is where the in-process evaluator
+	// is reached on purpose, so it is where the two halves of the language had
+	// drifted: `row.value in [1, "1"]` was refused in a filter and answered
+	// here, for both members. These say the expression is WRONG rather than
+	// that it has no SQL form, and the difference is why they are checked here
+	// while everything under LowerCodeRefused is deliberately not.
+	return CheckTypeRules(lam, concept, tiers.PositionQueryRefine)
 }
 
 // checkRefinePredicate checks a predicate application inside a refine: it is

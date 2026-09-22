@@ -47,7 +47,16 @@ type Engine interface {
 // clusterOwner-tier reads this package issues. A synthetic cluster owner,
 // scoped by what it is used for: the handful of named queries in this file.
 // Never used for anything else.
+//
+// The literal is kept rather than composed from systemActorName below, so a
+// test asserting the stored `createdBy` keeps reading the exact string it
+// asserts; auth.SystemActor builds the same value from the name, and
+// TestSystemEdgeActorMatchesTheSharedHelper holds the two together.
 const systemEdgeActor = "system:edge"
+
+// systemActorName is what this package calls itself to auth.SystemActor --
+// the part after `system:` in the id above.
+const systemActorName = "edge"
 
 // engineExecutor is the QueryExecutor that asks the live engine.
 type engineExecutor struct {
@@ -242,14 +251,21 @@ func (e *engineExecutor) StoreByID(ctx context.Context, storeId string) (*BoundS
 // actor.isClusterOwner==true conjunct is checking. That is precisely why
 // auth.ContextWithUserActor is NOT a substitute for this -- it hardcodes
 // RoleWriter.
+//
+// THE DEFINITION MOVED (memql#5574). Everything above is still true and is
+// now true in one place: auth.ContextWithSystemActor. This had been
+// hand-rolled here, hand-rolled again in component/datasync with only ONE of
+// the three surfaces, and not written at all in integrations/shopify -- which
+// reached for a connector actor instead and read zero rows. The wrapper stays
+// so every call site in this file keeps reading as the edge's own decision.
+//
+// Two flags come with the shared helper that this copy did not set, and both
+// are corrections rather than changes: Unranked (the rank rules must not read
+// RoleOwner above as rank 400) and Synthetic (the cluster can never be a
+// row's owner). Every use here is a READ, so neither alters what this file
+// does today; they close the hole a future write through it would fall into.
 func systemActorContext(ctx context.Context) context.Context {
-	claims := map[string]any{"sub": systemEdgeActor, "role": "owner"}
-	ctx = auth.ContextWithClaims(ctx, claims)
-	ctx = auth.ContextWithToken(ctx, auth.BuildTokenInfo(claims))
-	return auth.ContextWithAccess(ctx, &auth.AccessContext{
-		UserId: systemEdgeActor,
-		Role:   auth.RoleOwner,
-	})
+	return auth.ContextWithSystemActor(ctx, systemActorName)
 }
 
 // siteFromRow projects one engine row (the siteFull shape's output) onto

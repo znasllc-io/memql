@@ -71,6 +71,52 @@ var ErrAppUnavailable = errors.New("no machine can run this app right now")
 // the park card, the log line and the row.
 const AppRefusalCode = "no_app_available"
 
+// AppVisionStagingRefusalCode is the stable tag for a vision call through the
+// app door whose images could not be landed in the session workspace (issue
+// memql#5523).
+//
+// SEPARATE FROM AppRefusalCode on purpose. "No machine can run this app" is an
+// availability answer an operator acts on by waking a laptop or signing in;
+// "the image did not land" is a failure INSIDE a door that was open, and the
+// remedy is elsewhere entirely. Collapsing them would have a storage outage
+// read as "you have no machines".
+const AppVisionStagingRefusalCode = "app_vision_staging_failed"
+
+// AppVisionStagingFailed is what a vision call returns when its images could
+// not be staged.
+//
+// It carries the count so the message can distinguish "none of them landed"
+// from "two of three did" -- a partial stage is still a refusal, because a
+// prompt naming three files of which two exist is worse than no answer.
+type AppVisionStagingFailed struct {
+	AppId string
+	// Images is how many the call carried; Staged is how many landed.
+	Images int
+	Staged int
+	// Reason is what the stager reported, in an operator's terms.
+	Reason string
+}
+
+// Code is the stable machine-readable tag.
+func (e *AppVisionStagingFailed) Code() string { return AppVisionStagingRefusalCode }
+
+func (e *AppVisionStagingFailed) Error() string {
+	if e == nil {
+		return AppVisionStagingRefusalCode
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s: %d of %d image(s) reached the session workspace", AppVisionStagingRefusalCode, e.Staged, e.Images)
+	if e.AppId != "" {
+		fmt.Fprintf(&b, " for %s", e.AppId)
+	}
+	if e.Reason != "" {
+		fmt.Fprintf(&b, ": %s", e.Reason)
+	}
+	b.WriteString(" -- the call was refused rather than sent, because a prompt naming a file " +
+		"that is not there has the app answer about an image it never saw")
+	return b.String()
+}
+
 // AppMachine is one machine that could run an app.
 type AppMachine struct {
 	RegistrationId string
@@ -152,6 +198,23 @@ type AppCallRequest struct {
 	// Inputs are Library artifact ids the cockpit pulls into the session
 	// workspace before the run starts.
 	Inputs []string
+
+	// Images are the images of a VISION call, as bytes (issue memql#5523,
+	// design D11 of the app-session record).
+	//
+	// THE APP READS FILES, NOT MESSAGE PARTS. A cloud vision provider takes
+	// the bytes inline in the request; an app is a harness on somebody's
+	// machine that reads images natively FROM ITS WORKING DIRECTORY. So the
+	// bytes do not travel on the wire as bytes: the agent side stages each
+	// one into the session workspace and names it in the prompt, and what
+	// reaches AppSessionStart is an artifact id in Inputs -- which is why
+	// this needed no proto field.
+	//
+	// It is the ENGINE's job to land them, so a call whose images cannot be
+	// staged REFUSES (AppVisionStagingFailed). Sending a prompt that names a
+	// file which is not there would have the app answer about an image it
+	// never saw, confidently.
+	Images []common.VisionContent
 }
 
 // AppCallResult is the answer.
@@ -562,6 +625,14 @@ func orderDoors(doors []AppDoor, preference []string) []AppDoor {
 // exactly as FleetCallFingerprint does, and for the same reason: the purpose,
 // the run id and a timestamp all vary across a genuine loop and would make
 // every repetition look novel.
+//
+// THE IMAGES ARE PART OF THE CALL (issue memql#5523). A vision turn's prompt
+// is often identical across images -- "describe this screenshot" twice over
+// two different screenshots -- so a fingerprint over the conversation alone
+// would have the second call read as a repetition of the first and be tripped
+// by the identical-request breaker. The BYTES are hashed rather than the count
+// or the length, because two images of one size are a collision waiting for a
+// dashboard screenshot.
 func AppCallFingerprint(req AppCallRequest) string {
 	h := sha256.New()
 	h.Write([]byte(req.AppId))
@@ -575,6 +646,12 @@ func AppCallFingerprint(req AppCallRequest) string {
 		h.Write([]byte{2})
 		h.Write([]byte(req.Schema.Name))
 		h.Write(req.Schema.Schema)
+	}
+	for _, img := range req.Images {
+		h.Write([]byte{3})
+		h.Write([]byte(img.MimeType))
+		h.Write([]byte{4})
+		h.Write(img.Data)
 	}
 	return "app:" + hex.EncodeToString(h.Sum(nil))
 }
@@ -613,6 +690,31 @@ func (p *appProvider) CallChatStructured(ctx context.Context, messages []common.
 	return res.Content, nil
 }
 
+// CallVision implements common.VisionAIProvider -- the door that makes a
+// vision call resolve to an app at all (issue memql#5523).
+//
+// THE REGISTRATION IS THE FEATURE. The router's resolveChain skips a chain
+// entry that does not implement the modality it needs, so without this method
+// every vision call walked past every app door silently -- and an operator
+// reading a decision row saw a chain that considered the app and chose
+// something else, which is indistinguishable from a policy that meant to.
+//
+// The prompt and the images travel together and are separated on the agent
+// side: the stager lands each image in the session workspace, and the prompt
+// the app receives names the files by the names the engine chose. Nothing here
+// decides those names -- a filename invented on this side and a filename
+// written on that side would be two literals describing one file.
+func (p *appProvider) CallVision(ctx context.Context, prompt string, images []common.VisionContent) (string, error) {
+	res, err := p.call(ctx, AppCallRequest{
+		Messages: []common.ChatMessage{{Role: "user", Content: prompt}},
+		Images:   images,
+	})
+	if err != nil {
+		return "", err
+	}
+	return res.Content, nil
+}
+
 // The tool-calling surfaces are DELIBERATELY ABSENT, and their absence is
 // enforced by the router: resolveChain skips a chain entry that does not
 // implement the modality it needs, so a tool turn walks past every app door
@@ -622,6 +724,7 @@ var (
 	_ AIProvider                    = (*appProvider)(nil)
 	_ common.ChatAIProvider         = (*appProvider)(nil)
 	_ common.ChatStructuredProvider = (*appProvider)(nil)
+	_ common.VisionAIProvider       = (*appProvider)(nil)
 )
 
 // AppUnavailable is the typed refusal: no machine could run the app, WITH the

@@ -91,6 +91,24 @@ func ConnectorActor(name string) *AccessContext {
 // contract: a caller that cannot resolve the connector must refuse
 // before calling rather than rely on this, or the work runs as whoever
 // the inbound caller happened to be.
+//
+// ALL THREE SURFACES, and the third one is what memql#5574 found missing.
+// `actor.userId` in a filter or a mutation template reads the AccessContext,
+// but `createdBy` resolves through ActorFromContext -> TokenInfoFromContext --
+// so a connector carrying only the AccessContext could READ its mirror and
+// could not WRITE it: every mutation answered `no actor found in context`,
+// including the mirror inserts that are the connector's whole job.
+//
+// It was invisible for the reason memql#2989 describes: reads and writes are
+// exercised by different tests, and the ones here checked each GATE in
+// isolation (guardMirrorWrite, connectorAdmission) rather than running a
+// statement through the executor, where the actor is resolved. See
+// data_origins_enforcement_test.go, and the end-to-end write beside it.
+//
+// The claims are the actor's own, not a caller's: `role` is RoleConnector,
+// which sits outside ValidRoles() and outside the rank model, so this grants
+// nothing on its own -- a connector's reach still comes entirely from the
+// targeted row-admission rule keyed on its name.
 func ContextWithConnectorActor(ctx context.Context, name string) context.Context {
 	ac := ConnectorActor(name)
 	if ac == nil {
@@ -99,6 +117,9 @@ func ContextWithConnectorActor(ctx context.Context, name string) context.Context
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	claims := map[string]any{"sub": ac.UserId, "role": string(RoleConnector)}
+	ctx = ContextWithClaims(ctx, claims)
+	ctx = ContextWithToken(ctx, BuildTokenInfo(claims))
 	return ContextWithAccess(ctx, ac)
 }
 

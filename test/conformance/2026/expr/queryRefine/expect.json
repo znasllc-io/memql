@@ -36,6 +36,20 @@
       "message": ".contains(...) is retired in edition 2026: write v in <list> for membership or s.includes(sub) for a substring"
     },
     {
+      "file": "ordered-against-a-boolean.memql",
+      "verdict": "refuse_load",
+      "code": "lower_not_ordered",
+      "message": "booleans are not ordered",
+      "note": "A type rule, so it is refused in a refine exactly as in a filter (memql#5522). Before this the in-process evaluator answered false on every row and said nothing."
+    },
+    {
+      "file": "mixed-membership-list.memql",
+      "verdict": "refuse_load",
+      "code": "lower_mixed_membership_list",
+      "message": "a membership list holds one type",
+      "note": "The other type rule (memql#5522). The in-process evaluator answered this one TRUE for both the stored number 1 and the stored string \"1\"."
+    },
+    {
       "file": "value-equals-e.memql",
       "verdict": "evaluate",
       "concept": "ticket",

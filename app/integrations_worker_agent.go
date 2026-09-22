@@ -214,9 +214,16 @@ func (a *App) setupCockpitAppExecutor(
 	// resolve to a permanently unavailable provider and every chain simply
 	// walks past them.
 	if providers := a.engine.Providers(); providers != nil {
-		providers.SetAppInference(agentworker.NewAppInference(
+		// Kept on the App as well as handed to the registry: the VISION
+		// half needs the blob store, which is resolved two phases later in
+		// transport (app/transport_agent.go). A registered seam with no
+		// stager behind it serves chat and refuses vision BY NAME, which is
+		// the right failure but not the intended one.
+		appInference := agentworker.NewAppInference(
 			dispatcher, runner, &agentworker.EngineStore{Engine: a.engine}, a.Logger,
-		))
+		)
+		a.appInference = appInference
+		providers.SetAppInference(appInference)
 		a.Logger.Info("app door: this replica can serve inference through a signed-in local app",
 			"apps", strings.Join(worker.KnownAppIds(), ", "),
 		)

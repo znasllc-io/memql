@@ -70,6 +70,12 @@ type AppInference struct {
 	policies DelegationPolicyReader
 	logger   *slog.Logger
 	clock    func() time.Time
+	// vision lands the images of a vision call in the session workspace
+	// (issue memql#5523). NIL ON A NODE WITH NO BLOB STORAGE, and a vision
+	// call then REFUSES rather than running without its images -- see
+	// app_vision.go for why a prompt naming a file that is not there is the
+	// worst of the available failures.
+	vision *visionStager
 }
 
 // NewAppInference builds the seam implementation from the dispatcher's
@@ -96,6 +102,20 @@ func NewAppInference(
 		logger:   logger,
 		clock:    d.clock,
 	}
+}
+
+// SetVisionStager wires the blob surface a vision call needs.
+//
+// A SETTER rather than a constructor argument, because the blob store is
+// resolved in the transport phase (app/transport_agent.go) and this seam is
+// built in the integrations phase -- the same ordering that makes
+// SetAttachmentUploader a setter on the workbench integration. Left unset, the
+// door still serves chat and structured chat and refuses vision by name.
+func (a *AppInference) SetVisionStager(engine visionEngine, uploader visionBlobUploader, container string) {
+	if a == nil {
+		return
+	}
+	a.vision = newVisionStager(engine, uploader, container, a.logger, a.clock)
 }
 
 // Doors reports which apps this user could reach right now.
@@ -241,6 +261,23 @@ func (a *AppInference) Call(ctx context.Context, req memqlengine.AppCallRequest)
 		}
 	}
 
+	// CAN THIS REPLICA STAGE AT ALL (issue memql#5523) -- asked before a
+	// machine is chosen, because it is a CONFIGURATION fact and needs no
+	// machine to answer. A node with no blob storage refuses the call here
+	// rather than selecting a machine, opening a session and only then
+	// discovering the images have nowhere to land.
+	//
+	// The STAGE itself stays after selection, below: that one costs a Library
+	// write and a promotion wait, and paying it for a call about to be refused
+	// for having no machine is the waste this split avoids.
+	if len(req.Images) > 0 {
+		if ok, why := a.vision.ready(); !ok {
+			return memqlengine.AppCallResult{}, &memqlengine.AppVisionStagingFailed{
+				AppId: req.AppId, Images: len(req.Images), Staged: 0, Reason: why,
+			}
+		}
+	}
+
 	w, refusal := a.selectMachine(ctx, owner, req)
 	if refusal != nil {
 		return memqlengine.AppCallResult{}, refusal
@@ -250,12 +287,53 @@ func (a *AppInference) Call(ctx context.Context, req memqlengine.AppCallRequest)
 	if req.Schema != nil {
 		schema = string(req.Schema.Schema)
 	}
+	sessionId := "v1:worker:appSession:" + id.NewShortId()
+
+	// THE IMAGES, LANDED BEFORE THE SESSION STARTS (issue memql#5523).
+	//
+	// Ordered here -- after the machine is selected, before the run spec is
+	// built -- for two reasons. A stage costs a Library write and a promotion
+	// wait, so doing it before selection would pay for a call that is about to
+	// be refused for having no machine; and the prompt cannot be composed
+	// until the filenames exist, because the names in the prompt ARE the names
+	// the files landed under.
+	//
+	// A REFUSAL, not a degraded call. Every other failure on this path answers
+	// "no machine can run this"; this one answers "the image did not land",
+	// and they are different remedies. What must never happen is the third
+	// option: sending the prompt anyway, which has the app answer about an
+	// image it never saw.
+	var staged []stagedVisionInput
+	if len(req.Images) > 0 {
+		landed, err := a.vision.Stage(ctx, owner, sessionId, req.Images)
+		if err != nil {
+			// Release what DID land. A half-staged turn is refused, so the
+			// files it wrote are inputs to nothing and must not be left in
+			// the owner's Files app.
+			a.vision.Release(ctx, owner, landed)
+			return memqlengine.AppCallResult{}, &memqlengine.AppVisionStagingFailed{
+				AppId: req.AppId, Images: len(req.Images), Staged: len(landed), Reason: err.Error(),
+			}
+		}
+		staged = landed
+		// ARCHIVED WHEN THE SESSION ENDS, which is the lifecycle half of the
+		// owner's decision: a staged input belonged to one turn. Deferred so
+		// it runs on every exit -- an answered turn, a refused one, and a
+		// panic alike; a leaked input is a file the person never chose to keep
+		// and cannot tell from one they did.
+		defer a.vision.Release(ctx, owner, staged)
+	}
+
 	spec := workerservice.RunSpec{
-		SessionId:      "v1:worker:appSession:" + id.NewShortId(),
-		OwnerUserId:    owner,
-		App:            req.AppId,
-		Kind:           workerservice.AppSessionKindRun,
-		Prompt:         flattenMessages(req.Messages),
+		SessionId:   sessionId,
+		OwnerUserId: owner,
+		App:         req.AppId,
+		Kind:        workerservice.AppSessionKindRun,
+		// The prompt NAMES each landed file, by the name it landed under.
+		// visionPromptWithInputs is handed the stage's own result rather than
+		// deriving the names a second time -- one literal per file, or the
+		// two derivations disagree the day either changes.
+		Prompt:         visionPromptWithInputs(flattenMessages(req.Messages), staged),
 		ResponseSchema: schema,
 		RunId:          req.RunId,
 		StepId:         req.StepId,
@@ -266,8 +344,11 @@ func (a *AppInference) Call(ctx context.Context, req memqlengine.AppCallRequest)
 		// serves a turn rather than a step.
 		Level: req.Level,
 		// Library artifacts the cockpit pulls into the workspace before the
-		// run. Empty for an ordinary chat turn.
-		Inputs: req.Inputs,
+		// run. Empty for an ordinary chat turn; a vision turn's staged images
+		// are appended, which is the whole of what the wire needed for this
+		// feature -- AppSessionStart.inputs already carried artifact ids and
+		// the landing filename was already the engine's to choose (design D11).
+		Inputs: appendStagedInputs(req.Inputs, staged),
 	}
 
 	result, err := a.runner.Run(ctx, w, spec, nil)

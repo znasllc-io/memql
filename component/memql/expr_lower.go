@@ -162,7 +162,53 @@ const (
 	// shape; an ownership test belongs in the query filter, where row-authz
 	// reads it.
 	LowerCodeActorInRowPredicate = "lower_actor_in_row_predicate"
+
+	// The TYPE RULES (memql#5522). These two say the expression is WRONG,
+	// not that it has no SQL form, and the distinction is what the codes
+	// exist to carry.
+	//
+	// LowerCodeRefused covers "no form at its position" -- an in-process
+	// function, arithmetic over the row -- and those are exactly what a
+	// refine clause EXISTS to evaluate, so the in-process path must accept
+	// them. A type rule is the opposite: `booleans are not ordered` is a
+	// statement about the language, true wherever the expression is written,
+	// and an evaluator that quietly answers one is applying a different
+	// language from the one the author was refused by.
+	//
+	// The differential lane holds the two halves equal on these and only on
+	// these (test/conformance/differential_db_test.go). Bundling them under
+	// LowerCodeRefused is what let `row.value in [1, "1"]` be refused in a
+	// filter and answer `true` for both members in a refine.
+
+	// LowerCodeNotOrdered: `<`, `<=`, `>` or `>=` against a boolean. A
+	// boolean has no order, so the comparison has no meaning -- as distinct
+	// from having no SQL form.
+	LowerCodeNotOrdered = "lower_not_ordered"
+	// LowerCodeMixedMembershipList: an `in` whose list literal holds more
+	// than one type. One `in` tests one type; a mixed list is two questions
+	// written as one.
+	LowerCodeMixedMembershipList = "lower_mixed_membership_list"
 )
+
+// TypeRuleCodes is the set of refusal codes that are LANGUAGE TYPE RULES
+// rather than pushdown limits -- the ones both evaluators must refuse.
+//
+// Exported because the differential lane's accept-parity arm keys on it, and
+// because a reader asking "which refusals is the in-process side held to?"
+// should find one list rather than a grep.
+func TypeRuleCodes() []string {
+	return []string{LowerCodeNotOrdered, LowerCodeMixedMembershipList}
+}
+
+// IsTypeRuleCode reports whether code names a type rule.
+func IsTypeRuleCode(code string) bool {
+	for _, c := range TypeRuleCodes() {
+		if c == code {
+			return true
+		}
+	}
+	return false
+}
 
 // RuleCode is the refusal's stable rule id: its Code, or LowerCodeRefused
 // when it was built without one. A consumer that finds the code on an error
@@ -1163,7 +1209,7 @@ func (l *lowerer) comparison(e *ast.BinaryExpr) (ExpressionNode, error) {
 // fieldComparison is `<field> op <value>`.
 func (l *lowerer) fieldComparison(e *ast.BinaryExpr, f lowOperand, op ComparisonOperator, v lowOperand) (ExpressionNode, error) {
 	if isOrderingOp(op) && (v.typ == "bool" || f.typ == "bool") {
-		return nil, l.refuse(e, "booleans are not ordered", "Compare with `==` or `!=`: `"+ast.FormatExpr(f.node)+" == true`")
+		return nil, l.refuseAs(LowerCodeNotOrdered, e, "booleans are not ordered", "Compare with `==` or `!=`: `"+ast.FormatExpr(f.node)+" == true`")
 	}
 	if isOrderingOp(op) && v.typ == "nil" {
 		// Nothing orders against nil: false on both evaluators (EvalExpr's
@@ -1228,7 +1274,7 @@ func (l *lowerer) fieldFieldComparison(e *ast.BinaryExpr, left lowOperand, op Co
 			"Compare each field with a value, or compare the two payload fields")
 	}
 	if isOrderingOp(op) && (left.typ == "bool" || right.typ == "bool") {
-		return nil, l.refuse(e, "booleans are not ordered", "Compare with `==` or `!=`")
+		return nil, l.refuseAs(LowerCodeNotOrdered, e, "booleans are not ordered", "Compare with `==` or `!=`")
 	}
 	for _, side := range []lowOperand{left, right} {
 		if side.typ == "list" || side.typ == "map" {
@@ -1281,7 +1327,7 @@ func (l *lowerer) membership(e *ast.BinaryExpr) (ExpressionNode, error) {
 			// (compileTypedMembership), so a literal list of two types has
 			// no single guard; refused at load rather than at the first call.
 			if kinds := literalListKinds(list); len(kinds) > 1 {
-				return nil, l.refuse(e, fmt.Sprintf("a membership list holds one type, and `%s` mixes %s", ast.FormatExpr(right.node), strings.Join(kinds, " and ")),
+				return nil, l.refuseAs(LowerCodeMixedMembershipList, e, fmt.Sprintf("a membership list holds one type, and `%s` mixes %s", ast.FormatExpr(right.node), strings.Join(kinds, " and ")),
 					"Split it into one `in` per type, joined with `||`")
 			}
 		}

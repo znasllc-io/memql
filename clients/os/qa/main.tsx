@@ -35,6 +35,13 @@ import {
   previewReadinessRow,
 } from "../test/deployables/harness";
 import { siteFromRow } from "../src/apps/deployables/rows";
+import { OriginsSection } from "../src/apps/cluster/origins/OriginsSection";
+import {
+  dataOriginRow as clusterOriginRow,
+  fakeConnection as clusterConnection,
+  syncStateRow as clusterSyncStateRow,
+  withSession as clusterSession,
+} from "../test/cluster/harness";
 
 // The browser QA harness for the storefront's Store surface.
 //
@@ -431,7 +438,23 @@ function PreviewPage({ site }: { site: ReturnType<typeof siteFromRow> }) {
   );
 }
 
-const VIEWS: Record<string, { seed: FakeSeed; role?: string; framed?: boolean; render: () => JSX.Element }> = {
+// A view may bring its own CONNECTION and its own session wrapper. The Store
+// and Deployables views share `test/deployables/harness`; the Data origins
+// views need `test/cluster/harness`, whose fake answers `dataOrigins` and
+// `syncStatesAll`. Two fixture harnesses rather than one widened one, for the
+// reason the README gives about the fake in general: each is the SUITE's, so a
+// screenshot cannot disagree with what those tests assert.
+const VIEWS: Record<
+  string,
+  {
+    seed?: FakeSeed;
+    connect?: () => unknown;
+    wrap?: (el: JSX.Element, role: string) => JSX.Element;
+    role?: string;
+    framed?: boolean;
+    render: () => JSX.Element;
+  }
+> = {
   // The two lists. `framed` views bring their own window body, because the
   // app's wizard needs a floor and its pages publish to the window's trail.
   list: { seed: LISTS, framed: true, render: () => <Lists section="deployables" /> },
@@ -458,6 +481,44 @@ const VIEWS: Record<string, { seed: FakeSeed; role?: string; framed?: boolean; r
   quiet: { seed: QUIET, render: () => <StorePane site={siteFromRow(SHOP)} canBind /> },
   picker: { seed: UNBOUND, render: () => <StorePane site={siteFromRow(UNBOUND_SITE)} canBind /> },
   readonly: { seed: BOUND, role: "reader", render: () => <StorePane site={siteFromRow(SHOP)} canBind={false} /> },
+  // --- Data origins: the connector-coverage band (issue memql#5574) ------
+  //
+  // `origins-silent` is the production state the issue describes: eight
+  // declared concepts, nothing reported, and before this band a page of eight
+  // correct em dashes saying nothing about the connector.
+  "origins-silent": {
+    connect: () => clusterConnection({ dataOrigins: SHOPIFY_CONCEPTS, syncStatesAll: [] }),
+    wrap: (el, role) => clusterSession(el, { role }),
+    render: () => <OriginsPane />,
+  },
+  // The silent connector BESIDE a healthy one, which is how it will actually
+  // be read: the question is whether the one line worth finding is findable,
+  // and a page with one line on it cannot answer that.
+  "origins-mixed": {
+    connect: () =>
+      clusterConnection({
+        dataOrigins: [...SHOPIFY_CONCEPTS, ...BOOKS_CONCEPTS],
+        syncStatesAll: [
+          booksHealth("invoice"),
+          booksHealth("payment"),
+          booksHealth("customer", { lastError: "the origin refused the last page" }),
+        ],
+      }),
+    wrap: (el, role) => clusterSession(el, { role }),
+    render: () => <OriginsPane />,
+  },
+  // A cluster with nothing wrong. The band has to be QUIET here, or an
+  // operator learns to scroll past it and the silent case above is lost with
+  // it.
+  "origins-reporting": {
+    connect: () =>
+      clusterConnection({
+        dataOrigins: BOOKS_CONCEPTS,
+        syncStatesAll: [booksHealth("invoice"), booksHealth("payment"), booksHealth("customer")],
+      }),
+    wrap: (el, role) => clusterSession(el, { role }),
+    render: () => <OriginsPane />,
+  },
   hidden: {
     seed: BOUND,
     role: "reader",
@@ -478,6 +539,63 @@ const VIEWS: Record<string, { seed: FakeSeed; role?: string; framed?: boolean; r
   },
 };
 
+// --- Data origins (issue memql#5574) ------------------------------------
+//
+// The connector-coverage band cannot be judged from the diff or from jsdom.
+// The whole point of it is that ONE line among several has to be findable at a
+// glance on a page of ratios, which is a question about contrast, alignment
+// and density -- three things a green vitest case says nothing about.
+//
+// Three views, and the middle one is the one that matters: `origins-silent` is
+// memql#5574's production state, `origins-mixed` is the same page with a
+// healthy connector beside the silent one (so the silent line is judged
+// against something, not in isolation), and `origins-reporting` is a cluster
+// with nothing wrong -- where the band must be quiet enough that nobody learns
+// to ignore it.
+
+function shopifyConcept(n: number) {
+  return clusterOriginRow({
+    conceptId: `v1:shopify:concept${String(n).padStart(2, "0")}`,
+    dataState: "mirror",
+    origin: "shopify",
+    connectors: ["shopify"],
+  });
+}
+
+const SHOPIFY_CONCEPTS = Array.from({ length: 8 }, (_, i) => shopifyConcept(i + 1));
+
+const BOOKS_CONCEPTS = ["invoice", "payment", "customer"].map((name) =>
+  clusterOriginRow({
+    conceptId: `v1:books:${name}`,
+    dataState: "mirror",
+    origin: "quickBooks",
+    connectors: ["quickBooks"],
+  }),
+);
+
+function booksHealth(name: string, over: Record<string, unknown> = {}) {
+  return clusterSyncStateRow({
+    conceptId: `v1:books:${name}`,
+    connector: "quickBooks",
+    direction: "inbound",
+    lagSeconds: 3,
+    driftCount: 0,
+    outboxDepth: 0,
+    deadLetterCount: 0,
+    backfillStatus: "complete",
+    paused: false,
+    ...over,
+  } as never);
+}
+
+function OriginsPane() {
+  return (
+    <div className="os-window-content">
+      <OriginsSection />
+    </div>
+  );
+}
+
 function App() {
   const params = new URLSearchParams(window.location.search);
   const name = params.get("view") ?? "store";
@@ -485,7 +603,7 @@ function App() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    installQaConnection(fakeConnection(view.seed));
+    installQaConnection(view.connect ? view.connect() : fakeConnection(view.seed ?? {}));
     setReady(true);
   }, [name]);
 
@@ -495,8 +613,13 @@ function App() {
   // surfaces read all three (a Logs action opens another app, and `useOs`
   // throws outside its provider), and a harness that wired them itself would
   // be a second reading of the access model beside the one the tests use.
-  if (view.framed) return withSession(view.render(), { role: view.role ?? "owner", userId: "u-me" });
-  return <div className="os-window-content">{withSession(view.render(), { role: view.role ?? "owner" })}</div>;
+  const role = view.role ?? "owner";
+  // A view with its own wrapper renders whole: its render() already supplies
+  // whatever body it needs, so wrapping it again in `.os-window-content`
+  // would nest two of them.
+  if (view.wrap) return view.wrap(view.render(), role);
+  if (view.framed) return withSession(view.render(), { role, userId: "u-me" });
+  return <div className="os-window-content">{withSession(view.render(), { role })}</div>;
 }
 
 // MODE is `data-theme` on the root (src/styles/tokens.css); `data-os-theme`

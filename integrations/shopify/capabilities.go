@@ -371,7 +371,7 @@ func (i *Integration) handleStoreHealth(ctx context.Context, args map[string]any
 // component/datasync, and a connector that declared a parallel read of
 // it would be a second answer to a question the runtime already answers.
 func (c *Connector) syncStates(ctx context.Context) ([]map[string]any, error) {
-	res, err := c.engine.Execute(connectorContext(ctx), renderCall("syncStatesAll", map[string]any{"connector": ConnectorName}))
+	res, err := c.engine.Execute(operatorContext(ctx), renderCall("syncStatesAll", map[string]any{"connector": ConnectorName}))
 	if err != nil {
 		return nil, fmt.Errorf("shopify: read sync state: %w", err)
 	}

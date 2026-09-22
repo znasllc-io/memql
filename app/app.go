@@ -150,6 +150,13 @@ type App struct {
 	// Stored as any to avoid importing integrations/stt (pulls in go-openai SDK) in all builds.
 	sttProvider any
 
+	// appInference is the app door's seam implementation, held so the
+	// transport phase can hand it the blob store a VISION call stages images
+	// through (issue memql#5523). `any` for the reason sttProvider is: the
+	// field is declared in every build and only the agent build has the
+	// package that fills it.
+	appInference any
+
 	// Phase 5: transport
 	grpcServer *memqlgrpc.Server
 	httpServer *server.Server

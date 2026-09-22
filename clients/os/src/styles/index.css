@@ -11687,6 +11687,82 @@ a.os-button {
 }
 
 /* ---------------------------------------------------------------------------
+ * Data origins: connector coverage (issue memql#5574)
+ *
+ * The CONNECTOR as the subject, above the table of pairings. A name and a
+ * ratio on one line, the consequence beneath it in the quiet voice.
+ *
+ * No colour of its own and no container of its own. The one state that asks
+ * for something borrows `.os-cluster-row-attention` -- warn ink on words,
+ * which is what that class already exists for -- and everything else is the
+ * page's ordinary ink. A card, a border or a tinted background here would
+ * make a connector that has simply not started yet look like an incident.
+ * ------------------------------------------------------------------------- */
+
+.os-cluster-coverage {
+  display: flex;
+  flex-direction: column;
+}
+
+.os-cluster-coverage-line {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border-bottom: 1px solid var(--os-line);
+  min-width: 0;
+}
+
+.os-cluster-coverage-line:last-child {
+  border-bottom: none;
+}
+
+/* The name and the ratio, pushed to the two edges of the line. The ratio is
+ * the reading, so it sits where the eye lands last and stays put. */
+.os-cluster-coverage-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.os-cluster-coverage-name {
+  font-size: var(--os-text-sm);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Tabular figures, so a column of ratios reads down rather than jittering
+ * per digit -- the same reason `.os-cluster-row-when` asks for them. */
+.os-cluster-coverage-ratio {
+  color: var(--os-muted);
+  font-size: var(--os-text-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A sentence, not a label: it wraps, and at a readable measure rather than
+ * the width of the panel. */
+.os-cluster-coverage-note,
+.os-cluster-coverage-line .os-cluster-row-attention {
+  margin: 0;
+  max-width: 78ch;
+}
+
+.os-cluster-coverage-note {
+  color: var(--os-muted);
+  font-size: var(--os-text-sm);
+}
+
+/* A connector with nothing reported keeps its NAME at full ink: the reading
+ * is about the connector, and muting the thing the line is about would make
+ * the one row worth finding the hardest to see. */
+.os-cluster-coverage-line[data-tone="silent"] .os-cluster-coverage-ratio {
+  color: var(--os-warn);
+}
+
+/* ---------------------------------------------------------------------------
  * Data origins: the dead-letter band
  * ------------------------------------------------------------------------- */
 

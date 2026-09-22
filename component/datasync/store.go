@@ -229,21 +229,45 @@ func (s *Store) SetPaused(ctx context.Context, stateID string, paused bool) erro
 // than a context the Store builds for itself is stated at the top of this
 // file -- whose authority a call runs under has to be visible at the call
 // site.
+//
+// IT STAMPED ONE SURFACE AND COULD NOT WRITE (memql#5574). The body here set
+// only the AccessContext, and `createdBy` resolves through ActorFromContext ->
+// TokenInfoFromContext -- a different surface (memql#2989). So every read this
+// package makes worked and every WRITE answered `no actor found in context`:
+// WriteSyncState, SetPaused, and the outbox drain's own status writes. Measured
+// against a real engine, both shapes side by side, before this was changed.
+//
+// Its consequence reached further than this package. The sync-health row is
+// what MemQL OS's Data origins page reads to say whether a connector is
+// reporting, so a runtime that cannot write one makes every connector on every
+// cluster read as silent -- a false alarm on a healthy deployment, and
+// indistinguishable from the real silence memql#5574 was about.
+//
+// Now the one shared definition, which stamps all three surfaces and carries
+// Unranked and Synthetic. Both flags are corrections rather than changes here:
+// the concepts this package writes (v1:platform:syncState, outboxEntry) are
+// clusterOwner-tier with no owner field, so neither alters what a write lands
+// -- they close the holes a rank-strict or owner-bearing concept would fall
+// into later.
 func OperatorContext(ctx context.Context) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ctx = auth.ContextWithAccess(ctx, &auth.AccessContext{
-		UserId: syncOperatorActor,
-		Role:   auth.RoleOwner,
-	})
-	return auth.ContextWithInternalOrigin(ctx)
+	return auth.ContextWithInternalOrigin(
+		auth.ContextWithSystemActor(ctx, syncOperatorActorName))
 }
 
 // syncOperatorActor is the identity the runtime's own bookkeeping is
 // written under. Prefixed so a `createdBy` on a queue or health row says
 // plainly that the deployment wrote it, not a person.
 const syncOperatorActor = "system:datasync"
+
+// syncOperatorActorName is what this package calls itself to
+// auth.SystemActor -- the part after `system:` in the id above. The literal
+// above is kept so a test asserting a stored `createdBy` reads the exact
+// string it asserts, and TestSyncOperatorActorMatchesTheSharedHelper holds
+// the two together.
+const syncOperatorActorName = "datasync"
 
 // ---- decoding ----
 

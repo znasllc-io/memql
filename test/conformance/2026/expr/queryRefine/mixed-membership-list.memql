@@ -1,0 +1,12 @@
+/// Open tickets whose value is in a list holding a number and a string.
+///
+/// The second TYPE RULE (memql#5522). One `in` tests one type; a mixed list
+/// asks two questions written as one. The lowering refuses it, and the
+/// in-process evaluator used to ANSWER it -- `true` for the stored number 1
+/// and `true` for the stored string "1" alike, which is not what either
+/// reading of the expression would give.
+query ticket qrMixedMembershipList {
+  filter row => row.status == "open"
+  paginate 50
+  refine row => row.value in [1, "1"]
+}

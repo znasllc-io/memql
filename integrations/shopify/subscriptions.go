@@ -359,7 +359,7 @@ func (c *Connector) recordSubscriptionHealth(ctx context.Context, store Store, r
 		"health":                 health,
 		"subscriptionsCheckedAt": report.At.Format(time.RFC3339),
 	})
-	if _, err := c.engine.Execute(connectorContext(ctx), call); err != nil {
+	if _, err := c.engine.Execute(operatorContext(ctx), call); err != nil {
 		return err
 	}
 	c.stores.Invalidate()

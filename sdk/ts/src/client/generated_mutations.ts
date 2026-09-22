@@ -1290,7 +1290,7 @@ export interface CreateArtifactArgs {
   lens: string;
   // Enum: document | generated_output | note | todo | calendar_event | memory | live_source | file
   kind: string;
-  // Enum: uploaded | exported | workbench_generated | computer_use | agent_generated | derived | user_created | live | app_session
+  // Enum: uploaded | exported | workbench_generated | computer_use | agent_generated | derived | user_created | live | app_session | vision_input
   source: string;
   title: string;
   summary?: string;
@@ -2398,7 +2398,7 @@ export interface CreateLibraryFileArgs {
   size: number;
   sha256?: string;
   blobUrl: string;
-  // Enum: uploaded | exported | agent_generated | derived | app_session
+  // Enum: uploaded | exported | agent_generated | derived | app_session | vision_input
   source: string;
   // Enum: markdown | document | pdf | spreadsheet | image | text | conversation | other
   format?: string;

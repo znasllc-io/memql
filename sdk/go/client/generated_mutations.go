@@ -1922,7 +1922,7 @@ type CreateArtifactArgs struct {
 	Lens string
 	// Enum: document | generated_output | note | todo | calendar_event | memory | live_source | file
 	Kind string
-	// Enum: uploaded | exported | workbench_generated | computer_use | agent_generated | derived | user_created | live | app_session
+	// Enum: uploaded | exported | workbench_generated | computer_use | agent_generated | derived | user_created | live | app_session | vision_input
 	Source  string
 	Title   string
 	Summary string
@@ -4308,7 +4308,7 @@ type CreateLibraryFileArgs struct {
 	Size              int
 	Sha256            string
 	BlobUrl           string
-	// Enum: uploaded | exported | agent_generated | derived | app_session
+	// Enum: uploaded | exported | agent_generated | derived | app_session | vision_input
 	Source string
 	// Enum: markdown | document | pdf | spreadsheet | image | text | conversation | other
 	Format                 string

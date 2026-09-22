@@ -57,6 +57,14 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 		// disagrees with every other producer and consumer of the field.
 		"library/analysis.go":             "v1:library:file.sha256 is a wire-format SHA-256 the one-shot route also computes; the chunked stamp must match it byte for byte (memql#4782)",
 		"library/analysis_sha256_test.go": "asserts the stamped digest equals crypto/sha256 over the streamed bytes -- the test for the entry above",
+		// The SAME field, from a THIRD producer (issue memql#5523). A vision
+		// call through the app door stages each image as a v1:library:file, so
+		// it fills `sha256` alongside the one-shot route and the analysis
+		// pass. Three producers of one field must agree on the algorithm: a
+		// core/id fingerprint here would put a value in that column that no
+		// `sha256sum` matches and that the dedup hint cannot compare against
+		// the other two.
+		"agent/worker/app_vision.go": "v1:library:file.sha256 for a staged vision input -- the third producer of the field library/analysis.go's entry describes, and it has to be the same algorithm (memql#5523)",
 		// runScript ADDRESSES a script by its content hash and verifies the
 		// far side against it, so the digest is a wire-format fact in the
 		// strongest sense this list has: it is compared against
