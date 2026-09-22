@@ -24,6 +24,12 @@ type Symbol struct {
 // produce the same tree, which is what makes the distance comparable.
 type holeNamer func() string
 
+// NewHoleNamer is the exported constructor, for callers outside this package
+// that need to drive AntiUnify -- the reference parity harness is the only
+// one. It is exported rather than the type, so a caller can make a namer and
+// can do nothing else with it.
+func NewHoleNamer() func() string { return (func() string)(newHoleNamer()) }
+
 func newHoleNamer() holeNamer {
 	n := 0
 	return func() string {
