@@ -656,3 +656,42 @@ func TestTheDefaultTokenLifetimeIsTheOneTheConceptDocuments(t *testing.T) {
 		t.Fatalf("the rotation grace must stay short, got %s", workertoken.RotationGrace)
 	}
 }
+
+func TestReconnectingUnderTheSameCredentialSpeltDifferentlyRevokesNothing(t *testing.T) {
+	// THE WORST BUG THIS FUNCTION COULD HAVE, and a raw `!=` is all it takes.
+	//
+	// The engine bare-ifies ids on egress, so the identityId stored on a
+	// registration row and the one the interceptor resolved from a presented
+	// token are routinely the SAME credential written two ways. Compared
+	// rawly, reclaim reads "displaced" for a machine that merely reconnected
+	// and revokes the very token that just authenticated it -- so the machine
+	// connects and immediately loses its credential, every time, and the
+	// symptom is a laptop that pairs and then cannot come back.
+	now := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
+	store := &fakeRegistrationStore{
+		byUser: []RegistrationRow{{
+			ID:          "reg-1",
+			OwnerUserId: "user-1",
+			// Canonical on the row...
+			IdentityId: "v1:identity:identity:wkr-abc",
+			Labels:     map[string]string{"machineId": "mac-123"},
+		}},
+	}
+	srv := newUpsertTestServer(store, now)
+
+	_, err := srv.upsertRegistration(context.Background(),
+		// ...and bare from the resolver.
+		&WorkerIdentity{IdentityId: "wkr-abc", OwnerUserId: "user-1", Active: true},
+		&memqlv1.Register{
+			Capabilities: []string{CapabilityHeadless},
+			Labels:       map[string]string{"machineId": "mac-123"},
+		}, nil, now, "10.0.0.1:1234")
+	if err != nil {
+		t.Fatalf("reconnect: %v", err)
+	}
+
+	if len(store.revokedIdentities) != 0 {
+		t.Fatalf("the same credential in two spellings must not read as a displaced one: revoked %v",
+			store.revokedIdentities)
+	}
+}

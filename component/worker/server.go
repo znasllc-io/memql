@@ -367,7 +367,15 @@ func (s *server) upsertRegistration(
 	// registration is the record the cluster routes on, and failing the
 	// handshake because a cleanup write did not land would take a working
 	// machine offline over a credential nobody is using.
-	if reclaimed && existing.IdentityId != "" && existing.IdentityId != identity.IdentityId {
+	//
+	// THE COMPARISON IS SPELLING-TOLERANT, and a raw != here would be the
+	// worst bug in this function. The engine bare-ifies ids on egress, so the
+	// row's stored identityId and the one the interceptor resolved can be the
+	// SAME credential written two ways -- and a raw inequality would then read
+	// "displaced" for a machine that merely reconnected, and revoke the very
+	// token that had just authenticated it. The machine would connect and
+	// immediately lose its credential, every time.
+	if reclaimed && existing.IdentityId != "" && !sameWorkerSubject(existing.IdentityId, identity.IdentityId) {
 		if err := s.store.RevokeIdentity(ctx, existing.IdentityId); err != nil {
 			s.logger.Warn("worker: could not revoke the credential this machine reclaimed from",
 				"registration_id", registration.ID,
@@ -754,6 +762,11 @@ func (s *streamSession) clearConnectedNode() {
 	// keeping -- it saves the write entirely in the common case and it is the
 	// only check that can see a LOCAL successor, which the row cannot
 	// distinguish from ourselves.
+	//
+	// AN EMPTY `self` MAKES IT UNCONDITIONAL, which is the pre-D8 behaviour
+	// and is harmless rather than an exception: a replica with no node id
+	// stamped `connectedNodeId` empty on the way in, so there is nothing on
+	// the row for a compare to protect.
 	if err := s.server.store.ClearConnectedNode(ctx, s.worker.RegistrationId, s.worker.OwnerUserId, self); err != nil {
 		if s.server.logger != nil {
 			s.server.logger.Warn("worker: clear connectedNodeId failed",
