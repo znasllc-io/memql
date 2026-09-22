@@ -88,6 +88,13 @@ type TopologyReconciler struct {
 	conn   *sql.Conn
 	leader bool
 
+	// Readiness-row hygiene (memql#5325). readinessPurger is nil in
+	// production and built from dbGetter on first use; a test injects a fake.
+	// lastReadinessPurge paces the stopped-node sweep, which rides the
+	// leader's ordinary tick rather than a timer of its own.
+	readinessPurger    readinessRowPurger
+	lastReadinessPurge time.Time
+
 	now func() time.Time
 }
 
@@ -217,6 +224,10 @@ func (r *TopologyReconciler) tick(ctx context.Context) {
 		return
 	}
 	r.reconcile(ctx)
+	// After the pass, not before: a node retired on this very tick has its
+	// readiness rows removed by retire's own purge, so the sweep that follows
+	// finds only what the cron backstop retired and what older engines left.
+	r.sweepReadinessRowsOfStoppedNodes(ctx)
 }
 
 // ensureLeader acquires the advisory lock (non-leader) or keepalives it
@@ -414,6 +425,11 @@ func (r *TopologyReconciler) retire(ctx context.Context, n reconcileNode, reason
 	}
 	r.info("topology reconciler retired node",
 		"node_id", n.id, "node_type", n.nodeType, "reason", reason)
+	// The node is recorded stopped, so its readiness rows are now rows about a
+	// pod that is gone: the fold had already stopped counting them and nothing
+	// will read one again (memql#5325). n.id is the bare MEMQL_NODE_ID, which
+	// is what a readiness row's nodeId carries.
+	r.purgeReadinessRowsForNode(ctx, n.id)
 	return true
 }
 

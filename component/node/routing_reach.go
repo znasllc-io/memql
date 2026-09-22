@@ -108,6 +108,26 @@ func RoutingExclusions() []RoutingExclusion {
 				"needs live role changes badly enough to pay for it.",
 		},
 		{
+			Pattern: "graph.node.deleted.v1:platform:moduleReadiness",
+			Reason: "Deliberately asymmetric with the created/updated rules beside it " +
+				"in routing.go, and the one exclusion here whose subject is a " +
+				"delete this engine performs. memql#5325's D4 asked for the rule; " +
+				"it is not taken, because the fold had already stopped counting " +
+				"the row before the delete ran. A stopped node's report leaves " +
+				"the verdict inside NodeLiveWindow (60s) -- the liveness read " +
+				"excludes a stopped v1:cluster:node row outright -- so a replica " +
+				"that never hears the delete folds exactly the verdict it would " +
+				"fold if it had: no word on any screen differs. Taking the rule " +
+				"would also make this the FIRST production publisher of " +
+				"events.KindNodeDeleted (constructed only in tests today, as the " +
+				"campaigns block in routing.go records), bought for an observable " +
+				"difference of zero. The rows themselves are removed by " +
+				"component/node/readiness_row_purge.go; a browser holding a " +
+				"purged row folds it out and drops it on its next reseed. " +
+				"Reversible with one rule and a new reason the moment a surface " +
+				"counts readiness ROWS rather than reading the fold's verdict.",
+		},
+		{
 			Pattern: "graph.node.deleted.v1:library:file",
 			Reason: "Deliberately asymmetric with the created/updated rules beside it. " +
 				"A file is the BACKING row for a kind=file artifact and nothing " +

@@ -92,7 +92,33 @@ not, you will see *Set up on some nodes*. That is the honest answer and it
 resolves itself as the rollout completes. The Cluster app's Modules section
 shows the same fold beside each module's own inventory row, and a module's
 detail lists every live node with its own answer, how long ago it checked, and
--- quieter, and not counted -- the nodes catching up or unable to check.
+-- quieter, and not counted -- the nodes catching up or unable to check. Hover
+a node's line for the exact moment it read the cluster; two nodes that both say
+"3h ago" are in an order you otherwise cannot see, and that order is what step
+4 turns on.
+
+## A node that stopped leaves nothing behind
+
+Step 1 stops a departed pod's rows from counting within a minute. Its rows are
+also **removed**, so the detail's list is the cluster as it is and not every pod
+that has ever run: when the cluster records a node stopped, that node's
+readiness rows are deleted outright, and a sweep every ten minutes collects
+whatever the fast path missed. Nothing you can see depends on the delete having
+happened -- the verdict was already correct -- so there is no state to wait for
+and nothing to repair by hand.
+
+Two things follow that are worth knowing before you go looking:
+
+- **A node that has no `v1:cluster:node` row at all is never touched.** That is
+  what a pod looks like in the seconds between its first readiness pass and its
+  registration, and guessing there would delete the rows of a node that is
+  starting up.
+- **`memql_readiness_rows_purged_total{path}` is where to read it.** `retired`
+  is the prompt delete, `swept` is the ten-minute catch-up, and it is their
+  RATIO that tells you something: `swept` carrying the whole rate while
+  `retired` stays at zero means the prompt path is not running. A flat zero on
+  both is normal on a cluster that is not rolling -- there is nothing here to
+  alert on.
 
 ## Where each module is configured
 

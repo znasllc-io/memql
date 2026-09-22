@@ -260,6 +260,19 @@ export interface ReadinessNodeLine {
   words: string;
   note: string;
   counted: boolean;
+  /**
+   * The node's own reportedAt, verbatim, for the row's title -- or "" when it
+   * reported no time at all.
+   *
+   * WHY THE RAW STRING AND NOT A SECOND FORMATTED ONE. `note` carries the
+   * freshness a person READS ("checked 40s ago"), which is the right answer to
+   * "is this current" and the wrong one to "which of these two nodes read the
+   * cluster first". Two nodes both "checked 2m ago" are ordered by nothing a
+   * reader can see, and that ordering is exactly what the fold's staleness
+   * rule turns on. Same pattern as Fleet's round trip, which puts `rttAt` on
+   * the Fact's title beside the relative figure.
+   */
+  at: string;
 }
 
 /**
@@ -280,6 +293,7 @@ export function readinessNodeLines(v: Verdict, now: Date): ReadinessNodeLine[] {
     words: nodeStateWords(n.state),
     note: `checked ${formatFreshness(n.reportedAt, now)}`,
     counted: true,
+    at: n.reportedAt,
   }));
   for (const a of v.aside) {
     if (a.why === "stale") {
@@ -289,6 +303,7 @@ export function readinessNodeLines(v: Verdict, now: Date): ReadinessNodeLine[] {
         words: "Catching up",
         note: `last checked ${formatFreshness(a.reportedAt, now)}, before the last change; it re-checks on its own`,
         counted: false,
+        at: a.reportedAt,
       });
       continue;
     }
@@ -298,6 +313,7 @@ export function readinessNodeLines(v: Verdict, now: Date): ReadinessNodeLine[] {
       words: "Could not check",
       note: `${unknownReasonWords(a.reason)}; it retries on its own`,
       counted: false,
+      at: a.reportedAt,
     });
   }
   return lines;
