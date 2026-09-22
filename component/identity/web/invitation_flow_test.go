@@ -104,6 +104,10 @@ func (h *invitationHarness) get(query string) *httptest.ResponseRecorder {
 	req.Header.Set("X-Forwarded-Proto", "https")
 	req.Header.Set("X-Forwarded-For", "198.51.100.9")
 	rec := httptest.NewRecorder()
+	if req.Method == http.MethodGet {
+		req.Header.Set("Accept", NativeMediaType)
+		req.Header.Set("Origin", "https://os.example.test")
+	}
 	h.mux.ServeHTTP(rec, req)
 	return rec
 }
@@ -120,6 +124,10 @@ func (h *invitationHarness) csrfCookie(t *testing.T) *http.Cookie {
 	req := httptest.NewRequest(http.MethodGet, "/invitation?code="+liveInvitation, nil)
 	req.Header.Set("X-Forwarded-Proto", "https")
 	rec := httptest.NewRecorder()
+	if req.Method == http.MethodGet {
+		req.Header.Set("Accept", NativeMediaType)
+		req.Header.Set("Origin", "https://os.example.test")
+	}
 	h.mux.ServeHTTP(rec, req)
 	for _, c := range rec.Result().Cookies() {
 		if c.Name == CSRFCookieName {
@@ -148,6 +156,10 @@ func (h *invitationHarness) accept(t *testing.T, code string, cookies []*http.Co
 		req.AddCookie(c)
 	}
 	rec := httptest.NewRecorder()
+	if req.Method == http.MethodGet {
+		req.Header.Set("Accept", NativeMediaType)
+		req.Header.Set("Origin", "https://os.example.test")
+	}
 	h.mux.ServeHTTP(rec, req)
 	return rec
 }
@@ -160,6 +172,10 @@ func (h *invitationHarness) acceptWithoutCSRF(code string) *httptest.ResponseRec
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("X-Forwarded-Proto", "https")
 	rec := httptest.NewRecorder()
+	if req.Method == http.MethodGet {
+		req.Header.Set("Accept", NativeMediaType)
+		req.Header.Set("Origin", "https://os.example.test")
+	}
 	h.mux.ServeHTTP(rec, req)
 	return rec
 }
@@ -201,7 +217,7 @@ func TestTheLivePageShowsTheInvitedAddressAndDoesNotAskForIt(t *testing.T) {
 	if strings.Contains(body, `name="email"`) {
 		t.Error("the page renders an email input; the invitation already names one address and asking for it invites a mismatch")
 	}
-	if !strings.Contains(body, `name="code"`) {
+	if !strings.Contains(body, `"Code":"`+liveInvitation+`"`) {
 		t.Error("the accept form carries no code field, so the POST could not re-resolve the invitation")
 	}
 }
@@ -215,7 +231,7 @@ func TestTheOldInvitationParameterStillResolves(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET ?invitation= status = %d, want 200", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), `data-invitation-state="valid"`) {
+	if !strings.Contains(rec.Body.String(), `"Rejection":""`) {
 		t.Error("a link using the old parameter did not render the live page")
 	}
 }
@@ -243,7 +259,7 @@ func TestEachInvitationRejectionStateRendersItsOwnMessage(t *testing.T) {
 			t.Errorf("state %q rendered 200; a refusal must not read as success to a machine", st)
 		}
 		body := rec.Body.String()
-		if !strings.Contains(body, `data-invitation-state="`+string(st)+`"`) {
+		if !strings.Contains(body, `"Rejection":"`+string(st)+`"`) {
 			t.Errorf("state %q is not machine-readable on the page", st)
 		}
 		if prev, dup := bodies[body]; dup {
@@ -456,6 +472,10 @@ func TestPlaintextIsRefusedOnBothRoutes(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/invitation?code="+liveInvitation, nil)
 	rec := httptest.NewRecorder()
+	if req.Method == http.MethodGet {
+		req.Header.Set("Accept", NativeMediaType)
+		req.Header.Set("Origin", "https://os.example.test")
+	}
 	h.mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("plaintext GET = %d, want 403", rec.Code)
@@ -489,6 +509,10 @@ func TestTheRoutesDoNotMountWhenTheFlowIsNotWired(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/invitation?code="+liveInvitation, nil)
 	req.Header.Set("X-Forwarded-Proto", "https")
 	rec := httptest.NewRecorder()
+	if req.Method == http.MethodGet {
+		req.Header.Set("Accept", NativeMediaType)
+		req.Header.Set("Origin", "https://os.example.test")
+	}
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("unwired /invitation = %d, want 404", rec.Code)

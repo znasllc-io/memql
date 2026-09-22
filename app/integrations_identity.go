@@ -357,7 +357,11 @@ func (a *App) integrationsIdentity() {
 	// preserved (returns 1 when bootstrapped, 0 when not) so the web
 	// package's API stays stable.
 	webSrv.CountUsers = func(ctx context.Context) (int, error) {
-		if store.IsClusterBootstrapped(ctx) {
+		bootstrapped, err := store.IsClusterBootstrappedE(ctx)
+		if err != nil {
+			return 0, err
+		}
+		if bootstrapped {
 			return 1, nil
 		}
 		return 0, nil

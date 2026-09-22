@@ -170,6 +170,7 @@ func (s *Server) webauthnCeremony() (*webauthn.Ceremony, error) {
 	s.webauthnCeremonyOnce.Do(func() {
 		s.webauthnCeremonyValue, s.webauthnCeremonyErr = webauthn.New(webauthn.Config{
 			BaseURL:          s.Cfg.BaseURL,
+			UIOrigins:        s.passkeyUIOrigins(),
 			DisplayName:      s.Cfg.BrandName,
 			ChallengeBackend: s.challengeBackend(),
 		})

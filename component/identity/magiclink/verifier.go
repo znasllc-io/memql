@@ -224,6 +224,49 @@ func (v *Verifier) Finish(ctx context.Context, fin FinishInput) (*VerifyResult, 
 		return nil, ErrTokenAlreadyUsed
 	}
 
+	// Decode the OAuth ctx.
+	clientId, redirectURI, state, codeChallenge, codeChallengeMethod, bootstrap, adminSession, err := decodeOAuthCtx(row.OAuthCtxJSON)
+	if err != nil {
+		v.auditFailure(ctx, "magic_link_consume", in, "oauth_ctx_corrupt")
+		return nil, ErrOAuthCtxCorrupted
+	}
+
+	if bootstrap {
+		release, err := v.Store.AcquireBootstrapGate(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("magiclink: ownership coordination: %w", err)
+		}
+		defer release()
+		claimed, err := v.Store.IsClusterBootstrappedE(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if claimed {
+			return nil, ErrTokenAlreadyUsed
+		}
+		settings, err := v.Store.ReadClusterSettings(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if settings != nil && settings.BootstrapEmail != "" && !strings.EqualFold(settings.BootstrapEmail, row.Email) {
+			return nil, ErrInvalidToken
+		}
+		hasOwner, err := v.Store.HasOwnerUser(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if hasOwner {
+			owner, err := v.Store.LookupUserByEmail(ctx, row.Email)
+			if err != nil {
+				return nil, err
+			}
+			// An installation may seed its named owner before emailing a claim.
+			if owner == nil || owner.Role != "owner" {
+				return nil, ErrTokenAlreadyUsed
+			}
+		}
+	}
+
 	// EXACTLY ONCE. The store re-reads the row inside an advisory lock and
 	// writes only if consumedAt is still empty, so the loser of a race
 	// between the poller and a same-device click is TOLD it lost rather than
@@ -235,13 +278,6 @@ func (v *Verifier) Finish(ctx context.Context, fin FinishInput) (*VerifyResult, 
 		}
 		v.auditFailure(ctx, "magic_link_consume", in, "consume_mutation_failed")
 		return nil, fmt.Errorf("magiclink: stamp consumedAt: %w", err)
-	}
-
-	// Decode the OAuth ctx.
-	clientId, redirectURI, state, codeChallenge, codeChallengeMethod, bootstrap, adminSession, err := decodeOAuthCtx(row.OAuthCtxJSON)
-	if err != nil {
-		v.auditFailure(ctx, "magic_link_consume", in, "oauth_ctx_corrupt")
-		return nil, ErrOAuthCtxCorrupted
 	}
 
 	// Validate the registered redirect URI is still kosher (defensive:

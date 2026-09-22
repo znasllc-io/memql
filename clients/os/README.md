@@ -10,6 +10,27 @@ serializes refresh-cookie responses across its tabs, including the initial
 session probe. Browsers without that capability refuse sign-in rather than
 race cookie rotation; credentials stay in memory and HttpOnly cookies.
 
+Identity and ownership setup live in OS. Before probing a session, OS reads
+identity's `/auth/setup/state`: only an explicit `unclaimed` answer opens the
+ownership wizard. Either unreadable bootstrap/owner signal shows an unavailable
+view. After verification, the existing `CoreGate` still controls inference
+onboarding and retains its owner/developer admission rules.
+
+The Identity app contains your profile, passkeys, sessions, personal access
+tokens, and sign-in policy. Email verification, invitations, recovery, and
+external OAuth consent also render in OS. Old identity page URLs hand off to
+`/identity/...`, carrying their parameters in the fragment rather than OS access
+logs. Identity remains the authority: its structured representation requires the
+exact configured OS origin (or a verified account front door), credentialed
+requests, and CSRF on mutations. Cookies retain their identity-host paths;
+OAuth/PKCE and device-bound email verification keep their existing protocol.
+
+Passkeys keep their existing RP IDs. The identity host publishes
+`/.well-known/webauthn` for WebAuthn Related Origin Requests from OS. Passkey
+operations require a current browser with related-origin and WebAuthn JSON
+support; email sign-in remains subject to the account's sign-in policy. Shared
+challenge storage and a fail-closed database ownership lock coordinate replicas.
+
 - **Desks** hold at most two auto-placed windows (solo centered, two-up
   split, swap/throw by drag); a third app spills onto a new desk. Windows
   minimize to the dock, full-screen, close; apps navigate sections inside

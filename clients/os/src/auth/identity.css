@@ -1,0 +1,8 @@
+.os-identity-gate { height: 100dvh; overflow: auto; background: var(--os-ground); color: var(--os-ink); display: grid; }
+.os-identity-gate > .os-wizard { min-height: 100dvh; }
+.os-identity-page { padding: clamp(1.25rem, 4vw, 3rem); overflow: auto; }
+.os-identity-fields { max-width: 36rem; display: grid; gap: 1rem; }
+.os-identity-fields p { line-height: 1.6; overflow-wrap: anywhere; }
+.os-identity-actions { display: flex; gap: .75rem; flex-wrap: wrap; }
+.os-identity-legal { white-space: pre-wrap; font: inherit; }
+.os-identity-record { border-bottom: 1px solid var(--os-line); padding-block: 1rem; display: grid; gap: .75rem; }

@@ -225,7 +225,7 @@ func (s *Server) handleAuthComplete(w http.ResponseWriter, r *http.Request) {
 		// handler branches on -- not a second reading of the cookie.
 		SameDevice: completesHere(r, row),
 	}
-	s.render(w, r, "landing", webtempl.Landing(data))
+	s.render(w, r, "landing", webtempl.Landing(data), data)
 }
 
 // -----------------------------------------------------------------------
@@ -290,11 +290,12 @@ func (s *Server) handleAuthLanding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.auditMagicLink(r, "magic_link_approved", identity.AuditOutcomeSuccess, row, map[string]any{"crossDevice": true}, "")
-	s.render(w, r, "landing", webtempl.Landing(webtempl.LandingData{
+	data := webtempl.LandingData{
 		Layout:      s.LayoutData(r, "Sign-in confirmed", false, nil, nil),
 		Approved:    true,
 		MaskedEmail: maskEmail(row.Email),
-	}))
+	}
+	s.render(w, r, "landing", webtempl.Landing(data), data)
 }
 
 // -----------------------------------------------------------------------
@@ -546,11 +547,12 @@ func isRoleFloorError(err error) bool {
 
 // renderLandingProblem renders one of the terminal states of the flow.
 func (s *Server) renderLandingProblem(w http.ResponseWriter, r *http.Request, title, message string) {
-	s.render(w, r, "landing", webtempl.Landing(webtempl.LandingData{
+	data := webtempl.LandingData{
 		Layout:  s.LayoutData(r, title, false, nil, nil),
 		Problem: title,
 		Message: message,
-	}))
+	}
+	s.render(w, r, "landing", webtempl.Landing(data), data)
 }
 
 // auditMagicLink emits one row for a landing/finish outcome.

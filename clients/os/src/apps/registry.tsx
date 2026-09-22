@@ -1,3 +1,5 @@
+import { IdentityApp } from "./identity/IdentityApp";
+import { Fingerprint } from "lucide-react";
 import {
   Boxes,
   Building2,
@@ -709,8 +711,19 @@ const askWidget: OsWidgetManifest = {
   component: AskWidgetBody,
 };
 
+const identity: OsAppManifest = {
+  id: "identity", name: "Identity", icon: Fingerprint, requires: "app:identity",
+  settingsSection: "settings", logsSection: "logs",
+  sections: [{ id: "profile", name: "Profile" }, { id: "devices", name: "Passkeys and sessions" },
+    { id: "tokens", name: "Access tokens" },
+    { id: "logs", name: "Logs", requires: "app:identity/logs" }, { id: "settings", name: "Settings" }],
+  attentionChanges: [{ id: "identity:account-security", revision: "native-os-1", sectionId: "devices", label: "Manage your passkeys and sessions in OS" }],
+  component: IdentityApp,
+};
+
 export const OS_REGISTRY: OsRegistry = {
   apps: [
+    identity,
     accounts,
     campaigns,
     cluster,

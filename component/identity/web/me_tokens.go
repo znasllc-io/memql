@@ -112,7 +112,7 @@ func (s *Server) handleMeTokensGet(w http.ResponseWriter, r *http.Request) {
 		Tokens:     projectTokens(rows),
 		NextCursor: next,
 	}
-	s.render(w, r, "me/tokens", webtempl.MeTokens(data))
+	s.render(w, r, "me/tokens", webtempl.MeTokens(data), data)
 }
 
 // handleMeTokensPost mints a new PAT and renders the page with the
@@ -176,7 +176,7 @@ func (s *Server) handleMeTokensPost(w http.ResponseWriter, r *http.Request) {
 		Tokens:     projectTokens(rows),
 		NextCursor: next,
 	}
-	s.render(w, r, "me/tokens", webtempl.MeTokens(data))
+	s.render(w, r, "me/tokens", webtempl.MeTokens(data), data)
 }
 
 // handleMeTokensRevoke revokes the PAT identified by the form id, but

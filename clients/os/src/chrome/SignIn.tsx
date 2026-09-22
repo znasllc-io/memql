@@ -18,7 +18,7 @@ export function SignIn({
           {!supportedBrowser
             ? "Update your browser to keep sign-in in sync across tabs. MemQL OS requires Web Locks support."
             : status === "unavailable"
-            ? "This cluster has not published a sign-in configuration."
+            ? "Identity or ownership status is unavailable. Reconnect and try again."
             : "Sign in to MemQL with your passkey or a magic link."}
         </p>
         {supportedBrowser && status === "signed-out" ? (
@@ -26,6 +26,7 @@ export function SignIn({
             Sign in
           </button>
         ) : null}
+        {status === "unavailable" && <button className="os-primary" onClick={() => window.location.reload()}>Retry</button>}
       </div>
     </div>
   );

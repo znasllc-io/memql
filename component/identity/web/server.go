@@ -414,8 +414,29 @@ func (s *Server) Mount(mux *http.ServeMux) {
 		// CSRF wraps innermost so the cookie minted on a fresh GET
 		// is set BEFORE the security-headers / CSP layer writes
 		// other headers; ordering is otherwise irrelevant.
-		return identity.SystemActorHandlerFunc(SecurityHeadersHandlerFunc(s.cspHandlerFunc(csrf(h))))
+		handler := func(w http.ResponseWriter, r *http.Request) {
+			if nativeRequest(r) {
+				CSRFMiddlewareFunc(CSRFOptions{Secure: &secure, Logger: s.Logger})(h)(w, r)
+			} else {
+				csrf(h)(w, r)
+			}
+		}
+		return identity.SystemActorHandlerFunc(SecurityHeadersHandlerFunc(s.cspHandlerFunc(s.nativeUI(handler))))
 	}
+
+	for _, path := range []string{"/login", "/authorize", "/setup", "/check-email", "/error", "/logout-complete", "/enroll", "/recover", "/invitation", "/invitation/accept", "/device", "/me/", "/legal/", "/auth/complete", "/auth/landing", "/auth/magic-link/status", "/auth/magic-link/finish", "/auth/setup/state"} {
+		if path == "/enroll" && s.resolveEnrolment == nil {
+			continue
+		}
+		if path == "/recover" && s.resolveRecovery == nil {
+			continue
+		}
+		if strings.HasPrefix(path, "/invitation") && s.resolveInvitation == nil {
+			continue
+		}
+		mux.HandleFunc("OPTIONS "+path, s.nativeUI(func(w http.ResponseWriter, r *http.Request) {}))
+	}
+	mux.HandleFunc("GET /auth/setup/state", wrap(s.handleSetupState))
 
 	// Pre-auth GET surfaces wrap with redirectIfAuthenticated. If
 	// the caller already has a valid memql_admin cookie, the
@@ -662,7 +683,11 @@ func (s *Server) snapshotSettings(r *http.Request) Settings {
 // then renders the supplied templ.Component. Logs a single warning
 // on render failure but does not retry — partial writes are already
 // out the door.
-func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, c templ.Component) {
+func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, c templ.Component, data ...any) {
+	if nativeRequest(r) && len(data) == 1 {
+		writeNative(w, map[string]any{"page": name, "data": data[0], "csrf": CSRFTokenFromRequest(r)})
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	noStoreHTMLHeaders(w)
 	if err := c.Render(r.Context(), w); err != nil {

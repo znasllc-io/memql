@@ -298,6 +298,7 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	wrapHandler := func(h http.Handler) http.Handler {
 		return identity.SystemActorMiddleware(abuse.SecurityHeadersMiddleware(h))
 	}
+	mux.HandleFunc("GET /.well-known/webauthn", wrap(s.handleWebAuthnOrigins))
 
 	magicLink := http.HandlerFunc(s.cors(s.handleMagicLink))
 	var magicLinkHandler http.Handler = magicLink
