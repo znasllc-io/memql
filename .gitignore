@@ -165,6 +165,22 @@ clients/os/dist/
 clients/.vite/
 clients/os/qa/.vite/
 
+# Playwright MCP's own scratch directory. The browser-automation server writes
+# an accessibility snapshot (`page-<timestamp>.yml`), a console log and any
+# screenshot it is asked for into `.playwright-mcp/` under whatever directory
+# it was started in -- which, for a QA session driven from this repo, is the
+# repository root. It is per-session output of LOOKING at something, never an
+# input to a build or a test, and it accumulates a file per interaction.
+#
+# Ignored for the same reason `clients/os/qa/.vite/` above is: a browser QA
+# session is how both client trees get looked at in a real browser
+# (memql#4826), and the operator driving one should not have to remember to
+# sweep up after it before `git status` is readable again. Screenshots taken
+# during such a session are scratch too -- they land at the repository root
+# under whatever name was asked for, so they cannot be pattern-matched here
+# and are simply deleted rather than committed.
+.playwright-mcp/
+
 # macOS
 .DS_Store
 
