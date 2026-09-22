@@ -41,7 +41,7 @@ it("walks through all existing setup choices and submits only on verification", 
   const submit = vi.fn();
   render(<OwnershipWizard data={{ PrefillDomain: "example.test" }} busy={false} error="" submit={submit} />);
   expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
-  for (const [label, value] of [["First name", "Ada"], ["Last name", "Lovelace"], ["Owner email", "ada@example.test"], ["Phone number (optional)", "+1555010100"], ["Date of birth (optional)", "1990-01-01"]]) {
+  for (const [label, value] of [["First name", "Ada"], ["Last name", "Lovelace"], ["Owner email", "ada@example.test"], ["Phone number (optional)", "+1555010100"]]) {
     fireEvent.change(screen.getByLabelText(label!), { target: { value } });
   }
   fireEvent.click(screen.getByRole("combobox", { name: "Title in organization (optional)" }));
@@ -58,9 +58,25 @@ it("walks through all existing setup choices and submits only on verification", 
   fireEvent.click(screen.getByRole("button", { name: "Send verification link" }));
   await waitFor(() => expect(submit).toHaveBeenCalledWith("/setup", expect.objectContaining({
     owner_first_name: "Ada", owner_last_name: "Lovelace", owner_email: "ada@example.test", domain: "example.test",
-    owner_phone: "+1555010100", owner_primary_role: "Engineer", owner_birthdate: "1990-01-01", brand_name: "Example",
+    owner_phone: "+1555010100", owner_primary_role: "Engineer", brand_name: "Example",
     internal_domains: "example.test", registration_domains: "partner.test", access_request_notify_emails: "ops@example.test",
   })));
+});
+
+it.each([true, false])("ownership setup omits gender and birthdate even when prefilled (local=%s)", local => {
+  const submit = vi.fn();
+  render(<OwnershipWizard data={{ Local: local, PrefillOwnerFirstName: "Ada", PrefillOwnerLastName: "Owner", PrefillOwnerEmail: "ada@example.test",
+    PrefillDomain: "example.test", PrefillOrgName: "Example", PrefillOwnerGender: "female", PrefillOwnerBirthdate: "1990-01-01" }}
+    busy={false} error="" submit={submit} />);
+  expect(screen.queryByLabelText(/gender/i)).toBeNull();
+  expect(screen.queryByLabelText(/date of birth/i)).toBeNull();
+  expect(document.querySelector('input[type="date"]')).toBeNull();
+  for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  fireEvent.click(screen.getByRole("button", { name: local ? "Continue to passkey" : "Send verification link" }));
+  expect(submit).toHaveBeenCalledOnce();
+  expect(submit.mock.calls[0]?.[1]).not.toHaveProperty("owner_gender");
+  expect(submit.mock.calls[0]?.[1]).not.toHaveProperty("owner_birthdate");
+  expect(submit.mock.calls[0]?.[1]).toMatchObject({ owner_first_name: "Ada", owner_last_name: "Owner", owner_email: "ada@example.test", brand_name: "Example" });
 });
 
 it("requires the server's revocation warning and keeps unknown sessions distinct from none", () => {

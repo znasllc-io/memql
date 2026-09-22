@@ -189,6 +189,7 @@ readonly DB_GATED_TREES=(
 	"component/worker/fleetcatalog"
 	"integrations/compose"
 	"integrations/embedding"
+	"integrations/groups"
 	"integrations/planner"
 	"integrations/shopify"
 	"integrations/work"

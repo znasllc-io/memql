@@ -16,8 +16,7 @@ export function OwnershipWizard({ data, busy, error, submit }: {
     ...oauthFields(data), domain: value(data, "PrefillDomain"),
     owner_first_name: value(data, "PrefillOwnerFirstName"), owner_last_name: value(data, "PrefillOwnerLastName"),
     owner_email: value(data, "PrefillOwnerEmail"), owner_phone: value(data, "PrefillOwnerPhone"),
-    owner_primary_role: value(data, "PrefillOwnerPrimaryRole"), owner_gender: value(data, "PrefillOwnerGender"),
-    owner_birthdate: value(data, "PrefillOwnerBirthdate"), brand_name: value(data, "PrefillOrgName"),
+    owner_primary_role: value(data, "PrefillOwnerPrimaryRole"), brand_name: value(data, "PrefillOrgName"),
     internal_domains: value(data, "PrefillInternalDomains"), internal_default_role: "",
     registration_mode: value(data, "PrefillMode") || "invite_only",
     registration_domains: value(data, "PrefillRegistrationDomains"), access_request_notify_emails: value(data, "PrefillNotifyEmails"),
@@ -35,8 +34,7 @@ export function OwnershipWizard({ data, busy, error, submit }: {
     <div className="os-identity-fields">{field("owner_first_name", "First name", "text", true)}{field("owner_last_name", "Last name", "text", true)}
       {field("owner_email", "Owner email", "email", true)}<p>{local ? "Contact information only. This local installation does not verify email; your passkey will prove access." : "Verify this address, then register a passkey to become the cluster owner."}</p>
       {field("owner_phone", "Phone number (optional)", "tel")}<OrganizationTitle value={form.owner_primary_role || ""} onChange={next => setForm(f => ({ ...f, owner_primary_role: next }))} />
-      {select("owner_gender", "Gender (optional)", [["", "Choose"], ["female", "Female"], ["male", "Male"], ["nonbinary", "Nonbinary"], ["other", "Other"], ["prefer_not_to_say", "Prefer not to say"]])}
-      {field("owner_birthdate", "Date of birth (optional)", "date")}</div>,
+      </div>,
     <div className="os-identity-fields">{field("domain", "Cluster domain", "text", true)}<p>The hostname suffix for this installation, such as memql.localhost.</p>
       {field("brand_name", "Organization name", "text", true)}<p>Your organization owns this installation and is the default for cluster operators.</p>{field("internal_domains", "Internal email domains (comma-separated)")}
       <p>People with an internal email domain receive the default cluster role. External people receive a personal partition.</p></div>,

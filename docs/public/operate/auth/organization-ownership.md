@@ -14,6 +14,9 @@ this installation's operating company. Ownership setup requires its name,
 records the verified claim owner's user ID, and configures that existing account
 rather than creating a second organization model. The optional profile title
 (Owner, Founder, CEO, or another job title) does not assign authorization rights.
+The boot placeholder leaves the company's domain unset and unverified. A person
+can supply it later and complete the ordinary domain-verification process; the
+installation hostname alone proves no company-domain ownership.
 
 Setup completes only after the required passkey proof, organization update,
 account group, and owner membership have persisted. Local installations do not

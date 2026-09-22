@@ -148,3 +148,37 @@ func TestOrganizationSetupNeverTakesAnotherOwnersSelf(t *testing.T) {
 		t.Fatal("competing setup changed the existing organization")
 	}
 }
+
+func TestOrganizationSetupOnlyReplacesUnconfiguredSeedIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name, previous, configured string
+		allowed                    bool
+	}{
+		{"legacy seed", auth.MaintenanceActor("seedSelfAccount").UserId, "", true},
+		{"configured seed", auth.MaintenanceActor("seedSelfAccount").UserId, "2026-09-22T00:00:00Z", false},
+		{"other system actor", "system:maintenance:other", "", false},
+		{"real owner", "different-owner", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := &setupGraph{stubEngine: newStub()}
+			g.users["owner"] = map[string]any{"id": "owner", "role": "owner"}
+			g.accounts["self"] = map[string]any{"id": "self", "name": "My company", "status": StatusActive, "ownerUserId": tc.previous, "configuredAt": tc.configured}
+			err := New(g, nil).ConfigureSelfAccount(SystemActorContext(context.Background()), "Claimed", "owner")
+			if tc.allowed {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if g.accounts["self"]["ownerUserId"] != "owner" {
+					t.Fatal("claim owner not persisted")
+				}
+			} else {
+				if err == nil {
+					t.Fatal("protected ownership was replaced")
+				}
+				if len(g.writes) != 0 {
+					t.Fatal("refused ownership replacement wrote data")
+				}
+			}
+		})
+	}
+}

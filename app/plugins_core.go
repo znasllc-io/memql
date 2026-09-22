@@ -82,6 +82,9 @@ import (
 	_ "github.com/znasllc-io/memql/component/logstore"
 	_ "github.com/znasllc-io/memql/integrations/library"
 	_ "github.com/znasllc-io/memql/integrations/liveknowledge"
+	// Procedure automations load on every node and consume work-run events;
+	// their executors must be present wherever those events arrive.
+	_ "github.com/znasllc-io/memql/integrations/procedure"
 	_ "github.com/znasllc-io/memql/integrations/rbac"
 	// Cutting a release of MemQL itself (epic memql#4434). Registered on
 	// every node type rather than gated to one: the builtins are declared in

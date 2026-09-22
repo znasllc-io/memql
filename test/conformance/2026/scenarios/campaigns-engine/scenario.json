@@ -5,20 +5,30 @@
       "name": "cluster-role-rule-stages-one-email-per-owner",
       "description": "An active rule on new forge requests, for the cluster's owners, fires on a new request: it stages an email to the owner and records the firing. The same event delivered again is claimed already and sends nothing more.",
       "seed": [
-        { "mutation": "createUser", "args": { "userId": { "$id": "owner" }, "displayName": "Scenario Owner", "primaryEmail": { "$id": "owner-{tag}@scenario.invalid" }, "role": "owner" } },
-        { "mutation": "createTemplate", "as": { "userId": "user-scenario-author", "role": "writer" }, "args": { "templateId": { "$id": "tpl" }, "name": "A request arrived", "subject": "A request arrived", "textBody": "A new request is waiting for you." } },
-        { "mutation": "createEmailRule", "as": { "userId": "user-scenario-author", "role": "writer" }, "args": { "emailRuleId": { "$id": "rule" }, "name": "New requests", "triggerConcept": "v1:forge:request", "eventKind": "created", "templateId": { "$id": "tpl" }, "recipientMode": "cluster_roles", "recipientRoles": ["owner"] } },
-        { "mutation": "setEmailRuleStatus", "as": { "userId": "user-scenario-author", "role": "writer" }, "args": { "emailRuleId": { "$id": "rule" }, "status": "active" } },
-        { "mutation": "createRequest", "args": { "requestId": { "$id": "req" }, "projectId": "project-scenario", "title": "A scenario request", "body": "Mailed to the owners." } }
+        {"mutation": "createUser", "args": {"userId": {"$id": "owner"}, "displayName": "Scenario Owner", "primaryEmail": {"$id": "owner-{tag}@scenario.invalid"}, "role": "owner"}},
+        {"mutation": "createUser", "args": {"userId": {"$id": "author"}, "displayName": "Scenario Rule Author", "primaryEmail": {"$id": "author-{tag}@scenario.invalid"}, "role": "writer"}},
+        {"mutation": "createClientAccount", "args": {"accountId": {"$id": "organization"}, "name": "Scenario Organization"}},
+        {"mutation": "writeGroup", "args": {"groupId": {"$id": "organization-group"}, "name": "Scenario Organization Members", "kind": "account", "accountId": {"$id": "organization"}, "status": "active"}},
+        {"mutation": "writeGroupMembership", "args": {"membershipId": {"$id": "author-membership"}, "groupId": {"$id": "organization-group"}, "accountId": {"$id": "organization"}, "userId": {"$id": "author"}, "origin": "added", "status": "active"}},
+        {"mutation": "writeGrant", "args": {"grantId": {"$id": "grant-read-app-campaigns"}, "subjectKind": "group", "subjectId": {"$id": "organization-group"}, "verb": "read", "resourceType": "app:campaigns", "effect": "allow"}},
+        {"mutation": "writeGrant", "args": {"grantId": {"$id": "grant-read-data"}, "subjectKind": "group", "subjectId": {"$id": "organization-group"}, "verb": "read", "resourceType": "data", "effect": "allow"}},
+        {"mutation": "writeGrant", "args": {"grantId": {"$id": "grant-create-data"}, "subjectKind": "group", "subjectId": {"$id": "organization-group"}, "verb": "create", "resourceType": "data", "effect": "allow"}},
+        {"mutation": "writeGrant", "args": {"grantId": {"$id": "grant-update-data"}, "subjectKind": "group", "subjectId": {"$id": "organization-group"}, "verb": "update", "resourceType": "data", "effect": "allow"}},
+        {"mutation": "createTemplate", "as": {"userId": {"$id": "author"}, "role": "writer"}, "args": {"templateId": {"$id": "tpl"}, "name": "A request arrived", "subject": "A request arrived", "textBody": "A new request is waiting for you.", "accountId": {"$id": "organization"}}},
+        {"mutation": "createEmailRule", "as": {"userId": {"$id": "author"}, "role": "writer"}, "args": {"emailRuleId": {"$id": "rule"}, "name": "New requests", "triggerConcept": "v1:forge:request", "eventKind": "created", "templateId": {"$id": "tpl"}, "recipientMode": "cluster_roles", "recipientRoles": ["owner"], "accountId": {"$id": "organization"}}},
+        {"mutation": "setEmailRuleStatus", "as": {"userId": {"$id": "author"}, "role": "writer"}, "args": {"emailRuleId": {"$id": "rule"}, "status": "active"}},
+        {"mutation": "createRequest", "args": {"requestId": {"$id": "req"}, "projectId": "project-scenario", "title": "A scenario request", "body": "Mailed to the owners."}}
       ],
       "fire": [
-        { "emailRule": { "$id": "rule" }, "as": { "userId": "user-scenario-author" }, "event": { "action": "created", "concept": "v1:forge:request", "id": { "$id": "req" } } },
-        { "emailRule": { "$id": "rule" }, "as": { "userId": "user-scenario-author" }, "redeliver": true }
+        {"emailRule": {"$id": "rule"}, "as": {"userId": {"$id": "author"}}, "event": {"action": "created", "concept": "v1:forge:request", "id": {"$id": "req"}}},
+        {"emailRule": {"$id": "rule"}, "as": {"userId": {"$id": "author"}}, "redeliver": true}
       ],
       "expect": {
         "rows": [
-          { "concept": "v1:platform:outboundRequest", "where": { "target": { "$id": "owner-{tag}@scenario.invalid" }, "subject": "A request arrived" }, "payload": { "medium": "email", "body": "A new request is waiting for you.", "status": "pending" } },
-          { "concept": "v1:campaigns:emailRule", "id": { "$id": "rule" }, "payload": { "firedCount": 1 } }
+          {"concept": "v1:platform:outboundRequest", "where": {"target": {"$id": "owner-{tag}@scenario.invalid"}, "subject": "A request arrived"}, "payload": {"medium": "email", "body": "A new request is waiting for you.", "status": "pending"}},
+          {"concept": "v1:campaigns:emailRule", "id": {"$id": "rule"}, "payload": {"firedCount": 1}},
+          {"concept": "v1:campaigns:template", "id": {"$id": "tpl"}, "payload": {"accountId": {"$id": "v1:accounts:account:organization"}, "ownerUserId": {"$id": "v1:identity:user:author"}}},
+          {"concept": "v1:campaigns:emailRule", "id": {"$id": "rule"}, "payload": {"accountId": {"$id": "v1:accounts:account:organization"}, "ownerUserId": {"$id": "v1:identity:user:author"}}}
         ]
       }
     }
