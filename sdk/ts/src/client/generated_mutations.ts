@@ -1390,7 +1390,7 @@ export interface CreateAuditEventArgs {
   actorEmail?: string;
   actorRole?: string;
   actorIdentityId?: string;
-  // Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession | shopifyStore | releaseCut | oauthClient | upstreamIdentity | rowOwnership | githubGrant | role | group | groupMembership | grant
+  // Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession | shopifyStore | releaseCut | oauthClient | upstreamIdentity | rowOwnership | githubGrant | role | group | groupMembership | grant | worker
   targetType?: string;
   targetId?: string;
   targetEmail?: string;
@@ -3692,6 +3692,8 @@ export interface CreateWorkerRegistrationArgs {
   lastSeenAt?: string;
   lastConnectedFromIP?: string;
   connectedNodeId?: string;
+  /** When this machine's credential stops being accepted (epic memql#5327, design D4). Mirrored from the resolved worker token so the Fleet page can warn before a machine disconnects itself. EMPTY MEANS NO EXPIRY. */
+  credentialExpiresAt?: string;
 }
 
 export function buildCreateWorkerRegistration(args: CreateWorkerRegistrationArgs): string {
@@ -3714,6 +3716,7 @@ export function buildCreateWorkerRegistration(args: CreateWorkerRegistrationArgs
   if (args.lastSeenAt !== undefined) parts.push("lastSeenAt: " + renderMemQLValue(args.lastSeenAt));
   if (args.lastConnectedFromIP !== undefined) parts.push("lastConnectedFromIP: " + renderMemQLValue(args.lastConnectedFromIP));
   if (args.connectedNodeId !== undefined) parts.push("connectedNodeId: " + renderMemQLValue(args.connectedNodeId));
+  if (args.credentialExpiresAt !== undefined) parts.push("credentialExpiresAt: " + renderMemQLValue(args.credentialExpiresAt));
   return "mutation createWorkerRegistration(" + parts.join(", ") + ")";
 }
 
@@ -5459,6 +5462,8 @@ export interface RefreshWorkerRegistrationArgs {
   lastSeenAt: string;
   lastConnectedFromIP?: string;
   connectedNodeId?: string;
+  /** Re-stamped on every reconnect from the credential that admitted the stream, so a rotated token's new expiry lands without waiting for a heartbeat flush (epic memql#5327, design D4). */
+  credentialExpiresAt?: string;
 }
 
 export function buildRefreshWorkerRegistration(args: RefreshWorkerRegistrationArgs): string {
@@ -5480,6 +5485,7 @@ export function buildRefreshWorkerRegistration(args: RefreshWorkerRegistrationAr
   parts.push("lastSeenAt: " + renderMemQLValue(args.lastSeenAt));
   if (args.lastConnectedFromIP !== undefined) parts.push("lastConnectedFromIP: " + renderMemQLValue(args.lastConnectedFromIP));
   if (args.connectedNodeId !== undefined) parts.push("connectedNodeId: " + renderMemQLValue(args.connectedNodeId));
+  if (args.credentialExpiresAt !== undefined) parts.push("credentialExpiresAt: " + renderMemQLValue(args.credentialExpiresAt));
   return "mutation refreshWorkerRegistration(" + parts.join(", ") + ")";
 }
 
@@ -7300,32 +7306,6 @@ QueryClient.prototype.setWorkerOperatorLabels = function (this: QueryClient, arg
   return this.executeNamed("setWorkerOperatorLabels", buildSetWorkerOperatorLabels(args), opts);
 };
 
-/** Set the OWNER's half of a machine's sharing consent. The cockpit's half comes from that machine's own policy.yaml and is not writable here; both must say cluster before the machine serves anybody else. */
-// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["setWorkerSharing"] in generated_concepts.ts).
-export interface SetWorkerSharingArgs {
-  registrationId: string;
-  /** owner or cluster. Anything else is read as owner by every reader, so the enum is enforced here rather than left to be misread later. */
-  // Enum: owner | cluster
-  mode: string;
-}
-
-export function buildSetWorkerSharing(args: SetWorkerSharingArgs): string {
-  const parts: string[] = [];
-  parts.push("registrationId: " + renderMemQLValue(args.registrationId));
-  parts.push("mode: " + renderMemQLValue(args.mode));
-  return "mutation setWorkerSharing(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    setWorkerSharing(args: SetWorkerSharingArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.setWorkerSharing = function (this: QueryClient, args: SetWorkerSharingArgs = {} as SetWorkerSharingArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("setWorkerSharing", buildSetWorkerSharing(args), opts);
-};
-
 /** Soft-delete a worker invocation row past retention. */
 // Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["softDeleteWorkerInvocation"] in generated_concepts.ts).
 export interface SoftDeleteWorkerInvocationArgs {
@@ -9058,6 +9038,12 @@ export interface UpdateWorkerLastSeenArgs {
   rttMs?: number;
   /** When rttMs was measured, on the agent's clock. Present exactly when rttMs is; an absent rttAt on the row is the one reading for "not measured". */
   rttAt?: string;
+  /** The machine's clock minus the cluster's, in milliseconds, positive when the machine is ahead (epic memql#5327, design D6). */
+  /** OMITTED when the beat carried no timestamp, for rttMs's reason and with a sharper edge: zero here is a REAL ANSWER -- the clocks agree -- so a sent zero standing in for silence would read as a healthy machine rather than as one that has not spoken. */
+  clockSkewMs?: number;
+  /** When this machine's credential stops being accepted (epic memql#5327, design D4), re-stamped after a rotation renews it. */
+  /** OMITTED when the stream does not know one -- a token minted before expiry existed -- because an empty string here would CLEAR a real expiry the register already wrote, and the row would then promise a credential that never expires about one that does. */
+  credentialExpiresAt?: string;
 }
 
 export function buildUpdateWorkerLastSeen(args: UpdateWorkerLastSeenArgs): string {
@@ -9070,6 +9056,8 @@ export function buildUpdateWorkerLastSeen(args: UpdateWorkerLastSeenArgs): strin
   if (args.hardware !== undefined) parts.push("hardware: " + renderMemQLValue(args.hardware));
   if (args.rttMs !== undefined) parts.push("rttMs: " + renderMemQLValue(args.rttMs));
   if (args.rttAt !== undefined) parts.push("rttAt: " + renderMemQLValue(args.rttAt));
+  if (args.clockSkewMs !== undefined) parts.push("clockSkewMs: " + renderMemQLValue(args.clockSkewMs));
+  if (args.credentialExpiresAt !== undefined) parts.push("credentialExpiresAt: " + renderMemQLValue(args.credentialExpiresAt));
   return "mutation updateWorkerLastSeen(" + parts.join(", ") + ")";
 }
 

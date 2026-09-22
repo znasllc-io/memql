@@ -251,12 +251,12 @@ func TestRegistrationWrites_RefuseABlankOwner(t *testing.T) {
 		"create":  func() error { return store.CreateRegistration(ctx, RegistrationRow{ID: "reg-1"}) },
 		"refresh": func() error { return store.RefreshRegistration(ctx, RegistrationRow{ID: "reg-1"}) },
 		"updateSeen": func() error {
-			return store.UpdateLastSeen(ctx, "reg-1", "", time.Now(), "", "n1", 0, nil, 0, time.Time{})
+			return store.UpdateLastSeen(ctx, HeartbeatFlush{RegistrationId: "reg-1", LastSeenAt: time.Now(), ConnectedNodeId: "n1"})
 		},
 		"updateHardware": func() error {
 			return store.UpdateHardware(ctx, "reg-1", "", map[string]any{"chip": "M4"}, nil, time.Now(), "")
 		},
-		"clearNode":    func() error { return store.ClearConnectedNode(ctx, "reg-1", "") },
+		"clearNode":    func() error { return store.ClearConnectedNode(ctx, "reg-1", "", "") },
 		"revoke":       func() error { return store.RevokeRegistration(ctx, "reg-1", "", "admin", "why", time.Now()) },
 		"byIdentityId": func() error { _, err := store.WorkerByIdentityId(ctx, "ident-1", ""); return err },
 		"forUser":      func() error { _, err := store.WorkersForUser(ctx, ""); return err },

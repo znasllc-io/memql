@@ -549,6 +549,18 @@ const (
 	// promise holds even if the page is rewritten by somebody who never read
 	// the fold. See sharing_ledger_read.go.
 	BuiltinExecutorFleetSharingLedger = "fleetSharingLedger"
+	// BuiltinExecutorFleetRevokeMachine removes one of the CALLER'S machines:
+	// the registration row and the credential it connects with, as one act
+	// (epic memql#5327, design D2). The two used to be separate calls a client
+	// composed, and a surface that made only the first left a machine that
+	// kept its stream.
+	BuiltinExecutorFleetRevokeMachine = "fleetRevokeMachine"
+	// BuiltinExecutorFleetSetSharing sets the OWNER'S half of a machine's
+	// sharing consent, resolved through the caller's own machines (epic
+	// memql#5327, finding M-2). setWorkerSharing is @serverOnly behind it,
+	// because the concept's cluster-owner escape let an operator lend hardware
+	// they do not own.
+	BuiltinExecutorFleetSetSharing = "fleetSetSharing"
 	// BuiltinExecutorModuleReadiness folds every node's readiness rows into
 	// one verdict per module (design record 2026-09-06-configuration-readiness,
 	// section 4.5). See readiness_read.go.

@@ -270,7 +270,11 @@ func (h *ForwardHandler) HandleForwardedModelCall(
 	}
 
 	registrationId := req.GetRegistrationId()
-	if err := h.verifyRegistration(cctx, owner, registrationId); err != nil {
+	// THE SHARED CHECK, not the owned one (epic memql#5327, design D10). A
+	// model call is the one thing a lent machine lends, so this admits the
+	// caller's own machines AND cluster-shared ones; tool dispatch next door
+	// still asks verifyRegistration and stays owner-only.
+	if err := h.verifySharedRegistration(cctx, owner, registrationId); err != nil {
 		h.sendModelRefusal(send, requestId, "registration_refused", err.Error())
 		return
 	}
@@ -281,10 +285,23 @@ func (h *ForwardHandler) HandleForwardedModelCall(
 			"this replica no longer holds a stream for that machine")
 		return
 	}
+	// The registry's own owner check moves with the row check above, and for
+	// the same reason: on a SHARED call the connected machine is owned by
+	// somebody other than the caller BY DESIGN, so a bare inequality here
+	// refused every shared call that got this far -- the second half of H-2,
+	// and the half that would have survived fixing only the first.
+	//
+	// It still refuses the case it was built for. verifySharedRegistration has
+	// just established that this registration is either the caller's or
+	// cluster-shared; what this adds is that the STREAM in the local registry
+	// belongs to the same machine as the row that was checked. A mismatch
+	// means the registry entry and the row disagree about the owner, which is
+	// not a shared call -- it is a stale or crossed registry entry.
 	if w.OwnerUserId != "" && !sameSubject(w.OwnerUserId, owner) {
-		h.sendModelRefusal(send, requestId, "owner_mismatch",
-			"the connected machine is owned by a different user than the assertion names")
-		return
+		if err := h.ownerOfSharedMachine(cctx, registrationId, w.OwnerUserId); err != nil {
+			h.sendModelRefusal(send, requestId, "owner_mismatch", err.Error())
+			return
+		}
 	}
 
 	start := &memqlv1.ModelCallStart{}

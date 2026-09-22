@@ -33,11 +33,25 @@ type fakeRegistrationStore struct {
 	// lastSeenFlushes records the whole flush argument list, not just the
 	// registration id -- connectedNodeId and activeCount are the fields
 	// memql#4350 added and the ones a regression would drop silently.
-	lastSeenFlushes []lastSeenFlush
+	lastSeenFlushes []HeartbeatFlush
 	// cleared records ClearConnectedNode calls; clearedOwners is checked
 	// alongside because an unstamped owner is refused by the write guard.
 	cleared       []string
 	clearedOwners []string
+	// clearedExpectations records the COMPARE half of each clear (epic
+	// memql#5327, design D8): the node id the caller expected to still hold
+	// the row. Empty means unconditional, which only the sweep may pass.
+	clearedExpectations []string
+	// The design D3 / D9 / D5 recorders.
+	identityLookups   []string
+	identity          *WorkerIdentity
+	identityErr       error
+	revokedIdentities []string
+	revokeIdentityErr error
+	rotations         []string
+	rotatedToken      string
+	rotatedExpiry     time.Time
+	rotateErr         error
 	// lookupOwners records the owner each WorkerByIdentityId was asked
 	// under. An empty one means the real store would have read zero rows.
 	lookupOwners []string
@@ -60,25 +74,10 @@ type appUpdate struct {
 	at             time.Time
 }
 
-// lastSeenFlush is one UpdateLastSeen call, recorded whole.
-type lastSeenFlush struct {
-	RegistrationId  string
-	OwnerUserId     string
-	At              time.Time
-	SourceIP        string
-	ConnectedNodeId string
-	ActiveCount     int
-	// Hardware is the non-material inventory refresh riding this write, or nil
-	// when the beat carried none. Recorded so a test can assert which of the
-	// two paths a change took -- the whole point of the split is that free disk
-	// must NOT buy its own write.
-	Hardware map[string]any
-	// RttMs / RttAt are the Ping round trip riding this write (epic
-	// memql#5218, D11). A zero RttAt is what the session passes when no Pong
-	// has landed; the real store then leaves both out of the mutation call.
-	RttMs int
-	RttAt time.Time
-}
+// The recorded flush is the PRODUCTION struct (worker.HeartbeatFlush), not a
+// mirror of it. It used to be a hand-written copy of UpdateLastSeen's argument
+// list, which is a shape that drifts silently: a field added to the write and
+// not to the copy is simply never asserted, and the test keeps passing.
 
 // hardwareUpdate is one UpdateHardware call: the material path, which does not
 // wait for the throttle.
@@ -130,29 +129,20 @@ func (f *fakeRegistrationStore) UpdateHardware(ctx context.Context, registration
 	return nil
 }
 
-func (f *fakeRegistrationStore) UpdateLastSeen(ctx context.Context, registrationId, ownerUserId string, lastSeenAt time.Time, sourceIP, connectedNodeId string, activeCount int, hardware map[string]any, rttMs int, rttAt time.Time) error {
+func (f *fakeRegistrationStore) UpdateLastSeen(ctx context.Context, flush HeartbeatFlush) error {
 	if f.lastSeenErr != nil {
 		return f.lastSeenErr
 	}
-	f.lastSeen = append(f.lastSeen, registrationId)
-	f.lastSeenAts = append(f.lastSeenAts, lastSeenAt)
-	f.lastSeenFlushes = append(f.lastSeenFlushes, lastSeenFlush{
-		RegistrationId:  registrationId,
-		OwnerUserId:     ownerUserId,
-		At:              lastSeenAt,
-		SourceIP:        sourceIP,
-		ConnectedNodeId: connectedNodeId,
-		ActiveCount:     activeCount,
-		Hardware:        hardware,
-		RttMs:           rttMs,
-		RttAt:           rttAt,
-	})
+	f.lastSeen = append(f.lastSeen, flush.RegistrationId)
+	f.lastSeenAts = append(f.lastSeenAts, flush.LastSeenAt)
+	f.lastSeenFlushes = append(f.lastSeenFlushes, flush)
 	return nil
 }
 
-func (f *fakeRegistrationStore) ClearConnectedNode(ctx context.Context, registrationId, ownerUserId string) error {
+func (f *fakeRegistrationStore) ClearConnectedNode(ctx context.Context, registrationId, ownerUserId, expectedNodeId string) error {
 	f.cleared = append(f.cleared, registrationId)
 	f.clearedOwners = append(f.clearedOwners, ownerUserId)
+	f.clearedExpectations = append(f.clearedExpectations, expectedNodeId)
 	return nil
 }
 
@@ -185,6 +175,34 @@ func (f *fakeRegistrationStore) CreateInvocation(ctx context.Context, row Invoca
 
 func (f *fakeRegistrationStore) IdentityByTokenHash(ctx context.Context, tokenHash string) (*WorkerIdentity, error) {
 	return nil, nil
+}
+
+// identity, identityErr and revokedIdentities are the design D1/D3/D9 surface:
+// what the live re-check reads back, whether that read fails, and which
+// credentials the reclaim path revoked.
+func (f *fakeRegistrationStore) IdentityById(ctx context.Context, identityId, ownerUserId string) (*WorkerIdentity, error) {
+	f.identityLookups = append(f.identityLookups, identityId)
+	if f.identityErr != nil {
+		return nil, f.identityErr
+	}
+	if f.identity == nil {
+		return nil, nil
+	}
+	cp := *f.identity
+	return &cp, nil
+}
+
+func (f *fakeRegistrationStore) RevokeIdentity(ctx context.Context, identityId string) error {
+	f.revokedIdentities = append(f.revokedIdentities, identityId)
+	return f.revokeIdentityErr
+}
+
+func (f *fakeRegistrationStore) RotateIdentity(ctx context.Context, identityId, ownerUserId string) (string, time.Time, error) {
+	f.rotations = append(f.rotations, identityId)
+	if f.rotateErr != nil {
+		return "", time.Time{}, f.rotateErr
+	}
+	return f.rotatedToken, f.rotatedExpiry, nil
 }
 
 // testNodeId is the MEMQL_NODE_ID the test servers claim. Named rather than

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -69,6 +70,12 @@ type Worker struct {
 	// cancels the stream. Prefer it over raw cancelStream on voluntary
 	// shutdown so cockpit + agent logs share code=canceled reason=server_drain.
 	drainFn func(reason string)
+	// terminateFn, when set, names a reason and ends the stream AT ONCE --
+	// no Drain envelope, no grace (epic memql#5327, design D1). Its callers
+	// are decisions the cluster has made about a connection it no longer
+	// wants: a revoked credential and a superseded hold. Use drainFn for
+	// anything voluntary.
+	terminateFn func(reason string)
 
 	mu           sync.Mutex
 	activePerCap map[string]uint32
@@ -214,6 +221,62 @@ func (r *Registry) Drain() {
 			w.cancelStream()
 		}
 	}
+}
+
+// Terminate ends ONE machine's stream immediately, with a named reason, and
+// reports whether this replica was holding it (epic memql#5327, design D1).
+//
+// IMMEDIATELY, not drained, and the distinction is the whole point. A drain is
+// a courtesy extended to work the cluster still wants finished: it sends a
+// Drain envelope and gives the cockpit three seconds. The two callers here are
+// a revoked credential and a supersede, and in both cases the cluster has
+// decided this connection should not exist -- three more seconds of tool
+// dispatches on a revoked machine is three seconds of exactly what the revoke
+// was for.
+//
+// The boolean is not decoration: the watcher that calls this runs on EVERY
+// agent replica for every registration write, and all but one of them hold no
+// stream for the machine named. `false` is the ordinary answer and is what
+// keeps the log line to the replica that actually did something.
+func (r *Registry) Terminate(registrationId, reason string) bool {
+	if r == nil || strings.TrimSpace(registrationId) == "" {
+		return false
+	}
+	r.mu.RLock()
+	w := r.byId[registrationId]
+	r.mu.RUnlock()
+	if w == nil {
+		return false
+	}
+	return w.terminate(reason)
+}
+
+// terminate is Terminate against one worker. Split out so a caller holding the
+// pointer -- the registration watcher, which has already matched on it -- does
+// not go back through the map and risk acting on a successor that replaced it
+// between the lookup and the call.
+func (w *Worker) terminate(reason string) bool {
+	if w == nil {
+		return false
+	}
+	if w.terminateFn != nil {
+		w.terminateFn(reason)
+		return true
+	}
+	if w.cancelStream != nil {
+		w.cancelStream()
+		return true
+	}
+	return false
+}
+
+// SetTerminateFunc wires the immediate end-this-stream hook, alongside
+// SetDispatchFunc and SetDrainFunc when Register is admitted.
+func (w *Worker) SetTerminateFunc(fn func(reason string)) {
+	if w == nil {
+		return
+	}
+	w.terminateFn = fn
 }
 
 // WorkersForUser returns every connected worker owned by ownerUserId.

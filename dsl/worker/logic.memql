@@ -128,3 +128,45 @@ logic workerModelProbeStaleSweep {
   )
   return abandoned.nodes()
 }
+
+
+// workerStaleConnectionSweep
+// ==========================
+//
+// The third sweep in this file, and the one whose absence was a lie rather
+// than a stall (epic memql#5327, design D7).
+//
+// connectedNodeId names the replica holding a machine's stream. It is stamped
+// on register, re-asserted on every heartbeat flush, and cleared by a GRACEFUL
+// close -- which a SIGKILLed agent pod does not perform, and every redeploy
+// renames pods. So the stamp outlived the pod, StreamHeld read true for a
+// stream nobody held, the Fleet page showed the machine online, and the router
+// forwarded to a replica that no longer existed.
+//
+// What makes this different from its two siblings above: they close rows that
+// somebody is WATCHING, so their cost is a spinner. This one corrects a row
+// somebody is BELIEVING, and the belief is "that machine is up".
+
+/// Every registration still naming a holder that stopped heartbeating, for the sweep that clears
+/// the stamp.
+///
+/// ONE CUTOFF, unlike the pull and probe sweeps, because there is only one thing to judge: a
+/// heartbeat arrives THROUGH the stream on the holding pod, so a stale lastSeenAt IS the evidence
+/// that the pod named on the row is not holding it. No second read of which nodes are alive --
+/// that read can be stale in the other direction and would clear a live hold.
+///
+/// The grace is read from a globalVariable so an operator can widen it on a cluster whose
+/// heartbeats are slow, and it defaults to the engine's own StaleHoldWindow (45s: the online
+/// window plus one throttled flush interval). Clearing a hold that is merely late costs the
+/// machine one heartbeat to re-stamp; leaving a dead one costs every routing decision that
+/// forwards to a replica that is gone.
+logic workerStaleConnectionSweep {
+  args {
+    event object!
+  }
+  holdGrace := query globalVariable(name: "MEMQL_WORKER_STALE_HOLD_GRACE_SECONDS")
+  stranded := query registrationsWithStaleHold(
+    lastSeenBefore: addDuration(now, "PT-" + (holdGrace.first().value ?? "45") + "S")
+  )
+  return stranded.nodes()
+}

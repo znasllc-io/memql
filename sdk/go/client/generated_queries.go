@@ -6495,6 +6495,33 @@ func RefundRateBuild(args RefundRateArgs) string {
 	return b.String()
 }
 
+// RegistrationsWithStaleHold -- Every registration whose connectedNodeId names a replica that is no longer holding its stream (epic memql#5327, design D7).
+// ONE SIGNAL, AND IT IS THE ONE THAT CANNOT LIE. A heartbeat arrives THROUGH the stream on the holding pod, so a pod that has gone cannot be refreshing lastSeenAt -- which means the staleness of that timestamp subsumes any check of which nodes are alive. The audit proposed a second disjunct against live v1:cluster:node rows; it is deliberately not here, because that read can itself be stale, and its staleness would clear the hold of a LIVE pod the node registry had not caught up with.
+// The cutoff the caller passes is the online window PLUS one flush interval (component/worker.StaleHoldWindow), because the flush is throttled and a row can legitimately sit one interval behind a perfectly healthy stream.
+// `connectedNodeId != nil` is not decoration: a registration with no stamp has nothing to clear, and without the conjunct this would return every disconnected machine in the cluster and write to all of them every two minutes.
+// It reads under `actor.isClusterOwner == true` for the reason openModelPulls states at length -- its only caller is a cron under the cluster's MAINTENANCE PRINCIPAL, and writing the conjunct is what makes the failure loud: strip the principal and this returns zero rows, and the filter says why.
+//
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["registrationsWithStaleHold"] in generated_concepts.go).
+type RegistrationsWithStaleHoldArgs struct {
+	// A row whose lastSeenAt is older than this is no longer being held by whatever its connectedNodeId names.
+	LastSeenBefore string
+}
+
+// RegistrationsWithStaleHold calls the engine query registrationsWithStaleHold.
+func (qc *QueryClient) RegistrationsWithStaleHold(ctx context.Context, args RegistrationsWithStaleHoldArgs) (*Result, error) {
+	call := RegistrationsWithStaleHoldBuild(args)
+	return qc.executeNamed(ctx, "registrationsWithStaleHold", call)
+}
+
+func RegistrationsWithStaleHoldBuild(args RegistrationsWithStaleHoldArgs) string {
+	var b strings.Builder
+	b.WriteString("query registrationsWithStaleHold(")
+	b.WriteString("lastSeenBefore: ")
+	b.WriteString(quoteMemQL(args.LastSeenBefore))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ReleaseCutByVersion -- Every release this cluster cut, newest first. Backs the Releases card on the portal's Deployments page.
 // TWO TERMS FOR ONE PREDICATE, and both earn their place -- deleting either is the mistake this note exists to prevent.
 // `requiresOwner` is the DECISION, named. The owner ask was "only the owners (role) may cut a new version", and this spec (`actor.role == "owner"`) is the same predicate the builtin's Go wall applies as `AccessContext.IsClusterOwner`. Naming it here is what makes the double wall legible: the read and the write visibly agree about who may do this.
@@ -6799,46 +6826,6 @@ func RouterCallsInWindowBuild(args RouterCallsInWindowArgs) string {
 	b.WriteString("since: ")
 	b.WriteString(quoteMemQL(args.Since))
 	if b.Len() > 26 {
-		b.WriteString(", ")
-	}
-	b.WriteString("until: ")
-	b.WriteString(quoteMemQL(args.Until))
-	b.WriteString(")")
-	return b.String()
-}
-
-// RouterCallsOnMachine -- Every call served by ONE machine in a window, for that machine's sharing ledger.
-// SCOPED BY SURFACE, NOT BY OWNER, and the difference is a wrong answer rather than a style choice. `machineOwnerUserId` is deliberately EMPTY for a call a person ran on their own machine -- it names whose machine served a call when that machine was somebody ELSE's -- so `row.machineOwnerUserId == actor.userId` would return only the calls OTHER people ran on your hardware and none of your own. The fold counts the owner's own calls alongside everybody else's, because the figure answers "how busy has this machine been" rather than "how much have I lent it out", so that filter would show near-zero on a machine its owner uses constantly.
-// AUTHORIZATION IS THE CALLER'S OWNERSHIP OF THE MACHINE, checked in the builtin before this runs: `fleetSharingLedger` resolves the registration through the caller's own machines and refuses one that is not theirs, which is the same gate the pull and the probe use. The surface argument is then derived from a registration id the caller has already been proven to own, so it cannot be pointed at somebody else's machine by passing a different string.
-// It is a SEPARATE query from routerCallsInWindow for that reason: the fold's read is gated on `actor.isClusterOwner`, which is right for a maintenance sweep and returns zero rows for the machine owner this one serves.
-//
-// Bound concept: v1:router:call (machine-readable: BoundConcepts["routerCallsOnMachine"] in generated_concepts.go).
-type RouterCallsOnMachineArgs struct {
-	// The execution surface, as `fleet:<registrationId>`.
-	Surface string
-	// Inclusive lower bound, RFC3339.
-	Since string
-	// Exclusive upper bound, RFC3339.
-	Until string
-}
-
-// RouterCallsOnMachine calls the engine query routerCallsOnMachine.
-func (qc *QueryClient) RouterCallsOnMachine(ctx context.Context, args RouterCallsOnMachineArgs) (*Result, error) {
-	call := RouterCallsOnMachineBuild(args)
-	return qc.executeNamed(ctx, "routerCallsOnMachine", call)
-}
-
-func RouterCallsOnMachineBuild(args RouterCallsOnMachineArgs) string {
-	var b strings.Builder
-	b.WriteString("query routerCallsOnMachine(")
-	b.WriteString("surface: ")
-	b.WriteString(quoteMemQL(args.Surface))
-	if b.Len() > 27 {
-		b.WriteString(", ")
-	}
-	b.WriteString("since: ")
-	b.WriteString(quoteMemQL(args.Since))
-	if b.Len() > 27 {
 		b.WriteString(", ")
 	}
 	b.WriteString("until: ")
@@ -12167,7 +12154,8 @@ func WorkerPairingCodeByHashBuild(args WorkerPairingCodeByHashArgs) string {
 	return b.String()
 }
 
-// WorkerTokenByKeyHash -- Hot-path worker-token lookup by keyHash. Returns active + inactive rows.
+// WorkerTokenByKeyHash -- Hot-path worker-token lookup by keyHash. Returns active + inactive rows, and matches the ROTATION GRACE hash beside the current one (epic memql#5327, D5). Whether that grace is still open is the RESOLVER's question, against previousKeyExpiresAt: a window is a comparison with now, and a filter that made it would be comparing against a moment nobody chose.
+// The `args.keyHash != nil` conjunct is not decoration. A missing field and an empty string are one unset value here, so a blank argument would equal the blank previousKeyHash every never-rotated row carries -- and the query would answer with the whole worker-token population.
 //
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["workerTokenByKeyHash"] in generated_concepts.go).
 type WorkerTokenByKeyHashArgs struct {

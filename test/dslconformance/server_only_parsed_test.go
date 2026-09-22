@@ -1085,6 +1085,51 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "worker/mutations.memql", Name: "recordModelProbeProgress"}: true,
 		{Path: "worker/mutations.memql", Name: "finishModelProbe"}:         true,
 		{Path: "worker/mutations.memql", Name: "finishModelPull"}:          true,
+		// epic memql#5327, finding M-2. setWorkerSharing writes the OWNER'S
+		// half of a machine's sharing consent, and its own comment used to
+		// assert that the write guard refuses any actor but the owner. It does
+		// not: v1:worker:registration declares the composite
+		// @rowAuthz(owner=..., clusterOwner) tier, which is the owned tier
+		// with the admin gate ORed in, and rowauthz_write_guard.go grants the
+		// cluster-owner escape on it -- so a cluster owner could lend hardware
+		// they do not own, and un-lend hardware somebody else had lent.
+		//
+		// CALLER-SCOPING IS NOT THE FIX, and that is the argument this entry
+		// exists to carry. The caller IS the owner on the legitimate path, so
+		// a self-scoped filter admits exactly the call that is already allowed
+		// and changes nothing about the one that is not. What is too wide is
+		// the concept's TIER, and no filter in a mutation body can narrow a
+		// tier. The builtin fleetSetSharing resolves the machine through the
+		// caller's OWN machines -- the modelPullMachineFor precedent -- and is
+		// this mutation's only renderer.
+		{Path: "worker/mutations.memql", Name: "setWorkerSharing"}: true,
+		// epic memql#5327, design D5. Writes the SHA-256 of a plaintext its
+		// caller minted one instant earlier and will hand to exactly one
+		// machine over a live stream. A client-callable form would either
+		// accept a hash somebody else chose -- a credential this cluster never
+		// issued -- or mint one with no stream to deliver it on. actor.userId
+		// scoping is beside the point twice over: the identity's owner IS the
+		// caller on the only path that exists, and the hazard is that the
+		// value being written is a secret only the server can have produced.
+		{Path: "identity/mutations.memql", Name: "rotateWorkerTokenIdentity"}: true,
+		// epic memql#5327, finding H-3. routerCallsOnMachine is the read
+		// behind the sharing ledger: one machine's calls for one ISO week,
+		// projecting the userId of each caller. Its ownership gate lived only
+		// in the Go builtin -- the query's own comment said so -- while the
+		// query itself sat on the wire, generated into both SDKs, over
+		// v1:router:call, which declares @rowAuthz(public, requiresIdentity).
+		// So any signed-in caller could ask it directly, for any registration
+		// id, and read who had been running work on somebody else's hardware.
+		//
+		// CALLER-SCOPING CANNOT EXPRESS THE GATE. v1:router:call carries no
+		// machine owner for an actor to be compared against, and the `userId`
+		// on the row is the CALLER of each call rather than the owner of the
+		// hardware -- so a self-scoped filter would answer "your own calls",
+		// which is a different question and not the one the person who lent
+		// the machine is asking. fleetSharingLedger proves ownership through
+		// the caller's own machines first and stamps internal origin for this
+		// one read.
+		{Path: "router/queries.memql", Name: "routerCallsOnMachine"}: true,
 		// memql#4389. The connector's own writes, and the two halves of
 		// the push channel. What they share is that the caller is a
 		// CONNECTOR rather than a person, so actor.userId names nobody --

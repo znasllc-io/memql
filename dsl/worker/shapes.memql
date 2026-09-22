@@ -61,6 +61,8 @@ shape registration workerRegistrationFull {
   lastSeenAt
   rttMs
   rttAt
+  clockSkewMs
+  credentialExpiresAt
   lastConnectedFromIP
   revokedAt
   revokedBy

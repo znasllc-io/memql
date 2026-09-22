@@ -2150,7 +2150,7 @@ type CreateAuditEventArgs struct {
 	ActorEmail      string
 	ActorRole       string
 	ActorIdentityId string
-	// Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession | shopifyStore | releaseCut | oauthClient | upstreamIdentity | rowOwnership | githubGrant | role | group | groupMembership | grant
+	// Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession | shopifyStore | releaseCut | oauthClient | upstreamIdentity | rowOwnership | githubGrant | role | group | groupMembership | grant | worker
 	TargetType    string
 	TargetId      string
 	TargetEmail   string
@@ -6988,6 +6988,8 @@ type CreateWorkerRegistrationArgs struct {
 	LastSeenAt          string
 	LastConnectedFromIP string
 	ConnectedNodeId     string
+	// When this machine's credential stops being accepted (epic memql#5327, design D4). Mirrored from the resolved worker token so the Fleet page can warn before a machine disconnects itself. EMPTY MEANS NO EXPIRY.
+	CredentialExpiresAt string
 }
 
 // CreateWorkerRegistration calls the engine mutation createWorkerRegistration.
@@ -7109,6 +7111,13 @@ func CreateWorkerRegistrationBuild(args CreateWorkerRegistrationArgs) string {
 		}
 		b.WriteString("connectedNodeId: ")
 		b.WriteString(quoteMemQL(args.ConnectedNodeId))
+	}
+	if args.CredentialExpiresAt != "" {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("credentialExpiresAt: ")
+		b.WriteString(quoteMemQL(args.CredentialExpiresAt))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -10103,6 +10112,8 @@ type RefreshWorkerRegistrationArgs struct {
 	LastSeenAt          string
 	LastConnectedFromIP string
 	ConnectedNodeId     string
+	// Re-stamped on every reconnect from the credential that admitted the stream, so a rotated token's new expiry lands without waiting for a heartbeat flush (epic memql#5327, design D4).
+	CredentialExpiresAt string
 }
 
 // RefreshWorkerRegistration calls the engine mutation refreshWorkerRegistration.
@@ -10219,6 +10230,13 @@ func RefreshWorkerRegistrationBuild(args RefreshWorkerRegistrationArgs) string {
 		}
 		b.WriteString("connectedNodeId: ")
 		b.WriteString(quoteMemQL(args.ConnectedNodeId))
+	}
+	if args.CredentialExpiresAt != "" {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
+		b.WriteString("credentialExpiresAt: ")
+		b.WriteString(quoteMemQL(args.CredentialExpiresAt))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -12641,36 +12659,6 @@ func SetWorkerOperatorLabelsBuild(args SetWorkerOperatorLabelsArgs) string {
 	}
 	b.WriteString("operatorLabels: ")
 	b.WriteString(renderMemQLValue(args.OperatorLabels))
-	b.WriteString(")")
-	return b.String()
-}
-
-// SetWorkerSharing -- Set the OWNER's half of a machine's sharing consent. The cockpit's half comes from that machine's own policy.yaml and is not writable here; both must say cluster before the machine serves anybody else.
-//
-// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["setWorkerSharing"] in generated_concepts.go).
-type SetWorkerSharingArgs struct {
-	RegistrationId string
-	// owner or cluster. Anything else is read as owner by every reader, so the enum is enforced here rather than left to be misread later.
-	// Enum: owner | cluster
-	Mode string
-}
-
-// SetWorkerSharing calls the engine mutation setWorkerSharing.
-func (qc *QueryClient) SetWorkerSharing(ctx context.Context, args SetWorkerSharingArgs) (*Result, error) {
-	call := SetWorkerSharingBuild(args)
-	return qc.executeNamed(ctx, "setWorkerSharing", call)
-}
-
-func SetWorkerSharingBuild(args SetWorkerSharingArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation setWorkerSharing(")
-	b.WriteString("registrationId: ")
-	b.WriteString(quoteMemQL(args.RegistrationId))
-	if b.Len() > 26 {
-		b.WriteString(", ")
-	}
-	b.WriteString("mode: ")
-	b.WriteString(quoteMemQL(args.Mode))
 	b.WriteString(")")
 	return b.String()
 }
@@ -15635,6 +15623,12 @@ type UpdateWorkerLastSeenArgs struct {
 	RttMs int
 	// When rttMs was measured, on the agent's clock. Present exactly when rttMs is; an absent rttAt on the row is the one reading for "not measured".
 	RttAt string
+	// The machine's clock minus the cluster's, in milliseconds, positive when the machine is ahead (epic memql#5327, design D6).
+	// OMITTED when the beat carried no timestamp, for rttMs's reason and with a sharper edge: zero here is a REAL ANSWER -- the clocks agree -- so a sent zero standing in for silence would read as a healthy machine rather than as one that has not spoken.
+	ClockSkewMs int
+	// When this machine's credential stops being accepted (epic memql#5327, design D4), re-stamped after a rotation renews it.
+	// OMITTED when the stream does not know one -- a token minted before expiry existed -- because an empty string here would CLEAR a real expiry the register already wrote, and the row would then promise a credential that never expires about one that does.
+	CredentialExpiresAt string
 }
 
 // UpdateWorkerLastSeen calls the engine mutation updateWorkerLastSeen.
@@ -15694,6 +15688,20 @@ func UpdateWorkerLastSeenBuild(args UpdateWorkerLastSeenArgs) string {
 		}
 		b.WriteString("rttAt: ")
 		b.WriteString(quoteMemQL(args.RttAt))
+	}
+	if args.ClockSkewMs != 0 {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("clockSkewMs: ")
+		b.WriteString(fmt.Sprintf("%v", args.ClockSkewMs))
+	}
+	if args.CredentialExpiresAt != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("credentialExpiresAt: ")
+		b.WriteString(quoteMemQL(args.CredentialExpiresAt))
 	}
 	b.WriteString(")")
 	return b.String()

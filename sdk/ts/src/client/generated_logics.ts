@@ -617,3 +617,26 @@ QueryClient.prototype.workerModelPullStaleSweep = function (this: QueryClient, a
   return this.executeNamed("workerModelPullStaleSweep", buildWorkerModelPullStaleSweep(args), opts);
 };
 
+/** Every registration still naming a holder that stopped heartbeating, for the sweep that clears the stamp.
+ONE CUTOFF, unlike the pull and probe sweeps, because there is only one thing to judge: a heartbeat arrives THROUGH the stream on the holding pod, so a stale lastSeenAt IS the evidence that the pod named on the row is not holding it. No second read of which nodes are alive -- that read can be stale in the other direction and would clear a live hold.
+The grace is read from a globalVariable so an operator can widen it on a cluster whose heartbeats are slow, and it defaults to the engine's own StaleHoldWindow (45s: the online window plus one throttled flush interval). Clearing a hold that is merely late costs the machine one heartbeat to re-stamp; leaving a dead one costs every routing decision that forwards to a replica that is gone. */
+export interface WorkerStaleConnectionSweepArgs {
+  event: Record<string, unknown>;
+}
+
+export function buildWorkerStaleConnectionSweep(args: WorkerStaleConnectionSweepArgs): string {
+  const parts: string[] = [];
+  parts.push("event: " + renderMemQLValue(args.event));
+  return "logic workerStaleConnectionSweep(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workerStaleConnectionSweep(args: WorkerStaleConnectionSweepArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workerStaleConnectionSweep = function (this: QueryClient, args: WorkerStaleConnectionSweepArgs = {} as WorkerStaleConnectionSweepArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workerStaleConnectionSweep", buildWorkerStaleConnectionSweep(args), opts);
+};
+
