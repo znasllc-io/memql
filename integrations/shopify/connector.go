@@ -47,7 +47,7 @@ func init() {
 	memqlsync.Declare(ConnectorName)
 }
 
-// connectorContext stamps the identity every read and write in this
+// connectorContext stamps the identity every MIRROR read and write in this
 // package runs under.
 //
 // Two stamps, and they are not interchangeable:
@@ -60,11 +60,65 @@ func init() {
 //     precisely BECAUSE the concept is a mirror, and auth.CallOrigin's
 //     zero value is OriginClient -- so a context that does not say
 //     otherwise is treated as a client call whatever actor it carries.
+//
+// WHAT IT IS NOT FOR, since memql#5574: the concepts this package reads that
+// are MemQL's OWN -- v1:shopify:store, v1:shopify:complianceJob,
+// v1:platform:syncState, v1:identity:auditEvent. A connector actor is refused
+// every one of them, and refused SILENTLY. Those go through operatorContext
+// below; the split is stated there.
 func connectorContext(ctx context.Context) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	ctx = auth.ContextWithConnectorActor(ctx, ConnectorName)
+	return auth.ContextWithInternalOrigin(ctx)
+}
+
+// operatorContext stamps the identity this package's OWN configuration and
+// bookkeeping runs under: the deployment acting on rows that belong to the
+// deployment (memql#5574).
+//
+// # Why this is not connectorContext
+//
+// A connector actor is admitted to the concepts whose @origin or @mirroredTo
+// NAMES it, and to nothing else. Four of the concepts this package touches
+// name no connector, because nothing about them is a mirror of Shopify:
+//
+//	v1:shopify:store          @origin("memql")  -- MemQL's own record of how
+//	                                               to reach a store; Shopify
+//	                                               has no such object
+//	v1:shopify:complianceJob  @origin("memql")  -- our queue of privacy work
+//	v1:platform:syncState                       -- the deployment's sync health
+//	v1:identity:auditEvent                      -- the deployment's audit trail
+//
+// So `connectorAdmission` answered (admitted=false, isConnector=true) and the
+// connector branch of `rowAuthzAdmitsMode` DENIED without falling through --
+// correctly, since falling through would hand a connector whatever a tier
+// grants a stranger. On top of that the hand-written reads carry
+// `actor.isClusterOwner == true`, which a connector also fails, so the refusal
+// arrived twice and both times as an EMPTY RESULT rather than an error.
+//
+// The visible symptom was the mirror quietly stopping: `refresh` answered no
+// stores, `Stores()` answered none, and every act scoped by a store -- backfill,
+// subscription reconcile, webhook verification, compliance runs -- did nothing
+// for every store, with nothing anywhere saying why.
+//
+// # Two stamps here too, for two different reasons
+//
+// The SYSTEM ACTOR is the cluster's own identity: RoleOwner (which is what the
+// `actor.isClusterOwner` conjunct and the clusterOwner tier are both asking),
+// Unranked and Synthetic. INTERNAL ORIGIN is again the @serverOnly axis --
+// `markStoreRedacted`, `recordStoreHealth` and the compliance mutations are all
+// server-only, and the identity alone does not satisfy that.
+//
+// It is composed here rather than inside auth.ContextWithSystemActor on
+// purpose: whose authority a call runs under, and whether the engine is the one
+// making it, are two facts a reader should be able to see at the call site.
+func operatorContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx = auth.ContextWithSystemActor(ctx, ConnectorName)
 	return auth.ContextWithInternalOrigin(ctx)
 }
 

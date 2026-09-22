@@ -106,7 +106,7 @@ func (c *Connector) enqueueComplianceJob(ctx context.Context, store Store, topic
 		"shopDomain":  job.ShopDomain,
 		"dueAt":       job.DueAt.UTC().Format(time.RFC3339),
 	})
-	if _, err := c.engine.Execute(connectorContext(ctx), call); err != nil {
+	if _, err := c.engine.Execute(operatorContext(ctx), call); err != nil {
 		return fmt.Errorf("shopify: queue %s: %w", topic, err)
 	}
 	c.logger.Info("shopify: compliance request queued", "topic", topic, "store", store.ID, "dueAt", job.DueAt.Format(time.RFC3339))
@@ -126,7 +126,7 @@ func ComplianceJobID(storeID, topic, subject string) string {
 // RunDueComplianceJobs runs every queued privacy job whose hold has
 // elapsed.
 func (c *Connector) RunDueComplianceJobs(ctx context.Context) (int, error) {
-	res, err := c.engine.Execute(connectorContext(ctx), renderCall("complianceJobsDue", map[string]any{
+	res, err := c.engine.Execute(operatorContext(ctx), renderCall("complianceJobsDue", map[string]any{
 		"asOf": c.now().UTC().Format(time.RFC3339),
 	}))
 	if err != nil {
@@ -168,7 +168,7 @@ func (c *Connector) recordJob(ctx context.Context, jobID, status, outcome, lastE
 	call := renderCall("recordComplianceJob", map[string]any{
 		"jobId": jobID, "status": status, "outcome": outcome, "lastError": lastError,
 	})
-	if _, err := c.engine.Execute(connectorContext(ctx), call); err != nil {
+	if _, err := c.engine.Execute(operatorContext(ctx), call); err != nil {
 		c.logger.Warn("shopify: could not record a compliance job's outcome", "job", jobID, "error", err)
 	}
 }
@@ -488,7 +488,7 @@ func (c *Connector) PurgeStore(ctx context.Context, store Store) (int64, error) 
 		"storeId":    store.ID,
 		"redactedAt": c.now().UTC().Format(time.RFC3339),
 	})
-	if _, err := c.engine.Execute(connectorContext(ctx), stamp); err != nil {
+	if _, err := c.engine.Execute(operatorContext(ctx), stamp); err != nil {
 		return total, fmt.Errorf("shopify: stamp store redaction: %w", err)
 	}
 	c.stores.Invalidate()
@@ -524,7 +524,7 @@ func (c *Connector) auditCompliance(ctx context.Context, store Store, action str
 		"detail":      details,
 		"outcome":     "success",
 	})
-	if _, err := c.engine.Execute(connectorContext(ctx), call); err != nil {
+	if _, err := c.engine.Execute(operatorContext(ctx), call); err != nil {
 		// An audit write that fails must not swallow the compliance
 		// action, but it must be loud: the trail is the deliverable.
 		c.logger.Error("shopify: could not write compliance audit event", "action", action, "store", store.ID, "error", err)

@@ -138,7 +138,7 @@ func (r *StoreRegistry) Invalidate() {
 }
 
 func (r *StoreRegistry) refresh(ctx context.Context) ([]Store, error) {
-	res, err := r.engine.Execute(connectorContext(ctx), "stores()")
+	res, err := r.engine.Execute(operatorContext(ctx), "stores()")
 	if err != nil {
 		return nil, fmt.Errorf("shopify: list stores: %w", err)
 	}
