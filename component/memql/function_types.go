@@ -272,9 +272,9 @@ func (f *Function) clone() *Function {
 		// would be a form silently not collecting a client's fields, which
 		// is the exact failure this seam was built to end.
 		ShopperFormExtension: f.ShopperFormExtension,
-		CacheTTL:           f.CacheTTL,
-		MCPPromoted:        f.MCPPromoted,
-		LatestMode:         f.LatestMode,
+		CacheTTL:             f.CacheTTL,
+		MCPPromoted:          f.MCPPromoted,
+		LatestMode:           f.LatestMode,
 	}
 }
 

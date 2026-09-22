@@ -165,11 +165,11 @@ var reservedShopperFieldNames = map[string]string{
 	"submittedAt": "stamped from the server clock, never the shopper's",
 	"submissionId": "minted per POST by the bff and stamped into both constructs, so one " +
 		"submission has one id (design record 2026-09-21, D4)",
-	"actor":       "a reserved engine root",
-	"now":         "a reserved engine root",
-	"partition":   "a reserved engine root",
-	"config":      "a reserved engine root",
-	"trace":       "a reserved engine root",
+	"actor":     "a reserved engine root",
+	"now":       "a reserved engine root",
+	"partition": "a reserved engine root",
+	"config":    "a reserved engine root",
+	"trace":     "a reserved engine root",
 }
 
 // shopperNamePattern bounds a pack or route name. Both are PATH SEGMENTS
