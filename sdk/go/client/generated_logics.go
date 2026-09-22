@@ -618,3 +618,25 @@ func WorkerModelPullStaleSweepBuild(args WorkerModelPullStaleSweepArgs) string {
 	b.WriteString(")")
 	return b.String()
 }
+
+// WorkerStaleConnectionSweep -- Every registration still naming a holder that stopped heartbeating, for the sweep that clears the stamp.
+// ONE CUTOFF, unlike the pull and probe sweeps, because there is only one thing to judge: a heartbeat arrives THROUGH the stream on the holding pod, so a stale lastSeenAt IS the evidence that the pod named on the row is not holding it. No second read of which nodes are alive -- that read can be stale in the other direction and would clear a live hold.
+// The grace is read from a globalVariable so an operator can widen it on a cluster whose heartbeats are slow, and it defaults to the engine's own StaleHoldWindow (45s: the online window plus one throttled flush interval). Clearing a hold that is merely late costs the machine one heartbeat to re-stamp; leaving a dead one costs every routing decision that forwards to a replica that is gone.
+type WorkerStaleConnectionSweepArgs struct {
+	Event map[string]any
+}
+
+// WorkerStaleConnectionSweep calls the engine logic workerStaleConnectionSweep.
+func (qc *QueryClient) WorkerStaleConnectionSweep(ctx context.Context, args WorkerStaleConnectionSweepArgs) (*Result, error) {
+	call := WorkerStaleConnectionSweepBuild(args)
+	return qc.executeNamed(ctx, "workerStaleConnectionSweep", call)
+}
+
+func WorkerStaleConnectionSweepBuild(args WorkerStaleConnectionSweepArgs) string {
+	var b strings.Builder
+	b.WriteString("logic workerStaleConnectionSweep(")
+	b.WriteString("event: ")
+	b.WriteString(renderMemQLValue(args.Event))
+	b.WriteString(")")
+	return b.String()
+}

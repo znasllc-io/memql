@@ -165,6 +165,46 @@ nothing about anyone else's. A cross-owner read that *fails* does the same and
 logs it: your own laptop being able to serve the turn should not be refused
 because a read about somebody else's machine went wrong.
 
+### It works when the machine is on another replica, and for a year it did not
+
+A machine's stream terminates on **exactly one** agent replica, and the turn
+that wants it is served wherever the mesh routed the request — at the default
+two replicas, a coin flip. The router picked the shared machine correctly and
+the receiving replica then resolved it through *the caller's own* machines,
+which by construction cannot contain somebody else's. So the call was refused
+`registration_refused` and surfaced as `no_local_model_available` — the
+sentence that means "your fleet is asleep", told to somebody looking at a lent
+machine they could see was on.
+
+It worked exactly when the stream happened to be local. Fixed in epic
+[memql#5327](https://github.com/znasllc-io/memql/issues/5327) design D10: the
+receiving replica admits a machine that is the caller's own **or** unrevoked
+and cluster-shared, resolved through the same cross-owner read the router used
+to pick it. Both consents are still checked, on the receiver as well as in the
+router.
+
+**Tool dispatch is deliberately not widened.** Sharing a machine lends its GPU,
+not its shell: `workerHost` stays owner-only across the hop exactly as it is
+locally.
+
+### Only the owner may lend a machine
+
+The sharing consent is written through `fleetSetSharing`, which resolves the
+machine through the **caller's own** machines. The underlying mutation is
+`@serverOnly`.
+
+That is a narrowing, and it closed a real hole (memql#5327, finding M-2). The
+mutation's own comment asserted that the row's write guard refused any actor
+but the owner. It does not: `v1:worker:registration` declares the composite
+`owner=..., clusterOwner` tier, and the guard grants the cluster-owner escape
+on it — so a cluster owner could lend hardware they do not own, and un-lend
+hardware somebody else had lent. On the one row whose entire content is a
+person's consent, that escape is wrong.
+
+Removing a machine keeps the cluster-owner arm, and the difference is the
+point: offboarding somebody's laptop is an operator act the Fleet's operator
+view already implies, while giving their hardware to the cluster is not.
+
 ---
 
 ## Related

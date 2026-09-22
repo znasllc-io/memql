@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
@@ -91,7 +92,21 @@ func (e *MemQLEngine) evaluateFleetSharingLedgerExpression(ctx context.Context, 
 	if err != nil {
 		return nil, fmt.Errorf("fleetSharingLedger: render the window read: %w", err)
 	}
-	res, err := e.Execute(ctx, call)
+	// THE STAMP IS A LOCAL, AND IT IS NEVER RETURNED (epic memql#5327, D11).
+	//
+	// routerCallsOnMachine is @serverOnly now, because the ownership check
+	// above was the only gate standing between a signed-in caller and every
+	// user id that had run a call on any machine in the cluster. This read
+	// therefore has to say it is server-initiated.
+	//
+	// Confined to THIS call, in a distinctly named variable, rather than
+	// widening `ctx`: internal origin opens every @serverOnly construct for as
+	// long as the context lives, which is the escalation memql#2989 refused.
+	// The registration id it reads with has already been proven to belong to
+	// the caller, by the authorized read above, so nothing caller-supplied
+	// reaches the query un-checked.
+	internalCtx := auth.ContextWithInternalOrigin(ctx)
+	res, err := e.Execute(internalCtx, call)
 	if err != nil {
 		// A LEDGER THAT CANNOT BE READ IS NOT AN EMPTY LEDGER. Answering zero
 		// would tell somebody who lent their machine that nobody used it, which

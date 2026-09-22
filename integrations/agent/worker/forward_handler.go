@@ -31,6 +31,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strings"
 	"sync"
@@ -209,6 +210,10 @@ func (h *ForwardHandler) HandleForwardedRequest(
 
 // verifyRegistration re-reads the row and refuses a machine that is not this
 // owner's or that has been revoked.
+//
+// TOOL DISPATCH ONLY. It is deliberately NOT the model path's check: sharing a
+// machine lends its GPU, not its shell, so `WorkerForward` stays owner-only
+// and verifySharedRegistration beside it is what the model forward asks.
 func (h *ForwardHandler) verifyRegistration(ctx context.Context, ownerUserId, registrationId string) error {
 	if h.store == nil {
 		// No fleet store on this replica. The registry check below still
@@ -229,6 +234,100 @@ func (h *ForwardHandler) verifyRegistration(ctx context.Context, ownerUserId, re
 			return errRegistrationRevoked
 		}
 		return nil
+	}
+	return errRegistrationNotOwned
+}
+
+// verifySharedRegistration is verifyRegistration for a MODEL call, and the
+// difference between the two is the whole of finding H-2 (epic memql#5327,
+// design D10).
+//
+// The router picks a cluster-shared machine belonging to owner O for acting
+// user U. The envelope then crosses to the replica holding O's stream, and
+// this is the check it lands on. Before D10 the only check was
+// `WorkersForOwner(U)`, which by construction cannot return O's machine -- so
+// the receiver refused with errRegistrationNotOwned and the call died as
+// `registration_refused`. Neither this file nor model_forward.go was touched
+// when sharing landed, so the feature worked exactly when the stream happened
+// to be local, which on the default two-replica topology is a coin toss.
+//
+// So: admit when the machine is the caller's OWN, or when it is unrevoked and
+// cluster-shared. The second arm resolves through SharedFleetStore -- the SAME
+// cross-owner read the router used to pick it, deliberately on a second
+// interface so user-scoped paths cannot reach it -- and it is a narrow
+// widening rather than a relaxed check: revocation, both halves of the
+// consent, and the owner's identity are all still decided here.
+//
+// A replica with no SharedFleetStore answers exactly as it did before: only
+// owned machines. That is the honest degradation, because a node that cannot
+// make the cross-owner read cannot establish that anything was shared.
+func (h *ForwardHandler) verifySharedRegistration(ctx context.Context, actingUserId, registrationId string) error {
+	ownErr := h.verifyRegistration(ctx, actingUserId, registrationId)
+	switch {
+	case ownErr == nil:
+		return nil
+	case errors.Is(ownErr, errRegistrationRevoked):
+		// Their own machine, revoked. The shared arm cannot rescue that, and
+		// saying "not shared with you" about somebody's own revoked machine
+		// would send them to the wrong repair.
+		return ownErr
+	case errors.Is(ownErr, errNoFleetStore):
+		return ownErr
+	}
+
+	shared, ok := h.store.(SharedFleetStore)
+	if !ok {
+		return ownErr
+	}
+	machines, err := shared.SharedInferenceWorkers(ctx)
+	if err != nil {
+		return err
+	}
+	for _, m := range machines {
+		if !sameSubject(m.RegistrationId, registrationId) {
+			continue
+		}
+		if !m.RevokedAt.IsZero() {
+			return errRegistrationRevoked
+		}
+		if !m.ServesCluster() {
+			return errRegistrationNotShared
+		}
+		return nil
+	}
+	return ownErr
+}
+
+// ownerOfSharedMachine confirms that the LIVE registry entry for a machine
+// names the same owner the shared row does (epic memql#5327, design D10).
+//
+// It exists because the registry's plain `w.OwnerUserId != owner` refusal is
+// right for an owned call and wrong for a shared one -- on a shared call the
+// connected machine belongs to somebody else by design. Dropping the check
+// entirely would be the easy move and the wrong one: it is the only thing that
+// notices the registry entry and the row disagreeing about whose machine this
+// is, which is a crossed or stale entry rather than a sharing arrangement.
+//
+// So the question it asks is narrower than the one it replaces: not "is this
+// the caller's machine" but "is the machine this replica is holding the same
+// one the shared catalogue just described".
+func (h *ForwardHandler) ownerOfSharedMachine(ctx context.Context, registrationId, registryOwner string) error {
+	shared, ok := h.store.(SharedFleetStore)
+	if !ok {
+		return errRegistrationNotOwned
+	}
+	machines, err := shared.SharedInferenceWorkers(ctx)
+	if err != nil {
+		return err
+	}
+	for _, m := range machines {
+		if !sameSubject(m.RegistrationId, registrationId) {
+			continue
+		}
+		if sameSubject(m.OwnerUserId, registryOwner) {
+			return nil
+		}
+		return forwardRefusal("this replica's live registration for that machine names a different owner than the fleet row does")
 	}
 	return errRegistrationNotOwned
 }
@@ -323,6 +422,12 @@ var (
 	errNoFleetStore         = forwardRefusal("no fleet store on this replica, so the machine's revocation cannot be checked")
 	errRegistrationRevoked  = forwardRefusal("that machine has been revoked")
 	errRegistrationNotOwned = forwardRefusal("that machine is not registered to the asserted owner")
+	// errRegistrationNotShared is the MODEL path's own refusal (epic
+	// memql#5327, design D10). It is a separate sentence from "not registered
+	// to the asserted owner" because it leads somewhere else: that one says
+	// the machine is not yours and this one says it is somebody else's and
+	// they have not offered it, which is a thing its owner can change.
+	errRegistrationNotShared = forwardRefusal("that machine belongs to somebody else and is not shared with the cluster")
 )
 
 type forwardRefusal string

@@ -133,34 +133,57 @@ func (e *FleetUnavailable) consideredKeysForDisplay(omitNoise bool) []string {
 	actionable := make([]string, 0, len(e.Considered))
 	revoked := 0
 	foreignPrivate := 0
-	foreignKeys := make([]string, 0)
 	for k, why := range e.Considered {
 		switch {
 		case why == "revoked":
 			revoked++
 		case isForeignPrivateShareNoise(why):
+			// COUNTED, NEVER COLLECTED. The id is another user's row and this
+			// function's output reaches a caller; see the note below.
 			foreignPrivate++
-			foreignKeys = append(foreignKeys, k)
 		default:
 			actionable = append(actionable, k)
 		}
 	}
 	sort.Strings(actionable)
-	// When EVERY machine was a foreign private share refusal, keep those
-	// lines -- they are the only repair the operator has (system work / empty
-	// own fleet). When something actionable remains, summarise the noise.
-	if len(actionable) == 0 && foreignPrivate > 0 {
-		sort.Strings(foreignKeys)
-		actionable = foreignKeys
-		foreignPrivate = 0
-	}
+	// FOREIGN IDS ARE AGGREGATED IN BOTH BRANCHES (epic memql#5327, design
+	// D12), and the branch that used to restore them is what this replaces.
+	//
+	// It read: "when EVERY machine was a foreign private share refusal, keep
+	// those lines -- they are the only repair the operator has". The first
+	// half was true and the second was not. A registration id is not a repair:
+	// it names a row the caller cannot read, belonging to somebody whose name
+	// they do not learn, and the remedy is identical for every one of them.
+	// What it WAS is an enumeration primitive -- a list of other users'
+	// machine ids handed to anybody whose call ran out of options, which with
+	// the sharing ledger open (finding H-3) was the second half of a way to
+	// ask who had been using them.
+	//
+	// So the foreign-only case keeps its SENTENCE and loses its ids. The
+	// sentence is the repair, and it is the same sentence whichever machine
+	// you are looking at.
 	if revoked > 0 {
 		actionable = append(actionable, fmt.Sprintf("(%d revoked registration(s) omitted)", revoked))
 	}
 	if foreignPrivate > 0 {
-		actionable = append(actionable, fmt.Sprintf("(%d other private machine(s) omitted)", foreignPrivate))
+		actionable = append(actionable, foreignPrivateSummary(foreignPrivate))
 	}
 	return actionable
+}
+
+// foreignPrivateSummary is the one line a caller gets about machines that are
+// not theirs.
+//
+// It COUNTS and it EXPLAINS, and it names nothing. The count is worth having
+// -- "there is hardware on this cluster and none of it is open to you" leads
+// somewhere, where silence does not -- and the explanation is the whole repair:
+// both halves of the consent have to say cluster, and neither half is the
+// caller's to set.
+func foreignPrivateSummary(n int) string {
+	if n == 1 {
+		return "(1 machine on this cluster is not shared with you -- its owner would have to offer it, and the machine itself would have to agree)"
+	}
+	return fmt.Sprintf("(%d machines on this cluster are not shared with you -- each owner would have to offer theirs, and each machine would have to agree)", n)
 }
 
 func isForeignPrivateShareNoise(why string) bool {

@@ -312,7 +312,14 @@ func (s *Server) handlePairRedeem(w http.ResponseWriter, r *http.Request) {
 		workerName = "paired-" + suffix(row.ID, 6)
 	}
 
-	if err := tokenStore.Create(credCtx, identityId, row.OwnerUserId, workerName, tokenHash, row.OwnerUserId, time.Time{}); err != nil {
+	// A PAIRED TOKEN EXPIRES (epic memql#5327, design D4). This minted
+	// time.Time{} -- read by resolveWorkerToken as "never" -- so a token
+	// copied off a laptop was valid until somebody noticed. Ninety days from
+	// now, renewed without a person by the in-stream rotation the cockpit
+	// asks for; see workertoken.DefaultTTL for why that figure and why it is
+	// not an operator knob.
+	expiresAt := now.UTC().Add(workertoken.DefaultTTL)
+	if err := tokenStore.Create(credCtx, identityId, row.OwnerUserId, workerName, tokenHash, row.OwnerUserId, expiresAt); err != nil {
 		s.logErr("pair: token row create failed", err)
 		s.writeRedeemError(w, http.StatusInternalServerError, "persist_failed", "token row: "+err.Error())
 		return

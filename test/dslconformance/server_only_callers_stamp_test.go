@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -75,8 +76,14 @@ import (
 // one:
 //
 //   - A call assembled from pieces (`"query " + name + "("`). The pattern has
-//     to appear in one string literal to be seen. Every call in the tree today
-//     is a literal or a Sprintf format string, both of which it sees.
+//     to appear in one string literal to be seen. THE THIRD FORM,
+//     `langparser.RenderCall("<name>", args)`, is seen -- it has its own
+//     pattern below, added after epic memql#5327 made two mutations
+//     @serverOnly and their builtins rendered them that way on an unstamped
+//     context, with this gate green. That was not a hypothetical blind spot:
+//     RenderCall is the renderer memql#5004 introduced and the one every new
+//     write is supposed to use, so the gap was growing rather than holding
+//     still.
 //   - A construct reached from DSL rather than Go -- an automation calling a
 //     @serverOnly query through logic. Three constructs are in that position
 //     today (runningPlansForUser, usersInDeletionCooldown,
@@ -90,6 +97,39 @@ import (
 //     (component/identity/recoverykey/store_internal_origin_test.go,
 //     component/identity/workertoken/store_internal_origin_test.go) are what
 //     pin it per operation.
+//
+// dslReachedCallers names the file+construct pairs whose ORIGIN COMES FROM THE
+// DSL rather than from a stamp in the calling file.
+//
+// This is the second bullet of "what this does NOT catch" above, made
+// explicit. It became necessary when the gate learned to see RenderCall: the
+// three constructs that bullet names have no Go caller at all, but
+// integrations/router's evidence fold does -- it is the Go body of a BUILTIN,
+// reached only from `automation routingEvidenceFold`, which is tree-loaded and
+// therefore TRUSTED. component/automations' originForSource stamps internal
+// origin for a trusted source and CLIENT origin for a caller-supplied one
+// (memql#2879), and component/automations/step_origin_test.go is what pins
+// both halves.
+//
+// A stamp in the file would be WRONG here, not merely redundant: it would take
+// a decision the automation executor makes about trust and make it
+// unconditional, so the same code reached from an untrusted automation would
+// launder client origin into internal. That is the escalation memql#2989
+// refused.
+//
+// AN ENTRY HERE IS A CLAIM, and the claim is "every path that reaches this
+// call already carries internal origin by the time it arrives". Adding one to
+// silence a failure without establishing that is how a feature becomes inert
+// with a test vouching for it.
+var dslReachedCallers = map[string]string{
+	"integrations/router/evidence_fold.go createWorkApproval": "the nightly evidence fold (epic memql#5146, D5). " +
+		"It is the Go body of the routingEvidenceFold builtin, whose only caller is the tree-loaded " +
+		"automation of that name -- so originForSource has already stamped internal origin, and stamping " +
+		"again here would make it unconditional for a path the executor deliberately decides per source.",
+	"integrations/router/evidence_fold.go recordModelEvidence": "the same fold's own write, on the same terms " +
+		"as the approval above.",
+}
+
 func TestEveryGoCallerOfAServerOnlyConstructStampsInternalOrigin(t *testing.T) {
 	names := map[string]bool{}
 	for key := range serverOnlyConstructs(t) {
@@ -98,6 +138,24 @@ func TestEveryGoCallerOfAServerOnlyConstructStampsInternalOrigin(t *testing.T) {
 	if len(names) == 0 {
 		t.Fatal("no @serverOnly constructs resolved -- this gate would now pass vacuously")
 	}
+
+	// A SECOND CALL FORM: langparser.RenderCall("<name>", args).
+	//
+	// This gate's own limitations note said "every call in the tree today is a
+	// literal or a Sprintf format string". That stopped being true when
+	// memql#5004 introduced RenderCall as the renderer every new write is
+	// supposed to use -- and the tree has been moving to it since, so the
+	// blind spot has been GROWING rather than holding still.
+	//
+	// It was measured, not theorised: epic memql#5327 made two mutations
+	// @serverOnly and their builtins rendered them with RenderCall on an
+	// unstamped context. Both would have been refused on every call, and this
+	// gate was green.
+	//
+	// The construct name is the first argument, so it is matched as a whole
+	// string literal rather than inside one -- which is why it needs its own
+	// pattern instead of a wider version of the call form below.
+	renderCall := regexp.MustCompile(`RenderCall\(\s*"([A-Za-z_][A-Za-z0-9_]*)"`)
 
 	// The call form, anchored on the construct keyword and the open paren.
 	//
@@ -184,11 +242,56 @@ func TestEveryGoCallerOfAServerOnlyConstructStampsInternalOrigin(t *testing.T) {
 			}
 			return true
 		})
+
+		// The RenderCall form, matched over the file's SOURCE rather than over
+		// string literals: what identifies it is the call expression around
+		// the literal, which a literal-only walk cannot see. The
+		// over-reporting the literal walk avoids does not arise here -- prose
+		// in a comment does not say `RenderCall("`.
+		src, rerr := os.ReadFile(abs)
+		if rerr != nil {
+			continue
+		}
+		for _, m := range renderCall.FindAllStringSubmatch(string(src), -1) {
+			if !names[m[1]] {
+				continue
+			}
+			checked++
+			if _, dslReached := dslReachedCallers[rel+" "+m[1]]; dslReached {
+				continue
+			}
+			if !stamps {
+				unstamped = append(unstamped, site{file: rel, construct: m[1], pos: rel})
+			}
+		}
 	}
 
 	if checked == 0 {
 		t.Fatal("no Go call site of any @serverOnly construct was found -- the call-form pattern " +
 			"has stopped matching, and this gate would now pass vacuously")
+	}
+
+	// A STALE EXEMPTION IS WORSE THAN A MISSING ONE: it vouches for a call
+	// that no longer exists, so the next author reads a line that measures
+	// nothing. Every entry must name a call this scan actually saw.
+	seen := map[string]bool{}
+	for _, rel := range strings.Split(string(out), "\x00") {
+		if rel == "" {
+			continue
+		}
+		src, rerr := os.ReadFile(filepath.Join(root, rel))
+		if rerr != nil {
+			continue
+		}
+		for _, m := range renderCall.FindAllStringSubmatch(string(src), -1) {
+			seen[rel+" "+m[1]] = true
+		}
+	}
+	for key := range dslReachedCallers {
+		if !seen[key] {
+			t.Errorf("stale dslReachedCallers entry %q -- that call is gone, so the exemption now "+
+				"vouches for nothing. Remove it.", key)
+		}
 	}
 
 	sort.Slice(unstamped, func(i, j int) bool {

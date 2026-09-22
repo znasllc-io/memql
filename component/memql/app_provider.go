@@ -635,6 +635,14 @@ func orderDoors(doors []AppDoor, preference []string) []AppDoor {
 // dashboard screenshot.
 func AppCallFingerprint(req AppCallRequest) string {
 	h := sha256.New()
+	// The acting user leads the hash, for FleetCallFingerprint's reason (epic
+	// memql#5327, design D13): a loop is one caller repeating itself, and two
+	// people asking an app the same question are not a loop. Kept identical to
+	// the fleet form deliberately -- the two breakers share one guard, and a
+	// key shape that differed between them would make "why did this trip"
+	// depend on which door answered.
+	h.Write([]byte(req.ActingUserId))
+	h.Write([]byte{0xff})
 	h.Write([]byte(req.AppId))
 	for _, m := range req.Messages {
 		h.Write([]byte{0})

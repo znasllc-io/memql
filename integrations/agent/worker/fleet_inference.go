@@ -347,7 +347,7 @@ func (f *FleetInference) attempt(
 		return memqlengine.FleetCallResult{}, ForwardCompleted,
 			fmt.Errorf("%s: %s %s", cand.Label(), out.ErrorCode, out.ErrorMessage)
 	}
-	return resultFromEnd(cand, out.End), ForwardCompleted, nil
+	return resultFromEnd(cand, req.ActingUserId, out.End), ForwardCompleted, nil
 }
 
 // Ok reports a clean terminal answer.
@@ -402,7 +402,7 @@ func (f *FleetInference) attemptLocal(
 				return memqlengine.FleetCallResult{}, ForwardCompleted,
 					fmt.Errorf("%s: %s %s", cand.Label(), out.ErrorCode, out.ErrorMessage)
 			}
-			return resultFromEnd(cand, out.End), ForwardCompleted, nil
+			return resultFromEnd(cand, req.ActingUserId, out.End), ForwardCompleted, nil
 		}
 		// Holding-pod registry miss (prod dump: Ask already on holder pszjr,
 		// connectedNodeId==self, WorkerById nil). Forward cannot help — we ARE
@@ -459,7 +459,31 @@ func (f *FleetInference) attemptLocal(
 		Usage:            usageFrom(outcome.Usage),
 		ExecutionSurface: FleetSurfacePrefix + cand.RegistrationId,
 		MachineLabel:     cand.Label(),
+		// The local half of design D15, and it must stay identical to the
+		// forwarded half: a shared call that ran on this replica and one that
+		// crossed a hop are the same call, and a reader filtering the ledger
+		// by whose machine served it cannot be made to care which.
+		MachineOwnerUserId: machineOwnerAttribution(cand, req.ActingUserId),
 	}, ForwardCompleted, nil
+}
+
+// machineOwnerAttribution answers "whose machine, if not yours" for the
+// decision record (epic memql#5327, design D15).
+//
+// v1:router:call.machineOwnerUserId was documented as "Empty until shared team
+// machines land". They landed, and the field stayed empty -- so no row in the
+// cluster said that U's call had run on O's hardware, which is the one fact a
+// shared fleet adds to the ledger and the one its owner is entitled to.
+//
+// A call on the caller's OWN machine still leaves it empty, rather than
+// repeating userId. The field is a question with an implicit "if not yours" in
+// it; filling in the self case would make "was this shared" a comparison every
+// reader has to perform instead of a value they can read.
+func machineOwnerAttribution(cand Candidate, actingUserId string) string {
+	if OwnMachineFirst(cand, actingUserId) {
+		return ""
+	}
+	return strings.TrimSpace(cand.OwnerUserId)
 }
 
 // FleetSurfacePrefix is how a fleet-served call names its machine on the
@@ -477,10 +501,13 @@ func deltaSink(onDelta func(string)) func(uint64, string) {
 	}
 }
 
-func resultFromEnd(cand Candidate, end *memqlv1.ModelCallEnd) memqlengine.FleetCallResult {
+func resultFromEnd(cand Candidate, actingUserId string, end *memqlv1.ModelCallEnd) memqlengine.FleetCallResult {
 	res := memqlengine.FleetCallResult{
 		ExecutionSurface: FleetSurfacePrefix + cand.RegistrationId,
 		MachineLabel:     cand.Label(),
+		// WHOSE HARDWARE, and only when it is not the caller's (epic
+		// memql#5327, design D15). See machineOwnerAttribution.
+		MachineOwnerUserId: machineOwnerAttribution(cand, actingUserId),
 	}
 	if end == nil {
 		return res

@@ -6382,6 +6382,33 @@ QueryClient.prototype.refundRate = function (this: QueryClient, args: RefundRate
   return this.executeNamed("refundRate", buildRefundRate(args), opts);
 };
 
+/** Every registration whose connectedNodeId names a replica that is no longer holding its stream (epic memql#5327, design D7).
+ONE SIGNAL, AND IT IS THE ONE THAT CANNOT LIE. A heartbeat arrives THROUGH the stream on the holding pod, so a pod that has gone cannot be refreshing lastSeenAt -- which means the staleness of that timestamp subsumes any check of which nodes are alive. The audit proposed a second disjunct against live v1:cluster:node rows; it is deliberately not here, because that read can itself be stale, and its staleness would clear the hold of a LIVE pod the node registry had not caught up with.
+The cutoff the caller passes is the online window PLUS one flush interval (component/worker.StaleHoldWindow), because the flush is throttled and a row can legitimately sit one interval behind a perfectly healthy stream.
+`connectedNodeId != nil` is not decoration: a registration with no stamp has nothing to clear, and without the conjunct this would return every disconnected machine in the cluster and write to all of them every two minutes.
+It reads under `actor.isClusterOwner == true` for the reason openModelPulls states at length -- its only caller is a cron under the cluster's MAINTENANCE PRINCIPAL, and writing the conjunct is what makes the failure loud: strip the principal and this returns zero rows, and the filter says why. */
+// Bound concept: v1:worker:registration (machine-readable: BoundConcepts["registrationsWithStaleHold"] in generated_concepts.ts).
+export interface RegistrationsWithStaleHoldArgs {
+  /** A row whose lastSeenAt is older than this is no longer being held by whatever its connectedNodeId names. */
+  lastSeenBefore: string;
+}
+
+export function buildRegistrationsWithStaleHold(args: RegistrationsWithStaleHoldArgs): string {
+  const parts: string[] = [];
+  parts.push("lastSeenBefore: " + renderMemQLValue(args.lastSeenBefore));
+  return "query registrationsWithStaleHold(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    registrationsWithStaleHold(args: RegistrationsWithStaleHoldArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.registrationsWithStaleHold = function (this: QueryClient, args: RegistrationsWithStaleHoldArgs = {} as RegistrationsWithStaleHoldArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("registrationsWithStaleHold", buildRegistrationsWithStaleHold(args), opts);
+};
+
 /** Every release this cluster cut, newest first. Backs the Releases card on the portal's Deployments page.
 TWO TERMS FOR ONE PREDICATE, and both earn their place -- deleting either is the mistake this note exists to prevent.
 `requiresOwner` is the DECISION, named. The owner ask was "only the owners (role) may cut a new version", and this spec (`actor.role == "owner"`) is the same predicate the builtin's Go wall applies as `AccessContext.IsClusterOwner`. Naming it here is what makes the double wall legible: the read and the write visibly agree about who may do this.
@@ -6680,38 +6707,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.routerCallsInWindow = function (this: QueryClient, args: RouterCallsInWindowArgs = {} as RouterCallsInWindowArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("routerCallsInWindow", buildRouterCallsInWindow(args), opts);
-};
-
-/** Every call served by ONE machine in a window, for that machine's sharing ledger.
-SCOPED BY SURFACE, NOT BY OWNER, and the difference is a wrong answer rather than a style choice. `machineOwnerUserId` is deliberately EMPTY for a call a person ran on their own machine -- it names whose machine served a call when that machine was somebody ELSE's -- so `row.machineOwnerUserId == actor.userId` would return only the calls OTHER people ran on your hardware and none of your own. The fold counts the owner's own calls alongside everybody else's, because the figure answers "how busy has this machine been" rather than "how much have I lent it out", so that filter would show near-zero on a machine its owner uses constantly.
-AUTHORIZATION IS THE CALLER'S OWNERSHIP OF THE MACHINE, checked in the builtin before this runs: `fleetSharingLedger` resolves the registration through the caller's own machines and refuses one that is not theirs, which is the same gate the pull and the probe use. The surface argument is then derived from a registration id the caller has already been proven to own, so it cannot be pointed at somebody else's machine by passing a different string.
-It is a SEPARATE query from routerCallsInWindow for that reason: the fold's read is gated on `actor.isClusterOwner`, which is right for a maintenance sweep and returns zero rows for the machine owner this one serves. */
-// Bound concept: v1:router:call (machine-readable: BoundConcepts["routerCallsOnMachine"] in generated_concepts.ts).
-export interface RouterCallsOnMachineArgs {
-  /** The execution surface, as `fleet:<registrationId>`. */
-  surface: string;
-  /** Inclusive lower bound, RFC3339. */
-  since: string;
-  /** Exclusive upper bound, RFC3339. */
-  until: string;
-}
-
-export function buildRouterCallsOnMachine(args: RouterCallsOnMachineArgs): string {
-  const parts: string[] = [];
-  parts.push("surface: " + renderMemQLValue(args.surface));
-  parts.push("since: " + renderMemQLValue(args.since));
-  parts.push("until: " + renderMemQLValue(args.until));
-  return "query routerCallsOnMachine(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    routerCallsOnMachine(args: RouterCallsOnMachineArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.routerCallsOnMachine = function (this: QueryClient, args: RouterCallsOnMachineArgs = {} as RouterCallsOnMachineArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("routerCallsOnMachine", buildRouterCallsOnMachine(args), opts);
 };
 
 /** The recent AI routing decisions, newest first. This is how a rule is checked: a rule set nobody can read the consequences of is a set of assertions.
@@ -11477,7 +11472,8 @@ QueryClient.prototype.workerPairingCodeByHash = function (this: QueryClient, arg
   return this.executeNamed("workerPairingCodeByHash", buildWorkerPairingCodeByHash(args), opts);
 };
 
-/** Hot-path worker-token lookup by keyHash. Returns active + inactive rows. */
+/** Hot-path worker-token lookup by keyHash. Returns active + inactive rows, and matches the ROTATION GRACE hash beside the current one (epic memql#5327, D5). Whether that grace is still open is the RESOLVER's question, against previousKeyExpiresAt: a window is a comparison with now, and a filter that made it would be comparing against a moment nobody chose.
+The `args.keyHash != nil` conjunct is not decoration. A missing field and an empty string are one unset value here, so a blank argument would equal the blank previousKeyHash every never-rotated row carries -- and the query would answer with the whole worker-token population. */
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["workerTokenByKeyHash"] in generated_concepts.ts).
 export interface WorkerTokenByKeyHashArgs {
   keyHash: string;

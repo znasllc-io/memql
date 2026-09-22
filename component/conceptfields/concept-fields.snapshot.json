@@ -2081,6 +2081,7 @@
           "shopifyStore",
           "upstreamIdentity",
           "user",
+          "worker",
           "workerPairingCode"
         ]
       }
@@ -8308,8 +8309,10 @@
         "buildTag",
         "capabilities",
         "capabilityDescriptor",
+        "clockSkewMs",
         "concurrency",
         "connectedNodeId",
+        "credentialExpiresAt",
         "displayName",
         "hardware",
         "identityId",

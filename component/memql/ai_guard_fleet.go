@@ -141,8 +141,28 @@ func (g *llmGuard) admitLocalCall(ctx context.Context, fingerprint string) error
 // vary across a genuine loop and would make every repetition look novel, which
 // is precisely the failure the rate ceiling exists to backstop and the breaker
 // exists to catch cheaply.
+//
+// AND THE ACTING USER (epic memql#5327, design D13). Two people asking the
+// same question on the same replica were sharing a loop-breaker key, so one
+// person's runaway tripped the breaker for the other -- who had made one call.
+// The user is part of "the same call" for the same reason the conversation is:
+// a loop is one caller repeating itself, and a repetition by somebody else is
+// not a repetition at all.
+//
+// ONLY THE BREAKER IS KEYED THIS WAY. The rate ceiling stays per-LANE and the
+// cumulative ceiling stays per-PROCESS, deliberately: those two are the
+// operator's valve on how fast this replica makes model calls at all, and a
+// per-user rate ceiling would let N users collectively exceed the figure an
+// operator set once. The audit's finding (L-8) names this function, and this
+// function is the whole of it.
+//
+// An EMPTY acting user is system work, which is a real caller and gets its own
+// key rather than sharing every user's -- a maintenance sweep repeating itself
+// is exactly as much a runaway as a person is.
 func FleetCallFingerprint(req FleetCallRequest) string {
 	h := sha256.New()
+	h.Write([]byte(req.ActingUserId))
+	h.Write([]byte{0xff})
 	h.Write([]byte(req.ModelId))
 	h.Write([]byte{0})
 	h.Write([]byte(req.Kind))

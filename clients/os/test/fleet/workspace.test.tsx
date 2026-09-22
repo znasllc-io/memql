@@ -42,7 +42,7 @@ it.each([false,true])('returns to Machines after confirmed removal, with another
  await openMachine('Alpha');
  fireEvent.click(await screen.findByRole('button',{name:/Machine details/}));
  fireEvent.click(screen.getByRole('button',{name:'Remove this machine'}));
- fireEvent.click(screen.getByRole('button',{name:'Revoke Alpha'}));
+ fireEvent.click(screen.getByRole('button',{name:'Remove Alpha'}));
  if(other){expect(await screen.findByRole('button',{name:/^Open Beta/})).toBeTruthy();expect(screen.queryByRole('navigation',{name:'Machine views'})).toBeNull();}
  else expect(await screen.findByRole('button',{name:'Connect your first machine'})).toBeTruthy();
  expect(screen.getByRole('heading',{name:'Machines'})).toBeTruthy();
@@ -52,14 +52,14 @@ it.each([false,true])('returns to Machines after confirmed removal, with another
 });
 it('keeps a refused removal on its machine details',async()=>{
  h.connection=fakeConnection({myWorkersWithStatus:[machineRow({id:'a',displayName:'Alpha'})]});
- h.connection.query.revokeWorker.mockRejectedValue(new Error('Removal refused'));fleet();
+ h.connection.query.fleetRevokeMachine.mockRejectedValue(new Error('Removal refused'));fleet();
  await openMachine('Alpha');
  fireEvent.click(await screen.findByRole('button',{name:/Machine details/}));
  fireEvent.click(screen.getByRole('button',{name:'Remove this machine'}));
- fireEvent.click(screen.getByRole('button',{name:'Revoke Alpha'}));
+ fireEvent.click(screen.getByRole('button',{name:'Remove Alpha'}));
  expect(await screen.findByText('Removal refused')).toBeTruthy();
  expect(screen.getByLabelText('Name for Alpha')).toBeTruthy();
- expect(screen.getByRole('button',{name:'Revoke Alpha'})).toBeTruthy();
+ expect(screen.getByRole('button',{name:'Remove Alpha'})).toBeTruthy();
 });
 
 it('selects the first model, keeps a chosen model across heartbeats and falls back when it disappears',async()=>{

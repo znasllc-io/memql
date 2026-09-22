@@ -94,10 +94,22 @@ query call routerDecisionsRecent {
 /// so it cannot be pointed at somebody else's machine by passing a different
 /// string.
 ///
+/// @serverOnly SINCE epic memql#5327 (finding H-3), and the paragraph above is why it had to be.
+/// The gate it describes is real and it was the ONLY one: this query was reachable from the wire
+/// and generated into both SDKs, sitting on v1:router:call, which declares
+/// @rowAuthz(public, requiresIdentity). So any signed-in caller could ask it directly, for any
+/// machine, and read who ran what and when -- the exact metadata the ledger exists to fold away.
+/// actor.userId scoping is not the fix: v1:router:call carries no machine owner to compare an
+/// actor against, and the `userId` on the row is the CALLER of each call rather than the owner of
+/// the hardware, so a self-scoped filter would answer "your own calls" -- a different question,
+/// and not the one the person who lent the machine is asking. The promise is now enforced twice,
+/// and the second enforcement is the one that survives a rewrite of the first.
+///
 /// It is a SEPARATE query from routerCallsInWindow for that reason: the fold's
 /// read is gated on `actor.isClusterOwner`, which is right for a maintenance
 /// sweep and returns zero rows for the machine owner this one serves.
 @unbounded("one machine's calls for one ISO week -- the window is the bound, and the fold needs every call in it to count people correctly")
+@serverOnly
 query call routerCallsOnMachine {
   args {
     /// The execution surface, as `fleet:<registrationId>`.

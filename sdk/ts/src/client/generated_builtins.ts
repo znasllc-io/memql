@@ -963,6 +963,56 @@ QueryClient.prototype.fleetRecommended = function (this: QueryClient, args: Flee
   return this.executeNamed("fleetRecommended", buildFleetRecommended(args), opts);
 };
 
+/** Remove one of YOUR OWN machines from the fleet: revoke its registration AND the credential it connects with, as ONE act. The two used to be separate and the client composed them, which meant a window where the row said removed and the token still worked -- and a surface that made only the first call left a machine that kept its stream and could come back. The registration is resolved through your own machines, so another user's id answers exactly as a made-up one does. Revocation is an UPDATE, never a delete: the row is audit history and its credential's hash must stay taken. The machine's live stream is ended by the cluster within seconds, from whichever replica is holding it. */
+export interface FleetRevokeMachineArgs {
+  /** v1:worker:registration.id of the machine to remove. It must be one of the caller's own. */
+  registrationId: string;
+  /** Why, in the operator's own words, recorded on the row. Optional; an empty reason is recorded as empty rather than invented. */
+  reason?: string;
+}
+
+export function buildFleetRevokeMachine(args: FleetRevokeMachineArgs): string {
+  const parts: string[] = [];
+  parts.push("registrationId: " + renderMemQLValue(args.registrationId));
+  if (args.reason !== undefined) parts.push("reason: " + renderMemQLValue(args.reason));
+  return "builtin fleetRevokeMachine(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    fleetRevokeMachine(args: FleetRevokeMachineArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.fleetRevokeMachine = function (this: QueryClient, args: FleetRevokeMachineArgs = {} as FleetRevokeMachineArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("fleetRevokeMachine", buildFleetRevokeMachine(args), opts);
+};
+
+/** Set the OWNER's half of a machine's sharing consent: `owner` keeps it to yourself, `cluster` offers it to everybody on this cluster. The machine's own half comes from its policy.yaml and is not settable from here -- deliberately, because it is a decision about where the machine IS and only the machine can make it; both halves must say cluster before anybody else's work runs on it. It resolves the machine through YOUR OWN machines, which is the whole reason this is a builtin: the row's tier grants a cluster owner the write, and lending somebody else's hardware to the cluster is not a decision a cluster owner gets to make for them. */
+export interface FleetSetSharingArgs {
+  /** v1:worker:registration.id of the machine to set sharing on. It must be one of the caller's own. */
+  registrationId: string;
+  /** owner or cluster. Anything else is refused rather than read as owner -- a misspelling that silently meant `keep it private` would be safe, and one that silently meant anything else would not. */
+  mode: string;
+}
+
+export function buildFleetSetSharing(args: FleetSetSharingArgs): string {
+  const parts: string[] = [];
+  parts.push("registrationId: " + renderMemQLValue(args.registrationId));
+  parts.push("mode: " + renderMemQLValue(args.mode));
+  return "builtin fleetSetSharing(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    fleetSetSharing(args: FleetSetSharingArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.fleetSetSharing = function (this: QueryClient, args: FleetSetSharingArgs = {} as FleetSetSharingArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("fleetSetSharing", buildFleetSetSharing(args), opts);
+};
+
 /** What one of YOUR OWN machines has done this week: how many calls ran on it, for how many people, and how those calls split across the four levels. COUNTS AND LEVELS, and nothing else -- somebody who lends their machine to the team is entitled to know it is being used and NOT entitled to read what it was used for, so the narrowing happens in the engine before anything leaves it rather than in a renderer that could later be rewritten. People are counted and never named. A read that FAILS answers `readable: false` rather than zero: telling somebody who lent their machine that nobody used it is a specific claim, and a failed read is not evidence for it. */
 export interface FleetSharingLedgerArgs {
   /** v1:worker:registration.id of the machine to report on. It must be one of the caller's own; another user's id answers exactly as a made-up one does. */

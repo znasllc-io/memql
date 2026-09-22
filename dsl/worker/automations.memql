@@ -162,3 +162,39 @@ automation workerModelProbeStaleSweep {
     )
   }
 }
+
+
+// workerStaleConnectionSweep
+// ==========================
+//
+// Every two minutes, clear the connectedNodeId stamps nobody is holding
+// (epic memql#5327, design D7).
+//
+// The cadence is the pull and probe sweeps', for a related but sharper
+// reason: this is not a counter somebody is staring at, it is a machine
+// somebody believes is online. Two minutes is the longest a person should
+// read "connected" about a laptop whose agent replica was killed.
+//
+// It runs on the CRON LEADER, so exactly one replica sweeps, and the stamps it
+// clears belong to replicas that have gone -- which is why it cannot be the
+// stamping replica's own job.
+//
+// It is on the maintenance-principal list (component/auth/maintenance_actor.go)
+// because registrationsWithStaleHold reads across owners BY NATURE: a sweep for
+// abandoned holds cannot know whose machine was stranded before it looks.
+
+/// Every two minutes: blank the connectedNodeId of every machine still naming a replica that
+/// stopped heartbeating. `decide` (pure) returns the stranded rows; the `for` loop clears each one.
+///
+/// THE CLEAR IS UNCONDITIONAL HERE, and that is the one caller entitled to it (design D8). Every
+/// other path passes the node id it expects to still hold the row and abandons the write when
+/// somebody else has taken over; this one is clearing a stamp precisely on the evidence that nobody
+/// is holding the stream, so there is no successor to protect. A live successor re-stamps on its
+/// very next flush.
+@trigger(schedule="0 */2 * * * *")
+automation workerStaleConnectionSweep {
+  decide := logic workerStaleConnectionSweep(event: event)
+  for item in decide {
+    mutation clearWorkerConnectedNode(registrationId: item.id)
+  }
+}

@@ -13,7 +13,11 @@ import (
 // hardware_test.go; what is tested here is the WIRING, which has its own
 // decisions and its own way of going wrong.
 
+// hardwareBeat is beatAt carrying an inventory. It moves the server's clock
+// for beatAt's reason (design D6): the throttle these tests walk is a
+// comparison against the SERVER's now.
 func hardwareBeat(s *streamSession, at time.Time, inv *memqlv1.HardwareInventory) {
+	s.server.clock = func() time.Time { return at }
 	s.handleHeartbeat(&memqlv1.Heartbeat{
 		Ts:              timestamppb.New(at),
 		Hardware:        inv,

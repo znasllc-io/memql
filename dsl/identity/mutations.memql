@@ -640,7 +640,7 @@ mutation auditEvent createAuditEvent {
     actorEmail       string
     actorRole        string
     actorIdentityId  string
-    targetType       enum("user", "session", "identity", "invitation", "accessRequest", "config", "magicLinkRequest", "authCode", "clusterSettings", "deviceCode", "delegation", "workerPairingCode", "enrolmentToken", "passkeyIdentity", "badgeIdentity", "appSession", "shopifyStore", "releaseCut", "oauthClient", "upstreamIdentity", "rowOwnership", "githubGrant", "role", "group", "groupMembership", "grant")
+    targetType       enum("user", "session", "identity", "invitation", "accessRequest", "config", "magicLinkRequest", "authCode", "clusterSettings", "deviceCode", "delegation", "workerPairingCode", "enrolmentToken", "passkeyIdentity", "badgeIdentity", "appSession", "shopifyStore", "releaseCut", "oauthClient", "upstreamIdentity", "rowOwnership", "githubGrant", "role", "group", "groupMembership", "grant", "worker")
     targetId         string
     targetEmail      string
     detail           object
@@ -2016,6 +2016,63 @@ mutation identity revokePATIdentity {
   update {
     id: args.identityId
     active: false
+  }
+}
+
+// ---- mutations/v1/identity/rotateWorkerTokenIdentity.memql ----
+
+// rotateWorkerTokenIdentity
+// =========================
+//
+// Renews a worker token IN PLACE (epic memql#5327, design D5): a fresh
+// keyHash, a fresh expiresAt, and the hash being replaced parked in
+// previousKeyHash under a short grace.
+//
+// THE SAME ROW, and that is the ruling rather than an implementation detail.
+// v1:worker:registration binds to `identityId`, so minting a new identity
+// would unbind the registration and send the machine through machine-key
+// reclaim on its next connect -- which is the duplicate-row lineage ef64aa3
+// exists to prevent, triggered deliberately every ninety days.
+//
+// @mergeFields("credentials") for recordPasskeyAssertion's reason: this
+// mutation names four leaves of a variant that has nine, and a wholesale
+// replace would destroy `name`, `registeredBy`, the advertised snapshots and
+// the connect audit fields on every rotation. The annotation is what makes a
+// partial nested write partial.
+
+/// Rotate a worker_token identity's credential in place: new keyHash and expiresAt, with the
+/// displaced hash parked in previousKeyHash until previousKeyExpiresAt. The registration binds to
+/// this row's id, so rotation must not mint a second row.
+///
+/// @serverOnly because the caller cannot be scoped to actor.userId and, more to the point, cannot
+/// be a client at all. What it writes is the SHA-256 of a plaintext this mutation's caller minted
+/// one instant earlier and will hand to exactly one machine -- so a client-callable form would
+/// either accept a hash somebody else chose (which is a credential the server never issued) or
+/// mint one and have no stream to deliver it on. The one caller is the live WorkerService stream
+/// answering a RotationRequest, through component/identity/workertoken, which stamps internal
+/// origin for this call and nothing else.
+@mergeFields("credentials")
+@serverOnly
+mutation identity rotateWorkerTokenIdentity {
+  args {
+    identityId            string!
+    keyHash               string!
+    /// The displaced hash. ABSENT opens no grace and CLEARS any stale one --
+    /// which is the same write, because a grace nobody is inside is a second
+    /// credential waiting to be found.
+    previousKeyHash       string
+    previousKeyExpiresAt  string
+    expiresAt             string!
+  }
+  update {
+    id: args.identityId
+    credentials: {
+        keyHash: args.keyHash,
+        previousKeyHash: args.previousKeyHash ?? "",
+        previousKeyExpiresAt: args.previousKeyExpiresAt ?? "",
+        expiresAt: args.expiresAt
+      }
+    active: true
   }
 }
 

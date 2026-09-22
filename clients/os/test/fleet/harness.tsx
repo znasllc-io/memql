@@ -58,7 +58,7 @@ export interface FakeQuery {
   appSessionById: ReturnType<typeof vi.fn>;
   renameWorker: ReturnType<typeof vi.fn>;
   setWorkerOperatorLabels: ReturnType<typeof vi.fn>;
-  revokeWorker: ReturnType<typeof vi.fn>;
+  fleetRevokeMachine: ReturnType<typeof vi.fn>;
   createRoutingPolicy: ReturnType<typeof vi.fn>;
   updateRoutingPolicy: ReturnType<typeof vi.fn>;
   setDelegationPolicy: ReturnType<typeof vi.fn>;
@@ -73,7 +73,7 @@ export interface FakeQuery {
   fleetSharingLedger: ReturnType<typeof vi.fn>;
   fleetPullRecommended: ReturnType<typeof vi.fn>;
   fleetModelProbe: ReturnType<typeof vi.fn>;
-  setWorkerSharing: ReturnType<typeof vi.fn>;
+  fleetSetSharing: ReturnType<typeof vi.fn>;
 }
 
 // The subscription seam, faithful to the one bit of it a collection uses:
@@ -150,7 +150,21 @@ export function fakeConnection(seed: Partial<Record<keyof FakeQuery, Row[]>> = {
       appSessionById: read("appSessionById"),
       renameWorker: vi.fn(async () => rowsResult([])),
       setWorkerOperatorLabels: vi.fn(async () => rowsResult([])),
-      revokeWorker: vi.fn(async () => rowsResult([])),
+      // The removal builtin answers a RECEIPT row (epic memql#5327, design
+      // D2): a removal is two writes -- the registration and the credential --
+      // and the surface has to be able to say which of them landed.
+      fleetRevokeMachine: vi.fn(async () =>
+        rowsResult([
+          {
+            machineId: "v1:worker:registration:live",
+            registrationState: "revoked",
+            credentialState: "revoked",
+            alreadyRevoked: false,
+            sentence:
+              "Removed. The machine is out of the fleet and its credential no longer connects.",
+          },
+        ]),
+      ),
       createRoutingPolicy: vi.fn(async () => rowsResult([])),
       updateRoutingPolicy: vi.fn(async () => rowsResult([])),
       setDelegationPolicy: vi.fn(async () => rowsResult([])),
@@ -160,7 +174,7 @@ export function fakeConnection(seed: Partial<Record<keyof FakeQuery, Row[]>> = {
       fleetSharingLedger: read("fleetSharingLedger"),
       fleetPullRecommended: vi.fn(async () => rowsResult([])),
       fleetModelProbe: vi.fn(async () => rowsResult([])),
-      setWorkerSharing: vi.fn(async () => rowsResult([])),
+      fleetSetSharing: vi.fn(async () => rowsResult([])),
     },
     subscriptions: fakeSubscriptions(),
     dispatcher: { sendAndWait: vi.fn() },

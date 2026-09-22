@@ -57,6 +57,42 @@ func surfaceOf(p any) string {
 	return r.ExecutionSurface()
 }
 
+// machineOwnerReporter is what a provider says about WHOSE MACHINE served the
+// most recent call.
+//
+// STRUCTURAL, beside surfaceReporter and for its reason: component/router pins
+// the root module at a published version and cannot name a method that exists
+// only in the working tree.
+//
+// IT IS THE FOURTH ACCESSOR-SHAPED GAP IN THIS FILE, and the same shape as the
+// first: `v1:router:call.machineOwnerUserId` and `Decision.MachineOwnerUserId`
+// both existed, both were documented as "empty until shared team machines
+// land", and the machines landed without the one line between them (epic
+// memql#5327, design D15). Nothing failed, because an empty string is a value
+// -- so no row in any cluster said that one person's call had run on another
+// person's hardware, which is the single fact a shared fleet adds to the
+// ledger and the one thing the person who lent the machine is entitled to.
+//
+// EMPTY MEANS "NOT SOMEBODY ELSE'S", not "unknown". A vendor provider does not
+// implement this at all; a fleet provider answers empty for a call on the
+// caller's OWN machine. Both are the true reading, and folding them together
+// is deliberate: the question is whether this call used somebody else's
+// hardware, and for both of them the answer is no.
+type machineOwnerReporter interface {
+	// MachineOwner names the owner of the machine that served the most recent
+	// call, and "" when that owner is the caller or there was no machine.
+	MachineOwner() string
+}
+
+// machineOwnerOf asks a provider whose machine served the call.
+func machineOwnerOf(p any) string {
+	r, ok := p.(machineOwnerReporter)
+	if !ok {
+		return ""
+	}
+	return r.MachineOwner()
+}
+
 // servedModelReporter is what a provider says about the model that ACTUALLY
 // served the most recent call, and at what reasoning effort.
 //

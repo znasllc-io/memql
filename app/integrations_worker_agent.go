@@ -84,24 +84,61 @@ func (a *App) setupWorkerService() {
 
 	a.workerService = svc
 	a.Dependencies = append(a.Dependencies, svc)
+
+	// THE REGISTRATION WATCHER (epic memql#5327, design D1). One subscriber,
+	// two decisions: end this replica's stream for a machine whose row has
+	// been revoked, and end it for one another replica has taken over.
+	//
+	// It is wired HERE rather than inside worker.Service because it needs the
+	// event bus, which the service has no business holding: the service owns
+	// streams, and this reads the graph. The same split
+	// edge.SiteInvalidationSubscriber makes, for the same reason.
+	//
+	// The node id comes off the SERVICE rather than from MEMQL_NODE_ID again,
+	// exactly as the dispatcher's does above and for a sharper version of the
+	// same reason: the service is what stamps connectedNodeId, and a watcher
+	// that disagreed about which node it is would read every one of its own
+	// stamps as somebody else's and drain every stream it holds.
+	a.Dependencies = append(a.Dependencies, worker.NewRegistrationEventSubscriber(
+		a.Logger,
+		a.eventBus,
+		worker.NewRegistrationWatcher(svc.Registry(), svc.NodeId(), a.Logger),
+	))
+
 	a.Logger.Info("worker service registered on agent node")
 }
 
-// workerAuditorForApp resolves an Auditor for the agent build. The
-// agent node typically does not own an identity AuditLogger (those
-// live on the identity binary); for now we hand back a NoopAuditor
-// and the SlogAuditLogger gets wired during identity rollout when
-// audit relays for non-identity nodes go in.
+// workerAuditorForApp resolves an Auditor for the agent build (epic
+// memql#5327, design D14).
+//
+// IT RETURNED NoopAuditor, and the comment that stood here explained why that
+// was temporary: "the agent node typically does not own an identity
+// AuditLogger (those live on the identity binary) ... the SlogAuditLogger gets
+// wired during identity rollout when audit relays for non-identity nodes go
+// in." The relay never landed and the no-op did, so every `worker_registered`
+// and `worker_disconnected` the stream server emitted -- on every agent
+// replica, for every machine, for the life of the feature -- went nowhere.
+// Pairing a machine was audited; connecting one was not.
+//
+// No relay is needed. v1:identity:auditEvent is an ordinary graph concept and
+// identity.EngineAuditSink writes it through createAuditEvent like any other
+// Go writer -- which is exactly what component/packages does from a
+// non-identity node. The slog stream stays the always-on destination and the
+// row is best-effort beside it, which is SlogAuditLogger's own contract.
 func workerAuditorForApp(a *App) worker.Auditor {
-	if a == nil {
+	if a == nil || a.engine == nil {
+		// No engine means no row to write. The slog half would still work,
+		// but a logger with no sink is what the no-op already was and
+		// pretending otherwise helps nobody.
 		return worker.NoopAuditor{}
 	}
-	// Identity service exposes the audit logger interface only on
-	// identity-tagged binaries; a future identity-side relay will
-	// publish audit events back to agent nodes for cross-cutting
-	// security telemetry. Until then this is a no-op.
-	var _ identity.AuditLogger = (*identity.SlogAuditLogger)(nil)
-	return worker.NoopAuditor{}
+	return &worker.IdentityAuditor{
+		Logger: a.Logger,
+		AuditLogger: &identity.SlogAuditLogger{
+			Logger: a.Logger,
+			DB:     &identity.EngineAuditSink{Engine: a.engine, Logger: a.Logger},
+		},
+	}
 }
 
 // ErrWorkerNotConfigured is returned by helpers that look up the

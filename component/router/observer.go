@@ -214,18 +214,25 @@ func buildRecord(
 		// which rule decided and what it passed over, and a second answer
 		// computed here from the provider name would be a guess that agrees
 		// most of the time.
-		PolicyName:         resolved.PolicyName,
-		Level:              string(resolved.Decision.Level),
-		RequestedLevel:     string(resolved.Decision.RequestedLevel),
-		ServedLevel:        string(resolved.Decision.ServedLevel),
-		Degraded:           resolved.Decision.Degraded,
-		Rule:               resolved.Decision.Rule,
-		Policy:             resolved.Decision.Policy,
-		Door:               resolved.Decision.Door,
-		Considered:         resolved.Decision.Considered,
-		Touches:            resolved.Decision.Touches,
-		MinContextTokens:   resolved.Decision.MinContextTokens,
-		MachineOwnerUserId: resolved.Decision.MachineOwnerUserId,
+		PolicyName:       resolved.PolicyName,
+		Level:            string(resolved.Decision.Level),
+		RequestedLevel:   string(resolved.Decision.RequestedLevel),
+		ServedLevel:      string(resolved.Decision.ServedLevel),
+		Degraded:         resolved.Decision.Degraded,
+		Rule:             resolved.Decision.Rule,
+		Policy:           resolved.Decision.Policy,
+		Door:             resolved.Decision.Door,
+		Considered:       resolved.Decision.Considered,
+		Touches:          resolved.Decision.Touches,
+		MinContextTokens: resolved.Decision.MinContextTokens,
+		// WHOSE MACHINE. Asked of the PROVIDER and falling back to the
+		// resolution, in that order, because only the provider knows: the
+		// router resolves a door and a model, and which machine in a fleet
+		// answered is decided after that, by the fleet's own routing. The
+		// resolution's value is kept as the fallback rather than dropped --
+		// a future door that decides the machine up front would set it there,
+		// and a provider that says nothing must not blank what it knew.
+		MachineOwnerUserId: firstNonEmpty(machineOwnerOf(inner), resolved.Decision.MachineOwnerUserId),
 
 		// WHERE IT RAN. See execution_surface.go: the field and the column
 		// both predate this line, and nothing ever assigned it -- so every

@@ -479,6 +479,43 @@ query modelPull openModelPulls {
   shape   workerModelPullFull
 }
 
+/// Every registration whose connectedNodeId names a replica that is no longer holding its stream
+/// (epic memql#5327, design D7).
+///
+/// ONE SIGNAL, AND IT IS THE ONE THAT CANNOT LIE. A heartbeat arrives THROUGH the stream on the
+/// holding pod, so a pod that has gone cannot be refreshing lastSeenAt -- which means the staleness
+/// of that timestamp subsumes any check of which nodes are alive. The audit proposed a second
+/// disjunct against live v1:cluster:node rows; it is deliberately not here, because that read can
+/// itself be stale, and its staleness would clear the hold of a LIVE pod the node registry had not
+/// caught up with.
+///
+/// The cutoff the caller passes is the online window PLUS one flush interval
+/// (component/worker.StaleHoldWindow), because the flush is throttled and a row can legitimately
+/// sit one interval behind a perfectly healthy stream.
+///
+/// `connectedNodeId != nil` is not decoration: a registration with no stamp has nothing to clear,
+/// and without the conjunct this would return every disconnected machine in the cluster and write
+/// to all of them every two minutes.
+///
+/// It reads under `actor.isClusterOwner == true` for the reason openModelPulls states at length --
+/// its only caller is a cron under the cluster's MAINTENANCE PRINCIPAL, and writing the conjunct is
+/// what makes the failure loud: strip the principal and this returns zero rows, and the filter says
+/// why.
+@actor
+@unbounded("stale-hold sweep -- an internal sweep that must see every registration still naming a holder")
+query registration registrationsWithStaleHold {
+  args {
+    /// A row whose lastSeenAt is older than this is no longer being held by whatever its
+    /// connectedNodeId names.
+    lastSeenBefore  string!
+  }
+  filter  row => actor.isClusterOwner == true
+              && row.connectedNodeId != nil
+              && row.revokedAt == nil
+              && row.lastSeenAt < args.lastSeenBefore
+  shape   workerRegistrationFull
+}
+
 /// The CALLER'S probes for one machine, newest first (epic memql#5146). Backs the machine detail's
 /// Models group: a live probe renders its case counter, and finished ones answer "when was this
 /// measured, and did it work".

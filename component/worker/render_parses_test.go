@@ -38,6 +38,7 @@ import (
 	"time"
 
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/identity/workertoken"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
@@ -174,30 +175,58 @@ func writeDrivers() []driver {
 			return s.UpdatePermissions(ctx, reg.ID, testOwner, map[string]any{"accessibility_state": "unknown", "detail": awkwardText, "probe_context": "worker-process"})
 		}},
 		{"UpdateLastSeen", func(ctx context.Context, s *EngineStore) error {
-			return s.UpdateLastSeen(ctx, reg.ID, testOwner, at, "203.0.113.7", "agent-1", 2, nil, 0, time.Time{})
+			return s.UpdateLastSeen(ctx, HeartbeatFlush{
+				RegistrationId:  reg.ID,
+				OwnerUserId:     testOwner,
+				LastSeenAt:      at,
+				SourceIP:        "203.0.113.7",
+				ConnectedNodeId: "agent-1",
+				ActiveCount:     2,
+			})
 		}},
 		{"UpdateLastSeenWithHardware", func(ctx context.Context, s *EngineStore) error {
 			// The nested-object case. A hardware row carries an object inside an
 			// object and a list of objects, which is where a renderer that omits
 			// separators produces MemQL that lexes as one long identifier and
 			// fails at a place naming nothing in this file.
-			return s.UpdateLastSeen(ctx, reg.ID, testOwner, at, "203.0.113.7", "agent-1", 2, awkwardHardware(at), 0, time.Time{})
+			return s.UpdateLastSeen(ctx, HeartbeatFlush{
+				RegistrationId:  reg.ID,
+				OwnerUserId:     testOwner,
+				LastSeenAt:      at,
+				SourceIP:        "203.0.113.7",
+				ConnectedNodeId: "agent-1",
+				ActiveCount:     2,
+				Hardware:        awkwardHardware(at),
+			})
 		}},
 		{"UpdateLastSeenWithRoundTrip", func(ctx context.Context, s *EngineStore) error {
 			// The measured case (epic memql#5218, D11): rttMs and rttAt are on
 			// the call only when rttAt is set, so this is the one driver that
 			// renders them at all.
-			return s.UpdateLastSeen(ctx, reg.ID, testOwner, at, "203.0.113.7", "agent-1", 2, nil, 12, at)
+			return s.UpdateLastSeen(ctx, HeartbeatFlush{
+				RegistrationId:  reg.ID,
+				OwnerUserId:     testOwner,
+				LastSeenAt:      at,
+				SourceIP:        "203.0.113.7",
+				ConnectedNodeId: "agent-1",
+				ActiveCount:     2,
+				RttMs:           12,
+				RttAt:           at,
+				// The two optional fields epic memql#5327 added, driven
+				// PRESENT here so the statement this renders carries them:
+				// a driver that left them out would parse a call that is
+				// missing exactly the arguments most likely to be wrong.
+				ClockSkewMs:         -1234,
+				ClockSkewSeen:       true,
+				CredentialExpiresAt: at.Add(90 * 24 * time.Hour),
+			})
 		}},
 		{"UpdateHardware", func(ctx context.Context, s *EngineStore) error {
 			return s.UpdateHardware(ctx, reg.ID, testOwner, awkwardHardware(at),
 				map[string]string{"runtime:ollama": "0.5.4", "note": awkwardText}, at, "203.0.113.7")
 		}},
 		{"ClearConnectedNode", func(ctx context.Context, s *EngineStore) error {
-			return s.ClearConnectedNode(ctx, reg.ID, testOwner)
-		}},
-		{"RevokeRegistration", func(ctx context.Context, s *EngineStore) error {
-			return s.RevokeRegistration(ctx, reg.ID, testOwner, "v1:identity:user:admin-1", awkwardText, at)
+			return s.ClearConnectedNode(ctx, reg.ID, testOwner, "")
 		}},
 		{"UpdateApps", func(ctx context.Context, s *EngineStore) error {
 			return s.UpdateApps(ctx, reg.ID, testOwner, reg.Apps,
@@ -246,6 +275,21 @@ func writeDrivers() []driver {
 		{"ClaimRecordingSlot", func(ctx context.Context, s *EngineStore) error {
 			_, _ = s.ClaimRecordingSlot(ctx, sess.ID, sess.OwnerUserId)
 			return nil
+		}},
+		{"RevokeIdentity", func(ctx context.Context, s *EngineStore) error {
+			return s.RevokeIdentity(ctx, "v1:identity:identity:wid-1")
+		}},
+		// The RENDERING half only. RotateIdentity reads the credential first,
+		// through workertoken.Store.ListForUser, which renders an @serverOnly
+		// query under an internal-origin context of its own -- and this test's
+		// resolve step parses a bare statement with no origin, so driving the
+		// whole method here would fail on the read for a reason that has
+		// nothing to do with what it is checking. That read is parsed by
+		// component/identity's own tests; the mutation this package causes is
+		// parsed here.
+		{"RotateIdentity", func(ctx context.Context, s *EngineStore) error {
+			return (&workertoken.Store{Engine: s.Engine}).Rotate(ctx,
+				"v1:identity:identity:wid-1", "b2c3", "a1f0", at.Add(workertoken.DefaultTTL))
 		}},
 	}
 }
@@ -336,6 +380,7 @@ func TestEveryWriteMethodIsDriven(t *testing.T) {
 		"WorkerByIdentityId":  "reads a registration by identity id",
 		"WorkersForUser":      "lists an owner's registrations",
 		"IdentityByTokenHash": "resolves a presented mql_wkr_ token",
+		"IdentityById":        "re-resolves a live stream's credential (design D3)",
 	}
 
 	driven := make(map[string]bool, len(writeDrivers()))

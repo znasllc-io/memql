@@ -119,6 +119,18 @@ func TestMaintenanceAutomationsAreArgued(t *testing.T) {
 		// the principal it returns zero rows and no error -- leaving a
 		// progress bar on somebody's screen that will never move again.
 		"workerModelPullStaleSweep",
+		// workerStaleConnectionSweep (epic memql#5327, design D7) is the
+		// third worker sweep and the one whose absence was a LIE rather than
+		// a stall. The two above close rows somebody is WATCHING, so their
+		// cost is a spinner; this one corrects a row somebody is BELIEVING,
+		// and the belief is "that machine is up". connectedNodeId names the
+		// replica holding a stream and is cleared only by a graceful close,
+		// which a SIGKILLed pod does not perform and every redeploy causes.
+		// Its read spans owners for the reason theirs do -- a sweep for
+		// stranded holds cannot know whose machine was stranded before it
+		// looks -- and without the principal it returns zero rows and no
+		// error on a cluster where every stamp is dead.
+		"workerStaleConnectionSweep",
 	}
 	got := auth.MaintenanceAutomationNames()
 	if strings.Join(got, ",") != strings.Join(want, ",") {

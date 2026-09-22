@@ -26,8 +26,27 @@ func newHeartbeatTestSession(store Store, clock func() time.Time) *streamSession
 	return newStreamSession(srv, nil, w, ctx, cancel)
 }
 
+// beatAt delivers one heartbeat AT a moment.
+//
+// It moves the SERVER's clock as well as the beat's own stamp, and since epic
+// memql#5327 design D6 that is the whole reason this helper exists rather than
+// a literal Heartbeat: lastSeenAt and the flush throttle both read the
+// server's clock now, so a test that advanced only the beat's timestamp would
+// be advancing the one value the handler no longer uses -- and every
+// interval-boundary assertion in this file would pass by never flushing at
+// all. Moving both is a machine whose clock agrees with the cluster's, which
+// is what every test here means by a beat.
 func beatAt(s *streamSession, at time.Time) {
+	s.server.clock = func() time.Time { return at }
 	s.handleHeartbeat(&memqlv1.Heartbeat{Ts: timestamppb.New(at)}, "10.0.0.1:1234")
+}
+
+// beatAtWithClientClock is beatAt with the two clocks DELIBERATELY disagreeing
+// -- the cluster at `serverNow`, the machine at `clientNow`. It is what the
+// skew assertions drive, and what the rest of this file must never use.
+func beatAtWithClientClock(s *streamSession, serverNow, clientNow time.Time) {
+	s.server.clock = func() time.Time { return serverNow }
+	s.handleHeartbeat(&memqlv1.Heartbeat{Ts: timestamppb.New(clientNow)}, "10.0.0.1:1234")
 }
 
 // TestHandleHeartbeat_BatchesPersistence is the memql#1340 contract:
