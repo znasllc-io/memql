@@ -315,8 +315,8 @@ func TestArtifactEnumValuesDerivedFromDSL(t *testing.T) {
 	}
 
 	source := artifactEnumValues["source"]
-	if len(source) != 9 {
-		t.Fatalf("artifactEnumValues[\"source\"] has %d values, want 9 (memql#4298: the hand-maintained "+
+	if len(source) != 10 {
+		t.Fatalf("artifactEnumValues[\"source\"] has %d values, want 10 (memql#4298: the hand-maintained "+
 			"list silently dropped one -- \"user_created\" -- and the derivation must not repeat that): %v",
 			len(source), source)
 	}
@@ -329,9 +329,15 @@ func TestArtifactEnumValuesDerivedFromDSL(t *testing.T) {
 	// "app_session" joined in epic memql#5396: a delegated app session stores the
 	// contents it read and wrote, and its own transcript, as v1:library:file rows,
 	// and the same promotion passes that source through to the index.
+	// "vision_input" joined in issue memql#5523: a vision call through the app
+	// door stages each image as a v1:library:file so the session's workspace can
+	// hold it, and the same promotion carries that source to the index. Its own
+	// value rather than app_session's, because the two are opposite directions
+	// -- a file the session RECORDED versus one the engine wrote FOR it to read
+	// -- and the archive at session end is keyed on telling them apart.
 	wantSource := []string{
 		"uploaded", "exported", "workbench_generated", "computer_use", "agent_generated",
-		"derived", "user_created", "live", "app_session",
+		"derived", "user_created", "live", "app_session", "vision_input",
 	}
 	if !slices.Equal(source, wantSource) {
 		t.Fatalf("artifactEnumValues[\"source\"] = %v, want %v", source, wantSource)

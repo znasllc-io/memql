@@ -40,6 +40,22 @@ import (
 // configured". Declaring the connector on those concepts would have made the
 // admission rule pass by writing down something untrue.
 //
+// # THERE IS A SAME-NAMED SIBLING, AND IT IS NOT THIS
+//
+// `component/identity.ContextWithSystemActor(ctx)` exists and does something
+// else: it is the IDENTITY SERVICE's own operator envelope, at a fixed
+// subject, and it GUARDS -- a context already carrying a TokenInfo is returned
+// untouched, so it can never escalate a real caller. This one is named, takes
+// no view of what is already on the context, and is about the deployment
+// rather than about that service. Both are package-qualified at every call
+// site; the note is here because the names alone would have a reader assume
+// one is the other.
+//
+// One knock-on worth stating, since it moves in the safe direction: now that
+// ContextWithConnectorActor stamps a TokenInfo, a connector context reaching
+// identity's guard is left ALONE rather than promoted to that service's owner
+// envelope. Narrower than before.
+//
 // # It is an IDENTITY, and deliberately not an origin
 //
 // ContextWithSystemActor stamps WHO is acting and nothing else. Internal
