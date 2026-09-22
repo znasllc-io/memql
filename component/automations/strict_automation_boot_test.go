@@ -158,7 +158,7 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // in the mirror under a store somebody is exercising a candidate against. One
 // added, none removed, which is what the count says and a diff of a list could
 // not have.
-const shippedAutomationCount = 61
+const shippedAutomationCount = 63
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):
