@@ -3,11 +3,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ownershipState, nativeIdentity, identityEntry, identityLocation } from "../../src/auth/nativeIdentity";
 import { OwnershipWizard } from "../../src/auth/OwnershipWizard";
 import { IdentityAccount } from "../../src/apps/identity/IdentityAccount";
+import { probeSession } from "../../src/auth/identityClient";
 
 const config = { identityUrl: "https://identity.example.test", identityApiBaseUrl: "", oauthClientId: "os", authEnabled: true, domain: "example.test" };
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.replaceState({}, "", "/"); });
 
 describe("identity authority", () => {
+  it("does not present an identity outage as signed out", async () => {
+    vi.stubGlobal("navigator", { locks: { request: (_name: string, _options: unknown, run: () => Promise<Response>) => run() } });
+    await expect(probeSession(config, async () => new Response("", { status: 503 }))).rejects.toThrow("unavailable");
+    expect(await probeSession(config, async () => new Response("", { status: 401 }))).toEqual({ signedIn: false });
+  });
   it.each([503, 500, 404])("never turns an HTTP %s into unclaimed", async status => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: "Unavailable" }), { status })));
     await expect(ownershipState(config)).rejects.toThrow();
@@ -63,4 +69,13 @@ it("requires the server's revocation warning and keeps unknown sessions distinct
   expect(screen.getByRole("alert").textContent).toContain("You will lose access");
   fireEvent.click(screen.getByRole("button", { name: "Revoke passkey" }));
   expect(submit).toHaveBeenCalledWith("/me/devices/passkeys/revoke", { id: "key", confirm: "yes" });
+});
+
+it("requires allowed domains before choosing domain-restricted registration", () => {
+  render(<OwnershipWizard data={{ PrefillOwnerFirstName: "Ada", PrefillOwnerLastName: "Lovelace", PrefillOwnerEmail: "ada@example.test", PrefillDomain: "example.test", PrefillMode: "domain_restricted" }} busy={false} error="" submit={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+  fireEvent.change(screen.getByLabelText("Approved email domains (comma-separated)"), { target: { value: "example.test" } });
+  expect(screen.getByRole("button", { name: "Continue" })).toBeTruthy();
 });

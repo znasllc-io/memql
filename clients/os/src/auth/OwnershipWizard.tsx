@@ -25,8 +25,9 @@ export function OwnershipWizard({ data, busy, error, submit }: {
     id={name} label={label} value={form[name] || ""} onChange={next => setForm(f => ({ ...f, [name]: next }))}>
     {options.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
   </Select></Field>;
-  const valid = step === 0 ? Boolean((form.owner_first_name || "").trim() && (form.owner_last_name || "").trim() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.owner_email || ""))
-    : step === 1 ? Boolean((form.domain || "").trim()) : true;
+  const valid = step === 0 ? Boolean((form.owner_first_name || "").trim() && (form.owner_last_name || "").trim() && /^[^\s@]+@[^\s@]+$/.test(form.owner_email || ""))
+    : step === 1 ? Boolean((form.domain || "").trim())
+    : step === 2 && form.registration_mode === "domain_restricted" ? Boolean((form.registration_domains || "").trim()) : true;
   const bodies = [
     <div className="os-identity-fields">{field("owner_first_name", "First name", "text", true)}{field("owner_last_name", "Last name", "text", true)}
       {field("owner_email", "Owner email", "email", true)}<p>Verify this address to become the cluster owner.</p>

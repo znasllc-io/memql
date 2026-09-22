@@ -2,7 +2,15 @@
 .os-identity-gate > .os-wizard { min-height: 100dvh; }
 .os-identity-page { padding: clamp(1.25rem, 4vw, 3rem); overflow: auto; }
 .os-identity-fields { max-width: 36rem; display: grid; gap: 1rem; }
-.os-identity-fields p { line-height: 1.6; overflow-wrap: anywhere; }
+.os-identity-fields p { margin: 0; line-height: 1.6; overflow-wrap: anywhere; }
 .os-identity-actions { display: flex; gap: .75rem; flex-wrap: wrap; }
 .os-identity-legal { white-space: pre-wrap; font: inherit; }
-.os-identity-record { border-bottom: 1px solid var(--os-line); padding-block: 1rem; display: grid; gap: .75rem; }
+.os-identity-record { border-bottom: 1px solid var(--os-line); padding-block: 1rem; display: grid; gap: .5rem; }
+
+.os-identity-panel { height: 100%; min-height: 0; overflow: auto; }
+
+.os-identity-fields h2 { margin: .5rem 0 0; font-size: var(--os-text-lg); }
+.os-identity-fields .os-button { justify-self: start; }
+.os-identity-fields dl { display: grid; gap: 1rem; margin: 0; }
+.os-identity-fields dt { color: var(--os-muted); font-size: var(--os-text-sm); }
+.os-identity-fields dd { margin: .25rem 0 0; }

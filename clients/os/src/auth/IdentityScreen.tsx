@@ -148,7 +148,7 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
     case "legal_view": body = <pre className="os-identity-legal">{value(data, "Body")}</pre>; break;
     default: body = page ? <p>{value(data, "Message") || "You can continue to MemQL OS."}</p> : <p>{busy ? "Opening identity…" : "Identity could not be opened."}</p>;
   }
-  return <div className={embedded ? "os-identity-page" : "os-identity-gate"}><div className="os-identity-page">
+  return <div className={embedded ? "os-identity-panel" : "os-identity-gate"}><div className="os-identity-page">
     <Head title={title} />{!embedded && <Fingerprint size={32} aria-hidden="true" />}
     {data.Flash && <p role="status">{data.Flash.Message}</p>}{error && <p role="alert">{error}</p>}
     <div className="os-identity-fields">{body}</div>
