@@ -150,6 +150,15 @@ var (
 		Name:      "activity_pruned_total",
 		Help:      "IDENTITY NODES ONLY -- select app=\"identity\"; every other node type exports this at a constant 0 because only the identity node runs the sweep. Rows hard-deleted from v1:identity:authActivity by the daily retention job, past MEMQL_IDENTITY_AUTH_ACTIVITY_RETENTION_DAYS (default 30). Unlike v1:identity:auditEvent's observe-only sweep, this one really deletes, so the counter measures work done rather than work identified. A steady non-zero rate is NORMAL and is what the job existing looks like. Alert on a FLAT ZERO over more than a day on a cluster that authenticates anyone -- that means the sweep is not running, and the first thing to break is refresh-token REUSE DETECTION, which reaches back exactly as far as this window and degrades silently to \"stale cookie\" when the rows it keys on are neither pruned nor present.",
 	})
+	moduleReadinessRowsPurged = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: "readiness",
+			Name:      "rows_purged_total",
+			Help:      "BFF NODES ONLY, and of those only the ONE holding the topology-reconciler lease -- every other node and node type exports this at a constant 0. Versions hard-deleted from v1:platform:moduleReadiness because the node that reported them is stopped (memql#5325), labelled by `path`: `retired` is the reconciler purging a node it has just recorded stopped, `swept` is the ten-minute pass that collects whatever the 30-minute prune cron retired instead and whatever an older engine left behind. A version count, not a row count: a row's whole history goes, so one stopped pod usually shows as seven or more. THE SHAPE IS BURSTY AND ZERO IS NORMAL: a cluster that is not rolling retires nobody, so a flat zero for days means nothing is wrong -- which is why there is nothing here to alert on. What to read it for is the OTHER direction: a `swept` rate that never falls to zero while `retired` stays at zero says the fast path is not running (no leader, or the purge failing) and the sweep is carrying it alone; a sustained rate on either with no deploys says something is retiring nodes that should be live, and v1:cluster:node is where to look.",
+		},
+		[]string{"path"},
+	)
 	aiFederationExchanges = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
@@ -231,6 +240,7 @@ func init() {
 		identitySigningKeyRotationSupported,
 		subscriptionRowsDenied,
 		authActivityPruned,
+		moduleReadinessRowsPurged,
 		siteTrafficWritten,
 		siteTrafficDropped,
 		aiFederationExchanges,
@@ -537,6 +547,34 @@ func AuthActivityPruned(n int64) {
 func AuthActivityPrunedValue() float64 {
 	var m dto.Metric
 	if err := authActivityPruned.Write(&m); err != nil {
+		return 0
+	}
+	return m.GetCounter().GetValue()
+}
+
+// ModuleReadinessRowsPurged records readiness versions hard-deleted because
+// the node that reported them is stopped (memql#5325).
+//
+// LABELLED BY PATH, because the two paths answer different questions and a sum
+// of them answers neither: `retired` is the reconciler's own fast purge and
+// `swept` is the ten-minute catch-up, so their RATIO is what says whether the
+// fast path is working. Closed at two values -- both call sites are in
+// component/node/readiness_row_purge.go -- so the cardinality is fixed.
+func ModuleReadinessRowsPurged(path string, n int64) {
+	if n <= 0 {
+		return
+	}
+	moduleReadinessRowsPurged.WithLabelValues(path).Add(float64(n))
+}
+
+// ModuleReadinessRowsPurgedValue returns one path's count, for tests.
+func ModuleReadinessRowsPurgedValue(path string) float64 {
+	var m dto.Metric
+	c, err := moduleReadinessRowsPurged.GetMetricWithLabelValues(path)
+	if err != nil {
+		return 0
+	}
+	if err := c.Write(&m); err != nil {
 		return 0
 	}
 	return m.GetCounter().GetValue()

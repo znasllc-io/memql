@@ -36,13 +36,21 @@ describe("readinessNodeLines", () => {
     const [ai] = foldReadiness(REPORTS, LIVE, NOW);
     expect(ai?.state).toBe("configured");
     expect(readinessNodeLines(ai!, NOW)).toEqual([
-      { nodeId: "agent-a", nodeType: "agent", words: "Set up", note: "checked 8s ago", counted: true },
+      {
+        nodeId: "agent-a",
+        nodeType: "agent",
+        words: "Set up",
+        note: "checked 8s ago",
+        counted: true,
+        at: "2026-09-09T15:42:54Z",
+      },
       {
         nodeId: "edge-a",
         nodeType: "edge",
         words: "Catching up",
         note: "last checked 6h ago, before the last change; it re-checks on its own",
         counted: false,
+        at: "2026-09-09T09:05:02Z",
       },
       {
         nodeId: "bff-b",
@@ -50,8 +58,31 @@ describe("readinessNodeLines", () => {
         words: "Could not check",
         note: "the fleet could not be read; it retries on its own",
         counted: false,
+        at: "2026-09-09T15:40:00Z",
       },
     ]);
+  });
+
+  // The relative words and the exact moment answer different questions, and
+  // the list needs both: "checked 2m ago" on two nodes is an order a reader
+  // cannot see, and that order is what the fold's staleness rule turns on.
+  // A node that reported no time at all carries "" rather than a guess, which
+  // is what keeps the title off the row instead of showing an invented one.
+  it("carries each node's exact reported moment beside the relative words", () => {
+    const [ai] = foldReadiness(REPORTS, LIVE, NOW);
+    const lines = readinessNodeLines(ai!, NOW);
+    expect(lines.map((l) => l.at)).toEqual([
+      "2026-09-09T15:42:54Z",
+      "2026-09-09T09:05:02Z",
+      "2026-09-09T15:40:00Z",
+    ]);
+
+    const timeless = foldReadiness(
+      [{ module: "ai", nodeId: "agent-z", nodeType: "agent", state: "configured", core: true, lanes: lanes(true), reportedAt: "" }],
+      [{ nodeId: "agent-z", health: "healthy", lastSeen: "2026-09-09T15:42:50Z" }],
+      NOW,
+    );
+    expect(readinessNodeLines(timeless[0]!, NOW)[0]?.at).toBe("");
   });
 
   // The reason on a row is a CLOSED vocabulary and never an error string, so

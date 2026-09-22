@@ -174,7 +174,9 @@ that a context deadline always beats.
 
 - memql#5325's stopped-node deletion and purge migration: a stopped node's
   rows already drop out of the fold through the liveness window, and
-  write-on-change (PR #5315) removed the churn.
+  write-on-change (PR #5315) removed the churn. **Closed on 2026-09-21 --
+  section 6 below.** The reason above held and still holds; what it did not
+  cover is the rows, which nothing had ever removed.
 - memql#5338, the transport: S1 and D2 make readiness correct without it.
 
 ## 4. Failure modes
@@ -212,3 +214,118 @@ that a context deadline always beats.
   written down.
 - Evaluator, writer and loop unit tests; the OS vocabulary, the Modules detail,
   the gate's line and `reportFromRow`'s `unknown` default.
+
+---
+
+## 6. Addendum, 2026-09-21: D4's second half (memql#5325)
+
+Section 3 left this open with a reason that was true and is still true: "a
+stopped node's rows already drop out of the fold through the liveness window,
+and write-on-change (PR #5315) removed the churn." Nothing below contradicts
+that. What it closes is the half neither of those touched -- the rows
+themselves, which no code in the tree had ever removed.
+
+### What was actually wrong
+
+`v1:platform:moduleReadiness` had no retention of any kind. Every pod that has
+ever booted kept its seven rows forever, and before write-on-change every
+registration heartbeat appended seven more per hearing node -- 772k versions
+for a few dozen live ids on a production instance (2026-09-13). The fold could
+not see any of it and no query filtered on it, so it was invisible from every
+screen and from every read: a table nobody pruned.
+
+### A4 -- The rows go, and the fold's liveness window stays where it is
+
+- **`TopologyReconciler.retire` purges the node it has just recorded stopped**
+  (`component/node/readiness_row_purge.go`), under the bare `MEMQL_NODE_ID` a
+  readiness row's `nodeId` carries. It is the fast path, it runs on the one
+  replica holding the reconcile lease, and it infers nothing -- the node was
+  declared gone by the statement above it.
+- **A ten-minute sweep takes the rest**: every node whose LATEST
+  `v1:cluster:node` version says `stopped`. That is what collects the
+  30-minute prune cron's retirements (the backstop this repo already had for
+  whatever the reconciler missed) and every row an engine before this one left
+  behind. Ten minutes is `readinessRewriteFloor`, the longest a live node's own
+  row may go unrestated.
+- **A node with NO cluster-node row is left alone.** "No row" is also what a
+  pod looks like between its first readiness pass and its registration, and
+  deleting on absence would race a booting node.
+- **The liveness window in `Fold` is unchanged and is still the verdict's
+  answer.** These deletes are hygiene; they are not what makes a stopped node
+  stop counting, and nothing about the verdict now depends on a delete having
+  run.
+
+### A5 -- No delete mutation, because the DSL has none
+
+D4 asked for a `@serverOnly deleteModuleReadinessForNode(nodeId)`. That cannot
+be authored: `component/language/parser/body_clauses.go` accepts `insert` and
+`update` and nothing else, and the DSL's word for "gone" is a soft-delete
+field. The engine's existing answer for a retention delete is a statement
+against the node table -- `component/identity/authactivity/prune.go` and
+`component/node/delivery_store_pg.go` -- and this follows it, including its two
+stated consequences: every version goes, not only the latest, and nothing is
+notified.
+
+### A6 -- The deleted routing rule is NOT taken, and the reason is in code
+
+D4 asked for `graph.node.deleted.v1:platform:moduleReadiness`. Refused, and
+recorded as a reasoned entry in `RoutingExclusions()` rather than left as an
+absence:
+
+- **It would change no word on any screen.** The liveness read excludes a
+  stopped `v1:cluster:node` row outright, so a replica that never hears the
+  delete folds exactly the verdict it would fold if it had. Every readiness
+  surface reads the fold's verdict; none counts rows.
+- **It would be the first production publisher of `events.KindNodeDeleted`**,
+  which is constructed only in tests today -- new transport surface bought for
+  an observable difference of zero, which is the change `routing.go`'s
+  campaigns block already argues against.
+- Reversible with one rule and a new reason the moment a surface counts
+  readiness ROWS rather than reading the verdict.
+
+### A7 -- The migration collapses history; it does not delete every row
+
+D4 said "delete every row once. The next boot writes the new shape", and the
+reason was D3's plan to change that shape. S1 replaced D3 and per-node rows
+stayed, so there is no new shape and nothing for a rewrite to correct.
+`20260921000000_module_readiness_history_collapse` therefore keeps the newest
+version of each row and removes the restatements behind it. Deleting the
+current verdicts too would read every module as `unreported` -- "Not reported"
+on the desk, an open core gate -- from the moment the migration commits until
+each node's next pass: honest, but a flicker on every installation bought for a
+reason that no longer holds.
+
+### A7b -- Measured, because the migration runs before the engine serves
+
+772,828 readiness versions seeded onto a real TimescaleDB -- the shape the
+2026-09-13 instance was in -- and then:
+
+| | |
+|---|---|
+| the collapse migration | **985 ms**, 0 ids left holding a second version |
+| the sweep, worst case (that volume, 3 of 6 nodes stopped) | **494 ms**, exactly the stopped nodes' rows |
+
+The migration's number is the one that mattered. It runs at boot, ahead of the
+engine serving anything, so a statement that degrades badly on a real
+installation's volume is every pod blocked -- and a fresh CI database cannot
+show it. In steady state the sweep runs against a few hundred rows.
+
+### A8 -- Supervision is a counter, not a screen
+
+`memql_readiness_rows_purged_total{path}`, `retired` against `swept`. The two
+paths are labelled apart because their RATIO is the diagnosis: `swept` carrying
+the whole rate while `retired` sits at zero says the fast path is not running.
+Zero on both is the normal shape for a cluster that is not rolling, so there is
+nothing here to alert on -- which is why this is a counter and not a surface.
+
+### What the Modules detail says now
+
+One sentence, because the list's meaning changed: a stopped node is not on it
+at all, so it is the cluster now rather than whatever has not aged out. Beside
+it, each node row carries its exact `reportedAt` on the row's title -- two
+nodes that both read "3h ago" are in an order the reader cannot see, and that
+order is what S1's staleness rule turns on. Judged rendered in both modes, at
+the pane's own measure and at 380px, populated and with each of the fold's
+empty answers; the list needed no other change, and the prose under it now
+keeps a sentence's measure (DESIGN.md rule 9) rather than running the width of
+a maximised window.

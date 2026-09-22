@@ -306,6 +306,13 @@ function barTone(state: string): ActionBarTone {
  *
  * READ FROM THE LIVE FEED, so it moves when a node re-checks; the freshness
  * words are computed at render, which the feed's own changes drive.
+ *
+ * WHAT IS NOT HERE IS ALSO A FACT. A stopped node left the fold through the
+ * liveness window long before memql#5325, but its rows sat in the graph
+ * forever, so "the list is short" and "the list is current" were the same
+ * picture. The rows are now removed when the cluster retires the node
+ * (component/node/readiness_row_purge.go), which is what lets the caption
+ * promise this list IS the cluster rather than whatever has not aged out.
  */
 function ReadinessAcross({ verdict }: { verdict: Verdict }) {
   const lines = readinessNodeLines(verdict, new Date());
@@ -321,6 +328,11 @@ function ReadinessAcross({ verdict }: { verdict: Verdict }) {
               className="os-cluster-readiness-row"
               role="listitem"
               data-aside={line.counted ? undefined : true}
+              // The exact moment this node read the cluster, beside the
+              // relative words a person reads. Two nodes that both say "2m
+              // ago" are ordered by nothing visible, and that order is what
+              // the fold's staleness rule turns on.
+              title={line.at || undefined}
             >
               <span className="os-cluster-readiness-node os-mono">{line.nodeId}</span>
               <span className="os-cluster-readiness-words">{line.words}</span>
@@ -333,7 +345,9 @@ function ReadinessAcross({ verdict }: { verdict: Verdict }) {
       )}
       <Caption>
         Every live node checks this module for itself. A node that has not re-checked since the
-        cluster last changed, or that could not check, is listed and not counted.
+        cluster last changed, or that could not check, is listed and not counted. A node that has
+        stopped is not here at all -- its rows are removed when the cluster retires it -- so this
+        list is the cluster now, not every pod that has ever run.
       </Caption>
     </>
   );
