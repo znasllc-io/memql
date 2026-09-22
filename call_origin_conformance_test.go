@@ -527,7 +527,7 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// context REPLACES the caller's actor with a synthetic unranked cluster
 		// owner, and the one query it reaches takes no argument. It is a READ,
 		// and its reply is a projection that carries no run's payload.
-		"component/memql": "seed materialiser, authoring capability store (both boot-time), the module-readiness writer (epic memql#5077), and the loop-stops reader (memql#5384)",
+		"component/memql": "seed materialiser, authoring capability store (both boot-time), the module-readiness writer (epic memql#5077), the loop-stops reader (memql#5384), the sharing ledger's window read and the two machine acts (epic memql#5327 -- REQUEST-DERIVED, and each one stamps a LOCAL context for ONE rendered call after the caller's ownership of the machine has already been proven through the authorized workersForUser read; asserted by test/dslconformance's TestEveryGoCallerOfAServerOnlyConstructStampsInternalOrigin, which sees RenderCall since that epic)",
 		// SERVER-INITIATED, not request-derived -- the same class as
 		// integrations/agent/worker below rather than the three exceptions
 		// above, and the distinction is worth stating because this package

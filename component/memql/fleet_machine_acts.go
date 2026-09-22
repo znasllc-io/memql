@@ -41,6 +41,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
@@ -106,7 +107,19 @@ func (e *MemQLEngine) evaluateFleetRevokeMachineExpression(ctx context.Context, 
 	if err != nil {
 		return nil, fmt.Errorf("fleetRevokeMachine: render the revoke: %w", err)
 	}
-	if _, err := e.Execute(ctx, revoke); err != nil {
+	// THE STAMP IS A LOCAL, AND IT IS NEVER RETURNED. revokeWorker is
+	// @serverOnly since design D2 -- half an act must not be reachable from a
+	// client -- so this call has to say it is server-initiated, and without
+	// the stamp the builtin would be INERT: refused on every call, with one
+	// WARN and nothing else (the failure shape memql#2989 and the recovery-key
+	// gate are both about).
+	//
+	// Confined to THIS call rather than widening `ctx`: internal origin opens
+	// every @serverOnly construct for as long as the context lives. The
+	// registration id it revokes has already been proven to belong to the
+	// caller -- or to be visible to a cluster owner -- by machineToRevoke
+	// above, so nothing caller-supplied reaches the mutation un-checked.
+	if _, err := e.Execute(auth.ContextWithInternalOrigin(ctx), revoke); err != nil {
 		return nil, fmt.Errorf("fleetRevokeMachine: revoke the registration: %w", err)
 	}
 
@@ -262,7 +275,12 @@ func (e *MemQLEngine) evaluateFleetSetSharingExpression(ctx context.Context, arg
 	if err != nil {
 		return nil, fmt.Errorf("fleetSetSharing: render the write: %w", err)
 	}
-	if _, err := e.Execute(ctx, call); err != nil {
+	// The same stamp for the same reason (finding M-2): setWorkerSharing is
+	// @serverOnly because the concept's cluster-owner escape is wrong on a row
+	// whose content is a person's consent, and the ownership this builtin
+	// proved through the caller's OWN machines is what replaces it. A local,
+	// never returned.
+	if _, err := e.Execute(auth.ContextWithInternalOrigin(ctx), call); err != nil {
 		return nil, fmt.Errorf("fleetSetSharing: %w", err)
 	}
 

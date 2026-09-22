@@ -207,7 +207,6 @@ type Store interface {
 	// references is refused at load -- an expectedNodeId argument on the
 	// mutation could only ever be decoration.
 	ClearConnectedNode(ctx context.Context, registrationId, ownerUserId, expectedNodeId string) error
-	RevokeRegistration(ctx context.Context, registrationId, ownerUserId, revokedBy, reason string, at time.Time) error
 	// IdentityById re-resolves the worker identity that admitted a live
 	// stream (epic memql#5327, design D3). Returns nil when the identity no
 	// longer exists, which is the same answer as revoked: either way nothing

@@ -146,10 +146,6 @@ func (f *fakeRegistrationStore) ClearConnectedNode(ctx context.Context, registra
 	return nil
 }
 
-func (f *fakeRegistrationStore) RevokeRegistration(ctx context.Context, registrationId, ownerUserId, revokedBy, reason string, at time.Time) error {
-	return nil
-}
-
 func (f *fakeRegistrationStore) WorkerByIdentityId(ctx context.Context, identityId, ownerUserId string) (*RegistrationRow, error) {
 	f.lookupOwners = append(f.lookupOwners, ownerUserId)
 	if f.existing != nil && f.existing.IdentityId == identityId {

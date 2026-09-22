@@ -358,34 +358,6 @@ func (s *EngineStore) connectedNodeOf(ctx context.Context, registrationId, owner
 	return "", false, nil
 }
 
-// RevokeRegistration stamps revokedAt on a registration. revokedBy is who
-// performed the revocation and is NOT the actor: an admin may revoke somebody
-// else's machine, and the write still runs under the row's OWNER because that
-// is whose tier the guard checks.
-func (s *EngineStore) RevokeRegistration(ctx context.Context, registrationId, ownerUserId, revokedBy, reason string, at time.Time) error {
-	if s == nil || s.Engine == nil {
-		return nil
-	}
-	writeCtx, err := ownerActor(ctx, ownerUserId)
-	if err != nil {
-		return err
-	}
-	args := map[string]any{
-		"registrationId": registrationId,
-		"revokedAt":      at.UTC().Format(time.RFC3339Nano),
-		"revokedBy":      revokedBy,
-		"revokeReason":   reason,
-	}
-	query, err := langparser.RenderCall("revokeWorker", args)
-	if err != nil {
-		return fmt.Errorf("worker.store: render revoke: %w", err)
-	}
-	if _, err := s.Engine.Execute(writeCtx, query); err != nil {
-		return fmt.Errorf("worker.store: revoke registration: %w", err)
-	}
-	return nil
-}
-
 // CreateInvocation persists a v1:worker:invocation row.
 //
 // ownerUserId is NOT an argument of the mutation: the concept marks it

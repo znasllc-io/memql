@@ -257,7 +257,6 @@ func TestRegistrationWrites_RefuseABlankOwner(t *testing.T) {
 			return store.UpdateHardware(ctx, "reg-1", "", map[string]any{"chip": "M4"}, nil, time.Now(), "")
 		},
 		"clearNode":    func() error { return store.ClearConnectedNode(ctx, "reg-1", "", "") },
-		"revoke":       func() error { return store.RevokeRegistration(ctx, "reg-1", "", "admin", "why", time.Now()) },
 		"byIdentityId": func() error { _, err := store.WorkerByIdentityId(ctx, "ident-1", ""); return err },
 		"forUser":      func() error { _, err := store.WorkersForUser(ctx, ""); return err },
 	}

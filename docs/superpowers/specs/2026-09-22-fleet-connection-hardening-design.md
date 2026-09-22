@@ -383,6 +383,37 @@ replica through the real mesh. It is additive, and nothing above depends on it.
 
 ---
 
+## What this epic found in the gates themselves
+
+Two things, both discovered by a gate refusing work rather than by review, and
+both fixed here because leaving them would make the next author pay the same
+cost.
+
+**`TestEveryGoCallerOfAServerOnlyConstructStampsInternalOrigin` could not see
+`RenderCall`.** It matches string literals shaped `mutation <name>(`, and its
+own limitations note said "every call in the tree today is a literal or a
+Sprintf format string". That stopped being true when memql#5004 introduced
+`langparser.RenderCall` as the renderer every new write is supposed to use --
+so the blind spot was GROWING. Measured, not theorised: D2 and M-2 made two
+mutations `@serverOnly` and their builtins rendered them on an unstamped
+context. Both would have been refused on every call, with one WARN and nothing
+else, and the gate was green. It sees `RenderCall` now, and the one legitimate
+caller it newly flags -- the nightly evidence fold, reached only from a
+tree-loaded automation that has already stamped -- is a named exemption with a
+staleness check of its own.
+
+**`TestWorkerTokenListForUserIsAlwaysCallerScoped` refused the credential
+re-check, correctly.** D3's first implementation resolved the identity through
+`workertoken.ListForUser`, whose query is keyed on a caller-supplied userId and
+projects `keyHash`; that gate pins every caller of it to the authenticated
+caller's `Subject`, and a worker's subject is `worker:<identityId>` rather than
+a user. The fix was not an exemption but a better shape:
+`workerTokenIdentityById`, keyed on the CREDENTIAL'S OWN ID. There is then no
+user id to supply, so there is nothing to enumerate -- the stronger form of the
+same property rather than a waiver from it.
+
+---
+
 ## Out of scope, and where it lives
 
 | Finding | Where |

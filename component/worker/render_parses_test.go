@@ -228,9 +228,6 @@ func writeDrivers() []driver {
 		{"ClearConnectedNode", func(ctx context.Context, s *EngineStore) error {
 			return s.ClearConnectedNode(ctx, reg.ID, testOwner, "")
 		}},
-		{"RevokeRegistration", func(ctx context.Context, s *EngineStore) error {
-			return s.RevokeRegistration(ctx, reg.ID, testOwner, "v1:identity:user:admin-1", awkwardText, at)
-		}},
 		{"UpdateApps", func(ctx context.Context, s *EngineStore) error {
 			return s.UpdateApps(ctx, reg.ID, testOwner, reg.Apps,
 				map[string]string{"app:claude-code": "true", "note": awkwardText}, at, "203.0.113.7")
