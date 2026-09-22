@@ -163,3 +163,124 @@ describe("the data-origins table", () => {
     );
   });
 });
+
+describe("connector coverage", () => {
+  // memql#5574's production symptom, as a page: a connector that could not
+  // read its own store list enumerated nothing, reported on nothing, and the
+  // table drew a correct em dash per concept while saying nothing about the
+  // connector. The issue's words were "the mirror stopped changing, with
+  // nothing anywhere saying why".
+  it("says a connector has reported on none of its concepts", async () => {
+    mount(
+      fakeConnection({
+        dataOrigins: [
+          NEVER_RUN,
+          dataOriginRow({
+            conceptId: "v1:shopify:order",
+            dataState: "mirror",
+            origin: "shopify",
+            connectors: ["shopify"],
+          }),
+        ],
+        syncStatesAll: [],
+      }),
+    );
+    expect(await screen.findByText("0 of 2 reported")).toBeTruthy();
+    expect(
+      screen.getByText(/Nothing has reported on any of its 2 concepts/),
+    ).toBeTruthy();
+  });
+
+  // THE NEGATIVE CONTROL, and it is the one that matters most here. A page
+  // that reported "0 of N" for every connector regardless would satisfy the
+  // assertion above, and would be wrong in the direction that raises a false
+  // alarm on every healthy cluster.
+  it("says a fully reporting connector has reported, and says nothing more", async () => {
+    mount(
+      fakeConnection({
+        dataOrigins: [RAN_CLEAN],
+        syncStatesAll: [RAN_CLEAN_HEALTH],
+      }),
+    );
+    expect(await screen.findByText("1 of 1 reported")).toBeTruthy();
+    // No sentence: there is nothing to say about a connector that is working,
+    // and a line of reassurance per healthy connector is noise a reader has
+    // to scan past to find the one that is not.
+    expect(screen.queryByText(/Nothing has reported/)).toBeNull();
+    expect(screen.queryByText(/have reported\. The rest/)).toBeNull();
+  });
+
+  // THE PARTIAL CASE is its own reading and not a rounding of either. Some
+  // concepts measured and some not is what a backfill in progress looks like,
+  // and it must not read as the silent case.
+  it("distinguishes a partly reporting connector from a silent one", async () => {
+    mount(
+      fakeConnection({
+        dataOrigins: [NEVER_RUN, RAN_CLEAN],
+        syncStatesAll: [RAN_CLEAN_HEALTH],
+      }),
+    );
+    expect(await screen.findByText("1 of 2 reported")).toBeTruthy();
+    expect(
+      screen.getByText(/1 of 2 concepts have reported\. The rest have no measurement/),
+    ).toBeTruthy();
+    expect(screen.queryByText(/Nothing has reported on any of its/)).toBeNull();
+  });
+
+  // THE PAGE NEVER CLAIMS A FAULT. It cannot tell a connector that has not
+  // run from one that is running and reading nothing, and saying either would
+  // be inventing a fact out of an absence -- on a page whose whole design
+  // rests on an em dash not being a zero.
+  it("names both causes of a silent connector and picks neither", async () => {
+    mount(fakeConnection({ dataOrigins: [NEVER_RUN], syncStatesAll: [] }));
+    const sentence = await screen.findByText(/Nothing has reported on any of its/);
+    const text = sentence.textContent ?? "";
+    expect(text).toContain("has not run yet");
+    expect(text).toContain("reading nothing");
+    // And it sends the reader where the difference actually is.
+    expect(text).toContain("configuration");
+    for (const verdict of ["broken", "failed", "healthy", "fine"]) {
+      expect(text.toLowerCase()).not.toContain(verdict);
+    }
+  });
+
+  // One line per connector, so a cluster with two connectors and one silent
+  // one shows which.
+  it("reports each connector separately", async () => {
+    mount(
+      fakeConnection({
+        dataOrigins: [
+          NEVER_RUN,
+          dataOriginRow({
+            conceptId: "v1:books:invoice",
+            dataState: "mirror",
+            origin: "quickBooks",
+            connectors: ["quickBooks"],
+          }),
+        ],
+        syncStatesAll: [
+          syncStateRow({
+            conceptId: "v1:books:invoice",
+            connector: "quickBooks",
+            direction: "inbound",
+            lagSeconds: 2,
+            driftCount: 0,
+            outboxDepth: 0,
+            deadLetterCount: 0,
+            backfillStatus: "complete",
+            paused: false,
+          }),
+        ],
+      }),
+    );
+    expect(await screen.findByText("0 of 1 reported")).toBeTruthy();
+    expect(screen.getByText("1 of 1 reported")).toBeTruthy();
+    // The silent one's ratio carries the attention ink; the reporting one's
+    // does not. Asserted through the tone attribute rather than a computed
+    // colour, which jsdom cannot see.
+    const silent = screen.getByText("0 of 1 reported").closest(".os-cluster-coverage-line");
+    const reporting = screen.getByText("1 of 1 reported").closest(".os-cluster-coverage-line");
+    expect(silent?.getAttribute("data-tone")).toBe("silent");
+    expect(reporting?.getAttribute("data-tone")).toBe("reporting");
+  });
+});

@@ -215,6 +215,120 @@ function measuredRow(declaration: OriginDeclaration, connector: string, row: Row
 }
 
 /**
+ * One connector, and how much of what it carries has reported.
+ *
+ * ===========================================================================
+ * WHY A PER-CONNECTOR READING EXISTS AT ALL
+ * ===========================================================================
+ * The table reports per PAIRING and the Head reports one grand total. Neither
+ * answers the question an operator actually arrives with, which is about the
+ * CONNECTOR: is this thing working?
+ *
+ * The Shopify connector declares 65 concepts. When it could not read its own
+ * store list (memql#5574) it enumerated nothing, reported on nothing, and the
+ * table drew 65 rows of em dashes -- each one individually honest, and
+ * together silent about the only thing worth saying. The issue's own words for
+ * the production symptom were "the mirror stopped changing, with nothing
+ * anywhere saying why".
+ *
+ * So this is the connector as the subject: how many of its pairings have
+ * reported, how many are paused, how many are carrying an error.
+ */
+export interface ConnectorCoverage {
+  connector: string;
+  /** Pairings the declarations name for this connector. */
+  concepts: number;
+  /** Pairings something has actually reported on. A MEASURED count, not a
+   *  Figure: the health rows are in hand and were counted, so zero here means
+   *  "we looked and none matched" -- which is what a zero is for. */
+  reported: number;
+  /** Reported AND paused -- an operator's own decision, and the one cause of
+   *  a quiet connector that is not a fault. */
+  paused: number;
+  /** Reported AND carrying a lastError. */
+  withError: number;
+}
+
+/**
+ * Every connector the declarations name, with its coverage, sorted by name.
+ *
+ * Derived from the join rather than from a third read: the two reads the page
+ * already makes hold all of it, and a separate query would be a second answer
+ * that could disagree with the table underneath it.
+ */
+export function connectorCoverage(rows: readonly OriginRow[]): ConnectorCoverage[] {
+  const byConnector = new Map<string, ConnectorCoverage>();
+  for (const row of rows) {
+    if (row.connector === "") continue;
+    const held = byConnector.get(row.connector) ?? {
+      connector: row.connector,
+      concepts: 0,
+      reported: 0,
+      paused: 0,
+      withError: 0,
+    };
+    held.concepts += 1;
+    if (row.hasHealth) {
+      held.reported += 1;
+      if (row.paused) held.paused += 1;
+      if (row.lastError !== "") held.withError += 1;
+    }
+    byConnector.set(row.connector, held);
+  }
+  return [...byConnector.values()].sort((a, b) => a.connector.localeCompare(b.connector));
+}
+
+/**
+ * What a connector's coverage says, in one clause -- or "" when the honest
+ * answer is nothing and the line stays quiet.
+ *
+ * ===========================================================================
+ * THE SENTENCE FOR A SILENT CONNECTOR NAMES TWO CAUSES AND PICKS NEITHER
+ * ===========================================================================
+ * "Nothing has reported" has two explanations and this page can tell them
+ * apart in exactly no cases: a connector nobody has started yet, and a
+ * connector that is running and enumerating nothing, produce the identical
+ * absence here. memql#5574 was the second; a fresh cluster is the first.
+ *
+ * So the sentence states both and sends the reader to where the difference
+ * actually lives, which is the connector's own configuration. Choosing one --
+ * "this connector is broken", or the cheerier "not started yet" -- would be
+ * inventing a fact out of an absence, and on a page whose entire design rests
+ * on an em dash not being a zero that would be the one unforgivable line.
+ */
+export function coverageSentence(c: ConnectorCoverage): string {
+  if (c.concepts === 0) return "";
+  const noun = c.concepts === 1 ? "concept" : "concepts";
+  if (c.reported === 0) {
+    return `Nothing has reported on any of its ${c.concepts} ${noun}. A connector that has not run yet and one that is running and reading nothing look the same from here -- the difference is in the connector's own configuration.`;
+  }
+  if (c.reported < c.concepts) {
+    return `${c.reported} of ${c.concepts} ${noun} have reported. The rest have no measurement, which is not the same as no lag.`;
+  }
+  if (c.paused === c.concepts) {
+    return `Every concept is paused. Deliveries are staged and nothing is being applied.`;
+  }
+  if (c.paused > 0) {
+    return `All ${c.concepts} ${noun} have reported; ${c.paused} ${c.paused === 1 ? "is" : "are"} paused.`;
+  }
+  return "";
+}
+
+/**
+ * What a connector's coverage means for how its line reads: quiet when
+ * everything has reported, attention when nothing has.
+ *
+ * A TONE, not a verdict. `silent` says only that a reading is missing, which
+ * is what the page knows; nothing here claims a fault.
+ */
+export function coverageTone(c: ConnectorCoverage): "reporting" | "partial" | "silent" | "paused" {
+  if (c.concepts === 0 || c.reported === 0) return "silent";
+  if (c.paused === c.concepts) return "paused";
+  if (c.reported < c.concepts) return "partial";
+  return "reporting";
+}
+
+/**
  * What a data state MEANS for what a caller may do, in one clause.
  *
  * A MIRROR IS THE ONE THAT CHANGES THE ANSWER. `executeWrite` refuses every

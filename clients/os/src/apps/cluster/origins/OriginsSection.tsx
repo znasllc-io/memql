@@ -6,7 +6,16 @@ import { Measure } from "../../../kit/MeasureView";
 import { useOsConnection } from "../../../live/connection";
 import { useReading } from "../../../cluster/reading";
 import { DeadLetterBand } from "./DeadLetters";
-import { dataStateSentence, joinOrigins, originActs, type OriginRow } from "./rows";
+import {
+  connectorCoverage,
+  coverageSentence,
+  coverageTone,
+  dataStateSentence,
+  joinOrigins,
+  originActs,
+  type ConnectorCoverage,
+  type OriginRow,
+} from "./rows";
 
 // Data origins: what this cluster owns, what it mirrors, and how the
 // connectors carrying either are doing.
@@ -63,6 +72,8 @@ export function OriginsSection() {
     () => joinOrigins(inventory.value ?? [], health.value ?? []),
     [inventory.value, health.value],
   );
+
+  const coverage = useMemo(() => connectorCoverage(join.rows), [join.rows]);
 
   const [openConnector, setOpenConnector] = useState("");
   const [busyKey, setBusyKey] = useState("");
@@ -153,8 +164,37 @@ export function OriginsSection() {
         </Caption>
       ) : null}
 
+      {/* THE CONNECTOR, BEFORE THE PAIRINGS (issue memql#5574).
+          The table below is honest per row and silent about the connector:
+          65 concepts each correctly drawing an em dash say nothing about the
+          one thing an operator came to ask. This band answers it first, and
+          answers it as a COUNT -- what reported, out of what is declared --
+          rather than as a verdict the page is in no position to give. */}
+      {coverage.length === 0 ? null : (
+        <Panel label="Connector coverage">
+          <Subhead>Connectors</Subhead>
+          <div className="os-cluster-coverage">
+            {coverage.map((c) => (
+              <CoverageLine key={c.connector} coverage={c} />
+            ))}
+          </div>
+          {/* TWO SENTENCES, AND THE SECOND ONLY WHEN IT IS ABOUT SOMETHING.
+              The definition is always worth having. The refusal to give a
+              verdict is about a silent connector, so on a cluster with none
+              it explains a reading nobody is looking at -- and a caption that
+              is true but irrelevant is the kind a reader learns to skip,
+              taking the useful half with it. */}
+          <Caption>
+            Reported means something has written a health row for that concept.
+            {coverage.some((c) => coverageTone(c) === "silent")
+              ? " Nothing here says a silent connector is broken, because this page cannot tell a connector that has not run from one that is running and reading nothing."
+              : ""}
+          </Caption>
+        </Panel>
+      )}
+
       {join.rows.length === 0 ? null : (
-        <Panel label="Connectors">
+        <Panel label="Concepts">
           <Subhead>Concepts with a connector</Subhead>
           <div className="os-cluster-table" role="table" aria-label="Data origins">
             <div className="os-cluster-tr os-cluster-th" role="row">
@@ -231,6 +271,52 @@ export function OriginsSection() {
           Read {inventory.at.toLocaleTimeString()}. Nothing here is live: neither the registry
           projection nor the connector health broadcasts a change.
         </Caption>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One connector's line: its name, how much of what it carries has reported,
+ * and the consequence when there is one.
+ *
+ * THE RATIO IS THE READING and it carries the eye, so it is the only thing
+ * on the line besides the name. The sentence sits beneath in the quiet voice,
+ * where a reader who wants it will find it and a reader scanning the ratios
+ * is not made to read past it.
+ *
+ * `silent` takes warn INK ON WORDS and nothing else -- no chip, no card, no
+ * border. `.os-cluster-row-attention`'s own comment already describes this
+ * exact state ("configured to run and unable to"), which is why it is reused
+ * rather than given a tone of its own.
+ */
+function CoverageLine({ coverage }: { coverage: ConnectorCoverage }) {
+  const tone = coverageTone(coverage);
+  const sentence = coverageSentence(coverage);
+  return (
+    <div className="os-cluster-coverage-line" data-tone={tone}>
+      <div className="os-cluster-coverage-head">
+        <span className="os-cluster-coverage-name">{coverage.connector}</span>
+        <span className="os-cluster-coverage-ratio">
+          {coverage.reported} of {coverage.concepts} reported
+        </span>
+      </div>
+      {sentence === "" ? null : (
+        <p className={tone === "silent" ? "os-cluster-row-attention" : "os-cluster-coverage-note"}>
+          {sentence}
+        </p>
+      )}
+      {coverage.withError === 0 ? null : (
+        /* THE COUNT, IN THE QUIET VOICE, and the error itself stays in its own
+           row. This was error ink and it was the wrong call: red outshouted
+           the warn on a connector that had reported NOTHING, so the eye landed
+           on the lesser reading first. The band's one loud thing is a silent
+           connector; a per-concept failure is a detail the table already
+           carries, in the place where the sentence that explains it lives. */
+        <p className="os-cluster-coverage-note">
+          {coverage.withError} of them {coverage.withError === 1 ? "carries" : "carry"} an error
+          from its last attempt.
+        </p>
       )}
     </div>
   );

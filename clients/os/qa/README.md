@@ -29,7 +29,8 @@ google-chrome --headless=new --disable-gpu --no-sandbox --hide-scrollbars \
 `view` is one of `overview`, `store`, `quiet`, `picker`, `readonly`, `hidden`
 (the Store surface), or `list`, `sources`, `list-empty`, `sources-empty`,
 `connected`, `github-owner`, `github-member`, `settings-no-app`,
-`settings-no-app-member`, `settings-app` (the Deployables app, whole); `mode`
+`settings-no-app-member`, `settings-app` (the Deployables app, whole), or
+`origins-silent`, `origins-mixed`, `origins-reporting` (Data origins); `mode`
 is `dark` or `light`. **Take at least one narrow capture** (`820,760`): two of
 the first three real defects this harness found were invisible at 1400x900.
 
@@ -49,6 +50,27 @@ product with an account connected through it (`settings-app`). For the two
 found what the suite could not: the group's own sentence still opening with
 "Connect GitHub" directly above the part saying it cannot work, and a bare
 Remove that did not say of what.
+
+The three `origins-*` views are the connector-coverage band (issue
+memql#5574), and the middle one is the one that matters. `origins-silent` is
+the production state the issue describes -- eight declared concepts and nothing
+reported, which before the band was a page of eight individually-correct em
+dashes saying nothing about the connector. `origins-mixed` puts a silent
+connector BESIDE a healthy one, because the question the band exists to answer
+is whether the one line worth finding is findable, and a page with one line on
+it cannot answer that. `origins-reporting` is a cluster with nothing wrong,
+where the band has to be quiet enough that nobody learns to scroll past it.
+
+They mount over `test/cluster/harness.tsx` rather than the Deployables fake --
+two fixture harnesses rather than one widened one, so each stays the SUITE's
+and a screenshot cannot disagree with what those tests assert.
+
+Their first rendered pass found what 3,474 green cases could not: the
+per-connector ERROR COUNT was drawn in error ink, so red on a connector whose
+concepts had all reported outshouted the warn on a connector that had reported
+NOTHING -- the eye landed on the lesser reading first. The count is now in the
+quiet voice and the error itself stays in its own row, which is where the
+sentence explaining it already lived.
 
 ## What it is, and what it is not
 
