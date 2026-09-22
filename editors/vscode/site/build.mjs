@@ -198,10 +198,7 @@ async function build() {
   // double hyphens, which XML image decoders reject. Strip comments only for the
   // standalone image; preserve the canonical geometry and source file.
   const mark = await readFile(path.join(root, "brand/mark.svg"), "utf8");
-  await writeFile(
-    path.join(output, "brand/mark.svg"),
-    mark.replace(/<!--[\s\S]*?-->/g, ""),
-  );
+  await writeFile(path.join(output, "brand/mark.svg"), withoutComments(mark));
   const example = await readFile(
     path.join(root, "examples/research-desk/research/brief.memql"),
     "utf8",
@@ -219,6 +216,31 @@ async function build() {
     path.join(root, "examples/research-desk/research/memql.toml"),
     path.join(output, "memql.toml"),
   );
+}
+
+/**
+ * Every XML comment removed, not merely one pass of them.
+ *
+ * A SINGLE `replace(/<!--[\s\S]*?-->/g, "")` IS NOT A REMOVAL. The match is
+ * non-greedy, so `<!--<!---->` loses the inner `<!---->` and leaves a bare
+ * `<!--` behind -- the class of defect CodeQL calls
+ * `js/incomplete-multi-character-sanitization`, and the reason the output can
+ * still be the thing the strip existed to avoid. Repeating to a fixed point is
+ * the removal: the string shrinks on every pass that changes it, so it
+ * terminates, and it terminates only when no comment opener survives.
+ *
+ * The input here is this repository's own `brand/mark.svg` rather than
+ * anything a request carries, so nothing hostile reaches it today. That is an
+ * argument about the caller, not about the function, and the caller is a build
+ * step somebody will point at a second asset.
+ */
+function withoutComments(svg) {
+  let stripped = svg;
+  for (let previous = ""; previous !== stripped; ) {
+    previous = stripped;
+    stripped = stripped.replace(/<!--[\s\S]*?-->/g, "");
+  }
+  return stripped;
 }
 
 async function main() {

@@ -618,8 +618,8 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// integrations/work/internal_origin_test.go drives every capability
 		// with a client-origin context against a recording executor, and counts
 		// the stamp sites.
-		"integrations/work": "the work spine's entry points -- server-initiated; every id is engine-minted or copied off a row the caller already read under their own actor, and its nine @serverOnly writers are refused without it (epic memql#4966)",
-
+		"integrations/work":      "the work spine's entry points -- server-initiated; every id is engine-minted or copied off a row the caller already read under their own actor, and its nine @serverOnly writers are refused without it (epic memql#4966)",
+		"integrations/procedure": "procedure learning's two entry points (epic memql#5402) -- server-initiated, triggered by a run finishing or by a schedule; every id is engine-minted or copied off a row it read under the OWNER's actor, and the authoring mutations it writes (createAuthoringBundle, createAuthoringConstruct, recordBundleValidation, recordConstructGoalSignature) are refused without it",
 		// The Materializer (epic memql#4977). The context here IS derived
 		// from an inbound capability call, so the gate's own warning is the
 		// right question to ask -- and the answer is that the stamp opens a

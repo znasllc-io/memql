@@ -163,7 +163,13 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // workerStaleConnectionSweep is the third worker sweep, clearing
 // connectedNodeId stamps nobody is holding. One added, none removed -- which
 // is what the count SAYS and a diff of a list could not have.
-const shippedAutomationCount = 62
+//
+// 62 -> 64 ON THE MERGE, and MEASURED rather than added. This branch took the
+// constant 61 -> 62 while epic memql#5402 took it 61 -> 63 underneath; adding
+// the two intentions gives 64 and so does asking the loader, but only one of
+// those is evidence. The loader was asked, the way this file's own #5168 note
+// insists -- two arithmetics agreeing is not a measurement.
+const shippedAutomationCount = 64
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):
