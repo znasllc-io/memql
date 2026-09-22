@@ -140,6 +140,13 @@ func (e *MemQLEngine) resolveAI(ctx context.Context, req airoute.ResolveRequest)
 	if req.Needs.MinContextTokens <= 0 {
 		req.Needs.MinContextTokens = airoute.EstimateMinContextTokens("", 0)
 	}
+	// ATTRIBUTION IS FILLED HERE TOO, not only in requestForPrompt
+	// (memql#5581). This function is the one place this package reaches a
+	// provider, so a Go call site with no prompt at all -- the gRPC chat and
+	// suggest handlers, app/ai_call_sites.go, the compile pass -- gets the
+	// same derivation without naming it. applyCallAttribution fills only what
+	// is still empty, so the prompt path, which already ran it, is unchanged.
+	req = applyCallAttribution(ctx, req)
 	resolver := e.aiResolver.get()
 	if resolver == nil {
 		return ResolvedProvider{}, ErrAIResolverUnwired

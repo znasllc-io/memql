@@ -259,6 +259,7 @@ func fallbackRecord(req ResolveRequest, failedResolved Resolved, err error) Call
 		Partition:         req.Partition,
 		AgentId:           req.AgentId,
 		UserId:            req.UserId,
+		CallerKind:        req.CallerKind,
 		PromptName:        req.PromptName,
 		Vendor:            failedResolved.Vendor,
 		Model:             failedResolved.Model,

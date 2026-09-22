@@ -547,19 +547,32 @@ func (i *Integration) RunBudget(ctx context.Context, ownerUserId, runId string) 
 	if err != nil || goal == nil {
 		return out, err
 	}
+	out, err = ceilingsOf(goal)
+	if err != nil {
+		return out, fmt.Errorf("work: goal %s ceilings: %w", goalId, err)
+	}
+	return out, nil
+}
+
+// ceilingsOf decodes one goal row's declared ceilings.
+//
+// AN ABSENT `ceilings` IS THE ZERO VALUE, and that is the reading
+// component/work.CheckCeilings gives every ceiling: a goal declaring none is
+// unbounded by this gate rather than dead on arrival. The one thing that must
+// never read as absent is a goal nobody could READ, which is why every caller
+// checks for a nil row before it reaches here.
+func ceilingsOf(goal map[string]any) (work.Ceilings, error) {
+	var out work.Ceilings
 	raw := rowMap(goal, "ceilings")
 	if len(raw) == 0 {
-		// ABSENT, not zero. A goal with no ceilings declared is unbounded by
-		// this gate, which is the deployment's default -- and the caller's
-		// own attempt cap is what still bounds it.
 		return out, nil
 	}
 	b, err := json.Marshal(raw)
 	if err != nil {
-		return out, fmt.Errorf("work: goal %s ceilings: %w", goalId, err)
+		return out, err
 	}
 	if err := json.Unmarshal(b, &out); err != nil {
-		return out, fmt.Errorf("work: goal %s ceilings: %w", goalId, err)
+		return out, err
 	}
 	return out, nil
 }

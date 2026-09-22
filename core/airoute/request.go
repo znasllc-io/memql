@@ -129,6 +129,21 @@ type ResolveRequest struct {
 	AgentId   string
 	Partition string
 
+	// CallerKind says WHAT KIND of caller made this call, so that an empty
+	// UserId is an answer rather than a gap (memql#5581).
+	//
+	// It is one of component/auth's CallerKinds -- user / system / connector /
+	// anonymous / unattributed -- carried as a plain string because this
+	// package imports nothing but the standard library and must stay nameable
+	// from every module in the workspace. It is DERIVED from the context where
+	// the request is built and never supplied by a caller; the router fills it
+	// from the same derivation when a call site left it empty.
+	//
+	// NOTHING ROUTES ON IT. No rule key branches on the caller kind and none
+	// may: it exists so a decision record can say who caused the call, and a
+	// rule that read it would turn a piece of evidence into an input.
+	CallerKind string
+
 	// RunId and StepId name the WORK STEP this call serves, when it serves
 	// one.
 	//
