@@ -103,6 +103,25 @@ type CallRecord struct {
 	PromptName string
 	PolicyName string // Phase 1: always empty
 
+	// CallerKind is WHAT KIND of caller made this call (memql#5581), so that
+	// an empty UserId is an ANSWER -- the cluster's own maintenance sweep, a
+	// connector writing a mirror, an anonymous reader -- rather than a hole in
+	// attribution that a reader has to treat as a possible defect. One of
+	// component/auth's CallerKinds, and never empty on a row this router
+	// writes: recordCall fills `unattributed` for a record that reached it
+	// without one, because "nobody said" is itself one of the five answers.
+	CallerKind string
+
+	// CacheKind is set ONLY on a row for a call served from a CACHE, and
+	// names which one: "exact" or "semantic" (memql#5581). EMPTY MEANS A
+	// PROVIDER ANSWERED, which is what every row written before this was.
+	//
+	// It is how a reader tells a cache hit from a provider call, and it is why
+	// the zeros on such a row are readable: on a cache row every token and
+	// cost figure is a real zero -- nothing was spent -- where on a provider
+	// row a zero cost means the provider declared no pricing.
+	CacheKind string
+
 	// Provider selection
 	Vendor       string
 	Model        string

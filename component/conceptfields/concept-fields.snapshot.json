@@ -4625,8 +4625,10 @@
       "fields": [
         "agentId",
         "billing",
+        "cacheKind",
         "cachedInputCost",
         "cachedInputTokens",
+        "callerKind",
         "considered",
         "degraded",
         "door",
@@ -4678,6 +4680,17 @@
           "metered",
           "subscription",
           "unknown"
+        ],
+        "cacheKind": [
+          "exact",
+          "semantic"
+        ],
+        "callerKind": [
+          "anonymous",
+          "connector",
+          "system",
+          "unattributed",
+          "user"
         ],
         "door": [
           "app",

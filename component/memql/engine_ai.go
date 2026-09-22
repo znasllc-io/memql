@@ -260,7 +260,7 @@ func (e *MemQLEngine) InvokeAIStructured(
 	if !ok || prompt == nil {
 		return "", fmt.Errorf("unknown prompt template %q", templateId)
 	}
-	req, err := requestForPrompt(prompt, nil, airoute.ModalityStructured, rendered)
+	req, err := requestForPrompt(ctx, prompt, nil, airoute.ModalityStructured, rendered)
 	if err != nil {
 		return "", err
 	}

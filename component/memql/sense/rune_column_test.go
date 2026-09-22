@@ -32,14 +32,17 @@ func wantRuneColumn(t *testing.T, line, tok string) int {
 	return utf8.RuneCountInString(line[:i]) + 1
 }
 
-func TestArraySyntaxRuleColumnsCountRunes(t *testing.T) {
-	// The multi-byte rune sits inside a string literal. stripStringsAndComments
-	// blanks a string byte-for-byte, so the byte offset survives while the rune
-	// offset does not -- exactly the divergence this guards.
-	line := `  items string @default("ü") array(string)`
-	got := arraySyntaxRule(line)
+func TestDeprecatedFormsRuleColumnsCountRunes(t *testing.T) {
+	// The multi-byte rune sits in the field's name, before the spelling: the
+	// lexer admits it via unicode.IsLetter, so its byte offset and its rune
+	// offset differ -- exactly the divergence this guards.
+	line := `  naïve array(string)`
+	got := deprecatedFormsRule("concept ticket {\n" + line + "\n}\n")
 	if len(got) != 1 {
-		t.Fatalf("want one deprecated-array-syntax hint, got %+v", got)
+		t.Fatalf("want one deprecated_array_type warning, got %+v", got)
+	}
+	if got[0].Range.Start.Line != 2 {
+		t.Errorf("start line = %d, want 2", got[0].Range.Start.Line)
 	}
 	want := wantRuneColumn(t, line, "array(")
 	if got[0].Range.Start.Column != want {

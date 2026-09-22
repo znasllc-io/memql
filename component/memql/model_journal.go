@@ -155,6 +155,11 @@ type ModelCallJournal interface {
 type modelSeam struct {
 	journal ModelCallJournal
 	logger  *slog.Logger
+
+	// ceilings is the run-ceiling guard (memql#5580). Nil on a node that
+	// hosts no work integration, where there are no work runs to bound. See
+	// run_ceilings.go for why the check belongs at this seam.
+	ceilings RunCeilingGuard
 }
 
 // SetModelCallJournal installs the journal. Wired from app/ once the work
@@ -232,7 +237,28 @@ func (s *modelSeam) serve(
 		out, err := live(ctx)
 		return out.Value, err
 	}
+
+	// THE RUN'S CEILINGS, BEFORE ANYTHING IS SPENT (memql#5580). The check
+	// sits above the journal lookup as well as above the provider call, so a
+	// run past its loop cap is refused whether the answer would have come
+	// from a provider or from the journal -- a replayed answer is still an
+	// answered request, and a cap blind to those is a hole.
+	if err := s.admit(ctx, estimateRequestTokens(req)); err != nil {
+		return nil, err
+	}
+
 	record := func(call JournaledCall) {
+		// ONE CHARGE PER ANSWER, and this is the only place an answer is
+		// recorded: a journal hit, a live success and a live failure all
+		// reach here exactly once. Charging beside the record is what keeps
+		// the run's counted spend and the journal a reader compares it
+		// against from drifting apart.
+		s.charge(ctx, ModelSpend{
+			Served:       call.Served,
+			InputTokens:  call.InputTokens,
+			OutputTokens: call.OutputTokens,
+			Cost:         call.Cost,
+		})
 		s.record(ctx, rc, call)
 		for _, observer := range observers {
 			observer(call)

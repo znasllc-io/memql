@@ -9487,10 +9487,16 @@ func RecordResponsibilityEvaluationBuild(args RecordResponsibilityEvaluationArgs
 //
 // Bound concept: v1:router:call (machine-readable: BoundConcepts["recordRouterCall"] in generated_concepts.go).
 type RecordRouterCallArgs struct {
-	CallId               string
-	RequestId            string
-	AgentId              string
-	UserId               string
+	CallId    string
+	RequestId string
+	AgentId   string
+	UserId    string
+	// What kind of caller made this call: user | system | connector | anonymous | unattributed.
+	// Enum: user | system | connector | anonymous | unattributed
+	CallerKind string
+	// Which cache answered, when one did. Absent means a provider answered.
+	// Enum: exact | semantic
+	CacheKind            string
 	PromptName           string
 	PolicyName           string
 	Vendor               string
@@ -9579,6 +9585,20 @@ func RecordRouterCallBuild(args RecordRouterCallArgs) string {
 		}
 		b.WriteString("userId: ")
 		b.WriteString(quoteMemQL(args.UserId))
+	}
+	if args.CallerKind != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("callerKind: ")
+		b.WriteString(quoteMemQL(args.CallerKind))
+	}
+	if args.CacheKind != "" {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("cacheKind: ")
+		b.WriteString(quoteMemQL(args.CacheKind))
 	}
 	if args.PromptName != "" {
 		if b.Len() > 26 {

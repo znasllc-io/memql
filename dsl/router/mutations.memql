@@ -11,6 +11,10 @@ mutation call recordRouterCall {
     requestId           string!
     agentId             string
     userId              string
+    /// What kind of caller made this call: user | system | connector | anonymous | unattributed.
+    callerKind          enum("user", "system", "connector", "anonymous", "unattributed")
+    /// Which cache answered, when one did. Absent means a provider answered.
+    cacheKind           enum("exact", "semantic")
     promptName          string
     policyName          string
     vendor              string!
@@ -65,7 +69,7 @@ mutation call recordRouterCall {
     machineOwnerUserId  string
   }
   insert {
-    accept { requestId, agentId, userId, promptName, policyName, vendor, model, providerName, inputTokens, outputTokens, cachedInputTokens, tokensEstimated, inputCost, outputCost, cachedInputCost, totalCost, pricingConfigured, timeToFirstTokenMs, totalDurationMs, tokensPerSec, streaming, outcome, errorCategory, errorMessage, fallbackFromModel, executionSurface, level, requestedLevel, servedLevel, servedModel, servedEffort, degraded, rule, policy, door, considered, touches, minContextTokens, machineOwnerUserId }
+    accept { requestId, agentId, userId, callerKind, cacheKind, promptName, policyName, vendor, model, providerName, inputTokens, outputTokens, cachedInputTokens, tokensEstimated, inputCost, outputCost, cachedInputCost, totalCost, pricingConfigured, timeToFirstTokenMs, totalDurationMs, tokensPerSec, streaming, outcome, errorCategory, errorMessage, fallbackFromModel, executionSurface, level, requestedLevel, servedLevel, servedModel, servedEffort, degraded, rule, policy, door, considered, touches, minContextTokens, machineOwnerUserId }
     stamp {
       id: args.callId
       // NOT in accept{}: a concept-level @default is documentation and is

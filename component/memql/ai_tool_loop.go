@@ -57,7 +57,7 @@ func (e *MemQLEngine) InvokeAIChatWithTools(ctx context.Context, templateId stri
 	// the caller's own awake laptop resolved against the shared catalog and
 	// reported itself unavailable -- a silent paid call for a user whose
 	// machine was on the whole time. The seam resolves per acting user.
-	req, err := requestForPrompt(prompt, invocation, airoute.ModalityTools, systemText)
+	req, err := requestForPrompt(ctx, prompt, invocation, airoute.ModalityTools, systemText)
 	if err != nil {
 		return "", err
 	}
@@ -272,7 +272,7 @@ func (e *MemQLEngine) InvokeAIChatWithFilteredToolsOpts(ctx context.Context, tem
 	}
 
 	// The same seam as InvokeAIChatWithTools above, for the same reasons.
-	req, err := requestForPrompt(prompt, invocation, airoute.ModalityTools, systemText)
+	req, err := requestForPrompt(ctx, prompt, invocation, airoute.ModalityTools, systemText)
 	if err != nil {
 		return "", err
 	}

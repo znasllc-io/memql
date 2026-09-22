@@ -3,6 +3,7 @@ package memql
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
 	"sort"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/actions"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/language/deprecation"
 	"github.com/znasllc-io/memql/component/memql/baseloader"
 )
 
@@ -360,6 +362,10 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 		// unwired refusal and the level/modality validation are one place --
 		// and so this package still cannot import component/router.
 		e.aiRuntime.resolve = e.resolveAI
+		// And the route a CACHE HIT's decision record takes (memql#5581).
+		// Same argument for going through the engine: the seam lives here,
+		// so this package still cannot import component/router.
+		e.aiRuntime.recordCacheServed = e.recordCacheServed
 	}
 	if e.aiRuntime != nil {
 		// The SAME seam value, not a copy: SetModelCallJournal is called
@@ -482,6 +488,20 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 				"detail", v.Detail)
 		}
 	}
+
+	// Deprecated language forms (memql#5390, D22). Beside the contract gates
+	// and over the same merged source: a use of a form still inside its
+	// window loads, lands on the report as a WARNING naming its replacement
+	// and the release it stops loading at (which a strict boot ignores), and
+	// is counted; a use of a form whose window is spent is a strict-boot
+	// problem, refused as the parser refuses it. The release is the one the
+	// whole process decides at, so a load and a parse cannot disagree about
+	// the same spelling. See deprecated_uses.go.
+	var deprecationLogger *slog.Logger
+	if e.Component != nil && e.Logger != nil {
+		deprecationLogger = e.Logger
+	}
+	recordDeprecatedUses(report, rawTree, deprecationLogger, deprecation.Current())
 
 	// @requiresRank slug validation (epic memql#4832, D6/O2). A floor
 	// naming a role the ladder does not know ranks 0, and a floor of 0
