@@ -8,6 +8,7 @@ export function OwnershipWizard({ data, busy, error, submit }: {
   data: IdentityData; busy: boolean; error: string;
   submit: (path: string, form: Record<string, string>) => void;
 }) {
+  const local = data.Local === true;
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<Record<string, string>>(() => ({
     ...oauthFields(data), domain: value(data, "PrefillDomain"),
@@ -30,7 +31,7 @@ export function OwnershipWizard({ data, busy, error, submit }: {
     : step === 2 && form.registration_mode === "domain_restricted" ? Boolean((form.registration_domains || "").trim()) : true;
   const bodies = [
     <div className="os-identity-fields">{field("owner_first_name", "First name", "text", true)}{field("owner_last_name", "Last name", "text", true)}
-      {field("owner_email", "Owner email", "email", true)}<p>Verify this address to become the cluster owner.</p>
+      {field("owner_email", "Owner email", "email", true)}<p>{local ? "Contact information only. This local installation does not verify email; your passkey will prove access." : "Verify this address, then register a passkey to become the cluster owner."}</p>
       {field("owner_phone", "Phone number (optional)", "tel")}{field("owner_primary_role", "Role at organization (optional)")}
       {select("owner_gender", "Gender (optional)", [["", "Choose"], ["female", "Female"], ["male", "Male"], ["nonbinary", "Nonbinary"], ["other", "Other"], ["prefer_not_to_say", "Prefer not to say"]])}
       {field("owner_birthdate", "Date of birth (optional)", "date")}</div>,
@@ -41,16 +42,16 @@ export function OwnershipWizard({ data, busy, error, submit }: {
       {field("registration_domains", "Approved email domains (comma-separated)")}
       {field("access_request_notify_emails", "Notify these emails about access requests (comma-separated)")}</div>,
     <div className="os-identity-fields"><p>Claim <strong>{form.domain}</strong> for <strong>{form.owner_first_name} {form.owner_last_name}</strong>.</p>
-      <p>We’ll send a single-use verification link to <strong>{form.owner_email}</strong>. Ownership is granted only after verification.</p>
+      <p>{local ? "No email is sent. You must create a passkey to finish setup and sign in to this local installation." : <>We’ll send a single-use verification link to <strong>{form.owner_email}</strong>. After verifying your email, you must register a passkey to finish setup.</>}</p>
       <p>Once signed in, OS will continue with the existing inference setup.</p></div>,
   ];
   return <Wizard icon={<Fingerprint />} title="Welcome to MemQL OS" lead="Set up this installation and verify cluster ownership."
     label="Ownership setup" open={String(step)} onOpen={id => setStep(Number(id))}
-    steps={["Cluster owner", "Your installation", "Account access", "Verify ownership"].map((name, i) => ({ id: String(i), name,
+    steps={["Cluster owner", "Your installation", "Account access", local ? "Register passkey" : "Verify email", ...(local ? [] : ["Register passkey"])].map((name, i) => ({ id: String(i), name,
       state: i < step ? "done" : i === step ? "open" : "ahead", body: bodies[i] }))}
     notices={error ? <p role="alert">{error}</p> : undefined}
-    status={{ word: busy ? "Sending verification" : valid ? "Your turn" : "Complete the required fields", tone: busy ? "busy" : "none" }}
+    status={{ word: busy ? (local ? "Preparing passkey setup" : "Sending verification") : valid ? "Your turn" : "Complete the required fields", tone: busy ? "busy" : "none" }}
     acts={busy ? [] : [...(step > 0 ? [{ label: "Back", text: true, onAct: () => setStep(step - 1) }] : []),
-      ...(valid ? [{ label: step === 3 ? "Send verification link" : "Continue", tone: "primary" as const,
+      ...(valid ? [{ label: step === 3 ? (local ? "Continue to passkey" : "Send verification link") : "Continue", tone: "primary" as const,
         onAct: () => step === 3 ? submit("/setup", form) : setStep(step + 1) }] : [])]} />;
 }

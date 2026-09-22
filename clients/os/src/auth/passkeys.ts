@@ -12,17 +12,24 @@ async function post(config: OsRuntimeConfig, path: string, body: unknown, author
   return data;
 }
 
-export async function registerPasskey(config: OsRuntimeConfig, authorization: string, label: string): Promise<void> {
+export async function registerPasskey(config: OsRuntimeConfig, authorization: string, label: string): Promise<string | undefined> {
   if (typeof PublicKeyCredential === "undefined" || !PublicKeyCredential.parseCreationOptionsFromJSON) throw new Error("Use a current browser with passkey support to add a passkey.");
   const begin = await post(config, "/auth/webauthn/register/begin", { label }, authorization);
+  if (begin.redirectTo) return begin.redirectTo;
+  if (begin.resume) {
+    const finish = await post(config, "/auth/webauthn/register/finish", {}, authorization);
+    return finish.redirectTo;
+  }
   const credential = await navigator.credentials.create({ publicKey: PublicKeyCredential.parseCreationOptionsFromJSON(begin.creationOptions.publicKey) }) as PublicKeyCredential | null;
   if (!credential) throw new Error("No passkey was created");
-  await post(config, "/auth/webauthn/register/finish", { challengeId: begin.challengeId, label, credential: credential.toJSON() }, authorization);
+  const finish = await post(config, "/auth/webauthn/register/finish", { challengeId: begin.challengeId, label, credential: credential.toJSON() }, authorization);
+  return finish.redirectTo;
 }
 
 export async function loginWithPasskey(config: OsRuntimeConfig, context: Record<string, string>): Promise<string> {
-  if (typeof PublicKeyCredential === "undefined" || !PublicKeyCredential.parseRequestOptionsFromJSON) throw new Error("Use a current browser with passkey support, or sign in with an email link.");
+  if (typeof PublicKeyCredential === "undefined" || !PublicKeyCredential.parseRequestOptionsFromJSON) throw new Error("Use a current browser with passkey support to sign in.");
   const begin = await post(config, "/auth/webauthn/login/begin", {
+    firstParty: !context.client_id && !context.redirect_uri,
     clientId: context.client_id, redirectUri: context.redirect_uri, state: context.state,
     codeChallenge: context.code_challenge, codeChallengeMethod: context.code_challenge_method,
   });

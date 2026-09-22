@@ -13,7 +13,13 @@ race cookie rotation; credentials stay in memory and HttpOnly cookies.
 Identity and ownership setup live in OS. Before probing a session, OS reads
 identity's `/auth/setup/state`: only an explicit `unclaimed` answer opens the
 ownership wizard. Either unreadable bootstrap/owner signal shows an unavailable
-view. After verification, the existing `CoreGate` still controls inference
+view. The server reads the operator's `MEMQL_DEPLOY_PROVIDER`: only an exact
+`docker-local` enables local setup without email. Local setup requires a passkey
+and all subsequent local interactive sign-in uses passkeys; its contact email is
+not verified. `azure`, absent and unknown values retain hosted verification:
+email first, then mandatory passkey registration. Neither email verification nor
+an enrollment grant is an owner session. After both required steps, the existing
+`CoreGate` still controls inference
 onboarding and retains its owner/developer admission rules.
 
 The Identity app contains your profile, passkeys, sessions, personal access
@@ -28,8 +34,14 @@ OAuth/PKCE and device-bound email verification keep their existing protocol.
 Passkeys keep their existing RP IDs. The identity host publishes
 `/.well-known/webauthn` for WebAuthn Related Origin Requests from OS. Passkey
 operations require a current browser with related-origin and WebAuthn JSON
-support; email sign-in remains subject to the account's sign-in policy. Shared
-challenge storage and a fail-closed database ownership lock coordinate replicas.
+support. Hosted email sign-in remains subject to account policy. Shared challenge
+storage, a durable enrollment record and a fail-closed PostgreSQL ownership lock
+coordinate replicas. Failed ceremonies can be retried; an attestation saved before
+a transient graph-write failure resumes with the same credential and user IDs.
+A lost enrollment cookie resumes through the registered passkey, or through a
+new verification of the original hosted email. No competing claim can replace a
+reserved owner. The setup table is private authentication state, never graph data
+or client-visible session authority.
 
 - **Desks** hold at most two auto-placed windows (solo centered, two-up
   split, swap/throw by drag); a third app spills onto a new desk. Windows

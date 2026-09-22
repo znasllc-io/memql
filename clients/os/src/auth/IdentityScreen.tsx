@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Fingerprint } from "lucide-react";
 import { useAuth } from "./AuthProvider";
 import { nativeIdentity, oauthFields, value, type IdentityData, type IdentityPage } from "./nativeIdentity";
+import { Wizard } from "../kit/Wizard";
 import { OwnershipWizard } from "./OwnershipWizard";
 import { loginWithPasskey, registerPasskey } from "./passkeys";
 import { Field, Button, Head } from "../kit/controls";
@@ -83,9 +84,32 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
 
   if (page?.page === "setup_wizard") return <div className="os-identity-gate"><OwnershipWizard data={data} busy={busy} error={error} submit={submit} /></div>;
 
+  if (page?.page === "setup_passkey") {
+    const steps = ["Cluster owner", "Your installation", "Account access", ...(data.Local === true ? [] : ["Verify email"]), "Register passkey"];
+    const complete = () => void run(async () => {
+      const destination = await registerPasskey(config, `Bootstrap ${value(data, "EnrollmentToken")}`, "Owner passkey");
+      if (!destination) throw new Error("Setup is still incomplete. Retry this step.");
+      window.location.assign(destination);
+    });
+    return <div className="os-identity-gate"><Wizard icon={<Fingerprint />} title="Finish ownership setup"
+      lead={data.Local === true ? "Your passkey is required. No email verification is used on this local installation." : "Email verified. Register a passkey before you can enter MemQL OS."}
+      label="Ownership setup" open="passkey" onOpen={() => {}}
+      steps={steps.map((name, i) => ({ id: i === steps.length - 1 ? "passkey" : String(i), name, state: i === steps.length - 1 ? "open" : "done", body: <><p>Create a passkey with your device or security key. Your browser will ask you to confirm.</p><p>Canceling leaves setup incomplete. You can retry this step.</p></> }))}
+      notices={error ? <p role="alert">{error}</p> : undefined}
+      status={{ word: busy ? "Waiting for passkey" : "Passkey required", tone: busy ? "busy" : "none" }}
+      acts={busy ? [] : [{ label: data.HasProof ? "Finish setup" : "Create passkey and finish", tone: "primary", onAct: complete }, ...(error ? [{ label: "Reload setup", text: true, onAct: () => window.location.assign("/") }] : [])]} /></div>;
+  }
+
   let title = data.Layout?.Title || "Identity";
   let body: ReactNode;
   switch (page?.page) {
+    case "setup_resume":
+      title = "Resume ownership setup";
+      body = <><p>Ownership setup has started but is not complete.</p>
+        {data.HasProof === true && act("Resume with your passkey", () => void run(async () => window.location.assign(await loginWithPasskey(config, {}))))}
+        {data.Local !== true && <>{field("email", "Original owner email", "email")}{act("Verify email again", () => submit("/auth/setup/resume", fields))}</>}
+        {data.Local === true && <p>Use the passkey already created for this setup. A different browser cannot replace that claim.</p>}</>;
+      break;
     case "login": {
       const stage = value(data, "Stage");
       title = stage === "waitlist_signup" ? "Request access" : stage === "needs_invite" ? "Use your invitation" : "Sign in to MemQL OS";
@@ -93,10 +117,10 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
         {data.AuthorizeMode === true && <div><p>Continue to <strong>{value(data, "ClientName")}</strong></p>
           {data.ClientSelfRegistered === true && <p>This app’s name is self-registered and has not been verified.</p>}
           <p>Client: <code>{value(data, "ClientID")}</code></p><p>Return address: <code>{value(data, "RedirectURI")}</code></p></div>}
-        {field("email", "Email", "email")}
+        {data.Local !== true && field("email", "Email", "email")}
         {stage === "waitlist_signup" && <>{field("name", "Your name")}{field("additional_context", "Why would you like access?")}</>}
         {stage === "needs_invite" && field("invitation", "Invitation token")}
-        <div className="os-identity-actions">{act(stage === "waitlist_signup" ? "Request access" : stage === "needs_invite" ? "Use invitation" : "Send sign-in link",
+        <div className="os-identity-actions">{data.Local !== true && act(stage === "waitlist_signup" ? "Request access" : stage === "needs_invite" ? "Use invitation" : "Send sign-in link",
           () => submit("/login", { ...oauthFields(data), ...fields, form: stage === "waitlist_signup" ? "waitlist" : stage === "needs_invite" ? "invite" : "email" }))}
           {stage === "email" && act("Use a passkey", () => void run(async () => window.location.assign(await loginWithPasskey(config, oauthFields(data)))))}
         </div><p>By continuing you agree to the <button className="os-link" onClick={() => void load("/legal/tos")}>Terms of Service</button> and <button className="os-link" onClick={() => void load("/legal/privacy")}>Privacy Notice</button>.</p>

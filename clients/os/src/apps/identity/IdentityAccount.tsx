@@ -50,10 +50,10 @@ export function IdentityAccount({ page, data, busy, submit, navigate, register }
   return <>
     <p>Manage how you sign in and which devices can access your account.</p>
     {!security?.Available ? <p>Sign-in policy is unavailable.</p> : <>
-      <h2>Sign-in links</h2><p>{security.PasskeyOnly ? "Email sign-in links are turned off." : "You can sign in with an email link or a passkey."}</p>
+      {data.Local === true ? <p>This local installation requires passkeys. Email sign-in is unavailable.</p> : <><h2>Sign-in links</h2><p>{security.PasskeyOnly ? "Email sign-in links are turned off." : "You can sign in with an email link or a passkey."}</p>
       {security.PasskeyOnly ? button("Allow email sign-in links", "/me/settings/sign-in-policy", { policy: "any" })
         : security.PasskeyCountKnown && Number(security.ActivePasskeys) > 0 ? button("Require a passkey", "/me/settings/sign-in-policy", { policy: "passkey_only" })
-        : <p>Add a passkey before turning off email sign-in links.</p>}
+        : <p>Add a passkey before turning off email sign-in links.</p>}</>}
       <h2>Shared mailbox</h2><p>{security.SharedMailbox ? "This account uses a shared mailbox." : "This account uses a personal mailbox."}</p>
       {button(security.SharedMailbox ? "Mark mailbox as personal" : "Mark mailbox as shared", "/me/settings/shared-mailbox", { shared: security.SharedMailbox ? "false" : "true" })}
     </>}

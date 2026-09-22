@@ -253,6 +253,10 @@ func (s *Server) challengeBackend() webauthn.ChallengeBackend {
 // handleWebAuthnRegisterBegin issues a registration challenge bound to
 // the authenticated caller.
 func (s *Server) handleWebAuthnRegisterBegin(w http.ResponseWriter, r *http.Request) {
+	if token, ok := bootstrapToken(r); ok {
+		s.handleBootstrapRegister(w, r, token, false)
+		return
+	}
 	if !s.requireSecureRequest(w, r) {
 		return
 	}
@@ -360,6 +364,10 @@ func (s *Server) handleWebAuthnRegisterBegin(w http.ResponseWriter, r *http.Requ
 // handleWebAuthnRegisterFinish verifies the attestation and persists the
 // credential.
 func (s *Server) handleWebAuthnRegisterFinish(w http.ResponseWriter, r *http.Request) {
+	if token, ok := bootstrapToken(r); ok {
+		s.handleBootstrapRegister(w, r, token, true)
+		return
+	}
 	if !s.requireSecureRequest(w, r) {
 		return
 	}

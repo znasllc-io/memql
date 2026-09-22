@@ -222,6 +222,10 @@ func (s *Server) logSetupSeal(r *http.Request, reason string, err error) {
 //	form=invite    invitation-token submission. Skips the
 //	               registration-mode gate via invitationId.
 func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
+	if s.Cfg.LocalPasskeyOnly() {
+		s.renderError(w, r, http.StatusForbidden, "This local installation uses passkeys only.")
+		return
+	}
 	if s.preBootstrap(r) {
 		// Belt-and-suspenders: the Issuer also enforces this. The web
 		// pre-check just gives a nicer UX (redirect-to-setup) instead of
@@ -660,6 +664,20 @@ func usableSetupDomain(raw string) string {
 // handleSetupGet renders the first-run wizard. 404s unless the cluster
 // is provably unclaimed -- see setupSealed (memql#3415).
 func (s *Server) handleSetupGet(w http.ResponseWriter, r *http.Request) {
+	if nativeRequest(r) && s.bootstrapPage(w, r) {
+		return
+	}
+	if nativeRequest(r) && s.Store != nil {
+		pending, err := s.Store.ReservedBootstrap(r.Context())
+		if err != nil {
+			s.renderError(w, r, http.StatusServiceUnavailable, "Ownership enrollment is temporarily unavailable.")
+			return
+		}
+		if pending != nil && !pending.Complete {
+			writeNative(w, map[string]any{"page": "setup_resume", "csrf": CSRFTokenFromRequest(r), "data": map[string]any{"Local": s.Cfg.LocalPasskeyOnly(), "HasProof": len(pending.Proof) > 0}})
+			return
+		}
+	}
 	if s.setupSealed(r) {
 		http.NotFound(w, r)
 		return
@@ -736,6 +754,10 @@ func (s *Server) handleSetupGet(w http.ResponseWriter, r *http.Request) {
 // handleSetupPost validates the wizard submission, persists the
 // settings row, and triggers a magic link to the captured owner email.
 func (s *Server) handleSetupPost(w http.ResponseWriter, r *http.Request) {
+	if allowed, _ := s.enrolLimiter().Allow(clientIP(r)); !allowed {
+		s.renderError(w, r, http.StatusTooManyRequests, "Too many setup attempts. Please try again later.")
+		return
+	}
 	if s.Store != nil {
 		release, err := s.Store.AcquireBootstrapGate(r.Context())
 		if err != nil {
@@ -778,6 +800,32 @@ func (s *Server) handleSetupPost(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.OwnerFirstName == "" || in.OwnerLastName == "" {
 		s.renderError(w, r, http.StatusBadRequest, "Owner first name and last name are required.")
+		return
+	}
+	if s.Store != nil {
+		pending, err := s.Store.ReservedBootstrap(r.Context())
+		if err != nil || pending != nil {
+			s.renderError(w, r, http.StatusConflict, "Ownership setup is already in progress. Return to setup to resume it.")
+			return
+		}
+	}
+	if s.Cfg.LocalPasskeyOnly() {
+		if s.Store == nil {
+			s.renderError(w, r, http.StatusServiceUnavailable, "Ownership enrollment is unavailable.")
+			return
+		}
+		cid, uri, state, matched := s.pickOAuthCtx(r.Context(), r.Form.Get("client_id"), r.Form.Get("redirect_uri"), r.Form.Get("return_to"), r.Form.Get("state"))
+		oauth := map[string]string{}
+		if matched && r.Form.Get("code_challenge") != "" {
+			oauth = map[string]string{"client_id": cid, "redirect_uri": uri, "state": state, "code_challenge": r.Form.Get("code_challenge"), "code_challenge_method": r.Form.Get("code_challenge_method")}
+		}
+		token, err := s.Store.BeginBootstrapEnrollmentLocked(r.Context(), s.Cfg, bootstrapSettings(in), oauth, false)
+		if err != nil {
+			s.renderError(w, r, http.StatusServiceUnavailable, "Passkey setup is unavailable. Please retry.")
+			return
+		}
+		s.setBootstrapCookie(w, token)
+		http.Redirect(w, r, "/auth/setup/passkey", http.StatusSeeOther)
 		return
 	}
 	// The system-actor middleware stamped "system:identity-svc"

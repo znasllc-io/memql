@@ -434,6 +434,11 @@ func (s *Server) finishSignIn(w http.ResponseWriter, r *http.Request, row *ident
 		return
 	}
 	s.clearMagicLinkCookie(w)
+	if res.EnrollmentToken != "" {
+		s.setBootstrapCookie(w, res.EnrollmentToken)
+		http.Redirect(w, r, "/auth/setup/passkey", http.StatusSeeOther)
+		return
+	}
 
 	// Admin path: no relying party, so no OAuth callback to bounce through.
 	// A bootstrap link CAN still carry a client + redirect (the cockpit

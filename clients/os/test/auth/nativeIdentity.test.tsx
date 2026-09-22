@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ownershipState, nativeIdentity, identityEntry, identityLocation } from "../../src/auth/nativeIdentity";
 import { OwnershipWizard } from "../../src/auth/OwnershipWizard";
 import { IdentityAccount } from "../../src/apps/identity/IdentityAccount";
+import { registerPasskey, loginWithPasskey } from "../../src/auth/passkeys";
 import { probeSession } from "../../src/auth/identityClient";
 
 const config = { identityUrl: "https://identity.example.test", identityApiBaseUrl: "", oauthClientId: "os", authEnabled: true, domain: "example.test" };
@@ -78,4 +79,49 @@ it("requires allowed domains before choosing domain-restricted registration", ()
   expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
   fireEvent.change(screen.getByLabelText("Approved email domains (comma-separated)"), { target: { value: "example.test" } });
   expect(screen.getByRole("button", { name: "Continue" })).toBeTruthy();
+});
+
+
+it("local setup requires a passkey and never offers an email verification action", () => {
+  const submit = vi.fn();
+  render(<OwnershipWizard data={{ Local: true, PrefillOwnerFirstName: "Ada", PrefillOwnerLastName: "Owner", PrefillOwnerEmail: "ada@example.test", PrefillDomain: "test" }} busy={false} error="" submit={submit} />);
+  expect(screen.getByText(/Contact information only/)).toBeTruthy();
+  for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  expect(screen.queryByRole("button", { name: "Send verification link" })).toBeNull();
+  expect(screen.getByText(/No email is sent/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Continue to passkey" }));
+  expect(submit).toHaveBeenCalledWith("/setup", expect.objectContaining({ owner_email: "ada@example.test" }));
+});
+
+it("does not finish setup when passkeys are unavailable or the user cancels", async () => {
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ creationOptions: { publicKey: {} }, challengeId: "one" })));
+  vi.stubGlobal("fetch", fetcher);
+  vi.stubGlobal("PublicKeyCredential", undefined);
+  await expect(registerPasskey(config, "Bootstrap grant", "Owner")).rejects.toThrow("current browser");
+  expect(fetcher).not.toHaveBeenCalled();
+  vi.stubGlobal("PublicKeyCredential", { parseCreationOptionsFromJSON: (x: unknown) => x });
+  vi.stubGlobal("navigator", { credentials: { create: vi.fn().mockResolvedValue(null) } });
+  await expect(registerPasskey(config, "Bootstrap grant", "Owner")).rejects.toThrow("No passkey");
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+it("resumes a verified passkey save without creating a second credential", async () => {
+  vi.stubGlobal("PublicKeyCredential", { parseCreationOptionsFromJSON: (x: unknown) => x });
+  const create = vi.fn(); vi.stubGlobal("navigator", { credentials: { create } });
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ resume: true })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, redirectTo: "https://identity.example.test/login" })));
+  vi.stubGlobal("fetch", fetcher);
+  expect(await registerPasskey(config, "Bootstrap grant", "Owner")).toBe("https://identity.example.test/login");
+  expect(create).not.toHaveBeenCalled();
+  expect(fetcher.mock.calls[1]?.[1].body).toBe("{}");
+});
+
+it("explicitly requests first-party passkey sign-in when no OAuth client is in scope", async () => {
+  vi.stubGlobal("PublicKeyCredential", { parseRequestOptionsFromJSON: (x: unknown) => x });
+  vi.stubGlobal("navigator", { credentials: { get: vi.fn().mockResolvedValue({ toJSON: () => ({ id: "credential" }) }) } });
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ requestOptions: { publicKey: {} }, challengeId: "one" })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ redirectTo: "/" })));
+  vi.stubGlobal("fetch", fetcher);
+  expect(await loginWithPasskey(config, {})).toBe("/");
+  expect(JSON.parse(fetcher.mock.calls[0]?.[1].body)).toEqual({ firstParty: true });
 });
