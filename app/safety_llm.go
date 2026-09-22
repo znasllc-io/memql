@@ -283,3 +283,36 @@ func (a *App) wireModelCallJournal() {
 	a.Logger.Info("work: model-call journal enabled (v1:work:modelCall); a run in replay mode is served from it",
 		"component", "work.journal")
 }
+
+// wireRunCeilings installs the run-ceiling guard on the engine's model seam
+// (memql#5580).
+//
+// WITHOUT THIS, A GOAL'S CEILINGS ARE FIELDS NOTHING READS. tokenBudget,
+// costCeiling, maxModelCalls and wallClockMs are all settable and were all
+// inert: an operator who set one to bound an automation's model spend bounded
+// nothing, and the only real stop was the process-wide rate ceiling and
+// circuit breaker at the provider transport -- which one runaway run shares
+// with every other caller on the node.
+//
+// Nil is a working configuration for the journal's reason, and only for it: a
+// node with no work integration hosts no work runs, so it has no run ceilings
+// to enforce. It is logged either way, because "the guard is not installed"
+// and "no run reached a ceiling" look identical from the outside.
+func (a *App) wireRunCeilings() {
+	if a.engine == nil {
+		return
+	}
+	integ := a.lookupWorkIntegration()
+	if integ == nil {
+		a.Logger.Info("work: no run-ceiling guard on this node (the work plug-in is not materialized here), so there are no work runs here to bound",
+			"component", "work.ceilings")
+		return
+	}
+	guard := workspine.NewRunCeilings(a.engine, a.Logger)
+	if guard == nil {
+		return
+	}
+	a.engine.SetRunCeilingGuard(guard)
+	a.Logger.Info("work: run ceilings enforced at the model seam; a run past a ceiling is refused its next model call and parks on a budget approval",
+		"component", "work.ceilings")
+}

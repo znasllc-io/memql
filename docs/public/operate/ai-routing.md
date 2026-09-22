@@ -288,12 +288,38 @@ the tokens, cost and latency the row already carried, a decision carries:
 | `considered` | every entry the walk passed over, its door, and why -- **kept on success as well as on a refusal** |
 | `touches` | the call's footprint |
 | `minContextTokens` | the context floor this resolution was made against |
+| `callerKind` | what KIND of caller made the call: `user`, `system`, `connector`, `anonymous` or `unattributed` |
+| `cacheKind` | which CACHE answered, when one did: `exact` or `semantic`. Absent means a provider answered |
 
 **`session` is a fourth door, not a flag on `app`.** `app` means a subscription app
 answered this TURN; `session` means one was handed the whole STEP and drove its own
 loop (design D7 of the app-session record). They are separate values because this
 field is what you filter on, and folding them would make the entire history of a
 cluster whose only open door is a signed-in Claude Code read as ordinary chat turns.
+
+**`callerKind` is what makes an empty `userId` an ANSWER.** A blank user used to
+say two very different things at once -- "a person made this call and nobody wrote
+down which one" and "no person made this call at all, it was a boot seed or a
+retention sweep" -- so every unattributed row had to be read as a possible gap.
+`system` is the cluster acting and correctly has no user; `unattributed` is a Go
+call site that established no caller at all, which is the one honest answer for a
+context nobody stamped. It is DERIVED from the context where the request is built,
+never supplied by a caller, and **nothing routes on it**: no `@when` key reads it,
+because a rule that did would turn evidence into an input.
+
+**`cacheKind` is how you tell a cache hit from a provider call.** The exact-hash
+response cache is consulted AFTER the router resolves -- its key folds in the
+resolved provider name, which is what invalidates a cached answer when routing
+changes -- so a hit is a call that matched a rule, walked a chain and took a door
+without reaching a provider. Such a row names its cache and carries a REAL ZERO for
+every token and every cost: nothing was sent, nothing was billed, and
+`tokensEstimated` / `pricingConfigured` are false because nothing was estimated and
+no cost was computed. Absent means a provider answered, which is what every row
+written before this was. The whole decision travels with it, `considered` included
+-- the calls a cache serves are by definition the ones that repeat, so dropping
+their records would make them the decisions the rule corpus can never be checked
+against. Before this a warm page wrote no rows at all and was indistinguishable
+from an idle cluster.
 
 **`servedModel` is a REPORT, never the request.** `model` is what the chain resolved
 -- for an app door that is the door's own name, `claude-code` -- and what actually
@@ -313,7 +339,11 @@ a chain did *not* pick is half the decision, and before this the report was
 accumulated and then dropped the moment an entry won.
 
 These rows are **never broadcast** -- one row per model call is the same volume
-argument that excludes `v1:worker:invocation` from the live feeds.
+argument that excludes `v1:worker:invocation` from the live feeds. They are written
+through ONE bounded queue drained by ONE writer, so the ledger costs a node one
+goroutine and at most one concurrent write however many calls are in flight; a full
+queue drops the record and counts it on `RecordsDropped`, because a node whose
+database cannot keep up with its own model calls must not grow its heap instead.
 
 ---
 

@@ -40,6 +40,17 @@ export interface DecisionRow {
   id: string;
   createdAt: string;
   requestId: string;
+  /**
+   * What kind of caller made the call: user | system | connector | anonymous |
+   * unattributed (memql#5581). It is what makes a row with no person an ANSWER
+   * -- the cluster's own sweep -- rather than a gap in attribution.
+   */
+  callerKind: string;
+  /**
+   * Which cache answered, when one did: "exact" | "semantic". EMPTY MEANS A
+   * PROVIDER ANSWERED, which is what every row written before memql#5581 was.
+   */
+  cacheKind: string;
   promptName: string;
   level: string;
   requestedLevel: string;
@@ -88,6 +99,8 @@ export function decisionFromRow(raw: Row): DecisionRow {
     id: str(r, "id"),
     createdAt: str(r, "createdAt"),
     requestId: str(r, "requestId"),
+    callerKind: str(r, "callerKind"),
+    cacheKind: str(r, "cacheKind"),
     promptName: str(r, "promptName"),
     level: str(r, "level"),
     requestedLevel: str(r, "requestedLevel"),
@@ -123,6 +136,12 @@ export function decisionFromRow(raw: Row): DecisionRow {
  * subscription signal is silent.
  */
 export function billingWords(row: DecisionRow): string {
+  // A CACHE HIT IS CHECKED FIRST, because the row's `billing` is the concept's
+  // default of "metered" and that is not wrong -- it says which bucket the
+  // call WOULD have fallen into. Nothing was sent, so nothing was billed, and
+  // printing "$0.0000" for it would claim a metered call that cost nothing
+  // rather than a call that never happened (memql#5581).
+  if (row.cacheKind !== "") return "answered from the cache, nothing was sent";
   if (row.billing === "local") return "your own machine, no charge";
   if (row.billing === "subscription") return "your subscription, no charge here";
   if (row.billing === "unknown") return "not reported";
@@ -141,6 +160,7 @@ export function billingWords(row: DecisionRow): string {
  * name, where there is room for it.
  */
 export function billingShort(row: DecisionRow): string {
+  if (row.cacheKind !== "") return "from cache";
   if (row.billing === "local" || row.billing === "subscription") return "no charge";
   if (row.billing === "unknown") return "not reported";
   return "";
@@ -148,7 +168,7 @@ export function billingShort(row: DecisionRow): string {
 
 /** Whether this row's cost is a number worth printing. */
 export function costIsMoney(row: DecisionRow): boolean {
-  return row.billing === "metered";
+  return row.billing === "metered" && row.cacheKind === "";
 }
 
 /**

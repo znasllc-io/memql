@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -38,9 +39,17 @@ type Router struct {
 	logger    *slog.Logger
 
 	// recordsDropped tracks how many v1:router:call writes were
-	// skipped because the engine was unavailable or returned an
-	// error. Exposed for health metrics; not on the hot path.
+	// skipped because the engine was unavailable, the queue was full,
+	// or the write returned an error. Exposed for health metrics; not
+	// on the hot path.
 	recordsDropped atomic.Uint64
+
+	// ledger is the bounded queue of pending decision records and
+	// ledgerOnce starts its single writer (memql#5581). See
+	// LedgerQueueDepth for why the ledger is one goroutine and one
+	// bounded queue rather than a goroutine per record.
+	ledger     chan CallRecord
+	ledgerOnce sync.Once
 
 	// ceilingCheck is the cost-ceiling probe the federation hop consults
 	// (epic memql#5096, design D4). It defaults to memql.CostCeilingReached
@@ -890,11 +899,12 @@ func (r *Router) providerLookup(ctx context.Context, req ResolveRequest, name st
 // correlation; minting a fresh id (vs. extracting the bare UUID) also avoids
 // an id collision when one request fans out to a fallback call.
 func buildRouterCallArgs(rec CallRecord, callId string) map[string]any {
-	return map[string]any{
+	args := map[string]any{
 		"callId":             callId,
 		"requestId":          rec.RequestId,
 		"agentId":            rec.AgentId,
 		"userId":             rec.UserId,
+		"callerKind":         callerKindOrUnattributed(rec.CallerKind),
 		"promptName":         rec.PromptName,
 		"policyName":         rec.PolicyName,
 		"vendor":             rec.Vendor,
@@ -939,6 +949,17 @@ func buildRouterCallArgs(rec CallRecord, callId string) map[string]any {
 		"minContextTokens":   rec.MinContextTokens,
 		"machineOwnerUserId": rec.MachineOwnerUserId,
 	}
+
+	// `cacheKind` IS OMITTED RATHER THAN SENT EMPTY, and it has to be: the
+	// mutation declares it as a two-value enum, and "" is not one of the two
+	// -- sending it would fail argument validation and lose the WHOLE row for
+	// every ordinary provider call. Absent is also the right thing to store:
+	// on this concept an absent cacheKind means a provider answered, which is
+	// what every row written before memql#5581 was.
+	if airoute.ValidCacheKind(rec.CacheKind) {
+		args["cacheKind"] = rec.CacheKind
+	}
+	return args
 }
 
 // consideredArgs renders the door report as the plain []map the mutation's
@@ -971,59 +992,145 @@ func billingOrMetered(billing string) string {
 	return BillingMetered
 }
 
-// recordCall writes one v1:router:call row via the router mutation.
-// Fire-and-forget: runs on a detached goroutine with a fresh context so
-// the caller's cancellation never interrupts observability. A failed
-// write is logged and counted; it does not propagate.
+// callerKindOrUnattributed normalizes a record's caller kind for the ledger.
 //
-// The ledger mutation goes through `insert()` which requires an actor
-// (see component/memql/executor.go:mutationActor). We stamp a
-// synthetic "system:router" principal onto the detached context so
-// the write succeeds -- the alternative was every call emitting a
-// "no actor found in context" warning on every turn.
+// A BLANK IS THE ONE ANSWER THE FIELD MUST NEVER CARRY (memql#5581): it is
+// exactly the ambiguity the field exists to remove, and it would reappear on
+// any path that built a CallRecord without going through ResolveFor. An
+// unrecognised value is normalized the same way rather than stored: the five
+// kinds are a closed set on the concept, so a sixth string would be refused at
+// write time and lose the whole row.
+func callerKindOrUnattributed(kind string) string {
+	switch kind {
+	case auth.CallerKindUser, auth.CallerKindSystem, auth.CallerKindConnector,
+		auth.CallerKindAnonymous, auth.CallerKindUnattributed:
+		return kind
+	}
+	return auth.CallerKindUnattributed
+}
+
+// LedgerQueueDepth is how many pending v1:router:call records the router holds
+// before it starts dropping them (memql#5581).
+//
+// THE BOUND IS THE POINT. What it replaced was a goroutine per record: a node
+// answering a burst of model calls spawned a burst of writers, each rendering
+// a ~1.1 KB mutation, parsing it and taking a database connection, all at the
+// moment the node was busiest -- the decision records competing with the work
+// they describe. One writer drains this queue, so the ledger costs one
+// goroutine and at most one concurrent write no matter how many calls are in
+// flight.
+//
+// The depth is the same order as component/logstore's (4096 lines, batch 256),
+// which is the tree's other bounded-queue-with-counted-drops sink, and it is
+// deliberately generous: a full queue is a node whose database cannot keep up
+// with its own model calls, and at that point dropping the record is the right
+// answer and RecordsDropped is where it is reported.
+const LedgerQueueDepth = 1024
+
+// ledgerWriteTimeout bounds one ledger write. Unchanged from the per-record
+// goroutine it replaced.
+const ledgerWriteTimeout = 5 * time.Second
+
+// recordCall queues one v1:router:call row for the ledger writer.
+//
+// NON-BLOCKING, ALWAYS. It is called from stream goroutines and from the
+// observer's end-of-stream path, and a ledger that could block either of them
+// would put observability on the reply's critical path. A queue that is full
+// drops the record and counts it; it never waits.
+//
+// The write itself -- render, parse, mutation -- happens on the writer, which
+// is the one place this router touches the graph for observability.
 func (r *Router) recordCall(rec CallRecord) {
 	// A router with no engine cannot write the ledger, and that is a state
 	// RecordsDropped's own doc anticipates ("engine unavailability"). Without
-	// this check the detached goroutine dereferences nil and takes the WHOLE
-	// PROCESS with it -- a panic on a goroutine nobody recovers is fatal, so
-	// the failure mode of an unwired observability path was a crash rather
-	// than a missing row.
+	// this check the writer dereferences nil and takes the WHOLE PROCESS with
+	// it -- a panic on a goroutine nobody recovers is fatal, so the failure
+	// mode of an unwired observability path was a crash rather than a missing
+	// row.
 	if r == nil || r.engine == nil {
 		if r != nil {
 			r.recordsDropped.Add(1)
 		}
 		return
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		ctx = auth.ContextWithToken(ctx, &auth.TokenInfo{
-			Subject: "system:router",
-			Claims:  map[string]any{"sub": "system:router"},
-		})
+	queue := r.ledgerQueue()
+	select {
+	case queue <- rec:
+	default:
+		r.recordsDropped.Add(1)
+		r.logger.Warn("router: the ledger queue is full; dropping a v1:router:call row",
+			"depth", LedgerQueueDepth,
+			"requestId", rec.RequestId,
+			"provider", rec.ProviderName,
+			"outcome", rec.Outcome,
+		)
+	}
+}
 
-		args := buildRouterCallArgs(rec, id.NewShortId())
-		query, err := langparser.RenderCall("recordRouterCall", args)
-		if err != nil {
-			r.recordsDropped.Add(1)
-			r.logger.Warn("router: rendering the record call failed", "error", err, "requestId", rec.RequestId)
-			return
-		}
-		if _, err := r.engine.Execute(ctx, query); err != nil {
-			r.recordsDropped.Add(1)
-			r.logger.Warn("router: failed to write v1:router:call row",
-				"error", err,
-				"requestId", rec.RequestId,
-				"provider", rec.ProviderName,
-				"outcome", rec.Outcome,
-			)
-		}
-	}()
+// ledgerQueue returns the queue, starting the single writer on first use.
+//
+// LAZY RATHER THAN IN New, because a Router built by hand -- a test, an
+// embedding that skipped the constructor -- must not be left without one, and
+// because a router that never records a call should not hold a goroutine.
+func (r *Router) ledgerQueue() chan CallRecord {
+	r.ledgerOnce.Do(func() {
+		r.ledger = make(chan CallRecord, LedgerQueueDepth)
+		go r.drainLedger(r.ledger)
+	})
+	return r.ledger
+}
+
+// drainLedger is the ONE writer. It runs for the life of the process and
+// writes records in the order they were recorded.
+//
+// SERIAL ON PURPOSE. A pool would restore the contention this queue exists to
+// remove, and the throughput a single writer gives -- one mutation per
+// database round trip -- is far above the rate at which a node makes model
+// calls. A node that does exceed it is telling the operator something, and the
+// drop counter is how it says so.
+func (r *Router) drainLedger(queue <-chan CallRecord) {
+	for rec := range queue {
+		r.writeRecord(rec)
+	}
+}
+
+// writeRecord renders and executes one ledger mutation.
+//
+// The ledger mutation goes through `insert()` which requires an actor
+// (see component/memql/executor.go:mutationActor). We stamp a
+// synthetic "system:router" principal onto the detached context so
+// the write succeeds -- the alternative was every call emitting a
+// "no actor found in context" warning on every turn. The context is
+// detached so the caller's cancellation never interrupts observability.
+func (r *Router) writeRecord(rec CallRecord) {
+	ctx, cancel := context.WithTimeout(context.Background(), ledgerWriteTimeout)
+	defer cancel()
+	ctx = auth.ContextWithToken(ctx, &auth.TokenInfo{
+		Subject: "system:router",
+		Claims:  map[string]any{"sub": "system:router"},
+	})
+
+	args := buildRouterCallArgs(rec, id.NewShortId())
+	query, err := langparser.RenderCall("recordRouterCall", args)
+	if err != nil {
+		r.recordsDropped.Add(1)
+		r.logger.Warn("router: rendering the record call failed", "error", err, "requestId", rec.RequestId)
+		return
+	}
+	if _, err := r.engine.Execute(ctx, query); err != nil {
+		r.recordsDropped.Add(1)
+		r.logger.Warn("router: failed to write v1:router:call row",
+			"error", err,
+			"requestId", rec.RequestId,
+			"provider", rec.ProviderName,
+			"outcome", rec.Outcome,
+		)
+	}
 }
 
 // RecordsDropped returns the cumulative count of ledger writes the router
-// has skipped due to engine unavailability or marshal errors. Exposed
-// for health endpoints and tests.
+// has skipped: an unavailable engine, a marshal error, a failed write, or a
+// full queue. Exposed for health endpoints and tests.
 func (r *Router) RecordsDropped() uint64 {
 	return r.recordsDropped.Load()
 }

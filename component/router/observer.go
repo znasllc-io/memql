@@ -187,6 +187,7 @@ func buildRecord(
 		Partition:          req.Partition,
 		AgentId:            req.AgentId,
 		UserId:             req.UserId,
+		CallerKind:         req.CallerKind,
 		PromptName:         req.PromptName,
 		Vendor:             resolved.Vendor,
 		Model:              resolved.Model,

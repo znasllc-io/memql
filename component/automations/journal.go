@@ -569,6 +569,24 @@ func (j *workJournal) closeRun(ctx context.Context, exec *AutomationExecution, c
 	// nothing to do with the run. Failing it would throw away a compiled
 	// template and a journal because somebody closed a laptop.
 	if status == "failed" {
+		// A RUN THAT REACHED ITS OWN CEILING PARKS, AND IT IS ASKED FIRST
+		// (memql#5580). It is the same argument the door park makes -- a
+		// number a person set is not a defect in the work -- but a DIFFERENT
+		// ceiling from the process-wide one the router refuses with, and the
+		// two must stay tellable apart: this one names which of the run's
+		// ceilings was reached and what it had spent, and it waits on a
+		// `budget` approval rather than an `inferenceUnavailable` one.
+		//
+		// It is asked ABOVE DoorsFrom because DoorsFrom falls back to a
+		// substring match over the refusal codes, and a run ceiling that
+		// answered as the process cost ceiling would send a person to raise
+		// the wrong limit.
+		var ceiling *memql.RunCeilingError
+		if errors.As(runFailure(exec), &ceiling) {
+			j.parkOnRunCeiling(ctx, exec, chainHead, ceiling)
+			return
+		}
+
 		// DoorsFrom prefers the error VALUE, which carries the structured
 		// door report, and falls back to matching the message when the
 		// failure travelled as a string. An empty door list is the honest
@@ -703,6 +721,110 @@ func (j *workJournal) parkOnInference(ctx context.Context, exec *AutomationExecu
 	if j.logger != nil {
 		j.logger.Info("work journal: no door to a model is open, so the run parked instead of failing",
 			"component", ComponentName, "run", exec.ID, "approval", approvalId, "code", code)
+	}
+}
+
+// parkOnRunCeiling writes the budget approval and puts the run at `waiting`
+// (memql#5580).
+//
+// WHY PARK RATHER THAN FAIL. The run has already spent; the work itself is
+// fine; and the condition is a number a person set. Failing it would throw
+// away a compiled template and a journal because of a limit -- the same
+// argument parkOnInference makes above, arrived at for the same reason. What
+// parking buys is that raising the ceiling and deciding the approval resumes
+// the run where it stopped.
+//
+// WHY THE CALL IS REFUSED RATHER THAN CANCELLED MID-FLIGHT. The check runs
+// BEFORE the provider is asked, so there is never an in-flight call to
+// abandon. Cancelling one already sent would spend the money and throw away
+// the answer, which is the worst of both.
+//
+// WHAT MAKES THE BREACH LEGIBLE AFTERWARDS -- three rows' worth, because "the
+// run stopped" with no figures is not something anyone can decide about:
+//
+//	the approval   kind `budget`, subject {ceiling, limit, actual, reason}.
+//	the run        status `waiting`, waitingOn naming the ceiling by name,
+//	               and `spent` -- the first thing in this tree to write that
+//	               field with anything but wallClockMs.
+//	the log line   the ceiling and the run, at Info.
+//
+// THE ORDER IS parkOnInference'S, and load-bearing for its reason: a run
+// parked on an approval id that does not exist waits on nothing.
+//
+// NO resumeAt, EVER. Only a person changes a ceiling, so a timer here would
+// burn a dispatch every five minutes to rediscover a number nobody touched --
+// and unlike a shut door, no laptop opening will change this answer.
+func (j *workJournal) parkOnRunCeiling(ctx context.Context, exec *AutomationExecution, chainHead string, ceiling *memql.RunCeilingError) {
+	if j == nil || exec == nil || ceiling == nil {
+		return
+	}
+	now := time.Now().UTC()
+	approvalId := "v1:work:approval:" + id.NewShortId()
+	stepKey := ceiling.StepKey
+	if stepKey == "" && len(exec.StepOrder) > 0 {
+		stepKey = exec.StepOrder[len(exec.StepOrder)-1]
+	}
+	breach := work.CeilingBreach{
+		Ceiling: ceiling.Breach.Ceiling,
+		Limit:   ceiling.Breach.Limit,
+		Actual:  ceiling.Breach.Actual,
+		Reason:  ceiling.Breach.Reason,
+	}
+	req := work.BudgetApproval(exec.ID, stepKey, breach, now, workApprovalTTL)
+
+	j.call(ctx, "createWorkApproval", map[string]any{
+		"approvalId":   approvalId,
+		"runId":        req.RunId,
+		"stepKey":      req.StepKey,
+		"kind":         req.Kind,
+		"subject":      req.Subject,
+		"artifactHash": req.ArtifactHash,
+		"question":     "This run reached its " + breach.Ceiling + " ceiling. Raise it and carry on, or stop the run?",
+		"options": []map[string]any{
+			{"label": "I have raised the ceiling -- carry on", "value": "approved"},
+			{"label": "Stop this run", "value": "rejected"},
+		},
+		"evidence": map[string]any{
+			"tier":   req.Evidence.Tier,
+			"reason": req.Evidence.Reason,
+			"ruleId": req.Evidence.RuleId,
+			"source": req.Evidence.Source,
+		},
+		"requestedAt": rfc3339(req.RequestedAt),
+		"expiresAt":   rfc3339(req.ExpiresAt),
+	})
+
+	j.call(ctx, "updateWorkRun", map[string]any{
+		"runId":     exec.ID,
+		"status":    "waiting",
+		"chainHead": chainHead,
+		"stepOrder": exec.StepOrder,
+		"waitingOn": map[string]any{
+			"kind":         "approval",
+			"subject":      approvalId,
+			"approvalKind": work.ApprovalKindBudget,
+			"since":        rfc3339(now),
+			// The ceiling's NAME on the run row, so a reader scanning runs
+			// sees which limit stopped this one without opening the approval.
+			"ceiling": breach.Ceiling,
+			"reason":  breach.Reason,
+		},
+		"spent": map[string]any{
+			"tokens":             ceiling.Spent.Tokens,
+			"tokensSubscription": ceiling.Spent.TokensSubscription,
+			"tokensLocal":        ceiling.Spent.TokensLocal,
+			"cost":               ceiling.Spent.Cost,
+			"modelCalls":         ceiling.Spent.ModelCalls,
+			"wallClockMs":        ceiling.Spent.WallClockMs,
+		},
+		// NOT finishedAt and not an errorCode, for parkOnInference's reason:
+		// the run has not finished and has not failed.
+		"errorMessage": exec.Error,
+	})
+	if j.logger != nil {
+		j.logger.Info("work journal: the run reached a ceiling, so it parked instead of failing",
+			"component", ComponentName, "run", exec.ID, "approval", approvalId,
+			"ceiling", breach.Ceiling, "limit", breach.Limit, "actual", breach.Actual)
 	}
 }
 

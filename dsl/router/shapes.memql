@@ -31,6 +31,8 @@ shape call routerDecision {
   row.id
   row.createdAt
   requestId
+  callerKind
+  cacheKind
   promptName
   level
   requestedLevel

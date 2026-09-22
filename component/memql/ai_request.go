@@ -27,6 +27,7 @@ package memql
 // prevents is recorded in prompt_default_provider.go.
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -39,7 +40,13 @@ import (
 // question about what will actually be sent. Estimating from the template
 // would under-count every prompt whose data is larger than its wording, which
 // is most of them.
-func requestForPrompt(prompt *PromptTemplate, invocation *AIInvocation, modality airoute.Modality, renderedText string) (airoute.ResolveRequest, error) {
+//
+// IT TAKES A CONTEXT BECAUSE ATTRIBUTION IS ON IT (memql#5581). The prompt
+// says what the call NEEDS; only the context says who caused it, which
+// upstream request it belongs to, which run and step it serves, and what it is
+// about. ai_attribution.go is that derivation, and states why it is a context
+// read rather than a parameter threaded through the shape evaluator.
+func requestForPrompt(ctx context.Context, prompt *PromptTemplate, invocation *AIInvocation, modality airoute.Modality, renderedText string) (airoute.ResolveRequest, error) {
 	if prompt == nil {
 		return airoute.ResolveRequest{}, fmt.Errorf("no prompt to resolve a request for")
 	}
@@ -77,5 +84,5 @@ func requestForPrompt(prompt *PromptTemplate, invocation *AIInvocation, modality
 	if req.ExplicitProvider == "" {
 		req.ExplicitProvider = strings.TrimSpace(prompt.DefaultProvider)
 	}
-	return req, nil
+	return applyCallAttribution(ctx, req), nil
 }

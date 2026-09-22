@@ -335,9 +335,15 @@ DSL all live here.
    underneath it, `mergeStateStatus` becomes `DIRTY` and does not resolve
    itself; rebase on `origin/main` and force-push. **`BEHIND`** is the strict
    status-check policy saying the base moved: `gh pr update-branch <n>` clears
-   it, then wait for CI on the new merge commit. `merge-as-owner.sh` refuses
-   `BEHIND` by name, because forcing it with `--admin` would land a tree CI
-   never tested against the current base.
+   it, then wait for CI on the new merge commit. **But `mergeStateStatus` is
+   ONE value and GitHub returns the STRONGEST blocker, so `BLOCKED` HIDES
+   `BEHIND`** -- and every PR here is blocked on a code-owner review its author
+   may not give, so a stale branch reads `BLOCKED` and that name is never seen.
+   `merge-as-owner.sh` therefore MEASURES the drift rather than reading it off
+   the state (`compare/<base>...<head>`, printed by `--check` as a `base` line)
+   and refuses on a non-zero count OR an unreadable comparison -- forcing
+   either with `--admin` lands a tree CI never tested against the current base,
+   which is the one thing `strict` exists to prevent.
 2. **Merging your own PR: the owner uses the BYPASS, never a settings change.**
    The ruleset requires a code-owner review and that requirement stays on, but
    **GitHub never lets a pull request's author approve it** -- there is no
@@ -1471,11 +1477,21 @@ request beside the router would be an import cycle.
 
 **Every resolution is a decision record.** `v1:router:call` carries `level`,
 `requestedLevel`, `servedLevel`, `servedModel`, `servedEffort`, `degraded`,
-`rule`, `policy`, `door`, `considered`, `touches`, `minContextTokens` and
-`machineOwnerUserId`, read through `routerDecisionsRecent` and never broadcast
+`rule`, `policy`, `door`, `considered`, `touches`, `minContextTokens`,
+`machineOwnerUserId`, `callerKind` and `cacheKind`, read through
+`routerDecisionsRecent` and never broadcast
 (the volume argument that excludes `v1:worker:invocation`). `considered` is KEPT
 ON SUCCESS as well as on a refusal: a rule is falsifiable only if the decisions
 it made can be read, and what a chain did not pick is half of that.
+`callerKind` is what makes an empty `userId` an ANSWER rather than a gap
+(memql#5581) -- `system` is the cluster's own sweep or seed, `unattributed` is a
+Go call site that stamped no caller -- derived from the context and routed on by
+nothing. `cacheKind` names the cache that answered, when one did: the exact-hash
+cache sits AFTER the resolution (its key folds in the resolved provider), so a
+hit is a decision with no provider call, and its row carries REAL ZEROS for
+every token and cost. ABSENT means a provider answered. The rows are written
+through one bounded queue and one writer, so the ledger costs a node one
+goroutine and at most one concurrent write; a full queue drops and counts.
 `servedModel` / `servedEffort` are what the SURFACE REPORTED, as distinct from
 `model`, which is what the chain resolved; both are EMPTY when it said nothing,
 because a value copied from the request would record as measured something
@@ -2566,6 +2582,39 @@ touches rows.
   and local spend; loop caps (`maxModelCalls`, `maxRetries`, `maxEvents`,
   `wallClockMs`) INCLUDE every call. A ceiling of zero is UNSET, never
   "nothing allowed".
+- **The ceilings are enforced at the MODEL SEAM, and that placement answers
+  three questions at once** (memql#5580). `component/memql`'s `modelSeam` is
+  the one funnel both covered call sites pass through, it reads the run off
+  the context, and it sits BEFORE the provider call -- so the call can still
+  be refused. It asks a `RunCeilingGuard` (implemented by
+  `integrations/work.RunCeilings`, which reads the goal's ceilings and folds
+  the run's `v1:work:modelCall` rows into its spend) and refuses with a typed
+  `*memql.RunCeilingError`. The three:
+  - **A breach PARKS, it does not fail.** The refused call fails its step, and
+    `closeRun` recognises the typed error and parks the run at `waiting` on a
+    `budget` approval carrying `{ceiling, limit, actual, reason}` -- plus the
+    ceiling's name and the run's `spent` on the row. **No `resumeAt`, ever**:
+    only a person changes a ceiling. Nothing in flight is cancelled, because
+    the check runs before the provider is asked.
+  - **Every ANSWER is one model call, whoever answered** -- a provider, a
+    fleet machine, a subscription app, the replay journal, or the ai()
+    runtime's in-process caches (which answer ABOVE the seam, so `Invoke`
+    asks the guard before consulting them). The dollar buckets take only what
+    MemQL was BILLED for, so a replayed or cached answer costs a loop call and
+    nothing else. `component/work.AddCall` is that fold.
+  - **A resumed run continues its first attempt's budget.** The guard seeds
+    from the run's own journal rows, so park-approve-park is not a way to buy
+    another allowance; a replay or a fork is a different run id and rightly
+    gets its own.
+
+  Two edges, stated because silence about them would be the same defect one
+  layer down. **`maxRetries` and `maxEvents` are the EXECUTOR's counters and
+  reach no model call**, so this seam clears them and WARNS rather than
+  clearing them silently against a spend it never sees; and a run whose
+  ceilings **cannot be read** is REFUSED under the sentinel ceiling
+  `unevaluated` -- a limit nobody could read must not read like a limit nobody
+  set. A run with no `goalId` inherits no ceilings and costs the guard no read
+  at all, which is what keeps it off every automation run in the cluster.
 - **Both sweeps are in `maintenanceAutomations`, and that is not optional.**
   The work concepts declare the composite owner tier, so under the default
   reader actor these reads answer ZERO ROWS AND NO ERROR: a sweep that resumes
@@ -2688,6 +2737,19 @@ include every call, asserted by
 SURVIVES as the compile order's third tier; the specialist-creation gate is
 RECORDED in memql#5063. `produceArtifact` opens a goal naming a deterministic
 template, which reaches no model to decide anything.
+
+**That replacement was written and NOT WIRED for a while, which is worth
+knowing about the sentence above** (memql#5580). `CheckCeilings` had the split,
+had the unit test cited here, and had NO PRODUCTION CALLER -- so a run's
+ceilings were settable fields nothing read, and the only real stop was the
+process-wide guard, which is per-PROCESS and shared with every other caller on
+the node. It is wired now, at the model seam -- the work spine section above
+describes the seam, the park and the three counting rules. **The test
+named above does not hold that property and never did**: it is about the
+function's arithmetic and passes whether or not anything calls it. The one that
+holds it is `TestTheRunCeilingChainHasAProductionCaller`
+(`run_ceilings_have_a_caller_test.go`), which fails when any link of decision /
+wiring / seam goes test-only.
 
 ## Notes for Claude Code CLI
 
