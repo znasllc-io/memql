@@ -79,6 +79,17 @@ const (
 type Node struct {
 	Kind NodeKind
 	Lit  string
+	// LitType is the scalar's ORIGINAL type -- string, number or bool --
+	// carried for one purpose: rendering the value back as MemQL, where a
+	// number must not acquire quotes.
+	//
+	// Equal DELIBERATELY IGNORES IT. Canonicalization folds every scalar to
+	// one string spelling so that a 1 from JSON and a 1 from argv compare
+	// equal, which is what lets two recordings of the same call generalize;
+	// making the type part of equality would undo that. So this field is a
+	// rendering hint and never a semantic one, and an empty value means
+	// "nobody said", which renders as a string.
+	LitType string
 	// Keys are sorted for KindObject and align with Kids.
 	Keys []string
 	Kids []*Node
@@ -89,8 +100,13 @@ type Node struct {
 	HoleType string
 }
 
-// Lit builds a scalar node.
+// Lit builds a scalar node whose original type is unrecorded, which renders
+// as a string.
 func Lit(s string) *Node { return &Node{Kind: KindLit, Lit: s} }
+
+// LitOf builds a scalar node carrying its original type: "string", "number"
+// or "bool".
+func LitOf(s, litType string) *Node { return &Node{Kind: KindLit, Lit: s, LitType: litType} }
 
 // Arr builds an array node.
 func Arr(kids ...*Node) *Node { return &Node{Kind: KindArray, Kids: kids} }
@@ -225,7 +241,7 @@ func (n *Node) Clone() *Node {
 	if n == nil {
 		return nil
 	}
-	c := &Node{Kind: n.Kind, Lit: n.Lit, HoleId: n.HoleId, HoleType: n.HoleType}
+	c := &Node{Kind: n.Kind, Lit: n.Lit, LitType: n.LitType, HoleId: n.HoleId, HoleType: n.HoleType}
 	if len(n.Keys) > 0 {
 		c.Keys = append([]string(nil), n.Keys...)
 	}

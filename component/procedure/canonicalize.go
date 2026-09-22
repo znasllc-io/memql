@@ -79,15 +79,15 @@ func canonicalizeValue(key string, v any) *Node {
 	case nil:
 		return Lit("")
 	case bool:
-		return Lit(strconv.FormatBool(t))
+		return LitOf(strconv.FormatBool(t), "bool")
 	case float64:
-		return Lit(formatNumber(t))
+		return LitOf(formatNumber(t), "number")
 	case int:
-		return Lit(strconv.Itoa(t))
+		return LitOf(strconv.Itoa(t), "number")
 	case int64:
-		return Lit(strconv.FormatInt(t, 10))
+		return LitOf(strconv.FormatInt(t, 10), "number")
 	case json.Number:
-		return Lit(t.String())
+		return LitOf(t.String(), "number")
 	case string:
 		return canonicalizeString(key, t)
 	case []any:
