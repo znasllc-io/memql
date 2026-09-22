@@ -279,6 +279,31 @@ describe("Settings -> Decisions: what a call cost", () => {
     expect(rowFor("claude-code").textContent).not.toContain("$");
   });
 
+  it("says a cache hit cost nothing, and never prints a money figure for one", async () => {
+    // A CACHE ROW'S `billing` IS THE CONCEPT'S DEFAULT, "metered" -- which is
+    // not wrong, it says which bucket the call WOULD have fallen into -- so
+    // without the cacheKind guard this row printed `$0.0000` and claimed a
+    // metered call that cost nothing rather than a call that never happened
+    // (memql#5581).
+    h.state.decisions = [
+      wireDecision({
+        id: "d-cache",
+        billing: "metered",
+        cacheKind: "exact",
+        door: "federation",
+        vendor: "openai",
+        model: "gpt-5.4-mini",
+        totalCost: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+      }),
+    ];
+    await renderDecisions();
+    expect(costIn("gpt-5.4-mini")).toBe("from cache");
+    expect(titleOfCostIn("gpt-5.4-mini")).toBe("answered from the cache, nothing was sent");
+    expect(rowFor("gpt-5.4-mini").textContent).not.toContain("$");
+  });
+
   it("prints the figure for a call that WAS billed", async () => {
     // The control. Without it, "no `$` anywhere" would pass on a column that
     // never renders money at all.

@@ -362,6 +362,10 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 		// unwired refusal and the level/modality validation are one place --
 		// and so this package still cannot import component/router.
 		e.aiRuntime.resolve = e.resolveAI
+		// And the route a CACHE HIT's decision record takes (memql#5581).
+		// Same argument for going through the engine: the seam lives here,
+		// so this package still cannot import component/router.
+		e.aiRuntime.recordCacheServed = e.recordCacheServed
 	}
 	if e.aiRuntime != nil {
 		// The SAME seam value, not a copy: SetModelCallJournal is called
