@@ -8,6 +8,7 @@ import (
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	proc "github.com/znasllc-io/memql/component/procedure"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // learn.go -- the pipeline, in the record's order, and the two capability
@@ -316,14 +317,18 @@ func (i *Integration) runById(ctx context.Context, runId string) (map[string]any
 	return rows[0], nil
 }
 
+// levelArg reads D24's corpus level. The narrowing takes the CALLER'S DEFAULT
+// answer, which here is LevelAction: an unreadable or out-of-range level must
+// mine the actions rather than mine nothing, because a sweep that silently
+// mines an empty level looks exactly like a corpus with nothing left to learn.
 func levelArg(args map[string]any) Level {
 	switch v := args["level"].(type) {
 	case float64:
-		if int(v) == 2 {
+		if num.Float64Or(v, int(LevelAction)) == int(LevelAutomation) {
 			return LevelAutomation
 		}
 	case int:
-		if v == 2 {
+		if v == int(LevelAutomation) {
 			return LevelAutomation
 		}
 	}

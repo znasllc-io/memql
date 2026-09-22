@@ -1,0 +1,41 @@
+// builtins.memql
+//
+// Procedure learning's two entry points (design record
+// docs/superpowers/specs/2026-09-13-app-session-recording-and-learning-program-design.md,
+// section 4 epic C). Executors live in integrations/procedure; the pure
+// algorithms they call live in component/procedure and reach no model.
+//
+// Both are @serverOnly, and the reason is the same one recordConstructGoalSignature
+// states about itself. Learning writes a construct into somebody's catalog
+// with a goalSignature attached -- the key compile's exact-match tier serves a
+// later goal from WITHOUT A MODEL. A caller able to drive learning on an
+// arbitrary run could point any goal at a template of their choosing and have
+// the engine replay it. Scoping to actor.userId is not the missing piece: the
+// reads are already owner-scoped and a caller can only reach their own runs.
+// What is missing is that deciding two recordings are the same procedure is
+// not a caller's judgement to assert at all, which is what @serverOnly says
+// and a row tier cannot.
+
+/// Mine the corpus a finished run belongs to. Reads that run's owner's recorded runs for the same
+/// goal signature, mines the recurring shape, generalizes it into a template with classified holes,
+/// and -- when an abstraction clears the compression floor of at least two uses -- lifts it into a
+/// validated bundle carrying its provenance. Nothing auto-activates: the construct enters the trust
+/// ladder as a candidate. Returns {runId, goalSignature, sequences, candidates, constructId,
+/// accepted, reason}. A corpus of fewer than two runs is the ORDINARY answer, not a failure.
+@serverOnly
+@executor("integration.procedure.learnFromRun")
+builtin procedureLearnFromRun {
+  runId  string!  @description("The v1:work:run that just succeeded.")
+  level  integer  @description("1 mines the actions inside recorded sessions (default); 2 mines automation invocations, so a repeated sequence of automations becomes a higher automation.")
+}
+
+/// The scheduled sweep: mine one owner's recorded corpus for one goal signature at one level.
+/// Disliked recordings are excluded entirely. Returns {ownerUserId, goalSignature, level,
+/// sequences, candidates, constructId, accepted, reason}.
+@serverOnly
+@executor("integration.procedure.mineCorpus")
+builtin procedureMineCorpus {
+  ownerUserId    string!  @description("Whose corpus to mine. Every read runs as this person: the composite owner tier would otherwise blend two people's recordings into one template.")
+  goalSignature  string   @description("Restrict to one goal's runs. Empty mines every signature the owner has.")
+  level          integer  @description("1 actions (default); 2 automation invocations.")
+}

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	proc "github.com/znasllc-io/memql/component/procedure"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 // corpus.go -- rows to values, and the only half of this epic that reads a
@@ -266,14 +267,19 @@ func footprintDigest(fp map[string]any) string {
 	return strings.Join(leafValues(fp), "\x1f")
 }
 
+// intOf narrows a decoded payload number. The one field it reads is `seq`, a
+// step's POSITION, which is an ordering -- so an out-of-range value saturates
+// rather than becoming zero: a step that claimed position 0 would sort to the
+// front of a run it belongs at the end of, and the procedure mined from it
+// would have its steps in the wrong order. core/num names that answer.
 func intOf(m map[string]any, key string) int {
 	switch v := m[key].(type) {
 	case float64:
-		return int(v)
+		return num.ClampFloat64(v)
 	case int:
 		return v
 	case int64:
-		return int(v)
+		return num.ClampInt64(v)
 	default:
 		return 0
 	}

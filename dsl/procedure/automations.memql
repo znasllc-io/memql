@@ -1,0 +1,37 @@
+// automations.memql
+//
+// The two triggers of epic C's wiring paragraph: one on a session subrun
+// reaching `succeeded`, and one schedule over the corpus.
+//
+// Neither activates anything. A learned procedure is persisted as a validated
+// bundle whose construct stays a candidate on the trust ladder; promotion is a
+// person's, and epic D owns it.
+
+/// On a run reaching a terminal state, mine the corpus it belongs to. The builtin itself decides
+/// whether there is anything to learn: a run with no goalSignature, or a corpus of fewer than two
+/// recordings, answers `accepted: false` with the reason rather than failing. Filtering here on
+/// status would need the trigger to name a value the row carries at fire time, and an automation
+/// that fired on every update would mine the same corpus once per step.
+@trigger(event="node.updated", concept="v1:work:run")
+automation learnFromSucceededRun {
+  args {
+    id      any
+    status  any
+  }
+
+  learned := builtin procedureLearnFromRun(runId: args.id ?? "")
+}
+
+/// Every six hours: mine the second corpus level, where an automation invocation is a symbol like
+/// any action, so a repeated sequence of automations becomes a higher automation by the same
+/// compression rule (design D24). It runs per owner; the sweep reads no rows of its own and the
+/// builtin refuses a blank ownerUserId, because a read with no actor returns zero rows and no
+/// error -- which would look exactly like a cluster that has learned everything there is.
+@trigger(schedule="0 0 */6 * * *")
+automation mineProcedureCorpusAcrossAutomations {
+  args {
+    ownerUserId  any
+  }
+
+  mined := builtin procedureMineCorpus(ownerUserId: args.ownerUserId ?? "", level: 2)
+}

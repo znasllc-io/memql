@@ -1,0 +1,24 @@
+// prompts.memql
+//
+// The ONE bounded model call this epic allows (design D6). It proposes a
+// derivation for a hole the rules could not explain -- one that SOME recorded
+// instances derive from an earlier result and some do not.
+//
+// The answer is not trusted. Whatever comes back is parsed against the closed
+// grammar in component/procedure and then checked against EVERY instance; a
+// proposal that explains some and not others is rejected and the hole stays a
+// free parameter. So this prompt cannot make a procedure wrong -- at worst it
+// costs one call and changes nothing.
+
+/// Propose how one argument of a recorded procedure is derived from an earlier step's result.
+/// Answers ONE expression in a closed grammar, or an empty string when nothing fits. The engine
+/// checks the answer against every recorded instance before it is kept, so a guess costs a call and
+/// nothing else.
+@description("Propose a derivation expression for an unexplained hole in a learned procedure")
+@level("reasoning")
+@templateFile("deriveHole.tmpl")
+prompt deriveProcedureHole {
+  holePath   string   @required @description("Where the hole sits in the step's arguments, as a dotted path.")
+  holeType   string   @description("The widest type observed at that position: string, number, bool, object, array or mixed.")
+  instances  []object @required @description("One entry per recorded instance: {value, earlierResults}, where earlierResults is a list of {stepIndex, path, value} the procedure's earlier steps produced.")
+}
