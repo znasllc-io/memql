@@ -168,3 +168,5 @@ replace github.com/znasllc-io/memql/component/healing => ../healing
 replace github.com/znasllc-io/memql/component/frontdoor => ../frontdoor
 
 replace github.com/znasllc-io/memql/component/work => ../work
+
+replace github.com/znasllc-io/memql/integrations => ../../integrations
