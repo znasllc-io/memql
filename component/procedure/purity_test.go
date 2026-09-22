@@ -7,13 +7,21 @@ import (
 	"testing"
 )
 
-// allowedNonStdlib is the whole exemption list, and it has one entry on
-// purpose. component/work is the work spine's own pure half -- GoalSignature
-// is the key this module's output is filed under, and re-deriving it here
-// would be a second copy that drifts.
-var allowedNonStdlib = map[string]bool{
-	"github.com/znasllc-io/memql/component/work": true,
-}
+// allowedNonStdlib is the exemption list, and it is EMPTY.
+//
+// The design record allows this module the standard library and
+// component/work. It turned out to need only the first: every goalSignature
+// the pipeline groups by is read off a row by integrations/procedure rather
+// than derived here, so nothing imports the work spine and `go mod tidy`
+// removes a require that says otherwise. The narrower truth is what ships,
+// and it is a stronger claim than the record asked for.
+//
+// TO WIDEN IT: if a function here ever needs work.GoalSignature -- computing a
+// signature rather than being handed one -- add
+// "github.com/znasllc-io/memql/component/work" here AND the require to
+// go.mod, in the same change. That is the ONE import the record permits; a
+// second entry is a different decision and belongs in a different review.
+var allowedNonStdlib = map[string]bool{}
 
 // TestProcedureImportsNothingBeyondStdlibAndWork is what makes "induction
 // spends no model" checkable rather than promised (design record
@@ -60,7 +68,7 @@ func TestProcedureImportsNothingBeyondStdlibAndWork(t *testing.T) {
 	}
 	if len(offenders) > 0 {
 		sort.Strings(offenders)
-		t.Errorf("component/procedure imports outside the standard library + component/work:\n  %s\n\n"+
+		t.Errorf("component/procedure imports outside the standard library:\n  %s\n\n"+
 			"This module's whole value is that its decisions can be checked without running "+
 			"anything -- no engine, no database, no provider. If the import is genuinely "+
 			"needed, the code belongs in integrations/procedure, which may import anything.",
