@@ -195,6 +195,39 @@ func TestBootstrapLocalWizardSkipsEmailAndRequiresRealPasskeyAcrossReplicas(t *t
 	require.NotEmpty(t, token)
 	require.Zero(t, e.users)
 	require.Empty(t, e.mutations)
+	var redirect struct{ Redirect string }
+	require.NoError(t, json.Unmarshal(saved.Body.Bytes(), &redirect))
+	require.Equal(t, "/auth/setup/passkey", redirect.Redirect)
+	follow := httptest.NewRequest("GET", "https://identity.test"+redirect.Redirect, nil)
+	follow.Header = get.Header.Clone()
+	for _, cookie := range saved.Result().Cookies() {
+		follow.AddCookie(cookie)
+	}
+	passkeyPage := httptest.NewRecorder()
+	mux.ServeHTTP(passkeyPage, follow)
+	require.Equal(t, http.StatusOK, passkeyPage.Code, passkeyPage.Body.String())
+	var enrollmentPage struct {
+		Page string
+		Data struct {
+			Local           bool
+			EnrollmentToken string
+		}
+	}
+	require.NoError(t, json.Unmarshal(passkeyPage.Body.Bytes(), &enrollmentPage))
+	require.Equal(t, "setup_passkey", enrollmentPage.Page)
+	require.True(t, enrollmentPage.Data.Local)
+	require.Equal(t, token, enrollmentPage.Data.EnrollmentToken)
+	// Losing the cookie must expose an error, never silently restart the
+	// wizard and make a successful submission look like a flickering button.
+	missingCookie := httptest.NewRequest("GET", "https://identity.test"+redirect.Redirect, nil)
+	missingCookie.Header = get.Header.Clone()
+	missingPage := httptest.NewRecorder()
+	mux.ServeHTTP(missingPage, missingCookie)
+	require.Equal(t, http.StatusUnauthorized, missingPage.Code, missingPage.Body.String())
+	var missingResult struct{ Page, Redirect string }
+	require.NoError(t, json.Unmarshal(missingPage.Body.Bytes(), &missingResult))
+	require.Equal(t, "error", missingResult.Page)
+	require.Empty(t, missingResult.Redirect)
 	begin := bootstrapRegister(t, first, token, false, map[string]string{})
 	require.Equal(t, 200, begin.Code, begin.Body.String())
 	invalid := bootstrapRegister(t, second, token, true, WebAuthnRegisterFinishRequest{ChallengeId: decodeBegin(t, begin).ChallengeId, Credential: json.RawMessage(`{}`)})
