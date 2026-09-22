@@ -58,6 +58,7 @@ require (
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	github.com/zeozeozeo/gomplerate v0.0.0-20250404113140-0fbb236df825 // indirect
 	github.com/znasllc-io/memql/component/node/gen v0.0.0 // indirect
+	github.com/znasllc-io/memql/component/procedure v0.0.0 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/exp v0.0.0-20260813180055-c1d0aacb2297 // indirect
 	golang.org/x/tools v0.49.0 // indirect
@@ -182,6 +183,8 @@ replace github.com/znasllc-io/memql/component/architecture => ./component/archit
 replace github.com/znasllc-io/memql/component/metrics => ./component/metrics
 
 replace github.com/znasllc-io/memql/component/planner => ./component/planner
+
+replace github.com/znasllc-io/memql/component/procedure => ./component/procedure
 
 replace github.com/znasllc-io/memql/component/provenance => ./component/provenance
 

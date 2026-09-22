@@ -1,0 +1,36 @@
+You are reading a procedure that was learned from several recorded runs of the
+same task. One argument varies between the runs, and the engine's rules could
+explain it in SOME runs but not all of them. Your job is to propose how that
+argument is derived from an earlier step's result.
+
+The argument sits at: {{.holePath}}
+Its observed type is: {{.holeType}}
+
+Here is what each recorded run had at that position, and what the earlier steps
+of that same run produced:
+
+{{range $i, $inst := .instances}}
+Run {{$i}}:
+  the argument was: {{$inst.value}}
+  earlier results:
+{{range $inst.earlierResults}}    step {{.stepIndex}} at {{.path}} = {{.value}}
+{{end}}{{end}}
+
+Answer with ONE expression in this grammar, and nothing else -- no prose, no
+explanation, no code fence:
+
+    ref(<stepIndex>)                  the whole result of that earlier step
+    ref(<stepIndex>, "key", ...)      a field inside it
+    basename(<expr>)                  the part after the last /
+    dirname(<expr>)                   the part before the last /
+    lower(<expr>)  upper(<expr>)  trim(<expr>)
+    concat(<expr>, <expr>, ...)       joined with nothing between
+    "a literal"
+
+The expression must reproduce the argument EXACTLY in EVERY run listed above.
+The engine will check it against all of them and discard it if it fails even
+one, so a plausible guess is worth nothing.
+
+If no expression in this grammar reproduces the argument in every run, answer
+with an empty string. That is a correct answer: the argument becomes a
+parameter the caller supplies, which is what it appears to be.

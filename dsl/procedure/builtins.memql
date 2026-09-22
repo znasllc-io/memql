@@ -1,0 +1,43 @@
+// builtins.memql
+//
+// Procedure learning's two entry points (design record
+// docs/superpowers/specs/2026-09-13-app-session-recording-and-learning-program-design.md,
+// section 4 epic C). Executors live in integrations/procedure; the pure
+// algorithms they call live in component/procedure and reach no model.
+//
+// NEITHER CARRIES @serverOnly, AND THAT IS NOT AN OVERSIGHT. @serverOnly is
+// refused on a builtin at parse -- it is accepted on a query and a mutation --
+// so the gate these two need lives in their HANDLERS, which is the same place
+// the log store's reads put theirs and for the same reason: a builtin's
+// annotation set carries no rank or origin gate.
+//
+// The gate they need is real. Learning writes a construct into somebody's
+// catalog with a goalSignature attached, which is the key compile's
+// exact-match tier serves a later goal from WITHOUT A MODEL. A caller able to
+// drive learning on an arbitrary run could point any goal at a template of
+// their choosing. The handlers therefore refuse a blank ownerUserId, run every
+// read under the NAMED owner's actor, and reach the @serverOnly authoring
+// mutations only through the one internal-origin stamp in store.go -- so a
+// caller who is not that owner reads zero rows and mines nothing.
+
+/// Mine the corpus a finished run belongs to. Reads that run's owner's recorded runs for the same
+/// goal signature, mines the recurring shape, generalizes it into a template with classified holes,
+/// and -- when an abstraction clears the compression floor of at least two uses -- lifts it into a
+/// validated bundle carrying its provenance. Nothing auto-activates: the construct enters the trust
+/// ladder as a candidate. Returns {runId, goalSignature, sequences, candidates, constructId,
+/// accepted, reason}. A corpus of fewer than two runs is the ORDINARY answer, not a failure.
+@executor("integration.procedure.learnFromRun")
+builtin procedureLearnFromRun {
+  runId  string!  @description("The v1:work:run that just succeeded.")
+  level  integer  @description("1 mines the actions inside recorded sessions (default); 2 mines automation invocations, so a repeated sequence of automations becomes a higher automation.")
+}
+
+/// The scheduled sweep: mine one owner's recorded corpus for one goal signature at one level.
+/// Disliked recordings are excluded entirely. Returns {ownerUserId, goalSignature, level,
+/// sequences, candidates, constructId, accepted, reason}.
+@executor("integration.procedure.mineCorpus")
+builtin procedureMineCorpus {
+  ownerUserId    string!  @description("Whose corpus to mine. Every read runs as this person: the composite owner tier would otherwise blend two people's recordings into one template.")
+  goalSignature  string   @description("Restrict to one goal's runs. Empty mines every signature the owner has.")
+  level          integer  @description("1 actions (default); 2 automation invocations.")
+}

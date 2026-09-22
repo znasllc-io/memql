@@ -1,0 +1,39 @@
+{
+  "cases": [
+    {
+      "name": "no-repeats",
+      "sequences": [["a","b","c"],["d","e","f"],["g","h","i"]],
+      "minSupport": 2,
+      "gap": 2
+    },
+    {
+      "name": "one-shared-run",
+      "sequences": [["a","b","c","z"],["q","a","b","c"]],
+      "minSupport": 2,
+      "gap": 2
+    },
+    {
+      "name": "contiguous-beats-scattered",
+      "sequences": [
+        ["p","x","x","q","r","s","t"],
+        ["p","x","x","q","r","s","t"],
+        ["p","y","y","y","q"],
+        ["p","y","y","y","q"]
+      ],
+      "minSupport": 2,
+      "gap": 2
+    },
+    {
+      "name": "gap-one-tolerated",
+      "sequences": [["a","b","z1","c"],["a","b","z2","c"]],
+      "minSupport": 2,
+      "gap": 1
+    },
+    {
+      "name": "support-floor-three",
+      "sequences": [["a","b"],["a","b"]],
+      "minSupport": 3,
+      "gap": 2
+    }
+  ]
+}

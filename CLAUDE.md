@@ -118,7 +118,7 @@ MemQL/
 │                      ones, which no image loads, and deploypack, which the
 │                      identity node does load through its own node-type tag
 ├── component/         Core Go components (memql, grpc, events, database,
-│   │                  server, auth, edge, language, ...)
+│   │                  server, auth, edge, language, procedure, ...)
 │   ├── bus/           Channel-based inter-component communication
 │   ├── node/          Distributed node system (identity, peer mesh, bootstrap)
 │   ├── architecture/  Auto-generated architecture model (UML/C4 from source)
@@ -237,7 +237,7 @@ MEMQL_REQUIRE_DB=1 make test   # ...and make a missing database a FAILURE, not a
 ```
 
 **Do NOT verify with `go test ./...`. It does not run the engine** (memql#4032).
-This is a multi-module workspace -- `go.work` lists 49 modules -- and a relative
+This is a multi-module workspace -- `go.work` lists 51 modules -- and a relative
 pattern resolves inside whichever module owns the directory it is rooted at.
 Measured:
 
@@ -2700,6 +2700,43 @@ never a best case" is unrepresentable rather than merely discouraged.
   (memql#5216); without it a non-owner admin was admitted to the screen and
   served nothing, and the refusal rendered as UNMEASURED. The four reads carry
   `@requiresRank("admin")` to match, adjudicated in `tierDecidesTheRead`.
+
+### Procedure learning (epic memql#5402)
+
+Recordings generalized into parameterized constructs by a PURE module that
+spends no model. `component/procedure` is a leaf module -- stdlib plus
+`component/work`, a build-graph fact its own `purity_test.go` asserts --
+holding canonicalize / symbolize / mine / structure / generalize / classify /
+score / select as functions over values; `integrations/procedure` is the only
+half that reads a row. Record: section 4 epic C of
+[the recording-and-learning program](docs/superpowers/specs/2026-09-13-app-session-recording-and-learning-program-design.md).
+
+Four rules reach outside the epic:
+
+- **Holes classify in D13's order -- data flow, then constant, then free** --
+  and a classification must hold on EVERY instance. `unexplained` means PARTIAL
+  evidence and is the ONLY class that may reach the one bounded model call; a
+  hole nothing derives is FREE and asks nothing, which is what keeps the
+  ordinary path at zero provider calls. Whatever a model answers is parsed
+  against a closed grammar and re-checked against every instance.
+- **Compression is the score, two uses is the floor** (D14). A free parameter
+  is priced ABOVE a data-flow hole, so a template that is all free parameters
+  cannot clear the floor. `Select` rewrites the corpus between acceptances,
+  which is what makes the hierarchy emerge.
+- **The corpus is ONE owner's, read under their actor.** The composite tier
+  would serve a sweep every owner's runs, and a template mined from two
+  people's recordings is correct about neither. A disliked recording is
+  excluded in the loader; a run with no `goalSignature` is skipped, never
+  defaulted.
+- **`goalSignature` is written LAST**, after the compile gate -- it is the key
+  compile's exact-match tier serves a later goal from WITHOUT a model, so
+  writing it earlier points a future goal at a template that cannot run.
+  Nothing auto-activates.
+
+`@serverOnly` is refused on a builtin at parse, so both builtins carry their
+gate in the HANDLER. `component/procedure/reference` is a research harness
+(D6), never product: skipped when `python3` is absent, with a deliberately
+wrong reference committed so the harness can be shown to fail.
 
 ### Planner / Knowledge / Validation
 

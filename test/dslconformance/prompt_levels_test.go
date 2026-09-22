@@ -76,6 +76,19 @@ var promptLevels = map[string]string{
 	// result. The agent chooses actions and writes a user-facing reply; it does
 	// not emit executable DSL, so the agent reply band is sufficient.
 	"workAgentReply": "strong",
+	// deriveProcedureHole: proposes how ONE argument of a learned procedure is
+	// derived from an earlier step's result (epic memql#5402, D6's single
+	// bounded call). Reasoning rather than fast, and the reason is the shape
+	// of the mistake rather than the difficulty: the answer is an EXPRESSION
+	// in a closed grammar that must reproduce a value in every recorded
+	// instance, and a confidently wrong one that happens to hold on the two
+	// instances it was shown is exactly what the engine then checks and
+	// rejects -- so a cheaper band buys nothing but rejected calls. It sits
+	// beside authoringEmit for the same reason: it writes something
+	// executable, and reasoningParks means an unavailable door parks rather
+	// than degrading it, which here costs one free parameter and never a
+	// wrong derivation.
+	"deriveProcedureHole": "reasoning",
 	// consolidateMemory: distils at most ONE durable belief from a clustered
 	// set of episodic rows. A short bounded answer over material already
 	// narrowed by similarity, which is the fast band's shape exactly.
