@@ -3,8 +3,9 @@
 - **Date:** 2026-09-20
 - **Status:** brainstormed with the owner on 2026-09-20; **not yet approved as a
   whole.** Section 4 records the answers the owner gave. Several were given
-  BEFORE the facts in sections 3 and 6 were known: one of them (D3) is
-  contradicted by the tree. Each is flagged where it appears and filed as a
+  BEFORE the facts in sections 3 and 6 were known: one of them (D3) was
+  contradicted by the tree, and was DECIDED AGAIN by the owner on 2026-09-22
+  (Q1). Each is flagged where it appears and filed as a
   decision issue that blocks the work depending on it, rather than being
   written down as settled. Issues were filed on 2026-09-20; the table in
   section 12 names them.
@@ -262,15 +263,44 @@ accepts the application, and acceptance grants wholesale prices.
 Catalog, cart and checkout from Shopify's Storefront API; from MemQL, only what
 Shopify cannot model. This is the connector record's D5 (2.7).
 
-### D3 -- "Headless, hybrid rendering" -- NEEDS RE-CONFIRMATION (Q1)
+### D3 -- A static bundle, bound at runtime -- DECIDED BY THE OWNER, 2026-09-22 (Q1)
 
-The owner chose to keep Astro and add a server adapter for cart, account and
-wholesale routes. It was chosen before two facts were known: the edge runs
-nothing (2.1), so server routes have no runtime to run on; and the customer
-session does not obviously need a server (section 3). The likely resolution is
-a static bundle, the customer session held by the browser under PKCE, and
-`site.apiProxy` for the calls that must be same-origin with MemQL. That
-reverses the owner's answer and is his to make.
+**The owner, Jose Sanz, decided Q1 on 2026-09-22, and the decision replaces the
+2026-09-20 answer.** That answer was "headless, hybrid rendering": keep Astro and
+add a server adapter for the cart, account and wholesale routes. It was given
+before two facts were known. The edge runs nothing (2.1), so server routes have
+no runtime to run on. And the customer session does not need a server
+(section 3). It was put to the owner again with those facts and the three
+sub-questions of Q1, and he chose the static bundle:
+
+- **The catalog renders in the browser from the bound store.** Products,
+  collections, search and prices are read at runtime through the Storefront API
+  with the store named by `/runtime-config.json`. So ONE bundle is previewed
+  against the development store and promoted against the live one with no
+  rebuild. Nothing about a store is baked in at build time, and the product's
+  `src/data/products.js` is deleted rather than shadowed.
+- **A mistyped path is a soft 404, and that cost was accepted.** A product page
+  has no file in the bundle, so the site takes `resolutionTail: fallback`, and the
+  edge answers every unknown path with `index.html` and a 200. The bundle's router
+  renders the not-found page there and marks it `noindex`, so a mistyped URL is a
+  dead end for a person and invisible to a crawler. The prerendered pages (the
+  chrome, the collection pages' copy, the policies) are still real files, served
+  ahead of the fallback. The engine half of this (memql#5535, the tail as the
+  site's own choice) is what makes the answer expressible. It needed nothing
+  further from the engine.
+- **The customer session is the browser's, under PKCE,** against the store's
+  Customer Account API discovery documents. `site.apiProxy` stays available for
+  anything that must be same-origin with MemQL. The storefront needs none today.
+  **Whether a public client is accepted for THIS store's Customer Account API is
+  still UNVERIFIED.** The decision is not reversed if it fails, but the trade
+  buyer's session would then need another route. It is answered by trying it
+  against the development store, as step 7 of the product's end-to-end walk
+  (memql-fylo#28, `docs/operate/end-to-end-walk.md`), and not by reading about
+  it.
+
+Built in memql-fylo epic #19. The product's `memql-package.yaml` declares the
+storefront `kind: shopify_storefront`, `resolutionTail: fallback`, bound by name
+to the live store (memql#5540).
 
 ### D4 -- Wholesale entitlement is plan-independent; native B2B is one adapter
 
@@ -498,14 +528,11 @@ process attaches from outside: `use <pack>.concepts.{...}` and
 
 Each is filed as an issue that blocks what it names.
 
-- **Q1 -- Rendering and routing (owner; reverses D3).** Static bundle bound at
-  runtime, or server rendering that has no runtime (D3, G3). Carries three
-  sub-questions that are one decision: does the catalog render in the browser
-  from the bound store, so one bundle can be previewed and promoted; does the
-  kind keep the `index.html` fallback or gain a per-site choice, so a
-  multi-page bundle can still 404; and is a public PKCE client accepted for
-  this store's Customer Account API (UNVERIFIED). *Blocks the product's catalog,
-  cart and account work, and the engine's resolution task.*
+- **Q1 -- Rendering and routing. ANSWERED by the owner, 2026-09-22 (memql-fylo#21):
+  a static bundle bound at runtime, the catalog rendered in the browser, a soft
+  404 under the `fallback` tail, and the customer session under PKCE in the
+  browser.** D3 records the decision and what it cost. The PKCE sub-question is
+  answered by trying it against the development store (memql-fylo#28).
 
   **The ENGINE half is decided and built (epic 1, memql#5535), and it does
   not pre-empt the product half.** The tail became a property of the SITE
