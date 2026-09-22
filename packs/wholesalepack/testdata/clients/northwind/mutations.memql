@@ -25,6 +25,7 @@
 // application this row relates to already carries it. A field this concept
 // does not have is a field it does not take.
 
+@actor
 @shopperFormExtension(pack="wholesale", form="application")
 mutation northwindTaxDetail recordNorthwindTaxDetail {
   args {

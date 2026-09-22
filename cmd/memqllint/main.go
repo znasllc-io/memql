@@ -81,6 +81,7 @@ import (
 	"github.com/znasllc-io/memql/component/memql/dslimports"
 	"github.com/znasllc-io/memql/core/dslfs"
 	memqldsl "github.com/znasllc-io/memql/dsl"
+	"github.com/znasllc-io/memql/packs/anchor"
 
 	// Connector declarations (epic memql#4378). The engine-parity pass
 	// below drives MemQLEngine.Init, which resolves every @origin and
@@ -209,6 +210,20 @@ func run(args []string) int {
 	var paritySkipped []string
 	var parityWarnings []Diagnostic
 	if target == "" {
+		// THE STOREFRONT PACKS, for the reason stated at the connector
+		// imports above: a lint pass whose claim is "this tree also MOUNTS
+		// clean at boot" has to model the build that boots it. Every
+		// published image links reviews and wholesale with no build tag, so
+		// a product domain relating a client-specific field to a pack's
+		// concept -- the thing epic memql#5532 exists to enable -- loads on
+		// a real node. Without this the lint refuses it, and tells the
+		// author to add an import they have already written.
+		//
+		// Linking is not enabling: a storefront pack ships disabled and its
+		// reach is governed by v1:platform:packState. This makes the
+		// concepts importable, which is all a lint needs.
+		anchor.Storefront()
+
 		parityDiags, skipped, perr := memql.LintUnifiedTree(nil, root)
 		// What the parity pass found that LOADS -- a use of a deprecated form
 		// still inside its window (memql#5390) -- is not an error and must not

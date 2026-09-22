@@ -10,6 +10,8 @@ import (
 	languageAst "github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/dslimports"
+
+	"github.com/znasllc-io/memql/packs/anchor"
 )
 
 // DslRoot is where DSL domains are discovered, mirroring MEMQL_DSL_PATH's own
@@ -190,6 +192,15 @@ func analyzeDSL(tree fs.FS, rep *Report, logger *slog.Logger) {
 	}
 
 	counts := countConstructs(dslTree)
+
+	// THE ANALYZER MODELS AN ENGINE, and every published image links the
+	// storefront packs with no build tag. Without this, a product domain
+	// doing the one thing epic memql#5532 exists to enable -- relating a
+	// client-specific field to a pack's concept -- comes back
+	// "dsl_refuses_boot" against a tree that loads perfectly well on a real
+	// node. Idempotent, because a node runs this analysis in-process while
+	// already carrying the packs.
+	anchor.Storefront()
 
 	result, gateErr := memql.AnalyzePackageDSL(logger, dslTree)
 	if gateErr != nil {
