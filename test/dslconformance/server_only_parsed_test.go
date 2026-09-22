@@ -1143,6 +1143,20 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// the caller's own machines first and stamps internal origin for this
 		// one read.
 		{Path: "router/queries.memql", Name: "routerCallsOnMachine"}: true,
+		// epic memql#5327, designs D3 and D5. One worker-token identity by its
+		// own id, for the two things a LIVE stream does with the credential
+		// that admitted it: re-resolve it once a minute, and rotate it on
+		// request. It projects identityFull, which carries the SHA-256 digest
+		// and the last-connect IP.
+		//
+		// CALLER-SCOPING IS THE WRONG SHAPE, not merely insufficient. The
+		// authenticated party on the only path that reaches this is a MACHINE,
+		// whose subject is `worker:<identityId>` and not a user at all -- so a
+		// filter over actor.userId matches nothing for the sole caller. What
+		// makes the read safe is that there is NO USER ID TO SUPPLY: the
+		// argument is a credential id the auth path resolved, so unlike
+		// workerTokensForUser beside it there is nothing to enumerate.
+		{Path: "identity/queries.memql", Name: "workerTokenIdentityById"}: true,
 		// memql#4389. The connector's own writes, and the two halves of
 		// the push channel. What they share is that the caller is a
 		// CONNECTOR rather than a person, so actor.userId names nobody --

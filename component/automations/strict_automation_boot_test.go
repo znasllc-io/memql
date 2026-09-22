@@ -158,7 +158,12 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // in the mirror under a store somebody is exercising a candidate against. One
 // added, none removed, which is what the count says and a diff of a list could
 // not have.
-const shippedAutomationCount = 61
+//
+// 61 -> 62 in epic memql#5327 (fleet connection hardening):
+// workerStaleConnectionSweep is the third worker sweep, clearing
+// connectedNodeId stamps nobody is holding. One added, none removed -- which
+// is what the count SAYS and a diff of a list could not have.
+const shippedAutomationCount = 62
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

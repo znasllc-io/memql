@@ -199,6 +199,49 @@ func (s *Store) LookupByKeyHash(ctx context.Context, keyHash string) (*Row, erro
 	return rowFromNode(rows[0]), nil
 }
 
+// LookupById returns one worker-token identity by ITS OWN ID (epic
+// memql#5327, designs D3 and D5).
+//
+// THE READ A LIVE STREAM MAKES ABOUT ITSELF. It re-resolves the credential
+// that admitted it once a minute, and rotates it on request; both need the row
+// the stream is already authenticated as, so a USER id would be an input
+// neither one has -- the owner is a fact about the credential rather than a
+// way to find it.
+//
+// It is deliberately NOT ListForUser with a filter. That method is the one
+// component/grpc/worker_token_caller_scope_test.go pins to the authenticated
+// caller's Subject, because its query is keyed on a caller-supplied userId
+// with no actor check and projects keyHash and lastConnectedFromIP. Here there
+// is no user id to supply at all, which is the stronger form of the same
+// property rather than an exemption from it.
+//
+// Returns the row even when active=false, so the caller can say "revoked"
+// rather than "not found" -- the distinction design D3 turns on.
+func (s *Store) LookupById(ctx context.Context, identityId string) (*Row, error) {
+	if s == nil || s.Engine == nil {
+		return nil, errors.New("workertoken.Store: engine not wired")
+	}
+	if strings.TrimSpace(identityId) == "" {
+		return nil, nil
+	}
+	q := fmt.Sprintf(`query workerTokenIdentityById(identityId:%s)`, langparser.QuoteString(bareSlug(identityId)))
+
+	// workerTokenIdentityById is @serverOnly for identityFull's reason, so
+	// this read has to say it is server-initiated. Stamped into a SEPARATE
+	// context used for this query and nothing else, exactly as ListForUser
+	// below does and for that reason: internal origin opens every @serverOnly
+	// construct for as long as the context lives.
+	internalCtx := auth.ContextWithInternalOrigin(ctx)
+	rows, err := s.executeAndExtract(internalCtx, q)
+	if err != nil {
+		return nil, fmt.Errorf("workertoken.Store.LookupById: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return rowFromNode(rows[0]), nil
+}
+
 // ListForUser returns every worker-token identity owned by the
 // user (active + inactive). The keyHash field is populated but
 // callers should never re-emit it -- it's the lookup key, not

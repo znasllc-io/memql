@@ -1,0 +1,73 @@
+{
+  "automation": "worker/automations.memql workerStaleConnectionSweep",
+  "runs": {
+    "no event | 0 rows": {
+      "input": {
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "MEMQL_WORKER_STALE_HOLD_GRACE_SECONDS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "lastSeenBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "registrationsWithStaleHold"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "no event | 2 rows": {
+      "input": {
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "MEMQL_WORKER_STALE_HOLD_GRACE_SECONDS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "lastSeenBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "registrationsWithStaleHold"
+          },
+          {
+            "args": {
+              "registrationId": "v1:probe:row:registrationsWithStaleHold-1"
+            },
+            "kind": "mutation",
+            "name": "clearWorkerConnectedNode"
+          },
+          {
+            "args": {
+              "registrationId": "v1:probe:row:registrationsWithStaleHold-2"
+            },
+            "kind": "mutation",
+            "name": "clearWorkerConnectedNode"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

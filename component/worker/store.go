@@ -550,23 +550,35 @@ func (s *EngineStore) IdentityById(ctx context.Context, identityId, ownerUserId 
 		return nil, nil
 	}
 	store := &workertoken.Store{Engine: s.Engine, Logger: s.Logger}
-	rows, err := store.ListForUser(ctx, ownerUserId)
+	row, err := store.LookupById(ctx, identityId)
 	if err != nil {
 		return nil, fmt.Errorf("worker.store: re-resolve identity: %w", err)
 	}
-	want := trimRegistrationPrefix(identityId)
-	for _, row := range rows {
-		if trimRegistrationPrefix(row.ID) != want {
-			continue
-		}
-		return &WorkerIdentity{
-			IdentityId:  row.ID,
-			OwnerUserId: row.UserId,
-			Active:      row.Active,
-			ExpiresAt:   row.ExpiresAt,
-		}, nil
+	if row == nil {
+		return nil, nil
 	}
-	return nil, nil
+	// THE OWNER IS A CHECK, NOT THE LOOKUP KEY. Reading by credential id is
+	// what keeps this off workertoken's user-scoped path (see LookupById), and
+	// comparing the owner afterwards is what makes a mismatch loud: a stream
+	// authenticated as one person's credential whose row names another is a
+	// rebinding nobody performed, and continuing on it would borrow the wrong
+	// authority for every write the session makes.
+	if !sameWorkerSubject(row.UserId, ownerUserId) {
+		return nil, fmt.Errorf("worker.store: the credential %s is owned by a different user than the stream's", identityId)
+	}
+	return &WorkerIdentity{
+		IdentityId:  row.ID,
+		OwnerUserId: row.UserId,
+		Active:      row.Active,
+		ExpiresAt:   row.ExpiresAt,
+	}, nil
+}
+
+// sameWorkerSubject compares two identity subjects tolerantly of the
+// bare/canonical split, which the engine's egress bare-ification makes routine.
+func sameWorkerSubject(a, b string) bool {
+	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
+	return a == b || (a != "" && trimRegistrationPrefix(a) == trimRegistrationPrefix(b))
 }
 
 // RotateIdentity renews a worker token in place (epic memql#5327, design D5).
@@ -589,30 +601,23 @@ func (s *EngineStore) RotateIdentity(ctx context.Context, identityId, ownerUserI
 		return "", time.Time{}, fmt.Errorf("worker.store: rotate needs both the identity and its owner")
 	}
 	store := &workertoken.Store{Engine: s.Engine, Logger: s.Logger}
-	rows, err := store.ListForUser(ctx, ownerUserId)
+	row, err := store.LookupById(ctx, identityId)
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("worker.store: rotate: read the credential: %w", err)
 	}
-	want := trimRegistrationPrefix(identityId)
-	current := ""
-	found := false
-	for _, row := range rows {
-		if trimRegistrationPrefix(row.ID) != want {
-			continue
-		}
-		if !row.Active {
-			// Rotating a revoked credential would hand a live token to a
-			// stream that something has already decided against. The stream
-			// itself is ended by the recheck within one interval.
-			return "", time.Time{}, fmt.Errorf("worker.store: rotate: the credential is revoked")
-		}
-		current = row.KeyHash
-		found = true
-		break
+	if row == nil {
+		return "", time.Time{}, fmt.Errorf("worker.store: rotate: no worker credential with that id")
 	}
-	if !found {
-		return "", time.Time{}, fmt.Errorf("worker.store: rotate: no worker credential with that id belongs to this owner")
+	if !sameWorkerSubject(row.UserId, ownerUserId) {
+		return "", time.Time{}, fmt.Errorf("worker.store: rotate: that credential is owned by a different user than the stream's")
 	}
+	if !row.Active {
+		// Rotating a revoked credential would hand a live token to a stream
+		// something has already decided against. The stream itself is ended by
+		// the re-check within one interval.
+		return "", time.Time{}, fmt.Errorf("worker.store: rotate: the credential is revoked")
+	}
+	current := row.KeyHash
 
 	plain, hash, err := workertoken.Mint()
 	if err != nil {

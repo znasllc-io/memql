@@ -124,7 +124,7 @@ func (e *MemQLEngine) evaluateFleetRevokeMachineExpression(ctx context.Context, 
 	} else if err := e.revokeWorkerCredential(ctx, identityId); err != nil {
 		credentialState = "revoke_failed"
 		sentence = "Removed from the fleet, but its credential could not be revoked. The machine cannot be routed to, and it will be disconnected -- but revoke the credential from Settings before trusting that it cannot reconnect."
-		if e.Logger != nil {
+		if e.Component != nil && e.Logger != nil {
 			e.Logger.Warn("fleetRevokeMachine: the registration was revoked but its credential was not",
 				"registration_id", registrationId,
 				"identity_id", identityId,
