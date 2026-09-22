@@ -4,6 +4,7 @@ package app
 
 import (
 	"github.com/znasllc-io/memql/component/server"
+	agentworker "github.com/znasllc-io/memql/integrations/agent/worker"
 	"github.com/znasllc-io/memql/integrations/skills"
 	"github.com/znasllc-io/memql/integrations/stt"
 )
@@ -73,6 +74,26 @@ func (a *App) transportAgent() {
 		// container, computer-use rows stay worker-local pointers (memql#789).
 		if wo := a.lookupWorkerIntegration(); wo != nil {
 			wo.SetAttachmentUploader(uploader, blobContainer)
+		}
+	}
+
+	// THE VISION HALF OF THE APP DOOR (issue memql#5523). A vision call
+	// through an app is an image ON THAT MACHINE'S DISK and a prompt that
+	// names it, so the engine has to land the bytes somewhere the cockpit can
+	// pull them from -- which is the Library, which is this blob container.
+	//
+	// Wired HERE and not beside the door itself because the blob store is a
+	// transport-phase resolution. Without a container the door still serves
+	// chat and structured chat, and a vision call refuses by name rather than
+	// running without its images.
+	if ai, ok := a.appInference.(*agentworker.AppInference); ok && ai != nil {
+		if uploader != nil {
+			ai.SetVisionStager(a.engine, uploader, blobContainer)
+			a.Logger.Info("app door: vision calls can stage images into a session workspace",
+				"container", blobContainer)
+		} else {
+			a.Logger.Warn("app door: no blob storage on this replica, so a vision call through an " +
+				"app will be refused rather than sent without its images")
 		}
 	}
 

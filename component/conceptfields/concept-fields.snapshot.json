@@ -2765,6 +2765,7 @@
           "live",
           "uploaded",
           "user_created",
+          "vision_input",
           "workbench_generated"
         ],
         "validationStatus": [
@@ -2872,7 +2873,8 @@
           "app_session",
           "derived",
           "exported",
-          "uploaded"
+          "uploaded",
+          "vision_input"
         ],
         "status": [
           "analyzing",

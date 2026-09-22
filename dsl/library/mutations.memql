@@ -26,7 +26,7 @@ mutation artifact createArtifact {
     ownerUserId       string!
     lens              enum("artifact", "record")!
     kind              enum("document", "generated_output", "note", "todo", "calendar_event", "memory", "live_source", "file")!
-    source            enum("uploaded", "exported", "workbench_generated", "computer_use", "agent_generated", "derived", "user_created", "live", "app_session")!
+    source            enum("uploaded", "exported", "workbench_generated", "computer_use", "agent_generated", "derived", "user_created", "live", "app_session", "vision_input")!
     title             string!
     summary           string
     format            enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "conversation", "other")
@@ -264,7 +264,7 @@ mutation file createLibraryFile {
     // callers keep passing the inline hash.
     sha256    string
     blobUrl   string!
-    source    enum("uploaded", "exported", "agent_generated", "derived", "app_session")!
+    source    enum("uploaded", "exported", "agent_generated", "derived", "app_session", "vision_input")!
     format    enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "conversation", "other")
     summary   string
     folderId  string
