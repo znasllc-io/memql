@@ -5,7 +5,7 @@ import { clearEffectiveCapabilities, effectiveCapabilities, holds, holdsForOrgan
 import { NO_PARTS, partsForOrganization } from "../../src/apps/deployables/parts";
 
 const scoped: OrganizationCapability[] = ["acme", "beta"].flatMap(accountId => [
-  ["read", "app:campaigns"], ["read", "app:deployables"], ["create", "data"], ["update", "data"], ["execute", "app:deployables/deploy"],
+  ["read", "app:campaigns"], ["read", "app:deployables"], ["read", "data"], ["create", "data"], ["update", "data"], ["execute", "app:deployables/deploy"],
 ].map(([verb, resource]) => ({ accountId, verb: verb!, resource: resource!, effect: accountId === "acme" ? "allow" : "deny" })));
 
 beforeEach(() => clearEffectiveCapabilities());
@@ -21,6 +21,18 @@ describe("organization capability discovery", () => {
     expect(holds("execute", "app:deployables/deploy")).toBe(false);
     expect(effectiveCapabilities()).toEqual(entries);
     expect(accessAdmits("app:settings")).toBe(false);
+  });
+
+  it("requires app and data reads in the same organization even when the global app decision allows", () => {
+    const mismatched = scoped.map(entry => entry.resource === "data" && entry.verb === "read"
+      ? { ...entry, effect: entry.accountId === "acme" ? "deny" as const : "allow" as const }
+      : entry);
+    setEffectiveCapabilities([{ verb: "read", resource: "app:deployables", effect: "allow", source: "role" }], mismatched);
+    expect(holds("read", "app:deployables")).toBe(true);
+    expect(accessAdmits("app:deployables")).toBe(false);
+    expect(accessAdmits("app:campaigns")).toBe(false);
+    expect(partsForOrganization("acme", NO_PARTS).deploy).toBe(false);
+    expect(partsForOrganization("beta", NO_PARTS).deploy).toBe(false);
   });
 
   it("uses the selected organization's action decision and refuses foreign or missing targets", () => {

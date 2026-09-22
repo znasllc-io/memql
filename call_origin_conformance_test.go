@@ -527,7 +527,7 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// context REPLACES the caller's actor with a synthetic unranked cluster
 		// owner, and the one query it reaches takes no argument. It is a READ,
 		// and its reply is a projection that carries no run's payload.
-		"component/memql": "seed materialiser, authoring capability store (both boot-time), the module-readiness writer (epic memql#5077), and the loop-stops reader (memql#5384)",
+		"component/memql": "seed materialiser, authoring capability store (both boot-time), the module-readiness writer (epic memql#5077), the loop-stops reader (memql#5384), the sharing ledger's window read and the two machine acts (epic memql#5327 -- REQUEST-DERIVED, and each one stamps a LOCAL context for ONE rendered call after the caller's ownership of the machine has already been proven through the authorized workersForUser read; asserted by test/dslconformance's TestEveryGoCallerOfAServerOnlyConstructStampsInternalOrigin, which sees RenderCall since that epic)",
 		// SERVER-INITIATED, not request-derived -- the same class as
 		// integrations/agent/worker below rather than the three exceptions
 		// above, and the distinction is worth stating because this package
@@ -618,8 +618,8 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// integrations/work/internal_origin_test.go drives every capability
 		// with a client-origin context against a recording executor, and counts
 		// the stamp sites.
-		"integrations/work": "the work spine's entry points -- server-initiated; every id is engine-minted or copied off a row the caller already read under their own actor, and its nine @serverOnly writers are refused without it (epic memql#4966)",
-
+		"integrations/work":      "the work spine's entry points -- server-initiated; every id is engine-minted or copied off a row the caller already read under their own actor, and its nine @serverOnly writers are refused without it (epic memql#4966)",
+		"integrations/procedure": "procedure learning's two entry points (epic memql#5402) -- server-initiated, triggered by a run finishing or by a schedule; every id is engine-minted or copied off a row it read under the OWNER's actor, and the authoring mutations it writes (createAuthoringBundle, createAuthoringConstruct, recordBundleValidation, recordConstructGoalSignature) are refused without it",
 		// The Materializer (epic memql#4977). The context here IS derived
 		// from an inbound capability call, so the gate's own warning is the
 		// right question to ask -- and the answer is that the stamp opens a

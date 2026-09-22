@@ -641,8 +641,10 @@ deliberately has no way to read the token it holds. `memql worker pair` stays
 the right shape for a machine that can redeem a short code interactively.
 
 **Removing a machine** is the same act in reverse, on the machine's page:
-**Remove this machine** revokes the registration (the row stays as audit
-history) and shows the uninstall one-liner for its platform — the same
+**Remove this machine** revokes the registration AND the credential it
+connects with, as ONE act (`fleetRevokeMachine`, epic memql#5327 design D2),
+ends its live connection within seconds from whichever replica is holding it,
+and shows the uninstall one-liner for its platform — the same
 paste-safe `curl | bash` lines in [Uninstall](#uninstall) above
 (`uninstall-mac.sh` / `uninstall-linux.sh` from cockpit `main`). That
 script stops and removes the service, the binary, and the token registry
@@ -772,21 +774,38 @@ UI: MemQL OS → Fleet → Machines -> Revoke, per machine. The owner can
 also rename it (`displayName`) and edit its `operatorLabels` from the same
 card; see section 5.
 
-SDK / VS Code extension -- run the mutation (the `memql` command does **not**
+SDK / VS Code extension -- call the builtin (the `memql` command does **not**
 run mutations; it never carried a runner and the TUI that did is gone):
 
 ```memql fragment
-revokeWorker(
+builtin fleetRevokeMachine(
   registrationId: "wkr-abc...",
-  revokedAt: "2026-05-05T12:00:00Z",
-  revokedBy: "user-jose-...",
-  revokeReason: "decommissioned"
+  reason: "decommissioned"
 )
 ```
 
-The agent node's registry checks `revokedAt` on every dispatch and
-on a periodic sweep — a revoked worker's stream is closed out-of-
-band so any in-flight calls fail with `worker_disconnected`.
+**ONE call, two writes** (epic memql#5327, design D2). It revokes the
+registration row AND the worker-token credential bound to it. `revokedAt` and
+`revokedBy` are stamped by the engine from the clock and the actor rather than
+accepted, so the record of who removed a machine is not writable by whoever is
+holding the keyboard.
+
+The underlying `revokeWorker` mutation is `@serverOnly` and is no longer
+reachable from a client. It was HALF AN ACT: MemQL OS rendered it and nothing
+else, so the row left routing while the token stayed live -- the machine kept
+its stream, kept heartbeating onto a revoked row, and could re-register the
+moment a new row appeared.
+
+**The stream ends within seconds, from whichever replica is holding it.**
+`v1:worker:registration` carries broadcast routing rules, so every agent replica
+sees the revoke; the one holding the machine's stream drains it at once and
+in-flight calls fail with `worker_disconnected`. A replica cut off from the mesh
+is covered by the second half: a live stream re-resolves its own credential
+every 60 seconds and ends itself when nothing admits it any more.
+
+An earlier version of this page described that sweep as if it existed. It did
+not -- the claim was in `dsl/worker/mutations.memql`'s comment and in no code --
+and closing that gap is what epic memql#5327 is.
 
 ### Disable computer-use for yourself (kill switch)
 
@@ -816,12 +835,36 @@ invocationsForPlan(planId: "plan-...")
 Per machine rather than per plan, with the routing record rendered, use the
 activity list on `/fleet/machines` (section 5.7).
 
-### Force a token rotation
+### Token expiry and rotation
 
-The worker emits a `RotationRequest` 7 days before
-`worker_token.expiresAt`. Operators can also force one by
-restarting the worker — the next reconnect refreshes
-`lastSeenAt` and the next scheduled rotation fires from there.
+**A paired token lives 90 days** (`workertoken.DefaultTTL`, epic memql#5327
+design D4). It used to be minted non-expiring, which combined with the
+revocation gap above meant a token copied off a laptop was valid until somebody
+noticed.
+
+**Cockpit renews it in place over the live stream.** A `RotationRequest` on a
+connected machine mints a fresh token, writes its hash onto the SAME
+`v1:identity:identity` row and answers with the plaintext; the displaced hash
+stays valid for a 15-minute grace, so a cockpit that crashes between receiving
+the token and writing it to disk can reconnect and ask again rather than being
+locked out permanently.
+
+The row is the same one on purpose: `v1:worker:registration` binds to
+`identityId`, so minting a new row would unbind the registration and send the
+machine through machine-key reclaim on its next connect.
+
+**Nothing back-fills a token minted before D4.** Those stay non-expiring until
+they rotate; an expiry stamped retroactively onto a token somebody is using is a
+disconnect nobody asked for.
+
+**The Fleet page warns before a machine disconnects itself.** The credential's
+deadline is mirrored onto the registration as `credentialExpiresAt`, and the
+machine's detail says so two weeks out and again once the date has passed. A
+machine that stays connected needs nothing; one that is shut until after the
+date has to be paired again.
+
+Operators can force a rotation by restarting the worker — the next reconnect
+re-reads the deadline and the cockpit's own schedule fires from there.
 
 ### Add this machine to another cluster
 

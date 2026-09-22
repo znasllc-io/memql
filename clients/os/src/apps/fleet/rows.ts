@@ -118,6 +118,21 @@ export interface MachineRow {
    *  never answers -- and is never rendered as a figure. */
   rttMs: number;
   rttAt: string;
+  /** How far this machine's OWN CLOCK sits from the cluster's, in
+   *  milliseconds, positive when the machine is ahead (epic memql#5327,
+   *  design D6).
+   *
+   *  ZERO IS A REAL ANSWER -- the clocks agree -- so `clockSkewKnown` beside
+   *  it is what distinguishes agreement from a cockpit that stamps no
+   *  timestamp at all. Nothing routes on this; it exists because the
+   *  difference USED to decide `online`, and a machine that read offline
+   *  while it was connected now has an explanation rather than a mystery. */
+  clockSkewMs: number;
+  clockSkewKnown: boolean;
+  /** When the credential this machine connects with stops being accepted
+   *  (epic memql#5327, design D4). EMPTY MEANS NO EXPIRY, which is every
+   *  token minted before expiry existed -- not "unknown", and not "expired". */
+  credentialExpiresAt: string;
 }
 
 /**
@@ -331,12 +346,118 @@ export function machineFromRow(raw: Row): MachineRow {
     permissions: permissionsFrom(row["permissions"]),
     rttMs: rowNumber(row, "rttMs"),
     rttAt: rowString(row, "rttAt"),
+    clockSkewMs: rowNumber(row, "clockSkewMs"),
+    // PRESENCE OFF THE RAW FIELD, not off the number: rowNumber answers 0 for
+    // an absent key and for a measured zero alike, and here those are opposite
+    // readings -- "this cockpit does not stamp its beats" and "its clock
+    // agrees with ours to the millisecond".
+    clockSkewKnown: row["clockSkewMs"] !== undefined && row["clockSkewMs"] !== null,
+    credentialExpiresAt: rowString(row, "credentialExpiresAt"),
   };
 }
 
 /** Whether the cluster has measured a round trip to this machine at all. */
 export function hasRoundTrip(m: Pick<MachineRow, "rttAt">): boolean {
   return m.rttAt.trim() !== "";
+}
+
+/**
+ * How a machine's credential stands (epic memql#5327, design D4).
+ *
+ * FOUR STATES, NOT A BOOLEAN, because the repairs differ and so does the
+ * urgency:
+ *
+ *   never    the token has no expiry. Every token minted before D4 is here,
+ *            and it is not a problem to fix -- rotation gives it one.
+ *   valid    it expires, and not soon. Nothing to do.
+ *   soon     it expires within the warning window. The machine will
+ *            disconnect itself on that date unless its cockpit rotates first.
+ *   expired  the date has passed. The machine cannot reconnect.
+ *
+ * `soon` is fourteen days because rotation is the cockpit's job and a cockpit
+ * that is not running cannot do it: two weeks is long enough for somebody to
+ * notice a laptop that has been shut, and short enough that the warning is
+ * still about something happening.
+ */
+export type CredentialStanding = "never" | "valid" | "soon" | "expired";
+
+/** How many days before expiry the Fleet starts saying so. */
+export const CREDENTIAL_WARNING_DAYS = 14;
+
+export function credentialStanding(
+  m: Pick<MachineRow, "credentialExpiresAt">,
+  now: Date,
+): CredentialStanding {
+  const raw = m.credentialExpiresAt.trim();
+  if (raw === "") return "never";
+  const at = new Date(raw);
+  // An UNPARSEABLE date is not an expiry. Reading it as `expired` would
+  // declare a working machine dead on a string nobody can read; reading it as
+  // `never` is the quiet answer, and the row's own value is still on the
+  // facts list for anybody investigating.
+  if (Number.isNaN(at.getTime())) return "never";
+  const msLeft = at.getTime() - now.getTime();
+  if (msLeft <= 0) return "expired";
+  if (msLeft <= CREDENTIAL_WARNING_DAYS * 24 * 60 * 60 * 1000) return "soon";
+  return "valid";
+}
+
+/**
+ * Whether this machine's clock disagrees with the cluster's by enough to
+ * change an answer somebody reads (epic memql#5327, design D6).
+ *
+ * The threshold is the ONLINE WINDOW, and that is not an arbitrary round
+ * number: it is the figure at which a machine's own timestamps would have put
+ * it outside the window that decides whether it shows as online. Below it the
+ * skew is a curiosity; at or above it, it is the explanation for a machine
+ * that read offline while it was connected and beating.
+ */
+/**
+ * A clock offset, split into the figure and the direction.
+ *
+ * ONE READING OF THE NUMBER, TWO RENDERINGS OF IT. The facts list wants it
+ * terse ("3m 32s behind") and the advisory above wants it in a sentence ("3
+ * minutes behind the cluster's"), and those are genuinely different jobs --
+ * but a second implementation of "how long is 212000 ms" is a second answer
+ * waiting to disagree with the first.
+ *
+ * THE UNIT FOLLOWS THE SIZE, which is the whole reason this exists rather
+ * than a template literal at each site: the first rendered pass of the facts
+ * list showed `-212000 ms`, a figure nobody reads as three and a half
+ * minutes, sitting directly under a round trip written as `34 ms, checked 30s
+ * ago`. Milliseconds are right for a clock that is nearly right and useless
+ * for one that is not.
+ */
+export function clockOffsetParts(ms: number): { amount: string; direction: "ahead" | "behind" } {
+  const direction = ms > 0 ? "ahead" : "behind";
+  const abs = Math.abs(ms);
+  if (abs < 1000) return { amount: `${abs} ms`, direction };
+  const seconds = Math.round(abs / 1000);
+  if (seconds < 120) return { amount: `${seconds}s`, direction };
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return { amount: rest === 0 ? `${minutes}m` : `${minutes}m ${rest}s`, direction };
+}
+
+/**
+ * The offset as the facts list shows it: the figure, then the direction.
+ *
+ * A MEASURED ZERO IS "in step", not "0 ms ahead". The clocks agreeing is the
+ * answer somebody is looking for, and a signed zero with a direction on it
+ * reads as a measurement that came out oddly rather than as agreement.
+ */
+export function formatClockOffset(ms: number): string {
+  if (ms === 0) return "in step with the cluster";
+  const { amount, direction } = clockOffsetParts(ms);
+  return `${amount} ${direction}`;
+}
+
+export function clockSkewMatters(
+  m: Pick<MachineRow, "clockSkewMs" | "clockSkewKnown">,
+  onlineWindowMs: number,
+): boolean {
+  if (!m.clockSkewKnown) return false;
+  return Math.abs(m.clockSkewMs) >= onlineWindowMs;
 }
 
 /**

@@ -123,6 +123,10 @@ mutation registration createWorkerRegistration {
     lastSeenAt           string
     lastConnectedFromIP  string
     connectedNodeId      string
+    /// When this machine's credential stops being accepted (epic memql#5327,
+    /// design D4). Mirrored from the resolved worker token so the Fleet page
+    /// can warn before a machine disconnects itself. EMPTY MEANS NO EXPIRY.
+    credentialExpiresAt  string
   }
   insert {
     id: args.registrationId
@@ -144,6 +148,7 @@ mutation registration createWorkerRegistration {
     lastSeenAt: args.lastSeenAt ?? args.registeredAt
     lastConnectedFromIP: args.lastConnectedFromIP ?? ""
     connectedNodeId: args.connectedNodeId ?? ""
+    credentialExpiresAt: args.credentialExpiresAt ?? ""
     // operatorLabels, displayName, lastSelectedAt and activeCount are
     // deliberately absent. A create has nothing to preserve, and naming them
     // here would invite the same list to be copied into
@@ -212,6 +217,10 @@ mutation registration refreshWorkerRegistration {
     lastSeenAt           string!
     lastConnectedFromIP  string
     connectedNodeId      string
+    /// Re-stamped on every reconnect from the credential that admitted the
+    /// stream, so a rotated token's new expiry lands without waiting for a
+    /// heartbeat flush (epic memql#5327, design D4).
+    credentialExpiresAt  string
   }
   update {
     id: args.registrationId
@@ -239,6 +248,7 @@ mutation registration refreshWorkerRegistration {
     args.lastSeenAt
     lastConnectedFromIP: args.lastConnectedFromIP ?? ""
     connectedNodeId: args.connectedNodeId ?? ""
+    credentialExpiresAt: args.credentialExpiresAt ?? ""
     // `sharing` IS NOT WRITTEN HERE EITHER, and it is on the operatorLabels
     // side of the line rather than the `hardware` side. It is the OWNER's
     // consent, set by an act on the Fleet page, so a reconnect re-stamping it
@@ -268,6 +278,20 @@ mutation registration refreshWorkerRegistration {
 // out-of-band so any in-flight calls fail with worker_disconnected.
 
 /// Revoke a worker registration.
+///
+/// @serverOnly SINCE epic memql#5327 (design D2), and the reason is that this mutation is HALF AN
+/// ACT. Removing a machine is a registration revoke AND a credential revoke; MemQL OS rendered
+/// only this one, so the row was excluded from routing while the token stayed active -- the
+/// machine kept its stream, kept heartbeating onto a revoked row, and could re-register the moment
+/// a new row appeared.
+///
+/// actor.userId scoping is not the fix and never was: the caller IS the owner on the ordinary
+/// path, and a cluster owner offboarding somebody else's machine is a legitimate call this row's
+/// tier already admits. What is wrong is that half the act is REACHABLE ON ITS OWN. The builtin
+/// fleetRevokeMachine does both writes in one call, row first -- the order matters, because the
+/// registration write is the one the mesh broadcasts and the one that ends the live stream -- and
+/// is this mutation's only renderer.
+@serverOnly
 mutation registration revokeWorker {
   args {
     registrationId  string!
@@ -432,9 +456,25 @@ mutation registration updateWorkerLastSeen {
     /// rttMs is; an absent rttAt on the row is the one reading for "not
     /// measured".
     rttAt                string
+    /// The machine's clock minus the cluster's, in milliseconds, positive when
+    /// the machine is ahead (epic memql#5327, design D6).
+    ///
+    /// OMITTED when the beat carried no timestamp, for rttMs's reason and with
+    /// a sharper edge: zero here is a REAL ANSWER -- the clocks agree -- so a
+    /// sent zero standing in for silence would read as a healthy machine
+    /// rather than as one that has not spoken.
+    clockSkewMs          int
+    /// When this machine's credential stops being accepted (epic memql#5327,
+    /// design D4), re-stamped after a rotation renews it.
+    ///
+    /// OMITTED when the stream does not know one -- a token minted before
+    /// expiry existed -- because an empty string here would CLEAR a real
+    /// expiry the register already wrote, and the row would then promise a
+    /// credential that never expires about one that does.
+    credentialExpiresAt  string
   }
   update {
-    accept { lastSeenAt, hardware, rttMs, rttAt }
+    accept { lastSeenAt, hardware, rttMs, rttAt, clockSkewMs, credentialExpiresAt }
     stamp {
       id: args.registrationId
       lastConnectedFromIP: args.lastConnectedFromIP ?? ""
@@ -1219,18 +1259,43 @@ mutation modelProbe finishModelProbe {
 // Register and is not writable from here -- deliberately: it is a decision
 // about where the machine IS, and only the machine can make it.
 //
-// NOT @serverOnly. It writes no credential, names no replica and decides
-// nothing the tier has not already decided: the concept declares
-// @rowAuthz(owner="ownerUserId", clusterOwner), so the write guard already
-// refuses any actor but the owner, and the owner offering their own machine is
-// exactly the act this exists for. `sharedBy` and `sharedAt` are stamped from
-// the actor and the clock rather than accepted, so the record of WHO shared it
-// cannot be written by whoever is holding the keyboard.
+// @serverOnly SINCE epic memql#5327 (finding M-2), and the paragraph that used
+// to be here was WRONG in a way worth recording rather than deleting.
+//
+// It said: "NOT @serverOnly. It writes no credential, names no replica and
+// decides nothing the tier has not already decided: the concept declares
+// @rowAuthz(owner=\"ownerUserId\", clusterOwner), so the write guard already
+// refuses any actor but the owner."
+//
+// The write guard does NOT refuse any actor but the owner on that tier. The
+// composite `owner=..., clusterOwner` form is the owned tier with the admin
+// gate ORed in, and rowauthz_write_guard.go grants the cluster-owner escape --
+// so a cluster owner could lend a machine they do not own to the cluster, and
+// un-lend one somebody else had lent. On the one row whose entire content is a
+// person's consent, that is the single write where the escape is wrong.
+//
+// A caller-scoped filter is not the fix, for the reason the guard is not: the
+// tier is what is too wide, and no filter in this body can narrow it. The
+// builtin `fleetSetSharing` resolves the registration through the CALLER'S OWN
+// machines -- the modelPullMachineFor precedent -- and is the only thing that
+// renders this call.
+//
+// `sharedBy` and `sharedAt` are still stamped from the actor and the clock
+// rather than accepted, so the record of WHO shared it cannot be written by
+// whoever is holding the keyboard.
 
 /// Set the OWNER's half of a machine's sharing consent. The cockpit's half comes from that
 /// machine's own policy.yaml and is not writable here; both must say cluster before the machine
 /// serves anybody else.
+///
+/// @serverOnly because actor.userId scoping is NOT the fix here: the caller IS the owner on the
+/// legitimate path, so a self-scoped filter admits exactly the call that is already allowed and
+/// changes nothing about the one that is not. What is too wide is the concept's TIER -- the
+/// cluster-owner escape on the composite owner form -- and a filter in this body cannot narrow a
+/// tier. fleetSetSharing resolves the machine through the caller's own and is this mutation's one
+/// renderer.
 @actor
+@serverOnly
 mutation registration setWorkerSharing {
   args {
     registrationId  string!

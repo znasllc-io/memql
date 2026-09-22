@@ -121,7 +121,7 @@ describe("a missing door hides the app", () => {
 describe("organization-specific deployable controls", () => {
   it("shows Acme's publish action despite Beta's deny and never offers it on Beta's site", async () => {
     const organizationEntries: OrganizationCapability[] = ["acme", "beta"].flatMap(accountId => [
-      ["read", "app:deployables"], ["update", "data"], ["execute", "app:deployables/publish"],
+      ["read", "app:deployables"], ["read", "data"], ["update", "data"], ["execute", "app:deployables/publish"],
     ].map(([verb, resource]) => ({ accountId, verb: verb!, resource: resource!, effect: accountId === "acme" ? "allow" : "deny" })));
     const seed: FakeSeed = { sites: [siteRow({ ...BUILT, id: "site-new", accountId: "acme" })] };
     const globalDenied = seededAccessWithout("developer", "app:deployables/publish");

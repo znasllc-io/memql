@@ -51,7 +51,7 @@ import (
 // (memql#5357, EmbeddedManifest below). It is not a domain, and every walker
 // reads only .memql files, so nothing loads it but EmbeddedManifest.
 //
-//go:embed memql.toml all:accounts all:actions all:agents all:authoring all:bench all:calendar all:campaigns all:capabilities all:cluster all:compose all:commerce all:common all:data all:deployment all:forge all:healing all:identity all:install all:integrations all:knowledge all:library all:memory all:memql all:models all:notes all:observability all:os all:planner all:platform all:policies all:providers all:rbac all:router all:rules all:safety all:shopify all:skills all:todos all:work all:workbench all:worker
+//go:embed memql.toml all:accounts all:actions all:agents all:authoring all:bench all:calendar all:campaigns all:capabilities all:cluster all:compose all:commerce all:common all:data all:deployment all:forge all:healing all:identity all:install all:integrations all:knowledge all:library all:memory all:memql all:models all:notes all:observability all:os all:planner all:platform all:policies all:procedure all:providers all:rbac all:router all:rules all:safety all:shopify all:skills all:todos all:work all:workbench all:worker
 var embedFS embed.FS
 
 // EmbeddedManifestPath is where the embedded tree's language line lives in the

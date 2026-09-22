@@ -98,3 +98,33 @@ func StreamHeld(connectedNodeId string, revokedAt time.Time) bool {
 func (r RegistrationRow) StreamHeld() bool {
 	return StreamHeld(r.ConnectedNodeId, r.RevokedAt)
 }
+
+// StaleHoldWindow is how far behind `lastSeenAt` may fall before the sweep
+// treats a registration's connectedNodeId as a stamp nothing is holding
+// (epic memql#5327, design D7).
+//
+// It is the online window plus one flush interval of slack, and both terms are
+// load-bearing. A heartbeat arrives THROUGH the stream on the holding pod, so a
+// pod that has gone cannot be refreshing lastSeenAt -- the window is therefore
+// the whole signal, and the sweep needs no second read of which nodes are
+// alive. The slack is because the flush is THROTTLED: a row can legitimately
+// sit one HeartbeatBatchInterval behind a perfectly healthy stream, and a sweep
+// that cleared on the online window alone would race the machine's own next
+// write and blank a live hold.
+const StaleHoldWindow = OnlineWindow + HeartbeatBatchInterval
+
+// HoldIsStale reports whether a registration's connectedNodeId names a replica
+// that is no longer holding its stream.
+//
+// A registration with NO stamp is not stale -- there is nothing to clear, and
+// answering true would make the sweep write to every disconnected machine in
+// the cluster every two minutes. A registration that has never been heard from
+// but carries a stamp IS stale: the stamp can only have come from a register
+// that never reached its first heartbeat flush, which is a pod that died inside
+// one interval.
+func HoldIsStale(connectedNodeId string, lastSeenAt time.Time, now time.Time) bool {
+	if strings.TrimSpace(connectedNodeId) == "" {
+		return false
+	}
+	return now.Sub(lastSeenAt) > StaleHoldWindow
+}

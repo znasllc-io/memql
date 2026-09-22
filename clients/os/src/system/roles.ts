@@ -343,7 +343,9 @@ export function holds(verb: string, resource: string): boolean {
 
 /** Discovery only: one organization's allow never changes a global action. */
 export function availableInAnyOrganization(verb: string, resource: string): boolean {
-  return organizationEffective.some(entry => entry.verb === verb && entry.resource === resource && entry.effect === "allow");
+  return organizationEffective.some(entry => entry.verb === verb && entry.resource === resource && entry.effect === "allow" &&
+    holdsForOrganization(entry.accountId, "read", "data") &&
+    holdsForOrganization(entry.accountId, "read", resource.split("/")[0]!));
 }
 
 /** An explicit organization is authoritative when the server reports scoped

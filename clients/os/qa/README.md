@@ -26,13 +26,24 @@ google-chrome --headless=new --disable-gpu --no-sandbox --hide-scrollbars \
   --screenshot=store.png "http://localhost:5199/?view=store&mode=dark"
 ```
 
-`view` is one of `overview`, `store`, `quiet`, `picker`, `readonly`, `hidden`
+`view` is one of `fleet-healthy`, `fleet-expiring`, `fleet-expired`,
+`fleet-skewed`, `fleet-silent` (the machine detail's connection health, epic
+memql#5327 -- read `fleet-healthy` FIRST, because the design is that these
+warnings are absent almost always, and a capture of an unbroken machine is
+what says the page has not become a wall of advisories), or `overview`,
+`store`, `quiet`, `picker`, `readonly`, `hidden`
 (the Store surface), or `list`, `sources`, `list-empty`, `sources-empty`,
 `connected`, `github-owner`, `github-member`, `settings-no-app`,
 `settings-no-app-member`, `settings-app` (the Deployables app, whole), or
 `origins-silent`, `origins-mixed`, `origins-reporting` (Data origins); `mode`
 is `dark` or `light`. **Take at least one narrow capture** (`820,760`): two of
 the first three real defects this harness found were invisible at 1400x900.
+
+`&open=1` opens every `<details>` on the page once the reads have landed. A
+one-shot capture cannot click, and a facts list -- the densest thing on a
+machine detail, and the place a long value runs past its own label -- sits
+behind a shut `<details>`. Both defects the `fleet-*` views found were in
+content that needed it.
 
 The list views seed ONE OF EVERYTHING: a deployable of every origin (a named
 source, an uploaded zip, a Library zip, CI, built in, none) and a source in

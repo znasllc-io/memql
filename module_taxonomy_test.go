@@ -64,6 +64,12 @@ var pluginKinds = map[string]moduleKind{
 	// engine: there is no MemQL that does not authorise, route or read rows.
 	"auth": kindComponent,
 	"rbac": kindComponent,
+	// procedure learns a template from rows the engine already wrote (epic
+	// memql#5402). It talks to nobody else's system -- that is the whole test
+	// -- and an operator cannot switch it off without leaving the catalog
+	// unable to grow from what already ran, which is engine behaviour rather
+	// than a feature somebody chose.
+	"procedure": kindComponent,
 	// groups writes the two rows the account grant resolves through (epic
 	// memql#5165). Switching it off would not remove a feature -- it would
 	// leave every account-tied concept declaring an argument nothing can

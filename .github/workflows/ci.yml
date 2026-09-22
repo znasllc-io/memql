@@ -526,6 +526,19 @@ jobs:
               # step does not run cmd/**. Routed here rather than to `gates`
               # because `go` is the bucket that reaches the test.
               - 'cmd/shopifyschema/testdata/**'
+              # The procedure module's shared fixtures and its reference
+              # implementations (epic memql#5402). Same reasoning as the two
+              # entries above, with one addition worth stating: the .py files
+              # are NOT product -- design D6 keeps them as a research harness
+              # and nothing in component/procedure imports them -- but they ARE
+              # executed, by the parity harness, on every `go test` of that
+              # tree wherever python3 is on PATH. A change to a reference
+              # changes what the Go lane asserts, so it belongs in the bucket
+              # that reaches the test; exempting them would be the reading the
+              # coverage gate's mention-scan defaults to and it would be wrong
+              # in the direction that reddens `main` for the next author.
+              - 'component/procedure/testdata/**'
+              - 'component/procedure/reference/**'
               # Configuration readiness fixtures, read by the fold tests in
               # component/memql/readiness AND by the TypeScript mirror. The
               # test gate that consumes them runs in db-tests, which gates on

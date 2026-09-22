@@ -1196,6 +1196,64 @@ func FleetRecommendedBuild(args FleetRecommendedArgs) string {
 	return b.String()
 }
 
+// FleetRevokeMachine -- Remove one of YOUR OWN machines from the fleet: revoke its registration AND the credential it connects with, as ONE act. The two used to be separate and the client composed them, which meant a window where the row said removed and the token still worked -- and a surface that made only the first call left a machine that kept its stream and could come back. The registration is resolved through your own machines, so another user's id answers exactly as a made-up one does. Revocation is an UPDATE, never a delete: the row is audit history and its credential's hash must stay taken. The machine's live stream is ended by the cluster within seconds, from whichever replica is holding it.
+type FleetRevokeMachineArgs struct {
+	// v1:worker:registration.id of the machine to remove. It must be one of the caller's own.
+	RegistrationId string
+	// Why, in the operator's own words, recorded on the row. Optional; an empty reason is recorded as empty rather than invented.
+	Reason string
+}
+
+// FleetRevokeMachine calls the engine builtin fleetRevokeMachine.
+func (qc *QueryClient) FleetRevokeMachine(ctx context.Context, args FleetRevokeMachineArgs) (*Result, error) {
+	call := FleetRevokeMachineBuild(args)
+	return qc.executeNamed(ctx, "fleetRevokeMachine", call)
+}
+
+func FleetRevokeMachineBuild(args FleetRevokeMachineArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin fleetRevokeMachine(")
+	b.WriteString("registrationId: ")
+	b.WriteString(quoteMemQL(args.RegistrationId))
+	if args.Reason != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("reason: ")
+		b.WriteString(quoteMemQL(args.Reason))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// FleetSetSharing -- Set the OWNER's half of a machine's sharing consent: `owner` keeps it to yourself, `cluster` offers it to everybody on this cluster. The machine's own half comes from its policy.yaml and is not settable from here -- deliberately, because it is a decision about where the machine IS and only the machine can make it; both halves must say cluster before anybody else's work runs on it. It resolves the machine through YOUR OWN machines, which is the whole reason this is a builtin: the row's tier grants a cluster owner the write, and lending somebody else's hardware to the cluster is not a decision a cluster owner gets to make for them.
+type FleetSetSharingArgs struct {
+	// v1:worker:registration.id of the machine to set sharing on. It must be one of the caller's own.
+	RegistrationId string
+	// owner or cluster. Anything else is refused rather than read as owner -- a misspelling that silently meant `keep it private` would be safe, and one that silently meant anything else would not.
+	Mode string
+}
+
+// FleetSetSharing calls the engine builtin fleetSetSharing.
+func (qc *QueryClient) FleetSetSharing(ctx context.Context, args FleetSetSharingArgs) (*Result, error) {
+	call := FleetSetSharingBuild(args)
+	return qc.executeNamed(ctx, "fleetSetSharing", call)
+}
+
+func FleetSetSharingBuild(args FleetSetSharingArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin fleetSetSharing(")
+	b.WriteString("registrationId: ")
+	b.WriteString(quoteMemQL(args.RegistrationId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("mode: ")
+	b.WriteString(quoteMemQL(args.Mode))
+	b.WriteString(")")
+	return b.String()
+}
+
 // FleetSharingLedger -- What one of YOUR OWN machines has done this week: how many calls ran on it, for how many people, and how those calls split across the four levels. COUNTS AND LEVELS, and nothing else -- somebody who lends their machine to the team is entitled to know it is being used and NOT entitled to read what it was used for, so the narrowing happens in the engine before anything leaves it rather than in a renderer that could later be rewritten. People are counted and never named. A read that FAILS answers `readable: false` rather than zero: telling somebody who lent their machine that nobody used it is a specific claim, and a failed read is not evidence for it.
 type FleetSharingLedgerArgs struct {
 	// v1:worker:registration.id of the machine to report on. It must be one of the caller's own; another user's id answers exactly as a made-up one does.

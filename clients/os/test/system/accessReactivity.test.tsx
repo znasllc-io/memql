@@ -160,6 +160,7 @@ describe("the launcher recovers when the effective set lands after the identity"
     const fake = fakeConnection([
       () => ({ ...effectiveRow("viewer"), entries: denied, organizationEntries: [
         { accountId: "acme", verb: "read", resource: "app:campaigns", effect: "allow" },
+        { accountId: "acme", verb: "read", resource: "data", effect: "allow" },
         { accountId: "beta", verb: "read", resource: "app:campaigns", effect: "deny" },
       ] }),
       () => ({ ...effectiveRow("viewer"), entries: denied, organizationEntries: [

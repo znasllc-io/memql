@@ -346,6 +346,31 @@ exist. The claim that holds is the one below -- neither site is ever handed a
 user-chosen secret to VERIFY, and a user-chosen secret reaching either hash
 would still be a real finding.
 
+**#1211 and #1212 (epic memql#5327) are #1134 and #1133 RENUMBERED, not new
+findings** -- and the renumbering is the trap. Alert fingerprints include
+position, so editing either file shifts the line and GitHub raises a fresh
+alert number for the same defect while the old dismissal stays attached to the
+old number. A reader who checks "is this rule already triaged" by alert number
+concludes it is not.
+
+What did change is what the two functions hash: design D13 added the ACTING
+USER to both fingerprints, because two people asking the same question on one
+replica were sharing a loop-breaker key and one person's runaway tripped the
+breaker for the other. That is worth stating rather than passing over, since
+the section's own rule is that the property is the thing to preserve:
+
+- a user id is not a user-CHOSEN secret, so the entropy argument below is
+  untouched -- it is an identifier the cluster assigned, never verified
+  against a stored digest and never compared to anything;
+- the fingerprint is still only a map key with a short window, still never
+  stored, still never logged;
+- and the reason it is hashed rather than concatenated is unchanged: the
+  conversation is in there too, and a key built by concatenation would put
+  prompt text in a map key.
+
+If either fingerprint ever becomes something that is STORED, or compared
+against a stored value, this dismissal is void and the alerts are real.
+
 Note the sites that are NOT in this list and would be a different answer:
 MemQL does store SHA-256 digests of bearer credentials (worker tokens, PATs,
 invitation and enrolment tokens, magic-link binding nonces). Those are

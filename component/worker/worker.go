@@ -66,9 +66,43 @@ const (
 	// listening is a Ping it cannot answer.
 	FirstPingDelay = 3 * time.Second
 
+	// IdentityRecheckInterval is how often a LIVE stream re-resolves the
+	// worker identity that admitted it (epic memql#5327, design D3).
+	//
+	// The token is checked once, at stream open, and a stream can outlive that
+	// check by days -- so revoking a credential changed nothing about the
+	// connection it had already admitted. This is the backstop for the two
+	// cases the registration broadcast cannot carry: a token revoked through a
+	// path that writes no registration row, and EXPIRY, which no write
+	// announces at all.
+	//
+	// Four heartbeats rather than every one. The check is a database read on
+	// the recv goroutine of every connected machine in the cluster, and the
+	// question it answers changes at human speed: a minute of extra life for a
+	// revoked token is the same order as the time it takes somebody to reach
+	// the button.
+	IdentityRecheckInterval = 4 * HeartbeatBatchInterval
+
 	// DispatchTimeoutDefault is the default ToolDispatch timeout when
 	// the calling tool doesn't supply one.
 	DispatchTimeoutDefault = 5 * time.Minute
+)
+
+// Disconnect reasons this package ends a stream with, beyond the ones
+// disconnect.go derives from a transport error. Each is a DECISION the cluster
+// made about a live connection, so it names the decision rather than the
+// symptom -- "the token was revoked" and "the socket closed" lead a reader to
+// different places.
+const (
+	// DisconnectReasonRevoked is a credential or registration revoked under a
+	// live stream (epic memql#5327, D1/D3).
+	DisconnectReasonRevoked = "revoked"
+	// DisconnectReasonTokenExpired is a worker token that reached its
+	// expiresAt while connected (D3/D4).
+	DisconnectReasonTokenExpired = "token_expired"
+	// DisconnectReasonSuperseded is another replica taking over this
+	// machine's registration (D1, the supersede half of M-4).
+	DisconnectReasonSuperseded = "superseded"
 )
 
 // HashToken returns the SHA-256 hex digest of a worker token.
@@ -138,7 +172,12 @@ type Store interface {
 	// coalesces with the blank-coalescing `??`, so an absent key keeps
 	// whatever the row holds while a zero would overwrite a real figure with
 	// a fake one.
-	UpdateLastSeen(ctx context.Context, registrationId, ownerUserId string, lastSeenAt time.Time, sourceIP, connectedNodeId string, activeCount int, hardware map[string]any, rttMs int, rttAt time.Time) error
+	//
+	// It takes a STRUCT rather than a parameter list. It was ten positional
+	// arguments before epic memql#5327 added two more, at which point the
+	// three consecutive ints and the two consecutive times were a swap waiting
+	// to be made at a call site nobody would re-read.
+	UpdateLastSeen(ctx context.Context, flush HeartbeatFlush) error
 	// UpdateHardware re-stamps the reported inventory and the labels derived
 	// from it (epic memql#5146, D1). Separate from UpdateLastSeen for the
 	// reason UpdateApps is separate: an inventory change that alters what the
@@ -154,8 +193,50 @@ type Store interface {
 	// records when the machine was last heard from, and moving it on the
 	// way out would make a disconnected worker look fresh for one whole
 	// online window.
-	ClearConnectedNode(ctx context.Context, registrationId, ownerUserId string) error
-	RevokeRegistration(ctx context.Context, registrationId, ownerUserId, revokedBy, reason string, at time.Time) error
+	//
+	// `expectedNodeId` is the COMPARE half of a compare-and-swap (epic
+	// memql#5327, design D8): the implementation re-reads the row immediately
+	// before the write and refuses when the persisted holder is no longer the
+	// expected one, so a sibling replica that stamped its own hold during our
+	// teardown is not wiped. EMPTY means unconditional, and the only caller
+	// entitled to that is the stale-hold sweep, which is clearing a stamp
+	// precisely because nobody holds it.
+	//
+	// The guard is HERE rather than in clearWorkerConnectedNode because a
+	// .memql mutation carries no filter and an args field a body never
+	// references is refused at load -- an expectedNodeId argument on the
+	// mutation could only ever be decoration.
+	ClearConnectedNode(ctx context.Context, registrationId, ownerUserId, expectedNodeId string) error
+	// IdentityById re-resolves the worker identity that admitted a live
+	// stream (epic memql#5327, design D3). Returns nil when the identity no
+	// longer exists, which is the same answer as revoked: either way nothing
+	// admits this stream any more.
+	//
+	// It takes the OWNER for the reason WorkerByIdentityId does -- the read
+	// runs under the token owner's borrowed authority and returns nothing
+	// without one.
+	IdentityById(ctx context.Context, identityId, ownerUserId string) (*WorkerIdentity, error)
+	// RotateIdentity renews this stream's credential in place and returns the
+	// new PLAINTEXT (epic memql#5327, design D5).
+	//
+	// The plaintext leaves this method and goes onto the wire. It is not
+	// logged, not held on the session and not readable back -- only its hash
+	// is persisted, exactly as at pairing -- and confining the mint, the hash
+	// and the write to one implementation is what keeps that true.
+	//
+	// The displaced hash is parked under a short grace by the implementation,
+	// which is why the caller supplies neither hash: it does not have one, and
+	// a caller that had to fetch the current hash in order to rotate it would
+	// be a second reader of the credential table.
+	RotateIdentity(ctx context.Context, identityId, ownerUserId string) (plain string, expiresAt time.Time, err error)
+	// RevokeIdentity deactivates a worker-token identity row.
+	//
+	// The one caller inside this package is machine-key reclaim (design D9):
+	// when a NEW token takes over a machine whose row was bound to a
+	// different identity, the displaced credential is revoked, because a
+	// machine with two live tokens flaps between two cockpits that each
+	// reclaim the row back from the other.
+	RevokeIdentity(ctx context.Context, identityId string) error
 	// WorkerByIdentityId takes the OWNER as well as the identity, and the
 	// owner is not redundant: v1:worker:registration declares an owned
 	// tier, so the read returns zero rows unless the context carries an
@@ -230,6 +311,12 @@ type RegistrationRow struct {
 	// what makes a machine reachable from a replica that is NOT holding
 	// its stream: the router forwards there instead of finding nothing.
 	ConnectedNodeId string
+	// CredentialExpiresAt mirrors the worker token's own expiresAt onto the
+	// registration (epic memql#5327, design D4), so the Fleet page can warn
+	// before a machine disconnects itself. ZERO MEANS NO EXPIRY, which is
+	// every token minted before D4.
+	CredentialExpiresAt time.Time
+
 	// LastSelectedAt is stamped by the router (touchWorkerSelected) on
 	// every successful pick -- the shared clock roundRobin rotates on.
 	// component/worker never writes it.
@@ -276,6 +363,46 @@ type RegistrationRow struct {
 	RevokedAt    time.Time
 	RevokedBy    string
 	RevokeReason string
+}
+
+// HeartbeatFlush is one throttled write of everything a live stream knows
+// about itself that is worth persisting.
+//
+// EVERY OPTIONAL FIELD HERE MEANS "LEAVE THE STORED VALUE ALONE" WHEN UNSET,
+// and that is the same rule for all four of them rather than four rules. The
+// mutation coalesces with `??`, which is blank-coalescing, so an absent key
+// keeps what the row holds while a zero or an empty string would overwrite a
+// real figure with a fake one -- turning a cockpit's silence into a statement.
+// Which zero is a real answer differs per field, which is why each carries its
+// own presence flag rather than being inferred from the value:
+//
+//	Hardware             nil    -> nothing reported this beat
+//	RttAt                zero   -> no Pong has landed on this stream
+//	ClockSkewSeen        false  -> the beat carried no timestamp, and a
+//	                              measured ZERO skew (the clocks agree) is a
+//	                              real answer that must not read as silence
+//	CredentialExpiresAt  zero   -> the token does not expire, or this stream
+//	                              does not know
+type HeartbeatFlush struct {
+	RegistrationId string
+	OwnerUserId    string
+	LastSeenAt     time.Time
+	SourceIP       string
+	// ConnectedNodeId is this replica, re-asserted on every flush: the stamp
+	// is what a router forwards by, and re-asserting it is how a row recovers
+	// from a clear that raced a reconnect.
+	ConnectedNodeId string
+	ActiveCount     int
+	Hardware        map[string]any
+	RttMs           int
+	RttAt           time.Time
+	// ClockSkewMs is the machine's own clock minus the cluster's, positive
+	// when the machine is ahead (epic memql#5327, design D6).
+	ClockSkewMs   int
+	ClockSkewSeen bool
+	// CredentialExpiresAt is the token's expiry as this stream last resolved
+	// it (design D4), re-stamped after a rotation renews it.
+	CredentialExpiresAt time.Time
 }
 
 // IsActive reports whether the registration is currently usable.

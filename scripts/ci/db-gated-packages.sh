@@ -272,6 +272,36 @@ readonly DB_GATED_TREES=(
 # `integrations/work` is NOT here and must not be: it is a package inside the
 # existing `integrations` module, not a module.
 #
+# epic memql#5402 added `component/procedure`, the LEARNING half's pure
+# algorithms (canonicalize, symbolize, mine, structure, generalize, classify,
+# score, select). It exists for exactly the reason component/work,
+# component/frontdoor and component/skills do: it is imported from
+# `integrations`, and a root-module package cannot be imported from a nested
+# one with GOWORK=off. component/proving answers the same purity question with
+# a package boundary INSTEAD of a module, and that answer was unavailable here
+# for that one reason.
+#
+# What the complement now means, having MEASURED rather than assumed -- which
+# is the question this entry exists to make somebody answer:
+#
+#	go list github.com/znasllc-io/memql/... | grep -cE 'component/procedure$'
+#	  1
+#	scripts/ci/db-gated-packages.sh --complement | grep -cE 'component/procedure$'
+#	  1
+#
+# It is enumerated in workspace mode and it appears in the complement itself,
+# so its golden tests run in THIS lane and it needs no lane of its own. The
+# complement stands at 190.
+#
+# It is NOT db-gated, and adding it to DB_GATED_TREES would be a mistake rather
+# than a precaution: every function in it is a decision over values, and the
+# module CANNOT reach a database by construction (its own purity_test.go makes
+# that a build-graph fact). Putting it in the gated set would move real
+# coverage out of every lane that runs without Postgres.
+#
+# `integrations/procedure` is NOT here and must not be: like `integrations/work`
+# it is a package inside the existing `integrations` module.
+#
 # epic memql#4977 added `component/compose`, the Materializer's PURE half --
 # the format writers and the provenance they embed, as functions from values
 # to bytes. What the complement now means, having looked and MEASURED rather
@@ -335,6 +365,7 @@ readonly KNOWN_GO_MOD_DIRS=(
 	"component/observe"
 	"component/outbound"
 	"component/planner"
+	"component/procedure"
 	"component/provenance"
 	"component/router"
 	"component/safety"

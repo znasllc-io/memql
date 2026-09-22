@@ -1,0 +1,47 @@
+{
+  "automation": "procedure/automations.memql mineProcedureCorpusAcrossAutomations",
+  "runs": {
+    "no event | 0 rows": {
+      "input": {
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "level": 2,
+              "ownerUserId": ""
+            },
+            "kind": "builtin",
+            "name": "procedureMineCorpus"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "no event | 2 rows": {
+      "input": {
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "level": 2,
+              "ownerUserId": ""
+            },
+            "kind": "builtin",
+            "name": "procedureMineCorpus"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

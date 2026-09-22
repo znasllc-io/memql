@@ -829,6 +829,39 @@ builtin fleetSharingLedger {
   registrationId  string!  @description("v1:worker:registration.id of the machine to report on. It must be one of the caller's own; another user's id answers exactly as a made-up one does.")
 }
 
+// ---- Removing a machine, and lending one (epic memql#5327, D2 and M-2) ----
+//
+// Two acts that were CLIENT-COMPOSED and are now one server-side act each.
+//
+// "Remove this machine" used to be a single mutation that revoked the
+// registration ROW and left the credential active: the machine kept its
+// stream, kept heartbeating, and could re-register the moment a row appeared.
+// An operator told "removed" had removed half of it, and the half that was
+// left is the half that matters.
+//
+// "Share this machine" used to be a mutation whose own comment asserted the
+// write guard refuses any actor but the owner. It does not: the concept
+// declares the composite `owner=..., clusterOwner` tier, and the guard grants
+// the cluster-owner escape on it -- so a cluster owner could lend hardware
+// they do not own to the cluster, which is the one write on this row whose
+// whole content is a consent.
+
+@sdk
+@executor("fleetRevokeMachine")
+@description("Remove one of YOUR OWN machines from the fleet: revoke its registration AND the credential it connects with, as ONE act. The two used to be separate and the client composed them, which meant a window where the row said removed and the token still worked -- and a surface that made only the first call left a machine that kept its stream and could come back. The registration is resolved through your own machines, so another user's id answers exactly as a made-up one does. Revocation is an UPDATE, never a delete: the row is audit history and its credential's hash must stay taken. The machine's live stream is ended by the cluster within seconds, from whichever replica is holding it.")
+builtin fleetRevokeMachine {
+  registrationId  string!  @description("v1:worker:registration.id of the machine to remove. It must be one of the caller's own.")
+  reason          string   @description("Why, in the operator's own words, recorded on the row. Optional; an empty reason is recorded as empty rather than invented.")
+}
+
+@sdk
+@executor("fleetSetSharing")
+@description("Set the OWNER's half of a machine's sharing consent: `owner` keeps it to yourself, `cluster` offers it to everybody on this cluster. The machine's own half comes from its policy.yaml and is not settable from here -- deliberately, because it is a decision about where the machine IS and only the machine can make it; both halves must say cluster before anybody else's work runs on it. It resolves the machine through YOUR OWN machines, which is the whole reason this is a builtin: the row's tier grants a cluster owner the write, and lending somebody else's hardware to the cluster is not a decision a cluster owner gets to make for them.")
+builtin fleetSetSharing {
+  registrationId  string!  @description("v1:worker:registration.id of the machine to set sharing on. It must be one of the caller's own.")
+  mode            string!  @description("owner or cluster. Anything else is refused rather than read as owner -- a misspelling that silently meant `keep it private` would be safe, and one that silently meant anything else would not.")
+}
+
 // ---- Measuring a model on one of your machines (epic memql#5146, D3) ----
 //
 // The pull's act one question later. A pull says a model is on the disk; this

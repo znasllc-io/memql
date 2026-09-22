@@ -115,6 +115,6 @@ export function useDeployableParts(): PartsHeld {
  * and isolated-component contract when no organization decisions are present. */
 export function partsForOrganization(accountId: string, fallback: PartsHeld, dataVerb: "create" | "update" = "update"): PartsHeld {
   if (!hasOrganizationDecisions()) return fallback;
-  const allowed = holdsForOrganization(accountId, "read", "app:deployables") && holdsForOrganization(accountId, dataVerb, "data");
+  const allowed = holdsForOrganization(accountId, "read", "data") && holdsForOrganization(accountId, "read", "app:deployables") && holdsForOrganization(accountId, dataVerb, "data");
   return Object.fromEntries(DEPLOYABLE_PARTS.map(part => [part, allowed && holdsForOrganization(accountId, "execute", partResource(part))])) as Record<DeployablePart, boolean>;
 }

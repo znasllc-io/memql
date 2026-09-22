@@ -188,8 +188,15 @@ func (s *server) admitRegistration(
 
 	streamCtx, cancel := context.WithCancel(stream.Context())
 	session := newStreamSession(s, stream, w, streamCtx, cancel)
+	// The credential's expiry follows the stream that it admitted (design
+	// D4). It is taken from the resolved identity rather than re-read,
+	// because this is the value the interceptor actually admitted on -- a
+	// second read could disagree with it, and the row would then promise a
+	// deadline nothing enforced.
+	session.credentialExpiresAt = identity.ExpiresAt
 	w.SetDispatchFunc(session.dispatch, cancel)
 	w.SetDrainFunc(session.requestDrain)
+	w.SetTerminateFunc(session.terminate)
 	w.SetAppSessionFunc(session.openAppSession)
 	w.SetModelCallFunc(session.openModelCall)
 	w.SetModelPullFunc(session.openModelPull)
@@ -268,11 +275,13 @@ func (s *server) upsertRegistration(
 	// but the physical install already has an unrevoked registration. Lookup
 	// by identityId alone is what minted the e18ce→6ec52e→0ba471→6aa926
 	// duplicate lineage for one Mac.
+	reclaimed := false
 	if existing == nil {
 		existing, err = s.findRegistrationByMachineKey(ctx, identity.OwnerUserId, register)
 		if err != nil {
 			return RegistrationRow{}, err
 		}
+		reclaimed = existing != nil
 	}
 
 	apps := AppsFromProto(register.GetApps())
@@ -311,6 +320,12 @@ func (s *server) upsertRegistration(
 		// this machine has to be forwarded. Stamped on register and
 		// re-asserted on every heartbeat flush; cleared on disconnect.
 		ConnectedNodeId: s.nodeId,
+		// Mirrored from the credential that admitted this stream (epic
+		// memql#5327, design D4). It is written on EVERY register, including
+		// as an empty value for a token that does not expire, because "this
+		// credential has no deadline" is an answer and a row keeping a stale
+		// one would promise a disconnect that is not coming.
+		CredentialExpiresAt: identity.ExpiresAt,
 	}
 
 	if existing == nil {
@@ -335,6 +350,45 @@ func (s *server) upsertRegistration(
 	// one -- the worker no longer advertises it.
 	if err := s.store.RefreshRegistration(ctx, registration); err != nil {
 		return RegistrationRow{}, fmt.Errorf("worker refresh registration: %w", err)
+	}
+	// THE DISPLACED CREDENTIAL IS REVOKED (epic memql#5327, design D9).
+	//
+	// Reclaim rebinds the row's identityId to the token that just connected.
+	// Leaving the previous one active gives one physical machine two live
+	// credentials, and the machine key is what BOTH of them reclaim on -- so
+	// the old cockpit takes the row straight back on its next connect and the
+	// two flap, each re-pointing connectedNodeId at itself.
+	//
+	// Scoped to RECLAIM and never to an ordinary refresh. A refresh under the
+	// same identityId displaces nothing, and revoking there would kill the
+	// credential of every machine that merely reconnected.
+	//
+	// BEST EFFORT, and deliberately after the refresh rather than before: the
+	// registration is the record the cluster routes on, and failing the
+	// handshake because a cleanup write did not land would take a working
+	// machine offline over a credential nobody is using.
+	//
+	// THE COMPARISON IS SPELLING-TOLERANT, and a raw != here would be the
+	// worst bug in this function. The engine bare-ifies ids on egress, so the
+	// row's stored identityId and the one the interceptor resolved can be the
+	// SAME credential written two ways -- and a raw inequality would then read
+	// "displaced" for a machine that merely reconnected, and revoke the very
+	// token that had just authenticated it. The machine would connect and
+	// immediately lose its credential, every time.
+	if reclaimed && existing.IdentityId != "" && !sameWorkerSubject(existing.IdentityId, identity.IdentityId) {
+		if err := s.store.RevokeIdentity(ctx, existing.IdentityId); err != nil {
+			s.logger.Warn("worker: could not revoke the credential this machine reclaimed from",
+				"registration_id", registration.ID,
+				"displaced_identity_id", existing.IdentityId,
+				"error", err,
+			)
+		} else {
+			s.logger.Info("worker: revoked the credential this machine reclaimed from",
+				"registration_id", registration.ID,
+				"displaced_identity_id", existing.IdentityId,
+				"identity_id", identity.IdentityId,
+			)
+		}
 	}
 	return registration, nil
 }
@@ -441,10 +495,34 @@ type streamSession struct {
 	// both out of the write.
 	rttMs int
 	rttAt time.Time
-	// drainReason, when non-empty, was set by requestDrain before the stream
-	// ended. disconnectCodeReason prefers it so roll logs say server_drain
-	// rather than a bare Canceled from context cancel.
+	// drainReason, when non-empty, was set by requestDrain or by terminate
+	// before the stream ended. disconnectCodeReason prefers it so roll logs
+	// say server_drain -- or revoked / token_expired / superseded -- rather
+	// than a bare Canceled from context cancel.
 	drainReason string
+
+	// lastIdentityCheck is when this stream last re-resolved the credential
+	// that admitted it (epic memql#5327, design D3). Zero means never, and the
+	// FIRST heartbeat therefore checks: a token revoked in the seconds between
+	// the interceptor's lookup and the machine's first beat is the narrowest
+	// window this backstop has, and it is free to close. Touched only from
+	// handleHeartbeat, on the recv goroutine, so like lastPersistedAt it needs
+	// no lock.
+	lastIdentityCheck time.Time
+	// clockSkewMs is how far the machine's own clock sits from the cluster's,
+	// positive when the machine is ahead (design D6). clockSkewSeen
+	// distinguishes a measured zero -- the clocks agree -- from a cockpit that
+	// stamps no timestamp at all, which is silence and not agreement.
+	// clockSkewLogged keeps the warning to one line per stream.
+	clockSkewMs     int
+	clockSkewSeen   bool
+	clockSkewLogged bool
+	// credentialExpiresAt is this stream's token expiry as last resolved
+	// (design D4), mirrored onto the registration row so the Fleet page can
+	// warn before a machine disconnects itself. Set at admit from the
+	// credential that let the stream in, and re-set by a rotation that renews
+	// it. Zero means the token does not expire.
+	credentialExpiresAt time.Time
 }
 
 func newStreamSession(
@@ -678,7 +756,18 @@ func (s *streamSession) clearConnectedNode() {
 			}
 		}
 	}
-	if err := s.server.store.ClearConnectedNode(ctx, s.worker.RegistrationId, s.worker.OwnerUserId); err != nil {
+	// `self` is the COMPARE half (design D8): the store re-reads the holder
+	// immediately before the write and abandons the clear when a sibling has
+	// taken over in the meantime. The read-then-return above is still worth
+	// keeping -- it saves the write entirely in the common case and it is the
+	// only check that can see a LOCAL successor, which the row cannot
+	// distinguish from ourselves.
+	//
+	// AN EMPTY `self` MAKES IT UNCONDITIONAL, which is the pre-D8 behaviour
+	// and is harmless rather than an exception: a replica with no node id
+	// stamped `connectedNodeId` empty on the way in, so there is nothing on
+	// the row for a compare to protect.
+	if err := s.server.store.ClearConnectedNode(ctx, s.worker.RegistrationId, s.worker.OwnerUserId, self); err != nil {
 		if s.server.logger != nil {
 			s.server.logger.Warn("worker: clear connectedNodeId failed",
 				"registration_id", s.worker.RegistrationId,
@@ -797,11 +886,30 @@ func (s *streamSession) handleHeartbeat(hb *memqlv1.Heartbeat, sourceIP string) 
 	if hb == nil {
 		return
 	}
+	// THE SERVER'S CLOCK, ALWAYS (epic memql#5327, design D6).
+	//
+	// This used to take hb.GetTs() -- the cockpit's own timestamppb.Now() --
+	// and persist it, while IsOnline compares lastSeenAt against the SERVER's
+	// now. A machine whose clock ran 45s slow read offline while it was
+	// connected and beating; one running fast read online for the skew after
+	// it disconnected. The throttle below compared two client values too, so a
+	// client that lied about its clock could steer its own write cadence.
+	//
+	// The client's stamp is KEPT, as what it actually is: the difference
+	// between the two clocks, which is the only thing it can honestly measure.
+	// A machine whose clock is wrong is then diagnosable rather than merely
+	// absent from the page.
 	at := s.server.clock()
-	if hb.GetTs() != nil {
-		at = hb.GetTs().AsTime()
-	}
+	s.recordClockSkew(hb, at)
 	s.worker.TouchLastSeen(at, sourceIP)
+
+	// The token that admitted this stream is re-resolved here, at most once
+	// per IdentityRecheckInterval (design D3). It runs BEFORE any of the
+	// persistence below, so a revoked machine's last beat does not also
+	// refresh the row that says it is online.
+	if s.recheckIdentity(at) {
+		return
+	}
 
 	if hb.GetPermissions() != nil {
 		snapshot := permissionStatusToMap(hb.GetPermissions())
@@ -963,7 +1071,24 @@ func (s *streamSession) handleHeartbeat(hb *memqlv1.Heartbeat, sourceIP string) 
 	// write that already happens, and the row then always carries the latest
 	// figure this replica holds. A zero rttAt is "not measured" and the store
 	// leaves both fields out.
-	if err := s.server.store.UpdateLastSeen(ctx, s.worker.RegistrationId, s.worker.OwnerUserId, at, sourceIP, s.server.nodeId, active, hardware, s.rttMs, s.rttAt); err != nil {
+	if err := s.server.store.UpdateLastSeen(ctx, HeartbeatFlush{
+		RegistrationId:  s.worker.RegistrationId,
+		OwnerUserId:     s.worker.OwnerUserId,
+		LastSeenAt:      at,
+		SourceIP:        sourceIP,
+		ConnectedNodeId: s.server.nodeId,
+		ActiveCount:     active,
+		Hardware:        hardware,
+		RttMs:           s.rttMs,
+		RttAt:           s.rttAt,
+		// The two facts about the CONNECTION rather than the machine (epic
+		// memql#5327, designs D6 and D4). Both are re-asserted on every flush
+		// rather than written once: the skew moves with the machine's clock,
+		// and the expiry moves when a rotation renews it mid-stream.
+		ClockSkewMs:         s.clockSkewMs,
+		ClockSkewSeen:       s.clockSkewSeen,
+		CredentialExpiresAt: s.credentialExpiresAt,
+	}); err != nil {
 		if s.server.logger != nil {
 			s.server.logger.Warn("worker: persist heartbeat failed",
 				"registration_id", s.worker.RegistrationId,
@@ -1027,16 +1152,61 @@ func (s *streamSession) handleToolStream(chunk *memqlv1.ToolStream) {
 	sink(chunk)
 }
 
+// handleRotationRequest renews this stream's credential in place (epic
+// memql#5327, design D5).
+//
+// It answers on the SAME stream the request arrived on, which is what makes
+// the whole exchange safe: the machine has already proved possession of the
+// current token, so the new one is handed to a party that could use the old
+// one anyway. Nothing about this closes the stream -- a cockpit that fails to
+// persist what it is given can ask again.
+//
+// EVERY FAILURE STILL ANSWERS. The reply carries an empty token, which is
+// exactly what the pre-D5 stub always sent, so a cockpit that cannot tell the
+// two apart is no worse off than before and one that can sees no token and
+// keeps the credential it has. Answering nothing would park a cockpit waiting
+// on a message that is never coming.
 func (s *streamSession) handleRotationRequest(ctx context.Context, req *memqlv1.RotationRequest) {
-	// MVP responds with an empty rotation -- token rotation lands in
-	// Phase 7 alongside the rest of the hardening track. Until then
-	// the call is acknowledged so workers don't loop on it.
 	_ = req
+	plain, expires, err := s.rotateCredential(ctx)
+	if err != nil {
+		if s.server != nil && s.server.logger != nil {
+			s.server.logger.Warn("worker: token rotation failed; the machine keeps its current credential",
+				"registration_id", s.worker.RegistrationId,
+				"identity_id", s.worker.IdentityId,
+				"error", err,
+			)
+		}
+		_ = s.send(&memqlv1.WorkerServerMessage{
+			Payload: &memqlv1.WorkerServerMessage_RotationResponse{
+				RotationResponse: &memqlv1.RotationResponse{},
+			},
+		})
+		return
+	}
+	// The plaintext is on the wire and nowhere else. It is not logged, not
+	// held on the session, and not readable back from the row -- only its
+	// hash was persisted, exactly as at pairing.
 	_ = s.send(&memqlv1.WorkerServerMessage{
 		Payload: &memqlv1.WorkerServerMessage_RotationResponse{
-			RotationResponse: &memqlv1.RotationResponse{},
+			RotationResponse: &memqlv1.RotationResponse{
+				NewToken:          plain,
+				NewTokenExpiresAt: timestamppb.New(expires),
+			},
 		},
 	})
+	// The row learns the new deadline on the next flush (design D4). Setting
+	// it here rather than writing immediately keeps rotation to one write:
+	// the flush is at most one heartbeat away and the old expiry is still
+	// months out, so nothing reads a wrong answer in between.
+	s.credentialExpiresAt = expires
+	if s.server != nil && s.server.logger != nil {
+		s.server.logger.Info("worker token rotated",
+			"registration_id", s.worker.RegistrationId,
+			"identity_id", s.worker.IdentityId,
+			"expires_at", expires.Format(time.RFC3339),
+		)
+	}
 }
 
 func (s *streamSession) handleAuditEvent(ctx context.Context, evt *memqlv1.AuditEvent) {

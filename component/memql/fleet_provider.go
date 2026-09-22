@@ -331,6 +331,15 @@ type FleetCallResult struct {
 	ExecutionSurface string
 	// MachineLabel is the human-readable name for a card or a log line.
 	MachineLabel string
+	// MachineOwnerUserId names WHOSE MACHINE served the call, and ONLY when
+	// that owner is not the caller (epic memql#5327, design D15).
+	//
+	// EMPTY ON YOUR OWN MACHINE, deliberately, and repeating userId there
+	// would be the easy alternative and the wrong one: the field answers
+	// "whose machine, if not yours", so filling in the self case would turn
+	// "is this a shared call" from a read into a comparison -- and every
+	// reader would have to make it.
+	MachineOwnerUserId string
 	// The three MODALITY results (epic memql#5137, D4). Segments accompany a
 	// transcription's Content; Audio is a speak result; Images an image one.
 	//
@@ -847,7 +856,12 @@ type fleetProvider struct {
 	// interfaces return a string and have nowhere to carry it.
 	lastMu      sync.Mutex
 	lastSurface string
-	lastUsage   FleetUsage
+	// lastMachineOwner is the surface bookkeeping's second field, beside
+	// lastSurface and for its reason: the provider interfaces return a
+	// string, so anything the decision row needs has to be read back rather
+	// than returned (epic memql#5327, design D15).
+	lastMachineOwner string
+	lastUsage        FleetUsage
 }
 
 // LastCall reports the machine and usage of this provider's most recent call.
@@ -867,6 +881,23 @@ func (p *fleetProvider) ExecutionSurface() string {
 	p.lastMu.Lock()
 	defer p.lastMu.Unlock()
 	return p.lastSurface
+}
+
+// MachineOwner reports whose machine served the last call, and "" when it was
+// the caller's own or when nothing has been served (epic memql#5327, D15).
+//
+// It satisfies a structural interface declared in component/router, beside
+// ExecutionSurface and for exactly its reason -- that module pins the root
+// module at a published version and cannot name a method of this one. The
+// empty string is a real answer here twice over: no call yet, and a call on
+// your own hardware.
+func (p *fleetProvider) MachineOwner() string {
+	if p == nil {
+		return ""
+	}
+	p.lastMu.Lock()
+	defer p.lastMu.Unlock()
+	return p.lastMachineOwner
 }
 
 func (p *fleetProvider) LastCall() (surface string, usage FleetUsage) {
@@ -933,6 +964,7 @@ func (p *fleetProvider) call(ctx context.Context, req FleetCallRequest) (FleetCa
 	}
 	p.lastMu.Lock()
 	p.lastSurface = res.ExecutionSurface
+	p.lastMachineOwner = res.MachineOwnerUserId
 	p.lastUsage = res.Usage
 	p.lastMu.Unlock()
 	return res, nil

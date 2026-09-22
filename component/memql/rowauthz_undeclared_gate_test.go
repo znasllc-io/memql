@@ -196,6 +196,26 @@ const undeclared3322AccountTokenReason = "memql#3349 -- account-token reads; v1:
 // memql#4832's D6 says a surface floor and a row tier are both permanent and
 // neither stands in for the other.
 
+// undeclared5327WorkerRecheckReason covers workerTokenIdentityById, added by
+// epic memql#5327 so a LIVE WorkerService stream can re-resolve the credential
+// that admitted it (design D3) and rotate it in place (D5).
+//
+// It postdates the seed and names its own issue rather than carrying the
+// grandfather marker, the distinction that marker exists to draw.
+//
+// IT CANNOT BE CALLER-SCOPED, and not for the usual "no actor yet" reason. An
+// actor exists -- the stream is authenticated -- but the authenticated party
+// is a MACHINE whose subject is `worker:<identityId>` rather than a user, so
+// `userId == actor.userId` matches nothing for the only caller there is.
+//
+// What bounds it instead is the argument: it is keyed on the CREDENTIAL'S OWN
+// ID, which the auth path resolved from a presented token, so unlike
+// workerTokensForUser beside it there is no user id to supply and nothing to
+// enumerate. What keeps it on this list anyway is the concept:
+// v1:identity:identity declares no tier, so the engine measures nothing about
+// it, and unmeasured is not the same as safe.
+const undeclared5327WorkerRecheckReason = "epic memql#5327 -- a live worker stream re-checking and rotating its own credential, keyed on the credential id; v1:identity:identity still declares no tier"
+
 const undeclared3324NodeTokenAdminReason = "memql#3324 -- role-gated node-credential listing for the portal; v1:identity:identity still declares no tier"
 
 // undeclared3217SeedSweepReason covers usersForSeedSweep, added by memql#3217
@@ -848,6 +868,7 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"patIdentityByKeyHash":       {"v1:identity:identity", undeclaredGrandfatherReason},
 	"workerTokenByKeyHash":       {"v1:identity:identity", undeclaredGrandfatherReason},
 	"workerTokensForUser":        {"v1:identity:identity", undeclaredGrandfatherReason},
+	"workerTokenIdentityById":    {"v1:identity:identity", undeclared5327WorkerRecheckReason},
 
 	// v1:identity:enrolmentToken
 	"enrolmentTokenByHash": {"v1:identity:enrolmentToken", undeclared3408EnrolmentReason},

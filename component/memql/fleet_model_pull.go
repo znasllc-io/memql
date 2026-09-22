@@ -58,8 +58,14 @@ const ModelPullConcept = "v1:worker:modelPull"
 // decides on. A struct rather than the raw row so the decision is a function
 // of values and is testable without an engine, a database or a cluster.
 type modelPullMachine struct {
-	RegistrationId  string
-	OwnerUserId     string
+	RegistrationId string
+	OwnerUserId    string
+	// IdentityId is the worker credential this registration is bound to (epic
+	// memql#5327, design D2). Only fleetRevokeMachine reads it, and it lives
+	// here rather than behind a lookup of its own because this struct is the
+	// answer to "is this machine the caller's", which is the same question
+	// that has to be settled before anybody may touch its credential.
+	IdentityId      string
 	DisplayName     string
 	Name            string
 	ConnectedNodeId string
@@ -274,8 +280,14 @@ func (e *MemQLEngine) modelPullMachineFor(ctx context.Context, registrationId st
 			continue
 		}
 		return modelPullMachine{
-			RegistrationId:  registrationId,
-			OwnerUserId:     mapString(row, "ownerUserId"),
+			RegistrationId: registrationId,
+			OwnerUserId:    mapString(row, "ownerUserId"),
+			// The credential bound to this registration (epic memql#5327,
+			// design D2). It is on the shape already -- workerRegistrationFull
+			// projects identityId -- and it is read HERE rather than by a
+			// second lookup because this is the one resolution that has
+			// already proven the machine belongs to the caller.
+			IdentityId:      mapString(row, "identityId"),
 			DisplayName:     mapString(row, "displayName"),
 			Name:            mapString(row, "name"),
 			ConnectedNodeId: mapString(row, "connectedNodeId"),

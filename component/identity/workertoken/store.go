@@ -39,7 +39,38 @@ type Row struct {
 	ExpiresAt              time.Time
 	LastUsedAt             time.Time
 	CreatedAt              time.Time
+	// PreviousKeyHash / PreviousKeyExpiresAt are the rotation grace (epic
+	// memql#5327, design D5): the hash this row carried before its last
+	// rotation, and the instant it stops being accepted. Both zero on a row
+	// that has never rotated.
+	//
+	// They are READ here and never re-emitted, exactly as KeyHash is: the
+	// lookup returns them so the resolver can decide whether a presented
+	// token matched the current credential or a grace one, and no caller
+	// above that has a use for either.
+	PreviousKeyHash      string
+	PreviousKeyExpiresAt time.Time
 }
+
+// DefaultTTL is how long a freshly minted worker token lives (epic
+// memql#5327, design D4).
+//
+// Ninety days is long enough that a laptop which sleeps for a season still
+// wakes up paired, and short enough that a token copied out of a backup is
+// worthless within a quarter. It matches the figure v1:identity:identity's
+// worker_token variant has documented since the credential shipped, which
+// until this epic nothing implemented.
+//
+// It is a CONSTANT rather than an operator knob deliberately. The only other
+// honest setting is shorter, and an operator who wants shorter has rotation,
+// which renews without a person -- while a knob whose second position is
+// "never expire" simply re-creates the finding this closes.
+const DefaultTTL = 90 * 24 * time.Hour
+
+// RotationGrace is how long the displaced hash keeps working after a rotation
+// (design D5). Fifteen minutes: a reconnect-and-retry window, not a second
+// credential.
+const RotationGrace = 15 * time.Minute
 
 // NewId mints a new worker-token identity slug ("wkr-<32 hex>").
 func NewId() (string, error) {
@@ -98,6 +129,55 @@ func (s *Store) Revoke(ctx context.Context, identityId string) error {
 	return nil
 }
 
+// Rotate renews a worker token in place (epic memql#5327, design D5).
+//
+// The caller has already minted the new plaintext and hash; this writes the
+// new hash and expiry onto the SAME row and parks the displaced hash under a
+// RotationGrace window. The row's id does not move, because
+// v1:worker:registration binds to it -- a new row would unbind the
+// registration and send the machine through machine-key reclaim.
+//
+// `previousKeyHash` empty means no grace is opened, which is right for a
+// rotation of a row whose current hash was never in a cockpit's hands.
+func (s *Store) Rotate(ctx context.Context, identityId, keyHash, previousKeyHash string, expiresAt time.Time) error {
+	if s == nil || s.Engine == nil {
+		return errors.New("workertoken.Store: engine not wired")
+	}
+	if strings.TrimSpace(identityId) == "" || strings.TrimSpace(keyHash) == "" {
+		return errors.New("workertoken.Store.Rotate: identityId and keyHash are required")
+	}
+	graceUntil := ""
+	if strings.TrimSpace(previousKeyHash) != "" {
+		graceUntil = time.Now().UTC().Add(RotationGrace).Format(time.RFC3339Nano)
+	}
+	expires := ""
+	if !expiresAt.IsZero() {
+		expires = expiresAt.UTC().Format(time.RFC3339Nano)
+	}
+	q := fmt.Sprintf(
+		`mutation rotateWorkerTokenIdentity(identityId:%s,keyHash:%s,previousKeyHash:%s,previousKeyExpiresAt:%s,expiresAt:%s)`,
+		langparser.QuoteString(bareSlug(identityId)),
+		langparser.QuoteString(keyHash),
+		langparser.QuoteString(previousKeyHash),
+		langparser.QuoteString(graceUntil),
+		langparser.QuoteString(expires),
+	)
+	// rotateWorkerTokenIdentity is @serverOnly, so this read-write has to say
+	// it is server-initiated. Stamped into a SEPARATE context used for this
+	// one statement, for ListForUser's reason: internal origin opens every
+	// @serverOnly construct for as long as the context lives, and confining it
+	// to the call is what keeps the blast radius one mutation wide.
+	//
+	// Nothing caller-supplied reaches it. The hash was minted here from
+	// crypto/rand by the caller one frame up, and the identity id came off the
+	// stream's own resolved credential.
+	internalCtx := auth.ContextWithInternalOrigin(ctx)
+	if _, err := s.Engine.Execute(internalCtx, q); err != nil {
+		return fmt.Errorf("workertoken.Store.Rotate: %w", err)
+	}
+	return nil
+}
+
 // LookupByKeyHash is the gRPC interceptor hot-path. Returns the
 // row (active OR inactive -- the interceptor decides what to do
 // with revoked tokens) or nil when no token matches.
@@ -112,6 +192,49 @@ func (s *Store) LookupByKeyHash(ctx context.Context, keyHash string) (*Row, erro
 	rows, err := s.executeAndExtract(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("workertoken.Store.LookupByKeyHash: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return rowFromNode(rows[0]), nil
+}
+
+// LookupById returns one worker-token identity by ITS OWN ID (epic
+// memql#5327, designs D3 and D5).
+//
+// THE READ A LIVE STREAM MAKES ABOUT ITSELF. It re-resolves the credential
+// that admitted it once a minute, and rotates it on request; both need the row
+// the stream is already authenticated as, so a USER id would be an input
+// neither one has -- the owner is a fact about the credential rather than a
+// way to find it.
+//
+// It is deliberately NOT ListForUser with a filter. That method is the one
+// component/grpc/worker_token_caller_scope_test.go pins to the authenticated
+// caller's Subject, because its query is keyed on a caller-supplied userId
+// with no actor check and projects keyHash and lastConnectedFromIP. Here there
+// is no user id to supply at all, which is the stronger form of the same
+// property rather than an exemption from it.
+//
+// Returns the row even when active=false, so the caller can say "revoked"
+// rather than "not found" -- the distinction design D3 turns on.
+func (s *Store) LookupById(ctx context.Context, identityId string) (*Row, error) {
+	if s == nil || s.Engine == nil {
+		return nil, errors.New("workertoken.Store: engine not wired")
+	}
+	if strings.TrimSpace(identityId) == "" {
+		return nil, nil
+	}
+	q := fmt.Sprintf(`query workerTokenIdentityById(identityId:%s)`, langparser.QuoteString(bareSlug(identityId)))
+
+	// workerTokenIdentityById is @serverOnly for identityFull's reason, so
+	// this read has to say it is server-initiated. Stamped into a SEPARATE
+	// context used for this query and nothing else, exactly as ListForUser
+	// below does and for that reason: internal origin opens every @serverOnly
+	// construct for as long as the context lives.
+	internalCtx := auth.ContextWithInternalOrigin(ctx)
+	rows, err := s.executeAndExtract(internalCtx, q)
+	if err != nil {
+		return nil, fmt.Errorf("workertoken.Store.LookupById: %w", err)
 	}
 	if len(rows) == 0 {
 		return nil, nil
@@ -315,6 +438,8 @@ func rowFromNode(n *memqlv1.MemoryNode) *Row {
 			row.ExpiresAt = parsedTimeFromStruct(cf, "expiresAt")
 			row.CapabilitiesAdvertised = stringListFromStruct(cf, "capabilitiesAdvertised")
 			row.LabelsAdvertised = stringMapFromStruct(cf, "labelsAdvertised")
+			row.PreviousKeyHash = stringFromStruct(cf, "previousKeyHash")
+			row.PreviousKeyExpiresAt = parsedTimeFromStruct(cf, "previousKeyExpiresAt")
 		}
 	}
 	return row

@@ -128,6 +128,35 @@ func (r *EngineWorkerTokenResolver) ResolveWorkerToken(ctx context.Context, plai
 	if row == nil {
 		return nil, ErrWorkerTokenNotFound
 	}
+	// THE ROTATION GRACE IS DECIDED HERE, not in the query (epic memql#5327,
+	// design D5). workerTokenByKeyHash matches the current hash OR the
+	// displaced one, because a window is a comparison against now and a
+	// filter that made one would be comparing against a moment nobody chose.
+	// So a hit on the previous hash is admitted only while its own window is
+	// still open.
+	//
+	// Branch order matters: a row whose two hashes are equal -- which
+	// re-rotating to the same material would produce -- takes the current arm
+	// and needs no window at all.
+	if row.KeyHash != hash {
+		switch {
+		case row.PreviousKeyHash != hash:
+			// The lookup matched on something this resolver does not accept.
+			// Nothing should reach here; reading it as not-found rather than
+			// as an admission is the only safe treatment of a query that
+			// answered a question it was not asked.
+			return nil, ErrWorkerTokenNotFound
+		case row.PreviousKeyExpiresAt.IsZero(), !time.Now().Before(row.PreviousKeyExpiresAt):
+			return nil, fmt.Errorf("worker: the rotated token's grace window has closed")
+		default:
+			if r.Logger != nil {
+				r.Logger.Info("worker token admitted on the rotation grace hash",
+					"identity_id", row.ID,
+					"grace_until", row.PreviousKeyExpiresAt.UTC().Format(time.RFC3339),
+				)
+			}
+		}
+	}
 	return &worker.WorkerIdentity{
 		IdentityId:  row.ID,
 		OwnerUserId: row.UserId,

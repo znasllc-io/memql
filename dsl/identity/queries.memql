@@ -1989,13 +1989,68 @@ query workerPairingCode workerPairingCodeByHash {
 // Returns:
 //   Zero or one identity row in identityFull shape.
 
-/// Hot-path worker-token lookup by keyHash. Returns active + inactive rows.
+/// Hot-path worker-token lookup by keyHash. Returns active + inactive rows, and matches the
+/// ROTATION GRACE hash beside the current one (epic memql#5327, D5). Whether that grace is still
+/// open is the RESOLVER's question, against previousKeyExpiresAt: a window is a comparison with
+/// now, and a filter that made it would be comparing against a moment nobody chose.
+///
+/// The `args.keyHash != nil` conjunct is not decoration. A missing field and an empty string are
+/// one unset value here, so a blank argument would equal the blank previousKeyHash every
+/// never-rotated row carries -- and the query would answer with the whole worker-token population.
 @unbounded("worker token identity by unique credential keyHash -- bounded to a single row")
 query identity workerTokenByKeyHash {
   args {
     keyHash  string!
   }
-  filter  row => identityIsWorkerToken(row) && row.credentials.keyHash == args.keyHash
+  filter  row => identityIsWorkerToken(row)
+              && args.keyHash != nil
+              && (row.credentials.keyHash == args.keyHash
+                  || row.credentials.previousKeyHash == args.keyHash)
+  shape   identityFull
+}
+
+// ---- queries/v1/identity/workerTokenIdentityById.memql ----
+
+// workerTokenIdentityById
+// =======================
+//
+// One worker-token identity, by ITS OWN ID (epic memql#5327, designs D3/D5).
+//
+// WHY THIS EXISTS BESIDE workerTokensForUser. A live stream re-resolves the
+// credential that admitted it, once a minute, and rotates it on request. Both
+// need one row, and the row they need is the one the stream is already
+// authenticated as -- so keying the read on a USER id would be asking a
+// question neither one has: the owner is a fact about the credential, not an
+// input to finding it.
+//
+// It is also the safer shape. workerTokensForUser is @serverOnly because it
+// projects identityFull -- keyHash, registeredBy, lastConnectedFromIP --
+// behind a filter keyed on a caller-supplied userId with no actor check, and
+// component/grpc/worker_token_caller_scope_test.go exists to pin every one of
+// its callers to the authenticated caller's Subject. There is NO USER ID TO
+// SUPPLY here, so there is nothing to enumerate: the argument is a credential
+// id the auth path resolved, and a caller who guessed a different one would be
+// naming a row it is not authenticated as.
+//
+// Returns the row even when active=false, for workerTokenByKeyHash's reason:
+// the reader has to be able to say "revoked" rather than "not found".
+
+/// One worker-token identity by its own id (full shape, includes keyHash). Server-side only --
+/// never feed to a UI. Returns active + inactive rows so a reader can say "revoked" rather than
+/// "not found".
+///
+/// @serverOnly because it projects identityFull, which carries the credential's SHA-256 digest and
+/// its last-connect IP. actor.userId scoping is not the fix and would be the wrong shape: the row
+/// this finds is the one a live WorkerService stream is ALREADY authenticated as, and the
+/// authenticated party is a MACHINE whose subject is `worker:<identityId>` rather than a user -- so
+/// a self-scoped filter over actor.userId matches nothing for the only caller there is.
+@serverOnly
+@unbounded("one worker-token identity by its own id -- bounded to a single row")
+query identity workerTokenIdentityById {
+  args {
+    identityId  string!
+  }
+  filter  row => identityIsWorkerToken(row) && row.id == args.identityId
   shape   identityFull
 }
 

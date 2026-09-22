@@ -141,6 +141,16 @@ var maintenanceAutomations = map[string]string{
 		"stays stuck while the sweep reports nothing to do -- and a probe is worse to strand than a " +
 		"pull, because a suite nobody finished may still be occupying somebody's GPU and this row is " +
 		"the only thing that will ever say so",
+	"workerStaleConnectionSweep": "the two-minute sweep that clears connectedNodeId stamps nobody " +
+		"is holding (epic memql#5327, design D7). The stamp names the agent replica holding a " +
+		"machine's stream and is cleared only by a GRACEFUL close, which a SIGKILLed pod does not " +
+		"perform and every redeploy causes -- so StreamHeld read true for a stream nobody held and " +
+		"the Fleet page showed a machine as online. Its read spans owners BY NATURE, for the reason " +
+		"the two sweeps above do: a sweep for stranded holds cannot know whose machine was stranded " +
+		"before it looks. Without this principal registrationsWithStaleHold returns zero rows and no " +
+		"error, and the sweep reports nothing to clear on a cluster where every stamp is dead -- and " +
+		"unlike a stuck pull, what this leaves behind is not a spinner but a WRONG ANSWER: every " +
+		"reader, the router included, believes a machine is up",
 	"routingEvidenceFold": "the nightly fold of decision records into v1:platform:modelEvidence " +
 		"(epic memql#5146, D5). It reads EVERY owner's calls by nature -- the question is how a MODEL " +
 		"behaved across the fleet, not how it behaved for one person -- and v1:router:call carries no " +

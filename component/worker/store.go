@@ -10,6 +10,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/identity/workertoken"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
@@ -115,6 +116,7 @@ func (s *EngineStore) CreateRegistration(ctx context.Context, row RegistrationRo
 		"lastSeenAt":           row.LastSeenAt.UTC().Format(time.RFC3339Nano),
 		"lastConnectedFromIP":  row.LastConnectedFromIP,
 		"connectedNodeId":      row.ConnectedNodeId,
+		"credentialExpiresAt":  rfc3339OrBlank(row.CredentialExpiresAt),
 	}
 	// Omitted when absent rather than sent as a null. A cockpit that predates
 	// the field has said nothing, and a `hardware: null` on the row is a value
@@ -176,6 +178,13 @@ func (s *EngineStore) RefreshRegistration(ctx context.Context, row RegistrationR
 		"lastSeenAt":           row.LastSeenAt.UTC().Format(time.RFC3339Nano),
 		"lastConnectedFromIP":  row.LastConnectedFromIP,
 		"connectedNodeId":      row.ConnectedNodeId,
+		// Re-stamped on every reconnect from the credential that admitted the
+		// stream (epic memql#5327, design D4), so a rotated token's new expiry
+		// lands without waiting for a heartbeat flush. It is written EMPTY
+		// when the token does not expire, unlike the optional fields below:
+		// "this credential has no expiry" is an answer, and a row that kept a
+		// stale one would promise a disconnect that is not coming.
+		"credentialExpiresAt": rfc3339OrBlank(row.CredentialExpiresAt),
 	}
 	// `hardware` IS named here, unlike operatorLabels and displayName above,
 	// and the distinction is which side of the machine/owner line the field
@@ -218,33 +227,44 @@ func (s *EngineStore) RefreshRegistration(ctx context.Context, row RegistrationR
 // D11): the latest Ping round trip, and a ZERO rttAt means not measured, so
 // both stay out of the call. See the Store interface for why a zero must
 // never be sent as a figure.
-func (s *EngineStore) UpdateLastSeen(ctx context.Context, registrationId, ownerUserId string, lastSeenAt time.Time, sourceIP, connectedNodeId string, activeCount int, hardware map[string]any, rttMs int, rttAt time.Time) error {
+// `clockSkewMs` and `credentialExpiresAt` ride it on the same terms again
+// (epic memql#5327, designs D6 and D4). The skew needs its own presence flag
+// rather than a zero test, because a measured zero here is a REAL answer --
+// the clocks agree -- and would otherwise be indistinguishable from a cockpit
+// that stamps no timestamp at all.
+func (s *EngineStore) UpdateLastSeen(ctx context.Context, flush HeartbeatFlush) error {
 	if s == nil || s.Engine == nil {
 		return nil
 	}
-	writeCtx, err := ownerActor(ctx, ownerUserId)
+	writeCtx, err := ownerActor(ctx, flush.OwnerUserId)
 	if err != nil {
 		return err
 	}
 	args := map[string]any{
-		"registrationId":      registrationId,
-		"lastSeenAt":          lastSeenAt.UTC().Format(time.RFC3339Nano),
-		"lastConnectedFromIP": sourceIP,
-		"connectedNodeId":     connectedNodeId,
-		"activeCount":         activeCount,
+		"registrationId":      flush.RegistrationId,
+		"lastSeenAt":          flush.LastSeenAt.UTC().Format(time.RFC3339Nano),
+		"lastConnectedFromIP": flush.SourceIP,
+		"connectedNodeId":     flush.ConnectedNodeId,
+		"activeCount":         flush.ActiveCount,
 	}
 	// Omitted rather than sent empty. The mutation body coalesces with `??`,
 	// which is blank-coalescing, so an ABSENT key keeps the stored inventory
 	// while an empty object would overwrite it with a machine that reports
 	// nothing -- turning silence into a statement.
-	if len(hardware) > 0 {
-		args["hardware"] = hardware
+	if len(flush.Hardware) > 0 {
+		args["hardware"] = flush.Hardware
 	}
 	// The same rule for the round trip: a zero rttAt is "not measured", and
 	// sending it would write a 0 ms figure over a real one.
-	if !rttAt.IsZero() {
-		args["rttMs"] = rttMs
-		args["rttAt"] = rttAt.UTC().Format(time.RFC3339Nano)
+	if !flush.RttAt.IsZero() {
+		args["rttMs"] = flush.RttMs
+		args["rttAt"] = flush.RttAt.UTC().Format(time.RFC3339Nano)
+	}
+	if flush.ClockSkewSeen {
+		args["clockSkewMs"] = flush.ClockSkewMs
+	}
+	if !flush.CredentialExpiresAt.IsZero() {
+		args["credentialExpiresAt"] = flush.CredentialExpiresAt.UTC().Format(time.RFC3339Nano)
 	}
 	query, err := langparser.RenderCall("updateWorkerLastSeen", args)
 	if err != nil {
@@ -264,13 +284,48 @@ func (s *EngineStore) UpdateLastSeen(ctx context.Context, registrationId, ownerU
 // lastSeenAt is not touched. It records when the machine was last heard from,
 // and advancing it on the way out would make a disconnected worker read as
 // online for one whole OnlineWindow.
-func (s *EngineStore) ClearConnectedNode(ctx context.Context, registrationId, ownerUserId string) error {
+//
+// THE COMPARE-AND-SWAP (epic memql#5327, design D8). `expectedNodeId`, when
+// non-empty, is re-read from the row immediately before the write and the
+// clear is ABANDONED when the persisted holder is somebody else: a sibling
+// replica that stamped its own hold while this session was tearing down must
+// not have it wiped, which left StreamHeld false for up to one heartbeat
+// interval on a machine that was connected the whole time.
+//
+// Empty means unconditional. Exactly one caller passes it -- the stale-hold
+// sweep -- and it is entitled to, because it is clearing a stamp precisely on
+// the evidence that nobody is holding the stream.
+//
+// The residual window is this function's own read -> write, and it is bounded
+// in both directions: a hold wrongly wiped is re-stamped by the successor's
+// next flush, and a hold wrongly kept is cleared by the sweep. Before the
+// sweep existed the second direction had no closer at all.
+func (s *EngineStore) ClearConnectedNode(ctx context.Context, registrationId, ownerUserId, expectedNodeId string) error {
 	if s == nil || s.Engine == nil {
 		return nil
 	}
 	writeCtx, err := ownerActor(ctx, ownerUserId)
 	if err != nil {
 		return err
+	}
+	if expected := strings.TrimSpace(expectedNodeId); expected != "" {
+		holder, found, err := s.connectedNodeOf(writeCtx, registrationId, ownerUserId)
+		switch {
+		case err != nil:
+			// An unreadable row is not evidence that somebody else holds it.
+			// Refuse rather than clear: the sweep will reach this row within
+			// StaleHoldWindow if the hold really is dead, and a clear made on
+			// a failed read would be a guess with a write behind it.
+			return fmt.Errorf("worker.store: clear connected node: re-read holder: %w", err)
+		case !found:
+			return nil
+		case strings.TrimSpace(holder) == "":
+			// Already cleared. Nothing to do, and writing anyway would blank
+			// an activeCount a successor has just set.
+			return nil
+		case strings.TrimSpace(holder) != expected:
+			return nil
+		}
 	}
 	args := map[string]any{
 		"registrationId": registrationId,
@@ -285,32 +340,22 @@ func (s *EngineStore) ClearConnectedNode(ctx context.Context, registrationId, ow
 	return nil
 }
 
-// RevokeRegistration stamps revokedAt on a registration. revokedBy is who
-// performed the revocation and is NOT the actor: an admin may revoke somebody
-// else's machine, and the write still runs under the row's OWNER because that
-// is whose tier the guard checks.
-func (s *EngineStore) RevokeRegistration(ctx context.Context, registrationId, ownerUserId, revokedBy, reason string, at time.Time) error {
-	if s == nil || s.Engine == nil {
-		return nil
-	}
-	writeCtx, err := ownerActor(ctx, ownerUserId)
+// connectedNodeOf reads one registration's current holder under an actor the
+// caller has already built. `found` distinguishes "the row says nobody holds
+// it" from "there is no such row", which the compare-and-swap above treats
+// differently from each other and from a read failure.
+func (s *EngineStore) connectedNodeOf(ctx context.Context, registrationId, ownerUserId string) (holder string, found bool, err error) {
+	rows, err := s.workersForUserWithCtx(ctx, ownerUserId)
 	if err != nil {
-		return err
+		return "", false, err
 	}
-	args := map[string]any{
-		"registrationId": registrationId,
-		"revokedAt":      at.UTC().Format(time.RFC3339Nano),
-		"revokedBy":      revokedBy,
-		"revokeReason":   reason,
+	for _, row := range rows {
+		if row.ID != registrationId && trimRegistrationPrefix(row.ID) != trimRegistrationPrefix(registrationId) {
+			continue
+		}
+		return row.ConnectedNodeId, true, nil
 	}
-	query, err := langparser.RenderCall("revokeWorker", args)
-	if err != nil {
-		return fmt.Errorf("worker.store: render revoke: %w", err)
-	}
-	if _, err := s.Engine.Execute(writeCtx, query); err != nil {
-		return fmt.Errorf("worker.store: revoke registration: %w", err)
-	}
-	return nil
+	return "", false, nil
 }
 
 // CreateInvocation persists a v1:worker:invocation row.
@@ -408,8 +453,16 @@ func (s *EngineStore) WorkersForUser(ctx context.Context, ownerUserId string) ([
 	if err != nil {
 		return nil, err
 	}
+	return s.workersForUserWithCtx(readCtx, ownerUserId)
+}
+
+// workersForUserWithCtx is WorkersForUser once the owner's actor is already on
+// the context. Split out so a caller that has built the write context -- the
+// compare-and-swap in ClearConnectedNode -- re-reads through the same actor it
+// is about to write under, rather than building a second one that could differ.
+func (s *EngineStore) workersForUserWithCtx(ctx context.Context, ownerUserId string) ([]RegistrationRow, error) {
 	query := fmt.Sprintf(`query workersForUser(ownerUserId:%s)`, langparser.QuoteString(ownerUserId))
-	nodes, err := s.executeAndExtract(readCtx, query)
+	nodes, err := s.executeAndExtract(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -422,6 +475,151 @@ func (s *EngineStore) WorkersForUser(ctx context.Context, ownerUserId string) ([
 		out = append(out, *row)
 	}
 	return out, nil
+}
+
+// rfc3339OrBlank renders a timestamp for a mutation argument, and the BLANK is
+// the point: an empty string is how this tree encodes "no such moment" in a
+// string-typed timestamp field, and it is what a credential with no expiry
+// writes.
+func rfc3339OrBlank(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339Nano)
+}
+
+// trimRegistrationPrefix reduces a registration id to its bare short form.
+//
+// The engine bare-ifies ids on egress and resolves bare arguments on inbound,
+// so a row read back through a query and an id handed in by a caller can be
+// the same machine written two ways. Comparing them raw is the mistake this
+// exists to stop.
+func trimRegistrationPrefix(id string) string {
+	trimmed := strings.TrimSpace(id)
+	if idx := strings.LastIndex(trimmed, ":"); idx >= 0 {
+		return trimmed[idx+1:]
+	}
+	return trimmed
+}
+
+// IdentityById re-resolves the identity that admitted a live stream (epic
+// memql#5327, design D3).
+//
+// It reads through workertoken.Store, which is the ONE reader of that row
+// shape and stamps its own internal origin for the @serverOnly query behind
+// it -- rather than rendering the read here, where this package's borrowed
+// owner actor would be the only thing standing between a worker's own stream
+// context and a credential table.
+//
+// A nil answer with a nil error means the identity is GONE, which this
+// package's caller treats exactly as revoked: either way nothing admits the
+// stream any more.
+func (s *EngineStore) IdentityById(ctx context.Context, identityId, ownerUserId string) (*WorkerIdentity, error) {
+	if s == nil || s.Engine == nil {
+		return nil, nil
+	}
+	if strings.TrimSpace(identityId) == "" || strings.TrimSpace(ownerUserId) == "" {
+		return nil, nil
+	}
+	store := &workertoken.Store{Engine: s.Engine, Logger: s.Logger}
+	row, err := store.LookupById(ctx, identityId)
+	if err != nil {
+		return nil, fmt.Errorf("worker.store: re-resolve identity: %w", err)
+	}
+	if row == nil {
+		return nil, nil
+	}
+	// THE OWNER IS A CHECK, NOT THE LOOKUP KEY. Reading by credential id is
+	// what keeps this off workertoken's user-scoped path (see LookupById), and
+	// comparing the owner afterwards is what makes a mismatch loud: a stream
+	// authenticated as one person's credential whose row names another is a
+	// rebinding nobody performed, and continuing on it would borrow the wrong
+	// authority for every write the session makes.
+	if !sameWorkerSubject(row.UserId, ownerUserId) {
+		return nil, fmt.Errorf("worker.store: the credential %s is owned by a different user than the stream's", identityId)
+	}
+	return &WorkerIdentity{
+		IdentityId:  row.ID,
+		OwnerUserId: row.UserId,
+		Active:      row.Active,
+		ExpiresAt:   row.ExpiresAt,
+	}, nil
+}
+
+// sameWorkerSubject compares two identity subjects tolerantly of the
+// bare/canonical split, which the engine's egress bare-ification makes routine.
+func sameWorkerSubject(a, b string) bool {
+	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
+	return a == b || (a != "" && trimRegistrationPrefix(a) == trimRegistrationPrefix(b))
+}
+
+// RotateIdentity renews a worker token in place (epic memql#5327, design D5).
+//
+// The whole exchange lives here: read the row for the hash it currently
+// carries, mint a fresh pair, write the new hash with the displaced one parked
+// under workertoken.RotationGrace, and hand the caller the plaintext to put on
+// the wire. The plaintext exists in this function and in the message it is
+// written to, and nowhere else -- no log line, no session field, no row.
+//
+// The expiry is a fresh full DefaultTTL rather than an extension of whatever
+// was left, because a rotation is the machine proving possession: renewing to
+// less than a new token would get would make rotation a worse deal than
+// re-pairing, which is the opposite of what it is for.
+func (s *EngineStore) RotateIdentity(ctx context.Context, identityId, ownerUserId string) (string, time.Time, error) {
+	if s == nil || s.Engine == nil {
+		return "", time.Time{}, fmt.Errorf("worker.store: engine not configured")
+	}
+	if strings.TrimSpace(identityId) == "" || strings.TrimSpace(ownerUserId) == "" {
+		return "", time.Time{}, fmt.Errorf("worker.store: rotate needs both the identity and its owner")
+	}
+	store := &workertoken.Store{Engine: s.Engine, Logger: s.Logger}
+	row, err := store.LookupById(ctx, identityId)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("worker.store: rotate: read the credential: %w", err)
+	}
+	if row == nil {
+		return "", time.Time{}, fmt.Errorf("worker.store: rotate: no worker credential with that id")
+	}
+	if !sameWorkerSubject(row.UserId, ownerUserId) {
+		return "", time.Time{}, fmt.Errorf("worker.store: rotate: that credential is owned by a different user than the stream's")
+	}
+	if !row.Active {
+		// Rotating a revoked credential would hand a live token to a stream
+		// something has already decided against. The stream itself is ended by
+		// the re-check within one interval.
+		return "", time.Time{}, fmt.Errorf("worker.store: rotate: the credential is revoked")
+	}
+	current := row.KeyHash
+
+	plain, hash, err := workertoken.Mint()
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("worker.store: rotate: mint: %w", err)
+	}
+	expires := time.Now().UTC().Add(workertoken.DefaultTTL)
+	if err := store.Rotate(ctx, identityId, hash, current, expires); err != nil {
+		return "", time.Time{}, fmt.Errorf("worker.store: rotate: %w", err)
+	}
+	return plain, expires, nil
+}
+
+// RevokeIdentity deactivates a worker-token identity row.
+//
+// The caller in this package is machine-key reclaim (design D9). It is a
+// credential write and v1:identity:identity declares no row-authz tier, so
+// nothing about the actor decides it -- which is exactly why the one caller
+// is narrow and says in its own comment what it is doing and when.
+func (s *EngineStore) RevokeIdentity(ctx context.Context, identityId string) error {
+	if s == nil || s.Engine == nil {
+		return nil
+	}
+	if strings.TrimSpace(identityId) == "" {
+		return nil
+	}
+	store := &workertoken.Store{Engine: s.Engine, Logger: s.Logger}
+	if err := store.Revoke(ctx, identityId); err != nil {
+		return fmt.Errorf("worker.store: revoke identity: %w", err)
+	}
+	return nil
 }
 
 // IdentityByTokenHash resolves a worker token's hash to the
@@ -476,6 +674,7 @@ func decodeRegistration(node *memqlv1.MemoryNode) *RegistrationRow {
 		OperatorLabels:       g.stringMap("operatorLabels"),
 		DisplayName:          g.str("displayName"),
 		ConnectedNodeId:      g.str("connectedNodeId"),
+		CredentialExpiresAt:  g.time("credentialExpiresAt"),
 		LastSelectedAt:       g.time("lastSelectedAt"),
 		ActiveCount:          g.intVal("activeCount"),
 		Concurrency:          g.uint32Map("concurrency"),

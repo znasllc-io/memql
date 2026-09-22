@@ -523,7 +523,7 @@ const CASES: ActsCase[] = [
       },
 
       // The confirmation REPLACES its opener rather than sitting beside it.
-      { name: `Revoke ${MACHINE_LABEL}`, count: 0 },
+      { name: `Removing ${MACHINE_LABEL}`, count: 0 },
       { name: "Reason (optional)", count: 0 },
       { name: "Keep it", count: 0 },
     ],
@@ -541,7 +541,7 @@ const CASES: ActsCase[] = [
         count: 1,
         note: "the confirm group NAMES the machine, which is the point",
       },
-      { name: `Revoke ${MACHINE_LABEL}`, count: 1, note: "the danger button inside it, naming it too" },
+      { name: `Removing ${MACHINE_LABEL}`, count: 1, note: "the confirm REGION, named for the state it puts the page in -- the danger button inside it is `Remove <machine>`, and two controls must not answer to one accessible name" },
       { name: "Reason (optional)", count: 1 },
       { name: "Keep it", count: 1 },
       { name: "the uninstall command", count: 1, note: "the machine's half of the act, as a copy field (D12)" },

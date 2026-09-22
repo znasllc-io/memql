@@ -155,6 +155,26 @@ var credentialReadInventory = map[string]struct {
 	"workerTokenByKeyHash": {classPreActor,
 		"Worker-token verification on WorkerService.Stream. workertoken/store.go; " +
 			"resolves mql_wkr_<...> to its identity before any actor exists."},
+	// The same credential, one question later (epic memql#5327, designs D3 and
+	// D5). A LIVE WorkerService stream re-resolves the token that admitted it
+	// once a minute, and rotates it on request.
+	//
+	// classMachine RATHER THAN classPreActor, and the distinction is the one
+	// that class exists to make. An actor DOES exist by the time this runs --
+	// the stream is authenticated -- but the authenticated party is a MACHINE
+	// whose subject is `worker:<identityId>`, so there is no person whose
+	// actor.userId could scope it and a self-scoped filter would match nothing
+	// for the only caller there is. Filing it as pre-actor would weaken the
+	// pre-actor argument by making that set mean two things.
+	//
+	// It is keyed on the CREDENTIAL'S OWN ID rather than on a user, which is
+	// deliberately stronger than the entry below: there is no user id to
+	// supply, so there is nothing to enumerate, and the argument is an id the
+	// auth path resolved rather than one a caller chose.
+	"workerTokenIdentityById": {classMachine,
+		"One worker-token identity by its own id (@serverOnly). workertoken/store.go " +
+			"LookupById, read by a live stream re-checking the credential that admitted it " +
+			"(design D3) and by the in-stream rotation that renews it (D5)."},
 	"badgeByKeyHash": {classPreActor,
 		"Badge grant exchange. badge/store.go. The TERMINAL is authenticated, but the " +
 			"badge holder is a different subject, so the terminal's actor.userId is the " +

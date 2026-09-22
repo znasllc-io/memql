@@ -1,0 +1,9 @@
+{
+  "cases": [
+    {"name": "insertion",        "a": ["a","b","c"],     "b": ["a","x","b","c"], "distance": 1},
+    {"name": "identical",        "a": ["a","b"],         "b": ["a","b"],         "distance": 0},
+    {"name": "one-substitution", "a": ["a","b","c"],     "b": ["a","q","c"],     "distance": 1},
+    {"name": "disjoint",         "a": ["a","b"],         "b": ["x","y"],         "distance": 2},
+    {"name": "suffix-extension", "a": ["a"],             "b": ["a","b","c"],     "distance": 2}
+  ]
+}

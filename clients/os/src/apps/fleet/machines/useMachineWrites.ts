@@ -1,6 +1,5 @@
 import { useCallback, useState } from "react";
 
-import { useSession } from "../../../chrome/access";
 import { useOsConnection } from "../../../live/connection";
 import type { LabelMap } from "../labels";
 
@@ -31,6 +30,29 @@ import type { LabelMap } from "../labels";
 // label the router will never match on, which is the exact class of silent
 // disagreement the two-label-map split exists to prevent.
 
+/**
+ * What a removal actually did.
+ *
+ * REMOVAL IS TWO WRITES AND EITHER CAN LAND ALONE, so the receipt names both
+ * rather than collapsing to a boolean (epic memql#5327, design D2). Before
+ * this the shell made one call: it revoked the registration row and left the
+ * credential active, so a machine that had been "removed" kept its stream and
+ * could come back. The engine does both in one act now, and the honest report
+ * of a partial result belongs on screen rather than in a log -- somebody
+ * removing a stolen laptop needs to know whether its token is still live.
+ */
+export interface RemovalReceipt {
+  /** What happened to the credential. `revoked` is the whole job done;
+   *  `revoke_failed` means the machine is out of the fleet but its token still
+   *  exists; `not_found` means none was bound to it; `unknown` means the
+   *  receipt did not say. */
+  credentialState: "revoked" | "revoke_failed" | "not_found" | "unknown";
+  /** True when the machine had already been removed before this act. */
+  alreadyRevoked: boolean;
+  /** The engine's own sentence, shown verbatim. */
+  sentence: string;
+}
+
 export interface MachineWrites {
   /** The id of the machine a write is in flight for, or "". */
   busyId: string;
@@ -39,7 +61,10 @@ export interface MachineWrites {
   actionError: string;
   rename: (registrationId: string, displayName: string) => Promise<boolean>;
   setOperatorLabels: (registrationId: string, labels: LabelMap) => Promise<boolean>;
-  revoke: (registrationId: string, reason: string) => Promise<boolean>;
+  /** Remove a machine: its registration AND its credential, as one act.
+   *  Resolves to the receipt on success, or null on a refusal with
+   *  `actionError` carrying the reason. */
+  revoke: (registrationId: string, reason: string) => Promise<RemovalReceipt | null>;
   /** The OWNER's half of the sharing consent (epic memql#5146, D6). The
    *  cockpit's half comes from that machine's own policy.yaml and is not
    *  writable from here -- deliberately: it is a decision about where the
@@ -51,9 +76,35 @@ function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * Read the engine's removal receipt off the answer row.
+ *
+ * A row that does not parse reports `unknown` rather than success. The act
+ * itself worked -- we are past the throw -- but what cannot be read must not
+ * be claimed, and "removed, and the cluster did not say what happened to its
+ * credential" is the honest sentence for a receipt this page did not
+ * understand.
+ */
+function receiptFrom(row: unknown): RemovalReceipt {
+  const fallback: RemovalReceipt = {
+    credentialState: "unknown",
+    alreadyRevoked: false,
+    sentence: "Removed from the fleet. The cluster did not say what happened to its credential.",
+  };
+  if (row === null || typeof row !== "object") return fallback;
+  const fields = row as Record<string, unknown>;
+  const state = fields["credentialState"];
+  const sentence = fields["sentence"];
+  return {
+    credentialState:
+      state === "revoked" || state === "revoke_failed" || state === "not_found" ? state : "unknown",
+    alreadyRevoked: fields["alreadyRevoked"] === true,
+    sentence: typeof sentence === "string" && sentence !== "" ? sentence : fallback.sentence,
+  };
+}
+
 export function useMachineWrites(): MachineWrites {
   const connection = useOsConnection();
-  const { access } = useSession();
   const [busyId, setBusyId] = useState("");
   const [actionError, setActionError] = useState("");
 
@@ -99,33 +150,61 @@ export function useMachineWrites(): MachineWrites {
     [connection, run],
   );
 
-  // Revocation is an UPDATE, not a delete: the row is audit history, and its
-  // credential's hash must stay taken. `revokedBy` is the caller when we know
-  // who that is -- a self-revocation from an unresolved session omits it
-  // rather than guessing, because a wrong id in an audit field is worse than
-  // an empty one.
+  // ONE CALL, TWO WRITES (epic memql#5327, design D2).
+  //
+  // This rendered `revokeWorker` and nothing else, so the registration was
+  // excluded from routing while the TOKEN stayed active: the machine kept its
+  // stream, kept heartbeating onto a revoked row, and could re-register the
+  // moment a new one appeared. An operator told "removed" had removed half of
+  // it, and the half left behind is the half that matters.
+  //
+  // The shell could have made a second call, and then it would own the window
+  // between them -- a reload mid-flight would leave half a removal standing.
+  // fleetRevokeMachine does both server-side and returns a receipt naming
+  // which halves landed.
+  //
+  // Revocation is still an UPDATE, not a delete: the row is audit history and
+  // its credential's hash must stay taken.
+  //
+  // `revokedBy` is no longer sent. The engine stamps it from the actor, which
+  // is the rule sharing already follows and for its reason: the record of WHO
+  // removed a machine must not be writable by whoever is holding the keyboard.
   const revoke = useCallback(
-    (registrationId: string, reason: string) => {
-      const trimmedReason = reason.trim();
-      const revokedBy = access?.userId ?? "";
-      return run(registrationId, () =>
-        connection!.query.revokeWorker({
+    async (registrationId: string, reason: string): Promise<RemovalReceipt | null> => {
+      if (connection === null) {
+        setActionError("Not connected to the cluster, so nothing was written.");
+        return null;
+      }
+      setBusyId(registrationId);
+      setActionError("");
+      try {
+        const result = await connection.query.fleetRevokeMachine({
           registrationId,
-          revokedAt: new Date().toISOString(),
-          ...(revokedBy === "" ? {} : { revokedBy }),
-          ...(trimmedReason === "" ? {} : { revokeReason: trimmedReason }),
-        }),
-      );
+          ...(reason.trim() === "" ? {} : { reason: reason.trim() }),
+        });
+        return receiptFrom(result.rows()[0]);
+      } catch (err: unknown) {
+        setActionError(describe(err));
+        return null;
+      } finally {
+        setBusyId("");
+      }
     },
-    [access, connection, run],
+    [connection],
   );
 
   // `sharedAt` and `sharedBy` are stamped by the mutation from the clock and
   // the actor, never sent from here: the record of WHO shared a machine must
   // not be writable by whoever is holding the keyboard.
+  // Through the BUILTIN, not the mutation (epic memql#5327, finding M-2).
+  // setWorkerSharing is @serverOnly now: v1:worker:registration declares the
+  // composite owner/clusterOwner tier, and the write guard grants the
+  // cluster-owner escape on it -- so an operator could lend hardware they do
+  // not own, and un-lend hardware somebody else had lent. fleetSetSharing
+  // resolves the machine through the caller's OWN machines first.
   const setSharing = useCallback(
     (registrationId: string, mode: "owner" | "cluster") =>
-      run(registrationId, () => connection!.query.setWorkerSharing({ registrationId, mode })),
+      run(registrationId, () => connection!.query.fleetSetSharing({ registrationId, mode })),
     [connection, run],
   );
 
