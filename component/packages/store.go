@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -935,4 +936,17 @@ func rowBool(row map[string]any, key string) bool {
 		return strings.EqualFold(v, "true")
 	}
 	return false
+}
+
+func (s *store) sourceConnectionByID(ctx context.Context, id string) (map[string]any, error) {
+	return s.queryOne(ctx, "query sourceConnectionById(connectionId: "+langparser.QuoteString(id)+")")
+}
+
+func (s *store) recordSourceConnection(ctx context.Context, id, credential string, inst githubapp.Installation) error {
+	return s.writeInternal(ctx, fmt.Sprintf("mutation recordSourceConnection(connectionId: %s, credentialId: %s, installationId: %s, providerAccountId: %s, accountLogin: %s, accountType: %s)",
+		langparser.QuoteString(id), langparser.QuoteString(credential), langparser.QuoteString(formatInstallationId(inst.Id)), langparser.QuoteString(strconv.FormatInt(inst.Account.Id, 10)), langparser.QuoteString(inst.Account.Login), langparser.QuoteString(inst.Account.Type)))
+}
+
+func (s *store) removeSourceConnection(ctx context.Context, id string) error {
+	return s.writeInternal(ctx, "mutation removeSourceConnection(connectionId: "+langparser.QuoteString(id)+")")
 }

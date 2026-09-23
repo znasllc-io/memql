@@ -4,12 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
-	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/packages/githubapp"
 )
@@ -22,15 +20,6 @@ const CodeSourceConnectionUnavailable = "source_connection_unavailable"
 func sourceConnectionID(owner, credential, installation string) string {
 	sum := sha256.Sum256([]byte(memql.BareShortId(owner) + "\x00" + memql.BareShortId(credential) + "\x00" + installation))
 	return fmt.Sprintf("%s:%x", sourceConnectionConcept, sum[:16])
-}
-
-func (s *store) sourceConnectionByID(ctx context.Context, id string) (map[string]any, error) {
-	return s.queryOne(ctx, "query sourceConnectionById(connectionId: "+langparser.QuoteString(id)+")")
-}
-
-func (s *store) recordSourceConnection(ctx context.Context, id, credential string, inst githubapp.Installation) error {
-	return s.writeInternal(ctx, fmt.Sprintf("mutation recordSourceConnection(connectionId: %s, credentialId: %s, installationId: %s, providerAccountId: %s, accountLogin: %s, accountType: %s)",
-		langparser.QuoteString(id), langparser.QuoteString(credential), langparser.QuoteString(formatInstallationId(inst.Id)), langparser.QuoteString(strconv.FormatInt(inst.Account.Id, 10)), langparser.QuoteString(inst.Account.Login), langparser.QuoteString(inst.Account.Type)))
 }
 
 func sourceConnectionUnavailable() error {
@@ -179,7 +168,7 @@ func (i *Integration) handleSourceConnectionRemove(ctx context.Context, args map
 		return nil, sourceConnectionUnavailable()
 	}
 	if rowString(row, "status") != "removed" {
-		if err = d.Store.writeInternal(ctx, "mutation removeSourceConnection(connectionId: "+langparser.QuoteString(id)+")"); err != nil {
+		if err = d.Store.removeSourceConnection(ctx, id); err != nil {
 			return nil, err
 		}
 	}

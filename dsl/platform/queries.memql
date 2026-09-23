@@ -1203,7 +1203,7 @@ query modelMeasurement measurementsForCaller {
 @unbounded("personal installation bindings -- one per caller, grant and installation")
 @requiresCapability("read", "app:deployables")
 query sourceConnection sourceConnectionsMine {
-  filter row => row.ownerUserId == actor.userId && row.status == "active"
+  filter row => row.ownerUserId == actor.userId && statusIsActive(row)
   shape sourceConnectionCard
 }
 
