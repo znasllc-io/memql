@@ -140,6 +140,14 @@ func (c *WorkCompiler) Compile(ctx context.Context, req workintegration.CompileR
 	if len(req.Input) > 0 {
 		args["variables"] = req.Input
 	}
+	// THE GOAL SIGNATURE, on the run (epic memql#5408, gap G2). Compile is the
+	// one place that computes it, and until this write it existed only on a
+	// construct AFTER a run had succeeded -- so no run carried it, a delegated
+	// session's child run had nothing to inherit, and procedure learning's
+	// corpus loader skipped every recording as belonging to no goal.
+	if out.Signature != "" {
+		args["goalSignature"] = out.Signature
+	}
 	c.record(ctx, req.OwnerUserId, req.RunId, args)
 
 	if c.loop.logger != nil {

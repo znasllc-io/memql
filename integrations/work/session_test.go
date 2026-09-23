@@ -432,3 +432,90 @@ func TestArgumentsAboveTheCeilingKeepAReference(t *testing.T) {
 		t.Errorf("argsRef = %v, want the Library file the arguments spilled to", data["argsRef"])
 	}
 }
+
+// TestAnOpenedRecordingRunCarriesItsParentsGoalSignature (epic memql#5408, gap
+// G2). Procedure learning mines the recordings of ONE goal signature; a
+// recording run the writer opens itself -- the delegated-task path -- must
+// inherit its delegating run's signature, name that run, and carry the
+// parent's variables, or it belongs to no corpus and no goal input can be
+// mapped onto a parameter. The parent is read under the OWNER's actor, since
+// the composite tier answers zero rows and no error to anybody else.
+//
+// The control is the same open with no parent: nothing is read and none of
+// the three is written.
+func TestAnOpenedRecordingRunCarriesItsParentsGoalSignature(t *testing.T) {
+	w, eng := newSessionWriter(t)
+	eng.reply("workRunForOwner", map[string]any{
+		"id":            "v1:work:run:parent",
+		"goalSignature": "sig-parent",
+		"variables":     map[string]any{"day": "2026-09-04"},
+	})
+	if _, err := w.OpenRecording(context.Background(), workerservice.RecordingOpen{
+		SessionId: testSessionId, OwnerUserId: testOwner, App: "claude-code",
+		ParentRunId: "v1:work:run:parent", ParentStepId: "v1:work:step:parent",
+	}); err != nil {
+		t.Fatalf("OpenRecording: %v", err)
+	}
+	read := eng.callTo(t, "workRunForOwner")
+	if read.Actor != testOwner {
+		t.Errorf("the parent was read as %q, want the owner %q", read.Actor, testOwner)
+	}
+	run := eng.callTo(t, "createWorkRun").Args(t)
+	if run["goalSignature"] != "sig-parent" {
+		t.Errorf("goalSignature = %v, want the parent's", run["goalSignature"])
+	}
+	if run["parentRunId"] != "v1:work:run:parent" {
+		t.Errorf("parentRunId = %v, want the delegating run", run["parentRunId"])
+	}
+	if vars, _ := run["variables"].(map[string]any); vars["day"] != "2026-09-04" {
+		t.Errorf("variables = %v, want the parent's", run["variables"])
+	}
+
+	w2, eng2 := newSessionWriter(t)
+	if _, err := w2.OpenRecording(context.Background(), workerservice.RecordingOpen{
+		SessionId: testSessionId, OwnerUserId: testOwner, App: "claude-code",
+	}); err != nil {
+		t.Fatalf("OpenRecording: %v", err)
+	}
+	if len(eng2.callsTo("workRunForOwner")) != 0 {
+		t.Error("a recording with no parent read a parent anyway")
+	}
+	control := eng2.callTo(t, "createWorkRun").Args(t)
+	for _, absent := range []string{"goalSignature", "parentRunId", "variables"} {
+		if _, present := control[absent]; present {
+			t.Errorf("a recording with no parent wrote %s = %v", absent, control[absent])
+		}
+	}
+}
+
+// TestTheCloseCarriesTheReportedModelAndEffortOnTheSummary (epic memql#5408,
+// design D9). A learned procedure's provenance is read back from the
+// recording run's summary, written in the same call that moves the run to
+// `succeeded` -- the transition that fires the lift. What the app did NOT say
+// stays absent: an empty string on the summary would read as a report.
+func TestTheCloseCarriesTheReportedModelAndEffortOnTheSummary(t *testing.T) {
+	w, eng := newSessionWriter(t)
+	if err := w.CloseRecording(context.Background(), workerservice.RecordingClose{
+		SessionId: testSessionId, OwnerUserId: testOwner, RunId: testRunId,
+		Seq: 3, Status: "ended", Model: "claude-sonnet-4-6", Effort: "high",
+	}); err != nil {
+		t.Fatalf("CloseRecording: %v", err)
+	}
+	summary, _ := eng.callTo(t, "updateWorkRun").Args(t)["summary"].(map[string]any)
+	if summary["model"] != "claude-sonnet-4-6" || summary["effort"] != "high" {
+		t.Errorf("summary = %v, want the app's reported model and effort", summary)
+	}
+
+	w2, eng2 := newSessionWriter(t)
+	if err := w2.CloseRecording(context.Background(), workerservice.RecordingClose{
+		SessionId: testSessionId, OwnerUserId: testOwner, RunId: testRunId, Seq: 3, Status: "ended",
+	}); err != nil {
+		t.Fatalf("CloseRecording: %v", err)
+	}
+	silent, _ := eng2.callTo(t, "updateWorkRun").Args(t)["summary"].(map[string]any)
+	for _, absent := range []string{"model", "effort"} {
+		if _, present := silent[absent]; present {
+			t.Errorf("an app that reported nothing left %s = %v on the summary", absent, silent[absent])
+		}
+	}
+}

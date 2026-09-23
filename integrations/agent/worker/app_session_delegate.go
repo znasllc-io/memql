@@ -190,6 +190,14 @@ func (d *AppSessionDelegate) beginChildRun(ctx context.Context, h memqlengine.Ap
 	if d.journal == nil {
 		return nil
 	}
+	// THE CHILD INHERITS ITS PARENT'S GOAL (epic memql#5408, gap G2). The
+	// session is recorded into this run, and procedure learning mines the
+	// recordings of ONE goal signature: a child run that does not carry its
+	// parent's belongs to no corpus, so the app's work on this goal could never
+	// become a procedure. The parent's variables ride along for the same
+	// reason -- they are the goal's input, and the lift maps each free
+	// parameter to the input key that supplied it.
+	signature, variables := d.parentRunInheritance(ctx, owner, h.RunId)
 	run, err := d.journal.Begin(ctx, workjournal.Work{
 		OwnerUserID: owner,
 		Template:    appSessionTemplate,
@@ -209,8 +217,11 @@ func (d *AppSessionDelegate) beginChildRun(ctx context.Context, h memqlengine.Ap
 		// ONE step, and it is `reasoning`: an app session is an agent taking
 		// its own decisions, which is the definition the journal's two kinds
 		// draw the line on.
-		Steps:        []workjournal.StepDecl{{Key: appSessionStepKey, Kind: workjournal.KindReasoning}},
-		RequestedVia: "router",
+		Steps:         []workjournal.StepDecl{{Key: appSessionStepKey, Kind: workjournal.KindReasoning}},
+		RequestedVia:  "router",
+		GoalSignature: signature,
+		ParentRunID:   strings.TrimSpace(h.RunId),
+		Variables:     variables,
 	})
 	if err != nil {
 		d.logger.Warn("app session: could not open the child run; the step will carry no childRunId",
@@ -218,6 +229,40 @@ func (d *AppSessionDelegate) beginChildRun(ctx context.Context, h memqlengine.Ap
 		return nil
 	}
 	return run
+}
+
+// parentRunInheritance reads the delegating run under its OWNER's actor --
+// the composite tier answers anybody else zero rows and no error -- and
+// returns the goal signature and variables the child run inherits.
+//
+// BEST-EFFORT, for stampParentStep's reason: the session is about to run on
+// somebody's machine either way. A parent that cannot be read costs the
+// recording its place in a corpus and is logged, because a recording that
+// silently belongs to no goal is the gap this exists to close.
+func (d *AppSessionDelegate) parentRunInheritance(ctx context.Context, owner, parentRunId string) (string, map[string]any) {
+	parentRunId = strings.TrimSpace(parentRunId)
+	if d.engine == nil || parentRunId == "" {
+		return "", nil
+	}
+	query, err := langparser.RenderCall("workRunForOwner", map[string]any{"runId": parentRunId})
+	if err != nil {
+		return "", nil
+	}
+	res, err := d.engine.Execute(auth.ContextWithUserActor(ctx, owner), "query "+query)
+	if err != nil {
+		d.logger.Warn("app session: could not read the delegating run; the recording will carry no goal signature",
+			"parent_run_id", parentRunId, "error", err)
+		return "", nil
+	}
+	rows := memqlengine.MaterializeRows(res)
+	if len(rows) == 0 {
+		d.logger.Warn("app session: the delegating run is not readable as its owner; the recording will carry no goal signature",
+			"parent_run_id", parentRunId)
+		return "", nil
+	}
+	signature, _ := rows[0]["goalSignature"].(string)
+	variables, _ := rows[0]["variables"].(map[string]any)
+	return strings.TrimSpace(signature), variables
 }
 
 // stampParentStep records the subrun on the step that was handed over.

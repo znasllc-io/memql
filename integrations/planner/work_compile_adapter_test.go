@@ -126,6 +126,29 @@ func TestWorkCompiler_RecordsTheTemplateItChose(t *testing.T) {
 	}
 }
 
+// TestCompileStampsTheGoalSignatureOnTheRun (epic memql#5408, gap G2). The
+// goal signature is the key procedure learning groups recordings by, and
+// compile is the one place that computes it -- so the run compile moves to
+// `running` must carry it, or a delegated session's child run has nothing to
+// inherit and every recording is skipped as belonging to no goal. The value is
+// the one component/work.GoalSignature computes over the statement and the
+// input keys, not a second derivation that could drift from it.
+func TestCompileStampsTheGoalSignatureOnTheRun(t *testing.T) {
+	sig := work.GoalSignature(adapterReq().Statement, []string{"day"})
+	eng := &countingCompileEngine{catalogue: []map[string]any{
+		{"id": "v1:authoring:construct:c1", "name": "summariseTickets", "goalSignature": sig, "reliability": 0.9},
+	}}
+	w := &recordingRunWriter{}
+	NewWorkCompiler(&PlannerAgentLoop{engine: eng}, w).Compile(context.Background(), adapterReq())
+
+	if len(w.fields) != 1 {
+		t.Fatalf("expected one write, got %d", len(w.fields))
+	}
+	if got := w.fields[0]["goalSignature"]; got != sig {
+		t.Fatalf("goalSignature on the run = %v, want %q", got, sig)
+	}
+}
+
 // A compiler that decides correctly and cannot record the decision is worse
 // than none: the run moves to `running` in the log and never in the graph.
 func TestNewWorkCompiler_RefusesWithoutALoopOrAWriter(t *testing.T) {

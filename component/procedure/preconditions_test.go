@@ -155,14 +155,48 @@ func TestPlatformIsComparedOnTheMachine(t *testing.T) {
 	}
 }
 
-// TestAnUnknownTargetComparesEverything: only the workbench relaxes anything.
-// A target nobody named is not a reason to skip a predicate.
-func TestAnUnknownTargetComparesEverything(t *testing.T) {
-	learned := Preconditions{Platform: map[string]string{"os": "darwin"}, Variables: map[string]string{"PATH": "sha256:p"}}
+// TestAnUnknownTargetComparesThePlatform: only the workbench relaxes the
+// platform. A target nobody named is not a reason to skip a predicate.
+func TestAnUnknownTargetComparesThePlatform(t *testing.T) {
+	learned := Preconditions{Platform: map[string]string{"os": "darwin", "arch": "arm64"}}
 	observed := Preconditions{Platform: map[string]string{"os": "linux"}}
 	got := CheckPreconditions(learned, observed, "")
 	if got.Held || len(got.Mismatches) != 1 || len(got.Unmeasured) != 1 {
-		t.Fatalf("an unnamed target must compare platform and variables; got %+v", got)
+		t.Fatalf("an unnamed target must compare the platform: one mismatch (os) and one unmeasured (arch); got %+v", got)
+	}
+}
+
+// TestVariablesAreLearnedButNeverCompared is the coordinator's decision for
+// epic memql#5408. The fingerprint's variables describe the APP'S environment
+// -- the session the cockpit launched -- and a replay never runs there, on the
+// person's machine any more than on the workbench. So they stay in the learned
+// set (they are evidence) and no target compares them: a differing digest and
+// an unmeasured variable both leave the check holding. The per-step comparison
+// is what catches a variable that genuinely mattered.
+//
+// The control is the platform in the same call: it IS compared on the machine,
+// so a check that held here because it compared nothing at all fails.
+func TestVariablesAreLearnedButNeverCompared(t *testing.T) {
+	learned := LearnPreconditions([]map[string]any{macStart(t, "22.1.0", "2.43.0", 0), macStart(t, "22.1.0", "2.43.0", 0)}, []string{"node"})
+	if len(learned.Variables) == 0 {
+		t.Fatal("the fixture learned no variables, so this test would pass having compared nothing")
+	}
+	yes := true
+	observed := Preconditions{
+		Platform:       map[string]string{"os": "darwin", "arch": "arm64"},
+		Tools:          map[string]string{"node": "22.1.0"},
+		Variables:      map[string]string{"PATH": "sha256:somewhere-else"}, // LC_ALL unmeasured
+		EmptyWorkspace: &yes,
+	}
+	for _, target := range []string{TargetMachine, TargetWorkbench, ""} {
+		got := CheckPreconditions(learned, observed, target)
+		if !got.Held {
+			t.Fatalf("target %q: variables must not be compared; got %+v", target, got)
+		}
+	}
+	observed.Platform["os"] = "linux"
+	if CheckPreconditions(learned, observed, TargetMachine).Held {
+		t.Fatal("the control failed: the platform IS compared on the machine, so this check compares nothing")
 	}
 }
 

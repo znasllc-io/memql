@@ -273,13 +273,24 @@ type PreconditionReport struct {
 // CheckPreconditions compares a learned initiation set with what the target
 // reports, before the first step.
 //
-// On the WORKBENCH the platform and the variables are not compared. A
-// procedure reaches the workbench only because its footprint is portable
-// (D4), and a portable footprint is platform-independent by definition; the
-// person's environment variables do not exist there. The tools the
-// procedure's own commands use ARE compared, and so is the workspace. Any
-// other target -- the person's machine, or a target nobody named -- compares
-// everything: relaxing a check needs a reason, and only the workbench has one.
+// On the WORKBENCH the platform is not compared. A procedure reaches the
+// workbench only because its footprint is portable (D4), and a portable
+// footprint is platform-independent by definition. The tools the procedure's
+// own commands use ARE compared, and so is the workspace. Any other target --
+// the person's machine, or a target nobody named -- compares the platform too:
+// relaxing a check needs a reason, and only the workbench has one.
+//
+// THE VARIABLES ARE NEVER COMPARED, ON ANY TARGET, and that is a decision
+// rather than an omission (epic memql#5408, recorded in the plan's stream
+// notes). The fingerprint's variables describe the APP'S environment -- the
+// session the cockpit launched, CLAUDE_CONFIG_DIR and ANTHROPIC_MODEL among
+// them -- and a replay never runs there: it runs in the worker's environment
+// or the workbench's. Compared, they would refuse every replay for a
+// difference that belongs to the app rather than to the procedure, on the
+// person's own machine as surely as on the workbench. So they are LEARNED --
+// they are evidence, and the OS shows them -- and a variable that genuinely
+// mattered is caught where every other drift is: by the step it changes,
+// whose comparison is the safety net.
 //
 // An ABSENT measurement is never a match: a learned predicate the observation
 // does not carry is Unmeasured and the check does not hold, because a replay
@@ -315,12 +326,7 @@ func CheckPreconditions(learned, observed Preconditions, target string) Precondi
 		found, ok := measured(observed.Tools, name)
 		compare("tools."+name, normalizeToolVersion(learned.Tools[name]), normalizeToolVersion(found), ok, byVersion)
 	}
-	if everything {
-		for _, name := range sortedKeysOf(learned.Variables) {
-			found, ok := measured(observed.Variables, name)
-			compare("variables."+name, learned.Variables[name], found, ok, exact)
-		}
-	}
+	// learned.Variables is deliberately not read here: see the doc comment.
 	if learned.EmptyWorkspace != nil {
 		want := boolWord(*learned.EmptyWorkspace)
 		if observed.EmptyWorkspace == nil {

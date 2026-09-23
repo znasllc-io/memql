@@ -4,18 +4,42 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	proc "github.com/znasllc-io/memql/component/procedure"
+	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/num"
 )
 
 // learn.go -- the pipeline, in the record's order, and the two capability
 // handlers over it.
 
-// learnResult is what one mining pass produced.
-type learnResult struct {
+// LiftOutcome says what a lift did to the owner's catalog.
+type LiftOutcome string
+
+const (
+	// LiftNone: nothing cleared the floor, so nothing was lifted.
+	LiftNone LiftOutcome = ""
+	// LiftCreated: a new construct, entering the certification ladder.
+	LiftCreated LiftOutcome = "created"
+	// LiftRelifted: the owner's construct of that name learned a DIFFERENT
+	// procedure -- a new version, written in place and put back on the
+	// ladder's entry rung, because a person's approval was for the old one
+	// (D15: "a later change of the construct is a new candidate").
+	LiftRelifted LiftOutcome = "relifted"
+	// LiftUnchanged: the same version as the one stored. Nothing is written
+	// and every ladder counter is kept -- which is what lets a shadow streak
+	// grow while the recordings it is measured on keep arriving.
+	LiftUnchanged LiftOutcome = "unchanged"
+)
+
+// LearnResult is what one mining pass produced.
+type LearnResult struct {
+	// RunId is the run the pass was asked about; empty for a corpus sweep.
+	RunId         string
 	OwnerUserId   string
 	GoalSignature string
 	Level         Level
@@ -30,6 +54,23 @@ type learnResult struct {
 	// learned nothing and a sweep that could not read anything must not look
 	// the same in a log.
 	Reason string
+	// Lift is what the lift did; ProcedureHash is the version it computed and
+	// Rung the construct's rung after it -- written, or kept when unchanged.
+	// A shadow comparison of the recording that triggered this pass is
+	// meaningful only against an UNCHANGED version: a recording that changed
+	// the procedure is part of the new version's corpus, not evidence about it.
+	Lift          LiftOutcome
+	ProcedureHash string
+	Rung          work.Rung
+}
+
+// minedCorpus is the pipeline's winner and everything the lift needs beside
+// it: the canonicalized corpus the occurrences index, and the recordings the
+// corpus came from, in the same order.
+type minedCorpus struct {
+	win    proc.Accepted
+	corpus [][]proc.Action
+	recs   []recording
 }
 
 // runPipeline is the whole of epic C's algorithm side, and it reads as the
@@ -40,27 +81,27 @@ type learnResult struct {
 // Structure runs beside Mine rather than after it: the tree is what tells a
 // later reader that a pattern was a retry rather than a run of seven steps,
 // and it is recorded on the result instead of being folded into the pattern.
-func (i *Integration) runPipeline(ctx context.Context, k corpusKey) (learnResult, []proc.Accepted, [][]proc.Action, []string, error) {
-	out := learnResult{OwnerUserId: k.OwnerUserId, GoalSignature: k.GoalSignature, Level: k.Level}
+func (i *Integration) runPipeline(ctx context.Context, k corpusKey) (LearnResult, *minedCorpus, error) {
+	out := LearnResult{OwnerUserId: k.OwnerUserId, GoalSignature: k.GoalSignature, Level: k.Level}
 
-	runs, runIds, err := i.loadCorpus(ctx, k)
+	recs, err := i.loadCorpus(ctx, k)
 	if err != nil {
-		return out, nil, nil, nil, err
+		return out, nil, err
 	}
-	out.Sequences = len(runs)
-	if len(runs) < 2 {
+	out.Sequences = len(recs)
+	if len(recs) < 2 {
 		// D14's floor, reached before any work is done. The record is
 		// explicit that this is not a failure: "a corpus of one session
 		// yields no procedure; the session is still lifted as a one-off
 		// validated bundle, as today" -- which the existing capture path
 		// does, untouched by this epic.
 		out.Reason = "fewer than two recorded runs for this signature"
-		return out, nil, nil, nil, nil
+		return out, nil, nil
 	}
 
-	corpus := make([][]proc.Action, 0, len(runs))
-	for _, steps := range runs {
-		actions := proc.Canonicalize(steps)
+	corpus := make([][]proc.Action, 0, len(recs))
+	for _, rec := range recs {
+		actions := proc.Canonicalize(rec.Steps)
 		proc.SortActions(actions)
 		corpus = append(corpus, actions)
 	}
@@ -79,12 +120,12 @@ func (i *Integration) runPipeline(ctx context.Context, k corpusKey) (learnResult
 	out.Candidates = len(patterns)
 	if len(patterns) == 0 {
 		out.Reason = "nothing recurred across the corpus"
-		return out, nil, corpus, runIds, nil
+		return out, nil, nil
 	}
 
 	candidates := make([]proc.Candidate, 0, len(patterns))
 	for _, p := range patterns {
-		instances := instancesOf(p, corpus)
+		instances := actionsOf(occurrenceInstances(p.Occurrences, corpus))
 		if len(instances) < 2 {
 			continue
 		}
@@ -97,10 +138,10 @@ func (i *Integration) runPipeline(ctx context.Context, k corpusKey) (learnResult
 	accepted := proc.Select(candidates, corpus, i.params)
 	if len(accepted) == 0 {
 		out.Reason = "no abstraction cleared the compression floor"
-		return out, nil, corpus, runIds, nil
+		return out, nil, nil
 	}
 	out.Accepted = true
-	return out, accepted, corpus, runIds, nil
+	return out, &minedCorpus{win: accepted[0], corpus: corpus, recs: recs}, nil
 }
 
 // explainUnexplained makes the ONE bounded model call of D6, and only for a
@@ -198,126 +239,156 @@ func sliceSymbols(flat []proc.Action, symbols []proc.Symbol, from, to int) []str
 	return append([]string(nil), all[from:to]...)
 }
 
-// instancesOf lifts a pattern's occurrences back to the actions they name.
-func instancesOf(p proc.Pattern, corpus [][]proc.Action) [][]proc.Action {
-	var out [][]proc.Action
-	for _, occ := range p.Occurrences {
+// instance is one occurrence of a pattern: the actions it names, and which
+// corpus sequence -- which recording -- they came from.
+type instance struct {
+	seq     int
+	actions []proc.Action
+}
+
+// occurrenceInstances lifts a pattern's occurrences back to the actions they
+// name, keeping each one's recording. It is the ONE place instances are
+// formed, for Generalize and for the lift's evidence alike: an expectation or
+// a verdict read off a different instance set than the template was
+// generalized from would describe some other procedure.
+func occurrenceInstances(occs []proc.Occurrence, corpus [][]proc.Action) []instance {
+	var out []instance
+	for _, occ := range occs {
 		if occ.Sequence >= len(corpus) {
 			continue
 		}
 		run := corpus[occ.Sequence]
-		inst := make([]proc.Action, 0, len(occ.Positions))
+		acts := make([]proc.Action, 0, len(occ.Positions))
 		for _, pos := range occ.Positions {
 			if pos < len(run) {
-				inst = append(inst, run[pos])
+				acts = append(acts, run[pos])
 			}
 		}
-		if len(inst) == len(occ.Positions) {
-			out = append(out, inst)
+		if len(acts) == len(occ.Positions) {
+			out = append(out, instance{seq: occ.Sequence, actions: acts})
 		}
 	}
 	return out
 }
 
-// runIsDisliked reports whether any feedback observation on the run carries a
-// negative verdict (D23). A disliked recording is EXCLUDED from the corpus
-// entirely rather than weighted to zero, because a template generalized from
-// a run somebody rejected is a template that reproduces what they rejected.
-func (i *Integration) runIsDisliked(ctx context.Context, runId string) (bool, error) {
-	rows, err := i.store.query(ctx, "query "+call("workObservationsForOwnerRun", map[string]any{"runId": runId}))
-	if err != nil {
-		return false, err
+func actionsOf(insts []instance) [][]proc.Action {
+	out := make([][]proc.Action, len(insts))
+	for i, in := range insts {
+		out[i] = in.actions
 	}
-	for _, r := range rows {
-		if str(r, "kind") != "feedback" {
-			continue
-		}
-		if str(obj(r, "data"), "verdict") == "disliked" {
-			return true, nil
-		}
-	}
-	return false, nil
+	return out
 }
 
 // --- capability handlers --------------------------------------------------
+
+// LearnFromRun mines the corpus a finished run belongs to and lifts what it
+// finds, at the action level -- the exported form of the learnFromRun
+// builtin, for the proving driver and for Go callers. The caller is gated
+// exactly as the builtin is: the run's owner, or the cluster's maintenance
+// principal.
+func (i *Integration) LearnFromRun(ctx context.Context, runId string) (LearnResult, error) {
+	return i.learnFromRun(ctx, strings.TrimSpace(runId), LevelAction)
+}
 
 func (i *Integration) handleLearnFromRun(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	runId := strings.TrimSpace(argString(args, "runId"))
 	if runId == "" {
 		return nil, fmt.Errorf("procedure.learnFromRun: runId is required")
 	}
-	// THE GATE. @serverOnly is refused on a builtin at parse, so the check
-	// lives here (dsl/procedure/builtins.memql records why). The run is read
-	// under the CALLER's own actor: the composite owner tier means a caller
-	// who does not own it reads zero rows, and the refusal below is what
-	// turns that silence into an answer.
-	run, err := i.runById(ctx, runId)
+	res, err := i.learnFromRun(ctx, runId, levelArg(args))
 	if err != nil {
 		return nil, err
 	}
+	return i.reply(learnReply(res)), nil
+}
+
+// learnFromRun is the handler body.
+//
+// THE GATE (gap G10). @serverOnly is refused on a builtin at parse, so the
+// check lives here (dsl/procedure/builtins.memql records why), and it has two
+// callers with two different reads:
+//
+//   - A PERSON reads the run through workRunForOwner, under their own actor:
+//     the owned read answers zero rows for anybody else's run, and the refusal
+//     below turns that silence into an answer.
+//   - The learnFromSucceededRun automation runs under the cluster's
+//     MAINTENANCE PRINCIPAL (component/auth/maintenance_actor.go), because the
+//     event names a run before anybody knows whose it is. It reads through
+//     workRunById -- @serverOnly, so the stamp, and filtered to a cluster
+//     owner, which only that principal and trusted server-side Go are. Every
+//     read after it runs under the run owner's own actor.
+//
+// A synthetic caller is not "another person": it is the cluster acting, and it
+// can never own a row, so comparing it with the run's owner would refuse every
+// automation-driven lift -- which is how the feature stayed inert.
+func (i *Integration) learnFromRun(ctx context.Context, runId string, level Level) (LearnResult, error) {
+	res := LearnResult{RunId: runId, Level: level}
+	if runId == "" {
+		return res, fmt.Errorf("procedure.learnFromRun: runId is required")
+	}
+	run, err := i.readRunForCaller(ctx, runId)
+	if err != nil {
+		return res, err
+	}
 	if run == nil {
-		return nil, fmt.Errorf("procedure.learnFromRun: run %s is not readable as the caller -- "+
+		return res, fmt.Errorf("procedure.learnFromRun: run %s is not readable as the caller -- "+
 			"learning runs on the owner's own corpus", runId)
 	}
 	owner := strings.TrimSpace(str(run, "ownerUserId"))
-	if caller := callerUserId(ctx); caller != "" && owner != "" && caller != owner {
-		// Belt and braces over the row tier: a cluster owner CAN read another
-		// person's run, and learning from it would write a procedure into
-		// their catalog under their name.
-		return nil, fmt.Errorf("procedure.learnFromRun: run %s belongs to another person; "+
+	if owner == "" {
+		return res, fmt.Errorf("procedure.learnFromRun: run %s has no owner, so there is nobody whose catalog a procedure could be filed in", runId)
+	}
+	if ac, ok := auth.AccessFromContext(ctx); ok && ac != nil && !ac.Synthetic && !sameUser(ac.UserId, owner) {
+		// Belt and braces over the owned read: a procedure learned from
+		// somebody else's run would be written into their catalog under
+		// their name.
+		return res, fmt.Errorf("procedure.learnFromRun: run %s belongs to another person; "+
 			"a procedure is learned from its owner's corpus and filed in their catalog", runId)
 	}
-	k := corpusKey{
-		OwnerUserId:   owner,
-		GoalSignature: str(run, "goalSignature"),
-		Level:         levelArg(args),
+	res.OwnerUserId = owner
+	if isReplayRun(run) {
+		// A procedure's own replay is never a recording (see corpus.go).
+		// Answered rather than refused: the automation fires on every run
+		// that succeeds, replays included, and this is the ordinary answer
+		// for one.
+		res.Reason = "a replay run is not a recording"
+		return res, nil
 	}
-	if k.GoalSignature == "" {
-		return i.reply(map[string]any{
-			"runId":    runId,
-			"accepted": false,
-			"reason":   "the run carries no goalSignature, so there is no corpus to mine it against",
-		}), nil
+	sig := strings.TrimSpace(str(run, "goalSignature"))
+	if sig == "" {
+		res.Reason = "the run carries no goalSignature, so there is no corpus to mine it against"
+		return res, nil
 	}
-	res, err := i.learnAndPersist(ctx, k)
-	if err != nil {
-		return nil, err
-	}
-	return i.reply(map[string]any{
-		"runId":         runId,
-		"goalSignature": res.GoalSignature,
-		"sequences":     res.Sequences,
-		"candidates":    res.Candidates,
-		"constructId":   res.ConstructId,
-		"accepted":      res.Accepted,
-		"reason":        res.Reason,
-	}), nil
+	learned, err := i.learnAndPersist(ctx, corpusKey{OwnerUserId: owner, GoalSignature: sig, Level: level})
+	learned.RunId = runId
+	return learned, err
 }
 
-func (i *Integration) handleMineCorpus(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	owner := strings.TrimSpace(argString(args, "ownerUserId"))
-	if owner == "" {
-		return nil, fmt.Errorf("procedure.mineCorpus: ownerUserId is required -- every read runs as that person, " +
-			"and a blank one reads zero rows and no error, which looks exactly like a corpus with nothing to learn")
+// readRunForCaller reads one run the way the caller is entitled to: a person
+// through the owned read, the cluster through the stamped by-id read.
+func (i *Integration) readRunForCaller(ctx context.Context, runId string) (map[string]any, error) {
+	ac, ok := auth.AccessFromContext(ctx)
+	if !ok || ac == nil {
+		return nil, fmt.Errorf("procedure.learnFromRun: no authenticated caller")
 	}
-	// THE GATE, as above: this builtin cannot carry @serverOnly, so a caller
-	// may only mine their OWN corpus. The sweep that drives it for everybody
-	// is an automation running as the cluster, which carries no caller.
-	if caller := callerUserId(ctx); caller != "" && caller != owner {
-		return nil, fmt.Errorf("procedure.mineCorpus: a person mines their own corpus; " +
-			"the fleet-wide sweep is the scheduled automation, not this call")
+	if ac.Synthetic {
+		// The by-id read is @serverOnly, so it takes the stamp; its filter is
+		// actor.isClusterOwner, so the stamp opens the construct and the
+		// actor still decides the rows -- a synthetic READER (an automation
+		// that is not on the maintenance list) reads nothing.
+		return i.store.runByIdAsCluster(ctx, runId)
 	}
-	k := corpusKey{
-		OwnerUserId:   owner,
-		GoalSignature: strings.TrimSpace(argString(args, "goalSignature")),
-		Level:         levelArg(args),
-	}
-	res, err := i.learnAndPersist(ctx, k)
-	if err != nil {
+	rows, err := i.store.query(ctx, "query "+call("workRunForOwner", map[string]any{"runId": runId}))
+	if err != nil || len(rows) == 0 {
 		return nil, err
 	}
-	return i.reply(map[string]any{
-		"ownerUserId":   owner,
+	return rows[0], nil
+}
+
+func learnReply(res LearnResult) map[string]any {
+	return map[string]any{
+		"runId":         res.RunId,
+		"ownerUserId":   res.OwnerUserId,
 		"goalSignature": res.GoalSignature,
 		"level":         int(res.Level),
 		"sequences":     res.Sequences,
@@ -325,18 +396,203 @@ func (i *Integration) handleMineCorpus(ctx context.Context, args map[string]any,
 		"constructId":   res.ConstructId,
 		"accepted":      res.Accepted,
 		"reason":        res.Reason,
-	}), nil
+		"lift":          string(res.Lift),
+		"procedureHash": res.ProcedureHash,
+		"rung":          string(res.Rung),
+	}
 }
 
-func (i *Integration) runById(ctx context.Context, runId string) (map[string]any, error) {
-	rows, err := i.store.query(ctx, "query "+call("workRunById", map[string]any{"runId": runId}))
+func (i *Integration) handleMineCorpus(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	owner := strings.TrimSpace(argString(args, "ownerUserId"))
+	sig := strings.TrimSpace(argString(args, "goalSignature"))
+	level := levelArg(args)
+	ac, _ := auth.AccessFromContext(ctx)
+
+	if owner == "" {
+		// THE SWEEP (gap G10). A cron firing carries no arguments, so the
+		// scheduled automation arrives with a blank owner -- and a blank owner
+		// is answered by iterating every owner ONLY for the cluster's
+		// maintenance principal (or trusted server-side Go running as the
+		// cluster). From anybody else it is refused: a read with no actor
+		// returns zero rows and no error, which would look exactly like a
+		// corpus with nothing to learn.
+		if !isClusterPrincipal(ac) {
+			return nil, fmt.Errorf("procedure.mineCorpus: ownerUserId is required -- every read runs as that person, " +
+				"and a blank one reads zero rows and no error, which looks exactly like a corpus with nothing to learn; " +
+				"only the scheduled sweep, running as the cluster's maintenance principal, mines every owner")
+		}
+		return i.reply(i.mineEveryOwner(ctx, sig, level)), nil
+	}
+	// A person mines their OWN corpus. The cluster may name any owner, and
+	// so may server-side Go that carries no caller at all; a synthetic actor
+	// that is NOT the cluster -- an ordinary automation's reader -- may not.
+	if ac != nil && !isClusterPrincipal(ac) && !sameUser(ac.UserId, owner) {
+		return nil, fmt.Errorf("procedure.mineCorpus: a person mines their own corpus; " +
+			"the fleet-wide sweep is the scheduled automation, not this call")
+	}
+	signatures := []string{sig}
+	if sig == "" {
+		var err error
+		if signatures, err = i.ownerSignatures(ctx, owner); err != nil {
+			return nil, err
+		}
+	}
+	summary := newMineSummary(owner, sig, level)
+	for _, s := range signatures {
+		res, err := i.learnAndPersist(ctx, corpusKey{OwnerUserId: owner, GoalSignature: s, Level: level})
+		if err != nil {
+			return nil, err
+		}
+		summary.add(res)
+	}
+	return i.reply(summary.reply(len(signatures))), nil
+}
+
+// mineEveryOwner is the sweep: every owner, every signature (or the one
+// named), each mined under that owner's own actor. One owner's failure is
+// logged and skipped -- a sweep that stops at the first unreadable corpus
+// learns nothing for everybody after it.
+func (i *Integration) mineEveryOwner(ctx context.Context, sig string, level Level) map[string]any {
+	summary := newMineSummary("", sig, level)
+	owners, err := i.ownerIds(ctx)
+	if err != nil {
+		i.log().Warn("procedure: the corpus sweep could not list owners", "error", err)
+		out := summary.reply(0)
+		out["reason"] = "the owners could not be listed: " + err.Error()
+		return out
+	}
+	signatures := 0
+	for _, owner := range owners {
+		sigs := []string{sig}
+		if sig == "" {
+			if sigs, err = i.ownerSignatures(ctx, owner); err != nil {
+				i.log().Warn("procedure: the corpus sweep could not read an owner's goals", "owner", owner, "error", err)
+				continue
+			}
+		}
+		for _, s := range sigs {
+			signatures++
+			res, err := i.learnAndPersist(ctx, corpusKey{OwnerUserId: owner, GoalSignature: s, Level: level})
+			if err != nil {
+				i.log().Warn("procedure: the corpus sweep could not mine one corpus", "owner", owner, "goalSignature", s, "error", err)
+				continue
+			}
+			summary.add(res)
+		}
+	}
+	out := summary.reply(signatures)
+	out["owners"] = len(owners)
+	return out
+}
+
+// ownerIds lists every active person the sweep mines for, each once, sorted
+// -- the store's activeUserIds, which only the cluster's principal reaches.
+func (i *Integration) ownerIds(ctx context.Context) ([]string, error) {
+	rows, err := i.store.activeUserIds(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if len(rows) == 0 {
-		return nil, nil
+	seen := map[string]bool{}
+	var out []string
+	for _, r := range rows {
+		id := strings.TrimSpace(str(r, "id"))
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
 	}
-	return rows[0], nil
+	sort.Strings(out)
+	return out, nil
+}
+
+// ownerSignatures is every goal signature one owner has a SUCCEEDED recording
+// for, read under that owner's actor from their recent runs. A replay run is
+// not a recording and names no corpus of its own.
+func (i *Integration) ownerSignatures(ctx context.Context, owner string) ([]string, error) {
+	rows, err := i.store.query(ownerActor(ctx, owner), "query "+call("workRunsForOwner", nil))
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, r := range rows {
+		s := strings.TrimSpace(str(r, "goalSignature"))
+		if s == "" || seen[s] || str(r, "status") != "succeeded" || isReplayRun(r) {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// mineSummary folds several mining passes into the one reply a capability
+// returns.
+type mineSummary struct {
+	owner, sig    string
+	level         Level
+	sequences     int
+	candidates    int
+	lifted        []string
+	lastReason    string
+	lastConstruct string
+}
+
+func newMineSummary(owner, sig string, level Level) *mineSummary {
+	return &mineSummary{owner: owner, sig: sig, level: level}
+}
+
+func (s *mineSummary) add(res LearnResult) {
+	s.sequences += res.Sequences
+	s.candidates += res.Candidates
+	if res.ConstructId != "" {
+		s.lifted = append(s.lifted, res.ConstructId)
+		s.lastConstruct = res.ConstructId
+	}
+	if res.Reason != "" {
+		s.lastReason = res.Reason
+	}
+}
+
+func (s *mineSummary) reply(signatures int) map[string]any {
+	out := map[string]any{
+		"ownerUserId":   s.owner,
+		"goalSignature": s.sig,
+		"level":         int(s.level),
+		"signatures":    signatures,
+		"sequences":     s.sequences,
+		"candidates":    s.candidates,
+		"constructId":   s.lastConstruct,
+		"constructIds":  append([]string{}, s.lifted...),
+		"accepted":      len(s.lifted) > 0,
+		"reason":        s.lastReason,
+	}
+	if signatures == 0 && s.lastReason == "" {
+		out["reason"] = "no goal signature had a recorded corpus"
+	}
+	return out
+}
+
+// isClusterPrincipal reports the cluster acting: a SYNTHETIC actor with the
+// cluster-owner role -- the maintenance principal a listed automation runs
+// under, or a system actor trusted server-side Go builds. An ordinary
+// automation's synthetic READER is not one, and neither is any person.
+func isClusterPrincipal(ac *auth.AccessContext) bool {
+	return ac != nil && ac.Synthetic && ac.IsClusterOwner()
+}
+
+// sameUser compares two user ids that may be spelled canonically
+// (v1:identity:user:<id>) or bare -- a run row stores the canonical form of a
+// relationship field, and a caller's token carries whichever the identity
+// service minted.
+func sameUser(a, b string) bool {
+	return bareUserId(a) != "" && bareUserId(a) == bareUserId(b)
+}
+
+func bareUserId(id string) string {
+	return strings.TrimPrefix(strings.TrimSpace(id), "v1:identity:user:")
 }
 
 // levelArg reads D24's corpus level. The narrowing takes the CALLER'S DEFAULT

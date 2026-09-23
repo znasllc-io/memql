@@ -1,20 +1,26 @@
-// Package procedure is the wiring half of epic memql#5402 (design record
+// Package procedure is the wiring half of procedure learning and
+// certification: epic memql#5402 (design record
 // docs/superpowers/specs/2026-09-13-app-session-recording-and-learning-program-design.md,
-// section 4 epic C; decisions D6, D13, D14, D24). It backs the two builtins
-// declared in dsl/procedure/builtins.memql:
+// section 4 epic C; decisions D6, D13, D14, D24) and epic memql#5408 (epic D;
+// D3, D4, D15, D16). It backs the builtins declared in
+// dsl/procedure/builtins.memql:
 //
-//	integration.procedure.learnFromRun -- mine the corpus a finished run belongs to
-//	integration.procedure.mineCorpus   -- the scheduled sweep, per owner and goal signature
+//	integration.procedure.learnFromRun    -- mine the corpus a finished run belongs to, and lift it
+//	integration.procedure.mineCorpus      -- the scheduled sweep, per owner and goal signature
+//	integration.procedure.step            -- the statement every rendered step is
+//	integration.procedure.replay          -- serve a goal from a learned procedure
+//	integration.procedure.ladderSweep     -- the ladder's demotion and retirement sweeps
+//	integration.procedure.decidePromotion -- apply a person's promotion decision
 //
 // THE DIVISION OF LABOUR IS THE DESIGN, and it is the same one the work spine
-// draws. Every DECISION is a pure function in component/procedure -- what a
-// symbol is, what recurs, what a hole means, what an abstraction is worth --
-// so the epic's headline claim, that a recorded corpus becomes a parameterized
-// construct with no provider call, is a property of values and is provable
-// with no engine and no database. This package is responsible only for the
-// three things a pure module cannot do: reading rows under the right actor,
-// rendering the winner as MemQL, and making the ONE bounded model call D6
-// allows -- whose answer it hands straight back to the module to check.
+// draws. Every DECISION is a pure function in component/procedure or
+// component/work -- what a symbol is, what recurs, what a hole means, what an
+// abstraction is worth, where a procedure stands on the ladder -- so the
+// epic's headline claims are properties of values, provable with no engine and
+// no database. This package is responsible only for what a pure module cannot
+// do: reading rows under the right actor, rendering the winner as MemQL,
+// writing it, and making the ONE bounded model call D6 allows -- whose answer
+// it hands straight back to the module to check.
 package procedure
 
 import (
@@ -23,6 +29,7 @@ import (
 	"log/slog"
 	"time"
 
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	proc "github.com/znasllc-io/memql/component/procedure"
 )
@@ -48,13 +55,28 @@ type Deriver interface {
 	ProposeDerivation(ctx context.Context, h proc.Hole, instances [][]proc.Action) (string, error)
 }
 
+// CompileGate is Gate 1: the isolated compile + bind of a candidate bundle
+// (gap G7). A learned procedure whose source this does not compile is not
+// re-runnable, keeps no goal signature, and enters the ladder as a candidate.
+//
+// It is a SEAM installed from app/ rather than something the plug-in finds on
+// its engine, because the engine it is handed (*memql.MemQLEngine) has no such
+// method -- the compile is a function of the engine that app's
+// CognitionEngineAdapter wraps. A type assertion on the engine was how this
+// used to find it, and it failed on every node: Gate 1 never ran, no procedure
+// was ever recorded as re-runnable, and none was ever findable by its goal.
+type CompileGate interface {
+	CompileBundle(constructs []memql.SandboxConstruct) memql.SandboxReport
+}
+
 // Integration exposes the procedure capabilities.
 type Integration struct {
-	store   *store
-	logger  *slog.Logger
-	now     func() time.Time
-	deriver Deriver
-	params  proc.Params
+	store    *store
+	logger   *slog.Logger
+	now      func() time.Time
+	deriver  Deriver
+	params   proc.Params
+	compiler CompileGate
 }
 
 // New builds the integration.
@@ -88,6 +110,21 @@ func (i *Integration) SetDeriver(d Deriver) {
 	}
 }
 
+// SetCompiler installs Gate 1 (gap G7). app/ calls it on the REGISTERED
+// instance on every node type, because the plug-in registers everywhere and a
+// lift can run wherever a run succeeds. A nil gate is ignored rather than
+// installed: "no gate" must stay distinguishable from "a gate that refuses".
+func (i *Integration) SetCompiler(c CompileGate) {
+	if c != nil {
+		i.compiler = c
+	}
+}
+
+// CompileGateInstalled reports whether Gate 1 is wired, for the wiring test
+// that holds app/ to it -- a plug-in with an unwired setter is green in every
+// test and inert in the cluster.
+func (i *Integration) CompileGateInstalled() bool { return i != nil && i.compiler != nil }
+
 // SetParams overrides the pipeline knobs. The design record's cross-cutting
 // rule makes the budget, support, gap and argument ceiling values rather than
 // constants; this is where an operator's row reaches them.
@@ -114,17 +151,19 @@ func (i *Integration) log() *slog.Logger {
 	return i.logger
 }
 
-// Capabilities are the two builtins dsl/procedure/builtins.memql declares.
-// A capability the DSL names and the registry lacks is a BOOT failure on every
-// node type.
+// Capabilities are the builtins dsl/procedure/builtins.memql declares. A
+// capability the DSL names and the registry lacks is a BOOT failure on every
+// node type -- which is why the four the certification ladder adds are
+// registered here, as stubs, before their executors exist.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
 		{
 			Name: "learnFromRun",
 			Description: "Mine the corpus a finished run belongs to and, when an abstraction clears D14's floor, " +
-				"lift it into a validated v1:authoring:bundle with its goalSignature and provenance. Nothing " +
-				"auto-activates: the construct enters the trust ladder as a candidate. Returns " +
-				"{runId, goalSignature, candidates, constructId, accepted}.",
+				"lift it into a validated v1:authoring:bundle with its procedure, preconditions, version hash and " +
+				"provenance, and put it on the certification ladder. Nothing auto-activates: the construct enters as " +
+				"a candidate or in shadow. Returns {runId, ownerUserId, goalSignature, level, sequences, candidates, " +
+				"constructId, accepted, reason, lift, procedureHash, rung}.",
 			Handler: i.handleLearnFromRun,
 			ArgsSchema: map[string]string{
 				"runId": "string (required) -- the v1:work:run that just succeeded",
@@ -134,15 +173,53 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		{
 			Name: "mineCorpus",
 			Description: "The scheduled sweep: mine one owner's recorded corpus for one goal signature at one " +
-				"level. Disliked recordings are excluded. Returns {ownerUserId, goalSignature, level, " +
-				"sequences, candidates, constructId, accepted}.",
+				"level, or -- for the cluster's maintenance principal with a blank owner -- every owner's. " +
+				"Disliked recordings are excluded. Returns {ownerUserId, goalSignature, level, signatures, " +
+				"sequences, candidates, constructId, constructIds, accepted, reason}.",
 			Handler: i.handleMineCorpus,
 			ArgsSchema: map[string]string{
-				"ownerUserId":   "string (required) -- whose corpus to mine; every read runs as this person",
+				"ownerUserId":   "string (required unless the caller is the cluster's maintenance principal) -- whose corpus to mine; every read runs as this person",
 				"goalSignature": "string -- restrict to one goal's runs; empty mines every signature the owner has",
 				"level":         "integer -- 1 actions (default), 2 automation invocations",
 			},
 		},
+		// THE FOUR BELOW ARE STUBS until the replay runner lands (plan Task
+		// 5), and they say so in their error: a capability that resolves
+		// and refuses by name is honest, where one missing from the
+		// registry fails every node's boot the moment dsl/procedure names it.
+		{
+			Name:        "step",
+			Description: "The statement every step of a rendered learned procedure is. Refuses outside a replay.",
+			Handler:     notWiredYet("step"),
+			ArgsSchema: map[string]string{
+				"step": "integer (required)", "tool": "string (required)", "args": "object",
+			},
+		},
+		{
+			Name:        "replay",
+			Description: "Serve the current work run from a learned procedure on a serving rung.",
+			Handler:     notWiredYet("replay"),
+			ArgsSchema:  map[string]string{"constructId": "string (required)"},
+		},
+		{
+			Name:        "ladderSweep",
+			Description: "The certification ladder's demotion or retirement sweep.",
+			Handler:     notWiredYet("ladderSweep"),
+			ArgsSchema:  map[string]string{"sweep": "string (required) -- demotion or retirement"},
+		},
+		{
+			Name:        "decidePromotion",
+			Description: "Apply a decided procedurePromotion approval to the ladder.",
+			Handler:     notWiredYet("decidePromotion"),
+			ArgsSchema:  map[string]string{"approvalId": "string (required)"},
+		},
+	}
+}
+
+// notWiredYet is a capability that exists and refuses by name.
+func notWiredYet(name string) func(context.Context, map[string]any, int) ([]memorynodes.MemoryNode, error) {
+	return func(context.Context, map[string]any, int) ([]memorynodes.MemoryNode, error) {
+		return nil, fmt.Errorf("procedure: %s is not wired yet", name)
 	}
 }
 
