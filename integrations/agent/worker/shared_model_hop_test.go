@@ -194,6 +194,85 @@ func TestBothConsentsAreStillNeededAcrossTheHop(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Lent to NAMED people, across the hop (epic memql#5344)
+// ---------------------------------------------------------------------------
+//
+// The receiver re-decides on ITS OWN reads, as it does for a cluster share:
+// the list comes off the row it reads, and a group member's groups come from
+// the membership source ON THE RECEIVING REPLICA -- never from anything the
+// envelope carries, which is a claim the sender made rather than a fact.
+
+// newPeopleHop is newSharedHop with the owner's half set to a people share and
+// the receiver's group reads answered by groupsOf.
+func newPeopleHop(t *testing.T, userIds, groupIds []string, groupsOf workerservice.GroupResolver) *sharedHop {
+	t.Helper()
+	h := newSharedHop(t, workerservice.SharingModePeople, true, true)
+	store, ok := h.link.handler.store.(*sharedFleet)
+	if !ok {
+		t.Fatal("the hop's receiver has no cross-owner read")
+	}
+	for i := range store.all {
+		store.all[i].SharedUserIds = userIds
+		store.all[i].SharedGroupIds = groupIds
+	}
+	h.link.handler.SetGroupResolver(groupsOf)
+	return h
+}
+
+func TestAListedPersonIsServedAcrossTheHop(t *testing.T) {
+	h := newPeopleHop(t, []string{"ursula"}, nil, nil) // stored bare, asked canonical
+	out, err := h.call(t, h.caller)
+	if err != nil || out.RefusedBeforeStart {
+		t.Fatalf("a listed person must be served across the hop: %v %s %s", err, out.ErrorCode, out.ErrorMessage)
+	}
+	if out.End.GetContent() != "served" {
+		t.Fatalf("the call did not reach the machine: %q", out.End.GetContent())
+	}
+}
+
+func TestAGroupMemberIsServedAcrossTheHopByTheReceiversOwnRead(t *testing.T) {
+	asked := ""
+	groupsOf := func(_ context.Context, userId string) []string {
+		asked = userId
+		if sameSubject(userId, sharedHopCaller) {
+			return []string{"v1:identity:group:design"}
+		}
+		return nil
+	}
+	h := newPeopleHop(t, nil, []string{"design"}, groupsOf)
+	out, err := h.call(t, h.caller)
+	if err != nil || out.RefusedBeforeStart {
+		t.Fatalf("a member of a listed group must be served across the hop: %v %s %s", err, out.ErrorCode, out.ErrorMessage)
+	}
+	if !sameSubject(asked, sharedHopCaller) {
+		t.Fatalf("the receiver resolved groups for %q; it must ask about the VERIFIED authority's subject", asked)
+	}
+}
+
+func TestSomebodyNotOnTheListIsRefusedAcrossTheHop(t *testing.T) {
+	// The negative control for the two above: a widening that admitted
+	// everyone would pass both of them and fail only this.
+	h := newPeopleHop(t, []string{"v1:identity:user:somebody-else"}, []string{"design"},
+		func(context.Context, string) []string { return nil })
+	out, err := h.call(t, h.caller)
+	if err == nil && !out.RefusedBeforeStart {
+		t.Fatal("a person the owner did not list must not be served across the hop")
+	}
+}
+
+func TestAListedPersonStillNeedsTheMachineToAgreeAcrossTheHop(t *testing.T) {
+	h := newPeopleHop(t, []string{sharedHopCaller}, nil, nil)
+	store := h.link.handler.store.(*sharedFleet)
+	for i := range store.all {
+		store.all[i].InferenceServe = ""
+	}
+	out, err := h.call(t, h.caller)
+	if err == nil && !out.RefusedBeforeStart {
+		t.Fatal("the cockpit's half is still required for a people share, on the receiver too")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // D15 -- whose hardware served the call
 // ---------------------------------------------------------------------------
 
