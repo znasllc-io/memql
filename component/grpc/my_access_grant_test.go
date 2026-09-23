@@ -1,11 +1,95 @@
 package memql
 
 import (
+	"context"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
+
+type myAccessUserLookup func(context.Context, string) (any, error)
+
+func (lookup myAccessUserLookup) ExecuteShaped(ctx context.Context, query string) (any, error) {
+	return lookup(ctx, query)
+}
+
+// The stream authenticates claims before ensureAccess resolves the actor. Its
+// original context need not contain that actor, even after the session caches
+// it. Exercise the actual identity resolver and engine grant resolver across
+// this seam; testing applyAccessGrant alone cannot catch a missing context.
+func TestMyAccessResolvesGrantFromSessionActor(t *testing.T) {
+	eng := gateTestEngine(t)
+	for _, tc := range []struct {
+		name         string
+		storedRole   auth.Role
+		claimedRole  auth.Role
+		badgeCeiling auth.Role
+		wantRole     auth.Role
+		wantEvery    bool
+	}{
+		{"operator from user row", auth.RoleOwner, auth.RoleReader, "", auth.RoleOwner, true},
+		{"reader overrides stale owner claim", auth.RoleReader, auth.RoleOwner, "", auth.RoleReader, false},
+		{"operator constrained by badge", auth.RoleOwner, auth.RoleOwner, auth.RoleReader, auth.RoleReader, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, stream := gateTestSession(t, eng, tc.storedRole)
+			// Force the real ensureAccess resolution, not the helper's cached actor.
+			s.access, s.accessLoaded = nil, false
+			const userID = "v1:identity:user:my-access-session"
+			claims := map[string]any{"sub": userID, "role": string(tc.claimedRole), "sid": "session-my-access"}
+			if tc.badgeCeiling != "" {
+				claims["class"] = "badge"
+				claims["role_ceiling"] = string(tc.badgeCeiling)
+			}
+			stream.ctx = auth.ContextWithClaims(context.Background(), claims)
+			if ac, ok := auth.AccessFromContext(stream.Context()); ok || ac != nil {
+				t.Fatal("fixture must start without an actor in the stream context")
+			}
+			lookups := 0
+			s.service.identityResolver = auth.NewIdentityResolver(myAccessUserLookup(func(ctx context.Context, query string) (any, error) {
+				lookups++
+				if query != `query userByIdSystem(userId: "v1:identity:user:my-access-session")` {
+					t.Fatalf("unexpected identity lookup: %s", query)
+				}
+				if auth.OriginFromContext(ctx) != auth.OriginInternal {
+					t.Fatal("identity resolver did not stamp its server-only read")
+				}
+				return []map[string]any{{"role": string(tc.storedRole), "displayName": "Resolved caller"}}, nil
+			}), s.logger)
+
+			// The initial request resolves the actor; the next uses the cached
+			// session actor. Both must pass it to the engine's context-based API.
+			for _, requestID := range []string{"first-access", "cached-access"} {
+				msg := &memqlv1.MyAccessMsg{RequestId: requestID}
+				envelope := &memqlv1.MemqlClientMessage{MessageId: requestID, Payload: &memqlv1.MemqlClientMessage_MyAccess{MyAccess: msg}}
+				if err := s.handleMyAccess(envelope, msg); err != nil {
+					t.Fatalf("handleMyAccess: %v", err)
+				}
+				result := stream.lastSent().GetMyAccessResult()
+				if result == nil {
+					t.Fatalf("expected MyAccessResult, got %v", stream.lastSent())
+				}
+				if result.GetRequestId() != requestID || result.GetUserId() != userID || result.GetSessionId() != "session-my-access" {
+					t.Fatalf("caller or request identity lost: %+v", result)
+				}
+				if result.GetRole() != string(tc.wantRole) || result.GetDisplayName() != "Resolved caller" {
+					t.Fatalf("reply did not use the resolved user row and badge ceiling: %+v", result)
+				}
+				if result.GetEveryAccount() != tc.wantEvery {
+					t.Fatalf("everyAccount = %v, want %v for resolved role %q", result.GetEveryAccount(), tc.wantEvery, tc.wantRole)
+				}
+				if len(result.GetAccountIds()) != 0 || len(result.GetGroups()) != 0 {
+					t.Fatalf("DB-less fixture invented memberships: %+v", result)
+				}
+			}
+			if lookups != 1 {
+				t.Fatalf("identity lookups = %d, want one per stream session", lookups)
+			}
+		})
+	}
+}
 
 // The MyAccess grant mapping (epic memql#5165, section H).
 //

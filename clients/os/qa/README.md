@@ -33,7 +33,7 @@ warnings are absent almost always, and a capture of an unbroken machine is
 what says the page has not become a wall of advisories), or `overview`,
 `store`, `quiet`, `picker`, `readonly`, `hidden`
 (the Store surface), or `list`, `sources`, `list-empty`, `sources-empty`,
-`connected`, `connected-empty`, `github-owner`, `github-member`, `settings-no-app`,
+`connected`, `connected-empty`, `source-chooser`, `github-owner`, `github-member`, `settings-no-app`,
 `settings-no-app-member`, `settings-app` (the Deployables app, whole), or
 `origins-silent`, `origins-mixed`, `origins-reporting` (Data origins); `mode`
 is `dark` or `light`. **Take at least one narrow capture** (`820,760`): two of
@@ -159,3 +159,5 @@ connected GitHub account whose completed read returns no repositories. In either
 view, open Add deployable and choose A repository. Check desktop and narrow
 layouts with both `mode=light` and `mode=dark`. These use deterministic fixture
 connections and do not mint credentials or modify a real account.
+
+`source-chooser` supplies multiple saved sources under the canonical operator account. Open Add a deployable, choose A repository, then select a saved source or Add source. The latter opens repository choices and a real branch selector; Save source writes only to the fixture connection and returns to the chooser. Check title/branch alignment, the default-account cue, explicit account confirmation, and keyboard navigation at desktop and narrow widths in both themes.

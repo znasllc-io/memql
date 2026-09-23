@@ -1,18 +1,18 @@
 import type { ConnectReturn } from "../sources/connectReturn";
 import { ConnectReturnNotice } from "../sources/ConnectReturnNotice";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Rocket } from "lucide-react";
 import { useSession } from "../../../chrome/access";
 import { bare } from "../people";
 
-import { Caption, Field, Notice, useLiveView, type Stop } from "../../../kit";
+import { Button, Caption, Field, Notice, RefreshButton, useLiveView, type Stop } from "../../../kit";
 import type { Act } from "../../../kit/ActionBar";
 import { ActivityTarget } from "../../../kit/SemanticActivity";
 import { Wizard } from "../../../kit/Wizard";
 import { AccountPicker } from "../../accounts/AccountPicker";
 import { organizationChosen, useDefaultOrganization } from "../../accounts/organization";
-import { useAccountOptions } from "../../accounts/tie";
+import { useAccountOptionsFeed } from "../../accounts/tie";
 import { useCreateSite, usePublish } from "../actions";
 import { useAddDomain } from "../domainActions";
 import { hostnameFor } from "../hostname";
@@ -20,6 +20,7 @@ import { useNewPackage, usePackageActions, useSiteLifecycle } from "../packages/
 import { ProblemNotice, ReportView } from "../packages/ReportView";
 import {
   deploymentFromRow,
+  packageFromRow,
   shortRepo,
   sourceLabel,
   type DeployableOutcome,
@@ -64,7 +65,8 @@ import { returnPathFor } from "../sources/connectReturn";
 import { OWN_ACCOUNT, organizationOf, ownerIsNamed, type GithubAppOwner } from "../sources/GithubAppSetup";
 import { useGithubApp } from "../sources/useGithubApp";
 import { useCredentialRevoke, useGithubConnect } from "../sources/useGithubConnect";
-import type { ConnectionNeed } from "./stops/compose/RepositorySource";
+import { RepositorySource, type ConnectionNeed } from "./stops/compose/RepositorySource";
+import { SavedSourcePicker } from "./stops/compose/SavedSourcePicker";
 import { ComposeSourceDetailStep, ComposeSourceKindStep, SOURCE_DETAIL_NAME, SOURCE_KIND_LABEL } from "./stops/compose/Source";
 import { ComposeWhereItLivesStop } from "./stops/compose/WhereItLives";
 
@@ -169,10 +171,20 @@ export interface ComposePageProps {
    * and names the source, before Analyze would be refused for it.
    */
   packages?: readonly PackageRow[];
+  packageFeed?: { state: string; error: string; retry: () => void };
+  siteFeed?: { state: string; error: string };
+  placedSources?: readonly { packageId: string; name: string }[];
 }
 
 export function ComposePage(props: ComposePageProps) {
-  const { clusterDomain, can: globalCan, isClusterOwner, credentials, onBack, backLabel = "Deployables", parked, placed, only, source, packages } = props;
+  const { clusterDomain, can: globalCan, isClusterOwner, credentials, onBack, backLabel = "Deployables", parked, only, source: fixedSource, packages } = props;
+  const [selectedSourceId, setSelectedSourceId] = useState("");
+  const [savedSources, setSavedSources] = useState<PackageRow[]>([]);
+  const [addingSource, setAddingSource] = useState(Boolean(props.connectResult));
+  const savingSource = useRef(false);
+  const [selectedRunId, setSelectedRunId] = useState("");
+  const [focusSavedSourceId, setFocusSavedSourceId] = useState("");
+  const [sourceNotice, setSourceNotice] = useState("");
 
   const [draft, setDraft] = useState<ComposeDraft>(() => props.connectResult ? { ...EMPTY_DRAFT, choice: "repo" } : EMPTY_DRAFT);
   const [addresses, setAddresses] = useState<Record<string, AddressDraft>>({});
@@ -215,10 +227,46 @@ export function ComposePage(props: ComposePageProps) {
   const probe = useSourceProbe();
   const zipProbe = useArtifactProbe();
   const checks = useAddressChecks();
-  const accounts = useAccountOptions();
+  const { accounts, state: accountState, error: accountError } = useAccountOptionsFeed();
   const defaultAccountId = useDefaultOrganization(accounts);
   const [pickedAccountId, setAccountId] = useState("");
-  const sourceAccountId = parked?.pkg.accountId || source?.accountId || pickedAccountId || defaultAccountId;
+  const [accountChosenManually, setAccountChosenManually] = useState(false);
+  // Capture a verified default once. A feed refresh must not switch a draft.
+  useEffect(() => {
+    if (defaultAccountId && !accountChosenManually) setAccountId(held => held || defaultAccountId);
+  }, [defaultAccountId, accountChosenManually]);
+  const sourceAccountId = parked?.pkg.accountId || fixedSource?.accountId || pickedAccountId || defaultAccountId;
+  const availableSources = [...(packages ?? []), ...savedSources.filter(saved => !packages?.some(p => p.id === saved.id))]
+    .filter(p => p.sourceKind === "repo" && p.status !== "archived" && p.accountId === sourceAccountId);
+  useEffect(() => {
+    setSavedSources(held => {
+      const pending = held.filter(saved => !packages?.some(p => p.id === saved.id));
+      return pending.length === held.length ? held : pending;
+    });
+  }, [packages]);
+  const selectedSource = availableSources.find(p => p.id === selectedSourceId);
+  const source = fixedSource ?? selectedSource;
+  const placed = props.placed ?? props.placedSources?.filter(site => site.packageId === source?.id).map(site => site.name) ?? [];
+  // Never silently restore a source removed by an account switch or live update.
+  useEffect(() => {
+    if (selectedSourceId && !selectedSource) {
+      setSelectedSourceId(""); setSelectedRunId(""); setAddresses({});
+      setSourceNotice("The selected source is no longer available. Choose another source.");
+    }
+  }, [selectedSourceId, selectedSource]);
+  const placementsKnown = !props.siteFeed || (props.siteFeed.state === "live" && !props.siteFeed.error);
+  const sourceCreateCan = partsForOrganization(sourceAccountId, globalCan, "create");
+  const saveBoundary = useRef("");
+  saveBoundary.current = JSON.stringify([githubViewer, sourceAccountId, githubGrant?.id, githubDisconnect.revokedCredentialId, access?.everyAccount, access?.accountIds]);
+  const saveMounted = useRef(true);
+  useEffect(() => { saveMounted.current = true; return () => { saveMounted.current = false; }; }, []);
+  const previousViewer = useRef(githubViewer);
+  useEffect(() => {
+    if (previousViewer.current === githubViewer) return;
+    previousViewer.current = githubViewer;
+    setSavedSources([]); setSelectedSourceId(""); setSelectedRunId(""); setAddresses({});
+    setAccountId(""); setAccountChosenManually(false); setAddingSource(false);
+  }, [githubViewer]);
   const can = partsForOrganization(sourceAccountId, globalCan, source || parked || created.packageId || created.siteId ? "update" : "create");
 
   const newPackage = useNewPackage();
@@ -242,10 +290,11 @@ export function ComposePage(props: ComposePageProps) {
   // compose (a brand-new source) still takes the newest, which is right:
   // there is one app and one run.
   const timelineRows = deployments?.snapshot.rows ?? [];
+  const currentTimeline = selectedSource && !fixedSource && !parked ? timelineRows.filter(row => row.id === selectedRunId) : timelineRows;
   const run =
     (only !== undefined && only !== ""
-      ? runForScopedFlow(timelineRows, only)
-      : (timelineRows[0] ?? null)) ??
+      ? runForScopedFlow(currentTimeline, only)
+      : (currentTimeline[0] ?? null)) ??
     parked?.run ??
     null;
   const report = run?.report ?? null;
@@ -262,13 +311,14 @@ export function ComposePage(props: ComposePageProps) {
   const duplicate = useMemo(
     () =>
       draft.choice === "repo" && parked === undefined && source === undefined
-        ? duplicateSource(packages ?? [], draft.repoUrl, draft.repoRef, probe.reply?.defaultBranch ?? "")
+        ? duplicateSource([...(packages ?? []), ...savedSources], draft.repoUrl, draft.repoRef, probe.reply?.defaultBranch ?? "")
         : null,
-    [draft.choice, draft.repoUrl, draft.repoRef, packages, parked, source, probe.reply?.defaultBranch],
+    [draft.choice, draft.repoUrl, draft.repoRef, packages, savedSources, parked, source, probe.reply?.defaultBranch],
   );
   const githubSelectionReady = draft.choice !== "repo" || (githubGrant?.status === "active" &&
     githubDisconnect.revokedCredentialId !== githubGrant.id && githubInvalidGrantId !== githubGrant.id && draft.credentialId === githubGrant.id && connectionNeed === "");
-  const sourceDone = parked !== undefined || source !== undefined || (githubSelectionReady && organizationChosen(accounts, sourceAccountId) && sourceReady(draft, zip, probeParked, duplicate));
+  const draftSourceReady = githubSelectionReady && organizationChosen(accounts, sourceAccountId) && sourceReady(draft, zip, probeParked, duplicate);
+  const sourceDone = parked !== undefined || source !== undefined || (draft.choice !== "repo" && githubSelectionReady && organizationChosen(accounts, sourceAccountId) && sourceReady(draft, zip, probeParked, duplicate));
 
   // THE OFF-LIST, read off the source row (D5). `activated` answers the click
   // before the row's own broadcast does.
@@ -278,7 +328,7 @@ export function ComposePage(props: ComposePageProps) {
 
   const phase = phaseOf({
     path,
-    runStatus: run?.status ?? "",
+    runStatus: run?.status ?? (selectedRunId ? "analyzing" : ""),
     siteId: created.siteId,
     // A CI-PUSHED SOURCE HAS NOTHING TO PUBLISH FROM HERE. Its bytes are on
     // somebody's CI, so the moment the draft site exists this flow is done
@@ -331,16 +381,21 @@ export function ComposePage(props: ComposePageProps) {
   // by hand, and it is why this could not be built until skip actually
   // reached the engine.
   const everyApp = useMemo(() => (report?.deployables ?? []).map((d) => d.name).filter((n) => n !== ""), [report]);
-  const placementApps = scoped ? everyApp : apps;
+  const placementApps = scoped ? everyApp : selectedSource ? [...new Set([...apps, ...placed])] : apps;
   const placementAddresses = useMemo(() => {
-    if (!scoped) return addresses;
+    if (!scoped) {
+      if (!selectedSource) return addresses;
+      const next = { ...addresses };
+      for (const app of placed) next[app] = { ...EMPTY_ADDRESS, accountId: sourceAccountId, skip: true };
+      return next;
+    }
     const out: Record<string, AddressDraft> = { ...addresses };
     for (const app of everyApp) {
       if (app === only) continue;
       out[app] = { ...(out[app] ?? EMPTY_ADDRESS), skip: true };
     }
     return out;
-  }, [scoped, addresses, everyApp, only]);
+  }, [scoped, addresses, everyApp, only, selectedSource, placedKey, sourceAccountId]);
 
   // THE CLUSTER'S VERDICTS, per app (D7): folded from the check hook's keys
   // into the shape `placementsComplete` reads, so Deploy stays out of reach
@@ -361,8 +416,8 @@ export function ComposePage(props: ComposePageProps) {
   // (createPackage), so a flow opened with no source behind it needs both.
   const canStart = can.deploy && (source !== undefined || parked !== undefined || can.sources);
   const readyToAnalyze =
-    canStart && !archivedSource && path !== "unknown" && sourceDone && (path !== "handmade" || placementsDone);
-  const readyToDeploy = path === "handmade" ? draft.artifactId !== "" : placementsDone;
+    canStart && !archivedSource && path !== "unknown" && sourceDone && (path !== "handmade" || placementsDone) && (!selectedSource || placementsKnown) && (!selectedSource || selectedSource.declares.length === 0 || selectedSource.declares.some(app => !placed.includes(app.name)));
+  const readyToDeploy = path === "handmade" ? draft.artifactId !== "" : placementsDone && (!selectedSource || placementsKnown);
 
   const action = actionFor(phase, readyToAnalyze, readyToDeploy);
   const busy =
@@ -377,16 +432,34 @@ export function ComposePage(props: ComposePageProps) {
   // The acts
   // -------------------------------------------------------------------------
 
+  async function saveSource(): Promise<void> {
+    if (!draftSourceReady || !sourceCreateCan.sources || savingSource.current) return;
+    savingSource.current = true;
+    const boundary = saveBoundary.current;
+    const input = { name: draft.name.trim(), sourceKind: "repo" as const, repoUrl: draft.repoUrl.trim(), repoRef: draft.repoRef.trim(), autoDeploy: draft.autoDeploy === true, credentialId: draft.credentialId, artifactId: "", accountId: sourceAccountId };
+    const id = await newPackage.create(input);
+    savingSource.current = false;
+    if (!id || !saveMounted.current || boundary !== saveBoundary.current) return;
+    const saved = packageFromRow({ ...input, id: bare(id), ownerUserId: githubViewer, status: "active" });
+    setSavedSources(held => [...held, saved]);
+    setSelectedSourceId(saved.id);
+    setFocusSavedSourceId(saved.id);
+    setAddingSource(false);
+    chooseStop("sourceDetail");
+    props.packageFeed?.retry();
+  }
+
   async function analyze(): Promise<void> {
     if (source !== undefined || created.packageId !== "") {
       // AN APP OF A SOURCE THAT EXISTS: no package to create. The analysis
       // is SCOPED on the wire (memql#4953): the engine derives a run's
       // `scopedTo` from its placements' skips, so an unscoped call would park
       // a gate about the whole source that every sibling reads as its own.
-      await pkgActions.deploy(source?.id ?? created.packageId, {
+      const outcome = await pkgActions.deploy(source?.id ?? created.packageId, {
         confirm: false,
-        ...(scoped ? { placements: everyOtherAppSkipped(source?.declares ?? [], only) } : {}),
+        ...(scoped ? { placements: everyOtherAppSkipped(source?.declares ?? [], only) } : selectedSource ? { placements: Object.fromEntries(placed.map(name => [name, { hostname: "", accountId: sourceAccountId, ownDomain: "", skip: true }])) } : {}),
       });
+      if (selectedSource && outcome) setSelectedRunId(outcome.deploymentId);
       reseed();
       return;
     }
@@ -471,10 +544,11 @@ export function ComposePage(props: ComposePageProps) {
     // park an unscoped run -- the flow stayed titled and narrowed for that
     // app while the run underneath it was about the whole source, which is
     // the same fan-out the scoped analysis exists to prevent.
-    await pkgActions.deploy(packageId, {
+    const outcome = await pkgActions.deploy(packageId, {
       confirm: false,
-      ...(scoped ? { placements: everyOtherAppSkipped(source?.declares ?? parked?.pkg.declares ?? [], only) } : {}),
+      ...(scoped ? { placements: everyOtherAppSkipped(source?.declares ?? parked?.pkg.declares ?? [], only) } : selectedSource ? { placements: Object.fromEntries(placed.map(name => [name, { hostname: "", accountId: sourceAccountId, ownDomain: "", skip: true }])) } : {}),
     });
+    if (selectedSource && outcome) setSelectedRunId(outcome.deploymentId);
     reseed();
   }
 
@@ -538,14 +612,14 @@ export function ComposePage(props: ComposePageProps) {
   // NAMES. Reading it off the draft rather than off a click means a flow that
   // comes back with its choice already made -- from GitHub, after connecting --
   // lands on the repository step rather than on a question already answered.
-  const defaultStop: WizardStep = phase === "composing" ? source || parked ? "whatItIs" : draft.choice === "" ? "source" : "sourceDetail"
+  const defaultStop: WizardStep = phase === "composing" ? fixedSource || parked ? "whatItIs" : draft.choice === "" ? "source" : "sourceDetail"
     : phase === "analyzing" || phase === "awaiting_confirm" && path === "package" ? "whatItIs"
     : phase === "stopped" ? (railFor(input).stages.find(s => s.state === "stopped")?.id as StopId ?? "whatItIs")
     : phase === "deploying" || phase === "awaiting_confirm" && path === "handmade" ? "build" : "live";
   const journeyStop = journeyChoice?.key === journeyKey ? journeyChoice.stop : defaultStop;
   const chooseStop = (stop: WizardStep) => setJourneyChoice({ key: journeyKey, stop });
 
-  const sourceLocked = parked !== undefined || source !== undefined || phase !== "composing";
+  const sourceLocked = parked !== undefined || fixedSource !== undefined || phase !== "composing";
   const stopBody = (stage: RailStage) => {
     switch (stage.id) {
       case "source":
@@ -553,8 +627,26 @@ export function ComposePage(props: ComposePageProps) {
           <>
           <div className="os-compose-source-fields">
           <Field label="Accounts">
-            <AccountPicker id="compose-source-organization" label="Accounts" required value={sourceAccountId} accounts={accounts} disabled={sourceLocked} onChange={setAccountId} />
+            <AccountPicker id="compose-source-organization" label="Accounts" required requiredLabel="Choose an account" value={sourceAccountId} accounts={accounts} disabled={sourceLocked || busy} onChange={(id) => { setAccountId(id); setSelectedSourceId(""); }} onCommit={() => setAccountChosenManually(true)} />
+            {!sourceLocked && !fixedSource && !parked && !accountChosenManually && organizationChosen(accounts, sourceAccountId) ? <Caption>Selected by default. Review account.</Caption> : null}
+            {accountError ? <Caption>Accounts could not be refreshed. {String(accountError)}</Caption> : accounts.length === 0 ? <Caption>{accountState === "seeding" ? "Loading accounts…" : "No account is available for this source."}</Caption> : null}
           </Field>
+          {sourceLocked && source ? <Caption>{source.name} · {sourceLabel(source)}</Caption> : draft.choice === "repo" && !addingSource ? <>
+          <RepositorySource showRepositories={false} draft={draft} onDraft={(patch) => setDraft(held => ({ ...held, ...patch }))}
+            credentials={credentials} credentialFeed={props.credentialFeed} probe={probe}
+            connect={githubConnect} disconnect={githubDisconnect} invalidCredentialId={githubInvalidGrantId}
+            onConnectionInvalid={setGithubInvalidGrantId} onConnectionNeed={setConnectionNeed}
+            app={githubApp} appOwner={appOwner} onAppOwner={setAppOwner} />
+          {selectedSource && (connectionNeed === "connect" || connectionNeed === "reconnect") ? <div className="os-form-row"><Button busy={githubConnect.busy} onClick={() => void githubConnect.connect(returnPathFor("deployables"))}>{connectionNeed === "reconnect" ? "Reconnect GitHub" : "Connect GitHub"}</Button></div> : null}
+          <SavedSourcePicker sources={availableSources} selectedId={selectedSourceId} focusId={focusSavedSourceId}
+            onChoose={(p) => { setSelectedSourceId(p.id); setSourceNotice(""); pkgActions.clear(); }}
+            onAdd={() => { setSelectedSourceId(""); setSourceNotice(""); setAddingSource(true); newPackage.clear(); }}
+            canAdd={sourceCreateCan.sources && connectionNeed === "" && githubGrant?.status === "active"}
+            busy={busy} state={props.packageFeed?.state} error={props.packageFeed?.error} onRetry={props.packageFeed?.retry} />
+          {selectedSource && !placementsKnown ? <Caption>{props.siteFeed?.error ? "Existing deployables could not be read. Refresh Deployables before continuing." : "Checking existing deployables…"}</Caption> : null}
+          {selectedSource && props.siteFeed?.error && props.packageFeed?.retry ? <RefreshButton label="Refresh deployables" onClick={props.packageFeed.retry} /> : null}
+          {selectedSource && placementsKnown && selectedSource.declares.length > 0 && selectedSource.declares.every(app => placed.includes(app.name)) ? <Caption>All apps from this source already have deployables. Open them from Deployables.</Caption> : null}
+          </> : <>
           <ComposeSourceDetailStep
             draft={draft}
             onDraft={(patch) => setDraft((held) => ({ ...held, ...patch }))}
@@ -576,6 +668,8 @@ export function ComposePage(props: ComposePageProps) {
             onAppOwner={setAppOwner}
             duplicateOf={duplicate}
           />
+          {addingSource && !sourceLocked ? <Button disabled={busy} onClick={() => { setAddingSource(false); newPackage.clear(); }}>Cancel adding source</Button> : null}
+          </>}
           </div>
           </>
         );
@@ -675,7 +769,7 @@ export function ComposePage(props: ComposePageProps) {
         ? []
         : [{ label: action.label, tone: action.tone, busy, onAct: act }];
 
-  const title = composeTitle(parked?.pkg ?? source, only);
+  const title = composeTitle(parked?.pkg ?? fixedSource, only);
   // AN INACTIVE APP, OR ONE OF AN ARCHIVED SOURCE, IS HELD: whatever the
   // timeline says, the only act is Activate (or the way back), and the bar
   // must not read a finished flow off a run that never placed this app.
@@ -686,7 +780,7 @@ export function ComposePage(props: ComposePageProps) {
   // every other one. The step says when it is needed; nothing is offered while
   // the person's connections are still being read, because the step has not
   // mounted the part of itself that could say so.
-  const needsGithub = !sourceLocked && journeyStop === "sourceDetail" && draft.choice === "repo" && connectionNeed !== "";
+  const needsGithub = !sourceLocked && journeyStop === "sourceDetail" && draft.choice === "repo" && !selectedSource && connectionNeed !== "";
   // An organization is named by its login, and until one is typed there is
   // nothing to register the app under -- so the act is ABSENT (rule 12), and the
   // floor says what it is waiting for.
@@ -710,6 +804,7 @@ export function ComposePage(props: ComposePageProps) {
   const journeyActs: Act[] = !held && !finished && (
     needsGithub
       ? githubActs
+    : journeyStop === "sourceDetail" && addingSource ? (draftSourceReady && sourceCreateCan.sources ? [{ label: "Save source", tone: "primary", busy: newPackage.busy, onAct: () => void saveSource() }] : [])
     : journeyStop === "source" ? []
     : journeyStop === "sourceDetail" && path === "handmade" && sourceDone && phase === "composing"
       ? [{ label: "Continue", tone: "primary", onAct: () => chooseStop("whatItIs") }]
@@ -748,6 +843,7 @@ export function ComposePage(props: ComposePageProps) {
                 draft={draft}
                 isClusterOwner={isClusterOwner}
                 onChoose={(choice) => {
+                  setSelectedSourceId(""); setAddingSource(false);
                   setDraft((held) => ({ ...held, choice, name: "", kind: "", artifactId: "", repoUrl: "", storeId: "" }));
                   // CHOOSING ANSWERS THE STEP, so the wizard moves on to the
                   // one the answer names.
@@ -814,7 +910,7 @@ export function ComposePage(props: ComposePageProps) {
             // sentence twice on one screen. The floor says what goes on.
             : connectionNeed === "unavailable"
               ? { word: "GitHub is not set up", detail: "ask a cluster owner to set it up" }
-              : { word: "Choose a repository", detail: "then the branch to follow, and what to call it" };
+              : addingSource ? draftSourceReady ? { word: "Ready to save", detail: "saves this source without deploying" } : { word: "Choose a repository", detail: "then the branch to follow, and what to call it" } : { word: "Choose a source", detail: "or add one from GitHub" };
   const word = !sourceLocked && !organizationChosen(accounts, sourceAccountId) ? "Choose an account" : detailNeeds !== null ? detailNeeds.word : finished && draft.choice === "ci" ? "Waiting for CI" : composePhaseWord(phase, {
     inactive, archivedSource, declared: source !== undefined, wentLive, choice: draft.choice, moreToAnswer: action !== null && action.disabled,
   });
@@ -839,7 +935,7 @@ export function ComposePage(props: ComposePageProps) {
   // The forward act is the button and the way out beside it is text. When it
   // is the cluster's turn there is no forward act, and Leave is the button --
   // the same picture the machine and the domain draw while they wait.
-  const written = phase !== "composing";
+  const written = phase !== "composing" || focusSavedSourceId !== "";
   const acts: Act[] = finished
     ? canGoLive
       ? [
@@ -894,6 +990,7 @@ export function ComposePage(props: ComposePageProps) {
           {/* A refusal the engine gave BEFORE any row exists has no stop to
               belong to yet, so it renders beneath the action that asked for
               it. Every other refusal in this flow lands at its stop. */}
+          {sourceNotice ? <Caption>{sourceNotice}</Caption> : null}
           {newPackage.refusal ? <ProblemNotice problem={{ ...newPackage.refusal, fatal: true }} tone="error" /> : null}
           {pkgActions.refusal ? <ProblemNotice problem={{ ...pkgActions.refusal, fatal: true }} tone="error" /> : null}
           {createSite.error === "" ? null : (
@@ -1029,7 +1126,7 @@ function composePhaseDetail(
   // NOTHING IS CHOSEN YET, so the bar's word already says what is needed
   // ("Choose a source") and the three choices are on the page. What is worth
   // saying beside it is the thing somebody about to start wants to know.
-  if (phase === "composing" && !declared && choice === "") return "nothing is written until you deploy";
+  if (phase === "composing" && !declared && choice === "") return "nothing is deployed until you confirm";
   if (phase === "awaiting_confirm") {
     if (apps.length > 1) {
       const going = apps.filter((app) => addresses[app]?.skip !== true).length;
@@ -1048,7 +1145,7 @@ function composePhaseDetail(
     case "stopped":
       return "the last attempt did not finish; retrying starts a fresh one";
     default:
-      return declared ? "reading the source is the first step; nothing is written until you deploy" : "nothing is written until you deploy";
+      return declared ? "reading the source is the first step; nothing is deployed until you confirm" : "nothing is deployed until you confirm";
   }
 }
 

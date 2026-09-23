@@ -40,26 +40,32 @@ export const NO_ACCOUNT_LABEL = "No client";
 export function AccountPicker({
   value,
   onChange,
+  onCommit,
   accounts,
   id,
   label,
   emptyLabel = NO_ACCOUNT_LABEL,
   disabled = false,
   required = false,
+  requiredLabel = "Choose an organization",
 }: {
   value: string;
   onChange: (next: string) => void;
   accounts: AccountRow[];
   id: string;
   label: string;
+  /** Explicit choice, including confirming the current account. */
+  onCommit?: () => void;
   /**
    * The empty option for optional labels and scopes. Required ownership
-   * always says "Choose an organization" and cannot be cleared.
+   * uses requiredLabel and cannot be cleared.
    */
   emptyLabel?: string;
   disabled?: boolean;
   /** Organization ownership requires an explicit, active account. */
   required?: boolean;
+  /** Wording for the required, unselected prompt in the calling flow. */
+  requiredLabel?: string;
 }) {
   const options = useMemo(() => {
     const known = accounts.filter((a) => !required || !accountIsArchived(a) || a.id === value).map((a) => ({
@@ -74,9 +80,9 @@ export function AccountPicker({
   }, [accounts, value, required]);
 
   return (
-    <Select value={value} onChange={onChange} id={id} label={label}>
+    <Select value={value} onChange={onChange} onCommit={onCommit} id={id} label={label}>
       {/* Optional labels can be cleared; required ownership uses a prompt. */}
-      <option value="" disabled={required || disabled}>{required ? "Choose an organization" : emptyLabel}</option>
+      <option value="" disabled={required || disabled}>{required ? requiredLabel : emptyLabel}</option>
       {options.map((o) => (
         <option key={o.id} value={o.id} disabled={disabled || (required && !accounts.some((account) => account.id === o.id && !accountIsArchived(account)))}>
           {o.label}

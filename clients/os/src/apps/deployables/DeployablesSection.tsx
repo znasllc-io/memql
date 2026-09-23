@@ -324,9 +324,12 @@ export function DeployablesSection({
           }
           only={view.only}
           packages={packageRows}
+          packageFeed={{ state: packages?.snapshot.state ?? "seeding", error: packages?.snapshot.error ?? "", retry: onReseed }}
+          siteFeed={{ state: sites?.snapshot.state ?? "seeding", error: sites?.snapshot.error ?? "" }}
+          placedSources={siteRows.map(s => ({ packageId: s.packageId, name: s.packageDeployableName }))}
           placed={
             parkedFor === null
-              ? []
+              ? undefined
               : siteRows.filter((s) => s.packageId === parkedFor.pkg.id).map((s) => s.packageDeployableName)
           }
         />

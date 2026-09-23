@@ -68,6 +68,8 @@ func (s *streamSession) handleMyAccess(envelope *memqlv1.MemqlClientMessage, msg
 	// says a caller may see and what a read actually returns cannot
 	// disagree. Best-effort inside the engine -- a failure answers an empty
 	// grant rather than failing a reply the session does not depend on.
+	// ensureAccess resolves the stream actor; the engine reads it from context.
+	ctx = auth.ContextWithAccess(ctx, ac)
 	applyAccessGrant(result, s.service.engine.ResolveAccessGrant(ctx))
 
 	return s.sendServerMessage(envelope.GetMessageId(), &memqlv1.MemqlServerMessage{

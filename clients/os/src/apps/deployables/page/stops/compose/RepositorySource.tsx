@@ -29,6 +29,8 @@ import { NameField } from "./fields";
 const COMPOSE_SECTION = "deployables";
 
 interface RepositorySourceProps {
+  /** Connection status can stand apart from adding a repository source. */
+  showRepositories?: boolean;
   draft: ComposeDraft;
   onDraft: (patch: Partial<ComposeDraft>) => void;
   credentials: readonly CredentialRow[];
@@ -122,7 +124,7 @@ export function RepositorySource(props: RepositorySourceProps) {
 
 function PersonalRepositorySource({
   draft, onDraft, credentials, probe, connect, onConnectionNeed,
-  app, appOwner = OWN_ACCOUNT, onAppOwner, disconnect, invalidCredentialId = "", onConnectionInvalid,
+  app, appOwner = OWN_ACCOUNT, onAppOwner, disconnect, invalidCredentialId = "", onConnectionInvalid, showRepositories = true,
 }: RepositorySourceProps & { disconnect: CredentialRevokeActions }) {
   const install = useGithubConnect();
   const repositories = useSourceRepositories();
@@ -167,13 +169,13 @@ function PersonalRepositorySource({
   const readFor = useRef("");
   const read = repositories.read;
   useEffect(() => {
-    if (grantId === "" || grantId === readFor.current) return;
+    if (!showRepositories || grantId === "" || grantId === readFor.current) return;
     let current = true;
     void read(grantId, 1).then(answered => {
       if (current && answered) readFor.current = grantId;
     });
     return () => { current = false; };
-  }, [grantId, read]);
+  }, [grantId, read, showRepositories]);
 
   const learnedFor = useRef("");
   const learning = useRef(false);
@@ -255,7 +257,7 @@ function PersonalRepositorySource({
         <>
           <DisconnectGitHub compact summary={<Caption>Connected to GitHub as @{grant.login || "unknown"}.</Caption>}
             busy={disconnect.busy} refusal={disconnect.refusal} onDisconnect={() => void disconnectAccount()} />
-          <RepositoryPicker
+          {showRepositories ? <RepositoryPicker
             page={repositories.page}
             readAt={repositories.readAt}
             busy={repositories.busy}
@@ -270,8 +272,8 @@ function PersonalRepositorySource({
             onChoose={choose}
             onLookAgain={() => void repositories.read(grantId, 1)}
             onReadMore={() => void repositories.read(grantId, repositories.page.nextPage)}
-          />
-          {draft.repoUrl !== "" ? (
+          /> : null}
+          {showRepositories && draft.repoUrl !== "" ? (
             <>
               {probe.busy ? <Caption>Checking the repository…</Caption> : null}
               {probe.reply && !probeParks(probe.reply.reason) && probeNote(probe.reply) ?

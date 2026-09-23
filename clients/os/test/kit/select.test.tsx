@@ -689,3 +689,29 @@ describe("committing a choice", () => {
     ).toBe("developer");
   });
 });
+
+
+it("reports explicit confirmation separately from value changes and cancellation", () => {
+  const onChange = vi.fn();
+  const onCommit = vi.fn();
+  render(<Select id="confirmation" label="Account" value="self" onChange={onChange} onCommit={onCommit}>
+    <option value="self">Operator</option><option value="client">Client</option>
+  </Select>);
+  const trigger = screen.getByLabelText("Account");
+  fireEvent.click(trigger);
+  fireEvent.keyDown(trigger, { key: "Escape" });
+  expect(onCommit).not.toHaveBeenCalled();
+  fireEvent.click(trigger);
+  fireEvent.click(screen.getByRole("option", { name: "Operator" }));
+  expect(onCommit).toHaveBeenCalledTimes(1);
+  expect(onChange).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(trigger);
+  fireEvent.keyDown(trigger, { key: "Enter" });
+  fireEvent.keyDown(trigger, { key: "Enter" });
+  expect(onCommit).toHaveBeenCalledTimes(2);
+  expect(onChange).not.toHaveBeenCalled();
+  fireEvent.click(trigger);
+  fireEvent.click(screen.getByRole("option", { name: "Client" }));
+  expect(onCommit).toHaveBeenCalledTimes(3);
+  expect(onChange).toHaveBeenCalledExactlyOnceWith("client");
+});

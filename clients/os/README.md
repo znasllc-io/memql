@@ -2384,6 +2384,13 @@ and one person's receipts cannot dismiss another's changes.
 
 ### GitHub account connection
 
+Add a deployable separates the GitHub connection from saved Sources. Choose an
+existing source for the selected account, or use Add source and Save source to
+register another repository/ref. Saving does not analyze or deploy. Existing
+sources reuse their stored credentials and do not require the viewer to reconnect
+GitHub. Analysis follows its own new run and skips apps already placed by that
+source; the platform does not create a second instance of an already placed app.
+
 Repository creation uses GitHub only. Its Accounts selector retains the
 account-scoped default, permission checks and saved account ID; GitHub access
 is a separate group below it. Existing stored tokens and source credentials

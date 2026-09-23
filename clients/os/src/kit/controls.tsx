@@ -113,6 +113,8 @@ export function Input({
 }: {
   value: string;
   onChange: (next: string) => void;
+  /** Explicit confirmation, including choosing the current value. Dismissal does not commit. */
+  onCommit?: () => void;
   id: string;
   /** Always required, visually hidden by default. A control with no name is
    *  unreachable by anyone not using their eyes. */
@@ -365,12 +367,15 @@ export function listScrollTop(
 export function Select({
   value,
   onChange,
+  onCommit,
   id,
   label,
   children,
 }: {
   value: string;
   onChange: (next: string) => void;
+  /** Explicit confirmation, including choosing the current value. Dismissal does not commit. */
+  onCommit?: () => void;
   id: string;
   /** Always required, visually hidden. Names the control AND the open list. */
   label: string;
@@ -455,6 +460,7 @@ export function Select({
     // writes a recipient's subscription status and re-reads the roster.
     // Re-picking what is already chosen must not post either of those.
     if (option.value !== value) onChange(option.value);
+    onCommit?.();
   }
 
   /** Where a letter lands. Returns -1 when nothing starts with the buffer. */

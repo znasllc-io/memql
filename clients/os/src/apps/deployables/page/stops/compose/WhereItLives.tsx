@@ -296,12 +296,13 @@ function AppAddress({
               is free. */}
           <VerdictLine slug={slug} complaint={complaint} preview={preview} verdict={verdicts.slug} clusterDomain={clusterDomain} />
 
-          <Field label="Organization">
+          <Field label="Accounts">
             {/* The caller chooses a real organization; defaults come from MyAccess. */}
             <AccountPicker
               required
+              requiredLabel="Choose an account"
               id={`os-compose-account-${key}`}
-              label={`The client ${heading || "this deployable"} is for`}
+              label={`The account ${heading || "this deployable"} is for`}
               value={address.accountId}
               accounts={accounts}
               onChange={(accountId) => onAddress({ accountId, ...prefillDomain(accounts, accountId, address) })}

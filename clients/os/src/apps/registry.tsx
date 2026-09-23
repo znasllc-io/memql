@@ -226,7 +226,10 @@ const deployables: OsAppManifest = {
   wants: DEPLOYABLES_WANTS,
   settingsSection: "settings",
   logsSection: "logs",
-  attentionChanges: [{ id: "deployables:organization", revision: "organization-1", sectionId: "deployables", label: "Organization ownership for sources and deployables" }],
+  attentionChanges: [
+    { id: "deployables:organization", revision: "organization-1", sectionId: "deployables", label: "Organization ownership for sources and deployables" },
+    { id: "deployables:saved-sources", revision: "saved-sources-1", sectionId: "deployables", label: "Choose saved sources or add one for a new deployable" },
+  ],
   component: DeployablesApp,
 };
 

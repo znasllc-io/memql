@@ -78,6 +78,7 @@ describe("shared shell navigation", () => {
     await click(await screen.findByRole("button", { name: /Add a deployable/ }));
     const draft = screen.getByRole("region", { name: "Add a deployable" });
     await click(within(draft).getByRole("radio", { name: /A repository/ }));
+    await click(await within(draft).findByRole("button", { name: "Add source" }));
     await click(await within(draft).findByRole("button", { name: /storefront/ }));
     const input = within(draft).getByRole("textbox", { name: "What this deployable is called" });
     fireEvent.change(input, { target: { value: "Unfinished storefront" } });

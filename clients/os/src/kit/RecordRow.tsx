@@ -50,7 +50,7 @@ export function RecordList({ children, label, density, className = "", as: Eleme
   </Element>;
 }
 
-export function RecordRow({ icon, name, secondary, children, state, tone = "muted", stateTitle, stateExtra, trailing, actions, current = false, dim = false, open, onOpen, label }: {
+export function RecordRow({ icon, name, secondary, children, state, tone = "muted", stateTitle, stateExtra, trailing, actions, current = false, dim = false, open, onOpen, label, selected, disabled = false }: {
   icon?: ReactNode;
   name: ReactNode;
   /** The one quieter line under the name: an address, a kind, a place. */
@@ -77,9 +77,13 @@ export function RecordRow({ icon, name, secondary, children, state, tone = "mute
   onOpen?: () => void;
   /** The accessible name, when the visible name alone would not say enough. */
   label?: string;
+  /** A choice, separate from opening details. */
+  selected?: boolean;
+  disabled?: boolean;
 }) {
+  const hasIcon = icon !== undefined && icon !== null && icon !== false;
   const body = <>
-    <span className="os-record-icon">{icon}</span>
+    {hasIcon ? <span className="os-record-icon">{icon}</span> : null}
     <span className="os-record-identity">
       <span className="os-row-name">{name}</span>
       {secondary !== undefined && secondary !== null && secondary !== "" ? <span className="os-record-secondary">{secondary}</span> : null}
@@ -95,8 +99,8 @@ export function RecordRow({ icon, name, secondary, children, state, tone = "mute
   // `os-row` stays on the root: it is how a row is found, and it is what gives
   // `data-dim` its meaning. The pill it would otherwise draw is undone in the
   // stylesheet, exactly as the Deployables list always undid it.
-  const row = !onOpen ? <div className="os-row os-record-row" data-current={current || undefined} data-dim={dim || undefined}>{body}</div> : (
-    <button type="button" className="os-row os-record-row" aria-label={label} data-current={current || undefined} data-dim={dim || undefined} data-open={open || undefined} aria-expanded={open} onClick={onOpen}>
+  const row = !onOpen ? <div className="os-row os-record-row" data-no-icon={!hasIcon || undefined} data-current={current || undefined} data-dim={dim || undefined}>{body}</div> : (
+    <button type="button" className="os-row os-record-row" data-no-icon={!hasIcon || undefined} aria-label={label} data-current={current || undefined} data-dim={dim || undefined} data-open={open || undefined} aria-expanded={open} aria-pressed={selected} disabled={disabled} onClick={onOpen}>
       {body}
     </button>
   );

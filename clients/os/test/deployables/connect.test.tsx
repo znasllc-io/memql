@@ -1176,6 +1176,8 @@ async function composeSource(seed: FakeSeed): Promise<{ connection: FakeConnecti
   await click(await screen.findByRole("button", { name: /Add a deployable/ }));
   const region = await screen.findByRole("region", { name: "Add a deployable" });
   await click(within(region).getByRole("radio", { name: /A repository/ }));
+  const addSource = within(region).queryByRole("button", { name: "Add source" });
+  if (addSource) await click(addSource);
   return { connection, region };
 }
 
@@ -1312,7 +1314,7 @@ describe("disconnecting from the repository chooser", () => {
   it("discards a selected repository and probe when GitHub reports the grant has lapsed", async () => {
     const { connection, region } = await composeSource({ credentials: [GRANT], repositories: repositoriesReply({ repositories: [WIDGET] }), sourceProbe: { "cred-grant": probeReply({ branches: ["main", "private-old-branch"] }) } });
     await click(await within(region).findByRole("button", { name: /widget/ }));
-    expect(await within(region).findByText("acme/widget at default branch")).toBeTruthy();
+    expect((await within(region).findByRole("button", { name: /widget.*chosen/ })).getAttribute("aria-expanded")).toBe("true");
     vi.spyOn(connection.query, "sourceRepositories").mockResolvedValueOnce(builtinReply("sourceRepositories", [repositoriesReply({ reason: "reconnect_required" })]));
     await click(within(region).getByRole("button", { name: "Refresh repositories" }));
     await waitFor(() => expect(floorAct("Reconnect GitHub")).toBeTruthy());
@@ -1449,7 +1451,7 @@ describe("the compose Source stop, with a connection", () => {
     // is on screen in the field, never off a `.value`.
     expect(within(region).getByDisplayValue("widget")).toBeTruthy();
     // ...and the rail's own answer says what was chosen.
-    expect(within(region).getByText("acme/widget at default branch")).toBeTruthy();
+    expect(within(region).getByRole("button", { name: /widget.*chosen/ }).getAttribute("aria-expanded")).toBe("true");
   });
 
   it("offers the branches the probe answered, default first, and following it as its own answer", async () => {
@@ -1497,6 +1499,7 @@ describe("the compose Source stop, with a connection", () => {
     });
     await click(await within(region).findByRole("button", { name: /widget/ }));
 
+    await click(screen.getByRole("button", { name: "Save source" }));
     await click(await within(region).findByRole("button", { name: /^Review/ }));
     expect(await within(region).findByText("acme-storefront")).toBeTruthy();
     expect(within(region).getByText("web")).toBeTruthy();

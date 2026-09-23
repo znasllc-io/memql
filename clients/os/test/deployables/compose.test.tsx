@@ -118,6 +118,7 @@ async function chooseSource(region: HTMLElement, name: RegExp): Promise<void> {
 /** Choose a repository returned under the person's GitHub grant. */
 async function chooseRepository(region: HTMLElement): Promise<void> {
   await chooseSource(region, /A repository/);
+  await click(await within(region).findByRole("button", { name: "Add source" }));
   await click(await within(region).findByRole("button", { name: /storefront/ }));
 }
 
@@ -180,6 +181,8 @@ function fakeConnection(seed: FakeSeed = {}): FakeConnection {
   return harnessConnection({
     credentials: [GRANT],
     repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "acme/storefront" })] }),
+    // The action response and subsequent live row name the same run.
+    deployResult: { deploymentId: "dep-1", status: "awaiting_confirm", awaitingConfirm: "true" } as Row,
     ...seed,
   });
 }
@@ -290,6 +293,11 @@ function forwardAct(name: string): HTMLButtonElement | null {
  * state the design exists to prevent.
  */
 async function forward(name: string): Promise<HTMLButtonElement> {
+  // Saving persists a new repository source; analysis is a separate act.
+  // Probe-only tests intentionally inspect Save source without invoking this.
+  if (name === "Analyze" && forwardAct("Save source")) {
+    await click(forwardAct("Save source"));
+  }
   await waitFor(() => expect(forwardAct(name)).toBeTruthy());
   return forwardAct(name)!;
 }
@@ -308,9 +316,11 @@ describe("the compose flow: the Source stop's probe", () => {
     expect(await within(region).findByText("public, default branch main")).toBeTruthy();
     // The picker carries its personal grant even when the chosen repository is public.
     expect(connection.callsNamed("sourceProbe")).toEqual([`builtin sourceProbe(repoUrl: "${REPO}", credentialId: "cred-acme")`]);
-    // Nothing is parked: Analyze is reachable once it has a name.
+    // Nothing is parked: saving is reachable; analysis follows explicit persistence.
     await fill(NAME_FIELD, "storefront");
-    expect(forwardAct("Analyze")).toBeTruthy();
+    expect(forwardAct("Save source")).toBeTruthy();
+    expect(connection.callsNamed("createPackage")).toHaveLength(0);
+    expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
   });
 
   it("parks a repository the connected account cannot reach", async () => {
@@ -325,10 +335,10 @@ describe("the compose flow: the Source stop's probe", () => {
     expect(connection.callsNamed("sourceCredentialCreate")).toHaveLength(0);
     // A definite answer ABOUT THE REPOSITORY parks the flow: the rail stops
     // at the Repository step -- the one that holds the URL it is about -- and
-    // Analyze is out of reach. The choice above it stays answered.
+    // Saving is out of reach. The choice above it stays answered.
     expect(railStates(region).slice(0, 2)).toEqual(["complete", "stopped"]);
     await fill(NAME_FIELD, "storefront");
-    expect(forwardAct("Analyze")).toBeNull();
+    expect(forwardAct("Save source")).toBeNull();
   });
 
   it("shows an authorization refusal for the chosen GitHub account", async () => {
@@ -370,10 +380,10 @@ describe("the compose flow: the Source stop's probe", () => {
     await fill(NAME_FIELD, "storefront");
     // An answer about the PROBE, not about the repository: nothing parks.
     expect(railStates(region)[0]).toBe("complete");
-    expect(forwardAct("Analyze")).toBeTruthy();
+    expect(forwardAct("Save source")).toBeTruthy();
   });
 
-  it("NEVER blocks Analyze on a probe that could not run, and shows the server's sentence", async () => {
+  it("does not block saving on a probe that could not run, and shows the server's sentence", async () => {
     // Design H: the fetch is the authority and the probe is a courtesy. A
     // probe that threw must not stop somebody deploying a public repository.
     const connection = fakeConnection({ sourceProbeError: "source_unreadable: api.github.com is unreachable" });
@@ -382,7 +392,7 @@ describe("the compose flow: the Source stop's probe", () => {
 
     expect(await within(region).findByText("source_unreadable: api.github.com is unreachable")).toBeTruthy();
     await fill(NAME_FIELD, "storefront");
-    expect(forwardAct("Analyze")).toBeTruthy();
+    expect(forwardAct("Save source")).toBeTruthy();
     // The repository chooser remains available after the failed probe.
     expect(within(within(region).getByRole("list", { name: "acme repositories" })).getByRole("button", { name: /storefront/ })).toBeTruthy();
   });
@@ -456,7 +466,7 @@ describe("the compose flow: a zip in Files", () => {
     const floorNow = () => [...document.querySelectorAll(".os-actbar-acts button")].map((b) => [(b.textContent ?? "").trim(), b.classList.contains("os-actbar-text")]);
     await waitFor(() => expect(forwardAct("Analyze")).toBeTruthy());
     expect(floorNow()).toEqual([["Cancel", true], ["Analyze", false]]);
-    await click(forwardAct("Analyze"));
+    await click(await forward("Analyze"));
 
     const create = connection.callsNamed("createSite")[0] ?? "";
     expect(create).toContain('hostname: "landing.memql.example.com"');
@@ -567,7 +577,7 @@ async function analyzed(
   const { region, view } = await compose(connection, opts);
   await chooseRepository(region);
   await fill(NAME_FIELD, "acme");
-  await click(forwardAct("Analyze"));
+  await click(await forward("Analyze"));
   await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(mintedPackageId(connection)), "NODE_CREATED");
   await within(region).findByText("clients/web");
   return { connection, region, view };
@@ -629,7 +639,7 @@ describe("the compose flow: where each app will live", () => {
     const { region } = await compose(connection);
     await chooseRepository(region);
     await fill(NAME_FIELD, "acme");
-    await click(forwardAct("Analyze"));
+    await click(await forward("Analyze"));
     await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(mintedPackageId(connection), { report: REPORT_TWO }), "NODE_CREATED");
     await within(region).findByText("clients/marketing");
 
@@ -656,7 +666,7 @@ describe("the compose flow: where each app will live", () => {
     const { region } = await compose(connection);
     await chooseRepository(region);
     await fill(NAME_FIELD, "acme");
-    await click(forwardAct("Analyze"));
+    await click(await forward("Analyze"));
     await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(mintedPackageId(connection), { report: REPORT_TWO }), "NODE_CREATED");
     await within(region).findByText("clients/marketing");
 
@@ -690,7 +700,7 @@ describe("the compose flow: where each app will live", () => {
     const { region } = await compose(connection);
     await chooseRepository(region);
     await fill(NAME_FIELD, "acme");
-    await click(forwardAct("Analyze"));
+    await click(await forward("Analyze"));
     const pkgId = mintedPackageId(connection);
     await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(pkgId, { report: REPORT_TWO }), "NODE_CREATED");
     await within(region).findByText("clients/marketing");
@@ -732,7 +742,7 @@ describe("the compose flow: where each app will live", () => {
     const { region } = await compose(connection);
     await chooseRepository(region);
     await fill(NAME_FIELD, "acme");
-    await click(forwardAct("Analyze"));
+    await click(await forward("Analyze"));
     const pkgId = mintedPackageId(connection);
     await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(pkgId, { report: REPORT_TWO }), "NODE_CREATED");
     await within(region).findByText("clients/marketing");
@@ -773,7 +783,7 @@ describe("the compose flow: where each app will live", () => {
   it("offers the client to everybody who composes, and their own domain only with the domains part", async () => {
     const { region, view } = await analyzed();
     await openAddresses();
-    expect(within(region).getByLabelText("The client storefront is for")).toBeTruthy();
+    expect(within(region).getByLabelText("The account storefront is for")).toBeTruthy();
     expect(within(region).getByLabelText("A domain of the client's own for storefront")).toBeTruthy();
     view.unmount();
 
@@ -784,7 +794,7 @@ describe("the compose flow: where each app will live", () => {
       { role: "developer", capabilities: seededAccessWithout("developer", "app:deployables/domains") },
     );
     await openAddresses();
-    expect(within(developer).getByLabelText("The client storefront is for")).toBeTruthy();
+    expect(within(developer).getByLabelText("The account storefront is for")).toBeTruthy();
     expect(within(developer).queryByLabelText("A domain of the client's own for storefront")).toBeNull();
   });
 
@@ -803,13 +813,19 @@ describe("the compose flow: where each app will live", () => {
     expect(confirmed).toContain('accountId: "self"');
   });
 
-  it("ties a new source to the cluster's own account when it is registered", async () => {
-    // The package is registered at Analyze, before any client can be picked
-    // -- the picker is on the Where-it-lives stop, which the parked run
-    // opens. So the source itself is the cluster's own (memql#5303, D12): the
-    // people its group admits, and staff, read it and its runs from now on.
-    const { connection } = await analyzed();
+  it("saves a source under the default account before analysis, without creating it twice", async () => {
+    const connection = fakeConnection({ sourceProbe: { "": probeReply() } });
+    const { region } = await compose(connection);
+    await chooseRepository(region);
+    await fill(NAME_FIELD, "acme");
+    expect(connection.callsNamed("createPackage")).toHaveLength(0);
+    await click(await forward("Save source"));
+    expect(connection.callsNamed("createPackage")).toHaveLength(1);
     expect(connection.callsNamed("createPackage")[0]).toContain('accountId: "self"');
+    expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
+    await click(await forward("Analyze"));
+    expect(connection.callsNamed("createPackage")).toHaveLength(1);
+    expect(connection.callsNamed("packageDeploy")).toHaveLength(1);
   });
 });
 
@@ -891,7 +907,7 @@ describe("the compose flow: what the run answers", () => {
     const { region } = await compose(connection);
     await chooseRepository(region);
     await fill(NAME_FIELD, "acme");
-    await click(forwardAct("Analyze"));
+    await click(await forward("Analyze"));
 
     await emit(
       connection,
@@ -1010,7 +1026,7 @@ describe("a private repository whose build output is committed", () => {
 
     // Analyze.
     await fill(NAME_FIELD, "acme");
-    await click(forwardAct("Analyze"));
+    await click(await forward("Analyze"));
     expect(connection.callsNamed("createPackage")[0]).toContain('credentialId: "cred-acme"');
     await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(mintedPackageId(connection)), "NODE_CREATED");
     await within(region).findByText("clients/web");
@@ -1213,7 +1229,8 @@ describe("a source this cluster already tracks", () => {
     await fill(NAME_FIELD, "acme again");
     await within(region).findByText(/public, default branch main/);
     expect(within(region).queryByText(/already tracked by/)).toBeNull();
-    expect(await forward("Analyze")).toBeTruthy();
+    expect(await forward("Save source")).toBeTruthy();
+    expect(connection.callsNamed("createPackage")).toHaveLength(0);
   });
 });
 

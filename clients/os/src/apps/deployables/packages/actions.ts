@@ -20,6 +20,7 @@ import {
   enableDeployables,
   setPackageCredential,
   setSiteLive,
+  type DeployOutcome,
   type NewCredential,
   type NewPackageInput,
   type Placement,
@@ -141,7 +142,7 @@ export interface DeployOptions {
 
 export interface PackageActions extends WriteState {
   /** Start a run, or confirm one already parked. */
-  deploy: (packageId: string, opts: DeployOptions) => Promise<void>;
+  deploy: (packageId: string, opts: DeployOptions) => Promise<DeployOutcome | null>;
   /**
    * Retry a run that was lost, from the bytes it already fetched (memql#4900).
    * A separate verb from `deploy` because it is a different promise: deploy
@@ -188,7 +189,7 @@ export function usePackageActions(): PackageActions {
     refusal,
     clear,
     deploy: async (packageId, opts) => {
-      await run((query) =>
+      return await run((query) =>
         deployPackage(query, packageId, {
           confirm: opts.confirm,
           ...(opts.placements ? { placements: opts.placements } : {}),

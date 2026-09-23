@@ -673,7 +673,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
 
 export function withSession(
   children: ReactNode,
-  overrides: { userId?: string; role?: string; domain?: string; capabilities?: EffectiveCapability[] } = {},
+  overrides: { userId?: string; role?: string; domain?: string; capabilities?: EffectiveCapability[]; everyAccount?: boolean; accountIds?: string[] } = {},
 ) {
   const config: OsRuntimeConfig = {
     ...UNKNOWN_RUNTIME_CONFIG,
@@ -699,8 +699,8 @@ export function withSession(
           userId: overrides.userId ?? "u-me",
           primaryEmail: "owner@example.com",
           role: role,
-          everyAccount: ["owner", "admin", "developer"].includes(role),
-          accountIds: ["self"],
+          everyAccount: overrides.everyAccount ?? ["owner", "admin", "developer"].includes(role),
+          accountIds: overrides.accountIds ?? ["self"],
           roleName: "",
           rank: 0,
         },
