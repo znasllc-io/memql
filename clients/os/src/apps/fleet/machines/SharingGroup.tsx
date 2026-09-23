@@ -77,7 +77,7 @@ export function SharingGroup({
   const [open, setOpen] = useState(false);
   // What the last save on THIS machine did, and the stored state it was made
   // against. See `showReceipt` for when it stands.
-  const [receipt, setReceipt] = useState<{ receipt: SharingReceipt; before: string } | null>(null);
+  const [receipt, setReceipt] = useState<{ receipt: SharingReceipt; before: string; serve: string } | null>(null);
   const actRef = useRef<HTMLDivElement>(null);
 
   // A different machine is a different conversation: a receipt about the last
@@ -138,8 +138,14 @@ export function SharingGroup({
   // (the row still reads as it did before the save), and after, for as long as
   // the row says what the receipt says. A change landing from anywhere else
   // retires it rather than leaving a sentence about a state that has gone.
+  //
+  // AND WHILE THE MACHINE'S OWN CONSENT IS AS IT WAS: a receipt that told the
+  // owner to set inference.serve contradicts the consent line above it the
+  // moment the machine agrees.
   const showReceipt =
-    receipt !== null && (sharingSignature(machine) === receipt.before || receiptDescribes(receipt.receipt, machine));
+    receipt !== null &&
+    machine.inferenceServe === receipt.serve &&
+    (sharingSignature(machine) === receipt.before || receiptDescribes(receipt.receipt, machine));
 
   return (
     <div className="os-fleet-sharing">
@@ -178,7 +184,10 @@ export function SharingGroup({
                   : "Its cockpit serves only its owner."
                 : isOwner
                   ? "Its cockpit has not agreed to serve anyone but you. Set inference.serve to cluster in this machine's policy.yaml."
-                  : "Its cockpit has not agreed to serve anyone but its owner. Set inference.serve to cluster in this machine's policy.yaml."
+                  : // The repair is the OWNER'S -- a file on their machine's
+                    // disk -- so a non-owner is told the state, not handed an
+                    // instruction they cannot carry out.
+                    "Its cockpit has not agreed to serve anyone but its owner."
           }
         />
       </ul>
@@ -215,7 +224,7 @@ export function SharingGroup({
           writes={writes}
           onDiscard={() => setOpen(false)}
           onSaved={(done) => {
-            setReceipt({ receipt: done, before: sharingSignature(machine) });
+            setReceipt({ receipt: done, before: sharingSignature(machine), serve: machine.inferenceServe });
             setOpen(false);
           }}
           onDirectory={absorb}

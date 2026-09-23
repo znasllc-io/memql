@@ -3395,7 +3395,12 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
  * not know whom they may pick reads the answer instead of guessing names, and
  * a long directory scrolls inside its own box rather than pushing the floor
  * off the dialog. */
+/* `position: relative` MAKES THE LIST THE OPTIONS' offsetParent. Without it
+ * an option's offsetTop is measured from the dialog, counting everything
+ * above the list, and arrowing scrolled the active option OUT of view -- the
+ * kit Select escapes this only because its list is `position: fixed`. */
 .fleet-share-results {
+  position: relative;
   max-height: 212px;
   overflow-y: auto;
   border: 1px solid var(--os-line);
@@ -3449,6 +3454,25 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 .fleet-share-option:hover .fleet-share-option-add,
 .fleet-share-option[data-active] .fleet-share-option-add {
   color: var(--os-accent);
+}
+/* The refusal takes focus (so it is scrolled to and read); its outline is the
+ * notice's own edge, not a second ring around it. */
+/* Between the scrolling body and the floor: it never scrolls away, and the
+ * body gives up the height it needs. flow-root keeps the notice's margins
+ * inside, so the pinned band is exactly as tall as what it says. */
+.fleet-share-refusal {
+  flex: none;
+  display: flow-root;
+  padding: 12px 20px 14px;
+  /* The body scrolls behind this band; the hairline says where it stops. */
+  border-top: 1px solid var(--os-line);
+}
+.fleet-share-refusal:focus {
+  outline: none;
+}
+.fleet-share-refusal:focus-visible > .os-notice {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 2px;
 }
 .fleet-share-terms {
   display: flex;

@@ -111,11 +111,18 @@ read first: names, both consents given, and the week's split ledger line;
 The dialog views render the dialog directly and script the one click a view
 needs; `&modal=0` draws it in the page for a capture tool that does not paint
 the top layer (a one-shot `--headless=new --screenshot` does paint it).
+`&arrow=N` arrows N times through the results from the search: take
+`share-dialog-admin&arrow=1` and the first option must be highlighted AND in
+view (the list is its options' offsetParent only while it is positioned).
 
 Their first rendered pass found what 447 green cases could not: the search box
 drew about a hundred pixels tall, because `.os-input` is `flex: 1 1 12ch` and
 the picker is a flex COLUMN, where that basis is the height; and a private
 machine told its owner to edit `policy.yaml` for a share they had not chosen.
+The review's pass found two more that no jsdom case can see: arrowing scrolled
+the active option OUT of view (an unpositioned list, so `offsetTop` counted
+from the dialog), and a refusal at the end of the scrolling body sat below the
+fold at 1366x650 and 361x760 -- it is now pinned above the floor.
 
 ## What it is, and what it is not
 

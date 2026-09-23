@@ -237,7 +237,11 @@ describe("the sharing panel", () => {
     expect(screen.queryByRole("button", { name: "Change sharing" })).toBeNull();
     expect(screen.getByText("Only this machine's owner can change who it is shared with.")).toBeTruthy();
     expect(screen.getByText("Shared with 1 person")).toBeTruthy();
-    expect(screen.getByText(/Its cockpit has not agreed to serve anyone but its owner/)).toBeTruthy();
+    // The repair is the OWNER'S to make: a file on their machine's disk. A
+    // non-owner is told the state and not handed an instruction they cannot
+    // carry out.
+    expect(screen.getByText("Its cockpit has not agreed to serve anyone but its owner.")).toBeTruthy();
+    expect(screen.queryByText(/policy\.yaml/)).toBeNull();
     expect(conn.query.fleetShareDirectory).not.toHaveBeenCalled();
   });
 
@@ -579,6 +583,17 @@ describe("the share dialog", () => {
     expect(screen.getByRole("dialog")).toBe(dialog);
     expect(within(dialog).getByText("That change was not saved.")).toBeTruthy();
     expect(within(dialog).getByText(refusal)).toBeTruthy();
+    // THE REASON IS WHERE THE PERSON IS LOOKING. The notice is the last thing
+    // in a scrolling body, below the fold at common sizes, and the busy Save
+    // dropped focus to the page: so the notice takes focus (which scrolls it
+    // into view) and the floor says the save did not happen.
+    expect(document.activeElement).toBe(within(dialog).getByText("That change was not saved.").closest(".fleet-share-refusal"));
+    expect(within(dialog).getByText("Not saved.")).toBeTruthy();
+    // Honest about what it knows: a transport error may have landed, so it
+    // promises only that the choices are kept; the panel's live line says
+    // what is stored.
+    expect(within(dialog).getByText("Your choices are still here.")).toBeTruthy();
+    expect(within(dialog).queryByText(/exactly as it was/)).toBeNull();
     expect(within(dialog).getByRole("button", { name: "Remove Ana Ruiz" })).toBeTruthy();
     expect(within(dialog).getByRole("radio", { name: /^Specific people and groups/ }).getAttribute("aria-checked")).toBe(
       "true",
@@ -658,6 +673,77 @@ describe("the share dialog", () => {
     // Reopening starts from what is stored, not from the draft thrown away.
     const again = await openDialog();
     expect(within(again).getByRole("radio", { name: /^Only me/ }).getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("retires the receipt when the machine's own consent changes under it", async () => {
+    // The receipt told the owner to set inference.serve; once the machine has
+    // agreed, that sentence contradicts the consent line right above it.
+    const conn = fakeConnection({ fleetShareDirectory: [directory()] });
+    conn.query.fleetSetSharing.mockResolvedValueOnce(
+      builtinReply("fleetSetSharing", [
+        {
+          id: MACHINE_ID,
+          machineId: MACHINE_ID,
+          mode: "cluster",
+          people: 0,
+          groups: 0,
+          sentence:
+            "Offered to everyone on this cluster, and to the cluster's own work. The machine itself has to agree too -- set `inference.serve: cluster` in its policy.yaml -- and until it does, nothing runs on it for anybody else.",
+        },
+      ]),
+    );
+    const { rerender } = mount(studio(), { conn });
+    const dialog = await openDialog();
+    fireEvent.click(within(dialog).getAllByRole("radio")[2]!);
+    fireEvent.click(saveButton(dialog));
+    await settle();
+    rerender(studio({ mode: "cluster" }));
+    expect(screen.getByText(/The machine itself has to agree too/)).toBeTruthy();
+    rerender(studio({ mode: "cluster" }, willing));
+    expect(screen.queryByText(/The machine itself has to agree too/)).toBeNull();
+  });
+
+  it("keeps focus in the search after the last one is picked", async () => {
+    // Picking the last candidate used to unmount the focused search, dropping
+    // keyboard focus to the page behind a modal.
+    mount(studio(), { directory: directory({ people: [ANA], groups: [] }) });
+    const dialog = await openDialog();
+    fireEvent.click(within(dialog).getByRole("radio", { name: /^Specific people and groups/ }));
+    const box = search(dialog);
+    box.focus();
+    fireEvent.change(box, { target: { value: "ana" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await settle();
+    expect(document.activeElement).toBe(search(dialog));
+    expect(within(dialog).getByText("Everyone you can choose is already on the list.")).toBeTruthy();
+  });
+
+  it("does not let Escape or Cancel walk away from a save in flight", async () => {
+    // Its answer is either the receipt, which closes the dialog anyway, or a
+    // refusal -- and a refusal arriving after the dialog had gone would leave
+    // the person believing a change that was never made.
+    const conn = fakeConnection({ fleetShareDirectory: [directory()] });
+    let fail: (err: unknown) => void = () => {};
+    conn.query.fleetSetSharing.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          fail = reject;
+        }),
+    );
+    mount(studio(), { conn });
+    const dialog = await openDialog();
+    fireEvent.click(within(dialog).getAllByRole("radio")[2]!);
+    fireEvent.click(saveButton(dialog));
+    await settle();
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await settle();
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    await act(async () => {
+      fail(new Error("stream closed"));
+    });
+    await settle();
+    expect(within(dialog).getByText("That change was not saved.")).toBeTruthy();
   });
 
   it("stays open under StrictMode, whose rehearsal cleanup queues a close the platform delivers late", async () => {
@@ -752,9 +838,16 @@ describe("the sharing attention marker", () => {
   it("marks the way in, and is acknowledged by the Sharing view and by no ancestor of it", async () => {
     const conn = fakeConnection({ myWorkersWithStatus: [studio()], fleetShareDirectory: [directory()] });
     mountFleet(conn);
-    fireEvent.click(await screen.findByRole("button", { name: /^Open Studio mini/ }));
+    // THE TRAIL IS UNBROKEN: the machine's row in the list, then its Sharing
+    // tab and the way in from Equipment. A dot on the section that leads to a
+    // list with nothing marked is a dot that leads nowhere.
+    const row = await screen.findByRole("button", { name: /^Open Studio mini/ });
+    await waitFor(() => expect(within(row).getByRole("img", { name: "Unseen change" })).toBeTruthy());
+    fireEvent.click(row);
     const link = await screen.findByRole("button", { name: /^Personal inference/ });
     await waitFor(() => expect(within(link).getByRole("img", { name: "Unseen change" })).toBeTruthy());
+    const tab = screen.getByRole("button", { name: /^Sharing/ });
+    expect(within(tab).getByRole("img", { name: "Unseen change" })).toBeTruthy();
     // The app, the Machines section and the machine's Equipment are all on
     // screen, and none of them is the destination.
     await settle();

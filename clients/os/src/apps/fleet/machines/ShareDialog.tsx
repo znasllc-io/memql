@@ -122,6 +122,7 @@ export function ShareDialog({
 
   const dialogRef = useRef<HTMLDialogElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const refusalRef = useRef<HTMLDivElement>(null);
   const { read, retry } = useShareDirectory(machine.id);
   const directory = read.state === "ready" ? read.directory : null;
 
@@ -130,6 +131,9 @@ export function ShareDialog({
   const [active, setActive] = useState(-1);
   const [refused, setRefused] = useState(false);
   const [pendingFocus, setPendingFocus] = useState<number | "search" | null>(null);
+  // What the last add or remove did, for a screen reader: a chip appearing or
+  // going is otherwise silent to anybody who cannot see it.
+  const [announced, setAnnounced] = useState("");
 
   const busy = writes.busyId === machine.id;
 
@@ -197,6 +201,17 @@ export function ShareDialog({
     onSaved(receipt);
   }
 
+  // THE REASON GOES WHERE THE PERSON IS LOOKING. The notice is the last thing
+  // in a body that scrolls, below the fold at common sizes, and the busy Save
+  // took focus with it to the page: so the notice takes focus, which also
+  // scrolls it into view, and a keyboard is left inside the dialog.
+  useEffect(() => {
+    // The notice is pinned above the floor (see the markup), so it is on
+    // screen however far the body is scrolled; focus puts the keyboard on it
+    // rather than on the page behind the modal, where the busy Save left it.
+    if (refused) refusalRef.current?.focus();
+  }, [refused]);
+
   // ---- the draft -----------------------------------------------------------
 
   const candidates = candidatesFrom(directory);
@@ -227,10 +242,12 @@ export function ShareDialog({
     // The next name starts from the whole list again.
     setQuery("");
     setActive(-1);
+    setAnnounced(`Added ${candidate.name}.`);
   }
 
   function remove(index: number, subject: Subject): void {
     setDraft((held) => withoutSubject(held, subject));
+    setAnnounced(`Removed ${describe(subject).name}.`);
     const remaining = draft.subjects.length - 1;
     // Focus goes to a NEIGHBOUR -- the chip that took this one's place, else
     // the one before it -- so removing three in a row is three presses.
@@ -284,11 +301,13 @@ export function ShareDialog({
   const dirty = draftDiffers(draft, machine);
   const namesSomebody = draftNamesSomebody(draft);
   const canSave = dirty && namesSomebody && !busy;
-  const floor = !namesSomebody
-    ? "Choose at least one person or group."
-    : dirty
-      ? "Unsaved changes"
-      : "Nothing changed yet.";
+  const floor = refused
+    ? "Not saved."
+    : !namesSomebody
+      ? "Choose at least one person or group."
+      : dirty
+        ? "Unsaved changes"
+        : "Nothing changed yet.";
 
   return (
     <dialog
@@ -394,11 +413,7 @@ export function ShareDialog({
               </Caption>
             ) : null}
 
-            {directory !== null && candidates.length > 0 && available.length === 0 ? (
-              <Caption>Everyone you can choose is already on the list.</Caption>
-            ) : null}
-
-            {directory !== null && available.length > 0 ? (
+            {directory !== null && candidates.length > 0 ? (
               <>
                 <label className="os-sr-only" htmlFor={searchId}>
                   Search people and groups
@@ -429,7 +444,13 @@ export function ShareDialog({
                   }}
                   onKeyDown={onSearchKeyDown}
                 />
-                {results.length > 0 ? (
+                {available.length === 0 ? (
+                  // THE SEARCH STAYS MOUNTED once everyone is chosen: it is
+                  // where focus was when the last one was picked, and a
+                  // control that vanished from under the keyboard would drop
+                  // focus to the page behind a modal.
+                  <Caption>Everyone you can choose is already on the list.</Caption>
+                ) : results.length > 0 ? (
                   <div
                     ref={listRef}
                     id={listId}
@@ -465,8 +486,11 @@ export function ShareDialog({
                     ))}
                   </div>
                 ) : (
-                  <Caption>{`No person or group matches “${query.trim()}”.`}</Caption>
+                  <p className="os-caption" role="status">{`No person or group matches “${query.trim()}”.`}</p>
                 )}
+                <p className="os-sr-only" role="status">
+                  {announced}
+                </p>
               </>
             ) : null}
           </section>
@@ -496,15 +520,26 @@ export function ShareDialog({
           <Caption>Changes take effect on the next call. A call already running finishes.</Caption>
         </div>
 
-        {refused ? (
+      </div>
+
+      {refused ? (
+        // PINNED ABOVE THE FLOOR, not at the end of the scrolling body: that
+        // is below the fold at common sizes, and a reason the person has to
+        // scroll to find is a reason they did not get. Here it is always on
+        // screen, beside the Save that produced it.
+        <div ref={refusalRef} tabIndex={-1} className="fleet-share-refusal">
+          {/* HONEST ABOUT WHAT IT KNOWS. A refusal changed nothing, but a
+              dropped connection may have landed the write anyway; the choices
+              are kept either way, and the panel's live line says what is
+              actually stored. */}
           <Notice
             tone="error"
             sentence="That change was not saved."
-            next="Its sharing is exactly as it was, and your choices are still here."
+            next="Your choices are still here."
             detail={writes.actionError}
           />
-        ) : null}
-      </div>
+        </div>
+      ) : null}
 
       {/* THE FLOOR SAYS WHOSE TURN IT IS (DESIGN.md's wizard floor): the state
           in words on the left, the way out as a label, the one act as the

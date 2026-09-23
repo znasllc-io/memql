@@ -861,6 +861,21 @@ function SharePane({ over, startPeople = false, refuse = false }: { over: Record
         );
         people?.click();
       }
+      // `?arrow=N` arrows N times through the results from the search, so a
+      // capture shows whether the active option is kept in view (the list is
+      // its options' offsetParent only while it is positioned).
+      const arrows = Number(new URLSearchParams(window.location.search).get("arrow") ?? "0");
+      if (arrows > 0) {
+        window.setTimeout(() => {
+          const box = document.querySelector<HTMLInputElement>(".fleet-share-search");
+          box?.focus();
+          for (let i = 0; i < arrows; i += 1) {
+            window.setTimeout(() => {
+              box?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+            }, 150 * (i + 1));
+          }
+        }, 500);
+      }
       if (refuse) {
         const remove = document.querySelector<HTMLButtonElement>(".fleet-share-chip-remove");
         remove?.click();
