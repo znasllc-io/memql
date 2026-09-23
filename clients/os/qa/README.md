@@ -35,8 +35,10 @@ what says the page has not become a wall of advisories), or `overview`,
 (the Store surface), or `list`, `sources`, `list-empty`, `sources-empty`,
 `connected`, `github-owner`, `github-member`, `settings-no-app`,
 `settings-no-app-member`, `settings-app` (the Deployables app, whole), or
-`origins-silent`, `origins-mixed`, `origins-reporting` (Data origins); `mode`
-is `dark` or `light`. **Take at least one narrow capture** (`820,760`): two of
+`origins-silent`, `origins-mixed`, `origins-reporting` (Data origins), or
+`mesh-healthy`, `mesh-island`, `mesh-empty`, `mesh-node-bff`, `mesh-node-edge`,
+`mesh-node-identity`, `mesh-node-unreported` (Cluster > Mesh); `mode` is `dark`
+or `light`. **Take at least one narrow capture** (`820,760`): two of
 the first three real defects this harness found were invisible at 1400x900.
 
 `&open=1` opens every `<details>` on the page once the reads have landed. A
@@ -82,6 +84,21 @@ concepts had all reported outshouted the warn on a connector that had reported
 NOTHING -- the eye landed on the lesser reading first. The count is now in the
 quiet voice and the error itself stays in its own row, which is where the
 sentence explaining it already lived.
+
+The `mesh-*` views are Cluster > Mesh (epic memql#5338) over a sixteen-pod
+cloud-shaped cluster. `mesh-island` is the one that matters: a product bff and
+an edge that have heard nothing in three hours, a planner gone quiet, an mcp
+on an older release that has not reported, and identity sending only -- every
+state the section distinguishes, on one page. The `mesh-node-*` views are the
+node page in each reading, including a bff's full patch bay (take it narrow as
+well: under 560px the two columns stack) and identity's, which sends and hears
+nothing.
+
+Their rendered passes found what the green suite could not: the sentence named
+the quiet planner in the same breath as the two deaf nodes, hid the deaf edge
+behind "and 1 other", and broke a node id at its hyphen across two lines; a
+node with no report was dated "Report written"; identity's panel was titled
+"What it hears"; and a three-hour silence read "180 minutes".
 
 ## What it is, and what it is not
 

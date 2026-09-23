@@ -480,6 +480,15 @@ const cluster: OsAppManifest = {
   sections: CLUSTER_SECTIONS,
   settingsSection: "settings",
   logsSection: "logs",
+  // Mesh is a new place to learn whether every node hears the cluster (epic
+  // memql#5338), and nothing else in the shell says so: an island used to be
+  // found only by reading pod logs. The destination is the section itself, so
+  // the shell acknowledges the marker when Mesh is VISIBLE and opening the
+  // app on Readiness never can. Advance the revision only when the section
+  // changes meaningfully -- never because a node's counts moved.
+  attentionChanges: [
+    { id: "cluster:mesh", revision: "mesh-1", sectionId: "mesh", label: "See what every node hears" },
+  ],
   component: ClusterApp,
 };
 

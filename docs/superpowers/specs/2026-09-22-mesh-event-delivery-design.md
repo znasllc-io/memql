@@ -250,9 +250,9 @@ evidence took an investigation to find.
    write (another node recording this one going offline) omits it, and the
    read-merge keeps the node's own last report.
 3. **MemQL OS: Cluster > Mesh.** One row per live node, saying in words
-   whether it hears the cluster (Hearing, Quiet, Not hearing, No links, Sends
-   only, Not reported), and a page per node with its links -- which peers it
-   dials and which dial it -- and its counts, each dated. A node that has not
+   whether it hears the cluster (Hearing, Quiet, Not hearing, No links,
+   Starting, Sends only, Not reported), and a page per node with its links --
+   which peers it dials and which dial it -- and its counts, each dated. A node that has not
    reported is "Not reported", never a zero. Identity reads "Sends only", not
    "Not hearing".
 
@@ -280,14 +280,16 @@ landing on identity is an island by construction: identity relays nothing
   bff and an mcp. A broadcast from every origin reaches every participant,
   identity hears none, each node publishes each event exactly once, and the
   copies on the wire stay within the bound D3 gives.
-- **The three consumers end to end** (`test/meshdelivery/`, in the root module
-  because it wires `component/edge` and `component/memql` onto the node
-  transport): a registration change converges readiness everywhere, a
-  providers reload re-resolves on the edge and the product bff, and a site
-  write evicts every edge replica's resolver cache -- through the transport,
-  with the hand-built bus bridge of the older hop tests gone from the path.
-- **The readiness hop test's island list** shrinks to identity alone, as its
-  own comment said this change would do. Its convergence assertion is
+- **The three consumers end to end** (`app/mesh_delivery_consumers_test.go`,
+  in the root module because it wires `component/edge` and `component/memql`
+  onto the node transport): a registration change converges readiness
+  everywhere, a providers reload re-resolves on the edge and the product bff,
+  and a site write evicts every edge replica's resolver cache -- through the
+  transport, with the hand-built bus bridge of the older hop tests gone from
+  the path.
+- **The readiness hop test's island list** shrinks from six nodes to the two
+  the test itself arranges: identity, by design, and the edge whose only
+  stream the test cuts across the change. Its convergence assertion is
   unchanged.
 - **Loop and dedup** unit tests: a cycle, a triangle, duplicate links between
   one pair, a race won the long way round, and the hop limit.
