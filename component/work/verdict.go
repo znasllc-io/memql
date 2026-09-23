@@ -93,7 +93,7 @@ type CandidateEvidence struct {
 // this" is not a sentence anybody can act on.
 func CandidateGate(e CandidateEvidence) (ready bool, reason string) {
 	if e.Uses < 2 {
-		return false, fmt.Sprintf("used %d times, and a procedure needs at least two uses", e.Uses)
+		return false, usedPhrase(e.Uses) + ", and a procedure needs at least two uses"
 	}
 	if e.UnexplainedHoles > 0 {
 		return false, fmt.Sprintf("%d of its holes are unexplained, and every hole must be classified before it can be compared", e.UnexplainedHoles)
@@ -117,4 +117,18 @@ func EntryRung(e CandidateEvidence) (Rung, string) {
 		return RungShadow, reason
 	}
 	return RungCandidate, reason
+}
+
+// usedPhrase spells a use count the way a person reads it: the reason is
+// shown verbatim in Nexus, and "used 1 times" is the sentence a reader stops
+// at.
+func usedPhrase(n int) string {
+	switch n {
+	case 0:
+		return "never used"
+	case 1:
+		return "used once"
+	default:
+		return fmt.Sprintf("used %d times", n)
+	}
 }

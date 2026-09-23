@@ -7,6 +7,7 @@ import (
 	"errors"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -150,5 +151,31 @@ func TestValidateApprovalKindAcceptsAProcedurePromotionWithARun(t *testing.T) {
 	p.ShadowRunId = ""
 	if err := ValidateApprovalKind(ProcedurePromotionApproval(p, time.Now())); !errors.Is(err, ErrApprovalNeedsRun) {
 		t.Fatalf("a promotion built with no shadow run must be refused by the writer's check; got %v", err)
+	}
+}
+
+// TestThePromotionQuestionNamesTheGoalNotTheConstruct: the question is what
+// a person reads in their inbox, and a learned procedure's construct name is
+// derived from a digest (learnedProcedure_<sig>_l1). The goal it serves is
+// the name they recognise; the construct name is only the fallback.
+func TestThePromotionQuestionNamesTheGoalNotTheConstruct(t *testing.T) {
+	cases := []struct {
+		title, name, want, never string
+	}{
+		{"Reconcile the ledger", "learnedProcedure_abc_l1", `"Reconcile the ledger"`, "learnedProcedure_abc_l1"},
+		{"", "learnedProcedure_abc_l1", "learnedProcedure_abc_l1", `""`},
+		{"  ", "", "this learned procedure", `""`},
+	}
+	for _, tc := range cases {
+		a := ProcedurePromotionApproval(PromotionProposal{
+			OwnerUserId: "u1", ConstructId: "c1", ConstructName: tc.name, ProcedureHash: "sha256:x",
+			ShadowRunId: "r1", ShadowMatches: 5, Title: tc.title,
+		}, time.Unix(0, 0))
+		if !strings.Contains(a.Question, tc.want) {
+			t.Errorf("title %q, name %q: question %q does not name %s", tc.title, tc.name, a.Question, tc.want)
+		}
+		if strings.Contains(a.Question, tc.never) {
+			t.Errorf("title %q, name %q: question %q names %s", tc.title, tc.name, a.Question, tc.never)
+		}
 	}
 }
