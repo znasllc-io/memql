@@ -13,7 +13,7 @@ import (
 
 // meshHintWire is a test transport that carries a fast-path hint from a producer
 // EventBridge to a consumer EventBridge over the EXACT encode/decode path the
-// real mesh uses -- encodeMeshHint -> EventForward -> HandleInbound ->
+// real mesh uses -- encodeMeshHint -> EventForward -> ReceiveForward ->
 // decodeMeshHint -> fastPathSink -- but without standing up a gRPC peer
 // connection. It is the producer node's meshFastPath: when the producer
 // substrate Publishes, it calls PublishHint here, which builds the wire envelope
@@ -30,15 +30,14 @@ func (w *meshHintWire) PublishHint(d Deliverable) {
 	if err != nil {
 		panic(err)
 	}
-	w.consumer.HandleInbound(&nodev1.EventForward{
+	w.consumer.ReceiveForward(&nodev1.EventForward{
 		EventId:      "hint-envelope-" + d.EventID,
 		Topic:        meshHintTopic,
 		Kind:         int32(d.Kind),
 		Ts:           timestamppb.Now(),
 		Payload:      payload,
 		OriginNodeId: d.OriginNode,
-		Ttl:          1,
-	})
+	}, d.OriginNode)
 }
 
 // drainOne reads one deliverable from ch within timeout, failing if none arrives.

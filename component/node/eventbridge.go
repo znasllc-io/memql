@@ -4,10 +4,12 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/znasllc-io/memql/component/bus"
 	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/metrics"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/component"
@@ -20,19 +22,44 @@ const (
 	EventBridgeComponentName = common.ComponentName("nodeEventBridge")
 	eventBridgeOrder         = 46 // after PeerManager (45), before NodeServer (48)
 
-	defaultTTL = 3
+	// meshMaxHops is how many links a copy may travel (memql#5338, D4): every
+	// node within 16 links of an event's origin hears it, and nothing relays a
+	// copy that has already travelled 16. It replaced a TTL of 3, which is
+	// shorter than paths that exist in the cloud's own topology once every
+	// stream carries events both ways (an edge on one bff to an edge on the
+	// other is four links; an mcp parented on an edge, five).
+	//
+	// Sixteen is not tuned to a topology. A node relays a first sighting once,
+	// so every first-sighting path is a simple path and, in a mesh of
+	// seventeen nodes or fewer, no copy can run out of budget before every
+	// node has heard it; the shorter-route relay in ReceiveForward covers a
+	// bigger mesh. The budget is a hard stop for a mesh that has gone wrong,
+	// not a knob.
+	meshMaxHops = 16
+
 	// defaultDedupTTL is how long a forwarded event id is remembered so a
 	// re-delivered copy is suppressed (memql#1155). Time-windowed (not a
 	// fixed count) so high event volume can't evict an id and re-admit it
 	// mid-storm. The mesh re-circulation window is sub-second; 2 minutes is
 	// generous headroom and bounds memory to ~rate*ttl.
 	defaultDedupTTL = 2 * time.Minute
+
+	// meshDropLogEvery rate-limits the "copies are being dropped" warning to
+	// one line per interval, carrying the count since the last line.
+	meshDropLogEvery = 10 * time.Second
 )
 
 // EventBridge connects the local events.Bus to the distributed NodeService
-// mesh. It subscribes to all local events and forwards matching ones to
-// connected peers. Inbound events from peers are published locally after
-// dedup and TTL checks.
+// mesh. It subscribes to all local events and forwards the ones a routing
+// rule names to its peers; events arriving from peers are published locally
+// ONCE and relayed ONCE (ReceiveForward).
+//
+// EVERY STREAM CARRIES EVENTS BOTH WAYS (memql#5338). A forward goes to every
+// peer this node holds a stream to, whichever node opened it: a dialed
+// connection, or the push half of a stream the peer opened to this node
+// (inbound_stream.go). Before that epic events went only along OUTBOUND dials,
+// and a node nobody dialed -- the edge, a product bff, mcp -- heard nothing.
+// Design record: docs/superpowers/specs/2026-09-22-mesh-event-delivery-design.md.
 type EventBridge struct {
 	*component.Component
 
@@ -45,26 +72,6 @@ type EventBridge struct {
 	unsubscribe func() // local bus subscription cleanup
 	wiring      *bus.Wiring
 
-	// suppressInboundChatReply, when true, drops the INBOUND mesh copy of the
-	// chat-reply topics (utterance / presence / pack-registered) before it is
-	// published onto THIS node's local bus. Set only on the bff (via
-	// SuppressInboundChatReply from app/cluster.go) once ChatReplyDelivery is
-	// wired: on the bff the browser must receive those topics EXACTLY ONCE, and
-	// the durable substrate (memql#1264) is their single delivery path, so a
-	// second copy arriving over the mesh would double-deliver to the browser.
-	//
-	// This is deliberately asymmetric and inbound-only:
-	//   - The OUTBOUND forward (onLocalEvent -> peers) is UNTOUCHED, so a human
-	//     utterance written on the bff still reaches the cognition/agent worker
-	//     that subscribes graph.node.created.v1:cognition:utterance to produce
-	//     the reply. The chat TRIGGER path must keep flowing over the mesh.
-	//   - On a WORKER (non-bff) the inbound publish is UNTOUCHED, so cognition
-	//     still sees the human utterance on its local bus.
-	// Only the bff's inbound-to-local-bus copy of these reply topics is dropped,
-	// because only the bff fans them to a browser and only the bff subscribes
-	// the substrate.
-	suppressInboundChatReply bool
-
 	// fastPathSink receives a decoded mesh fast-path hint inbound from a peer
 	// (memql#1289). It is the local DeliverySubstrate's HandleFastPath, set on
 	// every mesh node via SetFastPathSink from app/cluster.go. A nil sink means
@@ -75,12 +82,29 @@ type EventBridge struct {
 	// live local subscriber wakes instantly instead of waiting for the durable
 	// poll floor (ADR 4.5; see PublishHint).
 	fastPathSink func(Deliverable)
+
+	stats meshStats
 }
 
-// SuppressInboundChatReply drops the inbound mesh copy of the chat-reply topics
-// on this node's local bus so the durable substrate is their single delivery
-// path to the browser (memql#1264). Called from app/cluster.go on the bff only.
-func (eb *EventBridge) SuppressInboundChatReply(on bool) { eb.suppressInboundChatReply = on }
+// meshStats is what this node has done with broadcast events since it
+// started: the counts behind its delivery report (memql#5338, D7). The same
+// increments feed the process's Prometheus counters, so the two can never
+// disagree about what they are counting.
+type meshStats struct {
+	since time.Time
+
+	originated atomic.Int64 // events published here and put on the mesh
+	heard      atomic.Int64 // events a peer delivered and this node published
+	relayed    atomic.Int64 // events this node passed on
+	duplicates atomic.Int64 // copies of events already heard, dropped
+	hopLimited atomic.Int64 // copies not relayed at the hop limit
+	dropped    atomic.Int64 // copies a transport could not take
+
+	lastHeard atomic.Int64 // unix nanos of the last first sighting; 0 = never
+
+	lastDropLog atomic.Int64 // unix nanos; rate-limits the drop warning
+	dropsSince  atomic.Int64 // drops since the last warning
+}
 
 // SetFastPathSink wires the local DeliverySubstrate's HandleFastPath as the
 // receiver for inbound mesh fast-path hints (memql#1289). Called from
@@ -92,8 +116,9 @@ func (eb *EventBridge) SuppressInboundChatReply(on bool) { eb.suppressInboundCha
 // inbound hints are ignored: correctness never depends on them (ADR 4.5 rule 3).
 func (eb *EventBridge) SetFastPathSink(sink func(Deliverable)) { eb.fastPathSink = sink }
 
-// NewEventBridge creates an EventBridge that bridges events between the
-// local bus and connected peers.
+// NewEventBridge creates an EventBridge that bridges events between the local
+// bus and the mesh, and installs it as peerManager's event sink: every stream
+// this node reads -- accepted, parent, dialed -- delivers into it.
 func NewEventBridge(identity *Identity, localBus *events.Bus, peerManager *PeerManager, logger *slog.Logger) *EventBridge {
 	comp, _ := component.New(EventBridgeComponentName)
 
@@ -106,6 +131,8 @@ func NewEventBridge(identity *Identity, localBus *events.Bus, peerManager *PeerM
 		seen:        newEventDedup(defaultDedupTTL),
 		logger:      logger,
 	}
+	eb.stats.since = time.Now().UTC()
+	peerManager.setEventSink(eb)
 
 	eb.ConfigureLifecycle(
 		component.WithRunHook(eb.run),
@@ -120,9 +147,20 @@ func (*EventBridge) Order() int {
 	return eventBridgeOrder
 }
 
-// HandleInbound processes an EventForward message received from a peer.
-// It checks dedup and TTL, then publishes the event on the local bus.
-func (eb *EventBridge) HandleInbound(evt *nodev1.EventForward) {
+// ReceiveForward is the ONE arrival path for an event a peer sent, whichever
+// direction of whichever stream it came down (memql#5338, D3, D6). It is
+// flooding with duplicate suppression:
+//
+//   - a FIRST sighting is published on the local bus and relayed;
+//   - a repeat that travelled FEWER hops than every copy before it is relayed
+//     again and not republished, so a copy that won the race the long way
+//     round cannot starve the far side of the mesh of hop budget;
+//   - any other repeat is dropped.
+//
+// So each node publishes an event once and relays it a bounded number of
+// times -- in practice once -- and there is no loop to prevent: a node that
+// already relayed a copy at least as short does nothing with this one.
+func (eb *EventBridge) ReceiveForward(evt *nodev1.EventForward, fromNodeId string) {
 	if evt == nil {
 		return
 	}
@@ -132,12 +170,13 @@ func (eb *EventBridge) HandleInbound(evt *nodev1.EventForward) {
 	// ordinary bus event: decode it and hand it to the substrate's
 	// HandleFastPath, which feeds the per-subscription dedup window and wakes a
 	// live local subscriber for LATENCY. It never touches the local bus and
-	// never advances a cursor (ADR 4.5). A duplicate/re-circulated hint is
-	// harmless -- the substrate's dedup and the durable cursor are the guards --
-	// so it is deliberately NOT run through eb.seen (which would otherwise
-	// suppress a legitimately-distinct deliverable that reused a coincidental
-	// mesh envelope id). It is also NOT re-forwarded to other peers: the hint is
-	// broadcast by the producer, so every owner already receives it directly.
+	// never advances a cursor (ADR 4.5). A duplicate hint is harmless -- the
+	// substrate's dedup and the durable cursor are the guards -- so it is
+	// deliberately NOT run through eb.seen (which would otherwise suppress a
+	// legitimately-distinct deliverable that reused a coincidental mesh
+	// envelope id). It is also never relayed: the producer sends it to every
+	// peer it holds a stream to, and an owner it misses catches up on the
+	// durable pull.
 	if evt.Topic == meshHintTopic {
 		if eb.fastPathSink != nil {
 			if d, ok := decodeMeshHint(evt); ok {
@@ -147,21 +186,27 @@ func (eb *EventBridge) HandleInbound(evt *nodev1.EventForward) {
 		return
 	}
 
-	// Dedup check
-	if eb.seen.Check(evt.EventId) {
+	// A copy on the wire has travelled at least the link it arrived on. A
+	// pre-epic sender sets no hops at all; reading its copy as 0 would make it
+	// look shorter than any real route and set off a needless relay.
+	hops := evt.GetHops()
+	if hops < 1 {
+		hops = 1
+	}
+	first, shorter := eb.seen.observe(evt.GetEventId(), hops)
+	if !first {
+		eb.stats.duplicates.Add(1)
+		metrics.MeshEvent(metrics.MeshDuplicate, 1)
+		if shorter {
+			eb.relay(evt, hops, fromNodeId)
+		}
 		return
 	}
 
-	// TTL check
-	if evt.Ttl <= 0 {
-		eb.logger.Debug("dropping event with expired TTL",
-			"event_id", evt.EventId,
-			"topic", evt.Topic,
-		)
-		return
-	}
+	eb.stats.heard.Add(1)
+	eb.stats.lastHeard.Store(time.Now().UnixNano())
+	metrics.MeshEvent(metrics.MeshHeard, 1)
 
-	// Convert proto payload to map[string]any
 	var payload map[string]any
 	if evt.Payload != nil {
 		payload = evt.Payload.AsMap()
@@ -169,9 +214,7 @@ func (eb *EventBridge) HandleInbound(evt *nodev1.EventForward) {
 	if payload == nil {
 		payload = make(map[string]any)
 	}
-
-	// Publish locally with origin tracking
-	localEvent := events.Event{
+	eb.publishViaBus(events.Event{
 		Topic:        evt.Topic,
 		Kind:         events.Kind(evt.Kind),
 		Timestamp:    evt.Ts.AsTime(),
@@ -179,9 +222,41 @@ func (eb *EventBridge) HandleInbound(evt *nodev1.EventForward) {
 		Metadata:     make(map[string]string),
 		OriginNodeId: evt.OriginNodeId,
 		Cause:        causeFromProto(evt.Cause),
-	}
+	})
 
-	eb.publishViaBus(localEvent)
+	eb.relay(evt, hops, fromNodeId)
+}
+
+// relay passes an arrived event on to this node's other peers, one link
+// further along: every event participant except the peer it came from and
+// the node it originated on. hops is how far the arriving copy travelled; a
+// copy that has already travelled meshMaxHops goes no further.
+func (eb *EventBridge) relay(evt *nodev1.EventForward, hops int32, fromNodeId string) {
+	if hops >= meshMaxHops {
+		eb.stats.hopLimited.Add(1)
+		metrics.MeshEvent(metrics.MeshHopLimited, 1)
+		return
+	}
+	// This node's own rules decide, not the origin's: a product pack can
+	// register rules on one binary and not another, and a relay must not carry
+	// a topic this binary was never told to.
+	decision := evaluateRouting(eb.rules, evt.Topic)
+	if !decision.Forward {
+		return
+	}
+	relayed := &nodev1.EventForward{
+		EventId:      evt.EventId,
+		Topic:        evt.Topic,
+		Kind:         evt.Kind,
+		Ts:           evt.Ts,
+		Payload:      evt.Payload,
+		OriginNodeId: evt.OriginNodeId,
+		Cause:        evt.Cause,
+		Hops:         hops + 1,
+	}
+	eb.sendToPeers(relayed, decision, fromNodeId, evt.OriginNodeId)
+	eb.stats.relayed.Add(1)
+	metrics.MeshEvent(metrics.MeshRelayed, 1)
 }
 
 // run is the lifecycle loop. It subscribes to the local bus and watches
@@ -199,9 +274,10 @@ func (eb *EventBridge) run(ctx context.Context, markStarted func()) error {
 }
 
 // onLocalEvent is called for every local event. It evaluates routing rules
-// and forwards the event to peers if appropriate.
+// and puts the event on the mesh if one names it.
 func (eb *EventBridge) onLocalEvent(event events.Event) {
-	// Never forward events that originated from another node (prevent loops)
+	// An event a peer delivered is relayed by ReceiveForward, never forwarded
+	// again from here as though this node had originated it.
 	if event.IsRemote() {
 		return
 	}
@@ -211,11 +287,10 @@ func (eb *EventBridge) onLocalEvent(event events.Event) {
 		return
 	}
 
-	// Build the proto EventForward
 	eventId := id.NewShortId()
-
-	// Mark as seen so we don't re-process our own forward
-	eb.seen.Check(eventId)
+	// Recorded at distance 0, so no copy that comes back round can ever read
+	// as new here, nor as a shorter route.
+	eb.seen.observe(eventId, 0)
 
 	payloadStruct, err := structpb.NewStruct(event.Payload)
 	if err != nil {
@@ -226,49 +301,34 @@ func (eb *EventBridge) onLocalEvent(event events.Event) {
 		payloadStruct = &structpb.Struct{}
 	}
 
-	forward := &nodev1.EventForward{
+	eb.sendToPeers(&nodev1.EventForward{
 		EventId:      eventId,
 		Topic:        event.Topic,
 		Kind:         int32(event.Kind),
 		Ts:           timestamppb.New(event.Timestamp),
 		Payload:      payloadStruct,
 		OriginNodeId: eb.identity.ID,
-		Ttl:          defaultTTL,
 		Cause:        causeToProto(event.Cause),
-	}
-
-	eb.forwardToPeers(forward, decision)
+		Hops:         1, // the link it is about to travel
+	}, decision)
+	eb.stats.originated.Add(1)
+	metrics.MeshEvent(metrics.MeshOriginated, 1)
 }
 
-// forwardToPeers sends an EventForward to the appropriate peers based on the
-// routing decision. It is a best-effort fast-path send: a peer with a live
-// outbound Connection is sent to immediately; a Connection==nil peer is simply
-// skipped.
+// sendToPeers puts one copy of forward on ONE transport to every target peer
+// -- a dialed connection or the push half of a stream the peer opened
+// (PeerManager.eventTarget) -- skipping the peers named in exclude, and
+// returns how many copies were queued. It never blocks: a transport that
+// cannot take the copy drops it, and the drop is counted.
 //
-// There is no buffering and no skip-classification here -- both were ad-hoc
-// push-model patches (the #1232 per-peer outbox and the #1245 dead-peer skip)
-// that have been retired in epic memql#1259 Phase 2 (memql#1267). For the
-// traffic that moved onto the durable delivery substrate (the chat-reply,
-// RPC and streaming keys of memql#1264/#1265/#1266) the substrate -- not the
-// mesh -- is the cross-replica guarantee: a hint that misses a
-// not-yet-connected peer is harmless there, because the durable pull catches
-// that consumer up, and the receiver dedups by EventId
-// (component/node/dedup.go) so the two paths never double-deliver.
-//
-// ORDINARY BUS EVENTS DID NOT MOVE, and for them there is no second path
-// (memql#5259). A graph.node.* forward that skips a peer is simply never
-// heard there -- nor on a node nobody dials, since this sends only along
-// OUTBOUND connections. A consumer that must be right on every replica needs
-// its own floor, as the readiness recompute loop has (component/memql/
-// readiness_recompute_subscriber.go, and readiness_mesh_hop_test.go here).
-func (eb *EventBridge) forwardToPeers(forward *nodev1.EventForward, decision routingDecision) {
-	msg := &nodev1.NodeClientMessage{
-		MessageId: id.NewShortId(),
-		Payload: &nodev1.NodeClientMessage_EventForward{
-			EventForward: forward,
-		},
-	}
-
+// A peer with no transport at all (a sibling learned only from gossip) is
+// skipped: a relay reaches it. What is NOT here is a buffer for a peer that
+// is absent -- the retired #1232 outbox. For the traffic the durable
+// substrate carries (memql#1264/#1265/#1266) that substrate is the guarantee;
+// for an ordinary bus event a node with no live stream at all misses what is
+// broadcast meanwhile, and a consumer that must converge anyway has its own
+// floor (the readiness safety net, the edge cache TTL, the dialer ticker).
+func (eb *EventBridge) sendToPeers(forward *nodev1.EventForward, decision routingDecision, exclude ...string) int {
 	var targets []*PeerEntry
 	if decision.Broadcast {
 		targets = meshEventParticipants(eb.peerManager.AllPeers())
@@ -277,91 +337,60 @@ func (eb *EventBridge) forwardToPeers(forward *nodev1.EventForward, decision rou
 	}
 
 	sent := 0
-	var skippedTypes []string
 	for _, peer := range targets {
-		if conn, ok := eb.peerManager.sendTarget(peer); ok {
-			conn.Send(msg)
-			sent++
-		} else if peer != nil && peer.Info != nil {
-			skippedTypes = append(skippedTypes, peer.Info.NodeType)
+		if peer == nil || peer.Info == nil || excluded(peer.Info.NodeId, exclude) {
+			continue
 		}
+		send, transport, ok := eb.peerManager.eventTarget(peer)
+		if !ok {
+			continue
+		}
+		if send(forward) {
+			sent++
+			metrics.MeshCopy(transport, metrics.MeshCopySent)
+			continue
+		}
+		eb.noteDroppedCopy(peer.Info.NodeId, transport)
 	}
 
 	if len(targets) > 0 {
-		eb.logger.Debug("event forwarded to peers",
+		eb.logger.Debug("mesh event sent to peers",
 			"topic", forward.Topic,
 			"event_id", forward.EventId,
-			"peer_count", sent,
+			"hops", forward.Hops,
+			"sent", sent,
 			"targets", len(targets),
 			"broadcast", decision.Broadcast,
 		)
 	}
-
+	return sent
 }
 
-// ForwardInboundToPeers re-forwards an inbound event to other peers with
-// decremented TTL. Used for mesh propagation.
-func (eb *EventBridge) ForwardInboundToPeers(evt *nodev1.EventForward, excludeNodeId string) {
-	if evt.Ttl <= 1 {
-		return // would be 0 after decrement, don't forward
+func excluded(nodeId string, exclude []string) bool {
+	for _, x := range exclude {
+		if x != "" && x == nodeId {
+			return true
+		}
 	}
+	return false
+}
 
-	decision := evaluateRouting(eb.rules, evt.Topic)
-	if !decision.Forward {
+// noteDroppedCopy counts a copy a transport could not take, and says so at
+// most once per meshDropLogEvery with the count since the last line. A peer
+// that stops reading drops every copy; one warning per copy would bury the
+// log.
+func (eb *EventBridge) noteDroppedCopy(peerId, transport string) {
+	eb.stats.dropped.Add(1)
+	metrics.MeshCopy(transport, metrics.MeshCopyDropped)
+	n := eb.stats.dropsSince.Add(1)
+	now := time.Now().UnixNano()
+	last := eb.stats.lastDropLog.Load()
+	if now-last < int64(meshDropLogEvery) || !eb.stats.lastDropLog.CompareAndSwap(last, now) {
 		return
 	}
-
-	// Clone with decremented TTL
-	forwarded := &nodev1.EventForward{
-		EventId:      evt.EventId,
-		Topic:        evt.Topic,
-		Kind:         evt.Kind,
-		Ts:           evt.Ts,
-		Payload:      evt.Payload,
-		OriginNodeId: evt.OriginNodeId,
-		Ttl:          evt.Ttl - 1,
-		Cause:        evt.Cause,
-	}
-
-	msg := &nodev1.NodeClientMessage{
-		MessageId: id.NewShortId(),
-		Payload: &nodev1.NodeClientMessage_EventForward{
-			EventForward: forwarded,
-		},
-	}
-
-	var targets []*PeerEntry
-	if decision.Broadcast {
-		targets = meshEventParticipants(eb.peerManager.AllPeers())
-	} else {
-		targets = eb.peerManager.ByType(decision.TargetType)
-	}
-
-	// Best-effort fast-path relay: send to connected peers, skip the rest.
-	// As in forwardToPeers, a Connection==nil peer is skipped -- harmlessly for
-	// traffic the durable substrate (memql#1264) also carries, and FOR GOOD for
-	// an ordinary bus event, which has no second path (memql#5259). The relayed
-	// copy keeps the original EventId, so the receiver's dedup window
-	// suppresses any duplicate that also arrives via a direct hop.
-	sent := 0
-	for _, peer := range targets {
-		if peer.Info.NodeId == excludeNodeId {
-			continue // don't send back to the node that sent it
-		}
-		if conn, ok := eb.peerManager.sendTarget(peer); ok {
-			conn.Send(msg)
-			sent++
-		}
-	}
-
-	if len(targets) > 0 {
-		eb.logger.Debug("mesh relay forwarded to peers",
-			"topic", evt.Topic,
-			"event_id", evt.EventId,
-			"ttl", evt.Ttl,
-			"peer_count", sent,
-		)
-	}
+	eb.stats.dropsSince.Add(-n)
+	eb.logger.Warn("mesh: event copies dropped; a peer's stream could not take them",
+		"peer_id", peerId, "transport", transport, "dropped", n)
 }
 
 // cleanup removes the local bus subscription.
@@ -373,12 +402,74 @@ func (eb *EventBridge) cleanup() {
 	eb.logger.Info("event bridge cleaned up")
 }
 
-// eventTimestamp returns a time.Time from a proto timestamp, or now if nil.
-func eventTimestamp(ts *timestamppb.Timestamp) time.Time {
-	if ts != nil {
-		return ts.AsTime()
+// MeshReport is this node's account of what it hears (memql#5338, D7): its
+// links, and what it has done with broadcast events since it started. The
+// node's own v1:cluster:node row carries it, refreshed by the self heartbeat,
+// and MemQL OS draws it in Cluster > Mesh.
+type MeshReport struct {
+	// Receives is false on a node that takes no mesh events by design --
+	// identity (meshEventParticipants) -- so a zero `heard` there is the
+	// design and not an island.
+	Receives bool
+	// Since is when this process started counting.
+	Since time.Time
+	// Links is every peer this node holds a stream to, in either direction.
+	Links []MeshLink
+
+	Heard      int64
+	Duplicates int64
+	Originated int64
+	Relayed    int64
+	Dropped    int64
+	HopLimited int64
+
+	// LastHeardAt is the last first sighting; zero until the first one.
+	LastHeardAt time.Time
+}
+
+// MeshReport snapshots this node's delivery report.
+func (eb *EventBridge) MeshReport() MeshReport {
+	r := MeshReport{
+		Receives:   takesMeshEvents(eb.identity.Type),
+		Since:      eb.stats.since,
+		Links:      eb.peerManager.meshLinks(),
+		Heard:      eb.stats.heard.Load(),
+		Duplicates: eb.stats.duplicates.Load(),
+		Originated: eb.stats.originated.Load(),
+		Relayed:    eb.stats.relayed.Load(),
+		Dropped:    eb.stats.dropped.Load(),
+		HopLimited: eb.stats.hopLimited.Load(),
 	}
-	return time.Now().UTC()
+	if ns := eb.stats.lastHeard.Load(); ns != 0 {
+		r.LastHeardAt = time.Unix(0, ns).UTC()
+	}
+	return r
+}
+
+// Wire is the report as the `mesh` object on a v1:cluster:node row. Field
+// names are the concept's (dsl/cluster/concepts.memql); lastHeardAt is ABSENT
+// until the first event, because a zero time would read as "heard at the epoch"
+// rather than as "never".
+func (r MeshReport) Wire() map[string]any {
+	links := make([]any, 0, len(r.Links))
+	for _, l := range r.Links {
+		links = append(links, map[string]any{"node": l.Node, "type": l.Type, "via": l.Via})
+	}
+	out := map[string]any{
+		"receives":   r.Receives,
+		"since":      r.Since.UTC().Format(time.RFC3339),
+		"links":      links,
+		"heard":      r.Heard,
+		"duplicates": r.Duplicates,
+		"originated": r.Originated,
+		"relayed":    r.Relayed,
+		"dropped":    r.Dropped,
+		"hopLimited": r.HopLimited,
+	}
+	if !r.LastHeardAt.IsZero() {
+		out["lastHeardAt"] = r.LastHeardAt.UTC().Format(time.RFC3339)
+	}
+	return out
 }
 
 // causeToProto converts a Cause to the EventForward wire form (node.proto's
@@ -419,11 +510,19 @@ func causeFromProto(p *nodev1.EventCause) events.Cause {
 	}
 }
 
+// takesMeshEvents reports whether a node of this type RECEIVES mesh events.
+// Every node type does but identity -- the one predicate meshEventParticipants
+// and the delivery report both read, so the report cannot call identity an
+// island while the bridge keeps it out on purpose.
+func takesMeshEvents(t NodeType) bool {
+	return NodeType(strings.ToLower(strings.TrimSpace(string(t)))) != NodeTypeIdentity
+}
+
 // meshEventParticipants filters a broadcast target list down to the nodes that
 // take part in mesh event distribution (memql#3380).
 //
 // It exists because reachability and event membership stopped being the same
-// thing. The bff now dials the identity node so a deploy-control call can reach
+// thing. The bff dials the identity node so a deploy-control call can reach
 // the one node that HAS a DeployControlService (isDialableType), which puts an
 // identity PeerEntry in the bff's peer table -- and a broadcast routing rule
 // (TargetType "") targets AllPeers. Without this filter, opening that route
@@ -432,6 +531,12 @@ func causeFromProto(p *nodev1.EventCause) events.Cause {
 // service, which republishes them on its local bus and would fire its
 // subscribers and automations on events it has never seen before. That is a
 // large, unrelated behaviour change to smuggle in behind a deploy-console fix.
+//
+// IT FILTERS WHO RECEIVES, NOT WHO SENDS (memql#5338, D5). Identity pushes its
+// OWN events down the streams the bffs opened to it -- which is what the
+// v1:identity:user / invitation / account / auditEvent / group rules in
+// routing.go were written for, and what no route carried until every stream
+// carried events both ways.
 //
 // The predicate is deliberately an exclusion of the ONE known non-participant
 // rather than an allow-list of participants: peer types arrive from a
@@ -445,8 +550,7 @@ func causeFromProto(p *nodev1.EventCause) events.Cause {
 func meshEventParticipants(peers []*PeerEntry) []*PeerEntry {
 	out := peers[:0:0]
 	for _, p := range peers {
-		if p != nil && p.Info != nil &&
-			NodeType(strings.ToLower(strings.TrimSpace(p.Info.NodeType))) == NodeTypeIdentity {
+		if p != nil && p.Info != nil && !takesMeshEvents(NodeType(p.Info.NodeType)) {
 			continue
 		}
 		out = append(out, p)

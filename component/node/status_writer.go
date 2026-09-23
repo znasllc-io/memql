@@ -72,7 +72,10 @@ func (w *NodeStatusWriter) Handle(ctx context.Context, peer *nodev1.PeerInfo, ol
 	// context is the PeerManager lifecycle context, which is fine, but a
 	// test caller may pass something shorter).
 	go func() {
-		query, err := buildUpdateNodeHealthCall(nodeId, nodeType, address, healthLabel, lastSeenISO)
+		// No mesh report: this is a PEER's transition as this node saw it, and
+		// only the node itself knows what it hears. The read-merge keeps the
+		// peer's own last report (an absent arg is omitted from the payload).
+		query, err := buildUpdateNodeHealthCall(nodeId, nodeType, address, healthLabel, lastSeenISO, nil)
 		if err != nil {
 			w.logger.Error("status_writer: failed to build mutation call",
 				"peer_id", nodeId,
@@ -243,7 +246,11 @@ func ParseHealthLabel(s string) nodev1.NodeHealthStatus {
 // that persists a health transition. Exported via a package-private helper
 // so status_writer_test.go can assert on the generated string without
 // spinning up the engine.
-func buildUpdateNodeHealthCall(nodeId, nodeType, address, health, lastSeenISO string) (string, error) {
+//
+// mesh is the node's own delivery report (EventBridge.MeshReport().Wire(),
+// memql#5338 D7), written only by the node about itself; nil leaves the stored
+// report as it was.
+func buildUpdateNodeHealthCall(nodeId, nodeType, address, health, lastSeenISO string, mesh map[string]any) (string, error) {
 	if strings.TrimSpace(nodeId) == "" {
 		return "", fmt.Errorf("status_writer: nodeId is required")
 	}
@@ -254,12 +261,15 @@ func buildUpdateNodeHealthCall(nodeId, nodeType, address, health, lastSeenISO st
 		return "", fmt.Errorf("status_writer: health is required")
 	}
 
-	args := map[string]string{
+	args := map[string]any{
 		"id":       nodeId,
 		"nodeType": nodeType,
 		"address":  address,
 		"health":   health,
 		"lastSeen": lastSeenISO,
+	}
+	if mesh != nil {
+		args["mesh"] = mesh
 	}
 
 	rendered, err := renderNodeMutationArgs(args)
@@ -269,12 +279,15 @@ func buildUpdateNodeHealthCall(nodeId, nodeType, address, health, lastSeenISO st
 	return "updateNodeHealth(" + rendered + ")", nil
 }
 
-// renderNodeMutationArgs renders a string-valued arg map as the named-args
+// renderNodeMutationArgs renders an arg map as the named-args
 // invocation body `k: "v", ...` (Story 9 / #2335: the kind-prefixed call form
 // `name(k: "v")` drops the legacy object-literal `{...}` wrapper, which the
-// parser now rejects). Each value is JSON-encoded for safe escaping; keys
-// sorted for a deterministic call string.
-func renderNodeMutationArgs(args map[string]string) (string, error) {
+// parser now rejects). Each value is JSON-encoded for safe escaping -- JSON
+// string escaping is exactly langparser.QuoteString's, so a control byte
+// renders as a \u escape the lexer decodes -- and an object value (the mesh
+// report) renders as an object literal. Keys sorted for a deterministic call
+// string; status_writer_test.go parses what this renders.
+func renderNodeMutationArgs(args map[string]any) (string, error) {
 	keys := make([]string, 0, len(args))
 	for k := range args {
 		keys = append(keys, k)
@@ -312,7 +325,7 @@ func buildCreateNodeHealthCall(nodeId, nodeType, address, health, lastSeenISO st
 		return "", fmt.Errorf("status_writer: health is required")
 	}
 
-	args := map[string]string{
+	args := map[string]any{
 		"id":       nodeId,
 		"nodeType": nodeType,
 		"address":  address,

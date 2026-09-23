@@ -54,7 +54,6 @@ type NodeServer struct {
 	// (memql#3380). Installed on the identity node -- the only node that
 	// carries a DeployControlService -- and nil everywhere else.
 	deployControlForwardHandler DeployControlForwardHandler
-	eventInbound                EventInbound
 	// authInterceptor is the class="node" JWT enforcement interceptor
 	// (#105). Wired by app/cluster.go from the per-binary verifier;
 	// nil when the verifier isn't configured (single-node dev),
@@ -95,18 +94,6 @@ func (s *NodeServer) SetAiForwardResponseSink(sink AiForwardResponseSink) {
 		return
 	}
 	s.aiForwardResponse = sink
-}
-
-// SetEventInbound installs the handler that bridges peer-forwarded events
-// onto the local event bus. Every node type needs this -- peer events
-// arrive at nodeService.handleEventForward and without an inbound handler
-// they are logged and dropped, leaving every local subscriber dark.
-// EventBridge satisfies the interface.
-func (s *NodeServer) SetEventInbound(h EventInbound) {
-	if s == nil {
-		return
-	}
-	s.eventInbound = h
 }
 
 // SetWorkbenchForwardHandler installs the workbench-node-side handler
@@ -279,7 +266,6 @@ func (s *NodeServer) prepareForRun(ctx context.Context) (context.Context, contex
 		workbenchForwardResponse: s.workbenchForwardResponse,
 		workerForwardHandler:     s.workerForwardHandler,
 		workerForwardResponse:    s.workerForwardResponse,
-		eventInbound:             s.eventInbound,
 
 		deployControlForwardHandler: s.deployControlForwardHandler,
 	}

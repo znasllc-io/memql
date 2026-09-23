@@ -28,27 +28,27 @@ import (
 // the ones the event never reaches.
 //
 // ===========================================================================
-// WHY THE EVENT DOES NOT REACH EVERY NODE (the delivery evidence)
+// WHO THE EVENT DOES NOT REACH (the delivery evidence)
 // ===========================================================================
-// A forward goes only where a node holds an OUTBOUND connection
-// (PeerManager.sendTarget), and a relay goes at most three hops along the
-// receiver's own outbound dials; nothing pushes server->client. So:
+// When memql#5259 was filed a forward went only along OUTBOUND dials, a relay
+// went at most three hops, and nothing pushed server->client -- so the edge,
+// the product bff and (depending on round-robin) the other shared bff heard
+// nothing. memql#5338 made every stream carry events both ways, far enough to
+// cross the mesh (mesh_delivery_test.go is that gate). Two ways are left for a
+// readiness participant to miss the broadcast, and this test keeps both:
 //
 //   - identity is excluded from every broadcast (meshEventParticipants), by
-//     design, even though every bff dials it -- and the fix must not widen
-//     that, because it would fire identity's subscribers on traffic it has
-//     never seen;
-//   - a node nobody dials -- the edge, a product bff -- hears nothing;
-//   - the other shared bff hears nothing when every child's parent dial
-//     landed on the first one (bff-active is a Service, so which pod a child
-//     reaches is whichever round-robin gave it);
-//   - a peer whose outbound connection is ABSENT, or DETACHED while
-//     reconnecting, is skipped, and nothing queues the event for it.
+//     design, even though every bff dials it -- and nothing may widen that,
+//     because it would fire identity's subscribers on traffic it has never
+//     seen;
+//   - a node whose every stream is DOWN at that moment -- here the edge, whose
+//     one stream is cut across the change -- misses it, and nothing queues
+//     the event for it.
 //
-// Those are the seven. The recompute loop does not need them to hear: the
-// node that WROTE the registration hears its own event on its local bus, the
-// fold sets aside a row whose cluster-scoped lanes lag the freshest one, and
-// every other node's safety-net pass converges its row within one period.
+// The recompute loop does not need either of them to hear: the node that
+// WROTE the registration hears its own event on its local bus, the fold sets
+// aside a row whose cluster-scoped lanes lag the freshest one, and every other
+// node's safety-net pass converges its row within one period.
 func TestEveryReadinessParticipantConvergesWhateverTheMeshDelivers(t *testing.T) {
 	m := newReadinessMesh(t)
 
@@ -63,12 +63,10 @@ func TestEveryReadinessParticipantConvergesWhateverTheMeshDelivers(t *testing.T)
 	m.dial("bff-product-a", "identity-a", "workbench-a", "agent-a", "agent-b", "planner-a")
 	m.dial("edge-a", "bff-a")
 
-	// AN ABSENT OUTBOUND CONNECTION: bff-a knows planner-a but holds no
-	// transport to it at the moment of the change, so the relay skips it.
-	m.absent("bff-a", "planner-a")
-	// A RECONNECTING ONE: bff-a's transport to agent-b is torn down across the
-	// change and restored after it.
-	m.detach("bff-a", "agent-b")
+	// A STREAM THAT IS DOWN AT THE MOMENT OF THE CHANGE: the edge's only
+	// stream -- its parent dial to bff-a -- is cut in both directions across
+	// the change and restored after it.
+	m.cut("edge-a", "bff-a")
 	// A FAILED READINESS WRITE: the edge's first pass after the change is
 	// refused, the way a saturated database refused it.
 	m.failNextWrite("edge-a")
@@ -79,7 +77,7 @@ func TestEveryReadinessParticipantConvergesWhateverTheMeshDelivers(t *testing.T)
 	// registration: the event lands on ITS bus, and its bridge forwards it.
 	m.change(1, "agent-a")
 	time.Sleep(50 * time.Millisecond)
-	m.attach("bff-a", "agent-b")
+	m.restore("edge-a", "bff-a")
 
 	m.awaitConvergence(t, 1)
 
@@ -93,23 +91,21 @@ func TestEveryReadinessParticipantConvergesWhateverTheMeshDelivers(t *testing.T)
 	if n := m.heard("identity-a"); n != 0 {
 		t.Fatalf("identity heard %d broadcast registration event(s); meshEventParticipants must keep it out of every broadcast", n)
 	}
-	// The absent and the reconnecting transports lost the event: nothing
-	// buffers a mesh forward for a peer that is not connected.
-	for _, id := range []string{"planner-a", "agent-b"} {
-		if n := m.heard(id); n != 0 {
-			t.Fatalf("%s heard %d event(s) across a transport that was not there", id, n)
-		}
+	// The cut stream lost the event: nothing buffers a mesh forward for a
+	// peer with no live stream.
+	if n := m.heard("edge-a"); n != 0 {
+		t.Fatalf("edge-a heard %d event(s) with its only stream cut", n)
 	}
 	// The failed write was retried rather than abandoned.
 	if m.failures("edge-a") == 0 {
 		t.Fatal("negative control failed: the edge's write was never refused, so the retry proved nothing")
 	}
 
-	// THE MESH ISLAND, as it stands when memql#5338 was filed. This is the
-	// delivery evidence for the five replicas memql#5259 could not explain
-	// with the identity filter; server-to-client push (memql#5340) is the
-	// change that should turn it over, and that change updates this list --
-	// the convergence above must keep passing without an edit.
+	// WHO MISSED IT. When memql#5338 was filed this list was
+	// {agent-b, bff-b, bff-product-a, edge-a, identity-a, planner-a}: the
+	// island. Server-to-client push (memql#5340) turned it over, as this
+	// comment said it would, and the convergence above passed without an
+	// edit. What is left is the design (identity) and a stream that was down.
 	var island []string
 	for _, id := range m.order {
 		if m.heard(id) == 0 {
@@ -117,7 +113,7 @@ func TestEveryReadinessParticipantConvergesWhateverTheMeshDelivers(t *testing.T)
 		}
 	}
 	sort.Strings(island)
-	want := []string{"agent-b", "bff-b", "bff-product-a", "edge-a", "identity-a", "planner-a"}
+	want := []string{"edge-a", "identity-a"}
 	if len(island) != len(want) {
 		t.Fatalf("the nodes the event did not reach are %v, want %v", island, want)
 	}
@@ -152,13 +148,13 @@ type readinessReplica struct {
 }
 
 type readinessMesh struct {
-	t        *testing.T
-	ctx      context.Context
-	nodes    map[string]*readinessReplica
-	order    []string
-	conns    map[[2]string]*peerConnection
-	absentTo map[[2]string]bool
-	version  atomic.Int64
+	t       *testing.T
+	ctx     context.Context
+	nodes   map[string]*readinessReplica
+	order   []string
+	conns   map[[2]string]*peerConnection // from -> to: the dialed half
+	inbound map[[2]string]*inboundStream  // from -> to: the half `to` pushes down
+	version atomic.Int64
 }
 
 func newReadinessMesh(t *testing.T) *readinessMesh {
@@ -166,7 +162,7 @@ func newReadinessMesh(t *testing.T) *readinessMesh {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	m := &readinessMesh{t: t, ctx: ctx, nodes: map[string]*readinessReplica{},
-		conns: map[[2]string]*peerConnection{}, absentTo: map[[2]string]bool{}}
+		conns: map[[2]string]*peerConnection{}, inbound: map[[2]string]*inboundStream{}}
 	for _, spec := range []struct {
 		id string
 		nt NodeType
@@ -191,10 +187,15 @@ func (m *readinessMesh) nodeType(id string) NodeType {
 	return m.nodes[id].bridge.identity.Type
 }
 
-// dial gives `from` an outbound connection to each of `to`, pumped into the
-// target's inbound handler exactly as NodeServer.Stream drives it
-// (stream_handler.go: HandleInbound, then ForwardInboundToPeers excluding the
-// sender).
+// dial gives `from` a stream to each of `to`, BOTH halves of it, exactly as
+// the real transport now drives one:
+//
+//   - the dialed half: an outbound connection on `from`, pumped into the
+//     target's one arrival path (ReceiveForward, as NodeServer.Stream calls
+//     it);
+//   - the pushed half (memql#5338): `to` holds `from` as a peer with an
+//     accepted stream whose sends land on `from`'s arrival path, as the
+//     ParentConnector and the WorkerDialer deliver them.
 func (m *readinessMesh) dial(from string, to ...string) {
 	src := m.nodes[from]
 	for _, target := range to {
@@ -215,25 +216,45 @@ func (m *readinessMesh) dial(from string, to ...string) {
 					return
 				case msg := <-conn.sendCh:
 					if fwd := msg.GetEventForward(); fwd != nil {
-						dst.bridge.HandleInbound(fwd)
-						dst.bridge.ForwardInboundToPeers(fwd, sender)
+						dst.bridge.ReceiveForward(fwd, sender)
 					}
 				}
 			}
 		}(conn, dst, from)
+
+		dst.pm.Register(&nodev1.PeerInfo{
+			NodeId:   from,
+			NodeType: string(m.nodeType(from)),
+			Address:  from + ":50052",
+			Health:   nodev1.NodeHealthStatus_NODE_HEALTH_HEALTHY,
+		})
+		pushed := newInboundStream(from, func(sender string) func(*nodev1.NodeServerMessage) error {
+			return func(msg *nodev1.NodeServerMessage) error {
+				if fwd := msg.GetEventForward(); fwd != nil {
+					src.bridge.ReceiveForward(fwd, sender)
+				}
+				return nil
+			}
+		}(target), testLogger())
+		dst.pm.attachInbound(from, pushed)
+		go pushed.run()
+		m.t.Cleanup(pushed.close)
+		m.inbound[[2]string{from, target}] = pushed
 	}
 }
 
-// absent leaves the peer registered with no transport at all.
-func (m *readinessMesh) absent(from, to string) {
+// cut takes the whole from->to stream down, both halves: the state of a
+// stream mid-reconnect, and since memql#5338 the one way left for a
+// participant to miss a broadcast.
+func (m *readinessMesh) cut(from, to string) {
 	m.nodes[from].pm.DetachConnection(to)
-	m.absentTo[[2]string{from, to}] = true
+	m.nodes[to].pm.detachInbound(from, m.inbound[[2]string{from, to}])
 }
 
-func (m *readinessMesh) detach(from, to string) { m.nodes[from].pm.DetachConnection(to) }
-
-func (m *readinessMesh) attach(from, to string) {
+// restore brings a cut stream back, both halves.
+func (m *readinessMesh) restore(from, to string) {
 	m.nodes[from].pm.AttachConnection(to, m.conns[[2]string{from, to}])
+	m.nodes[to].pm.attachInbound(from, m.inbound[[2]string{from, to}])
 }
 
 func (m *readinessMesh) failNextWrite(id string) {

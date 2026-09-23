@@ -26,6 +26,11 @@ message NodeClientMessage {
   // machinery, #2814.
   reserved 60;
   reserved "query_forward";
+  // 31 (event_ack) retired by memql#5338: nothing ever read an ack, in either
+  // direction, and once a stream carries events both ways an ack costs exactly
+  // what an event costs.
+  reserved 31;
+  reserved "event_ack";
 
   oneof payload {
     NodeHello node_hello = 10;
@@ -34,7 +39,6 @@ message NodeClientMessage {
     SpawnRequest spawn_request = 20;
     SpawnResult spawn_result = 21;
     EventForward event_forward = 30;
-    EventAck event_ack = 31;
     CapabilityQuery capability_query = 40;
     CapabilityResponse capability_response = 41;
     AiForwardRequest ai_forward_request = 70;
@@ -61,6 +65,9 @@ message NodeServerMessage {
   // machinery, #2814.
   reserved 60;
   reserved "query_response";
+  // 31 (event_ack) retired by memql#5338; see NodeClientMessage.
+  reserved 31;
+  reserved "event_ack";
 
   oneof payload {
     NodeWelcome node_welcome = 10;
@@ -69,7 +76,6 @@ message NodeServerMessage {
     SpawnRequest spawn_request = 20;
     SpawnResult spawn_result = 21;
     EventForward event_forward = 30;
-    EventAck event_ack = 31;
     CapabilityQuery capability_query = 40;
     CapabilityResponse capability_response = 41;
     NodeShutdown node_shutdown = 50;
@@ -187,17 +193,28 @@ message EventForward {
   google.protobuf.Timestamp ts = 4;
   google.protobuf.Struct payload = 5;
   string origin_node_id = 6;
-  int32 ttl = 7;
+  // 7 (ttl) retired by memql#5338, replaced by `hops` below. A TTL is a
+  // number a pre-epic node relays on -- every arrival, along every outbound
+  // dial -- so raising it far enough to cross the mesh would have multiplied
+  // every event during a rolling update. A pre-epic node reads the absent field
+  // as expired and drops the copy: deaf for the rollout, never a storm.
+  reserved 7;
+  reserved "ttl";
   // The event's causal lineage (component/events.Cause, epic memql#5380).
   // Additive and optional: an old node in a mixed-version rollout sends no
   // cause, which the receiver reads as the zero cause -- a root event, never
-  // a refusal. ForwardInboundToPeers relays it untouched on the TTL-decremented
-  // relay, the way OriginNodeId and Payload already ride through unchanged.
+  // a refusal. A relay carries it untouched, the way OriginNodeId and Payload
+  // already ride through unchanged.
   EventCause cause = 8;
-}
-
-message EventAck {
-  string event_id = 1;
+  // The links this copy has travelled, counting the one it arrives on: 1 as
+  // it leaves the node the event originated on, one more per relay. A node
+  // publishes an event once, relays a first sighting once, and relays a
+  // repeat only when it has travelled FEWER links than every copy before it;
+  // a copy that has travelled 16 is not relayed, so every node within 16
+  // links of the origin hears the event (component/node/eventbridge.go,
+  // meshMaxHops). Design record:
+  // docs/superpowers/specs/2026-09-22-mesh-event-delivery-design.md, D3-D4.
+  int32 hops = 9;
 }
 
 // EventCause carries an event's causal lineage across the mesh hop

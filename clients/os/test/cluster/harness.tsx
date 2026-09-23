@@ -45,6 +45,7 @@ export interface FakeQuery {
   allAgents: ReturnType<typeof vi.fn>;
   agentAuthorizationsForSelf: ReturnType<typeof vi.fn>;
   recentAuditEvents: ReturnType<typeof vi.fn>;
+  clusterNodes: ReturnType<typeof vi.fn>;
 }
 
 /** The reads a seed can preload, by the method that answers them. */
@@ -209,6 +210,7 @@ export function fakeConnection(seed: QuerySeed = {}, modules: ModulesSeed = {}):
       allAgents: read("allAgents"),
       agentAuthorizationsForSelf: read("agentAuthorizationsForSelf"),
       recentAuditEvents: read("recentAuditEvents"),
+      clusterNodes: read("clusterNodes"),
     },
     subscriptions: fakeSubscriptions(),
     dispatcher: fakeDispatcher(modules),
@@ -346,4 +348,48 @@ export function passkeyRow(over: Partial<Row> & { id: string }): Row {
     createdAt: "2026-08-01T00:00:00Z",
     ...over,
   };
+}
+
+/**
+ * A `v1:cluster:node` row as the engine writes it, with the node's own
+ * delivery report (epic memql#5338) under `mesh`. Pass `mesh: null` for a node
+ * that has not reported -- the state whose counts must read absent, not zero.
+ * `lastSeen` defaults to the test's clock so the node is running; a node the
+ * page should leave out is one given an old `lastSeen` or a stopped health.
+ */
+export function clusterNodeRow(over: {
+  id: string;
+  nodeType?: string;
+  health?: string;
+  lastSeen?: string;
+  address?: string;
+  mesh?: Record<string, unknown> | null;
+}): Row {
+  const lastSeen = over.lastSeen ?? new Date().toISOString();
+  const row: Row = {
+    // BARE, as the wire carries it: the engine bare-ifies ids on egress, on a
+    // read and on an event alike, and the live collection keys both by it.
+    id: over.id,
+    nodeType: over.nodeType ?? "bff",
+    address: over.address ?? "10.244.0.9:50058",
+    health: over.health ?? "healthy",
+    lastSeen,
+    createdAt: "2026-09-22T09:00:00Z",
+  };
+  if (over.mesh !== null) {
+    row.mesh = {
+      receives: true,
+      since: new Date(Date.parse(lastSeen) - 3 * 3_600_000).toISOString(),
+      links: [],
+      heard: 1204,
+      duplicates: 310,
+      originated: 7,
+      relayed: 3,
+      dropped: 0,
+      hopLimited: 0,
+      lastHeardAt: new Date(Date.parse(lastSeen) - 2_000).toISOString(),
+      ...(over.mesh ?? {}),
+    };
+  }
+  return row;
 }

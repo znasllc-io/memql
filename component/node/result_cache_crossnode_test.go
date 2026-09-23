@@ -93,7 +93,7 @@ func TestResultCacheInvalidation_CrossNode(t *testing.T) {
 				return
 			case msg := <-conn.sendCh:
 				if fwd := msg.GetEventForward(); fwd != nil {
-					ebB.HandleInbound(fwd)
+					ebB.ReceiveForward(fwd, idA.ID)
 				}
 			}
 		}
@@ -237,7 +237,7 @@ func TestResultCacheInvalidation_CrossNodeThroughTheWriteSeam(t *testing.T) {
 				return
 			case msg := <-conn.sendCh:
 				if fwd := msg.GetEventForward(); fwd != nil {
-					ebB.HandleInbound(fwd)
+					ebB.ReceiveForward(fwd, idA.ID)
 				}
 			}
 		}

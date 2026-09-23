@@ -56,8 +56,8 @@ func assertCauseEqual(t *testing.T, got, want events.Cause) {
 
 // TestEventBridgeCauseSurvivesTheDirectForwardAndRelay covers the
 // EventForward leg end to end: node A forwards a local event carrying a
-// cause; node B's HandleInbound rebuilds it; node B's ForwardInboundToPeers
-// relays it onward with Ttl-1, cause intact.
+// cause; node B's ReceiveForward rebuilds it on B's bus AND relays it onward
+// one hop further, cause intact.
 func TestEventBridgeCauseSurvivesTheDirectForwardAndRelay(t *testing.T) {
 	busA := events.NewBus(events.WithLogger(testLogger()))
 	defer busA.Close()
@@ -103,27 +103,7 @@ func TestEventBridgeCauseSurvivesTheDirectForwardAndRelay(t *testing.T) {
 		t.Fatal("captured message carried no EventForward")
 	}
 
-	// Feed the captured EventForward straight into node B's inbound handler,
-	// exactly as NodeServer.Stream does.
-	var received events.Event
-	delivered := make(chan struct{})
-	unsubscribe := busB.Subscribe("graph.node.created.v1:cluster:node", func(e events.Event) {
-		received = e
-		close(delivered)
-	})
-	defer unsubscribe()
-
-	bridgeB.HandleInbound(forward)
-
-	select {
-	case <-delivered:
-	case <-time.After(2 * time.Second):
-		t.Fatal("node B never delivered the inbound event")
-	}
-	assertCauseEqual(t, received.Cause, cause)
-
-	// The relay: B dials C, and ForwardInboundToPeers preserves the cause
-	// with Ttl-1.
+	// B dials C, so the relay has somewhere to go.
 	pmB.Register(&nodev1.PeerInfo{
 		NodeId:   "node-c",
 		NodeType: string(NodeTypeAgent),
@@ -133,7 +113,24 @@ func TestEventBridgeCauseSurvivesTheDirectForwardAndRelay(t *testing.T) {
 	connBC := newPeerConnection(identB, "node-c", "node-c:50052", testLogger())
 	pmB.AttachConnection("node-c", connBC)
 
-	bridgeB.ForwardInboundToPeers(forward, "node-a")
+	// Feed the captured EventForward into node B's one arrival path, exactly
+	// as NodeServer.Stream does.
+	var received events.Event
+	delivered := make(chan struct{})
+	unsubscribe := busB.Subscribe("graph.node.created.v1:cluster:node", func(e events.Event) {
+		received = e
+		close(delivered)
+	})
+	defer unsubscribe()
+
+	bridgeB.ReceiveForward(forward, "node-a")
+
+	select {
+	case <-delivered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("node B never delivered the inbound event")
+	}
+	assertCauseEqual(t, received.Cause, cause)
 
 	var relayed *nodev1.EventForward
 	select {
@@ -145,8 +142,12 @@ func TestEventBridgeCauseSurvivesTheDirectForwardAndRelay(t *testing.T) {
 	if relayed == nil {
 		t.Fatal("captured relay message carried no EventForward")
 	}
-	if relayed.Ttl != forward.Ttl-1 {
-		t.Fatalf("relayed ttl = %d, want %d", relayed.Ttl, forward.Ttl-1)
+	if relayed.Hops != forward.Hops+1 {
+		t.Fatalf("relayed hops = %d, want %d", relayed.Hops, forward.Hops+1)
+	}
+	if relayed.EventId != forward.EventId || relayed.OriginNodeId != forward.OriginNodeId {
+		t.Fatalf("a relay must keep the event's id and origin: got (%s, %s), want (%s, %s)",
+			relayed.EventId, relayed.OriginNodeId, forward.EventId, forward.OriginNodeId)
 	}
 	assertCauseEqual(t, causeFromProto(relayed.Cause), cause)
 }

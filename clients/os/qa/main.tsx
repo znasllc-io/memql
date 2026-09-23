@@ -44,7 +44,9 @@ import {
   withSession as fleetSession,
 } from "../test/fleet/harness";
 import { OriginsSection } from "../src/apps/cluster/origins/OriginsSection";
+import { MeshSection } from "../src/apps/cluster/mesh/MeshSection";
 import {
+  clusterNodeRow,
   dataOriginRow as clusterOriginRow,
   fakeConnection as clusterConnection,
   syncStateRow as clusterSyncStateRow,
@@ -558,6 +560,22 @@ const VIEWS: Record<
     wrap: (el, role) => clusterSession(el, { role }),
     render: () => <OriginsPane />,
   },
+  // --- Cluster > Mesh (epic memql#5338) ------------------------------------
+  //
+  // `mesh-healthy` is the control, and it is read FIRST: a cluster whose every
+  // node hears, where the band has to be quiet enough that nobody learns to
+  // scroll past it. `mesh-island` is the production state that opened the
+  // epic -- an edge and a product bff that hear nothing -- beside a node on an
+  // older release that has not reported and one gone quiet, so the one line
+  // worth finding has to be findable among the others. `mesh-node-*` open a
+  // node's page through the section's own intent, so no click is needed.
+  "mesh-healthy": { connect: () => clusterConnection({ clusterNodes: meshNodes("healthy") }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane /> },
+  "mesh-island": { connect: () => clusterConnection({ clusterNodes: meshNodes("island") }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane /> },
+  "mesh-empty": { connect: () => clusterConnection({ clusterNodes: [] }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane /> },
+  "mesh-node-bff": { connect: () => clusterConnection({ clusterNodes: meshNodes("island") }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane nodeId="bff-5658459dd4-92gnh" /> },
+  "mesh-node-edge": { connect: () => clusterConnection({ clusterNodes: meshNodes("island") }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane nodeId="edge-6cc7f56755-rlnsv" /> },
+  "mesh-node-identity": { connect: () => clusterConnection({ clusterNodes: meshNodes("healthy") }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane nodeId="identity-7f9c6d5b8-2xk4q" /> },
+  "mesh-node-unreported": { connect: () => clusterConnection({ clusterNodes: meshNodes("island") }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane nodeId="mcp-64b9d8f7c-8wq2z" /> },
   hidden: {
     seed: BOUND,
     role: "reader",
@@ -677,6 +695,113 @@ function MachinePane({ over }: { over: Record<string, unknown> }) {
   return (
     <div className="os-window-content">
       <MachineDetail machine={machine} writes={writes} now={FLEET_NOW} view="details" />
+    </div>
+  );
+}
+
+// --- Cluster > Mesh (epic memql#5338) --------------------------------------
+//
+// The cloud's topology as memql#5316 measured it, pod names and all: two
+// engine bffs dialing every worker and identity, two product bffs doing the
+// same, agents and planners and workbenches parented on a bff, edges and mcps
+// on theirs, and identity dialed by every bff.
+const MESH_PODS = {
+  bffA: "bff-5658459dd4-92gnh",
+  bffB: "bff-5658459dd4-tprvz",
+  prodA: "bff-shop-545bf75455-88bfj",
+  prodB: "bff-shop-545bf75455-tprvz",
+  agentA: "agent-7c9d8f6b54-abcde",
+  agentB: "agent-7c9d8f6b54-fghij",
+  plannerA: "planner-58f7b9c6d4-k2m4p",
+  plannerB: "planner-58f7b9c6d4-q8r3t",
+  benchA: "workbench-6d5f4c7b9-x7v2n",
+  benchB: "workbench-6d5f4c7b9-z3w8y",
+  edgeA: "edge-6cc7f56755-79j5s",
+  edgeB: "edge-6cc7f56755-rlnsv",
+  mcpA: "mcp-64b9d8f7c-8wq2z",
+  mcpB: "mcp-64b9d8f7c-m5n6b",
+  idA: "identity-7f9c6d5b8-2xk4q",
+  idB: "identity-7f9c6d5b8-9pl3r",
+};
+
+function meshNodes(shape: "healthy" | "island") {
+  const P = MESH_PODS;
+  const workers = [P.agentA, P.agentB, P.plannerA, P.plannerB, P.benchA, P.benchB];
+  const typeOf = (id: string) => id.replace(/-[a-z0-9]+-[a-z0-9]+$/, "").replace(/^bff-shop$/, "bff");
+  const link = (node: string, via: string) => ({ node, type: typeOf(node), via });
+  const now = Date.now();
+  const at = (secondsAgo: number) => new Date(now - secondsAgo * 1000).toISOString();
+  const bff = (id: string, children: string[]) => ({
+    id,
+    nodeType: "bff",
+    address: `10.244.0.${Object.values(MESH_PODS).indexOf(id) + 11}:50058`,
+    mesh: {
+      links: [
+        ...workers.map((w) => link(w, [P.agentA, P.agentB, P.plannerA, P.benchA].includes(w) && id === P.bffA ? "both" : "dialed")),
+        link(P.idA, "dialed"),
+        link(P.idB, "dialed"),
+        ...children.map((c) => link(c, "accepted")),
+      ],
+      heard: 48210 + id.length * 37,
+      duplicates: 9120,
+      originated: 1840,
+      relayed: 46100,
+    },
+  });
+  const worker = (id: string, extra: object[] = []) => ({
+    id,
+    nodeType: typeOf(id),
+    address: `10.244.1.${Object.values(MESH_PODS).indexOf(id) + 11}:${{ agent: 50055, planner: 50056, workbench: 50060 }[typeOf(id)] ?? 50052}`,
+    mesh: {
+      links: [link(P.bffA, id === P.agentA || id === P.agentB || id === P.plannerA || id === P.benchA ? "both" : "accepted"), link(P.bffB, "accepted"), link(P.prodA, "accepted"), link(P.prodB, "accepted"), ...extra],
+      heard: 51002 - id.length * 11,
+      duplicates: 22040,
+      originated: 610,
+      relayed: 300,
+    },
+  });
+  const rows = [
+    bff(P.bffA, [P.edgeA, P.mcpA]),
+    bff(P.bffB, [P.edgeB, P.mcpB]),
+    bff(P.prodA, []),
+    bff(P.prodB, []),
+    worker(P.agentA, [link(P.benchA, "dialed")]),
+    worker(P.agentB, [link(P.benchA, "dialed")]),
+    worker(P.plannerA, [link(P.agentA, "dialed"), link(P.agentB, "dialed")]),
+    worker(P.plannerB, [link(P.agentA, "dialed"), link(P.agentB, "dialed")]),
+    worker(P.benchA),
+    worker(P.benchB),
+    { id: P.edgeA, nodeType: "edge", address: "10.244.2.7:50062", mesh: { links: [link(P.bffA, "dialed")], heard: 47880, duplicates: 0, originated: 22, relayed: 0 } },
+    { id: P.edgeB, nodeType: "edge", address: "10.244.2.9:50062", mesh: { links: [link(P.bffB, "dialed")], heard: 47880, duplicates: 0, originated: 22, relayed: 0 } },
+    { id: P.mcpA, nodeType: "mcp", address: "10.244.3.4:50060", mesh: { links: [link(P.bffA, "dialed")], heard: 47700, duplicates: 0, originated: 5, relayed: 0 } },
+    { id: P.mcpB, nodeType: "mcp", address: "10.244.3.5:50060", mesh: { links: [link(P.bffB, "dialed")], heard: 47700, duplicates: 0, originated: 5, relayed: 0 } },
+    { id: P.idA, nodeType: "identity", address: "10.244.4.2:50061", mesh: { receives: false, links: [P.bffA, P.bffB, P.prodA, P.prodB].map((b) => link(b, "accepted")), heard: 0, duplicates: 0, originated: 412, relayed: 0, lastHeardAt: undefined } },
+    { id: P.idB, nodeType: "identity", address: "10.244.4.3:50061", mesh: { receives: false, links: [P.bffA, P.bffB, P.prodA, P.prodB].map((b) => link(b, "accepted")), heard: 0, duplicates: 0, originated: 398, relayed: 0, lastHeardAt: undefined } },
+  ] as Array<{ id: string; nodeType: string; address: string; mesh: Record<string, unknown> | null }>;
+
+  if (shape === "island") {
+    // The epic's production state: an edge and a product bff that are linked
+    // and have heard nothing in hours; an mcp still on the release before the
+    // report existed; a planner gone quiet for eleven minutes.
+    for (const r of rows) {
+      if (r.id === P.edgeB) r.mesh = { ...r.mesh, heard: 0, relayed: 0, lastHeardAt: undefined, since: at(3 * 3600) };
+      if (r.id === P.prodB) r.mesh = { ...r.mesh, heard: 0, relayed: 0, duplicates: 0, lastHeardAt: undefined, since: at(3 * 3600) };
+      if (r.id === P.mcpA) r.mesh = null;
+      if (r.id === P.plannerB) r.mesh = { ...r.mesh, lastHeardAt: at(11 * 60), dropped: 14 };
+    }
+  }
+  return rows.map((r) => {
+    const row = clusterNodeRow({ id: r.id, nodeType: r.nodeType, address: r.address, mesh: r.mesh });
+    const mesh = row.mesh as Record<string, unknown> | undefined;
+    if (mesh && mesh.lastHeardAt === undefined) delete mesh.lastHeardAt;
+    return row;
+  });
+}
+
+function MeshPane({ nodeId }: { nodeId?: string }) {
+  return (
+    <div className="os-window-content">
+      <MeshSection intent={nodeId ? { id: "qa-open", payload: { nodeId } } : undefined} consumeIntent={() => {}} />
     </div>
   );
 }

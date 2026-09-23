@@ -16,11 +16,9 @@ func (*AgentBootstrap) NodeDependencies(ctx BootstrapContext) ([]common.Dependen
 		eventBridge.SetWiring(ctx.Wiring)
 	}
 	nodeServer := NewNodeServer(ctx.Identity, peerMgr, ctx.Logger)
-	nodeServer.SetEventInbound(eventBridge)
 
 	deps := []common.Dependency{peerMgr, eventBridge, nodeServer}
 	if pconn := NewParentConnector(ctx.Identity, peerMgr, ctx.Logger); pconn != nil {
-		pconn.SetEventInbound(eventBridge)
 		deps = append(deps, pconn)
 	}
 	return deps, nil

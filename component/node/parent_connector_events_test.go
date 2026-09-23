@@ -21,12 +21,14 @@ func TestParentConnector_CompositionEventsRecoverAfterParentRemoval(t *testing.T
 	parentPM := NewPeerManager(parentIdentity, logger)
 	parentBus := events.NewBus()
 	defer parentBus.Close()
-	parentBridge := NewEventBridge(parentIdentity, parentBus, parentPM, logger)
+	// The bridge installs itself as the peer table's event sink; the server
+	// needs no wiring of its own.
+	_ = NewEventBridge(parentIdentity, parentBus, parentPM, logger)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	server := grpc.NewServer()
 	nodev1.RegisterNodeServiceServer(server, &nodeService{
-		logger: logger, identity: parentIdentity, peerManager: parentPM, eventInbound: parentBridge,
+		logger: logger, identity: parentIdentity, peerManager: parentPM,
 	})
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(server.Stop)

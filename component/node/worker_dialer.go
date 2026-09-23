@@ -89,9 +89,10 @@ func isWorkerType(t NodeType) bool {
 // UNIMPLEMENTED on the surface an operator actually uses.
 //
 // Reachability is all this grants. The identity node is still not a mesh EVENT
-// participant: EventBridge.forwardToPeers excludes it from every broadcast
-// (isMeshEventParticipant), so joining the bff's peer table does not start
-// fanning graph events at the auth service.
+// participant: EventBridge.sendToPeers excludes it from every broadcast
+// (meshEventParticipants), so joining the bff's peer table does not start
+// fanning graph events at the auth service. Identity's OWN events do travel
+// the other way, down the stream the bff opened (memql#5338, D5).
 func isDialableType(t NodeType) bool {
 	switch t {
 	case NodeTypeIdentity, NodeTypeWorkbench:
@@ -954,6 +955,14 @@ func (wd *WorkerDialer) handleServerMessage(entry *dialEntry, msg *nodev1.NodeSe
 		if sink != nil {
 			sink.Dispatch(payload.DeployControlForwardResponse)
 		}
+
+	case *nodev1.NodeServerMessage_EventForward:
+		// An event the dialed node pushed down this stream (memql#5338, D1).
+		// This case did not exist: a bff dials every agent, planner, workbench
+		// and identity node, and dropped every event any of them could have
+		// sent back -- which is how a product bff, dialed by nobody, heard
+		// nothing at all. Same arrival path as every other stream end.
+		wd.peerMgr.receiveEvent(payload.EventForward, knownId)
 	}
 }
 

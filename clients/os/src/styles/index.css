@@ -1746,6 +1746,10 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 .os-record-status { display: inline-flex; align-items: center; gap: 6px; font-size: var(--os-text-sm); white-space: nowrap; color: var(--os-muted); }
 .os-record-status::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .os-record-status[data-tone="accent"] { color: var(--os-accent); }
+/* `warn` was declared on RecordTone and styled nowhere, so a state that asks
+ * for a person read exactly like one that does not. Cluster > Mesh is its
+ * first use (epic memql#5338): a node that is not hearing the cluster. */
+.os-record-status[data-tone="warn"] { color: var(--os-warn); }
 .os-record-chevron { color: var(--os-muted); }
 /* A list that is a SECTION of a page. It keeps `.os-report-part`'s spacing and
  * none of its top rule: that rule separates a part from what stands above it,
@@ -11861,6 +11865,310 @@ a.os-button {
   color: var(--os-ink);
   font-size: var(--os-text-sm);
   overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------------------------
+ * Mesh: what every node hears (epic memql#5338)
+ *
+ * The list is the kit's record list inside a live list, grouped by node type;
+ * the node's page draws its links as a patch bay -- the node on a spine, the
+ * streams it opened branching to one side and the streams opened to it to the
+ * other. No colour of its own: a state that asks for a person takes warn ink
+ * on its word and its dot, and everything else is the page's ordinary ink.
+ * ------------------------------------------------------------------------- */
+
+/* Record rows draw their own hairline; the live list's row gap would put a
+ * sliver of page between every pair of them. */
+.os-cluster-mesh .os-livelist-rows {
+  gap: 0;
+}
+
+.os-cluster-mesh-context {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--os-muted);
+  font-size: var(--os-text-sm);
+}
+
+.os-cluster-mesh-context p {
+  margin: 0;
+}
+
+/* The answer before the list: the distribution, then the one sentence. */
+.os-cluster-mesh-band {
+  display: grid;
+  gap: 10px;
+}
+
+.os-cluster-mesh-band .os-overview-breakdown {
+  padding-top: 0;
+}
+
+.os-cluster-mesh-verdict {
+  margin: 0;
+  max-width: 80ch;
+}
+
+/* A node the sentence names, and the way to its page. It keeps the
+ * sentence's own ink -- an accent link inside an attention line would read as
+ * a second, cheerier message -- and says it opens with an underline. An id
+ * stays whole on one line: broken at its hyphen it reads as two names. */
+.os-cluster-mesh-name {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font-size: 0.95em;
+  white-space: nowrap;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-underline-offset: 3px;
+}
+.os-cluster-mesh-name:hover {
+  text-decoration-color: currentColor;
+}
+.os-cluster-mesh-name:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* A node type's heading inside the list: the type, and how many are running.
+ * The heading is the type's NAME, so it keeps ink; the count is quiet. */
+.os-cluster-mesh-group {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 18px 4px 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--os-line);
+  color: var(--os-ink);
+  font-size: var(--os-text-sm);
+  font-weight: 600;
+}
+
+.os-livelist-row:first-child .os-cluster-mesh-group {
+  margin-top: 4px;
+}
+
+.os-cluster-mesh-group-count {
+  color: var(--os-muted);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The node page's verdict: the state word with its dot, then the sentence at
+ * a sentence's measure. */
+.os-cluster-mesh-verdict-line {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+.os-cluster-mesh-verdict-line p {
+  margin: 0;
+  flex: 1 1 32ch;
+  max-width: 80ch;
+}
+
+.os-cluster-mesh-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.os-cluster-mesh-links-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.os-cluster-mesh-links-head .os-subhead {
+  margin: 0;
+}
+
+/* The patch bay. Its own container, so the stacked form follows the width
+ * the panel actually has -- a half-width window, a split desk -- not the
+ * screen's. The grid is a child because a container query cannot restyle its
+ * own container. */
+.os-cluster-mesh-bay {
+  container: os-mesh-bay / inline-size;
+  min-width: 0;
+  padding-top: 8px;
+}
+
+.os-cluster-mesh-bay-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.os-cluster-mesh-side {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.os-cluster-mesh-side-title {
+  margin: 0;
+  min-height: 18px;
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+}
+
+.os-cluster-mesh-side-empty {
+  margin: 0;
+  color: var(--os-muted);
+  font-size: var(--os-text-sm);
+}
+
+.os-cluster-mesh-peers {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Each slot carries its branch to the spine: from the inner edge of the peer
+ * to the centre line of the middle column (half of its 64px). */
+.os-cluster-mesh-peer-slot {
+  position: relative;
+  min-width: 0;
+}
+
+.os-cluster-mesh-peer-slot::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 32px;
+  border-top: 1px solid var(--os-line);
+}
+
+.os-cluster-mesh-peer-slot[data-side="opened"]::after {
+  right: -32px;
+}
+
+.os-cluster-mesh-peer-slot[data-side="accepted"]::after {
+  left: -32px;
+}
+
+/* The node itself: a mark at the head of the spine, which runs down the
+ * middle column as far as the longer side reaches. */
+.os-cluster-mesh-hub {
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+
+.os-cluster-mesh-hub::before {
+  content: "";
+  position: absolute;
+  top: 18px;
+  bottom: calc(var(--os-control-h) / 2);
+  left: 50%;
+  border-left: 1px solid var(--os-line);
+}
+
+.os-cluster-mesh-hub-mark {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--os-line);
+  border-radius: 50%;
+  background: var(--os-raised);
+  color: var(--os-ink);
+}
+
+/* One peer: its state's dot, its id, its type. A control line tall, flat,
+ * with the shell's hairline -- a patch point, not a card. */
+.os-cluster-mesh-peer {
+  display: grid;
+  grid-template-columns: 6px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: var(--os-control-h);
+  padding: 0 10px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-xs);
+  background: var(--os-plate);
+  color: var(--os-ink);
+  font: inherit;
+  font-size: var(--os-text-sm);
+  text-align: left;
+}
+
+button.os-cluster-mesh-peer {
+  cursor: pointer;
+}
+
+button.os-cluster-mesh-peer:hover {
+  background: var(--os-hover);
+}
+
+button.os-cluster-mesh-peer:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 2px;
+}
+
+/* A peer this page does not list (stopped, or never wrote a row): still a
+ * link the node reported, drawn as text rather than as a control. */
+.os-cluster-mesh-peer[data-unlisted] {
+  grid-template-columns: minmax(0, 1fr) auto;
+  border-style: dashed;
+  background: none;
+  color: var(--os-muted);
+}
+
+.os-cluster-mesh-peer-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--os-muted);
+}
+
+.os-cluster-mesh-peer-dot[data-tone="accent"] {
+  background: var(--os-accent);
+}
+
+.os-cluster-mesh-peer-dot[data-tone="warn"] {
+  background: var(--os-warn);
+}
+
+.os-cluster-mesh-peer-id {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.os-cluster-mesh-peer-type {
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+  white-space: nowrap;
+}
+
+/* Narrow: the two sides stack, and the spine and its branches go with the
+ * side-by-side arrangement they only make sense in. The side titles carry the
+ * direction alone. */
+@container os-mesh-bay (max-width: 560px) {
+  .os-cluster-mesh-bay-grid {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 18px;
+  }
+
+  .os-cluster-mesh-hub,
+  .os-cluster-mesh-peer-slot::after {
+    display: none;
+  }
 }
 
 /* ---- the store a storefront fronts, on its deployable (memql#5541) ---- */

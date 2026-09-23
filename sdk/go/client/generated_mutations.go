@@ -14370,13 +14370,14 @@ func UpdateMyPreferencesBuild(args UpdateMyPreferencesArgs) string {
 	return b.String()
 }
 
-// UpdateNodeHealth -- Record a node health transition. Read-merges the existing v1:cluster:node row (created on startup by registerNode under the same NodeId) so only health + lastSeen change; nodeType/address/parentId/capabilities/labels inherit from the persisted row instead of being wiped when a caller omits them (memql#1628 -- previously the insert form re-stamped address to "" and reset capabilities/labels on every transition).
+// UpdateNodeHealth -- Record a node health transition. Read-merges the existing v1:cluster:node row (created on startup by registerNode under the same NodeId) so only health + lastSeen change; nodeType/address/parentId/capabilities/labels inherit from the persisted row instead of being wiped when a caller omits them (memql#1628 -- previously the insert form re-stamped address to "" and reset capabilities/labels on every transition). `mesh` is the node's own delivery report (memql#5338), sent only by the node about itself on its heartbeat; a write that omits it -- another node recording this one's health -- keeps the stored report.
 //
 // Bound concept: v1:cluster:node (machine-readable: BoundConcepts["updateNodeHealth"] in generated_concepts.go).
 type UpdateNodeHealthArgs struct {
 	Id       string
 	Health   string
 	LastSeen string
+	Mesh     map[string]any
 }
 
 // UpdateNodeHealth calls the engine mutation updateNodeHealth.
@@ -14400,6 +14401,13 @@ func UpdateNodeHealthBuild(args UpdateNodeHealthArgs) string {
 	}
 	b.WriteString("lastSeen: ")
 	b.WriteString(quoteMemQL(args.LastSeen))
+	if args.Mesh != nil {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("mesh: ")
+		b.WriteString(renderMemQLValue(args.Mesh))
+	}
 	b.WriteString(")")
 	return b.String()
 }

@@ -128,6 +128,7 @@ concept node {
   deploymentId  string  @description("Stable id of the deployment that created this node (#1873). Injected at registration from the rollout (MEMQL_DEPLOYMENT_ID; downward-API pod/rollout template hash in k8s, 'local' in dev). Plain string FK to v1:cluster:deployment.deploymentId -- a deployment's topology is every node with the same deploymentId, and a node whose deploymentId != the cluster's current deployment is an orphan from a previous deploy (feeds the reaper #1874 + cockpit orphan highlight).")
   provider      string  @description("Cloud provider / deploy target backing this node: 'docker-local' (local Docker) or 'azure' (AKS). Stamped at registration from the system.startup payload (#1873).")
   region        string  @description("Cloud region (e.g. 'us-central1') or 'local'. Stamped at registration from MEMQL_REGION (#1873).")
+  mesh          object  @description("What this node hears of the cluster's broadcast events (memql#5338): its links -- each peer it holds a stream to and which side opened it (dialed, accepted, both) -- and its counts since it started (heard, duplicates, originated, relayed, dropped, hopLimited), with since and lastHeardAt (absent until the first event). receives is false only on identity, which takes no mesh events by design. Written by the node about itself on its one-minute heartbeat; another node recording this one's health leaves it as it was. Absent on a node that has not reported.")
 }
 
 /// Definition of a node type and its expected capabilities.

@@ -2,11 +2,14 @@ package node
 
 import (
 	"context"
-	"google.golang.org/protobuf/proto"
 	"log/slog"
+	"sort"
 	"sync"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
+	"github.com/znasllc-io/memql/component/metrics"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/component"
@@ -72,9 +75,21 @@ type PeerManager struct {
 	// Parent connection (to the peer that bootstrapped this node).
 	parentConn *peerConnection
 
-	// Child connections (nodes that registered with this node as parent).
-	childMu    sync.RWMutex
-	childConns map[string]*peerConnection
+	// inbound holds the push half of every stream a peer OPENED to this node,
+	// by the peer's node id, oldest first (memql#5338, D1). Guarded by mu. A
+	// peer can hold more than one: a static seed and a discovered address can
+	// land on the same pod, and a reconnect can overlap the stream it
+	// replaces. eventTarget uses the newest one that is still open.
+	inbound map[string][]*inboundStream
+
+	// sink is where an event arriving on ANY stream goes -- the server side of
+	// an accepted stream, the ParentConnector and the WorkerDialer alike
+	// (memql#5338, D6). NewEventBridge installs itself here, so a component
+	// that reads events off the wire needs no wiring of its own: the
+	// WorkerDialer, wired by hand at four call sites, never was, and dropped
+	// every event a server pushed to it.
+	sinkMu sync.RWMutex
+	sink   meshEventSink
 
 	heartbeatInterval  time.Duration
 	livenessTimeout    time.Duration
@@ -107,7 +122,7 @@ func NewPeerManager(identity *Identity, logger *slog.Logger) *PeerManager {
 		identity:           identity,
 		peers:              make(map[string]*PeerEntry),
 		byType:             make(map[NodeType]map[string]*PeerEntry),
-		childConns:         make(map[string]*peerConnection),
+		inbound:            make(map[string][]*inboundStream),
 		heartbeatInterval:  defaultHeartbeatInterval,
 		livenessTimeout:    defaultLivenessTimeout,
 		offlineTimeout:     defaultOfflineTimeout,
@@ -169,21 +184,16 @@ func (pm *PeerManager) SetStaleGossipTimeout(d time.Duration) {
 	}
 }
 
-// sendTarget atomically reads the entry's Connection under the read lock and
-// returns the live connection to Send on, or (nil, false) when the peer has no
-// outbound connection. Returning the connection from inside the lock-protected
-// read closes the check->Send TOCTOU window: the EventBridge sends on the
-// snapshot it got here rather than re-reading entry.Connection (which a
-// concurrent DetachConnection could have niled).
+// sendTarget atomically reads the entry's OUTBOUND Connection under the read
+// lock and returns it, or (nil, false) when this node never dialed the peer.
+// Returning the connection from inside the lock-protected read closes the
+// check->Send TOCTOU window: callers send on the snapshot they got here rather
+// than re-reading entry.Connection (which a concurrent DetachConnection could
+// have niled).
 //
-// A Connection==nil peer is simply skipped for this best-effort fast-path send
-// -- there is no buffering. The mesh is purely a latency optimization over the
-// durable delivery substrate (memql#1264), which is the cross-replica delivery
-// guarantee; a fast-path hint that misses a not-yet-connected peer is harmless
-// because the durable pull catches it up. This is the closeout of epic
-// memql#1259 Phase 2: the ad-hoc push-model patches (#1232 per-peer outbox,
-// #1245 dead-peer skip) are retired now that all three delivery patterns ride
-// the substrate.
+// This is the transport for REQUESTS (the capability router, and the tests
+// that bind a dial). Events use eventTarget, which can also push down a stream
+// the peer opened.
 func (pm *PeerManager) sendTarget(entry *PeerEntry) (*peerConnection, bool) {
 	if entry == nil {
 		return nil, false
@@ -193,6 +203,172 @@ func (pm *PeerManager) sendTarget(entry *PeerEntry) (*peerConnection, bool) {
 	pm.mu.RUnlock()
 
 	return conn, conn != nil
+}
+
+// meshEventSink is what takes an event off the wire: the EventBridge. One
+// method, one arrival path, whichever direction of whichever stream the event
+// came down (memql#5338, D6).
+type meshEventSink interface {
+	ReceiveForward(evt *nodev1.EventForward, fromNodeId string)
+}
+
+// setEventSink installs the bridge that events arriving on this node's streams
+// go to. NewEventBridge calls it.
+func (pm *PeerManager) setEventSink(s meshEventSink) {
+	if pm == nil {
+		return
+	}
+	pm.sinkMu.Lock()
+	pm.sink = s
+	pm.sinkMu.Unlock()
+}
+
+// receiveEvent hands an EventForward that arrived from fromNodeId to the
+// bridge. A node with no bridge drops it: nothing on it could consume the
+// event, and saying so at Debug is all there is to say.
+func (pm *PeerManager) receiveEvent(evt *nodev1.EventForward, fromNodeId string) {
+	if pm == nil || evt == nil {
+		return
+	}
+	pm.sinkMu.RLock()
+	sink := pm.sink
+	pm.sinkMu.RUnlock()
+	if sink == nil {
+		pm.logger.Debug("mesh event dropped: no event bridge on this node",
+			"topic", evt.Topic, "from", fromNodeId)
+		return
+	}
+	sink.ReceiveForward(evt, fromNodeId)
+}
+
+// attachInbound records the push half of a stream peerId opened to this node.
+// The stream handler calls it once the handshake completes, before the
+// welcome goes out, so by the time the peer binds its own side of the stream
+// this side can already push.
+func (pm *PeerManager) attachInbound(peerId string, s *inboundStream) {
+	if pm == nil || peerId == "" || s == nil {
+		return
+	}
+	pm.mu.Lock()
+	pm.inbound[peerId] = append(pm.inbound[peerId], s)
+	pm.mu.Unlock()
+}
+
+// detachInbound releases exactly the stream it is given -- compare-and-delete,
+// so a stream that ends late can never release the replacement that
+// reconnected under the same peer id.
+func (pm *PeerManager) detachInbound(peerId string, s *inboundStream) {
+	if pm == nil || peerId == "" || s == nil {
+		return
+	}
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	streams := pm.inbound[peerId]
+	for i, cur := range streams {
+		if cur == s {
+			streams = append(streams[:i:i], streams[i+1:]...)
+			break
+		}
+	}
+	if len(streams) == 0 {
+		delete(pm.inbound, peerId)
+		return
+	}
+	pm.inbound[peerId] = streams
+}
+
+// latestOpenInboundLocked returns the newest accepted stream from peerId that
+// still takes events. Caller holds mu.
+func (pm *PeerManager) latestOpenInboundLocked(peerId string) *inboundStream {
+	streams := pm.inbound[peerId]
+	for i := len(streams) - 1; i >= 0; i-- {
+		if streams[i].open() {
+			return streams[i]
+		}
+	}
+	return nil
+}
+
+// eventSender puts one EventForward on one transport without blocking, and
+// reports whether it was queued.
+type eventSender func(*nodev1.EventForward) bool
+
+// eventTarget picks the ONE transport an event goes to this peer on
+// (memql#5338, D2), and names it for the counters. A node often holds two
+// streams to one peer -- the bff dials an agent that also parent-dials the
+// bff -- and sending on both would put a duplicate on the wire for dedup to
+// throw away. In order:
+//
+//  1. the dialed connection, when its stream is up right now;
+//  2. the newest accepted stream that is still open;
+//  3. the dialed connection while it reconnects: its outbox holds the event
+//     until the stream is back, which is what it always did.
+//
+// A peer with none of the three -- a sibling learned only from gossip -- has
+// no transport, and a relay reaches it instead (D3).
+func (pm *PeerManager) eventTarget(entry *PeerEntry) (eventSender, string, bool) {
+	if pm == nil || entry == nil || entry.Info == nil {
+		return nil, "", false
+	}
+	pm.mu.RLock()
+	dialed := entry.Connection
+	accepted := pm.latestOpenInboundLocked(entry.Info.NodeId)
+	pm.mu.RUnlock()
+
+	switch {
+	case dialed != nil && dialed.connected():
+		return dialed.sendEvent, metrics.MeshTransportDialed, true
+	case accepted != nil:
+		return accepted.sendEvent, metrics.MeshTransportAccepted, true
+	case dialed != nil:
+		return dialed.sendEvent, metrics.MeshTransportDialed, true
+	}
+	return nil, "", false
+}
+
+// MeshLink is one peer this node exchanges events with, as its delivery
+// report spells it (memql#5338, D7).
+type MeshLink struct {
+	// Node is the peer's node id.
+	Node string
+	// Type is the peer's node type, as it announced itself.
+	Type string
+	// Via says which way the stream runs: "dialed" (this node opened it),
+	// "accepted" (the peer opened it) or "both".
+	Via string
+}
+
+// meshLinks lists every peer this node holds a stream to, in either direction,
+// sorted by node id. A gossiped sibling with no stream is not a link.
+func (pm *PeerManager) meshLinks() []MeshLink {
+	if pm == nil {
+		return nil
+	}
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	links := make([]MeshLink, 0, len(pm.peers))
+	for nodeId, entry := range pm.peers {
+		dialed := entry.Connection != nil
+		accepted := pm.latestOpenInboundLocked(nodeId) != nil
+		var via string
+		switch {
+		case dialed && accepted:
+			via = "both"
+		case dialed:
+			via = metrics.MeshTransportDialed
+		case accepted:
+			via = metrics.MeshTransportAccepted
+		default:
+			continue
+		}
+		nodeType := ""
+		if entry.Info != nil {
+			nodeType = entry.Info.NodeType
+		}
+		links = append(links, MeshLink{Node: nodeId, Type: nodeType, Via: via})
+	}
+	sort.Slice(links, func(i, j int) bool { return links[i].Node < links[j].Node })
+	return links
 }
 
 // HeartbeatInterval returns the interval between outbound heartbeats.
@@ -519,14 +695,20 @@ func (pm *PeerManager) AllPeers() []*PeerEntry {
 	return entries
 }
 
-// PeerInfoList returns PeerInfo protos for all current peers.
+// PeerInfoList returns COPIES of the PeerInfo protos for all current peers.
+//
+// Copies, because the caller marshals them onto a stream (the NodeWelcome)
+// outside this lock while a heartbeat on another stream can be updating the
+// same peer's Health in place (UpdatePeerHealth). Handing out the table's own
+// pointers was a data race the real-transport gate found the first time it
+// ran several streams at once (mesh_delivery_test.go, under -race).
 func (pm *PeerManager) PeerInfoList() []*nodev1.PeerInfo {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 
 	infos := make([]*nodev1.PeerInfo, 0, len(pm.peers))
 	for _, entry := range pm.peers {
-		infos = append(infos, entry.Info)
+		infos = append(infos, proto.Clone(entry.Info).(*nodev1.PeerInfo))
 	}
 	return infos
 }
@@ -588,24 +770,6 @@ func (pm *PeerManager) detachConnectionIf(nodeID string, conn *peerConnection) {
 	defer pm.mu.Unlock()
 	if entry := pm.peers[nodeID]; entry != nil && entry.Connection == conn {
 		entry.Connection = nil
-	}
-}
-
-// AddChildConnection adds a connection for a child node.
-func (pm *PeerManager) AddChildConnection(nodeId string, conn *peerConnection) {
-	pm.childMu.Lock()
-	defer pm.childMu.Unlock()
-	pm.childConns[nodeId] = conn
-}
-
-// RemoveChildConnection removes a child connection.
-func (pm *PeerManager) RemoveChildConnection(nodeId string) {
-	pm.childMu.Lock()
-	defer pm.childMu.Unlock()
-
-	if conn, ok := pm.childConns[nodeId]; ok {
-		conn.Close()
-		delete(pm.childConns, nodeId)
 	}
 }
 
@@ -760,12 +924,11 @@ func (pm *PeerManager) cleanup() {
 	pm.byType = make(map[NodeType]map[string]*PeerEntry)
 	pm.mu.Unlock()
 
-	pm.childMu.Lock()
-	for _, conn := range pm.childConns {
-		conn.Close()
-	}
-	pm.childConns = make(map[string]*peerConnection)
-	pm.childMu.Unlock()
+	// The accepted streams belong to their handlers, which close them as the
+	// server stops; forgetting them here is all the table owes.
+	pm.mu.Lock()
+	pm.inbound = make(map[string][]*inboundStream)
+	pm.mu.Unlock()
 
 	if pm.parentConn != nil {
 		pm.parentConn.Close()
