@@ -224,7 +224,7 @@ export function withoutSubject(draft: ShareDraft, subject: Subject): ShareDraft 
 
 /** Lower case with the accents taken off, so "ruiz" finds "Ruíz". */
 function folded(text: string): string {
-  return text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 }
 
 /** Whether any of these fields contains the query. An empty query matches. */

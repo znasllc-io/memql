@@ -3382,7 +3382,12 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   background: var(--os-hover);
 }
 
+/* `flex: none` because `.os-input` is `flex: 1 1 12ch`, which is right in a
+ * control ROW and wrong in this COLUMN: along a column's main axis that basis
+ * is the input's HEIGHT, and the search drew about a hundred pixels tall. One
+ * control line (DESIGN.md rule 5) is what the rendered pass is for. */
 .fleet-share-search {
+  flex: none;
   width: 100%;
   min-width: 0;
 }

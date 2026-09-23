@@ -159,18 +159,19 @@ function search(dialog: HTMLElement): HTMLInputElement {
 // ---------------------------------------------------------------------------
 
 describe("the sharing panel", () => {
-  it("says who can use a private machine, with both consents and each one's repair", () => {
+  it("says who can use a private machine, with both consents, and no repair for a share nobody asked for", () => {
     mount(studio());
     expect(screen.getByText("Only you")).toBeTruthy();
     // TWO LINES, NOT ONE DERIVED FLAG: the owner's repair is an act on this
     // page and the cockpit's is a line in a file on that machine's disk, and a
     // single "not shared" sends half the people to the wrong place.
     expect(screen.getByText("You have not shared it.")).toBeTruthy();
-    expect(
-      screen.getByText(
-        "Its cockpit has not agreed to serve anyone but you. Set inference.serve to cluster in this machine's policy.yaml.",
-      ),
-    ).toBeTruthy();
+    // BUT A REPAIR IS FOR A DECISION SOMEBODY MADE. A private machine's
+    // cockpit line states its position; telling the owner to edit
+    // policy.yaml for a share they have not chosen is noise -- the repair
+    // appears the moment a share does (below, and in the dialog).
+    expect(screen.getByText("Its cockpit serves only you.")).toBeTruthy();
+    expect(screen.queryByText(/policy\.yaml/)).toBeNull();
   });
 
   it("names up to two people and groups it is lent to", async () => {
@@ -365,6 +366,26 @@ describe("the share dialog", () => {
         "You see how many calls ran and for how many people. You never see what anybody asked or what the model answered.",
       ),
     ).toBeTruthy();
+  });
+
+  it("says, while a draft lends it, that a machine which has not agreed serves nobody else yet", async () => {
+    // THE CONSEQUENCE AT THE MOMENT OF DECIDING (SUPERVISED-VISUAL-COMPOSITION:
+    // "explicit consequences"). Saving a share on a machine whose policy.yaml
+    // still says owner changes nothing anybody can use, and the owner should
+    // learn that before pressing Save, not from a receipt after it.
+    mount(studio());
+    const dialog = await openDialog();
+    expect(within(dialog).queryByText("This machine has not agreed to serve anyone else yet.")).toBeNull();
+    fireEvent.click(within(dialog).getAllByRole("radio")[2]!);
+    expect(within(dialog).getByText("This machine has not agreed to serve anyone else yet.")).toBeTruthy();
+    expect(within(dialog).getByText(/inference\.serve/)).toBeTruthy();
+  });
+
+  it("does not warn about a machine that has already agreed", async () => {
+    mount(studio(undefined, willing));
+    const dialog = await openDialog();
+    fireEvent.click(within(dialog).getAllByRole("radio")[2]!);
+    expect(within(dialog).queryByText("This machine has not agreed to serve anyone else yet.")).toBeNull();
   });
 
   it("searches under Specific people and groups, turns a pick into a removable chip, and saves exactly the draft", async () => {
@@ -779,5 +800,21 @@ describe("the sharing attention marker", () => {
     // this person's receipts, so the silence above is the feed's, not a mount
     // that never listened.
     expect(conn.query.myAttentionReceipts).toHaveBeenCalled();
+  });
+});
+
+describe("the model library's sources sentence", () => {
+  it("counts machines lent to you as part of the local door", async () => {
+    // Since epic memql#5344 a person's catalog holds the machines lent to them
+    // as well as their own, and "a model on your own machines" would tell
+    // somebody with no machine of their own that the model they are using
+    // does not exist.
+    const { ModelsSection } = await import("../../src/apps/fleet/models/ModelsSection");
+    h.connection = fakeConnection({
+      fleetModels: [],
+      inferenceStatus: [{ id: "v1:platform:inferenceStatus:self", eligible: true, doorsOpen: ["local"], localEligible: true, localModelCount: 1, eligibleModelIds: [], appEligible: false, runnableApps: [], appSessionsInstalled: true, cloudConfigured: false, federationConfigured: false, fleetInferenceInstalled: true, fleetCatalogInstalled: true, minimumContextWindow: 8192 }],
+    });
+    render(withSession(<ModelsSection />));
+    expect(await screen.findByText(/a local model on your machines or on one lent to you/)).toBeTruthy();
   });
 });

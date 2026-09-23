@@ -36,11 +36,14 @@ import {
 } from "../test/deployables/harness";
 import { siteFromRow } from "../src/apps/deployables/rows";
 import { MachineDetail } from "../src/apps/fleet/machines/MachineDetail";
+import { ShareDialog } from "../src/apps/fleet/machines/ShareDialog";
+import type { MachineWrites } from "../src/apps/fleet/machines/useMachineWrites";
 import { machineFromRow } from "../src/apps/fleet/rows";
 import { MachinesProvider } from "../src/live/machines";
 import {
   fakeConnection as fleetConnection,
   machineRow as fleetMachineRow,
+  shareDirectoryRow,
   withSession as fleetSession,
 } from "../test/fleet/harness";
 import { OriginsSection } from "../src/apps/cluster/origins/OriginsSection";
@@ -511,6 +514,62 @@ const VIEWS: Record<
     wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
     render: () => <MachinePane over={{ credentialExpiresAt: "", rttAt: "", rttMs: 0 }} />,
   },
+  // Sharing a machine (epic memql#5344). The panel in each reading of who can
+  // use it, then the dialog. `sharing-people` is the one to read first: names,
+  // both consents given, and the week's split ledger line.
+  "sharing-owner": {
+    connect: () => fleetConnection({}),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharingPane over={{ sharing: { mode: "owner" } }} />,
+  },
+  "sharing-people": {
+    connect: () => fleetConnection({ fleetShareDirectory: [SHARE_DIRECTORY], fleetSharingLedger: [SHARE_LEDGER] }),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharingPane over={{ sharing: SHARED_WITH_PEOPLE, capabilityDescriptor: { inferenceServe: "cluster" } }} />,
+  },
+  // Lent by its owner, not yet agreed to by the machine: the one-line state is
+  // muted and the cockpit's line says what to change and where.
+  "sharing-waiting": {
+    connect: () => fleetConnection({ fleetShareDirectory: [SHARE_DIRECTORY] }),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharingPane over={{ sharing: SHARED_WITH_PEOPLE, capabilityDescriptor: { inferenceServe: "owner" } }} />,
+  },
+  "sharing-everyone": {
+    connect: () => fleetConnection({ fleetSharingLedger: [SHARE_LEDGER] }),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharingPane over={{ sharing: { mode: "cluster", sharedAt: "2026-09-20T10:00:00Z" }, capabilityDescriptor: { inferenceServe: "cluster" } }} />,
+  },
+  // Somebody else's machine, as a cluster owner sees it in the fleet: counts,
+  // never names, and no act.
+  "sharing-viewer": {
+    connect: () => fleetConnection({}),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharingPane over={{ ownerUserId: "v1:identity:user:olivia", sharing: SHARED_WITH_PEOPLE, capabilityDescriptor: { inferenceServe: "cluster" } }} />,
+  },
+  // The dialog, opened on a people share with a stale subject on it.
+  "share-dialog": {
+    connect: () => fleetConnection({ fleetShareDirectory: [SHARE_DIRECTORY] }),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharePane over={{ sharing: SHARED_WITH_PEOPLE, capabilityDescriptor: { inferenceServe: "cluster" } }} />,
+  },
+  // An admin's directory: everyone, with the emails they already see in Users.
+  "share-dialog-admin": {
+    connect: () => fleetConnection({ fleetShareDirectory: [{ ...SHARE_DIRECTORY, everyone: true, people: SHARE_PEOPLE_ADMIN, current: { people: [], groups: [] } }] }),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharePane over={{ sharing: { mode: "owner" } }} startPeople />,
+  },
+  // A person in no group, below admin: nobody to pick, and the way out named.
+  "share-dialog-empty": {
+    connect: () => fleetConnection({ fleetShareDirectory: [shareDirectoryRow({ id: "v1:worker:registration:studio", machineId: "v1:worker:registration:studio" })] }),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharePane over={{ sharing: { mode: "owner" } }} startPeople />,
+  },
+  // The engine refused the save: the draft stays, and the engine's words.
+  "share-dialog-refused": {
+    connect: () => fleetConnection({ fleetShareDirectory: [SHARE_DIRECTORY] }),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharePane over={{ sharing: SHARED_WITH_PEOPLE, capabilityDescriptor: { inferenceServe: "cluster" } }} refuse />,
+  },
   overview: { seed: BOUND, render: () => <Overview site={siteFromRow(SHOP)} /> },
   // The preview section, in the five states worth judging as pixels.
   preview: { seed: PREVIEW_MEASURED, render: () => <PreviewPage site={siteFromRow(SHOP_PREVIEWING)} /> },
@@ -690,11 +749,133 @@ function MachinePane({ over }: { over: Record<string, unknown> }) {
     rename: async () => true,
     setOperatorLabels: async () => true,
     revoke: async () => null,
-    setSharing: async () => true,
+    setSharing: async () => null,
   };
   return (
     <div className="os-window-content">
       <MachineDetail machine={machine} writes={writes} now={FLEET_NOW} view="details" />
+    </div>
+  );
+}
+
+// --- Sharing a machine (epic memql#5344) -----------------------------------
+//
+// The panel and the dialog, over the suite's own fixture connection. The
+// dialog views render ShareDialog directly -- the harness does not click --
+// and `?modal=0` draws it in the page rather than the top layer, for a capture
+// tool that does not paint the top layer.
+
+const SHARED_WITH_PEOPLE = {
+  mode: "people",
+  userIds: ["ana", "dee"],
+  groupIds: ["design"],
+  sharedAt: "2026-09-21T16:30:00Z",
+  sharedBy: "v1:identity:user:me",
+};
+
+const SHARE_PEOPLE = [
+  { id: "ana", name: "Ana Ruiz", detail: "" },
+  { id: "bo", name: "Bo Chen", detail: "" },
+  { id: "cy", name: "Cy Okafor", detail: "" },
+  { id: "eli", name: "Eli Marsh", detail: "" },
+];
+
+const SHARE_PEOPLE_ADMIN = [
+  { id: "ana", name: "Ana Ruiz", detail: "ana.ruiz@example.com" },
+  { id: "bo", name: "Bo Chen", detail: "bo@example.com" },
+  { id: "cy", name: "Cy Okafor", detail: "cy.okafor@example.com" },
+  { id: "dee", name: "Dee Park", detail: "dee.park@example.com" },
+  { id: "eli", name: "Eli Marsh", detail: "eli@example.com" },
+  { id: "fay", name: "Fay Lindqvist", detail: "fay.lindqvist@example.com" },
+];
+
+const SHARE_DIRECTORY = shareDirectoryRow({
+  id: "v1:worker:registration:studio",
+  machineId: "v1:worker:registration:studio",
+  everyone: false,
+  people: SHARE_PEOPLE,
+  groups: [
+    { id: "design", name: "Design", members: 4 },
+    { id: "ops", name: "Operations", members: 7 },
+  ],
+  current: {
+    people: [
+      { id: "ana", name: "Ana Ruiz", known: true, inDirectory: true },
+      { id: "dee", name: "Dee Park", known: true, inDirectory: false },
+    ],
+    groups: [{ id: "design", name: "Design", known: true, inDirectory: true }],
+  },
+});
+
+const SHARE_LEDGER = {
+  id: "v1:worker:registration:studio",
+  machineId: "v1:worker:registration:studio",
+  week: "2026-W39",
+  calls: 41,
+  people: 3,
+  otherCalls: 12,
+  otherPeople: 2,
+  systemCalls: 0,
+  readable: true,
+  sentence: "Served 41 calls this week, 12 of them for 2 other people.",
+};
+
+function qaWrites(refuse = false): MachineWrites {
+  return {
+    busyId: "",
+    actionError: refuse
+      ? "some of the people or groups chosen are not ones you can lend this machine to; choose from the people and groups offered"
+      : "",
+    rename: async () => true,
+    setOperatorLabels: async () => true,
+    revoke: async () => null,
+    setSharing: async (_id, choice) =>
+      refuse ? null : { mode: choice.mode, people: choice.userIds.length, groups: choice.groupIds.length, sentence: "Lent to 2 people and 1 group." },
+  };
+}
+
+function SharingPane({ over }: { over: Record<string, unknown> }) {
+  const machine = fleetMachine({ ownerUserId: "v1:identity:user:me", ...over });
+  return (
+    <div className="os-window-content">
+      <MachineDetail machine={machine} writes={qaWrites()} now={FLEET_NOW} view="sharing" />
+    </div>
+  );
+}
+
+function SharePane({ over, startPeople = false, refuse = false }: { over: Record<string, unknown>; startPeople?: boolean; refuse?: boolean }) {
+  const machine = fleetMachine({ ownerUserId: "v1:identity:user:me", ...over });
+  const modal = new URLSearchParams(window.location.search).get("modal") !== "0";
+  if (!modal) {
+    // In-page for a capture tool that does not paint the top layer: the SAME
+    // component and stylesheet, opened with show() instead of showModal().
+    HTMLDialogElement.prototype.showModal = HTMLDialogElement.prototype.show;
+  }
+  useEffect(() => {
+    // One-shot captures cannot click: choose "Specific people and groups"
+    // for the views that open on it, and press Save for the refused one.
+    const timer = window.setTimeout(() => {
+      if (startPeople) {
+        const people = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="radio"]')).find((b) =>
+          (b.textContent ?? "").startsWith("Specific people"),
+        );
+        people?.click();
+      }
+      if (refuse) {
+        const remove = document.querySelector<HTMLButtonElement>(".fleet-share-chip-remove");
+        remove?.click();
+        window.setTimeout(() => {
+          const save = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((b) => b.textContent === "Save");
+          save?.click();
+        }, 300);
+      }
+    }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [startPeople, refuse]);
+  return (
+    <div className="os-window-content">
+      <MachineDetail machine={machine} writes={qaWrites(refuse)} now={FLEET_NOW} view="sharing" />
+      <ShareDialog machine={machine} writes={qaWrites(refuse)} onDiscard={() => undefined} onSaved={() => undefined} />
     </div>
   );
 }

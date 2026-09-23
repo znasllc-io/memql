@@ -472,6 +472,18 @@ export function ShareDialog({
           </section>
         ) : null}
 
+        {draft.mode !== "owner" && machine.inferenceServe !== "cluster" ? (
+          // THE CONSEQUENCE, BEFORE SAVE RATHER THAN AFTER IT: a share on a
+          // machine whose own policy.yaml still says owner changes nothing
+          // anybody can use yet, and the person should learn that while they
+          // are deciding -- not from the receipt.
+          <Notice
+            tone="info"
+            sentence="This machine has not agreed to serve anyone else yet."
+            next="Until inference.serve is set to cluster in its policy.yaml, nobody else's work runs on it."
+          />
+        ) : null}
+
         <div className="fleet-share-terms">
           {/* THE TERMS OF THE OFFER, where the question is being asked. They
               are about lending, so they stand only while the draft lends. */}

@@ -167,9 +167,18 @@ export function SharingGroup({
               ? isOwner
                 ? "Its cockpit has agreed to serve anyone you share it with."
                 : "Its cockpit has agreed to serve anyone its owner shares it with."
-              : isOwner
-                ? "Its cockpit has not agreed to serve anyone but you. Set inference.serve to cluster in this machine's policy.yaml."
-                : "Its cockpit has not agreed to serve anyone but its owner. Set inference.serve to cluster in this machine's policy.yaml."
+              : !ownerGiven
+                ? // A REPAIR IS FOR A DECISION SOMEBODY MADE. Unshared, the
+                  // cockpit's position is stated and nothing more: telling an
+                  // owner to edit policy.yaml for a share they have not chosen
+                  // is noise. The repair appears the moment a share does --
+                  // below, and in the dialog while a draft lends the machine.
+                  isOwner
+                  ? "Its cockpit serves only you."
+                  : "Its cockpit serves only its owner."
+                : isOwner
+                  ? "Its cockpit has not agreed to serve anyone but you. Set inference.serve to cluster in this machine's policy.yaml."
+                  : "Its cockpit has not agreed to serve anyone but its owner. Set inference.serve to cluster in this machine's policy.yaml."
           }
         />
       </ul>
