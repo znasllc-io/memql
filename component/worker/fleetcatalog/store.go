@@ -44,6 +44,7 @@ func (s *EngineStore) WorkersForOwner(ctx context.Context, ownerUserId string) (
 		if id == "" {
 			continue
 		}
+		sharing := workerservice.SharingFromRow(row["sharing"])
 		out = append(out, Candidate{
 			RegistrationId: id,
 			Name:           rowString(row, "name"),
@@ -61,7 +62,9 @@ func (s *EngineStore) WorkersForOwner(ctx context.Context, ownerUserId string) (
 			// merge one line above (epic memql#4676): the cockpit rewrites
 			// `labels` on every reconnect, so an opt-in found there was
 			// granted by the machine rather than by its owner.
-			SharingMode:     workerservice.SharingFromRow(row["sharing"]).Mode,
+			SharingMode:     sharing.Mode,
+			SharedUserIds:   sharing.UserIds,
+			SharedGroupIds:  sharing.GroupIds,
 			InferenceServe:  capabilityInferenceServe(row["capabilityDescriptor"]),
 			Apps:            rowApps(row, "apps"),
 			AppDescriptors:  rowAppDescriptors(row, "appDescriptors"),
@@ -98,13 +101,16 @@ func (s *EngineStore) SharedInferenceWorkers(ctx context.Context) ([]Candidate, 
 			continue
 		}
 		operator := rowStringMap(row, "operatorLabels")
+		sharing := workerservice.SharingFromRow(row["sharing"])
 		out = append(out, Candidate{
 			RegistrationId:  id,
 			Name:            rowString(row, "name"),
 			DisplayName:     rowString(row, "displayName"),
 			Capabilities:    rowStringList(row, "capabilities"),
 			Labels:          MergeLabels(rowStringMap(row, "labels"), operator),
-			SharingMode:     workerservice.SharingFromRow(row["sharing"]).Mode,
+			SharingMode:     sharing.Mode,
+			SharedUserIds:   sharing.UserIds,
+			SharedGroupIds:  sharing.GroupIds,
 			InferenceServe:  capabilityInferenceServe(row["capabilityDescriptor"]),
 			Apps:            rowApps(row, "apps"),
 			AppDescriptors:  rowAppDescriptors(row, "appDescriptors"),
