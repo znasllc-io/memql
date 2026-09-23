@@ -1019,6 +1019,28 @@ QueryClient.prototype.fleetSetSharing = function (this: QueryClient, args: Fleet
   return this.executeNamed("fleetSetSharing", buildFleetSetSharing(args), opts);
 };
 
+/** Who you can lend one of YOUR OWN machines to: the people and groups you may pick, and the ones already on this machine's list. At admin rank or above that is every active person (with the email you already see in Users) and every active group; otherwise it is the active groups you are in and the active people in them, by display name only. Also names every subject already on the machine's list, marked when it is no longer one you could pick -- somebody who left your group stays on the list until you remove them. The machine is resolved through your own machines, so another user's id answers exactly as a made-up one does, and a person with no machine cannot list anybody through it. */
+export interface FleetShareDirectoryArgs {
+  /** v1:worker:registration.id of the machine being shared. It must be one of the caller's own. */
+  registrationId: string;
+}
+
+export function buildFleetShareDirectory(args: FleetShareDirectoryArgs): string {
+  const parts: string[] = [];
+  parts.push("registrationId: " + renderMemQLValue(args.registrationId));
+  return "builtin fleetShareDirectory(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    fleetShareDirectory(args: FleetShareDirectoryArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.fleetShareDirectory = function (this: QueryClient, args: FleetShareDirectoryArgs = {} as FleetShareDirectoryArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("fleetShareDirectory", buildFleetShareDirectory(args), opts);
+};
+
 /** What one of YOUR OWN machines has done this week: how many calls ran on it, for how many people, and how those calls split across the four levels. COUNTS AND LEVELS, and nothing else -- somebody who lends their machine to the team is entitled to know it is being used and NOT entitled to read what it was used for, so the narrowing happens in the engine before anything leaves it rather than in a renderer that could later be rewritten. People are counted and never named. A read that FAILS answers `readable: false` rather than zero: telling somebody who lent their machine that nobody used it is a specific claim, and a failed read is not evidence for it. */
 export interface FleetSharingLedgerArgs {
   /** v1:worker:registration.id of the machine to report on. It must be one of the caller's own; another user's id answers exactly as a made-up one does. */

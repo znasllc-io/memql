@@ -1272,6 +1272,27 @@ func FleetSetSharingBuild(args FleetSetSharingArgs) string {
 	return b.String()
 }
 
+// FleetShareDirectory -- Who you can lend one of YOUR OWN machines to: the people and groups you may pick, and the ones already on this machine's list. At admin rank or above that is every active person (with the email you already see in Users) and every active group; otherwise it is the active groups you are in and the active people in them, by display name only. Also names every subject already on the machine's list, marked when it is no longer one you could pick -- somebody who left your group stays on the list until you remove them. The machine is resolved through your own machines, so another user's id answers exactly as a made-up one does, and a person with no machine cannot list anybody through it.
+type FleetShareDirectoryArgs struct {
+	// v1:worker:registration.id of the machine being shared. It must be one of the caller's own.
+	RegistrationId string
+}
+
+// FleetShareDirectory calls the engine builtin fleetShareDirectory.
+func (qc *QueryClient) FleetShareDirectory(ctx context.Context, args FleetShareDirectoryArgs) (*Result, error) {
+	call := FleetShareDirectoryBuild(args)
+	return qc.executeNamed(ctx, "fleetShareDirectory", call)
+}
+
+func FleetShareDirectoryBuild(args FleetShareDirectoryArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin fleetShareDirectory(")
+	b.WriteString("registrationId: ")
+	b.WriteString(quoteMemQL(args.RegistrationId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // FleetSharingLedger -- What one of YOUR OWN machines has done this week: how many calls ran on it, for how many people, and how those calls split across the four levels. COUNTS AND LEVELS, and nothing else -- somebody who lends their machine to the team is entitled to know it is being used and NOT entitled to read what it was used for, so the narrowing happens in the engine before anything leaves it rather than in a renderer that could later be rewritten. People are counted and never named. A read that FAILS answers `readable: false` rather than zero: telling somebody who lent their machine that nobody used it is a specific claim, and a failed read is not evidence for it.
 type FleetSharingLedgerArgs struct {
 	// v1:worker:registration.id of the machine to report on. It must be one of the caller's own; another user's id answers exactly as a made-up one does.

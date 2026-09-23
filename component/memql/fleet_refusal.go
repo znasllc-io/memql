@@ -191,8 +191,22 @@ func isForeignPrivateShareNoise(why string) bool {
 	return strings.Contains(why, "both are needed") ||
 		strings.Contains(why, "has not shared") ||
 		strings.Contains(why, "policy.yaml") ||
-		strings.Contains(why, "inference.serve")
+		strings.Contains(why, "inference.serve") ||
+		// A machine lent to NAMED people (epic memql#5344): "shared it with
+		// specific people, and not with you" and "... not with the cluster's
+		// own work". Somebody else's machine either way, so it is counted and
+		// never named, exactly as the two-consent sentences are.
+		strings.Contains(why, "specific people")
 }
+
+// IsForeignShareRefusal reports whether a routing refusal is about a machine
+// that is not the caller's to use -- one this package COUNTS rather than names
+// (epic memql#5327, D12). Exported for the parity test that holds it to every
+// sentence component/worker can write: the two packages cannot import each
+// other, so they agree on words, and a new sentence the classifier missed
+// would slip back into the named list as an enumeration of other people's
+// machines.
+func IsForeignShareRefusal(why string) bool { return isForeignPrivateShareNoise(why) }
 
 // Unwrap makes errors.Is(err, ErrFleetUnavailable) true, so a caller that only
 // wants to know "unavailable" does not have to type-assert.

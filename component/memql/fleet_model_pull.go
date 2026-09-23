@@ -71,6 +71,18 @@ type modelPullMachine struct {
 	ConnectedNodeId string
 	LastSeenAt      string
 	RevokedAt       string
+	// The owner's stored share and the cockpit's consent (epic memql#5344).
+	// fleetSetSharing checks only subjects NOT already on the list, and the
+	// share directory names the ones that are, so both need what is stored --
+	// read from the row this struct already proved belongs to the caller.
+	// The lists are set only under SharingModePeople (ParseMachineSharing).
+	SharingMode    string
+	SharedUserIds  []string
+	SharedGroupIds []string
+	// InferenceServe is capabilityDescriptor.inferenceServe: "cluster" when the
+	// machine agreed to serve people other than its owner, "" or "owner" when
+	// it has not said so.
+	InferenceServe string
 }
 
 // modelPullPlan is what an accepted act will write.
@@ -279,7 +291,7 @@ func (e *MemQLEngine) modelPullMachineFor(ctx context.Context, registrationId st
 		if rowId != registrationId && trimConceptPrefix(rowId) != registrationId {
 			continue
 		}
-		return modelPullMachine{
+		machine := modelPullMachine{
 			RegistrationId: registrationId,
 			OwnerUserId:    mapString(row, "ownerUserId"),
 			// The credential bound to this registration (epic memql#5327,
@@ -293,7 +305,12 @@ func (e *MemQLEngine) modelPullMachineFor(ctx context.Context, registrationId st
 			ConnectedNodeId: mapString(row, "connectedNodeId"),
 			LastSeenAt:      mapString(row, "lastSeenAt"),
 			RevokedAt:       mapString(row, "revokedAt"),
-		}, nil
+		}
+		machine.SharingMode, machine.SharedUserIds, machine.SharedGroupIds = ParseMachineSharing(row["sharing"])
+		if descriptor, ok := row["capabilityDescriptor"].(map[string]any); ok {
+			machine.InferenceServe = strings.TrimSpace(stringFromAny(descriptor["inferenceServe"]))
+		}
+		return machine, nil
 	}
 	return modelPullMachine{}, notYours
 }

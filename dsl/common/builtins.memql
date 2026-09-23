@@ -864,6 +864,22 @@ builtin fleetSetSharing {
   groupIds        []string  @description("Under people: the v1:identity:group ids whose active members may use the machine. Ignored under owner and cluster.")
 }
 
+// ---- Who a machine can be lent to (epic memql#5344, design G2) ----
+//
+// The share dialog's list. A plain user has no read that lists anybody -- the
+// roster is floored at developer and groups at admin -- and opening the whole
+// roster to every machine owner, client-rank people included, would be a new
+// visibility bought for a dialog. So this offers what the owner can already
+// account for: the groups they are in and the people in those groups; and
+// everyone, with emails, at the admin rank that already reads them in Users.
+
+@sdk
+@executor("fleetShareDirectory")
+@description("Who you can lend one of YOUR OWN machines to: the people and groups you may pick, and the ones already on this machine's list. At admin rank or above that is every active person (with the email you already see in Users) and every active group; otherwise it is the active groups you are in and the active people in them, by display name only. Also names every subject already on the machine's list, marked when it is no longer one you could pick -- somebody who left your group stays on the list until you remove them. The machine is resolved through your own machines, so another user's id answers exactly as a made-up one does, and a person with no machine cannot list anybody through it.")
+builtin fleetShareDirectory {
+  registrationId  string!  @description("v1:worker:registration.id of the machine being shared. It must be one of the caller's own.")
+}
+
 // ---- Measuring a model on one of your machines (epic memql#5146, D3) ----
 //
 // The pull's act one question later. A pull says a model is on the disk; this
