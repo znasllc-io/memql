@@ -105,15 +105,28 @@ func (s *store) query(ctx context.Context, q string) ([]map[string]any, error) {
 	return memqlRows(res), nil
 }
 
-// callerUserId is the authenticated caller, or "" when there is none -- which
-// is what an automation's system actor looks like, and why the gates that use
-// it treat a blank caller as "not a person acting" rather than as a refusal.
-func callerUserId(ctx context.Context) string {
-	ac, ok := auth.AccessFromContext(ctx)
-	if !ok || ac == nil {
-		return ""
+// The two @serverOnly READS the header names. They live HERE, beside the one
+// stamp, rather than at their callers: a @serverOnly call belongs next to the
+// internal origin it needs, where the next reader -- and the conformance gate
+// that holds every such call to a file that stamps -- finds the two together.
+
+// runByIdAsCluster reads one run through the by-id read, which only a cluster
+// owner's actor answers: the maintenance principal learning whose run an event
+// named. nil when nothing answered.
+func (s *store) runByIdAsCluster(ctx context.Context, runId string) (map[string]any, error) {
+	rows, err := s.executeInternal(ctx, "query "+call("workRunById", map[string]any{"runId": runId}))
+	if err != nil || len(rows) == 0 {
+		return nil, err
 	}
-	return ac.UserId
+	return rows[0], nil
+}
+
+// activeUserIds lists every active person, through the query the seed sweep
+// uses -- unscoped by nature, because a sweep over owners cannot know whose
+// corpus to read before it has the list. Its caller admits only the cluster's
+// principal first.
+func (s *store) activeUserIds(ctx context.Context) ([]map[string]any, error) {
+	return s.executeInternal(ctx, "query usersForSeedSweep()")
 }
 
 // --- call-string construction --------------------------------------------

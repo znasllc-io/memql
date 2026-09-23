@@ -371,24 +371,16 @@ func (i *Integration) readRunForCaller(ctx context.Context, runId string) (map[s
 	if !ok || ac == nil {
 		return nil, fmt.Errorf("procedure.learnFromRun: no authenticated caller")
 	}
-	var (
-		rows []map[string]any
-		err  error
-	)
 	if ac.Synthetic {
-		// workRunById is @serverOnly, so it takes the stamp; its filter is
+		// The by-id read is @serverOnly, so it takes the stamp; its filter is
 		// actor.isClusterOwner, so the stamp opens the construct and the
 		// actor still decides the rows -- a synthetic READER (an automation
 		// that is not on the maintenance list) reads nothing.
-		rows, err = i.store.executeInternal(ctx, "query "+call("workRunById", map[string]any{"runId": runId}))
-	} else {
-		rows, err = i.store.query(ctx, "query "+call("workRunForOwner", map[string]any{"runId": runId}))
+		return i.store.runByIdAsCluster(ctx, runId)
 	}
-	if err != nil {
+	rows, err := i.store.query(ctx, "query "+call("workRunForOwner", map[string]any{"runId": runId}))
+	if err != nil || len(rows) == 0 {
 		return nil, err
-	}
-	if len(rows) == 0 {
-		return nil, nil
 	}
 	return rows[0], nil
 }
@@ -493,11 +485,10 @@ func (i *Integration) mineEveryOwner(ctx context.Context, sig string, level Leve
 	return out
 }
 
-// ownerIds lists every active person the sweep mines for, through the query
-// the seed sweep uses: @serverOnly, so stamped, and unscoped by nature -- a
-// sweep over owners cannot know whose corpus to read before it has the list.
+// ownerIds lists every active person the sweep mines for, each once, sorted
+// -- the store's activeUserIds, which only the cluster's principal reaches.
 func (i *Integration) ownerIds(ctx context.Context) ([]string, error) {
-	rows, err := i.store.executeInternal(ctx, "query usersForSeedSweep()")
+	rows, err := i.store.activeUserIds(ctx)
 	if err != nil {
 		return nil, err
 	}
