@@ -36,13 +36,17 @@ import (
 // shadow streak could never reach m. So two things are left out of what is
 // hashed, and each is stated where it is stored:
 //
-//   - the source's COMMENT lines, which carry D9's provenance stamp;
-//   - procedure.recordedFrom, the same stamp as data.
+//   - the source's COMMENT lines, which carry D9's provenance stamp and the
+//     description;
+//   - procedure.recordedFrom, the same stamp as data, and procedure.title,
+//     the goal statement the description quotes -- read off the oldest
+//     recording the corpus still holds, so it can be reworded when that one
+//     ages out, with nothing a replay does changing.
 //
-// Both are still STORED, and they describe the version: the lift writes
-// nothing when the hash is unchanged, so they name the recordings the version
-// was first learned from. Anyone can recompute the hash from the stored row
-// with procedureHash below.
+// All of them are still STORED, and they describe the version: the lift
+// writes nothing when the hash is unchanged, so they name the recordings the
+// version was first learned from. Anyone can recompute the hash from the
+// stored row with procedureHash below.
 
 // procedurePayloadVersion is the payload's `v`.
 const procedurePayloadVersion = 1
@@ -200,15 +204,16 @@ func asObject(v any) (map[string]any, error) {
 // insignificant whitespace, nothing HTML-escaped) of
 //
 //	{source: <source without its comment lines>,
-//	 procedure: <procedure without recordedFrom>,
+//	 procedure: <procedure without recordedFrom and title>,
 //	 preconditions: <preconditions>}
 //
-// The two exclusions are the provenance, and the file header says why they
-// cannot be hashed. Everything a replay executes or checks is inside it.
+// The exclusions are the provenance and the presentation, and the file header
+// says why neither can be hashed. Everything a replay executes or checks is
+// inside it.
 func procedureHash(source string, procedure, preconditions map[string]any) (string, error) {
 	behaviour := make(map[string]any, len(procedure))
 	for k, v := range procedure {
-		if k == "recordedFrom" {
+		if unhashedProcedureKeys[k] {
 			continue
 		}
 		behaviour[k] = v
@@ -226,6 +231,10 @@ func procedureHash(source string, procedure, preconditions map[string]any) (stri
 	}
 	return proc.Digest(canonical), nil
 }
+
+// unhashedProcedureKeys are the payload keys outside the version: provenance
+// and presentation, never behaviour.
+var unhashedProcedureKeys = map[string]bool{"recordedFrom": true, "title": true}
 
 // canonicalJSON encodes with sorted keys (encoding/json sorts map keys), no
 // indentation and no HTML escaping -- `<` written as < is the same

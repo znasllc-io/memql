@@ -38,7 +38,7 @@ const goldenSource = `// Learned procedure (epic memql#5402). Generalized by com
 // Recorded from app claude-code, model claude-sonnet-4-6, session s1, s2.
 // From runs: r1, r2.
 // Accepted on 2 use(s), net compression 9.
-@description("Procedure learned from the recorded runs of: Write the \"greeting\" file")
+/// Procedure learned from the recorded runs of: Write the "greeting" file
 automation learnedProcedure_abc_l1 {
   args {
     command_70 string
@@ -50,7 +50,7 @@ automation learnedProcedure_abc_l1 {
 `
 
 // TestRenderProcedureSourceWritesEveryStepAsAProcedureStep is the golden: the
-// provenance stamp, a QuoteString-quoted description, the free parameter as
+// provenance stamp, the description as a doc comment, the free parameter as
 // the args block, and every step one procedureStep statement with its holes
 // spelled -- where every step used to be a comment line.
 func TestRenderProcedureSourceWritesEveryStepAsAProcedureStep(t *testing.T) {
@@ -94,15 +94,22 @@ func TestAStepWhoseArgumentsHaveNoSpellingIsACommentLine(t *testing.T) {
 	}
 }
 
-// TestTheDescriptionNeverCountsTheRuns: the description is source, the source
-// is hashed, and a number that grows with every agreeing recording would make
-// each of them a new version. The count belongs to the provenance comment.
-func TestTheDescriptionNeverCountsTheRuns(t *testing.T) {
+// TestTheSourceOutsideItsCommentsIsTheBehaviourAlone: the source is hashed
+// without its comment lines, so whatever varies with the CORPUS rather than
+// with the procedure -- the run count, the sessions, and the goal statement,
+// read off whichever recording is oldest -- must live in a comment. Outside
+// one, a reworded goal or one more agreeing recording would be a new version.
+func TestTheSourceOutsideItsCommentsIsTheBehaviourAlone(t *testing.T) {
 	tmpl := twoStepTemplate()
-	two, _ := renderProcedureSource("p", "", tmpl, freeHoles(tmpl), planner.TemplateProvenance{RunIds: []string{"a", "b"}})
-	three, _ := renderProcedureSource("p", "", tmpl, freeHoles(tmpl), planner.TemplateProvenance{RunIds: []string{"a", "b", "c"}})
+	two, _ := renderProcedureSource("p", "Write the greeting file", tmpl, freeHoles(tmpl),
+		planner.TemplateProvenance{RunIds: []string{"a", "b"}, SessionId: "s1"})
+	three, _ := renderProcedureSource("p", "write the greeting file!", tmpl, freeHoles(tmpl),
+		planner.TemplateProvenance{RunIds: []string{"a", "b", "c"}, SessionId: "s1, s2"})
 	if sourceWithoutComments(two) != sourceWithoutComments(three) {
-		t.Fatalf("the source outside its comments changed with the run count:\n%s\n---\n%s", two, three)
+		t.Fatalf("the source outside its comments changed with the corpus:\n%s\n---\n%s", two, three)
+	}
+	if !strings.Contains(two, "/// Procedure learned from the recorded runs of: Write the greeting file\n") {
+		t.Fatalf("the goal statement must still be READ in the source, as its doc comment:\n%s", two)
 	}
 }
 

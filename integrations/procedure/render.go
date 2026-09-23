@@ -42,16 +42,18 @@ func renderProcedureSource(name, title string, t proc.Template, freeParams []pro
 	var b strings.Builder
 	b.WriteString(planner.ProvenanceComment(prov))
 
-	// No count of runs here: the description is source, source is hashed,
-	// and a number that grows with every agreeing recording would make each
-	// one a new version. The count lives in the provenance comment above.
+	// THE DESCRIPTION IS A DOC COMMENT, not an @description, because what it
+	// quotes is PRESENTATION: the goal statement is read off the oldest
+	// recording the corpus still holds, and when that one ages out of the
+	// corpus the wording can change with nothing a replay does changing. A
+	// comment is outside the version hash (payload.go); an annotation would
+	// make a reworded goal a new version and send a trusted procedure back
+	// to shadow. For the same reason it never counts the runs.
 	desc := "Procedure learned from recorded runs."
-	if goal := strings.Join(strings.Fields(title), " "); goal != "" {
+	if goal := oneLine(title); goal != "" {
 		desc = "Procedure learned from the recorded runs of: " + goal
 	}
-	// QuoteString, never %q: the two escape sets differ, and a goal
-	// statement is exactly the text that carries the character they differ on.
-	fmt.Fprintf(&b, "@description(%s)\n", langparser.QuoteString(truncateRunes(desc, 200)))
+	fmt.Fprintf(&b, "/// %s\n", truncateRunes(desc, 200))
 	fmt.Fprintf(&b, "automation %s {\n", name)
 	if len(freeParams) > 0 {
 		b.WriteString("  args {\n")

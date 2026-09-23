@@ -198,6 +198,10 @@ func TestTheProcedureHashCoversSourceProcedureAndPreconditions(t *testing.T) {
 	withProvenance["recordedFrom"] = map[string]any{"runIds": []any{"another"}}
 	h, _ = procedureHash(source, withProvenance, prec)
 	same("recordedFrom", h)
+	reworded := cloneObject(t, payload)
+	reworded["title"] = "write the greeting file, reworded"
+	h, _ = procedureHash(strings.Replace(source, "Write the greeting file", "write the greeting file, reworded", 1), reworded, prec)
+	same("goal statement the title and the description quote", h)
 }
 
 func cloneObject(t *testing.T, m map[string]any) map[string]any {
