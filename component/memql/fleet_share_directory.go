@@ -14,10 +14,11 @@ package memql
 //   - the ACTIVE groups they are an ACTIVE member of, and
 //   - the active people in those groups,
 //
-// and a caller at admin rank or above -- who reads every person and group in
-// the Users app today -- is offered everyone, with the email they already see
-// there. A plain user is never handed an email; a display name is the most
-// the engine publishes about one person to another (userDisplayById).
+// and a caller who may already read every person -- `read` on `principal`,
+// which owner, developer and admin hold by seed and a grant can give or take
+// away -- is offered everyone, with the email that read already shows them.
+// Anybody else is never handed an email; a display name is the most the
+// engine publishes about one person to another (userDisplayById).
 //
 // ===========================================================================
 // IT ANSWERS ONLY AN OWNER, ABOUT ONE OF THEIR OWN MACHINES
@@ -62,11 +63,6 @@ const shareSubjectsMax = 50
 // SharingModePeople sits beside the two fleet_machine_acts.go already names.
 const SharingModePeople = "people"
 
-// shareDirectoryAdminFloor is the rank at which the directory is everyone:
-// the Users app's own floor, so nobody is offered a person they could not
-// already find there.
-const shareDirectoryAdminFloor = "admin"
-
 // shareEntry is one person or group as the directory renders it.
 type shareEntry struct {
 	Id      string // bare, the client contract
@@ -98,20 +94,30 @@ func (d shareDirectory) offersGroup(id string) bool {
 	return ok
 }
 
-// actorSeesEveryone reports whether the caller is at or above the admin floor.
+// actorSeesEveryone reports whether the caller may already read every person
+// on the cluster: `read` on `principal`, decided by auth.CapableFor -- the one
+// resolver every other gate asks, with role, group and person grants folded in.
+//
+// A CAPABILITY, NOT A RANK. The owner's rule was "anyone who can already see
+// everyone", and a rank floor answered a different question: an admin with an
+// explicit deny on reading people, or a custom role ranked above admin that
+// was never given the verb, would have been handed every name and email the
+// grant withholds from them everywhere else. By default the answer is the
+// same -- owner, developer and admin hold `read principal` by seed.
 //
 // BORROWED AND SYNTHETIC AUTHORITY SEES CO-MEMBERS ONLY. An Unranked context
-// is server-side Go acting for somebody (D4), and its stamped role is not a
-// rung; answering "everyone" for it would hand a roster to whatever borrowed
-// the authority. The floor itself goes through rankFloorAdmits, whose whole
-// point is that an unresolvable floor denies rather than admits.
+// is server-side Go acting for somebody (D4), and answering "everyone" for it
+// would hand a roster to whatever borrowed the authority.
 func (e *MemQLEngine) actorSeesEveryone(ctx context.Context) bool {
 	ac, ok := auth.AccessFromContext(ctx)
 	if !ok || ac == nil || ac.Unranked || ac.Synthetic {
 		return false
 	}
-	ladder := e.rankLadder(ctx)
-	return rankFloorAdmits(ladder, shareDirectoryAdminFloor, ladder.rankOf(string(ac.Role)))
+	subject, ok := e.subjectFor(ctx)
+	if !ok || strings.TrimSpace(subject.UserId) == "" {
+		return false
+	}
+	return auth.CapableFor(ctx, subject, auth.VerbRead, auth.ResourcePrincipal)
 }
 
 // shareDirectoryFor builds the caller's directory.
@@ -361,10 +367,15 @@ func (e *MemQLEngine) evaluateFleetShareDirectoryExpression(ctx context.Context,
 	})
 }
 
-// normalizeShareIds trims, drops empties, collapses one subject's spellings to
-// the first one sent, and drops any id naming one of `skip` -- the machine's
-// owner, whose own machine is theirs already and never needs lending to them.
-// Always non-nil: an empty list renders as `[]`, never `null`.
+// normalizeShareIds is the WRITE side: trimmed, empties dropped, reduced to
+// the BARE id -- the client contract's spelling, whatever the caller sent --
+// one entry per subject, and any id naming one of `skip` dropped (the
+// machine's owner, whose own machine is theirs already). Always non-nil: an
+// empty list renders as `[]`, never `null`.
+//
+// BARE, NOT AS SENT. A caller that sent `v1:identity:group:<a user's id>` in
+// userIds would otherwise have that spelling stored for a person, validated
+// on its bare id and forever read as belonging to a concept it does not.
 func normalizeShareIds(ids []string, skip ...string) []string {
 	out := []string{}
 	seen := map[string]struct{}{}
@@ -373,9 +384,8 @@ func normalizeShareIds(ids []string, skip ...string) []string {
 			seen[bare] = struct{}{}
 		}
 	}
-	for _, id := range ids {
-		id = strings.TrimSpace(id)
-		bare := BareShortId(id)
+	for _, raw := range ids {
+		bare := BareShortId(strings.TrimSpace(raw))
 		if bare == "" {
 			continue
 		}
@@ -383,7 +393,7 @@ func normalizeShareIds(ids []string, skip ...string) []string {
 			continue
 		}
 		seen[bare] = struct{}{}
-		out = append(out, id)
+		out = append(out, bare)
 	}
 	return out
 }
@@ -408,20 +418,43 @@ func ParseMachineSharing(v any) (mode string, userIds, groupIds []string) {
 	if mode == SharingModeCluster {
 		return mode, nil, nil
 	}
-	userIds = collapseShareIds(stringSliceFromAny(row["userIds"]))
-	groupIds = collapseShareIds(stringSliceFromAny(row["groupIds"]))
+	userIds = readShareIdList(row["userIds"])
+	groupIds = readShareIdList(row["groupIds"])
 	if len(userIds) == 0 && len(groupIds) == 0 {
 		return SharingModeOwner, nil, nil
 	}
 	return mode, userIds, groupIds
 }
 
-// collapseShareIds is normalizeShareIds with nothing skipped and nil for an
-// empty result, matching the stored-list reader on the worker side.
-func collapseShareIds(ids []string) []string {
-	out := normalizeShareIds(ids)
-	if len(out) == 0 {
-		return nil
+// readShareIdList is the READ side, and it matches the worker's reader rule for
+// rule: a LIST only (a single string where a list belongs is a hand-edited row,
+// and neither reader guesses at it), trimmed, empties dropped, one entry per
+// subject by BareShortId with the first spelling kept, and nil when empty.
+func readShareIdList(v any) []string {
+	var raw []string
+	switch list := v.(type) {
+	case []string:
+		raw = list
+	case []any:
+		for _, item := range list {
+			if s, ok := item.(string); ok {
+				raw = append(raw, s)
+			}
+		}
+	}
+	var out []string
+	seen := map[string]struct{}{}
+	for _, id := range raw {
+		id = strings.TrimSpace(id)
+		bare := BareShortId(id)
+		if bare == "" {
+			continue
+		}
+		if _, dup := seen[bare]; dup {
+			continue
+		}
+		seen[bare] = struct{}{}
+		out = append(out, id)
 	}
 	return out
 }

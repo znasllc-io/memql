@@ -875,7 +875,7 @@ builtin fleetSetSharing {
 
 @sdk
 @executor("fleetShareDirectory")
-@description("Who you can lend one of YOUR OWN machines to: the people and groups you may pick, and the ones already on this machine's list. At admin rank or above that is every active person (with the email you already see in Users) and every active group; otherwise it is the active groups you are in and the active people in them, by display name only. Also names every subject already on the machine's list, marked when it is no longer one you could pick -- somebody who left your group stays on the list until you remove them. The machine is resolved through your own machines, so another user's id answers exactly as a made-up one does, and a person with no machine cannot list anybody through it.")
+@description("Who you can lend one of YOUR OWN machines to: the people and groups you may pick, and the ones already on this machine's list. When you may already read every person on the cluster (`read` on `principal`: owner, developer and admin by default, and whoever a grant gives it to) that is every active person, with their email, and every active group; otherwise it is the active groups you are in and the active people in them, by display name only. Also names every subject already on the machine's list, marked when it is no longer one you could pick -- somebody who left your group stays on the list until you remove them. The machine is resolved through your own machines, so another user's id answers exactly as a made-up one does, and a person with no machine cannot list anybody through it.")
 builtin fleetShareDirectory {
   registrationId  string!  @description("v1:worker:registration.id of the machine being shared. It must be one of the caller's own.")
 }

@@ -82,6 +82,12 @@ func TestTheTwoReadersOfAStoredShareAgree(t *testing.T) {
 		map[string]any{"mode": "people", "groupIds": []any{"v1:identity:group:design", "design"}},
 		map[string]any{"mode": "people", "userIds": []any{"ana"}, "groupIds": []any{"g"}},
 		map[string]any{"mode": "everyone", "userIds": []any{"ana"}},
+		// A hand-edited row: a single string where a list belongs. A list is
+		// the only shape either reader accepts (review finding).
+		map[string]any{"mode": "people", "userIds": "ana"},
+		// Ids that differ only in a prefix neither reader should strip.
+		map[string]any{"mode": "people", "userIds": []any{"system:automation:ana", "ana"}},
+		map[string]any{"mode": "people", "userIds": []any{"a:b", "c:b"}},
 		"not a map",
 	}
 	for i, row := range rows {

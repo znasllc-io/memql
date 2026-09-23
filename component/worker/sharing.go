@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // SHARING: two consents, and neither one alone (epic memql#5146, design D6).
@@ -257,6 +258,16 @@ func (s Sharing) Admits(p *Person) bool {
 	if p == nil || p.UserId == "" {
 		return false
 	}
+	if auth.IsSystemActorId(p.UserId) {
+		// A SYNTHETIC ACTOR IS THE CLUSTER'S OWN WORK, never a person on a
+		// list. Automations run as `system:automation:<name>` and maintenance
+		// as `system:maintenance:<name>`, so their calls carry an id -- and a
+		// comparison that matched one to a listed person by the text after its
+		// last colon would lend a machine to an automation because its name
+		// happened to equal somebody's id. Only a machine lent to everyone
+		// serves the cluster's own work (design G3), by construction.
+		return s.Mode == SharingModeCluster
+	}
 	switch s.Mode {
 	case SharingModeCluster:
 		return true
@@ -339,11 +350,21 @@ func SameSubjectId(a, b string) bool {
 	return a == b || bareSubjectId(a) == bareSubjectId(b)
 }
 
+// bareSubjectId is component/memql.BareShortId's rule, through the same
+// parser: the short id after a `v<N>:domain:entity` concept prefix, and the
+// whole value when there is no such prefix. NOT the text after the last colon
+// -- that rule read `system:automation:ana` as `ana` and `a:b` as `c:b`, and
+// the two readers of one stored share must collapse ids identically.
 func bareSubjectId(v string) string {
-	if i := strings.LastIndex(v, ":"); i >= 0 {
-		return v[i+1:]
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return ""
 	}
-	return v
+	_, short, err := id.ParseNodeId(v)
+	if err != nil || short == "" {
+		return v
+	}
+	return short
 }
 
 // subjectIds reads a stored id list: trimmed, empties dropped, and one entry

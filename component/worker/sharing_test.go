@@ -280,3 +280,27 @@ func TestRefusalsNameTheMissingHalfForPeopleShares(t *testing.T) {
 		t.Fatalf("an owner-only machine keeps the two-consent sentence, got %q", got)
 	}
 }
+
+func TestASyntheticActorIsNeverOnAPeopleList(t *testing.T) {
+	// Review finding (epic memql#5344): automations run as
+	// `system:automation:<name>` and maintenance as `system:maintenance:<name>`,
+	// and a last-colon comparison matched `system:automation:ana` to a listed
+	// `ana`. A people share is consent for PEOPLE; the cluster's own work
+	// reaches only a machine lent to everyone (design G3). By construction,
+	// not by the odds of a name colliding with an id.
+	s := Sharing{Mode: SharingModePeople, UserIds: []string{"indextodo", "v1:identity:user:indextodo"}}
+	for _, actor := range []string{"system:automation:indextodo", "system:maintenance:indextodo", "system:indextodo"} {
+		if s.Admits(NewPerson(context.Background(), actor, nil)) {
+			t.Fatalf("%q must never be admitted by a people share", actor)
+		}
+	}
+	if !(Sharing{Mode: SharingModeCluster}).Admits(NewPerson(context.Background(), "system:automation:indextodo", nil)) {
+		t.Fatal("a machine lent to everyone serves the cluster's own work")
+	}
+	if SameSubjectId("system:automation:x", "x") {
+		t.Fatal("a system actor id is one opaque id, never the text after its last colon")
+	}
+	if !SameSubjectId("v1:identity:user:ana", "ana") {
+		t.Fatal("a canonical user id and its bare form are one person")
+	}
+}

@@ -33,10 +33,10 @@ shell: tool dispatch and app sessions stay yours alone.
 | **Everyone in this cluster** | `cluster` | everyone signed in to this cluster, **and** the cluster's own work |
 
 The consent lives on the machine's own row, `v1:worker:registration.sharing`:
-`{mode, userIds, groupIds, sharedAt, sharedBy}`. It is a **closed** block —
-a misspelled key is refused rather than stored beside the real one — and it is
-written only by `fleetSetSharing`, which resolves the machine through the
-caller's own machines (see [Only the owner may lend a
+`{mode, userIds, groupIds, sharedAt, sharedBy}`, with ids stored bare. It is a
+**closed** block — a misspelled key is refused rather than stored beside the
+real one — and it is written only by `fleetSetSharing`, which resolves the
+machine through the caller's own machines (see [Only the owner may lend a
 machine](#only-the-owner-may-lend-a-machine)).
 
 The lists mean something only under `people`, and changing to either other
@@ -85,7 +85,7 @@ the same reason:
 | the owner's | "The machine's cockpit is willing to serve the cluster, but its owner has not shared it. The owner turns this on from the machine's page in Fleet." |
 | the machine's | "The owner has shared this machine, but its cockpit is not willing to serve the cluster. Set `inference.serve` to `cluster` in that machine's `policy.yaml` -- it is a decision about where the machine is, and only the machine can make it." |
 | you are not on the list | "Its owner has shared it with specific people, and not with you." |
-| you are on the list, the machine has not agreed | "Its owner has shared it with you, but its cockpit is not willing to serve anyone but its owner. Set `inference.serve` to `cluster` in that machine's `policy.yaml` ..." |
+| you are on the list, the machine has not agreed | "Its owner has shared it with you, but its cockpit is not willing to serve anyone but its owner. Set `inference.serve` to `cluster` in that machine's `policy.yaml` ..." -- counted as "1 machine lent to you is waiting on its own consent" |
 
 A refusal about somebody else's machine is **counted, never named** (epic
 memql#5327, D12): a person whose call ran out of options learns that machines
@@ -110,9 +110,10 @@ The share dialog offers what you can already account for, and no more:
   active people, and
 - **the active people in those groups**, by display name.
 
-At **admin rank or above** — who already read every person and group in the
-Users app — it offers every active person, with the email you already see
-there, and every active group. Nobody else is ever handed an email address.
+If you may already read every person on the cluster — `read` on `principal`,
+which owners, developers and admins hold by default and a grant can give or
+take away — it offers every active person, with their email, and every active
+group. Nobody else is ever handed an email address.
 
 That is `fleetShareDirectory(registrationId)`, and it answers only a machine's
 owner, about one of their own machines: a person with no machine cannot list
@@ -137,12 +138,13 @@ made-up one does.
 
 ## The cluster's own work
 
-System work — automations and cluster maintenance, with no acting person —
-reaches **only a machine lent to everyone**. A machine shared with specific
-people never serves it, whatever its list says: a list of names is consent for
-those people, and the cluster's own work is nobody on the list. The routing
-plan says so in as many words: "Its owner has shared it with specific people,
-not with the cluster's own work."
+System work — automations and cluster maintenance, with no acting person or
+under the cluster's own synthetic identity (`system:automation:<name>`,
+`system:maintenance:<name>`) — reaches **only a machine lent to everyone**. A
+machine shared with specific people never serves it, whatever its list says: a
+list of names is consent for those people, and the cluster's own work is
+nobody on the list. The routing plan says so in as many words: "Its owner has
+shared it with specific people, not with the cluster's own work."
 
 ---
 
@@ -166,8 +168,10 @@ row read, which is the last point where the full decision record is in hand
 and the first where the promise can be kept — not in a renderer that a later
 change could quietly widen.
 
-The type the fold is built on cannot express a prompt. Other people are
-**counted and never named**: the row carries `calls`, `people`,
+The cluster's own work is every call with no acting person, or with the
+cluster's synthetic identity (an automation or a maintenance sweep) — never
+"another person". The type the fold is built on cannot express a prompt. Other
+people are **counted and never named**: the row carries `calls`, `people`,
 `otherCalls`, `otherPeople`, `systemCalls` and calls per level, and nothing
 else. With a one-person share the count of other people implies that person,
 which is inherent to any count — it tells you they used the machine, never
@@ -190,9 +194,12 @@ question that went unanswered read alike in the same typeface.
 ## What a person it is lent to sees
 
 The machine's models appear in their catalog — in Fleet's model library, and
-in every place a policy chain asks whether a local model is available — under
-the machine's name. That is all: they read no registration row, so they do not
-see the machine's hardware, labels, history or who else it is lent to.
+in every place a policy chain asks whether a local model is available — with
+the facts routing uses about the machine: its name, whether it is online and
+how busy, its memory, platform and runtimes. Those are the same catalog fields a
+machine lent to everyone already shows everyone. They read no registration row,
+so they do not see its labels, history, hardware inventory or who else it is
+lent to.
 
 Before epic memql#5344 a person's catalog listed **their own** machines only,
 so somebody whose only route was a colleague's machine was told no local model

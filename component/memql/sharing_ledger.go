@@ -4,6 +4,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // THE SHARING LEDGER (epic memql#5146, design D6).
@@ -135,7 +137,12 @@ func FoldLedger(machineId, ownerUserId, week string, calls []LedgerCall) LedgerE
 		entry.Calls++
 		id := strings.TrimSpace(c.ActingUserId)
 		switch {
-		case id == "":
+		case id == "" || auth.IsSystemActorId(id):
+			// THE CLUSTER'S OWN WORK: no acting person, or a SYNTHETIC actor --
+			// automations run as `system:automation:<name>` and maintenance as
+			// `system:maintenance:<name>`, so their calls carry an id that is
+			// nobody's. Counting it as another person would tell the owner a
+			// stranger used their machine.
 			entry.SystemCalls++
 		case owner != "" && BareShortId(id) == owner:
 			people[BareShortId(id)] = struct{}{}

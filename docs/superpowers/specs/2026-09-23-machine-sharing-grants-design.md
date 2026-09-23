@@ -24,7 +24,7 @@ whole cluster, and system work rides it.
 | # | Decision | Ruling |
 |---|---|---|
 | G1 | Where the share list lives | On the machine's own row. `registration.sharing.mode` gains `people`, with `userIds` and `groupIds` beside it. Written only by the machine's owner through `fleetSetSharing`, exactly as today. Not a `machine:<id>` resource on `v1:rbac:grant` |
-| G2 | Who the owner can pick | People who share an active group with the owner, and those groups. A caller at admin rank or above (admin, developer, owner) sees every active person and every active group |
+| G2 | Who the owner can pick | People who share an active group with the owner, and those groups. A caller who may already read every person -- `read` on `principal` through `auth.CapableFor`, which owner, developer and admin hold by seed and a grant can give or withhold -- sees every active person and every active group. (First implemented as a rank floor; the review showed a rank hands the roster to an admin with a deny grant, so the capability is the owner's rule, "anyone who can already see everyone", stated exactly) |
 | G3 | The cluster's own work | Only a machine shared with **everyone** (`cluster`) serves a call with no acting person. A `people` share never does |
 | G4 | The ledger | Counts split by who the calls were for: "Served 41 calls this week, 12 of them for 2 other people." Still counts only, never names |
 | G5 | The cockpit's consent keeps its two values | `inference.serve: cluster` now means "may serve people other than its owner"; the owner decides which. No cockpit release |
@@ -36,7 +36,7 @@ whole cluster, and system work rides it.
 | G11 | `sharing` becomes a closed nested block | `mode`, `userIds`, `groupIds`, `sharedAt`, `sharedBy`. A block holding a consent must refuse a misspelled key (memql#3641). Rows written before this carry only `mode`, `sharedAt` and `sharedBy`, so they still validate |
 | G12 | "Not shared with you" stays aggregated | It joins D12's count. A parity test pins every sharing refusal sentence as foreign noise |
 | G13 | Mixed versions fail closed | Every existing reader maps anything but `cluster` to `owner`, so during a rollout a `people` machine is private, never open |
-| G14 | What a person the machine is shared with sees | The machine's models in their catalog and model library, with the machine's name. Nothing else about the machine; they read no registration row |
+| G14 | What a person the machine is shared with sees | The machine's models in their catalog and model library, with the facts routing uses about it: its name, whether it is online and how busy, its memory, platform and runtimes -- the same catalog fields a machine lent to everyone already shows everyone. They read no registration row: not its labels, history, hardware inventory or who else it is lent to |
 | G15 | Attention | A runtime marker, published only to a person who owns an unrevoked machine, at that machine's Sharing view |
 
 ## 1. The data model (#5346)
@@ -54,9 +54,11 @@ sharing {
 - `owner` is the default and the absent case: the machine serves its owner and nobody
   else. `cluster` is everyone. `people` is exactly the listed users plus the ACTIVE
   members of the listed ACTIVE groups.
-- The lists are meaningful only under `people` (G10). Ids are stored as the caller
-  sent them. Every comparison is bare/canonical tolerant, so a list is never
-  canonicalised on write (memory: relationship fields are stored canonicalized).
+- The lists are meaningful only under `people` (G10). Ids are stored BARE -- the
+  client contract's spelling -- whatever spelling the caller sent, and every
+  comparison is bare/canonical tolerant using `ParseNodeId`'s rule (the text after
+  a `v<N>:domain:entity` prefix, the whole value otherwise), never "the text after
+  the last colon".
 - `setWorkerSharing` stays `@serverOnly` and gains `userIds` and `groupIds`;
   `fleetSetSharing` is its only renderer.
 - In `component/worker`, `Sharing` gains `UserIds` and `GroupIds`, and
@@ -89,9 +91,18 @@ sharing lends the GPU, never the shell.
 `PlanSharedModel`, `Catalog(ctx, "")` and `fleetEntry` with no acting user keep asking
 `ServesTheCluster`, which requires `mode == cluster`. A `people` machine is
 rejected with its own sentence: "Its owner has shared it with specific people,
-not with the cluster's own work." A synthetic actor (`system:*`) is not on any list
-and is in no group, so it cannot reach a `people` machine through the person path
-either.
+not with the cluster's own work."
+
+**A synthetic actor is the cluster's own work too.** Automations run as
+`system:automation:<name>` and maintenance as `system:maintenance:<name>`, so their
+calls carry a non-empty id and take the PERSON path. `Sharing.Admits` answers
+`auth.IsSystemActorId` with "only under `cluster`", so no such actor is ever on a
+people list by construction (the review found a last-colon comparison could match
+`system:automation:ana` to a listed `ana`), and the ledger counts their calls as
+the cluster's own work. One consequence of G8 follows and is intended: with the
+catalog now reading machines lent to the caller, an automation under a synthetic
+actor reaches machines lent to EVERYONE, which D6 always said system work should
+and the own-only catalog had silently prevented.
 
 ## 4. The directory and the write
 
@@ -163,7 +174,10 @@ is inherent to any count, and the owner chose the list.
   offers removal.
 - A mixed-version rollout: G13.
 - A machine is shared with people whose cockpit says `owner`: nobody else is served,
-  and the panel says which half is missing, as today.
+  and the panel says which half is missing, as today. A person ON the list whose
+  call is refused for it gets their own count line -- "1 machine lent to you is
+  waiting on its own consent" -- rather than the foreign "not shared with you",
+  which would be false and would send them to the owner for the machine's repair.
 
 ## 8. Testing (#5350)
 

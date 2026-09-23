@@ -133,10 +133,16 @@ func (e *FleetUnavailable) consideredKeysForDisplay(omitNoise bool) []string {
 	actionable := make([]string, 0, len(e.Considered))
 	revoked := 0
 	foreignPrivate := 0
+	lentWaiting := 0
 	for k, why := range e.Considered {
 		switch {
 		case why == "revoked":
 			revoked++
+		case isLentButNotAgreed(why):
+			// Somebody else's machine, so counted and never named -- but LENT
+			// to this caller, so "not shared with you" would be false and would
+			// send them to its owner for a repair that belongs to the machine.
+			lentWaiting++
 		case isForeignPrivateShareNoise(why):
 			// COUNTED, NEVER COLLECTED. The id is another user's row and this
 			// function's output reaches a caller; see the note below.
@@ -165,10 +171,30 @@ func (e *FleetUnavailable) consideredKeysForDisplay(omitNoise bool) []string {
 	if revoked > 0 {
 		actionable = append(actionable, fmt.Sprintf("(%d revoked registration(s) omitted)", revoked))
 	}
+	if lentWaiting > 0 {
+		actionable = append(actionable, lentWaitingSummary(lentWaiting))
+	}
 	if foreignPrivate > 0 {
 		actionable = append(actionable, foreignPrivateSummary(foreignPrivate))
 	}
 	return actionable
+}
+
+// lentWaitingSummary is the line for machines LENT TO the caller whose own
+// consent is missing (epic memql#5344). It counts and names nothing, like
+// foreignPrivateSummary, and names the one repair that applies: the machine's
+// policy.yaml, which is its owner's to change.
+func lentWaitingSummary(n int) string {
+	if n == 1 {
+		return "(1 machine lent to you is waiting on its own consent -- its owner has to set inference.serve to cluster in that machine's policy.yaml)"
+	}
+	return fmt.Sprintf("(%d machines lent to you are waiting on their own consent -- each owner has to set inference.serve to cluster in that machine's policy.yaml)", n)
+}
+
+// isLentButNotAgreed recognises component/worker.PersonRefusal's sentence for a
+// person ON the list of a machine whose cockpit has not agreed.
+func isLentButNotAgreed(why string) bool {
+	return strings.Contains(strings.ToLower(why), "shared it with you, but its cockpit")
 }
 
 // foreignPrivateSummary is the one line a caller gets about machines that are
@@ -206,7 +232,9 @@ func isForeignPrivateShareNoise(why string) bool {
 // other, so they agree on words, and a new sentence the classifier missed
 // would slip back into the named list as an enumeration of other people's
 // machines.
-func IsForeignShareRefusal(why string) bool { return isForeignPrivateShareNoise(why) }
+func IsForeignShareRefusal(why string) bool {
+	return isLentButNotAgreed(why) || isForeignPrivateShareNoise(why)
+}
 
 // Unwrap makes errors.Is(err, ErrFleetUnavailable) true, so a caller that only
 // wants to know "unavailable" does not have to type-assert.

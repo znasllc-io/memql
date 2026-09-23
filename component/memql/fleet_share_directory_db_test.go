@@ -268,7 +268,7 @@ func TestFleetSetSharingLendsOnlyToPeopleTheOwnerCanPick(t *testing.T) {
 	require.NoError(t, f.share(asAna, machine, "people", []string{ana, bo}, []string{BareShortId(design)}))
 	stored := f.sharingOf(machine)
 	require.Equal(t, "people", stored["mode"])
-	require.Equal(t, []any{bo}, stored["userIds"], "the owner is never stored in their own list")
+	require.Equal(t, []any{BareShortId(bo)}, stored["userIds"], "the owner is never stored in their own list, and ids are stored BARE -- the client contract's spelling, whatever the caller sent")
 	require.Equal(t, []any{BareShortId(design)}, stored["groupIds"])
 	require.Equal(t, ana, stored["sharedBy"])
 
@@ -348,4 +348,46 @@ func renameCall(t *testing.T, registrationId string) string {
 	call, err := langparser.RenderCall("renameWorker", map[string]any{"registrationId": registrationId, "displayName": "Renamed"})
 	require.NoError(t, err)
 	return call
+}
+
+func TestTheDirectoryFollowsTheGrantOnReadingPeople(t *testing.T) {
+	// Review finding (epic memql#5344): "everyone" was a RANK floor, so an
+	// admin-rank person with an explicit deny on reading people -- or a custom
+	// role ranked above admin without the verb -- was handed every name and
+	// email anyway. The owner's rule was "anyone who can already see everyone",
+	// and what decides that everywhere else is `read` on `principal`, through
+	// the same resolver every other gate asks.
+	eng, db, _ := sharedReadMergeEngine(t)
+	eng.InstallGrantResolution()
+	t.Cleanup(func() {
+		auth.SetGrantSource(nil)
+		auth.SetMembershipSource(nil)
+	})
+	f := shareDirFixture{t: t, eng: eng, db: db, prefix: uniqueSuffix("dirgrant")}
+	ana, bo := f.person("ana", true), f.person("bo", true)
+	ada := f.person("ada", true)
+	design := f.group("design", "active")
+	f.member(design, ana, "active")
+	f.member(design, bo, "active")
+	adasMachine := f.machine("adas-box", ada)
+	anasMachine := f.machine("anas-mac", ana)
+	grant := func(subject, effect string) {
+		id := writeGrant(t, eng, "user", subject, "read", "principal", effect)
+		t.Cleanup(func() {
+			_, _ = db.NewDelete().Model((*memorynodes.MemoryNode)(nil)).Where("concept = ?", "v1:rbac:grant").Where("id = ?", id).Exec(context.Background())
+		})
+	}
+
+	asAda := shareDirActor(context.Background(), ada, auth.RoleAdmin)
+	require.True(t, f.directory(asAda, adasMachine).Everyone, "an admin holds read on principal by default")
+
+	grant(ada, "deny")
+	require.False(t, f.directory(asAda, adasMachine).Everyone, "a deny on reading people must narrow the directory to co-members")
+
+	asAna := shareDirActor(context.Background(), ana, auth.RoleWriter)
+	require.False(t, f.directory(asAna, anasMachine).Everyone)
+	grant(ana, "allow")
+	all := f.directory(asAna, anasMachine)
+	require.True(t, all.Everyone, "a person GRANTED read on principal sees everyone, whatever their rank")
+	require.Contains(t, dirPeopleIds(all), BareShortId(bo))
 }

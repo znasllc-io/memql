@@ -233,3 +233,25 @@ func TestTheSplitCountsAreRendered(t *testing.T) {
 		t.Fatalf("row = %#v", row)
 	}
 }
+
+func TestAnAutomationsCallsAreTheClustersOwnWork(t *testing.T) {
+	// Review finding (epic memql#5344): automations run as a SYNTHETIC actor,
+	// `system:automation:<name>`, so their calls carry a non-empty user id --
+	// and counting that id as "another person" tells a machine's owner that a
+	// stranger used it when it was the cluster's own work.
+	const owner = "v1:identity:user:olivia"
+	var calls []LedgerCall
+	for i := 0; i < 29; i++ {
+		calls = append(calls, LedgerCall{MachineId: "m", ActingUserId: owner, Level: "fast", Week: "2026-W39"})
+	}
+	for i := 0; i < 12; i++ {
+		calls = append(calls, LedgerCall{MachineId: "m", ActingUserId: "system:automation:indexTodoOnCreate", Level: "fast", Week: "2026-W39"})
+	}
+	entry := FoldLedger("m", owner, "2026-W39", calls)
+	if entry.SystemCalls != 12 || entry.OtherCalls != 0 || entry.OtherPeople != 0 {
+		t.Fatalf("got %+v; an automation is the cluster's own work, not a person", entry)
+	}
+	if got, want := entry.Sentence(), "Served 41 calls this week, 12 of them for the cluster's own work."; got != want {
+		t.Fatalf("got  %q\nwant %q", got, want)
+	}
+}
