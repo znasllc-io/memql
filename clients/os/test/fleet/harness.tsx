@@ -26,6 +26,89 @@ export function rowsResult(rows: Row[]): Result {
   return new Result({ data: rows } as never);
 }
 
+/**
+ * What a top-level `builtin X(...)` answers ON THE WIRE: ONE data value keyed
+ * by node id, each value the node envelope with the handler's fields under
+ * `payload`, stamped with DECREASING createdAt in slice order the way the
+ * engine's PreserveOrder path does (executor_builtin.go).
+ *
+ * NOT `rowsResult`. A fake answering flat rows for a builtin passes every test
+ * against a shape the engine never sends -- which is how the Logs app and
+ * Connect GitHub shipped reading nothing. Copied from the Deployables harness,
+ * which found that out first.
+ */
+export function builtinReply(name: string, rows: Row[]): Result {
+  const wrapper: Record<string, unknown> = {};
+  rows.forEach((row, index) => {
+    const own = typeof row["id"] === "string" && row["id"] !== "" ? (row["id"] as string) : name;
+    const id = own in wrapper ? `${own}-${index}` : own;
+    wrapper[id] = {
+      id,
+      concept: `integration:test:${name}`,
+      type: "object",
+      createdAt: `2026-01-01T00:00:00.${String(999_999_999 - index).padStart(9, "0")}Z`,
+      payload: row,
+    };
+  });
+  return new Result({ data: rows.length === 0 ? [] : [wrapper] } as never);
+}
+
+/**
+ * The one row `fleetShareDirectory` answers (epic memql#5344, design section
+ * 4): who the caller may lend this machine to, and who is already on it.
+ *
+ * EMPTY BY DEFAULT, and that is a real answer rather than a placeholder: a
+ * person in no group, below admin rank, is offered nobody. Pass `people`,
+ * `groups` and `current` to model anything else. Ids are BARE, as the engine
+ * sends them.
+ */
+export function shareDirectoryRow(over: Partial<Row> = {}): Row {
+  return {
+    id: "v1:worker:registration:live",
+    machineId: "v1:worker:registration:live",
+    everyone: false,
+    people: [],
+    groups: [],
+    current: { people: [], groups: [] },
+    ...over,
+  };
+}
+
+/**
+ * What `fleetSetSharing` answers when the write lands: the receipt row, in the
+ * engine's own sentence (fleet_machine_acts.go, sharingReceiptSentence -- the
+ * machine-half clause is omitted because this fake does not know what the
+ * cockpit said).
+ */
+export function sharingReceiptRow(args: {
+  registrationId: string;
+  mode: string;
+  userIds?: string[];
+  groupIds?: string[];
+}): Row {
+  const people = args.mode === "people" ? (args.userIds ?? []).length : 0;
+  const groups = args.mode === "people" ? (args.groupIds ?? []).length : 0;
+  const count = [
+    people === 1 ? "1 person" : people > 1 ? `${people} people` : "",
+    groups === 1 ? "1 group" : groups > 1 ? `${groups} groups` : "",
+  ]
+    .filter(Boolean)
+    .join(" and ");
+  return {
+    id: args.registrationId,
+    machineId: args.registrationId,
+    mode: args.mode,
+    people,
+    groups,
+    sentence:
+      args.mode === "people"
+        ? `Lent to ${count}.`
+        : args.mode === "cluster"
+          ? "Offered to everyone on this cluster, and to the cluster's own work."
+          : "Kept to you. Nobody else's work will run on this machine.",
+  };
+}
+
 export interface FakeQuery {
   myWorkersWithStatus: ReturnType<typeof vi.fn>;
   myRoutingPolicies: ReturnType<typeof vi.fn>;
@@ -73,7 +156,17 @@ export interface FakeQuery {
   fleetSharingLedger: ReturnType<typeof vi.fn>;
   fleetPullRecommended: ReturnType<typeof vi.fn>;
   fleetModelProbe: ReturnType<typeof vi.fn>;
+  /** The owner's half of the consent (epic memql#5344). Answers the RECEIPT
+   *  row, in the builtin wire shape, built from what was sent. */
   fleetSetSharing: ReturnType<typeof vi.fn>;
+  /** Who the owner may lend a machine to. On demand, never live: a virtual
+   *  row computed per request, read once each time the share dialog opens. */
+  fleetShareDirectory: ReturnType<typeof vi.fn>;
+  // The shared attention service's two calls (src/attention), so a suite can
+  // mount the real AttentionProvider over this connection: the receipts it
+  // seeds from, and the write that records a change as seen.
+  myAttentionReceipts: ReturnType<typeof vi.fn>;
+  acknowledgeAttention: ReturnType<typeof vi.fn>;
 }
 
 // The subscription seam, faithful to the one bit of it a collection uses:
@@ -135,6 +228,8 @@ function fakeSubscriptions(): FakeSubscriptions {
 
 export function fakeConnection(seed: Partial<Record<keyof FakeQuery, Row[]>> = {}): FakeConnection {
   const read = (key: keyof FakeQuery) => vi.fn(async () => rowsResult(seed[key] ?? []));
+  // A BUILTIN'S seed, answered in the builtin wire shape (see builtinReply).
+  const builtin = (key: keyof FakeQuery) => vi.fn(async () => builtinReply(key, seed[key] ?? []));
   return {
     query: {
       myWorkersWithStatus: read("myWorkersWithStatus"),
@@ -143,8 +238,8 @@ export function fakeConnection(seed: Partial<Record<keyof FakeQuery, Row[]>> = {
       clusterNodes: read("clusterNodes"),
       invocationsForWorker: read("invocationsForWorker"),
       modelPullsForWorker: read("modelPullsForWorker"),
-      fleetModels: read("fleetModels"),
-      inferenceStatus: read("inferenceStatus"),
+      fleetModels: builtin("fleetModels"),
+      inferenceStatus: builtin("inferenceStatus"),
       delegationPolicyForUser: read("delegationPolicyForUser"),
       appSessionsForUser: read("appSessionsForUser"),
       appSessionById: read("appSessionById"),
@@ -154,7 +249,7 @@ export function fakeConnection(seed: Partial<Record<keyof FakeQuery, Row[]>> = {
       // D2): a removal is two writes -- the registration and the credential --
       // and the surface has to be able to say which of them landed.
       fleetRevokeMachine: vi.fn(async () =>
-        rowsResult([
+        builtinReply("fleetRevokeMachine", [
           {
             machineId: "v1:worker:registration:live",
             registrationState: "revoked",
@@ -168,13 +263,23 @@ export function fakeConnection(seed: Partial<Record<keyof FakeQuery, Row[]>> = {
       createRoutingPolicy: vi.fn(async () => rowsResult([])),
       updateRoutingPolicy: vi.fn(async () => rowsResult([])),
       setDelegationPolicy: vi.fn(async () => rowsResult([])),
-      fleetModelPull: vi.fn(async () => rowsResult([])),
-      fleetRecommended: read("fleetRecommended"),
+      fleetModelPull: vi.fn(async () => builtinReply("fleetModelPull", [])),
+      fleetRecommended: builtin("fleetRecommended"),
       measurementsForMachine: read("measurementsForMachine"),
-      fleetSharingLedger: read("fleetSharingLedger"),
-      fleetPullRecommended: vi.fn(async () => rowsResult([])),
-      fleetModelProbe: vi.fn(async () => rowsResult([])),
-      fleetSetSharing: vi.fn(async () => rowsResult([])),
+      // EVERY BUILTIN HERE ANSWERS IN THE BUILTIN WIRE SHAPE (builtinReply);
+      // only the shaped queries and the mutations answer flat rows.
+      fleetSharingLedger: builtin("fleetSharingLedger"),
+      fleetPullRecommended: vi.fn(async () => builtinReply("fleetPullRecommended", [])),
+      fleetModelProbe: vi.fn(async () => builtinReply("fleetModelProbe", [])),
+      fleetSetSharing: vi.fn(
+        async (args: { registrationId: string; mode: string; userIds?: string[]; groupIds?: string[] }) =>
+          builtinReply("fleetSetSharing", [sharingReceiptRow(args)]),
+      ),
+      fleetShareDirectory: vi.fn(async () =>
+        builtinReply("fleetShareDirectory", seed.fleetShareDirectory ?? [shareDirectoryRow()]),
+      ),
+      myAttentionReceipts: read("myAttentionReceipts"),
+      acknowledgeAttention: vi.fn(async () => rowsResult([])),
     },
     subscriptions: fakeSubscriptions(),
     dispatcher: { sendAndWait: vi.fn() },

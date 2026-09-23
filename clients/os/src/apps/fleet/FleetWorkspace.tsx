@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { ActivityTarget } from "../../kit/SemanticActivity";
 import { ArrowUpRight, Box, ChevronRight, Cpu, History, Info, Monitor, SlidersHorizontal, Terminal, Wrench } from "lucide-react";
+import { AttentionDestination, AttentionMarker } from "../../attention/Attention";
+import { useSessionIfPresent } from "../../chrome/access";
 import type { OsAppProps } from "../../system/registry";
 import { Button, EmptyState, Refine, Head, Notice, ProvenanceDot, formatBytes, formatFreshness, useNow } from "../../kit";
 import { IconButton } from "../../kit/IconButton";
@@ -16,6 +18,8 @@ import { AddMachinePage } from "./addMachine/AddMachinePage";
 import type { AddMachineFlow } from "./addMachine/useAddMachineFlow";
 import { MachineDetail, MachineAppsHelp } from "./machines/MachineDetail";
 import { machineModelsFrom, type MachineModel } from "./machines/models";
+import { canLend, sharingLinkWords } from "./machines/sharing";
+import { MACHINE_SHARING_SECTION, MACHINE_SHARING_TARGET } from "./machines/sharingAttention";
 import { useMachineWrites } from "./machines/useMachineWrites";
 import { isWorkerOnline } from "./online";
 import { computerUseStatus, isRevoked, machineFromRow, machineName, type MachineRow } from "./rows";
@@ -24,12 +28,18 @@ export type MachineView = "equipment" | "details" | "models" | "apps" | "sharing
 export interface FleetSelection { machineId: string; view: MachineView }
 const VIEW_NAMES: Record<MachineView, string> = { equipment: "Equipment", details: "Details", models: "Models", apps: "Apps", sharing: "Sharing", activity: "History" };
 
-export function FleetWorkspace({ flow, showRevoked, selection, select, navigate, onOpenSession, intent, consumeIntent }: {
+export function FleetWorkspace({ flow, showRevoked, selection, select, navigate, onOpenSession, intent, consumeIntent, active = true }: {
   onOpenSession?: (id: string) => void;
   flow: AddMachineFlow; showRevoked: boolean; selection: FleetSelection;
   select: (selection: FleetSelection) => void; navigate: OsAppProps["navigate"];
   intent?: OsAppProps["intent"]; consumeIntent?: OsAppProps["consumeIntent"];
+  /** Whether Machines is the section on screen. FleetApp keeps a visited
+   *  section MOUNTED behind the one showing, and a retained Sharing view must
+   *  not acknowledge an unseen change nobody could see (README, "Unseen
+   *  changes"). */
+  active?: boolean;
 }) {
+  const viewerId = useSessionIfPresent()?.access?.userId ?? "";
   const { collection, settled, feedState, reload } = useMachines();
   const sessions = useAppSessions();
   const consumed = useRef("");
@@ -120,7 +130,8 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
             : machine ? retained.map(item => {
               const retainedMachine = machines.find(value => value.id === item.machineId);
               if (!retainedMachine) return null;
-              return <div key={`${item.machineId}:${item.view}`} hidden={item.machineId !== machine.id || item.view !== selection.view}>
+              const shown = item.machineId === machine.id && item.view === selection.view;
+              return <div key={`${item.machineId}:${item.view}`} hidden={!shown}>
                 {item.view === "equipment" ? <><MachineEquipment machine={retainedMachine} now={now} onInspect={view => select({ machineId: item.machineId, view })} />
                 <section className="fleet-recent-work" aria-label="Recent app sessions"><div className="fleet-bank-heading"><h4>Recent work</h4><span className="fleet-heading-actions"><RefreshButton label="Refresh recent work" busy={sessions.loading} onClick={sessions.reread} /><IconButton label="All app sessions" onClick={() => navigate("apps", { fromContent: true })}><ArrowUpRight size={16} aria-hidden /></IconButton></span></div>
                   {sessions.error ? <Notice sentence="Recent app sessions could not be read." detail={sessions.error} /> : null}
@@ -131,7 +142,15 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
                     {item.view === "apps" ? <MachineAppsHelp /> : null}
                     {item.view === "apps" || item.view === "activity" ? <IconButton label="App sessions" onClick={() => navigate("apps", { fromContent: true })}><History size={16} aria-hidden /></IconButton> : null}
                   </Head>
-                  <ScopedMachineDetail machine={retainedMachine} now={now} view={item.view} onRemoved={onRemoved} />
+                  {/* THE SHARING VIEW IS THE UNSEEN CHANGE'S DESTINATION (design
+                      G15) -- for somebody who can lend this machine, and only
+                      while it is actually on screen: a retained pane, or one in
+                      a section another has replaced, is not a view anybody saw.
+                      Always wrapped, so the pane is never remounted (and its
+                      dialog never dropped) when the answer flips. */}
+                  {item.view === "sharing" ? <AttentionDestination appId="fleet" sectionId={MACHINE_SHARING_SECTION} target={MACHINE_SHARING_TARGET} visible={active && shown && canLend(retainedMachine, viewerId)}>
+                    <ScopedMachineDetail machine={retainedMachine} now={now} view={item.view} onRemoved={onRemoved} />
+                  </AttentionDestination> : <ScopedMachineDetail machine={retainedMachine} now={now} view={item.view} onRemoved={onRemoved} />}
                 </div>}
               </div>;
             })
@@ -198,6 +217,11 @@ function EmptyEquipment({ onConnect, showRevoked }: { onConnect: () => void; sho
 /** The spatial view is all reported inventory. Selecting equipment inspects
  * it; managing, probing and installing remain distinct, explicit actions. */
 export function MachineEquipment({ machine, now, onInspect }: { machine: MachineRow; now: Date; onInspect: (view: MachineView) => void }) {
+  // The unseen-change mark for lending a machine goes on the way into its
+  // Sharing view, and only where that view has something to offer: a machine
+  // this viewer owns and that is still in the fleet (design G15).
+  const viewerId = useSessionIfPresent()?.access?.userId ?? "";
+  const lendable = canLend(machine, viewerId);
   const [chosen, choose] = useState<{ kind: "model" | "app"; id: string } | null>(null);
   const models = machineModelsFrom(machine.reportedLabels);
   const online = isWorkerOnline(machine, now);
@@ -228,7 +252,7 @@ export function MachineEquipment({ machine, now, onInspect }: { machine: Machine
       {selectedModel ? <div><strong>{selectedModel.modelId}</strong><p>{modelSummary(selectedModel)}{!online ? " · Machine offline" : ""}</p></div>
         : selectedApp ? <div><strong>{selectedApp.label}</strong><p>{selectedApp.why || (selectedApp.runnable ? "Available to run on this machine." : "Not available to run.")}{!online ? " Machine offline." : ""}</p></div> : null}
     </section> : null}
-    <div className="fleet-machine-tools"><div><Wrench size={16} aria-hidden /><strong>Tools</strong><span>{machine.capabilities.filter(c => c !== "MODEL").map(c => c === "HEADLESS" ? "Terminal" : c === "COMPUTERUSE" ? "Computer use" : c).join(", ") || "None reported"}</span><InfoDetail title="Machine capabilities"><p>{desktop.answer}</p><p>Capabilities are reported by this machine. Connecting it does not grant missing operating-system permissions.</p></InfoDetail></div><button type="button" className="fleet-reading-link" onClick={() => onInspect("sharing")}>{machine.sharingMode === "cluster" && machine.inferenceServe === "cluster" ? "Shared inference" : "Personal inference"}<ChevronRight size={14} aria-hidden /></button></div>
+    <div className="fleet-machine-tools"><div><Wrench size={16} aria-hidden /><strong>Tools</strong><span>{machine.capabilities.filter(c => c !== "MODEL").map(c => c === "HEADLESS" ? "Terminal" : c === "COMPUTERUSE" ? "Computer use" : c).join(", ") || "None reported"}</span><InfoDetail title="Machine capabilities"><p>{desktop.answer}</p><p>Capabilities are reported by this machine. Connecting it does not grant missing operating-system permissions.</p></InfoDetail></div><button type="button" className="fleet-reading-link os-attention-anchor" onClick={() => onInspect("sharing")}>{sharingLinkWords(machine)}<ChevronRight size={14} aria-hidden />{lendable ? <AttentionMarker appId="fleet" sectionId={MACHINE_SHARING_SECTION} target={MACHINE_SHARING_TARGET} /> : null}</button></div>
   </ActivityTarget>;
 }
 

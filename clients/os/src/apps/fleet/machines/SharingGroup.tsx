@@ -1,36 +1,60 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useSession } from "../../../chrome/access";
-import { Button, Notice, Subhead } from "../../../kit";
+import { useOsConnection } from "../../../live/connection";
+import { Button, Caption, Notice, Subhead } from "../../../kit";
 import { formatMoment } from "../../../kit/format";
-import { machineName, type MachineRow } from "../rows";
-import type { MachineWrites } from "./useMachineWrites";
+import { isRevoked, type MachineRow } from "../rows";
+import { ShareDialog } from "./ShareDialog";
+import {
+  isShared,
+  ownsMachine,
+  receiptDescribes,
+  servesOthers,
+  sharingSignature,
+  sharingSummary,
+  storedSubjects,
+  subjectKey,
+} from "./sharing";
+import type { MachineWrites, SharingReceipt } from "./useMachineWrites";
 import type { SharingLedger } from "./useMachineInference";
+import { readShareDirectory, type ShareDirectory } from "./useShareDirectory";
 
-// Whether this machine serves the cluster (epic memql#5146, D6).
+// Who may use this machine (epic memql#5146, D6; three modes since epic
+// memql#5344).
+//
+// ===========================================================================
+// ONE LINE OF STATE, TWO CONSENTS, ONE ACT
+// ===========================================================================
+// The panel answers "who can use this machine?" in one line -- "Only you",
+// "Shared with Ana Ruiz and Design", "Everyone in this cluster" -- and puts
+// every way of changing that answer behind ONE button. The choosing (three
+// modes, a search over the people the owner may pick, the chips, the terms)
+// is a dialog, because it is a decision somebody makes now and then, and a
+// page that held its controls open would ask it again every time it was read.
 //
 // ===========================================================================
 // TWO CONSENTS, RENDERED SEPARATELY, ALWAYS
 // ===========================================================================
-// A machine serves somebody other than its owner only when BOTH say cluster:
-// the owner, from this page, and the cockpit, from that machine's own
-// policy.yaml. It would be shorter to render one derived "shared / not shared"
-// line, and it would be wrong, because THE TWO REPAIRS ARE IN DIFFERENT
-// PLACES: one is an act here, the other is a line in a file on a disk this
-// page cannot reach. A single "not shared" sends half the operators to the
-// wrong machine, and the laptop's owner goes looking on a web page for a
-// setting that is not there.
+// A machine serves somebody other than its owner only when BOTH halves are
+// given: the owner lends it (people or everyone), from this page, and the
+// cockpit agrees, from that machine's own policy.yaml. It would be shorter to
+// render one derived "shared / not shared" line, and it would be wrong,
+// because THE TWO REPAIRS ARE IN DIFFERENT PLACES: one is an act here, the
+// other is a line in a file on a disk this page cannot reach. So there are two
+// lines, always both, each saying its own state and carrying its own repair.
 //
-// So there are two lines, always both, each saying its own state and carrying
-// its own repair when it is not given.
+// The one-line state says what the OWNER decided. It is set in full ink only
+// while it is in force; a share the cockpit has not agreed to is muted, and
+// the cockpit's line beneath it says why.
 //
 // ===========================================================================
 // THE LEDGER IS COUNTS, AND SAYING SO IS PART OF THE OFFER
 // ===========================================================================
 // Somebody deciding whether to lend their Mac Studio to the team is entitled
-// to know what they will and will not see. The sentence saying the owner sees
-// counts and never content sits WITH THE ACT rather than in a help page,
-// because that is the moment the question is being asked.
+// to know what they will and will not see. That sentence sits WITH THE ACT --
+// in the dialog, while the question is being asked -- rather than in a help
+// page.
 
 export function SharingGroup({
   machine,
@@ -46,49 +70,149 @@ export function SharingGroup({
   ledger: SharingLedger | null;
 }) {
   const { access } = useSession();
-  const isOwner =
-    access !== null && access.userId !== "" && sameSubject(access.userId, machine.ownerUserId);
+  const connection = useOsConnection();
+  const isOwner = ownsMachine(machine, access?.userId ?? "");
+  const revoked = isRevoked(machine);
 
-  const ownerShared = machine.sharingMode === "cluster";
-  const cockpitWilling = machine.inferenceServe === "cluster";
-  const serving = ownerShared && cockpitWilling;
+  const [open, setOpen] = useState(false);
+  // What the last save on THIS machine did, and the stored state it was made
+  // against. See `showReceipt` for when it stands.
+  const [receipt, setReceipt] = useState<{ receipt: SharingReceipt; before: string } | null>(null);
+  const actRef = useRef<HTMLDivElement>(null);
+
+  // A different machine is a different conversation: a receipt about the last
+  // one, or its dialog, must not carry over to this one.
+  useEffect(() => {
+    setReceipt(null);
+    setOpen(false);
+  }, [machine.id]);
+
+  // ---- names ---------------------------------------------------------------
+  //
+  // The stored list holds IDS; the one-line state wants NAMES, and the only
+  // read that has them is the directory -- which answers the machine's owner
+  // and nobody else. So the owner's panel asks it for the names it does not
+  // have yet, and every directory the dialog reads is folded in too: after a
+  // save, the names of whoever was just picked are already here, and the row
+  // arriving on the subscription is named without a second read.
+  //
+  // A read that fails is not retried and does not complain: the state line
+  // counts instead, which is a true sentence with nothing guessed.
+  const [names, setNames] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const absorb = useCallback((directory: ShareDirectory) => {
+    setNames((held) => {
+      const next = new Map(held);
+      for (const person of directory.people) next.set(subjectKey("person", person.id), person.name);
+      for (const group of directory.groups) next.set(subjectKey("group", group.id), group.name);
+      for (const person of directory.current.people) {
+        next.set(subjectKey("person", person.id), person.known ? person.name : "Unknown person");
+      }
+      for (const group of directory.current.groups) {
+        next.set(subjectKey("group", group.id), group.known ? group.name : "Unknown group");
+      }
+      return next;
+    });
+  }, []);
+  const unnamed = storedSubjects(machine)
+    .map((s) => subjectKey(s.kind, s.id))
+    .filter((key) => !names.has(key))
+    .sort()
+    .join(",");
+  useEffect(() => {
+    if (!isOwner || unnamed === "" || connection === null) return undefined;
+    const controller = new AbortController();
+    readShareDirectory(connection, machine.id, controller.signal).then(absorb, () => {
+      // The count stands; see above.
+    });
+    return () => controller.abort();
+    // KEYED ON WHO IS UNNAMED, not on the row: a heartbeat changes the row
+    // every fifteen seconds and changes nobody's name.
+  }, [isOwner, unnamed, machine.id, connection, absorb]);
+
+  const summary = sharingSummary(machine, isOwner, (s) => names.get(subjectKey(s.kind, s.id)));
+  const ownerGiven = isShared(machine);
+  const cockpitGiven = machine.inferenceServe === "cluster";
+  const inForce = !ownerGiven || cockpitGiven;
+
+  // THE RECEIPT STANDS WHILE IT IS STILL TRUE: until its own echo has arrived
+  // (the row still reads as it did before the save), and after, for as long as
+  // the row says what the receipt says. A change landing from anywhere else
+  // retires it rather than leaving a sentence about a state that has gone.
+  const showReceipt =
+    receipt !== null && (sharingSignature(machine) === receipt.before || receiptDescribes(receipt.receipt, machine));
 
   return (
     <div className="os-fleet-sharing">
       {!standalone ? <Subhead>Sharing</Subhead> : null}
 
-      <p className="os-fleet-sharing-state" data-serving={serving || undefined}>
-        {serving
-          ? "This machine serves the whole cluster."
-          : "This machine serves its owner's calls only."}
+      <p className="os-fleet-sharing-state" data-in-force={inForce || undefined}>
+        {summary}
       </p>
 
       <ul className="os-fleet-consents">
         <Consent
-          given={ownerShared}
-          given_text={
-            machine.sharedAt
-              ? `Shared by its owner ${formatMoment(machine.sharedAt)}.`
-              : "Shared by its owner."
+          given={ownerGiven}
+          text={
+            ownerGiven
+              ? `${isOwner ? "You shared it" : "Its owner shared it"}${machine.sharedAt ? ` on ${formatMoment(machine.sharedAt)}` : ""}.`
+              : isOwner
+                ? "You have not shared it."
+                : "Its owner has not shared it."
           }
-          missing_text="Owner sharing is off."
         />
         <Consent
-          given={cockpitWilling}
-          given_text="Cockpit allows cluster inference."
-          missing_text={
-            "Cockpit has not allowed cluster inference. Set inference.serve to cluster in this machine’s policy.yaml to allow it."
+          given={cockpitGiven}
+          text={
+            cockpitGiven
+              ? isOwner
+                ? "Its cockpit has agreed to serve anyone you share it with."
+                : "Its cockpit has agreed to serve anyone its owner shares it with."
+              : isOwner
+                ? "Its cockpit has not agreed to serve anyone but you. Set inference.serve to cluster in this machine's policy.yaml."
+                : "Its cockpit has not agreed to serve anyone but its owner. Set inference.serve to cluster in this machine's policy.yaml."
           }
         />
       </ul>
 
-      {serving && ledger ? <LedgerLine ledger={ledger} /> : null}
+      {servesOthers(machine) && ledger ? <LedgerLine ledger={ledger} /> : null}
 
-      {isOwner ? (
-        <ShareControl machine={machine} shared={ownerShared} writes={writes} />
+      {isOwner && !revoked ? (
+        <div className="os-fleet-sharing-act" ref={actRef}>
+          <Button
+            onClick={() => {
+              setReceipt(null);
+              setOpen(true);
+            }}
+          >
+            Change sharing
+          </Button>
+          {/* A STATUS REGION, standing and empty until there is something to
+              say, so the engine's answer is announced when it arrives. */}
+          <p className="os-caption fleet-share-receipt" role="status">
+            {showReceipt ? receipt.receipt.sentence : ""}
+          </p>
+        </div>
       ) : (
-        <p className="os-caption">Only this machine&apos;s owner can share it with the cluster.</p>
+        <Caption>
+          {isOwner
+            ? "This machine was removed, so it cannot be shared."
+            : "Only this machine's owner can change who it is shared with."}
+        </Caption>
       )}
+
+      {open ? (
+        <ShareDialog
+          machine={machine}
+          writes={writes}
+          onDiscard={() => setOpen(false)}
+          onSaved={(done) => {
+            setReceipt({ receipt: done, before: sharingSignature(machine) });
+            setOpen(false);
+          }}
+          onDirectory={absorb}
+          returnFocus={() => actRef.current?.querySelector("button") ?? null}
+        />
+      ) : null}
     </div>
   );
 }
@@ -99,98 +223,16 @@ export function SharingGroup({
  * BOTH LINES ARE ALWAYS PRESENT, including the one that is given. Rendering
  * only the missing half would make a fully shared machine show nothing at all,
  * and a person who had just shared theirs would have no confirmation that
- * anything had happened.
+ * anything had happened. The mark is a SHAPE -- filled or hollow -- so the two
+ * states are told apart without colour.
  */
-function Consent({
-  given,
-  given_text,
-  missing_text,
-}: {
-  given: boolean;
-  given_text: string;
-  missing_text: string;
-}) {
+function Consent({ given, text }: { given: boolean; text: string }) {
   return (
     <li className="os-fleet-consent" data-given={given || undefined}>
       <span className="os-fleet-consent-mark" aria-hidden="true" />
-      <span>{given ? given_text : missing_text}</span>
+      <span>{text}</span>
     </li>
   );
-}
-
-/**
- * The act.
- *
- * TURNING IT ON IS ONE PRESS; TURNING IT OFF IS ALSO ONE PRESS, and neither
- * asks for confirmation. Sharing is reversible on the next call and takes
- * nothing away that cannot be given back, so a confirmation would spend a
- * person's attention on a decision that costs nothing to change.
- *
- * The sentence beneath is the OFFER'S TERMS, and it is here rather than in a
- * help page because here is where the question is being asked.
- */
-function ShareControl({
-  machine,
-  shared,
-  writes,
-}: {
-  machine: MachineRow;
-  shared: boolean;
-  writes: MachineWrites;
-}) {
-  const [failed, setFailed] = useState("");
-  const busy = writes.busyId === machine.id;
-  const label = machineName(machine);
-
-  return (
-    <div className="os-fleet-sharing-act">
-      <Button
-        tone={shared ? undefined : "primary"}
-        busy={busy}
-        busyLabel={shared ? "Stopping..." : "Sharing..."}
-        onClick={() => {
-          setFailed("");
-          void writes.setSharing(machine.id, shared ? "owner" : "cluster").then((ok) => {
-            if (!ok) setFailed(writes.actionError);
-          });
-        }}
-      >
-        {shared ? "Stop sharing with the cluster" : "Share with the cluster"}
-      </Button>
-
-      <p className="os-caption">
-        {shared
-          ? `Stopping takes effect on the next call. Calls already running on ${label} are allowed to finish.`
-          : "You see how many calls ran and for how many people. You never see what anybody asked or what the model answered."}
-      </p>
-
-      {failed ? (
-        <Notice
-          tone="error"
-          sentence="That change was not saved."
-          next="This machine is sharing exactly as it was."
-          detail={failed}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * Compare two user ids that may differ only in canonicalisation.
- *
- * The engine bare-ifies ids on egress and the shell never composes them, so a
- * row's `ownerUserId` and the session's `userId` are routinely the same subject
- * in two spellings. Comparing them naively would hide the act from the person
- * whose machine it is.
- */
-function sameSubject(a: string, b: string): boolean {
-  const bare = (id: string) => {
-    const trimmed = id.trim();
-    const at = trimmed.lastIndexOf(":");
-    return at >= 0 ? trimmed.slice(at + 1) : trimmed;
-  };
-  return a.trim() === b.trim() || (bare(a) !== "" && bare(a) === bare(b));
 }
 
 /**
@@ -198,9 +240,10 @@ function sameSubject(a: string, b: string): boolean {
  *
  * THE TWO ANSWERS DO NOT LOOK ALIKE, and `readable` is the only thing that can
  * tell them apart. Both arrive as a sentence, because the engine refuses to
- * hand a page a count it would have to phrase: "Served 41 calls for 3 people
- * this week." and "This week's usage could not be read. It is not that nothing
- * ran -- nobody looked." are both true sentences about the same field.
+ * hand a page a count it would have to phrase: "Served 41 calls this week, 12
+ * of them for 2 other people." and "This week's usage could not be read. It is
+ * not that nothing ran -- nobody looked." are both true sentences about the
+ * same field.
  *
  * Rendered identically they would read alike, and the second is not a reading
  * at all -- it is a question that did not get an answer. So the count is a

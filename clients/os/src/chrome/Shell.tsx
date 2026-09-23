@@ -1,6 +1,7 @@
 import { AttentionProvider } from "../attention/Attention";
 import { SharedPackagesProvider } from "../apps/deployables/packages/usePackages";
 import { DeployablesAttentionFeed } from "../apps/deployables/attention";
+import { FleetSharingAttentionFeed } from "../apps/fleet/machines/sharingAttention";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type { ChromeLayout } from "../app/layout";
@@ -274,6 +275,12 @@ function ShellRoster({
           that did not arrive from a callback -- which is every other one. It
           sits INSIDE OsProvider because opening an app is a shell act. */}
       <AttentionProvider apps={OS_REGISTRY.apps}><SharedPackagesProvider><DeployablesAttentionFeed />
+      {/* Sharing a machine with people and groups (epic memql#5344, G15): a
+          runtime change, published only while the viewer owns a machine still
+          in the fleet. At shell lifetime, like the Deployables feed, so a
+          closed Fleet is marked too; it reads the machines feed the
+          MachinesProvider above already retains, and opens nothing new. */}
+      <FleetSharingAttentionFeed />
       <ConnectReturnDispatcher />
       <SetupReturnDispatcher />
       {/* Whether the setup widget is on the active desk at all -- derived from

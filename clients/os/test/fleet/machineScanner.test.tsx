@@ -11,7 +11,6 @@ vi.mock("../../src/live/connection", () => ({
 }));
 
 const { HardwareGroup } = await import("../../src/apps/fleet/machines/HardwareGroup");
-const { SharingGroup } = await import("../../src/apps/fleet/machines/SharingGroup");
 const { ModelsGroup } = await import("../../src/apps/fleet/machines/ModelsGroup");
 const { machineFromRow } = await import("../../src/apps/fleet/rows");
 const { fakeConnection, machineRow, withSession } = await import("./harness");
@@ -173,151 +172,12 @@ describe("the Hardware group", () => {
 });
 
 // --- Sharing ----------------------------------------------------------------
-
-const noWrites = {
-  busyId: "",
-  actionError: "",
-  rename: vi.fn(async () => true),
-  setOperatorLabels: vi.fn(async () => true),
-  // A removal answers with a RECEIPT rather than a boolean (epic memql#5327,
-  // design D2): the registration and the credential are two writes and either
-  // can land alone, so the surface has to be able to say which did.
-  revoke: vi.fn(async () => ({
-    credentialState: "revoked" as const,
-    alreadyRevoked: false,
-    sentence: "Removed. The machine is out of the fleet and its credential no longer connects.",
-  })),
-  setSharing: vi.fn(async () => true),
-};
-
-describe("the Sharing group", () => {
-  it("renders BOTH consents, always, and names the repair for the missing one", () => {
-    // THE REASON THIS IS TWO LINES AND NOT ONE DERIVED FLAG. The owner's
-    // repair is an act on this page; the cockpit's is a line in a file on that
-    // machine's disk. A single "not shared" sends half the operators to the
-    // wrong machine.
-    render(
-      withSession(
-        <SharingGroup
-          machine={machine({ sharing: { mode: "cluster" }, capabilityDescriptor: {} })}
-          writes={noWrites}
-          ledger={null}
-        />,
-        { userId: OWNER },
-      ),
-    );
-    expect(screen.getByText(/Shared by its owner/)).toBeTruthy();
-    expect(screen.getByText(/policy\.yaml/)).toBeTruthy();
-    expect(screen.getByText(/serves its owner's calls only/)).toBeTruthy();
-  });
-
-  it("names the OWNER's half when the cockpit is willing and the owner has not shared", () => {
-    render(
-      withSession(
-        <SharingGroup
-          machine={machine({ capabilityDescriptor: { inferenceServe: "cluster" } })}
-          writes={noWrites}
-          ledger={null}
-        />,
-        { userId: OWNER },
-      ),
-    );
-    expect(screen.getByText(/Owner sharing is off/)).toBeTruthy();
-    expect(screen.getByText(/Cockpit allows cluster inference/)).toBeTruthy();
-  });
-
-  it("says the machine serves the cluster only when both consents are given", () => {
-    render(
-      withSession(
-        <SharingGroup
-          machine={machine({
-            sharing: { mode: "cluster" },
-            capabilityDescriptor: { inferenceServe: "cluster" },
-          })}
-          writes={noWrites}
-          ledger={{ sentence: "Served 41 calls for 3 people this week.", readable: true }}
-        />,
-        { userId: OWNER },
-      ),
-    );
-    expect(screen.getByText(/serves the whole cluster/)).toBeTruthy();
-    expect(screen.getByText("Served 41 calls for 3 people this week.")).toBeTruthy();
-  });
-
-  it("does not let a ledger that could not be read look like a count of zero", () => {
-    // The engine answers `readable: false` with a sentence of its own rather
-    // than with zero, and the surface has to keep those apart: a quiet caption
-    // saying nothing ran and a quiet caption saying nobody looked read alike,
-    // and only one of them is a measurement. The failure takes the notice this
-    // page uses everywhere else for "you asked and I could not tell you".
-    const { container } = render(
-      withSession(
-        <SharingGroup
-          machine={machine({
-            sharing: { mode: "cluster" },
-            capabilityDescriptor: { inferenceServe: "cluster" },
-          })}
-          writes={noWrites}
-          ledger={{
-            sentence:
-              "This week's usage could not be read. It is not that nothing ran -- nobody looked.",
-            readable: false,
-          }}
-        />,
-        { userId: OWNER },
-      ),
-    );
-    expect(screen.getByText(/nobody looked/)).toBeTruthy();
-    expect(container.querySelector(".os-notice")).toBeTruthy();
-  });
-
-  it("tells the owner what they will and will not see, where the question is asked", () => {
-    // Somebody deciding whether to lend their machine is entitled to the terms
-    // at the moment of deciding, not in a help page they have to find.
-    render(
-      withSession(
-        <SharingGroup machine={machine()} writes={noWrites} ledger={null} />,
-        { userId: OWNER },
-      ),
-    );
-    expect(screen.getByRole("button", { name: "Share with the cluster" })).toBeTruthy();
-    expect(screen.getByText(/never see what anybody asked/)).toBeTruthy();
-  });
-
-  it("offers the act to the owner and to nobody else", () => {
-    // ABSENT rather than disabled -- rule 12's reading, and the engine refuses
-    // a machine that is not the caller's anyway.
-    render(
-      withSession(
-        <SharingGroup
-          machine={machine({ ownerUserId: "v1:identity:user:someone-else" })}
-          writes={noWrites}
-          ledger={null}
-        />,
-        { userId: OWNER },
-      ),
-    );
-    expect(screen.queryByRole("button", { name: /Share with the cluster/ })).toBeNull();
-    expect(screen.getByText(/Only this machine's owner can share it/)).toBeTruthy();
-  });
-
-  it("offers Stop sharing once the machine is shared", () => {
-    render(
-      withSession(
-        <SharingGroup
-          machine={machine({
-            sharing: { mode: "cluster" },
-            capabilityDescriptor: { inferenceServe: "cluster" },
-          })}
-          writes={noWrites}
-          ledger={null}
-        />,
-        { userId: OWNER },
-      ),
-    );
-    expect(screen.getByRole("button", { name: "Stop sharing with the cluster" })).toBeTruthy();
-  });
-});
+//
+// The Sharing group's tests moved to test/fleet/sharing.test.tsx when the
+// two-way toggle became a panel and a share dialog (epic memql#5344): both
+// consents always drawn with their own repair, the ledger only while the
+// machine serves somebody else and a notice when it could not be read, and
+// the act offered to the owner alone. Each of those promises is kept there.
 
 // --- Models: the recommended set and the measured figures --------------------
 
