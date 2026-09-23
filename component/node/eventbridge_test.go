@@ -11,7 +11,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-func TestEventBridge_HandleInbound_PublishesLocally(t *testing.T) {
+func TestEventBridge_ReceiveForward_PublishesLocally(t *testing.T) {
 	bus := events.NewBus(events.WithLogger(testLogger()))
 	defer bus.Close()
 
@@ -31,15 +31,14 @@ func TestEventBridge_HandleInbound_PublishesLocally(t *testing.T) {
 
 	payload, _ := structpb.NewStruct(map[string]any{"nodeType": "cognition"})
 
-	eb.HandleInbound(&nodev1.EventForward{
+	eb.ReceiveForward(&nodev1.EventForward{
 		EventId:      "evt-123",
 		Topic:        "graph.node.created.v1:cluster:node",
 		Kind:         int32(events.KindNodeCreated),
 		Ts:           timestamppb.New(time.Now()),
 		Payload:      payload,
 		OriginNodeId: "remote-node",
-		Ttl:          3,
-	})
+	}, "remote-node")
 
 	wg.Wait()
 
@@ -57,7 +56,7 @@ func TestEventBridge_HandleInbound_PublishesLocally(t *testing.T) {
 	}
 }
 
-func TestEventBridge_HandleInbound_DedupDuplicates(t *testing.T) {
+func TestEventBridge_ReceiveForward_DedupDuplicates(t *testing.T) {
 	bus := events.NewBus(events.WithLogger(testLogger()))
 	defer bus.Close()
 
@@ -78,12 +77,11 @@ func TestEventBridge_HandleInbound_DedupDuplicates(t *testing.T) {
 		Kind:         int32(events.KindNodeCreated),
 		Ts:           timestamppb.New(time.Now()),
 		OriginNodeId: "remote",
-		Ttl:          3,
 	}
 
-	eb.HandleInbound(evt)
-	eb.HandleInbound(evt) // duplicate
-	eb.HandleInbound(evt) // duplicate
+	eb.ReceiveForward(evt, "peer-1")
+	eb.ReceiveForward(evt, "peer-2") // the same event down another stream
+	eb.ReceiveForward(evt, "peer-1") // and again
 
 	// Give async handlers time to process
 	time.Sleep(50 * time.Millisecond)
@@ -95,12 +93,18 @@ func TestEventBridge_HandleInbound_DedupDuplicates(t *testing.T) {
 	mu.Unlock()
 }
 
-func TestEventBridge_HandleInbound_TTLExpired(t *testing.T) {
+// A copy that has travelled the hop limit is still HEARD -- this node has not
+// seen the event, and the budget was never about whether to deliver it -- but
+// it goes no further (memql#5338, D4). The TTL this replaced dropped the copy
+// outright, which made a node four hops out deaf rather than merely the end of
+// the line.
+func TestEventBridge_ACopyAtTheHopLimitIsHeardButNotRelayed(t *testing.T) {
 	bus := events.NewBus(events.WithLogger(testLogger()))
 	defer bus.Close()
 
 	pm := NewPeerManager(testIdentity(), testLogger())
 	eb := NewEventBridge(testIdentity(), bus, pm, testLogger())
+	onward := attachDialedPeer(t, pm, "peer-onward", NodeTypeAgent)
 
 	var count int
 	var mu sync.Mutex
@@ -110,22 +114,28 @@ func TestEventBridge_HandleInbound_TTLExpired(t *testing.T) {
 		mu.Unlock()
 	})
 
-	eb.HandleInbound(&nodev1.EventForward{
-		EventId:      "ttl-evt",
+	eb.ReceiveForward(&nodev1.EventForward{
+		EventId:      "far-evt",
 		Topic:        "graph.node.created.v1:cluster:node",
 		Kind:         int32(events.KindNodeCreated),
 		Ts:           timestamppb.New(time.Now()),
 		OriginNodeId: "remote",
-		Ttl:          0, // expired
-	})
+		Hops:         meshMaxHops,
+	}, "peer-behind")
 
 	time.Sleep(50 * time.Millisecond)
 
 	mu.Lock()
-	if count != 0 {
-		t.Errorf("expected 0 deliveries for expired TTL, got %d", count)
+	if count != 1 {
+		t.Errorf("a first sighting at the hop limit must still be published once, got %d", count)
 	}
 	mu.Unlock()
+	if got := drainSendCh(onward); len(got) != 0 {
+		t.Fatalf("a copy that travelled %d hops was relayed %d time(s); the budget is spent", meshMaxHops, len(got))
+	}
+	if r := eb.MeshReport(); r.HopLimited != 1 || r.Relayed != 0 {
+		t.Fatalf("report: hopLimited=%d relayed=%d, want 1 and 0", r.HopLimited, r.Relayed)
+	}
 }
 
 func TestEventBridge_LocalEventsNotReforwarded(t *testing.T) {

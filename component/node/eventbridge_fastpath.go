@@ -24,7 +24,7 @@ import (
 //     change, no new broker, the same best-effort send-if-connected forward
 //     path verbatim (a hint to a Connection==nil peer is skipped; a dropped
 //     hint is harmless because the durable pull is the guarantee).
-//   - HandleInbound (consumer side) recognises meshHintTopic, decodes it back to
+//   - ReceiveForward (consumer side) recognises meshHintTopic, decodes it back to
 //     a Deliverable, and hands it to the substrate's HandleFastPath via the
 //     fastPathSink wired in app/cluster.go. HandleFastPath feeds the hint into
 //     the per-subscription dedup window and wakes the local subscriber.
@@ -101,13 +101,17 @@ func (eb *EventBridge) PublishHint(d Deliverable) {
 		Ts:           timestamppb.Now(),
 		Payload:      payload,
 		OriginNodeId: d.OriginNode,
-		Ttl:          1, // single hop: broadcast reaches every owner directly; no relay
+		Hops:         1,
+		// Never relayed (ReceiveForward returns on the hint topic before its
+		// dedup and relay): the producer sends it to every peer it holds a
+		// stream to -- dialed or accepted -- and an owner it misses catches up
+		// on the durable pull.
 	}
 
 	// Broadcast to all peers -- logical addressing means we do not know (or care)
 	// which physical replica owns the key's consumer; every owner picks it up,
 	// every non-owner discards it. Reuses the best-effort send-if-connected path.
-	eb.forwardToPeers(forward, routingDecision{Forward: true, Broadcast: true})
+	eb.sendToPeers(forward, routingDecision{Forward: true, Broadcast: true})
 }
 
 // encodeMeshHint flattens a Deliverable into the reserved-key envelope carried

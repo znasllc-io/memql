@@ -140,17 +140,6 @@ type DeployControlForwardResponseSink interface {
 	Dispatch(resp *nodev1.DeployControlForwardResponse)
 }
 
-// EventInbound accepts a peer-forwarded event, dedups it against
-// recently-seen event IDs + TTL, and republishes it on the local event
-// bus so local subscribers (integrations, automations, gRPC subscribers)
-// see it. *EventBridge satisfies this contract. Without an implementation
-// wired in, nodeService.handleEventForward logs and ACKs but never
-// publishes, which silently breaks every cross-node subscriber.
-type EventInbound interface {
-	HandleInbound(evt *nodev1.EventForward)
-	ForwardInboundToPeers(evt *nodev1.EventForward, excludeNodeId string)
-}
-
 // nodeService implements the NodeService gRPC server.
 type nodeService struct {
 	nodev1.UnimplementedNodeServiceServer
@@ -168,7 +157,6 @@ type nodeService struct {
 	// (memql#3380). Non-nil only on the identity node, the only node that
 	// carries a DeployControlService.
 	deployControlForwardHandler DeployControlForwardHandler
-	eventInbound                EventInbound // bridges peer-forwarded events onto the local bus
 }
 
 // Stream handles a bidirectional streaming connection from a peer node.
@@ -248,6 +236,22 @@ func (s *nodeService) Stream(stream nodev1.NodeService_StreamServer) error {
 	}
 	s.peerManager.RegisterMonitored(peerInfo)
 
+	// THE PUSH HALF OF THIS STREAM (memql#5338, D1). Until this existed the
+	// server side only ever answered -- heartbeats, the welcome, forward
+	// replies -- so a node that nobody dials heard no broadcast at all.
+	// Registered BEFORE the welcome goes out, so by the time the peer binds its
+	// own side of the stream this side can already push; drained only AFTER the
+	// welcome is sent, so the handshake reply is always the first message and
+	// anything queued in between waits in the outbox. Released when the receive
+	// loop below ends, and only this stream (compare-and-delete), so a late end
+	// cannot release the replacement a reconnect put in its place.
+	inbound := newInboundStream(peerId, out.Send, s.logger)
+	s.peerManager.attachInbound(peerId, inbound)
+	defer func() {
+		s.peerManager.detachInbound(peerId, inbound)
+		inbound.close()
+	}()
+
 	// Send NodeWelcome with the server's own identity + peer table.
 	// NodeWelcome.node_id is the SERVER's ID -- the client already
 	// knows its own, but it needs the server's so it can register the
@@ -271,6 +275,8 @@ func (s *nodeService) Stream(stream nodev1.NodeService_StreamServer) error {
 		s.peerManager.Remove(peerId)
 		return err
 	}
+
+	go inbound.run()
 
 	// Announce the new peer to existing peers via PeerIntroduction
 	s.broadcastPeerIntroduction([]*nodev1.PeerInfo{peerInfo}, false)
@@ -405,7 +411,7 @@ func (s *nodeService) handleMessage(peerId string, msg *nodev1.NodeClientMessage
 		s.handleSpawnRequest(peerId, payload.SpawnRequest, stream)
 
 	case *nodev1.NodeClientMessage_EventForward:
-		s.handleEventForward(peerId, payload.EventForward, stream)
+		s.handleEventForward(peerId, payload.EventForward)
 
 	case *nodev1.NodeClientMessage_CapabilityQuery:
 		s.handleCapabilityQuery(peerId, payload.CapabilityQuery, stream)
@@ -500,41 +506,25 @@ func (s *nodeService) handleSpawnRequest(peerId string, req *nodev1.SpawnRequest
 	})
 }
 
-// handleEventForward processes a forwarded event from another node. The
-// event is handed to the EventInbound implementation (EventBridge), which
-// dedups against recently-seen IDs, enforces TTL, and publishes to the
-// local event bus. It is then re-forwarded to other peers (excluding the
-// sender) so a mesh topology still propagates events across the cluster;
-// in a star topology this is a no-op because workers have no other
-// outbound peer connections. Finally we ACK the event.
+// handleEventForward hands an event a peer sent up this stream to the
+// bridge's one arrival path (PeerManager.receiveEvent -> ReceiveForward), which
+// publishes it on the local bus once and relays it once (memql#5338, D3, D6).
 //
-// Without the HandleInbound call, cross-node subscribers on this node
-// never fire -- the event arrives in the networking layer and stops
-// there. That was the concrete cause of "cognition receives the
-// utterance event but handleUtteranceForCognition never runs."
-func (s *nodeService) handleEventForward(peerId string, evt *nodev1.EventForward, stream nodev1.NodeService_StreamServer) {
+// Without that handoff cross-node subscribers on this node never fire -- the
+// event arrives in the networking layer and stops there. That was the
+// concrete cause of "cognition receives the utterance event but
+// handleUtteranceForCognition never runs."
+//
+// There is no ack. Nothing ever read one, in either direction, and once a
+// stream carries events both ways an ack costs exactly what an event costs.
+func (s *nodeService) handleEventForward(peerId string, evt *nodev1.EventForward) {
 	s.logger.Debug("event forwarded from peer",
 		"peer_id", peerId,
-		"event_id", evt.EventId,
-		"topic", evt.Topic,
-		"ttl", evt.Ttl,
+		"event_id", evt.GetEventId(),
+		"topic", evt.GetTopic(),
+		"hops", evt.GetHops(),
 	)
-
-	if s.eventInbound != nil {
-		s.eventInbound.HandleInbound(evt)
-		s.eventInbound.ForwardInboundToPeers(evt, peerId)
-	}
-
-	// ACK the event
-	_ = stream.Send(&nodev1.NodeServerMessage{
-		MessageId:   id.NewShortId(),
-		CorrelateTo: evt.EventId,
-		Payload: &nodev1.NodeServerMessage_EventAck{
-			EventAck: &nodev1.EventAck{
-				EventId: evt.EventId,
-			},
-		},
-	})
+	s.peerManager.receiveEvent(evt, peerId)
 }
 
 // handleCapabilityQuery responds to a capability lookup request.

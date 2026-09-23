@@ -198,7 +198,6 @@ func (m *wireMesh) start() {
 		n := m.nodes[id]
 		if n.parent != "" {
 			pc := NewParentConnector(n.identity, n.pm, testLogger())
-			n.wireParent(pc)
 			pc.Start(m.ctx)
 			m.t.Cleanup(func() { pc.Stop(context.Background()) })
 		}
@@ -328,11 +327,8 @@ func describeMissing(order []string, missing map[string][]string) string {
 }
 
 // service is the NodeService a replica's server registers -- the same
-// nodeService NodeServer builds, over this replica's peer table and bridge.
+// nodeService NodeServer builds, over this replica's peer table. The bridge
+// needs no wiring: NewEventBridge installed it as the table's event sink.
 func (n *wireNode) service() nodev1.NodeServiceServer {
-	return &nodeService{logger: testLogger(), identity: n.identity, peerManager: n.pm, eventInbound: n.bridge}
+	return &nodeService{logger: testLogger(), identity: n.identity, peerManager: n.pm}
 }
-
-// wireParent connects a ParentConnector to this replica's bridge, as the
-// bootstraps do.
-func (n *wireNode) wireParent(pc *ParentConnector) { pc.SetEventInbound(n.bridge) }

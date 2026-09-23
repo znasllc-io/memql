@@ -45,7 +45,6 @@ type ParentConnector struct {
 	// because peer discovery can make the identity node this node's PARENT,
 	// in which case the reply arrives on this stream and nowhere else.
 	deployControlSink DeployControlForwardResponseSink
-	eventInbound      EventInbound // republishes parent-pushed events onto local bus
 }
 
 // SetAiForwardResponseSink registers a sink for AiForwardResponse
@@ -95,18 +94,6 @@ func (pc *ParentConnector) SetDeployControlForwardResponseSink(sink DeployContro
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
 	pc.deployControlSink = sink
-}
-
-// SetEventInbound registers the local-bus bridge for EventForward
-// messages the parent pushes down this stream. Without it, events sent
-// parent -> child land in this callback and fall through silently.
-func (pc *ParentConnector) SetEventInbound(h EventInbound) {
-	if pc == nil {
-		return
-	}
-	pc.mu.Lock()
-	defer pc.mu.Unlock()
-	pc.eventInbound = h
 }
 
 // NewParentConnector returns nil when the identity has no parent address,
@@ -277,7 +264,7 @@ func (pc *ParentConnector) handleServerMessage(msg *nodev1.NodeServerMessage) {
 				Health:   nodev1.NodeHealthStatus_NODE_HEALTH_HEALTHY,
 			})
 			// Bind our outbound stream onto the parent's PeerEntry so
-			// EventBridge.forwardToPeers can Send on it. Without this the
+			// EventBridge.sendToPeers can Send on it. Without this the
 			// connection lives on PeerManager.parentConn but every downstream
 			// iterator over AllPeers()/ByType() sees peer.Connection == nil
 			// and silently skips it -- events originated on this node never
@@ -427,18 +414,13 @@ func (pc *ParentConnector) handleServerMessage(msg *nodev1.NodeServerMessage) {
 		}
 
 	case *nodev1.NodeServerMessage_EventForward:
-		// Events the parent pushes down this stream need to land on the
-		// local event bus, same as events received via nodeService.Stream
-		// on the server side. Without this handoff, cross-node subscribers
-		// silently never fire.
+		// An event the parent pushed down this stream (memql#5338, D1) takes
+		// the same arrival path as one a peer sent up a stream this node
+		// accepted: published once, relayed once, never back to the parent.
 		pc.mu.Lock()
-		inbound := pc.eventInbound
 		parentId := pc.parentNodeId
 		pc.mu.Unlock()
-		if inbound != nil {
-			inbound.HandleInbound(payload.EventForward)
-			inbound.ForwardInboundToPeers(payload.EventForward, parentId)
-		}
+		pc.peerMgr.receiveEvent(payload.EventForward, parentId)
 	}
 	// SpawnRequest, Heartbeat, CapabilityQuery, etc. fall through -- the
 	// top-of-function TouchPeer already refreshed the parent's liveness

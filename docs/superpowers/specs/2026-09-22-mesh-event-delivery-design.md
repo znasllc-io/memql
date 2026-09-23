@@ -154,11 +154,14 @@ of eight is on the order of 28,000 copies of every event while old and new
 pods coexist.
 
 **The ruling.** `EventForward.ttl` (field 7) is retired and reserved. A new
-field, `hops` (9), counts the links a copy has travelled; the origin sends 0,
-and a node does not relay a copy that has already travelled `meshMaxHops`
-(16). Sixteen is not tuned to a topology: D3 makes every first-sighting path a
-simple path, so in a mesh of seventeen nodes or fewer no copy can exhaust its
-budget before every node has heard it, and the hop refinement covers the rest.
+field, `hops` (9), counts the links a copy has travelled, counting the one it
+arrives on: the origin sends 1, each relay adds one, and a node does not relay
+a copy that has already travelled `meshMaxHops` (16) -- so every node within
+16 links of the origin hears the event. Sixteen is not tuned to a topology: D3
+makes every first-sighting path a simple path, so in a mesh of seventeen nodes
+or fewer no copy can exhaust its budget before every node has heard it, and
+the shorter-route refinement covers the rest. A copy from a pre-epic sender
+carries no `hops` and is read as having travelled one link.
 
 **The rollout consequence, stated rather than softened.** A pre-epic node
 reads the absent `ttl` as zero -- expired -- and drops what an upgraded node
