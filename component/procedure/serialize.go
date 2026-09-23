@@ -1,6 +1,8 @@
 package procedure
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 )
@@ -32,6 +34,21 @@ import (
 // other value types carry json tags, so a caller that embeds them in a larger
 // payload gets exactly the encoding and the checks MarshalTemplate and
 // MarshalTree give.
+
+// Digest is the version digest a stored procedure is pinned by: "sha256:" and
+// the lowercase hex SHA-256 of the bytes it is handed -- the spelling
+// component/work.BindingDigest gives a binding, so every digest the ladder
+// stores reads alike.
+//
+// It lives HERE, beside the encoding it is taken over, rather than in the
+// wiring that computes procedureHash: integrations/ may not import
+// crypto/sha256 (integrations/sha256_conformance_test.go), and a version pin
+// computed in two places is two versions. The caller decides WHAT is hashed
+// -- canonical bytes, keys sorted -- and this decides only how.
+func Digest(b []byte) string {
+	sum := sha256.Sum256(b)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
 
 // MarshalTemplate encodes a template: {"steps":[{"tool","args"}],"holes":[...]}.
 func MarshalTemplate(t Template) ([]byte, error) {

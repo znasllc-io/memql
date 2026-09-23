@@ -238,3 +238,22 @@ func TestMarshalRefusesANodeItCouldNotReadBack(t *testing.T) {
 		t.Fatal("MarshalTree must refuse an unknown operator")
 	}
 }
+
+// TestDigestIsTheSha256PrefixedHexOfItsBytes pins the version digest's
+// spelling. It is compared byte for byte -- a promotion approval's
+// artifactHash against the construct's procedureHash -- so a second spelling
+// of the same bytes would read as a different version and refuse every
+// approval. The fixed value is sha256("abc"), which anyone can check with
+// sha256sum.
+func TestDigestIsTheSha256PrefixedHexOfItsBytes(t *testing.T) {
+	const want = "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+	if got := Digest([]byte("abc")); got != want {
+		t.Fatalf("Digest(abc) = %s, want %s", got, want)
+	}
+	if Digest([]byte("abc")) == Digest([]byte("abd")) {
+		t.Fatal("two different inputs share a digest")
+	}
+	if got := Digest(nil); !strings.HasPrefix(got, "sha256:") || len(got) != len("sha256:")+64 {
+		t.Fatalf("Digest(nil) = %q, want sha256: and 64 hex digits", got)
+	}
+}
