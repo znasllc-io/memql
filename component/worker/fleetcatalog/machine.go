@@ -48,6 +48,11 @@ type Candidate struct {
 	// ServesCluster() is the only way to ask; neither half alone is consent.
 	SharingMode    string
 	InferenceServe string
+	// SharedUserIds and SharedGroupIds are who the owner lent the machine to
+	// under SharingModePeople (epic memql#5344), empty in every other mode.
+	// ServesPerson() is the only way to ask whether they include somebody.
+	SharedUserIds  []string
+	SharedGroupIds []string
 	// Apps is the local-app inventory the cockpit reported, verbatim -- ids
 	// this engine cannot drive included, so an operator surface can show an
 	// app the engine will never select.
@@ -91,6 +96,30 @@ func (c Candidate) ServesCluster() bool {
 // machine.
 func (c Candidate) SharingRefusal() string {
 	return workerservice.SharingRefusal(c.SharingMode, c.InferenceServe)
+}
+
+// Sharing is the owner's half as component/worker reads it.
+func (c Candidate) Sharing() workerservice.Sharing {
+	return workerservice.Sharing{Mode: c.SharingMode, UserIds: c.SharedUserIds, GroupIds: c.SharedGroupIds}
+}
+
+// ServesPerson reports whether BOTH consents let this person's call run here
+// (epic memql#5344, design G7). It is the question every person-path reader
+// asks -- the catalog, the shared plan, the replica-hop receiver -- so that
+// "is this machine lent to you" has one answer.
+func (c Candidate) ServesPerson(p *workerservice.Person) bool {
+	return workerservice.ServesPerson(c.Sharing(), c.InferenceServe, p)
+}
+
+// PersonRefusal names why the machine does not serve this person, or "".
+func (c Candidate) PersonRefusal(p *workerservice.Person) string {
+	return workerservice.PersonRefusal(c.Sharing(), c.InferenceServe, p)
+}
+
+// SystemRefusal names why the machine does not serve the cluster's own work,
+// or "". A machine lent to named people never does (design G3).
+func (c Candidate) SystemRefusal() string {
+	return workerservice.SystemRefusal(c.Sharing(), c.InferenceServe)
 }
 
 // Label returns the machine's display label for a card or a log line.

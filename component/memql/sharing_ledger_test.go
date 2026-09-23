@@ -14,13 +14,17 @@ func TestTheLedgerCarriesNoPromptContent(t *testing.T) {
 	// smuggled in through an `any` -- a nested map, a slice of objects -- is
 	// caught too. Every leaf must be a count, a machine id, a week, or one of
 	// the four level words.
-	entry := FoldLedger("v1:worker:registration:m1", "2026-W36", []LedgerCall{
+	entry := FoldLedger("v1:worker:registration:m1", "v1:identity:user:olivia", "2026-W36", []LedgerCall{
 		{MachineId: "v1:worker:registration:m1", ActingUserId: "alice", Level: "fast", Week: "2026-W36"},
 		{MachineId: "v1:worker:registration:m1", ActingUserId: "bob", Level: "reasoning", Week: "2026-W36"},
 	})
 	row := entry.Row()
 
-	allowed := map[string]bool{"machineId": true, "week": true, "calls": true, "people": true, "byLevel": true}
+	// otherCalls, otherPeople and systemCalls are the owner-approved split of
+	// epic memql#5344 (design G4): still counts, split by WHO THE CALL WAS FOR
+	// -- the owner, somebody else, or the cluster's own work.
+	allowed := map[string]bool{"machineId": true, "week": true, "calls": true, "people": true, "byLevel": true,
+		"otherCalls": true, "otherPeople": true, "systemCalls": true}
 	for key := range row {
 		if !allowed[key] {
 			t.Fatalf("the ledger grew a field %q; a shared machine's owner sees counts and levels and nothing else", key)
@@ -87,7 +91,7 @@ func TestTheFoldReadsOnlyTheAllowlistedKeys(t *testing.T) {
 }
 
 func TestPeopleAreCountedNotNamed(t *testing.T) {
-	entry := FoldLedger("m1", "2026-W36", []LedgerCall{
+	entry := FoldLedger("m1", "v1:identity:user:olivia", "2026-W36", []LedgerCall{
 		{MachineId: "m1", ActingUserId: "alice", Level: "fast", Week: "2026-W36"},
 		{MachineId: "m1", ActingUserId: "alice", Level: "fast", Week: "2026-W36"},
 		{MachineId: "m1", ActingUserId: "bob", Level: "strong", Week: "2026-W36"},
@@ -108,16 +112,16 @@ func TestTheOwnersOwnCallsAreCounted(t *testing.T) {
 	// lent it out". A ledger that excluded the owner would show zero on a
 	// machine they use constantly, and its owner would conclude sharing had
 	// done nothing.
-	entry := FoldLedger("m1", "2026-W36", []LedgerCall{
-		{MachineId: "m1", ActingUserId: "owner", Level: "fast", Week: "2026-W36"},
+	entry := FoldLedger("m1", "v1:identity:user:olivia", "2026-W36", []LedgerCall{
+		{MachineId: "m1", ActingUserId: "olivia", Level: "fast", Week: "2026-W36"},
 	})
-	if entry.Calls != 1 || entry.People != 1 {
+	if entry.Calls != 1 || entry.People != 1 || entry.OtherCalls != 0 || entry.SystemCalls != 0 {
 		t.Fatalf("got %+v", entry)
 	}
 }
 
 func TestAnotherMachinesCallsAreNotCounted(t *testing.T) {
-	entry := FoldLedger("m1", "2026-W36", []LedgerCall{
+	entry := FoldLedger("m1", "v1:identity:user:olivia", "2026-W36", []LedgerCall{
 		{MachineId: "m2", ActingUserId: "alice", Level: "fast", Week: "2026-W36"},
 	})
 	if entry.Calls != 0 {
@@ -126,7 +130,7 @@ func TestAnotherMachinesCallsAreNotCounted(t *testing.T) {
 }
 
 func TestAnotherWeeksCallsAreNotCounted(t *testing.T) {
-	entry := FoldLedger("m1", "2026-W36", []LedgerCall{
+	entry := FoldLedger("m1", "v1:identity:user:olivia", "2026-W36", []LedgerCall{
 		{MachineId: "m1", ActingUserId: "alice", Level: "fast", Week: "2026-W35"},
 	})
 	if entry.Calls != 0 {
@@ -136,30 +140,118 @@ func TestAnotherWeeksCallsAreNotCounted(t *testing.T) {
 
 func TestTheSentenceSaysNothingAboutWhoOrWhat(t *testing.T) {
 	// One line, in words, because the figure is for a person deciding whether
-	// to keep sharing rather than for a dashboard.
-	empty := FoldLedger("m1", "2026-W36", nil).Sentence()
+	// to keep lending rather than for a dashboard. It COUNTS other people and
+	// never names them; with a one-person share the count implies that person,
+	// which is inherent to any count -- the owner chose the split knowing it
+	// (epic memql#5344, design G4).
+	empty := FoldLedger("m1", "v1:identity:user:olivia", "2026-W36", nil).Sentence()
 	if !strings.Contains(empty, "No calls") {
 		t.Fatalf("got %q", empty)
 	}
 
-	one := FoldLedger("m1", "2026-W36", []LedgerCall{
+	one := FoldLedger("m1", "v1:identity:user:olivia", "2026-W36", []LedgerCall{
 		{MachineId: "m1", ActingUserId: "alice", Level: "fast", Week: "2026-W36"},
 	}).Sentence()
-	if !strings.Contains(one, "1 call") || strings.Contains(one, "people") {
-		// The single-person case does not say "for 1 person": when that person
-		// is the owner it reads as a stranger, and when it is not, naming the
-		// count of one is a step from naming them.
+	if !strings.Contains(one, "1 call") || strings.Contains(one, "alice") {
 		t.Fatalf("got %q", one)
 	}
 
-	many := FoldLedger("m1", "2026-W36", []LedgerCall{
+	many := FoldLedger("m1", "v1:identity:user:olivia", "2026-W36", []LedgerCall{
 		{MachineId: "m1", ActingUserId: "alice", Level: "fast", Week: "2026-W36"},
 		{MachineId: "m1", ActingUserId: "bob", Level: "fast", Week: "2026-W36"},
 	}).Sentence()
-	if !strings.Contains(many, "2 people") {
+	if !strings.Contains(many, "2 other people") {
 		t.Fatalf("got %q", many)
 	}
 	if strings.Contains(many, "alice") || strings.Contains(many, "bob") {
 		t.Fatalf("the sentence must never name a caller, got %q", many)
+	}
+}
+
+func TestTheLedgerSentenceSplitsYouFromOthers(t *testing.T) {
+	// Design G4, the whole table. The owner's own calls are theirs, a call with
+	// no acting person is the cluster's own work, and everybody else is
+	// counted -- in calls and in distinct people -- and never named.
+	const owner = "v1:identity:user:olivia"
+	call := func(user string) LedgerCall {
+		return LedgerCall{MachineId: "m", ActingUserId: user, Level: "fast", Week: "2026-W39"}
+	}
+	repeat := func(n int, user string) []LedgerCall {
+		out := make([]LedgerCall, n)
+		for i := range out {
+			out[i] = call(user)
+		}
+		return out
+	}
+	join := func(parts ...[]LedgerCall) []LedgerCall {
+		var out []LedgerCall
+		for _, p := range parts {
+			out = append(out, p...)
+		}
+		return out
+	}
+	cases := []struct {
+		name  string
+		calls []LedgerCall
+		want  string
+	}{
+		{"none", nil, "No calls have run on this machine this week."},
+		{"one, yours", repeat(1, "olivia"), "Served 1 call this week, for you."},
+		{"all yours", repeat(41, owner), "Served 41 calls this week, all of them yours."},
+		{"mixed", join(repeat(29, owner), repeat(6, "ana"), repeat(6, "bo")), "Served 41 calls this week, 12 of them for 2 other people."},
+		{"mixed, one other", join(repeat(29, owner), repeat(12, "ana")), "Served 41 calls this week, 12 of them for 1 other person."},
+		{"mixed with system", join(repeat(26, owner), repeat(12, "ana"), repeat(3, "")), "Served 41 calls this week, 12 of them for 1 other person and 3 for the cluster's own work."},
+		{"yours and system", join(repeat(38, owner), repeat(3, "")), "Served 41 calls this week, 3 of them for the cluster's own work."},
+		{"all others", join(repeat(6, "ana"), repeat(6, "bo")), "Served 12 calls this week, all for 2 other people."},
+		{"one other", repeat(1, "ana"), "Served 1 call this week, for 1 other person."},
+		{"all system", repeat(5, ""), "Served 5 calls this week, all for the cluster's own work."},
+		{"one, system", repeat(1, ""), "Served 1 call this week, for the cluster's own work."},
+		{"others and system", join(repeat(12, "ana"), repeat(3, "")), "Served 15 calls this week: 12 for 1 other person and 3 for the cluster's own work."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := FoldLedger("m", owner, "2026-W39", tc.calls).Sentence(); got != tc.want {
+				t.Fatalf("got  %q\nwant %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTheSplitCountsAreRendered(t *testing.T) {
+	entry := FoldLedger("m", "v1:identity:user:olivia", "2026-W39", []LedgerCall{
+		{MachineId: "m", ActingUserId: "olivia", Level: "fast", Week: "2026-W39"},
+		{MachineId: "m", ActingUserId: "ana", Level: "fast", Week: "2026-W39"},
+		{MachineId: "m", ActingUserId: "ana", Level: "strong", Week: "2026-W39"},
+		{MachineId: "m", ActingUserId: "bo", Level: "fast", Week: "2026-W39"},
+		{MachineId: "m", ActingUserId: "", Level: "fast", Week: "2026-W39"},
+	})
+	if entry.Calls != 5 || entry.OtherCalls != 3 || entry.OtherPeople != 2 || entry.SystemCalls != 1 || entry.People != 3 {
+		t.Fatalf("got %+v", entry)
+	}
+	row := entry.Row()
+	if row["otherCalls"] != 3 || row["otherPeople"] != 2 || row["systemCalls"] != 1 {
+		t.Fatalf("row = %#v", row)
+	}
+}
+
+func TestAnAutomationsCallsAreTheClustersOwnWork(t *testing.T) {
+	// Review finding (epic memql#5344): automations run as a SYNTHETIC actor,
+	// `system:automation:<name>`, so their calls carry a non-empty user id --
+	// and counting that id as "another person" tells a machine's owner that a
+	// stranger used it when it was the cluster's own work.
+	const owner = "v1:identity:user:olivia"
+	var calls []LedgerCall
+	for i := 0; i < 29; i++ {
+		calls = append(calls, LedgerCall{MachineId: "m", ActingUserId: owner, Level: "fast", Week: "2026-W39"})
+	}
+	for i := 0; i < 12; i++ {
+		calls = append(calls, LedgerCall{MachineId: "m", ActingUserId: "system:automation:indexTodoOnCreate", Level: "fast", Week: "2026-W39"})
+	}
+	entry := FoldLedger("m", owner, "2026-W39", calls)
+	if entry.SystemCalls != 12 || entry.OtherCalls != 0 || entry.OtherPeople != 0 {
+		t.Fatalf("got %+v; an automation is the cluster's own work, not a person", entry)
+	}
+	if got, want := entry.Sentence(), "Served 41 calls this week, 12 of them for the cluster's own work."; got != want {
+		t.Fatalf("got  %q\nwant %q", got, want)
 	}
 }

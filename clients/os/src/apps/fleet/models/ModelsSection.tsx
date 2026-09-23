@@ -556,7 +556,9 @@ function doorSentence(doors: DoorsReading): string {
 function doorWord(door: string): string {
   switch (door) {
     case "local":
-      return "a model on your own machines";
+      // Yours, or lent to you (epic memql#5344): a person's catalog holds
+      // both, and somebody with no machine of their own may be using one.
+      return "a local model on your machines or on one lent to you";
     case "app":
       return "a signed-in app on one of your machines";
     case "federation":

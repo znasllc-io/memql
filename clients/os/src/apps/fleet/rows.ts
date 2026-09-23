@@ -1,4 +1,4 @@
-import { rowArray, rowNumber, rowObject, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { bareShortId, rowArray, rowNumber, rowObject, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { absent, figureFrom, figureOf, figureValue, type Figure } from "../../kit/measure";
 import { flatten } from "../../kit/rows";
@@ -97,10 +97,18 @@ export interface MachineRow {
    *  `present` false means the cockpit predates the field -- NOT a machine
    *  with no memory. See machines/hardware.ts. */
   hardware: MachineHardware;
-  /** The OWNER's half of the sharing consent (D6): "owner" or "cluster". The
+  /** The OWNER's half of the sharing consent (D6, epic memql#5344 G1). The
    *  cockpit's half is `inferenceServe` beside it, and a machine serves
-   *  another user only when BOTH say cluster. */
-  sharingMode: string;
+   *  anybody but its owner only when the owner said `people` or `cluster`
+   *  AND the cockpit said cluster. */
+  sharingMode: SharingMode;
+  /** Under `people`: the users it is lent to, in the spelling stored and in
+   *  stored order. EMPTY under the other two modes whatever the row holds --
+   *  a list that is not in force is residue, not a share (design G10). */
+  sharedUserIds: string[];
+  /** Under `people`: the groups whose ACTIVE members may use it. Empty
+   *  otherwise, for the same reason. */
+  sharedGroupIds: string[];
   sharedAt: string;
   sharedBy: string;
   /** The COCKPIT's half, from that machine's own policy.yaml. Empty reads as
@@ -302,6 +310,7 @@ export function machineFromRow(raw: Row): MachineRow {
   const row = flatten(raw);
   const platformInfo = rowObject(row, "platformInfo");
   const descriptor = rowObject(row, "capabilityDescriptor");
+  const sharing = sharingFrom(row["sharing"]);
   const reportedLabels = labelMapFrom(row["labels"]);
   const operatorLabels = labelMapFrom(row["operatorLabels"]);
   // platformInfo is the register-time snapshot; the descriptor repeats the
@@ -339,7 +348,9 @@ export function machineFromRow(raw: Row): MachineRow {
     revokeReason: rowString(row, "revokeReason"),
     apps: appsFrom(row),
     hardware: hardwareFrom(row["hardware"]),
-    sharingMode: sharingModeFrom(row["sharing"]),
+    sharingMode: sharing.mode,
+    sharedUserIds: sharing.userIds,
+    sharedGroupIds: sharing.groupIds,
     sharedAt: nestedString(objectAt(row["sharing"]), "sharedAt"),
     sharedBy: nestedString(objectAt(row["sharing"]), "sharedBy"),
     inferenceServe: nestedString(descriptor, "inferenceServe") === "cluster" ? "cluster" : "owner",
@@ -460,16 +471,65 @@ export function clockSkewMatters(
   return Math.abs(m.clockSkewMs) >= onlineWindowMs;
 }
 
+/** The owner's three answers (epic memql#5344, design G1): `owner` keeps it,
+ *  `people` lends it to the users and groups listed, `cluster` to everyone
+ *  signed in and to the cluster's own work. */
+export type SharingMode = "owner" | "people" | "cluster";
+
+interface Sharing {
+  mode: SharingMode;
+  userIds: string[];
+  groupIds: string[];
+}
+
 /**
- * The owner's sharing consent.
+ * The owner's sharing consent, read the way the engine reads it
+ * (ParseMachineSharing in component/memql, SharingFromRow in
+ * component/worker).
  *
- * ANYTHING THAT IS NOT EXACTLY `cluster` IS `owner` -- a typo, a value from a
- * future engine, a half-written row. The failure direction here is a
+ * ANYTHING THAT IS NOT `cluster` OR `people` IS `owner` -- a typo, a value
+ * from a future engine, a half-written row. The failure direction here is a
  * stranger's prompt running on somebody's machine, so the reading that must
- * not be generous is the permissive one.
+ * not be generous is the permissive one. The mode is trimmed first only
+ * because the engine trims it: two readers of one consent that disagreed
+ * would show a machine as private that the engine lends out.
+ *
+ * TWO MORE WAYS TO BE `owner`. A `people` share naming nobody is one -- the
+ * engine admits nobody through it, so calling it shared would describe a
+ * share that serves no one (design review focus 2). And the lists are read
+ * under `people` ONLY: residue left under another mode is not in force, and a
+ * surface that named it would be naming people the machine does not serve.
  */
-function sharingModeFrom(v: unknown): string {
-  return nestedString(objectAt(v), "mode") === "cluster" ? "cluster" : "owner";
+function sharingFrom(v: unknown): Sharing {
+  const block = objectAt(v);
+  const mode = nestedString(block, "mode").trim();
+  if (mode === "cluster") return { mode: "cluster", userIds: [], groupIds: [] };
+  if (mode !== "people") return { mode: "owner", userIds: [], groupIds: [] };
+  const userIds = subjectIdsFrom(block?.["userIds"]);
+  const groupIds = subjectIdsFrom(block?.["groupIds"]);
+  if (userIds.length === 0 && groupIds.length === 0) return { mode: "owner", userIds: [], groupIds: [] };
+  return { mode: "people", userIds, groupIds };
+}
+
+/**
+ * A stored list of people or groups: trimmed, empties and non-strings
+ * dropped, and one subject's two spellings (bare and canonical) collapsed to
+ * the FIRST one stored -- the engine's normalizeShareIds rule, so the id this
+ * surface sends back on a save is the one the row already holds.
+ */
+function subjectIdsFrom(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of v) {
+    if (typeof entry !== "string") continue;
+    const id = entry.trim();
+    const key = bareShortId(id);
+    if (key === "" || seen.has(key)) continue;
+    seen.add(key);
+    out.push(id);
+  }
+  return out;
 }
 
 function objectAt(v: unknown): Record<string, unknown> | null {

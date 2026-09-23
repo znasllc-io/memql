@@ -1226,12 +1226,16 @@ func FleetRevokeMachineBuild(args FleetRevokeMachineArgs) string {
 	return b.String()
 }
 
-// FleetSetSharing -- Set the OWNER's half of a machine's sharing consent: `owner` keeps it to yourself, `cluster` offers it to everybody on this cluster. The machine's own half comes from its policy.yaml and is not settable from here -- deliberately, because it is a decision about where the machine IS and only the machine can make it; both halves must say cluster before anybody else's work runs on it. It resolves the machine through YOUR OWN machines, which is the whole reason this is a builtin: the row's tier grants a cluster owner the write, and lending somebody else's hardware to the cluster is not a decision a cluster owner gets to make for them.
+// FleetSetSharing -- Set the OWNER's half of a machine's sharing consent: `owner` keeps it to yourself, `people` lends it to the users and groups you name, `cluster` offers it to everybody on this cluster and to the cluster's own work. The machine's own half comes from its policy.yaml and is not settable from here -- deliberately, because it is a decision about where the machine IS and only the machine can make it; it must say cluster before anybody else's work runs on it. It resolves the machine through YOUR OWN machines, which is the whole reason this is a builtin: the row's tier grants a cluster owner the write, and lending somebody else's hardware is not a decision a cluster owner gets to make for them. Under `people`, a user or group not already on the machine's list must be one fleetShareDirectory offers you, and one sentence refuses both an id that does not exist and one you may not pick, so this is never a way to learn who is on the cluster.
 type FleetSetSharingArgs struct {
 	// v1:worker:registration.id of the machine to set sharing on. It must be one of the caller's own.
 	RegistrationId string
-	// owner or cluster. Anything else is refused rather than read as owner -- a misspelling that silently meant `keep it private` would be safe, and one that silently meant anything else would not.
+	// owner, people or cluster. Anything else is refused rather than read as owner -- a misspelling that silently meant `keep it private` would be safe, and one that silently meant anything else would not.
 	Mode string
+	// Under people: the v1:identity:user ids to lend the machine to. At most 50 subjects across both lists, and at least one. Your own id is dropped rather than refused -- your own machine is yours already. Ignored under owner and cluster.
+	UserIds []string
+	// Under people: the v1:identity:group ids whose active members may use the machine. Ignored under owner and cluster.
+	GroupIds []string
 }
 
 // FleetSetSharing calls the engine builtin fleetSetSharing.
@@ -1250,6 +1254,41 @@ func FleetSetSharingBuild(args FleetSetSharingArgs) string {
 	}
 	b.WriteString("mode: ")
 	b.WriteString(quoteMemQL(args.Mode))
+	if args.UserIds != nil {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("userIds: ")
+		b.WriteString(renderMemQLValue(args.UserIds))
+	}
+	if args.GroupIds != nil {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("groupIds: ")
+		b.WriteString(renderMemQLValue(args.GroupIds))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// FleetShareDirectory -- Who you can lend one of YOUR OWN machines to: the people and groups you may pick, and the ones already on this machine's list. When you may already read every person on the cluster (`read` on `principal`: owner, developer and admin by default, and whoever a grant gives it to) that is every active person, with their email, and every active group; otherwise it is the active groups you are in and the active people in them, by display name only. Also names every subject already on the machine's list, marked when it is no longer one you could pick -- somebody who left your group stays on the list until you remove them. The machine is resolved through your own machines, so another user's id answers exactly as a made-up one does, and a person with no machine cannot list anybody through it.
+type FleetShareDirectoryArgs struct {
+	// v1:worker:registration.id of the machine being shared. It must be one of the caller's own.
+	RegistrationId string
+}
+
+// FleetShareDirectory calls the engine builtin fleetShareDirectory.
+func (qc *QueryClient) FleetShareDirectory(ctx context.Context, args FleetShareDirectoryArgs) (*Result, error) {
+	call := FleetShareDirectoryBuild(args)
+	return qc.executeNamed(ctx, "fleetShareDirectory", call)
+}
+
+func FleetShareDirectoryBuild(args FleetShareDirectoryArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin fleetShareDirectory(")
+	b.WriteString("registrationId: ")
+	b.WriteString(quoteMemQL(args.RegistrationId))
 	b.WriteString(")")
 	return b.String()
 }

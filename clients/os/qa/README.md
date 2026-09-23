@@ -37,7 +37,10 @@ what says the page has not become a wall of advisories), or `overview`,
 `settings-no-app-member`, `settings-app` (the Deployables app, whole), or
 `origins-silent`, `origins-mixed`, `origins-reporting` (Data origins), or
 `mesh-healthy`, `mesh-island`, `mesh-empty`, `mesh-node-bff`, `mesh-node-edge`,
-`mesh-node-identity`, `mesh-node-unreported` (Cluster > Mesh); `mode` is `dark`
+`mesh-node-identity`, `mesh-node-unreported` (Cluster > Mesh), or
+`sharing-owner`, `sharing-people`, `sharing-waiting`, `sharing-everyone`,
+`sharing-viewer`, `share-dialog`, `share-dialog-admin`, `share-dialog-empty`,
+`share-dialog-refused` (a machine's Sharing view and its dialog); `mode` is `dark`
 or `light`. **Take at least one narrow capture** (`820,760`): two of
 the first three real defects this harness found were invisible at 1400x900.
 
@@ -99,6 +102,27 @@ the quiet planner in the same breath as the two deaf nodes, hid the deaf edge
 behind "and 1 other", and broke a node id at its hyphen across two lines; a
 node with no report was dated "Report written"; identity's panel was titled
 "What it hears"; and a three-hour silence read "180 minutes".
+
+The `sharing-*` and `share-dialog*` views are a machine's Sharing view and
+the dialog behind its one act (epic memql#5344). `sharing-people` is the one to
+read first: names, both consents given, and the week's split ledger line;
+`sharing-waiting` is the same share with the machine's own consent missing, and
+`sharing-viewer` is somebody else's machine, which is counted rather than named.
+The dialog views render the dialog directly and script the one click a view
+needs; `&modal=0` draws it in the page for a capture tool that does not paint
+the top layer (a one-shot `--headless=new --screenshot` does paint it).
+`&arrow=N` arrows N times through the results from the search: take
+`share-dialog-admin&arrow=1` and the first option must be highlighted AND in
+view (the list is its options' offsetParent only while it is positioned).
+
+Their first rendered pass found what 447 green cases could not: the search box
+drew about a hundred pixels tall, because `.os-input` is `flex: 1 1 12ch` and
+the picker is a flex COLUMN, where that basis is the height; and a private
+machine told its owner to edit `policy.yaml` for a share they had not chosen.
+The review's pass found two more that no jsdom case can see: arrowing scrolled
+the active option OUT of view (an unpositioned list, so `offsetTop` counted
+from the dialog), and a refusal at the end of the scrolling body sat below the
+fold at 1366x650 and 361x760 -- it is now pinned above the floor.
 
 ## What it is, and what it is not
 
