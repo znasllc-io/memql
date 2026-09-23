@@ -2,6 +2,7 @@ package packages
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -47,7 +48,9 @@ type Engine interface {
 // guard its internal-origin escape and let anyone revoke anything).
 // internal_origin_test.go asserts all four lists.
 type store struct {
-	engine Engine
+	directDB  func() *sql.DB
+	grantGate func(context.Context, string, string, func(context.Context) error) error
+	engine    Engine
 	// logger is for the one thing the store does on its own account -- the
 	// best-effort heartbeat behind resolveCredential. Nil means slog.Default.
 	logger *slog.Logger

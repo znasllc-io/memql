@@ -38,15 +38,15 @@ describe("the manifest", () => {
     // deployables, with a life of its own. It used to be a header row inside
     // the deployables list with its apps indented beneath it -- a tab is a
     // different kind of thing, and a subset is a filter.
-    expect(DEPLOYABLES_SECTION_IDS).toEqual(["map", "deployables", "sources", "logs", "settings"]);
-    expect(DEPLOYABLES_SECTIONS.map((s) => s.name)).toEqual(["Overview", "Deployables", "Sources", "Logs", "Settings"]);
+    expect(DEPLOYABLES_SECTION_IDS).toEqual(["map", "deployables", "sources", "repositories", "logs", "settings"]);
+    expect(DEPLOYABLES_SECTIONS.map((s) => s.name)).toEqual(["Overview", "Deployables", "Sources", "Repositories", "Logs", "Settings"]);
     // The gated one is offered to an admin and withheld below, so the window
     // nav genuinely differs by role -- the assertion the three-section version
     // of this file could not make, because it had nothing gated.
     installSeededAccess("reader");
-    expect(sectionsFor(deployables!).map((s) => s.id)).toEqual(["map", "deployables", "sources", "settings"]);
+    expect(sectionsFor(deployables!).map((s) => s.id)).toEqual(["map", "deployables", "sources", "repositories", "settings"]);
     installSeededAccess("admin");
-    expect(sectionsFor(deployables!).map((s) => s.id)).toEqual(["map", "deployables", "sources", "logs", "settings"]);
+    expect(sectionsFor(deployables!).map((s) => s.id)).toEqual(["map", "deployables", "sources", "repositories", "logs", "settings"]);
   });
 
   it("opens on the MAP", () => {

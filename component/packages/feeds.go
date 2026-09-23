@@ -232,6 +232,9 @@ func (i *Integration) handlePollUpstream(ctx context.Context, _ map[string]any, 
 
 // upstreamHead asks GitHub for the ref's current commit.
 func (i *Integration) upstreamHead(ctx context.Context, d *Deps, pkg map[string]any) (string, error) {
+	if err := d.validatePackageSourceConnection(ctx, pkg); err != nil {
+		return "", err
+	}
 	owner, repo, err := parseGitHubRepo(rowString(pkg, "repoUrl"))
 	if err != nil {
 		return "", err

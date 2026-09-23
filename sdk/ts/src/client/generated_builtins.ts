@@ -1142,12 +1142,18 @@ It answers `{authorizeUrl, reason, installUrl}` and never an error a client has 
   ok                        -- authorizeUrl is set; navigate to it.   github_app_not_configured -- this cluster has no GitHub App (the six MEMQL_GITHUB_APP_*                                values are absent). authorizeUrl and installUrl are empty and                                the Source stop offers the pasted-token path alone. An                                operator's condition, not a person's.   connect_state_invalid     -- the state row could not be written. The person retries; there                                is nothing for them to fix.
 A call carrying no actor is REFUSED rather than answered, because the state row names the account the callback may land a grant on and a row naming nobody is a grant nobody owns. */
 export interface GithubConnectBeginArgs {
+  /** Existing own grant to reconnect; omitted means add another GitHub identity. */
+  credentialId?: string;
+  /** Browser flow correlation, echoed on callback; never authorization. */
+  flowId?: string;
   /** Where in MemQL OS to land when the callback finishes -- a same-origin path such as "/packages/new". Validated as a relative path on the way in and again on the way out; anything absolute, protocol-relative or carrying a control character is dropped for the OS root. */
   returnPath?: string;
 }
 
 export function buildGithubConnectBegin(args: GithubConnectBeginArgs): string {
   const parts: string[] = [];
+  if (args.credentialId !== undefined) parts.push("credentialId: " + renderMemQLValue(args.credentialId));
+  if (args.flowId !== undefined) parts.push("flowId: " + renderMemQLValue(args.flowId));
   if (args.returnPath !== undefined) parts.push("returnPath: " + renderMemQLValue(args.returnPath));
   return "builtin githubConnectBegin(" + parts.join(", ") + ")";
 }
@@ -3152,6 +3158,50 @@ QueryClient.prototype.siteTrafficInWindow = function (this: QueryClient, args: S
   return this.executeNamed("siteTrafficInWindow", buildSiteTrafficInWindow(args), opts);
 };
 
+/** Save a caller-owned GitHub installation grouping. Re-adding the same binding reactivates its stable ID after live verification; it never creates a token. */
+export interface SourceConnectionCreateArgs {
+  credentialId: string;
+  installationId: string;
+}
+
+export function buildSourceConnectionCreate(args: SourceConnectionCreateArgs): string {
+  const parts: string[] = [];
+  parts.push("credentialId: " + renderMemQLValue(args.credentialId));
+  parts.push("installationId: " + renderMemQLValue(args.installationId));
+  return "builtin sourceConnectionCreate(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    sourceConnectionCreate(args: SourceConnectionCreateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.sourceConnectionCreate = function (this: QueryClient, args: SourceConnectionCreateArgs = {} as SourceConnectionCreateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("sourceConnectionCreate", buildSourceConnectionCreate(args), opts);
+};
+
+/** Remove only this personal saved binding. Existing packages and sites remain; other sources sharing the same GitHub grant remain connected. */
+export interface SourceConnectionRemoveArgs {
+  connectionId: string;
+}
+
+export function buildSourceConnectionRemove(args: SourceConnectionRemoveArgs): string {
+  const parts: string[] = [];
+  parts.push("connectionId: " + renderMemQLValue(args.connectionId));
+  return "builtin sourceConnectionRemove(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    sourceConnectionRemove(args: SourceConnectionRemoveArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.sourceConnectionRemove = function (this: QueryClient, args: SourceConnectionRemoveArgs = {} as SourceConnectionRemoveArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("sourceConnectionRemove", buildSourceConnectionRemove(args), opts);
+};
+
 /** Store a personal source credential (epic memql#4885, D10). The token crosses the wire ONCE, inside this call, is sealed server-side under MEMQL_MASTER_KEY, and lands on a v1:platform:sourceCredential row owned by the caller; it appears in no row, no log line and no reply. Only github.com is admitted as a host today -- any other host is refused with source_host_unsupported, and the answer is to upload the tree as a zip instead. Returns {credentialId, fingerprint}, the fingerprint being the token's last four characters prefixed with '...', for telling two credentials apart. Name the credential on a package through createPackage or updatePackageSource; the fetcher resolves it under that package's OWNER, so a package naming somebody else's credential is refused by name. */
 export interface SourceCredentialCreateArgs {
   /** The host the token authenticates against. github.com is the only value admitted today. */
@@ -3202,8 +3252,31 @@ QueryClient.prototype.sourceCredentialRevoke = function (this: QueryClient, args
   return this.executeNamed("sourceCredentialRevoke", buildSourceCredentialRevoke(args), opts);
 };
 
+/** List installations for one personal GitHub identity, without reading its repositories. */
+export interface SourceInstallationsArgs {
+  credentialId: string;
+}
+
+export function buildSourceInstallations(args: SourceInstallationsArgs): string {
+  const parts: string[] = [];
+  parts.push("credentialId: " + renderMemQLValue(args.credentialId));
+  return "builtin sourceInstallations(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    sourceInstallations(args: SourceInstallationsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.sourceInstallations = function (this: QueryClient, args: SourceInstallationsArgs = {} as SourceInstallationsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("sourceInstallations", buildSourceInstallations(args), opts);
+};
+
 /** Ask whether this cluster can read a repository (epic memql#4885, D11). Parses the URL, resolves credentialId under the caller's own actor the way a fetch does, asks GitHub for the repository, and answers {host, reachable, private, defaultBranch, reason}. reason is exactly one of: ok (reachable; private and defaultBranch are GitHub's answer), not_found_or_private (404 with no credential -- GitHub answers the two alike, and the stop offers a credential), credential_cannot_see_it (refused under the credential: choose another, or fix its grant), credential_not_found (the caller cannot read the named credential), credential_revoked, source_host_unsupported (only github.com today, or upload a zip), rate_limited (ask again later), reconnect_required (GitHub refused the grant itself -- never read as 'private, or not there', because the repair is reconnecting and not choosing another credential), repository_not_installed (the grant is good and the app is not installed on this repository, which is a link away). Under a grant the probe also answers `branches` and a `manifest` summary read from memql-package.yaml through the contents API -- {name, deployables:[{name, kind, path}], dslDomains} -- so the ref picker and the What-it-is preview are filled before Analyze runs; both are empty when there is no grant, no manifest, or the manifest does not parse, and a manifest that does not parse is NOT a refusal here, because the analysis is the authority. A typed reason, never the API's own body. A GitHub this cluster cannot reach is an ERROR rather than a reason, so the stop says so and stays editable; the fetch is the authority and the probe is a courtesy. Writes nothing and stamps nothing. */
 export interface SourceProbeArgs {
+  /** A caller-owned active saved source. When supplied, its grant and installation bound this probe. */
+  connectionId?: string;
   /** The repository URL as typed, e.g. https://github.com/acme/widget. */
   repoUrl: string;
   /** One of the caller's v1:platform:sourceCredential rows to probe under -- a pasted token or a GitHub App grant. Empty resolves the caller's active grant when they hold one and probes anonymously otherwise, which is what a public repository needs and what makes a connected person's picker prefill without naming anything. */
@@ -3212,6 +3285,7 @@ export interface SourceProbeArgs {
 
 export function buildSourceProbe(args: SourceProbeArgs): string {
   const parts: string[] = [];
+  if (args.connectionId !== undefined) parts.push("connectionId: " + renderMemQLValue(args.connectionId));
   parts.push("repoUrl: " + renderMemQLValue(args.repoUrl));
   if (args.credentialId !== undefined) parts.push("credentialId: " + renderMemQLValue(args.credentialId));
   return "builtin sourceProbe(" + parts.join(", ") + ")";
@@ -3229,6 +3303,8 @@ QueryClient.prototype.sourceProbe = function (this: QueryClient, args: SourcePro
 
 /** List the repositories a GitHub App grant can reach (epic memql#4912, C7). Resolves the caller's active grant -- or the one named by credentialId -- reads its installations live from GitHub and walks each one's repositories, and answers {repositories, installations, pending, nextPage, reason}. Each repository carries {fullName, owner, name, url, private, visibility, defaultBranch, pushedAt, installationId}, so the picker can group by owner and prefill a ref without a second call. `installations` names every installation the grant reaches, and `pending` names those still awaiting an organization owner's approval BY NAME -- a pending installation is not a reachable one, and saying so is what stops a person hunting for a repository that will appear when somebody else clicks. reason is one of: ok, github_app_not_configured (this cluster has no GitHub App, so only the token path is offered), reconnect_required (GitHub refused the grant -- the person reconnects), credential_not_found (no grant, or not the caller's), credential_revoked, rate_limited. Writes nothing except the grant's own installation ids, which it refreshes from what it just read. */
 export interface SourceRepositoriesArgs {
+  /** A caller-owned active saved source. When supplied, only its live installation is listed. */
+  connectionId?: string;
   /** A github_app grant of the caller's to list under. Empty resolves the caller's active grant, which is what a person with one connection has. */
   credentialId?: string;
   /** 1-based page through the repositories of every installation, 100 per page. Empty or 0 means the first page; nextPage in the reply is 0 when there are no more. */
@@ -3237,6 +3313,7 @@ export interface SourceRepositoriesArgs {
 
 export function buildSourceRepositories(args: SourceRepositoriesArgs): string {
   const parts: string[] = [];
+  if (args.connectionId !== undefined) parts.push("connectionId: " + renderMemQLValue(args.connectionId));
   if (args.credentialId !== undefined) parts.push("credentialId: " + renderMemQLValue(args.credentialId));
   if (args.page !== undefined) parts.push("page: " + renderMemQLValue(args.page));
   return "builtin sourceRepositories(" + parts.join(", ") + ")";

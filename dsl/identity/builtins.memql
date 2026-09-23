@@ -121,10 +121,15 @@ builtin transferRowOwnership {
 /// A call carrying no actor is REFUSED rather than answered, because the state row names the
 /// account the callback may land a grant on and a row naming nobody is a grant nobody owns.
 @sdk
+@requiresCapability("execute", "app:deployables/sources")
 @executor("integration.identity.githubConnectBegin")
 @args(profile="object")
-@description("Begin GitHub Connect (epic memql#4912, C4). Writes a short-lived state row bound to the caller and answers {authorizeUrl, reason, installUrl}: navigate the browser to authorizeUrl, and GitHub redirects back to this cluster's identity service, which exchanges the code, seals the tokens and lands one v1:platform:sourceCredential grant of kind github_app owned by the caller. reason is 'ok' on success, 'github_app_not_configured' when this cluster has no GitHub App (authorizeUrl empty; offer the pasted-token path instead), or 'connect_state_invalid' when the state could not be stored. installUrl is the app's installation page, for 'Install on another organization'; empty when unconfigured. Never returns a token, and never echoes the state value anywhere but inside authorizeUrl.")
+@description("Begin session-bound GitHub authorization with PKCE. Returns {authorizeUrl, reason, installUrl}. Omit credentialId to add a GitHub identity; supply an own grant to reconnect only that identity. The callback requires the originating live browser session and returns safe credential and flow correlation identifiers. reason is ok, github_app_not_configured, or connect_state_invalid. Never returns a token.")
 builtin githubConnectBegin {
+  /// Existing own grant to reconnect; omitted means add another GitHub identity.
+  credentialId string
+  /// Browser flow correlation, echoed on callback; never authorization.
+  flowId string
   /// Where in MemQL OS to land when the callback finishes -- a same-origin path such as
   /// "/packages/new". Validated as a relative path on the way in and again on the way out; anything
   /// absolute, protocol-relative or carrying a control character is dropped for the OS root.

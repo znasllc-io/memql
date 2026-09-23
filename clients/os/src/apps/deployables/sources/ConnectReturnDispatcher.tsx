@@ -1,8 +1,10 @@
 import { useEffect } from "react";
 
+import { useSession } from "../../../chrome/access";
+import { bare } from "../people";
 import { useOs } from "../../../chrome/state";
 import { canOpen } from "../../../system/registry";
-import { takeParkedConnectReturn } from "./connectReturn";
+import { correlateConnectReturn, takeParkedConnectReturn } from "./connectReturn";
 
 // Hands a parked GitHub-connect return to the surface that asked for it
 // (epic memql#4915).
@@ -27,18 +29,20 @@ import { takeParkedConnectReturn } from "./connectReturn";
 // sign-in rather than being lost to it.
 
 export function ConnectReturnDispatcher() {
+  const { access } = useSession();
+  const viewer = bare(access?.userId ?? "");
   const { actions, registry, accessEpoch } = useOs();
   useEffect(() => {
     // The shell mounts before effective capabilities arrive. Keep the return
     // parked until the same gate as openApp admits it; the access epoch
     // retries this effect when the asynchronous permission read completes.
-    if (!canOpen(registry, "deployables")) return;
+    if (!viewer || !canOpen(registry, "deployables")) return;
     // TAKE, not read: the parked value is consumed here and this effect is
     // free to run again -- a StrictMode remount does, and so does any change
     // in `actions` identity -- and every later run correctly finds nothing.
     const result = takeParkedConnectReturn();
     if (result === null) return;
-    actions.openApp("deployables", result.section, { connect: result });
-  }, [actions, registry, accessEpoch]);
+    actions.openApp("deployables", result.section, { connect: correlateConnectReturn(result, viewer) });
+  }, [actions, registry, accessEpoch, viewer]);
   return null;
 }

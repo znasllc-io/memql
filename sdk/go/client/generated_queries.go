@@ -11205,6 +11205,45 @@ func SoldByVariantBuild(args SoldByVariantArgs) string {
 	return b.String()
 }
 
+// SourceConnectionById -- Resolve a saved binding under its owner's identity, including a removed row for idempotent removal. No cluster-owner branch borrows another user's grant.
+//
+// Bound concept: v1:platform:sourceConnection (machine-readable: BoundConcepts["sourceConnectionById"] in generated_concepts.go).
+type SourceConnectionByIdArgs struct {
+	ConnectionId string
+}
+
+// SourceConnectionById calls the engine query sourceConnectionById.
+func (qc *QueryClient) SourceConnectionById(ctx context.Context, args SourceConnectionByIdArgs) (*Result, error) {
+	call := SourceConnectionByIdBuild(args)
+	return qc.executeNamed(ctx, "sourceConnectionById", call)
+}
+
+func SourceConnectionByIdBuild(args SourceConnectionByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query sourceConnectionById(")
+	b.WriteString("connectionId: ")
+	b.WriteString(quoteMemQL(args.ConnectionId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SourceConnectionsMine -- The caller's active saved source connections, independent of MemQL accounts.
+//
+// Bound concept: v1:platform:sourceConnection (machine-readable: BoundConcepts["sourceConnectionsMine"] in generated_concepts.go).
+type SourceConnectionsMineArgs struct {
+}
+
+// SourceConnectionsMine calls the engine query sourceConnectionsMine.
+func (qc *QueryClient) SourceConnectionsMine(ctx context.Context, args SourceConnectionsMineArgs) (*Result, error) {
+	call := SourceConnectionsMineBuild(args)
+	return qc.executeNamed(ctx, "sourceConnectionsMine", call)
+}
+
+func SourceConnectionsMineBuild(args SourceConnectionsMineArgs) string {
+	_ = args
+	return "query sourceConnectionsMine()"
+}
+
 // SourceCredentialById -- One credential by id -- the Source stop's credential chip. Card shape, so metadata only.
 //
 // Bound concept: v1:platform:sourceCredential (machine-readable: BoundConcepts["sourceCredentialById"] in generated_concepts.go).

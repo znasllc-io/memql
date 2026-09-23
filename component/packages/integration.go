@@ -2,6 +2,7 @@ package packages
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -54,7 +55,8 @@ type Integration struct {
 	// and the resolver that knows where the app comes from (the environment,
 	// or the rows a cluster owner's registration wrote -- design record
 	// 2026-09-20-github-app-setup, D2). Nil reads the environment alone.
-	githubApp func() githubapp.Config
+	githubApp     func() githubapp.Config
+	githubGrantDB func() *sql.DB
 
 	depsOnce sync.Once
 	deps     *Deps
@@ -102,6 +104,10 @@ func (i *Integration) IntegrationName() string { return integrationName }
 // Capabilities implements memql.IntegrationProvider.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
+		{Name: "sourceConnectionCreate", Description: "Save one personal GitHub installation binding, verified live under its grant.", Handler: i.handleSourceConnectionCreate, ArgsSchema: map[string]string{"credentialId": "string (required)", "installationId": "string (required)"}},
+		{Name: "sourceConnectionRemove", Description: "Remove a saved installation binding without revoking its grant or deleting deployments.", Handler: i.handleSourceConnectionRemove, ArgsSchema: map[string]string{"connectionId": "string (required)"}},
+		{Name: "sourceInstallations", Description: "Discover installations under a named personal GitHub grant, without listing repositories.", Handler: i.handleSourceInstallations, ArgsSchema: map[string]string{"credentialId": "string (required)"}},
+		{Name: "validateSourceConnectionRepository", Description: "Validate a personal source binding and its live repository access before package persistence.", Handler: i.handleValidateSourceConnectionRepository, ArgsSchema: map[string]string{"connectionId": "string (required)", "credentialId": "string (required)", "repoUrl": "string (required)"}},
 		{
 			Name:        "analyze",
 			Description: "Analyze a package source offline and return the report, without deploying anything (epic memql#4794, D12). Runs the same Init-grade gates strict boot runs, so 'this DSL would refuse boot' is an answer here rather than a crashlooping node later. Returns the section E report; a refusal carries a stable code.",
@@ -242,6 +248,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Handler:     i.handleSourceProbe,
 			ArgsSchema: map[string]string{
 				"repoUrl":      "string (required) -- the repository URL as typed",
+				"connectionId": "string -- a saved installation binding of the caller",
 				"credentialId": "string -- one of the caller's v1:platform:sourceCredential rows to probe under; empty probes anonymously",
 			},
 		},
@@ -250,6 +257,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "List the repositories the caller's GitHub App grant can reach (epic memql#4912, C7). Resolves the caller's active grant -- or the one named by credentialId -- reads its installations LIVE from GitHub and walks each one's repositories, and answers {repositories, installations, pending, nextPage, reason}. Every refusal is a typed reason rather than an error, so the picker renders in place: github_app_not_configured (this cluster has no app, so only the token path is offered), credential_not_found (no grant, or not the caller's), credential_revoked, reconnect_required, rate_limited. Writes nothing except the grant's own installation ids, refreshed from what it just read.",
 			Handler:     i.handleSourceRepositories,
 			ArgsSchema: map[string]string{
+				"connectionId": "string -- a saved installation binding of the caller",
 				"credentialId": "string -- a github_app grant of the caller's; empty resolves their active grant",
 				"page":         "int -- 1-based page through each installation's repositories, 100 per page; 0 means the first",
 			},
@@ -961,7 +969,7 @@ func (i *Integration) resolve() (*Deps, error) {
 		if i.githubApp != nil {
 			gh = githubapp.New(githubapp.Config{}, githubapp.WithConfigSource(i.githubApp))
 		}
-		s := &store{engine: i.engine, logger: i.logger, github: gh}
+		s := &store{engine: i.engine, logger: i.logger, github: gh, directDB: i.githubGrantDB}
 		i.deps = &Deps{
 			Store:           s,
 			Fetcher:         newProductionFetcher(s, i.logger, gh),

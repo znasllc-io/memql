@@ -1778,6 +1778,7 @@ mutation syncState setSyncPaused {
 @requiresCapability("execute", "app:deployables/sources")
 mutation package createPackage {
   args {
+    sourceConnectionId string
     packageId     string!
     name          string!  @maxLength(120)
     sourceKind    enum("repo", "artifact")!
@@ -1790,7 +1791,7 @@ mutation package createPackage {
     accountId     string
   }
   insert {
-    accept { name, repoUrl, repoRef, credentialId, artifactId, accountId, autoDeploy }
+    accept { name, repoUrl, repoRef, credentialId, artifactId, accountId, autoDeploy, sourceConnectionId }
     stamp {
       id:              args.packageId
       ownerUserId:     actor.userId
@@ -2752,5 +2753,43 @@ mutation modelEvidence recordEvidenceDecision {
     id: args.evidenceId
     args.proposal
     foldedAt: args.decidedAt
+  }
+}
+
+/// Verified installation writer. Only the Go capability may supply the grant,
+/// installation and provider account facts after checking GitHub live.
+/// actor.userId scoping cannot establish that the grant reaches this installation
+/// or derive provider metadata; a caller could otherwise forge its own binding.
+@serverOnly
+@actor
+mutation sourceConnection recordSourceConnection {
+  args {
+    connectionId string!
+    credentialId string!
+    installationId string!
+    providerAccountId string!
+    accountLogin string!
+    accountType string!
+  }
+  insert {
+    accept { credentialId, installationId, providerAccountId, accountLogin, accountType }
+    stamp {
+      id: args.connectionId
+      ownerUserId: actor.userId
+      status: "active"
+    }
+  }
+}
+
+/// Local binding removal after the capability has resolved the owner. This
+/// changes no credential, package, deployment or hosted site.
+/// actor.userId scoping alone cannot enforce execute on app:deployables/sources;
+/// the capability checks that independent management permission before this write.
+@serverOnly
+mutation sourceConnection removeSourceConnection {
+  args { connectionId string! }
+  update {
+    id: args.connectionId
+    status: "removed"
   }
 }

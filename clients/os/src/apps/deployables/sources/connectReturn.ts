@@ -39,15 +39,17 @@ export const CONNECT_RESULT_PARAM = "github";
  *  sensible place. */
 export const CONNECT_SECTION_PARAM = "connect";
 
-/** Where a return with no section hint goes: the Sources settings group,
+/** Where a return with no section hint goes: the Sources page,
  *  which is the one surface that is always there to receive it. */
-export const DEFAULT_CONNECT_SECTION = "settings";
+export const DEFAULT_CONNECT_SECTION = "sources";
 
 export interface ConnectReturn {
   /** connected, reconnected, installed (no grant yet), or a refusal code. */
   reason: string;
   /** The Deployables section to open. */
   section: string;
+  credentialId?: string;
+  flowId?: string;
 }
 
 /**
@@ -77,7 +79,9 @@ export function readConnectReturn(search: string): ConnectReturn | null {
   const section = (params.get(CONNECT_SECTION_PARAM) ?? "").trim();
   return {
     reason: (params.get(CONNECT_RESULT_PARAM) ?? "").trim(),
-    section: section === "deployables" ? section : DEFAULT_CONNECT_SECTION,
+    section: ["deployables", "sources", "settings"].includes(section) ? section : DEFAULT_CONNECT_SECTION,
+    ...(params.get("githubCredentialId") ? { credentialId: params.get("githubCredentialId")! } : {}),
+    ...(params.get("githubFlowId") ? { flowId: params.get("githubFlowId")! } : {}),
   };
 }
 
@@ -92,6 +96,8 @@ export function scrubbedSearch(search: string): string {
   const params = new URLSearchParams(search);
   params.delete(CONNECT_RESULT_PARAM);
   params.delete(CONNECT_SECTION_PARAM);
+  params.delete("githubCredentialId");
+  params.delete("githubFlowId");
   const rest = params.toString();
   return rest === "" ? "" : `?${rest}`;
 }
@@ -138,4 +144,21 @@ export function takeParkedConnectReturn(): ConnectReturn | null {
 /** Tests only: forget anything parked, so one case cannot leak into the next. */
 export function clearParkedConnectReturn(): void {
   parked = null;
+}
+
+// Correlation is UI state only. Identity validates the OAuth state, browser
+// session, target GitHub identity and PKCE; this record never grants authority.
+const ATTEMPT_KEY = "memql:github-connect-attempt";
+export function rememberConnectAttempt(flowId: string, viewer: string, credentialId = ""): void {
+  try { sessionStorage.setItem(ATTEMPT_KEY, JSON.stringify({ flowId, viewer, credentialId })); } catch { /* No auto-selection without a record. */ }
+}
+export function correlateConnectReturn(result: ConnectReturn, viewer: string): ConnectReturn {
+  if (!result.flowId) return { reason: result.reason, section: result.section };
+  let attempt: { flowId?: string; viewer?: string; credentialId?: string } | null = null;
+  try { attempt = JSON.parse(sessionStorage.getItem(ATTEMPT_KEY) ?? "null"); sessionStorage.removeItem(ATTEMPT_KEY); } catch { /* Refuse an unreadable correlation. */ }
+  if (!attempt || attempt.flowId !== result.flowId || attempt.viewer !== viewer ||
+      (connectSucceeded(result) && attempt.credentialId && attempt.credentialId !== result.credentialId)) {
+    return { reason: "connect_state_invalid", section: result.section };
+  }
+  return result;
 }

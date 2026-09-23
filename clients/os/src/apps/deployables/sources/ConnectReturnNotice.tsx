@@ -22,6 +22,9 @@ export function ConnectReturnNotice({ result }: { result?: ConnectReturn | null 
   if (result.reason === APP_REGISTERED) {
     return <Notice tone="info" sentence="GitHub is set up for this cluster. Connect your account to choose its repositories." />;
   }
+  if (result.reason === "github_account_mismatch") {
+    return <Notice tone="warn" sentence="GitHub returned a different account." detail="Reconnect using the original GitHub identity, or add the other account as a separate source. Existing sources have not changed." />;
+  }
   // TWO TRIPS COME BACK THROUGH THIS ONE MARKER, and the sentence beneath the
   // headline says which one did not finish.
   const message = result.reason.startsWith("github_app_")

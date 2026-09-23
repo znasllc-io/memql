@@ -263,8 +263,8 @@ func TestSourceCredentialRevokeIsTheCallersOwnWrite(t *testing.T) {
 		t.Fatalf("reply %v", reply)
 	}
 	stmts := engine.statements()
-	if len(stmts) != 1 || stmts[0] != `mutation revokeSourceCredential(credentialId: "v1:platform:sourceCredential:abc")` {
-		t.Fatalf("want exactly the revoke statement, got %v", stmts)
+	if len(stmts) != 2 || !strings.HasPrefix(stmts[0], "query sourceCredentialSealedById(") || stmts[1] != `mutation revokeSourceCredential(credentialId: "v1:platform:sourceCredential:abc")` {
+		t.Fatalf("want the owner-scoped read then authorized revoke, got %v", stmts)
 	}
 	if got := engine.actors["revokeSourceCredential"]; got != "v1:identity:user:alice" {
 		t.Fatalf("the revoke must run under the caller's actor, got %q", got)

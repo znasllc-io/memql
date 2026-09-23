@@ -117,7 +117,7 @@ func (r *connectOriginRecorder) statement(t *testing.T, prefix string) string {
 // v1:identity:githubConnectState.
 func TestConnectStateWritesStampInternalOrigin(t *testing.T) {
 	rec := &connectOriginRecorder{}
-	store := &Store{Engine: rec}
+	store := &Store{GithubGate: githubUnitGate, Engine: rec}
 	ctx := context.Background()
 
 	if _, err := store.CreateGithubConnectState(ctx, GithubConnectStateSeed{
@@ -148,7 +148,7 @@ func TestConnectStateWritesStampInternalOrigin(t *testing.T) {
 func TestConsumeStampsInternalOriginOnTheWrite(t *testing.T) {
 	eng := &githubConnectFakeEngine{row: liveConnectStateRow()}
 	origins := &connectOriginTee{inner: eng}
-	store := &Store{Engine: origins}
+	store := &Store{GithubGate: githubUnitGate, Engine: origins}
 
 	if _, err := store.ConsumeGithubConnectState(context.Background(),
 		HashConnectState("the-plaintext-state"), "203.0.113.9"); err != nil {
@@ -188,7 +188,7 @@ func (t *connectOriginTee) Execute(ctx context.Context, q string) (*memqlengine.
 // TestGrantWriteBorrowsTheOwnersActorAndStampsOrigin is contract (2).
 func TestGrantWriteBorrowsTheOwnersActorAndStampsOrigin(t *testing.T) {
 	rec := &connectOriginRecorder{}
-	store := &Store{Engine: rec}
+	store := &Store{GithubGate: githubUnitGate, Engine: rec}
 
 	id, created, err := store.UpsertGithubAppGrant(context.Background(), GithubAppGrant{
 		OwnerUserId:     "v1:identity:user:asked",
@@ -237,7 +237,7 @@ func TestGrantWriteBorrowsTheOwnersActorAndStampsOrigin(t *testing.T) {
 // nobody. The refusal has to be here, before the borrow.
 func TestAGrantWithNoOwnerIsRefusedBeforeAnythingIsExecuted(t *testing.T) {
 	rec := &connectOriginRecorder{}
-	store := &Store{Engine: rec}
+	store := &Store{GithubGate: githubUnitGate, Engine: rec}
 
 	_, _, err := store.UpsertGithubAppGrant(context.Background(), GithubAppGrant{
 		OwnerUserId: "  ",
@@ -256,7 +256,7 @@ func TestAGrantWithNoOwnerIsRefusedBeforeAnythingIsExecuted(t *testing.T) {
 // and the failure would then arrive at the first live callback.
 func TestConnectStatementsParse(t *testing.T) {
 	rec := &connectOriginRecorder{}
-	store := &Store{Engine: rec}
+	store := &Store{GithubGate: githubUnitGate, Engine: rec}
 	ctx := context.Background()
 
 	if _, err := store.CreateGithubConnectState(ctx, GithubConnectStateSeed{
@@ -329,4 +329,9 @@ func renderEmptyInstallationList(t *testing.T, store *Store, rec *connectOriginR
 		t.Fatalf("an empty installation list does not parse:\n  %s\n  %v", q, err)
 	}
 	return q
+}
+
+// Isolated statement tests supply their own gate; real replica tests use Postgres.
+func githubUnitGate(ctx context.Context, _ string, fn func(context.Context) error) error {
+	return fn(ctx)
 }

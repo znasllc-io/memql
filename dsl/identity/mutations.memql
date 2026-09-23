@@ -3296,6 +3296,12 @@ mutation invitation revokeUserInvitation {
 @serverOnly
 mutation githubConnectState createGithubConnectState {
   args {
+    sessionId string
+    pkceVerifier string
+    credentialId string
+    targetRevokedAt string
+    expectedExternalId string
+    flowId string
     stateId     string!
     userId      string!
     stateHash   string!
@@ -3306,7 +3312,7 @@ mutation githubConnectState createGithubConnectState {
     organization  string
   }
   insert {
-    accept { userId, stateHash, expiresAt }
+    accept { userId, stateHash, expiresAt, sessionId, pkceVerifier, credentialId, expectedExternalId, targetRevokedAt, flowId }
     stamp {
       id: args.stateId
       returnPath: args.returnPath ?? ""

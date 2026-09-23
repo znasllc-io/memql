@@ -23,6 +23,18 @@ export interface RefusalCopy {
 }
 
 const COPY: Record<string, RefusalCopy> = {
+  source_connection_unavailable: {
+    title: "This Source is no longer available",
+    next: "Return to Source and reconnect or choose another.",
+  },
+  source_repository_mismatch: {
+    title: "This repository belongs to another Source",
+    next: "Choose its Source, then choose the repository again.",
+  },
+  repository_not_accessible: {
+    title: "This GitHub account cannot read the repository",
+    next: "Check its access at GitHub or choose another Source.",
+  },
   organization_required: {
     title: "An organization is required",
     next: "Choose the organization that owns this deployable before publishing it.",
@@ -507,6 +519,9 @@ const NOT_A_FAULT: ReadonlySet<string> = new Set([
   "reconnect_required",
   "installation_pending",
   "repository_not_installed",
+  "repository_not_accessible",
+  "source_connection_unavailable",
+  "source_repository_mismatch",
   "github_app_not_configured",
   "connect_state_invalid",
   // Four of the setup flow's five. Whose app it is, who may register one, a

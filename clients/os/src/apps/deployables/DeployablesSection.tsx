@@ -122,7 +122,7 @@ type Gone = { name: string; what: "deleted" | "deactivated" } | null;
  */
 export type SectionRoot = "deployables" | "sources";
 
-const ROOT_LABEL: Readonly<Record<SectionRoot, string>> = { deployables: "Deployables", sources: "Sources" };
+const ROOT_LABEL: Readonly<Record<SectionRoot, string>> = { deployables: "Deployables", sources: "Repositories" };
 
 export function DeployablesSection({
   root = "deployables",
@@ -313,7 +313,7 @@ export function DeployablesSection({
           viewerUserId={viewerUserId}
           credentials={credentials}
           credentialFeed={credentialFeed}
-          backLabel={view.fromSource ? "Source" : ROOT_LABEL[root]}
+          backLabel={view.fromSource ? "Repository" : ROOT_LABEL[root]}
           onBack={() => view.fromSource ? setView({ kind: "source", packageId: view.fromSource }) : backToList()}
           onAsk={onAsk}
           parked={parkedFor ?? undefined}
@@ -389,7 +389,7 @@ export function DeployablesSection({
           clusterDomain={clusterDomain}
           onAsk={onAsk}
           onBack={() => view.from ? setView({ kind: "source", packageId: view.from }) : backToList()}
-          backLabel={view.from ? "Source" : ROOT_LABEL[root]}
+          backLabel={view.from ? "Repository" : ROOT_LABEL[root]}
           onOpenSource={(packageId) => setView({ kind: "source", packageId, fromSite: site.id })}
           onOpenHistory={(packageId) => setView({ kind: "history", packageId, siteId: site.id, returnTo: view })}
           onDeleted={(goneId, what) => {
@@ -462,7 +462,7 @@ export function DeployablesSection({
             search={filter.search}
             onSearch={(search) => patch({ search })}
             chips={root === "sources" ? [] : chips}
-            label={root === "sources" ? "Find sources" : "Refine deployables"}
+            label={root === "sources" ? "Find repositories" : "Refine deployables"}
           >
             {/* THE FACETS ARE QUESTIONS ABOUT DEPLOYABLES -- a kind, a status, a
                 client, a way in. A source has none of them, so its list is
@@ -567,7 +567,7 @@ export function DeployablesSection({
 
         {listedCount === 0 && (feedError || list?.snapshot.state !== "live") ? (feedError ? null : <div data-os-livelist data-state={list?.snapshot.state ?? "disconnected"}>
           <EmptyState icon={root === "sources" ? GitBranch : Globe} title={list?.snapshot.state === "seeding" ? "Loading from the cluster" : "Not connected to the cluster"}>
-            {list?.snapshot.state === "seeding" ? "Your apps and sources will appear here." : "Your apps will appear when the connection returns."}
+            {list?.snapshot.state === "seeding" ? "Your apps and repositories will appear here." : "Your apps will appear when the connection returns."}
           </EmptyState>
         </div>) : root === "sources" ? (
           /* THE SOURCES, as their own list: a row each, in the list language
@@ -577,11 +577,11 @@ export function DeployablesSection({
             source={sourcesList}
             rowId={(g) => g.id}
             fingerprint={groupFingerprint}
-            label="Sources in this cluster"
-            emptyText={showArchived ? "No archived sources." : filtered ? "No matching sources." : "No sources yet."}
-            emptyContent={<EmptyState icon={GitBranch} title={showArchived ? "No archived sources" : filtered ? "No matching sources" : "No sources yet"}
+            label="Repositories in this cluster"
+            emptyText={showArchived ? "No archived repositories." : filtered ? "No matching repositories." : "No repositories yet."}
+            emptyContent={<EmptyState icon={GitBranch} title={showArchived ? "No archived repositories" : filtered ? "No matching repositories" : "No repositories yet"}
               action={filtered ? <Button onClick={() => setFilter(DEFAULT_LIST_FILTER)}>Clear the search</Button> : undefined}>
-              {showArchived ? "Archived sources will appear here." : filtered ? "Try a different search." : "A source is a repository or a zip that declares one or more apps. Add a deployable from one and it is listed here, with everything it produced."}
+              {showArchived ? "Archived repositories will appear here." : filtered ? "Try a different search." : "Registered repositories and zip packages appear here with the apps they declare. Add a deployable to register one."}
             </EmptyState>}
             renderRow={(group, tick) => (
               <SourceLine accounts={accounts} group={group} tick={tick} onOpen={() => setView({ kind: "source", packageId: group.pkg!.id })} />
@@ -625,13 +625,13 @@ export function DeployablesSection({
           <div className="os-archive-toggle">
             <button type="button" className="os-sort" aria-expanded={showArchived} onClick={flipArchived}>
               <Archive size={12} aria-hidden />{" "}
-              {showArchived ? `Show active ${root === "sources" ? "sources" : "deployables"}` : `Show archived (${archivedCount})`}
+              {showArchived ? `Show active ${root === "sources" ? "repositories" : "deployables"}` : `Show archived (${archivedCount})`}
             </button>
             <Caption>
               {root === "sources"
                 ? showArchived
                   ? "A restored source's apps come back inactive. Open a source to restore it."
-                  : "Restore archived sources here."
+                  : "Restore archived repositories here."
                 : showArchived
                   ? "Restored apps return offline. Open an app to restore it."
                   : "Restore archived apps here."}

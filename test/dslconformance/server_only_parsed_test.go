@@ -641,6 +641,13 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// person does needs them: a grant is unsealed only inside a fetch, a
 		// poll, a probe or the connect callback, into a local that dies with
 		// the call.
+		// Personal installation bindings are verified facts, not arbitrary owned
+		// data. actor.userId cannot prove live grant/install membership or derive
+		// provider identity; record is reached only after GitHub verification.
+		// Removal likewise requires the separate execute Sources capability;
+		// owning a row plus generic data update is insufficient for that action.
+		{Path: "platform/mutations.memql", Name: "recordSourceConnection"}:       true,
+		{Path: "platform/mutations.memql", Name: "removeSourceConnection"}:       true,
 		{Path: "platform/mutations.memql", Name: "createGithubAppGrant"}:         true,
 		{Path: "platform/mutations.memql", Name: "updateGithubAppGrant"}:         true,
 		{Path: "platform/mutations.memql", Name: "refreshGithubAppGrantToken"}:   true,

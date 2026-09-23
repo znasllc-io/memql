@@ -191,7 +191,7 @@ func (e *MemQLEngine) validateOrganizationSensitiveChanges(ctx context.Context, 
 			require("sources")
 		}
 		if !creating {
-			for _, field := range []string{"sourceKind", "repoUrl", "repoRef", "credentialId", "artifactId", "deploymentMode"} {
+			for _, field := range []string{"sourceKind", "repoUrl", "repoRef", "credentialId", "sourceConnectionId", "artifactId", "deploymentMode"} {
 				if changed(field) {
 					require("sources")
 				}

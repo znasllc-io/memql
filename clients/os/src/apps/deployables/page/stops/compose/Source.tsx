@@ -15,10 +15,7 @@ import { flatten } from "../../../../../kit/rows";
 import { zipUnusableNote, type ZipVerdict } from "../../../sources/probe";
 import type { ArtifactProbeHandle, SourceProbeHandle } from "../../../sources/useProbes";
 import { PICKER_PAGE_SIZE, useZipArtifacts } from "../../../sources/useZipArtifacts";
-import type { CredentialFeedStatus, CredentialRow } from "../../../sources/rows";
-import type { GithubAppOwner } from "../../../sources/GithubAppSetup";
-import type { GithubAppActions } from "../../../sources/useGithubApp";
-import type { CredentialRevokeActions, GithubConnectActions } from "../../../sources/useGithubConnect";
+import type { SourceConnectionRow } from "../../../sources/connections";
 import type { PackageRow } from "../../../packages/rows";
 import { sourceLabel } from "../../../packages/rows";
 import { suggestName, type ComposeDraft } from "../../compose";
@@ -134,28 +131,19 @@ export function ComposeSourceKindStep({
 export function ComposeSourceDetailStep({
   draft,
   onDraft,
-  credentials,
-  credentialFeed,
+  connection,
   probe,
   zipProbe,
   zip,
   siteId,
   clusterDomain,
   locked,
-  connect,
-  disconnect,
-  invalidCredentialId,
-  onConnectionInvalid,
   onConnectionNeed,
-  app,
-  appOwner,
-  onAppOwner,
   duplicateOf = null,
 }: {
   draft: ComposeDraft;
   onDraft: (patch: Partial<ComposeDraft>) => void;
-  credentials: readonly CredentialRow[];
-  credentialFeed?: CredentialFeedStatus;
+  connection?: SourceConnectionRow;
   probe: SourceProbeHandle;
   zipProbe: ArtifactProbeHandle;
   /** The zip's verdict once it has been probed; null before that. */
@@ -165,18 +153,7 @@ export function ComposeSourceDetailStep({
   clusterDomain: string;
   /** Chosen once: after Analyze the step is facts, not fields. */
   locked: boolean;
-  /** The GitHub connect, held by the page because it is the floor's act. */
-  connect: GithubConnectActions;
-  disconnect?: CredentialRevokeActions;
-  invalidCredentialId?: string;
-  onConnectionInvalid?: (credentialId: string) => void;
-  /** What the repository step needs before it can go on; see RepositorySource. */
   onConnectionNeed?: (need: ConnectionNeed) => void;
-  /** The cluster's GitHub App and where an owner would register one -- held by
-   *  the page for the floor's reason, and only passed through here. */
-  app?: GithubAppActions;
-  appOwner?: GithubAppOwner;
-  onAppOwner?: (owner: GithubAppOwner) => void;
   /**
    * The ACTIVE source that already tracks this repository at this ref
    * (2026-09-05 design, D8), when there is one. The engine refuses the second
@@ -190,21 +167,9 @@ export function ComposeSourceDetailStep({
     <div className="os-stop-body">
       {draft.choice === "repo" ? (
         <>
-          <RepositorySource
-            draft={draft}
-            onDraft={onDraft}
-            credentials={credentials}
-            credentialFeed={credentialFeed}
-            probe={probe}
-            connect={connect}
-            disconnect={disconnect}
-            invalidCredentialId={invalidCredentialId}
-            onConnectionInvalid={onConnectionInvalid}
-            onConnectionNeed={onConnectionNeed}
-            app={app}
-            appOwner={appOwner}
-            onAppOwner={onAppOwner}
-          />
+          {connection ? <RepositorySource key={connection.id}
+            connection={connection} draft={draft} onDraft={onDraft} probe={probe}
+            onConnectionNeed={onConnectionNeed} /> : <Caption>Choose a Source before choosing a repository.</Caption>}
           {/* ASKED ONCE THERE IS A REPOSITORY TO ASK IT ABOUT. It used to stand
               under an empty picker as two more full-width cards. It is a
               choice row now -- the two answers are short, and the line beneath
@@ -233,7 +198,7 @@ export function ComposeSourceDetailStep({
           {duplicateOf === null ? null : (
             <p className="os-stop-verdict" data-tone="warn" role="status">
               This repository at this ref is already tracked by <strong>{duplicateOf.name || sourceLabel(duplicateOf)}</strong>.
-              A source is added once -- open that one instead, or archive it first to start over.
+              A repository and ref are registered once. Open its existing deployables or choose a different ref.
             </p>
           )}
         </>

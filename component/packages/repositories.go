@@ -86,6 +86,7 @@ type PickerRepository struct {
 // PickerInstallation is one installation the grant reaches.
 type PickerInstallation struct {
 	Id                  string `json:"id"`
+	AccountId           string `json:"accountId"`
 	Account             string `json:"account"`
 	AccountType         string `json:"accountType"`
 	RepositorySelection string `json:"repositorySelection"`
@@ -95,8 +96,16 @@ type PickerInstallation struct {
 	Suspended bool `json:"suspended"`
 }
 
+func pickerInstallation(inst githubapp.Installation) PickerInstallation {
+	return PickerInstallation{Id: formatInstallationId(inst.Id), AccountId: strconv.FormatInt(inst.Account.Id, 10), Account: inst.Account.Login, AccountType: inst.Account.Type, RepositorySelection: inst.RepositorySelection, Suspended: strings.TrimSpace(inst.SuspendedAt) != ""}
+}
+
 // SourceRepositories lists what the caller's GitHub App grant can reach.
 func SourceRepositories(ctx context.Context, d *Deps, credentialId string, page int) (SourceRepositoriesResult, error) {
+	return sourceRepositoriesForConnection(ctx, d, "", credentialId, page)
+}
+
+func sourceRepositoriesForConnection(ctx context.Context, d *Deps, connectionId, credentialId string, page int) (SourceRepositoriesResult, error) {
 	res := SourceRepositoriesResult{
 		Reason:        RepositoriesReasonOK,
 		Repositories:  []PickerRepository{},
@@ -115,7 +124,15 @@ func SourceRepositories(ctx context.Context, d *Deps, credentialId string, page 
 		return res, nil
 	}
 
-	grant, reason, err := resolvePickerGrant(ctx, d, credentialId)
+	var grant ResolvedCredential
+	var reason string
+	var err error
+	var bound githubapp.Installation
+	if connectionId != "" {
+		grant, bound, err = resolveSourceConnection(ctx, d, connectionId, credentialId)
+	} else {
+		grant, reason, err = resolvePickerGrant(ctx, d, credentialId)
+	}
 	if err != nil {
 		return SourceRepositoriesResult{}, err
 	}
@@ -131,14 +148,14 @@ func SourceRepositories(ctx context.Context, d *Deps, credentialId string, page 
 
 	ids := make([]string, 0, len(installations))
 	for _, inst := range installations {
-		res.Installations = append(res.Installations, PickerInstallation{
-			Id:                  formatInstallationId(inst.Id),
-			Account:             inst.Account.Login,
-			AccountType:         inst.Account.Type,
-			RepositorySelection: inst.RepositorySelection,
-			Suspended:           strings.TrimSpace(inst.SuspendedAt) != "",
-		})
 		ids = append(ids, formatInstallationId(inst.Id))
+		if connectionId != "" && inst.Id != bound.Id {
+			continue
+		}
+		res.Installations = append(res.Installations, pickerInstallation(inst))
+		if strings.TrimSpace(inst.SuspendedAt) != "" {
+			continue
+		}
 
 		repos, total, rerr := d.GitHubApp.InstallationRepositories(ctx, grant.Bearer, inst.Id, page)
 		if rerr != nil {
@@ -162,7 +179,9 @@ func SourceRepositories(ctx context.Context, d *Deps, credentialId string, page 
 		}
 	}
 
-	res.Pending = pendingInstallations(ctx, d, grant.Login)
+	if connectionId == "" {
+		res.Pending = pendingInstallations(ctx, d, grant.Login)
+	}
 
 	// THE GRANT'S STORED INSTALLATION IDS ARE REFRESHED FROM WHAT WE JUST
 	// READ, and this is one of the three owner-actor paths that keep them
@@ -315,7 +334,7 @@ func (i *Integration) handleSourceRepositories(ctx context.Context, args map[str
 	if err != nil {
 		return nil, err
 	}
-	res, rerr := SourceRepositories(ctx, deps, stringArg(args, "credentialId"), intArg(args, "page"))
+	res, rerr := sourceRepositoriesForConnection(ctx, deps, stringArg(args, "connectionId"), stringArg(args, "credentialId"), intArg(args, "page"))
 	if rerr != nil {
 		return nil, rerr
 	}

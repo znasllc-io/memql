@@ -1,5 +1,5 @@
-import { useCallback, useRef, useState } from "react";
-import { rowNumber, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { renderMemQLValue, rowNumber, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { boolOr, flatten } from "../../../kit/rows";
 import { useOsConnection } from "../../../live/connection";
@@ -36,7 +36,7 @@ interface ProbeState<T> {
 const IDLE = { reply: null, error: "", busy: false };
 
 export interface SourceProbeHandle extends ProbeState<SourceProbeReply> {
-  probe: (repoUrl: string, credentialId: string) => Promise<void>;
+  probe: (repoUrl: string, credentialId: string, connectionId?: string) => Promise<void>;
   /** Forget the last answer -- the URL changed, so the answer is about a different repository. */
   clear: () => void;
 }
@@ -45,6 +45,7 @@ export function useSourceProbe(): SourceProbeHandle {
   const connection = useOsConnection();
   const [state, setState] = useState<ProbeState<SourceProbeReply>>(IDLE);
   const seq = useRef(0);
+  useEffect(() => () => { seq.current++; }, []);
 
   const clear = useCallback(() => {
     seq.current += 1;
@@ -52,7 +53,7 @@ export function useSourceProbe(): SourceProbeHandle {
   }, []);
 
   const probe = useCallback(
-    async (repoUrl: string, credentialId: string) => {
+    async (repoUrl: string, credentialId: string, connectionId = "") => {
       const query = connection?.query ?? null;
       const url = repoUrl.trim();
       if (url === "") {
@@ -67,10 +68,9 @@ export function useSourceProbe(): SourceProbeHandle {
       const mine = seq.current;
       setState((held) => ({ ...held, busy: true, error: "" }));
       try {
-        const result = await query.sourceProbe({
-          repoUrl: url,
-          ...(credentialId.trim() === "" ? {} : { credentialId: credentialId.trim() }),
-        });
+        const result = connectionId
+          ? await query.executeNamed("sourceProbe", `builtin sourceProbe(repoUrl: ${renderMemQLValue(url)}, credentialId: ${renderMemQLValue(credentialId)}, connectionId: ${renderMemQLValue(connectionId)})`)
+          : await query.sourceProbe({ repoUrl: url, ...(credentialId.trim() === "" ? {} : { credentialId: credentialId.trim() }) });
         if (mine !== seq.current) return;
         setState({ reply: sourceProbeFromRow(result.rows()[0] ?? null), error: "", busy: false });
       } catch (err) {

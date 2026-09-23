@@ -1395,6 +1395,10 @@ func GithubAppStatusBuild(args GithubAppStatusArgs) string {
 //
 // A call carrying no actor is REFUSED rather than answered, because the state row names the account the callback may land a grant on and a row naming nobody is a grant nobody owns.
 type GithubConnectBeginArgs struct {
+	// Existing own grant to reconnect; omitted means add another GitHub identity.
+	CredentialId string
+	// Browser flow correlation, echoed on callback; never authorization.
+	FlowId string
 	// Where in MemQL OS to land when the callback finishes -- a same-origin path such as "/packages/new". Validated as a relative path on the way in and again on the way out; anything absolute, protocol-relative or carrying a control character is dropped for the OS root.
 	ReturnPath string
 }
@@ -1408,7 +1412,21 @@ func (qc *QueryClient) GithubConnectBegin(ctx context.Context, args GithubConnec
 func GithubConnectBeginBuild(args GithubConnectBeginArgs) string {
 	var b strings.Builder
 	b.WriteString("builtin githubConnectBegin(")
+	if args.CredentialId != "" {
+		b.WriteString("credentialId: ")
+		b.WriteString(quoteMemQL(args.CredentialId))
+	}
+	if args.FlowId != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("flowId: ")
+		b.WriteString(quoteMemQL(args.FlowId))
+	}
 	if args.ReturnPath != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
 		b.WriteString("returnPath: ")
 		b.WriteString(quoteMemQL(args.ReturnPath))
 	}
@@ -3990,6 +4008,52 @@ func SiteTrafficInWindowBuild(args SiteTrafficInWindowArgs) string {
 	return b.String()
 }
 
+// SourceConnectionCreate -- Save a caller-owned GitHub installation grouping. Re-adding the same binding reactivates its stable ID after live verification; it never creates a token.
+type SourceConnectionCreateArgs struct {
+	CredentialId   string
+	InstallationId string
+}
+
+// SourceConnectionCreate calls the engine builtin sourceConnectionCreate.
+func (qc *QueryClient) SourceConnectionCreate(ctx context.Context, args SourceConnectionCreateArgs) (*Result, error) {
+	call := SourceConnectionCreateBuild(args)
+	return qc.executeNamed(ctx, "sourceConnectionCreate", call)
+}
+
+func SourceConnectionCreateBuild(args SourceConnectionCreateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin sourceConnectionCreate(")
+	b.WriteString("credentialId: ")
+	b.WriteString(quoteMemQL(args.CredentialId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("installationId: ")
+	b.WriteString(quoteMemQL(args.InstallationId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SourceConnectionRemove -- Remove only this personal saved binding. Existing packages and sites remain; other sources sharing the same GitHub grant remain connected.
+type SourceConnectionRemoveArgs struct {
+	ConnectionId string
+}
+
+// SourceConnectionRemove calls the engine builtin sourceConnectionRemove.
+func (qc *QueryClient) SourceConnectionRemove(ctx context.Context, args SourceConnectionRemoveArgs) (*Result, error) {
+	call := SourceConnectionRemoveBuild(args)
+	return qc.executeNamed(ctx, "sourceConnectionRemove", call)
+}
+
+func SourceConnectionRemoveBuild(args SourceConnectionRemoveArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin sourceConnectionRemove(")
+	b.WriteString("connectionId: ")
+	b.WriteString(quoteMemQL(args.ConnectionId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // SourceCredentialCreate -- Store a personal source credential (epic memql#4885, D10). The token crosses the wire ONCE, inside this call, is sealed server-side under MEMQL_MASTER_KEY, and lands on a v1:platform:sourceCredential row owned by the caller; it appears in no row, no log line and no reply. Only github.com is admitted as a host today -- any other host is refused with source_host_unsupported, and the answer is to upload the tree as a zip instead. Returns {credentialId, fingerprint}, the fingerprint being the token's last four characters prefixed with '...', for telling two credentials apart. Name the credential on a package through createPackage or updatePackageSource; the fetcher resolves it under that package's OWNER, so a package naming somebody else's credential is refused by name.
 type SourceCredentialCreateArgs struct {
 	// The host the token authenticates against. github.com is the only value admitted today.
@@ -4046,8 +4110,30 @@ func SourceCredentialRevokeBuild(args SourceCredentialRevokeArgs) string {
 	return b.String()
 }
 
+// SourceInstallations -- List installations for one personal GitHub identity, without reading its repositories.
+type SourceInstallationsArgs struct {
+	CredentialId string
+}
+
+// SourceInstallations calls the engine builtin sourceInstallations.
+func (qc *QueryClient) SourceInstallations(ctx context.Context, args SourceInstallationsArgs) (*Result, error) {
+	call := SourceInstallationsBuild(args)
+	return qc.executeNamed(ctx, "sourceInstallations", call)
+}
+
+func SourceInstallationsBuild(args SourceInstallationsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin sourceInstallations(")
+	b.WriteString("credentialId: ")
+	b.WriteString(quoteMemQL(args.CredentialId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // SourceProbe -- Ask whether this cluster can read a repository (epic memql#4885, D11). Parses the URL, resolves credentialId under the caller's own actor the way a fetch does, asks GitHub for the repository, and answers {host, reachable, private, defaultBranch, reason}. reason is exactly one of: ok (reachable; private and defaultBranch are GitHub's answer), not_found_or_private (404 with no credential -- GitHub answers the two alike, and the stop offers a credential), credential_cannot_see_it (refused under the credential: choose another, or fix its grant), credential_not_found (the caller cannot read the named credential), credential_revoked, source_host_unsupported (only github.com today, or upload a zip), rate_limited (ask again later), reconnect_required (GitHub refused the grant itself -- never read as 'private, or not there', because the repair is reconnecting and not choosing another credential), repository_not_installed (the grant is good and the app is not installed on this repository, which is a link away). Under a grant the probe also answers `branches` and a `manifest` summary read from memql-package.yaml through the contents API -- {name, deployables:[{name, kind, path}], dslDomains} -- so the ref picker and the What-it-is preview are filled before Analyze runs; both are empty when there is no grant, no manifest, or the manifest does not parse, and a manifest that does not parse is NOT a refusal here, because the analysis is the authority. A typed reason, never the API's own body. A GitHub this cluster cannot reach is an ERROR rather than a reason, so the stop says so and stays editable; the fetch is the authority and the probe is a courtesy. Writes nothing and stamps nothing.
 type SourceProbeArgs struct {
+	// A caller-owned active saved source. When supplied, its grant and installation bound this probe.
+	ConnectionId string
 	// The repository URL as typed, e.g. https://github.com/acme/widget.
 	RepoUrl string
 	// One of the caller's v1:platform:sourceCredential rows to probe under -- a pasted token or a GitHub App grant. Empty resolves the caller's active grant when they hold one and probes anonymously otherwise, which is what a public repository needs and what makes a connected person's picker prefill without naming anything.
@@ -4063,6 +4149,13 @@ func (qc *QueryClient) SourceProbe(ctx context.Context, args SourceProbeArgs) (*
 func SourceProbeBuild(args SourceProbeArgs) string {
 	var b strings.Builder
 	b.WriteString("builtin sourceProbe(")
+	if args.ConnectionId != "" {
+		b.WriteString("connectionId: ")
+		b.WriteString(quoteMemQL(args.ConnectionId))
+	}
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
 	b.WriteString("repoUrl: ")
 	b.WriteString(quoteMemQL(args.RepoUrl))
 	if args.CredentialId != "" {
@@ -4078,6 +4171,8 @@ func SourceProbeBuild(args SourceProbeArgs) string {
 
 // SourceRepositories -- List the repositories a GitHub App grant can reach (epic memql#4912, C7). Resolves the caller's active grant -- or the one named by credentialId -- reads its installations live from GitHub and walks each one's repositories, and answers {repositories, installations, pending, nextPage, reason}. Each repository carries {fullName, owner, name, url, private, visibility, defaultBranch, pushedAt, installationId}, so the picker can group by owner and prefill a ref without a second call. `installations` names every installation the grant reaches, and `pending` names those still awaiting an organization owner's approval BY NAME -- a pending installation is not a reachable one, and saying so is what stops a person hunting for a repository that will appear when somebody else clicks. reason is one of: ok, github_app_not_configured (this cluster has no GitHub App, so only the token path is offered), reconnect_required (GitHub refused the grant -- the person reconnects), credential_not_found (no grant, or not the caller's), credential_revoked, rate_limited. Writes nothing except the grant's own installation ids, which it refreshes from what it just read.
 type SourceRepositoriesArgs struct {
+	// A caller-owned active saved source. When supplied, only its live installation is listed.
+	ConnectionId string
 	// A github_app grant of the caller's to list under. Empty resolves the caller's active grant, which is what a person with one connection has.
 	CredentialId string
 	// 1-based page through the repositories of every installation, 100 per page. Empty or 0 means the first page; nextPage in the reply is 0 when there are no more.
@@ -4093,7 +4188,14 @@ func (qc *QueryClient) SourceRepositories(ctx context.Context, args SourceReposi
 func SourceRepositoriesBuild(args SourceRepositoriesArgs) string {
 	var b strings.Builder
 	b.WriteString("builtin sourceRepositories(")
+	if args.ConnectionId != "" {
+		b.WriteString("connectionId: ")
+		b.WriteString(quoteMemQL(args.ConnectionId))
+	}
 	if args.CredentialId != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
 		b.WriteString("credentialId: ")
 		b.WriteString(quoteMemQL(args.CredentialId))
 	}

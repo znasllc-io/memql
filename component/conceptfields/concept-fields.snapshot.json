@@ -2337,12 +2337,18 @@
       "fields": [
         "consumedAt",
         "consumedFromIP",
+        "credentialId",
+        "expectedExternalId",
         "expiresAt",
+        "flowId",
         "organization",
+        "pkceVerifier",
         "purpose",
         "returnPath",
+        "sessionId",
         "sourceIP",
         "stateHash",
+        "targetRevokedAt",
         "userId"
       ],
       "required": [
@@ -4022,6 +4028,7 @@
         "ownerUserId",
         "repoRef",
         "repoUrl",
+        "sourceConnectionId",
         "sourceKind",
         "status",
         "updateAvailable"
@@ -4357,6 +4364,34 @@
           "catalog_read",
           "checkout_url",
           "order_mirrored"
+        ]
+      }
+    },
+    {
+      "concept": "v1:platform:sourceConnection",
+      "file": "platform/concepts.memql",
+      "fields": [
+        "accountLogin",
+        "accountType",
+        "credentialId",
+        "installationId",
+        "ownerUserId",
+        "providerAccountId",
+        "status"
+      ],
+      "required": [
+        "accountLogin",
+        "accountType",
+        "credentialId",
+        "installationId",
+        "ownerUserId",
+        "providerAccountId",
+        "status"
+      ],
+      "enums": {
+        "status": [
+          "active",
+          "removed"
         ]
       }
     },

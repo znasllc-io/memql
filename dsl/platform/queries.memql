@@ -949,6 +949,7 @@ query site sitesArchived {
 /// does not recognise, so TestRowAuthzEnforcementLandGate reports the read undecidable. Written
 /// the way every composite-tier sibling writes the term, it is recognised as the tier's own.
 @actor
+@requiresCapability("read", "app:deployables")
 query sourceCredential sourceCredentialsMine {
   filter  row => row.ownerUserId == actor.userId || actor.isClusterOwner == true
   sort    "label", "asc"
@@ -958,6 +959,7 @@ query sourceCredential sourceCredentialsMine {
 /// One credential by id -- the Source stop's credential chip. Card shape, so metadata only.
 @unbounded("credential by id -- bounded to a single row (id is the row's own primary key)")
 @actor
+@requiresCapability("read", "app:deployables")
 query sourceCredential sourceCredentialById {
   args {
     credentialId  string!
@@ -985,6 +987,7 @@ query sourceCredential sourceCredentialById {
 @serverOnly
 @unbounded("sealed credential by id -- bounded to a single row (id is the row's own primary key)")
 @actor
+@cache(0)
 query sourceCredential sourceCredentialSealedById {
   args {
     credentialId  string!
@@ -1031,6 +1034,7 @@ query sourceCredential sourceCredentialSealedById {
 @serverOnly
 @unbounded("one grant per (owner, GitHub account) -- bounded by construction, not by a page")
 @actor
+@cache(0)
 query sourceCredential githubAppGrantByExternalId {
   args {
     externalId  string!
@@ -1055,6 +1059,7 @@ query sourceCredential githubAppGrantByExternalId {
 /// touches has any use for them.
 @serverOnly
 @actor
+@cache(0)
 query sourceCredential githubAppGrantForCaller {
   filter  row => row.kind == "github_app" && statusIsActive(row) && row.ownerUserId == actor.userId
   sort    "row.createdAt", "desc"
@@ -1191,4 +1196,24 @@ query modelMeasurement measurementsForCaller {
   sort     "measuredAt", "desc"
   paginate 500
   shape    modelMeasurementFull
+}
+
+/// The caller's active saved source connections, independent of MemQL accounts.
+@actor
+@unbounded("personal installation bindings -- one per caller, grant and installation")
+@requiresCapability("read", "app:deployables")
+query sourceConnection sourceConnectionsMine {
+  filter row => row.ownerUserId == actor.userId && row.status == "active"
+  shape sourceConnectionCard
+}
+
+/// Resolve a saved binding under its owner's identity, including a removed row
+/// for idempotent removal. No cluster-owner branch borrows another user's grant.
+@actor
+@cache(0)
+@requiresCapability("read", "app:deployables")
+query sourceConnection sourceConnectionById {
+  args { connectionId string! }
+  filter row => row.id == args.connectionId && row.ownerUserId == actor.userId
+  shape sourceConnectionCard
 }

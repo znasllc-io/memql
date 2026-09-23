@@ -227,7 +227,7 @@ func TestConcurrentConnectConsumesWithoutTheGateRace(t *testing.T) {
 		row:          liveConnectStateRow(),
 		readWriteGap: 250 * time.Millisecond,
 	}
-	store := &Store{Engine: eng} // no DirectDB: no lock
+	store := &Store{Engine: eng, GithubGate: githubUnitGate} // explicit negative control: no lock
 	hash := HashConnectState("the-plaintext-state")
 
 	var wg sync.WaitGroup
@@ -261,7 +261,7 @@ func TestAnExpiredConnectStateIsRefusedWithoutAWrite(t *testing.T) {
 	row := liveConnectStateRow()
 	row["expiresAt"] = time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)
 	eng := &githubConnectFakeEngine{row: row}
-	store := &Store{Engine: eng}
+	store := &Store{Engine: eng, GithubGate: githubUnitGate}
 
 	got, err := store.ConsumeGithubConnectState(context.Background(),
 		HashConnectState("the-plaintext-state"), "203.0.113.9")

@@ -40,10 +40,10 @@ export interface ConnectBegin {
  * PATH rather than a URL: the cluster composes the origin from its own
  * domain, so nothing this browser says can redirect somebody off-cluster.
  */
-export async function githubConnectBegin(query: QueryClient, returnPath: string): Promise<ConnectBegin> {
+export async function githubConnectBegin(query: QueryClient, returnPath: string, credentialId?: string, flowId?: string): Promise<ConnectBegin> {
   const result = await query.executeNamed(
     "githubConnectBegin",
-    `builtin githubConnectBegin(returnPath: ${renderMemQLValue(returnPath)})`,
+    `builtin githubConnectBegin(returnPath: ${renderMemQLValue(returnPath)}${credentialId ? `, credentialId: ${renderMemQLValue(credentialId)}` : ""}${flowId ? `, flowId: ${renderMemQLValue(flowId)}` : ""})`,
   );
   const row = result.rows()[0];
   return {
@@ -65,8 +65,9 @@ export async function readSourceRepositories(
   query: QueryClient,
   credentialId: string,
   page: number,
+  connectionId?: string,
 ): Promise<RepositoryPage> {
-  const result = await query.sourceRepositories({ credentialId, page });
+  const result = await query.executeNamed("sourceRepositories", `builtin sourceRepositories(credentialId: ${renderMemQLValue(credentialId)}, page: ${renderMemQLValue(page)}${connectionId ? `, connectionId: ${renderMemQLValue(connectionId)}` : ""})`);
   return repositoryPageFrom(result.rows()[0]);
 }
 

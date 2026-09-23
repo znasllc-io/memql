@@ -42,6 +42,7 @@ export interface ComposeDraft {
   autoDeploy?: boolean;
   /** One of the caller's own credentials, or "" to fetch anonymously. */
   credentialId: string;
+  sourceConnectionId?: string;
   /** A Library zip's artifact id. */
   artifactId: string;
   /** What the thing is called: a package's name, a hand-made deployable's title. */

@@ -233,6 +233,7 @@ shape sourceCredential sourceCredentialCard {
 /// reconnect_required.
 @row
 shape sourceCredential sourceCredentialSealed {
+  revokedAt
   row.id
   ownerUserId
   host
@@ -253,6 +254,7 @@ shape sourceCredential sourceCredentialSealed {
 /// Nothing here can leak a credential, because no credential is ever on the row.
 @row
 shape package packageFull {
+  sourceConnectionId
   row.id
   ownerUserId
   accountId
@@ -406,5 +408,19 @@ shape sitePreviewObservation sitePreviewObservationFull {
   detail
   failure
   durationMs
+  row.createdAt
+}
+
+/// Public source selection facts; credentials are referenced only by ID.
+@row
+shape sourceConnection sourceConnectionCard {
+  row.id
+  ownerUserId
+  credentialId
+  installationId
+  providerAccountId
+  accountLogin
+  accountType
+  status
   row.createdAt
 }

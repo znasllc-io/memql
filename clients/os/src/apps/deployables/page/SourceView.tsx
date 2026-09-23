@@ -125,13 +125,13 @@ export function SourceView({
   const acts: Act[] = onReview === undefined ? [] : [{ label: "Review", tone: "primary", onAct: onReview }];
 
   return (
-    <div className="os-deploy-pane deployable-source-view" data-os-page-context={JSON.stringify({ page: "Source", packageId: pkg.id, source: label })}>
+    <div className="os-deploy-pane deployable-source-view" data-os-page-context={JSON.stringify({ page: "Repository", packageId: pkg.id, source: label })}>
       <div className="os-deploy-scroll">
-        <Panel label={`Source ${label}`}>
+        <Panel label={`Repository ${label}`}>
           <Head title={label} breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label }]} back={{ label: backLabel, onSelect: onBack }} />
 
           <Caption>
-            {pkg.sourceKind === "repo" ? "Shared repository source" : "Shared source ZIP"}
+            {pkg.sourceKind === "repo" ? "Shared repository" : "Shared ZIP package"}
           </Caption>
 
           <div className="deployable-source-access"><CredentialChip pkg={pkg} credentials={credentials} /></div>
@@ -165,7 +165,7 @@ export function SourceView({
             </h4>
             {apps.length === 0 && undeployed.length === 0 ? (
               <Caption>
-                Nothing yet. This source has not been analyzed, so there is no reading of what it contains.
+                Nothing yet. This repository has not been analyzed, so there is no reading of what it contains.
               </Caption>
             ) : (
               <RecordList><ul className="os-source-apps">

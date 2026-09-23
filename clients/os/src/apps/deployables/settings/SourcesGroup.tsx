@@ -1,435 +1,52 @@
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import { KeyRound } from "lucide-react";
-
 import { Button, Caption, LiveList, RecordRow as ListRow, listCount, Subhead, formatFreshness, useNow } from "../../../kit";
 import { useLiveView, type LiveView } from "../../../live/liveView";
 import { useCredentialActions } from "../packages/actions";
 import { toneFor } from "../packages/refusals";
 import { ProblemNotice } from "../packages/ReportView";
 import { sourceLabel, type PackageRow } from "../packages/rows";
-import { AddCredential, cardName } from "../sources/CredentialField";
-import { ConnectedAccountCard } from "../sources/ConnectedAccountCard";
-import { ConnectReturnNotice } from "../sources/ConnectReturnNotice";
-import { ConnectGitHub } from "../sources/ConnectGitHub";
-import { GithubAppBlock, GithubAppMissing } from "../sources/GithubAppSetup";
+import { cardName } from "../sources/CredentialField";
+import { GithubAppBlock } from "../sources/GithubAppSetup";
 import { useGithubApp } from "../sources/useGithubApp";
-import { returnPathFor, type ConnectReturn } from "../sources/connectReturn";
-import { SOURCE_HOST } from "../sources/probe";
+import type { ConnectReturn } from "../sources/connectReturn";
 import { bare, usePeopleNames } from "../people";
-import {
-  credentialFingerprint,
-  credentialIsRevoked,
-  githubGrantOf,
-  pastedCredentials,
-  type CredentialRow,
-} from "../sources/rows";
-import {
-  useCredentialRevoke,
-  useGithubConnect,
-  useSourceRepositories,
-  type SourceRepositoriesActions,
-} from "../sources/useGithubConnect";
+import { credentialFingerprint, credentialIsRevoked, pastedCredentials, type CredentialRow } from "../sources/rows";
+import { SourceConnections } from "../sources/SourceConnections";
 
-// Settings -> Sources: where a person's deployables fetch from -- the GitHub
-// connection, and every credential they hold (epic memql#4885 design section
-// D, widened for the grant by memql#4915).
-//
-// ===========================================================================
-// TWO WAYS TO REACH A PRIVATE REPOSITORY, AND NEITHER IS HIDDEN
-// ===========================================================================
-// A GitHub connection is the recommended one and a pasted token is the
-// fallback -- for a self-hosted host, an organization that will not install
-// an app, or somebody who simply prefers it. So the token half is not behind
-// "Advanced": calling it that would be a judgement about the person rather
-// than a fact about the choice.
-//
-// ===========================================================================
-// A CREDENTIAL IS ONLY LEGIBLE WITH ITS DEPENDANTS BESIDE IT
-// ===========================================================================
-// "Revoke" is a decision about other things: every source fetching under this
-// credential refuses at its next fetch until somebody switches it. So the
-// sources are joined onto the row, by `credentialId` over the package feed
-// the app root already retains -- not fetched, and not a second subscription.
-// The revoke sentence names the consequence in those terms and the confirm
-// sits in the surface, because a dialog would take the list of dependants off
-// the screen at exactly the moment it matters. Disconnect says the same thing
-// about the whole connection, in the same words, for the same reason.
-//
-// ===========================================================================
-// LAST USED IS DISPLAYED CONTINUOUSLY AND FINGERPRINTED NEVER
-// ===========================================================================
-// `lastUsedAt` is written by every fetch under this credential, the ten-minute
-// poll included. It is the exact field the arrival-cue rule
-// (clients/os/README.md) is about: naming it in a fingerprint would ring the
-// row on a timer forever. `credentialFingerprint` leaves it out, and this
-// surface shows it against a ticking clock instead -- the right home for
-// something that is always true and never news.
-//
-// ===========================================================================
-// A REVOKED CREDENTIAL STAYS LISTED
-// ===========================================================================
-// The row is never deleted: it is the history of what fetched under it. It
-// stays on the list, marked, and stays offerable as the CURRENT value of a
-// source's picker so somebody can switch away from it by name.
-//
-// NOTHING HERE SHOWS A VALUE. Every credential reaches this browser as a
-// CARD (`sources/rows.ts`), so there is no chip, fact or tooltip on this
-// surface that could print a token -- there is no type that could hold one.
-//
-// ONE HOOK PER CONTROL. Disconnecting the connection, revoking a pasted
-// credential and adding one are three acts in one group, and each owns its
-// own busy/refusal pair so a server sentence never lands under a button
-// nobody pressed.
-//
-// ===========================================================================
-// THE VIEWER'S OWN FIRST; OTHER PEOPLE'S UNDER AN OWNER-VIEW HEADING
-// ===========================================================================
-// (epic memql#5289, task memql#5306; design section 4 "Attribution".) The
-// `sourceCredential` concept keeps its clusterOwner branch: what an owner
-// sees of somebody else's credential is metadata, never a token, and
-// dropping the branch would leave a departed person's grant -- which
-// auto-deploy still fetches under -- with nobody able to see or revoke it.
-// So a cluster owner's feed carries everybody's cards, and this surface
-// PRESENTS them apart: the viewer's own connection and tokens first, exactly
-// as before, then "Other people's connections", each row naming its owner,
-// shown only to a cluster owner and only when there is somebody to show. A
-// non-owner's feed never carries another person's row, so for them nothing
-// here changes.
-//
-// MINE AND THEIRS IS DECIDED ON BARE IDS. The split is the whole of this
-// presentation, and the two values it compares reach the browser by different
-// routes: a credential's `ownerUserId` off the row, the viewer's id off the
-// session token, which in a deployed cluster routinely carries the canonical
-// `v1:identity:user:...` spelling. A raw `===` between the two forms is false
-// for every card, which puts the viewer's OWN connection under "Other
-// people's connections" -- with their own name beside it -- and leaves the
-// GitHub card saying "not connected" to somebody who is. `bare` (../people)
-// is applied to both sides, as the attribution line already does.
-
-/** The SECTION id this group is mounted under, so the connect callback brings
- *  somebody back to the surface that asked. */
-const SETTINGS_SECTION = "settings";
-
-export function SourcesGroup(props: Parameters<typeof SourcesGroupForViewer>[0]) {
-  // Personal state must never follow a different signed-in viewer.
-  return <SourcesGroupForViewer key={bare(props.viewerUserId)} {...props} />;
-}
-
-function SourcesGroupForViewer({
-  credentials,
-  packages,
-  viewerUserId,
-  isClusterOwner,
-  connectResult = null,
-}: {
-  /** The app root's one credentials feed. */
+/** Source management is shared with Sources and the deployable wizard.
+ * Stored tokens and operator oversight remain reachable for existing fetches. */
+export function SourcesGroup({ credentials, packages, viewerUserId, isClusterOwner, connectResult = null, onRetryCredentials = () => {} }: {
   credentials: LiveView<CredentialRow> | null;
-  /** Whose cards come first. */
-  viewerUserId: string;
-  /** Whether other people's cards are on the feed at all (the concept's clusterOwner branch). */
-  isClusterOwner: boolean;
-  /** The app root's package rows, for the join. Read-only: this surface writes no package. */
   packages: readonly PackageRow[];
-  /** The answer carried back from GitHub, when this window was opened by one. */
+  viewerUserId: string;
+  isClusterOwner: boolean;
   connectResult?: ConnectReturn | null;
+  onRetryCredentials?: () => void;
 }) {
-  const [adding, setAdding] = useState(false);
-  const now = useNow();
-  const connect = useGithubConnect();
-  // A SECOND INSTANCE, for the install link and nothing else. It shares no
-  // busy flag and no refusal with the control above, which is what stops a
-  // background lookup greying out Reconnect or printing "Not connected to
-  // the cluster" under a button nobody pressed.
-  const install = useGithubConnect();
-  const disconnect = useCredentialRevoke();
-  // THE CARD'S ORGANISATIONS, ON DEMAND. The credential row projects
-  // installation IDS and nothing else -- only `sourceRepositories` answers
-  // LOGINS and which organizations are still waiting for an owner -- so
-  // without this the card can only ever say "2 installations" and the pending
-  // state is unreachable on the surface built to show it. See `LookedUp`.
-  const lookup = useSourceRepositories();
-  const returnPath = returnPathFor(SETTINGS_SECTION);
-  // THE CLUSTER'S GITHUB APP, read as this group opens. Connect needs one, so
-  // on a cluster that has none it is not offered: an owner is asked the one
-  // question registering an app has, and anybody else is told who can. A null
-  // status is "not known" and keeps everything below exactly as it was
-  // (`useGithubApp`).
-  const githubApp = useGithubApp();
-  const appMissing = githubApp.status !== null && !githubApp.status.configured;
-
-  // THE CONNECTION IS READ OFF THE FEED THE LIST RENDERS, never a second
-  // subscription: a card saying "connected as @octocat" beside a list that
-  // had not heard about the grant yet would be one app contradicting itself.
-  const held = credentials?.snapshot.rows ?? [];
   const viewer = bare(viewerUserId);
-  // THE VIEWER'S OWN GRANT, never somebody else's: a cluster owner's feed
-  // carries every person's cards, and a card saying "connected as @octocat"
-  // about a colleague's grant would be the wrong person's connection.
-  const mine = useMemo(() => held.filter((c) => bare(c.ownerUserId) === viewer), [held, viewer]);
-  const feedGrant = useMemo(() => githubGrantOf(mine), [mine]);
-  const [disconnected, setDisconnected] = useState<{ id: string; login: string } | null>(null);
-  const locallyRevoked = feedGrant !== null && disconnected?.id === feedGrant.id && disconnected.login === feedGrant.login;
-  const grant = feedGrant !== null && locallyRevoked ? { ...feedGrant, status: "revoked" } : feedGrant;
-  useEffect(() => {
-    if (disconnected && (feedGrant === null || credentialIsRevoked(feedGrant) || feedGrant.id !== disconnected.id || feedGrant.login !== disconnected.login)) {
-      setDisconnected(null);
-    }
-  }, [feedGrant, disconnected]);
-  // ...and the list is that same feed NARROWED, because a grant is already
-  // the card above and a row that appeared in both would be one credential
-  // offering two different acts. `useLiveView` is exactly what LiveList's
-  // source seam is for, so the pasted rows keep their arrival cues and their
-  // live-state caption.
-  const pasted = useLiveView<CredentialRow, CredentialRow>(credentials, `pasted:${viewer}`, (rows) =>
-    pastedCredentials(rows.filter((c) => bare(c.ownerUserId) === viewer)),
-  );
-  // OTHER PEOPLE'S, every kind -- a colleague's GitHub grant is listed here
-  // as a row rather than as a card, because the card's acts (reconnect,
-  // check what it reaches) are the grant-holder's and the one act an owner
-  // has over it is Revoke. Newest first, like the pasted list.
-  const others = useLiveView<CredentialRow, CredentialRow>(credentials, `others:${viewer}`, (rows) =>
-    rows
-      .filter((c) => bare(c.ownerUserId) !== viewer)
-      .slice()
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
-  );
-  const othersCount = others?.snapshot.rows.length ?? 0;
+  const now = useNow();
   const nameOf = usePeopleNames();
-
-  const sourceNames = useMemo(
-    () =>
-      grant === null
-        ? []
-        : packages.filter((p) => p.credentialId === grant.id).map((p) => p.name || p.id),
-    [packages, grant],
-  );
-
-  // A lookup belongs to one grant, including its current login and scope.
-  // Clearing invalidates requests already in flight. Hide old facts during
-  // the render before the effect resets them, and learn the new install URL
-  // only for an active connection. Viewer changes remount this whole group.
-  const grantBoundary = grant === null ? "" : credentialFingerprint(grant);
-  const [lookedUpFor, setLookedUpFor] = useState("");
-  const currentLookup = lookedUpFor === grantBoundary;
-  const learn = install.learn;
-  const clearInstall = install.clear;
-  const clearLookup = lookup.clear;
-  const clearConnect = connect.clear;
-  const clearDisconnect = disconnect.clear;
-  useEffect(() => { clearDisconnect(); }, [feedGrant?.id, feedGrant?.login, clearDisconnect]);
-  const activeGrant = grant !== null && !credentialIsRevoked(grant);
-  useEffect(() => {
-    clearLookup();
-    clearInstall();
-    clearConnect();
-    setLookedUpFor(grantBoundary);
-    if (activeGrant) void learn(returnPath);
-    return () => {
-      clearLookup();
-      clearInstall();
-    };
-  }, [grantBoundary, activeGrant, learn, returnPath, clearInstall, clearLookup, clearConnect]);
-
-  return (
-    <fieldset className="os-field-group">
-      <legend>Sources</legend>
-      {/* WHAT THIS GROUP OFFERS, which depends on the cluster. On one with no
-          GitHub App the usual sentence opened with something nobody here could
-          do, directly above the part that said so. */}
-      <Caption>
-        {!appMissing
-          ? "Connect GitHub to choose repositories, or add a stored access token."
-          : githubApp.status?.canSetup === true
-            ? "Set up GitHub to choose repositories from a list, or add a stored access token."
-            : "Add a stored access token to fetch private repositories."}
-      </Caption>
-
-      {/* THE ANSWER FROM GITHUB, ON THE SURFACE THAT ASKED. A successful
-          connection says NOTHING here: the card arrives on the credential
-          feed's own broadcast with the standard arrival ring, and this shell
-          has no toasts. Only a refusal has something to add. */}
-      <ConnectReturnNotice result={connectResult} />
-
-      {/* NO APP: said once, above whatever this person holds. A grant made
-          against an app that is gone stays listed below -- it is the history
-          of what fetched under it -- and neither Connect nor Reconnect is
-          offered beside it, because neither can work. */}
-      {appMissing ? <GithubAppMissing app={githubApp} returnPath={returnPath} /> : null}
-
-      {grant === null ? (
-        appMissing ? null : (
-          <ConnectGitHub
-            busy={connect.busy}
-            refusal={connect.refusal}
-            onConnect={() => void connect.connect(returnPath)}
-          />
-        )
-      ) : (
-        <>
-          <ConnectedAccountCard
-            grant={grant}
-            /* NULL UNTIL SOMEBODY ASKED. The card falls back to the COUNT the
-               row itself carries, which is the reaches fact at the resolution
-               the row can support; passing an empty list from an unread
-               lookup would say this connection reaches nothing. */
-            installations={!activeGrant ? [] : !currentLookup || lookup.readAt === "" ? null : lookup.page.installations}
-            pending={!activeGrant ? [] : !currentLookup || lookup.readAt === "" ? null : lookup.page.pending}
-            installUrl={activeGrant && currentLookup ? install.installUrl : ""}
-            /* INSIDE THE CARD, under the facts it refreshes. Its own sentence
-               says "the count above", and mounted as a SIBLING of the card it
-               sat below the whole Disconnect block -- so "above" pointed past
-               a destructive control at a chip row two blocks away. NOT FOR A
-               LAPSED CONNECTION: a disconnected grant reads nothing from
-               GitHub, so the control could only ever refuse, and the
-               reconnect below is the repair -- a different sentence from a
-               refusal. */
-            reaches={credentialIsRevoked(grant) ? null : <LookedUp lookup={lookup} grantId={grant.id} now={now} />}
-            sourceNames={sourceNames}
-            busy={disconnect.busy}
-            refusal={disconnect.refusal}
-            remoteRevoked={disconnect.remoteRevoked}
-            onDisconnect={() => {
-              const target = { id: grant.id, login: grant.login };
-              void disconnect.revoke(grant.id).then(succeeded => {
-                if (!succeeded) return;
-                setDisconnected(target);
-                lookup.clear();
-                install.clear();
-              });
-            }}
-          />
-          {credentialIsRevoked(grant) && !appMissing ? (
-            /* The copy for `reconnect_required` sends a person to
-               "Settings > Sources", so the control it names has to be here --
-               a sentence pointing at a button that does not exist is worse
-               than no sentence. */
-            <ConnectGitHub
-              label="Reconnect GitHub"
-              caption="This connection was disconnected. Reconnecting puts your sources back to fetching under it."
-              busy={connect.busy}
-              refusal={connect.refusal}
-              onConnect={() => void connect.connect(returnPath)}
-            />
-          ) : null}
-        </>
-      )}
-
-      {/* THE TOKEN HALF, NAMED, because there is now a connection above it:
-          an unheaded list would read as belonging to that card rather than as
-          the other way in. The sealing sentence sits here, over the values it
-          is about, rather than over a group that is half connection.
-
-          A SECTION, LIKE THE CARD ABOVE IT, and that is what carries the
-          level. A legend and a Subhead are ONE declaration in this shell --
-          13px, 600, ink -- so `Sources`, `GitHub` and `Access tokens` are
-          typographically identical and the only thing that can say which
-          contains which is the space around them. Measured as a bare Subhead
-          this heading sat 0px under the caption above it and read as a third
-          sibling of `Sources`; as a section it is a part inside it
-          (styles/index.css, `.os-field-group .os-field-group`). */}
-      <section className="os-field-group" aria-label="Access tokens">
-        <Subhead meta={listCount(pasted?.snapshot)}>Access tokens</Subhead>
-        <Caption>
-          Access tokens let the cluster fetch private repositories. Token values are not shown after saving.
-        </Caption>
-
-        <LiveList<CredentialRow>
-          source={pasted}
-          rowId={(c) => c.id}
-          fingerprint={credentialFingerprint}
-          label="Your source credentials"
-          emptyText="No credentials yet. A public repository needs none; add one when a private repository asks for it."
-          renderRow={(card) => <CredentialLine card={card} packages={packages} now={now} />}
-        />
-
-        {adding ? (
-          <AddCredential
-            id="os-sources-add"
-            host={SOURCE_HOST}
-            onAdded={() => setAdding(false)}
-            onCancel={() => setAdding(false)}
-          />
-        ) : (
-          <div className="os-form-row">
-            <Button onClick={() => setAdding(true)}>Add a credential</Button>
-            <Caption>Supported host: {SOURCE_HOST}.</Caption>
-          </div>
-        )}
-      </section>
-
-      {/* THE OWNER VIEW, and only when there is somebody in it: a heading
-          over an empty list would announce a division the page does not
-          have. A non-owner never reaches this branch -- the engine's
-          clusterOwner branch on the concept is what puts other people's rows
-          on the feed, and this surface only says whose they are. */}
-      {isClusterOwner && othersCount > 0 ? (
-        <section className="os-field-group" aria-label="Other people's connections">
-          <Subhead meta={listCount(others?.snapshot)}>Other people's connections</Subhead>
-          <Caption>
-            Review shared repository access. Revoke a credential when it should no longer be used.
-          </Caption>
-          <LiveList<CredentialRow>
-            source={others}
-            rowId={(c) => c.id}
-            fingerprint={credentialFingerprint}
-            label="Other people's source credentials"
-            emptyText="Nobody else holds a credential."
-            renderRow={(card) => (
-              <CredentialLine card={card} packages={packages} now={now} owner={nameOf(card.ownerUserId)} />
-            )}
-          />
-        </section>
-      ) : null}
-
-      {/* THE CLUSTER'S OWN HALF, LAST, and an owner's only: which app every
-          connection above was made through, and taking it away. It is the
-          least-visited thing in this group, so it sits beneath everything a
-          person comes here for. */}
-      {isClusterOwner ? <GithubAppBlock app={githubApp} /> : null}
-    </fieldset>
-  );
-}
-
-/**
- * The one control that fills in WHICH organizations this connection reaches.
- *
- * ===========================================================================
- * AN ACTION, NEVER SOMETHING A RENDER DOES
- * ===========================================================================
- * `sourceRepositories` is a GitHub round trip through the cluster, so calling
- * it while the card draws would dial a vendor every time somebody opened
- * Settings -- for a fact most visits do not need. This is the same shape the
- * Integrations section already uses for its live vendor check
- * (`apps/settings/IntegrationsSection.tsx`): the card renders immediately from
- * the row it already holds, and one `.os-refresh-row` control offers to go and
- * look.
- *
- * IT SAYS WHEN IT LOOKED, which is what keeps the card honest. Before anybody
- * asks, the chips are the count off the row and the caption says the logins
- * have not been read; after, they are logins and a pending organization can
- * appear -- the `--os-warn` state this design exists to make reachable. The
- * picker's own footer says the same two things in the same words for the same
- * reason: this is a READING, and a reading that does not date itself gets read
- * as a feed.
- *
- * A REFUSED LOOKUP KEEPS THE CARD. `useSourceRepositories` holds the last
- * good page and renders the refusal in place; the card goes on saying what
- * the row says.
- */
-function LookedUp({ lookup, grantId, now }: { lookup: SourceRepositoriesActions; grantId: string; now: Date }) {
-  return (
-    <div className="os-refresh-row">
-      <Button onClick={() => void lookup.read(grantId, 1)} busy={lookup.busy} busyLabel="Asking GitHub">
-        Check what it reaches
-      </Button>
-      <Caption>
-        {lookup.readAt === ""
-          ? "The count above is off this cluster's own row. Which organizations, and any waiting for an owner to approve, are GitHub's to answer."
-          : `Asked GitHub ${formatFreshness(lookup.readAt, now)}.`}
-      </Caption>
-      {lookup.refusal ? <ProblemNotice problem={lookup.refusal} tone={toneFor(lookup.refusal.code)} /> : null}
-    </div>
-  );
+  const githubApp = useGithubApp();
+  const pasted = useLiveView<CredentialRow, CredentialRow>(credentials, `pasted:${viewer}`, rows => pastedCredentials(rows.filter(row => bare(row.ownerUserId) === viewer)));
+  const others = useLiveView<CredentialRow, CredentialRow>(credentials, `others:${viewer}`, rows => rows.filter(row => bare(row.ownerUserId) !== viewer).slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+  return <section className="os-field-group" aria-label="Source settings">
+    <SourceConnections mode="manage" credentials={credentials?.snapshot.rows ?? []} returnSection="settings" connectResult={connectResult}
+      credentialFeed={{ state: credentials?.snapshot.state ?? "disconnected", error: credentials?.snapshot.error ?? "", retry: onRetryCredentials }} />
+    <section className="os-field-group" aria-label="Access tokens">
+      <Subhead meta={listCount(pasted?.snapshot)}>Access tokens</Subhead>
+      <Caption>Stored tokens remain available to existing repositories. Token values are never shown.</Caption>
+      <LiveList<CredentialRow> source={pasted} rowId={row => row.id} fingerprint={credentialFingerprint} label="Your source credentials" emptyText="No stored access tokens."
+        renderRow={card => <CredentialLine card={card} packages={packages} now={now} />} />
+    </section>
+    {isClusterOwner && (others?.snapshot.rows.length ?? 0) > 0 ? <section className="os-field-group" aria-label="Other people's connections">
+      <Subhead meta={listCount(others?.snapshot)}>Other people's connections</Subhead>
+      <Caption>Review existing repository access. These credentials cannot be chosen as your source.</Caption>
+      <LiveList<CredentialRow> source={others} rowId={row => row.id} fingerprint={credentialFingerprint} label="Other people's source credentials" emptyText="Nobody else holds a credential."
+        renderRow={card => <CredentialLine card={card} packages={packages} now={now} owner={nameOf(card.ownerUserId)} />} />
+    </section> : null}
+    {isClusterOwner ? <GithubAppBlock app={githubApp} /> : null}
+  </section>;
 }
 
 function CredentialLine({

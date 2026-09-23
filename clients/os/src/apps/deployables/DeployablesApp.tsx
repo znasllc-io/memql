@@ -16,6 +16,8 @@ import { deploymentFromRow, packageFromRow, type DeploymentRow, type PackageRow 
 import { useAwaitingConfirm } from "./packages/useAwaitingConfirm";
 import { usePackages } from "./packages/usePackages";
 import { siteFingerprint, siteFromRow, type SiteRow } from "./rows";
+import { SourceConnectionsProvider } from "./sources/connections";
+import { SourceConnections } from "./sources/SourceConnections";
 import { SourcesGroup } from "./settings/SourcesGroup";
 import type { ConnectReturn } from "./sources/connectReturn";
 import { credentialFromRow, type CredentialRow } from "./sources/rows";
@@ -70,7 +72,11 @@ const DEPLOYABLES_LOG_CONCEPTS = [
   Concepts.PLATFORM_CUSTOM_DOMAIN,
 ] as const;
 
-export function DeployablesApp({
+export function DeployablesApp(props: Parameters<typeof DeployablesAppContent>[0]) {
+  return <SourceConnectionsProvider><DeployablesAppContent {...props} /></SourceConnectionsProvider>;
+}
+
+function DeployablesAppContent({
   sectionId,
   navigation,
   windowVisible = true,
@@ -241,6 +247,8 @@ export function DeployablesApp({
       setConnectResult({
         reason: typeof answer.reason === "string" ? answer.reason : "",
         section: typeof answer.section === "string" ? answer.section : sectionId,
+        ...(typeof answer.credentialId === "string" ? { credentialId: answer.credentialId } : {}),
+        ...(typeof answer.flowId === "string" ? { flowId: answer.flowId } : {}),
       });
     }
     consumeIntent?.(intent.id);
@@ -277,6 +285,7 @@ export function DeployablesApp({
         credentials={credentials}
         packages={packageSnapshot.rows}
         connectResult={connectResult}
+        onRetryCredentials={reseedCredentials}
       />
     );
   // The app's slice of the cluster's logs (epic memql#4895). It survived the
@@ -328,12 +337,12 @@ export function DeployablesApp({
   // Deployables tab off whatever it was showing. It takes no open request and
   // no connect return: those are addressed to Deployables, which is where the
   // map sends people and where GitHub sends them back.
-  const sourcesContent =
+  const repositoriesContent =
     snapshot.state === "disconnected" ? null : (
       <DeployablesSettingsProvider value={{ settings, update, toggleSource }}>
         <DeployablesSection
           root="sources"
-          active={sectionId === "sources"}
+          active={sectionId === "repositories"}
           navigation={navigation}
           connectResult={null}
           sites={measuredSource}
@@ -354,6 +363,9 @@ export function DeployablesApp({
         />
       </DeployablesSettingsProvider>
     );
+  const sourcesContent = <SourceConnections mode="manage" credentials={credentialRows}
+    credentialFeed={{ state: credentialSnapshot.state, error: credentialSnapshot.error, retry: reseedCredentials }}
+    connectResult={connectResult?.section === "sources" ? connectResult : null} />;
   const mapContent = (
     <MapSection
       sites={snapshot.rows}
@@ -379,7 +391,8 @@ export function DeployablesApp({
     <RetainedSection active={sectionId === "logs"}>{logsContent}</RetainedSection>
     <RetainedSection active={sectionId === "deployables"}>{deployablesContent}</RetainedSection>
     <RetainedSection active={sectionId === "sources"}>{sourcesContent}</RetainedSection>
-    <RetainedSection active={!["settings", "logs", "deployables", "sources"].includes(sectionId)}>{mapContent}</RetainedSection>
+    <RetainedSection active={sectionId === "repositories"}>{repositoriesContent}</RetainedSection>
+    <RetainedSection active={!["settings", "logs", "deployables", "sources", "repositories"].includes(sectionId)}>{mapContent}</RetainedSection>
   </ActivePane>;
 }
 
@@ -398,6 +411,7 @@ function DeployablesSettingsSection({
   credentials,
   packages,
   connectResult,
+  onRetryCredentials,
 }: {
   settings: DeployablesSettings;
   update: (patch: Partial<DeployablesSettings>) => void;
@@ -411,6 +425,7 @@ function DeployablesSettingsSection({
   packages: readonly PackageRow[];
   /** The answer from a GitHub connect, rendered by the group that asked. */
   connectResult: ConnectReturn | null;
+  onRetryCredentials: () => void;
 }) {
   const { readiness } = useSession();
   // OFFER ONLY WHAT THIS SESSION CAN OPEN. A preference naming a section the
@@ -488,7 +503,7 @@ function DeployablesSettingsSection({
             step out). The two above ARE preferences and stay above it. */}
         <SourcesGroup
           viewerUserId={viewerUserId}
-          isClusterOwner={isClusterOwner} credentials={credentials} packages={packages} connectResult={connectResult} />
+          isClusterOwner={isClusterOwner} credentials={credentials} packages={packages} connectResult={connectResult} onRetryCredentials={onRetryCredentials} />
 
         <p className="os-caption">Preferences are saved in this browser.</p>
       </Panel>

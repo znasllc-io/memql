@@ -2815,6 +2815,7 @@ QueryClient.prototype.createPATIdentity = function (this: QueryClient, args: Cre
 `accountId` is the tie the package's tier reads (memql#5303, D12). The compose flow sends the cluster's own account unless a client was picked; absent, the package is untied and its owner's. */
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["createPackage"] in generated_concepts.ts).
 export interface CreatePackageArgs {
+  sourceConnectionId?: string;
   packageId: string;
   name: string;
   // Enum: repo | artifact
@@ -2830,6 +2831,7 @@ export interface CreatePackageArgs {
 
 export function buildCreatePackage(args: CreatePackageArgs): string {
   const parts: string[] = [];
+  if (args.sourceConnectionId !== undefined) parts.push("sourceConnectionId: " + renderMemQLValue(args.sourceConnectionId));
   parts.push("packageId: " + renderMemQLValue(args.packageId));
   parts.push("name: " + renderMemQLValue(args.name));
   parts.push("sourceKind: " + renderMemQLValue(args.sourceKind));

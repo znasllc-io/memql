@@ -118,7 +118,7 @@ async function chooseSource(region: HTMLElement, name: RegExp): Promise<void> {
 /** Choose a repository returned under the person's GitHub grant. */
 async function chooseRepository(region: HTMLElement): Promise<void> {
   await chooseSource(region, /A repository/);
-  await click(await within(region).findByRole("button", { name: "Add source" }));
+  await click(await within(region).findByRole("button", { name: /^acme Organization/i }));
   await click(await within(region).findByRole("button", { name: /storefront/ }));
 }
 
@@ -155,7 +155,7 @@ async function choose(label: string, option: string | RegExp): Promise<void> {
  */
 async function openSourcePage(name: string): Promise<HTMLElement> {
   await click(await screen.findByRole("button", { name: (label) => label.startsWith(`Open ${name},`) }));
-  return screen.findByRole("region", { name: /^Source / });
+  return screen.findByRole("region", { name: /^Repository / });
 }
 
 function railStates(region: HTMLElement): (string | null)[] {
@@ -294,10 +294,6 @@ function forwardAct(name: string): HTMLButtonElement | null {
  */
 async function forward(name: string): Promise<HTMLButtonElement> {
   // Saving persists a new repository source; analysis is a separate act.
-  // Probe-only tests intentionally inspect Save source without invoking this.
-  if (name === "Analyze" && forwardAct("Save source")) {
-    await click(forwardAct("Save source"));
-  }
   await waitFor(() => expect(forwardAct(name)).toBeTruthy());
   return forwardAct(name)!;
 }
@@ -315,10 +311,10 @@ describe("the compose flow: the Source stop's probe", () => {
 
     expect(await within(region).findByText("public, default branch main")).toBeTruthy();
     // The picker carries its personal grant even when the chosen repository is public.
-    expect(connection.callsNamed("sourceProbe")).toEqual([`builtin sourceProbe(repoUrl: "${REPO}", credentialId: "cred-acme")`]);
+    expect(connection.callsNamed("sourceProbe")).toEqual([`builtin sourceProbe(repoUrl: "${REPO}", credentialId: "cred-acme", connectionId: "source-cred-acme-i-acme")`]);
     // Nothing is parked: saving is reachable; analysis follows explicit persistence.
     await fill(NAME_FIELD, "storefront");
-    expect(forwardAct("Save source")).toBeTruthy();
+    expect(forwardAct("Analyze")).toBeTruthy();
     expect(connection.callsNamed("createPackage")).toHaveLength(0);
     expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
   });
@@ -336,9 +332,9 @@ describe("the compose flow: the Source stop's probe", () => {
     // A definite answer ABOUT THE REPOSITORY parks the flow: the rail stops
     // at the Repository step -- the one that holds the URL it is about -- and
     // Saving is out of reach. The choice above it stays answered.
-    expect(railStates(region).slice(0, 2)).toEqual(["complete", "stopped"]);
+    expect(railStates(region).slice(0, 3)).toEqual(["complete", "complete", "stopped"]);
     await fill(NAME_FIELD, "storefront");
-    expect(forwardAct("Save source")).toBeNull();
+    expect(forwardAct("Analyze")).toBeNull();
   });
 
   it("shows an authorization refusal for the chosen GitHub account", async () => {
@@ -353,7 +349,7 @@ describe("the compose flow: the Source stop's probe", () => {
     await chooseRepository(region);
     expect(await within(region).findByText("this token cannot see it")).toBeTruthy();
     expect(connection.callsNamed("sourceProbe")).toContain(
-      `builtin sourceProbe(repoUrl: "${REPO}", credentialId: "cred-acme")`,
+      `builtin sourceProbe(repoUrl: "${REPO}", credentialId: "cred-acme", connectionId: "source-cred-acme-i-acme")`,
     );
   });
 
@@ -362,8 +358,8 @@ describe("the compose flow: the Source stop's probe", () => {
       const connection = fakeConnection({ sourceProbe: { "": probeReply({ reachable: false, reason }) } });
       const { region, view } = await compose(connection);
       await chooseRepository(region);
-      expect(await within(region).findByText(/Your GitHub connection has lapsed/)).toBeTruthy();
-      expect(screen.getByRole("button", { name: "Reconnect GitHub" })).toBeTruthy();
+      expect(await within(region).findByText("This source needs attention.")).toBeTruthy();
+      expect(within(region).getByText("Return to Source to reconnect or choose another.")).toBeTruthy();
       expect(forwardAct("Continue")).toBeNull();
       view.unmount();
     }
@@ -380,7 +376,7 @@ describe("the compose flow: the Source stop's probe", () => {
     await fill(NAME_FIELD, "storefront");
     // An answer about the PROBE, not about the repository: nothing parks.
     expect(railStates(region)[0]).toBe("complete");
-    expect(forwardAct("Save source")).toBeTruthy();
+    expect(forwardAct("Analyze")).toBeTruthy();
   });
 
   it("does not block saving on a probe that could not run, and shows the server's sentence", async () => {
@@ -392,7 +388,7 @@ describe("the compose flow: the Source stop's probe", () => {
 
     expect(await within(region).findByText("source_unreadable: api.github.com is unreachable")).toBeTruthy();
     await fill(NAME_FIELD, "storefront");
-    expect(forwardAct("Save source")).toBeTruthy();
+    expect(forwardAct("Analyze")).toBeTruthy();
     // The repository chooser remains available after the failed probe.
     expect(within(within(region).getByRole("list", { name: "acme repositories" })).getByRole("button", { name: /storefront/ })).toBeTruthy();
   });
@@ -813,18 +809,15 @@ describe("the compose flow: where each app will live", () => {
     expect(confirmed).toContain('accountId: "self"');
   });
 
-  it("saves a source under the default account before analysis, without creating it twice", async () => {
+  it("registers the repository under the default account when analysis starts", async () => {
     const connection = fakeConnection({ sourceProbe: { "": probeReply() } });
     const { region } = await compose(connection);
     await chooseRepository(region);
     await fill(NAME_FIELD, "acme");
     expect(connection.callsNamed("createPackage")).toHaveLength(0);
-    await click(await forward("Save source"));
-    expect(connection.callsNamed("createPackage")).toHaveLength(1);
-    expect(connection.callsNamed("createPackage")[0]).toContain('accountId: "self"');
-    expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
     await click(await forward("Analyze"));
     expect(connection.callsNamed("createPackage")).toHaveLength(1);
+    expect(connection.callsNamed("createPackage")[0]).toContain('accountId: "self"');
     expect(connection.callsNamed("packageDeploy")).toHaveLength(1);
   });
 });
@@ -923,7 +916,7 @@ describe("the compose flow: what the run answers", () => {
     expect(await within(region).findByText("no memql-package.yaml at the root of acme/storefront")).toBeTruthy();
     // What it is is where a manifest refusal belongs, and every stop after it
     // is unreached.
-    expect(railStates(region)).toEqual(["complete", "complete", "stopped", "pending", "pending", "pending"]);
+    expect(railStates(region)).toEqual(["complete", "complete", "complete", "stopped", "pending", "pending", "pending"]);
     // ...and the one forward act is Retry, on the bar beside Cancel -- so
     // leaving a stopped flow is as reachable as trying it again.
     expect(forwardAct("Retry")).toBeTruthy();
@@ -938,7 +931,7 @@ describe("the compose flow: leaving and coming back", () => {
   it("lands on the same rail, with the report in place", async () => {
         // A window that was closed mid-compose: the run is parked, and the list's
     // "will serve" row is how somebody finds it again.
-    mount(fakeConnection({ packages: [ACME], awaitingConfirm: [parkedRun("pkg-acme")], sites: [] }), { section: "sources" });
+    mount(fakeConnection({ packages: [ACME], awaitingConfirm: [parkedRun("pkg-acme")], sites: [] }), { section: "repositories" });
     await openSourcePage("acme");
     await click(within(document.querySelector(".os-actbar") as HTMLElement).getByRole("button", { name: "Review" }));
 
@@ -963,10 +956,10 @@ describe("what the compose flow does not do", () => {
     const connection = fakeConnection({ credentials: [], githubApp: { configured: false, canSetup: true } });
     const { region } = await compose(connection);
     await chooseSource(region, /A repository/);
-    await waitFor(() => expect(forwardAct("Set up GitHub")).toBeTruthy());
+    await click(within(region).getByRole("button", { name: "Add source" }));
+    expect(await within(region).findByRole("button", { name: "Set up GitHub" })).toBeTruthy();
     expect(forwardAct("Connect GitHub")).toBeNull();
     expect(forwardAct("Analyze")).toBeNull();
-    expect(within(region).getByRole("radio", { name: "Your account" })).toBeTruthy();
     expect(within(region).queryByRole("radio", { name: "A token" })).toBeNull();
     expect(within(region).queryByLabelText("The github.com access token")).toBeNull();
     expect(connection.callsNamed("sourceCredentialCreate")).toHaveLength(0);
@@ -977,7 +970,8 @@ describe("what the compose flow does not do", () => {
     const connection = fakeConnection({ credentials: [], githubApp: { configured: false, canSetup: false } });
     const { region } = await compose(connection, { role: "developer" });
     await chooseSource(region, /A repository/);
-    expect(await within(region).findByText(/Ask a cluster owner to set it up before choosing a repository/)).toBeTruthy();
+    await click(within(region).getByRole("button", { name: "Add source" }));
+    expect(await within(region).findByText(/Ask a cluster owner/)).toBeTruthy();
     expect(forwardAct("Set up GitHub")).toBeNull();
     expect(forwardAct("Connect GitHub")).toBeNull();
     expect(forwardAct("Analyze")).toBeNull();
@@ -992,7 +986,8 @@ describe("what the compose flow does not do", () => {
     const { region } = await compose(connection);
     await chooseSource(region, /A repository/);
     expect(document.querySelector("[data-toast], .os-toast, dialog, [role='dialog']")).toBeNull();
-    await waitFor(() => expect(forwardAct("Connect GitHub")).toBeTruthy());
+    await click(within(region).getByRole("button", { name: "Add source" }));
+    expect(await within(region).findByRole("button", { name: "Add GitHub account" })).toBeTruthy();
     expect(within(region).queryByRole("radio", { name: "A token" })).toBeNull();
     expect(within(region).queryByLabelText(URL_FIELD)).toBeNull();
     expect(within(region).queryByLabelText("The github.com access token")).toBeNull();
@@ -1060,13 +1055,13 @@ describe("a private repository whose build output is committed", () => {
     await waitFor(() =>
       expect((document.querySelector(".os-actbar")?.textContent ?? "")).toContain("in place at shop.memql.example.com"),
     );
-    expect(railStates(region)).toEqual(["complete", "complete", "complete", "complete", "skipped", "open"]);
+    expect(railStates(region)).toEqual(["complete", "complete", "complete", "complete", "complete", "skipped", "open"]);
     // The addresses are facts now, and the one that landed is the run's own.
     expect(within(region).queryByLabelText("The name storefront answers at")).toBeNull();
     expect(within(region).getAllByText("shop.memql.example.com").length).toBeGreaterThan(0);
 
     expect(connection.callsNamed("sourceCredentialCreate")).toHaveLength(0);
-    expect(connection.callsNamed("sourceRepositories")).toContain('builtin sourceRepositories(credentialId: "cred-acme", page: 1)');
+    expect(connection.callsNamed("sourceRepositories")).toContain('builtin sourceRepositories(credentialId: "cred-acme", page: 1, connectionId: "source-cred-acme-i-acme")');
   });
 });
 
@@ -1091,7 +1086,7 @@ describe("a gate opened for one app", () => {
       packages: [{ ...ACME, declares: [{ name: "storefront", kind: "spa" }, { name: "web", kind: "spa" }] }],
       sites: [],
     });
-    mount(connection, { section: "sources" });
+    mount(connection, { section: "repositories" });
     const page = await openSourcePage("acme");
     await click((await within(page).findByText("web")).closest("button"));
 
@@ -1229,7 +1224,7 @@ describe("a source this cluster already tracks", () => {
     await fill(NAME_FIELD, "acme again");
     await within(region).findByText(/public, default branch main/);
     expect(within(region).queryByText(/already tracked by/)).toBeNull();
-    expect(await forward("Save source")).toBeTruthy();
+    expect(await forward("Analyze")).toBeTruthy();
     expect(connection.callsNamed("createPackage")).toHaveLength(0);
   });
 });
@@ -1238,7 +1233,7 @@ describe("a source this cluster already tracks", () => {
 describe("composition write failures and bindings", () => {
   it("keeps activation available when enabling the app is refused, without starting analysis", async () => {
     const connection = fakeConnection({ packages: [{...ACME, declares:[{name:"storefront",kind:"spa"}], disabledDeployables:["storefront"]}], enableDeployablesError:"Activation was refused" });
-    mount(connection, { section: "sources" });
+    mount(connection, { section: "repositories" });
     const page = await openSourcePage("acme");
     await click((await within(page).findByText("storefront")).closest("button"));
     await click(await forward("Activate"));

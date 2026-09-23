@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { useSession } from "../../../chrome/access";
+import { bare } from "../people";
+import { rememberConnectAttempt } from "./connectReturn";
 import { useWrite, type WriteState } from "../packages/actions";
 import { githubConnectBegin, readSourceRepositories, revokeSourceCredential } from "./calls";
 import { EMPTY_PAGE, type RepositoryPage } from "./repositories";
@@ -33,7 +36,7 @@ export interface GithubConnectActions extends WriteState {
    * treated the same way -- there is nothing to navigate to, and sending a
    * browser to "" would reload the OS and look like the button did nothing.
    */
-  connect: (returnPath: string) => Promise<void>;
+  connect: (returnPath: string, credentialId?: string) => Promise<void>;
   /**
    * Begin WITHOUT navigating, to learn `installUrl`.
    *
@@ -77,6 +80,8 @@ export function reasonSentence(reason: string): string {
 }
 
 export function useGithubConnect(): GithubConnectActions {
+  const { access } = useSession();
+  const viewer = bare(access?.userId ?? "");
   const { refusal, clear: clearWrite, run } = useWrite();
   const [installUrl, setInstallUrl] = useState("");
   const [busy, setBusy] = useState(false);
@@ -97,16 +102,15 @@ export function useGithubConnect(): GithubConnectActions {
   // code (integrations/identity/githubconnect.go, `connectResult`). `useWrite`
   // only records what is THROWN, so the reason is raised here, inside `run`,
   // in the `<code>: <sentence>` shape `describe` reads -- which is what puts
-  // the same ProblemNotice under the button that a thrown refusal gets, and
-  // what lets the Source stop recognise `github_app_not_configured` and make
-  // the token form the whole stop. Before this, a not-configured cluster's
+  // the same ProblemNotice under the button that a thrown refusal gets.
+  // Before this, a not-configured cluster's
   // Connect button went busy for one round trip and then did nothing at all.
-  const begin = useCallback(async (returnPath: string) => {
+  const begin = useCallback(async (returnPath: string, credentialId?: string, flowId?: string) => {
     const request = ++generation.current;
     setBusy(true);
     const answer = await run(async query => {
       try {
-        const begun = await githubConnectBegin(query, returnPath);
+        const begun = await githubConnectBegin(query, returnPath, credentialId, flowId);
         if (request !== generation.current) return null;
         if (begun.installUrl !== "") setInstallUrl(begun.installUrl);
         if (begun.reason !== "" && begun.reason !== "ok") {
@@ -124,13 +128,15 @@ export function useGithubConnect(): GithubConnectActions {
   }, [run]);
 
   const connect = useCallback(
-    async (returnPath: string) => {
-      const begun = await begin(returnPath);
+    async (returnPath: string, credentialId?: string) => {
+      const flowId = crypto.randomUUID();
+      const begun = await begin(returnPath, credentialId, flowId);
       if (begun === null) return;
       if (begun.authorizeUrl === "") return;
+      rememberConnectAttempt(flowId, viewer, credentialId);
       window.location.assign(begun.authorizeUrl);
     },
-    [begin],
+    [begin, viewer],
   );
 
   const learn = useCallback(
@@ -145,8 +151,7 @@ export function useGithubConnect(): GithubConnectActions {
 }
 
 export interface SourceRepositoriesActions extends WriteState {
-  /** What the last read answered. Never null: an unread picker and one that
-   *  answered nothing both render the same empty invitation. */
+  /** Last successful reading; readAt distinguishes unread from empty. */
   page: RepositoryPage;
   /** When the list was read, as an ISO instant. Empty = never read. */
   readAt: string;
@@ -158,7 +163,7 @@ export interface SourceRepositoriesActions extends WriteState {
    * the same question over, and reading more is continuing a walk. Appending
    * on a re-read would show every repository twice.
    */
-  read: (credentialId: string, page: number) => Promise<boolean>;
+  read: (credentialId: string, page: number, connectionId?: string) => Promise<boolean>;
 }
 
 export function useSourceRepositories(): SourceRepositoriesActions {
@@ -181,17 +186,18 @@ export function useSourceRepositories(): SourceRepositoriesActions {
   }, []);
 
   const read = useCallback(
-    async (credentialId: string, wanted: number) => {
-      const changedCredential = credential.current !== credentialId;
+    async (credentialId: string, wanted: number, connectionId?: string) => {
+      const boundary = JSON.stringify([credentialId, connectionId ?? ""]);
+      const changedCredential = credential.current !== boundary;
       if (changedCredential) {
         clear();
-        credential.current = credentialId;
+        credential.current = boundary;
       }
       const request = ++latestRead.current;
       setBusy(true);
       const answered = await run(async (query) => {
         try {
-          const result = await readSourceRepositories(query, credentialId, wanted);
+          const result = await readSourceRepositories(query, credentialId, wanted, connectionId);
           if (request !== latestRead.current) return null;
           if (result.reason !== "" && result.reason !== "ok") {
             throw new Error(`${result.reason}: ${reasonSentence(result.reason)}`);

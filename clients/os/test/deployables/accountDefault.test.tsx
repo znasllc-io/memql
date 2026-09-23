@@ -22,7 +22,7 @@ async function open(connection: FakeConnection, scope: { everyAccount?: boolean;
   { role: "owner", userId: "u-me", ...scope }));
   await click(await screen.findByRole("button", { name: /Add a deployable/ }));
   const region = await screen.findByRole("region", { name: "Add a deployable" });
-  await click(within(region).getByRole("radio", { name: /A repository/ }));
+  await click(within(region).getByRole("radio", { name: /Pushed by your CI/ }));
   return region;
 }
 function selection() { return screen.getByLabelText("Accounts").textContent; }
@@ -79,8 +79,8 @@ describe("compose account default", () => {
     expect(screen.queryByText(cue)).toBeNull();
     await emit(connection, ACCOUNT_CONCEPT, { ...ACME, name: "Acme renamed" });
     await waitFor(() => expect(selection()).toContain("Acme renamed"));
-    await click(screen.getByRole("button", { name: /^Source / }));
-    await click(screen.getByRole("radio", { name: /A repository/ }));
+    await click(screen.getByRole("button", { name: /^Method / }));
+    await click(screen.getByRole("radio", { name: /Pushed by your CI/ }));
     expect(selection()).toContain("Acme renamed");
     expect(screen.queryByText(cue)).toBeNull();
   });

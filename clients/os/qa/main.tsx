@@ -16,6 +16,7 @@ import {
   STORE,
   fakeConnection,
   githubGrantRow,
+  sourceConnectionRow,
   probeReply,
   repositoriesReply,
   repositoryFixture,
@@ -230,6 +231,20 @@ const CONNECTED: FakeSeed = {
       repositoryFixture({ fullName: "octocat/dotfiles", installationId: "i-octocat" }),
     ],
   }),
+};
+
+const SOURCE_CHOOSER: FakeSeed = {
+  ...CONNECTED,
+  accounts: [{ id: "client", name: "Client account", status: "active" }, { id: "self", name: "Operator organization", status: "active" }],
+  credentials: [githubGrantRow({ id: "cred-grant", login: "octocat" }), githubGrantRow({ id: "cred-work", login: "workcat" })],
+  sourceConnections: [sourceConnectionRow({ credentialId: "cred-grant" }), sourceConnectionRow({ id: "source-personal", credentialId: "cred-grant", installationId: "i-octocat", accountLogin: "octocat", accountType: "User" }), sourceConnectionRow({ id: "source-work", credentialId: "cred-work", installationId: "i-studio", accountLogin: "studio" })],
+  sourceInstallations: {
+    "cred-grant": { reason: "ok", installations: [{ id: "i-acme", account: "acme", accountType: "Organization" }, { id: "i-octocat", account: "octocat", accountType: "User" }], pending: [] },
+    "cred-work": { reason: "ok", installations: [{ id: "i-studio", account: "studio", accountType: "Organization" }], pending: [{ login: "partner" }] },
+  },
+  repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "acme/storefront" }), repositoryFixture({ fullName: "acme/field-notes" }), repositoryFixture({ fullName: "octocat/dotfiles", installationId: "i-octocat" }), repositoryFixture({ fullName: "studio/portal", installationId: "i-studio" })] }),
+  packages: [ACME, WIDGETS, FRESH].map(p => ({ ...p, accountId: "self" })),
+  sourceProbe: { "": probeReply({ branches: ["main", "release"] }) },
 };
 
 /** A cluster with NO GitHub App, seen by somebody who may register one. Press
@@ -490,7 +505,9 @@ const VIEWS: Record<
   // The same app with a GitHub account connected: press + and choose
   // "A repository" and the Repository step is the picker, not the invitation.
   connected: { seed: CONNECTED, framed: true, render: () => <Lists section="deployables" /> },
-  "source-chooser": { seed: { ...CONNECTED, accounts: [{ id: "client", name: "Client account", status: "active" }, { id: "self", name: "Operator organization", status: "active" }], packages: [ACME, WIDGETS, FRESH].map(p => ({ ...p, accountId: "self" })), sourceProbe: { "": probeReply({ branches: ["main", "release"] }) } }, framed: true, render: () => <Lists section="deployables" /> },
+  "source-chooser": { seed: SOURCE_CHOOSER, framed: true, render: () => <Lists section="deployables" /> },
+  "source-management": { seed: SOURCE_CHOOSER, framed: true, render: () => <Lists section="sources" /> },
+  "source-empty": { seed: { ...SOURCE_CHOOSER, sourceConnections: [] }, framed: true, render: () => <Lists section="sources" /> },
   "connected-empty": { seed: { ...CONNECTED, repositories: repositoriesReply({ repositories: [], installations: [], pending: [] }) }, framed: true, render: () => <Lists section="deployables" /> },
   // The cluster's GitHub App, in each reading a surface has of it.
   "github-owner": { seed: NO_APP_OWNER, framed: true, render: () => <Lists section="deployables" /> },

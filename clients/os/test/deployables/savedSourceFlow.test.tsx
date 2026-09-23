@@ -7,10 +7,10 @@ const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connection }));
 
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
-import { bare } from "../../src/apps/deployables/people";
-import { DEPLOYMENT_CONCEPT, PACKAGE_CONCEPT } from "../../src/apps/deployables/packages/rows";
+import { DEPLOYMENT_CONCEPT } from "../../src/apps/deployables/packages/rows";
+import { SOURCE_CONNECTION_CONCEPT } from "../../src/apps/deployables/sources/connections";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
-import { click, emit, fakeConnection, githubGrantRow, probeReply, repositoriesReply, repositoryFixture, siteRow, rowsResult, withSession, type FakeConnection, type FakeSeed } from "./harness";
+import { click, emit, fakeConnection, githubGrantRow, probeReply, repositoriesReply, repositoryFixture, siteRow, rowsResult, sourceConnectionRow, withSession, type FakeConnection, type FakeSeed } from "./harness";
 
 const SELF: Row = { id: "self", name: "Operator organization", status: "active" };
 const CLIENT: Row = { id: "acme", name: "Acme", status: "active" };
@@ -32,7 +32,7 @@ const REPORT = { name: "saved project", formatVersion: 1, ok: true, problems: []
 afterEach(() => { cleanup(); h.connection = null; });
 
 async function open(seed: FakeSeed = {}, prepare?: (connection: FakeConnection) => void) {
-  const connection = fakeConnection({ accounts: [SELF, CLIENT], packages: [ALPHA, BETA], credentials: [], ...seed });
+  const connection = fakeConnection({ accounts: [SELF, CLIENT], packages: [ALPHA, BETA], ...connectedSeed(), ...seed });
   prepare?.(connection);
   h.connection = connection;
   const app = <DeployablesApp sectionId="deployables" navigate={vi.fn()} askContext={vi.fn()}
@@ -57,91 +57,66 @@ async function forward(name: string) {
 
 function connectedSeed(): FakeSeed {
   return { credentials: [GRANT], githubApp: { configured: true },
-    repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "acme/new-project" })] }),
+    repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "acme/new-project" }), repositoryFixture({ fullName: "acme/source-alpha" }), repositoryFixture({ fullName: "acme/source-beta" })] }),
     sourceProbe: { "github-me": probeReply({ branches: ["main", "release"] }) } };
 }
 
-async function addRepository(region: HTMLElement) {
-  await click(await within(region).findByRole("button", { name: "Add source" }));
-  await click(await within(region).findByRole("button", { name: /new-project/ }));
+async function addRepository(region: HTMLElement, name = "new-project") {
+  await click(await within(region).findByRole("button", { name: /^acme Organization/ }));
+  await click(await within(region).findByRole("button", { name: new RegExp(name) }));
 }
 
 function mintedId(connection: FakeConnection): string {
   const id = /packageId: "([^"]+)"/.exec(connection.callsNamed("createPackage")[0] ?? "")?.[1];
   expect(id).toBeTruthy();
-  return bare(id!);
+  return id!;
 }
 
-describe("saved sources in Add a deployable", () => {
-  it.each([["Alpha source", "source-alpha"], ["Beta source", "source-beta"]])("reuses %s without a personal GitHub grant or a new package", async (name, id) => {
+describe("GitHub Sources in Add a deployable", () => {
+  it("asks for Source before repository and MemQL ownership, then registers once at Analyze", async () => {
     const { region, connection } = await open();
-    await click(await within(region).findByRole("button", { name: new RegExp(name!) }));
-    await forward("Analyze");
-    expect(connection.callsNamed("packageDeploy")).toHaveLength(1);
-    expect(connection.callsNamed("packageDeploy")[0]).toContain(`packageId: "${id}"`);
-    expect(connection.callsNamed("packageDeploy")[0]).toContain("confirm: false");
-    expect(connection.callsNamed("createPackage")).toHaveLength(0);
-    expect(connection.callsNamed("sourceCredentialCreate")).toHaveLength(0);
+    expect(within(region).queryByLabelText("Accounts")).toBeNull();
+    expect(within(region).queryByRole("button", { name: /Alpha source/ })).toBeNull();
     expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
-  });
-
-  it("saves a GitHub source once, returns it selected, and analyzes the saved id", async () => {
-    const { region, connection } = await open(connectedSeed());
     await addRepository(region);
-    await click(await within(region).findByLabelText("Which branch or tag to deploy"));
+    expect(within(region).getByLabelText("Accounts")).toBeTruthy();
+    await click(within(region).getByLabelText("Which branch or tag to deploy"));
     await click(await screen.findByRole("option", { name: "release" }));
-    fireEvent.input(within(region).getByLabelText("What this deployable is called"), { target: { value: "New source" } });
-    await forward("Save source");
+    fireEvent.input(within(region).getByLabelText("What this deployable is called"), { target: { value: "New project" } });
+    await forward("Analyze");
     expect(connection.callsNamed("createPackage")).toHaveLength(1);
     const call = connection.callsNamed("createPackage")[0]!;
-    expect(call).toContain(`repoUrl: "${REPO}"`);
-    expect(call).toContain('repoRef: "release"');
-    expect(call).toContain('name: "New source"');
-    expect(call).toContain('accountId: "self"');
-    expect(call).toContain('credentialId: "github-me"');
-    expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
-    const savedRow = await within(region).findByRole("button", { name: /New source/ });
-    await waitFor(() => expect(document.activeElement).toBe(savedRow));
-    await forward("Analyze");
+    for (const fragment of [`repoUrl: "${REPO}"`, 'repoRef: "release"', 'accountId: "self"', 'credentialId: "github-me"', 'sourceConnectionId: "source-github-me-i-acme"']) expect(call).toContain(fragment);
     expect(connection.callsNamed("packageDeploy")[0]).toContain(`packageId: "${mintedId(connection)}"`);
-    expect(connection.callsNamed("createPackage")).toHaveLength(1);
-    expect(connection.callsNamed("sourceCredentialCreate")).toHaveLength(0);
+    expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(0);
   });
 
-  it("cancels adding a source without writing a source or starting a deployment", async () => {
-    const { region, connection } = await open(connectedSeed());
-    await addRepository(region);
+  it("cancels adding a Source without creating a repository or deployment", async () => {
+    const { region, connection } = await open();
+    await click(within(region).getByRole("button", { name: "Add source" }));
     await click(within(region).getByRole("button", { name: "Cancel adding source" }));
-    expect(await within(region).findByRole("button", { name: /Alpha source/ })).toBeTruthy();
-    expect(floorAct("Save source")).toBeNull();
+    expect(within(region).getByRole("button", { name: /^acme Organization/ })).toBeTruthy();
+    expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(0);
     expect(connection.callsNamed("createPackage")).toHaveLength(0);
     expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
-    expect(connection.callsNamed("sourceCredentialCreate")).toHaveLength(0);
   });
 
-  it("clears a selected source when Accounts changes and lists only active sources for that account", async () => {
-    const client = source("source-client", "Client source", "acme");
-    const { region, connection } = await open({ packages: [ALPHA, client, { ...BETA, status: "archived" }] });
-    expect(await within(region).findByRole("button", { name: /Alpha source/ })).toBeTruthy();
-    expect(within(region).queryByRole("button", { name: /Client source|Beta source/ })).toBeNull();
-    await click(within(region).getByRole("button", { name: /Alpha source/ }));
-    await waitFor(() => expect(floorAct("Analyze")).toBeTruthy());
-    await click(within(region).getByLabelText("Accounts"));
-    await click(await screen.findByRole("option", { name: "Acme" }));
-    expect(await within(region).findByRole("button", { name: /Client source/ })).toBeTruthy();
-    expect(within(region).queryByRole("button", { name: /Alpha source/ })).toBeNull();
-    expect(floorAct("Analyze")).toBeNull();
-    expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
-    await click(within(region).getByRole("button", { name: /Client source/ }));
-    await forward("Analyze");
-    expect(connection.callsNamed("packageDeploy")[0]).toContain('packageId: "source-client"');
+  it("invalidates repository and branch when the selected binding is removed", async () => {
+    const binding = sourceConnectionRow({ id: "source-github-me-i-acme", credentialId: "github-me" });
+    const { region, connection } = await open({ sourceConnections: [binding] });
+    await addRepository(region);
+    await emit(connection, SOURCE_CONNECTION_CONCEPT, { ...binding, status: "removed" });
+    await waitFor(() => expect(floorAct("Analyze")).toBeNull());
+    expect(within(region).queryByLabelText("Which branch or tag to deploy")).toBeNull();
+    expect(connection.callsNamed("createPackage")).toHaveLength(0);
+    expect(connection.callsNamed("sourceCredentialRevoke")).toHaveLength(0);
   });
 
   it("does not reuse a historical success as this flow's deployment", async () => {
     const old: Row = { id: "old-run", packageId: "source-alpha", status: "succeeded", report: REPORT,
       createdAt: "2026-09-01T10:00:00Z", finishedAt: "2026-09-01T10:01:00Z", deployables: [] };
     const { region, connection } = await open({ deployments: { "source-alpha": [old] } });
-    await click(await within(region).findByRole("button", { name: /Alpha source/ }));
+    await addRepository(region, "source-alpha");
     await waitFor(() => expect(connection.callsNamed("packageDeployments").length).toBeGreaterThan(0));
     await waitFor(() => expect(floorAct("Analyze")).toBeTruthy());
     expect(floorAct("Done")).toBeNull();
@@ -155,19 +130,6 @@ describe("saved sources in Add a deployable", () => {
     expect(connection.callsNamed("createPackage")).toHaveLength(0);
   });
 
-  it("blocks duplicate saving before the package live feed acknowledges the first save", async () => {
-    const { region, connection } = await open(connectedSeed());
-    await addRepository(region);
-    await forward("Save source");
-    // packagesAll still returns the original two rows. The confirmed save
-    // must participate in duplicate detection before its broadcast arrives.
-    await addRepository(region);
-    expect(await within(region).findByText(/already tracked by/)).toBeTruthy();
-    expect(floorAct("Save source")).toBeNull();
-    expect(connection.callsNamed("createPackage")).toHaveLength(1);
-    expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
-  });
-
   it("retries the selected source with a fresh run id and preserves skips for already placed apps", async () => {
     const outcome: Row = { deploymentId: "dep-new", status: "awaiting_confirm", awaitingConfirm: "true" };
     const { region, connection } = await open({
@@ -175,7 +137,7 @@ describe("saved sources in Add a deployable", () => {
       sites: [siteRow({ id: "placed-web", packageId: "source-alpha", packageDeployableName: "web", accountId: "self" })],
       deployResult: outcome,
     });
-    await click(await within(region).findByRole("button", { name: /Alpha source/ }));
+    await addRepository(region, "source-alpha");
     await forward("Analyze");
     const firstCall = connection.callsNamed("packageDeploy")[0]!;
     expect(firstCall).toContain('packageId: "source-alpha"');
@@ -201,7 +163,7 @@ describe("saved sources in Add a deployable", () => {
     const { region, connection } = await open({}, connection => {
       vi.spyOn(connection.query, "sitesAll").mockImplementation(() => new Promise<ReturnType<typeof rowsResult>>((_resolve, reject) => { rejectRead = reject; }));
     });
-    await click(await within(region).findByRole("button", { name: /Alpha source/ }));
+    await addRepository(region, "source-alpha");
     expect(await within(region).findByText("Checking existing deployables…")).toBeTruthy();
     expect(floorAct("Analyze")).toBeNull();
     await act(async () => rejectRead(new Error("Placements cannot be read")));
@@ -215,8 +177,8 @@ describe("saved sources in Add a deployable", () => {
       packages: [{ ...ALPHA, declares: [{ name: "web", kind: "spa" }] }],
       sites: [siteRow({ id: "placed-web", packageId: "source-alpha", packageDeployableName: "web", accountId: "self" })],
     });
-    await click(await within(region).findByRole("button", { name: /Alpha source/ }));
-    expect(await within(region).findByText("All apps from this source already have deployables. Open them from Deployables.")).toBeTruthy();
+    await addRepository(region, "source-alpha");
+    expect(await within(region).findByText("All apps from this repository already have deployables. Open them from Deployables.")).toBeTruthy();
     expect(floorAct("Analyze")).toBeNull();
     expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
     expect(connection.callsNamed("createPackage")).toHaveLength(0);
@@ -234,7 +196,7 @@ describe("saved sources in Add a deployable", () => {
       });
     });
     await addRepository(first.region);
-    await forward("Save source");
+    await forward("Analyze");
     expect(first.connection.callsNamed("createPackage")).toHaveLength(1);
 
     let replacement = first;
@@ -244,7 +206,7 @@ describe("saved sources in Add a deployable", () => {
     } else {
       await act(async () => first.changeViewer("u-replacement"));
     }
-    expect(await within(replacement.region).findByRole("button", { name: /Alpha source/ })).toBeTruthy();
+    expect(floorAct("Analyze")).toBeNull();
     const firstReads = first.connection.callsNamed("packagesAll").length;
     const replacementReads = replacement.connection.callsNamed("packagesAll").length;
     await act(async () => finishSave());
@@ -257,22 +219,40 @@ describe("saved sources in Add a deployable", () => {
     expect(replacement.connection.callsNamed("packagesAll")).toHaveLength(replacementReads);
   });
 
-  it.each(["archived", "removed"])("does not resurrect a confirmed source after its authoritative row is %s", async change => {
-    const { connection, region } = await open(connectedSeed());
+  it("clears repository, ref and owning-account UI before listing another Source", async () => {
+    const beta = sourceConnectionRow({ id: "source-beta-org", credentialId: "github-me", installationId: "i-beta", accountLogin: "beta" });
+    const acme = sourceConnectionRow({ id: "source-github-me-i-acme", credentialId: "github-me" });
+    const { region, connection } = await open({ sourceConnections: [acme, beta], repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "acme/new-project" }), repositoryFixture({ fullName: "beta/portal", installationId: "i-beta" })] }) });
     await addRepository(region);
-    await forward("Save source");
-    const saved = { ...source(mintedId(connection), "Acknowledged source"), ownerUserId: "u-me", repoUrl: REPO,
-      createdAt: "2026-09-23T10:00:00Z" };
-    await emit(connection, PACKAGE_CONCEPT, saved, "NODE_CREATED");
-    expect(await within(region).findByRole("button", { name: /Acknowledged source/ })).toBeTruthy();
-    await waitFor(() => expect(floorAct("Analyze")).toBeTruthy());
-
-    await emit(connection, PACKAGE_CONCEPT, { ...saved, status: "archived", createdAt: "2026-09-23T10:01:00Z" },
-      change === "removed" ? "NODE_DELETED" : "NODE_UPDATED");
-    expect(await within(region).findByText("The selected source is no longer available. Choose another source.")).toBeTruthy();
-    expect(within(region).queryByRole("button", { name: /Acknowledged source|new-project/ })).toBeNull();
+    await click(within(region).getByLabelText("Which branch or tag to deploy"));
+    await click(await screen.findByRole("option", { name: "release" }));
+    await click(within(region).getByRole("button", { name: "Source acme" }));
+    await click(within(region).getByRole("button", { name: /^beta Organization/ }));
+    expect(await within(region).findByRole("button", { name: /^portal main/ })).toBeTruthy();
+    expect(within(region).queryByRole("button", { name: /^new-project main/ })).toBeNull();
+    expect(within(region).queryByLabelText("Which branch or tag to deploy")).toBeNull();
+    expect(within(region).queryByLabelText("Accounts")).toBeNull();
     expect(floorAct("Analyze")).toBeNull();
+    expect(connection.callsNamed("sourceRepositories").at(-1)).toContain('connectionId: "source-beta-org"');
+  });
+
+  it("does not register twice when Analyze is pressed twice before the write returns", async () => {
+    let finish!: () => void;
+    const pending = new Promise<void>(resolve => { finish = resolve; });
+    const { region, connection } = await open({}, connection => {
+      const execute = vi.mocked(connection.query.executeNamed).getMockImplementation()!;
+      vi.mocked(connection.query.executeNamed).mockImplementation(async (name, call, opts) => {
+        const result = await execute(name, call, opts);
+        if (name === "createPackage") await pending;
+        return result;
+      });
+    });
+    await addRepository(region);
+    await waitFor(() => expect(floorAct("Analyze")).toBeTruthy());
+    const analyze = floorAct("Analyze")!;
+    await act(async () => { analyze.click(); analyze.click(); });
     expect(connection.callsNamed("createPackage")).toHaveLength(1);
-    expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
+    await act(async () => finish());
+    expect(connection.callsNamed("packageDeploy")).toHaveLength(1);
   });
 });

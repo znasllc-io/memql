@@ -835,6 +835,9 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			return nil, meta, err
 		}
 		if existed {
+			if err := e.validateSourceConnectionWrite(ctx, conceptMeta.Name, priorPayload, payload); err != nil {
+				return nil, meta, err
+			}
 			if err := e.validateOrganizationSensitiveChanges(ctx, conceptMeta.Name, priorPayload, payload); err != nil {
 				return nil, meta, err
 			}
@@ -946,6 +949,9 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		return nil, meta, err
 	}
 	if !meta.priorExisted {
+		if err := e.validateSourceConnectionWrite(ctx, conceptMeta.Name, nil, payload); err != nil {
+			return nil, meta, err
+		}
 		if err := e.validateOrganizationSensitiveChanges(ctx, conceptMeta.Name, nil, payload); err != nil {
 			return nil, meta, err
 		}

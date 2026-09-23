@@ -185,7 +185,7 @@ describe("the deployable's page and the source's page", () => {
       .find((b) => b.classList.contains("os-rail-line") && (b.textContent ?? "").startsWith("Source"));
     if (line !== undefined && line.getAttribute("aria-expanded") !== "true") await click(line);
     await click(within(page).getByRole("button", { name: /^Open / }));
-    const source = await screen.findByRole("region", { name: /^Source / });
+    const source = await screen.findByRole("region", { name: /^Repository / });
     expect(within(source).getByText("Deployed by")).toBeTruthy();
     expect(within(source).getByText("Ada Lovelace")).toBeTruthy();
   });

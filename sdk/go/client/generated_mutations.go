@@ -5119,8 +5119,9 @@ func CreatePATIdentityBuild(args CreatePATIdentityArgs) string {
 //
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["createPackage"] in generated_concepts.go).
 type CreatePackageArgs struct {
-	PackageId string
-	Name      string
+	SourceConnectionId string
+	PackageId          string
+	Name               string
 	// Enum: repo | artifact
 	SourceKind    string
 	RepoUrl       string
@@ -5142,6 +5143,13 @@ func (qc *QueryClient) CreatePackage(ctx context.Context, args CreatePackageArgs
 func CreatePackageBuild(args CreatePackageArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createPackage(")
+	if args.SourceConnectionId != "" {
+		b.WriteString("sourceConnectionId: ")
+		b.WriteString(quoteMemQL(args.SourceConnectionId))
+	}
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
 	b.WriteString("packageId: ")
 	b.WriteString(quoteMemQL(args.PackageId))
 	if b.Len() > 23 {

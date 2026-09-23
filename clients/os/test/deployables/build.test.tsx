@@ -136,7 +136,7 @@ async function openSourceView(page: HTMLElement): Promise<HTMLElement> {
     .find((b) => b.classList.contains("os-rail-line") && (b.textContent ?? "").startsWith("Source"));
   if (line !== undefined && line.getAttribute("aria-expanded") !== "true") await click(line);
   await click(within(page).getByRole("button", { name: /^Open / }));
-  return screen.findByRole("region", { name: /^Source / });
+  return screen.findByRole("region", { name: /^Repository / });
 }
 
 /**

@@ -939,6 +939,9 @@ func (d *Deps) fetchFor(ctx context.Context, req DeployRequest, pkg map[string]a
 func (d *Deps) fetch(ctx context.Context, pkg map[string]any) (*SourceSnapshot, error) {
 	switch rowString(pkg, "sourceKind") {
 	case "repo":
+		if err := d.validatePackageSourceConnection(ctx, pkg); err != nil {
+			return nil, err
+		}
 		// The owner rides along with the credential NAME, because the name
 		// is resolved under the owner's actor and not the caller's: a
 		// cluster owner deploying a colleague's package fetches under the

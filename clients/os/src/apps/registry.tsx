@@ -228,7 +228,7 @@ const deployables: OsAppManifest = {
   logsSection: "logs",
   attentionChanges: [
     { id: "deployables:organization", revision: "organization-1", sectionId: "deployables", label: "Organization ownership for sources and deployables" },
-    { id: "deployables:saved-sources", revision: "saved-sources-1", sectionId: "deployables", label: "Choose saved sources or add one for a new deployable" },
+    { id: "deployables:saved-sources", revision: "github-sources-2", sectionId: "sources", label: "Manage GitHub accounts and organization sources" },
   ],
   component: DeployablesApp,
 };

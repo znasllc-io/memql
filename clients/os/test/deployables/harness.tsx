@@ -193,6 +193,14 @@ export interface FakeSeed {
   publishError?: string;
   /** v1:platform:sourceCredential CARDS `sourceCredentialsMine` answers with -- never a value. */
   credentials?: Row[];
+  /** Explicit source bindings; [] means none even with connected identities. */
+  sourceConnections?: Row[];
+  sourceConnectionsError?: string;
+  /** Installation readings by credential ID; absent derives only from fixture repositories. */
+  sourceInstallations?: Record<string, Row>;
+  sourceInstallationsError?: string;
+  sourceConnectionCreateError?: string;
+  sourceConnectionRemoveError?: string;
   /** v1:identity:user rows `searchUsers` answers with, for "deployed by" (epic memql#5289). */
   people?: Row[];
   /** Fails the roster read with this server message -- what a reader gets. */
@@ -332,6 +340,25 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
   const sites = seed.sites ?? [];
   const artifacts = seed.artifacts ?? [];
   const domains = seed.domains ?? [];
+  const installationRows = (credentialId: string): Row[] => {
+    const explicit = seed.sourceInstallations?.[credentialId]?.["installations"];
+    if (Array.isArray(explicit)) return explicit as Row[];
+    const declared = seed.repositories?.["installations"];
+    if (Array.isArray(declared) && declared.length > 0) return declared as Row[];
+    const repos = seed.repositories?.["repositories"];
+    const derived = new Map<string, Row>();
+    for (const repo of Array.isArray(repos) ? repos as Row[] : []) {
+      const id = String(repo["installationId"] ?? "");
+      if (id) derived.set(id, { id, account: repo["owner"], accountType: "Organization", accountId: `provider-${id}`, repositorySelection: "selected", suspended: false });
+    }
+    return [...derived.values()];
+  };
+  const sourceConnections = seed.sourceConnections?.map(row => ({ ...row })) ?? (seed.credentials ?? []).flatMap(grant =>
+    grant["kind"] !== "github_app" ? [] : installationRows(String(grant["id"])).map(installation => ({
+      id: `source-${grant["id"]}-${installation["id"]}`, ownerUserId: grant["ownerUserId"], credentialId: grant["id"],
+      installationId: installation["id"], providerAccountId: installation["accountId"] ?? "", accountLogin: installation["account"] ?? installation["login"] ?? "",
+      accountType: installation["accountType"], status: "active",
+    }) as Row));
 
   const stub = {
     executeNamed: vi.fn(async (_name: string, call: string) => {
@@ -509,6 +536,37 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         return builtinReply("shopifyEnsureSubscriptions", []);
       }
 
+      if (call === "query sourceConnectionsMine()") {
+        if (seed.sourceConnectionsError) throw new Error(seed.sourceConnectionsError);
+        return rowsResult(sourceConnections.filter(row => row["status"] === "active"));
+      }
+      if (call.startsWith("builtin sourceInstallations(")) {
+        if (seed.sourceInstallationsError) throw new Error(seed.sourceInstallationsError);
+        const credentialId = /credentialId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        return builtinReply("sourceInstallations", [seed.sourceInstallations?.[credentialId] ?? { reason: "ok", installations: installationRows(credentialId), pending: [] }]);
+      }
+      if (call.startsWith("builtin sourceConnectionCreate(")) {
+        if (seed.sourceConnectionCreateError) throw new Error(seed.sourceConnectionCreateError);
+        const credentialId = /credentialId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        const installationId = /installationId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        const installation = installationRows(credentialId).find(row => row["id"] === installationId);
+        const grant = seed.credentials?.find(row => row["id"] === credentialId);
+        if (!installation || !grant) throw new Error("source_connection_unavailable: Source access is unavailable.");
+        const connectionId = `source-${credentialId}-${installationId}`;
+        const existing = sourceConnections.find(row => row["id"] === connectionId);
+        if (existing) existing["status"] = "active";
+        else sourceConnections.push({ id: connectionId, ownerUserId: grant["ownerUserId"], credentialId, installationId,
+          providerAccountId: installation["accountId"] ?? "", accountLogin: installation["account"] ?? installation["login"], accountType: installation["accountType"], status: "active" });
+        return builtinReply("sourceConnectionCreate", [{ connectionId, status: "active" }]);
+      }
+      if (call.startsWith("builtin sourceConnectionRemove(")) {
+        if (seed.sourceConnectionRemoveError) throw new Error(seed.sourceConnectionRemoveError);
+        const connectionId = /connectionId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        const row = sourceConnections.find(row => row["id"] === connectionId);
+        if (!row) throw new Error("source_connection_unavailable: Source access is unavailable.");
+        row["status"] = "removed";
+        return builtinReply("sourceConnectionRemove", [{ connectionId, status: "removed" }]);
+      }
       if (call === "query sourceCredentialsMine()") return rowsResult(seed.credentials ?? []);
 
       if (call.startsWith("builtin sourceProbe(")) {
@@ -593,7 +651,12 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
 
       if (call.startsWith("builtin sourceRepositories(")) {
         if (seed.repositoriesError !== undefined) throw new Error(seed.repositoriesError);
-        return builtinReply("sourceRepositories", seed.repositories ? [seed.repositories] : []);
+        const connectionId = /connectionId: "([^"]*)"/.exec(call)?.[1];
+        if (!connectionId || !seed.repositories) return builtinReply("sourceRepositories", seed.repositories ? [seed.repositories] : []);
+        const binding = sourceConnections.find(row => row["id"] === connectionId && row["status"] === "active");
+        if (!binding) return builtinReply("sourceRepositories", [{ reason: "source_connection_unavailable", repositories: [], installations: [], pending: [], nextPage: 0 }]);
+        const repositories = Array.isArray(seed.repositories["repositories"]) ? (seed.repositories["repositories"] as Row[]).filter(row => row["installationId"] === binding["installationId"]) : [];
+        return builtinReply("sourceRepositories", [{ ...seed.repositories, repositories }]);
       }
 
       if (call.startsWith("mutation updatePackageSource(")) {
@@ -657,7 +720,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       // `getRowByConceptAndId` composes `concept==<c> && id==<id>`.
       const match = /id==(\S+)/.exec(call);
       const wanted = match?.[1] ?? "";
-      const row = wanted === "" ? undefined : seed.byId?.[wanted];
+      const row = wanted === "" ? undefined : seed.byId?.[wanted] ?? sourceConnections.find(row => row["id"] === wanted);
       return bundleResult(row ? [row] : []);
     }),
   };
@@ -1185,3 +1248,8 @@ export const OPENED_PREVIEW: Row = {
   ttlMinutes: 30,
   url: "https://shop.memql.example.com/_memql/preview?grant=mql_prv_TEST",
 } as unknown as Row;
+
+/** A persisted GitHub identity-to-installation source binding. */
+export function sourceConnectionRow(over: Partial<Row> = {}): Row {
+  return { id: "source-acme", ownerUserId: "u-me", credentialId: "cred-grant", installationId: "i-acme", providerAccountId: "provider-acme", accountLogin: "acme", accountType: "Organization", status: "active", ...over };
+}

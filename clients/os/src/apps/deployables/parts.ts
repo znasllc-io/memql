@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 
 import { useSessionIfPresent } from "../../chrome/access";
-import { hasOrganizationDecisions, holds, holdsForOrganization } from "../../system/roles";
+import { availableInAnyOrganization, hasOrganizationDecisions, holds, holdsForOrganization } from "../../system/roles";
 
 // THE PARTS OF DEPLOYABLES (epic memql#5289, task memql#5305; app access
 // grants design, section 2's table and section 4 "A missing part").
@@ -117,4 +117,16 @@ export function partsForOrganization(accountId: string, fallback: PartsHeld, dat
   if (!hasOrganizationDecisions()) return fallback;
   const allowed = holdsForOrganization(accountId, "read", "data") && holdsForOrganization(accountId, "read", "app:deployables") && holdsForOrganization(accountId, dataVerb, "data");
   return Object.fromEntries(DEPLOYABLE_PARTS.map(part => [part, allowed && holdsForOrganization(accountId, "execute", partResource(part))])) as Record<DeployablePart, boolean>;
+}
+
+/** Personal GitHub grants and installation bindings have no owning MemQL
+ * account. The server admits their management when one authorized account
+ * permits all three capabilities; this never authorizes a package write. */
+export function canManagePersonalSources(): boolean {
+  return (holds("read", "data") && holds("read", "app:deployables") && holds("execute", partResource("sources"))) ||
+    availableInAnyOrganization("execute", partResource("sources"));
+}
+export function useCanManagePersonalSources(): boolean {
+  const epoch = useSessionIfPresent()?.accessEpoch ?? 0;
+  return useMemo(canManagePersonalSources, [epoch]);
 }

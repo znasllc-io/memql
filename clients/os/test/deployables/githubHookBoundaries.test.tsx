@@ -10,6 +10,7 @@ vi.mock("../../src/apps/deployables/sources/calls", () => ({
   readSourceRepositories: h.repositories, revokeSourceCredential: h.revoke, githubConnectBegin: h.begin,
 }));
 import { useCredentialRevoke, useGithubConnect, useSourceRepositories } from "../../src/apps/deployables/sources/useGithubConnect";
+import { withSession } from "./harness";
 import { EMPTY_PAGE } from "../../src/apps/deployables/sources/repositories";
 
 function deferred<T>() {
@@ -65,6 +66,20 @@ describe("GitHub hook request boundaries", () => {
     expect(result.current.page.installations.map(row => row.login)).toEqual(["new"]);
   });
 
+  it("switching organizations under one grant drops old pages and ignores a late answer", async () => {
+    h.repositories.mockResolvedValueOnce(page("acme"));
+    const { result } = renderHook(useSourceRepositories);
+    await act(async () => { await result.current.read("grant", 1, "source-acme"); });
+    const old = deferred<ReturnType<typeof page>>();
+    h.repositories.mockReturnValueOnce(old.promise).mockResolvedValueOnce(page("beta"));
+    let oldRead!: Promise<boolean>;
+    act(() => { oldRead = result.current.read("grant", 2, "source-acme"); });
+    await act(async () => { await result.current.read("grant", 1, "source-beta"); });
+    await act(async () => { old.resolve(page("acme-late")); expect(await oldRead).toBe(false); });
+    expect(result.current.page.installations.map(row => row.login)).toEqual(["beta"]);
+    expect(h.repositories).toHaveBeenLastCalledWith(h.connection.query, "grant", 1, "source-beta");
+  });
+
   it.each([true, false])("returns successful local revoke when GitHub acknowledgement is %s", async remote => {
     h.revoke.mockResolvedValueOnce(remote);
     const { result } = renderHook(useCredentialRevoke);
@@ -88,7 +103,7 @@ describe("GitHub hook request boundaries", () => {
   it.each(["success", "failure"])("clear prevents a late install-link %s from reviving the old connection", async outcome => {
     const pending = deferred<{ installUrl: string; authorizeUrl: string; reason: string }>();
     h.begin.mockReturnValueOnce(pending.promise);
-    const { result } = renderHook(useGithubConnect);
+    const { result } = renderHook(useGithubConnect, { wrapper: ({ children }) => withSession(children) });
     let learn!: Promise<boolean>;
     act(() => { learn = result.current.learn("/return"); });
     act(() => result.current.clear());
@@ -114,7 +129,7 @@ describe("GitHub hook request boundaries", () => {
   it("a begin response arriving after unmount cannot finish its connect flow", async () => {
     const pending = deferred<{ installUrl: string; authorizeUrl: string; reason: string }>();
     h.begin.mockReturnValueOnce(pending.promise);
-    const { result, unmount } = renderHook(useGithubConnect);
+    const { result, unmount } = renderHook(useGithubConnect, { wrapper: ({ children }) => withSession(children) });
     let learn!: Promise<boolean>;
     act(() => { learn = result.current.learn("/return"); });
     unmount();

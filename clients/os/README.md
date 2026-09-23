@@ -2382,43 +2382,43 @@ clears marks only after a successful write, preserves them on failure, and
 offers an in-surface retry. An old revision cannot acknowledge a newer one,
 and one person's receipts cannot dismiss another's changes.
 
-### GitHub account connection
+### GitHub Sources
 
-Add a deployable separates the GitHub connection from saved Sources. Choose an
-existing source for the selected account, or use Add source and Save source to
-register another repository/ref. Saving does not analyze or deploy. Existing
-sources reuse their stored credentials and do not require the viewer to reconnect
-GitHub. Analysis follows its own new run and skips apps already placed by that
-source; the platform does not create a second instance of an already placed app.
+A Source is one person's verified GitHub identity bound to an approved personal
+or organization installation. Multiple GitHub accounts and multiple Sources per
+account coexist. Source selection never infers the first or latest credential.
 
-Repository creation uses GitHub only. Its Accounts selector retains the
-account-scoped default, permission checks and saved account ID; GitHub access
-is a separate group below it. Existing stored tokens and source credentials
-remain manageable in Settings and existing source details.
+Add a deployable asks for the method, then Source, then a repository within that
+Source, then the MemQL owning account. The default-account review cue remains
+immediately below the account selector. Add source explicitly chooses a GitHub
+identity and approved installation; Save source persists only that binding.
+Analyze registers the chosen repository/ref and starts its analysis. An existing
+repository in the same owning account is reused without changing its credentials;
+the flow follows its newly returned run rather than historical successes.
 
-The repository chooser uses the shared `RecordList`/`RecordRow` anatomy with
-organization groups, branch/privacy facts and selection state. Refresh and
-Disconnect use the shared accessible icon controls; disconnect keeps its
-explicit confirmation. The connection row names the personal GitHub account.
-Disconnect Disconnect uses the same lifecycle as Settings →
-Sources: authorize the local credential revocation first, then attempt to end
-that person's GitHub authorization. It never uninstalls the shared GitHub App,
-signs the browser out of GitHub, or deletes sources or deployables. Existing
-sources using the connection require reconnection at their next fetch.
+Sources manages these same personal bindings. Repositories holds saved package
+history and lifecycle controls. Removing a Source only tombstones the chooser
+binding: sibling Sources, its shared grant, saved repositories and deployables
+remain. Existing repositories retain the original installation relationship and
+revalidate live access on fetch. Disconnect GitHub is a separate account-wide
+operation that revokes that identity's authorization and affects all Sources and
+future repository fetches using it. Neither action uninstalls the shared app.
 
-Successful disconnect immediately discards repository/organization listings,
-selected repository and branch, and pending source probes. A delayed live-feed
-acknowledgment cannot keep those selections usable. Viewer/grant changes and
-unmounts invalidate pending reads; a canceled connection flow cannot navigate
-when its late reply arrives. A refused disconnect retains the connection and
-explains the failure. Local success with an unconfirmed GitHub revoke says so
-and remains disconnected locally.
+Connect adds another identity. Reconnect explicitly names a stored credential
+and refuses a different numeric GitHub identity. OAuth uses PKCE and single-use
+shared state bound to the initiating live MemQL session. The installation setup
+return is neutral; protected Connect establishes the personal authorization.
+Per-identity database locks serialize callback upsert, refresh and disconnect
+across replicas, with uncached credential reads inside that boundary.
 
-Reconnect requests GitHub's documented `prompt=select_account` chooser. Picking
-another organization for the same account uses the existing installation link;
-that changes repository access, not the personal account. Repository reads
-remain bounded by the caller's grant and GitHub-visible installations. This is
-a repair to an existing connection capability, so it adds no attention marker.
+The backend verifies owner, credential, installation and repository access on
+list, probe and create. Browser-provided provider claims cannot mint bindings.
+Source and credential changes, viewer changes and unmount invalidate pending
+reads and draft selections. Source creation and repository registration prevent
+duplicate submission; late responses cannot deploy a replacement flow. GitHub
+setup, refused access and pending organization approval stay visible in Add
+source. New connections do not offer pasted tokens; existing stored credentials
+remain manageable.
 
 ### Branch deployment policy
 

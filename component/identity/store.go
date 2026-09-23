@@ -40,6 +40,10 @@ type Store struct {
 	// session-scoped lock, so the pooled handle is not interchangeable.
 	// See magic_link_gate.go.
 	DirectDB func() *sql.DB
+
+	// GithubGate supplies an explicit gate in isolated harnesses. Production uses
+	// the direct Postgres advisory gate below and refuses unavailable storage.
+	GithubGate func(context.Context, string, func(context.Context) error) error
 }
 
 // warn logs at WARN when a logger is wired, and does nothing otherwise.

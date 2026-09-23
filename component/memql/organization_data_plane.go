@@ -46,6 +46,10 @@ func (e *MemQLEngine) OrganizationDataPlaneEnforced(ctx context.Context, query s
 		if !found || fn.FunctionKind != "builtin" {
 			return false
 		}
+		if personalSourceBuiltin(fn) {
+			verb, resource := personalSourceRequirement(fn.Name)
+			return e.personalSourceCapable(ctx, verb, resource)
+		}
 		// This exact builtin exposes only the verified caller's own decisions.
 		switch fn.Name {
 		case "effectiveCapabilitiesForActor":
@@ -60,7 +64,13 @@ func (e *MemQLEngine) OrganizationDataPlaneEnforced(ctx context.Context, query s
 		concept, _ := organizationCapabilityTarget(fn)
 		return concept != ""
 	}
-	if plan.SourceFunction == "" || !HasOrganizationBoundary(plan.BoundConcept) || !e.organizationPlainFilter(plan.Root, map[string]bool{}) {
+	personalRead := false
+	if fn, ok := e.functions.Lookup(plan.SourceFunction); ok && personalSourceQuery(fn) {
+		verb, resource := personalSourceRequirement(fn.Name)
+		personalRead = e.personalSourceCapable(ctx, verb, resource)
+	}
+
+	if plan.SourceFunction == "" || (!HasOrganizationBoundary(plan.BoundConcept) && !personalRead) || !e.organizationPlainFilter(plan.Root, map[string]bool{}) {
 		return false
 	}
 	if plan.Count {

@@ -42,15 +42,6 @@ function mount(connection: FakeConnection | null, role = "owner", userId = "u-me
   );
 }
 
-async function fill(label: string, value: string): Promise<void> {
-  const input = screen.getByLabelText(label) as HTMLInputElement;
-  await act(async () => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
-    setter.call(input, value);
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-  });
-}
-
 function credential(over: Partial<Row> & { id: string }): Row {
   return {
     ownerUserId: "u-me",
@@ -164,24 +155,14 @@ describe("Settings -> Sources", () => {
     expect(await screen.findByText("that credential is not yours")).toBeTruthy();
   });
 
-  it("adds one, and the token appears in that call and no other", async () => {
-    const secret = "github_pat_" + "11SETTINGS" + "0123456789";
+  it("keeps stored tokens manageable without offering new token creation", async () => {
     const connection = fakeConnection(SEED);
     mount(connection);
-    await click(await screen.findByRole("button", { name: "Add a credential" }));
-
-    // The shape of token to make is stated where the token is typed.
-    expect(screen.getByText(/fine-grained personal access token/)).toBeTruthy();
-    await fill("A name for this github.com credential", "work laptop");
-    await fill("The github.com access token", secret);
-    await click(screen.getByRole("button", { name: "Add credential" }));
-
-    expect(connection.calls.filter((call) => call.includes(secret))).toEqual([
-      `builtin sourceCredentialCreate(host: "github.com", label: "work laptop", token: ${JSON.stringify(secret)})`,
-    ]);
-    // The form closes; the new card arrives on its own broadcast.
-    await waitFor(() => expect(screen.queryByLabelText("The github.com access token")).toBeNull());
-    expect(screen.getByRole("button", { name: "Add a credential" })).toBeTruthy();
+    await screen.findByRole("list", { name: "Your source credentials" });
+    expect(screen.queryByRole("button", { name: "Add a credential" })).toBeNull();
+    expect(screen.queryByLabelText("The github.com access token")).toBeNull();
+    expect(screen.getByRole("button", { name: /Revoke acme deploy token/ })).toBeTruthy();
+    expect(connection.callsNamed("sourceCredentialCreate")).toHaveLength(0);
   });
 
   it("reads the credentials feed ONCE, and the settings section opens no second one", async () => {
@@ -194,7 +175,7 @@ describe("Settings -> Sources", () => {
   it("says what to do when there are none", async () => {
     mount(fakeConnection({ credentials: [], packages: [] }));
     expect(
-      await screen.findByText(/No credentials yet. A public repository needs none/),
+      await screen.findByText(/No stored access tokens/),
     ).toBeTruthy();
   });
 });
@@ -282,65 +263,69 @@ describe("Settings -> Sources: whose credentials", () => {
 describe("GitHub settings disconnect boundaries", () => {
   const grant = githubGrantRow({ id: "grant", ownerUserId: "u-me", login: "octocat", installationIds: ["acme"] });
   const repositories = repositoriesReply({ installations: [{ id: "acme", login: "Acme", accountType: "Organization" }], pending: [{ login: "AwaitingOrg" }] });
+  async function identity() { return within(await screen.findByRole("list", { name: "Connected GitHub accounts" })).getAllByRole("listitem")[0]!; }
 
-  it("disconnects immediately without a feed event and keeps an unconfirmed remote revoke visible through its acknowledgement", async () => {
-    const conn = fakeConnection({ credentials: [grant], repositories, credentialRevokeRemote: false, installUrl: "https://github.com/apps/memql/installations/new" });
+  it("disconnects immediately and keeps the unconfirmed remote revoke warning through its feed acknowledgement", async () => {
+    const conn = fakeConnection({ credentials: [grant], repositories, credentialRevokeRemote: false });
     mount(conn);
-    await screen.findByText("@octocat");
-    await click(screen.getByRole("button", { name: "Check what it reaches" }));
-    expect(await screen.findByText("Acme")).toBeTruthy();
-    expect(screen.getByText("AwaitingOrg pending")).toBeTruthy();
-    await screen.findByRole("link", { name: "Install on another organization" });
-    await click(screen.getByRole("button", { name: "Disconnect" }));
-    await click(screen.getByRole("button", { name: "Disconnect" }));
-    await screen.findByRole("button", { name: "Reconnect GitHub" });
-    expect(screen.queryByText("Acme")).toBeNull();
-    expect(screen.queryByText("AwaitingOrg pending")).toBeNull();
-    expect(screen.queryByRole("link", { name: "Install on another organization" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Check what it reaches" })).toBeNull();
+    const account = await identity();
+    await click(within(account).getByRole("button", { name: "Disconnect GitHub" }));
+    await click(within(account).getByRole("button", { name: "Disconnect" }));
+    await within(account).findByRole("button", { name: "Reconnect GitHub" });
+    expect(screen.getByText("Reconnect needed")).toBeTruthy();
     expect(screen.getByText(/GitHub did not confirm/)).toBeTruthy();
-    await emit(conn, SOURCE_CREDENTIAL_CONCEPT, githubGrantRow({ ...grant, id: "grant", status: "revoked", revokedAt: "2026-09-22T00:00:00Z" }));
+    // A delayed active acknowledgement predating the revoke cannot undo it.
+    await emit(conn, SOURCE_CREDENTIAL_CONCEPT, grant);
+    expect(screen.getByText("Reconnect needed")).toBeTruthy();
+    await emit(conn, SOURCE_CREDENTIAL_CONCEPT, githubGrantRow({ ...grant, id: "grant", status: "revoked" }));
     expect(screen.getByText(/GitHub did not confirm/)).toBeTruthy();
+    expect(screen.getByText("Acme")).toBeTruthy();
+    expect(conn.callsNamed("sourceConnectionRemove")).toHaveLength(0);
+    // A later authoritative revoked -> active transition represents reconnect.
+    await emit(conn, SOURCE_CREDENTIAL_CONCEPT, grant);
+    await waitFor(() => expect(screen.queryByText("Reconnect needed")).toBeNull());
+    expect(screen.getByRole("button", { name: "Disconnect GitHub" })).toBeTruthy();
   });
 
-  it("retains the connection and its organizations when the cluster refuses disconnect", async () => {
-    const conn = fakeConnection({ credentials: [grant], repositories, credentialRevokeError: "forbidden: cannot revoke this credential", installUrl: "https://github.com/apps/memql/installations/new" });
+  it("retains the connection and its source when disconnect is refused", async () => {
+    const conn = fakeConnection({ credentials: [grant], repositories, credentialRevokeError: "forbidden: cannot revoke this credential" });
     mount(conn);
-    await screen.findByText("@octocat");
-    await click(screen.getByRole("button", { name: "Check what it reaches" }));
-    await screen.findByText("Acme");
-    await click(screen.getByRole("button", { name: "Disconnect" }));
-    await click(screen.getByRole("button", { name: "Disconnect" }));
+    const account = await identity();
+    await click(within(account).getByRole("button", { name: "Disconnect GitHub" }));
+    await click(within(account).getByRole("button", { name: "Disconnect" }));
     expect(await screen.findByText("cannot revoke this credential")).toBeTruthy();
     expect(screen.getByText("Acme")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Reconnect GitHub" })).toBeNull();
-    expect(screen.getByRole("link", { name: "Install on another organization" })).toBeTruthy();
+    expect(screen.queryByText("Reconnect needed")).toBeNull();
+    expect(within(account).getByRole("button", { name: "Disconnect" })).toBeTruthy();
   });
 
-  it("drops a pending old lookup when the active grant changes", async () => {
+  it("drops a pending installation reading when the selected identity is revoked", async () => {
     const conn = fakeConnection({ credentials: [grant], repositories });
     let resolve!: (value: ReturnType<typeof builtinReply>) => void;
-    vi.spyOn(conn.query, "sourceRepositories").mockImplementationOnce(() => new Promise(yes => { resolve = yes; }));
+    const original = vi.mocked(conn.query.executeNamed).getMockImplementation()!;
+    vi.spyOn(conn.query, "executeNamed").mockImplementation((name, call, options) => name === "sourceInstallations" ? new Promise(yes => { resolve = yes; }) : original(name, call, options));
     mount(conn);
-    await screen.findByText("@octocat");
-    await click(screen.getByRole("button", { name: "Check what it reaches" }));
-    await emit(conn, SOURCE_CREDENTIAL_CONCEPT, githubGrantRow({ id: "grant", ownerUserId: "u-me", login: "new-account", createdAt: "2026-09-22T00:00:00Z" }));
-    await screen.findByText("@new-account");
-    await act(async () => resolve(builtinReply("sourceRepositories", [repositories])));
-    expect(screen.queryByText("Acme")).toBeNull();
-    expect(screen.queryByText("AwaitingOrg pending")).toBeNull();
-    expect(screen.queryByText(/Asked GitHub/)).toBeNull();
+    await click(await screen.findByRole("button", { name: "Add source" }));
+    await click(screen.getByRole("button", { name: "@octocat GitHub account Connected" }));
+    await waitFor(() => expect(resolve).toBeTruthy());
+    await emit(conn, SOURCE_CREDENTIAL_CONCEPT, githubGrantRow({ id: "grant", status: "revoked" }));
+    await act(async () => resolve(builtinReply("sourceInstallations", [repositories])));
+    expect(screen.queryByRole("button", { name: "Acme Organization" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save source" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Reconnect @octocat" })).toBeTruthy();
   });
 
-  it("does not carry a prior viewer's organization lookup into another viewer's card", async () => {
-    const conn = fakeConnection({ credentials: [grant, githubGrantRow({ id: "other", ownerUserId: "u-other", login: "another-person" })], repositories });
+  it("does not carry a viewer's source or installation selection into another viewer", async () => {
+    const conn = fakeConnection({ credentials: [grant, githubGrantRow({ id: "other", ownerUserId: "u-other", login: "another-person" })], repositories, sourceConnections: [{ id: "only-mine", ownerUserId: "u-me", credentialId: "grant", installationId: "acme", accountLogin: "Acme", accountType: "Organization", status: "active" }] });
     const view = mount(conn);
-    await screen.findByText("@octocat");
-    await click(screen.getByRole("button", { name: "Check what it reaches" }));
     await screen.findByText("Acme");
+    await click(screen.getByRole("button", { name: "Add source" }));
+    await click(screen.getByRole("button", { name: "@octocat GitHub account Connected" }));
+    await screen.findByRole("button", { name: "Acme Organization" });
     view.rerender(withSession(<DeployablesApp sectionId="settings" navigate={vi.fn()} askContext={vi.fn()} store={memStore()} />, { role: "owner", userId: "u-other" }));
     await screen.findByText("@another-person");
+    expect(screen.queryByRole("button", { name: "Acme Organization" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save source" })).toBeNull();
     expect(screen.queryByText("Acme")).toBeNull();
-    expect(screen.queryByText("AwaitingOrg pending")).toBeNull();
   });
 });

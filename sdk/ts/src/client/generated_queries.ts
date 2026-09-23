@@ -10539,6 +10539,48 @@ QueryClient.prototype.soldByVariant = function (this: QueryClient, args: SoldByV
   return this.executeNamed("soldByVariant", buildSoldByVariant(args), opts);
 };
 
+/** Resolve a saved binding under its owner's identity, including a removed row for idempotent removal. No cluster-owner branch borrows another user's grant. */
+// Bound concept: v1:platform:sourceConnection (machine-readable: BoundConcepts["sourceConnectionById"] in generated_concepts.ts).
+export interface SourceConnectionByIdArgs {
+  connectionId: string;
+}
+
+export function buildSourceConnectionById(args: SourceConnectionByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("connectionId: " + renderMemQLValue(args.connectionId));
+  return "query sourceConnectionById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    sourceConnectionById(args: SourceConnectionByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.sourceConnectionById = function (this: QueryClient, args: SourceConnectionByIdArgs = {} as SourceConnectionByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("sourceConnectionById", buildSourceConnectionById(args), opts);
+};
+
+/** The caller's active saved source connections, independent of MemQL accounts. */
+// Bound concept: v1:platform:sourceConnection (machine-readable: BoundConcepts["sourceConnectionsMine"] in generated_concepts.ts).
+export interface SourceConnectionsMineArgs {
+}
+
+export function buildSourceConnectionsMine(args: SourceConnectionsMineArgs): string {
+  void args;
+  return "query sourceConnectionsMine()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    sourceConnectionsMine(args?: SourceConnectionsMineArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.sourceConnectionsMine = function (this: QueryClient, args: SourceConnectionsMineArgs = {} as SourceConnectionsMineArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("sourceConnectionsMine", buildSourceConnectionsMine(args), opts);
+};
+
 /** One credential by id -- the Source stop's credential chip. Card shape, so metadata only. */
 // Bound concept: v1:platform:sourceCredential (machine-readable: BoundConcepts["sourceCredentialById"] in generated_concepts.ts).
 export interface SourceCredentialByIdArgs {

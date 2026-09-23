@@ -110,6 +110,18 @@ func (e *MemQLEngine) refuseBelowRequiredCapability(ctx context.Context, fn *Fun
 				"which would admit every caller (epic memql#5166)",
 			name, required.Verb, required.Resource)
 	}
+	if e != nil && e.functions != nil {
+		actual, _ := e.functions.Get(name)
+		if personalSourceBuiltin(actual) || personalSourceQuery(actual) {
+			verb, resource := personalSourceRequirement(actual.Name)
+			if required.Verb == verb && required.Resource == resource {
+				if e.personalSourceCapable(ctx, verb, resource) {
+					return nil
+				}
+				return fmt.Errorf("%s: %q is not available for the caller's personal sources", CodeCapabilityNotHeld, name)
+			}
+		}
+	}
 	if len(arguments) != 0 {
 		if handled, err := e.refuseOrganizationActionCapability(ctx, fn, arguments[0]); handled {
 			return err

@@ -262,6 +262,36 @@ func credentialKind(row map[string]any) string {
 // such a token really is dead, GitHub answers 401 and the caller reads that as
 // reconnect_required, which is the same repair by a slower route.
 func (s *store) refreshGrantIfExpired(ctx context.Context, row map[string]any, current string) (string, error) {
+	expiry, err := time.Parse(time.RFC3339, rowString(row, "expiresAt"))
+	if err != nil || time.Now().UTC().Add(refreshMargin).Before(expiry) || s.github == nil || !s.github.Configured() {
+		return s.refreshGrantLocked(ctx, row, current)
+	}
+	var token string
+	err = s.withGrantGate(ctx, row, func(ctx context.Context) error {
+		latest, err := s.sourceCredentialSealedById(ctx, rowString(row, "id"))
+		if err != nil {
+			return err
+		}
+		if latest == nil {
+			return refuse(CodeCredentialNotFound, "the GitHub credential is no longer available")
+		}
+		if rowString(latest, "status") == credentialStatusRevoked {
+			return refuse(CodeCredentialRevoked, "the GitHub credential was disconnected")
+		}
+		if rowString(latest, "externalId") != rowString(row, "externalId") || rowString(latest, "ownerUserId") != rowString(row, "ownerUserId") {
+			return refuse(CodeCredentialNotFound, "the GitHub credential identity changed")
+		}
+		current, err := secret.Decrypt(rowString(latest, "encryptedValue"))
+		if err != nil {
+			return err
+		}
+		token, err = s.refreshGrantLocked(ctx, latest, current)
+		return err
+	})
+	return token, err
+}
+
+func (s *store) refreshGrantLocked(ctx context.Context, row map[string]any, current string) (string, error) {
 	expiresAt := strings.TrimSpace(rowString(row, "expiresAt"))
 	if expiresAt == "" {
 		return current, nil
@@ -464,13 +494,30 @@ func (i *Integration) handleSourceCredentialRevoke(ctx context.Context, args map
 		return nil, fmt.Errorf("packages: credentialId is required")
 	}
 
-	// Capture once before revoking; ordinary fetch resolvers refuse revoked
-	// credentials. This read never refreshes tokens or contacts GitHub.
-	bearer := deps.disconnectBearer(ctx, credentialId)
-	if err := deps.Store.revokeSourceCredential(ctx, credentialId); err != nil {
+	// A disconnect and a callback/refresh of the same provider identity must
+	// not overlap: remote revoke must not erase a newly reconnected token.
+	remote := false
+	revoke := func(ctx context.Context) error {
+		bearer := deps.disconnectBearer(ctx, credentialId)
+		if err := deps.Store.revokeSourceCredential(ctx, credentialId); err != nil {
+			return err
+		}
+		remote = deps.revokeAtGitHub(ctx, credentialId, bearer)
+		return nil
+	}
+	row, readErr := deps.Store.sourceCredentialSealedById(ctx, credentialId)
+	if readErr != nil {
+		return nil, readErr
+	}
+	if row != nil && credentialKind(row) == credentialKindGithubApp {
+		err = deps.Store.withGrantGate(ctx, row, revoke)
+	} else {
+		err = revoke(ctx)
+	}
+	if err != nil {
 		return nil, err
 	}
-	remote := deps.revokeAtGitHub(ctx, credentialId, bearer)
+
 	return resultNode(map[string]any{
 		"credentialId": credentialId,
 		"status":       credentialStatusRevoked,

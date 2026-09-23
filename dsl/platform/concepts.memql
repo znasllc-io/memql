@@ -786,6 +786,7 @@ concept sourceCredential {
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @displayCard(primary="name", secondary="repoUrl", tertiary="deployedVersion", status="status")
 concept package {
+  sourceConnectionId  string  @description("The personal GitHub installation binding selected at registration. Removal prevents new selection but preserves this package and its credential.")
   ownerUserId         string  @description("v1:identity:user.id that owns this package, or EMPTY for a cluster-owned one. Stamped from the actor on create, exactly as v1:platform:site stamps its own -- it is the row-authz key the composite tier compares against actor.userId, so a caller-supplied value would record a guarantee nothing provides. NOT `string!`, for the same reason the site's is not: an empty value is the meaningful cluster-owned state.")
   name                string!  @description("From the manifest at first analysis (memql-package.yaml `name`). Not caller-chosen: the package IS the tree, and a name typed into a form could disagree with what the tree says it is on the very next deploy.")
   sourceKind          enum("repo", "artifact")!  @description("Where the source comes from. 'repo' tracks a Git repository as the source of truth and is the form the D11 update feeds watch. 'artifact' is a zip already in the Library -- a complete, self-contained snapshot with nothing upstream to notice, so it never carries an update cue. Both analyze, build, stage, roll and publish through exactly the same pipeline.")
@@ -807,6 +808,7 @@ concept package {
   @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
   @relationship(type="references", as="fetchedFrom", field="artifactId", target=artifact, direction="outgoing")
   @relationship(type="references", as="fetchesUnder", field="credentialId", target=sourceCredential, direction="outgoing")
+  @relationship(type="references", as="selectedFrom", field="sourceConnectionId", target=sourceConnection, direction="outgoing")
 }
 
 /// ONE ATTEMPT to deploy one version of one package -- the append-only timeline (D7).
@@ -1014,4 +1016,21 @@ concept siteHealth {
   reason string!
   httpStatus int!
   durationMs int!
+}
+
+/// A person's saved GitHub installation access grouping. It carries no token
+/// and no MemQL owning account. Removing it affects new selections only;
+/// packages retain their credential and deployed sites remain untouched.
+@rowAuthz(owner="ownerUserId")
+@displayCard(primary="accountLogin", secondary="accountType", status="status")
+concept sourceConnection {
+  ownerUserId       string!
+  credentialId      string!
+  installationId    string!
+  providerAccountId string!
+  accountLogin      string!
+  accountType       string!
+  status            enum("active", "removed")!
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="usesGrant", field="credentialId", target=sourceCredential, direction="outgoing")
 }

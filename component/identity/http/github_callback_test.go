@@ -20,6 +20,7 @@ import (
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/githubconnect"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/secret"
 )
 
 // github_callback_test.go -- the acceptance criteria of epic memql#4912's
@@ -58,6 +59,7 @@ type githubFakeEngine struct {
 	updates  int
 	// statements is every MemQL string the handler issued, in order. The
 	// no-token-leak test greps it.
+	session    map[string]string
 	statements []string
 	unknown    []string
 }
@@ -77,6 +79,11 @@ func (f *githubFakeEngine) Execute(_ context.Context, q string) (*memqlengine.Ex
 	f.statements = append(f.statements, q)
 
 	switch {
+	case strings.HasPrefix(q, "query authSessionByRefreshTokenHash("):
+		if f.session != nil {
+			return bundleOf(f.session), nil
+		}
+		return bundleOf(map[string]string{"id": "browser-session", "userId": "v1:identity:user:asked", "expiresAt": time.Now().Add(time.Hour).UTC().Format(time.RFC3339)}), nil
 	case fakeStateByHashRe.MatchString(q):
 		if f.state == nil {
 			return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}, nil
@@ -90,7 +97,7 @@ func (f *githubFakeEngine) Execute(_ context.Context, q string) (*memqlengine.Ex
 		}
 		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}, nil
 
-	case fakeGrantByExtRe.MatchString(q):
+	case fakeGrantByExtRe.MatchString(q), strings.HasPrefix(q, "query sourceCredentialSealedById("):
 		if f.grant == nil {
 			return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}, nil
 		}
@@ -176,6 +183,9 @@ func (g *fakeGitHub) start(t *testing.T) *githubconnect.Client {
 		switch {
 		case r.URL.Path == "/login/oauth/access_token":
 			g.tokenHits++
+			if err := r.ParseForm(); err != nil || r.Form.Get("code_verifier") != "test-pkce-verifier" {
+				t.Error("token exchange must send the stored PKCE verifier")
+			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(g.tokenStatus)
 			_, _ = w.Write([]byte(g.tokenBody))
@@ -233,6 +243,10 @@ func newGitHubCallbackServer(t *testing.T, eng *githubFakeEngine, gh *fakeGitHub
 	// high-entropy-looking constant in source is what a secret scanner hunts
 	// for, and history is append-only.
 	t.Setenv("MEMQL_MASTER_KEY", strings.Repeat("ab", 32))
+	if eng.state != nil {
+		eng.state["pkceVerifier"], _, _ = secret.Encrypt("test-pkce-verifier")
+		eng.state["sessionId"] = "browser-session"
+	}
 
 	audit := &githubAuditRecorder{}
 	// DEBUG level, deliberately: a leak scan that read only warnings would
@@ -252,7 +266,7 @@ func newGitHubCallbackServer(t *testing.T, eng *githubFakeEngine, gh *fakeGitHub
 				WebhookSecret: "example-webhook-secret",
 			},
 		},
-		Store:        &identity.Store{Engine: eng, Logger: logger},
+		Store:        &identity.Store{Engine: eng, Logger: logger, GithubGate: githubHTTPUnitGate},
 		Audit:        audit,
 		Logger:       logger,
 		GitHubClient: gh.start(t),
@@ -276,6 +290,7 @@ func callbackRequest(query string) *http.Request {
 	// The binary sits behind a TLS-terminating ingress in every environment
 	// MemQL runs in, so this is what a real secure request looks like here.
 	r.Header.Set("X-Forwarded-Proto", "https")
+	r.AddCookie(&http.Cookie{Name: refreshCookieName, Value: "browser-refresh"})
 	return r
 }
 
@@ -768,4 +783,8 @@ func findStatement(t *testing.T, eng *githubFakeEngine, prefix string) string {
 	}
 	t.Fatalf("no statement starting %q was issued. Recorded:\n  %s", prefix, strings.Join(eng.statements, "\n  "))
 	return ""
+}
+
+func githubHTTPUnitGate(ctx context.Context, _ string, fn func(context.Context) error) error {
+	return fn(ctx)
 }

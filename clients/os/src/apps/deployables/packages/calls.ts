@@ -33,6 +33,7 @@ export interface NewPackageInput {
   autoDeploy?: boolean;
   /** A v1:platform:sourceCredential id. This surface never handles a token value. */
   credentialId: string;
+  sourceConnectionId?: string;
   artifactId: string;
   /**
    * The v1:accounts:account the source is FOR (memql#5303, D12). The compose
@@ -54,6 +55,7 @@ export async function createPackage(query: QueryClient, input: NewPackageInput):
   if (input.repoUrl !== "") parts.push(`repoUrl: ${renderMemQLValue(input.repoUrl)}`);
   if (input.repoRef !== "") parts.push(`repoRef: ${renderMemQLValue(input.repoRef)}`);
   if (input.credentialId !== "") parts.push(`credentialId: ${renderMemQLValue(input.credentialId)}`);
+  if (input.sourceConnectionId) parts.push(`sourceConnectionId: ${renderMemQLValue(input.sourceConnectionId)}`);
   if (input.artifactId !== "") parts.push(`artifactId: ${renderMemQLValue(input.artifactId)}`);
   if (input.accountId !== "") parts.push(`accountId: ${renderMemQLValue(input.accountId)}`);
   await query.executeNamed("createPackage", `mutation createPackage(${parts.join(", ")})`);

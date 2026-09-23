@@ -32,7 +32,7 @@ func TestNoneOfSixLeavesConnectAbsent(t *testing.T) {
 	if c.Configured() {
 		t.Fatal("the zero Config reports itself configured")
 	}
-	if got := c.AuthorizeURL("https://identity.example.test/auth/github/callback", "state"); got != "" {
+	if got := c.AuthorizeURL("https://identity.example.test/auth/github/callback", "state", "verifier"); got != "" {
 		t.Errorf("an unconfigured cluster composed an authorize URL: %q", got)
 	}
 	if got := c.InstallURL(); got != "" {
@@ -110,7 +110,7 @@ func TestFiveOfSixIsRefusedNamingBothHalves(t *testing.T) {
 func TestAuthorizeURLOffersAccountSelection(t *testing.T) {
 	c := fullConfig()
 	const redirect = "https://identity.example.test/auth/github/callback"
-	got := c.AuthorizeURL(redirect, "the-state-value")
+	got := c.AuthorizeURL(redirect, "the-state-value", "verifier")
 
 	if !strings.HasPrefix(got, "https://github.com/login/oauth/authorize?") {
 		t.Fatalf("authorize URL does not point at GitHub's authorize endpoint: %q", got)
@@ -125,7 +125,7 @@ func TestAuthorizeURLOffersAccountSelection(t *testing.T) {
 			t.Errorf("authorize URL is missing %q:\n  %s", want, got)
 		}
 	}
-	if c.AuthorizeURL("", "state") != "" || c.AuthorizeURL(redirect, "") != "" {
+	if c.AuthorizeURL("", "state", "verifier") != "" || c.AuthorizeURL(redirect, "", "verifier") != "" {
 		t.Error("an authorize URL was composed with no redirect URI or no state; both are required " +
 			"and a URL missing either sends the person to a page GitHub refuses")
 	}

@@ -40,6 +40,7 @@ type User struct {
 type Installation struct {
 	Id      int64 `json:"id"`
 	Account struct {
+		Id    int64  `json:"id"`
 		Login string `json:"login"`
 		Type  string `json:"type"`
 	} `json:"account"`
@@ -112,14 +113,33 @@ func (c *Client) User(ctx context.Context, userToken string) (User, error) {
 // would keep offering yesterday's -- the one failure a picker cannot survive.
 // The stored ids are a display cache the caller refreshes FROM this.
 func (c *Client) UserInstallations(ctx context.Context, userToken string) ([]Installation, error) {
-	var payload struct {
-		TotalCount    int            `json:"total_count"`
-		Installations []Installation `json:"installations"`
+	var installations []Installation
+	for page := 1; ; page++ {
+		var payload struct {
+			TotalCount    int            `json:"total_count"`
+			Installations []Installation `json:"installations"`
+		}
+		endpoint := "/user/installations?per_page=" + strconv.Itoa(RepositoriesPerPage)
+		if page > 1 {
+			endpoint += "&page=" + strconv.Itoa(page)
+		}
+		if _, err := c.call(ctx, http.MethodGet, endpoint, userToken, &payload); err != nil {
+			return nil, reauthorizeOn401(err)
+		}
+		installations = append(installations, payload.Installations...)
+		if len(installations) >= payload.TotalCount || len(payload.Installations) == 0 {
+			return installations, nil
+		}
 	}
-	if _, err := c.call(ctx, http.MethodGet, "/user/installations?per_page="+strconv.Itoa(RepositoriesPerPage), userToken, &payload); err != nil {
-		return nil, reauthorizeOn401(err)
-	}
-	return payload.Installations, nil
+}
+
+// UserRepository checks the person's current repository access before any
+// app-wide authority is borrowed for a fetch. Installation tokens alone do
+// not establish that the person behind a stored grant can read a repository.
+func (c *Client) UserRepository(ctx context.Context, userToken, owner, repo string) (Repository, error) {
+	var out Repository
+	_, err := c.call(ctx, http.MethodGet, "/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(repo), userToken, &out)
+	return out, reauthorizeOn401(err)
 }
 
 // InstallationRepositories lists one installation's repositories for this
