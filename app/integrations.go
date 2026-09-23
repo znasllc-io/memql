@@ -24,5 +24,8 @@ func (a *App) integrationsCore() {
 	// too -- produceArtifact is called from an Assistant's tool loop, which
 	// runs on a bff.
 	a.wireAgentWorkGoals()
+	// Procedure learning's Gate 1 (epic memql#5408, gap G7): the plug-in is
+	// core, so its compile gate is installed on every node type too.
+	a.wireProcedureIntegration()
 	a.Logger.Info("core integration providers registered")
 }

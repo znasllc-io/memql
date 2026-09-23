@@ -2,9 +2,13 @@ package procedure
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"maps"
+	"math"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -38,6 +42,15 @@ import (
 // than work does: mining runs the corpus of ONE owner. A cluster-owner read
 // would blend two people's recordings into one template, and the procedure
 // that came out would be correct about nobody.
+//
+// TWO READS ARE THE EXCEPTION, and both are made by the cluster's maintenance
+// principal BEFORE any owner is known (gap G10): workRunById, to learn whose
+// run an event named, and usersForSeedSweep, to list the owners a sweep walks.
+// Both are @serverOnly, so they go through executeInternal, and neither is
+// reachable by anybody else: workRunById filters to a cluster owner, which a
+// person and an ordinary automation's reader are not, and the handler admits
+// only the cluster's principal before it ever lists owners. Every read after
+// them borrows the owner.
 
 // Engine is the executor seam.
 type Engine interface {
@@ -122,8 +135,10 @@ func call(name string, args map[string]any) string {
 	for _, k := range keys {
 		v := args[k]
 		// A nil argument is DROPPED, never rendered as `nil`: "the caller said
-		// nothing" and "the caller said nil" must not render the same way.
-		if v == nil {
+		// nothing" and "the caller said nil" must not render the same way. The
+		// TYPED nils matter as much as the untyped one -- a nil map inside an
+		// `any` is not == nil, and rendered it would be a value.
+		if isNilValue(v) {
 			continue
 		}
 		if !first {
@@ -138,8 +153,26 @@ func call(name string, args map[string]any) string {
 	return b.String()
 }
 
+// literal renders one value as the MemQL literal the engine's call grammar
+// reads back as that value (gap G9, epic memql#5408).
+//
+// MAPS AND LISTS ARE LITERALS TOO, recursively. The first renderer here fell
+// through to a quoted string for anything it did not name, so the Gate 1
+// report went in as the TEXT "map[gate1Ran:true ...]" -- a string where the
+// concept declares an object, refused by the schema the moment the row was
+// validated. The payload this package now writes is an object of objects.
+//
+// A map's keys are written in sorted order, BARE when the lexer reads the key
+// back as one plain identifier and QUOTED otherwise: a hole id like
+// `s0.command.3`, a tool name like `docker-compose` or a keyword like `if` is
+// a legitimate key, and the call grammar accepts a quoted key where a bare one
+// would lex as something else. A nil inside a map is dropped for call's
+// reason; a nil inside a list is kept as `nil`, because dropping it would
+// shift every later element.
 func literal(v any) string {
 	switch t := v.(type) {
+	case nil:
+		return "nil"
 	case string:
 		return langparser.QuoteString(t)
 	case bool:
@@ -148,20 +181,109 @@ func literal(v any) string {
 		}
 		return "false"
 	case int:
-		return fmt.Sprint(t)
+		return strconv.Itoa(t)
 	case int64:
-		return fmt.Sprint(t)
+		return strconv.FormatInt(t, 10)
 	case float64:
-		return fmt.Sprint(t)
+		return numberLiteral(t)
+	case json.Number:
+		return t.String()
 	case []string:
 		parts := make([]string, len(t))
 		for i, s := range t {
 			parts[i] = langparser.QuoteString(s)
 		}
 		return "[" + strings.Join(parts, ", ") + "]"
+	case []any:
+		parts := make([]string, len(t))
+		for i, e := range t {
+			parts[i] = literal(e)
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
+	case []map[string]any:
+		parts := make([]string, len(t))
+		for i, e := range t {
+			parts[i] = literal(e)
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
+	case map[string]any:
+		return objectLiteral(t)
+	case map[string]string:
+		m := make(map[string]any, len(t))
+		for k, s := range t {
+			m[k] = s
+		}
+		return objectLiteral(m)
 	default:
 		return langparser.QuoteString(fmt.Sprint(t))
 	}
+}
+
+// objectLiteral renders a map as `{k: v, ...}`, keys sorted.
+func objectLiteral(m map[string]any) string {
+	keys := make([]string, 0, len(m))
+	for k, v := range m {
+		if isNilValue(v) {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, objectKey(k)+": "+literal(m[k]))
+	}
+	return "{" + strings.Join(parts, ", ") + "}"
+}
+
+// objectKey writes a map key bare exactly when the lexer reads it back as the
+// same single identifier -- so the rule is the lexer's own, and a keyword the
+// grammar adds later is quoted rather than broken -- and quoted otherwise.
+func objectKey(k string) string {
+	if plainName.MatchString(k) {
+		toks, err := langparser.NewLexer(k).Tokenize()
+		if err == nil && len(toks) >= 1 && toks[0].Type == langparser.TokenIdentifier && toks[0].Literal == k &&
+			(len(toks) == 1 || toks[1].Type == langparser.TokenEOF) {
+			return k
+		}
+	}
+	return langparser.QuoteString(k)
+}
+
+// plainName is the shape a bare key must have before the lexer is asked.
+var plainName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// numberLiteral writes a decoded JSON number the way the call grammar reads a
+// number: integral values without a fraction or an exponent, everything else
+// in its shortest exact form. A value no JSON document can hold (NaN, an
+// infinity) has no literal, and `nil` is the honest spelling of "no number".
+func numberLiteral(f float64) string {
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return "nil"
+	}
+	return strconv.FormatFloat(f, 'f', -1, 64)
+}
+
+// isNilValue reports an untyped nil or a typed nil map or slice -- the values
+// that mean "said nothing" rather than "said empty". An EMPTY map is not one:
+// `{}` is a value, and it is how recordConstructLadder is told to clear a
+// streak's bindings.
+func isNilValue(v any) bool {
+	switch t := v.(type) {
+	case nil:
+		return true
+	case map[string]any:
+		return t == nil
+	case map[string]string:
+		return t == nil
+	case []any:
+		return t == nil
+	case []string:
+		return t == nil
+	case []map[string]any:
+		return t == nil
+	}
+	return false
 }
 
 func firstConstruct(q string) string {

@@ -82,6 +82,15 @@ import (
 	_ "github.com/znasllc-io/memql/component/logstore"
 	_ "github.com/znasllc-io/memql/integrations/library"
 	_ "github.com/znasllc-io/memql/integrations/liveknowledge"
+	// Procedure learning and its certification ladder (epics memql#5402 and
+	// memql#5408, gap G1). Registered on every node type: its builtins are
+	// declared in dsl/procedure, which every binary loads, and until this
+	// line NO binary imported the package -- so learnFromSucceededRun and the
+	// corpus sweep reached no executor on any node while every epic C test
+	// stayed green. A lift runs wherever a run succeeds, which is any node,
+	// so it is not gated by build tag either. app/integrations_procedure.go
+	// installs its compile gate.
+	_ "github.com/znasllc-io/memql/integrations/procedure"
 	_ "github.com/znasllc-io/memql/integrations/rbac"
 	// Cutting a release of MemQL itself (epic memql#4434). Registered on
 	// every node type rather than gated to one: the builtins are declared in
