@@ -92,6 +92,19 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	// tell "the artifact changed" from anything else.
 	if decision != "rejected" {
 		current := currentArtifactHash(kind, storedHash, rowMap(approval, "subject"))
+		if kind == work.ApprovalKindProcedurePromotion {
+			// The one kind whose artifact is a ROW that keeps changing after
+			// the approval is raised: a re-lift rewrites the construct's
+			// source, template and preconditions, and D15 says a changed
+			// construct is a new candidate. So "what does it hash to now" is
+			// the construct's CURRENT procedureHash, read here -- recomputing
+			// over the stored subject would only prove the subject was not
+			// edited, which nobody does.
+			current, err = st.currentProcedureHash(ctx, rowMap(approval, "subject"))
+			if err != nil {
+				return nil, err
+			}
+		}
 		if ok, rerr := work.ResumeAllowed(storedHash, current, decision); !ok {
 			if errors.Is(rerr, work.ErrArtifactChanged) {
 				return nil, fmt.Errorf("work: %w -- approve it again against what it is now", rerr)
@@ -132,6 +145,24 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	if decision == "approved" {
 		trainingGoalId, trainingRunId, trainingEscalated =
 			i.startApprovedTraining(writeCtx, owner, runId, kind, rowMap(approval, "subject"))
+	}
+
+	if kind == work.ApprovalKindProcedurePromotion {
+		// NOTHING IS PARKED ON A PROMOTION. Its runId names the SHADOW run
+		// whose comparison met the threshold -- a finished run, kept on the
+		// approval so a person can open the evidence. resumeParkedRun would
+		// leave a succeeded run alone anyway (it acts only on `waiting`), but
+		// its rejection branch FAILS the run it names, and a person saying
+		// "not yet" must never rewrite the evidence they were shown. The
+		// ladder move itself is integrations/procedure's: the
+		// onProcedurePromotionDecided automation reads this decision and
+		// moves shadow to canary exactly once.
+		return i.resultNode(map[string]any{
+			"approvalId": approvalId,
+			"runId":      runId,
+			"decision":   decision,
+			"runResumed": false,
+		}), nil
 	}
 
 	resumed, err := i.resumeParkedRun(writeCtx, runId, approvalId, decision, now)

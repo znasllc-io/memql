@@ -240,6 +240,25 @@ func (s *store) pendingApprovalsForOwner(ctx context.Context) ([]map[string]any,
 	return s.query(ctx, "query workApprovalsForOwner()")
 }
 
+// currentProcedureHash is what a procedurePromotion approval's construct
+// hashes to NOW (epic memql#5408, D15). It reads under the CALLER's actor --
+// the only caller is a person deciding their own approval, and the construct
+// tier is owner-only -- so a construct that is gone, or not theirs, answers
+// "" and the artifact gate refuses rather than approving something nobody can
+// read. An empty answer is deliberately not an error: "the thing you approved
+// is not there any more" is the artifact-changed refusal, in its own words.
+func (s *store) currentProcedureHash(ctx context.Context, subject map[string]any) (string, error) {
+	constructId, _ := subject["constructId"].(string)
+	if strings.TrimSpace(constructId) == "" {
+		return "", nil
+	}
+	row, err := one(s.query(ctx, "query "+call("authoringConstructById", map[string]any{"constructId": constructId})))
+	if err != nil || row == nil {
+		return "", err
+	}
+	return rowString(row, "procedureHash"), nil
+}
+
 // ---------------------------------------------------------------------------
 // Writes (@serverOnly: internal origin, plus the owner's borrowed authority)
 // ---------------------------------------------------------------------------
