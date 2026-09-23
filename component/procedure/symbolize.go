@@ -9,14 +9,15 @@ import (
 // generalization of every member.
 type Symbol struct {
 	// Id is the symbol's name in every sequence downstream.
-	Id string
+	Id string `json:"id"`
 	// Tool is the identity every member shares.
-	Tool string
+	Tool string `json:"tool"`
 	// Template is the anti-unification of all Members' argument trees.
-	Template *Node
+	Template *Node `json:"template"`
 	// Members are indices into the actions slice Symbolize was given, in
-	// ascending order.
-	Members []int
+	// ascending order. They index a corpus, so a stored procedure has no use
+	// for them and they are omitted when empty.
+	Members []int `json:"members,omitempty"`
 }
 
 // holeNamer hands out hole ids. It is a closure rather than a counter field so
