@@ -32,6 +32,7 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	proc "github.com/znasllc-io/memql/component/procedure"
+	"github.com/znasllc-io/memql/component/work"
 )
 
 // integrationName is the plug-in name and the middle segment of every
@@ -77,6 +78,9 @@ type Integration struct {
 	deriver  Deriver
 	params   proc.Params
 	compiler CompileGate
+	// seams are what a replay needs from the node it runs on (seams.go):
+	// the dispatchers, the prober and the app fallback. app/ installs them.
+	seams seams
 }
 
 // New builds the integration.
@@ -124,6 +128,76 @@ func (i *Integration) SetCompiler(c CompileGate) {
 // that holds app/ to it -- a plug-in with an unwired setter is green in every
 // test and inert in the cluster.
 func (i *Integration) CompileGateInstalled() bool { return i != nil && i.compiler != nil }
+
+// SetDispatcher installs the dispatcher for one replay target. app/ installs
+// the workbench's on every node that can reach a workbench, and the machine's
+// on agent nodes only (the worker stream lives there). A nil dispatcher is
+// ignored, for SetCompiler's reason.
+func (i *Integration) SetDispatcher(target work.ReplayTarget, d Dispatcher) {
+	if i == nil || d == nil {
+		return
+	}
+	i.seams.mu.Lock()
+	defer i.seams.mu.Unlock()
+	if i.seams.dispatchers == nil {
+		i.seams.dispatchers = map[work.ReplayTarget]Dispatcher{}
+	}
+	i.seams.dispatchers[target] = d
+}
+
+// SetProber installs the environment prober the preconditions are checked
+// against. Absent, a procedure that learned any precondition cannot start:
+// an unmeasured precondition does not hold (D16).
+func (i *Integration) SetProber(p Prober) {
+	if i == nil || p == nil {
+		return
+	}
+	i.seams.mu.Lock()
+	defer i.seams.mu.Unlock()
+	i.seams.prober = p
+}
+
+// SetAppFallback installs the hand-back to the app. Absent, a replay that
+// cannot serve its goal fails the run with procedure_fallback_unavailable,
+// naming why -- never a silent success.
+func (i *Integration) SetAppFallback(f AppFallback) {
+	if i == nil || f == nil {
+		return
+	}
+	i.seams.mu.Lock()
+	defer i.seams.mu.Unlock()
+	i.seams.fallback = f
+}
+
+// dispatcherFor, prober and appFallback read what app/ installed.
+func (i *Integration) dispatcherFor(target work.ReplayTarget) Dispatcher {
+	i.seams.mu.RLock()
+	defer i.seams.mu.RUnlock()
+	return i.seams.dispatchers[target]
+}
+
+func (i *Integration) prober() Prober {
+	i.seams.mu.RLock()
+	defer i.seams.mu.RUnlock()
+	return i.seams.prober
+}
+
+func (i *Integration) appFallback() AppFallback {
+	i.seams.mu.RLock()
+	defer i.seams.mu.RUnlock()
+	return i.seams.fallback
+}
+
+// ReplaySeamsInstalled reports which seams app/ wired, for the wiring tests.
+func (i *Integration) ReplaySeamsInstalled() (workbench, machine, prober, fallback bool) {
+	if i == nil {
+		return
+	}
+	i.seams.mu.RLock()
+	defer i.seams.mu.RUnlock()
+	return i.seams.dispatchers[work.TargetWorkbench] != nil, i.seams.dispatchers[work.TargetMachine] != nil,
+		i.seams.prober != nil, i.seams.fallback != nil
+}
 
 // SetParams overrides the pipeline knobs. The design record's cross-cutting
 // rule makes the budget, support, gap and argument ceiling values rather than
