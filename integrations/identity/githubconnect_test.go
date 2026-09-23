@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -125,6 +126,10 @@ func TestGithubConnectBeginAnswersAnAuthorizeURL(t *testing.T) {
 	authorizeURL, _ := reply["authorizeUrl"].(string)
 	if !strings.HasPrefix(authorizeURL, "https://github.com/login/oauth/authorize?") {
 		t.Fatalf("authorizeUrl = %q", authorizeURL)
+	}
+	parsed, parseErr := url.Parse(authorizeURL)
+	if parseErr != nil || parsed.Query().Get("prompt") != "select_account" {
+		t.Fatalf("connect must offer account selection, got %q (%v)", authorizeURL, parseErr)
 	}
 	if !strings.Contains(authorizeURL, "redirect_uri=https%3A%2F%2Fidentity.example.test%2Fauth%2Fgithub%2Fcallback") {
 		t.Errorf("the redirect URI is not derived from this cluster's own identity base URL:\n  %s", authorizeURL)

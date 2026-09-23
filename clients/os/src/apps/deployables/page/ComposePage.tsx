@@ -3,6 +3,8 @@ import { ConnectReturnNotice } from "../sources/ConnectReturnNotice";
 import { useEffect, useMemo, useState } from "react";
 
 import { Rocket } from "lucide-react";
+import { useSession } from "../../../chrome/access";
+import { bare } from "../people";
 
 import { Caption, Field, Notice, useLiveView, type Stop } from "../../../kit";
 import type { Act } from "../../../kit/ActionBar";
@@ -26,7 +28,7 @@ import {
 } from "../packages/rows";
 import { usePackageDeployments } from "../packages/usePackages";
 import { probeNote, probeParks, zipVerdict } from "../sources/probe";
-import type { CredentialFeedStatus, CredentialRow } from "../sources/rows";
+import { githubGrantOf, type CredentialFeedStatus, type CredentialRow } from "../sources/rows";
 import { useAddressChecks, useArtifactProbe, useSourceProbe } from "../sources/useProbes";
 import { kindLabel, type StopId } from "../targets";
 import { siteStateDetail } from "../words";
@@ -61,7 +63,7 @@ import { ManifestPreview } from "./stops/compose/ManifestPreview";
 import { returnPathFor } from "../sources/connectReturn";
 import { OWN_ACCOUNT, organizationOf, ownerIsNamed, type GithubAppOwner } from "../sources/GithubAppSetup";
 import { useGithubApp } from "../sources/useGithubApp";
-import { useGithubConnect } from "../sources/useGithubConnect";
+import { useCredentialRevoke, useGithubConnect } from "../sources/useGithubConnect";
 import type { ConnectionNeed } from "./stops/compose/RepositorySource";
 import { ComposeSourceDetailStep, ComposeSourceKindStep, SOURCE_DETAIL_NAME, SOURCE_KIND_LABEL } from "./stops/compose/Source";
 import { ComposeWhereItLivesStop } from "./stops/compose/WhereItLives";
@@ -197,6 +199,13 @@ export function ComposePage(props: ComposePageProps) {
   // THE CONNECT IS HELD HERE because it is a step's forward act, and a wizard's
   // forward act lives on its floor -- which this page draws.
   const githubConnect = useGithubConnect();
+  // Keep the confirmed result above the responsive step body: changing a
+  // wizard stop or window width must not resurrect a disconnected picker.
+  const githubDisconnect = useCredentialRevoke();
+  const { access } = useSession();
+  const githubViewer = bare(access?.userId ?? "");
+  const githubGrant = githubGrantOf(credentials.filter(c => bare(c.ownerUserId) === githubViewer));
+  useEffect(() => { githubDisconnect.clear(); }, [githubViewer, githubGrant?.id, githubDisconnect.clear]);
   // What the repository step says it needs before it can go on. The step says
   // it, because only the step has GitHub's own answer about the grant.
   const [connectionNeed, setConnectionNeed] = useState<ConnectionNeed>("");
@@ -561,6 +570,7 @@ export function ComposePage(props: ComposePageProps) {
             tokenFormOpen={tokenFormOpen}
             onTokenFormOpenChange={setTokenFormOpen}
             connect={githubConnect}
+            disconnect={githubDisconnect}
             onConnectionNeed={setConnectionNeed}
             app={githubApp}
             appOwner={appOwner}
@@ -795,7 +805,7 @@ export function ComposePage(props: ComposePageProps) {
           : connectionNeed === "connect"
             ? { word: "Not connected to GitHub", detail: "connect to pick from your repositories, or choose A token" }
             : connectionNeed === "reconnect"
-              ? { word: "GitHub connection lapsed", detail: "reconnect to pick from your repositories, or choose A token" }
+              ? { word: "GitHub reconnection needed", detail: "reconnect to pick from your repositories, or choose A token" }
             : connectionNeed === "setup"
               ? ownerNamed
                 ? { word: "GitHub is not set up", detail: "set it up once for this cluster, or choose A token" }

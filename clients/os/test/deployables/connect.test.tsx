@@ -1247,6 +1247,104 @@ describe("personal repository connection lifecycle", () => {
 });
 
 
+describe("disconnecting from the repository chooser", () => {
+  afterEach(() => { h.connection = null; });
+
+  async function confirmDisconnect(region: HTMLElement) {
+    await click(within(region).getByRole("button", { name: "Disconnect" }));
+    await click(within(region).getByRole("button", { name: "Disconnect" }));
+  }
+
+  it("names the account, allows cancellation, and leaves shared installations alone", async () => {
+    const { connection, region } = await composeSource({ credentials: [GRANT], repositories: repositoriesReply({ repositories: [WIDGET] }) });
+    await within(region).findByRole("button", { name: /widget/ });
+    expect(within(region).getByText(/Connected to GitHub as @/)).toBeTruthy();
+    await click(within(region).getByRole("button", { name: "Disconnect" }));
+    expect(within(region).getByText(/The GitHub App stays installed/)).toBeTruthy();
+    await click(within(region).getByRole("button", { name: "Cancel" }));
+    expect(connection.callsNamed("sourceCredentialRevoke")).toHaveLength(0);
+    expect(within(region).getByRole("button", { name: /widget/ })).toBeTruthy();
+  });
+
+  it("clears selected repository and pending probe immediately before any broadcast, then offers fresh authorization", async () => {
+    const { connection, region } = await composeSource({ credentials: [GRANT], repositories: repositoriesReply({ repositories: [WIDGET] }), installUrl: "https://github.com/apps/memql/installations/new" });
+    let finishProbe!: (reply: ReturnType<typeof builtinReply>) => void;
+    vi.spyOn(connection.query, "sourceProbe").mockImplementationOnce(() => new Promise(resolve => { finishProbe = resolve; }));
+    await click(await within(region).findByRole("button", { name: /widget/ }));
+    await confirmDisconnect(region);
+    await waitFor(() => expect(floorAct("Reconnect GitHub")).toBeTruthy());
+    expect(within(region).queryByRole("button", { name: /widget/ })).toBeNull();
+    expect(within(region).queryByText("acme/widget at default branch")).toBeNull();
+    expect(within(region).queryByRole("link", { name: "Install on another organization" })).toBeNull();
+    await act(async () => finishProbe(builtinReply("sourceProbe", [probeReply({ branches: ["old-secret-branch"] })])));
+    expect(within(region).queryByLabelText(BRANCH_FIELD)).toBeNull();
+    expect(connection.callsNamed("sourceCredentialRevoke")).toEqual(['builtin sourceCredentialRevoke(credentialId: "cred-grant")']);
+    const begins = connection.callsNamed("githubConnectBegin").length;
+    await click(floorAct("Reconnect GitHub")!);
+    expect(connection.callsNamed("githubConnectBegin")).toHaveLength(begins + 1);
+    expect(connection.callsNamed("githubAppRemove")).toHaveLength(0);
+  });
+
+  it("keeps the confirmed disconnect when the repository step unmounts and reopens before its feed update", async () => {
+    const { region } = await composeSource({ credentials: [GRANT], repositories: repositoriesReply({ repositories: [WIDGET] }) });
+    await within(region).findByRole("button", { name: /widget/ });
+    await confirmDisconnect(region);
+    await waitFor(() => expect(floorAct("Reconnect GitHub")).toBeTruthy());
+    await click(within(region).getByRole("button", { name: "Source A repository" }));
+    await click(within(region).getByRole("button", { name: /^Repository(?: |$)/ }));
+    await waitFor(() => expect(floorAct("Reconnect GitHub")).toBeTruthy());
+    expect(within(region).queryByRole("button", { name: /widget/ })).toBeNull();
+    expect(within(region).queryByText(/Connected to GitHub as/)).toBeNull();
+  });
+
+  it("keeps the account and list after a refused disconnect, and permits retry", async () => {
+    const seed: FakeSeed = { credentials: [GRANT], repositories: repositoriesReply({ repositories: [WIDGET] }), credentialRevokeError: "credential_not_found: You cannot disconnect this credential." };
+    const { region } = await composeSource(seed);
+    await within(region).findByRole("button", { name: /widget/ });
+    await confirmDisconnect(region);
+    expect(await within(region).findByText("You cannot disconnect this credential.")).toBeTruthy();
+    expect(within(region).getByText(/Connected to GitHub as @/)).toBeTruthy();
+    expect(within(region).getByRole("button", { name: /widget/ })).toBeTruthy();
+    delete seed.credentialRevokeError;
+    await click(within(region).getByRole("button", { name: "Disconnect" }));
+    await waitFor(() => expect(floorAct("Reconnect GitHub")).toBeTruthy());
+  });
+
+  it("discards a selected repository and probe when GitHub reports the grant has lapsed", async () => {
+    const { connection, region } = await composeSource({ credentials: [GRANT], repositories: repositoriesReply({ repositories: [WIDGET] }), sourceProbe: { "cred-grant": probeReply({ branches: ["main", "private-old-branch"] }) } });
+    await click(await within(region).findByRole("button", { name: /widget/ }));
+    expect(await within(region).findByText("acme/widget at default branch")).toBeTruthy();
+    vi.spyOn(connection.query, "sourceRepositories").mockResolvedValueOnce(builtinReply("sourceRepositories", [repositoriesReply({ reason: "reconnect_required" })]));
+    await click(within(region).getByRole("button", { name: "Look again" }));
+    await waitFor(() => expect(floorAct("Reconnect GitHub")).toBeTruthy());
+    expect(within(region).queryByText("acme/widget at default branch")).toBeNull();
+    expect(within(region).queryByLabelText(BRANCH_FIELD)).toBeNull();
+  });
+
+  it("does not erase a pasted-token draft in the automatic no-app fallback", async () => {
+    h.connection = fakeConnection({});
+    const onDraft = vi.fn();
+    render(withSession(<RepositorySource
+      draft={{ ...EMPTY_DRAFT, choice: "repo", repoUrl: "https://github.com/acme/token-repo", credentialId: "token-only" }}
+      onDraft={onDraft} credentials={[credentialFromRow(credentialRow({ id: "token-only", ownerUserId: "u-me" }))]}
+      probe={{ reply: null, error: "", busy: false, probe: vi.fn(async () => {}), clear: vi.fn() }}
+      tokenFormOpen={false} onTokenFormOpenChange={vi.fn()}
+      connect={{ busy: false, refusal: { code: "github_app_not_configured", message: "No app." }, installUrl: "", connect: vi.fn(async () => {}), learn: vi.fn(async () => false), clear: vi.fn() }}
+    />, { userId: "u-me" }));
+    expect(await screen.findByDisplayValue("https://github.com/acme/token-repo")).toBeTruthy();
+    expect(onDraft).not.toHaveBeenCalled();
+  });
+
+  it("keeps the partial remote-revocation warning when the revoked feed event arrives", async () => {
+    const { connection, region } = await composeSource({ credentials: [GRANT], repositories: repositoriesReply({ repositories: [WIDGET] }), credentialRevokeRemote: false });
+    await within(region).findByRole("button", { name: /widget/ });
+    await confirmDisconnect(region);
+    emit(connection, "v1:platform:sourceCredential", githubGrantRow({ id: "cred-grant", status: "revoked" }));
+    expect(await within(region).findByText(/GitHub did not confirm that your personal authorization ended/)).toBeTruthy();
+    expect(floorAct("Reconnect GitHub")).toBeTruthy();
+  });
+});
+
 describe("the compose Source stop, with a connection", () => {
   afterEach(() => {
     h.connection = null;
@@ -1602,7 +1700,7 @@ describe("what a disconnect says about GitHub", () => {
   });
 
   it("names the half that did not, because only the person can finish it", async () => {
-    // The engine revokes at GitHub FIRST and flips the row either way, so a
+    // The engine revokes the local row first and then tries GitHub, so a
     // disconnect that could not reach GitHub succeeded HERE and left the
     // authorization standing THERE. `--os-warn` and not `--os-error`: the
     // disconnect worked, and this is somebody's next step.

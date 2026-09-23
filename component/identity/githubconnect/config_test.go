@@ -104,10 +104,10 @@ func TestFiveOfSixIsRefusedNamingBothHalves(t *testing.T) {
 	}
 }
 
-// TestAuthorizeURLCarriesTheThreeParameters pins the shape the browser is sent
+// TestAuthorizeURLOffersAccountSelection pins the shape the browser is sent
 // to. The state travels in the URL and only its digest is stored, so this is
 // the one place the plaintext appears.
-func TestAuthorizeURLCarriesTheThreeParameters(t *testing.T) {
+func TestAuthorizeURLOffersAccountSelection(t *testing.T) {
 	c := fullConfig()
 	const redirect = "https://identity.example.test/auth/github/callback"
 	got := c.AuthorizeURL(redirect, "the-state-value")
@@ -118,6 +118,7 @@ func TestAuthorizeURLCarriesTheThreeParameters(t *testing.T) {
 	for _, want := range []string{
 		"client_id=" + c.ClientID,
 		"state=the-state-value",
+		"prompt=select_account",
 		"redirect_uri=https%3A%2F%2Fidentity.example.test%2Fauth%2Fgithub%2Fcallback",
 	} {
 		if !strings.Contains(got, want) {

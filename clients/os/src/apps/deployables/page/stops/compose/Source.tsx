@@ -18,7 +18,7 @@ import { PICKER_PAGE_SIZE, useZipArtifacts } from "../../../sources/useZipArtifa
 import type { CredentialFeedStatus, CredentialRow } from "../../../sources/rows";
 import type { GithubAppOwner } from "../../../sources/GithubAppSetup";
 import type { GithubAppActions } from "../../../sources/useGithubApp";
-import type { GithubConnectActions } from "../../../sources/useGithubConnect";
+import type { CredentialRevokeActions, GithubConnectActions } from "../../../sources/useGithubConnect";
 import type { PackageRow } from "../../../packages/rows";
 import { sourceLabel } from "../../../packages/rows";
 import { suggestName, type ComposeDraft } from "../../compose";
@@ -158,6 +158,7 @@ export function ComposeSourceDetailStep({
   tokenFormOpen,
   onTokenFormOpenChange,
   connect,
+  disconnect,
   onConnectionNeed,
   app,
   appOwner,
@@ -182,6 +183,7 @@ export function ComposeSourceDetailStep({
   onTokenFormOpenChange: (open: boolean) => void;
   /** The GitHub connect, held by the page because it is the floor's act. */
   connect: GithubConnectActions;
+  disconnect?: CredentialRevokeActions;
   /** What the repository step needs before it can go on; see RepositorySource. */
   onConnectionNeed?: (need: ConnectionNeed) => void;
   /** The cluster's GitHub App and where an owner would register one -- held by
@@ -211,6 +213,7 @@ export function ComposeSourceDetailStep({
             tokenFormOpen={tokenFormOpen}
             onTokenFormOpenChange={onTokenFormOpenChange}
             connect={connect}
+            disconnect={disconnect}
             onConnectionNeed={onConnectionNeed}
             app={app}
             appOwner={appOwner}

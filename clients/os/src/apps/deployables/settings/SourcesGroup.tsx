@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { KeyRound } from "lucide-react";
 
 import { Button, Caption, LiveList, RecordRow as ListRow, listCount, Subhead, formatFreshness, useNow } from "../../../kit";
@@ -110,7 +110,12 @@ import {
  *  somebody back to the surface that asked. */
 const SETTINGS_SECTION = "settings";
 
-export function SourcesGroup({
+export function SourcesGroup(props: Parameters<typeof SourcesGroupForViewer>[0]) {
+  // Personal state must never follow a different signed-in viewer.
+  return <SourcesGroupForViewer key={bare(props.viewerUserId)} {...props} />;
+}
+
+function SourcesGroupForViewer({
   credentials,
   packages,
   viewerUserId,
@@ -161,20 +166,28 @@ export function SourcesGroup({
   // carries every person's cards, and a card saying "connected as @octocat"
   // about a colleague's grant would be the wrong person's connection.
   const mine = useMemo(() => held.filter((c) => bare(c.ownerUserId) === viewer), [held, viewer]);
-  const grant = useMemo(() => githubGrantOf(mine), [mine]);
+  const feedGrant = useMemo(() => githubGrantOf(mine), [mine]);
+  const [disconnected, setDisconnected] = useState<{ id: string; login: string } | null>(null);
+  const locallyRevoked = feedGrant !== null && disconnected?.id === feedGrant.id && disconnected.login === feedGrant.login;
+  const grant = feedGrant !== null && locallyRevoked ? { ...feedGrant, status: "revoked" } : feedGrant;
+  useEffect(() => {
+    if (disconnected && (feedGrant === null || credentialIsRevoked(feedGrant) || feedGrant.id !== disconnected.id || feedGrant.login !== disconnected.login)) {
+      setDisconnected(null);
+    }
+  }, [feedGrant, disconnected]);
   // ...and the list is that same feed NARROWED, because a grant is already
   // the card above and a row that appeared in both would be one credential
   // offering two different acts. `useLiveView` is exactly what LiveList's
   // source seam is for, so the pasted rows keep their arrival cues and their
   // live-state caption.
-  const pasted = useLiveView<CredentialRow, CredentialRow>(credentials, "pasted", (rows) =>
+  const pasted = useLiveView<CredentialRow, CredentialRow>(credentials, `pasted:${viewer}`, (rows) =>
     pastedCredentials(rows.filter((c) => bare(c.ownerUserId) === viewer)),
   );
   // OTHER PEOPLE'S, every kind -- a colleague's GitHub grant is listed here
   // as a row rather than as a card, because the card's acts (reconnect,
   // check what it reaches) are the grant-holder's and the one act an owner
   // has over it is Revoke. Newest first, like the pasted list.
-  const others = useLiveView<CredentialRow, CredentialRow>(credentials, "others", (rows) =>
+  const others = useLiveView<CredentialRow, CredentialRow>(credentials, `others:${viewer}`, (rows) =>
     rows
       .filter((c) => bare(c.ownerUserId) !== viewer)
       .slice()
@@ -191,43 +204,31 @@ export function SourcesGroup({
     [packages, grant],
   );
 
-  // THE INSTALL LINK'S URL, ASKED FOR ONCE PER GRANT.
-  //
-  // "Install on another organization" has to be a real anchor with a real
-  // href, and `githubConnectBegin` is the only call that answers where that
-  // is -- the credential row projects installation IDS, never the app's
-  // installation page. So it is asked for exactly once, keyed on the grant's
-  // id in a ref rather than in the dependency list: `learn` is stable only
-  // while the connection is, and a dependency on it alone would ask again
-  // every time the socket redialled.
-  //
-  // Only for somebody who is already CONNECTED, which is the only place the
-  // link is offered. A person with no grant sees Connect, whose click makes
-  // this same call and navigates with what it answers -- so the common path
-  // asks the cluster nothing until somebody presses something.
-  //
-  // MARKED ASKED ONLY WHEN IT WAS ANSWERED. A browser that had not finished
-  // dialling when this mounted would otherwise record the question as asked
-  // and never ask it again, and the link would be missing for the rest of
-  // the session; `learn` says which happened. The in-flight ref is what
-  // keeps a re-render during the call from sending a second one.
-  //
-  // A LOOKUP THAT FAILS COSTS THE LINK AND NOTHING ELSE, which is why its
-  // refusal is not rendered. It is an enhancement on a card that is already
-  // telling the truth, and the refusals that matter here -- the ones a click
-  // produces -- still land beside the control that produced them.
-  const learnedFor = useRef("");
-  const learning = useRef(false);
+  // A lookup belongs to one grant, including its current login and scope.
+  // Clearing invalidates requests already in flight. Hide old facts during
+  // the render before the effect resets them, and learn the new install URL
+  // only for an active connection. Viewer changes remount this whole group.
+  const grantBoundary = grant === null ? "" : credentialFingerprint(grant);
+  const [lookedUpFor, setLookedUpFor] = useState("");
+  const currentLookup = lookedUpFor === grantBoundary;
   const learn = install.learn;
+  const clearInstall = install.clear;
+  const clearLookup = lookup.clear;
+  const clearConnect = connect.clear;
+  const clearDisconnect = disconnect.clear;
+  useEffect(() => { clearDisconnect(); }, [feedGrant?.id, feedGrant?.login, clearDisconnect]);
+  const activeGrant = grant !== null && !credentialIsRevoked(grant);
   useEffect(() => {
-    if (grant === null || grant.id === learnedFor.current || learning.current) return;
-    const wanted = grant.id;
-    learning.current = true;
-    void learn(returnPath).then((answered) => {
-      learning.current = false;
-      if (answered) learnedFor.current = wanted;
-    });
-  }, [grant, learn, returnPath]);
+    clearLookup();
+    clearInstall();
+    clearConnect();
+    setLookedUpFor(grantBoundary);
+    if (activeGrant) void learn(returnPath);
+    return () => {
+      clearLookup();
+      clearInstall();
+    };
+  }, [grantBoundary, activeGrant, learn, returnPath, clearInstall, clearLookup, clearConnect]);
 
   return (
     <fieldset className="os-field-group">
@@ -271,9 +272,9 @@ export function SourcesGroup({
                row itself carries, which is the reaches fact at the resolution
                the row can support; passing an empty list from an unread
                lookup would say this connection reaches nothing. */
-            installations={lookup.readAt === "" ? null : lookup.page.installations}
-            pending={lookup.readAt === "" ? null : lookup.page.pending}
-            installUrl={install.installUrl}
+            installations={!activeGrant ? [] : !currentLookup || lookup.readAt === "" ? null : lookup.page.installations}
+            pending={!activeGrant ? [] : !currentLookup || lookup.readAt === "" ? null : lookup.page.pending}
+            installUrl={activeGrant && currentLookup ? install.installUrl : ""}
             /* INSIDE THE CARD, under the facts it refreshes. Its own sentence
                says "the count above", and mounted as a SIBLING of the card it
                sat below the whole Disconnect block -- so "above" pointed past
@@ -287,7 +288,15 @@ export function SourcesGroup({
             busy={disconnect.busy}
             refusal={disconnect.refusal}
             remoteRevoked={disconnect.remoteRevoked}
-            onDisconnect={() => void disconnect.revoke(grant.id)}
+            onDisconnect={() => {
+              const target = { id: grant.id, login: grant.login };
+              void disconnect.revoke(grant.id).then(succeeded => {
+                if (!succeeded) return;
+                setDisconnected(target);
+                lookup.clear();
+                install.clear();
+              });
+            }}
           />
           {credentialIsRevoked(grant) && !appMissing ? (
             /* The copy for `reconnect_required` sends a person to

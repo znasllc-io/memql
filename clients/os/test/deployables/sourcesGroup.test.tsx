@@ -13,7 +13,7 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { SOURCE_CREDENTIAL_CONCEPT } from "../../src/apps/deployables/sources/rows";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
-import { click, emit, fakeConnection, githubGrantRow, withSession, type FakeConnection, type FakeSeed } from "./harness";
+import { builtinReply, repositoriesReply, click, emit, fakeConnection, githubGrantRow, withSession, type FakeConnection, type FakeSeed } from "./harness";
 
 // Settings -> Sources (epic memql#4885, task memql#4891, design section D):
 // every credential this person holds, what fetches under it, and the two acts
@@ -275,5 +275,72 @@ describe("Settings -> Sources: whose credentials", () => {
     expect(within(list).getByText("ada's token")).toBeTruthy();
     expect(within(list).queryByText("acme deploy token")).toBeNull();
     await waitFor(() => expect(within(list).getByText("Ada Lovelace's")).toBeTruthy());
+  });
+});
+
+
+describe("GitHub settings disconnect boundaries", () => {
+  const grant = githubGrantRow({ id: "grant", ownerUserId: "u-me", login: "octocat", installationIds: ["acme"] });
+  const repositories = repositoriesReply({ installations: [{ id: "acme", login: "Acme", accountType: "Organization" }], pending: [{ login: "AwaitingOrg" }] });
+
+  it("disconnects immediately without a feed event and keeps an unconfirmed remote revoke visible through its acknowledgement", async () => {
+    const conn = fakeConnection({ credentials: [grant], repositories, credentialRevokeRemote: false, installUrl: "https://github.com/apps/memql/installations/new" });
+    mount(conn);
+    await screen.findByText("@octocat");
+    await click(screen.getByRole("button", { name: "Check what it reaches" }));
+    expect(await screen.findByText("Acme")).toBeTruthy();
+    expect(screen.getByText("AwaitingOrg pending")).toBeTruthy();
+    await screen.findByRole("link", { name: "Install on another organization" });
+    await click(screen.getByRole("button", { name: "Disconnect" }));
+    await click(screen.getByRole("button", { name: "Disconnect" }));
+    await screen.findByRole("button", { name: "Reconnect GitHub" });
+    expect(screen.queryByText("Acme")).toBeNull();
+    expect(screen.queryByText("AwaitingOrg pending")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Install on another organization" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Check what it reaches" })).toBeNull();
+    expect(screen.getByText(/GitHub did not confirm/)).toBeTruthy();
+    await emit(conn, SOURCE_CREDENTIAL_CONCEPT, githubGrantRow({ ...grant, id: "grant", status: "revoked", revokedAt: "2026-09-22T00:00:00Z" }));
+    expect(screen.getByText(/GitHub did not confirm/)).toBeTruthy();
+  });
+
+  it("retains the connection and its organizations when the cluster refuses disconnect", async () => {
+    const conn = fakeConnection({ credentials: [grant], repositories, credentialRevokeError: "forbidden: cannot revoke this credential", installUrl: "https://github.com/apps/memql/installations/new" });
+    mount(conn);
+    await screen.findByText("@octocat");
+    await click(screen.getByRole("button", { name: "Check what it reaches" }));
+    await screen.findByText("Acme");
+    await click(screen.getByRole("button", { name: "Disconnect" }));
+    await click(screen.getByRole("button", { name: "Disconnect" }));
+    expect(await screen.findByText("cannot revoke this credential")).toBeTruthy();
+    expect(screen.getByText("Acme")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Reconnect GitHub" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Install on another organization" })).toBeTruthy();
+  });
+
+  it("drops a pending old lookup when the active grant changes", async () => {
+    const conn = fakeConnection({ credentials: [grant], repositories });
+    let resolve!: (value: ReturnType<typeof builtinReply>) => void;
+    vi.spyOn(conn.query, "sourceRepositories").mockImplementationOnce(() => new Promise(yes => { resolve = yes; }));
+    mount(conn);
+    await screen.findByText("@octocat");
+    await click(screen.getByRole("button", { name: "Check what it reaches" }));
+    await emit(conn, SOURCE_CREDENTIAL_CONCEPT, githubGrantRow({ id: "grant", ownerUserId: "u-me", login: "new-account", createdAt: "2026-09-22T00:00:00Z" }));
+    await screen.findByText("@new-account");
+    await act(async () => resolve(builtinReply("sourceRepositories", [repositories])));
+    expect(screen.queryByText("Acme")).toBeNull();
+    expect(screen.queryByText("AwaitingOrg pending")).toBeNull();
+    expect(screen.queryByText(/Asked GitHub/)).toBeNull();
+  });
+
+  it("does not carry a prior viewer's organization lookup into another viewer's card", async () => {
+    const conn = fakeConnection({ credentials: [grant, githubGrantRow({ id: "other", ownerUserId: "u-other", login: "another-person" })], repositories });
+    const view = mount(conn);
+    await screen.findByText("@octocat");
+    await click(screen.getByRole("button", { name: "Check what it reaches" }));
+    await screen.findByText("Acme");
+    view.rerender(withSession(<DeployablesApp sectionId="settings" navigate={vi.fn()} askContext={vi.fn()} store={memStore()} />, { role: "owner", userId: "u-other" }));
+    await screen.findByText("@another-person");
+    expect(screen.queryByText("Acme")).toBeNull();
+    expect(screen.queryByText("AwaitingOrg pending")).toBeNull();
   });
 });

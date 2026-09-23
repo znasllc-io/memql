@@ -8,6 +8,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -1086,6 +1088,12 @@ func TestDisconnectRevokesAtGitHubAndTheRowRegardless(t *testing.T) {
 	t.Run("the happy path revokes both halves", func(t *testing.T) {
 		hub := newGrantHub().body("/applications/Iv1.memqlconnect/grant", http.StatusNoContent, ``)
 		i, _, engine, _ := grantHarness(t, hub, sealedGrantRow(t, grantRowOpts{}))
+		hub.on("/applications/Iv1.memqlconnect/grant", func(*http.Request) (int, string) {
+			if !engine.sawStatement("mutation revokeSourceCredential") {
+				t.Error("GitHub revoke preceded the authorized local write")
+			}
+			return http.StatusNoContent, ""
+		})
 		nodes, err := i.handleSourceCredentialRevoke(callerCtx(grantOwner), map[string]any{"credentialId": grantCredentialId}, 0)
 		if err != nil {
 			t.Fatalf("revoke: %v", err)
@@ -1099,6 +1107,15 @@ func TestDisconnectRevokesAtGitHubAndTheRowRegardless(t *testing.T) {
 		}
 		if !engine.sawStatement("mutation revokeSourceCredential") {
 			t.Fatalf("the row must be flipped; statements: %v", engine.statements())
+		}
+		reads := 0
+		for _, statement := range engine.statements() {
+			if strings.HasPrefix(statement, "query sourceCredentialSealedById") {
+				reads++
+			}
+		}
+		if reads != 1 {
+			t.Fatalf("must capture the bearer once before revocation, got %d reads", reads)
 		}
 	})
 
@@ -1136,6 +1153,64 @@ func TestDisconnectRevokesAtGitHubAndTheRowRegardless(t *testing.T) {
 			t.Fatal("the row must still be flipped")
 		}
 	})
+}
+
+func TestDisconnectDeniedLocallyNeverContactsGitHub(t *testing.T) {
+	t.Setenv(secret.EnvMasterKey, testMasterKey)
+	for _, expired := range []bool{false, true} {
+		t.Run(fmt.Sprintf("expired=%t", expired), func(t *testing.T) {
+			opts := grantRowOpts{}
+			if expired {
+				opts.ExpiresAt = time.Now().UTC().Add(-time.Hour)
+			}
+			hub := newGrantHub()
+			i, _, engine, _ := grantHarness(t, hub, sealedGrantRow(t, opts))
+			denied := errors.New("update/data denied")
+			engine.fail = map[string]error{"mutation revokeSourceCredential": denied}
+			nodes, err := i.handleSourceCredentialRevoke(callerCtx(grantOwner), map[string]any{"credentialId": grantCredentialId}, 0)
+			if !errors.Is(err, denied) || len(nodes) != 0 {
+				t.Fatalf("must preserve local refusal, got nodes=%d err=%v", len(nodes), err)
+			}
+			if len(hub.seen()) != 0 {
+				t.Fatalf("local refusal caused %d GitHub requests (including refresh)", len(hub.seen()))
+			}
+		})
+	}
+}
+
+func TestDisconnectExpiredGrantIsLocalOnly(t *testing.T) {
+	t.Setenv(secret.EnvMasterKey, testMasterKey)
+	for _, tc := range []struct {
+		name      string
+		expiresAt string
+	}{
+		{"expired", time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)},
+		{"expiring during request", time.Now().UTC().Add(refreshMargin / 2).Format(time.RFC3339)},
+		{"unreadable expiry", "invalid-expiry"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			row := sealedGrantRow(t, grantRowOpts{})
+			row["expiresAt"] = tc.expiresAt
+			// GitHub may return 404 for an expired access token. That cannot
+			// establish that its underlying authorization has been revoked.
+			hub := newGrantHub().body("/applications/Iv1.memqlconnect/grant", http.StatusNotFound, `{}`)
+			i, _, engine, _ := grantHarness(t, hub, row)
+			nodes, err := i.handleSourceCredentialRevoke(callerCtx(grantOwner), map[string]any{"credentialId": grantCredentialId}, 0)
+			if err != nil {
+				t.Fatalf("local disconnect: %v", err)
+			}
+			reply := replyPayload(t, nodes)
+			if reply["status"] != credentialStatusRevoked || reply["remoteRevoked"] != false {
+				t.Fatalf("expected local success without claiming remote revocation, got %v", reply)
+			}
+			if !engine.sawStatement("mutation revokeSourceCredential") {
+				t.Fatal("expired credentials must still be revoked locally")
+			}
+			if len(hub.seen()) != 0 {
+				t.Fatalf("disconnect with unusable token made %d GitHub requests", len(hub.seen()))
+			}
+		})
+	}
 }
 
 // ---------------------------------------------------------------------------

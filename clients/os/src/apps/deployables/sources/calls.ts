@@ -78,7 +78,7 @@ export async function readSourceRepositories(
  * row is never deleted; it is the record of what fetched under it.
  *
  * IT ANSWERS WHETHER GITHUB WAS TOLD, and that is worth reading. The engine
- * revokes at GitHub FIRST and flips the row even when that half failed
+ * authorizes and revokes locally FIRST, then attempts the GitHub half
  * (`handleSourceCredentialRevoke`) -- the local row is what actually stops
  * every fetch on this cluster, so refusing the disconnect because GitHub was
  * unreachable would leave the cluster fetching under an authorization the

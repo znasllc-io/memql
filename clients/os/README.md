@@ -2382,6 +2382,29 @@ clears marks only after a successful write, preserves them on failure, and
 offers an in-surface retry. An old revision cannot acknowledge a newer one,
 and one person's receipts cannot dismiss another's changes.
 
+### GitHub account connection
+
+The repository chooser names the current personal GitHub account and offers
+Disconnect beside the list. Disconnect uses the same lifecycle as Settings →
+Sources: authorize the local credential revocation first, then attempt to end
+that person's GitHub authorization. It never uninstalls the shared GitHub App,
+signs the browser out of GitHub, or deletes sources or deployables. Existing
+sources using the connection require reconnection at their next fetch.
+
+Successful disconnect immediately discards repository/organization listings,
+selected repository and branch, and pending source probes. A delayed live-feed
+acknowledgment cannot keep those selections usable. Viewer/grant changes and
+unmounts invalidate pending reads; a canceled connection flow cannot navigate
+when its late reply arrives. A refused disconnect retains the connection and
+explains the failure. Local success with an unconfirmed GitHub revoke says so
+and remains disconnected locally.
+
+Reconnect requests GitHub's documented `prompt=select_account` chooser. Picking
+another organization for the same account uses the existing installation link;
+that changes repository access, not the personal account. Repository reads
+remain bounded by the caller's grant and GitHub-visible installations. This is
+a repair to an existing connection capability, so it adds no attention marker.
+
 ### Branch deployment policy
 
 Repository sources use the existing backend `autoDeploy` policy. Creation

@@ -7,13 +7,14 @@ import { Caption, EmptyState, Field, Notice, RefreshButton, Select } from "../..
 import { toneFor } from "../../../packages/refusals";
 import { ProblemNotice } from "../../../packages/ReportView";
 import { shortRepo } from "../../../packages/rows";
+import { DisconnectGitHub } from "../../../sources/ConnectedAccountCard";
 import { RepositoryPicker } from "../../../sources/RepositoryPicker";
 import { returnPathFor } from "../../../sources/connectReturn";
 import type { RepositoryRow } from "../../../sources/repositories";
-import { credentialIsRevoked, githubGrantOf, type CredentialFeedStatus, type CredentialRow } from "../../../sources/rows";
+import { credentialIsRevoked, githubGrantOf, isGithubAppGrant, type CredentialFeedStatus, type CredentialRow } from "../../../sources/rows";
 import { GithubAppOwnerField, OWN_ACCOUNT, SET_UP_SENTENCE, type GithubAppOwner } from "../../../sources/GithubAppSetup";
 import type { GithubAppActions } from "../../../sources/useGithubApp";
-import { useGithubConnect, useSourceRepositories, type GithubConnectActions } from "../../../sources/useGithubConnect";
+import { useCredentialRevoke, useGithubConnect, useSourceRepositories, type GithubConnectActions, type CredentialRevokeActions } from "../../../sources/useGithubConnect";
 import type { SourceProbeHandle } from "../../../sources/useProbes";
 import { suggestName, type ComposeDraft } from "../../compose";
 import { NameField } from "./fields";
@@ -87,6 +88,7 @@ interface RepositorySourceProps {
    * and renders what came back.
    */
   connect: GithubConnectActions;
+  disconnect?: CredentialRevokeActions;
   /**
    * What this step needs before it can go on, said to the page that draws the
    * floor: nothing, a first connection, or a fresh one.
@@ -128,12 +130,29 @@ export type ConnectionNeed = "" | "connect" | "reconnect" | "setup" | "unavailab
 
 export function RepositorySource(props: RepositorySourceProps) {
   const { access } = useSession();
+  const localDisconnect = useCredentialRevoke();
+  const disconnect = props.disconnect ?? localDisconnect;
   // Owner oversight includes colleagues' cards; using a source is personal.
   const viewer = bare(access?.userId ?? "");
   const personal = props.credentials.filter(c => viewer !== "" && bare(c.ownerUserId) === viewer);
   const grant = githubGrantOf(personal);
   // A different viewer or grant gets fresh reads, errors and installation
   // help. An earlier request cannot land in the next person's picker.
+  const activeGrantId = grant && !credentialIsRevoked(grant) && disconnect.revokedCredentialId !== grant.id ? grant.id : "";
+  useEffect(() => { if (!props.disconnect) localDisconnect.clear(); }, [viewer, grant?.id, props.disconnect, localDisconnect.clear]);
+  const previousGrantId = useRef(activeGrantId);
+  // A source selected under another account or a revoked grant cannot carry
+  // its URL, branch or asynchronous probe into the next connection.
+  useEffect(() => {
+    const selected = props.draft.credentialId;
+    const selectedWithGithub = selected !== "" && (previousGrantId.current === selected ||
+      props.credentials.some(c => c.id === selected && isGithubAppGrant(c)));
+    previousGrantId.current = activeGrantId;
+    if (selectedWithGithub && selected !== activeGrantId) {
+      props.probe.clear();
+      props.onDraft({ repoUrl: "", repoRef: "", credentialId: "" });
+    }
+  }, [activeGrantId, props.credentials, props.draft.credentialId, props.probe.clear, props.onDraft]);
   const feed = props.credentialFeed;
   const waiting = feed && (feed.state !== "live" || feed.error !== "");
   return <>
@@ -142,23 +161,29 @@ export function RepositorySource(props: RepositorySourceProps) {
       title={feed.state === "seeding" ? "Loading your source connections" : "Source connections are unavailable"}
       action={feed.state === "seeding" ? undefined : <RefreshButton label="Read source connections again" onClick={feed.retry} />}>
       {feed.state === "seeding" ? "Checking your saved GitHub connection." : "Reconnect to the cluster or read your connections again."}
-    </EmptyState> : <PersonalRepositorySource {...props} credentials={personal}
+    </EmptyState> : <PersonalRepositorySource {...props} credentials={personal} disconnect={disconnect}
       key={`${viewer}:${grant?.id ?? ""}:${grant?.status ?? ""}`} />}
   </>;
 }
 
 function PersonalRepositorySource({
   draft, onDraft, credentials, probe, tokenFormOpen, onTokenFormOpenChange, connect, onConnectionNeed,
-  app, appOwner = OWN_ACCOUNT, onAppOwner,
-}: RepositorySourceProps) {
+  app, appOwner = OWN_ACCOUNT, onAppOwner, disconnect,
+}: RepositorySourceProps & { disconnect: CredentialRevokeActions }) {
   const install = useGithubConnect();
   const repositories = useSourceRepositories();
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   const grant = githubGrantOf(credentials);
+  const disconnected = grant !== null && disconnect.revokedCredentialId === grant.id;
   // A LAPSED GRANT IS NOT A CONNECTION. It cannot read a repository list, so
   // the picker would answer an empty invitation to somebody whose repair is
   // one click; the Connect control below says "Reconnect" for them instead.
-  const connected = grant !== null && !credentialIsRevoked(grant);
+  const connected = grant !== null && !credentialIsRevoked(grant) && !disconnected;
   const grantId = connected ? grant.id : "";
   const returnPath = returnPathFor(COMPOSE_SECTION);
   const reconnect = ["credential_not_found", "credential_revoked", "reconnect_required"].includes(repositories.refusal?.code ?? "");
@@ -221,7 +246,22 @@ function PersonalRepositorySource({
     void probe.probe(repo.url, grantId);
   }
 
+  async function disconnectAccount() {
+    if (!grant || !await disconnect.revoke(grant.id) || !mounted.current) return;
+    repositories.clear();
+    install.clear();
+    connect.clear();
+    probe.clear();
+    onDraft({ repoUrl: "", repoRef: "", credentialId: "" });
+  }
+
   const method = tokenFormOpen ? "token" : "github";
+  useEffect(() => {
+    if (reconnect && draft.credentialId === grant?.id) {
+      probe.clear();
+      onDraft({ repoUrl: "", repoRef: "", credentialId: "" });
+    }
+  }, [reconnect, draft.credentialId, grant?.id, probe.clear, onDraft]);
 
   // THE CLUSTER HAS NO APP, AND THIS TIME IT IS KNOWN BEFORE ANYBODY PRESSES.
   // Only a status that ANSWERED "not configured" counts: null is "not known",
@@ -287,6 +327,9 @@ function PersonalRepositorySource({
         </>
       ) : connected && !reconnect ? (
         <>
+          <Caption>Connected to GitHub as @{grant.login || "unknown"}.</Caption>
+          <DisconnectGitHub compact busy={disconnect.busy} refusal={disconnect.refusal} onDisconnect={() => void disconnectAccount()} />
+          <Caption>Wrong GitHub account? Disconnect, then reconnect to choose another.</Caption>
           <RepositoryPicker
             page={repositories.page}
             readAt={repositories.readAt}
@@ -315,10 +358,14 @@ function PersonalRepositorySource({
           {/* NOT CONNECTED: what connecting is FOR, and nothing to press here.
               The act is on the floor, where every step's forward act is. */}
           <Caption>
-            {grant === null
+            {disconnected
+              ? "Your GitHub connection is disconnected. Reconnect to choose an account; you come back to this step."
+              : grant === null
               ? "Connect your GitHub account and pick from a list of your repositories. You come back to this step."
               : "Your GitHub connection has lapsed. Reconnect to pick from your repositories; you come back to this step."}
           </Caption>
+          <Caption>Reconnecting opens GitHub’s account chooser. Choose another account there, or add an account if it is not listed. Your GitHub App installations stay in place.</Caption>
+          {disconnect.remoteRevoked === false ? <Notice tone="warn" sentence="Disconnected from MemQL." detail="GitHub did not confirm that your personal authorization ended. You can remove it under Applications in your GitHub settings; this does not require uninstalling the app." /> : null}
           {/* IN PLACE, NEVER A TOAST, and in the tone the CODE asks for
               (`toneFor`): a refusal to connect is rendered where the person
               was when they asked. */}
