@@ -31,7 +31,7 @@ export function SourceAccess({ pkg, credentials }: { pkg: PackageRow; credential
       <div className="os-form-row"><Button tone="primary" busy={actions.busy} disabled={!ready || !choice || choice.id === pkg.sourceConnectionId} onClick={() => { if (choice) void actions.setCredential(pkg.id, choice.credentialId, choice.id); }}>Save access</Button></div>
       <Caption>The next fetch uses this account and installation. Existing deployables and their history stay intact.</Caption>
     </> : null}
-    {!pkg.sourceConnectionId ? <SwitchCredential pkg={pkg} credentials={mine.filter(row => !isGithubAppGrant(row))} /> : null}
+    {!pkg.sourceConnectionId && (!record.credential || !isGithubAppGrant(record.credential)) ? <SwitchCredential pkg={pkg} credentials={mine.filter(row => !isGithubAppGrant(row))} /> : null}
     {record.credential && isGithubAppGrant(record.credential) ? <div className="os-form-row"><Button busy={reconnect.busy} onClick={() => void reconnect.connect(returnPathFor("sources"), record.credential!.id)}>Reconnect {record.identity}</Button></div> : null}
     {connections.error ? <Caption>GitHub access could not be refreshed. Return to Sources and refresh to try again.</Caption> : null}
     {actions.refusal ? <ProblemNotice problem={actions.refusal} tone="error" /> : null}

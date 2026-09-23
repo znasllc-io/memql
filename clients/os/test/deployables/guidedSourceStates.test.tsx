@@ -17,7 +17,6 @@ async function open(seed: FakeSeed = {}, prepare?: (connection: FakeConnection) 
   render(withSession(<DeployablesApp sectionId="deployables" navigate={vi.fn()} askContext={vi.fn()} store={new LocalDeployablesSettingsStore({getItem: () => null, setItem: () => {}})} />));
   await click(await screen.findByRole("button", { name: "Add a deployable" }));
   await click(screen.getByRole("radio", { name: /^A repository/ }));
-  await click(screen.getByRole("button", { name: "Add source" }));
   return connection;
 }
 async function organization() { await click(await screen.findByRole("button", { name: "@alice Connected" })); await forward(); }
@@ -28,7 +27,7 @@ describe("guided source availability and recovery", () => {
     await open({ credentials: [] });
     expect(screen.getByText("Connect a GitHub account to see its repositories.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Add GitHub account" })).toBeTruthy();
-    expect(screen.queryByRole("link", { name: "Install on another organization" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Add organization access" })).toBeNull();
     expect(floor("Continue")).toBeNull();
   });
   it("distinguishes loading access from empty access and refreshes on installation return", async () => {
@@ -43,7 +42,7 @@ describe("guided source availability and recovery", () => {
     expect(floor("Continue")).toBeNull();
     await act(async () => finish(builtinReply("sourceInstallations", [{ reason: "ok", installations: [], pending: [] }])));
     expect(screen.getByText(/No approved access yet/)).toBeTruthy();
-    const link = screen.getByRole("link", { name: "Install on another organization" });
+    const link = screen.getByRole("link", { name: "Add organization access" });
     link.addEventListener("click", event => event.preventDefault(), { once: true });
     await click(link);
     act(() => { fireEvent(window, new Event("focus")); });
@@ -88,7 +87,7 @@ describe("guided source availability and recovery", () => {
     expect(await screen.findByText("Permission was removed.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Refresh repositories" })).toBeTruthy();
     expect(screen.queryByLabelText("Accounts")).toBeNull();
-    expect(screen.queryByRole("link", { name: "Install on another organization" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Add organization access" })).toBeNull();
     expect(floor("Continue")).toBeNull();
   });
 });

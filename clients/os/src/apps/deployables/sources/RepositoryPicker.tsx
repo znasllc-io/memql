@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { AddLink } from "../../../kit/AddButton";
 
 import { Button, Caption, Chips, Input, RecordList, RecordRow, RefreshButton, Subhead, useNow } from "../../../kit";
 import { formatFreshness } from "../../../kit/format";
@@ -43,6 +44,7 @@ export function RepositoryPicker({
   onChoose,
   onLookAgain,
   onReadMore,
+  showRefresh = true,
 }: {
   page: RepositoryPage;
   /** When the list was read, as an ISO instant. Empty = not read yet. */
@@ -58,6 +60,7 @@ export function RepositoryPicker({
   onChoose: (repo: RepositoryRow) => void;
   onLookAgain: () => void;
   onReadMore: () => void;
+  showRefresh?: boolean;
 }) {
   const [search, setSearch] = useState("");
   const now = useNow();
@@ -94,7 +97,7 @@ export function RepositoryPicker({
   return (
     <div className="os-stop-body">
       <div className="os-refresh-row">
-        <RefreshButton label="Refresh repositories" onClick={onLookAgain} busy={busy} />
+        {showRefresh ? <RefreshButton label="Refresh repositories" onClick={onLookAgain} busy={busy} /> : null}
         <span className="os-caption">
           {total === 0
             ? readAt === ""
@@ -273,14 +276,16 @@ function EmptyPicker({
  * when a URL is in hand -- a cluster with no GitHub App has none, and a link
  * to nowhere is worse than no link.
  */
-export function InstallLink({ installUrl, text = false, onFollow }: {
+export function InstallLink({ installUrl, text = false, onFollow, compact = false }: {
   installUrl: string;
   /** Draw it as a text link, for a row that already has its one button. */
   text?: boolean;
   /** Told when the link is followed, so a list can read again on the way back. */
   onFollow?: () => void;
+  compact?: boolean;
 }) {
   if (installUrl === "") return null;
+  if (compact) return <AddLink label="Add organization access" href={installUrl} target="_blank" rel="noreferrer noopener" onClick={onFollow} />;
   return (
     <a
       className={text ? "os-link" : "os-button"}

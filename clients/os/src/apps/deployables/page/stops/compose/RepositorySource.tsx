@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Caption, Field, Notice, RefreshButton, Select } from "../../../../../kit";
+import { WizardStepHeader } from "../../../../../kit/WizardStepHeader";
 import { shortRepo } from "../../../packages/rows";
 import { RepositoryPicker } from "../../../sources/RepositoryPicker";
 import type { RepositoryRow } from "../../../sources/repositories";
@@ -47,9 +48,12 @@ export function RepositorySource({ connection, draft, onDraft, probe, onConnecti
     void probe.probe(repo.url, connection.credentialId, connection.id);
   }
   return <>
+    <WizardStepHeader count={repositories.readAt && !repositories.busy && !repositories.refusal ? repositories.page.repositories.length : undefined}>
+      <RefreshButton label="Refresh repositories" busy={repositories.busy} onClick={() => void read(connection.credentialId, 1, connection.id)} />
+    </WizardStepHeader>
     <Caption>Repositories from {connection.accountLogin}.</Caption>
     {needsRepair ? <Notice tone="warn" sentence="This source needs attention." next="Go Back to choose another organization or GitHub account." /> : null}
-    <RepositoryPicker page={repositories.page} readAt={repositories.readAt} busy={repositories.busy}
+    <RepositoryPicker showRefresh={false} page={repositories.page} readAt={repositories.readAt} busy={repositories.busy}
       refusal={repositories.refusal} installUrl=""
       chosen={draft.repoUrl ? shortRepo(draft.repoUrl) : ""} idPrefix="os-compose-repo"
       onChoose={choose} onLookAgain={() => void read(connection.credentialId, 1, connection.id)}

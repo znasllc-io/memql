@@ -78,7 +78,6 @@ describe("shared shell navigation", () => {
     await click(await screen.findByRole("button", { name: /Add a deployable/ }));
     const draft = screen.getByRole("region", { name: "Add a deployable" });
     await click(within(draft).getByRole("radio", { name: /A repository/ }));
-    await click(within(draft).getByRole("button", { name: "Add source" }));
     await click(await within(draft).findByRole("button", { name: /^@octocat Connected/ }));
     await click(screen.getByRole("button", { name: "Continue" }));
     await click(await within(draft).findByRole("button", { name: /^acme Organization/ }));

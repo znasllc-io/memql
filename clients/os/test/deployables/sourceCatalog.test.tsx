@@ -74,6 +74,14 @@ describe("configured Sources catalog", () => {
     expect(record.binding).toBeUndefined();
     expect(record.target).toBe("acme");
   });
+  it("keeps a legacy GitHub grant readable without presenting it as an unavailable token", async () => {
+    mount({ packages: [{ ...A, sourceConnectionId: "" }] });
+    await click(await screen.findByRole("button", { name: /Open Website, @alice/ }));
+    expect(screen.getByRole("button", { name: "Reconnect @alice" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Account and organization" })).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: /credential this source is fetched under/ })).toBeNull();
+    expect(screen.queryByText(/alice \(not visible to you\)/)).toBeNull();
+  });
   it("ignores removal completion after its detail has closed", async () => {
     const connection = fakeConnection(); h.connection = connection;
     let resolve!: (value: ReturnType<typeof builtinReply>) => void;

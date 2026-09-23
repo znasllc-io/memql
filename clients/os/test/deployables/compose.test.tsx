@@ -118,7 +118,6 @@ async function chooseSource(region: HTMLElement, name: RegExp): Promise<void> {
 /** Choose a repository returned under the person's GitHub grant. */
 async function chooseRepository(region: HTMLElement, configure = true): Promise<void> {
   await chooseSource(region, /A repository/);
-  await click(within(region).getByRole("button", { name: "Add source" }));
   await click(await within(region).findByRole("button", { name: /^@octocat (?:Chosen )?Connected/ }));
   await click(await forward("Continue"));
   await click(await within(region).findByRole("button", { name: /^acme Organization/i }));
@@ -924,7 +923,7 @@ describe("the compose flow: what the run answers", () => {
     expect(await within(region).findByText("no memql-package.yaml at the root of acme/storefront")).toBeTruthy();
     // What it is is where a manifest refusal belongs, and every stop after it
     // is unreached.
-    expect(railStates(region)).toEqual(["complete", "complete", "complete", "complete", "complete", "complete", "stopped", "pending", "pending", "pending"]);
+    expect(railStates(region)).toEqual(["complete", "complete", "complete", "complete", "complete", "stopped", "pending", "pending", "pending"]);
     // ...and the one forward act is Retry, on the bar beside Cancel -- so
     // leaving a stopped flow is as reachable as trying it again.
     expect(forwardAct("Retry")).toBeTruthy();
@@ -964,7 +963,6 @@ describe("what the compose flow does not do", () => {
     const connection = fakeConnection({ credentials: [], githubApp: { configured: false, canSetup: true } });
     const { region } = await compose(connection);
     await chooseSource(region, /A repository/);
-    await click(within(region).getByRole("button", { name: "Add source" }));
     expect(await within(region).findByRole("button", { name: "Set up GitHub" })).toBeTruthy();
     expect(forwardAct("Connect GitHub")).toBeNull();
     expect(forwardAct("Analyze")).toBeNull();
@@ -978,7 +976,6 @@ describe("what the compose flow does not do", () => {
     const connection = fakeConnection({ credentials: [], githubApp: { configured: false, canSetup: false } });
     const { region } = await compose(connection, { role: "developer" });
     await chooseSource(region, /A repository/);
-    await click(within(region).getByRole("button", { name: "Add source" }));
     expect(await within(region).findByText(/Ask a cluster owner/)).toBeTruthy();
     expect(forwardAct("Set up GitHub")).toBeNull();
     expect(forwardAct("Connect GitHub")).toBeNull();
@@ -994,7 +991,6 @@ describe("what the compose flow does not do", () => {
     const { region } = await compose(connection);
     await chooseSource(region, /A repository/);
     expect(document.querySelector("[data-toast], .os-toast, dialog, [role='dialog']")).toBeNull();
-    await click(within(region).getByRole("button", { name: "Add source" }));
     expect(await within(region).findByRole("button", { name: "Add GitHub account" })).toBeTruthy();
     expect(within(region).queryByRole("radio", { name: "A token" })).toBeNull();
     expect(within(region).queryByLabelText(URL_FIELD)).toBeNull();
@@ -1064,7 +1060,7 @@ describe("a private repository whose build output is committed", () => {
     await waitFor(() =>
       expect((document.querySelector(".os-actbar")?.textContent ?? "")).toContain("in place at shop.memql.example.com"),
     );
-    expect(railStates(region)).toEqual(["complete", "complete", "complete", "complete", "complete", "complete", "complete", "complete", "skipped", "open"]);
+    expect(railStates(region)).toEqual(["complete", "complete", "complete", "complete", "complete", "complete", "complete", "skipped", "open"]);
     // The addresses are facts now, and the one that landed is the run's own.
     expect(within(region).queryByLabelText("The name storefront answers at")).toBeNull();
     expect(within(region).getAllByText("shop.memql.example.com").length).toBeGreaterThan(0);

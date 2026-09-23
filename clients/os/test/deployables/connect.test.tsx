@@ -866,7 +866,6 @@ async function composeAccount(seed: FakeSeed): Promise<{ connection: FakeConnect
   await click(await screen.findByRole("button", { name: /Add a deployable/ }));
   const region = await screen.findByRole("region", { name: "Add a deployable" });
   await click(within(region).getByRole("radio", { name: /A repository/ }));
-  await click(within(region).getByRole("button", { name: "Add source" }));
   return { connection, region };
 }
 

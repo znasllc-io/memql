@@ -6,7 +6,7 @@ import { Rocket } from "lucide-react";
 import { useSession } from "../../../chrome/access";
 import { bare } from "../people";
 
-import { Button, Caption, Field, Notice, RecordList, RecordRow, RefreshButton, useLiveView, type Stop } from "../../../kit";
+import { Button, Caption, Field, Notice, RefreshButton, useLiveView, type Stop } from "../../../kit";
 import type { Act } from "../../../kit/ActionBar";
 import { ActivityTarget } from "../../../kit/SemanticActivity";
 import { Wizard } from "../../../kit/Wizard";
@@ -62,7 +62,6 @@ import { partsForOrganization, type PartsHeld } from "../parts";
 import { ManifestPreview } from "./stops/compose/ManifestPreview";
 import { RepositoryProbeStatus, RepositorySource, type ConnectionNeed } from "./stops/compose/RepositorySource";
 import { GitHubAccountStep, GitHubOrganizationStep } from "./stops/compose/GitHubSource";
-import { AddButton } from "../../../kit/AddButton";
 import { createSourceConnection, useSourceConnections, useSourceInstallations, type SourceConnectionRow } from "../sources/connections";
 import { ComposeSourceDetailStep, ComposeSourceKindStep, SOURCE_DETAIL_NAME, SOURCE_KIND_LABEL } from "./stops/compose/Source";
 import { ComposeWhereItLivesStop } from "./stops/compose/WhereItLives";
@@ -261,7 +260,7 @@ export function ComposePage(props: ComposePageProps) {
     if (selectedConnection && githubGrant?.status === "active") return;
     setSelectedConnectionId(""); setSelectedRunId(""); setAddresses({});
     setDraft(held => ({...held, repoUrl: "", repoRef: "", credentialId: "", sourceConnectionId: ""}));
-    setSourceNotice("The selected source is no longer available. Choose or reconnect a source.");
+    setSourceNotice("Repository access is no longer available. Choose or reconnect a GitHub account.");
     setJourneyChoice(null); probe.clear();
   }, [selectedConnectionId, selectedConnection, githubGrant?.status, fixedSource, parked, created.packageId, probe.clear]);
   const can = partsForOrganization(sourceAccountId, globalCan, source || parked || created.packageId || created.siteId ? "update" : "create");
@@ -627,8 +626,8 @@ export function ComposePage(props: ComposePageProps) {
   // A NEW DEPLOYABLE OPENS ON THE CHOICE, AND THE CHOICE OPENS THE STEP IT
   // NAMES. Reading it off the draft rather than off a click means a flow that
   // comes back with its choice already made -- from GitHub, after connecting --
-  // lands on the repository step rather than on a question already answered.
-  const defaultStop: WizardStep = phase === "composing" ? fixedSource || parked ? "whatItIs" : draft.choice === "" ? "source" : draft.choice === "repo" ? props.connectResult && !selectedConnection ? "githubAccount" : !selectedConnection ? "githubSource" : draft.repoUrl ? "sourceDetail" : "githubRepository" : "sourceDetail"
+  // lands on its GitHub account and still requires each explicit Continue.
+  const defaultStop: WizardStep = phase === "composing" ? fixedSource || parked ? "whatItIs" : draft.choice === "" ? "source" : draft.choice === "repo" ? !accountConfirmed || !identityReady ? "githubAccount" : !selectedConnection ? "githubOrganization" : repositoryConfirmed ? "sourceDetail" : "githubRepository" : "sourceDetail"
     : phase === "analyzing" || phase === "awaiting_confirm" && path === "package" ? "whatItIs"
     : phase === "stopped" ? (railFor(input).stages.find(s => s.state === "stopped")?.id as StopId ?? "whatItIs")
     : phase === "deploying" || phase === "awaiting_confirm" && path === "handmade" ? "build" : "live";
@@ -666,11 +665,6 @@ export function ComposePage(props: ComposePageProps) {
       providerAccountId: chosenInstallation.providerAccountId, accountLogin: chosenInstallation.login, accountType: chosenInstallation.accountType, status: "active" });
     connections.retry(); chooseStop("githubRepository");
   }
-  const savedPaths = (packages ?? []).flatMap(pkg => {
-    const binding = connections.rows.find(row => row.id === pkg.sourceConnectionId && row.credentialId === pkg.credentialId);
-    const grant = githubAccounts.find(row => row.id === binding?.credentialId && row.status === "active");
-    return pkg.sourceKind === "repo" && !pkg.sourceRemoved && bare(pkg.ownerUserId) === githubViewer && pkg.status !== "archived" && binding && grant ? [{ pkg, binding, grant }] : [];
-  });
   const sourceLocked = parked !== undefined || fixedSource !== undefined || created.packageId !== "" || phase !== "composing";
   const accountField = () => <Field label="Accounts">
     <div className="os-compose-account-control">
@@ -809,7 +803,7 @@ export function ComposePage(props: ComposePageProps) {
   const finished = phase === "published" && !held;
   const canGoLive = finished && !wentLive && can.publish && (path !== "handmade" || draft.choice !== "ci");
   const journeyActs: Act[] = !held && !finished && (
-    journeyStop === "source" || journeyStop === "githubSource" ? []
+    journeyStop === "source" ? []
     : journeyStop === "githubAccount" ? identityReady ? [{ label: "Continue", tone: "primary", onAct: () => { setAccountConfirmed(true); chooseStop("githubOrganization"); } }] : []
     : journeyStop === "githubOrganization" ? identityReady && chosenInstallation && installations.readAt && !installations.busy && !installations.refusal ? [{ label: "Continue", tone: "primary", busy: bindingWrite.busy, onAct: () => void continueOrganization() }] : []
     : journeyStop === "githubRepository" ? draft.repoUrl && !probeParked && !probe.busy && connectionNeed === "" ? [{ label: "Continue", tone: "primary", onAct: () => { setRepositoryConfirmed(true); chooseStop("sourceDetail"); } }] : []
@@ -854,25 +848,18 @@ export function ComposePage(props: ComposePageProps) {
                   setDraft((held) => ({ ...held, choice, name: "", kind: "", artifactId: "", repoUrl: "", repoRef: "", credentialId: "", sourceConnectionId: "", storeId: "" }));
                   // CHOOSING ANSWERS THE STEP, so the wizard moves on to the
                   // one the answer names.
-                  chooseStop(choice === "repo" ? "githubSource" : "sourceDetail");
+                  chooseStop(choice === "repo" ? "githubAccount" : "sourceDetail");
                 }}
               />
             </ActivityTarget>
           ),
         },
         ...(kind === "repo" && !fixedSource && !parked ? [
-          { id: "githubSource", name: "Source", state: journeyStop !== "githubSource" || sourceLocked ? "complete" as const : "open" as const,
-            answer: draft.repoUrl ? `${githubGrant?.login ? "@" + githubGrant.login + " · " : ""}${shortRepo(draft.repoUrl)}` : journeyStop !== "githubSource" ? "New source" : "", openable: !sourceLocked && !busy,
-            body: <div className="os-stop-body">
-              <AddButton label="Add source" disabled={busy} onClick={() => { clearRepository(); setGithubCredentialId(""); setAccountConfirmed(false); setInstallationId(""); chooseStop("githubAccount"); }} />
-              {savedPaths.length ? <RecordList as="ul" label="Saved sources">{savedPaths.map(({ pkg, binding, grant }) => <RecordRow key={pkg.id} name={shortRepo(pkg.repoUrl)} secondary={`@${grant.login} · ${binding.accountLogin} · ${pkg.repoRef || "default branch"}`} selected={draft.repoUrl === pkg.repoUrl && selectedConnectionId === binding.id}
-                onOpen={() => { clearRepository(); setGithubCredentialId(grant.id); setAccountConfirmed(true); setRepositoryConfirmed(true); setInstallationId(binding.installationId); holdConnection(binding); setAccountId(pkg.accountId); setAccountChosenManually(true); setDraft(held => ({ ...held, repoUrl: pkg.repoUrl, repoRef: pkg.repoRef, name: pkg.name, credentialId: grant.id, sourceConnectionId: binding.id })); void probe.probe(pkg.repoUrl, grant.id, binding.id); chooseStop("sourceDetail"); }} />)}</RecordList> : <Caption>Add a source to choose its GitHub account, organization and repository.</Caption>}
-            </div> },
-          { id: "githubAccount", name: "GitHub account", state: accountConfirmed ? "complete" as const : "open" as const, answer: chosenGithubAccount ? `@${chosenGithubAccount.login}` : "", openable: !sourceLocked && !busy,
+          { id: "githubAccount", name: "GitHub account", state: accountConfirmed ? "complete" as const : "ahead" as const, answer: chosenGithubAccount ? `@${chosenGithubAccount.login}` : "", openable: !sourceLocked && !busy,
             body: <GitHubAccountStep credentials={githubAccounts} selectedId={githubCredentialId} onSelect={chooseIdentity} feed={props.credentialFeed} disabled={busy} /> },
-          { id: "githubOrganization", name: "Organization", state: selectedConnection ? "complete" as const : accountConfirmed ? "open" as const : "ahead" as const, answer: selectedConnection?.accountLogin ?? "", openable: accountConfirmed && identityReady && !sourceLocked && !busy,
+          { id: "githubOrganization", name: "Organization", state: selectedConnection ? "complete" as const : "ahead" as const, answer: selectedConnection?.accountLogin ?? "", openable: accountConfirmed && identityReady && !sourceLocked && !busy,
             body: <><GitHubOrganizationStep lookup={installations} selectedId={installationId} onSelect={chooseOrganization} disabled={busy} />{bindingWrite.refusal ? <ProblemNotice problem={bindingWrite.refusal} tone="error" /> : null}</> },
-          { id: "githubRepository", name: "Repository", state: repositoryConfirmed ? "complete" as const : selectedConnection ? "open" as const : "ahead" as const, answer: shortRepo(draft.repoUrl), openable: Boolean(selectedConnection) && !sourceLocked && !busy,
+          { id: "githubRepository", name: "Repository", state: repositoryConfirmed ? "complete" as const : "ahead" as const, answer: shortRepo(draft.repoUrl), openable: Boolean(selectedConnection) && !sourceLocked && !busy,
             body: selectedConnection ? <RepositorySource key={selectedConnection.id} connection={selectedConnection} draft={draft} onDraft={patch => { setRepositoryConfirmed(false); setDraft(held => ({ ...held, ...patch })); }} probe={probe} onConnectionNeed={setConnectionNeed} /> : undefined },
         ] : []),
         {
@@ -922,11 +909,11 @@ export function ComposePage(props: ComposePageProps) {
         : draft.choice === "ci"
           ? { word: "Name it", detail: "and say what kind of app your CI will push" }
           : !selectedConnection
-            ? { word: "Choose a source", detail: "a GitHub account and personal or organization access" }
+            ? { word: "Choose a GitHub account", detail: "" }
             : connectionNeed === "reconnect"
-              ? { word: "Source needs attention", detail: "return to Source to reconnect or choose another" }
+              ? { word: "GitHub account needs attention", detail: "return to GitHub account to reconnect or choose another" }
               : { word: "Choose a repository", detail: "then configure its branch, name and owning account" };
-  const stepNeeds = !sourceLocked && draft.choice === "repo" ? ({ githubAccount: "Choose a GitHub account", githubOrganization: "Choose an organization or personal account", githubRepository: "Choose a repository", sourceDetail: "Configure the deployable" } as Partial<Record<WizardStep, string>>)[journeyStop] : undefined;
+  const stepNeeds = !sourceLocked && draft.choice === "repo" ? ({ source: "Choose a method", githubAccount: "Choose a GitHub account", githubOrganization: "Choose an organization or personal account", githubRepository: "Choose a repository", sourceDetail: "Configure the deployable" } as Partial<Record<WizardStep, string>>)[journeyStop] : undefined;
   const word = stepNeeds ?? (!sourceLocked && (draft.choice !== "repo" || draft.repoUrl !== "") && !organizationChosen(accounts, sourceAccountId) ? "Choose an account" : detailNeeds !== null ? detailNeeds.word : finished && draft.choice === "ci" ? "Waiting for CI" : composePhaseWord(phase, {
     inactive, archivedSource, declared: source !== undefined, wentLive, choice: draft.choice, moreToAnswer: action !== null && action.disabled,
   }));
@@ -952,7 +939,7 @@ export function ComposePage(props: ComposePageProps) {
   // is the cluster's turn there is no forward act, and Leave is the button --
   // the same picture the machine and the domain draw while they wait.
   const written = phase !== "composing" || created.packageId !== "";
-  const previousStep: WizardStep | undefined = !sourceLocked && kind === "repo" ? ({ githubAccount: "githubSource", githubOrganization: "githubAccount", githubRepository: "githubOrganization", sourceDetail: "githubRepository" } as Partial<Record<WizardStep, WizardStep>>)[journeyStop] : undefined;
+  const previousStep: WizardStep | undefined = !sourceLocked && kind === "repo" ? ({ githubAccount: "source", githubOrganization: "githubAccount", githubRepository: "githubOrganization", sourceDetail: "githubRepository" } as Partial<Record<WizardStep, WizardStep>>)[journeyStop] : undefined;
   const leaveAct: Act = previousStep ? { label: "Back", text: true, onAct: () => { if (!busy) chooseStop(previousStep); } } : { label: written ? "Leave" : "Cancel", text: true, onAct: onBack };
   const acts: Act[] = restoredSourceId ? [{ label: "Done", tone: "primary", onAct: onBack }] : finished
     ? canGoLive
@@ -1049,7 +1036,7 @@ export function ComposePage(props: ComposePageProps) {
 
 /** A step of this wizard: the pipeline's own stops, plus the one the Source
  *  stage splits into. */
-type WizardStep = StopId | "githubSource" | "githubAccount" | "githubOrganization" | "githubRepository" | "sourceDetail";
+type WizardStep = StopId | "githubAccount" | "githubOrganization" | "githubRepository" | "sourceDetail";
 
 /** What the step a choice names is for, beside its name. */
 const DETAIL_SENTENCES: Readonly<Record<string, string>> = {
@@ -1121,8 +1108,8 @@ function composePhaseWord(
       // is the page's own title said a second time (rule 7) in the one place
       // that is meant to say what is NEEDED. So it says that.
       if (at.declared) return "Not deployed";
-      if ((at.choice ?? "") === "") return "Choose a source";
-      return at.moreToAnswer ? "Describe the source" : "Ready";
+      if ((at.choice ?? "") === "") return "Choose a method";
+      return at.moreToAnswer ? "Configure the deployable" : "Ready";
   }
 }
 
@@ -1143,7 +1130,7 @@ function composePhaseDetail(
   choice = "-",
 ): string {
   // NOTHING IS CHOSEN YET, so the bar's word already says what is needed
-  // ("Choose a source") and the three choices are on the page. What is worth
+  // ("Choose a method") and the three choices are on the page. What is worth
   // saying beside it is the thing somebody about to start wants to know.
   if (phase === "composing" && !declared && choice === "") return "nothing is deployed until you confirm";
   if (phase === "awaiting_confirm") {

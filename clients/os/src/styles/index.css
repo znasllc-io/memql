@@ -5665,6 +5665,9 @@ a.os-button {
   gap: 1px;
   min-width: 0;
 }
+.os-rail-heading { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.os-rail-heading > .os-rail-line { flex: 0 1 auto; width: auto; min-width: 0; }
+.os-step-header-extras { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; }
 
 .os-rail-label {
   font-size: var(--os-text-sm);
