@@ -14725,3 +14725,9 @@ a.os-button {
   gap: 24px;
   min-width: 0;
 }
+.os-compose-account-control {
+  display: grid;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}

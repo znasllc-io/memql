@@ -627,9 +627,11 @@ export function ComposePage(props: ComposePageProps) {
           <>
           <div className="os-compose-source-fields">
           <Field label="Accounts">
+            <div className="os-compose-account-control">
             <AccountPicker id="compose-source-organization" label="Accounts" required requiredLabel="Choose an account" value={sourceAccountId} accounts={accounts} disabled={sourceLocked || busy} onChange={(id) => { setAccountId(id); setSelectedSourceId(""); }} onCommit={() => setAccountChosenManually(true)} />
             {!sourceLocked && !fixedSource && !parked && !accountChosenManually && organizationChosen(accounts, sourceAccountId) ? <Caption>Selected by default. Review account.</Caption> : null}
             {accountError ? <Caption>Accounts could not be refreshed. {String(accountError)}</Caption> : accounts.length === 0 ? <Caption>{accountState === "seeding" ? "Loading accounts…" : "No account is available for this source."}</Caption> : null}
+            </div>
           </Field>
           {sourceLocked && source ? <Caption>{source.name} · {sourceLabel(source)}</Caption> : draft.choice === "repo" && !addingSource ? <>
           <RepositorySource showRepositories={false} draft={draft} onDraft={(patch) => setDraft(held => ({ ...held, ...patch }))}
