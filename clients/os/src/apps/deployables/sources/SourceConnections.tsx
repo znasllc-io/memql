@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { GitBranch, Link2Off, Plus } from "lucide-react";
+import { GitBranch, Link2Off } from "lucide-react";
 import { Button, Caption, Head, Notice, RecordList, RecordRow, RefreshButton, Subhead, listCount } from "../../../kit";
 import { IconButton } from "../../../kit/IconButton";
+import { AddButton } from "../../../kit/AddButton";
 import { useSession } from "../../../chrome/access";
 import { useCanManagePersonalSources } from "../parts";
 import { bare } from "../people";
@@ -52,7 +53,7 @@ function SourceConnectionsForViewer({ mode, selectedId = "", onChoose, credentia
   const mine = credentials.filter(grant => bare(grant.ownerUserId) === viewer && isGithubAppGrant(grant)).map(grant => feed.revokedCredentialIds.includes(grant.id) ? { ...grant, status: "revoked" } : grant);
   const rows = feed.rows.filter(row => !removed.includes(row.id));
   return <section aria-label="Source connections">
-    <Head title="Sources" meta={listCount({ ...feed, rows })}>{can && !adding ? <Button disabled={disabled} onClick={() => setAdding(true)}><Plus size={14} aria-hidden /> Add source</Button> : null}</Head>
+    <Head title="Sources" meta={listCount({ ...feed, rows })}>{can && !adding ? <AddButton label="Add source" disabled={disabled} onClick={() => setAdding(true)} /> : null}</Head>
     <ConnectReturnNotice result={connectResult} />
     {adding ? <AddSource key={viewer} can={can && !disabled} initialCredentialId={connectResult?.credentialId} credentials={mine} credentialFeed={credentialFeed} returnSection={returnSection}
       onCancel={() => setAdding(false)} onSaved={() => { setAdding(false); setRemoved([]); feed.retry(); }} /> : <>
