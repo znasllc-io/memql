@@ -117,3 +117,104 @@ func TestCanonicalize_CarriesDigestsAndOrder(t *testing.T) {
 		t.Fatalf("canonicalize must carry seq, key and both digests through; got %+v", a)
 	}
 }
+
+// TestCanonicalizeMarksTheFormItParsed: every string canonicalization parses
+// into a tree says which reading it took, because that reading is the only
+// thing that can turn the tree back into the string a replay has to send.
+func TestCanonicalizeMarksTheFormItParsed(t *testing.T) {
+	got := Canonicalize([]Step{{StepType: "exec", Consumed: true, Input: map[string]any{
+		"command": "git status",
+		"payload": `{"a":1}`,
+		"path":    "/tmp/a",
+		"target":  "./a/b",
+		"message": "hello world",
+	}}})
+	args := got[0].Args
+	for key, want := range map[string]string{
+		"command": FormArgv,
+		"payload": FormJSON,
+		"path":    FormRootedPath,
+		"target":  FormPath,
+		"message": "",
+	} {
+		n, ok := args.At([]string{key})
+		if !ok {
+			t.Fatalf("%s: missing from the canonical tree", key)
+		}
+		if n.Form != want {
+			t.Errorf("%s: Form = %q, want %q", key, n.Form, want)
+		}
+	}
+	if args.Form != "" {
+		t.Errorf("the argument object itself was never a string; Form = %q, want none", args.Form)
+	}
+}
+
+// TestCanonicalizeKeepsAnArgumentVectorsElementsWhole: an array under a
+// command key (Codex's exec events record argv this way) is ALREADY split
+// into arguments. Splitting each element again as a command line would read
+// the apostrophe in a commit message as an opening quote and lose it, and the
+// replay would send a message nobody wrote.
+func TestCanonicalizeKeepsAnArgumentVectorsElementsWhole(t *testing.T) {
+	got := Canonicalize([]Step{{StepType: "exec", Consumed: true, Input: map[string]any{
+		"command": []any{"git", "commit", "-m", "don't break it"},
+	}}})
+	argv, _ := got[0].Args.At([]string{"command"})
+	if argv.Kind != KindArray || len(argv.Kids) != 4 {
+		t.Fatalf("an argument vector must stay one element per argument; got %+v", argv)
+	}
+	if argv.Kids[3].Kind != KindLit || argv.Kids[3].Lit != "don't break it" {
+		t.Fatalf("an argument must be kept verbatim; got %+v", argv.Kids[3])
+	}
+	// The same command recorded as a string generalizes with it: both
+	// readings are four arguments with the message as one literal.
+	str := Canonicalize([]Step{{StepType: "exec", Consumed: true, Input: map[string]any{
+		"command": `git commit -m "don't break it"`,
+	}}})
+	line, _ := str[0].Args.At([]string{"command"})
+	if !line.Equal(argv) {
+		t.Fatalf("the string and the vector recording of one command must be Equal:\n %+v\n %+v", line, argv)
+	}
+}
+
+// TestCanonicalizeKeepsEveryEmptySegmentButTheRoot: a rooted path's leading
+// slash is recorded as its Form rather than as a segment, so two recordings
+// differing only in a root still differ in no segment. Every OTHER empty
+// segment is information -- a protocol-relative URL, rsync's trailing slash,
+// a source file whose first line is a // comment -- and a segment dropped here
+// is a byte no materialization can put back.
+func TestCanonicalizeKeepsEveryEmptySegmentButTheRoot(t *testing.T) {
+	got := Canonicalize([]Step{{StepType: "fs_write", Consumed: true, Input: map[string]any{
+		"path":   "/srv/app/main.go",
+		"target": "//cdn.example.com/x",
+		"file":   "out/",
+	}}})
+	args := got[0].Args
+	root, _ := args.At([]string{"path"})
+	if len(root.Kids) != 3 {
+		t.Fatalf("a rooted path's leading slash is its Form, not a segment; got %d segments", len(root.Kids))
+	}
+	cdn, _ := args.At([]string{"target"})
+	if cdn.Form != FormRootedPath || len(cdn.Kids) != 3 || cdn.Kids[0].Lit != "" {
+		t.Fatalf("//cdn.example.com/x must keep its second slash as an empty segment; got %+v", cdn)
+	}
+	dir, _ := args.At([]string{"file"})
+	if len(dir.Kids) != 2 || dir.Kids[1].Lit != "" {
+		t.Fatalf("a trailing slash is a trailing empty segment; got %+v", dir)
+	}
+}
+
+// TestCanonicalizeRecordsANullAsNull: JSON null and the empty string compare
+// EQUAL (Equal ignores LitType, so the two still generalize together), but a
+// replay that wrote "" where the recording sent null would change what the
+// call means.
+func TestCanonicalizeRecordsANullAsNull(t *testing.T) {
+	got := Canonicalize([]Step{{StepType: "mcp", Consumed: true, Input: map[string]any{"cursor": nil}}})
+	n, _ := got[0].Args.At([]string{"cursor"})
+	if n.Kind != KindLit || n.LitType != "null" {
+		t.Fatalf("a null must be recorded as a null literal; got %+v", n)
+	}
+	if !n.Equal(Lit("")) {
+		t.Fatal("a null literal must still Equal the empty string: canonicalization folds scalars to one spelling")
+	}
+}

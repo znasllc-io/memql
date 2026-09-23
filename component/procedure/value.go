@@ -79,9 +79,10 @@ const (
 type Node struct {
 	Kind NodeKind
 	Lit  string
-	// LitType is the scalar's ORIGINAL type -- string, number or bool --
-	// carried for one purpose: rendering the value back as MemQL, where a
-	// number must not acquire quotes.
+	// LitType is the scalar's ORIGINAL type -- string, number, bool or null --
+	// carried for one purpose: writing the value back, as MemQL (where a
+	// number must not acquire quotes) or as the Go value a replay sends
+	// (Materialize, where a null must not become "").
 	//
 	// Equal DELIBERATELY IGNORES IT. Canonicalization folds every scalar to
 	// one string spelling so that a 1 from JSON and a 1 from argv compare
@@ -98,14 +99,42 @@ type Node struct {
 	// HoleType is the widest type observed at this position: string, number,
 	// bool, object, array, or mixed.
 	HoleType string
+	// Form is how canonicalization READ the string this subtree came from:
+	// FormArgv (a command line), FormPath or FormRootedPath (a path, the
+	// second one with its leading slash), FormJSON (a JSON document), or ""
+	// (the subtree was never a string). It exists for one purpose: turning the
+	// tree back into the value a replay has to send (Materialize).
+	//
+	// Equal DELIBERATELY IGNORES IT, for the reason it ignores LitType: two
+	// recordings whose trees agree are the same action however their strings
+	// were spelled, and making the reading part of identity would stop them
+	// generalizing. A rendering hint, never a semantic one.
+	Form string
 }
+
+// The readings canonicalization records on a parsed string (Node.Form).
+const (
+	// FormArgv is a command line split into arguments. It materializes as
+	// ONE shell-quoted string.
+	FormArgv = "argv"
+	// FormPath is a relative path split on "/". It materializes joined.
+	FormPath = "path"
+	// FormRootedPath is a path that began with "/". The leading slash is not
+	// a segment -- two recordings differing only in a root would otherwise
+	// differ in a segment that is always empty -- so the Form is where it is
+	// kept.
+	FormRootedPath = "rootedPath"
+	// FormJSON is a JSON object or array that arrived as a string. It
+	// materializes as JSON text.
+	FormJSON = "json"
+)
 
 // Lit builds a scalar node whose original type is unrecorded, which renders
 // as a string.
 func Lit(s string) *Node { return &Node{Kind: KindLit, Lit: s} }
 
-// LitOf builds a scalar node carrying its original type: "string", "number"
-// or "bool".
+// LitOf builds a scalar node carrying its original type: "string", "number",
+// "bool" or "null".
 func LitOf(s, litType string) *Node { return &Node{Kind: KindLit, Lit: s, LitType: litType} }
 
 // Arr builds an array node.
@@ -134,6 +163,7 @@ func HoleNode(id, typ string) *Node { return &Node{Kind: KindHole, HoleId: id, H
 
 // Equal reports structural equality. A hole equals only a hole with the same
 // id: two templates open at different positions are different templates.
+// LitType and Form describe spelling, not identity, and are not compared.
 func (n *Node) Equal(o *Node) bool {
 	switch {
 	case n == nil || o == nil:
@@ -241,7 +271,7 @@ func (n *Node) Clone() *Node {
 	if n == nil {
 		return nil
 	}
-	c := &Node{Kind: n.Kind, Lit: n.Lit, LitType: n.LitType, HoleId: n.HoleId, HoleType: n.HoleType}
+	c := &Node{Kind: n.Kind, Lit: n.Lit, LitType: n.LitType, HoleId: n.HoleId, HoleType: n.HoleType, Form: n.Form}
 	if len(n.Keys) > 0 {
 		c.Keys = append([]string(nil), n.Keys...)
 	}

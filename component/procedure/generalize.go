@@ -27,44 +27,45 @@ const (
 // DataFlowRef names where a data-flow hole's value comes from.
 type DataFlowRef struct {
 	// StepIndex is the earlier step within the template.
-	StepIndex int
+	StepIndex int `json:"stepIndex"`
 	// Path is the path into that step's RESULT.
-	Path []string
+	Path []string `json:"path"`
 }
 
 // Hole is one open position in a template, plus what explains it.
 type Hole struct {
-	Id        string
-	StepIndex int
+	Id        string `json:"id"`
+	StepIndex int    `json:"stepIndex"`
 	// Path is the path into that step's ARGUMENTS.
-	Path []string
-	Type string
+	Path []string `json:"path"`
+	Type string   `json:"type,omitempty"`
 	// Class is D13's answer.
-	Class HoleClass
+	Class HoleClass `json:"class,omitempty"`
 	// Ref is set when Class is HoleDataFlow.
-	Ref *DataFlowRef
+	Ref *DataFlowRef `json:"ref,omitempty"`
 	// Const is set when Class is HoleConstant.
-	Const string
+	Const string `json:"const,omitempty"`
 	// Evidence is how many instances the classification held on. A count
 	// below len(instances) may never be recorded as explained -- that is the
 	// over-generalization failure mode, and this field is what makes it
 	// visible rather than assumed.
-	Evidence int
+	Evidence int `json:"evidence,omitempty"`
 	// Derivation is set when a checked proposal from the one model call
 	// explained the hole. Empty otherwise.
-	Derivation string
+	Derivation string `json:"derivation,omitempty"`
 }
 
 // TemplateStep is one step of a template.
 type TemplateStep struct {
-	Tool string
-	Args *Node
+	Tool string `json:"tool"`
+	Args *Node  `json:"args"`
 }
 
-// Template is a candidate procedure: steps whose arguments carry holes.
+// Template is a candidate procedure: steps whose arguments carry holes. Its
+// JSON form is the one MarshalTemplate writes (see serialize.go).
 type Template struct {
-	Steps []TemplateStep
-	Holes []Hole
+	Steps []TemplateStep `json:"steps"`
+	Holes []Hole         `json:"holes"`
 }
 
 // Generalize anti-unifies a candidate's instances into one template.

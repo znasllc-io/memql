@@ -151,3 +151,87 @@ func TestSymbolize_IdsAreStableAndDeterministic(t *testing.T) {
 		}
 	}
 }
+
+// TestAntiUnifyKeepsTheLeftForm: the generalization of two command lines is a
+// command line. Without the Form a template's argv would materialize as a
+// JSON array, and the replay would hand a shell a list.
+func TestAntiUnifyKeepsTheLeftForm(t *testing.T) {
+	a := Arr(Lit("go"), Lit("test"), Lit("./a"))
+	a.Form = FormArgv
+	b := Arr(Lit("go"), Lit("test"), Lit("./b"))
+	b.Form = FormPath
+	g, _ := AntiUnify(a, b, newHoleNamer())
+	if g.Form != FormArgv {
+		t.Fatalf("array: Form = %q, want the left operand's %q", g.Form, FormArgv)
+	}
+
+	oa := Obj(map[string]*Node{"x": Lit("1")})
+	oa.Form = FormJSON
+	ob := Obj(map[string]*Node{"x": Lit("2")})
+	og, _ := AntiUnify(oa, ob, newHoleNamer())
+	if og.Form != FormJSON {
+		t.Fatalf("object: Form = %q, want the left operand's %q", og.Form, FormJSON)
+	}
+
+	// Through Generalize, which is where it matters: the recorded command is
+	// still a command line after its instances were anti-unified.
+	tmpl := Generalize([][]Action{
+		Canonicalize([]Step{{StepType: "exec", Consumed: true, Input: map[string]any{"command": "echo hi > a.txt"}}}),
+		Canonicalize([]Step{{StepType: "exec", Consumed: true, Input: map[string]any{"command": "echo hi > b.txt"}}}),
+	})
+	cmd, _ := tmpl.Steps[0].Args.At([]string{"command"})
+	if cmd.Form != FormArgv {
+		t.Fatalf("a generalized command must still be a command line; Form = %q", cmd.Form)
+	}
+}
+
+// TestAntiUnifyKeepsTheTypeOfALiteralBothSidesAgreeOn: a number both
+// instances agree on is still a number in the template. A template that
+// forgot it would render and materialize it as a string, and a tool whose
+// schema wants an integer refuses the replay's call.
+func TestAntiUnifyKeepsTheTypeOfALiteralBothSidesAgreeOn(t *testing.T) {
+	a := Obj(map[string]*Node{"retries": LitOf("3", "number"), "name": Lit("a")})
+	b := Obj(map[string]*Node{"retries": LitOf("3", "number"), "name": Lit("b")})
+	g, _ := AntiUnify(a, b, newHoleNamer())
+	n, _ := g.At([]string{"retries"})
+	if n.Kind != KindLit || n.LitType != "number" {
+		t.Fatalf("an agreed number must stay a number; got %+v", n)
+	}
+}
+
+// TestAHoleIsTypedByWhatBothSidesObserved is HoleType's own contract -- "the
+// widest type observed at this position" -- which the renderer and
+// Materialize both read. Two numbers open a number hole; a number against a
+// string is only a string; and a third instance keeps the type rather than
+// collapsing it to "mixed", because a hole meeting one more literal of its own
+// type has observed nothing wider.
+func TestAHoleIsTypedByWhatBothSidesObserved(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		a, b *Node
+		want string
+	}{
+		{"two numbers", LitOf("1", "number"), LitOf("2", "number"), "number"},
+		{"two bools", LitOf("true", "bool"), LitOf("false", "bool"), "bool"},
+		{"a number and a string", LitOf("1", "number"), Lit("x"), "string"},
+		{"two strings", Lit("a"), Lit("b"), "string"},
+		{"a string hole meeting a string", HoleNode("h9", "string"), Lit("c"), "string"},
+		{"a number hole meeting a number", HoleNode("h9", "number"), LitOf("7", "number"), "number"},
+		{"a scalar and an object", Lit("a"), Obj(map[string]*Node{"k": Lit("v")}), "mixed"},
+	} {
+		g, _ := AntiUnify(c.a, c.b, newHoleNamer())
+		if g.Kind != KindHole || g.HoleType != c.want {
+			t.Errorf("%s: got %+v, want a %q hole", c.name, g, c.want)
+		}
+	}
+
+	three := [][]Action{
+		{{Tool: "mcp", Args: Obj(map[string]*Node{"limit": LitOf("10", "number")})}},
+		{{Tool: "mcp", Args: Obj(map[string]*Node{"limit": LitOf("20", "number")})}},
+		{{Tool: "mcp", Args: Obj(map[string]*Node{"limit": LitOf("30", "number")})}},
+	}
+	tmpl := Generalize(three)
+	if len(tmpl.Holes) != 1 || tmpl.Holes[0].Type != "number" {
+		t.Fatalf("three numbers must open one number hole; got %+v", tmpl.Holes)
+	}
+}
