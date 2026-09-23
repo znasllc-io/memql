@@ -20,7 +20,9 @@ const (
 	contentB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 )
 
-func wrote(path, digest string) ContentDigest { return ContentDigest{Op: "write", Path: path, Digest: digest} }
+func wrote(path, digest string) ContentDigest {
+	return ContentDigest{Op: "write", Path: path, Digest: digest}
+}
 
 // cleanRun is a recording of a command that exited 0, reported no error,
 // printed text and wrote one file.
