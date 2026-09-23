@@ -659,3 +659,22 @@ Steps:
 - [ ] Delete this plan in the last commit before the PR merges.
 - [ ] Full verification on the FINAL tree (after the last commit): `make test` (captured, MAKE_EXIT read), `go test -count=1 -timeout=900s $(scripts/ci/db-gated-packages.sh --complement-cacheable)`, `go test -count=1 -timeout=300s .`, db-gated trees on the epic database, `go run ./cmd/memqllint dsl/`, `go run ./cmd/harness-eval`, `make env-registry-check`, `make sdk-gen-check`, `make arch-model-check`, `make frontdoor-paths-check`, tagged vet/test sweep, module-boundaries loop, `make os-test os-typecheck os-build`, `go run ./cmd/memql-bench --do=gate` against the epic database, gitleaks.
 - [ ] One PR against `main` with `Closes #5408.` `Closes #5409.` `Closes #5410.` `Closes #5411.` `Closes #5412.` `Closes #5413.` each on its own line (a comma list links only the first); assert `closingIssuesReferences` lists all six.
+
+---
+
+## 3. Stream notes (what shipped differs from section 1 in these ways; later streams code against THESE)
+
+### Task 1 (component/work), merged at `8eb33b88c`
+- `ParseRung("")` is `(RungNone, true)` (the empty member is valid); unknown spellings, including `"Trusted"`, are `(RungNone, false)`.
+- `Advance` normalizes the policy itself.
+- A `promotionDecided` event on shadow does NOTHING unless the state carries the stored `PromotionApprovalId`. `DecidePromotion` (Task 5) and the proving driver (Task 7) must read the construct's `promotionApprovalId` into the state before calling `Advance`.
+- A failed canary replay or a refused start resets `CanaryMatches` (it counts CONSECUTIVE clean replays).
+- `LastReplayAt` is stamped by every shadow comparison and every canary/trusted replay (failed ones too) but NOT by a refused start. Retirement also clears an open `PromotionApprovalId`.
+- Rungs off the ladder (`RungNone`, unknown) are never moved by any event, the sweep included.
+- A free parameter absent from `Bindings` records no digest. A cleared streak is an EMPTY NON-NIL map, so a writer that omits nil still clears the stored value -- write `distinctBindings: {}` explicitly.
+- Candidate gate: a step's NEWEST verdict decides; unseen versions do not count; so an earlier like does not clear a later dislike.
+- `compare.go` JSON is lowerCamel with omitempty: `ContentDigest{op,path,digest}`, `StepObservation{isError,exitCode,resultType,contents}`, `StepExpectation{noError,exitCode,resultType,contents,exact}`. Digests are normalized (the `sha256:` prefix dropped, lowercase hex); paths go through `path.Clean`; `ExpectationFrom` sorts contents by path then op. An expectation holding NOTHING is refused as unverifiable by `Compare` and `CompareShadow`. `CompareShadow` takes the app's observation as the reference; isError and exitCode are always exact; only file digests relax to presence where the recordings varied.
+- `ActionFootprint(tool, cwd, paths)`: `cwd` MUST be the session WORKSPACE (the fingerprint's `cwd`), not a command's own directory. `fs_read` does not set `Files` (Files means "writes"); `exec`/`fs_write` set Files; `fetch` External; `mcp`/`app_answer` empty; an unknown tool is machine-local.
+- `ProcedurePromotionApproval` sets Question, two Options (approve, decline) and rules-sourced Evidence (`ladder.promotion`); it uses `ProcedureHash` as the artifact hash even when EMPTY -- Task 4 must ALWAYS write a hash.
+- `CatalogCandidate` gains only `Rung`; `Rung != RungNone` means a learned procedure.
+- Risk for Task 4: put file contents into an EXEC step's expectation only if the dispatcher can observe them; for exec, expect exitCode, isError and resultType only. fs_write/fs_read carry the content digests.
