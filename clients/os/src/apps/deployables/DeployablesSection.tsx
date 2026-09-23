@@ -524,10 +524,11 @@ export function DeployablesSection({
               keeps its name through the whole flow. */}
           {/* `deploy`, because composing ENDS in a deploy: a person holding
               only `sources` has nothing to reach here that is theirs. */}
-          {canOpenCompose ? (
+          {root === "deployables" && canOpenCompose ? (
             <AddButton label="Add a deployable" className="deployable-new" onClick={() => setView({ kind: "compose" })} />
           ) : null}
         </Head>
+        {root === "sources" ? <Caption>Edit or archive repositories here. Add new ones through Add deployable.</Caption> : null}
 
         {/* WHAT HAPPENED TO THE THING THAT IS NO LONGER HERE. The name is free
             the instant the row is stamped; the certificate and route come down

@@ -13,7 +13,7 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { SITE_CONCEPT } from "../../src/apps/deployables/concepts";
-import { DEPLOYMENT_CONCEPT } from "../../src/apps/deployables/packages/rows";
+import { DEPLOYMENT_CONCEPT, PACKAGE_CONCEPT } from "../../src/apps/deployables/packages/rows";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import { PLATFORM_SITE, SHOP, click, emit, fakeConnection, siteRow, withSession, type FakeConnection, type FakeSeed } from "./harness";
 
@@ -369,9 +369,12 @@ describe("the list", () => {
   // deployables, with a life of its own -- so it has a list of its own, in the
   // same row language, rather than a header row inside somebody else's.
   it("lists each source once on the Sources tab, with what it produced and where it stands", async () => {
-    mount(fakeConnection(TWO_SOURCES), { section: "repositories" });
+    const connection = fakeConnection(TWO_SOURCES);
+    mount(connection, { section: "repositories" });
     const acme = await screen.findByRole("button", { name: /^Open acme,/ });
     expect(screen.getByRole("heading", { name: "Repositories" })).toBeTruthy();
+    expect(screen.getByText("Edit or archive repositories here. Add new ones through Add deployable.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Add a deployable" })).toBeNull();
     expect(rowNames()).toEqual(["acme", "widgets-co"]);
     // Where it lives, how much it produced, and the one state word.
     expect(within(acme).getByText("acme/storefront at main")).toBeTruthy();
@@ -379,6 +382,8 @@ describe("the list", () => {
     expect(within(acme).getByText("Current")).toBeTruthy();
     // No deployable is a row here.
     expect(rowNames()).not.toContain("storefront");
+    await emit(connection, PACKAGE_CONCEPT, { ...ACME, id: "pkg-new", name: "new-repository", repoUrl: "https://github.com/acme/new-repository" });
+    await screen.findByRole("button", { name: /^Open new-repository,/ });
   });
 
   it("opens a source's page from its row, rooted at Sources, and its apps from there", async () => {

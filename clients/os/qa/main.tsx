@@ -292,9 +292,9 @@ function WindowBody({ fallback, children }: { fallback: string; children: ReactN
   );
 }
 
-function Lists({ section }: { section: "deployables" | "sources" | "settings" }) {
+function Lists({ section }: { section: "deployables" | "sources" | "repositories" | "settings" }) {
   return (
-    <WindowBody fallback={section === "sources" ? "Sources" : section === "settings" ? "Settings" : "Deployables"}>
+    <WindowBody fallback={section === "sources" ? "Sources" : section === "repositories" ? "Repositories" : section === "settings" ? "Settings" : "Deployables"}>
       <DeployablesApp sectionId={section} navigate={() => {}} askContext={() => {}} store={settingsStore()} />
     </WindowBody>
   );
@@ -506,6 +506,8 @@ const VIEWS: Record<
   // "A repository" and the Repository step is the picker, not the invitation.
   connected: { seed: CONNECTED, framed: true, render: () => <Lists section="deployables" /> },
   "source-chooser": { seed: SOURCE_CHOOSER, framed: true, render: () => <Lists section="deployables" /> },
+  "repository-management": { seed: SOURCE_CHOOSER, framed: true, render: () => <Lists section="repositories" /> },
+  "source-settings": { seed: SOURCE_CHOOSER, framed: true, render: () => <Lists section="settings" /> },
   "source-management": { seed: SOURCE_CHOOSER, framed: true, render: () => <Lists section="sources" /> },
   "source-empty": { seed: { ...SOURCE_CHOOSER, sourceConnections: [] }, framed: true, render: () => <Lists section="sources" /> },
   "connected-empty": { seed: { ...CONNECTED, repositories: repositoriesReply({ repositories: [], installations: [], pending: [] }) }, framed: true, render: () => <Lists section="deployables" /> },

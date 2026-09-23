@@ -41,8 +41,9 @@ export function SourceConnections(props: SourceConnectionsProps) {
 function SourceConnectionsForViewer({ mode, selectedId = "", onChoose, credentials, credentialFeed, can = true, disabled = false, connectResult, returnSection = "sources", viewer }: SourceConnectionsProps & { viewer: string }) {
   const feed = useSourceConnections();
   useEffect(() => { feed.observeCredentials(credentials); }, [credentials, feed.observeCredentials]);
-  const [adding, setAdding] = useState(Boolean(connectResult));
-  useEffect(() => { if (connectResult) setAdding(true); }, [connectResult]);
+  const [adding, setAdding] = useState(mode === "choose" && Boolean(connectResult));
+  useEffect(() => { if (mode !== "choose") setAdding(false); else if (connectResult) setAdding(true); }, [mode, connectResult]);
+  const creating = mode === "choose" && adding;
   const [removed, setRemoved] = useState<readonly string[]>([]);
   useEffect(() => {
     if (feed.state !== "live" || feed.error) return;
@@ -53,12 +54,13 @@ function SourceConnectionsForViewer({ mode, selectedId = "", onChoose, credentia
   const mine = credentials.filter(grant => bare(grant.ownerUserId) === viewer && isGithubAppGrant(grant)).map(grant => feed.revokedCredentialIds.includes(grant.id) ? { ...grant, status: "revoked" } : grant);
   const rows = feed.rows.filter(row => !removed.includes(row.id));
   return <section aria-label="Source connections">
-    <Head title="Sources" meta={listCount({ ...feed, rows })}>{can && !adding ? <AddButton label="Add source" disabled={disabled} onClick={() => setAdding(true)} /> : null}</Head>
+    <Head title="Sources" meta={listCount({ ...feed, rows })}>{mode === "choose" && can && !creating ? <AddButton label="Add source" disabled={disabled} onClick={() => setAdding(true)} /> : null}</Head>
+    {mode === "manage" ? <Caption>Reconnect or remove sources here. Add new ones through Add deployable.</Caption> : null}
     <ConnectReturnNotice result={connectResult} />
-    {adding ? <AddSource key={viewer} can={can && !disabled} initialCredentialId={connectResult?.credentialId} credentials={mine} credentialFeed={credentialFeed} returnSection={returnSection}
+    {creating ? <AddSource key={viewer} can={can && !disabled} initialCredentialId={connectResult?.credentialId} credentials={mine} credentialFeed={credentialFeed} returnSection={returnSection}
       onCancel={() => setAdding(false)} onSaved={() => { setAdding(false); setRemoved([]); feed.retry(); }} /> : <>
       {feed.error ? <Notice tone="error" sentence="Sources could not be read." detail={feed.error} /> : null}
-      {rows.length === 0 ? <Caption>{feed.state === "seeding" ? "Reading sources…" : feed.state !== "live" || feed.error ? "Sources are unavailable. Refresh to try again." : "No sources yet. Add a GitHub account or organization to choose its repositories."}</Caption> : <RecordList as="ul" label="Sources">
+      {rows.length === 0 ? <Caption>{feed.state === "seeding" ? "Reading sources…" : feed.state !== "live" || feed.error ? "Sources are unavailable. Refresh to try again." : mode === "manage" ? "No sources yet. Start with Add deployable." : "No sources yet. Add a GitHub account or organization to choose its repositories."}</Caption> : <RecordList as="ul" label="Sources">
         {rows.map(row => <SourceConnectionLine key={row.id} connection={row} grant={mine.find(grant => grant.id === row.credentialId)} mode={mode} selected={selectedId === row.id}
           onChoose={onChoose} can={can && !disabled} returnSection={returnSection} available={!disabled && feed.state === "live" && !feed.error && (!credentialFeed || credentialFeed.state === "live" && !credentialFeed.error)}
           onRemoved={() => { setRemoved(held => [...held, row.id]); feed.retry(); }} />)}

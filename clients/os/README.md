@@ -2396,8 +2396,11 @@ Analyze registers the chosen repository/ref and starts its analysis. An existing
 repository in the same owning account is reused without changing its credentials;
 the flow follows its newly returned run rather than historical successes.
 
-Sources manages these same personal bindings. Repositories holds saved package
-history and lifecycle controls. Removing a Source only tombstones the chooser
+Sources reconnects or removes these same personal bindings. Repositories holds
+saved package history and lifecycle controls. Both pages and Settings are
+management-only, with a short subtitle directing creation through Add deployable.
+Only the deployable wizard offers the plus-style Add source control and new
+GitHub account connections; saved entries update the shared live lists. Removing a Source only tombstones the chooser
 binding: sibling Sources, its shared grant, saved repositories and deployables
 remain. Existing repositories retain the original installation relationship and
 revalidate live access on fetch. Disconnect GitHub is a separate account-wide

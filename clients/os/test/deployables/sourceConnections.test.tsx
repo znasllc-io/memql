@@ -38,7 +38,7 @@ describe("GitHub source connections", () => {
     await waitFor(() => expect(within(list).queryByRole("button", { name: /^beta / })).toBeNull());
   });
   it("adds a named installation under the explicitly chosen GitHub identity without creating a repository", async () => {
-    const { connection } = mount({ sourceConnections: [] });
+    const { connection, view } = mount({ sourceConnections: [] }, "choose");
     await click(screen.getByRole("button", { name: "Add source" }));
     const identities = screen.getByRole("list", { name: "GitHub accounts" });
     expect(within(identities).getAllByRole("listitem")).toHaveLength(2);
@@ -51,6 +51,9 @@ describe("GitHub source connections", () => {
     expect(connection.callsNamed("sourceConnectionCreate")).toEqual(['builtin sourceConnectionCreate(credentialId: "grant-alice", installationId: "i-acme")']);
     expect(connection.callsNamed("createPackage")).toHaveLength(0);
     expect(connection.callsNamed("sourceCredentialCreate")).toHaveLength(0);
+    view.rerender(withSession(<SourceConnectionsProvider><SourceConnections mode="manage" credentials={[ALICE, BOB].map(credentialFromRow)} /></SourceConnectionsProvider>));
+    expect(within(screen.getByRole("list", { name: "Sources" })).getByText("acme")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Add source" })).toBeNull();
   });
   it("removes only the selected binding after confirmation, preserving other sources and the shared grant", async () => {
     const { connection } = mount();
@@ -86,7 +89,7 @@ describe("GitHub source connections", () => {
     expect(screen.getByRole("button", { name: "Refresh sources" })).toBeTruthy();
   });
   it("keeps failed source creation in place and exposes no token entry", async () => {
-    mount({ sourceConnections: [], sourceConnectionCreateError: "source_connection_unavailable: Access changed. Choose another source." });
+    mount({ sourceConnections: [], sourceConnectionCreateError: "source_connection_unavailable: Access changed. Choose another source." }, "choose");
     await click(screen.getByRole("button", { name: "Add source" }));
     await click(screen.getByRole("button", { name: "@alice GitHub account Connected" }));
     await click(await screen.findByRole("button", { name: "acme Organization" }));
@@ -114,7 +117,7 @@ describe("GitHub source connections", () => {
     expect(connection.callsNamed("sourceConnectionRemove")).toHaveLength(0);
   });
   it("offers authorized GitHub setup inside Add source, preserving refusal and cancellation", async () => {
-    const { connection } = mount({ credentials: [], sourceConnections: [], githubApp: { configured: false, canSetup: true }, appSetupReason: "github_app_setup_failed" });
+    const { connection } = mount({ credentials: [], sourceConnections: [], githubApp: { configured: false, canSetup: true }, appSetupReason: "github_app_setup_failed" }, "choose");
     await click(screen.getByRole("button", { name: "Add source" }));
     await click(await screen.findByRole("button", { name: "Set up GitHub" }));
     expect(await screen.findByText("GitHub could not be set up")).toBeTruthy();
@@ -124,12 +127,25 @@ describe("GitHub source connections", () => {
     expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(0);
   });
   it("explains missing app setup without offering it to a non-owner", async () => {
-    mount({ credentials: [], sourceConnections: [], githubApp: { configured: false, canSetup: false } });
+    mount({ credentials: [], sourceConnections: [], githubApp: { configured: false, canSetup: false } }, "choose");
     await click(screen.getByRole("button", { name: "Add source" }));
     expect(await screen.findByText(/Ask a cluster owner/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Set up GitHub" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Add GitHub account" })).toBeNull();
   });
+  it("keeps management read/change/remove only, even after a reconnect callback", async () => {
+    const { view } = mount();
+    await screen.findByRole("list", { name: "Sources" });
+    expect(screen.getByText("Reconnect or remove sources here. Add new ones through Add deployable.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Add source" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add GitHub account" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Remove source acme" })).toBeTruthy();
+    view.rerender(withSession(<SourceConnectionsProvider><SourceConnections mode="manage" credentials={[ALICE, BOB].map(credentialFromRow)} connectResult={{ reason: "reconnected", section: "sources", credentialId: "grant-alice" }} /></SourceConnectionsProvider>));
+    expect(screen.queryByRole("button", { name: "Save source" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add GitHub account" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Remove source acme" })).toBeTruthy();
+  });
+
   it("projects nested wire rows without losing installation ownership", () => {
     expect(sourceConnectionFromRow({ id: "source-acme", payload: { ...ACME } })).toEqual(expect.objectContaining({ id: "source-acme", ownerUserId: "u-me", installationId: "i-acme" }));
   });
@@ -165,7 +181,7 @@ it("does not save twice or close Add source when an in-flight save loses its gra
     if (name === "sourceConnectionCreate") { creates++; return new Promise(resolve => { finish = resolve; }); }
     return original(name, call, options);
   });
-  const panel = (status: string) => withSession(<SourceConnectionsProvider><SourceConnections mode="manage" credentials={[credentialFromRow({ ...ALICE, status })]} /></SourceConnectionsProvider>);
+  const panel = (status: string) => withSession(<SourceConnectionsProvider><SourceConnections mode="choose" credentials={[credentialFromRow({ ...ALICE, status })]} /></SourceConnectionsProvider>);
   const view = render(panel("active"));
   await click(screen.getByRole("button", { name: "Add source" }));
   await click(screen.getByRole("button", { name: "@alice GitHub account Connected" }));

@@ -1,5 +1,4 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
-import { act } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -13,11 +12,11 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { SOURCE_CREDENTIAL_CONCEPT } from "../../src/apps/deployables/sources/rows";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
-import { builtinReply, repositoriesReply, click, emit, fakeConnection, githubGrantRow, withSession, type FakeConnection, type FakeSeed } from "./harness";
+import { repositoriesReply, click, emit, fakeConnection, githubGrantRow, withSession, type FakeConnection, type FakeSeed } from "./harness";
 
 // Settings -> Sources (epic memql#4885, task memql#4891, design section D):
 // every credential this person holds, what fetches under it, and the two acts
-// -- add, and revoke.
+// -- reconnect, and revoke. New sources enter through Add deployable.
 //
 // Per-file isolation: this file mounts the app's SETTINGS section, and
 // `list.test.tsx` mounts the list. Vitest isolates per FILE rather than per
@@ -299,29 +298,24 @@ describe("GitHub settings disconnect boundaries", () => {
     expect(within(account).getByRole("button", { name: "Disconnect" })).toBeTruthy();
   });
 
-  it("drops a pending installation reading when the selected identity is revoked", async () => {
+  it("keeps Settings management-only while live revocation exposes reconnect", async () => {
     const conn = fakeConnection({ credentials: [grant], repositories });
-    let resolve!: (value: ReturnType<typeof builtinReply>) => void;
-    const original = vi.mocked(conn.query.executeNamed).getMockImplementation()!;
-    vi.spyOn(conn.query, "executeNamed").mockImplementation((name, call, options) => name === "sourceInstallations" ? new Promise(yes => { resolve = yes; }) : original(name, call, options));
     mount(conn);
-    await click(await screen.findByRole("button", { name: "Add source" }));
-    await click(screen.getByRole("button", { name: "@octocat GitHub account Connected" }));
-    await waitFor(() => expect(resolve).toBeTruthy());
+    await identity();
+    expect(screen.getByText("Reconnect or remove sources here. Add new ones through Add deployable.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Add source" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add GitHub account" })).toBeNull();
     await emit(conn, SOURCE_CREDENTIAL_CONCEPT, githubGrantRow({ id: "grant", status: "revoked" }));
-    await act(async () => resolve(builtinReply("sourceInstallations", [repositories])));
-    expect(screen.queryByRole("button", { name: "Acme Organization" })).toBeNull();
+    expect(await screen.findByRole("button", { name: "Reconnect GitHub" })).toBeTruthy();
+    expect(screen.getByText("Reconnect needed")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Save source" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Reconnect @octocat" })).toBeTruthy();
+    expect(conn.callsNamed("sourceInstallations")).toHaveLength(0);
   });
 
-  it("does not carry a viewer's source or installation selection into another viewer", async () => {
+  it("does not carry a viewer's managed sources into another viewer", async () => {
     const conn = fakeConnection({ credentials: [grant, githubGrantRow({ id: "other", ownerUserId: "u-other", login: "another-person" })], repositories, sourceConnections: [{ id: "only-mine", ownerUserId: "u-me", credentialId: "grant", installationId: "acme", accountLogin: "Acme", accountType: "Organization", status: "active" }] });
     const view = mount(conn);
     await screen.findByText("Acme");
-    await click(screen.getByRole("button", { name: "Add source" }));
-    await click(screen.getByRole("button", { name: "@octocat GitHub account Connected" }));
-    await screen.findByRole("button", { name: "Acme Organization" });
     view.rerender(withSession(<DeployablesApp sectionId="settings" navigate={vi.fn()} askContext={vi.fn()} store={memStore()} />, { role: "owner", userId: "u-other" }));
     await screen.findByText("@another-person");
     expect(screen.queryByRole("button", { name: "Acme Organization" })).toBeNull();
