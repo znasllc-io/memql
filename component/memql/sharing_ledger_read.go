@@ -68,7 +68,8 @@ func (e *MemQLEngine) evaluateFleetSharingLedgerExpression(ctx context.Context, 
 	// resolving it through `workersForUser` means a machine that is not the
 	// caller's is not in the answer -- this function does not have to be
 	// trusted to check, exactly as the pull and the probe do not.
-	if _, err := e.modelPullMachineFor(ctx, registrationId); err != nil {
+	machine, err := e.modelPullMachineFor(ctx, registrationId)
+	if err != nil {
 		return nil, err
 	}
 
@@ -138,7 +139,10 @@ func (e *MemQLEngine) evaluateFleetSharingLedgerExpression(ctx context.Context, 
 		})
 	}
 
-	entry := FoldLedger(trimConceptPrefix(registrationId), week, calls)
+	// THE OWNER IS THE MACHINE'S, read off the row that proved it is the
+	// caller's -- the split (design G4) is "for you" versus "for anybody else",
+	// and "you" is whoever owns this machine.
+	entry := FoldLedger(trimConceptPrefix(registrationId), machine.OwnerUserId, week, calls)
 	// The machine id on the row is the CANONICAL one the caller asked with, so
 	// the page does not have to know that the fold matched on the bare form.
 	payload := entry.Row()
