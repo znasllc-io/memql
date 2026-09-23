@@ -79,27 +79,29 @@ async function hydrate(desktop: ReturnType<typeof deferred<Result>>) {
   await act(async () => desktop.resolve(rowsResult([{ revision: 4, document: documentFromOtherDevice }])));
 }
 describe("GitHub callback through real shell startup", () => {
-  it("waits for capabilities after desktop hydration, then opens one explicit source chooser", async () => {
+  it("waits for capabilities after desktop hydration, then opens one explicit GitHub account step", async () => {
     const { capabilities, desktop, connection } = boot();
     await hydrate(desktop);
     expect(screen.queryByRole("dialog", { name: "Deployables" })).toBeNull();
     await allow(capabilities);
-    expect(await screen.findByRole("button", { name: "@octocat GitHub account Connected" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /^@octocat (?:Chosen )?Connected/ })).toBeTruthy();
     expect(screen.getAllByRole("dialog", { name: "Deployables" })).toHaveLength(1);
     expect(new LocalDesktopStore().load()?.desks).toHaveLength(1);
     expect(takeParkedConnectReturn()).toBeNull();
     expect(window.location.search).toBe("");
     expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
+    expect(connection.callsNamed("sourceInstallations")).toHaveLength(0);
+    expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(0);
   });
   it("keeps the returned window and component state when the desktop hydrates later", async () => {
     const { capabilities, desktop } = boot();
     await allow(capabilities);
-    const repository = await screen.findByRole("button", { name: "@octocat GitHub account Connected" });
+    const account = await screen.findByRole("button", { name: /^@octocat (?:Chosen )?Connected/ });
     const originalWindow = screen.getByRole("dialog", { name: "Deployables" });
     await hydrate(desktop);
     await waitFor(() => expect(new LocalDesktopStore().load()?.desks.some(d => d.id === "remote-desk")).toBe(true));
     expect(screen.getByRole("dialog", { name: "Deployables" })).toBe(originalWindow);
-    expect(screen.getByRole("button", { name: "@octocat GitHub account Connected" })).toBe(repository);
+    expect(screen.getByRole("button", { name: /^@octocat (?:Chosen )?Connected/ })).toBe(account);
     expect(screen.getAllByRole("dialog", { name: "Deployables" })).toHaveLength(1);
     const persisted = new LocalDesktopStore().load()!;
     expect(persisted.desks).toHaveLength(2);

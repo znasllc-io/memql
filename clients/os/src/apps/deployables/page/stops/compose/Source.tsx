@@ -15,13 +15,12 @@ import { flatten } from "../../../../../kit/rows";
 import { zipUnusableNote, type ZipVerdict } from "../../../sources/probe";
 import type { ArtifactProbeHandle, SourceProbeHandle } from "../../../sources/useProbes";
 import { PICKER_PAGE_SIZE, useZipArtifacts } from "../../../sources/useZipArtifacts";
-import type { SourceConnectionRow } from "../../../sources/connections";
 import type { PackageRow } from "../../../packages/rows";
 import { sourceLabel } from "../../../packages/rows";
 import { suggestName, type ComposeDraft } from "../../compose";
 import { CiHandoff } from "./CiHandoff";
 import { KindField, NameField } from "./fields";
-import { RepositorySource, type ConnectionNeed } from "./RepositorySource";
+import { RepositoryConfiguration } from "./RepositorySource";
 
 // The compose Source stop: where this deployable comes from, asked once
 // (epic memql#4885, design section C).
@@ -131,19 +130,16 @@ export function ComposeSourceKindStep({
 export function ComposeSourceDetailStep({
   draft,
   onDraft,
-  connection,
   probe,
   zipProbe,
   zip,
   siteId,
   clusterDomain,
   locked,
-  onConnectionNeed,
   duplicateOf = null,
 }: {
   draft: ComposeDraft;
   onDraft: (patch: Partial<ComposeDraft>) => void;
-  connection?: SourceConnectionRow;
   probe: SourceProbeHandle;
   zipProbe: ArtifactProbeHandle;
   /** The zip's verdict once it has been probed; null before that. */
@@ -153,7 +149,6 @@ export function ComposeSourceDetailStep({
   clusterDomain: string;
   /** Chosen once: after Analyze the step is facts, not fields. */
   locked: boolean;
-  onConnectionNeed?: (need: ConnectionNeed) => void;
   /**
    * The ACTIVE source that already tracks this repository at this ref
    * (2026-09-05 design, D8), when there is one. The engine refuses the second
@@ -167,9 +162,7 @@ export function ComposeSourceDetailStep({
     <div className="os-stop-body">
       {draft.choice === "repo" ? (
         <>
-          {connection ? <RepositorySource key={connection.id}
-            connection={connection} draft={draft} onDraft={onDraft} probe={probe}
-            onConnectionNeed={onConnectionNeed} /> : <Caption>Choose a Source before choosing a repository.</Caption>}
+          <RepositoryConfiguration draft={draft} onDraft={onDraft} branches={probe.reply?.branches ?? []} />
           {/* ASKED ONCE THERE IS A REPOSITORY TO ASK IT ABOUT. It used to stand
               under an empty picker as two more full-width cards. It is a
               choice row now -- the two answers are short, and the line beneath

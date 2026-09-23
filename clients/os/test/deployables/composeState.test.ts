@@ -120,6 +120,9 @@ describe("what a probe reason is worth", () => {
       // fetch and refuse with the same information a round trip later.
       "reconnect_required",
       "repository_not_installed",
+      "source_connection_unavailable",
+      "source_repository_mismatch",
+      "repository_not_accessible",
     ]) {
       expect(probeParks(reason), `${reason} must park`).toBe(true);
     }

@@ -235,6 +235,7 @@ const CONNECTED: FakeSeed = {
 
 const SOURCE_CHOOSER: FakeSeed = {
   ...CONNECTED,
+  githubApp: { configured: true, installUrl: "https://github.com/apps/memql/installations/new" },
   accounts: [{ id: "client", name: "Client account", status: "active" }, { id: "self", name: "Operator organization", status: "active" }],
   credentials: [githubGrantRow({ id: "cred-grant", login: "octocat" }), githubGrantRow({ id: "cred-work", login: "workcat" })],
   sourceConnections: [sourceConnectionRow({ credentialId: "cred-grant" }), sourceConnectionRow({ id: "source-personal", credentialId: "cred-grant", installationId: "i-octocat", accountLogin: "octocat", accountType: "User" }), sourceConnectionRow({ id: "source-work", credentialId: "cred-work", installationId: "i-studio", accountLogin: "studio" })],
@@ -505,6 +506,8 @@ const VIEWS: Record<
   // The same app with a GitHub account connected: press + and choose
   // "A repository" and the Repository step is the picker, not the invitation.
   connected: { seed: CONNECTED, framed: true, render: () => <Lists section="deployables" /> },
+  "guided-account-empty": { seed: { ...SOURCE_CHOOSER, credentials: [], sourceConnections: [] }, framed: true, render: () => <Lists section="deployables" /> },
+  "guided-org-empty": { seed: { ...SOURCE_CHOOSER, sourceInstallations: { "cred-grant": { reason: "ok", installations: [], pending: [] } } }, framed: true, render: () => <Lists section="deployables" /> },
   "source-chooser": { seed: SOURCE_CHOOSER, framed: true, render: () => <Lists section="deployables" /> },
   "repository-management": { seed: SOURCE_CHOOSER, framed: true, render: () => <Lists section="repositories" /> },
   "source-settings": { seed: SOURCE_CHOOSER, framed: true, render: () => <Lists section="settings" /> },

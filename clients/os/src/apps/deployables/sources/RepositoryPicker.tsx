@@ -93,6 +93,34 @@ export function RepositoryPicker({
 
   return (
     <div className="os-stop-body">
+      <div className="os-refresh-row">
+        <RefreshButton label="Refresh repositories" onClick={onLookAgain} busy={busy} />
+        <span className="os-caption">
+          {total === 0
+            ? readAt === ""
+              ? "Not read yet."
+              : `Nothing to show, read ${formatFreshness(readAt, now)}.`
+            : `Showing ${shown} of ${total}, read ${formatFreshness(readAt, now)}.`}
+        </span>
+        {/* THE WALK, on demand and named for what it does. There is no
+            infinite scroll here: a person picking one repository out of many
+            should not have to make the browser fetch by accident. */}
+        {page.nextPage > 0 ? (
+          <Button onClick={onReadMore} busy={busy} busyLabel="Reading...">
+            Read more
+          </Button>
+        ) : null}
+        {/* ANOTHER ORGANIZATION IS ANOTHER GROUP IN THIS LIST, so the way to
+            add one is here, under the groups, and not only on a settings page.
+            It used to be offered when the list was EMPTY and nowhere else in
+            the wizard: somebody with one organization connected, looking for a
+            repository in a second, was shown a complete-looking list and no
+            way to make it longer. TEXT, not a third button on this row: it
+            leaves the product, and the row's one act is reading again. An
+            empty list keeps it as its own control (`EmptyPicker`), where it is
+            the only thing to do. */}
+        {total > 0 ? <InstallLink installUrl={installUrl} text onFollow={() => { awaitingInstall.current = true; }} /> : null}
+      </div>
       {/* THE REFUSAL FIRST, and above the list rather than instead of it: a
           refusal is not a zero (clients/os/README.md), so a read that failed
           leaves whatever was already read on screen and says what happened
@@ -165,38 +193,7 @@ export function RepositoryPicker({
         ))
       )}
 
-      {/* WHEN IT WAS READ, BESIDE THE CONTROL THAT READS IT AGAIN. The
-          control and the answer to "how old is this" are one thought
-          (.os-refresh-row), and separating them is how a stale reading gets
-          read as a live one. */}
-      <div className="os-refresh-row">
-        <span className="os-caption">
-          {total === 0
-            ? readAt === ""
-              ? "Not read yet."
-              : `Nothing to show, read ${formatFreshness(readAt, now)}.`
-            : `Showing ${shown} of ${total}, read ${formatFreshness(readAt, now)}.`}
-        </span>
-        <RefreshButton label="Refresh repositories" onClick={onLookAgain} busy={busy} />
-        {/* THE WALK, on demand and named for what it does. There is no
-            infinite scroll here: a person picking one repository out of many
-            should not have to make the browser fetch by accident. */}
-        {page.nextPage > 0 ? (
-          <Button onClick={onReadMore} busy={busy} busyLabel="Reading...">
-            Read more
-          </Button>
-        ) : null}
-        {/* ANOTHER ORGANIZATION IS ANOTHER GROUP IN THIS LIST, so the way to
-            add one is here, under the groups, and not only on a settings page.
-            It used to be offered when the list was EMPTY and nowhere else in
-            the wizard: somebody with one organization connected, looking for a
-            repository in a second, was shown a complete-looking list and no
-            way to make it longer. TEXT, not a third button on this row: it
-            leaves the product, and the row's one act is reading again. An
-            empty list keeps it as its own control (`EmptyPicker`), where it is
-            the only thing to do. */}
-        {total > 0 ? <InstallLink installUrl={installUrl} text onFollow={() => { awaitingInstall.current = true; }} /> : null}
-      </div>
+
     </div>
   );
 }

@@ -322,14 +322,16 @@ describe("the return from GitHub", () => {
     expect(screen.getByText("GitHub sent you back without setting this cluster up.")).toBeTruthy();
   });
 
-  it("reopens Sources exactly once and waits for explicit source registration", async () => {
+  it("reopens source management exactly once without registering another source", async () => {
     const connection = fakeConnection({ credentials: [githubGrantRow({ id: "own", login: "alice" }), githubGrantRow({ id: "foreign", ownerUserId: "other", login: "colleague" })], sourceConnections: [] });
     h.connection = connection;
     history.replaceState({}, "", "/?github=connected");
     captureConnectReturn(window);
     render(withSession(<StrictMode><ConnectReturnDispatcher /><ReturnedWindow /></StrictMode>));
-    expect(await screen.findByRole("button", { name: "@alice GitHub account Connected" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /@colleague/ })).toBeNull();
+    const accounts = await screen.findByRole("list", { name: "Connected GitHub accounts" });
+    expect(within(accounts).getByText("@alice")).toBeTruthy();
+    expect(within(accounts).queryByText("@colleague")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add source" })).toBeNull();
     expect(screen.getByTestId("window-count").textContent).toBe("1");
     expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(0);
     expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
@@ -760,12 +762,13 @@ describe("existing credential and cluster settings", () => {
   afterEach(() => { h.connection = null; restoreLocation?.(); });
   it("starts additive GitHub authorization with correlation and preserves existing sources", async () => {
     const assigned = stubNavigation();
-    const { connection } = mountSources({ credentials: [], sourceConnections: [], connectUrl: "https://github.com/login/oauth/authorize?fixture=1" });
-    await click(await screen.findByRole("button", { name: "Add source" }));
+    const { connection } = await composeAccount({ credentials: [GRANT], repositories: repositoriesReply({ repositories: [WIDGET] }), connectUrl: "https://github.com/login/oauth/authorize?fixture=1" });
     await click(screen.getByRole("button", { name: "Add GitHub account" }));
     expect(assigned).toEqual(["https://github.com/login/oauth/authorize?fixture=1"]);
     expect(connection.callsNamed("githubConnectBegin")[0]).toMatch(/flowId: "[a-f0-9-]+"/);
     expect(connection.callsNamed("githubConnectBegin")[0]).not.toContain("credentialId:");
+    expect(connection.callsNamed("githubConnectBegin")[0]).toContain('returnPath: "/?connect=deployables"');
+    expect(connection.callsNamed("sourceConnectionRemove")).toHaveLength(0);
     expect(connection.callsNamed("sourceCredentialRevoke")).toHaveLength(0);
     expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(0);
   });
@@ -864,7 +867,7 @@ const URL_FIELD = "The repository this deployable is built from";
 const BRANCH_FIELD = "Which branch or tag to deploy";
 const NAME_FIELD = "What this deployable is called";
 
-async function composeSource(seed: FakeSeed): Promise<{ connection: FakeConnection; region: HTMLElement }> {
+async function composeAccount(seed: FakeSeed): Promise<{ connection: FakeConnection; region: HTMLElement }> {
   const connection = fakeConnection(seed);
   h.connection = connection;
   render(
@@ -876,10 +879,25 @@ async function composeSource(seed: FakeSeed): Promise<{ connection: FakeConnecti
   await click(await screen.findByRole("button", { name: /Add a deployable/ }));
   const region = await screen.findByRole("region", { name: "Add a deployable" });
   await click(within(region).getByRole("radio", { name: /A repository/ }));
-  const sources = await within(region).findByRole("list", { name: "Sources" });
-  const choose = within(sources).getAllByRole("button").find(button => button.classList.contains("os-record-row"));
-  expect(choose).toBeTruthy();
-  await click(choose!);
+  await click(within(region).getByRole("button", { name: "Add source" }));
+  return { connection, region };
+}
+
+async function continueWizard() {
+  await waitFor(() => expect(document.querySelector(".os-actbar-acts")).toBeTruthy());
+  await click(await within(document.querySelector(".os-actbar-acts") as HTMLElement).findByRole("button", { name: "Continue" }));
+}
+
+async function composeSource(seed: FakeSeed): Promise<{ connection: FakeConnection; region: HTMLElement }> {
+  const { connection, region } = await composeAccount(seed);
+  const accounts = await within(region).findByRole("list", { name: "GitHub accounts" });
+  const choices = within(accounts).getAllByRole("button");
+  expect(choices).toHaveLength(1);
+  await click(choices[0]!);
+  expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
+  await continueWizard();
+  await click(await within(region).findByRole("button", { name: /^acme Organization/ }));
+  await continueWizard();
   return { connection, region };
 }
 
@@ -909,19 +927,19 @@ describe("the compose Source stop, with a connection", () => {
     expect(connection.callsNamed("sourceProbe").join()).not.toContain("colleague-grant");
   });
 
-  it("reads the list on its own, so a connected person opens the stop and picks", async () => {
+  it("reads repositories after explicit account and organization confirmation", async () => {
     const { connection, region } = await composeSource({
       credentials: [GRANT],
       repositories: repositoriesReply({ repositories: [WIDGET] }),
     });
 
-    // NOTHING WAS TYPED AND NOTHING WAS PRESSED. The measure of this surface
-    // is that a connected person never notices it.
+    // Confirming the installation loads its authorized repositories without
+    // asking for a URL or another credential.
     expect(await within(region).findByRole("button", { name: /widget/ })).toBeTruthy();
     expect(connection.callsNamed("sourceRepositories")).toEqual([
       'builtin sourceRepositories(credentialId: "cred-grant", page: 1, connectionId: "source-cred-grant-i-acme")',
     ]);
-    // The token form is under it, closed: one answer on screen at a time.
+    // Repository creation offers no pasted-token alternative.
     expect(within(region).queryByLabelText(URL_FIELD)).toBeNull();
     expect(within(region).queryByRole("radio", { name: "A token" })).toBeNull();
   });
@@ -943,11 +961,10 @@ describe("the compose Source stop, with a connection", () => {
         'builtin sourceProbe(repoUrl: "https://github.com/acme/widget", credentialId: "cred-grant", connectionId: "source-cred-grant-i-acme")',
       ]),
     );
-    // The name came with it, so nothing else has to be typed -- read as what
-    // is on screen in the field, never off a `.value`.
-    expect(within(region).getByDisplayValue("widget")).toBeTruthy();
-    // ...and the rail's own answer says what was chosen.
     expect(within(region).getByRole("button", { name: /widget.*chosen/ }).getAttribute("aria-expanded")).toBe("true");
+    await continueWizard();
+    // Configuration retains the name supplied by the chosen repository.
+    expect(within(region).getByDisplayValue("widget")).toBeTruthy();
   });
 
   it("offers the branches the probe answered, default first, and following it as its own answer", async () => {
@@ -958,6 +975,7 @@ describe("the compose Source stop, with a connection", () => {
     });
     await click(await within(region).findByRole("button", { name: /widget/ }));
 
+    await continueWizard();
     await click(await within(region).findByLabelText(BRANCH_FIELD));
     const options = (await screen.findAllByRole("option")).map((o) => o.textContent);
     // Following the default is a DIFFERENT answer from pinning the branch
@@ -973,12 +991,13 @@ describe("the compose Source stop, with a connection", () => {
       sourceProbe: { "cred-grant": probeReply() },
     });
     await click(await within(region).findByRole("button", { name: /widget/ }));
+    await continueWizard();
     await within(region).findByLabelText(NAME_FIELD);
     // An empty select is a control that can only be wrong.
     expect(within(region).queryByLabelText(BRANCH_FIELD)).toBeNull();
   });
 
-  it("previews what the manifest claims at What it is, in the report's own vocabulary", async () => {
+  it("previews manifest claims under Repository contents on Configuration", async () => {
     const { region } = await composeSource({
       credentials: [GRANT],
       repositories: repositoriesReply({ repositories: [WIDGET] }),
@@ -995,7 +1014,9 @@ describe("the compose Source stop, with a connection", () => {
     });
     await click(await within(region).findByRole("button", { name: /widget/ }));
 
-    await click(await within(region).findByRole("button", { name: /^Review/ }));
+    await continueWizard();
+    expect(within(region).queryByRole("button", { name: /^Review/ })).toBeNull();
+    await click(await within(region).findByText("Repository contents", { selector: "summary" }));
     expect(await within(region).findByText("acme-storefront")).toBeTruthy();
     expect(within(region).getByText("web")).toBeTruthy();
     expect(within(region).getByText("clients/web")).toBeTruthy();
@@ -1011,10 +1032,12 @@ describe("the compose Source stop, with a connection", () => {
       sourceProbe: { "cred-grant": probeReply({ branches: ["main"] }) },
     });
     await click(await within(region).findByRole("button", { name: /widget/ }));
+    await continueWizard();
     await within(region).findByLabelText(NAME_FIELD);
 
     // No preview AND no complaint: the analysis is the authority, and a
     // warning here would report a manifest problem twice.
+    expect(within(region).queryByText("Repository contents", { selector: "summary" })).toBeNull();
     expect(within(region).queryByText(/Analyze reads the tree itself/)).toBeNull();
     expect(within(region).queryByText(/manifest/i)).toBeNull();
   });

@@ -234,6 +234,9 @@ export function probeNote(reply: SourceProbeReply): string {
     // refusal is two things to keep in step.
     case "reconnect_required":
     case "repository_not_installed":
+    case "source_connection_unavailable":
+    case "source_repository_mismatch":
+    case "repository_not_accessible":
       return copyFor(reply.reason)?.title ?? "";
     default:
       // A reason this build has no name for is not paraphrased. The stop
@@ -259,7 +262,10 @@ export function probeParks(reason: string): boolean {
     // here: it is an operator's condition, the token path still works, and
     // parking on it would block a deploy this cluster can perform.
     reason === "reconnect_required" ||
-    reason === "repository_not_installed"
+    reason === "repository_not_installed" ||
+    reason === "source_connection_unavailable" ||
+    reason === "source_repository_mismatch" ||
+    reason === "repository_not_accessible"
   );
 }
 

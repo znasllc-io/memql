@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
 import { Caption, Field, Notice, RefreshButton, Select } from "../../../../../kit";
-import { ProblemNotice } from "../../../packages/ReportView";
 import { shortRepo } from "../../../packages/rows";
 import { RepositoryPicker } from "../../../sources/RepositoryPicker";
 import type { RepositoryRow } from "../../../sources/repositories";
@@ -36,12 +35,11 @@ export function RepositorySource({ connection, draft, onDraft, probe, onConnecti
   const refused = ["credential_not_found", "credential_revoked", "reconnect_required", "source_connection_unavailable", "source_repository_mismatch", "repository_not_accessible"];
   const needsRepair = refused.includes(repositories.refusal?.code ?? "") || refused.includes(probe.reply?.reason ?? "");
   useEffect(() => {
-    onConnectionNeed?.(needsRepair ? "reconnect" : "");
-    return () => onConnectionNeed?.("");
-  }, [needsRepair, onConnectionNeed]);
+    onConnectionNeed?.(needsRepair ? "reconnect" : repositories.busy || repositories.refusal || !repositories.readAt ? "unavailable" : "");
+  }, [needsRepair, repositories.busy, repositories.refusal, repositories.readAt, onConnectionNeed]);
 
   function choose(repo: RepositoryRow) {
-    if (repo.installationId !== connection.installationId || needsRepair) return;
+    if (repo.installationId !== connection.installationId || needsRepair || repositories.busy || repositories.refusal) return;
     onDraft({ repoUrl: repo.url, repoRef: "", credentialId: connection.credentialId,
       sourceConnectionId: connection.id,
       name: draft.name || suggestName({ ...draft, choice: "repo", repoUrl: repo.url }, "") });
@@ -50,24 +48,30 @@ export function RepositorySource({ connection, draft, onDraft, probe, onConnecti
   }
   return <>
     <Caption>Repositories from {connection.accountLogin}.</Caption>
-    {needsRepair ? <Notice tone="warn" sentence="This source needs attention." next="Return to Source to reconnect or choose another." /> : null}
+    {needsRepair ? <Notice tone="warn" sentence="This source needs attention." next="Go Back to choose another organization or GitHub account." /> : null}
     <RepositoryPicker page={repositories.page} readAt={repositories.readAt} busy={repositories.busy}
       refusal={repositories.refusal} installUrl=""
       chosen={draft.repoUrl ? shortRepo(draft.repoUrl) : ""} idPrefix="os-compose-repo"
       onChoose={choose} onLookAgain={() => void read(connection.credentialId, 1, connection.id)}
       onReadMore={() => void read(connection.credentialId, repositories.page.nextPage, connection.id)} />
-    {draft.repoUrl ? <>
-      {probe.busy ? <Caption>Checking the repository…</Caption> : null}
-      {probe.reply && !probeParks(probe.reply.reason) && probeNote(probe.reply) ?
-        <p className="os-stop-verdict" data-tone={probe.reply.reason === "ok" ? "ok" : "warn"} role="status">{probeNote(probe.reply)}</p> : null}
-      {probe.error ? <Notice tone="warn" sentence="This cluster could not check the repository just now." detail={probe.error}>
-        <RefreshButton label="Check repository again" busy={probe.busy} onClick={() => void probe.probe(draft.repoUrl, connection.credentialId, connection.id)} />
-      </Notice> : null}
-      {repositories.refusal && needsRepair ? <ProblemNotice problem={repositories.refusal} tone="warn" /> : null}
-      <RefField draft={draft} onDraft={onDraft} branches={probe.reply?.branches ?? []} />
-      <NameField draft={draft} onDraft={onDraft} label="Call it" placeholderFrom={suggestName(draft, "")} />
-    </> : null}
+    <RepositoryProbeStatus draft={draft} probe={probe} />
+
   </>;
+}
+
+export function RepositoryProbeStatus({ draft, probe }: { draft: ComposeDraft; probe: SourceProbeHandle }) {
+  if (!draft.repoUrl) return null;
+  const parked = probeParks(probe.reply?.reason ?? "");
+  return <>
+    {probe.busy ? <Caption>Checking the repository…</Caption> : null}
+    {probe.reply && probeNote(probe.reply) ? <p className="os-stop-verdict" data-tone={probe.reply.reason === "ok" ? "ok" : "warn"} role="status">{probeNote(probe.reply)}</p> : null}
+    {probe.error ? <Notice tone="warn" sentence="This cluster could not check the repository just now." detail={probe.error} /> : null}
+    {probe.error || parked ? <RefreshButton label="Check repository again" busy={probe.busy} onClick={() => void probe.probe(draft.repoUrl, draft.credentialId, draft.sourceConnectionId)} /> : null}
+  </>;
+}
+
+export function RepositoryConfiguration({ draft, onDraft, branches }: { draft: ComposeDraft; onDraft: (patch: Partial<ComposeDraft>) => void; branches: readonly string[] }) {
+  return <><RefField draft={draft} onDraft={onDraft} branches={branches} /><NameField draft={draft} onDraft={onDraft} label="Call it" placeholderFrom={suggestName(draft, "")} /></>;
 }
 
 function RefField({

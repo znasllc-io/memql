@@ -116,10 +116,15 @@ async function chooseSource(region: HTMLElement, name: RegExp): Promise<void> {
 }
 
 /** Choose a repository returned under the person's GitHub grant. */
-async function chooseRepository(region: HTMLElement): Promise<void> {
+async function chooseRepository(region: HTMLElement, configure = true): Promise<void> {
   await chooseSource(region, /A repository/);
+  await click(within(region).getByRole("button", { name: "Add source" }));
+  await click(await within(region).findByRole("button", { name: /^@octocat (?:Chosen )?Connected/ }));
+  await click(await forward("Continue"));
   await click(await within(region).findByRole("button", { name: /^acme Organization/i }));
+  await click(await forward("Continue"));
   await click(await within(region).findByRole("button", { name: /storefront/ }));
+  if (configure) await click(await forward("Continue"));
 }
 
 /** Follow the wizard to its address step without writing anything. */
@@ -307,12 +312,13 @@ describe("the compose flow: the Source stop's probe", () => {
   it("says a public repository is public, and names the branch it will follow", async () => {
     const connection = fakeConnection({ sourceProbe: { "": probeReply() } });
     const { region } = await compose(connection);
-    await chooseRepository(region);
+    await chooseRepository(region, false);
 
     expect(await within(region).findByText("public, default branch main")).toBeTruthy();
     // The picker carries its personal grant even when the chosen repository is public.
     expect(connection.callsNamed("sourceProbe")).toEqual([`builtin sourceProbe(repoUrl: "${REPO}", credentialId: "cred-acme", connectionId: "source-cred-acme-i-acme")`]);
     // Nothing is parked: saving is reachable; analysis follows explicit persistence.
+    await click(await forward("Continue"));
     await fill(NAME_FIELD, "storefront");
     expect(forwardAct("Analyze")).toBeTruthy();
     expect(connection.callsNamed("createPackage")).toHaveLength(0);
@@ -325,15 +331,15 @@ describe("the compose flow: the Source stop's probe", () => {
       credentials: [GRANT],
     });
     const { region } = await compose(connection);
-    await chooseRepository(region);
+    await chooseRepository(region, false);
 
     expect(await within(region).findByText("private, or not there")).toBeTruthy();
     expect(connection.callsNamed("sourceCredentialCreate")).toHaveLength(0);
     // A definite answer ABOUT THE REPOSITORY parks the flow: the rail stops
     // at the Repository step -- the one that holds the URL it is about -- and
     // Saving is out of reach. The choice above it stays answered.
-    expect(railStates(region).slice(0, 3)).toEqual(["complete", "complete", "stopped"]);
-    await fill(NAME_FIELD, "storefront");
+    expect(forwardAct("Continue")).toBeNull();
+    expect(within(region).queryByLabelText(NAME_FIELD)).toBeNull();
     expect(forwardAct("Analyze")).toBeNull();
   });
 
@@ -346,7 +352,7 @@ describe("the compose flow: the Source stop's probe", () => {
       credentials: [GRANT],
     });
     const { region } = await compose(connection);
-    await chooseRepository(region);
+    await chooseRepository(region, false);
     expect(await within(region).findByText("this token cannot see it")).toBeTruthy();
     expect(connection.callsNamed("sourceProbe")).toContain(
       `builtin sourceProbe(repoUrl: "${REPO}", credentialId: "cred-acme", connectionId: "source-cred-acme-i-acme")`,
@@ -357,9 +363,9 @@ describe("the compose flow: the Source stop's probe", () => {
     for (const reason of ["credential_not_found", "credential_revoked"] as const) {
       const connection = fakeConnection({ sourceProbe: { "": probeReply({ reachable: false, reason }) } });
       const { region, view } = await compose(connection);
-      await chooseRepository(region);
+      await chooseRepository(region, false);
       expect(await within(region).findByText("This source needs attention.")).toBeTruthy();
-      expect(within(region).getByText("Return to Source to reconnect or choose another.")).toBeTruthy();
+      expect(within(region).getByText("Go Back to choose another organization or GitHub account.")).toBeTruthy();
       expect(forwardAct("Continue")).toBeNull();
       view.unmount();
     }
@@ -370,9 +376,10 @@ describe("the compose flow: the Source stop's probe", () => {
       sourceProbe: { "": probeReply({ reachable: false, defaultBranch: "", reason: "rate_limited" }) },
     });
     const { region } = await compose(connection);
-    await chooseRepository(region);
+    await chooseRepository(region, false);
 
     expect(await within(region).findByText(/rate-limiting this cluster/)).toBeTruthy();
+    await click(await forward("Continue"));
     await fill(NAME_FIELD, "storefront");
     // An answer about the PROBE, not about the repository: nothing parks.
     expect(railStates(region)[0]).toBe("complete");
@@ -384,13 +391,14 @@ describe("the compose flow: the Source stop's probe", () => {
     // probe that threw must not stop somebody deploying a public repository.
     const connection = fakeConnection({ sourceProbeError: "source_unreadable: api.github.com is unreachable" });
     const { region } = await compose(connection);
-    await chooseRepository(region);
+    await chooseRepository(region, false);
 
     expect(await within(region).findByText("source_unreadable: api.github.com is unreachable")).toBeTruthy();
-    await fill(NAME_FIELD, "storefront");
-    expect(forwardAct("Analyze")).toBeTruthy();
     // The repository chooser remains available after the failed probe.
     expect(within(within(region).getByRole("list", { name: "acme repositories" })).getByRole("button", { name: /storefront/ })).toBeTruthy();
+    await click(await forward("Continue"));
+    await fill(NAME_FIELD, "storefront");
+    expect(forwardAct("Analyze")).toBeTruthy();
   });
 });
 
@@ -916,7 +924,7 @@ describe("the compose flow: what the run answers", () => {
     expect(await within(region).findByText("no memql-package.yaml at the root of acme/storefront")).toBeTruthy();
     // What it is is where a manifest refusal belongs, and every stop after it
     // is unreached.
-    expect(railStates(region)).toEqual(["complete", "complete", "complete", "stopped", "pending", "pending", "pending"]);
+    expect(railStates(region)).toEqual(["complete", "complete", "complete", "complete", "complete", "complete", "stopped", "pending", "pending", "pending"]);
     // ...and the one forward act is Retry, on the bar beside Cancel -- so
     // leaving a stopped flow is as reachable as trying it again.
     expect(forwardAct("Retry")).toBeTruthy();
@@ -1015,8 +1023,9 @@ describe("a private repository whose build output is committed", () => {
       repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "acme/storefront", private: true })] }),
     });
     const { region } = await compose(connection);
-    await chooseRepository(region);
+    await chooseRepository(region, false);
     await within(region).findByText(/private, and reachable under this credential/);
+    await click(await forward("Continue"));
     expect(within(region).queryByLabelText("The github.com access token")).toBeNull();
 
     // Analyze.
@@ -1055,7 +1064,7 @@ describe("a private repository whose build output is committed", () => {
     await waitFor(() =>
       expect((document.querySelector(".os-actbar")?.textContent ?? "")).toContain("in place at shop.memql.example.com"),
     );
-    expect(railStates(region)).toEqual(["complete", "complete", "complete", "complete", "complete", "skipped", "open"]);
+    expect(railStates(region)).toEqual(["complete", "complete", "complete", "complete", "complete", "complete", "complete", "complete", "skipped", "open"]);
     // The addresses are facts now, and the one that landed is the run's own.
     expect(within(region).queryByLabelText("The name storefront answers at")).toBeNull();
     expect(within(region).getAllByText("shop.memql.example.com").length).toBeGreaterThan(0);
@@ -1220,9 +1229,10 @@ describe("a source this cluster already tracks", () => {
       sourceProbe: { "": probeReply({ defaultBranch: "main" }) },
     });
     const { region } = await compose(connection);
-    await chooseRepository(region);
-    await fill(NAME_FIELD, "acme again");
+    await chooseRepository(region, false);
     await within(region).findByText(/public, default branch main/);
+    await click(await forward("Continue"));
+    await fill(NAME_FIELD, "acme again");
     expect(within(region).queryByText(/already tracked by/)).toBeNull();
     expect(await forward("Analyze")).toBeTruthy();
     expect(connection.callsNamed("createPackage")).toHaveLength(0);

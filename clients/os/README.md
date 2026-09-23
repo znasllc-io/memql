@@ -2384,17 +2384,26 @@ and one person's receipts cannot dismiss another's changes.
 
 ### GitHub Sources
 
-A Source is one person's verified GitHub identity bound to an approved personal
-or organization installation. Multiple GitHub accounts and multiple Sources per
-account coexist. Source selection never infers the first or latest credential.
+A repository source identifies a verified GitHub account, its organization or
+personal account, and a repository. Saved access bindings allow multiple GitHub
+identities and installations to coexist and be reused across repositories.
+Selection never infers the first or latest credential.
 
-Add a deployable asks for the method, then Source, then a repository within that
-Source, then the MemQL owning account. The default-account review cue remains
-immediately below the account selector. Add source explicitly chooses a GitHub
-identity and approved installation; Save source persists only that binding.
-Analyze registers the chosen repository/ref and starts its analysis. An existing
-repository in the same owning account is reused without changing its credentials;
-the flow follows its newly returned run rather than historical successes.
+Add a deployable offers saved repository paths or Add source. New source setup
+asks one question per screen: GitHub account, organization (or personal account),
+then repository, each confirmed by Continue. Together those choices describe the
+source. Account connection appears only on the first screen; installation access
+only on the second. Refresh sits at the top left of the list it reads. Back
+preserves drafts; changing an identity clears organization and repository choices,
+and changing an organization clears the repository. Configuration follows, with
+branch/name/deployment mode and the separate MemQL owning account. Its default
+review cue remains immediately below the selector.
+
+Organization Continue verifies and saves the identity/installation access binding
+when needed; cancelling setup retains that access. Analyze registers the repository
+and starts its analysis. A saved repository is silently reused only with the same
+GitHub binding and MemQL ownership; its history never impersonates a different
+selected identity. Progress marks the visible step, not merely prefilled values.
 
 Sources reconnects or removes these same personal bindings. Repositories holds
 saved package history and lifecycle controls. Both pages and Settings are
