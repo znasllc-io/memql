@@ -138,6 +138,17 @@ type Work struct {
 	Steps []StepDecl
 	// RequestedVia is the surface the work arrived through.
 	RequestedVia string
+	// GoalSignature, ParentRunID and Variables are what a CHILD run inherits
+	// from the run that opened it (epic memql#5408, gap G2). A delegated app
+	// session is recorded into a child run, and procedure learning mines the
+	// recordings of ONE goal: a child that does not carry its parent's goal
+	// signature belongs to no corpus, and one that does not carry the parent's
+	// variables cannot say which goal input supplied each parameter. All three
+	// are written at open, on the run's first version, so no reader ever sees
+	// the run without them; blank ones are omitted like every other argument.
+	GoalSignature string
+	ParentRunID   string
+	Variables     map[string]any
 }
 
 // StepDecl is one stage of the template.
@@ -235,6 +246,9 @@ func (j *Journal) Begin(ctx context.Context, w Work) (*Run, error) {
 		arg("status", "running"),
 		arg("nodeId", j.nodeID),
 		arg("startedAt", started.Format(time.RFC3339)),
+		arg("goalSignature", w.GoalSignature),
+		arg("parentRunId", w.ParentRunID),
+		objectArg("variables", w.Variables),
 	)
 	if _, err := j.engine.Execute(auth.ContextWithInternalOrigin(ctx), runCall); err != nil {
 		return nil, fmt.Errorf("workjournal: open run: %w", err)

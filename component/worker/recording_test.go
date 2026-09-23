@@ -187,3 +187,32 @@ func TestActionArgumentsRoundTripWhole(t *testing.T) {
 		t.Fatalf("content survived as %d bytes, want %d", got, len(big))
 	}
 }
+
+// TestContentBaseNameInvertsTheComposedName: a lift says WHICH file a recorded
+// content was, and the Library row keeps only the name contentFileName
+// composed. Three shapes matter:
+//
+//   - the ordinary case, the suffix this action composed, is stripped exactly
+//     even when the base itself carries dots;
+//   - a DEDUPLICATED content references the row an earlier session filed, under
+//     THAT session's suffix -- the base must still come back;
+//   - a name without the composed shape answers ok=false rather than a guess.
+func TestContentBaseNameInvertsTheComposedName(t *testing.T) {
+	const session, action = "v1:worker:appSession:sessAbc", "toolu_0123456789abcdef"
+	name := contentFileName("/w/src/archive.tar.gz", session, action)
+	if base, ok := ContentBaseName(name, session, action); !ok || base != "archive.tar.gz" {
+		t.Fatalf("ContentBaseName(%q) = %q, %v; want archive.tar.gz", name, base, ok)
+	}
+	earlier := contentFileName("/w/main.go", "v1:worker:appSession:other", "toolu_earlier")
+	if base, ok := ContentBaseName(earlier, session, action); !ok || base != "main.go" {
+		t.Fatalf("a deduplicated row's name %q read back as %q, %v; want main.go", earlier, base, ok)
+	}
+	if base, ok := ContentBaseName(earlier, "", ""); !ok || base != "main.go" {
+		t.Fatalf("with no ids, %q read back as %q, %v; want main.go", earlier, base, ok)
+	}
+	for _, bad := range []string{"", "main", "main.go", ".a.b", "a..b"} {
+		if base, ok := ContentBaseName(bad, session, action); ok {
+			t.Errorf("ContentBaseName(%q) = %q; a name without the composed shape has no base", bad, base)
+		}
+	}
+}

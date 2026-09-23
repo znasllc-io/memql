@@ -592,3 +592,44 @@ func TestAnUnreachableAllocatorStillRecordsTheActions(t *testing.T) {
 		seen[a.Seq] = true
 	}
 }
+
+// TestTheRecordingCloseCarriesTheReportedModelAndEffort (epic memql#5408,
+// design D9). A learned procedure says what it was "recorded from", and the
+// recording run is the one row a lift can read that under the owner's actor --
+// so the close must carry what the APP REPORTED, not what was asked for. The
+// control is a session that reports nothing: its close carries nothing, rather
+// than a value borrowed from somewhere else.
+func TestTheRecordingCloseCarriesTheReportedModelAndEffort(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		model, effort string
+	}{
+		{name: "reported", model: "claude-sonnet-4-6", effort: "high"},
+		{name: "silent"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner, session, _, rec, _ := recordingFixture(t)
+			go func() {
+				waitForSession(t, session, "sess-run")
+				session.handleAppSessionChunk(actionChunk(t, 1, map[string]any{
+					"id": "toolu_1", "seq": 1, "tool": "exec",
+					"args": map[string]any{"command": "ls"},
+				}))
+				session.handleAppSessionEnd(&memqlv1.AppSessionEnd{
+					SessionId: "sess-run", Model: tc.model, Effort: tc.effort,
+				})
+			}()
+			if _, err := runner.Run(context.Background(), session.worker, runSpec(), nil); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			_, _, closes := rec.recorded()
+			if len(closes) != 1 {
+				t.Fatalf("closes = %d, want 1", len(closes))
+			}
+			if closes[0].Model != tc.model || closes[0].Effort != tc.effort {
+				t.Fatalf("close carried model %q effort %q, want the app's report %q / %q",
+					closes[0].Model, closes[0].Effort, tc.model, tc.effort)
+			}
+		})
+	}
+}
