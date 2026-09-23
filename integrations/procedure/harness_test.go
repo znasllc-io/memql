@@ -239,6 +239,9 @@ type recFixture struct {
 	noFingerprint bool
 	// execExit overrides the exec exit code.
 	execExit int
+	// writeArgs overrides the fs_write step's arguments -- another app's
+	// spelling of a write, or one no dispatcher applies.
+	writeArgs map[string]any
 }
 
 type stepFeedback struct {
@@ -270,8 +273,13 @@ func (r recFixture) writeKey() string {
 // under the name the FIRST session's action composed.
 const reportFileId = "v1:library:file:f-report"
 
-// reportPath is where every recording wrote the report.
-const reportPath = testWorkspace + "/out/report.txt"
+// reportPath is where every recording wrote the report, and
+// relativeReportPath is the same file as the corpus loader writes it: relative
+// to the recording's workspace (relativize.go).
+const (
+	reportPath         = testWorkspace + "/out/report.txt"
+	relativeReportPath = "./out/report.txt"
+)
 
 // helloDigest is sha256("hello\n"), the bytes every recording wrote.
 const helloDigest = "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03"
@@ -361,12 +369,16 @@ func (r recFixture) observationRows(t *testing.T) []map[string]any {
 		}
 		out = append(out, map[string]any{"kind": "tool_result", "stepKey": r.execKey(), "data": data})
 	}
+	writeArgs := r.writeArgs
+	if writeArgs == nil {
+		writeArgs = map[string]any{"file_path": reportPath, "content": "hello\n"}
+	}
 	out = append(out, map[string]any{
 		"kind": "tool_result", "stepKey": r.writeKey(),
 		"data": map[string]any{
 			"tool": "fs_write", "appActionId": "toolu_write_" + strings.TrimSuffix(r.file, ".txt"),
 			"sessionId": r.sessionId, "seq": float64(2), "isError": false, "resultType": "string",
-			"args":        argsJSON(t, map[string]any{"file_path": reportPath, "content": "hello\n"}),
+			"args":        argsJSON(t, writeArgs),
 			"contentRefs": []any{reportFileId},
 		},
 	})
