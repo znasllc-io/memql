@@ -1,0 +1,45 @@
+{
+  "automation": "procedure/automations.memql demoteProcedures",
+  "runs": {
+    "no event | 0 rows": {
+      "input": {
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "sweep": "demotion"
+            },
+            "kind": "builtin",
+            "name": "procedureLadderSweep"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "no event | 2 rows": {
+      "input": {
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "sweep": "demotion"
+            },
+            "kind": "builtin",
+            "name": "procedureLadderSweep"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

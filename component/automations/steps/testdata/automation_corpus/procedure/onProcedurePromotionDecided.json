@@ -1,5 +1,5 @@
 {
-  "automation": "procedure/automations.memql learnFromSucceededRun",
+  "automation": "procedure/automations.memql onProcedurePromotionDecided",
   "runs": {
     "event agent | 0 rows": {
       "input": {
@@ -18,7 +18,6 @@
               "id": "v1:cluster:node:n1",
               "type": "agent"
             },
-            "oldStatus": "s-oldStatus",
             "partitionId": "space-1",
             "recordType": "contact",
             "roleCeiling": "user",
@@ -27,7 +26,7 @@
             ],
             "status": "succeeded"
           },
-          "topic": "graph.node.updated.v1:work:run"
+          "topic": "graph.node.updated.v1:work:approval"
         },
         "rows": 0
       },
@@ -35,10 +34,10 @@
         "calls": [
           {
             "args": {
-              "runId": "v1:probe:thing:1"
+              "approvalId": "v1:probe:thing:1"
             },
             "kind": "builtin",
-            "name": "procedureLearnFromRun"
+            "name": "procedureDecidePromotion"
           }
         ],
         "result": {
@@ -64,7 +63,6 @@
               "id": "v1:cluster:node:n1",
               "type": "agent"
             },
-            "oldStatus": "s-oldStatus",
             "partitionId": "space-1",
             "recordType": "contact",
             "roleCeiling": "user",
@@ -73,7 +71,7 @@
             ],
             "status": "succeeded"
           },
-          "topic": "graph.node.updated.v1:work:run"
+          "topic": "graph.node.updated.v1:work:approval"
         },
         "rows": 2
       },
@@ -81,10 +79,10 @@
         "calls": [
           {
             "args": {
-              "runId": "v1:probe:thing:1"
+              "approvalId": "v1:probe:thing:1"
             },
             "kind": "builtin",
-            "name": "procedureLearnFromRun"
+            "name": "procedureDecidePromotion"
           }
         ],
         "result": {
@@ -110,7 +108,6 @@
               "id": "v1:cluster:node:n1",
               "type": "bff"
             },
-            "oldStatus": "s-oldStatus",
             "partitionId": "space-1",
             "recordType": "contact",
             "roleCeiling": "user",
@@ -119,7 +116,7 @@
             ],
             "status": "succeeded"
           },
-          "topic": "graph.node.updated.v1:work:run"
+          "topic": "graph.node.updated.v1:work:approval"
         },
         "rows": 0
       },
@@ -127,10 +124,10 @@
         "calls": [
           {
             "args": {
-              "runId": "v1:probe:thing:1"
+              "approvalId": "v1:probe:thing:1"
             },
             "kind": "builtin",
-            "name": "procedureLearnFromRun"
+            "name": "procedureDecidePromotion"
           }
         ],
         "result": {
@@ -156,7 +153,6 @@
               "id": "v1:cluster:node:n1",
               "type": "bff"
             },
-            "oldStatus": "s-oldStatus",
             "partitionId": "space-1",
             "recordType": "contact",
             "roleCeiling": "user",
@@ -165,7 +161,7 @@
             ],
             "status": "succeeded"
           },
-          "topic": "graph.node.updated.v1:work:run"
+          "topic": "graph.node.updated.v1:work:approval"
         },
         "rows": 2
       },
@@ -173,10 +169,10 @@
         "calls": [
           {
             "args": {
-              "runId": "v1:probe:thing:1"
+              "approvalId": "v1:probe:thing:1"
             },
             "kind": "builtin",
-            "name": "procedureLearnFromRun"
+            "name": "procedureDecidePromotion"
           }
         ],
         "result": {

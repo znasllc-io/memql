@@ -1,0 +1,59 @@
+{
+  "automation": "procedure/automations.memql replayLearnedProcedure",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "procedureConstructId": "s-procedureConstructId"
+          },
+          "topic": "automation.invocation.replayLearnedProcedure"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "constructId": "s-procedureConstructId"
+            },
+            "kind": "builtin",
+            "name": "procedureReplay"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "procedureConstructId": "s-procedureConstructId"
+          },
+          "topic": "automation.invocation.replayLearnedProcedure"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "constructId": "s-procedureConstructId"
+            },
+            "kind": "builtin",
+            "name": "procedureReplay"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

@@ -76,6 +76,24 @@ shape construct constructFull {
   reliability
   reinforceCount
   lastReinforced
+  // The certification ladder (epic memql#5408), listed for the reason every
+  // note above gives: a body-carrying shape projects ONLY the paths it lists,
+  // and authoringConstructById is how the replay runner, the promotion
+  // decision and compile read a construct -- a field missing here is a field
+  // none of them can see, whatever the row stores.
+  ladder
+  preconditions
+  procedure
+  procedureHash
+  shadowMatches
+  canaryMatches
+  distinctBindings
+  failures
+  insufficient
+  promotionApprovalId
+  lastReplayAt
+  ladderReason
+  ladderChangedAt
   row.createdAt
   row.createdBy
 }
@@ -94,4 +112,49 @@ shape dependencyEdge dependencyEdgeFull {
   toSource
   row.createdAt
   row.createdBy
+}
+
+/// A learned procedure as Nexus lists and opens it (epic memql#5408): where it stands on the
+/// certification ladder and the evidence that put it there, its reliability, and what it replays --
+/// the procedure template, its learned preconditions and the version hash an approval pins. The
+/// rendered MemQL source is deliberately NOT here: the list does not show it, and a page that needs
+/// it reads the construct whole through authoringConstructById.
+@row
+shape construct procedureCard {
+  row.id
+  name
+  kind
+  status
+  ladder
+  shadowMatches
+  canaryMatches
+  distinctBindings
+  failures
+  insufficient
+  promotionApprovalId
+  lastReplayAt
+  ladderReason
+  ladderChangedAt
+  reliability
+  reinforceCount
+  lastReinforced
+  goalSignature
+  procedure
+  preconditions
+  procedureHash
+  bundleId
+  row.createdAt
+}
+
+/// The certification ladder's values, every one of them, and when the seed last wrote the row.
+@row
+shape ladderPolicy ladderPolicyFull {
+  row.id
+  shadowMatches
+  distinctBindings
+  canaryMatches
+  failuresToDemote
+  insufficientToDemote
+  retireAfterDays
+  row.createdAt
 }
