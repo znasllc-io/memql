@@ -63,19 +63,22 @@ func AntiUnify(a, b *Node, next holeNamer) (*Node, int) {
 		return HoleNode(next(), typeOf(present)), present.Size()
 	}
 	if a.Kind != b.Kind {
-		return HoleNode(next(), "mixed"), maxInt(a.Size(), b.Size())
+		return HoleNode(next(), widenType(typeOf(a), typeOf(b))), maxInt(a.Size(), b.Size())
 	}
 	switch a.Kind {
 	case KindLit:
 		if a.Lit == b.Lit {
-			return Lit(a.Lit), 0
+			// The LEFT operand's hints survive: a number both sides agree on
+			// is still a number, or the template renders and materializes it
+			// as a string.
+			return &Node{Kind: KindLit, Lit: a.Lit, LitType: a.LitType, Form: a.Form}, 0
 		}
-		return HoleNode(next(), "string"), 1
+		return HoleNode(next(), widenType(typeOf(a), typeOf(b))), 1
 	case KindHole:
 		if a.HoleId == b.HoleId {
 			return HoleNode(a.HoleId, a.HoleType), 0
 		}
-		return HoleNode(next(), "mixed"), 1
+		return HoleNode(next(), widenType(a.HoleType, b.HoleType)), 1
 	case KindObject:
 		return antiUnifyObject(a, b, next)
 	default:
@@ -100,7 +103,12 @@ func antiUnifyObject(a, b *Node, next holeNamer) (*Node, int) {
 			m[k], dist = HoleNode(next(), typeOf(bv)), dist+bv.Size()
 		}
 	}
-	return Obj(m), dist
+	g := Obj(m)
+	// The generalization of two JSON documents is a JSON document. Form is a
+	// hint Equal ignores, so the LEFT operand's is kept: the template reads
+	// the way its first instance was read.
+	g.Form = a.Form
+	return g, dist
 }
 
 // antiUnifyArray aligns two arrays on their longest common subsequence and
@@ -141,7 +149,11 @@ func antiUnifyArray(a, b *Node, next holeNamer) (*Node, int) {
 		bi++
 	}
 	emitGap(len(a.Kids), len(b.Kids))
-	return Arr(kids...), dist
+	g := Arr(kids...)
+	// A generalized command line is still a command line: without the Form a
+	// template's argv would materialize as a list, and a shell cannot run one.
+	g.Form = a.Form
+	return g, dist
 }
 
 // lcsPairs returns the index pairs of a longest common subsequence, in order.
@@ -281,7 +293,39 @@ func typeOf(n *Node) string {
 	case KindHole:
 		return n.HoleType
 	default:
+		// A literal is the type it was recorded as, when that is a type a
+		// hole can carry. A null and an unrecorded type read as a string,
+		// the safe reading for a value that has to be sent somewhere.
+		if n.LitType == "number" || n.LitType == "bool" {
+			return n.LitType
+		}
 		return "string"
+	}
+}
+
+// scalarTypes are the hole types a literal can have. Canonicalization spells
+// every scalar as a string, which is why two DIFFERENT scalar types widen to
+// "string" rather than to "mixed": the one spelling they share is a string.
+var scalarTypes = map[string]bool{"string": true, "number": true, "bool": true}
+
+// widenType is the widest of two observed types, which is HoleType's own
+// contract.
+//
+// It replaced a fixed answer -- every literal hole was "string" and every
+// hole re-unified against a literal was "mixed" -- and the difference is not
+// cosmetic. Generalize anti-unifies the growing template against each further
+// instance, so from the THIRD instance on every hole met a literal and became
+// "mixed", which the renderer writes as `any` and Materialize can only send as
+// a string. A number hole meeting one more number has observed nothing wider.
+// The distance and the hole numbering are unchanged; only the type is.
+func widenType(a, b string) string {
+	switch {
+	case a == b:
+		return a
+	case scalarTypes[a] && scalarTypes[b]:
+		return "string"
+	default:
+		return "mixed"
 	}
 }
 

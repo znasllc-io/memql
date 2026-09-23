@@ -60,3 +60,37 @@ func TestNodeEqual_AHoleEqualsOnlyTheSameHole(t *testing.T) {
 		t.Fatal("a hole is not a literal")
 	}
 }
+
+// TestFormIsIgnoredByEqual pins what Form IS: a note on how canonicalization
+// read a string (a command line, a path, a JSON document), kept so that
+// Materialize can write the value back the way it arrived. It is never part of
+// identity. Two recordings whose trees agree are the same action however their
+// strings were spelled, and a Form inside Equal would stop them generalizing.
+func TestFormIsIgnoredByEqual(t *testing.T) {
+	argv := Arr(Lit("ls"), Lit("-la"))
+	argv.Form = FormArgv
+	path := Arr(Lit("ls"), Lit("-la"))
+	path.Form = FormPath
+	plain := Arr(Lit("ls"), Lit("-la"))
+	if !argv.Equal(path) || !argv.Equal(plain) || !plain.Equal(argv) {
+		t.Fatal("two trees that differ only in Form must be Equal: Form is a rendering hint")
+	}
+	obj := Obj(map[string]*Node{"a": Lit("1")})
+	obj.Form = FormJSON
+	if !obj.Equal(Obj(map[string]*Node{"a": Lit("1")})) {
+		t.Fatal("an object's Form must not take part in equality either")
+	}
+}
+
+// TestCloneCopiesTheForm: a template is built from clones of recorded trees,
+// and a clone that dropped the Form would materialize a command line as an
+// array.
+func TestCloneCopiesTheForm(t *testing.T) {
+	n := Obj(map[string]*Node{"command": Arr(Lit("git"), Lit("status"))})
+	n.Form = FormJSON
+	n.Kids[0].Form = FormArgv
+	c := n.Clone()
+	if c.Form != FormJSON || c.Kids[0].Form != FormArgv {
+		t.Fatalf("Clone lost a Form: root %q, child %q", c.Form, c.Kids[0].Form)
+	}
+}
