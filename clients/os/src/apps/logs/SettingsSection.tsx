@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { Button, Caption, Fact, Facts, Head, Notice, Panel, Subhead, roleAdmits, useNow, SetupGroup } from "../../kit";
+import { Button, Caption, RecordList, RecordRow, Fact, Facts, Head, Notice, Panel, Subhead, roleAdmits, useNow, SetupGroup } from "../../kit";
 import { accessAdmits } from "../../system/registry";
 import { formatBytes, formatFreshness, formatMoment } from "../../kit/format";
 import { boolOr, flatten } from "../../kit/rows";
@@ -347,7 +347,7 @@ export function LogsSettingsSection({
       </Panel>
 
       <Panel label="Archived days">
-        <Subhead>Archived days</Subhead>
+        <Subhead meta={connection !== null && daysReadAt !== null && !daysError ? days.length : undefined}>Archived days</Subhead>
         {connection === null ? (
           <Caption>Not connected to the cluster.</Caption>
         ) : daysError !== "" ? (
@@ -360,15 +360,10 @@ export function LogsSettingsSection({
             keeps everything when no archive is configured.
           </Caption>
         ) : (
-          <ul className="os-logs-days" aria-label="Archived days">
+          <RecordList as="ul" label="Archived days">
             {days.map((entry) => (
-              <li key={entry.day} className="os-logs-day">
-                <span className="os-logs-day-name">{entry.day}</span>
-                <span className="os-logs-day-note">
-                  {entry.nodeTypes.length === 0 ? `${entry.objects} objects` : entry.nodeTypes.join(", ")}
-                  {entry.bytes > 0 ? ` · ${formatBytes(entry.bytes)}` : ""}
-                </span>
-                {isOwner ? (
+              <div key={entry.day}>
+                <RecordRow name={entry.day} secondary={`${entry.nodeTypes.length === 0 ? `${entry.objects} objects` : entry.nodeTypes.join(", ")}${entry.bytes > 0 ? ` · ${formatBytes(entry.bytes)}` : ""}`} actions={<>                {isOwner ? (
                   <Button
                     onClick={() => void bringBack(entry.day)}
                     busy={restoring === entry.day}
@@ -378,13 +373,13 @@ export function LogsSettingsSection({
                   >
                     Bring back
                   </Button>
-                ) : null}
+                ) : null}</>} />
                 {restoreNote !== null && restoreNote.day === entry.day ? (
                   <Notice tone={restoreNote.tone} sentence={restoreNote.sentence} detail={restoreNote.detail} />
                 ) : null}
-              </li>
+              </div>
             ))}
-          </ul>
+          </RecordList>
         )}
         {connection !== null && !isOwner ? (
           <Caption>

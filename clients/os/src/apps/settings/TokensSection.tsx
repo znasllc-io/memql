@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { Button, Caption, Chip, formatFreshness, Head, Notice, Panel, Row, Subhead, useNow } from "../../kit";
+import { Button, Caption, formatFreshness, Head, Notice, Panel, RecordList, RecordRow, Subhead, useNow } from "../../kit";
 import { useSession } from "../../chrome/access";
 import { useTokenFacts, MAX_PEOPLE_SCANNED, type NodeTokenRow, type TokenRow } from "./tokenFacts";
 import { useSettingsWrites } from "./settingsWrites";
@@ -48,18 +48,13 @@ export function TokensSection() {
   // with, which is "is anything still using it".
   const now = useNow();
 
-  const live = facts.tokens.filter((t) => t.active).length;
-  const liveNodes = facts.nodeTokens.filter((t) => t.active).length;
+  const counted = !facts.loading && !facts.error && facts.fetchedAt !== null;
 
   return (
     <div className="os-settings">
       <Head
         title="Tokens"
-        meta={
-          facts.loading
-            ? "Reading"
-            : `${live} personal, ${liveNodes} node, in use`
-        }
+        meta={counted ? facts.tokens.length + facts.nodeTokens.length : undefined}
       />
       <p className="os-caption">
         Every credential that is not a browser session. Revoking one takes
@@ -94,7 +89,7 @@ export function TokensSection() {
       {writes.done ? <Notice tone="info" sentence={writes.done} /> : null}
 
       <Panel label="Personal access tokens">
-        <Subhead>Personal access tokens</Subhead>
+        <Subhead meta={counted ? facts.tokens.length : undefined}>Personal access tokens</Subhead>
         {facts.tokens.length === 0 ? (
           <Caption>
             {facts.loading
@@ -102,9 +97,9 @@ export function TokensSection() {
               : "Nobody has issued a personal access token. They are minted from the CLI, and a cluster can run without one."}
           </Caption>
         ) : (
-          <ul className="os-hidden-list" aria-label="Personal access tokens">
+          <RecordList as="ul" label="Personal access tokens">
             {facts.tokens.map((token) => (
-              <li key={token.id}>
+              <div key={token.id}>
                 <TokenLine
                   token={token}
                   now={now}
@@ -120,9 +115,9 @@ export function TokensSection() {
                     void writes.revokeToken(token.id, `${token.label} (${token.owner})`);
                   }}
                 />
-              </li>
+              </div>
             ))}
-          </ul>
+          </RecordList>
         )}
         <Caption>
           {facts.capped
@@ -134,15 +129,15 @@ export function TokensSection() {
       </Panel>
 
       <Panel label="Node credentials">
-        <Subhead>Node credentials</Subhead>
+        <Subhead meta={counted ? facts.nodeTokens.length : undefined}>Node credentials</Subhead>
         {facts.nodeTokens.length === 0 ? (
           <Caption>
             {facts.loading ? "Reading the credential list" : "No node has bootstrapped a credential."}
           </Caption>
         ) : (
-          <ul className="os-hidden-list" aria-label="Node credentials">
+          <RecordList as="ul" label="Node credentials">
             {facts.nodeTokens.map((token) => (
-              <li key={token.id}>
+              <div key={token.id}>
                 <NodeTokenLine
                   token={token}
                   now={now}
@@ -158,9 +153,9 @@ export function TokensSection() {
                     void writes.revokeNodeToken(token.id, token.node);
                   }}
                 />
-              </li>
+              </div>
             ))}
-          </ul>
+          </RecordList>
         )}
       </Panel>
 
@@ -197,21 +192,20 @@ function TokenLine({
 }) {
   return (
     <>
-      <Row
+      <RecordRow
         name={token.label}
         current={token.active}
         dim={!token.active}
+        state={token.active ? "In use" : "Revoked"}
+        tone={token.active ? "accent" : "muted"}
         // ONE STATE AND ONE ACT, and the count is the point. Two chips plus a
         // button in the trailing cluster wrapped "In use" onto two lines and
         // "Agents may use it" onto three at the measure a Settings section
         // actually renders at, which left three rows at three different
         // heights. Everything that is a FACT rather than a state moved into
         // the quiet middle below, where facts live.
-        state={
+        actions={
           <>
-            <Chip tone={token.active ? "accent" : "muted"}>
-              {token.active ? "In use" : "Revoked"}
-            </Chip>
             {/* ABSENT, not disabled, on a revoked row. */}
             {token.active ? (
               <Button tone="danger" onClick={onAsk} busy={busy} busyLabel="Revoking" ariaLabel={`Revoke ${token.label}`}>
@@ -232,7 +226,7 @@ function TokenLine({
           {formatFreshness(token.lastUsedAt, now)}
           {token.usableByAgents ? " -- agents may use it" : ""}
         </span>
-      </Row>
+      </RecordRow>
       {asking ? (
         // THE CONSEQUENCE IS ABOVE THE ACTS, not below them. `Notice` renders
         // `children` before `next`, so putting the buttons in `children` and
@@ -276,17 +270,16 @@ function NodeTokenLine({
 }) {
   return (
     <>
-      <Row
+      <RecordRow
         name={token.node}
         current={token.active}
         dim={!token.active}
+        state={token.active ? "In use" : "Revoked"}
+        tone={token.active ? "accent" : "muted"}
         // Same one-state-one-act rule as the personal half above. The node
         // TYPE is a fact and reads below.
-        state={
+        actions={
           <>
-            <Chip tone={token.active ? "accent" : "muted"}>
-              {token.active ? "In use" : "Revoked"}
-            </Chip>
             {token.active ? (
               <Button
                 tone="danger"
@@ -306,7 +299,7 @@ function NodeTokenLine({
           connected {formatFreshness(token.lastConnectAt, now)}
           {token.expiresAt ? ` -- expires ${token.expiresAt}` : ""}
         </span>
-      </Row>
+      </RecordRow>
       {asking ? (
         <Notice tone="warn" sentence={`Revoke the credential for ${token.node}?`}>
           <p className="os-caption">

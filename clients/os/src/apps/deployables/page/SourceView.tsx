@@ -1,9 +1,10 @@
+import { RecordList, RecordRow } from "../../../kit/RecordRow";
 import { useAccountOptions } from "../../accounts/tie";
 import { accountNameFrom } from "../../accounts/rows";
 import { AvailableVersion } from "./AvailableVersion";
 import { GitBranch, History } from "lucide-react";
 
-import { Caption, Chip, Fact, Facts, Head, Panel } from "../../../kit";
+import { Caption, Fact, Facts, Head, Panel } from "../../../kit";
 import { formatMoment } from "../../../kit/format";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
 import { shortVersion, sourceLabel, type PackageRow } from "../packages/rows";
@@ -48,6 +49,7 @@ import { AutoDeploySwitch, CredentialChip, PackageLifecycle, SwitchCredential } 
 export function SourceView({
   pkg,
   apps,
+  appsSettled = false,
   credentials,
   can,
   onBack,
@@ -62,6 +64,7 @@ export function SourceView({
   pkg: PackageRow;
   /** The apps this source produced, from the root's site feed. */
   apps: readonly SiteRow[];
+  appsSettled?: boolean;
   credentials: readonly CredentialRow[];
   /** The parts this session holds: the credential and the switch are `sources`, the cascade is `retire`. */
   can: PartsHeld;
@@ -158,22 +161,19 @@ export function SourceView({
           <section className="os-report-part">
             <h4 className="os-report-heading">
               <GitBranch size={12} aria-hidden /> Apps it produces
+              {appsSettled ? <span className="os-head-meta">{apps.length + undeployed.length}</span> : null}
             </h4>
             {apps.length === 0 && undeployed.length === 0 ? (
               <Caption>
                 Nothing yet. This source has not been analyzed, so there is no reading of what it contains.
               </Caption>
             ) : (
-              <ul className="os-source-apps">
+              <RecordList><ul className="os-source-apps">
                 {apps.map((app) => {
                   const word = siteStateWord(app);
                   return (
                     <li key={app.id}>
-                      <button type="button" className="os-source-app" onClick={() => onOpenApp(app.id)}>
-                        <span className="os-source-app-name">{app.packageDeployableName || siteName(app)}</span>
-                        <span className="os-mono os-source-app-host">{app.hostname}</span>
-                        <Chip tone={word === "Live" ? "accent" : "muted"}>{word === "Live" ? "live" : stateChip(word)}</Chip>
-                      </button>
+                      <RecordRow name={app.packageDeployableName || siteName(app)} secondary={app.hostname} state={word === "Live" ? "live" : stateChip(word)} tone={word === "Live" ? "accent" : "muted"} onOpen={() => onOpenApp(app.id)} />
                     </li>
                   );
                 })}
@@ -186,20 +186,11 @@ export function SourceView({
                           had no page to open -- but the flow that gives it one
                           is the page, and the owner asked to reach it from
                           here. */}
-                      <button
-                        type="button"
-                        className="os-source-app"
-                        data-declared="true"
-                        onClick={() => onOpenDeclared(d.name)}
-                      >
-                        <span className="os-source-app-name">{d.name}</span>
-                        <span className="os-source-app-host">no address yet</span>
-                        <Chip tone="muted">{off ? "inactive" : "not deployed"}</Chip>
-                      </button>
+                      <RecordRow name={d.name} secondary="no address yet" state={off ? "inactive" : "not deployed"} onOpen={() => onOpenDeclared(d.name)} />
                     </li>
                   );
                 })}
-              </ul>
+              </ul></RecordList>
             )}
             {inactive > 0 ? (
               <Caption>

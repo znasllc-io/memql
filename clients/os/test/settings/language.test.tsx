@@ -355,7 +355,7 @@ describe("Settings -> Language", () => {
     expect(within(forms).getByText("[]T").tagName).toBe("CODE");
     // The arrow is drawn for the eye and hidden from assistive tech; the words
     // stand in for it, so the pair reads as a sentence rather than two tokens.
-    const pair = within(forms).getByText("array(T)").closest("p")!;
+    const pair = within(forms).getByText("array(T)").closest<HTMLElement>(".os-row-name")!;
     expect(pair.querySelector("svg")!.getAttribute("aria-hidden")).toBe("true");
     expect(within(pair).getByText("is now written").className).toContain("os-sr-only");
     expect(pair.textContent!.replace(/\s+/g, " ").trim()).toBe("array(T) is now written []T");
@@ -405,7 +405,7 @@ describe("Settings -> Language", () => {
     // Said ONCE, where the count would be -- under the Subhead, not as a footnote
     // below the list, and not again as a meta beside the Subhead (rule 7).
     expect(nothing.compareDocumentPosition(spelling) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(forms.querySelector(".os-head-meta")).toBeNull();
+    expect(forms.querySelector(".os-subhead-meta")?.textContent).toBe("1");
     expect(within(forms).queryByText("No loaded file uses a deprecated form.")).toBeNull();
   });
 

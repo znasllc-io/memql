@@ -1721,6 +1721,8 @@ button:not(:disabled):active {
  *
  * The list is its own CONTAINER so the narrow layout follows the width the
  * list actually has -- a half-width window, a split desk -- not the screen's. */
+.os-record-list:is(ul, ol) { list-style: none; margin: 0; padding: 0; }
+.os-record-list > li { min-width: 0; }
 .os-record-list { container: os-record-list / inline-size; min-width: 0; }
 /* THE STATE COLUMN HAS A FLOOR, SO THE MIDDLE COLUMN IS A COLUMN. Every row is
  * its own grid, and with the state track at `auto` each row resolved its
@@ -1737,6 +1739,13 @@ button.os-row.os-record-row { cursor: pointer; }
 button.os-row.os-record-row:hover { background: var(--os-hover); }
 button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }
 .os-record-list[data-density="compact"] .os-row.os-record-row { padding-block: 9px; }
+.os-record-entry { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-width: 0; }
+.os-record-actions:empty { display: none; }
+.os-record-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 10px 4px 10px 12px; border-bottom: 1px solid var(--os-line); }
+.os-row.os-record-row[data-open] { background: var(--os-hover); box-shadow: inset 2px 0 var(--os-accent); }
+.os-subhead-meta { margin-left: 10px; font-weight: 400; }
+.os-record-facts { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.os-record-excerpt { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .os-record-icon { display: flex; align-items: center; justify-content: center; color: var(--os-muted); }
 .os-record-identity, .os-record-summary { display: grid; gap: 4px; min-width: 0; }
 .os-record-identity .os-row-name { font-weight: 500; white-space: normal; overflow-wrap: anywhere; }
@@ -1746,6 +1755,7 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 .os-record-status { display: inline-flex; align-items: center; gap: 6px; font-size: var(--os-text-sm); white-space: nowrap; color: var(--os-muted); }
 .os-record-status::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .os-record-status[data-tone="accent"] { color: var(--os-accent); }
+.os-record-status[data-tone="warn"] { color: var(--os-warn); }
 .os-record-chevron { color: var(--os-muted); }
 /* A list that is a SECTION of a page. It keeps `.os-report-part`'s spacing and
  * none of its top rule: that rule separates a part from what stands above it,
@@ -1760,6 +1770,9 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
  * is, in ink, and says it is a link with its underline. */
 .os-record-identity .os-row-name a { color: var(--os-ink); }
 @container os-record-list (max-width: 600px) {
+  .os-record-entry { grid-template-columns: minmax(0, 1fr); }
+  .os-record-entry > .os-record-row { border-bottom: 0; }
+  .os-record-actions { padding-top: 0; }
   .os-row.os-record-row { grid-template-columns: 22px minmax(0, 1fr) auto 12px; gap: 10px; }
   .os-record-summary { grid-column: 2; grid-row: 2; display: flex; flex-wrap: wrap; column-gap: 12px; }
   .os-record-state { grid-column: 3; grid-row: 1; }
@@ -7556,15 +7569,7 @@ a.os-button {
  * restyles the whole surface with no code change.
  */
 
-.os-backup {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
-  border: 1px solid var(--os-line);
-  border-radius: var(--os-radius-sm);
-  background: var(--os-plate);
-}
+.os-backup { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 
 /* The link and the row's actions share one line: the link takes a bounded
  * measure on the left and the buttons take the space that is left. An

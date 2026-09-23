@@ -165,7 +165,7 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
     case "me/profile":
       body = <dl>{Object.entries((data.Profile || {}) as Record<string, string>).map(([label, text]) => <div key={label}><dt>{label}</dt><dd>{text || "Not set"}</dd></div>)}</dl>; break;
     case "me/devices": case "me/settings": case "me/tokens": case "me/dashboard":
-      body = <IdentityAccount page={page.page} data={data} busy={busy} submit={submit} navigate={next => void load(next)} register={() => void run(async () => {
+      body = <IdentityAccount page={page.page} data={data} busy={busy} error={error} submit={submit} navigate={next => void load(next)} register={() => void run(async () => {
         const bearer = await authSource.bearer(); if (!bearer) throw new Error("Sign in again to add a passkey");
         await registerPasskey(config, `Bearer ${bearer}`, "My passkey"); await load("/me/devices");
       })} />; break;

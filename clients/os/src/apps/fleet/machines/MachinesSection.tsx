@@ -6,7 +6,7 @@ import { MonitorSmartphone } from "lucide-react";
 import type { OsAppProps } from "../../../system/registry";
 import { LiveList } from "../../../live/LiveList";
 import { useMachines } from "../../../live/machines";
-import { ProvenanceDot } from "../../../kit";
+import { RecordRow, listCount } from "../../../kit";
 import { AddMachinePage } from "../addMachine/AddMachinePage";
 import type { AddMachineFlow } from "../addMachine/useAddMachineFlow";
 import { useLiveView } from "../../../live/liveView";
@@ -96,7 +96,7 @@ export function MachinesSection({
 
   return (
     <div className="os-fleet">
-      <Head title="Machines">
+      <Head title="Machines" meta={listCount(source?.snapshot)}>
         <AddButton onClick={() => flow.start({})} label="Add a machine" />
       </Head>
 
@@ -199,17 +199,10 @@ function MachineLine({
   const labels = machine.mergedLabels;
 
   return (
-    <button
-      type="button"
-      className="os-machine"
-      data-online={online || undefined}
-      data-revoked={revoked || undefined}
-      aria-expanded={open}
-      onClick={onToggle}
-    >
-      <MonitorSmartphone size={16} aria-hidden />
-      <span className="os-machine-name">{machineName(machine)}</span>
-      {machine.platform ? <span className="os-caption">{machine.platform}</span> : null}
+    <RecordRow name={machineName(machine)} secondary={machine.platform} icon={<MonitorSmartphone size={16} aria-hidden />}
+      current={online} dim={revoked} open={open} onOpen={onToggle}
+      state={revoked ? "Revoked" : online ? "Online" : "Offline"} tone={online ? "accent" : "muted"}
+      stateExtra={tick === "added" ? <span className="os-livelist-tick">new</span> : null}>
       {labels.length > 0 ? (
         <Chips label={`Labels on ${machineName(machine)}`}>
           {labels.slice(0, 4).map((one) => (
@@ -230,18 +223,7 @@ function MachineLine({
           {labels.length > 4 ? <span className="os-caption">+{labels.length - 4}</span> : null}
         </Chips>
       ) : null}
-      <span className="os-machine-state">
-        <span className="os-caption">{formatFreshness(machine.lastSeenAt, now)}</span>
-        {revoked ? (
-          <span className="os-fleet-revoked-tag">revoked</span>
-        ) : (
-          <ProvenanceDot
-            tone={online ? "reachable" : "unreachable"}
-            label={online ? "Online" : "Offline"}
-          />
-        )}
-        {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
-      </span>
-    </button>
+      <span className="os-caption">{formatFreshness(machine.lastSeenAt, now)}</span>
+    </RecordRow>
   );
 }

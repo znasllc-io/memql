@@ -1,11 +1,11 @@
 import { AddButton } from "../../kit/AddButton";
-import { RecordList, RecordRow } from "../../kit/RecordRow";
+import { RecordList, RecordRow, listCount } from "../../kit/RecordRow";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { ActivityTarget } from "../../kit/SemanticActivity";
 import { ArrowUpRight, Box, ChevronRight, Cpu, History, Info, Monitor, SlidersHorizontal, Terminal, Wrench } from "lucide-react";
 import type { OsAppProps } from "../../system/registry";
-import { Button, EmptyState, Refine, Head, Notice, ProvenanceDot, formatBytes, formatFreshness, useNow } from "../../kit";
+import { Button, EmptyState, Refine, Head, Notice, ProvenanceDot, formatBytes, formatFreshness, useNow, Subhead } from "../../kit";
 import { IconButton } from "../../kit/IconButton";
 import { InfoDetail } from "../../kit/InfoDetail";
 import { useLiveView } from "../../live/liveView";
@@ -98,7 +98,7 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
         breadcrumbs={machine ? [{ label: "Machines", onSelect: toList }, { label: machineName(machine) }, { label: VIEW_NAMES.equipment }] : undefined}
         back={machine ? { label: "Machines", onSelect: toList } : undefined}
         navigation={selection.view === "equipment" || !machine}
-        meta={<span className="fleet-feed-label">{snapshot?.error && machines.length === 0 ? "Unavailable" : settled ? `${machines.length} ${machines.length === 1 ? "machine" : "machines"}` : "Connecting"}</span>}>
+        meta={machine ? undefined : listCount(snapshot, shown.length)}>
         {/* ON THE LIST the search narrows the rows beneath it (DESIGN.md rule 2:
             a filter is a question asked of the content). Inside a machine it
             keeps its results, which are the quick way across to another.
@@ -122,12 +122,12 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
               if (!retainedMachine) return null;
               return <div key={`${item.machineId}:${item.view}`} hidden={item.machineId !== machine.id || item.view !== selection.view}>
                 {item.view === "equipment" ? <><MachineEquipment machine={retainedMachine} now={now} onInspect={view => select({ machineId: item.machineId, view })} />
-                <section className="fleet-recent-work" aria-label="Recent app sessions"><div className="fleet-bank-heading"><h4>Recent work</h4><span className="fleet-heading-actions"><RefreshButton label="Refresh recent work" busy={sessions.loading} onClick={sessions.reread} /><IconButton label="All app sessions" onClick={() => navigate("apps", { fromContent: true })}><ArrowUpRight size={16} aria-hidden /></IconButton></span></div>
+                <section className="fleet-recent-work" aria-label="Recent app sessions"><div className="fleet-bank-heading"><Subhead meta={sessions.readAt && !sessions.loading && !sessions.error ? sessions.sessions.filter(session => session.workerId === item.machineId).slice(0, 5).length : undefined}>Recent work</Subhead><span className="fleet-heading-actions"><RefreshButton label="Refresh recent work" busy={sessions.loading} onClick={sessions.reread} /><IconButton label="All app sessions" onClick={() => navigate("apps", { fromContent: true })}><ArrowUpRight size={16} aria-hidden /></IconButton></span></div>
                   {sessions.error ? <Notice sentence="Recent app sessions could not be read." detail={sessions.error} /> : null}
-                  {sessions.sessions.filter(session => session.workerId === item.machineId).slice(0, 5).map(session => <button type="button" className="fleet-session-link" key={session.id} onClick={() => onOpenSession?.(session.id)}>{session.app} · {session.runId || session.id}<span>{session.status}</span></button>)}
+                  <RecordList as="ul" label="Recent app sessions">{sessions.sessions.filter(session => session.workerId === item.machineId).slice(0, 5).map(session => <RecordRow key={session.id} name={session.app} secondary={session.runId || session.id} onOpen={onOpenSession ? () => onOpenSession(session.id) : undefined} state={session.status} />)}</RecordList>
                   {!sessions.loading && !sessions.error && !sessions.sessions.some(session => session.workerId === item.machineId) ? <EmptyState icon={History} title="No recent work">App sessions will appear here when an app runs on this machine.</EmptyState> : null}
                 </section></> : <div className="fleet-inspector">
-                  <Head title={VIEW_NAMES[item.view]} breadcrumbs={[{ label: "Machines", onSelect: toList }, { label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }, { label: VIEW_NAMES[item.view] }]} back={{ label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }}>
+                  <Head title={VIEW_NAMES[item.view]} meta={item.view === "apps" ? listCount(snapshot, retainedMachine.apps.length) : item.view === "models" ? listCount(snapshot, machineModelsFrom(retainedMachine.reportedLabels).length) : undefined} breadcrumbs={[{ label: "Machines", onSelect: toList }, { label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }, { label: VIEW_NAMES[item.view] }]} back={{ label: machineName(retainedMachine), onSelect: () => select({ machineId: item.machineId, view: "equipment" }) }}>
                     {item.view === "apps" ? <MachineAppsHelp /> : null}
                     {item.view === "apps" || item.view === "activity" ? <IconButton label="App sessions" onClick={() => navigate("apps", { fromContent: true })}><History size={16} aria-hidden /></IconButton> : null}
                   </Head>
@@ -153,7 +153,7 @@ function MachineList({ machines, now, searching, onOpen }: {
   machines: readonly MachineRow[]; now: Date; searching: boolean; onOpen: (id: string) => void;
 }) {
   if (machines.length === 0) return <EmptyState icon={Monitor} title="No matching machines">{searching ? "Try another machine name." : "Connect a machine to find it here."}</EmptyState>;
-  return <RecordList label="Machines">
+  return <RecordList as="ul" label="Machines">
     {machines.map(m => {
       const revoked = isRevoked(m);
       const online = !revoked && isWorkerOnline(m, now);

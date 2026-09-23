@@ -1,4 +1,4 @@
-import { Button, Caption, Chip, CopyValue, Fact, Facts, Head, Notice, Panel, Row, Subhead } from "../../kit";
+import { Button, Caption, Chip, CopyValue, Fact, Facts, Head, Notice, Panel, RecordList, RecordRow, Subhead } from "../../kit";
 import { useSession } from "../../chrome/access";
 import { agreementOf, PROBE_READS, useKeyFacts } from "./keyFacts";
 
@@ -30,11 +30,12 @@ export function KeysSection() {
   const { access, config } = useSession();
   const origin = config.identityUrl || "";
   const facts = useKeyFacts(origin, access?.role === "owner");
+  const counted = !facts.loading && !facts.error && facts.fetchedAt !== null && facts.probe.distinct.length > 0;
   const agreement = agreementOf(facts.probe);
 
   return (
     <div className="os-settings">
-      <Head title="Keys" meta={facts.probe.keys.length === 0 ? undefined : `${facts.probe.keys.length} published`} />
+      <Head title="Keys" meta={counted ? facts.probe.keys.length : undefined} />
       <p className="os-caption">
         The keys every verifier in this mesh checks a token against, read from{" "}
         <span className="os-mono">{origin || "an origin this deployment could not derive"}</span>{" "}
@@ -73,23 +74,23 @@ export function KeysSection() {
 
       {facts.probe.distinct.length > 1 ? (
         <Panel label="The keysets that came back">
-          <Subhead>The keysets that came back</Subhead>
-          <ul className="os-hidden-list" aria-label="Distinct keysets">
+          <Subhead meta={counted ? facts.probe.distinct.length : undefined}>The keysets that came back</Subhead>
+          <RecordList as="ul" label="Distinct keysets">
             {facts.probe.distinct.map((print, i) => (
-              <li key={print}>
-                <Row
+              <div key={print}>
+                <RecordRow
                   name={`Keyset ${i + 1}`}
-                  state={
+                  stateExtra={
                     <Chip tone="muted">
                       {print.split(" ").length} {print.split(" ").length === 1 ? "key" : "keys"}
                     </Chip>
                   }
                 >
                   <CopyValue value={print} label="keyset" />
-                </Row>
-              </li>
+                </RecordRow>
+              </div>
             ))}
-          </ul>
+          </RecordList>
           <Caption>
             Each line is the key ids one read returned, sorted. A JWKS feed
             states no order, so sorting is what makes the comparison honest --
@@ -101,19 +102,19 @@ export function KeysSection() {
       ) : null}
 
       <Panel label="Published keys">
-        <Subhead>Published keys</Subhead>
+        <Subhead meta={counted ? facts.probe.keys.length : undefined}>Published keys</Subhead>
         {facts.probe.keys.length === 0 ? (
           <Caption>
             {facts.loading ? "Reading the feed" : "The feed carried no keys."}
           </Caption>
         ) : (
-          <ul className="os-hidden-list" aria-label="Published keys">
+          <RecordList as="ul" label="Published keys">
             {facts.probe.keys.map((key) => (
-              <li key={key.kid}>
-                <Row
+              <div key={key.kid}>
+                <RecordRow
                   name={<span className="os-mono">{key.kid}</span>}
                   current
-                  state={
+                  stateExtra={
                     <>
                       <Chip tone="neutral">{key.alg || "unknown alg"}</Chip>
                       {key.use ? <Chip tone="muted">{key.use}</Chip> : null}
@@ -125,10 +126,10 @@ export function KeysSection() {
                     {key.kty}
                     {key.crv ? ` ${key.crv}` : ""}
                   </span>
-                </Row>
-              </li>
+                </RecordRow>
+              </div>
             ))}
-          </ul>
+          </RecordList>
         )}
         <Caption>
           {facts.probe.distinct.length > 1

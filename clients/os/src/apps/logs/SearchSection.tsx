@@ -10,12 +10,10 @@ import {
   WINDOW_PRESETS,
   constraintsOf,
   isNarrowed,
-  lineCount,
   subjectIntentOf,
   logViewIntentOf,
   toTailArgs,
   windowBounds,
-  windowLabel,
   windowPhrase,
   type LogFilters,
   type LogScope,
@@ -119,7 +117,7 @@ export function SearchSection({
   return (
     <div className="os-app-stack os-logs" data-density={settings.density}>
       {scope.apps?.length || scope.subjectConcepts?.length ? <div className="os-head-actions"><span className="os-caption">App scope: {scope.apps?.join(", ")} and its related subjects</span><Button onClick={() => setScope(WHOLE_STORE)}>Clear app scope</Button></div> : null}
-      <Head title="Search" meta={`${windowLabel(filters.window)} · ${lineCount(search.rows.length)}`}>
+      <Head title="Search" meta={search.state === "ready" && !search.error ? search.rows.length : undefined}>
         <Refine
           search={filters.text}
           onSearch={(next) => patch({ text: next })}

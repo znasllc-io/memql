@@ -1,3 +1,4 @@
+import { RecordList, RecordRow } from "../../../kit/RecordRow";
 import { useCallback, useMemo, useState } from "react";
 import { RefreshCw, ShoppingBag } from "lucide-react";
 import { Concepts } from "@znasllc-io/memql-sdk-core/client";
@@ -522,7 +523,7 @@ function DevelopmentStore({ store }: { store: StoreRow }) {
   }
   return (
     <Panel label="Development store">
-      <Subhead>Development store</Subhead>
+      <Subhead meta={paired.state === "read" ? paired.stores.length : undefined}>Development store</Subhead>
       {paired.state === "failed" ? (
         <Notice tone="error" sentence="The development stores could not be read." detail={paired.error} />
       ) : paired.stores.length === 0 ? (
@@ -532,16 +533,9 @@ function DevelopmentStore({ store }: { store: StoreRow }) {
           storefront is exercised against before it goes live.
         </Caption>
       ) : (
-        <ul className="os-store-devlist">
-          {paired.stores.map((dev) => (
-            <li key={dev.id}>
-              <span className="os-mono">{storeLabel(dev)}</span>
-              <span className="os-store-status" data-tone={statusTone(dev.status)}>
-                {dev.status === "" ? "no status reported" : dev.status}
-              </span>
-            </li>
-          ))}
-        </ul>
+        <RecordList as="ul" label="Development stores">
+          {paired.stores.map((dev) => <RecordRow key={dev.id} name={storeLabel(dev)} state={dev.status || "no status reported"} />)}
+        </RecordList>
       )}
     </Panel>
   );

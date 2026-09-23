@@ -68,7 +68,7 @@ export function LiveList<T>({
           : null;
 
   return (
-    <div className="os-livelist" data-os-livelist data-state={snapshot.state}>
+    <div className="os-livelist os-record-list" data-os-livelist data-state={snapshot.state}>
       <ul className="os-livelist-rows" aria-label={label}>
         {snapshot.rows.map((row) => {
           const id = rowId(row);

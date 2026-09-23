@@ -2,7 +2,7 @@ import type { OsAppProps } from "../../system/registry";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check } from "lucide-react";
 
-import { Caption, Chip, Field, Head, Notice, Panel, Select, Subhead } from "../../kit";
+import { Caption, RecordList, RecordRow, Field, Head, Notice, Panel, Select, Subhead } from "../../kit";
 import { useSession } from "../../chrome/access";
 import { useOs } from "../../chrome/state";
 import { holds } from "../../system/roles";
@@ -429,7 +429,7 @@ function ResourceHolders({
   const yours = grants.some((g) => namesTheViewer(g, viewerUserId));
   return (
     <div className="os-access-holders">
-      <Subhead>{resource.part === "" ? `Who may open ${resource.label}` : `Who holds ${resource.label}`}</Subhead>
+      <Subhead meta={state === "ready" && !error ? grants.length : undefined}>{resource.part === "" ? `Who may open ${resource.label}` : `Who holds ${resource.label}`}</Subhead>
       <p className="os-access-roles">
         {roles.length === 0 ? "No role holds this; only a grant by name can." : `By role: ${roles.join(", ")}.`}
       </p>
@@ -437,26 +437,16 @@ function ResourceHolders({
       {state === "ready" && grants.length === 0 ? (
         <Caption>Nobody holds it by name. The roles above are the whole answer.</Caption>
       ) : (
-        <ul className="os-access-grant-list" aria-label="Granted by name">
+        <RecordList as="ul" label="Granted by name">
           {grants.map((grant) => {
             const who = holderLabel(grant, nameOf);
             return (
-              <li key={grant.id} className="os-access-grant">
-                <span className="os-access-grant-who">{who}</span>
-                <Chip tone={grant.effect === "allow" ? "accent" : "muted"}>{grant.effect === "allow" ? "allowed" : "denied"}</Chip>
-                <span className="os-access-from">
-                  {grant.subjectKind === "group" ? "a group" : "a person"}
-                  {nameOf(grant.grantedBy) === "" ? "" : `, by ${nameOf(grant.grantedBy)}`}
-                </span>
-                {canWrite && !namesTheViewer(grant, viewerUserId) ? (
-                  <button type="button" className="os-link" disabled={busy} onClick={() => onRevoke(grant)} aria-label={`Revoke ${grant.effect} for ${who}`}>
-                    Revoke
-                  </button>
-                ) : null}
-              </li>
+              <RecordRow key={grant.id} name={who} state={grant.effect === "allow" ? "allowed" : "denied"} tone={grant.effect === "allow" ? "accent" : "muted"}
+                secondary={`${grant.subjectKind === "group" ? "a group" : "a person"}${nameOf(grant.grantedBy) === "" ? "" : `, by ${nameOf(grant.grantedBy)}`}`}
+                actions={canWrite && !namesTheViewer(grant, viewerUserId) ? <button type="button" className="os-link" disabled={busy} onClick={() => onRevoke(grant)} aria-label={`Revoke ${grant.effect} for ${who}`}>Revoke</button> : undefined} />
             );
           })}
-        </ul>
+        </RecordList>
       )}
       {/* THE ABSENT ACT, EXPLAINED ONCE. Rule 12 takes the button away rather
           than disabling it, and a control that vanishes with no sentence

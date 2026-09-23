@@ -107,7 +107,7 @@ function mount(
 }
 
 function rowFor(name: string): HTMLElement {
-  const row = screen.getByText(name).closest(".os-row");
+  const row = screen.getByText(name).closest(".os-livelist-row");
   if (!(row instanceof HTMLElement)) throw new Error(`no row for ${name}`);
   return row;
 }
@@ -426,5 +426,28 @@ describe("auto-open review", () => {
     await settle();
 
     expect(navigate).not.toHaveBeenCalledWith("review");
+  });
+});
+
+
+describe("the training record list", () => {
+  it("waits for the file read before counting and keeps teaching controls out of the collapsible summary", async () => {
+    const view = mount(fakeConnection({ files: [READY_FILE], runs: [READY_RUN], domainCatalog: [domainRow({ id: "domain-sales", name: "Sales" })] }));
+    expect(view.container.querySelector(".os-head-meta")).toBeNull();
+    await settle();
+    expect(view.container.querySelector(".os-head-meta")?.textContent).toBe("1");
+    const teach = screen.getByRole("button", { name: "Teach a domain" });
+    expect(teach.closest(".os-record-actions")).not.toBeNull();
+    expect(teach.closest(".os-record-summary")).toBeNull();
+    await click(teach);
+    const domain = screen.getByRole("combobox", { name: /Knowledge domain/ });
+    expect(domain.closest(".os-record-summary")).toBeNull();
+  });
+
+  it("does not describe an unreadable file collection as zero files", async () => {
+    const view = mount(fakeConnection({ filesError: "files denied" }));
+    await settle();
+    expect(screen.getByText(/files denied/)).toBeTruthy();
+    expect(view.container.querySelector(".os-head-meta")).toBeNull();
   });
 });

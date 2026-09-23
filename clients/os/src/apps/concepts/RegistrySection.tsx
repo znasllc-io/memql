@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { Concept } from "@znasllc-io/memql-sdk-core/client";
 
-import { Caption, Chip, Head, Notice, Panel, Refine, Select, Subhead } from "../../kit";
+import { Caption, Head, RecordList, RecordRow, Notice, Panel, Refine, Select, Subhead } from "../../kit";
 import { ConceptPage } from "./ConceptPage";
 import { domainCounts, groupConcepts, originBadgeFor, originBadgeLabel } from "./registry";
 import { useConceptRegistry } from "./useConceptRegistry";
@@ -60,19 +60,12 @@ export function RegistrySection({
 
   const shown = groups.reduce((n, g) => n + g.concepts.length, 0);
   const total = registry.concepts.length;
-  const filtered = search.trim() !== "" || domain !== "";
 
   return (
     <div className="os-app-stack os-concepts">
       <Head
         title="Concepts"
-        meta={
-          registry.state === "seeding"
-            ? "Reading the registry"
-            : filtered
-              ? `${shown} of ${total} concepts`
-              : `${total} concepts across ${domains.length} domains`
-        }
+        meta={registry.state === "live" ? shown : undefined}
       >
         {/* Search and the domain facet both ride the one Refine affordance
             (rule 2). The portal stood a horizontal domain chip rail above
@@ -128,8 +121,8 @@ export function RegistrySection({
 
       {groups.map((group) => (
         <Panel key={group.domain} label={group.domain}>
-          <Subhead>{group.domain}</Subhead>
-          <ul className="os-concept-list">
+          <Subhead meta={registry.state === "live" ? group.concepts.length : undefined}>{group.domain}</Subhead>
+          <RecordList as="ul" label={group.domain}>
             {group.concepts.map((concept) => (
               <ConceptLine
                 key={concept.id}
@@ -137,7 +130,7 @@ export function RegistrySection({
                 onOpen={() => setView({ kind: "concept", conceptId: concept.id })}
               />
             ))}
-          </ul>
+          </RecordList>
         </Panel>
       ))}
     </div>
@@ -147,22 +140,10 @@ export function RegistrySection({
 function ConceptLine({ concept, onOpen }: { concept: Concept; onOpen: () => void }) {
   const badge = originBadgeFor(concept);
   return (
-    <li className="os-concept-row">
-      <button type="button" className="os-concept-open" onClick={onOpen}>
-        <span className="os-concept-name">{concept.entity}</span>
-        <span className="os-concept-id">{concept.id}</span>
-        {concept.description === "" ? null : (
-          <span className="os-concept-desc">{concept.description}</span>
-        )}
-      </button>
-      {/* Only a mirror or an origin earns a badge. Native is the default and
-          most of the registry is native, so badging it would mark almost
-          every row and hide the two marks that mean something. */}
-      {badge.kind === "none" ? null : (
-        <Chip tone={badge.kind === "mirror" ? "accent" : "muted"} title={originBadgeLabel(badge)}>
-          {originBadgeLabel(badge)}
-        </Chip>
-      )}
-    </li>
+    <RecordRow name={concept.entity} secondary={concept.id} onOpen={onOpen}
+      state={badge.kind === "none" ? undefined : originBadgeLabel(badge)}
+      tone={badge.kind === "mirror" ? "accent" : "muted"}>
+      {concept.description}
+    </RecordRow>
   );
 }

@@ -5,14 +5,14 @@ import type { AccountTokenMintResult } from "@znasllc-io/memql-sdk-core/identity
 import {
   Button,
   Caption,
-  Chip,
   Fact,
   Facts,
   Field,
   Input,
   Notice,
   Panel,
-  Row,
+  RecordRow,
+  RecordList,
   Subhead,
   formatMoment,
 } from "../../kit";
@@ -133,7 +133,7 @@ export function CredentialsPanel({
 
   return (
     <Panel label="Credentials">
-      <Subhead>Credentials</Subhead>
+      <Subhead meta={feed.state === "ready" ? feed.tokens.length : undefined}>Credentials</Subhead>
 
       <p className="os-caption os-account-credential-note">
         A credential issued here authenticates as <strong>you</strong>, on behalf of{" "}
@@ -268,7 +268,7 @@ function CredentialList({
 
   return (
     <>
-      <ul
+      <RecordList><ul
         className="os-account-credentials"
         aria-label="Credentials issued for this billing account"
       >
@@ -284,7 +284,7 @@ function CredentialList({
             />
           </li>
         ))}
-      </ul>
+      </ul></RecordList>
       {feed.readAt === "" ? null : (
         <Caption>
           Read at {new Date(feed.readAt).toLocaleTimeString()}. This list is not live -- it
@@ -315,7 +315,7 @@ function CredentialRow({
 
   return (
     <>
-      <Row
+      <RecordRow
         icon={<KeyRound size={16} aria-hidden />}
         name={name}
         // `current` is the row's own liveness; a revoked credential keeps its
@@ -324,24 +324,12 @@ function CredentialRow({
         // revocation impossible to see having taken effect.
         current={!revoked}
         dim={revoked}
-        state={
-          <>
-            {revoked ? <Chip tone="muted">revoked</Chip> : null}
-            {/* DESIGN.md rule 12: an act that is not legal is ABSENT, never
-                disabled. A revoked credential cannot be revoked again, so
-                there is no control here at all -- not a greyed one, which
-                would be a question this surface refuses to answer. */}
-            {revoked || confirming ? null : (
-              <Button tone="danger" onClick={onAsk} ariaLabel={`Revoke ${name}`}>
-                Revoke
-              </Button>
-            )}
-          </>
-        }
+        secondary={token.subjectUserId}
+        state={revoked ? "revoked" : "active"}
+        tone={revoked ? "muted" : "accent"}
+        actions={revoked || confirming ? null : <Button tone="danger" onClick={onAsk} ariaLabel={`Revoke ${name}`}>Revoke</Button>}
+
       >
-        <span className="os-caption os-mono" title="The credential's authenticated subject">
-          {token.subjectUserId}
-        </span>
         <span className="os-caption">issued {formatMoment(token.createdAt)}</span>
         <span className="os-caption">
           {token.expiresAt === "" ? "no expiry" : `expires ${formatMoment(token.expiresAt)}`}
@@ -349,7 +337,7 @@ function CredentialRow({
         <span className="os-caption">
           {token.lastUsedAt === "" ? "never used" : `last used ${formatMoment(token.lastUsedAt)}`}
         </span>
-      </Row>
+      </RecordRow>
 
       {/* AN IN-SURFACE CONFIRM THAT NAMES THE CREDENTIAL, never a browser
           dialog: window.confirm blocks the whole shell, and a generic "are you

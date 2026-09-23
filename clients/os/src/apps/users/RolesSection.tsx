@@ -2,7 +2,7 @@ import { AddButton } from "../../kit/AddButton";
 import { useEffect, useMemo, useState } from "react";
 import { Shield } from "lucide-react";
 
-import { Button, Chip, Head, Notice, RankMark, Row as ListRow } from "../../kit";
+import { Button, Chip, Head, Notice, RankMark, RecordRow, RecordList } from "../../kit";
 import { AccountChip } from "../accounts/AccountPicker";
 import { accountName, type AccountRow } from "../accounts/rows";
 import type { UsersActions } from "./actions";
@@ -24,6 +24,7 @@ import type { RolesView } from "./views";
 export function RolesSection({
   catalog,
   people,
+  peopleAvailable = false,
   accounts,
   actions,
   viewerRole,
@@ -35,6 +36,7 @@ export function RolesSection({
   onOpened?: () => void;
   catalog: RoleCatalog;
   people: readonly PersonRow[];
+  peopleAvailable?: boolean;
   accounts: readonly AccountRow[];
   actions: UsersActions;
   viewerRole: string;
@@ -67,6 +69,7 @@ export function RolesSection({
         role={role}
         catalog={catalog}
         people={people}
+        peopleAvailable={peopleAvailable}
         accounts={accounts}
         actions={actions}
         viewerRole={viewerRole}
@@ -93,7 +96,7 @@ export function RolesSection({
 
   return (
     <div className="os-app-stack">
-      <Head title="Roles" meta={ladder.length === 0 ? undefined : `${ladder.length}`}>
+      <Head title="Roles" meta={catalog.state === "ready" && !catalog.error ? ladder.length : undefined}>
         {/* OFFERED ONLY WHERE IT WOULD WORK. `create` on `role` is the grant
             roleCreate checks, and a New role button for somebody who does not
             hold it is a form whose every submission is refused. */}
@@ -113,19 +116,18 @@ export function RolesSection({
         </Notice>
       ) : null}
 
-      <ul className="os-role-list" aria-label="This cluster's roles, strongest first">
+      <RecordList as="ul" label="This cluster's roles, strongest first">
         {ladder.map((role) => (
-          <li key={role.slug}>
-            <RoleLine
+          <RoleLine
+              key={role.slug}
               role={role}
               accounts={accounts}
-              holders={holderCount(people, role)}
+              holders={peopleAvailable ? holderCount(people, role) : undefined}
               viewerRole={viewerRole}
               onOpen={() => setView({ kind: "role", slug: role.slug })}
-            />
-          </li>
+          />
         ))}
-      </ul>
+      </RecordList>
 
       {ladder.length === 0 && catalog.state === "ready" ? (
         <p className="os-caption">
@@ -146,26 +148,28 @@ function RoleLine({
 }: {
   role: RoleRow;
   accounts: readonly AccountRow[];
-  holders: number;
+  holders: number | undefined;
   viewerRole: string;
   onOpen: () => void;
 }) {
   const account = accounts.find((a) => a.id === role.accountId) ?? null;
   return (
-    <ListRow
+    <RecordRow
       icon={<Shield size={16} aria-hidden />}
       name={role.name}
+      secondary={role.slug}
+      state={role.active ? "Active" : "Retired"}
+      tone={role.active ? "accent" : "muted"}
       current={role.active}
       dim={!role.active}
       onOpen={onOpen}
-      state={
+      stateExtra={holders === undefined ? null :
         <span className="os-caption">
           {holders === 0 ? "nobody" : holders === 1 ? "1 person" : `${holders} people`}
         </span>
       }
     >
       <RankMark actorRole={viewerRole} ownerRole={role.slug} />
-      <span className="os-role-slug">{role.slug}</span>
       {role.predefined ? (
         <span className="os-caption">predefined</span>
       ) : account !== null ? (
@@ -173,7 +177,6 @@ function RoleLine({
       ) : role.accountId !== "" ? (
         <Chip>scoped</Chip>
       ) : null}
-      {role.active ? null : <span className="os-users-inactive-tag">retired</span>}
-    </ListRow>
+    </RecordRow>
   );
 }

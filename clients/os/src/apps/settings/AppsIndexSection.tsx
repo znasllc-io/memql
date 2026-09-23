@@ -1,4 +1,4 @@
-import { Caption } from "../../kit";
+import { Caption, Head, RecordList, RecordRow } from "../../kit";
 import { useOs } from "../../chrome/state";
 import { appsFor, sectionsFor, settingsSectionProblem } from "../../system/registry";
 import type { OsAppManifest } from "../../system/registry";
@@ -22,16 +22,16 @@ export function AppsIndexSection() {
 
   return (
     <div className="os-settings">
-      <h3 className="os-settings-title">Apps</h3>
+      <Head title="Apps" meta={apps.length} />
       <p className="os-stub-summary">
         Every app installed on this cluster that you can open. Each one keeps
         its own settings; these entries take you there.
       </p>
-      <ul className="os-app-index" aria-label="Installed apps">
+      <RecordList as="ul" label="Installed apps">
         {apps.map((app) => (
           <AppEntry key={app.id} app={app} actorRole={actorRole} onOpen={openAppSettings} />
         ))}
-      </ul>
+      </RecordList>
       <Caption>
         Presentation gating only: apps you cannot see are hidden here, but the
         engine's row admission is the authority on every read.
@@ -76,20 +76,6 @@ function AppEntry({
   const problem = settingsSectionProblem(app);
 
   return (
-    <li className="os-app-entry">
-      <span className="os-app-entry-mark" aria-hidden={true}>
-        <Icon size={18} aria-hidden={true} />
-      </span>
-      <span className="os-app-entry-name">{app.name}</span>
-      {target ? (
-        <button type="button" className="os-choice" onClick={() => onOpen(app)}>
-          {target.name}
-        </button>
-      ) : (
-        <span className="os-app-entry-note">
-          {problem ?? `Requires a higher role than ${actorRole || "unknown"}`}
-        </span>
-      )}
-    </li>
+    <RecordRow name={app.name} icon={<Icon size={18} aria-hidden />} secondary={target ? undefined : problem ?? `Requires a higher role than ${actorRole || "unknown"}`} actions={target ? <button type="button" className="os-choice" onClick={() => onOpen(app)}>{target.name}</button> : undefined} />
   );
 }

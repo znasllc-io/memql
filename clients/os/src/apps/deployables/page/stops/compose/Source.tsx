@@ -7,7 +7,7 @@ import {
   Field,
   LiveList,
   Notice,
-  Row as ListRow,
+  RecordRow as ListRow,
   formatBytes,
   useLiveView,
 } from "../../../../../kit";
@@ -320,7 +320,7 @@ function ZipBranch({
             current={draft.artifactId === row.id}
             open={draft.artifactId === row.id}
             onOpen={() => choose(row)}
-            state={draft.artifactId === row.id ? <span className="os-livelist-tick">chosen</span> : null}
+            stateExtra={draft.artifactId === row.id ? <span className="os-livelist-tick">chosen</span> : null}
           >
             <span className="os-caption os-mono">{row.mimeType}</span>
           </ListRow>

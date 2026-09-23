@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import type { Module, ModuleDetail as ModuleDetailWire, ModulesClient } from "@znasllc-io/memql-sdk-core/client";
 
 import { ActionBar, type Act, type ActionBarTone } from "../../../kit/ActionBar";
-import { Button, Caption, Chip, Fact, Facts, Head, Notice, Panel, Subhead, roleAdmits, stateWords } from "../../../kit";
+import { Button, Caption, Chip, Fact, Facts, Head, Notice, Panel, Subhead, RecordList, RecordRow, roleAdmits, stateWords } from "../../../kit";
 import { useSession } from "../../../chrome/access";
 import { useReading } from "../../../cluster/reading";
 import type { Verdict } from "../../../system/readinessFold";
@@ -154,7 +154,7 @@ export function ModuleDetail({
 
           {verdict ? <ReadinessAcross verdict={verdict} /> : null}
 
-          <Subhead>Environment</Subhead>
+          <Subhead meta={detail.state === "read" && !detail.error ? envVars.length : undefined}>Environment</Subhead>
           {detail.state === "failed" ? (
             <Notice
               tone="error"
@@ -318,30 +318,13 @@ function ReadinessAcross({ verdict }: { verdict: Verdict }) {
   const lines = readinessNodeLines(verdict, new Date());
   return (
     <>
-      <Subhead>Across the cluster</Subhead>
+      <Subhead meta={lines.length}>Across the cluster</Subhead>
       <p className="os-cluster-fact">{acrossSentence(verdict)}</p>
       {lines.length === 0 ? null : (
-        <div className="os-cluster-readiness" role="list" aria-label={`${verdict.module} on each live node`}>
-          {lines.map((line) => (
-            <div
-              key={line.nodeId}
-              className="os-cluster-readiness-row"
-              role="listitem"
-              data-aside={line.counted ? undefined : true}
-              // The exact moment this node read the cluster, beside the
-              // relative words a person reads. Two nodes that both say "2m
-              // ago" are ordered by nothing visible, and that order is what
-              // the fold's staleness rule turns on.
-              title={line.at || undefined}
-            >
-              <span className="os-cluster-readiness-node os-mono">{line.nodeId}</span>
-              <span className="os-cluster-readiness-words">{line.words}</span>
-              <span className="os-cluster-readiness-note">
-                {line.nodeType} &middot; {line.note}
-              </span>
-            </div>
-          ))}
-        </div>
+        <RecordList as="ul" label={`${verdict.module} on each live node`}>
+          {lines.map(line => <RecordRow key={line.nodeId} name={line.nodeId} secondary={line.nodeType}
+            state={line.words} stateTitle={line.at || undefined} dim={!line.counted}>{line.note}</RecordRow>)}
+        </RecordList>
       )}
       <Caption>
         Every live node checks this module for itself. A node that has not re-checked since the

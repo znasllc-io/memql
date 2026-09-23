@@ -1064,3 +1064,37 @@ it("keeps test, send and scheduling unavailable until provider and unsubscribe s
   fireEvent.keyDown(screen.getByLabelText("Test recipient address"), { key: "Enter" });
   expect(conn.query.campaignTestSend).not.toHaveBeenCalled();
 });
+
+
+describe("record list counts", () => {
+  const lists = [
+    { section: "campaigns", query: "campaigns", row: campaignRow({ id: "count-c", name: "Counted campaign" }) },
+    { section: "audiences", query: "audiences", row: audienceRow({ id: "count-a", name: "Counted audience" }) },
+    { section: "templates", query: "templates", row: templateRow({ id: "count-t", name: "Counted template" }) },
+    { section: "senders", query: "senderIdentities", row: senderRow({ id: "count-s", address: "counted@example.com" }) },
+    { section: "rules", query: "emailRules", row: ruleRow({ id: "count-r", name: "Counted rule" }) },
+  ] as const;
+
+  it.each(lists)("counts $section only after its authorized read settles", async ({ section, query, row }) => {
+    const conn = fakeConnection({ [query]: [row] });
+    const { view } = mount(conn, section);
+    expect(view.container.querySelector(".os-head-meta")).toBeNull();
+    await waitFor(() => expect(view.container.querySelector(".os-head-meta")?.textContent).toBe("1"));
+    expect(view.container.querySelectorAll(".os-record-list .os-record-row")).toHaveLength(1);
+  });
+
+  it.each(lists)("does not turn a denied $section read into zero", async ({ section, query }) => {
+    const conn = fakeConnection();
+    conn.query[query].mockRejectedValue(new Error("permission denied"));
+    const { view } = mount(conn, section);
+    await screen.findByText(/permission denied/);
+    expect(view.container.querySelector(".os-head-meta")).toBeNull();
+  });
+
+  it("counts the finished filter and an honestly empty answer", async () => {
+    const conn = fakeConnection({ campaigns: [campaignRow({ id: "done", name: "Finished", status: "sent" })] });
+    const { view } = mount(conn);
+    await waitFor(() => expect(view.container.querySelector(".os-head-meta")?.textContent).toBe("0"));
+    expect(view.container.querySelectorAll(".os-record-row")).toHaveLength(0);
+  });
+});

@@ -14,7 +14,8 @@ import {
   Notice,
   Panel,
   Refine,
-  Row as KitRow,
+  RecordRow as KitRow,
+  listCount,
   Subhead,
   formatFreshness,
   formatMoment,
@@ -170,7 +171,7 @@ export function ApprovalsSection({
     <div className="os-nexus-approvals">
       <Head
         title="Approvals"
-        meta={rows.length === 0 ? "nothing waiting" : `${rows.length} waiting for you`}
+        meta={listCount(view?.snapshot)}
       >
         <Refine
           search={search}
@@ -308,7 +309,10 @@ function ApprovalLine({
       open={selected}
       current={approval.decision === "" && !lapsed}
       dim={approval.decision !== "" || lapsed}
-      state={
+      state={approvalKindWord(approval.kind)}
+      stateTitle={approvalKindMeaning(approval.kind)}
+      secondary={run === null ? "a run" : runTitle(run)}
+      stateExtra={
         <>
           {lapsed ? <Chip tone="muted">lapsed</Chip> : null}
           <span className="os-caption" title={formatMoment(waited)}>
@@ -317,10 +321,6 @@ function ApprovalLine({
         </>
       }
     >
-      <Chip tone="neutral" title={approvalKindMeaning(approval.kind)}>
-        {approvalKindWord(approval.kind)}
-      </Chip>
-      <span className="os-nexus-approval-run">{run === null ? "a run" : runTitle(run)}</span>
     </KitRow>
   );
 }

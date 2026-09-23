@@ -1,3 +1,4 @@
+import { listCount } from "../../kit/RecordRow";
 import { AddButton } from "../../kit/AddButton";
 import { Fragment, useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -11,7 +12,6 @@ import {
   Button,
   EmptyState,
   Caption,
-  Chip,
   ChoiceStack,
   Fact,
   Facts,
@@ -21,7 +21,7 @@ import {
   LiveList,
   Notice,
   Panel,
-  Row as ListRow,
+  RecordRow,
   Select,
   Subhead,
   formatMoment,
@@ -151,7 +151,7 @@ export function RulesSection({
 
   return (
     <div className="os-app-stack">
-      <Head title="Rules">
+      <Head title="Rules" meta={listCount(source?.snapshot)}>
         <AddButton onClick={() => setAdding((v) => !v)} label="New rule" />
       </Head>
 
@@ -254,11 +254,7 @@ function AuthoredAutomationsBanner({
 
 /** Only two statuses carry colour: one that is running and one that broke.
  *  Four coloured chips is a list with no emphasis at all. */
-function ruleTone(status: string): "neutral" | "accent" | "muted" {
-  if (status === "active") return "accent";
-  if (status === "draft" || status === "paused") return "muted";
-  return "neutral";
-}
+
 
 function RuleLine({
   rule,
@@ -280,30 +276,25 @@ function RuleLine({
     audience: nameOfAudience(audiences, rule.audienceId),
   };
   return (
-    <ListRow
+    <RecordRow
       icon={<Zap size={16} aria-hidden />}
       name={ruleName(rule)}
       current={rule.status === "active"}
       dim={rule.status === "paused"}
       open={open}
       onOpen={onToggle}
-      state={
-        <>
-          <Chip tone={ruleTone(rule.status)}>{rule.status || "draft"}</Chip>
-          {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
-        </>
-      }
+      secondary={<span title={ruleSentence(rule, names)}><SentenceText parts={ruleSentenceParts(rule, names)} /></span>}
+      state={rule.status || "draft"}
+      tone={rule.status === "active" ? "accent" : "muted"}
+      stateExtra={tick === "added" ? <span className="os-livelist-tick">new</span> : null}
     >
       {/* THE LIST READS THE WAY THE BUILDER DOES. Somebody who built a rule by
           filling in a sentence should recognise it here without translating. */}
-      <span className="os-caption os-campaign-rule-sentence" title={ruleSentence(rule, names)}>
-        <SentenceText parts={ruleSentenceParts(rule, names)} />
-      </span>
       {/* LIVENESS IS DISPLAYED, NEVER RUNG. */}
       {rule.firedCount === 0 ? null : (
         <span className="os-caption os-mono">{rule.firedCount}x</span>
       )}
-    </ListRow>
+    </RecordRow>
   );
 }
 

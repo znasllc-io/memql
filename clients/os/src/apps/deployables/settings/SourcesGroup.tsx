@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { KeyRound } from "lucide-react";
 
-import { Button, Caption, Chip, LiveList, Row as ListRow, Subhead, formatFreshness, useNow } from "../../../kit";
+import { Button, Caption, LiveList, RecordRow as ListRow, listCount, Subhead, formatFreshness, useNow } from "../../../kit";
 import { useLiveView, type LiveView } from "../../../live/liveView";
 import { useCredentialActions } from "../packages/actions";
 import { toneFor } from "../packages/refusals";
@@ -319,7 +319,7 @@ export function SourcesGroup({
           sibling of `Sources`; as a section it is a part inside it
           (styles/index.css, `.os-field-group .os-field-group`). */}
       <section className="os-field-group" aria-label="Access tokens">
-        <Subhead>Access tokens</Subhead>
+        <Subhead meta={listCount(pasted?.snapshot)}>Access tokens</Subhead>
         <Caption>
           Access tokens let the cluster fetch private repositories. Token values are not shown after saving.
         </Caption>
@@ -355,7 +355,7 @@ export function SourcesGroup({
           on the feed, and this surface only says whose they are. */}
       {isClusterOwner && othersCount > 0 ? (
         <section className="os-field-group" aria-label="Other people's connections">
-          <Subhead>Other people's connections</Subhead>
+          <Subhead meta={listCount(others?.snapshot)}>Other people's connections</Subhead>
           <Caption>
             Review shared repository access. Revoke a credential when it should no longer be used.
           </Caption>
@@ -459,27 +459,15 @@ function CredentialLine({
         }
         current={!revoked}
         dim={revoked}
-        state={
-          <>
-            <Chip tone="muted">{card.host}</Chip>
-            {owner === "" ? null : <span className="os-deploy-by">{owner}'s</span>}
-            {/* A HEARTBEAT, displayed and never fingerprinted. */}
-            <span className="os-source-used">used {formatFreshness(card.lastUsedAt, now)}</span>
-            {revoked ? (
-              <span className="os-deploy-status" data-tone="warn">
-                revoked
-              </span>
-            ) : (
-              /* THE ACT BELONGS TO THE ROW. Beneath it, a lone button read as
-                 a control of the whole group rather than of the credential it
-                 revokes -- and the second one under the second row said so
-                 twice. */
-              <Button onClick={() => setConfirming(true)} ariaLabel={`Revoke ${cardName(card)}`}>
-                Revoke
-              </Button>
-            )}
-          </>
-        }
+        secondary={card.host}
+        state={revoked ? "revoked" : undefined}
+        tone={revoked ? "warn" : "muted"}
+        stateExtra={<>
+          {owner === "" ? null : <span className="os-deploy-by">{owner}'s</span>}
+          <span className="os-source-used">used {formatFreshness(card.lastUsedAt, now)}</span>
+        </>}
+        actions={revoked ? null : <Button onClick={() => setConfirming(true)} ariaLabel={`Revoke ${cardName(card)}`}>Revoke</Button>}
+
       />
 
       {/* WHAT FETCHES UNDER IT gets its own line beneath the row rather than

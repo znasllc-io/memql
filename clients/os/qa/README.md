@@ -143,3 +143,11 @@ On the two lists, the first time they were rendered with real rows:
 - **The rail lit the wrong step.** With a repository chosen the stage said
   "Repository" and the rail's accent was on "Review".
 - "uploaded zip" on one tab and "Uploaded zip" on the other, for the same thing.
+
+
+## All-app record lists
+
+The `accounts` and `accounts-empty` views compare the Accounts registry with
+`list` (Deployables). `origins-mixed` exercises records with separate actions
+and absent measurements. Check light and dark modes at wide and narrow widths.
+The full app inventory and inspected exceptions are in [list-coverage.md](list-coverage.md).

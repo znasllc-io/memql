@@ -385,6 +385,8 @@ async function openMachineDetail(connection: Conn) {
   mountMachines(connection);
   await click(await screen.findByText(MACHINE_LABEL));
   await settle();
+  const model = screen.queryByRole("button", { name: /^llama3.1:8b/ });
+  if (model) await click(model);
 }
 
 // -----------------------------------------------------------------------------
@@ -595,6 +597,7 @@ const CASES: ActsCase[] = [
       render(withSession(<ModelsSection />));
       await settle();
       await settle();
+      await click(screen.getByRole("button", { name: /llama3.1:8b/ }));
     },
     acts: [
       { name: "Refresh model library", count: 1 },

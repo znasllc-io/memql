@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { Button, Caption, Chip, Notice, Subhead, flatten } from "../../../kit";
+import { Button, Caption, Notice, RecordList, RecordRow, Subhead, flatten } from "../../../kit";
 import { useOsConnection } from "../../../live/connection";
 import { useReading } from "../../../cluster/reading";
 
@@ -106,7 +106,7 @@ export function DeadLetterBand({ connector }: { connector: string }) {
 
   return (
     <div className="os-cluster-band">
-      <Subhead>{connector} dead letters</Subhead>
+      <Subhead meta={entries.state === "read" && !entries.error ? rows.length : undefined}>{connector} dead letters</Subhead>
 
       {entries.state === "failed" ? (
         <Notice
@@ -129,20 +129,10 @@ export function DeadLetterBand({ connector }: { connector: string }) {
         <Notice tone="error" sentence="The cluster refused, and nothing changed." detail={refusal} />
       )}
 
+      <RecordList as="ul" label={`${connector} dead letters`}>
       {rows.map((entry) => (
-        <div key={entry.id} className="os-cluster-dl">
-          <span className="os-cluster-dl-head">
-            <span className="os-cluster-dl-concept os-mono">{entry.conceptId}</span>
-            <Chip tone="muted">{entry.action || "unstated"}</Chip>
-            <Chip tone="muted" title="How many times the drain tried before giving up.">
-              {entry.attempts} {entry.attempts === 1 ? "attempt" : "attempts"}
-            </Chip>
-          </span>
-          <span className="os-cluster-dl-ref os-mono">{entry.rowRef}</span>
-          {entry.lastError === "" ? null : (
-            <span className="os-cluster-dl-error os-mono">{entry.lastError}</span>
-          )}
-          {confirming !== null && confirming.id === entry.id ? (
+        <RecordRow key={entry.id} name={entry.conceptId} secondary={entry.rowRef} state={entry.action || "unstated"} tone="warn" actions={
+          confirming !== null && confirming.id === entry.id ? (
             <span className="os-cluster-confirm">
               <span className="os-cluster-confirm-text">
                 {confirming.act === "retry"
@@ -170,9 +160,13 @@ export function DeadLetterBand({ connector }: { connector: string }) {
                 Discard
               </Button>
             </span>
-          )}
-        </div>
+          )
+        }>
+          <span>{entry.attempts} {entry.attempts === 1 ? "attempt" : "attempts"}</span>
+          {entry.lastError ? <span className="os-cluster-dl-error os-mono">{entry.lastError}</span> : null}
+        </RecordRow>
       ))}
+      </RecordList>
 
       {entries.at === null ? null : (
         <Caption>Read {entries.at.toLocaleTimeString()}.</Caption>

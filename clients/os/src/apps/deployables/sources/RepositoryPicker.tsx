@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { Button, Caption, Chip, Chips, Input, Row as ListRow, Subhead, useNow } from "../../../kit";
+import { Button, Caption, Chip, Chips, Input, PickerRow as ListRow, Subhead, useNow } from "../../../kit";
 import { formatFreshness } from "../../../kit/format";
 import type { Refusal } from "../packages/actions";
 import { toneFor } from "../packages/refusals";
@@ -122,7 +122,7 @@ export function RepositoryPicker({
       ) : (
         groups.map((group) => (
           <div className="os-files-group" key={group.owner} role="group" aria-label={group.owner}>
-            <Subhead>{group.owner}</Subhead>
+            <Subhead meta={group.repositories.length}>{group.owner}</Subhead>
             {group.pending ? (
               /* A PENDING INSTALLATION IS A GROUP WITH A SENTENCE INSTEAD OF
                  ROWS -- never hidden and never an error. The repair belongs

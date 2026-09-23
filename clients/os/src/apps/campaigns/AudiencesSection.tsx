@@ -1,3 +1,4 @@
+import { RecordList, listCount } from "../../kit/RecordRow";
 import { AddButton } from "../../kit/AddButton";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -22,7 +23,7 @@ import {
   LiveList,
   Notice,
   Panel,
-  Row as ListRow,
+  RecordRow,
   Select,
   Subhead,
   formatMoment,
@@ -125,7 +126,7 @@ export function AudiencesSection({
 
   return (
     <div className="os-app-stack">
-      <Head title="Audiences">
+      <Head title="Audiences" meta={listCount(source?.snapshot)}>
         <AddButton onClick={() => setAdding((v) => !v)} label="New audience" />
       </Head>
 
@@ -177,24 +178,19 @@ function AudienceLine({
 }) {
   const archived = audienceIsArchived(audience);
   return (
-    <ListRow
+    <RecordRow
       icon={<Users size={16} aria-hidden />}
       name={audienceName(audience)}
       current={!archived}
       dim={archived}
       open={open}
       onOpen={onToggle}
-      state={
-        <>
-          {archived ? <Chip tone="muted">archived</Chip> : null}
-          {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
-        </>
-      }
+      secondary={audience.description}
+      state={archived ? "Archived" : "Active"}
+      tone={archived ? "muted" : "accent"}
+      stateExtra={tick === "added" ? <span className="os-livelist-tick">new</span> : null}
     >
-      {audience.description === "" ? null : (
-        <span className="os-caption">{audience.description}</span>
-      )}
-    </ListRow>
+    </RecordRow>
   );
 }
 
@@ -553,7 +549,7 @@ function RosterPanel({
   return (
     <Panel label="Who is on this list">
       <div className="os-campaign-detail-head">
-        <Subhead>Who is on this list</Subhead>
+        <Subhead meta={roster.state === "ready" && !roster.error ? `${recipients.length} read` : undefined}>Who is on this list</Subhead>
         <Button busy={roster.state === "loading"} busyLabel="Reading" onClick={roster.reload}>
           Read again
         </Button>
@@ -573,51 +569,38 @@ function RosterPanel({
             : "Nobody on this list yet. Import a CSV or add an address above."}
         </Caption>
       ) : (
-        <ul className="os-campaign-roster" aria-label="Addresses in this audience">
+        <RecordList as="ul" label="Addresses in this audience">
           {recipients.slice(0, ROSTER_ROWS).map((recipient) => (
-            <li
+            <RecordRow
               key={recipient.id}
-              className="os-campaign-roster-row"
-              data-sendable={recipientIsSendable(recipient) || undefined}
+              name={<span className="os-mono">{recipient.email || "--"}</span>}
+              secondary={recipient.displayName}
+              current={recipientIsSendable(recipient)}
+              state={recipient.subscriptionStatus}
+              actions={
+                <Select
+                  id={`os-recipient-state-${recipient.id}`}
+                  label={`Subscription state for ${recipient.email}`}
+                  value={recipient.subscriptionStatus}
+                  onChange={async (next) => {
+                    const ok = await setSubscription.set(recipient.id, next);
+                    if (ok) roster.reload();
+                  }}
+                >
+                  {SUBSCRIPTION_STATES.map((state) => (
+                    <option key={state.value} value={state.value}>{state.label}</option>
+                  ))}
+                </Select>
+              }
             >
-              <span className="os-mono os-campaign-roster-address">{recipient.email || "--"}</span>
-              {recipient.displayName === "" ? null : (
-                <span className="os-campaign-roster-name">{recipient.displayName}</span>
-              )}
-              {recipient.source === "" ? null : (
-                <Chip tone="muted" title="How this address got here">
-                  {recipient.source}
-                </Chip>
-              )}
-              {/* CHANGING SOMEBODY'S STATE IS A SELECT, not four buttons. All
-                  four states are reachable from all four -- an operator
-                  putting somebody back after a mistaken unsubscribe is a real
-                  thing -- and four buttons per row on a fifty-row list is a
-                  wall. */}
-              <Select
-                id={`os-recipient-state-${recipient.id}`}
-                label={`Subscription state for ${recipient.email}`}
-                value={recipient.subscriptionStatus}
-                onChange={async (next) => {
-                  const ok = await setSubscription.set(recipient.id, next);
-                  if (ok) roster.reload();
-                }}
-              >
-                {SUBSCRIPTION_STATES.map((state) => (
-                  <option key={state.value} value={state.value}>
-                    {state.label}
-                  </option>
-                ))}
-              </Select>
-              {recipient.unsubscribedAt === "" ? null : (
-                <span className="os-caption">{formatMoment(recipient.unsubscribedAt)}</span>
-              )}
-            </li>
+              {recipient.source === "" ? null : <Chip tone="muted" title="How this address got here">{recipient.source}</Chip>}
+              {recipient.unsubscribedAt === "" ? null : <span className="os-caption">{formatMoment(recipient.unsubscribedAt)}</span>}
+            </RecordRow>
           ))}
           {recipients.length > ROSTER_ROWS ? (
-            <li className="os-caption">and {recipients.length - ROSTER_ROWS} more in this page</li>
+            <p className="os-caption">and {recipients.length - ROSTER_ROWS} more in this page</p>
           ) : null}
-        </ul>
+        </RecordList>
       )}
 
       {setSubscription.error === "" ? null : (

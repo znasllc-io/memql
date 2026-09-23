@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { ArrowRight } from "lucide-react";
 
-import { Button, Caption, CopyField, Fact, Facts, FormRow, Head, Notice, Panel, Subhead, type ButtonTone } from "../../kit";
+import { Button, Caption, RecordList, RecordRow, CopyField, Fact, Facts, FormRow, Head, Notice, Panel, Subhead, type ButtonTone } from "../../kit";
 import { useSession } from "../../chrome/access";
 import {
   editionCaption,
@@ -163,7 +163,7 @@ function DeprecatedFormsPanel({ facts }: { facts: LanguageFacts }) {
   return (
     <Panel label="Deprecated forms">
       <div className="os-head">
-        <Subhead>Deprecated forms</Subhead>
+        <Subhead meta={facts.forms.length}>Deprecated forms</Subhead>
         {used ? <span className="os-head-meta">{usesSummary(facts.forms)}</span> : null}
       </div>
       {facts.forms.length === 0 ? (
@@ -171,11 +171,11 @@ function DeprecatedFormsPanel({ facts }: { facts: LanguageFacts }) {
       ) : (
         <>
           {used ? null : <Caption>Nothing this cluster loads uses a deprecated form.</Caption>}
-          <ul className="os-language-forms">
+          <RecordList as="ul" label="Deprecated forms">
             {facts.forms.map((form) => (
               <DeprecatedForm key={form.rule} form={form} />
             ))}
-          </ul>
+          </RecordList>
         </>
       )}
     </Panel>
@@ -200,30 +200,19 @@ function DeprecatedForm({ form }: { form: LanguageForm }) {
   const extra = form.uses.length - USES_SHOWN;
   const shown = expanded ? form.uses : form.uses.slice(0, USES_SHOWN);
   return (
-    <li className="os-language-form">
+    <div className="os-language-form">
       {/* The spaces are text nodes, not layout: a flex container renders no
           whitespace-only run, and without them the text alternative reads as
           one word, "array(T)is now written[]T". */}
-      <p className="os-language-pair">
-        <code className="os-mono">{form.spelling}</code>{" "}
-        <ArrowRight size={14} aria-hidden />
-        <span className="os-sr-only">is now written</span>{" "}
-        <code className="os-mono">{form.replacement}</code>
-      </p>
-      <p className="os-language-window">{windowSentence(form)}</p>
+      <RecordRow name={<><code>{form.spelling}</code>{" "}<ArrowRight size={14} aria-hidden /><span className="os-sr-only">is now written</span>{" "}<code>{form.replacement}</code></>} secondary={windowSentence(form)} />
       {form.uses.length === 0 ? null : (
         <>
-          <ul className="os-language-uses" aria-label={`Uses of ${form.spelling}`}>
+          <Subhead meta={shown.length}>Uses</Subhead>
+          <RecordList as="ul" label={`Uses of ${form.spelling}`}>
             {shown.map((use) => (
-              <li key={`${use.file}:${use.line}:${use.column}`}>
-                <span className="os-mono">
-                  {use.file}:{use.line}
-                </span>
-                {/* The concrete spelling, which the generic one cannot show. */}
-                <span className="os-language-use-text os-mono">{use.text}</span>
-              </li>
+              <RecordRow key={`${use.file}:${use.line}:${use.column}`} name={`${use.file}:${use.line}`} secondary={use.text} />
             ))}
-          </ul>
+          </RecordList>
           {/* A TOGGLE THAT STAYS. A control that removed itself when pressed
               would drop keyboard focus to the document body. Drawn in both
               states it is the same DOM node, so focus stays on the control that
@@ -256,7 +245,7 @@ function DeprecatedForm({ form }: { form: LanguageForm }) {
       ) : (
         <CopyField value={form.migrator} label="command" />
       )}
-    </li>
+    </div>
   );
 }
 

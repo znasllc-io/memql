@@ -350,6 +350,7 @@ export function DeployablesSection({
         <SourceView
           pkg={pkg}
           apps={apps}
+          appsSettled={!feedError && sites?.snapshot.state === "live" && packages?.snapshot.state === "live"}
           credentials={credentials}
           can={partsForOrganization(pkg.accountId, can)}
           backLabel={view.fromSite ? (siteRows.find(s => s.id === view.fromSite)?.title || "Deployable") : ROOT_LABEL[root]}

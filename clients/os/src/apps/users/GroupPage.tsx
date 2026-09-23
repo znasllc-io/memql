@@ -1,3 +1,4 @@
+import { RecordList, listCount } from "../../kit/RecordRow";
 import { useSessionIfPresent } from "../../chrome/access";
 import { useGroupPeople } from "./useGroupPeople";
 import { useOsIfPresent } from "../../chrome/state";
@@ -8,14 +9,13 @@ import { UserRound } from "lucide-react";
 
 import {
   Button,
-  Chip,
   FormRow,
   Head,
   Input,
   LiveList,
   Notice,
   Panel,
-  Row as ListRow,
+  RecordRow,
   RoleTag,
   Subhead,
   roleRungOf,
@@ -44,7 +44,9 @@ import type { RoleCatalog } from "./useRoles";
 export function GroupPage({
   group,
   people: clusterPeople,
+  peopleAvailable = false,
   invitations,
+  invitationsAvailable = false,
   accounts,
   catalog,
   actions,
@@ -55,7 +57,9 @@ export function GroupPage({
 }: {
   group: GroupRow;
   people: readonly PersonRow[];
+  peopleAvailable?: boolean;
   invitations: readonly InvitationRow[];
+  invitationsAvailable?: boolean;
   accounts: readonly AccountRow[];
   catalog: RoleCatalog;
   actions: UsersActions;
@@ -183,7 +187,7 @@ export function GroupPage({
         ) : null}
 
         <Panel label={`Members of ${group.name}`}>
-          <Subhead>Members</Subhead>
+          <Subhead meta={listCount(memberRows?.snapshot)}>Members</Subhead>
           <LiveList<MembershipRow>
             source={memberRows}
             rowId={(m) => m.id}
@@ -194,12 +198,11 @@ export function GroupPage({
               const person = people.find((p) => p.id === membership.userId) ?? null;
               const addedBy = people.find((p) => p.id === membership.addedBy) ?? null;
               return (
-                <ListRow
+                <RecordRow
                   icon={<UserRound size={16} aria-hidden />}
-                  name={person && operator
-                    ? <Button tone="quiet" onClick={() => onOpenPerson(person.id)}>{personName(person)}</Button>
-                    : person ? personName(person) : membership.userId}
-                  state={
+                  name={person ? personName(person) : membership.userId}
+                  onOpen={person && operator ? () => onOpenPerson(person.id) : undefined}
+                  actions={
                     archived || !canUpdate ? null : (
                       <Button
                         onClick={() => void actions.groupMemberRemove(group.id, membership.userId)}
@@ -219,35 +222,34 @@ export function GroupPage({
                       domain: account?.domain,
                     })}
                   </span>
-                </ListRow>
+                </RecordRow>
               );
             }}
           />
 
           {invited.length === 0 ? null : (
-            <ul className="os-invited-list" aria-label={`People invited into ${group.name}`}>
+            <div>
+              <Subhead meta={invitationsAvailable ? invited.length : undefined}>Invited</Subhead>
+              <RecordList as="ul" label={`People invited into ${group.name}`}>
               {invited.map((invite) => (
-                <li key={invite.id} className="os-invited-row">
-                  <span>{invite.inviteeEmail}</span>
-                  <Chip title="They join this group when they accept">Invited</Chip>
-                </li>
+                <RecordRow key={invite.id} name={invite.inviteeEmail} state="Invited" stateTitle="They join this group when they accept" />
               ))}
-            </ul>
+              </RecordList>
+            </div>
           )}
         </Panel>
 
         {standing.length === 0 ? null : (
           <Panel label={`Managed by, for ${group.name}`}>
-            <Subhead>Managed by</Subhead>
+            <Subhead meta={peopleAvailable && catalog.state === "ready" && !catalog.error ? standing.length : undefined}>Managed by</Subhead>
             <p className="os-caption">Everyone at developer and above, standing.</p>
-            <ul className="os-standing-list" aria-label="Standing members">
+            <RecordList as="ul" label="Standing members">
               {standing.map((person) => (
-                <li key={person.id} className="os-standing-row">
-                  <span>{personName(person)}</span>
+                <RecordRow key={person.id} name={personName(person)}>
                   <RoleTag role={person.role} actorRole={viewerRole} />
-                </li>
+                </RecordRow>
               ))}
-            </ul>
+            </RecordList>
           </Panel>
         )}
 

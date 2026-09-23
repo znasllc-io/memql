@@ -212,10 +212,10 @@ describe("the delegated runs list", () => {
     await screen.findByText("ended");
     const toneOf = (status: string) =>
       screen.getByText(status).getAttribute("data-tone");
-    expect(toneOf("ended")).toBe("ok");
-    expect(toneOf("failed")).toBe("danger");
+    expect(toneOf("ended")).toBe("accent");
+    expect(toneOf("failed")).toBe("warn");
     expect(toneOf("cancelled")).toBe("warn");
-    expect(toneOf("running")).toBe("neutral");
+    expect(toneOf("running")).toBe("muted");
     // `unknown` and `metered` are real answers; neither is folded into the
     // other and neither reads as "subscription".
     expect(screen.getByText("metered")).toBeTruthy();

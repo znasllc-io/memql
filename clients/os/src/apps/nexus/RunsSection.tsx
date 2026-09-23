@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import {
@@ -7,7 +7,8 @@ import {
   Head,
   LiveList,
   Refine,
-  Row as KitRow,
+  RecordRow as KitRow,
+  listCount,
   SortControl,
   formatFreshness,
   formatMoment,
@@ -83,22 +84,14 @@ export function RunsSection({ runs, goalsById, showFinished, onOpenRun }: RunsSe
     return projected;
   });
 
-  const count = view?.snapshot.rows.length ?? 0;
-  const parked = useMemo(
-    () => (view?.snapshot.rows ?? []).filter(runWaitsOnYou).length,
-    [view?.snapshot],
-  );
+
+  const parked = (view?.snapshot.rows ?? []).filter(runWaitsOnYou).length;
 
   return (
     <div className="os-nexus-list">
       <Head
         title="Runs"
-        meta={
-          // A COUNT OF WHAT IS STUCK, NOT AN UNREAD BADGE. It is derived from
-          // the rows on screen and it goes away when the last one is answered
-          // -- there is nothing to dismiss.
-          parked > 0 ? `${count} runs -- ${parked} waiting for you` : `${count} runs`
-        }
+        meta={listCount(view?.snapshot) === undefined ? undefined : `${listCount(view?.snapshot)}${parked > 0 ? ` · ${parked} waiting for you` : ""}`}
       >
         <Refine
           search={search}
@@ -176,7 +169,10 @@ export function RunLine({
       // else is history.
       current={moving || parked}
       dim={runIsTerminal(run) && !parked}
-      state={
+      state={runStatusWord(run.status)}
+      tone={moving || parked ? "accent" : "muted"}
+      secondary={showContext ? goal === null ? run.goalId === "" ? "an automation" : "a goal" : goalTitle(goal) : undefined}
+      stateExtra={
         <>
           {parked ? (
             <Chip tone="accent" title={waitingWord(run.waitingOnKind)}>
@@ -188,20 +184,11 @@ export function RunLine({
               {runModeWord(run.mode)}
             </Chip>
           )}
-          <span className="os-nexus-run-status" data-status={run.status}>
-            {runStatusWord(run.status)}
-          </span>
-          <span className="os-caption" title={formatMoment(run.startedAt || run.createdAt)}>
-            {formatFreshness(run.startedAt || run.createdAt, now)}
-          </span>
+
         </>
       }
     >
-      {showContext ? (
-        <span className="os-nexus-run-for">
-          {goal === null ? (run.goalId === "" ? "an automation" : "a goal") : goalTitle(goal)}
-        </span>
-      ) : null}
+      <span title={formatMoment(run.startedAt || run.createdAt)}>{formatFreshness(run.startedAt || run.createdAt, now)}</span>
     </KitRow>
   );
 }

@@ -60,7 +60,7 @@ export function VersionHistory({
   return (
     <section className="os-files-versions" aria-label="Version history">
       <div className="os-files-versions-head">
-        <Subhead>Versions</Subhead>
+        <Subhead meta={!loading && !error && readAt !== null ? history.total : undefined}>Versions</Subhead>
         <span className="os-caption">
           {/* WHEN THIS WAS READ, said plainly. These rows carry no broadcast
               routing rule, so this panel is a read rather than a feed -- and a

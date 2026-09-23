@@ -1,3 +1,4 @@
+import { RecordList, listCount } from "../../kit/RecordRow";
 import { NeedsConfiguration } from "./NeedsConfiguration";
 import { useSession } from "../../chrome/access";
 import { campaignSendingConfigured } from "./readiness";
@@ -28,7 +29,7 @@ import {
   LiveList,
   Notice,
   Panel,
-  Row as ListRow,
+  RecordRow,
   Select,
   Subhead,
   formatMoment,
@@ -146,7 +147,7 @@ export function CampaignsSection({
 
   return (
     <div className="os-app-stack">
-      <Head title="Campaigns">
+      <Head title="Campaigns" meta={listCount(source?.snapshot)}>
         <AddButton onClick={() => setAdding((v) => !v)} label="New campaign" />
       </Head>
       <NeedsConfiguration email={email} />
@@ -236,11 +237,7 @@ export function labelOfSender(senders: SenderIdentityRow[], id: string): string 
 /** The tone a status reads in. Only two states are worth colouring: one that
  *  is happening and one that went wrong. Everything else is a plain chip --
  *  seven coloured statuses is a list with no emphasis at all. */
-function statusTone(status: string): "neutral" | "accent" | "muted" {
-  if (status === "sending") return "accent";
-  if (status === "draft") return "muted";
-  return "neutral";
-}
+
 
 function CampaignLine({
   campaign,
@@ -257,7 +254,7 @@ function CampaignLine({
 }) {
   const audience = nameOfAudience(audiences, campaign.audienceId);
   return (
-    <ListRow
+    <RecordRow
       icon={<Send size={16} aria-hidden />}
       name={campaignName(campaign)}
       // `current` is the row's own liveness, and for a campaign that is
@@ -267,14 +264,11 @@ function CampaignLine({
       dim={campaignIsFinished(campaign)}
       open={open}
       onOpen={onToggle}
-      state={
-        <>
-          <Chip tone={statusTone(campaign.status)}>{campaign.status || "unknown"}</Chip>
-          {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
-        </>
-      }
+      secondary={audience}
+      state={campaign.status || "unknown"}
+      tone={campaign.status === "sending" ? "accent" : campaign.lastError ? "warn" : "muted"}
+      stateExtra={tick === "added" ? <span className="os-livelist-tick">new</span> : null}
     >
-      {audience === "" ? null : <span className="os-caption">{audience}</span>}
       {campaign.scheduledAt === "" || campaign.status !== "scheduled" ? null : (
         <span className="os-caption">{formatMoment(campaign.scheduledAt)}</span>
       )}
@@ -287,7 +281,7 @@ function CampaignLine({
         </span>
       )}
       {campaign.lastError === "" ? null : <Chip tone="neutral">problem</Chip>}
-    </ListRow>
+    </RecordRow>
   );
 }
 
@@ -801,7 +795,7 @@ function DeliveriesPanel({ campaignId }: { campaignId: string }) {
   return (
     <Panel label="Who got it">
       <div className="os-campaign-detail-head">
-        <Subhead>Who got it</Subhead>
+        <Subhead meta={ledger.state === "ready" && !ledger.error ? `${rows.length} read` : undefined}>Who got it</Subhead>
         <Button busy={ledger.state === "loading"} busyLabel="Reading" onClick={ledger.reload}>
           Read again
         </Button>
@@ -821,27 +815,19 @@ function DeliveriesPanel({ campaignId }: { campaignId: string }) {
             : "Nothing has been written to the record yet."}
         </Caption>
       ) : (
-        <ul className="os-campaign-ledger" aria-label="Per-recipient outcomes">
+        <RecordList as="ul" label="Per-recipient outcomes">
           {rows.slice(0, LEDGER_ROWS).map((delivery) => (
-            <li key={delivery.id} className="os-campaign-ledger-row" data-outcome={delivery.status}>
-              <span className="os-mono os-campaign-ledger-address">{delivery.email || "--"}</span>
-              <span className="os-campaign-ledger-outcome">
-                {delivery.status === "skipped"
-                  ? skipReasonSentence(delivery.skipReason)
-                  : delivery.status || "unknown"}
-              </span>
-              {delivery.lastError === "" ? null : (
-                <span className="os-caption os-mono">{delivery.lastError}</span>
-              )}
-              {delivery.sentAt === "" ? null : (
-                <span className="os-caption">{formatMoment(delivery.sentAt)}</span>
-              )}
-            </li>
+            <RecordRow key={delivery.id}
+              name={<span className="os-mono">{delivery.email || "--"}</span>}
+              state={delivery.status || "unknown"}
+              tone={delivery.status === "sent" ? "accent" : delivery.lastError ? "warn" : "muted"}
+              secondary={delivery.lastError || (delivery.status === "skipped" ? skipReasonSentence(delivery.skipReason) : undefined)}
+            >
+              {delivery.sentAt === "" ? null : <span className="os-caption">{formatMoment(delivery.sentAt)}</span>}
+            </RecordRow>
           ))}
-          {rows.length > LEDGER_ROWS ? (
-            <li className="os-caption">and {rows.length - LEDGER_ROWS} more in this page</li>
-          ) : null}
-        </ul>
+          {rows.length > LEDGER_ROWS ? <p className="os-caption">and {rows.length - LEDGER_ROWS} more in this page</p> : null}
+        </RecordList>
       )}
 
       {ledger.readAt === "" ? null : (

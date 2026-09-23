@@ -18,7 +18,8 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
 1. **Every section opens with the Head.** Title, at most one primary
    action, nothing else standing. No section renders a control strip before
    its content. Encoded by `kit` `Head` (its `meta` slot carries a quiet
-   count or scope note).
+   count or scope note). Counts come from the authorized filtered collection
+   only after its read settles; unavailable is not zero.
 
 2. **Filters are questions, not furniture.** Search and facet controls live
    behind one affordance on the Head line (`kit` `Refine`): collapsed by
@@ -107,6 +108,17 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
   rules is rendered screenshots, both modes, empty and populated -- not the
   diff. The audit that produced these rules was visual, and the drift it
   found had survived every code review.
+
+## Record lists
+
+App record collections use `RecordList` and `RecordRow`, the Deployables list
+pattern. `LiveList` already provides the list container and arrival semantics.
+Use the row's `actions` slot for independent controls, outside its opening
+button, and `Subhead.meta` for subordinate collection counts. Static collections
+can use `RecordList as="ul"` to retain list/listitem semantics. `PickerRow` is
+reserved for the repository chooser's aligned columns. See the
+[coverage inventory](qa/list-coverage.md) for specialized grids, trees and
+workflow surfaces that retain their interaction model.
 
 ## App overviews
 

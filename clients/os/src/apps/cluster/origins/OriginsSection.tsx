@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { Button, Caption, Chip, Head, Notice, Panel, Subhead } from "../../../kit";
+import { Button, Caption, Head, Notice, Panel, Subhead, RecordList, RecordRow } from "../../../kit";
 import { Measure } from "../../../kit/MeasureView";
 import { useOsConnection } from "../../../live/connection";
 import { useReading } from "../../../cluster/reading";
@@ -110,10 +110,6 @@ export function OriginsSection() {
     [connection, health],
   );
 
-  const meta =
-    inventory.value === null
-      ? null
-      : `${join.withConnector} of ${join.declared} declared concepts have a connector`;
 
   return (
     <div className="os-cluster">
@@ -121,7 +117,7 @@ export function OriginsSection() {
           together: they describe one subject, and a page where half the
           numbers were refreshed and half were not is worse than one where
           none were. */}
-      <Head title="Data origins" meta={meta}>
+      <Head title="Data origins" meta={inventory.state === "read" && !inventory.error ? join.rows.length : undefined}>
         <Button
           tone="quiet"
           busy={inventory.state === "reading" || health.state === "reading"}
@@ -135,6 +131,7 @@ export function OriginsSection() {
         </Button>
       </Head>
 
+      {inventory.state === "read" ? <Caption>{join.withConnector} of {join.declared} declared concepts have a connector</Caption> : null}
       {inventory.state === "failed" ? (
         <Notice
           tone="error"
@@ -172,12 +169,12 @@ export function OriginsSection() {
           rather than as a verdict the page is in no position to give. */}
       {coverage.length === 0 ? null : (
         <Panel label="Connector coverage">
-          <Subhead>Connectors</Subhead>
-          <div className="os-cluster-coverage">
+          <Subhead meta={inventory.state === "read" && !inventory.error ? coverage.length : undefined}>Connectors</Subhead>
+          <RecordList as="ul" label="Connectors">
             {coverage.map((c) => (
               <CoverageLine key={c.connector} coverage={c} />
             ))}
-          </div>
+          </RecordList>
           {/* TWO SENTENCES, AND THE SECOND ONLY WHEN IT IS ABOUT SOMETHING.
               The definition is always worth having. The refusal to give a
               verdict is about a silent connector, so on a cluster with none
@@ -195,25 +192,8 @@ export function OriginsSection() {
 
       {join.rows.length === 0 ? null : (
         <Panel label="Concepts">
-          <Subhead>Concepts with a connector</Subhead>
-          <div className="os-cluster-table" role="table" aria-label="Data origins">
-            <div className="os-cluster-tr os-cluster-th" role="row">
-              <span role="columnheader">Concept</span>
-              <span role="columnheader">Connector</span>
-              <span role="columnheader" title="Seconds between the origin's write and MemQL applying it.">
-                Lag
-              </span>
-              <span role="columnheader" title="Rows the last sweep found disagreeing with the origin.">
-                Drift
-              </span>
-              <span role="columnheader" title="Pending and failed entries waiting to be drained.">
-                Outbox
-              </span>
-              <span role="columnheader" title="Entries that exhausted their attempts and are waiting for a person.">
-                Dead
-              </span>
-              <span role="columnheader">What you can do</span>
-            </div>
+          <Subhead meta={inventory.state === "read" && !inventory.error ? join.rows.length : undefined}>Concepts with a connector</Subhead>
+          <RecordList as="ul" label="Data origins">
             {join.rows.map((row) => (
               <OriginLine
                 key={row.key}
@@ -222,7 +202,7 @@ export function OriginsSection() {
                 onAct={(which) => void act(row, which)}
               />
             ))}
-          </div>
+          </RecordList>
           <Caption>
             An em dash is not a zero. It means nothing has reported that figure yet -- a connector
             that has never run has no lag and no drift, which is a different answer from a sweep
@@ -294,13 +274,7 @@ function CoverageLine({ coverage }: { coverage: ConnectorCoverage }) {
   const tone = coverageTone(coverage);
   const sentence = coverageSentence(coverage);
   return (
-    <div className="os-cluster-coverage-line" data-tone={tone}>
-      <div className="os-cluster-coverage-head">
-        <span className="os-cluster-coverage-name">{coverage.connector}</span>
-        <span className="os-cluster-coverage-ratio">
-          {coverage.reported} of {coverage.concepts} reported
-        </span>
-      </div>
+    <RecordRow name={coverage.connector} state={`${coverage.reported} of ${coverage.concepts} reported`} tone={tone === "silent" ? "warn" : "muted"}>
       {sentence === "" ? null : (
         <p className={tone === "silent" ? "os-cluster-row-attention" : "os-cluster-coverage-note"}>
           {sentence}
@@ -318,7 +292,7 @@ function CoverageLine({ coverage }: { coverage: ConnectorCoverage }) {
           from its last attempt.
         </p>
       )}
-    </div>
+    </RecordRow>
   );
 }
 
@@ -333,61 +307,22 @@ function OriginLine({
 }) {
   const acts = originActs(row);
   return (
-    <div className="os-cluster-tr" role="row" data-paused={row.paused || undefined}>
-      <span role="cell" className="os-cluster-td-concept">
-        <span className="os-mono">{row.conceptId}</span>
-        <span className="os-cluster-state-marks">
-          <Chip
-            tone={row.dataState === "mirror" ? "accent" : "muted"}
-            title={dataStateSentence(row.dataState, row.origin, row.mirroredTo)}
-          >
-            {row.dataState || "undeclared"}
-          </Chip>
-          {row.paused ? <Chip tone="accent">paused</Chip> : null}
-        </span>
-        {row.dataState === "mirror" ? (
-          <span className="os-cluster-row-note">
-            Read-only here -- the engine refuses every write that does not come from {row.origin}.
-          </span>
-        ) : null}
-        {row.lastError === "" ? null : (
-          <span className="os-cluster-row-error os-mono">{row.lastError}</span>
-        )}
+    <RecordRow name={row.conceptId} secondary={`${row.connector}${row.direction ? ` · ${row.direction}` : ""}`}
+      state={row.paused ? "paused" : row.dataState || "undeclared"}
+      stateTitle={dataStateSentence(row.dataState, row.origin, row.mirroredTo)}
+      tone={row.paused || row.lastError ? "warn" : row.dataState === "mirror" ? "accent" : "muted"}
+      actions={acts.map(which => <Button key={which} tone="quiet" busy={busyKey === `${row.key}:${which}`} busyLabel="Working"
+        ariaLabel={`${actLabel(which)} ${row.conceptId} on ${row.connector}`} onClick={() => onAct(which)}>{actLabel(which)}</Button>)}>
+      <span className="os-record-facts">
+      <span title="Seconds between the origin's write and MemQL applying it.">Lag <Measure figure={row.lagSeconds} suffix="s" /></span>
+      <span title="Rows the last sweep found disagreeing with the origin.">Drift <Measure figure={row.driftCount} /></span>
+      <span title="Pending and failed entries waiting to be drained.">Outbox <Measure figure={row.outboxDepth} /></span>
+      <span title="Entries that exhausted their attempts and are waiting for a person.">Dead <Measure figure={row.deadLetterCount} /></span>
       </span>
-      <span role="cell" className="os-cluster-td-connector">
-        <span className="os-mono">{row.connector}</span>
-        {row.direction === "" ? null : <span className="os-cluster-dir">{row.direction}</span>}
-        {row.hasHealth ? null : (
-          <span className="os-cluster-row-note">nothing has reported on this pairing</span>
-        )}
-      </span>
-      <span role="cell">
-        <Measure figure={row.lagSeconds} suffix="s" />
-      </span>
-      <span role="cell">
-        <Measure figure={row.driftCount} />
-      </span>
-      <span role="cell">
-        <Measure figure={row.outboxDepth} />
-      </span>
-      <span role="cell">
-        <Measure figure={row.deadLetterCount} />
-      </span>
-      <span role="cell" className="os-cluster-td-acts">
-        {acts.map((which) => (
-          <Button
-            key={which}
-            tone="quiet"
-            busy={busyKey === `${row.key}:${which}`}
-            busyLabel="Working"
-            ariaLabel={`${actLabel(which)} ${row.conceptId} on ${row.connector}`}
-            onClick={() => onAct(which)}
-          >
-            {actLabel(which)}
-          </Button>
-        ))}
-      </span>
-    </div>
+      {row.hasHealth ? null : <span>nothing has reported on this pairing</span>}
+      {row.dataState === "mirror" ? <span>Read-only here -- the engine refuses every write that does not come from {row.origin}.</span> : null}
+      {row.lastError ? <span className="os-cluster-row-error os-mono">{row.lastError}</span> : null}
+    </RecordRow>
   );
 }
 

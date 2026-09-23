@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { Button, Caption, Chip, Field, Head, Input, Notice, Panel, Row, Select, Subhead, formatMoment } from "../../kit";
+import { Button, Caption, Field, Head, Input, Notice, Panel, RecordList, RecordRow, Select, Subhead, formatMoment } from "../../kit";
 import type { NewTemplateFacts } from "./actions";
 import type { RecipeRow, TemplateRow } from "./rows";
 import { FORMATS, RECIPES_EMPTY, TEMPLATES_EMPTY, formatWord } from "./words";
@@ -39,6 +39,8 @@ export interface TemplatesSectionProps {
   onArchiveRecipe: (recipeId: string) => void;
   onRestoreRecipe: (recipeId: string) => void;
   showArchived: boolean;
+  templatesAvailable?: boolean;
+  recipesAvailable?: boolean;
 }
 
 export function TemplatesSection({
@@ -53,6 +55,8 @@ export function TemplatesSection({
   onArchiveRecipe,
   onRestoreRecipe,
   showArchived,
+  templatesAvailable = false,
+  recipesAvailable = false,
 }: TemplatesSectionProps) {
   const [adding, setAdding] = useState(false);
   const visibleTemplates = templates.filter((t) => showArchived || !t.archived);
@@ -60,7 +64,7 @@ export function TemplatesSection({
 
   return (
     <div className="os-mz-templates">
-      <Head title="Templates" meta={`${visibleTemplates.length} bound`}>
+      <Head title="Templates" meta={templatesAvailable ? visibleTemplates.length : undefined}>
         <Button tone="primary" onClick={() => setAdding((v) => !v)}>
           {adding ? "Cancel" : "Bind a file"}
         </Button>
@@ -81,20 +85,16 @@ export function TemplatesSection({
       {visibleTemplates.length === 0 ? (
         <p className="os-caption">{TEMPLATES_EMPTY}</p>
       ) : (
-        <ul className="os-mz-rows" aria-label="Templates">
+        <RecordList as="ul" label="Templates">
           {visibleTemplates.map((t) => (
-            <li key={t.id}>
-              {/* THE ACTS GO IN THE `state` SLOT, which is the row's
-                  right-aligned end. Put in `children` they flowed inline
-                  after the description and read as part of the sentence --
-                  "The branded report we send Acme  Archive" -- which a
-                  rendered pass caught and jsdom cannot see. */}
-              <Row
+            <div key={t.id}>
+              <RecordRow
                 name={t.name}
+                secondary={t.description || undefined}
+                state={t.archived ? "Archived" : formatWord(t.format)}
                 dim={t.archived}
-                state={
+                actions={
                   <>
-                    <Chip tone="neutral">{formatWord(t.format)}</Chip>
                     {t.archived ? (
                       <Button tone="quiet" onClick={() => onRestoreTemplate(t.id)}>
                         Restore
@@ -108,18 +108,15 @@ export function TemplatesSection({
                 }
               >
                 <span className="os-mz-template-desc">
-                  {t.description || "No description"}
-                  {t.placeholders.length > 0
-                    ? ` — asks for ${t.placeholders.map((p) => p.name).join(", ")}`
-                    : ""}
+                  {t.placeholders.length > 0 ? `Asks for ${t.placeholders.map((p) => p.name).join(", ")}` : ""}
                 </span>
-              </Row>
-            </li>
+              </RecordRow>
+            </div>
           ))}
-        </ul>
+        </RecordList>
       )}
 
-      <Subhead>Recipes</Subhead>
+      <Subhead meta={recipesAvailable ? visibleRecipes.length : undefined}>Recipes</Subhead>
       <Caption>
         A recipe re-runs a composition against whatever the graph holds now — it stores the
         selection, not the rows the selection returned. A re-run that matches what was done before
@@ -129,15 +126,16 @@ export function TemplatesSection({
       {visibleRecipes.length === 0 ? (
         <p className="os-caption">{RECIPES_EMPTY}</p>
       ) : (
-        <ul className="os-mz-rows" aria-label="Recipes">
+        <RecordList as="ul" label="Recipes">
           {visibleRecipes.map((r) => (
-            <li key={r.id}>
-              <Row
+            <div key={r.id}>
+              <RecordRow
                 name={r.name}
+                secondary={r.description || undefined}
+                state={r.archived ? "Archived" : formatWord(r.format)}
                 dim={r.archived}
-                state={
+                actions={
                   <>
-                    <Chip tone="neutral">{formatWord(r.format)}</Chip>
                     {r.archived ? (
                       <Button tone="quiet" onClick={() => onRestoreRecipe(r.id)}>
                         Restore
@@ -176,12 +174,11 @@ export function TemplatesSection({
                   {r.runCount === 0
                     ? "Not run yet"
                     : `Made ${r.runCount} ${r.runCount === 1 ? "time" : "times"}, last on ${formatMoment(r.lastRunAt)}`}
-                  {r.description ? ` — ${r.description}` : ""}
                 </span>
-              </Row>
-            </li>
+              </RecordRow>
+            </div>
           ))}
-        </ul>
+        </RecordList>
       )}
     </div>
   );

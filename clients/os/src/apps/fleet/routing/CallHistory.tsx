@@ -2,7 +2,7 @@ import { History } from "lucide-react";
 import { InfoDetail } from "../../../kit/InfoDetail";
 import { useState } from "react";
 
-import { Button, Notice, EmptyState, RefreshButton, Subhead } from "../../../kit";
+import { Button, Notice, EmptyState, RefreshButton, Subhead, RecordList, RecordRow } from "../../../kit";
 import { formatDuration, formatMoment } from "../../../kit/format";
 import { OUTCOME_TONE, type InvocationRow } from "../rows";
 import { RoutingRecordView } from "./RoutingRecordView";
@@ -28,7 +28,7 @@ export function CallHistory({ workerId, machineLabel, standalone = false }: { wo
   return (
     <div className="os-fleet-history">
       <div className="fleet-bank-heading">
-        {standalone ? <Subhead>Recent calls</Subhead> : <Button onClick={() => setOpen((v) => !v)} ariaLabel={`Recent calls on ${machineLabel}`}>
+        {standalone ? <Subhead meta={readAt && !loading && !error ? invocations.length : undefined}>Recent calls</Subhead> : <Button onClick={() => setOpen((v) => !v)} ariaLabel={`Recent calls on ${machineLabel}`}>
           {open ? "Hide recent calls" : "Recent calls"}
         </Button>}
         {open ? <span className="fleet-heading-actions">
@@ -58,13 +58,11 @@ export function CallHistory({ workerId, machineLabel, standalone = false }: { wo
             <EmptyState icon={History} title="No calls recorded">Calls appear here when work runs on this machine. App sessions are available in Activity.</EmptyState>
           ) : null}
 
-          {invocations.length > 0 ? <ul className="os-fleet-calls">
+          {invocations.length > 0 ? <RecordList as="ul" label="Recent calls">
             {invocations.map((call) => (
-              <li key={call.id}>
-                <CallLine call={call} />
-              </li>
+              <CallLine key={call.id} call={call} />
             ))}
-          </ul> : null}
+          </RecordList> : null}
         </>
       )}
     </div>
@@ -81,22 +79,11 @@ function CallLine({ call }: { call: InvocationRow }) {
 
   return (
     <div className="os-fleet-call">
-      <button
-        type="button"
-        className="os-fleet-call-head"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((v) => !v)}
-      >
-        <span className="os-fleet-outcome" data-tone={tone}>
-          {call.outcome || "unknown"}
-        </span>
-        <span className="os-mono">
-          {call.tool}
-          {call.action ? `.${call.action}` : ""}
-        </span>
-        <span className="os-caption">{formatMoment(when)}</span>
-        <span className="os-caption">{formatDuration(call.durationMs)}</span>
-      </button>
+      <RecordRow name={`${call.tool}${call.action ? `.${call.action}` : ""}`} secondary={formatMoment(when)}
+        state={call.outcome || "unknown"} tone={tone === "ok" ? "accent" : "warn"}
+        open={expanded} onOpen={() => setExpanded(v => !v)}>
+        <span>{formatDuration(call.durationMs)}</span>
+      </RecordRow>
       {expanded ? (
         <div className="os-fleet-call-body">
           {call.errorCode || call.errorMessage ? (

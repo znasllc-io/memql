@@ -1,3 +1,4 @@
+import { listCount } from "../../kit/RecordRow";
 import { AddButton } from "../../kit/AddButton";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -12,14 +13,13 @@ import {
   EmptyState,
   Caption,
   Check,
-  Chip,
   Field,
   Head,
   Input,
   LiveList,
   Notice,
   Panel,
-  Row as ListRow,
+  RecordRow,
   Select,
   Subhead,
 } from "../../kit";
@@ -125,7 +125,7 @@ export function TemplatesSection({
 
   return (
     <div className="os-app-stack">
-      <Head title="Templates">
+      <Head title="Templates" meta={listCount(source?.snapshot)}>
         <AddButton onClick={() => setAdding((v) => !v)} label="New template" />
       </Head>
 
@@ -180,24 +180,19 @@ function TemplateLine({
 }) {
   const archived = templateIsArchived(template);
   return (
-    <ListRow
+    <RecordRow
       icon={<FileText size={16} aria-hidden />}
       name={templateName(template)}
       current={!archived}
       dim={archived}
       open={open}
       onOpen={onToggle}
-      state={
-        <>
-          <Chip tone={template.status === "ready" ? "accent" : "muted"}>
-            {template.status || "draft"}
-          </Chip>
-          {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
-        </>
-      }
+      secondary={template.subject}
+      state={template.status || "draft"}
+      tone={template.status === "ready" ? "accent" : "muted"}
+      stateExtra={tick === "added" ? <span className="os-livelist-tick">new</span> : null}
     >
-      {template.subject === "" ? null : <span className="os-caption">{template.subject}</span>}
-    </ListRow>
+    </RecordRow>
   );
 }
 

@@ -1,3 +1,6 @@
+import { AccountsApp } from "../src/apps/accounts/AccountsApp";
+import { LocalAccountsSettingsStore } from "../src/apps/accounts/settings";
+import { fakeConnection as accountConnection, accountRow, withSession as accountSession } from "../test/accounts/harness";
 import { createRoot } from "react-dom/client";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
@@ -463,6 +466,20 @@ const VIEWS: Record<
     render: () => JSX.Element;
   }
 > = {
+  accounts: {
+    connect: () => accountConnection({ clientAccountsAll: [
+      accountRow({ id: "v1:accounts:account:self", name: "Our Studio", domain: "studio.example.com", primaryContactName: "Dana" }),
+      accountRow({ id: "client-acme", name: "Acme Consulting", domain: "acme.example.com", primaryContactName: "Avery" }),
+      accountRow({ id: "client-borden", name: "Borden Ltd", domain: "borden.example.com", primaryContactName: "Morgan" }),
+    ] }),
+    wrap: (el, role) => accountSession(el, { role }),
+    render: () => <AccountsPane />,
+  },
+  "accounts-empty": {
+    connect: () => accountConnection({ clientAccountsAll: [] }),
+    wrap: (el, role) => accountSession(el, { role }),
+    render: () => <AccountsPane />,
+  },
   // The two lists. `framed` views bring their own window body, because the
   // app's wizard needs a floor and its pages publish to the window's trail.
   list: { seed: LISTS, framed: true, render: () => <Lists section="deployables" /> },
@@ -679,6 +696,11 @@ function MachinePane({ over }: { over: Record<string, unknown> }) {
       <MachineDetail machine={machine} writes={writes} now={FLEET_NOW} view="details" />
     </div>
   );
+}
+
+function AccountsPane() {
+  const [store] = useState(() => new LocalAccountsSettingsStore({ getItem: () => null, setItem: () => {} }));
+  return <WindowBody fallback="Accounts"><AccountsApp sectionId="accounts" navigate={() => {}} askContext={() => {}} store={store} /></WindowBody>;
 }
 
 function OriginsPane() {

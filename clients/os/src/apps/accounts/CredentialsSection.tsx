@@ -10,7 +10,8 @@ import {
   Head,
   Notice,
   Panel,
-  Row,
+  RecordRow,
+  RecordList,
   formatMoment,
 } from "../../kit";
 import { CredentialsPanel } from "./CredentialsPanel";
@@ -95,15 +96,7 @@ function BillingAccountList({
     <div className="os-app-stack">
       <Head
         title="Credentials"
-        // SAY IT ONCE (rule 8's sibling, rule 7). The count is absent at zero
-        // rather than reading "0 billing accounts" above a sentence that
-        // already says there are none -- and absent while the read is still in
-        // flight, because a count nobody has been given yet is not zero.
-        meta={
-          feed.state === "ready" && feed.accounts.length > 0
-            ? countLabel(feed.accounts.length)
-            : undefined
-        }
+        meta={feed.state === "ready" ? feed.accounts.length : undefined}
       >
         {/* The one control, and it is not a primary act: nothing on this
             surface CREATES a billing account. `createAccount` is an identity
@@ -179,13 +172,13 @@ function BillingAccountRows({
 
   return (
     <>
-      <ul className="os-credentials-accounts" aria-label="Billing accounts">
+      <RecordList><ul className="os-credentials-accounts" aria-label="Billing accounts">
         {feed.accounts.map((account) => (
           <li key={account.id}>
             <BillingAccountLine account={account} onOpen={() => onOpen(account.id)} />
           </li>
         ))}
-      </ul>
+      </ul></RecordList>
       {feed.readAt === "" ? null : (
         <Caption>
           Read at {new Date(feed.readAt).toLocaleTimeString()}. This list is not live -- Re-read is
@@ -206,7 +199,7 @@ function BillingAccountLine({
   const archived = billingAccountIsArchived(account);
   const suspended = billingAccountIsSuspended(account);
   return (
-    <Row
+    <RecordRow
       icon={<Landmark size={16} aria-hidden />}
       name={billingAccountName(account)}
       // `current` is the row's own liveness. A closed account keeps its facts
@@ -215,16 +208,14 @@ function BillingAccountLine({
       current={!archived}
       dim={archived}
       onOpen={onOpen}
-      state={
+      secondary={account.description || undefined}
+      stateExtra={
         <>
           {archived ? <Chip tone="muted">archived</Chip> : null}
           {suspended ? <Chip tone="muted">suspended</Chip> : null}
         </>
       }
     >
-      {account.description === "" ? null : (
-        <span className="os-caption">{account.description}</span>
-      )}
       {account.externalRef === "" ? null : (
         <span
           className="os-caption os-mono"
@@ -233,7 +224,7 @@ function BillingAccountLine({
           {account.externalRef}
         </span>
       )}
-    </Row>
+    </RecordRow>
   );
 }
 
@@ -305,6 +296,3 @@ function BillingAccountPage({
 }
 
 /** A quiet count for the Head's meta slot. */
-function countLabel(n: number): string {
-  return n === 1 ? "1 billing account" : `${n} billing accounts`;
-}

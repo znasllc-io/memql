@@ -1,7 +1,7 @@
 import { EmptyState, Button } from "../../../kit";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
-import { Caption, Fact, Facts, Notice, Subhead } from "../../../kit";
+import { Caption, Fact, Facts, Notice, Subhead, RecordList, RecordRow } from "../../../kit";
 import {
   applyFacets,
   categorySentence,
@@ -151,7 +151,7 @@ export function CatalogSection({
 
   return (
     <>
-      <Subhead>What to run</Subhead>
+      <Subhead meta={profilesState === "read" && !profilesError ? groups.reduce((n, group) => n + group.shown.length, 0) : undefined}>What to run</Subhead>
       <Caption>
         Explore models by capability and check which fit your machines. Models you already serve remain available even if they are not in this catalog.
       </Caption>
@@ -196,11 +196,11 @@ export function CatalogSection({
           <details className="os-fleet-catgroup" key={group.category} open={groups.length === 1}>
             <summary className="os-fleet-catname">{group.label} <span className="os-caption">{group.shown.length} models</span></summary>
             {state === "" ? null : <p className="os-fleet-catstate">{state}</p>}
-            <ul className="os-fleet-catrows">
+            <RecordList as="ul">
               {group.shown.map((row) => (
                 <CatalogEntry key={`${row.profile.category}:${row.profile.modelId}`} row={row} />
               ))}
-            </ul>
+            </RecordList>
           </details>
           );
         })}
@@ -213,17 +213,16 @@ export function CatalogSection({
             {reading.uncatalogued.length === 1 ? "model" : "models"} the catalog does not list. They
             work exactly as any other — the catalog is what we recommend, not what is allowed.
           </Caption>
-          <ul className="os-fleet-catrows">
+          <RecordList as="ul">
             {reading.uncatalogued.map((m) => (
-              <li className="os-fleet-catrow" key={m.modelId} data-served>
-                <span className="os-fleet-catid os-mono">{m.modelId}</span>
+              <RecordRow key={m.modelId} name={m.modelId} state={m.online ? "Online" : "Offline"}>
                 <span className="os-fleet-catnote">
                   on {m.machineCount} {m.machineCount === 1 ? "machine" : "machines"}
                   {m.online ? "" : ", none awake"}
                 </span>
-              </li>
+              </RecordRow>
             ))}
-          </ul>
+          </RecordList>
         </>
       )}
     </>
@@ -232,6 +231,7 @@ export function CatalogSection({
 
 function CatalogEntry({ row }: { row: CatalogRow }) {
   const { profile, served, blocked } = row;
+  const [open, setOpen] = useState(false);
 
   // The right-hand text does ONE job per state, and the three are different
   // jobs: confirm, explain, or invite. A single field carrying all three would
@@ -243,16 +243,14 @@ function CatalogEntry({ row }: { row: CatalogRow }) {
       : joinSize(sizeWords(profile.sizeBytes), profile.notes);
 
   return (
-    <li
-      className="os-fleet-catrow"
-      data-served={served || undefined}
-      data-blocked={blocked ? blocked.kind : undefined}
-    >
-      <details className="fleet-catalog-profile"><summary><span className="os-fleet-catid os-mono">{profile.modelId}</span><span className="os-fleet-catnote">{served ? "Installed" : blocked ? blocked.detail : "Available to install"}</span></summary>
+    <div>
+      <RecordRow name={profile.modelId} secondary={profile.runtime} state={served ? "Installed" : blocked ? "Unavailable" : "Available"}
+        stateTitle={blocked?.detail} open={open} onOpen={() => setOpen(value => !value)} />
+      {open ? <div className="fleet-catalog-profile">
         <p className="os-caption">{note}</p>
         <Facts><Fact label="Runtime" value={profile.runtime} /><Fact label="Family" value={profile.family || "Not reported"} /><Fact label="Parameters" value={profile.params || "Not reported"} /><Fact label="Context" value={profile.contextWindow || "Not reported"} /><Fact label="Quantization" value={profile.quant || "Not reported"} /><Fact label="Capabilities" value={profile.flags.join(", ") || "None reported"} /><Fact label="Dimensions" value={profile.dimensions || "Not applicable"} /><Fact label="License" value={profile.license || "Not reported"} /><Fact label="Recommended for" value={profile.recommendedFor.join(", ") || "Not specified"} /><Fact label="Machine class" value={profile.minMachineClass || "Not specified"} /><Fact label="Platforms" value={profile.offeredOn.join(", ") || "Not specified"} /></Facts>
-      </details>
-    </li>
+      </div> : null}
+    </div>
   );
 }
 

@@ -1,3 +1,4 @@
+import { listCount } from "../../kit/RecordRow";
 import { AddButton } from "../../kit/AddButton";
 import { useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -11,7 +12,6 @@ import {
   Button,
   EmptyState,
   Caption,
-  Chip,
   Fact,
   Facts,
   Field,
@@ -20,7 +20,7 @@ import {
   LiveList,
   Notice,
   Panel,
-  Row as ListRow,
+  RecordRow,
   Subhead,
   formatMoment,
 } from "../../kit";
@@ -114,7 +114,7 @@ export function SendersSection({
 
   return (
     <div className="os-app-stack">
-      <Head title="Senders">
+      <Head title="Senders" meta={listCount(source?.snapshot)}>
         <AddButton onClick={() => setAdding((v) => !v)} label="Add a mailbox" />
       </Head>
 
@@ -167,22 +167,19 @@ function SenderLine({
 }) {
   const retired = senderIsRetired(sender);
   return (
-    <ListRow
+    <RecordRow
       icon={<AtSign size={16} aria-hidden />}
       name={<span className="os-mono">{senderLabel(sender)}</span>}
       current={!retired}
       dim={retired}
       open={open}
       onOpen={onToggle}
-      state={
-        <>
-          {retired ? <Chip tone="muted">retired</Chip> : null}
-          {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
-        </>
-      }
+      secondary={sender.fromName}
+      state={retired ? "Retired" : "Active"}
+      tone={retired ? "muted" : "accent"}
+      stateExtra={tick === "added" ? <span className="os-livelist-tick">new</span> : null}
     >
-      {sender.fromName === "" ? null : <span className="os-caption">{sender.fromName}</span>}
-    </ListRow>
+    </RecordRow>
   );
 }
 

@@ -1,3 +1,4 @@
+import { RecordList, RecordRow } from "../../kit/RecordRow";
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { FileText, GraduationCap, Rocket, Send, UserPlus, UserRound } from "lucide-react";
@@ -524,11 +525,11 @@ function PeopleBand({
       {people.groups.length === 0 ? (
         <p className="os-account-band-owner">Users is where these are added.</p>
       ) : (
-        <ul className="os-account-band-rows" aria-label="Groups for this client">
+        <RecordList density="compact"><ul className="os-account-band-rows" aria-label="Groups for this client">
           {people.groups.map((group) => (
-            <li key={group.id}>{onOpenGroup ? <Button onClick={() => onOpenGroup(group.id)}>{group.name}</Button> : group.name}</li>
+            <li key={group.id}><RecordRow name={group.name} onOpen={onOpenGroup ? () => onOpenGroup(group.id) : undefined} /></li>
           ))}
-        </ul>
+        </ul></RecordList>
       )}
       <p className="os-caption">Open a group to manage membership, organization roles and app access.</p>
     </article>
@@ -589,16 +590,16 @@ function Band({ band }: { band: BandSpec }) {
       {count === 0 ? (
         <p className="os-account-band-owner">{band.owner} is where these are added.</p>
       ) : (
-        <ul className="os-account-band-rows" aria-label={`${band.title} for this client`}>
+        <RecordList density="compact"><ul className="os-account-band-rows" aria-label={`${band.title} for this client`}>
           {rollup.rows.slice(0, LEDGER_ROWS).map((row, i) => (
-            <li key={rowString(flatten(row), "id") || String(i)}>{band.line(row) || "--"}</li>
+            <li key={rowString(flatten(row), "id") || String(i)}><RecordRow name={band.line(row) || "--"} /></li>
           ))}
           {count > LEDGER_ROWS ? (
             <li className="os-account-band-more">
               and {count - LEDGER_ROWS} more, in {band.owner}
             </li>
           ) : null}
-        </ul>
+        </ul></RecordList>
       )}
     </article>
   );

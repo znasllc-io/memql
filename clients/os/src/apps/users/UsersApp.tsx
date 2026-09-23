@@ -1,3 +1,4 @@
+import { listCount } from "../../kit/RecordRow";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 
@@ -190,7 +191,9 @@ export function UsersApp({
       <GroupsSection
         groups={groups}
         people={people}
+        peopleAvailable={listCount(users.snapshot) !== undefined}
         invitations={invitations}
+        invitationsAvailable={listCount(invites.snapshot) !== undefined}
         accounts={accounts}
         catalog={catalog}
         actions={actions}
@@ -210,6 +213,7 @@ export function UsersApp({
         onOpened={consume}
         catalog={catalog}
         people={people}
+        peopleAvailable={listCount(users.snapshot) !== undefined}
         accounts={accounts}
         actions={actions}
         viewerRole={viewerRole}

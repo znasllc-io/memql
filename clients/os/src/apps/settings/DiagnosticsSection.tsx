@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { Button, Caption } from "../../kit";
+import { Button, Caption, Head, Subhead, RecordList, RecordRow } from "../../kit";
 import { RoleIdentity, placeOnLadder } from "../../modules/profile/RoleIdentity";
 import { useSession } from "../../chrome/access";
 import { useConnectionStatus } from "../../chrome/connection";
@@ -31,10 +31,10 @@ export function DiagnosticsSection() {
 
   return (
     <div className="os-settings">
-      <h3 className="os-settings-title">Diagnostics</h3>
+      <Head title="Diagnostics" />
 
       <section className="os-field-group" aria-label="Connection">
-        <h4 className="os-subhead">Connection</h4>
+        <Subhead meta={history.transitions.length}>Connection</Subhead>
         <dl className="os-facts">
           <dt>Status</dt>
           <dd>
@@ -74,7 +74,7 @@ export function DiagnosticsSection() {
       </section>
 
       <section className="os-field-group" aria-label="Permissions">
-        <h4 className="os-subhead">Permissions</h4>
+        <Subhead meta={hidden.length}>Permissions</Subhead>
         {/* THE ROLE NAMED, NOT THE SLUG (epic memql#5166). This printed the
             raw slug at a person -- "You are support-lead" -- which is the
             machine's word for a thing they know as Support Lead. The block form
@@ -88,14 +88,13 @@ export function DiagnosticsSection() {
         {hidden.length === 0 ? (
           <Caption>Nothing in this shell is hidden from you.</Caption>
         ) : (
-          <ul className="os-hidden-list" aria-label="Hidden from this session">
+          <RecordList as="ul" label="Hidden from this session">
             {hidden.map((h) => (
-              <li key={`${h.kind}:${h.label}`}>
-                {h.label} <span className="os-caption-inline">({h.kind})</span> -- needs{" "}
-                {h.requires}; you are <RoleIdentity access={access} inline />
-              </li>
+              <RecordRow key={`${h.kind}:${h.label}`} name={h.label} secondary={<>{h.kind} — needs {h.requires}</>}>
+                <span>you are <RoleIdentity access={access} inline /></span>
+              </RecordRow>
             ))}
-          </ul>
+          </RecordList>
         )}
         <Caption>
           This is presentation gating. The engine's row admission is the

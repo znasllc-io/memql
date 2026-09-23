@@ -5,7 +5,7 @@ import { InfoDetail } from "../../../kit/InfoDetail";
 import { useEffect, useState } from "react";
 
 import { CallHistory } from "../routing/CallHistory";
-import { Button, EmptyState, Caption, Chip, Chips, ChoiceStack, CopyField, Fact, Facts, Notice, Panel, Subhead, Switch } from "../../../kit";
+import { Button, EmptyState, Caption, Chip, Chips, ChoiceStack, CopyField, Fact, Facts, Notice, Panel, Subhead, Switch, RecordList, RecordRow } from "../../../kit";
 import { formatFreshness, formatMoment } from "../../../kit/format";
 import { uninstallCommand, workerClusterUrl, type InstallPlatform } from "../addMachine/install";
 import { roundTripFigure } from "../addMachine/flow";
@@ -287,22 +287,27 @@ export function MachineAppsHelp() {
 function AppsGroup({ machine, standalone }: { machine: MachineRow; standalone: boolean }) {
   return (
     <div className="os-fleet-apps">
-      {!standalone ? <div className="fleet-bank-heading"><Subhead>Apps on this machine</Subhead><MachineAppsHelp /></div> : null}
+      {!standalone ? <div className="fleet-bank-heading"><Subhead meta={machine.apps.length}>Apps on this machine</Subhead><MachineAppsHelp /></div> : null}
       {machine.apps.length === 0 ? (
         <EmptyState icon={Terminal} title="No apps reported">Install and sign in to a supported app on this machine. It will appear here when Cockpit reports it.</EmptyState>
       ) : (
-        <ul className="os-fleet-applist">
+        <RecordList as="ul" label="Apps on this machine">
           {machine.apps.map((app) => (
-            <li key={app.id}>
-              <details className="fleet-record" data-runnable={app.runnable || undefined}><summary><span className="fleet-record-identity"><strong>{app.label}</strong><small>{app.version || "Version not reported"}</small></span><span className="fleet-record-status">{app.runnable ? "Ready" : "Needs attention"}</span></summary>
-                <div className="fleet-record-detail"><Facts><Fact label="Subscription" value={app.subscription || "Unknown"} /><Fact label="Availability" value={app.runnable ? "Allowed and signed in" : app.why || "Not available to run"} /></Facts></div>
-              </details>
-            </li>
+            <MachineAppLine key={app.id} app={app} />
           ))}
-        </ul>
+        </RecordList>
       )}
     </div>
   );
+}
+
+function MachineAppLine({ app }: { app: MachineRow["apps"][number] }) {
+  const [open, setOpen] = useState(false);
+  return <div><RecordRow name={app.label} secondary={app.version || "Version not reported"}
+    state={app.runnable ? "Ready" : "Needs attention"} tone={app.runnable ? "accent" : "warn"}
+    open={open} onOpen={() => setOpen(value => !value)} />
+    {open ? <Facts><Fact label="Subscription" value={app.subscription || "Unknown"} /><Fact label="Availability" value={app.runnable ? "Allowed and signed in" : app.why || "Not available to run"} /></Facts> : null}
+  </div>;
 }
 
 /** The uninstaller the machine's own platform takes. Anything that is not

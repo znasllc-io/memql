@@ -354,7 +354,7 @@ describe("the runs list", () => {
       ],
     });
     mount(conn, "runs");
-    expect(await screen.findByText("2 runs -- 1 waiting for you")).toBeTruthy();
+    expect(await screen.findByText("2 · 1 waiting for you")).toBeTruthy();
   });
 });
 
