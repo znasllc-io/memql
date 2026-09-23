@@ -24,6 +24,7 @@ type SelfStatusWriter struct {
 	now                       func() time.Time
 	writeMu                   sync.Mutex
 	stateMu                   sync.Mutex
+	meshReport                func() MeshReport
 	activeCancel              context.CancelFunc
 	stopped                   bool
 	stop                      chan struct{}
@@ -52,6 +53,20 @@ func newSelfStatusWriter(self *Identity, lifecycle *NodeLifecycle, engine Engine
 }
 
 func (*SelfStatusWriter) Order() int { return 94 }
+
+// SetMeshReporter gives the writer this node's delivery report (memql#5338,
+// D7): every refresh then carries it onto the node's own v1:cluster:node row
+// as its `mesh` object, which is what MemQL OS's Cluster > Mesh reads. No new
+// rows and no new writes -- the report rides the heartbeat that already
+// writes the row once a minute.
+func (w *SelfStatusWriter) SetMeshReporter(fn func() MeshReport) {
+	if w == nil {
+		return
+	}
+	w.stateMu.Lock()
+	w.meshReport = fn
+	w.stateMu.Unlock()
+}
 
 func (w *SelfStatusWriter) run(ctx context.Context, markStarted func()) error {
 	ticker := time.NewTicker(w.interval)
@@ -127,13 +142,18 @@ func (w *SelfStatusWriter) persistLocked(parent context.Context, terminal bool) 
 		return nil
 	}
 	w.activeCancel = cancel
+	report := w.meshReport
 	w.stateMu.Unlock()
 	defer func() { w.stateMu.Lock(); w.activeCancel = nil; w.stateMu.Unlock() }()
 	// Observers run outside the lifecycle lock and may reach us out of order.
 	// Always sample the actual current state after entering write serialization.
 	health := HealthLabel(w.lifecycle.Health())
 	at := w.now().UTC().Format(time.RFC3339)
-	query, err := buildUpdateNodeHealthCall(w.nodeID, w.nodeType, w.address, health, at)
+	var mesh map[string]any
+	if report != nil {
+		mesh = report().Wire()
+	}
+	query, err := buildUpdateNodeHealthCall(w.nodeID, w.nodeType, w.address, health, at, mesh)
 	if err != nil {
 		return err
 	}

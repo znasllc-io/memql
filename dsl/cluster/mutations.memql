@@ -164,15 +164,18 @@ mutation spawnEvent createSpawnEvent {
 /// startup by registerNode under the same NodeId) so only health + lastSeen change;
 /// nodeType/address/parentId/capabilities/labels inherit from the persisted row instead of being
 /// wiped when a caller omits them (memql#1628 -- previously the insert form re-stamped address to
-/// "" and reset capabilities/labels on every transition).
+/// "" and reset capabilities/labels on every transition). `mesh` is the node's own delivery
+/// report (memql#5338), sent only by the node about itself on its heartbeat; a write that omits
+/// it -- another node recording this one's health -- keeps the stored report.
 mutation node updateNodeHealth {
   args {
     id        string!
     health    string!
     lastSeen  string!
+    mesh      object
   }
   update {
-    accept { id, health, lastSeen }
+    accept { id, health, lastSeen, mesh }
   }
 }
 

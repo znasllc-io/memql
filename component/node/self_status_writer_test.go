@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 )
 
 func TestSelfStatusWriterRefreshesEveryRoleWithCurrentLifecycle(t *testing.T) {
@@ -199,5 +201,31 @@ func awaitSelfSignal(t *testing.T, signal <-chan struct{}) {
 	case <-signal:
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for self-writer lifecycle signal")
+	}
+}
+
+// THE HEARTBEAT CARRIES WHAT THE NODE HEARS (memql#5338, D7). With the bridge's
+// report attached, every refresh writes it onto the node's own row -- from the
+// REAL bridge, over a real link, so the test cannot pass on a report shape the
+// bridge never produces. Without a reporter the write carries no mesh at all.
+func TestSelfStatusWriterCarriesTheMeshReport(t *testing.T) {
+	engine := &stubExecutor{}
+	identity := &Identity{ID: "edge-1", Type: NodeTypeEdge, Address: "edge-1:50062"}
+	writer := newSelfStatusWriter(identity, NewNodeLifecycle(), engine, testLogger())
+	writer.now = func() time.Time { return time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC) }
+
+	require.NoError(t, writer.refresh(context.Background()))
+
+	eb := newBridgeFor(t, "edge-1", NodeTypeEdge)
+	attachDialedPeer(t, eb.peerManager, "bff-a", NodeTypeBFF)
+	eb.ReceiveForward(&nodev1.EventForward{EventId: "e1", Topic: relayTopic, OriginNodeId: "agent-a", Hops: 2}, "bff-a")
+	writer.SetMeshReporter(eb.MeshReport)
+	require.NoError(t, writer.refresh(context.Background()))
+
+	queries := engine.snapshot()
+	require.Len(t, queries, 2)
+	require.NotContains(t, queries[0], "mesh", "no reporter, no mesh argument: the stored report stands")
+	for _, needle := range []string{`mesh: {`, `"heard":1`, `"receives":true`, `"node":"bff-a"`, `"via":"dialed"`} {
+		require.Contains(t, queries[1], needle)
 	}
 }

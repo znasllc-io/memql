@@ -508,6 +508,11 @@ func (a *App) cluster() {
 	if peerMgr != nil {
 		a.nodeLifecycle = peerMgr.Lifecycle()
 		selfStatus := a.wireNodeSelfStatus(nodeIdentity, a.nodeLifecycle)
+		// What this node hears, on its own row (memql#5338, D7): the report
+		// Cluster > Mesh draws, refreshed by the heartbeat above.
+		if selfStatus != nil && eventBridge != nil {
+			selfStatus.SetMeshReporter(eventBridge.MeshReport)
+		}
 		a.nodeLifecycle.SetObserver(func(_, newState node.LifecycleState) {
 			if newState == node.LifecycleDraining || newState == node.LifecycleStopped {
 				server.SetDraining(true)
