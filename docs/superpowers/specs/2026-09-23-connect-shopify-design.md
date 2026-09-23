@@ -14,7 +14,7 @@ A developer deploying the Fylo storefront to memql.znas.io was refused with "a s
 
 This design fixes both with eight small pull requests:
 
-- **Two security fixes come first.** The new features lean on two protections that turned out to have holes: creating a store or pack record without being an Owner, and planting a sign-in ticket.
+- **Two security fixes come first.** The new features lean on two protections that turned out to have holes: anyone signed in, of any role, can create a store or pack record, and anyone signed in can plant a sign-in ticket.
 - **Developers get three permissions:** read store records, hold the store permission, and turn storefront packs on and off.
 - **A storefront's first deploy becomes a draft** instead of a refusal. It cannot go live until a store is connected.
 - **A new Connect Shopify button** signs in to Shopify, lets the person approve, and has MemQL save the keys and attach the store itself.
@@ -76,8 +76,9 @@ The packs take effect after the node that answers storefront forms restarts. Tha
 | D9 | Automated tests run against a fake Shopify only. The first real connection is made from the local cluster once a Shopify login is available | the user, 2026-09-23 |
 | D10 | The callback lives on the identity node and reuses GitHub Connect's single-use state row | the user, 2026-09-23 |
 | D11 | Build and prove everything locally, then split into stacked, one-concern draft PRs, then wait for Jose's approval to merge | the user, 2026-09-23 |
-| D12 | **Proposed.** Saving app credentials never touches a live store. They are held as *pending* and take effect only after the shop's own staff approve on Shopify | design review, 2026-09-23 |
-| D13 | **Proposed.** Two security fixes ride this epic as their own PRs (sections 6 and 11), because the new features are only safe with them | design review, 2026-09-23 |
+| D12 | Saving app credentials never touches a live store. They are held as *pending* and take effect only after the shop's own staff approve on Shopify | proposed by design review; approved by the user, 2026-09-23 |
+| D13 | Two security fixes ride this epic as their own PRs (sections 6 and 11), because the new features are only safe with them | proposed by design review; approved by the user, 2026-09-23 |
+| D14 | PR 1's floor is developer, not owner: developers and owners may create store and pack records; everyone below is refused | the user, 2026-09-23 |
 
 ### Facts from Shopify that shape the design
 
@@ -127,7 +128,7 @@ These are from shopify.dev, read 2026-09-23. Sources are in section 21.
 
 | # | PR | Base |
 |---|---|---|
-| 1 | Owner-only store and pack records refuse non-owner creates | main |
+| 1 | Store and pack records refuse creates below developer rank | main |
 | 2 | Developers can read Shopify store records | 1 |
 | 3 | Developers hold the store permission | 2 |
 | 4 | Developers can turn storefront packs on and off | 1 |
@@ -172,23 +173,25 @@ Each is its own PR because it can be reviewed and reverted alone.
 | 4 | `component/grpc/`, `component/auth/`, `docs/public/operate/auth/` |
 | 7 | `component/identity/`, `app/`, `CLAUDE.md` |
 
-## 6. PR 1: owner-only store and pack records refuse non-owner creates
+## 6. PR 1: store and pack records refuse creates below developer rank
 
 **The hole.**
 
 - The row-authz write guard does not judge a create on a cluster-owner-tier concept: with no row at the id it returns nil (`component/memql/rowauthz_write_guard.go:199-219`).
 - `createStore` (`dsl/shopify/overlay/mutations.memql:7`) and `setPackEnabled` (`dsl/platform/mutations.memql:981`) are plain inserts with no gate.
-- So today any signed-in caller can register a store, or enable a pack that nobody has flipped yet. Enabling `wholesale` publishes a shopper write endpoint.
+- So today any signed-in caller, of any role, can register a store, or enable a pack that nobody has flipped yet. Enabling `wholesale` publishes a shopper write endpoint.
 
-**The fix.**
+**The fix (D14).**
 
-- Add `@requiresRank("owner")` to `createStore` and `setPackEnabled`.
+- Add `@requiresRank("developer")` to `createStore` and `setPackEnabled`. The floor admits developer (300) and owner (400); admin (200), writer and everyone below are refused.
 - Internal origin passes the rank gate (`component/memql/requires_rank.go:70-77`). So the first-boot seed, the connector, the Connect writes (section 12) and the new pack-flip method (section 9) are unaffected.
-- `updateStore` and `setStoreStatus` write existing rows, which the write guard already protects.
+- `updateStore` and `setStoreStatus` write existing rows, which the write guard already protects, so changing an existing store stays owner-only (or through Connect).
+
+**A consequence, stated.** With a developer floor, a developer calling `setPackEnabled` directly can create the FIRST `packState` row of any pack, not only a storefront pack, and that direct path skips the audit event the Modules path writes. Once a pack has a row, the write guard refuses non-owner flips of it. Marking `setPackEnabled` `@serverOnly`, so every flip goes through the audited, storefront-checked path of PR 4, is proposed as a separate task (section 15).
 
 **Tests.** Database-backed:
-- a developer, an admin and a writer are refused `createStore` on a fresh id, and `setPackEnabled` for a pack with no `packState` row
-- an owner succeeds
+- an admin and a writer are refused `createStore` on a fresh id, and `setPackEnabled` for a pack with no `packState` row
+- a developer and an owner succeed at both
 - internal origin succeeds
 
 ## 7. PR 2: developers can read Shopify store records
@@ -237,7 +240,7 @@ Each is its own PR because it can be reviewed and reverted alone.
 
 **In the OS,** the part check is data-driven, so the Store slot and panel appear for developers.
 
-- Hide the owner-only store writes from non-owners: the register-by-secret-names form (`store/StorePicker.tsx`), pause and resume (`StorePanel.tsx`), and the subscriptions button.
+- Hide pause and resume (`StorePanel.tsx`) from non-owners: they write an existing store row, which stays owner-only. The register-by-secret-names form (`store/StorePicker.tsx`) stays visible to anyone holding the store part, since PR 1 lets developers create store rows.
 - The copy at `StorePanel.tsx:176, 193` becomes "Only someone holding the store permission can attach one."
 
 **Tests.**
@@ -288,7 +291,7 @@ Each is its own PR because it can be reviewed and reverted alone.
 **Tests.**
 
 - `TestAuthorizeModuleRoles` gains developer cases: read allowed; storefront flip allowed; other flip refused; admin refused.
-- Database-backed: the internal write lands for a pack with **no** `packState` row, and a developer's direct mutation is refused.
+- Database-backed: the internal write lands for a pack with **no** `packState` row, and a developer's direct mutation on a pack that already HAS a row is refused by the write guard.
 - OS: the switch appears on `reviews` and not on `referencepack`.
 - The proto and SDK parity checks.
 
@@ -614,7 +617,7 @@ The Store panel (`clients/os/src/apps/deployables/store/StorePanel.tsx`) reads i
 - **Callback order.** The callback verifies Shopify's signature before spending the state, re-derives every stored field, and judges the person by their real role at the moment of the callback (12.6).
 - **Secrets stay hidden.** They never appear in URLs, logs, audit events or errors. Exchanges use the request body, and failures are recorded as fixed tokens.
 - **The privacy-export owner never moves:** `ownerUserId` is never overwritten.
-- **Two security holes close first:** creates on owner-only records (PR 1), and forged states (PR 6).
+- **Two security holes close first:** creates on store and pack records below developer rank (PR 1), and forged states (PR 6).
 - **An accepted consequence (D3):** any developer can bind a storefront they own to any store (section 8).
 
 ## 15. Out of scope
@@ -625,6 +628,7 @@ Each item is proposed as its own task:
 - **The preview guard's presence checks** assume a delta while receiving the merged payload. This may misclassify ordinary deploys as promotions after a candidate was cleared. Inferred, not run.
 - **Fatal publish-stage refusals still arrive after the roll** (`stages.go:610, 655-660`). PR 5 removes only the one that hit this deploy. Moving the store and hostname checks ahead of `staging_dsl` is its own task.
 - **Shopify builtins with no gate:** `shopifyStoreHealth`, `shopifyEnsureSubscriptions`, `shopifyRunComplianceJobs`.
+- **`setPackEnabled` as `@serverOnly`,** so every pack flip goes through the audited, storefront-checked path (section 6's consequence).
 - **Secret naming.**
   - Shopify's seed uses `sec-<slug>` ids where every other sealer uses `secret-global-<slug>`.
   - The store id's hyphen stays in secret names (`SHOPIFY_FYLO-9423_...`), while Fylo's runbook says `_`.
@@ -695,7 +699,7 @@ The first real connection settles these:
 
 ## 19. What a developer still cannot do, deliberately
 
-- Change store records directly; they change only through Connect.
+- Change an EXISTING store record directly. Creating one is allowed (PR 1); later changes go through Connect.
 - Read the mirrored Shopify orders and customers data.
 - Change `ownerUserId`.
 - Flip non-storefront packs.
