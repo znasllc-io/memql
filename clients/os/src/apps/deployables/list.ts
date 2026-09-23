@@ -542,15 +542,16 @@ export function foldSources(
   parkedRuns: readonly DeploymentRow[],
   search: string,
   showArchived: boolean,
+  provenance?: (pkg: PackageRow) => string,
 ): DeployableListGroup[] {
   const { rowsByGroup } = collectRows(sites, packages, parkedRuns);
   const needle = search.trim().toLowerCase();
   const groups: DeployableListGroup[] = [];
   for (const pkg of packages) {
-    if ((pkg.status === "archived") !== showArchived) continue;
+    if (pkg.sourceRemoved || (pkg.status === "archived") !== showArchived) continue;
     const rows = [...(rowsByGroup.get(`pkg:${pkg.id}`) ?? [])].sort(compareRows);
     if (needle !== "") {
-      const hay = [pkg.name, sourceLabel(pkg), sourceName(pkg), ...rows.flatMap((row) => [row.name, row.hostname])]
+      const hay = [pkg.name, sourceLabel(pkg), sourceName(pkg), provenance?.(pkg) ?? "", ...rows.flatMap((row) => [row.name, row.hostname])]
         .join(" ")
         .toLowerCase();
       if (!hay.includes(needle)) continue;

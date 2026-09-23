@@ -8,6 +8,7 @@ vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connectio
 
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { DEPLOYMENT_CONCEPT } from "../../src/apps/deployables/packages/rows";
+import { SOURCE_CREDENTIAL_CONCEPT } from "../../src/apps/deployables/sources/rows";
 import { SOURCE_CONNECTION_CONCEPT } from "../../src/apps/deployables/sources/connections";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import { click, emit, fakeConnection, githubGrantRow, probeReply, repositoriesReply, repositoryFixture, siteRow, rowsResult, sourceConnectionRow, withSession, type FakeConnection, type FakeSeed } from "./harness";
@@ -18,7 +19,7 @@ const GRANT = githubGrantRow({ id: "github-me", login: "octocat" });
 const REPO = "https://github.com/acme/new-project";
 
 function source(id: string, name: string, accountId = "self"): Row {
-  return { id, name, accountId, ownerUserId: "u-colleague", sourceKind: "repo",
+  return { id, name, accountId, ownerUserId: "u-me", sourceKind: "repo",
     repoUrl: `https://github.com/acme/${id}`, repoRef: "main", credentialId: "github-me", sourceConnectionId: "source-github-me-i-acme",
     artifactId: "", status: "active", deployedVersion: "", latestKnownVersion: "", updateAvailable: false,
     createdAt: "2026-09-01T10:00:00Z" };
@@ -82,7 +83,7 @@ function expectCurrentStage(region: HTMLElement, name: string) {
 }
 
 function mintedId(connection: FakeConnection): string {
-  const id = /packageId: "([^"]+)"/.exec(connection.callsNamed("createPackage")[0] ?? "")?.[1];
+  const id = /packageId: "([^"]+)"/.exec(connection.callsNamed("packageDeploy")[0] ?? "")?.[1];
   expect(id).toBeTruthy();
   return id!;
 }
@@ -155,14 +156,56 @@ describe("GitHub Sources in Add a deployable", () => {
     expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
   });
 
-  it("does not silently reuse a repository retained under another credential", async () => {
-    const { region, connection } = await open({ packages: [{ ...ALPHA, credentialId: "colleague-grant" }] });
+  it.each([
+    { credentialId: "colleague-grant" },
+    { sourceConnectionId: "another-installation" },
+    { accountId: "acme" },
+    { ownerUserId: "u-colleague" },
+  ])("registers a distinct source without reusing another ownership tuple: %j", async difference => {
+    const { region, connection } = await open({ packages: [{ ...ALPHA, ...difference }] });
+    await addRepository(region, "source-alpha");
+    expect(within(region).queryByText(/already tracked by/)).toBeNull();
+    await forward("Analyze");
+    expect(connection.callsNamed("packageSourceRegister")).toHaveLength(1);
+    expect(connection.callsNamed("createPackage")).toHaveLength(0);
+    expect(connection.callsNamed("packageDeploy")[0]).not.toContain('packageId: "source-alpha"');
+    expect(connection.callsNamed("packageDeploy")[0]).toContain('packageId: "pkg-registered-1"');
+  });
+
+  it("restores an exact removed source without a deployment when its apps are already placed", async () => {
+    const removed = { ...ALPHA, sourceRemoved: true, declares: [{ name: "web", kind: "spa" }] };
+    const { region, connection } = await open({ packages: [removed], sites: [siteRow({ id: "placed-web", packageId: "source-alpha", packageDeployableName: "web", accountId: "self" })] });
     expect(within(region).queryByRole("list", { name: "Saved sources" })).toBeNull();
     await addRepository(region, "source-alpha");
-    expect(await within(region).findByText(/already tracked by/)).toBeTruthy();
     expect(floorAct("Analyze")).toBeNull();
-    expect(connection.callsNamed("createPackage")).toHaveLength(0);
+    await forward("Restore source");
+    expect(await within(region).findByText("Source restored. Existing deployables are unchanged.")).toBeTruthy();
+    expect(floorAct("Done")).toBeTruthy();
+    expect(connection.callsNamed("packageSourceRegister")).toHaveLength(1);
     expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
+    expect(connection.callsNamed("packageArchive")).toHaveLength(0);
+    expect(connection.callsNamed("sourceCredentialRevoke")).toHaveLength(0);
+    expect(within(region).getByRole("button", { name: "Open web" })).toBeTruthy();
+  });
+
+  it("keeps a refused restore in place and offers retry without starting a run", async () => {
+    const { region, connection } = await open({ packages: [{ ...ALPHA, sourceRemoved: true, declares: [{ name: "web", kind: "spa" }] }], sites: [siteRow({ id: "placed-web", packageId: "source-alpha", packageDeployableName: "web", accountId: "self" })], registerSourceError: "source_connection_unavailable: Source access changed" });
+    await addRepository(region, "source-alpha");
+    await forward("Restore source");
+    expect(await within(region).findByText("Source access changed")).toBeTruthy();
+    expect(floorAct("Restore source")).toBeTruthy();
+    expect(floorAct("Done")).toBeNull();
+    expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
+  });
+
+  it("restores an exact removed source before analyzing its unplaced apps", async () => {
+    const { region, connection } = await open({ packages: [{ ...ALPHA, sourceRemoved: true }] });
+    expect(within(region).queryByRole("list", { name: "Saved sources" })).toBeNull();
+    await addRepository(region, "source-alpha");
+    await forward("Analyze");
+    expect(connection.callsNamed("packageSourceRegister")).toHaveLength(1);
+    expect(connection.callsNamed("packageDeploy")[0]).toContain('packageId: "source-alpha"');
+    expect(connection.callsNamed("createPackage")).toHaveLength(0);
   });
 
   it("preserves configuration on Back and clears downstream choices after changing GitHub identity", async () => {
@@ -198,6 +241,32 @@ describe("GitHub Sources in Add a deployable", () => {
     expect(connection.callsNamed("createPackage")).toHaveLength(0);
   });
 
+  it("ignores an organization registration that finishes after its GitHub identity is revoked", async () => {
+    let finish!: () => void;
+    const pending = new Promise<void>(resolve => { finish = resolve; });
+    const { region, connection } = await open({ sourceConnections: [] }, connection => {
+      const execute = vi.mocked(connection.query.executeNamed).getMockImplementation()!;
+      vi.mocked(connection.query.executeNamed).mockImplementation(async (name, call, opts) => {
+        const reply = await execute(name, call, opts);
+        if (name === "sourceConnectionCreate") await pending;
+        return reply;
+      });
+    });
+    await click(within(region).getByRole("button", { name: "Add source" }));
+    await click(await within(region).findByRole("button", { name: /^@octocat/ }));
+    await forward("Continue");
+    await click(await within(region).findByRole("button", { name: /^acme Organization/ }));
+    await forward("Continue");
+    expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(1);
+    await emit(connection, SOURCE_CREDENTIAL_CONCEPT, { ...GRANT, status: "revoked" });
+    await act(async () => finish());
+    expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
+    expect(connection.callsNamed("packageSourceRegister")).toHaveLength(0);
+    expect(floorAct("Continue")).toBeNull();
+    await forward("Back");
+    expect(await within(region).findByRole("button", { name: "Reconnect @octocat" })).toBeTruthy();
+  });
+
   it("returns from OAuth to its account without advancing to an organization or repository", async () => {
     const connection = fakeConnection({ accounts: [SELF], ...connectedSeed() });
     h.connection = connection;
@@ -226,8 +295,8 @@ describe("GitHub Sources in Add a deployable", () => {
     await click(await screen.findByRole("option", { name: "release" }));
     fireEvent.input(within(region).getByLabelText("What this deployable is called"), { target: { value: "New project" } });
     await forward("Analyze");
-    expect(connection.callsNamed("createPackage")).toHaveLength(1);
-    const call = connection.callsNamed("createPackage")[0]!;
+    expect(connection.callsNamed("packageSourceRegister")).toHaveLength(1);
+    const call = connection.callsNamed("packageSourceRegister")[0]!;
     for (const fragment of [`repoUrl: "${REPO}"`, 'repoRef: "release"', 'accountId: "self"', 'credentialId: "github-me"', 'sourceConnectionId: "source-github-me-i-acme"']) expect(call).toContain(fragment);
     expect(connection.callsNamed("packageDeploy")[0]).toContain(`packageId: "${mintedId(connection)}"`);
     expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(0);
@@ -336,13 +405,13 @@ describe("GitHub Sources in Add a deployable", () => {
       const execute = vi.mocked(connection.query.executeNamed).getMockImplementation()!;
       vi.mocked(connection.query.executeNamed).mockImplementation(async (name, call, opts) => {
         const result = await execute(name, call, opts);
-        if (name === "createPackage") await pending;
+        if (name === "packageSourceRegister") await pending;
         return result;
       });
     });
     await addRepository(first.region);
     await forward("Analyze");
-    expect(first.connection.callsNamed("createPackage")).toHaveLength(1);
+    expect(first.connection.callsNamed("packageSourceRegister")).toHaveLength(1);
 
     let replacement = first;
     if (boundary === "unmount") {
@@ -390,7 +459,7 @@ describe("GitHub Sources in Add a deployable", () => {
       const execute = vi.mocked(connection.query.executeNamed).getMockImplementation()!;
       vi.mocked(connection.query.executeNamed).mockImplementation(async (name, call, opts) => {
         const result = await execute(name, call, opts);
-        if (name === "createPackage") await pending;
+        if (name === "packageSourceRegister") await pending;
         return result;
       });
     });
@@ -398,7 +467,7 @@ describe("GitHub Sources in Add a deployable", () => {
     await waitFor(() => expect(floorAct("Analyze")).toBeTruthy());
     const analyze = floorAct("Analyze")!;
     await act(async () => { analyze.click(); analyze.click(); });
-    expect(connection.callsNamed("createPackage")).toHaveLength(1);
+    expect(connection.callsNamed("packageSourceRegister")).toHaveLength(1);
     await act(async () => finish());
     expect(connection.callsNamed("packageDeploy")).toHaveLength(1);
   });

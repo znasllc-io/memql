@@ -766,6 +766,16 @@ query package packagesAll {
   shape   packageFull
 }
 
+/// The caller's configured repository records, including removed entries so registration
+/// can restore their stable IDs. No lifecycle or provider authorization is widened.
+@actor
+@cache(0)
+@unbounded("owner repository registrations -- exact source identity is matched by the registration capability")
+query package packagesForSourceRegistration {
+  filter row => row.ownerUserId == actor.userId && row.sourceKind == "repo" && statusIsActive(row)
+  shape packageFull
+}
+
 /// Archived packages -- the Archived filter's read. Deliberately selects archived
 /// rows instead of inheriting a filter that would hide them; see the note above.
 @actor

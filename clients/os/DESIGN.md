@@ -154,12 +154,15 @@ combined list". Two lists now, in one row language (`RecordRow`):
   address of its own. Where it came from is a FACT ON THE ROW (the source's
   name, "Zip", "CI", "Built in") and a facet in Refine -- never a heading over
   it and an indent.
-- **Sources** is every repository or zip that produces deployables: what it is
-  called and where it lives, how much it produced, and the one state word a
-  person might have to act on (Review needed, then Update available, then the
-  quiet ones). Its page lists its apps, including the ones it declares and has
-  not deployed, and carries the act its state asks for on its bar.
-- **Every source is on it, and each is summarised by everything it made.** A
+- **Sources** is the single configured repository catalog. Each row shows its
+  GitHub identity, organization or personal target, repository and tracked
+  branch, alongside the separate MemQL owning account. Credentials and saved
+  installation bindings provide access metadata rather than separate list
+  entries. There are no sibling Repositories or Accounts pages; Settings links
+  to this catalog without repeating a credential roster. A source's detail
+  holds its access, settings, apps and history. ZIP-backed apps remain in
+  Deployables and retain their existing detail and lifecycle controls.
+- **Every listed source is summarised by everything it made.** A
   source whose analysis was refused has made nothing and is still a source:
   this tab is where somebody looks for it to try again. A search is asked of
   the SOURCE (its name, where it lives, what it made) and never trims the
@@ -167,6 +170,13 @@ combined list". Two lists now, in one row language (`RecordRow`):
   apps'. The list has its own fold for this (`foldSources`): read as a filter
   over the deployables list's answer it inherited that list's questions, and
   showed three of five seeded sources.
+- **Remove source changes catalog visibility only.** It hides the configured
+  repository from Sources and saved choices while preserving its grant,
+  installation binding, package ID, automatic updates, deployables and history.
+  Add deployable registers, reuses or restores the same authorized configuration
+  atomically; it does not borrow a different identity's or MemQL account's
+  history. Archive remains the distinct lifecycle operation. Only Add deployable
+  offers Add source and GitHub connection setup.
 - **What belongs to the source is said on the source, once.** A run parked at a
   source's gate is "Review needed" on that source's row and on its page's bar,
   with Review beside it -- not repeated on every deployable the source made.

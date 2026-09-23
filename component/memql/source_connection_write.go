@@ -21,6 +21,12 @@ func (e *MemQLEngine) validateSourceConnectionWrite(ctx context.Context, concept
 	if concept != "v1:platform:package" {
 		return nil
 	}
+	if _, changesVisibility := delta["sourceRemoved"]; changesVisibility && prior != nil {
+		ac, _ := auth.AccessFromContext(ctx)
+		if ac == nil || strings.TrimSpace(stringFromAny(prior["ownerUserId"])) == "" || BareShortId(ac.UserId) != BareShortId(stringFromAny(prior["ownerUserId"])) {
+			return fmt.Errorf("only the repository owner can remove or restore its source entry")
+		}
+	}
 	merged := make(map[string]any, len(prior)+len(delta))
 	for k, v := range prior {
 		merged[k] = v

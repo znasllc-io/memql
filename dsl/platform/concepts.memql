@@ -786,6 +786,7 @@ concept sourceCredential {
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @displayCard(primary="name", secondary="repoUrl", tertiary="deployedVersion", status="status")
 concept package {
+  sourceRemoved       bool  @description("Removed from the configured Sources list only. Absent means listed. Deployables, polling, credentials and history remain active; re-adding restores this same record.")
   sourceConnectionId  string  @description("The personal GitHub installation binding selected at registration. Removal prevents new selection but preserves this package and its credential.")
   ownerUserId         string  @description("v1:identity:user.id that owns this package, or EMPTY for a cluster-owned one. Stamped from the actor on create, exactly as v1:platform:site stamps its own -- it is the row-authz key the composite tier compares against actor.userId, so a caller-supplied value would record a guarantee nothing provides. NOT `string!`, for the same reason the site's is not: an empty value is the meaningful cluster-owned state.")
   name                string!  @description("From the manifest at first analysis (memql-package.yaml `name`). Not caller-chosen: the package IS the tree, and a name typed into a form could disagree with what the tree says it is on the very next deploy.")

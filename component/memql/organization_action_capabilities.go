@@ -34,13 +34,16 @@ func organizationCapabilityTarget(fn *Function) (concept, argument string) {
 			if fn.BoundConcept == "v1:platform:site" {
 				return fn.BoundConcept, "siteId"
 			}
-		case "createPackage", "updatePackageSource", "disablePackageDeployables", "enablePackageDeployables", "setPackageAutoDeploy":
+		case "setPackageSourceRemoved", "createPackage", "updatePackageSource", "disablePackageDeployables", "enablePackageDeployables", "setPackageAutoDeploy":
 			if fn.BoundConcept == "v1:platform:package" {
 				return fn.BoundConcept, "packageId"
 			}
 		}
 	}
 	if fn.FunctionKind == "builtin" {
+		if fn.Name == "packageSourceRegister" && fn.Executor == "integration.packages.sourceRegister" {
+			return "v1:platform:package", "packageId"
+		}
 		switch fn.Name {
 		case "sitePublishFromArtifact", "siteArchive", "siteRestore", "siteDelete", "sitePreviewOpen":
 			return "v1:platform:site", "siteId"
@@ -78,7 +81,7 @@ func (e *MemQLEngine) refuseOrganizationActionCapability(ctx context.Context, fn
 		}
 	}
 	if !found {
-		if fn.Name != "createPackage" {
+		if fn.Name != "createPackage" && fn.Name != "packageSourceRegister" {
 			return denied()
 		}
 		account = requested
@@ -191,7 +194,7 @@ func (e *MemQLEngine) validateOrganizationSensitiveChanges(ctx context.Context, 
 			require("sources")
 		}
 		if !creating {
-			for _, field := range []string{"sourceKind", "repoUrl", "repoRef", "credentialId", "sourceConnectionId", "artifactId", "deploymentMode"} {
+			for _, field := range []string{"sourceRemoved", "sourceKind", "repoUrl", "repoRef", "credentialId", "sourceConnectionId", "artifactId", "deploymentMode"} {
 				if changed(field) {
 					require("sources")
 				}

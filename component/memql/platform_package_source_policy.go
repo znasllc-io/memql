@@ -14,40 +14,10 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
-// One source, once: the SOURCE UNIQUENESS guard for v1:platform:package
-// (2026-09-05-deployables-states-activation-and-source-archive-design.md, D8).
-// Sibling of platform_site_hostname_policy.go, wired into the same
-// executeWrite path and for the same reason: "another active package already
-// tracks this repository at this ref" is a read across rows, which no mutation
-// body can make, and a UI-only check is not a check.
-//
-// # Why it is a rule and not a nicety
-//
-// The owner added the same repository at the same branch twice and got two
-// sources on the list, each declaring the same apps. Deploying both is not
-// merely confusing: a package's DSL domains land in the cluster's active set,
-// so two packages shipping one domain would race at the roll, and its apps
-// would compete for the same addresses. There is exactly one thing a second
-// registration of one source at one ref can be, and that is a mistake.
-//
-// # What counts as the same source
-//
-// The repository URL as a person types it varies in ways that name the same
-// tree -- scheme, case, a `.git` suffix, a trailing slash, the SSH form -- so
-// the comparison is over normalizeRepoSource's answer, never the raw string.
-// The ref is compared after trimming and EMPTY IS ITS OWN VALUE: a package
-// tracking "" follows the default branch, and this guard cannot resolve what
-// that branch is called, so `main` and "" are two refs here. The OS's own
-// check on the Source stop knows the default branch from the probe and closes
-// that gap before Analyze.
-//
-// # Archived packages do not count
-//
-// The whole point of archiving a source (D3) is that it can be added again,
-// so only ACTIVE packages hold a source. Cluster-wide, exactly as hostnames
-// are: a source another person tracks still collides, and the refusal names
-// the package that holds it -- the same disclosure a hostname collision
-// makes, and the one fact that helps.
+// Repository registrations are unique within their owning user, MemQL account,
+// credential and installation binding. The same tree reached through another
+// identity is an independent source. Hidden source entries continue holding
+// their tuple so re-add restores the existing deployment history.
 
 // conceptPlatformPackage is v1:platform:package's canonical concept id.
 const conceptPlatformPackage = "v1:platform:package"
@@ -93,7 +63,7 @@ func (e *MemQLEngine) validatePackageSourceUnique(
 	payload map[string]any,
 	mutationId, actor string,
 	priorExisted bool,
-	priorRepoUrl, priorRepoRef string,
+	priorRepoUrl, priorRepoRef, priorScope string,
 ) error {
 	if e == nil || payload == nil {
 		return nil
@@ -112,7 +82,7 @@ func (e *MemQLEngine) validatePackageSourceUnique(
 	}
 	if priorExisted {
 		priorUrl, priorRef := normalizeRepoSource(priorRepoUrl, priorRepoRef)
-		if priorUrl == url && priorRef == ref {
+		if priorUrl == url && priorRef == ref && priorScope == packageSourceScope(payload) {
 			return nil
 		}
 	}
@@ -122,7 +92,7 @@ func (e *MemQLEngine) validatePackageSourceUnique(
 		return nil
 	}
 
-	holders, err := e.activePackagesTrackingSource(ctx, url, ref)
+	holders, err := e.activePackagesTrackingSource(ctx, url, ref, packageSourceScope(payload))
 	if err != nil {
 		// Fail CLOSED, for the reason the hostname guard states: "we could
 		// not check" and "there is nothing to find" are different answers.
@@ -143,8 +113,7 @@ func (e *MemQLEngine) validatePackageSourceUnique(
 		}
 		return fmt.Errorf(
 			"v1:platform:package: %s at %s is already tracked by the source %q (%s). One source is added "+
-				"once -- its apps and its MemQL would otherwise deploy twice from two records. Open that "+
-				"source instead, or archive it first if you meant to start over.",
+				"once for this identity -- open or restore that source instead.",
 			url, which, name, h.ID)
 	}
 	return nil
@@ -175,9 +144,9 @@ func canonicalPackageStorageId(rowId string) string {
 // and step two resolves only those rows to their latest version and compares
 // the normalized pair exactly.
 //
-// Read WITHOUT row-authz narrowing, as the hostname probe is: a source another
-// person tracks must still collide even though the caller may not read that
-// row, which is why the refusal names the package and nothing else about it.
+// Reads bypass row-authz only to find candidates; the final exact comparison
+// includes owner, account, credential and binding. A different person's source
+// never collides and its identifier is never returned in a refusal.
 //
 // staged-data: MUST-NOT-GATE -- the gate CREATES the violation it would then be
 // unable to detect (epic memql#3974, task memql#3984). This is a uniqueness
@@ -188,7 +157,7 @@ func canonicalPackageStorageId(rowId string) string {
 // probe could not see, so the duplicate is invisible to the next probe as
 // well. The read discloses nothing but the holder's id; it is the thing
 // keeping a second row out.
-func (e *MemQLEngine) activePackagesTrackingSource(ctx context.Context, url, ref string) ([]sourceHolder, error) {
+func (e *MemQLEngine) activePackagesTrackingSource(ctx context.Context, url, ref, scope string) ([]sourceHolder, error) {
 	db := e.database()
 	if db == nil {
 		return nil, fmt.Errorf("memory engine database not configured")
@@ -252,10 +221,27 @@ func (e *MemQLEngine) activePackagesTrackingSource(ctx context.Context, url, ref
 			continue // an archived source holds nothing; that is what archiving is for
 		}
 		gotUrl, gotRef := normalizeRepoSource(stringFromAny(p["repoUrl"]), stringFromAny(p["repoRef"]))
-		if gotUrl != url || gotRef != ref {
+		if gotUrl != url || gotRef != ref || packageSourceScope(p) != scope {
 			continue
 		}
 		out = append(out, sourceHolder{ID: node.ID, Name: strings.TrimSpace(stringFromAny(p["name"]))})
 	}
 	return out, nil
+}
+
+// PackageSourceIdentity is shared by registration and the engine guard. IDs are
+// normalized at this boundary; clients never compose this key.
+func PackageSourceIdentity(payload map[string]any) string {
+	url, ref := normalizeRepoSource(stringFromAny(payload["repoUrl"]), stringFromAny(payload["repoRef"]))
+	encoded, _ := json.Marshal([]string{packageSourceScope(payload), url, ref})
+	return string(encoded)
+}
+
+func packageSourceScope(payload map[string]any) string {
+	var parts []string
+	for _, field := range []string{"ownerUserId", "accountId", "credentialId", "sourceConnectionId"} {
+		parts = append(parts, BareShortId(strings.TrimSpace(stringFromAny(payload[field]))))
+	}
+	encoded, _ := json.Marshal(parts)
+	return string(encoded)
 }

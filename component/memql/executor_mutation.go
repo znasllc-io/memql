@@ -128,8 +128,9 @@ type writeMeta struct {
 	// source pair (empty when absent), so the source-uniqueness guard can
 	// tell "this write is choosing a source" from "this write inherited one
 	// through the read-merge" (2026-09-05 design, D8).
-	priorRepoUrl string
-	priorRepoRef string
+	priorRepoUrl     string
+	priorRepoRef     string
+	priorSourceScope string
 }
 
 // executeUpdate runs the update() form: read the latest existing row by
@@ -753,6 +754,16 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		return nil, meta, fmt.Errorf("invalid payload JSON for mutation: %w", err)
 	}
 
+	// Hold source claims through persistence so two replicas cannot both pass
+	// the uniqueness read before either registration becomes visible.
+	if conceptMeta.Name == conceptPlatformPackage && packageSourceClaims(payload) {
+		release, err := e.lockPackageSourceClaim(ctx)
+		if err != nil {
+			return nil, meta, err
+		}
+		defer release()
+	}
+
 	// Reserved-field check at mutation time. The concept-load validator
 	// already rejects reserved field names in concept definitions, but
 	// the payload on a mutation call bypasses that check. Without this
@@ -911,6 +922,7 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			// source-uniqueness guard judges only a write that changes it.
 			meta.priorRepoUrl = stringFromAny(priorPayload["repoUrl"])
 			meta.priorRepoRef = stringFromAny(priorPayload["repoRef"])
+			meta.priorSourceScope = packageSourceScope(priorPayload)
 			// @createOnly fields are written on create only (fylo#63): drop
 			// them from the delta BEFORE the merge so the stored value wins.
 			// A deterministic-id re-stage of a row another writer owns after
@@ -1380,7 +1392,7 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// read no mutation body can make, so it lives here beside the hostname
 	// policy. See platform_package_source_policy.go.
 	if conceptMeta.Name == conceptPlatformPackage {
-		if err := e.validatePackageSourceUnique(ctx, payload, mutation.ID, actor, meta.priorExisted, meta.priorRepoUrl, meta.priorRepoRef); err != nil {
+		if err := e.validatePackageSourceUnique(ctx, payload, mutation.ID, actor, meta.priorExisted && meta.priorStatus == "active", meta.priorRepoUrl, meta.priorRepoRef, meta.priorSourceScope); err != nil {
 			return nil, meta, err
 		}
 	}

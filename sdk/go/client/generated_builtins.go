@@ -2558,6 +2558,67 @@ func PackageSetAutoDeployBuild(args PackageSetAutoDeployArgs) string {
 	return b.String()
 }
 
+// PackageSourceRegister -- Atomically register or restore one verified repository path, preserving an existing package ID.
+type PackageSourceRegisterArgs struct {
+	Name               string
+	RepoUrl            string
+	RepoRef            string
+	CredentialId       string
+	SourceConnectionId string
+	AccountId          string
+	AutoDeploy         bool
+	AutoDeploySet      bool // set true to send autoDeploy; required because zero-value bool is ambiguous
+}
+
+// PackageSourceRegister calls the engine builtin packageSourceRegister.
+func (qc *QueryClient) PackageSourceRegister(ctx context.Context, args PackageSourceRegisterArgs) (*Result, error) {
+	call := PackageSourceRegisterBuild(args)
+	return qc.executeNamed(ctx, "packageSourceRegister", call)
+}
+
+func PackageSourceRegisterBuild(args PackageSourceRegisterArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin packageSourceRegister(")
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("repoUrl: ")
+	b.WriteString(quoteMemQL(args.RepoUrl))
+	if args.RepoRef != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("repoRef: ")
+		b.WriteString(quoteMemQL(args.RepoRef))
+	}
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("credentialId: ")
+	b.WriteString(quoteMemQL(args.CredentialId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("sourceConnectionId: ")
+	b.WriteString(quoteMemQL(args.SourceConnectionId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if args.AutoDeploySet {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("autoDeploy: ")
+		b.WriteString(fmt.Sprintf("%v", args.AutoDeploy))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // ProviderAuthStatus -- List every AI provider this NODE has registered: its vendor and model, whether this node can call it, which tier of the resolution chain supplied its credential (federation | globalSecret | globalVariable | env | unresolved), and -- when it cannot be called -- why not. Produced from the live provider registry, never persisted, and carrying no credential or fingerprint of one. Per-node on purpose: two replicas genuinely can disagree, and that disagreement is the most useful thing this read surfaces. Owner-only.
 type ProviderAuthStatusArgs struct {
 }

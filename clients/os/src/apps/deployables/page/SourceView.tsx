@@ -1,3 +1,10 @@
+import { useSession } from "../../../chrome/access";
+import { bare } from "../people";
+import { sourceName } from "../list";
+import { useSourceConnections } from "../sources/connections";
+import { sourceRecord } from "../sources/sourceRecord";
+import { SourceAccess } from "../sources/SourceAccess";
+import { RemoveSource } from "../sources/RemoveSource";
 import { RecordList, RecordRow } from "../../../kit/RecordRow";
 import { useAccountOptions } from "../../accounts/tie";
 import { accountNameFrom } from "../../accounts/rows";
@@ -7,12 +14,12 @@ import { GitBranch, History } from "lucide-react";
 import { Caption, Fact, Facts, Head, Panel } from "../../../kit";
 import { formatMoment } from "../../../kit/format";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
-import { shortVersion, sourceLabel, type PackageRow } from "../packages/rows";
+import { shortVersion, type PackageRow } from "../packages/rows";
 import type { PartsHeld } from "../parts";
 import { siteName, type SiteRow } from "../rows";
 import type { CredentialRow } from "../sources/rows";
 import { siteStateWord, stateChip } from "../words";
-import { AutoDeploySwitch, CredentialChip, PackageLifecycle, SwitchCredential } from "./stops/Source";
+import { AutoDeploySwitch, CredentialChip, PackageLifecycle } from "./stops/Source";
 
 // SourceView -- a source is a THING, with its own page (epic memql#4937, D4).
 //
@@ -48,6 +55,8 @@ import { AutoDeploySwitch, CredentialChip, PackageLifecycle, SwitchCredential } 
 
 export function SourceView({
   pkg,
+  viewerUserId,
+  onRemoved,
   apps,
   appsSettled = false,
   credentials,
@@ -62,6 +71,8 @@ export function SourceView({
   deployedBy,
 }: {
   pkg: PackageRow;
+  viewerUserId?: string;
+  onRemoved?: () => void;
   /** The apps this source produced, from the root's site feed. */
   apps: readonly SiteRow[];
   appsSettled?: boolean;
@@ -94,7 +105,11 @@ export function SourceView({
   deployedBy: string;
 }) {
   const accounts = useAccountOptions();
-  const label = sourceLabel(pkg);
+  const label = sourceName(pkg);
+  const connections = useSourceConnections();
+  const { access } = useSession();
+  const mine = bare(pkg.ownerUserId) === bare(viewerUserId ?? access?.userId ?? "");
+  const provenance = sourceRecord(pkg, credentials, connections.rows);
   const live = apps.filter((a) => siteStateWord(a) === "Live").length;
   // Declared by the manifest and never deployed -- the difference between what
   // the source SAYS it contains and what it has actually put on the internet.
@@ -125,19 +140,22 @@ export function SourceView({
   const acts: Act[] = onReview === undefined ? [] : [{ label: "Review", tone: "primary", onAct: onReview }];
 
   return (
-    <div className="os-deploy-pane deployable-source-view" data-os-page-context={JSON.stringify({ page: "Repository", packageId: pkg.id, source: label })}>
+    <div className="os-deploy-pane deployable-source-view" data-os-page-context={JSON.stringify({ page: "Source", packageId: pkg.id, source: label })}>
       <div className="os-deploy-scroll">
-        <Panel label={`Repository ${label}`}>
-          <Head title={label} breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label }]} back={{ label: backLabel, onSelect: onBack }} />
+        <Panel label={`Source ${label}`}>
+          <Head title={label} breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label }]} back={{ label: backLabel, onSelect: onBack }}>{can.sources && mine && pkg.sourceKind === "repo" && !pkg.sourceRemoved ? <RemoveSource pkg={pkg} onRemoved={onRemoved} /> : null}</Head>
 
           <Caption>
-            {pkg.sourceKind === "repo" ? "Shared repository" : "Shared ZIP package"}
+            {pkg.sourceKind === "repo" ? provenance.provenance : "Shared ZIP package"}
           </Caption>
 
+          {pkg.sourceRemoved ? <Caption>Removed from Sources. Its deployables and repository history are retained.</Caption> : null}
           <div className="deployable-source-access"><CredentialChip pkg={pkg} credentials={credentials} /></div>
           {pkg.updateAvailable ? <Caption>A newer version is available: {shortVersion(pkg.latestKnownVersion)}. Open an app to review and deploy it.</Caption> : null}
           <Facts>
-            <Fact label="Organization" value={accountNameFrom(accounts, pkg.accountId)} />
+            <Fact label="MemQL account" value={accountNameFrom(accounts, pkg.accountId)} />
+            {pkg.sourceKind === "repo" ? <Fact label="GitHub account" value={provenance.identity} /> : null}
+            {pkg.sourceKind === "repo" ? <Fact label="GitHub target" value={provenance.binding ? `${provenance.target} (${provenance.binding.accountType === "Organization" ? "organization" : "personal account"})` : `${provenance.target} (from repository URL)`} /> : null}
             {pkg.sourceKind === "repo" ? <Fact label="Repository" value={pkg.repoUrl} /> : <Fact label="ZIP in Files" value={pkg.artifactId} />}
             {pkg.sourceKind === "repo" ? <Fact label="Tracking" value={pkg.repoRef === "" ? "default branch" : pkg.repoRef} /> : null}
             <Fact label="Deployed" value={pkg.deployedVersion === "" ? "" : shortVersion(pkg.deployedVersion)} mono />
@@ -199,7 +217,7 @@ export function SourceView({
             ) : null}
           </section>
 
-          {pkg.sourceKind === "repo" && can.sources ? <SwitchCredential pkg={pkg} credentials={credentials} /> : null}
+          {pkg.sourceKind === "repo" && can.sources && mine ? <SourceAccess key={`${pkg.id}:${pkg.credentialId}:${pkg.sourceConnectionId}`} pkg={pkg} credentials={credentials} /> : null}
           {can.sources && pkg.status !== "archived" ? <AutoDeploySwitch pkg={pkg} /> : null}
 
           <button type="button" className="os-deploy-history-line" onClick={onOpenHistory}>

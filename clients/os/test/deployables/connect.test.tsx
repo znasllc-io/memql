@@ -15,8 +15,6 @@ vi.mock("../../src/live/connection", () => ({
   useOsConnection: () => h.connection,
 }));
 
-import type { Row } from "@znasllc-io/memql-sdk-core/client";
-
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import { RepositoryPicker } from "../../src/apps/deployables/sources/RepositoryPicker";
@@ -328,9 +326,9 @@ describe("the return from GitHub", () => {
     history.replaceState({}, "", "/?github=connected");
     captureConnectReturn(window);
     render(withSession(<StrictMode><ConnectReturnDispatcher /><ReturnedWindow /></StrictMode>));
-    const accounts = await screen.findByRole("list", { name: "Connected GitHub accounts" });
-    expect(within(accounts).getByText("@alice")).toBeTruthy();
-    expect(within(accounts).queryByText("@colleague")).toBeNull();
+    expect(await screen.findByRole("heading", { name: "Sources" })).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Connected GitHub accounts" })).toBeNull();
+    expect(screen.queryByText("@colleague")).toBeNull();
     expect(screen.queryByRole("button", { name: "Add source" })).toBeNull();
     expect(screen.getByTestId("window-count").textContent).toBe("1");
     expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(0);
@@ -805,25 +803,14 @@ describe("existing credential and cluster settings", () => {
     expect(within(block).queryByRole("button", { name: "Remove" })).toBeNull();
   });
 
-  it("lists a pasted credential beside what fetches under it, and revokes it by name", async () => {
-    const { connection } = mountSources({
-      credentials: [credentialRow({ id: "cred-1" })],
-      packages: [
-        { id: "pkg-a", ownerUserId: "u-me", name: "widget", sourceKind: "repo", repoUrl: "https://github.com/acme/widget", repoRef: "main", credentialId: "cred-1", status: "active", createdAt: "2026-08-01T00:00:00Z" } as unknown as Row,
-      ],
-    });
+  it("directs source management to Sources without a second credential list or mutation", async () => {
+    const { connection } = mountSources({ credentials: [credentialRow({ id: "cred-1" }), GRANT] });
     const group = await sourcesGroup();
-    // The name and the digest are two nodes, because they are two kinds of
-    // thing: the label somebody chose, and the id that tells two cards apart.
-    expect(await within(group).findByText("acme deploy token")).toBeTruthy();
-    expect(within(group).getByText("sha256:ab12cd34").className).toContain("os-mono");
-    // What a revoke would break, named before it is offered.
-    expect(within(group).getByText("acme/widget at main")).toBeTruthy();
-    await click(within(group).getByRole("button", { name: /Revoke acme deploy token/ }));
-    await click(within(group).getByRole("button", { name: "Revoke" }));
-    expect(connection.callsNamed("sourceCredentialRevoke")).toEqual([
-      'builtin sourceCredentialRevoke(credentialId: "cred-1")',
-    ]);
+    expect(within(group).getByText("Manage saved sources in Sources. Add a deployable to connect a GitHub account and choose a repository.")).toBeTruthy();
+    expect(within(group).queryByRole("list")).toBeNull();
+    expect(within(group).queryByRole("button", { name: /Revoke|Disconnect|Add source/ })).toBeNull();
+    expect(connection.callsNamed("sourceCredentialRevoke")).toHaveLength(0);
+    expect(connection.callsNamed("sourceConnectionRemove")).toHaveLength(0);
   });
 
   it("never renders anything token-shaped, on either path", async () => {
@@ -834,11 +821,11 @@ describe("existing credential and cluster settings", () => {
       ],
     });
     const group = await sourcesGroup();
-    // The reachable positive: the seed really does carry a token-shaped
-    // string, and the cards it is attached to really did render.
+    // The wire fixture carries secrets, but Settings only shows guidance
+    // and cluster setup, never a second credential roster.
     expect(FIXTURE_GITHUB_PAT.startsWith("ghp_")).toBe(true);
-    expect(within(group).getByText(/acme deploy token/)).toBeTruthy();
-    expect((await within(group).findAllByText("@octocat")).length).toBeGreaterThan(0);
+    expect(within(group).queryByRole("list")).toBeNull();
+    expect(within(group).queryByText("@octocat")).toBeNull();
     expect(container.textContent).not.toContain("ghp_");
     expect(container.textContent).not.toContain(FIXTURE_GITHUB_PAT);
     // Nor does anything token-shaped go OUT.

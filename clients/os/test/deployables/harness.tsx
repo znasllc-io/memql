@@ -164,6 +164,8 @@ export interface FakeSeed {
   promoteError?: string;
   /** v1:platform:package rows `packagesAll` answers with. */
   packages?: Row[];
+  registerSourceError?: string;
+  registeredPackageId?: string;
   /** v1:platform:packageDeployment rows, keyed by packageId. */
   deployments?: Record<string, Row[]>;
   /** Fails the next `packageDeploy` with this server message. */
@@ -353,6 +355,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
     }
     return [...derived.values()];
   };
+  const registeredPackages: Row[] = [];
   const sourceConnections = seed.sourceConnections?.map(row => ({ ...row })) ?? (seed.credentials ?? []).flatMap(grant =>
     grant["kind"] !== "github_app" ? [] : installationRows(String(grant["id"])).map(installation => ({
       id: `source-${grant["id"]}-${installation["id"]}`, ownerUserId: grant["ownerUserId"], credentialId: grant["id"],
@@ -388,7 +391,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         return rowsResult([]);
       }
 
-      if (call === "query packagesAll()") return rowsResult(seed.packages ?? []);
+      if (call === "query packagesAll()") return rowsResult([...(seed.packages ?? []), ...registeredPackages]);
       if (call === "query packageDeploymentsAwaitingConfirm()") return rowsResult(seed.awaitingConfirm ?? []);
 
       if (call.startsWith("query packageDeployments(")) {
@@ -701,6 +704,24 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         const history = seed.siteHistory ?? [];
         const found = history.find((row) => String(row["createdAt"] ?? "") <= at);
         return rowsResult(found ? [found] : []);
+      }
+
+      if (call.startsWith("builtin packageSourceRegister(")) {
+        if (seed.registerSourceError) throw new Error(seed.registerSourceError);
+        const arg = (name: string) => new RegExp(`${name}: "([^"]*)"`).exec(call)?.[1] ?? "";
+        const credentialId = arg("credentialId");
+        const ownerUserId = seed.credentials?.find(row => row["id"] === credentialId)?.["ownerUserId"] ?? "u-me";
+        const sourceConnectionId = arg("sourceConnectionId");
+        const repoUrl = arg("repoUrl"), repoRef = arg("repoRef"), accountId = arg("accountId");
+        const normalize = (url: unknown) => String(url ?? "").trim().replace(/\.git$/, "").replace(/\/$/, "").toLowerCase();
+        const defaultBranch = String((seed.sourceProbe?.[credentialId] ?? seed.sourceProbe?.[""])?.["defaultBranch"] ?? "main");
+        const ref = (value: unknown) => String(value || defaultBranch);
+        const existing = [...(seed.packages ?? []), ...registeredPackages].find(row => row["accountId"] === accountId && row["ownerUserId"] === ownerUserId && row["credentialId"] === credentialId && row["sourceConnectionId"] === sourceConnectionId && normalize(row["repoUrl"]) === normalize(repoUrl) && ref(row["repoRef"]) === ref(repoRef));
+        const packageId = String(existing?.["id"] ?? seed.registeredPackageId ?? `pkg-registered-${registeredPackages.length + 1}`);
+        const restored = existing?.["sourceRemoved"] === true;
+        if (existing) existing["sourceRemoved"] = false;
+        else registeredPackages.push({ id: packageId, name: arg("name"), sourceKind: "repo", repoUrl, repoRef, accountId, ownerUserId, credentialId, sourceConnectionId, sourceRemoved: false, status: "active" });
+        return builtinReply("packageSourceRegister", [{ packageId, created: !existing, restored }]);
       }
 
       if (call.startsWith("mutation createPackage(")) {

@@ -127,7 +127,7 @@ async function openStop(page: HTMLElement, label: string): Promise<void> {
  */
 async function openSourceView(page: HTMLElement): Promise<HTMLElement> {
   await click(page.querySelector(".deployable-source-piece"));
-  return screen.findByRole("region", { name: /^Repository / });
+  return screen.findByRole("region", { name: /^Source / });
 }
 
 /** Walks from a source view to its history. */
@@ -632,7 +632,7 @@ describe("the Source stop", () => {
   it("shows a package-produced site's source as facts", async () => {
     const { page } = await mountAndOpen(WITH_PACKAGE, "store.memql.example.com");
     await openStop(page, "Source");
-    expect(within(screen.getByRole("region", { name: /^Repository / })).getByRole("heading", { name: "acme/storefront at main" })).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: /^Source / })).getByRole("heading", { name: "acme" })).toBeTruthy();
     expect(within(page).getByText("Tracking")).toBeTruthy();
     expect(within(page).getByText("Deployed")).toBeTruthy();
     expect(within(page).getAllByText("aaaaaaa").length).toBeGreaterThan(0);

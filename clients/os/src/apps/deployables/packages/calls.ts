@@ -196,8 +196,8 @@ export async function deployPackage(
 }
 
 /** Switch which of the caller's credentials a tracked source fetches under. */
-export async function setPackageCredential(query: QueryClient, packageId: string, credentialId: string): Promise<void> {
-  await query.updatePackageSource({ packageId, credentialId });
+export async function setPackageCredential(query: QueryClient, packageId: string, credentialId: string, sourceConnectionId?: string): Promise<void> {
+  await query.updatePackageSource({ packageId, credentialId, ...(sourceConnectionId === undefined ? {} : { sourceConnectionId }) });
 }
 
 // ---------------------------------------------------------------------------
@@ -517,4 +517,19 @@ export function justBefore(iso: string): string {
   const ms = Date.parse(iso);
   if (Number.isNaN(ms)) return "";
   return new Date(ms - 1).toISOString();
+}
+
+/** Restore/reuse the exact authorized path; the server returns its stable package ID. */
+export async function registerRepositorySource(query: QueryClient, input: NewPackageInput): Promise<string> {
+  const result = await query.packageSourceRegister({ name: input.name, repoUrl: input.repoUrl, repoRef: input.repoRef,
+    credentialId: input.credentialId, sourceConnectionId: input.sourceConnectionId ?? "", accountId: input.accountId, autoDeploy: input.autoDeploy === true });
+  const row = result.rows()[0];
+  const id = row ? rowString(row, "packageId") : "";
+  if (!id) throw new Error("The repository source was not registered. Try again.");
+  return id;
+}
+
+export async function setPackageSourceRemoved(query: QueryClient, packageId: string, removed: boolean): Promise<boolean> {
+  await query.setPackageSourceRemoved({ packageId, removed });
+  return true;
 }

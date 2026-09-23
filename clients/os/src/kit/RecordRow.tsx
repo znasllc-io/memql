@@ -50,7 +50,7 @@ export function RecordList({ children, label, density, className = "", as: Eleme
   </Element>;
 }
 
-export function RecordRow({ icon, name, secondary, children, state, tone = "muted", stateTitle, stateExtra, trailing, actions, current = false, dim = false, open, onOpen, label, selected, disabled = false }: {
+export function RecordRow({ icon, name, secondary, children, state, tone = "muted", stateTitle, stateExtra, trailing, actions, actionLayout = "responsive", current = false, dim = false, open, onOpen, label, selected, disabled = false }: {
   icon?: ReactNode;
   name: ReactNode;
   /** The one quieter line under the name: an address, a kind, a place. */
@@ -68,6 +68,8 @@ export function RecordRow({ icon, name, secondary, children, state, tone = "mute
   trailing?: ReactNode;
   /** Independent controls, outside the row button and always keyboard reachable. */
   actions?: ReactNode;
+  /** A compact icon action stays beside its row at narrow widths. */
+  actionLayout?: "responsive" | "compact";
   /** The row's own liveness -- live, online -- which takes it to full ink. */
   current?: boolean;
   /** Still true, no longer live: paused, archived, revoked. */
@@ -104,5 +106,5 @@ export function RecordRow({ icon, name, secondary, children, state, tone = "mute
       {body}
     </button>
   );
-  return actions ? <div className="os-record-entry">{row}<div className="os-record-actions">{actions}</div></div> : row;
+  return actions ? <div className="os-record-entry" data-actions={actionLayout}>{row}<div className="os-record-actions">{actions}</div></div> : row;
 }

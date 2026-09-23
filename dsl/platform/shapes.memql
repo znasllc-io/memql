@@ -254,6 +254,7 @@ shape sourceCredential sourceCredentialSealed {
 /// Nothing here can leak a credential, because no credential is ever on the row.
 @row
 shape package packageFull {
+  sourceRemoved
   sourceConnectionId
   row.id
   ownerUserId

@@ -437,16 +437,15 @@ of the Packages half this passage replaces and survived it unchanged.
   browser unnamed. No toasts, no dialogs, no `window.confirm` -- a refusal
   inside a modal that then closes is a refusal nobody can re-read.
 
-- **THE SOURCES GROUP LIVES IN THIS APP'S SETTINGS, NOT IN THE SHELL'S**
-  (`settings/SourcesGroup.tsx`). A source credential is this app's own record
-  -- the person's token for the repositories THEY deploy -- rather than a
-  cluster credential an operator rotates from a shell, which is the same line
-  Campaigns draws between its sending identities and Settings -> Integrations.
-  Revoking says what it will cost before it is done: sources fetching under it
-  will refuse at their next fetch until you switch them. Rotation is adding a
-  credential and repointing the source on its Source stop; there is no
-  in-place replace, because a replace would change what a source fetches under
-  without a row saying so.
+- **SOURCES HAS ONE CATALOG; SETTINGS DOES NOT REPEAT IT.** A configured
+  repository is the record, with its GitHub identity, organization or personal
+  target, repository and branch shown together. Credentials and installation
+  bindings supply verified access metadata; they are not separate Sources
+  rows or sibling Accounts/Repositories lists. Open a source to manage its
+  access and repository settings. Settings links to that same catalog rather
+  than rendering a second credential roster. Creating or restoring a source
+  belongs to Add deployable. Removing its catalog entry is separate from
+  archiving its deployment lifecycle or disconnecting its shared GitHub grant.
 
 - **A CUE AND A STANDING MARK ARE DIFFERENT STATEMENTS, and the update needs
   both.** The arrival ring says "this just changed" and decays on the clock;
@@ -2405,16 +2404,30 @@ and starts its analysis. A saved repository is silently reused only with the sam
 GitHub binding and MemQL ownership; its history never impersonates a different
 selected identity. Progress marks the visible step, not merely prefilled values.
 
-Sources reconnects or removes these same personal bindings. Repositories holds
-saved package history and lifecycle controls. Both pages and Settings are
-management-only, with a short subtitle directing creation through Add deployable.
-Only the deployable wizard offers the plus-style Add source control and new
-GitHub account connections; saved entries update the shared live lists. Removing a Source only tombstones the chooser
-binding: sibling Sources, its shared grant, saved repositories and deployables
-remain. Existing repositories retain the original installation relationship and
-revalidate live access on fetch. Disconnect GitHub is a separate account-wide
-operation that revokes that identity's authorization and affects all Sources and
-future repository fetches using it. Neither action uninstalls the shared app.
+**Sources is the single configured repository catalog.** Each row projects the
+GitHub identity, organization or personal target, repository and tracked branch
+from the saved package and its verified access records. The MemQL owning account
+is separate attribution. There are no sibling Repositories or Accounts sections,
+and Settings links here without duplicating the credential roster. Opening a
+source exposes its access, repository settings, deployables and history. Missing
+personal metadata is labelled unknown; the repository URL cannot establish the
+GitHub identity that authorized it.
+
+Sources is management-only: new source setup remains in Add deployable. Remove
+source hides that configured package from the catalog and saved choices; it
+preserves the package ID, automatic updates, deployment history, running sites,
+shared credential and installation binding. Adding the same active configuration
+again restores or reuses that record atomically. Identity, installation binding,
+MemQL owner/account, repository and ref participate in reuse, so another identity
+or account never silently inherits its history. Archive and restore remain
+separate lifecycle actions. An installation binding without a configured
+repository never creates a Sources row.
+
+Existing repositories retain their original installation relationship and
+revalidate live access on fetch. Disconnect GitHub is a separate identity-wide
+operation: it revokes that identity's authorization and affects future fetches
+for every repository using it. Removing a source does not disconnect GitHub;
+neither operation uninstalls the shared GitHub App.
 
 Connect adds another identity. Reconnect explicitly names a stored credential
 and refuses a different numeric GitHub identity. OAuth uses PKCE and single-use

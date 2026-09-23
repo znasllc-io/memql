@@ -160,7 +160,7 @@ async function choose(label: string, option: string | RegExp): Promise<void> {
  */
 async function openSourcePage(name: string): Promise<HTMLElement> {
   await click(await screen.findByRole("button", { name: (label) => label.startsWith(`Open ${name},`) }));
-  return screen.findByRole("region", { name: /^Repository / });
+  return screen.findByRole("region", { name: /^Source / });
 }
 
 function railStates(region: HTMLElement): (string | null)[] {
@@ -261,7 +261,7 @@ const ZIP = artifactRow({ id: "artifact-zip", title: "storefront-build.zip" });
 
 /** The id `createPackage` minted, read back off the wire. */
 function mintedPackageId(connection: FakeConnection): string {
-  return /packageId: "([^"]*)"/.exec(connection.callsNamed("createPackage")[0] ?? "")?.[1] ?? "";
+  return /packageId: "([^"]*)"/.exec(connection.callsNamed("packageDeploy")[0] ?? connection.callsNamed("createPackage")[0] ?? "")?.[1] ?? "";
 }
 
 // ---------------------------------------------------------------------------
@@ -824,8 +824,8 @@ describe("the compose flow: where each app will live", () => {
     await fill(NAME_FIELD, "acme");
     expect(connection.callsNamed("createPackage")).toHaveLength(0);
     await click(await forward("Analyze"));
-    expect(connection.callsNamed("createPackage")).toHaveLength(1);
-    expect(connection.callsNamed("createPackage")[0]).toContain('accountId: "self"');
+    expect(connection.callsNamed("packageSourceRegister")).toHaveLength(1);
+    expect(connection.callsNamed("packageSourceRegister")[0]).toContain('accountId: "self"');
     expect(connection.callsNamed("packageDeploy")).toHaveLength(1);
   });
 });
@@ -939,7 +939,7 @@ describe("the compose flow: leaving and coming back", () => {
   it("lands on the same rail, with the report in place", async () => {
         // A window that was closed mid-compose: the run is parked, and the list's
     // "will serve" row is how somebody finds it again.
-    mount(fakeConnection({ packages: [ACME], awaitingConfirm: [parkedRun("pkg-acme")], sites: [] }), { section: "repositories" });
+    mount(fakeConnection({ packages: [ACME], awaitingConfirm: [parkedRun("pkg-acme")], sites: [] }), { section: "sources" });
     await openSourcePage("acme");
     await click(within(document.querySelector(".os-actbar") as HTMLElement).getByRole("button", { name: "Review" }));
 
@@ -1031,7 +1031,7 @@ describe("a private repository whose build output is committed", () => {
     // Analyze.
     await fill(NAME_FIELD, "acme");
     await click(await forward("Analyze"));
-    expect(connection.callsNamed("createPackage")[0]).toContain('credentialId: "cred-acme"');
+    expect(connection.callsNamed("packageSourceRegister")[0]).toContain('credentialId: "cred-acme"');
     await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(mintedPackageId(connection)), "NODE_CREATED");
     await within(region).findByText("clients/web");
 
@@ -1095,7 +1095,7 @@ describe("a gate opened for one app", () => {
       packages: [{ ...ACME, declares: [{ name: "storefront", kind: "spa" }, { name: "web", kind: "spa" }] }],
       sites: [],
     });
-    mount(connection, { section: "repositories" });
+    mount(connection, { section: "sources" });
     const page = await openSourcePage("acme");
     await click((await within(page).findByText("web")).closest("button"));
 
@@ -1206,7 +1206,7 @@ describe("the address, checked as it is typed", () => {
 // ---------------------------------------------------------------------------
 
 describe("a source this cluster already tracks", () => {
-  it("is named on the Source stop, and Analyze stays out of reach", async () => {
+  it("allows the same repository under a distinct credential and ownership tuple", async () => {
     const connection = fakeConnection({
       packages: [ACME], sourceProbe: { "": probeReply({ defaultBranch: "main" }) },
       repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "ACME/storefront", url: "https://github.com/ACME/storefront.git" })] }),
@@ -1217,9 +1217,8 @@ describe("a source this cluster already tracks", () => {
     // ACME tracks by name -- which the probe's answer is what lets the stop
     // read as one ref.
     await fill(NAME_FIELD, "acme again");
-    expect(await within(region).findByText(/already tracked by/)).toBeTruthy();
-    expect(within(region).getByText("acme")).toBeTruthy();
-    expect(forwardAct("Analyze")).toBeNull();
+    expect(within(region).queryByText(/already tracked by/)).toBeNull();
+    expect(await forward("Analyze")).toBeTruthy();
     expect(connection.callsNamed("createPackage")).toHaveLength(0);
   });
 
@@ -1243,7 +1242,7 @@ describe("a source this cluster already tracks", () => {
 describe("composition write failures and bindings", () => {
   it("keeps activation available when enabling the app is refused, without starting analysis", async () => {
     const connection = fakeConnection({ packages: [{...ACME, declares:[{name:"storefront",kind:"spa"}], disabledDeployables:["storefront"]}], enableDeployablesError:"Activation was refused" });
-    mount(connection, { section: "repositories" });
+    mount(connection, { section: "sources" });
     const page = await openSourcePage("acme");
     await click((await within(page).findByText("storefront")).closest("button"));
     await click(await forward("Activate"));

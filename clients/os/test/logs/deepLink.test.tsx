@@ -136,7 +136,7 @@ describe("the deployment's Logs action", () => {
     // draw the identical 2,600px wall on both of its apps' pages.
     const page = await screen.findByRole("region", { name: /^Deployable / });
     await click(within(page).getByRole("button", { name: /^Open / }));
-    const source = await screen.findByRole("region", { name: /^Repository / });
+    const source = await screen.findByRole("region", { name: /^Source / });
     await click(within(source).getByRole("button", { name: /^History/ }));
     const history = await screen.findByRole("region", { name: /^History of / });
     const attempts = await within(history).findByRole("list", { name: "Deployments of acme" });

@@ -1802,6 +1802,20 @@ mutation package createPackage {
   }
 }
 
+/// Remove or restore only the configured source entry. Package lifecycle, deployables,
+/// grants and installation bindings are unchanged. The engine restricts this to its owner.
+@requiresCapability("execute", "app:deployables/sources")
+mutation package setPackageSourceRemoved {
+  args {
+    packageId string!
+    removed bool!
+  }
+  update {
+    id: args.packageId
+    sourceRemoved: args.removed
+  }
+}
+
 /// Edit the source facts of a tracked package: which ref to deploy, and which of the owner's
 /// credentials to fetch under -- switching a source to a fresh credential after revoking the old one
 /// is this write. Minimal arguments deliberately -- update{} has been a read-merge since memql#1628,
@@ -1812,9 +1826,10 @@ mutation package updatePackageSource {
     packageId     string!
     repoRef       string   @maxLength(200)
     credentialId  string
+    sourceConnectionId string
   }
   update {
-    accept { repoRef, credentialId }
+    accept { repoRef, credentialId, sourceConnectionId }
     stamp {
       id: args.packageId
     }

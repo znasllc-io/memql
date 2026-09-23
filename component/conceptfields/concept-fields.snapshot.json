@@ -4030,6 +4030,7 @@
         "repoUrl",
         "sourceConnectionId",
         "sourceKind",
+        "sourceRemoved",
         "status",
         "updateAvailable"
       ],

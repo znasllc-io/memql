@@ -6977,6 +6977,30 @@ QueryClient.prototype.setPackageAutoDeploy = function (this: QueryClient, args: 
   return this.executeNamed("setPackageAutoDeploy", buildSetPackageAutoDeploy(args), opts);
 };
 
+/** Remove or restore only the configured source entry. Package lifecycle, deployables, grants and installation bindings are unchanged. The engine restricts this to its owner. */
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["setPackageSourceRemoved"] in generated_concepts.ts).
+export interface SetPackageSourceRemovedArgs {
+  packageId: string;
+  removed: boolean;
+}
+
+export function buildSetPackageSourceRemoved(args: SetPackageSourceRemovedArgs): string {
+  const parts: string[] = [];
+  parts.push("packageId: " + renderMemQLValue(args.packageId));
+  parts.push("removed: " + renderMemQLValue(args.removed));
+  return "mutation setPackageSourceRemoved(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    setPackageSourceRemoved(args: SetPackageSourceRemovedArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.setPackageSourceRemoved = function (this: QueryClient, args: SetPackageSourceRemovedArgs = {} as SetPackageSourceRemovedArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("setPackageSourceRemoved", buildSetPackageSourceRemoved(args), opts);
+};
+
 /** Persist a partition-scoped encrypted secret row in v1:platform:partitionSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them. */
 // Bound concept: v1:platform:partitionSecret (machine-readable: BoundConcepts["setPartitionSecret"] in generated_concepts.ts).
 export interface SetPartitionSecretArgs {
@@ -8372,6 +8396,7 @@ export interface UpdatePackageSourceArgs {
   packageId: string;
   repoRef?: string;
   credentialId?: string;
+  sourceConnectionId?: string;
 }
 
 export function buildUpdatePackageSource(args: UpdatePackageSourceArgs): string {
@@ -8379,6 +8404,7 @@ export function buildUpdatePackageSource(args: UpdatePackageSourceArgs): string 
   parts.push("packageId: " + renderMemQLValue(args.packageId));
   if (args.repoRef !== undefined) parts.push("repoRef: " + renderMemQLValue(args.repoRef));
   if (args.credentialId !== undefined) parts.push("credentialId: " + renderMemQLValue(args.credentialId));
+  if (args.sourceConnectionId !== undefined) parts.push("sourceConnectionId: " + renderMemQLValue(args.sourceConnectionId));
   return "mutation updatePackageSource(" + parts.join(", ") + ")";
 }
 

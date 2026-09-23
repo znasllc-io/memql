@@ -618,3 +618,18 @@ builtin sourceConnectionRemove { connectionId string! }
 @args(profile="object")
 @requiresCapability("read", "app:deployables")
 builtin sourceInstallations { credentialId string! }
+
+/// Atomically register or restore one verified repository path, preserving an existing package ID.
+@sdk
+@executor("integration.packages.sourceRegister")
+@args(profile="object")
+@requiresCapability("execute", "app:deployables/sources")
+builtin packageSourceRegister {
+  name string!
+  repoUrl string!
+  repoRef string
+  credentialId string!
+  sourceConnectionId string!
+  accountId string!
+  autoDeploy bool
+}

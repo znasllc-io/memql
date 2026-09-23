@@ -1743,12 +1743,16 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 .os-record-entry { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-width: 0; }
 .os-record-actions:empty { display: none; }
 .os-record-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 10px 4px 10px 12px; border-bottom: 1px solid var(--os-line); }
+.os-record-entry[data-actions="compact"] { grid-template-columns: minmax(0, 1fr) auto; }
+.os-record-entry[data-actions="compact"] > .os-record-row { border-bottom: 1px solid var(--os-line); }
+.os-record-entry[data-actions="compact"] > .os-record-actions { padding: 10px 0 10px 4px; }
 .os-row.os-record-row[data-open] { background: var(--os-hover); box-shadow: inset 2px 0 var(--os-accent); }
 .os-subhead-meta { margin-left: 10px; font-weight: 400; }
 .os-record-facts { display: flex; flex-wrap: wrap; gap: 4px 12px; }
 .os-record-excerpt { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .os-record-icon { display: flex; align-items: center; justify-content: center; color: var(--os-muted); }
 .os-record-identity, .os-record-summary { display: grid; gap: 4px; min-width: 0; }
+.os-record-summary > .os-chip { justify-self: start; }
 .os-record-identity .os-row-name { font-weight: 500; white-space: normal; overflow-wrap: anywhere; }
 .os-record-secondary, .os-record-summary { color: var(--os-muted); font-size: var(--os-text-sm); overflow-wrap: anywhere; }
 .os-record-state { display: grid; justify-items: end; gap: 4px; font-size: var(--os-text-sm); }
@@ -1780,6 +1784,7 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   .os-record-row[data-no-icon] .os-record-state { grid-column: 2; }
   .os-record-row[data-no-icon] .os-record-chevron { grid-column: 3; }
   .os-record-summary { grid-column: 2; grid-row: 2; display: flex; flex-wrap: wrap; column-gap: 12px; }
+  .os-record-entry[data-actions="compact"] .os-record-summary { grid-column: 2 / -1; }
   .os-record-state { grid-column: 3; grid-row: 1; }
   .os-record-chevron { grid-column: 4; grid-row: 1; }
 }

@@ -2035,6 +2035,39 @@ QueryClient.prototype.packageSetAutoDeploy = function (this: QueryClient, args: 
   return this.executeNamed("packageSetAutoDeploy", buildPackageSetAutoDeploy(args), opts);
 };
 
+/** Atomically register or restore one verified repository path, preserving an existing package ID. */
+export interface PackageSourceRegisterArgs {
+  name: string;
+  repoUrl: string;
+  repoRef?: string;
+  credentialId: string;
+  sourceConnectionId: string;
+  accountId: string;
+  autoDeploy?: boolean;
+}
+
+export function buildPackageSourceRegister(args: PackageSourceRegisterArgs): string {
+  const parts: string[] = [];
+  parts.push("name: " + renderMemQLValue(args.name));
+  parts.push("repoUrl: " + renderMemQLValue(args.repoUrl));
+  if (args.repoRef !== undefined) parts.push("repoRef: " + renderMemQLValue(args.repoRef));
+  parts.push("credentialId: " + renderMemQLValue(args.credentialId));
+  parts.push("sourceConnectionId: " + renderMemQLValue(args.sourceConnectionId));
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.autoDeploy !== undefined) parts.push("autoDeploy: " + renderMemQLValue(args.autoDeploy));
+  return "builtin packageSourceRegister(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    packageSourceRegister(args: PackageSourceRegisterArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.packageSourceRegister = function (this: QueryClient, args: PackageSourceRegisterArgs = {} as PackageSourceRegisterArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("packageSourceRegister", buildPackageSourceRegister(args), opts);
+};
+
 /** List every AI provider this NODE has registered: its vendor and model, whether this node can call it, which tier of the resolution chain supplied its credential (federation | globalSecret | globalVariable | env | unresolved), and -- when it cannot be called -- why not. Produced from the live provider registry, never persisted, and carrying no credential or fingerprint of one. Per-node on purpose: two replicas genuinely can disagree, and that disagreement is the most useful thing this read surfaces. Owner-only. */
 export interface ProviderAuthStatusArgs {
 }

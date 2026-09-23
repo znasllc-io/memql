@@ -5731,6 +5731,23 @@ func PackagesByRepoUrlBuild(args PackagesByRepoUrlArgs) string {
 	return b.String()
 }
 
+// PackagesForSourceRegistration -- The caller's configured repository records, including removed entries so registration can restore their stable IDs. No lifecycle or provider authorization is widened.
+//
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesForSourceRegistration"] in generated_concepts.go).
+type PackagesForSourceRegistrationArgs struct {
+}
+
+// PackagesForSourceRegistration calls the engine query packagesForSourceRegistration.
+func (qc *QueryClient) PackagesForSourceRegistration(ctx context.Context, args PackagesForSourceRegistrationArgs) (*Result, error) {
+	call := PackagesForSourceRegistrationBuild(args)
+	return qc.executeNamed(ctx, "packagesForSourceRegistration", call)
+}
+
+func PackagesForSourceRegistrationBuild(args PackagesForSourceRegistrationArgs) string {
+	_ = args
+	return "query packagesForSourceRegistration()"
+}
+
 // PackagesTrackingRepos -- Every repo-sourced package, for the D11 polling feed's sweep. Runs under the engine's own operator identity, which the admin branch admits; a person calling it reads exactly their own, which is harmless and correct.
 //
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesTrackingRepos"] in generated_concepts.go).

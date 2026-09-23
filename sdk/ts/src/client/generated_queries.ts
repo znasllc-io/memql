@@ -5674,6 +5674,26 @@ QueryClient.prototype.packagesByRepoUrl = function (this: QueryClient, args: Pac
   return this.executeNamed("packagesByRepoUrl", buildPackagesByRepoUrl(args), opts);
 };
 
+/** The caller's configured repository records, including removed entries so registration can restore their stable IDs. No lifecycle or provider authorization is widened. */
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesForSourceRegistration"] in generated_concepts.ts).
+export interface PackagesForSourceRegistrationArgs {
+}
+
+export function buildPackagesForSourceRegistration(args: PackagesForSourceRegistrationArgs): string {
+  void args;
+  return "query packagesForSourceRegistration()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    packagesForSourceRegistration(args?: PackagesForSourceRegistrationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.packagesForSourceRegistration = function (this: QueryClient, args: PackagesForSourceRegistrationArgs = {} as PackagesForSourceRegistrationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("packagesForSourceRegistration", buildPackagesForSourceRegistration(args), opts);
+};
+
 /** Every repo-sourced package, for the D11 polling feed's sweep. Runs under the engine's own operator identity, which the admin branch admits; a person calling it reads exactly their own, which is harmless and correct. */
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesTrackingRepos"] in generated_concepts.ts).
 export interface PackagesTrackingReposArgs {

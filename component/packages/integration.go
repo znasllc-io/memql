@@ -104,6 +104,7 @@ func (i *Integration) IntegrationName() string { return integrationName }
 // Capabilities implements memql.IntegrationProvider.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
+		{Name: "sourceRegister", Description: "Register or restore a repository source without changing its deployables.", Handler: i.handleSourceRegister, ArgsSchema: map[string]string{"name": "string (required)", "repoUrl": "string (required)", "repoRef": "string", "credentialId": "string (required)", "sourceConnectionId": "string (required)", "accountId": "string (required)", "autoDeploy": "bool"}},
 		{Name: "sourceConnectionCreate", Description: "Save one personal GitHub installation binding, verified live under its grant.", Handler: i.handleSourceConnectionCreate, ArgsSchema: map[string]string{"credentialId": "string (required)", "installationId": "string (required)"}},
 		{Name: "sourceConnectionRemove", Description: "Remove a saved installation binding without revoking its grant or deleting deployments.", Handler: i.handleSourceConnectionRemove, ArgsSchema: map[string]string{"connectionId": "string (required)"}},
 		{Name: "sourceInstallations", Description: "Discover installations under a named personal GitHub grant, without listing repositories.", Handler: i.handleSourceInstallations, ArgsSchema: map[string]string{"credentialId": "string (required)"}},

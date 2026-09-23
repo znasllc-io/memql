@@ -8,6 +8,8 @@ import {
   deactivateDeployable,
   deleteSite,
   createPackage,
+  registerRepositorySource,
+  setPackageSourceRemoved,
   createSourceCredential,
   deployPackage,
   repointSite,
@@ -174,7 +176,7 @@ export interface PackageActions extends WriteState {
    */
   deactivate: (packageId: string, deployableName: string, confirmName: string) => Promise<boolean>;
   /** Switch which of the caller's credentials this source fetches under. */
-  setCredential: (packageId: string, credentialId: string) => Promise<void>;
+  setCredential: (packageId: string, credentialId: string, sourceConnectionId?: string) => Promise<void>;
   /**
    * Ask a run in flight to stop (epic memql#4937, D3). It flags the row; the
    * node running the attempt closes it `cancelled` at its next stage boundary.
@@ -226,8 +228,8 @@ export function usePackageActions(): PackageActions {
       });
       return done === true;
     },
-    setCredential: async (packageId, credentialId) => {
-      await run((query) => setPackageCredential(query, packageId, credentialId));
+    setCredential: async (packageId, credentialId, sourceConnectionId) => {
+      await run((query) => setPackageCredential(query, packageId, credentialId, sourceConnectionId));
     },
     cancel: async (packageId, deploymentId) => {
       await run((query) => cancelDeployment(query, packageId, deploymentId));
@@ -326,4 +328,15 @@ export function useSiteLifecycle(): SiteLifecycleActions {
       return done === true;
     },
   };
+}
+
+export function useRegisterRepositorySource(): NewPackageActions {
+  const { busy, refusal, clear, run } = useWrite();
+  return { busy, refusal, clear, create: async input => (await run(query => registerRepositorySource(query, input))) ?? "" };
+}
+
+export function usePackageSourceVisibility() {
+  const { busy, refusal, clear, run } = useWrite();
+  return { busy, refusal, clear, setRemoved: async (packageId: string, removed: boolean): Promise<boolean> =>
+    (await run(query => setPackageSourceRemoved(query, packageId, removed))) === true };
 }

@@ -1,3 +1,7 @@
+import { useSourceConnections } from "./sources/connections";
+import { sourceRecord } from "./sources/sourceRecord";
+import { RemoveSource } from "./sources/RemoveSource";
+import { bare } from "./people";
 import { AccountChip } from "../accounts/AccountPicker";
 import { AttentionMarker } from "../../attention/Attention";
 import { updateTarget } from "./attention";
@@ -53,7 +57,7 @@ import {
   type DeployableListRow,
   type ListFilter,
 } from "./list";
-import { runIsScopedToApp, sourceLabel, type DeploymentRow, type PackageRow } from "./packages/rows";
+import { runIsScopedToApp, type DeploymentRow, type PackageRow } from "./packages/rows";
 import { ComposePage } from "./page/ComposePage";
 import { partsForOrganization, type PartsHeld } from "./parts";
 import { availableInAnyOrganization } from "../../system/roles";
@@ -122,7 +126,7 @@ type Gone = { name: string; what: "deleted" | "deactivated" } | null;
  */
 export type SectionRoot = "deployables" | "sources";
 
-const ROOT_LABEL: Readonly<Record<SectionRoot, string>> = { deployables: "Deployables", sources: "Repositories" };
+const ROOT_LABEL: Readonly<Record<SectionRoot, string>> = { deployables: "Deployables", sources: "Sources" };
 
 export function DeployablesSection({
   root = "deployables",
@@ -214,6 +218,11 @@ export function DeployablesSection({
   const packageRows = packages?.snapshot.rows ?? [];
   const parkedRows = parked?.snapshot.rows ?? [];
 
+  const connections = useSourceConnections();
+  const provenanceKey = JSON.stringify(packageRows.map(pkg => sourceRecord(pkg, credentials, connections.rows).provenance));
+  const sourceMetadataReady = connections.state === "live" && !connections.error && (!credentialFeed || credentialFeed.state === "live" && !credentialFeed.error);
+  const sourceSearch = (pkg: PackageRow) => sourceRecord(pkg, credentials, connections.rows).provenance;
+  const refreshSources = () => { onReseed(); credentialFeed?.retry(); connections.retry(); };
   const viewKey = listViewKey(filter, showArchived);
   const list = useThreeFeedView<SiteRow, PackageRow, DeploymentRow, DeployableListGroup>(
     sites,
@@ -233,8 +242,8 @@ export function DeployablesSection({
   // every app it made, so the deployables list's questions (its search narrows
   // ROWS, its archived flip is the row's) must not reach it. See `foldSources`.
   const sourcesList = useThreeFeedView<SiteRow, PackageRow, DeploymentRow, DeployableListGroup>(
-    sites, packages, parked, `sources:${viewKey}`,
-    (s, p, r) => foldSources(s, p, r, filter.search, showArchived),
+    sites, packages, parked, `sources:${viewKey}:${provenanceKey}`,
+    (s, p, r) => foldSources(s, p.filter(pkg => pkg.sourceKind === "repo" && pkg.repoUrl), r, filter.search, showArchived, sourceSearch),
   );
   const listedCount = root === "sources" ? (sourcesList?.snapshot.rows.length ?? 0) : (flat?.snapshot.rows.length ?? 0);
 
@@ -251,7 +260,7 @@ export function DeployablesSection({
   const archivedCount = useMemo(
     () =>
       root === "sources"
-        ? packageRows.filter((p) => p.status === "archived").length
+        ? packageRows.filter((p) => p.status === "archived" && p.sourceKind === "repo" && !p.sourceRemoved).length
         : foldDeployables(siteRows, packageRows, parkedRows, DEFAULT_LIST_FILTER, true).reduce(
             (n, g) => n + g.rows.length,
             0,
@@ -313,7 +322,7 @@ export function DeployablesSection({
           viewerUserId={viewerUserId}
           credentials={credentials}
           credentialFeed={credentialFeed}
-          backLabel={view.fromSource ? "Repository" : ROOT_LABEL[root]}
+          backLabel={view.fromSource ? "Source" : ROOT_LABEL[root]}
           onBack={() => view.fromSource ? setView({ kind: "source", packageId: view.fromSource }) : backToList()}
           onAsk={onAsk}
           parked={parkedFor ?? undefined}
@@ -326,7 +335,8 @@ export function DeployablesSection({
           packages={packageRows}
           packageFeed={{ state: packages?.snapshot.state ?? "seeding", error: packages?.snapshot.error ?? "", retry: onReseed }}
           siteFeed={{ state: sites?.snapshot.state ?? "seeding", error: sites?.snapshot.error ?? "" }}
-          placedSources={siteRows.map(s => ({ packageId: s.packageId, name: s.packageDeployableName }))}
+          placedSources={siteRows.map(s => ({ packageId: s.packageId, name: s.packageDeployableName, siteId: s.id }))}
+          onOpenDeployable={openSite}
           placed={
             parkedFor === null
               ? undefined
@@ -351,7 +361,10 @@ export function DeployablesSection({
       }
       return (
         <SourceView
+          key={`${pkg.id}:${viewerUserId}`}
           pkg={pkg}
+          viewerUserId={viewerUserId}
+          onRemoved={() => { refreshSources(); backToList(); }}
           apps={apps}
           appsSettled={!feedError && sites?.snapshot.state === "live" && packages?.snapshot.state === "live"}
           credentials={credentials}
@@ -389,7 +402,7 @@ export function DeployablesSection({
           clusterDomain={clusterDomain}
           onAsk={onAsk}
           onBack={() => view.from ? setView({ kind: "source", packageId: view.from }) : backToList()}
-          backLabel={view.from ? "Repository" : ROOT_LABEL[root]}
+          backLabel={view.from ? "Source" : ROOT_LABEL[root]}
           onOpenSource={(packageId) => setView({ kind: "source", packageId, fromSite: site.id })}
           onOpenHistory={(packageId) => setView({ kind: "history", packageId, siteId: site.id, returnTo: view })}
           onDeleted={(goneId, what) => {
@@ -419,7 +432,7 @@ export function DeployablesSection({
     const pkg = packageRows.find((p) => p.id === packageId);
     const group = pkg === undefined
       ? undefined
-      : foldSources(siteRows, packageRows, parkedRows, "", pkg.status === "archived").find((g) => g.pkg?.id === packageId);
+      : foldSources(siteRows, [{ ...pkg, sourceRemoved: false }], parkedRows, "", pkg.status === "archived").find((g) => g.pkg?.id === packageId);
     const waiting = group?.rows.find((row) => row.parked !== null);
     if (waiting === undefined || waiting.parked === null) return undefined;
     const only = runIsScopedToApp(waiting.parked, waiting.app) ? waiting.app : "";
@@ -457,12 +470,12 @@ export function DeployablesSection({
     const filtered = filterIsNarrowing(filter);
     return (
       <div className="os-app-stack os-deployables-list deployable-overview os-record-list" data-density={density}>
-        <Head title={ROOT_LABEL[root]} meta={!feedError && list?.snapshot.state === "live" ? listedCount : undefined}>
+        <Head title={ROOT_LABEL[root]} meta={!feedError && (root !== "sources" || sourceMetadataReady) && (root === "sources" ? sourcesList : list)?.snapshot.state === "live" ? listedCount : undefined}>
           <Refine iconOnly
             search={filter.search}
             onSearch={(search) => patch({ search })}
             chips={root === "sources" ? [] : chips}
-            label={root === "sources" ? "Find repositories" : "Refine deployables"}
+            label={root === "sources" ? "Find sources" : "Refine deployables"}
           >
             {/* THE FACETS ARE QUESTIONS ABOUT DEPLOYABLES -- a kind, a status, a
                 client, a way in. A source has none of them, so its list is
@@ -527,8 +540,10 @@ export function DeployablesSection({
           {root === "deployables" && canOpenCompose ? (
             <AddButton label="Add a deployable" className="deployable-new" onClick={() => setView({ kind: "compose" })} />
           ) : null}
+          {root === "sources" ? <RefreshButton label="Refresh sources" busy={sourcesList?.snapshot.state === "seeding"} onClick={refreshSources} /> : null}
         </Head>
-        {root === "sources" ? <Caption>Edit or archive repositories here. Add new ones through Add deployable.</Caption> : null}
+        {root === "sources" ? <Caption>Manage sources here. Add new ones through Add deployable.</Caption> : null}
+        {root === "sources" && (connections.error || credentialFeed?.error) ? <Notice tone="warn" sentence="Some GitHub provenance could not be refreshed." detail={connections.error || credentialFeed?.error} next="Refresh sources to try again. Configured repositories remain available." /> : null}
 
         {/* WHAT HAPPENED TO THE THING THAT IS NO LONGER HERE. The name is free
             the instant the row is stamped; the certificate and route come down
@@ -558,15 +573,15 @@ export function DeployablesSection({
         {feedError ? (
           <Notice
             tone="error"
-            sentence="Deployables could not be loaded."
+            sentence={root === "sources" ? "Sources could not be loaded." : "Deployables could not be loaded."}
             detail={feedError}
             next="Check your connection and try again."
           >
-            <RefreshButton label="Reload deployables" onClick={onReseed} />
+            {root === "sources" ? null : <RefreshButton label="Reload deployables" onClick={onReseed} />}
           </Notice>
         ) : null}
 
-        {listedCount === 0 && (feedError || list?.snapshot.state !== "live") ? (feedError ? null : <div data-os-livelist data-state={list?.snapshot.state ?? "disconnected"}>
+        {root === "sources" && listedCount === 0 && !sourceMetadataReady ? <Caption>{connections.error || credentialFeed?.error ? "Source provenance is unavailable. Refresh sources to finish this reading." : connections.state === "disconnected" || credentialFeed?.state === "disconnected" ? "Sources are unavailable while disconnected. Reconnect to the cluster and refresh." : "Reading sources and GitHub access…"}</Caption> : listedCount === 0 && (feedError || list?.snapshot.state !== "live") ? (feedError ? null : <div data-os-livelist data-state={list?.snapshot.state ?? "disconnected"}>
           <EmptyState icon={root === "sources" ? GitBranch : Globe} title={list?.snapshot.state === "seeding" ? "Loading from the cluster" : "Not connected to the cluster"}>
             {list?.snapshot.state === "seeding" ? "Your apps and repositories will appear here." : "Your apps will appear when the connection returns."}
           </EmptyState>
@@ -578,14 +593,14 @@ export function DeployablesSection({
             source={sourcesList}
             rowId={(g) => g.id}
             fingerprint={groupFingerprint}
-            label="Repositories in this cluster"
-            emptyText={showArchived ? "No archived repositories." : filtered ? "No matching repositories." : "No repositories yet."}
-            emptyContent={<EmptyState icon={GitBranch} title={showArchived ? "No archived repositories" : filtered ? "No matching repositories" : "No repositories yet"}
+            label="Sources in this cluster"
+            emptyText={showArchived ? "No archived sources." : filtered ? "No matching sources." : "No sources yet."}
+            emptyContent={<EmptyState icon={GitBranch} title={showArchived ? "No archived sources" : filtered ? "No matching sources" : "No sources yet"}
               action={filtered ? <Button onClick={() => setFilter(DEFAULT_LIST_FILTER)}>Clear the search</Button> : undefined}>
-              {showArchived ? "Archived repositories will appear here." : filtered ? "Try a different search." : "Registered repositories and zip packages appear here with the apps they declare. Add a deployable to register one."}
+              {showArchived ? "Archived sources will appear here." : filtered ? "Try a different search." : "Configured GitHub account, organization and repository paths appear here. Start with Add deployable."}
             </EmptyState>}
             renderRow={(group, tick) => (
-              <SourceLine accounts={accounts} group={group} tick={tick} onOpen={() => setView({ kind: "source", packageId: group.pkg!.id })} />
+              <SourceLine accounts={accounts} group={group} tick={tick} provenance={sourceSearch(group.pkg!)} canRemove={partsForOrganization(group.pkg!.accountId, can).sources && bare(group.pkg!.ownerUserId) === bare(viewerUserId)} onRemoved={refreshSources} onOpen={() => setView({ kind: "source", packageId: group.pkg!.id })} />
             )}
           />
         ) : (
@@ -626,13 +641,13 @@ export function DeployablesSection({
           <div className="os-archive-toggle">
             <button type="button" className="os-sort" aria-expanded={showArchived} onClick={flipArchived}>
               <Archive size={12} aria-hidden />{" "}
-              {showArchived ? `Show active ${root === "sources" ? "repositories" : "deployables"}` : `Show archived (${archivedCount})`}
+              {showArchived ? `Show active ${root === "sources" ? "sources" : "deployables"}` : `Show archived (${archivedCount})`}
             </button>
             <Caption>
               {root === "sources"
                 ? showArchived
                   ? "A restored source's apps come back inactive. Open a source to restore it."
-                  : "Restore archived repositories here."
+                  : "Restore archived sources here."
                 : showArchived
                   ? "Restored apps return offline. Open an app to restore it."
                   : "Restore archived apps here."}
@@ -663,7 +678,7 @@ function newestParked(
  * ONE SOURCE, as a row: what it is called and where it lives, how much it
  * produced, and the one thing about it a person might have to act on.
  */
-function SourceLine({ group, tick, onOpen, accounts }: { accounts: AccountRow[]; group: DeployableListGroup; tick: ArrivalKind | null; onOpen: () => void }) {
+function SourceLine({ group, tick, onOpen, accounts, provenance, canRemove, onRemoved }: { accounts: AccountRow[]; group: DeployableListGroup; tick: ArrivalKind | null; onOpen: () => void; provenance: string; canRemove: boolean; onRemoved: () => void }) {
   const pkg = group.pkg!;
   const { apps, deployed } = sourceSummary(group);
   const state = sourceStateWord(group);
@@ -672,14 +687,16 @@ function SourceLine({ group, tick, onOpen, accounts }: { accounts: AccountRow[];
     icon={pkg.sourceKind === "artifact" ? <FileArchive size={18} aria-hidden /> : <GitBranch size={18} aria-hidden />}
     name={name}
     // Said once: a source with no name of its own is already called by where it lives.
-    secondary={pkg.name.trim() === "" ? undefined : sourceLabel(pkg)}
+    secondary={provenance}
+    actions={canRemove ? <RemoveSource pkg={pkg} onRemoved={onRemoved} /> : undefined}
+    actionLayout="compact"
     state={state.word}
     tone={state.tone}
     stateExtra={tick === "added" ? <span className="os-livelist-tick">new</span> : null}
     trailing={<AttentionMarker appId="deployables" target={updateTarget(pkg.id)} />}
     current={state.tone === "accent"}
     dim={pkg.status === "archived"}
-    label={`Open ${name}, ${state.word.toLowerCase()}`}
+    label={`Open ${name}, ${provenance}, ${state.word.toLowerCase()}`}
     onOpen={onOpen}
   >
     {/* A sentence when there is nothing to count: "0 apps" reads as a result,

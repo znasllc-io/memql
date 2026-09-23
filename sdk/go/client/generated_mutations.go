@@ -12195,6 +12195,34 @@ func SetPackageAutoDeployBuild(args SetPackageAutoDeployArgs) string {
 	return b.String()
 }
 
+// SetPackageSourceRemoved -- Remove or restore only the configured source entry. Package lifecycle, deployables, grants and installation bindings are unchanged. The engine restricts this to its owner.
+//
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["setPackageSourceRemoved"] in generated_concepts.go).
+type SetPackageSourceRemovedArgs struct {
+	PackageId string
+	Removed   bool
+}
+
+// SetPackageSourceRemoved calls the engine mutation setPackageSourceRemoved.
+func (qc *QueryClient) SetPackageSourceRemoved(ctx context.Context, args SetPackageSourceRemovedArgs) (*Result, error) {
+	call := SetPackageSourceRemovedBuild(args)
+	return qc.executeNamed(ctx, "setPackageSourceRemoved", call)
+}
+
+func SetPackageSourceRemovedBuild(args SetPackageSourceRemovedArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation setPackageSourceRemoved(")
+	b.WriteString("packageId: ")
+	b.WriteString(quoteMemQL(args.PackageId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("removed: ")
+	b.WriteString(fmt.Sprintf("%v", args.Removed))
+	b.WriteString(")")
+	return b.String()
+}
+
 // SetPartitionSecret -- Persist a partition-scoped encrypted secret row in v1:platform:partitionSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them.
 //
 // Bound concept: v1:platform:partitionSecret (machine-readable: BoundConcepts["setPartitionSecret"] in generated_concepts.go).
@@ -14511,9 +14539,10 @@ func UpdateOutboundRequestStatusBuild(args UpdateOutboundRequestStatusArgs) stri
 //
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["updatePackageSource"] in generated_concepts.go).
 type UpdatePackageSourceArgs struct {
-	PackageId    string
-	RepoRef      string
-	CredentialId string
+	PackageId          string
+	RepoRef            string
+	CredentialId       string
+	SourceConnectionId string
 }
 
 // UpdatePackageSource calls the engine mutation updatePackageSource.
@@ -14540,6 +14569,13 @@ func UpdatePackageSourceBuild(args UpdatePackageSourceArgs) string {
 		}
 		b.WriteString("credentialId: ")
 		b.WriteString(quoteMemQL(args.CredentialId))
+	}
+	if args.SourceConnectionId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sourceConnectionId: ")
+		b.WriteString(quoteMemQL(args.SourceConnectionId))
 	}
 	b.WriteString(")")
 	return b.String()

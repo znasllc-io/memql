@@ -72,7 +72,7 @@ function originOf(name: string): string {
 /** The Sources tab's row for one source, opened. */
 async function openSource(name: string): Promise<HTMLElement> {
   await click(await screen.findByRole("button", { name: (label) => label.startsWith(`Open ${name},`) }));
-  return screen.findByRole("region", { name: /^Repository / });
+  return screen.findByRole("region", { name: /^Source / });
 }
 
 /** The list item a row sits in -- where the arrival cue lands. */
@@ -275,7 +275,7 @@ describe("the list", () => {
       ...WITH_PACKAGE,
       packages: [{ ...ACME, declares: [{ name: "storefront", kind: "spa" }, { name: "web", kind: "spa" }] }],
     });
-    mount(connection, { section: "repositories" });
+    mount(connection, { section: "sources" });
     // It is listed on its SOURCE's page, with no address of its own.
     const page = await openSource("acme");
     const web = await within(page).findByText("web");
@@ -319,7 +319,7 @@ describe("the list", () => {
         disabledDeployables: ["web"],
       }],
     });
-    mount(connection, { section: "repositories" });
+    mount(connection, { section: "sources" });
     const page = await openSource("acme");
     const web = await within(page).findByText("web");
     // It is there to be found, and says it is inactive -- the one word every
@@ -354,7 +354,7 @@ describe("the list", () => {
       ...WITH_PACKAGE,
       packages: [{ ...ACME, declares: [{ name: "storefront", kind: "spa" }, { name: "web", kind: "spa" }] }],
     });
-    mount(connection, { section: "repositories" });
+    mount(connection, { section: "sources" });
     const page = await openSource("acme");
     await click((await within(page).findByText("web")).closest("button"));
     await screen.findByRole("region", { name: "Deploy web from acme" });
@@ -370,14 +370,14 @@ describe("the list", () => {
   // same row language, rather than a header row inside somebody else's.
   it("lists each source once on the Sources tab, with what it produced and where it stands", async () => {
     const connection = fakeConnection(TWO_SOURCES);
-    mount(connection, { section: "repositories" });
+    mount(connection, { section: "sources" });
     const acme = await screen.findByRole("button", { name: /^Open acme,/ });
-    expect(screen.getByRole("heading", { name: "Repositories" })).toBeTruthy();
-    expect(screen.getByText("Edit or archive repositories here. Add new ones through Add deployable.")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Sources" })).toBeTruthy();
+    expect(screen.getByText("Manage sources here. Add new ones through Add deployable.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Add a deployable" })).toBeNull();
     expect(rowNames()).toEqual(["acme", "widgets-co"]);
     // Where it lives, how much it produced, and the one state word.
-    expect(within(acme).getByText("acme/storefront at main")).toBeTruthy();
+    expect(within(acme).getByText("Unknown GitHub identity · acme · acme/storefront · main")).toBeTruthy();
     expect(within(acme).getByText("2 apps, 2 deployed")).toBeTruthy();
     expect(within(acme).getByText("Current")).toBeTruthy();
     // No deployable is a row here.
@@ -387,13 +387,13 @@ describe("the list", () => {
   });
 
   it("opens a source's page from its row, rooted at Sources, and its apps from there", async () => {
-    mount(fakeConnection(WITH_PACKAGE), { section: "repositories" });
+    mount(fakeConnection(WITH_PACKAGE), { section: "sources" });
     const page = await openSource("acme");
     // Back goes to the list it came from, which is Sources.
-    expect(within(page).getByRole("button", { name: "Back to Repositories" })).toBeTruthy();
+    expect(within(page).getByRole("button", { name: "Back to Sources" })).toBeTruthy();
     await click(within(page).getByText("storefront").closest("button"));
     const deployable = await screen.findByRole("region", { name: /^Deployable / });
-    expect(within(deployable).getByRole("button", { name: "Back to Repository" })).toBeTruthy();
+    expect(within(deployable).getByRole("button", { name: "Back to Source" })).toBeTruthy();
   });
 
   // THREE THINGS A RENDERED LIST OF REAL SOURCES SHOWED, and a cluster with
@@ -403,20 +403,20 @@ describe("the list", () => {
   it("lists a source that has produced nothing, because this tab is where somebody looks for it", async () => {
     // What a refused analysis leaves: a source, and nothing it made.
     const fresh = { ...(ACME as unknown as Record<string, unknown>), id: "pkg-fresh", name: "field-notes", repoUrl: "https://github.com/acme/field-notes", deployedVersion: "" } as unknown as Row;
-    mount(fakeConnection({ sites: [STORE, ADMIN], packages: [ACME, fresh] }), { section: "repositories" });
+    mount(fakeConnection({ sites: [STORE, ADMIN], packages: [ACME, fresh] }), { section: "sources" });
     const row = await screen.findByRole("button", { name: /^Open field-notes,/ });
     expect(rowNames()).toEqual(["acme", "field-notes"]);
     expect(within(row).getByText("No apps yet")).toBeTruthy();
     expect(within(row).getByText("Nothing deployed")).toBeTruthy();
     // And it opens, like any other: its page is where it is tried again.
     await click(row);
-    expect(await screen.findByRole("region", { name: /^Repository / })).toBeTruthy();
+    expect(await screen.findByRole("region", { name: /^Source / })).toBeTruthy();
   });
 
   it("asks a search of the source, and leaves what it made alone", async () => {
-    mount(fakeConnection({ ...TWO_SOURCES, awaitingConfirm: [parkedRun()] }), { section: "repositories" });
+    mount(fakeConnection({ ...TWO_SOURCES, awaitingConfirm: [parkedRun()] }), { section: "sources" });
     await screen.findByRole("button", { name: /^Open acme,/ });
-    await click(screen.getByRole("button", { name: "Find repositories" }));
+    await click(screen.getByRole("button", { name: "Find sources" }));
     const { type: typeInto } = await import("./harness");
     // An app's name finds the source that made it...
     await typeInto(screen.getByLabelText("Search") as HTMLInputElement, "admin");
@@ -429,7 +429,7 @@ describe("the list", () => {
     // neither of which matches what was typed -- and Review was read off the
     // narrowed list, so it vanished from the one page that carries it.
     await click(acme);
-    await screen.findByRole("region", { name: /^Repository / });
+    await screen.findByRole("region", { name: /^Source / });
     expect(within(document.querySelector(".os-actbar") as HTMLElement).getByRole("button", { name: "Review" })).toBeTruthy();
   });
 
@@ -437,18 +437,18 @@ describe("the list", () => {
     const legacy = { ...(ACME as unknown as Record<string, unknown>), id: "pkg-legacy", name: "legacy-portal", repoUrl: "https://github.com/acme/legacy-portal", status: "archived" } as unknown as Row;
     // RETIRED is an archived DEPLOYABLE of no source: it is not this tab's noun
     // and must not be counted here.
-    mount(fakeConnection({ sites: [STORE, ADMIN, RETIRED], packages: [ACME, legacy] }), { section: "repositories" });
+    mount(fakeConnection({ sites: [STORE, ADMIN, RETIRED], packages: [ACME, legacy] }), { section: "sources" });
     await screen.findByRole("button", { name: /^Open acme,/ });
     expect(rowNames()).toEqual(["acme"]);
     await click(screen.getByRole("button", { name: /Show archived \(1\)/ }));
     await waitFor(() => expect(rowNames()).toEqual(["legacy-portal"]));
-    expect(screen.getByRole("button", { name: /Show active repositories/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Show active sources/ })).toBeTruthy();
   });
 
   it("says what a source is when there are none", async () => {
-    mount(fakeConnection({ sites: [SHOP], packages: [] }), { section: "repositories" });
-    expect(await screen.findByText("No repositories yet")).toBeTruthy();
-    expect(screen.getByText(/Registered repositories and zip packages appear here/)).toBeTruthy();
+    mount(fakeConnection({ sites: [SHOP], packages: [] }), { section: "sources" });
+    expect(await screen.findByText("No sources yet")).toBeTruthy();
+    expect(screen.getByText(/Configured GitHub account, organization and repository paths appear here/)).toBeTruthy();
   });
 
   it("says what to do when there is nothing yet", async () => {
@@ -510,13 +510,13 @@ describe("a deploy waiting for you", () => {
   // the act that answers it. The app it is about has no address yet, so it is
   // not a row on the Deployables list at all.
   it("says Review needed once, on the source, and offers Review on its page", async () => {
-    mount(fakeConnection({ ...WITH_PACKAGE, awaitingConfirm: [parkedRun()] }), { section: "repositories" });
-    const acme = await screen.findByRole("button", { name: /^Open acme, review needed/ });
+    mount(fakeConnection({ ...WITH_PACKAGE, awaitingConfirm: [parkedRun()] }), { section: "sources" });
+    const acme = await screen.findByRole("button", { name: /^Open acme, .*review needed/ });
     expect(screen.getAllByText("Review needed")).toHaveLength(1);
     expect(within(acme).getByText("Review needed")).toBeTruthy();
 
     await click(acme);
-    await screen.findByRole("region", { name: /^Repository / });
+    await screen.findByRole("region", { name: /^Source / });
     expect((document.querySelector(".os-actbar-word")?.textContent ?? "").trim()).toBe("Review needed");
     expect(within(document.querySelector(".os-actbar") as HTMLElement).getByRole("button", { name: "Review" })).toBeTruthy();
   });
@@ -556,7 +556,7 @@ describe("a deploy waiting for you", () => {
 
   it("clears the mark when the run moves on, on its own event", async () => {
     const connection = fakeConnection({ ...WITH_PACKAGE, awaitingConfirm: [parkedRun()] });
-    mount(connection, { section: "repositories" });
+    mount(connection, { section: "sources" });
     await screen.findByText("Review needed");
 
     await emit(connection, DEPLOYMENT_CONCEPT, parkedRun({ status: "succeeded" }));
@@ -567,7 +567,7 @@ describe("a deploy waiting for you", () => {
 
   it("clears it for a refusal too", async () => {
     const connection = fakeConnection({ ...WITH_PACKAGE, awaitingConfirm: [parkedRun()] });
-    mount(connection, { section: "repositories" });
+    mount(connection, { section: "sources" });
     await screen.findByText("Review needed");
 
     await emit(connection, DEPLOYMENT_CONCEPT, parkedRun({ status: "refused" }));
@@ -740,7 +740,7 @@ describe("Add a deployable", () => {
   });
 
   it("reopens a parked run's reading from its source's bar, with its report in place", async () => {
-    mount(fakeConnection({ ...WITH_PACKAGE, awaitingConfirm: [parkedRun()] }), { section: "repositories" });
+    mount(fakeConnection({ ...WITH_PACKAGE, awaitingConfirm: [parkedRun()] }), { section: "sources" });
     await openSource("acme");
     await click(within(document.querySelector(".os-actbar") as HTMLElement).getByRole("button", { name: "Review" }));
 
