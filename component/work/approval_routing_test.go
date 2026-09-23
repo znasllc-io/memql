@@ -24,6 +24,9 @@ func TestOnlyRoutingReviewMayOmitTheRun(t *testing.T) {
 	for _, kind := range []string{
 		ApprovalKindSideEffect, ApprovalKindScopeElevation,
 		ApprovalKindBudget, ApprovalKindSkillMint,
+		// Raised by the ladder rather than parked on a run, and still
+		// pointed at one: the shadow run whose comparison met the threshold.
+		ApprovalKindProcedurePromotion,
 	} {
 		err := ValidateApprovalKind(ApprovalRequest{Kind: kind})
 		if !errors.Is(err, ErrApprovalNeedsRun) {
