@@ -80,6 +80,10 @@ export interface FakeSeed {
   deriveReply?: Row;
   /** The authoring catalog the Automations section reads. */
   constructs?: Row[] | Error;
+  /** The learned procedures, every rung (`learnedProceduresForOwner`). */
+  learnedProcedures?: Row[] | Error;
+  /** The ladder's values: at most one row (`ladderPolicyCurrent`). */
+  ladderPolicy?: Row[] | Error;
 }
 
 export function fakeConnection(seed: FakeSeed = {}) {
@@ -120,6 +124,10 @@ export function fakeConnection(seed: FakeSeed = {}) {
       // The authoring catalog. NOT a feed -- `v1:authoring:construct` carries
       // no broadcast routing rule -- so the section reads it and dates itself.
       cataloguedConstructsForOwner: read(seed.constructs),
+      // The same concept, read the same way: the learned procedures and the
+      // seeded policy singleton share the catalog's one "Look again".
+      learnedProceduresForOwner: read(seed.learnedProcedures),
+      ladderPolicyCurrent: read(seed.ladderPolicy),
       setConstructStatus: write(),
       workModelCallsForOwnerRun: read(seed.modelCalls),
       workObservationsForOwnerRun: read(seed.observations),
@@ -244,6 +252,126 @@ export function constructRow(over: Partial<Row> & { id: string; name: string }):
     catalogedAt: "2026-08-20T09:00:00Z",
     catalogedFromBundleId: "v1:authoring:bundle:b1",
     createdAt: "2026-08-20T09:00:00Z",
+    ...over,
+  };
+}
+
+/**
+ * A learned procedure as `procedureCard` projects it: in SHADOW, three of five
+ * matches, one binding of two on its one parameter, recorded twice from Claude
+ * Code -- the ordinary middle of the ladder, so a test has to ASK for a
+ * promotion waiting, a canary, a trusted or a retired one.
+ */
+export function procedureRow(over: Partial<Row> & { id: string }): Row {
+  return {
+    ownerUserId: "v1:identity:user:me",
+    name: "procedureReconcileLedger",
+    kind: "automation",
+    status: "draft",
+    ladder: "shadow",
+    shadowMatches: 3,
+    canaryMatches: 0,
+    distinctBindings: { "s0.command.2": ["sha256:aaa"] },
+    failures: 0,
+    insufficient: 0,
+    promotionApprovalId: "",
+    lastReplayAt: "2026-09-04T08:00:00Z",
+    ladderReason: "matched the app 3 of the 5 consecutive times promotion needs",
+    ladderChangedAt: "2026-09-02T08:00:00Z",
+    reliability: 0.62,
+    reinforceCount: 3,
+    lastReinforced: "2026-09-04T08:00:00Z",
+    goalSignature: "sha256:goal-7",
+    procedureHash: "sha256:proc-v1",
+    bundleId: "v1:authoring:bundle:b9",
+    procedure: {
+      v: 1,
+      level: "strong",
+      title: "Reconcile last month's ledger against the bank export",
+      goalSignature: "sha256:goal-7",
+      inputKeys: ["month"],
+      steps: [
+        {
+          tool: "exec",
+          symbol: "a",
+          args: {
+            kind: "object",
+            keys: ["command"],
+            kids: [
+              {
+                kind: "array",
+                form: "argv",
+                kids: [
+                  { kind: "lit", lit: "node" },
+                  { kind: "lit", lit: "scripts/reconcile.js" },
+                  { kind: "hole", holeId: "s0.command.2", holeType: "string" },
+                ],
+              },
+            ],
+          },
+        },
+        {
+          tool: "fs_write",
+          symbol: "b",
+          args: {
+            kind: "object",
+            keys: ["content", "path"],
+            kids: [
+              { kind: "hole", holeId: "s1.content", holeType: "string" },
+              {
+                kind: "array",
+                form: "path",
+                kids: [
+                  { kind: "lit", lit: "reports" },
+                  { kind: "hole", holeId: "s1.path.1", holeType: "string" },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+      holes: [
+        { id: "s0.command.2", stepIndex: 0, path: ["command", "2"], type: "string", class: "free" },
+        {
+          id: "s1.content",
+          stepIndex: 1,
+          path: ["content"],
+          type: "string",
+          class: "dataflow",
+          ref: { stepIndex: 0, path: ["stdout"] },
+        },
+        { id: "s1.path.1", stepIndex: 1, path: ["path", "1"], type: "string", class: "constant", const: "ledger.csv" },
+      ],
+      expect: [],
+      inputMap: { "s0.command.2": "month" },
+      freeParameters: ["s0.command.2"],
+      footprint: { files: true },
+      target: "workbench",
+      recordedFrom: {
+        app: "claude-code",
+        model: "claude-sonnet-4-5",
+        effort: "high",
+        sessionIds: ["sess-1", "sess-2"],
+        runIds: ["run-rec-1", "run-rec-2"],
+      },
+    },
+    preconditions: { tools: { node: "22.1.0" }, emptyWorkspace: true },
+    createdAt: "2026-09-01T08:00:00Z",
+    ...over,
+  };
+}
+
+/** The seeded ladder values, as `ladderPolicyFull` projects them. */
+export function ladderPolicyRow(over: Partial<Row> = {}): Row {
+  return {
+    id: "v1:authoring:ladderPolicy:primary",
+    shadowMatches: 5,
+    distinctBindings: 2,
+    canaryMatches: 5,
+    failuresToDemote: 2,
+    insufficientToDemote: 1,
+    retireAfterDays: 30,
+    createdAt: "2026-09-01T00:00:00Z",
     ...over,
   };
 }

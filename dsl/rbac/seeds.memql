@@ -556,6 +556,16 @@ seed capability cap-owner-read-app-settings-decisions { roleSlug: "owner"  verb:
 seed capability cap-developer-read-app-settings-decisions { roleSlug: "developer"  verb: "read"  resourceType: "app:settings/decisions"  predefined: true }
 @description("admin: open the decisions section of the settings app -- reproduces the OS registry floor min admin (memql#5300).")
 seed capability cap-admin-read-app-settings-decisions { roleSlug: "admin"  verb: "read"  resourceType: "app:settings/decisions"  predefined: true }
+// Settings -> Procedures (epic memql#5408, task memql#5412): the certification
+// ladder's values, read-only. Seeded on the roles that hold
+// read app:settings/levels -- the same kind of reflection of the cluster's AI
+// configuration, carrying no prompt, no credential and no act.
+@description("owner: open the procedures section of the settings app -- the Levels roles (memql#5412).")
+seed capability cap-owner-read-app-settings-procedures { roleSlug: "owner"  verb: "read"  resourceType: "app:settings/procedures"  predefined: true }
+@description("developer: open the procedures section of the settings app -- the Levels roles (memql#5412).")
+seed capability cap-developer-read-app-settings-procedures { roleSlug: "developer"  verb: "read"  resourceType: "app:settings/procedures"  predefined: true }
+@description("admin: open the procedures section of the settings app -- the Levels roles (memql#5412).")
+seed capability cap-admin-read-app-settings-procedures { roleSlug: "admin"  verb: "read"  resourceType: "app:settings/procedures"  predefined: true }
 @description("owner: open the tokens section of the settings app -- reproduces the OS registry floor min admin (memql#5300).")
 seed capability cap-owner-read-app-settings-tokens { roleSlug: "owner"  verb: "read"  resourceType: "app:settings/tokens"  predefined: true }
 @description("developer: open the tokens section of the settings app -- reproduces the OS registry floor min admin (memql#5300).")

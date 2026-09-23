@@ -1,31 +1,37 @@
-import { useMemo, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { FileCode2, Footprints, RefreshCw, Repeat } from "lucide-react";
 
 import {
   Button,
   Caption,
-  Chip,
+  EmptyState,
   Head,
   Notice,
   Panel,
   Refine,
-  Row as KitRow,
+  Select,
   formatFreshness,
   formatMoment,
   useNow,
 } from "../../kit";
 import { ActionBar, type Act, type ActionBarTone } from "../../kit/ActionBar";
+import { RecordList, RecordRow, type RecordTone } from "../../kit/RecordRow";
 import {
+  automationBand,
   automationMatches,
+  constructOriginWord,
   rung,
   rungMeaning,
   rungWord,
   statusMeaning,
   statusWord,
   type AutomationRow,
+  type Origin,
 } from "./automations";
-import { useAutomations, useSetAutomationStatus } from "./useAutomations";
-import { idTail } from "./rows";
+import { evidenceLine, ladderWord, procedureBand, procedureTitle, type ProcedureRow } from "./ladder";
+import { ProcedurePage } from "./ProcedurePage";
+import { useSetAutomationStatus, type AutomationsRead, PROCEDURE_PAGE_BOUND } from "./useAutomations";
+import { idTail, type ApprovalRow, type RunRow } from "./rows";
 
 // AUTOMATIONS: what this instance can replay without a model.
 //
@@ -33,9 +39,22 @@ import { idTail } from "./rows";
 // THIS IS WHERE THE PRODUCT'S CLAIM BECOMES CHECKABLE
 // ===========================================================================
 // Every other surface in this app is about one piece of work. This one is
-// about what the instance has LEARNED: the templates a goal compiled to, how
-// well each has done, and whether it is armed. A person who wants to know
-// whether the system is actually getting cheaper reads this list.
+// about what the instance has LEARNED: the templates a goal compiled to, the
+// procedures it watched an app perform, how well each has done, and whether it
+// serves. A person who wants to know whether the system is actually getting
+// cheaper reads this list.
+//
+// ===========================================================================
+// ONE LIST, AND WHERE A ROW CAME FROM IS A FACT ON IT
+// ===========================================================================
+// A learned procedure is an automation with a different origin, so it is a
+// row here like any other, saying "Learned" where an authored one says
+// "Authored" -- and the question "only the learned ones" is a facet in Refine
+// (DESIGN.md, "a subset is a filter"), never a heading over half the list.
+// The two open differently, and that is rule 11 applied twice rather than an
+// inconsistency: an authored automation's detail is short and stands BESIDE
+// the list; a procedure's is a ladder, its evidence and every step it runs, so
+// its page REPLACES the list.
 //
 // ===========================================================================
 // IT IS A READ AND IT SAYS WHEN IT LOOKED
@@ -54,36 +73,142 @@ import { idTail } from "./rows";
 // actually cares about is whether this can be trusted to run unwatched, and
 // that is a word -- with "not yet proven" kept distinct from "struggling",
 // because a template nobody has run has earned nothing and one that has been
-// run and kept missing has earned less than nothing.
+// run and kept missing has earned less than nothing. A learned procedure's
+// rung is a word too, and its evidence is a count.
 
 export interface AutomationsSectionProps {
+  catalog: AutomationsRead;
   selectedId: string;
   onSelect: (constructId: string) => void;
+  /** The learned procedure whose page is open, or "". */
+  openProcedureId: string;
+  /**
+   * When that procedure was asked for, when the catalog in hand did not hold
+   * it -- "" otherwise. Only a read that FINISHED after it may say the
+   * procedure is not there.
+   */
+  openProcedureSince: string;
+  onOpenProcedure: (constructId: string) => void;
+  onCloseProcedure: () => void;
+  /** The pending approvals feed, so a page can tell an open promotion from a decided one. */
+  approvals: readonly ApprovalRow[];
+  approvalsKnown: boolean;
+  runs: readonly RunRow[];
+  onOpenApproval: (approvalId: string) => void;
+  onOpenRun: (runId: string) => void;
 }
 
-export function AutomationsSection({ selectedId, onSelect }: AutomationsSectionProps) {
+/** One row of the merged list: an authored automation or a learned procedure. */
+type Entry =
+  | { origin: "authored"; key: string; band: number; reliability: number; name: string; automation: AutomationRow }
+  | { origin: "learned"; key: string; band: number; reliability: number; name: string; procedure: ProcedureRow };
+
+export function AutomationsSection({
+  catalog,
+  selectedId,
+  onSelect,
+  openProcedureId,
+  openProcedureSince,
+  onOpenProcedure,
+  onCloseProcedure,
+  approvals,
+  approvalsKnown,
+  runs,
+  onOpenApproval,
+  onOpenRun,
+}: AutomationsSectionProps) {
   const now = useNow(30_000);
   const [search, setSearch] = useState("");
-  const catalog = useAutomations();
+  const [origin, setOrigin] = useState<"" | Origin>("");
+  // A LINK THAT NAMES A PROCEDURE THIS CATALOG DOES NOT HOLD is answered once
+  // and let go: holding the id open would pop the page open by itself the day
+  // a later read happened to find it, which is navigation nobody asked for.
+  const [missing, setMissing] = useState("");
   const status = useSetAutomationStatus();
 
-  const rows = useMemo(
-    () =>
-      catalog.automations
-        .filter((automation) => automationMatches(automation, search))
-        // Armed first, then by how far each has climbed, then by name. A
-        // total order: two templates with the same rung and the same name
-        // would otherwise swap places between reads.
-        .sort((a, b) => {
-          const armed = Number(b.status === "active") - Number(a.status === "active");
-          if (armed !== 0) return armed;
-          if (a.reliability !== b.reliability) return b.reliability - a.reliability;
-          return a.name.localeCompare(b.name);
-        }),
-    [catalog.automations, search],
-  );
+  const openProcedure =
+    openProcedureId === ""
+      ? null
+      : (catalog.procedures.find((p) => idTail(p.id) === idTail(openProcedureId)) ?? null);
 
-  const selected = rows.find((row) => idTail(row.id) === idTail(selectedId)) ?? null;
+  useEffect(() => {
+    if (openProcedureId === "" || openProcedure !== null) return;
+    if (catalog.state !== "ready" && catalog.state !== "error") return;
+    // A read that finished BEFORE the ask cannot answer it.
+    if (openProcedureSince !== "" && catalog.readAt < openProcedureSince) return;
+    setMissing(openProcedureId);
+    onCloseProcedure();
+  }, [openProcedureId, openProcedureSince, openProcedure, catalog.state, catalog.readAt]);
+
+  const entries = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    const out: Entry[] = [];
+    if (origin !== "learned") {
+      for (const automation of catalog.automations) {
+        if (!automationMatches(automation, search)) continue;
+        out.push({
+          origin: "authored",
+          key: `a:${automation.id}`,
+          band: automationBand(automation),
+          reliability: automation.reliability,
+          name: automation.name,
+          automation,
+        });
+      }
+    }
+    if (origin !== "authored") {
+      for (const procedure of catalog.procedures) {
+        const title = procedureTitle(procedure);
+        const haystack = [title, procedure.name, ladderWord(procedure.ladder), "learned"]
+          .join(" ")
+          .toLowerCase();
+        if (needle !== "" && !haystack.includes(needle)) continue;
+        out.push({
+          origin: "learned",
+          key: `p:${procedure.id}`,
+          band: procedureBand(procedure),
+          reliability: procedure.reliability ?? 0,
+          name: title,
+          procedure,
+        });
+      }
+    }
+    // BANDS A PERSON CAN EXPLAIN, then how far each has climbed, then the name.
+    // The one waiting on you first; then what serves; then what is still
+    // earning it; then what serves nothing. A total order: two rows with the
+    // same band, reliability and name would otherwise swap between reads.
+    return out.sort((a, b) => {
+      if (a.band !== b.band) return a.band - b.band;
+      if (a.reliability !== b.reliability) return b.reliability - a.reliability;
+      const byName = a.name.localeCompare(b.name);
+      return byName !== 0 ? byName : a.key.localeCompare(b.key);
+    });
+  }, [catalog.automations, catalog.procedures, search, origin]);
+
+  const selected =
+    entries.find(
+      (e): e is Extract<Entry, { origin: "authored" }> =>
+        e.origin === "authored" && idTail(e.automation.id) === idTail(selectedId),
+    )?.automation ?? null;
+
+  if (openProcedure !== null) {
+    return (
+      <ProcedurePage
+        procedure={openProcedure}
+        policy={catalog.policy}
+        policyError={catalog.policyError}
+        approvals={approvals}
+        approvalsKnown={approvalsKnown}
+        runs={runs}
+        readAt={catalog.readAt}
+        reading={catalog.state === "loading"}
+        onBack={onCloseProcedure}
+        onLookAgain={catalog.read}
+        onOpenApproval={onOpenApproval}
+        onOpenRun={onOpenRun}
+      />
+    );
+  }
 
   const acts: Act[] = [];
   if (selected !== null) {
@@ -121,19 +246,32 @@ export function AutomationsSection({ selectedId, onSelect }: AutomationsSectionP
 
   const tone: ActionBarTone =
     selected === null ? "none" : selected.status === "active" ? "live" : "paused";
+  const total = catalog.automations.length + catalog.procedures.length;
+  const anyAuthored = catalog.automations.length > 0;
+  const chips =
+    origin === ""
+      ? []
+      : [{ id: "origin", label: origin === "learned" ? "learned" : "authored", onRemove: () => setOrigin("") }];
 
   return (
     <div className="os-nexus-automations">
-      <Head
-        title="Automations"
-        meta={`${rows.length} ${rows.length === 1 ? "automation" : "automations"}`}
-      >
-        <Refine
-          search={search}
-          onSearch={setSearch}
-          placeholder="Name or namespace"
-          label="Search your automations"
-        />
+      <Head title="Automations" meta={`${entries.length} ${entries.length === 1 ? "automation" : "automations"}`}>
+        {/* NO FILTER CHROME OVER NO CONTENT (rule 2): with nothing in the
+            catalog there is no question to ask of it. */}
+        {total === 0 ? null : (
+          <Refine search={search} onSearch={setSearch} placeholder="Search" label="Refine automations" chips={chips}>
+            <Select
+              id="automations-facet-origin"
+              label="Origin"
+              value={origin}
+              onChange={(next) => setOrigin(next === "authored" || next === "learned" ? next : "")}
+            >
+              <option value="">Authored and learned</option>
+              <option value="authored">Authored only</option>
+              <option value="learned">Learned only</option>
+            </Select>
+          </Refine>
+        )}
         <Button onClick={catalog.read} busy={catalog.state === "loading"}>
           <RefreshCw size={13} aria-hidden />
           Look again
@@ -150,45 +288,75 @@ export function AutomationsSection({ selectedId, onSelect }: AutomationsSectionP
               detail={catalog.error}
             />
           ) : null}
+          {catalog.proceduresError !== "" ? (
+            <Notice
+              tone="warn"
+              sentence="The learned procedures could not be read."
+              next="Every authored automation is still listed. Look again once the cluster answers."
+              detail={catalog.proceduresError}
+            />
+          ) : null}
+          {missing === "" ? null : (
+            <Notice
+              tone="info"
+              sentence="That procedure is not in your catalog."
+              next="It may have been learned on another account's runs, or its id has changed. Every procedure you own is listed below."
+              detail={missing}
+            />
+          )}
 
-          <ul className="os-nexus-catalog" aria-label="Automations this instance can replay">
-            {rows.map((automation) => (
-              <li key={automation.id}>
-                <KitRow
-                  name={automation.name}
-                  current={idTail(automation.id) === idTail(selectedId)}
-                  onOpen={() => onSelect(automation.id)}
-                  state={
-                    <>
-                      <Chip
-                        tone={automation.status === "active" ? "accent" : "muted"}
-                        title={statusMeaning(automation.status)}
-                      >
-                        {statusWord(automation.status)}
-                      </Chip>
-                      <RungMark automation={automation} />
-                    </>
-                  }
-                >
-                  <span className="os-nexus-row-sub os-mono">
-                    {automation.targetNamespace === "" ? "—" : automation.targetNamespace}
-                  </span>
-                </KitRow>
-              </li>
-            ))}
-          </ul>
+          {entries.length === 0 ? null : (
+            <RecordList label="Automations this instance can replay">
+              {entries.map((entry) =>
+                entry.origin === "authored" ? (
+                  <AuthoredRow
+                    key={entry.key}
+                    automation={entry.automation}
+                    open={idTail(entry.automation.id) === idTail(selectedId)}
+                    onOpen={() => {
+                      setMissing("");
+                      onSelect(entry.automation.id);
+                    }}
+                  />
+                ) : (
+                  <LearnedRow
+                    key={entry.key}
+                    procedure={entry.procedure}
+                    catalog={catalog}
+                    now={now}
+                    onOpen={() => {
+                      setMissing("");
+                      onOpenProcedure(entry.procedure.id);
+                    }}
+                  />
+                ),
+              )}
+            </RecordList>
+          )}
 
-          {rows.length === 0 ? (
-            <Caption>
-              {catalog.state === "loading"
-                ? "Reading the catalog"
-                : search.trim() !== ""
-                  ? "No automation here matches that."
-                  : // AN EMPTY SCREEN IS AN INVITATION, and here the invitation
-                    // is not a button -- nobody authors an automation by hand in
-                    // this app. It says where they come from instead.
-                    "Nothing here yet. An automation appears when a goal is worked out: the system compiles what it decided into a template, and a template that keeps succeeding earns its way up this list."}
-            </Caption>
+          {entries.length === 0 ? (
+            catalog.state === "loading" ? (
+              <Caption>Reading the catalog</Caption>
+            ) : search.trim() !== "" || (origin !== "" && total > 0) ? (
+              <Caption>No automation here matches that.</Caption>
+            ) : catalog.error !== "" ? null : (
+              // AN EMPTY SCREEN IS AN INVITATION, and here the invitation is
+              // not a button -- nobody authors an automation by hand in this
+              // app. It says where they come from instead. Settled emptiness
+              // only: a refused read already said so above.
+              <EmptyState title="Nothing here yet" icon={Repeat}>
+                <p>
+                  An automation appears when a goal is worked out: the system compiles what it
+                  decided into a template, and a template that keeps succeeding earns its way up
+                  this list.
+                </p>
+                <p>
+                  A procedure appears when the system has watched an app do the same work more than
+                  once. It replays beside the app first, and runs without a model only once it has
+                  earned it.
+                </p>
+              </EmptyState>
+            )
           ) : null}
 
           <Caption>
@@ -199,6 +367,9 @@ export function AutomationsSection({ selectedId, onSelect }: AutomationsSectionP
             itself rather than a list that would silently never move.
             {catalog.bounded
               ? ` Showing the first ${catalog.scanned} catalogued constructs; there may be more.`
+              : ""}
+            {catalog.proceduresBounded
+              ? ` Showing the first ${PROCEDURE_PAGE_BOUND} learned procedures; there may be more.`
               : ""}
           </Caption>
         </div>
@@ -256,20 +427,22 @@ export function AutomationsSection({ selectedId, onSelect }: AutomationsSectionP
         state={
           selected !== null
             ? statusWord(selected.status)
-            : rows.length === 0
+            : entries.length === 0
               ? "Nothing yet"
               : "Nothing selected"
         }
         detail={
           selected !== null
             ? statusMeaning(selected.status)
-            : rows.length === 0
+            : entries.length === 0
               ? // "Select an automation" on an empty list is an instruction for
                 // a list that does not exist. Say what IS true instead.
                 catalog.state === "loading"
                   ? "reading the catalog"
                   : "nothing to arm yet"
-              : "select an automation to arm or retire it"
+              : anyAuthored
+                ? "select an automation to arm or retire it"
+                : "select one to see where it stands"
         }
         tone={tone}
         acts={acts}
@@ -284,13 +457,93 @@ export function AutomationsSection({ selectedId, onSelect }: AutomationsSectionP
   );
 }
 
+function AuthoredRow({
+  automation,
+  open,
+  onOpen,
+}: {
+  automation: AutomationRow;
+  open: boolean;
+  onOpen: () => void;
+}) {
+  return (
+    <RecordRow
+      icon={<FileCode2 size={16} aria-hidden />}
+      name={automation.name}
+      secondary={
+        <>
+          {constructOriginWord("authored")}
+          {automation.targetNamespace === "" ? null : (
+            <>
+              , registers as <span className="os-mono">{automation.targetNamespace}</span>
+            </>
+          )}
+        </>
+      }
+      state={statusWord(automation.status)}
+      tone={automation.status === "active" ? "accent" : "muted"}
+      stateTitle={statusMeaning(automation.status)}
+      stateExtra={<RungMark automation={automation} />}
+      dim={automation.status === "retired"}
+      open={open}
+      onOpen={onOpen}
+    >
+      <span>{rungWord(rung(automation))}</span>
+    </RecordRow>
+  );
+}
+
+function LearnedRow({
+  procedure,
+  catalog,
+  now,
+  onOpen,
+}: {
+  procedure: ProcedureRow;
+  catalog: AutomationsRead;
+  now: Date;
+  onOpen: () => void;
+}) {
+  const line = evidenceLine(procedure, catalog.policy);
+  const runs = procedure.recordedFrom.runIds.length;
+  // THE STATE WORD IS THE RUNG, IN THE RUNG'S TONE: the accent for the two
+  // that serve. A promotion waiting on the person is said once, by the
+  // evidence line beside it -- the one real event in the list, and the only
+  // place the accent means "yours to do".
+  const tone: RecordTone = procedure.ladder === "canary" || procedure.ladder === "trusted" ? "accent" : "muted";
+  return (
+    <RecordRow
+      icon={<Footprints size={16} aria-hidden />}
+      name={procedureTitle(procedure)}
+      secondary={
+        runs === 0
+          ? constructOriginWord("learned")
+          : `${constructOriginWord("learned")} from ${runs} ${runs === 1 ? "run" : "runs"}`
+      }
+      state={ladderWord(procedure.ladder)}
+      tone={tone}
+      stateExtra={
+        <span className="os-nexus-procedure-fresh" title={procedure.lastReplayAt === "" ? undefined : formatMoment(procedure.lastReplayAt)}>
+          {procedure.lastReplayAt === "" ? "never replayed" : `replayed ${formatFreshness(procedure.lastReplayAt, now)}`}
+        </span>
+      }
+      dim={procedure.ladder === "retired" || procedure.ladder === ""}
+      onOpen={onOpen}
+    >
+      <span className="os-nexus-evidence-line" data-tone={line.tone}>
+        {line.text}
+      </span>
+    </RecordRow>
+  );
+}
+
 /**
  * The ladder, as a mark.
  *
- * FIVE RUNGS DRAWN AS FIVE TICKS, filled to where this template stands. It is
- * a shape rather than a colour, so it survives greyscale and every theme pack,
- * and the accessible name carries the word -- a reader who cannot see the
- * ticks gets "Proven", which is the whole reading.
+ * FOUR TICKS, filled to where this template stands. It is a shape rather than
+ * a colour, so it survives greyscale and every theme pack, and the accessible
+ * name carries the word -- a reader who cannot see the ticks gets "Proven",
+ * which is the whole reading.
  */
 function RungMark({ automation }: { automation: AutomationRow }) {
   const level = rung(automation);

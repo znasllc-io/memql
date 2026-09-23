@@ -19,6 +19,7 @@ import { LanguageSection } from "./LanguageSection";
 import { DecisionsSection } from "./DecisionsSection";
 import { DoorsSection } from "./DoorsSection";
 import { LevelsSection } from "./LevelsSection";
+import { ProceduresSection } from "./ProceduresSection";
 import { RulesSection } from "./RulesSection";
 import { TokensSection } from "./TokensSection";
 import { ConnectionHistoryProvider } from "./useConnectionHistory";
@@ -73,6 +74,9 @@ function sectionFor(sectionId: string, intent: OsAppProps["intent"], consumeInte
   if (sectionId === "levels") return <LevelsSection />;
   if (sectionId === "rules") return <RulesSection />;
   if (sectionId === "decisions") return <DecisionsSection />;
+  // Procedures (epic memql#5408): the certification ladder's values, which
+  // decide when a learned procedure stops needing a model.
+  if (sectionId === "procedures") return <ProceduresSection />;
   if (sectionId === "tokens") return <TokensSection />;
   if (sectionId === "keys") return <KeysSection />;
   // No owned concepts: the shell's own lines are tagged with no app, and

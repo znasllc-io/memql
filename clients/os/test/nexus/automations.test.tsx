@@ -13,7 +13,8 @@ vi.mock("../../src/live/connection", () => ({
 const { NexusApp } = await import("../../src/apps/nexus/NexusApp");
 const { LocalNexusSettingsStore } = await import("../../src/apps/nexus/settings");
 const { rung, rungWord } = await import("../../src/apps/nexus/automations");
-const { constructRow, fakeConnection, withSession } = await import("./harness");
+const { constructRow, fakeConnection, ladderPolicyRow, procedureRow, withSession } = await import("./harness");
+const { chooseOption } = await import("../selectControl");
 
 type Conn = ReturnType<typeof fakeConnection>;
 
@@ -175,6 +176,83 @@ describe("arm and retire", () => {
     fireEvent.click(screen.getByText("Arm it"));
     expect(await screen.findByText(/PERMISSION_DENIED: not yours to arm/)).toBeTruthy();
     expect(screen.getByText("Arm it")).toBeTruthy();
+  });
+});
+
+describe("learned procedures are automations with a different origin", () => {
+  const LEARNED: Row = procedureRow({ id: "p1" });
+
+  it("lists a learned procedure in the SAME list, with its rung as a word and its origin as a fact", async () => {
+    mount(
+      fakeConnection({
+        constructs: [PROVEN],
+        learnedProcedures: [LEARNED],
+        ladderPolicy: [ladderPolicyRow()],
+      }),
+    );
+    const list = await screen.findByLabelText("Automations this instance can replay");
+    const learned = await within(list).findByRole("button", { name: /Reconcile last month's ledger/ });
+    expect(learned.textContent).toContain("Learned from 2 runs");
+    expect(learned.textContent).toContain("Shadow");
+    expect(learned.textContent).toContain("3 of 5 matches beside the app");
+    const authored = within(list).getByRole("button", { name: /nightlyReconcile/ });
+    expect(authored.textContent).toContain("Authored");
+    // No heading splits the list by origin.
+    expect(screen.queryByRole("heading", { name: /Learned/ })).toBeNull();
+  });
+
+  it("puts a procedure waiting on you first, and says so in words", async () => {
+    mount(
+      fakeConnection({
+        constructs: [PROVEN],
+        learnedProcedures: [procedureRow({ id: "p1", shadowMatches: 5, promotionApprovalId: "a-promo" })],
+        ladderPolicy: [ladderPolicyRow()],
+      }),
+    );
+    const list = await screen.findByLabelText("Automations this instance can replay");
+    await within(list).findByText("Promotion waiting for you");
+    const rows = within(list).getAllByRole("button");
+    expect(rows[0]?.textContent).toContain("Promotion waiting for you");
+  });
+
+  it("filters by origin behind Refine, and shows the facet as a removable chip", async () => {
+    mount(fakeConnection({ constructs: [PROVEN], learnedProcedures: [LEARNED] }));
+    await screen.findByText("nightlyReconcile");
+    fireEvent.click(screen.getByRole("button", { name: "Refine automations" }));
+    chooseOption(screen.getByLabelText("Origin"), "Learned only");
+    await waitFor(() => expect(screen.queryByText("nightlyReconcile")).toBeNull());
+    expect(screen.getByText("Reconcile last month's ledger against the bank export")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Remove learned" }));
+    expect(await screen.findByText("nightlyReconcile")).toBeTruthy();
+  });
+
+  it("never offers Arm or Retire on a learned procedure", async () => {
+    mount(fakeConnection({ constructs: [], learnedProcedures: [LEARNED] }));
+    await screen.findByText("Reconcile last month's ledger against the bank export");
+    expect(screen.queryByText("Arm it")).toBeNull();
+    expect(screen.queryByText("Retire it")).toBeNull();
+    // ...and the bar does not tell somebody to arm what cannot be armed.
+    expect(screen.getByText("select one to see where it stands")).toBeTruthy();
+  });
+
+  it("still lists every authored automation when the learned read is refused", async () => {
+    mount(
+      fakeConnection({
+        constructs: [PROVEN],
+        learnedProcedures: new Error("PERMISSION_DENIED: no procedures for you"),
+      }),
+    );
+    expect(await screen.findByText("nightlyReconcile")).toBeTruthy();
+    expect(screen.getByText("PERMISSION_DENIED: no procedures for you")).toBeTruthy();
+  });
+
+  it("looks again at all three reads at once", async () => {
+    const conn = fakeConnection({ constructs: [PROVEN], learnedProcedures: [LEARNED] });
+    mount(conn);
+    await screen.findByText("nightlyReconcile");
+    fireEvent.click(screen.getByRole("button", { name: /Look again/ }));
+    await waitFor(() => expect(conn.query.learnedProceduresForOwner).toHaveBeenCalledTimes(2));
+    expect(conn.query.ladderPolicyCurrent).toHaveBeenCalledTimes(2);
   });
 });
 

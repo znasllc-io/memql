@@ -72,10 +72,20 @@ export function isAutomation(row: Row): boolean {
 export type Rung = "unproven" | "poor" | "fair" | "good" | "proven";
 
 export function rung(automation: AutomationRow): Rung {
-  if (automation.reinforceCount === 0 && automation.reliability === 0) return "unproven";
-  if (automation.reliability >= 0.9) return "proven";
-  if (automation.reliability >= 0.7) return "good";
-  if (automation.reliability >= 0.4) return "fair";
+  return rungFrom(automation.reliability, automation.reinforceCount);
+}
+
+/**
+ * The same reading from the two figures alone, for a construct that is not an
+ * authored automation -- a learned procedure carries both, and its reliability
+ * is the same 0..1 the one writer (`recordConstructReliability`) keeps for
+ * every construct, so it reads with the same five words.
+ */
+export function rungFrom(reliability: number, reinforceCount: number): Rung {
+  if (reinforceCount === 0 && reliability === 0) return "unproven";
+  if (reliability >= 0.9) return "proven";
+  if (reliability >= 0.7) return "good";
+  if (reliability >= 0.4) return "fair";
   return "poor";
 }
 
@@ -159,6 +169,42 @@ export function automationMatches(automation: AutomationRow, search: string): bo
   return (
     automation.name.toLowerCase().includes(needle) ||
     automation.targetNamespace.toLowerCase().includes(needle) ||
-    automation.status.toLowerCase().includes(needle)
+    automation.status.toLowerCase().includes(needle) ||
+    statusWord(automation.status).toLowerCase().includes(needle)
   );
+}
+
+/**
+ * Where an authored automation sits in the merged list, in the bands a
+ * learned procedure sorts into (ladder.ts `procedureBand`): what serves, then
+ * what does not yet, then what serves nothing. An authored automation never
+ * waits on a person, so it never takes the first band. Lower sorts first.
+ */
+export function automationBand(automation: AutomationRow): number {
+  switch (automation.status) {
+    case "active":
+      return 1;
+    case "retired":
+      return 3;
+    default:
+      return 2;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Origin: a FACT on the row and a facet in Refine, never a heading
+// ---------------------------------------------------------------------------
+// A learned procedure is an automation that came from somewhere else -- mined
+// from an app's recorded runs rather than compiled from a goal or written --
+// so it is listed WITH the authored ones and says where it came from. Two
+// headings over two lists would make a person know the origin before they
+// could find the thing, which is the combined list DESIGN.md's "a subset is a
+// filter" was written against.
+
+export type Origin = "authored" | "learned";
+
+export const ORIGINS: readonly Origin[] = ["authored", "learned"];
+
+export function constructOriginWord(origin: Origin): string {
+  return origin === "learned" ? "Learned" : "Authored";
 }

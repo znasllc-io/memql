@@ -12,6 +12,8 @@ import { RunPage } from "./RunPage";
 import { RunsSection } from "./RunsSection";
 import { defaultRunId } from "./world";
 import { NEXUS_APP_ID, NEXUS_LOG_CONCEPTS } from "./concepts";
+import { PROCEDURE_PROMOTION } from "./ladder";
+import { useAutomations } from "./useAutomations";
 import {
   useCancelGoal,
   useCreateGoal,
@@ -68,10 +70,15 @@ import { useSession } from "../../chrome/access";
 // THE SELECTION IS THE APP'S, NOT A SECTION'S
 // ===========================================================================
 // Following a goal to its run and a run to its approval crosses sections, and
-// a selection held inside a section would be lost on the way. So the three ids
-// live here and each section is told what is open -- which also means going to
+// a selection held inside a section would be lost on the way. So the ids live
+// here and each section is told what is open -- which also means going to
 // Approvals to answer something and coming back lands somebody exactly where
-// they were.
+// they were. A learned procedure's page is the fourth (epic memql#5408): its
+// promotion is decided in Approvals, and its approval card links back to it.
+//
+// THE CATALOG IS READ HERE TOO, for the same reason: the Automations list and
+// a promotion's approval card both read it, and two reads of one catalog at
+// two moments would be two answers about where a procedure stands.
 
 /** The concepts this app owns, for its Logs section's subject scope. */
 const LOG_CONCEPTS = NEXUS_LOG_CONCEPTS;
@@ -130,6 +137,22 @@ export function NexusApp({
     return byId;
   }, [goalRows]);
 
+  // THE CATALOG, READ WHILE A VISIBLE SURFACE NEEDS IT (see useAutomations).
+  // Automations always does; Approvals does only while a promotion waits in
+  // it, because only that card names a procedure it has to find.
+  const catalog = useAutomations(
+    sectionId === "automations" ||
+      (sectionId === "approvals" && approvalRows.some((a) => a.kind === PROCEDURE_PROMOTION)),
+  );
+  // Which procedure's page is open, and WHEN it was asked for. A link can
+  // name a procedure the catalog in hand predates -- the page then waits for
+  // a read that started after the ask before it says the procedure is not
+  // there, rather than judging it against rows read before it existed.
+  const [openProcedure, setOpenProcedure] = useState<{ id: string; since: string }>({
+    id: "",
+    since: "",
+  });
+
   function openRun(runId: string) {
     if (runId.trim() === "") return;
     setOpenRunId(runId);
@@ -152,8 +175,20 @@ export function NexusApp({
     navigate("approvals");
   }
 
+  function openProcedureById(constructId: string) {
+    if (constructId.trim() === "") return;
+    const held = catalog.procedures.some((p) => idTail(p.id) === idTail(constructId));
+    setOpenProcedure({ id: constructId, since: held ? "" : new Date().toISOString() });
+    // A PROCEDURE THE CATALOG IN HAND DOES NOT HOLD is looked for again rather
+    // than declared missing: the link came from a live row, and the read is
+    // the one that is behind.
+    if (!held) catalog.read();
+    askContext(`nexus procedure:${idTail(constructId)}`);
+    navigate("automations");
+  }
+
   // A STANDING OPEN INSTRUCTION, id-matched on consumption so acting on a
-  // stale render can never eat a newer one. The payload names ONE of the three
+  // stale render can never eat a newer one. The payload names ONE of the four
   // things this app can open; anything else is left alone rather than guessed
   // at, which is what keeps an unrelated opener from moving somebody's window.
   const handled = useRef("");
@@ -163,15 +198,17 @@ export function NexusApp({
     const runId = typeof payload["runId"] === "string" ? payload["runId"] : "";
     const goalId = typeof payload["goalId"] === "string" ? payload["goalId"] : "";
     const approvalId = typeof payload["approvalId"] === "string" ? payload["approvalId"] : "";
+    const procedureId = typeof payload["procedureId"] === "string" ? payload["procedureId"] : "";
     // A MOMENT, so a rewound goal is shareable. The OS has no per-window URL --
     // this is the shell's deep-link primitive, and an opener that hands one in
     // gets the goal drawn as it stood. Ignored on a run or approval payload,
     // because neither of those surfaces is rewindable.
     const at = typeof payload["at"] === "string" ? payload["at"] : "";
-    if (runId === "" && goalId === "" && approvalId === "") return;
+    if (runId === "" && goalId === "" && approvalId === "" && procedureId === "") return;
     handled.current = intent.id;
     if (runId !== "") openRun(runId);
     else if (approvalId !== "") openApproval(approvalId);
+    else if (procedureId !== "") openProcedureById(procedureId);
     else {
       setOpenAt(at);
       openGoal(goalId);
@@ -218,7 +255,20 @@ export function NexusApp({
   }
   if (sectionId === "automations") {
     return (
-      <AutomationsSection selectedId={selectedAutomationId} onSelect={setSelectedAutomationId} />
+      <AutomationsSection
+        catalog={catalog}
+        selectedId={selectedAutomationId}
+        onSelect={setSelectedAutomationId}
+        openProcedureId={openProcedure.id}
+        openProcedureSince={openProcedure.since}
+        onOpenProcedure={openProcedureById}
+        onCloseProcedure={() => setOpenProcedure({ id: "", since: "" })}
+        approvals={approvalRows}
+        approvalsKnown={approvals.snapshot.state === "live"}
+        runs={runRows}
+        onOpenApproval={openApproval}
+        onOpenRun={openRun}
+      />
     );
   }
   if (sectionId === "approvals") {
@@ -230,6 +280,12 @@ export function NexusApp({
         selectedApprovalId={selectedApprovalId}
         onSelectApproval={setSelectedApprovalId}
         onOpenRun={openRun}
+        procedures={catalog.procedures}
+        onOpenProcedure={openProcedureById}
+        // A DECIDED PROMOTION MOVES THE LADDER, and the catalog is a read: this
+        // window caused the change, so it looks again rather than showing the
+        // procedure still waiting on a decision already made.
+        onPromotionDecided={catalog.read}
       />
     );
   }

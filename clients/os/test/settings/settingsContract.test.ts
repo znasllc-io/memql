@@ -103,6 +103,10 @@ describe("the settings-section contract", () => {
   // SEVENTEEN since Language (memql#5390), directly after Cluster and on its
   // roles: the MemQL line the cluster speaks is the same kind of engineering
   // fact as the versions Cluster lists.
+  //
+  // EIGHTEEN since Procedures (epic memql#5408, #5412), closing the AI group
+  // after Decisions: the certification ladder's values -- when a learned
+  // procedure stops needing a model -- read-only, on the Levels roles.
   it("Settings itself declares its sections", () => {
     const settings = OS_REGISTRY.apps.find((a) => a.id === "settings");
     expect(settings?.sections?.map((s) => s.id)).toEqual([
@@ -120,6 +124,7 @@ describe("the settings-section contract", () => {
       "levels",
       "rules",
       "decisions",
+      "procedures",
       "tokens",
       "keys",
       "logs",
@@ -173,6 +178,10 @@ describe("the settings-section contract", () => {
     expect(rolesOpening("app:settings/levels")).toEqual(["owner", "developer", "admin"]);
     expect(settings?.sections?.find((s) => s.id === "decisions")?.requires).toBe("app:settings/decisions");
     expect(rolesOpening("app:settings/decisions")).toEqual(["owner", "developer", "admin"]);
+    // Procedures mirrors Levels exactly: a read-only reflection of the
+    // cluster's AI configuration, carrying no prompt, credential or act.
+    expect(settings?.sections?.find((s) => s.id === "procedures")?.requires).toBe("app:settings/procedures");
+    expect(rolesOpening("app:settings/procedures")).toEqual(rolesOpening("app:settings/levels"));
     expect(settings?.sections?.find((s) => s.id === "providers")?.requires).toBe("app:settings/providers");
     expect(rolesOpening("app:settings/providers")).toEqual(["owner", "developer"]);
     expect(settings?.sections?.find((s) => s.id === "tokens")?.requires).toBe("app:settings/tokens");
