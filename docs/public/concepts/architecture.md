@@ -816,7 +816,7 @@ Each node type compiles to a separate binary via Go build tags. See [build-tags.
 **Key components:**
 - `NodeService` gRPC bidirectional stream for inter-node communication
 - `PeerManager` for mesh discovery
-- `EventBridge` for distributed event propagation with dedup and TTL
+- `EventBridge` for distributed event propagation: both directions on every stream, dedup, and a sixteen-link hop budget ([mesh event delivery](../operate/mesh-event-delivery.md))
 - Bootstrap strategy pattern selects components per node type
 - `CapabilityRouter` routes function calls to nodes that own them
 
