@@ -216,6 +216,19 @@ var tierDecidesTheRead = map[string]string{
 	"grantsForResource": "memql#5294, as grantsForSubject -- the same concept, tier and annotation.",
 	"grantById":         "memql#5297, as grantsForSubject -- the same concept, tier and annotation; what grantRevoke reads before it acts.",
 
+	// The certification ladder's values (epic memql#5408), the bench argument at
+	// the BOTTOM of the ladder rather than at admin: v1:authoring:ladderPolicy
+	// has no owner field -- the numbers are the deployment's -- its tier's arms
+	// are clusterOwner OR rankFloor="reader", and @requiresRank("reader") bounds
+	// the callers to exactly the second, so the tier decides every row for
+	// every admitted caller. `reader` rather than `viewer` because it is the
+	// spelling the compiled ladder answers before the rbac catalog is readable;
+	// the concept's doc says why that matters at Init. The test that fails if
+	// this reasoning is wrong is TestLadderPolicyIsReadableFromTheReaderRungAndRefusedBelowIt
+	// (ladder_policy_seed_db_test.go), which asserts BOTH halves against the
+	// real tier.
+	"ladderPolicyCurrent": "epic memql#5408, as benchRuns: an ownerless clusterOwner-tier concept read at exactly its rankFloor, here the reader rung every predefined role clears.",
+
 	// The Deployables reads (memql#5303, design
 	// docs/superpowers/specs/2026-09-11-app-access-grants-design.md, D4 /
 	// D12), and the argument is of a THIRD shape: not a rank floor bounding

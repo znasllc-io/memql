@@ -343,3 +343,109 @@ mutation construct recordConstructReliability {
     }
   }
 }
+
+/// Record a LEARNED procedure's payload on its construct (epic memql#5408): the rendered MemQL
+/// source, the procedure TEMPLATE a replay executes, the learned preconditions, and procedureHash --
+/// sha256: over the canonical JSON of the three, the version a procedurePromotion approval pins. The
+/// lift writes it on a first lift and on every re-lift whose hash changed; an unchanged hash writes
+/// nothing, so re-mining an unchanged corpus keeps every ladder counter.
+///
+/// Server-only, and scoping to actor.userId is not the missing piece: the construct is already the
+/// caller's own row. What must not be the caller's is the ASSERTION that this template is what their
+/// recordings show -- the ladder replays it, and a trusted procedure serves goals with no model and
+/// no app, so a caller able to write `procedure` could write the code their own goals then run
+/// unreviewed. The one writer is integrations/procedure, under the owner's borrowed actor and one
+/// internal-origin stamp.
+///
+/// THE THREE ARE ONE VERSION, which is why preconditions defaults to `{}` rather than being left
+/// alone when a caller sends none: a re-lift that learned no predicates must CLEAR the previous
+/// version's, or the stored preconditions would belong to a procedure that no longer exists while
+/// procedureHash claims otherwise. That default erases no co-writer -- this is the only mutation
+/// that writes the field.
+@serverOnly
+mutation construct recordProcedure {
+  args {
+    constructId    string!
+    source         string!
+    procedure      object!
+    preconditions  object
+    procedureHash  string!
+  }
+  update {
+    accept { source, procedure, procedureHash }
+    stamp {
+      id: args.constructId
+      preconditions: args.preconditions ?? {}
+    }
+  }
+}
+
+/// Write where a learned procedure stands on the certification ladder (epic memql#5408): the rung
+/// and the evidence a component/work.Transition carries. The values are computed by the caller --
+/// component/work.Advance is the state machine -- because a MemQL update is a read-merge and carries
+/// no arithmetic, and a rule restated in the DSL would be a second copy of it.
+///
+/// Server-only for recordConstructReliability's reason, sharper: the rung decides whether a goal is
+/// served by the procedure WITHOUT A MODEL, and a caller able to write `trusted` could skip the
+/// shadow evidence and the one human approval the ladder exists to require. Scoping to
+/// actor.userId does not help -- these are already the caller's own rows, and the point is that the
+/// judgement is not theirs to make. The writers are integrations/procedure's shadow comparison,
+/// replay runner, promotion decision and sweeps.
+///
+/// Every evidence argument is OPTIONAL and bound with no default, so a write names exactly the
+/// fields it moves and the read-merge keeps the rest. promotionApprovalId is the one a caller CLEARS:
+/// the empty string is a value here and is written as one, which is how a decided or superseded
+/// approval stops blocking the next proposal. A `?? ""` would instead clear it on every write that
+/// did not mean to touch it -- and the ladder would then propose a second approval beside the open
+/// one.
+@serverOnly
+mutation construct recordConstructLadder {
+  args {
+    constructId          string!
+    ladder               enum("candidate", "shadow", "canary", "trusted", "retired")!
+    shadowMatches        int
+    canaryMatches        int
+    distinctBindings     object
+    failures             int
+    insufficient         int
+    promotionApprovalId  string
+    lastReplayAt         string
+    ladderReason         string
+    ladderChangedAt      string
+  }
+  update {
+    accept { ladder, shadowMatches, canaryMatches, distinctBindings, failures, insufficient, promotionApprovalId, lastReplayAt, ladderReason, ladderChangedAt }
+    stamp {
+      id: args.constructId
+    }
+  }
+}
+
+/// Create the certification ladder's values -- the seed materializer's write for `seed
+/// ladderPolicy primary` (dsl/authoring/seeds.memql), which calls create<Concept> with
+/// <concept>Id by convention and re-asserts the row on every boot.
+///
+/// Server-only, and scoping to actor.userId is not available even in principle: the row has no
+/// owner -- the numbers are the deployment's -- so there is no field for actor.userId to compare
+/// against, and inventing one would give each person a private ladder. What must hold is that no
+/// caller can rewrite the thresholds every person's procedures climb against. The one writer is the
+/// seed materializer, which stamps internal origin, and the concept's cluster-owner write rule stands
+/// behind this annotation.
+@serverOnly
+mutation ladderPolicy createLadderPolicy {
+  args {
+    ladderPolicyId        string!
+    shadowMatches         int!
+    distinctBindings      int!
+    canaryMatches         int!
+    failuresToDemote      int!
+    insufficientToDemote  int!
+    retireAfterDays       int!
+  }
+  insert {
+    accept { shadowMatches, distinctBindings, canaryMatches, failuresToDemote, insufficientToDemote, retireAfterDays }
+    stamp {
+      id: args.ladderPolicyId
+    }
+  }
+}

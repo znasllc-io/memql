@@ -27,7 +27,10 @@
 
 /// Open a run. status is an argument rather than a stamp so epic A2 can open a run in `compiling`.
 /// @serverOnly: a caller who can open a run can fabricate an execution record, and the writer is a
-/// synthetic cluster actor with no actor.userId to scope to.
+/// synthetic cluster actor with no actor.userId to scope to. goalSignature and parentRunId (epic
+/// memql#5408) are accepted so a run can be opened already carrying the goal it serves and the run
+/// that delegated it -- a delegated app session's recording run and a procedure's replay run both
+/// are -- and both are bound with no default, so a writer that has neither writes neither.
 @serverOnly
 @actor
 mutation run createWorkRun {
@@ -52,9 +55,11 @@ mutation run createWorkRun {
     nodeId                 string
     initialChainHead       string
     startedAt              string!
+    goalSignature          string
+    parentRunId            string
   }
   insert {
-    accept { goalId, automationName, templateFingerprint, templateConstructId, templateVersion, input, inputFingerprint, triggeredBy, triggerEvent, variables, forkedFromRunId, forkAtStepKey, status, nodeId, initialChainHead, startedAt }
+    accept { goalId, automationName, templateFingerprint, templateConstructId, templateVersion, input, inputFingerprint, triggeredBy, triggerEvent, variables, forkedFromRunId, forkAtStepKey, status, nodeId, initialChainHead, startedAt, goalSignature, parentRunId }
     stamp {
       id: args.runId
       ownerUserId: actor.userId
@@ -69,7 +74,9 @@ mutation run createWorkRun {
 /// Advance a run: a heartbeat, the chain head, or the terminal status. Read-merge, so every field
 /// not named keeps its prior value. @serverOnly: only the executor knows a run's true status, and
 /// actor.userId scoping would let a caller close somebody's run as succeeded so long as it was
-/// their own.
+/// their own. goalSignature and parentRunId (epic memql#5408) are accepted for the run compile opens
+/// before it knows the goal's signature, and for a child run opened by a writer that learns its
+/// parent afterwards; like every argument here they are written only when named.
 @serverOnly
 mutation run updateWorkRun {
   args {
@@ -95,9 +102,11 @@ mutation run updateWorkRun {
     cancelledBy      string
     actualFootprint  object
     summary          object
+    goalSignature    string
+    parentRunId      string
   }
   update {
-    accept { status, automationName, templateConstructId, templateVersion, templateFingerprint, variables, nodeId, callerSuppliedPayload, heartbeatAt, chainHead, stepOrder, waitingOn, spent, outcome, errorCode, errorMessage, finishedAt, cancelRequested, cancelledBy, actualFootprint, summary }
+    accept { status, automationName, templateConstructId, templateVersion, templateFingerprint, variables, nodeId, callerSuppliedPayload, heartbeatAt, chainHead, stepOrder, waitingOn, spent, outcome, errorCode, errorMessage, finishedAt, cancelRequested, cancelledBy, actualFootprint, summary, goalSignature, parentRunId }
     stamp {
       id: args.runId
     }
@@ -139,6 +148,10 @@ mutation step createWorkStep {
 /// Write a step's receipt: the done / failed / skipped version after the body. Read-merge.
 /// @serverOnly: the receipt is the engine's testimony about its own execution; a caller scoped to
 /// actor.userId could still mark their own failed step done, which is the whole failure mode.
+/// fingerprint (epic memql#5408, gap G4) is the environment a delegated session's FIRST step ran
+/// against. The session writer has sent it on that receipt since epic memql#5396, and until this
+/// argument existed it was dropped without a word -- an internal caller's unknown argument is not
+/// refused -- so every recording's fingerprint was lost and no precondition could be learned.
 @serverOnly
 mutation step updateWorkStep {
   args {
@@ -161,9 +174,10 @@ mutation step updateWorkStep {
     approvalId         string
     resumeAt           string
     externalKey        string
+    fingerprint        object
   }
   update {
-    accept { status, result, resultFingerprint, binding, actualFootprint, postcondition, symptom, attempt, errorCode, errorMessage, finishedAt, durationMs, tokens, cost, childRunId, approvalId, resumeAt, externalKey }
+    accept { status, result, resultFingerprint, binding, actualFootprint, postcondition, symptom, attempt, errorCode, errorMessage, finishedAt, durationMs, tokens, cost, childRunId, approvalId, resumeAt, externalKey, fingerprint }
     stamp {
       id: args.stepId
     }

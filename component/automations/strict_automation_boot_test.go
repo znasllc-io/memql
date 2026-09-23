@@ -169,7 +169,14 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // the two intentions gives 64 and so does asking the loader, but only one of
 // those is evidence. The loader was asked, the way this file's own #5168 note
 // insists -- two arithmetics agreeing is not a measurement.
-const shippedAutomationCount = 64
+//
+// 64 -> 68 in epic memql#5408 (procedure certification and replay), MEASURED:
+// replayLearnedProcedure is the @template compile names when the ladder says a
+// learned procedure serves, onProcedurePromotionDecided applies the one human
+// approval, and demoteProcedures and retireProcedures are the ladder's two
+// sweeps. Four added, none removed; learnFromSucceededRun gained a filter and
+// is the same automation.
+const shippedAutomationCount = 68
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

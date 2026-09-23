@@ -83,6 +83,28 @@ concept construct {
   reinforceCount    int     @description("How many successful runs have reinforced this template. Absent reads as 0.")
   lastReinforced    datetime @description("When the ladder last climbed. Together with reinforceCount this is what decides whether a template has succeeded often enough to be offered back to its owner as a responsibility with its arguments as the form.")
 
+  // The CERTIFICATION LADDER of a learned procedure (epic memql#5408, design
+  // D15, D16 and D23). Every field below is optional and ADDITIVE: a construct
+  // that was authored rather than learned carries none of them, and every
+  // construct written before the epic reads exactly as it did. The DECISIONS
+  // about these values are pure functions in component/work (Advance,
+  // DecideServe); these fields only keep the state machine's state between
+  // events, and the one writer is integrations/procedure, through
+  // recordProcedure and recordConstructLadder.
+  ladder               enum("candidate", "shadow", "canary", "trusted", "retired") @description("Where a LEARNED procedure stands on the certification ladder (epic memql#5408). candidate = lifted, not yet eligible to be compared; shadow = replayed in a sandbox beside the app on every matching recording, never serving a goal; canary = serves the goal with the app standing by to take over on divergence; trusted = serves the goal with no model and no app; retired = unused past the policy's window and served by nothing. ABSENT on every construct that was not learned -- an authored template is not on this ladder at all -- and a reader treats an absent or unknown value as NOT servable (component/work.ParseRung). Written only by recordConstructLadder.")
+  preconditions        object @description("The learned INITIATION SET (design D16), component/procedure.Preconditions as JSON: platform (os, arch), tools (name to version, only the tools the procedure's own exec steps invoke), variables (name to unset or a digest) and emptyWorkspace. A predicate is kept only when EVERY recorded start agreed on it, so an absent key means the recordings disagreed or never measured it -- never that anything matches. A replay whose target cannot measure a learned predicate falls back to the app rather than running blind. Written by recordProcedure.")
+  procedure            object @description("What a replay EXECUTES (epic memql#5408): the procedure TEMPLATE, not the rendered MemQL source, which is the auditable artifact beside it. Shape, version 1: {v, level, title, goalSignature, inputKeys, steps: [{tool, args, symbol}], holes, expect, inputMap, freeParameters, footprint, target, symbols: [{id, tool, template}], model, recordedFrom: {app, model, effort, sessionIds, runIds}}. steps[].args is component/procedure Node JSON; expect holds one component/work.StepExpectation per step; inputMap maps a free hole id to the goal input key that binds it; model is the procedure's own ProcessTree JSON, which the running check aligns the live trace against. Written by recordProcedure on the first lift and on every re-lift that changes it.")
+  procedureHash        string @description("The VERSION a procedurePromotion approval pins: sha256: over the canonical JSON of {source, procedure, preconditions}. A change to any of the three is a different hash, and the decide handler recomputes the approval's artifact hash from THIS field, so an approval raised against an earlier version refuses rather than promoting a procedure the person never saw. Written by recordProcedure beside the payload it hashes.")
+  shadowMatches        int @description("Consecutive shadow comparisons that matched the app in the CURRENT streak. A mismatch resets it to zero. Absent reads as 0.")
+  canaryMatches        int @description("Consecutive clean canary replays since the procedure reached canary. Reaching the policy's canaryMatches moves it to trusted. Absent reads as 0.")
+  distinctBindings     object @description("The binding evidence of the current shadow streak: free parameter hole id to the list of distinct binding DIGESTS (sha256: of the bound value, component/work.BindingDigest) the matching comparisons used. Digests rather than values, because a bound value can be anything the person typed. A procedure with a free parameter is proposed only once every parameter holds at least the policy's distinctBindings digests -- m matches on ONE binding prove nothing about the parameter. Replaced whole on every write, never merged.")
+  failures             int @description("Consecutive failed replays on canary or trusted, a refused start included. Reaching the policy's failuresToDemote demotes the procedure to shadow; a clean replay resets it. Absent reads as 0.")
+  insufficient         int @description("Replays that DIVERGED although every learned precondition held -- evidence that the initiation set is too weak to predict success. Reaching the policy's insufficientToDemote demotes the procedure to shadow. Absent reads as 0.")
+  promotionApprovalId  string @description("The id of the OPEN procedurePromotion approval this procedure is waiting on, exactly as the approval writer returned it, or the empty string when none is open. The ladder never proposes twice while it is set, and it is CLEARED to the empty string when the approval is decided or the streak resets -- which is why this is a plain string and deliberately not a @relationship: a relationship canonicalizes on write, and the stored value has to stay the one the ladder compares against.")
+  lastReplayAt         datetime @description("When this procedure last replayed -- a shadow comparison, a canary replay or a trusted replay. With the row's creation it is what the retirement sweep measures disuse from.")
+  ladderReason         string @description("Why the ladder last moved, as one sentence a person reads in Nexus -- the Reason of the last component/work.Transition written.")
+  ladderChangedAt      datetime @description("When the rung last CHANGED. A write that kept the rung and only moved the evidence leaves this alone.")
+
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="bundleId", target=bundle, direction="outgoing")
   @relationship(type="references", field="catalogedFromBundleId", target=bundle, direction="outgoing")
@@ -108,4 +130,48 @@ concept dependencyEdge {
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="bundleId", target=bundle, direction="outgoing")
+}
+
+// @no-displayCard: a singleton of six positive integers -- the certification
+// ladder's thresholds -- with no field that names the row better than its
+// literal id. Nobody browses to it: MemQL OS reads it once, on Settings >
+// Procedures, and renders each value as a sentence rather than as a card.
+
+/// The certification ladder's VALUES (epic memql#5408): how many shadow matches, across how many
+/// distinct bindings, earn a learned procedure its promotion proposal; how many clean canary replays
+/// make it trusted; how many failed replays -- or replays whose preconditions proved insufficient --
+/// demote it; and how many days of disuse retire it. They are rows rather than constants so a
+/// person can read the numbers the ladder is applying, and so the Go that applies them carries the
+/// same numbers only as component/work.DefaultLadderPolicy() for an absent or unreadable row.
+///
+/// ONE ROW, AT A LITERAL ID: v1:authoring:ladderPolicy:primary, written by `seed ladderPolicy
+/// primary` (dsl/authoring/seeds.memql) through createLadderPolicy. A global seed is re-asserted on
+/// every boot on every node, fields the seed declares winning, so the row is refreshed the way the
+/// cluster singletons are and an edit made anywhere else does not survive a restart. Every read pins
+/// the literal id, so a stray row at any other id is never mistaken for the policy.
+///
+/// TIER: `@rowAuthz(clusterOwner, rankFloor="reader")` -- every signed-in person READS it, and the
+/// WRITE stays where the cluster-owner tier puts it: the cluster owner, or trusted server-side Go
+/// stamping internal origin (the seed materializer), with createLadderPolicy @serverOnly in front of
+/// that. There is no owner field because the numbers are the deployment's, not anybody's. The floor
+/// names `reader` and not `viewer`, although the two are one rung (rank 50, the lowest predefined
+/// one): `reader` is viewer's alias, and it is the spelling the ENGINE'S COMPILED LADDER answers
+/// (component/auth.RoleRank) as well as the seeded catalog. The load-time floor check runs at Init,
+/// before the rbac catalog is readable on a fresh cluster and with no database at all under
+/// memqllint, and there `viewer` would rank 0 and refuse the declaration. So the floor admits every
+/// predefined role; the one caller it refuses is a custom role authored BELOW viewer, whose holder
+/// reads nothing -- and the Go reader treats a row it cannot read as absent and applies the defaults,
+/// which are the numbers this seed carries.
+///
+/// Every value is at least 1 (the schema refuses anything lower), so the row a person reads on
+/// Settings is always the row the ladder applies; Go's normalization of a non-positive value to its
+/// default exists only for the row that is absent.
+@rowAuthz(clusterOwner, rankFloor="reader")
+concept ladderPolicy {
+  shadowMatches         int!  @minimum(1)  @description("m: consecutive shadow comparisons that must match the app before promotion to canary is proposed. The seeded value is 5.")
+  distinctBindings      int!  @minimum(1)  @description("k: how many DISTINCT bindings each free parameter needs across that streak. m matches on one binding prove nothing about the parameter, so the proposal waits for k. The seeded value is 2.")
+  canaryMatches         int!  @minimum(1)  @description("Consecutive clean canary replays that move a procedure from canary to trusted -- on its own evidence, with no second approval. The seeded value is 5.")
+  failuresToDemote      int!  @minimum(1)  @description("Consecutive failed replays on canary or trusted -- a refused start included -- that demote a procedure to shadow. The seeded value is 2.")
+  insufficientToDemote  int!  @minimum(1)  @description("Replays that diverged although every learned precondition held that demote a procedure to shadow at once: the initiation set has been shown not to predict success. The seeded value is 1.")
+  retireAfterDays       int!  @minimum(1)  @description("Days without a replay after which a procedure retires, on any rung. The seeded value is 30.")
 }

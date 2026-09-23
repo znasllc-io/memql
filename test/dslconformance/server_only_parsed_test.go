@@ -296,6 +296,27 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "work/queries.memql", Name: "workRunsInFlight"}:                  true,
 		{Path: "authoring/mutations.memql", Name: "recordConstructReliability"}: true,
 
+		// epic memql#5408, the certification ladder's three writes.
+		//
+		// recordProcedure and recordConstructLadder are recordConstructReliability's
+		// argument, sharper. The rung decides whether a goal is served WITHOUT A
+		// MODEL, and the procedure payload is the code a trusted procedure then
+		// runs on the person's behalf, so a caller able to write either could skip
+		// the shadow evidence and the one human approval the ladder exists to
+		// require. The rows are already the caller's own, so caller-scoping
+		// narrows nothing that matters: what must hold is that a caller cannot
+		// make these ASSERTIONS at all, which a tier cannot say.
+		//
+		// createLadderPolicy has no owner to scope to in the first place. The
+		// ladder's values are the deployment's -- v1:authoring:ladderPolicy
+		// carries no owner field -- so an actor.userId filter would have nothing
+		// to compare, and inventing one would give every person a private ladder.
+		// The one writer is the seed materializer under internal origin, and the
+		// concept keeps the cluster-owner write rule behind this annotation.
+		{Path: "authoring/mutations.memql", Name: "recordProcedure"}:       true,
+		{Path: "authoring/mutations.memql", Name: "recordConstructLadder"}: true,
+		{Path: "authoring/mutations.memql", Name: "createLadderPolicy"}:    true,
+
 		// epic memql#4819 / memql#4820 D15. The six campaign-lifecycle and
 		// progress writers. Every one of them is reached ONLY through the
 		// `campaign*` builtins, which do the authorization first -- an owned-tier
