@@ -3624,94 +3624,6 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   background: var(--os-raised);
 }
 
-/* ---- the repository picker's rows are COLUMNS, not a sentence ----------
- *
- * `.os-row` is a plain flex line, which is right for a list whose rows carry
- * one trailing state and wrong for one carrying three repeated facts: each
- * fact started at whatever x the name before it happened to end at, so over
- * seven repositories the branch column began at seven different offsets
- * (101.75 / 142.94 / 164.19 / 188.05 / 192.2 / 228.09 / 283.08) and so did
- * "pushed". A person scanning for one repository's default branch had to
- * re-find the column on every line.
- *
- * EVERY BASIS IS THE SAME ON EVERY ROW, AND THAT IS THE WHOLE MECHANISM. A
- * flex item with `flex-basis: auto` is sized by its own content, so the row's
- * geometry became a property of the words in it. Here the three fact cells are
- * `0 0 <n>ch` and the name is the only thing that may give ground -- so when a
- * narrow stop forces a shrink, every row is over by the same amount and
- * shrinks by the same amount, and the columns stay columns instead of
- * re-scattering at small widths. (The earlier epic's `flex: 0 1 16ch` failed
- * for the mirror-image reason: its rows differed in what came AFTER the basis,
- * so each one absorbed a different overflow.) The name ellipsises when it
- * runs out; the full `owner/name` is already on the row's `title`.
- *
- * The cells are rendered even when EMPTY (`RepositoryPicker.tsx`), because an
- * absent cell is what let the next one move. `min-height` is what keeps a row
- * with a chip the same height as one without: the list was 38px and 36px
- * alternating down its own length. */
-/* The chain that lets the name actually give ground. A flex or grid box
- * reports its own min-content to the box above it, so without `min-width: 0`
- * at every step the picker simply overflowed a narrow stop rather than
- * ellipsising -- the name never shrank because nothing above it was willing
- * to be smaller than the row wanted to be. */
-.os-repo-rows,
-.os-repo-rows .os-row {
-  min-width: 0;
-}
-.os-repo-rows .os-row-name {
-  flex: 0 1 22ch;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.os-repo-cell {
-  display: inline-flex;
-  align-items: center;
-  min-height: 18px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.os-repo-cell[data-cell="visibility"] {
-  flex: 0 0 10ch;
-}
-/* THE TWO TEXT CELLS ARE BLOCKS, AND THAT IS WHAT MAKES THE ELLIPSIS REAL.
- *
- * `text-overflow` applies to a BLOCK CONTAINER's inline content. A flex
- * container's text is an anonymous flex item, which is blockified, so the
- * declaration was inert on all three cells and the branch column HARD-CLIPPED
- * instead: `release-candidate` measured 112px of text in a 59px cell and
- * rendered `release-c`, with nothing on the line to say a word had been cut.
- * That is the failure the pushed cell's own note names -- a reader cannot tell
- * a clipped value from a real one -- arriving through the cell beside it.
- *
- * Only the two TEXT cells change: `visibility` holds a chip and needs to stay
- * a flex box to centre it, and a chip is a closed vocabulary that cannot
- * overflow. `line-height` is what keeps a block cell the same 18px box the
- * flex ones make. */
-.os-repo-cell[data-cell="branch"],
-.os-repo-cell[data-cell="pushed"] {
-  display: block;
-  line-height: 18px;
-}
-/* Wide enough for the branch names that are not `main`: `release-candidate`,
- * `feature/checkout`. A branch name has no bound, so the cell cannot be sized
- * to hold every one -- what it can do is ellipsise honestly and carry the
- * whole value in its `title`, which is the same answer the row's own name
- * gives (RepositoryPicker.tsx). */
-.os-repo-cell[data-cell="branch"] {
-  flex: 0 0 16ch;
-}
-/* Wide enough for the longest freshness this build can print -- `formatFreshness`
- * tops out at "pushed 9999d ago", ~97px in the caption face -- because a cell
- * that clips its last word ("pushed 276d ag") is worse than the jitter it
- * replaced: the reader cannot tell a clipped number from a real one. */
-.os-repo-cell[data-cell="pushed"] {
-  flex: 0 0 15ch;
-}
-
 /* ---- the map ----
  *
  * Plain SVG, every colour a token, so a theme restyles it with no code and the
@@ -14801,3 +14713,10 @@ a.os-button {
 .os-icon-button[data-os-setup]:has(> .os-attention-dot) .os-dot { right: auto; left: 3px; }
 
 .os-wizard-marks { display: flex; gap: .5rem; align-items: center; }
+
+/* Account ownership and GitHub authorization answer separate questions. */
+.os-compose-source-fields {
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+}

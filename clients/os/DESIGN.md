@@ -115,8 +115,8 @@ App record collections use `RecordList` and `RecordRow`, the Deployables list
 pattern. `LiveList` already provides the list container and arrival semantics.
 Use the row's `actions` slot for independent controls, outside its opening
 button, and `Subhead.meta` for subordinate collection counts. Static collections
-can use `RecordList as="ul"` to retain list/listitem semantics. `PickerRow` is
-reserved for the repository chooser's aligned columns. See the
+can use `RecordList as="ul"` to retain list/listitem semantics. The repository
+chooser uses this same anatomy, with selection state and grouped counts. See the
 [coverage inventory](qa/list-coverage.md) for specialized grids, trees and
 workflow surfaces that retain their interaction model.
 
@@ -262,9 +262,9 @@ surface in the shell that read as a single thought.
   cards about updates, with a picker and three fields arriving in between --
   the owner's word was "overcrowded". It is two steps now: **Source** is the
   choice and nothing else, and the step after it is NAMED BY THE ANSWER
-  (Repository, Zip, Your CI) and holds what that answer needs. Alternatives
-  that answer one question are ONE choice -- GitHub or a token is a choice
-  row, not a button with a second button beneath it -- and a question that
+  (Repository, Zip, Your CI) and holds what that answer needs. Repository
+  creation uses GitHub alone; it does not ask someone to choose a connection
+  mechanism. A question that
   only makes sense once another is answered (what happens when something newer
   lands) waits until it is.
 - **A step that is one choice is answered by choosing.** There is no Continue
@@ -283,7 +283,7 @@ surface in the shell that read as a single thought.
   first now, with a read that writes nothing, and offers what can be done:
   Connect where there is an app, Set up GitHub where there is none and this
   person may register one, and for anybody else no act at all -- the step says
-  who can, and the other way in is one choice away. "Not known" is not "no":
+  who can set it up. "Not known" is not "no":
   when the question goes unanswered the old offer stands, and the refusal
   still lands in place.
 - **The orb names the subject.** The gate wears the MemQL mark, because what is

@@ -1,6 +1,9 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+
+import { Link2Off } from "lucide-react";
 
 import { Button, Caption, Chip, Chips, Fact, Facts } from "../../../kit";
+import { IconButton } from "../../../kit/IconButton";
 import type { Refusal } from "../packages/actions";
 import { toneFor } from "../packages/refusals";
 import { ProblemNotice } from "../packages/ReportView";
@@ -233,12 +236,15 @@ function formatDay(value: string): string {
 
 export function DisconnectGitHub({
   compact = false,
+  summary,
   sourceNames,
   busy,
   refusal,
   onDisconnect,
 }: {
   compact?: boolean;
+  /** The connected identity, inline with the compact action. */
+  summary?: ReactNode;
   sourceNames?: readonly string[];
   busy: boolean;
   refusal: Refusal | null;
@@ -246,8 +252,17 @@ export function DisconnectGitHub({
 }) {
   const [armed, setArmed] = useState(false);
   const named = sourceNames?.join(", ") ?? "";
+  const region = useRef<HTMLElement>(null);
+  const previouslyArmed = useRef(false);
+  useEffect(() => {
+    if (compact && previouslyArmed.current !== armed) {
+      region.current?.querySelector<HTMLButtonElement>(armed ? ".os-confirm-row button" : 'button[aria-label="Disconnect GitHub"]')?.focus();
+    }
+    previouslyArmed.current = armed;
+  }, [armed, compact]);
   return (
-    <section className={compact && !armed ? "os-form-row" : "os-settings-danger"}>
+    <section ref={region} className={compact && !armed ? "os-form-row" : "os-settings-danger"}>
+      {summary}
       {armed ? (
         <>
           <Caption>
@@ -275,7 +290,11 @@ export function DisconnectGitHub({
             Revokes this connection here and at GitHub. Your sources keep their settings and ask you to
             reconnect at their next fetch.
           </Caption>}
-          <Button onClick={() => setArmed(true)}>Disconnect</Button>
+          {compact ? (
+            <IconButton label="Disconnect GitHub" disabled={busy} aria-busy={busy || undefined} onClick={() => setArmed(true)}>
+              <Link2Off size={16} aria-hidden />
+            </IconButton>
+          ) : <Button disabled={busy} onClick={() => setArmed(true)}>Disconnect</Button>}
         </>
       )}
       {refusal ? <ProblemNotice problem={refusal} tone={toneFor(refusal.code)} /> : null}

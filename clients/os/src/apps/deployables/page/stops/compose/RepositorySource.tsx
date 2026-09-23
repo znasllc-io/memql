@@ -1,9 +1,9 @@
 import { GitBranch } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useSession } from "../../../../../chrome/access";
 import { bare } from "../../../people";
-import { Caption, EmptyState, Field, Notice, RefreshButton, Select } from "../../../../../kit";
+import { Caption, EmptyState, Field, Notice, RefreshButton, Select, Subhead } from "../../../../../kit";
 import { toneFor } from "../../../packages/refusals";
 import { ProblemNotice } from "../../../packages/ReportView";
 import { shortRepo } from "../../../packages/rows";
@@ -15,54 +15,15 @@ import { credentialIsRevoked, githubGrantOf, isGithubAppGrant, type CredentialFe
 import { GithubAppOwnerField, OWN_ACCOUNT, SET_UP_SENTENCE, type GithubAppOwner } from "../../../sources/GithubAppSetup";
 import type { GithubAppActions } from "../../../sources/useGithubApp";
 import { useCredentialRevoke, useGithubConnect, useSourceRepositories, type GithubConnectActions, type CredentialRevokeActions } from "../../../sources/useGithubConnect";
+import { probeNote, probeParks } from "../../../sources/probe";
 import type { SourceProbeHandle } from "../../../sources/useProbes";
 import { suggestName, type ComposeDraft } from "../../compose";
 import { NameField } from "./fields";
-import { TokenSourceForm } from "./TokenSourceForm";
 
-// The repository answer, in its readings (epic memql#4915, design sections A
-// and C; the mount point Compose left for it in `Source.tsx`).
-//
-// ===========================================================================
-// THE SAME QUESTION, ANSWERED BY WHAT THIS PERSON ALREADY HAS
-// ===========================================================================
-// "Where does this come from" has one answer and several ways of giving it,
-// and which one a person sees is decided by what the cluster and they hold:
-//
-//   * a CONNECTION -- the picker is the answer. Choosing a repository fills
-//     the URL, the credential and the branch list at once.
-//   * NO connection, and a cluster that has a GitHub App -- what connecting is
-//     for, and Connect GitHub on the floor.
-//   * NO GitHub App on this cluster -- said BEFORE anybody presses anything.
-//     A cluster owner is asked the one question registering an app has, with
-//     Set up GitHub on the floor; anybody else is told who can, and that a
-//     token works meanwhile (`GithubNotSetUp`).
-//   * no app, and NOBODY COULD SAY SO IN ADVANCE -- an engine that predates
-//     the status call. Connect is offered, the cluster refuses it, and the
-//     token form becomes the stop under the server's own sentence. This is
-//     what every cluster without an app got before the status existed.
-//
-// ===========================================================================
-// WHAT IS ASKED OF THE CLUSTER, AND WHEN
-// ===========================================================================
-// `githubConnectBegin` MINTS A STATE ROW, so it is never called to find out
-// whether this cluster has an app. `githubAppStatus` is a READ and mints
-// nothing, so the page asks it as the wizard opens (`useGithubApp`) -- which is
-// what turned "press Connect and learn the cluster cannot" into a step that
-// knows before it offers.
-//
-// The picker's list, by contrast, is a READ, and it runs on its own the
-// moment a connected person opens this stop: the measure of this surface is
-// that they never notice it, and a list that made them press "Look again"
-// before showing anything would be a surface announcing itself.
-//
-// ===========================================================================
-// ONE REF FIELD AND ONE NAME FIELD, EVER
-// ===========================================================================
-// `TokenSourceForm` carries its own ref and name, so the picker's pair renders
-// only while the fold is CLOSED. Two controls writing one draft field, side by
-// side, is two answers to one question -- and in markup it is two inputs with
-// the same accessible name, which is the version a screen reader gets.
+// Repository creation uses the caller's GitHub App grant. Stored token
+// credentials remain available to existing sources and Settings; this flow
+// has no token fallback. The page owns connection actions and the selected
+// source so they survive responsive step remounts.
 
 /** The section that resumes this repository step after OAuth. */
 const COMPOSE_SECTION = "deployables";
@@ -74,14 +35,6 @@ interface RepositorySourceProps {
   credentialFeed?: CredentialFeedStatus;
   probe: SourceProbeHandle;
   /**
-   * Which of the two ways in is chosen -- held by the page, so the choice
-   * survives everything that re-renders this step (a probe answering, a
-   * credential arriving on its feed) rather than flipping back under somebody
-   * mid-sentence. `true` is the token.
-   */
-  tokenFormOpen: boolean;
-  onTokenFormOpenChange: (open: boolean) => void;
-  /**
    * The connect, held by the PAGE. Connecting is this step's forward act, and a
    * wizard's forward act lives on its floor and nowhere else -- so the page
    * that draws the floor owns the call, and this step only says what it is for
@@ -89,6 +42,8 @@ interface RepositorySourceProps {
    */
   connect: GithubConnectActions;
   disconnect?: CredentialRevokeActions;
+  invalidCredentialId?: string;
+  onConnectionInvalid?: (credentialId: string) => void;
   /**
    * What this step needs before it can go on, said to the page that draws the
    * floor: nothing, a first connection, or a fresh one.
@@ -123,8 +78,7 @@ interface RepositorySourceProps {
  *                          register one. The floor's act, like the other two.
  *   unavailable         -- the cluster has none and this person may not. There
  *                          is NO act for it (rule 12: absent, never disabled);
- *                          the floor says why, and the token path is one choice
- *                          away.
+ *                          the floor says who can set it up.
  */
 export type ConnectionNeed = "" | "connect" | "reconnect" | "setup" | "unavailable";
 
@@ -167,8 +121,8 @@ export function RepositorySource(props: RepositorySourceProps) {
 }
 
 function PersonalRepositorySource({
-  draft, onDraft, credentials, probe, tokenFormOpen, onTokenFormOpenChange, connect, onConnectionNeed,
-  app, appOwner = OWN_ACCOUNT, onAppOwner, disconnect,
+  draft, onDraft, credentials, probe, connect, onConnectionNeed,
+  app, appOwner = OWN_ACCOUNT, onAppOwner, disconnect, invalidCredentialId = "", onConnectionInvalid,
 }: RepositorySourceProps & { disconnect: CredentialRevokeActions }) {
   const install = useGithubConnect();
   const repositories = useSourceRepositories();
@@ -186,7 +140,17 @@ function PersonalRepositorySource({
   const connected = grant !== null && !credentialIsRevoked(grant) && !disconnected;
   const grantId = connected ? grant.id : "";
   const returnPath = returnPathFor(COMPOSE_SECTION);
-  const reconnect = ["credential_not_found", "credential_revoked", "reconnect_required"].includes(repositories.refusal?.code ?? "");
+  const authRefusals = ["credential_not_found", "credential_revoked", "reconnect_required"];
+  const [refusedGrant, setRefusedGrant] = useState("");
+  const probeRefused = draft.credentialId === grant?.id && authRefusals.includes(probe.reply?.reason ?? "");
+  useEffect(() => {
+    if (probeRefused && grant) {
+      setRefusedGrant(grant.id);
+      onConnectionInvalid?.(grant.id);
+    }
+  }, [probeRefused, grant?.id, onConnectionInvalid]);
+  const reconnect = authRefusals.includes(repositories.refusal?.code ?? "") || probeRefused ||
+    (grant !== null && (refusedGrant === grant.id || invalidCredentialId === grant.id));
 
   // THE CLUSTER HAS NO GITHUB APP, and only a refused begin can say so.
   // The control is not rendered at all in this reading: a disabled Connect
@@ -255,7 +219,6 @@ function PersonalRepositorySource({
     onDraft({ repoUrl: "", repoRef: "", credentialId: "" });
   }
 
-  const method = tokenFormOpen ? "token" : "github";
   useEffect(() => {
     if (reconnect && draft.credentialId === grant?.id) {
       probe.clear();
@@ -266,15 +229,13 @@ function PersonalRepositorySource({
   // THE CLUSTER HAS NO APP, AND THIS TIME IT IS KNOWN BEFORE ANYBODY PRESSES.
   // Only a status that ANSWERED "not configured" counts: null is "not known",
   // and not known keeps Connect on offer (`useGithubApp`).
-  const appMissing = app?.status != null && !app.status.configured;
+  const appMissing = noApp !== null || (app?.status != null && !app.status.configured);
   const maySetup = appMissing && app?.status?.canSetup === true;
 
   // Said on every change and WITHDRAWN on the way out: a need that outlived
   // its step would leave "Connect GitHub" on the floor of the step after it.
   const need: ConnectionNeed =
-    method !== "github" || noApp !== null
-      ? ""
-      : appMissing
+    appMissing
         ? maySetup ? "setup" : "unavailable"
         : connected && !reconnect
           ? ""
@@ -284,52 +245,16 @@ function PersonalRepositorySource({
     return () => onConnectionNeed?.("");
   }, [need, onConnectionNeed]);
 
-  if (noApp !== null) {
-    return (
-      <>
-        {/* THE TONE IS READ FROM THE CODE, never fixed to error: a cluster
-            with no GitHub App is an operator's condition and this person's
-            next step, and the fault colour would say they broke it
-            (`toneFor`). */}
-        <ProblemNotice problem={noApp} tone={toneFor(noApp.code)} />
-        <TokenSourceForm draft={draft} onDraft={onDraft} credentials={credentials} probe={probe} />
-      </>
-    );
-  }
-
   return (
     <>
-      {/* ONE QUESTION, ASKED AS ONE. This step used to open on a "Connect
-          GitHub" button with a "Use a token instead" button beneath it --
-          two loose controls wedged between two stacks of choice cards, the
-          second of which unfolded a form with a "Hide the token form" button
-          at its foot. They were always the two answers to a single question,
-          so they are one choice now, in the shell's choice row: neither
-          needs a card's sentence to be understood, and the line beneath says
-          what the chosen one does. */}
-      <Field label="How this cluster reaches it">
-        <div className="os-choice-row" role="radiogroup" aria-label="How this cluster reaches it">
-          <button type="button" role="radio" className="os-choice" aria-checked={method === "github"} onClick={() => onTokenFormOpenChange(false)}>GitHub</button>
-          <button type="button" role="radio" className="os-choice" aria-checked={method === "token"} onClick={() => onTokenFormOpenChange(true)}>A token</button>
-        </div>
-      </Field>
-
-      {method === "github" && appMissing ? (
-        <GithubNotSetUp app={app!} maySetup={maySetup} owner={appOwner} onOwner={onAppOwner} />
-      ) : method === "token" ? (
-        <>
-          {/* NOT "ADVANCED". A pasted URL and a personal token are a legitimate
-              first choice -- a host the app does not cover, an organization
-              that will not install one, or a preference -- and it stands
-              beside GitHub as an equal rather than behind a disclosure. */}
-          <Caption>Paste a repository URL, and for a private one a token you hold.</Caption>
-          <TokenSourceForm draft={draft} onDraft={onDraft} credentials={credentials} probe={probe} />
-        </>
+      <Subhead>GitHub</Subhead>
+      {noApp ? <ProblemNotice problem={noApp} tone={toneFor(noApp.code)} /> : null}
+      {appMissing ? (
+        <GithubNotSetUp app={app} maySetup={maySetup} owner={appOwner} onOwner={onAppOwner} />
       ) : connected && !reconnect ? (
         <>
-          <Caption>Connected to GitHub as @{grant.login || "unknown"}.</Caption>
-          <DisconnectGitHub compact busy={disconnect.busy} refusal={disconnect.refusal} onDisconnect={() => void disconnectAccount()} />
-          <Caption>Wrong GitHub account? Disconnect, then reconnect to choose another.</Caption>
+          <DisconnectGitHub compact summary={<Caption>Connected to GitHub as @{grant.login || "unknown"}.</Caption>}
+            busy={disconnect.busy} refusal={disconnect.refusal} onDisconnect={() => void disconnectAccount()} />
           <RepositoryPicker
             page={repositories.page}
             readAt={repositories.readAt}
@@ -348,6 +273,13 @@ function PersonalRepositorySource({
           />
           {draft.repoUrl !== "" ? (
             <>
+              {probe.busy ? <Caption>Checking the repository…</Caption> : null}
+              {probe.reply && !probeParks(probe.reply.reason) && probeNote(probe.reply) ?
+                <p className="os-stop-verdict" data-tone={probe.reply.reason === "ok" ? "ok" : "warn"} role="status">{probeNote(probe.reply)}</p> : null}
+              {probe.error ? <Notice tone="warn" sentence="This cluster could not check the repository just now."
+                detail={probe.error} next="Retry the check or continue to analysis.">
+                <RefreshButton label="Check repository again" busy={probe.busy} onClick={() => void probe.probe(draft.repoUrl, draft.credentialId)} />
+              </Notice> : null}
               <RefField draft={draft} onDraft={onDraft} branches={probe.reply?.branches ?? []} />
               <NameField draft={draft} onDraft={onDraft} label="Call it" placeholderFrom={suggestName(draft, "")} />
             </>
@@ -391,11 +323,10 @@ function PersonalRepositorySource({
  * trip is for and that it ends back here.
  *
  * FOR ANYBODY ELSE there is nothing to press (rule 12: absent, never
- * disabled), so it says who can change it and what works meanwhile -- and the
- * token is one choice away, in the row above.
+ * disabled), so it says who can set it up.
  */
 function GithubNotSetUp({ app, maySetup, owner, onOwner }: {
-  app: GithubAppActions;
+  app?: GithubAppActions;
   maySetup: boolean;
   owner: GithubAppOwner;
   onOwner?: (owner: GithubAppOwner) => void;
@@ -403,7 +334,7 @@ function GithubNotSetUp({ app, maySetup, owner, onOwner }: {
   if (!maySetup) {
     return (
       <Caption>
-        This cluster is not linked to GitHub yet. A cluster owner sets that up once; until then, choose A token.
+        This cluster is not linked to GitHub yet. Ask a cluster owner to set it up before choosing a repository.
       </Caption>
     );
   }
@@ -416,7 +347,7 @@ function GithubNotSetUp({ app, maySetup, owner, onOwner }: {
       <GithubAppOwnerField owner={owner} onOwner={(next) => onOwner?.(next)} idPrefix="os-compose-github-app" />
       {/* IN PLACE, in the tone the CODE asks for -- where the person was when
           they asked. */}
-      {app.refusal ? <ProblemNotice problem={app.refusal} tone={toneFor(app.refusal.code)} /> : null}
+      {app?.refusal ? <ProblemNotice problem={app.refusal} tone={toneFor(app.refusal.code)} /> : null}
     </>
   );
 }

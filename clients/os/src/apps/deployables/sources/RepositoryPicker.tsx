@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { Button, Caption, Chip, Chips, Input, PickerRow as ListRow, Subhead, useNow } from "../../../kit";
+import { Button, Caption, Chips, Input, RecordList, RecordRow, RefreshButton, Subhead, useNow } from "../../../kit";
 import { formatFreshness } from "../../../kit/format";
 import type { Refusal } from "../packages/actions";
 import { toneFor } from "../packages/refusals";
@@ -30,7 +30,7 @@ import { groupRepositories, repositoryCount, type RepositoryPage, type Repositor
 //
 // IT IS NOT A LIVE LIST. Nothing broadcasts a repository -- these rows are
 // not in this graph -- so the footer says when the list was read and offers
-// to look again. A LiveList here would caption liveness that is not there.
+// to refresh. A LiveList here would caption liveness that is not there.
 
 export function RepositoryPicker({
   page,
@@ -92,7 +92,7 @@ export function RepositoryPicker({
   }, []);
 
   return (
-    <div className="os-deploy-publish">
+    <div className="os-stop-body">
       {/* THE REFUSAL FIRST, and above the list rather than instead of it: a
           refusal is not a zero (clients/os/README.md), so a read that failed
           leaves whatever was already read on screen and says what happened
@@ -117,12 +117,14 @@ export function RepositoryPicker({
         </div>
       ) : null}
 
-      {groups.length === 0 && refusal ? null : groups.length === 0 ? (
+      {groups.length === 0 && refusal ? null : groups.length === 0 && (busy || readAt === "") ? (
+        <Caption>{busy ? "Reading repositories…" : "Repositories have not been read yet."}</Caption>
+      ) : groups.length === 0 ? (
         <EmptyPicker total={total} searching={search.trim() !== ""} installUrl={installUrl} onFollow={() => { awaitingInstall.current = true; }} />
       ) : (
         groups.map((group) => (
           <div className="os-files-group" key={group.owner} role="group" aria-label={group.owner}>
-            <Subhead meta={group.repositories.length}>{group.owner}</Subhead>
+            <Subhead meta={readAt !== "" && !busy && !refusal && !group.pending ? group.repositories.length : undefined}>{group.owner}</Subhead>
             {group.pending ? (
               /* A PENDING INSTALLATION IS A GROUP WITH A SENTENCE INSTEAD OF
                  ROWS -- never hidden and never an error. The repair belongs
@@ -147,7 +149,7 @@ export function RepositoryPicker({
                 <Caption>Waiting for an owner of {group.owner} to approve the app.</Caption>
               </>
             ) : (
-              <div className="os-livelist-rows os-repo-rows">
+              <RecordList as="ul" label={`${group.owner} repositories`}>
                 {group.repositories.map((repo) => (
                   <RepositoryChoice
                     key={repo.fullName}
@@ -157,7 +159,7 @@ export function RepositoryPicker({
                     onChoose={onChoose}
                   />
                 ))}
-              </div>
+              </RecordList>
             )}
           </div>
         ))
@@ -175,9 +177,7 @@ export function RepositoryPicker({
               : `Nothing to show, read ${formatFreshness(readAt, now)}.`
             : `Showing ${shown} of ${total}, read ${formatFreshness(readAt, now)}.`}
         </span>
-        <Button onClick={onLookAgain} busy={busy} busyLabel="Reading...">
-          Look again
-        </Button>
+        <RefreshButton label="Refresh repositories" onClick={onLookAgain} busy={busy} />
         {/* THE WALK, on demand and named for what it does. There is no
             infinite scroll here: a person picking one repository out of many
             should not have to make the browser fetch by accident. */}
@@ -201,39 +201,9 @@ export function RepositoryPicker({
   );
 }
 
-/**
- * One repository.
- *
- * `private` is a chip and `public` says NOTHING: most repositories are
- * public, and silence is the default state -- a lock icon AND the word would
- * be the same fact twice. `visibility` is printed only when GitHub says
- * something other than the two it already told us through `private`, which
- * is how `internal` reaches the eye without every other row carrying a word
- * it did not need -- and it REPLACES the private chip when it is present,
- * because "private internal" is that same fact twice with an extra word.
- *
- * ===========================================================================
- * THE FACTS ARE COLUMNS, AND EVERY ROW RENDERS ALL THREE
- * ===========================================================================
- * `.os-row` is a plain flex line, so a fact placed after the name starts
- * wherever that name happens to end: measured over seven rows, the branch
- * began at seven different offsets (101.75 / 142.94 / 164.19 / 188.05 /
- * 192.2 / 228.09 / 283.08) and so did "pushed", which is a list somebody has
- * to re-find the same column in on every line.
- *
- * So each fact sits in a cell of its own with a DEFINITE width, and the cell
- * is rendered EVEN WHEN IT IS EMPTY -- an absent cell is exactly what let
- * the next one move. The names are the visible content and the cells are
- * geometry, so the empty ones say nothing.
- *
- * A DEFINITE WIDTH MAKES THE OVERFLOW SOMEBODY ELSE'S PROBLEM, and the two
- * text cells answer it in the browser (styles/index.css): they are BLOCKS, so
- * `text-overflow` actually applies, and the branch carries its whole value on
- * a `title`. Measured before that, `release-candidate` rendered `release-c`
- * with no ellipsis -- a clipped branch name is indistinguishable from a real
- * one, which is the same objection the pushed cell's width was chosen to
- * avoid.
- */
+/** Repository choices use the same flat row anatomy as every record list.
+ * The default branch is the secondary identity line; privacy and selection
+ * stay in the state column, and the last push remains a quiet summary fact. */
 function RepositoryChoice({
   repo,
   chosen,
@@ -247,35 +217,17 @@ function RepositoryChoice({
 }) {
   const unusual = repo.visibility !== "" && repo.visibility !== "public" && repo.visibility !== "private";
   return (
-    <ListRow
+    <RecordRow
       name={<span title={repo.fullName}>{repo.name || repo.fullName}</span>}
+      secondary={repo.defaultBranch ? <span title={repo.defaultBranch}>{repo.defaultBranch}</span> : undefined}
       current={chosen}
       open={chosen}
       onOpen={() => onChoose(repo)}
-      state={chosen ? <span className="os-livelist-tick">chosen</span> : null}
+      state={unusual ? repo.visibility : repo.private ? "private" : undefined}
+      stateExtra={chosen ? <span className="os-livelist-tick">chosen</span> : null}
     >
-      <span className="os-repo-cell" data-cell="visibility">
-        {unusual ? (
-          <Chip tone="muted">{repo.visibility}</Chip>
-        ) : repo.private ? (
-          <Chip tone="muted">private</Chip>
-        ) : null}
-      </span>
-      {/* THE WHOLE BRANCH NAME IS ON THE `title`, for the reason the row's own
-          name carries one: the cell has a definite width, a branch name has
-          no bound, and `release-candidate` ellipsises. The mark says a word
-          was cut and the title says which. */}
-      <span
-        className="os-repo-cell os-caption os-mono"
-        data-cell="branch"
-        {...(repo.defaultBranch === "" ? {} : { title: repo.defaultBranch })}
-      >
-        {repo.defaultBranch}
-      </span>
-      <span className="os-repo-cell os-caption" data-cell="pushed">
-        {repo.pushedAt === "" ? "" : `pushed ${formatFreshness(repo.pushedAt, now)}`}
-      </span>
-    </ListRow>
+      {repo.pushedAt ? <span>pushed {formatFreshness(repo.pushedAt, now)}</span> : null}
+    </RecordRow>
   );
 }
 

@@ -577,7 +577,7 @@ describe("the repository picker", () => {
 
   it("offers to look again, because this is a reading and not a feed", async () => {
     const { onLookAgain } = renderPicker();
-    await click(screen.getByRole("button", { name: "Look again" }));
+    await click(screen.getByRole("button", { name: "Refresh repositories" }));
     expect(onLookAgain).toHaveBeenCalledTimes(1);
     // No walk to offer when the page said there was none.
     expect(screen.queryByRole("button", { name: "Read more" })).toBeNull();
@@ -595,7 +595,7 @@ describe("the repository picker", () => {
   it("draws no search box when there is nothing to search", () => {
     renderPicker({ page: repositoryPageFrom(repositoriesReply({})), readAt: "" });
     expect(screen.queryByLabelText("Search repositories")).toBeNull();
-    expect(screen.getByText("This connection reaches no repositories yet.")).toBeTruthy();
+    expect(screen.getByText("Repositories have not been read yet.")).toBeTruthy();
   });
 
   it("makes empty an invitation, with a real anchor to a new tab", () => {
@@ -632,7 +632,7 @@ describe("the repository picker", () => {
     expect(link.getAttribute("rel")).toBe("noreferrer noopener");
     // ON THE ROW THAT READS AGAIN, because reading again is what follows it...
     const row = link.closest(".os-refresh-row") as HTMLElement;
-    expect(within(row).getByRole("button", { name: "Look again" })).toBeTruthy();
+    expect(within(row).getByRole("button", { name: "Refresh repositories" })).toBeTruthy();
     // ...and NOT a second button there: it leaves the product, and the row has
     // its one act already.
     expect(link.classList.contains("os-button")).toBe(false);
@@ -714,7 +714,7 @@ describe("reading the picker's list", () => {
       repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "acme/widget" })] }),
     });
     expect(screen.getByText("Not read yet.")).toBeTruthy();
-    await click(screen.getByRole("button", { name: "Look again" }));
+    await click(screen.getByRole("button", { name: "Refresh repositories" }));
     // `credentialId: ""` is a documented value -- "the grant I hold" -- and
     // not an omission, so it is sent rather than left out.
     expect(connection.callsNamed("sourceRepositories")).toEqual([
@@ -730,7 +730,7 @@ describe("reading the picker's list", () => {
         nextPage: 2,
       }),
     });
-    await click(screen.getByRole("button", { name: "Look again" }));
+    await click(screen.getByRole("button", { name: "Refresh repositories" }));
     await screen.findByRole("button", { name: /widget/ });
     await click(screen.getByRole("button", { name: "Read more" }));
     expect(connection.callsNamed("sourceRepositories").at(-1)).toBe(
@@ -739,7 +739,7 @@ describe("reading the picker's list", () => {
     // The same fixture came back, so the walk shows it twice -- which is
     // exactly what a re-read must NOT do.
     await waitFor(() => expect(screen.getAllByRole("button", { name: /widget/ })).toHaveLength(2));
-    await click(screen.getByRole("button", { name: "Look again" }));
+    await click(screen.getByRole("button", { name: "Refresh repositories" }));
     await waitFor(() => expect(screen.getAllByRole("button", { name: /widget/ })).toHaveLength(1));
   });
 
@@ -757,11 +757,11 @@ describe("reading the picker's list", () => {
     };
     h.connection = fakeConnection(seed);
     render(<PickerHost />);
-    await click(screen.getByRole("button", { name: "Look again" }));
+    await click(screen.getByRole("button", { name: "Refresh repositories" }));
     await screen.findByRole("button", { name: /widget/ });
 
     seed.repositoriesError = "reconnect_required: GitHub refused this connection.";
-    await click(screen.getByRole("button", { name: "Look again" }));
+    await click(screen.getByRole("button", { name: "Refresh repositories" }));
     expect(await screen.findByText("Your GitHub connection needs renewing")).toBeTruthy();
     expect(screen.getByText("GitHub refused this connection.")).toBeTruthy();
     expect(screen.getByRole("button", { name: /widget/ })).toBeTruthy();
@@ -772,7 +772,7 @@ describe("reading the picker's list", () => {
     mountPicker({
       repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "acme/widget" })] }),
     });
-    await click(screen.getByRole("button", { name: "Look again" }));
+    await click(screen.getByRole("button", { name: "Refresh repositories" }));
     const row = await screen.findByRole("button", { name: /widget/ });
     await click(row);
     expect(screen.getByRole("button", { name: /widget/ }).getAttribute("data-current")).toBe("true");
@@ -1196,7 +1196,6 @@ function personalSource(credentials: Row[], userId = "u-me") {
     draft={EMPTY_DRAFT} onDraft={vi.fn()}
     credentials={credentials.map(credentialFromRow)}
     probe={{ reply: null, error: "", busy: false, probe: vi.fn(async () => {}), clear: vi.fn() }}
-    tokenFormOpen={false} onTokenFormOpenChange={vi.fn()}
     /* The connect is the page's: it is the step's forward act, and a wizard's
        forward act lives on its floor. A step mounted alone gets an idle one. */
     connect={{ busy: false, refusal: null, installUrl: "", connect: vi.fn(async () => false), learn: vi.fn(async () => false), clear: vi.fn() } as never}
@@ -1251,7 +1250,7 @@ describe("disconnecting from the repository chooser", () => {
   afterEach(() => { h.connection = null; });
 
   async function confirmDisconnect(region: HTMLElement) {
-    await click(within(region).getByRole("button", { name: "Disconnect" }));
+    await click(within(region).getByRole("button", { name: "Disconnect GitHub" }));
     await click(within(region).getByRole("button", { name: "Disconnect" }));
   }
 
@@ -1259,7 +1258,7 @@ describe("disconnecting from the repository chooser", () => {
     const { connection, region } = await composeSource({ credentials: [GRANT], repositories: repositoriesReply({ repositories: [WIDGET] }) });
     await within(region).findByRole("button", { name: /widget/ });
     expect(within(region).getByText(/Connected to GitHub as @/)).toBeTruthy();
-    await click(within(region).getByRole("button", { name: "Disconnect" }));
+    await click(within(region).getByRole("button", { name: "Disconnect GitHub" }));
     expect(within(region).getByText(/The GitHub App stays installed/)).toBeTruthy();
     await click(within(region).getByRole("button", { name: "Cancel" }));
     expect(connection.callsNamed("sourceCredentialRevoke")).toHaveLength(0);
@@ -1315,23 +1314,43 @@ describe("disconnecting from the repository chooser", () => {
     await click(await within(region).findByRole("button", { name: /widget/ }));
     expect(await within(region).findByText("acme/widget at default branch")).toBeTruthy();
     vi.spyOn(connection.query, "sourceRepositories").mockResolvedValueOnce(builtinReply("sourceRepositories", [repositoriesReply({ reason: "reconnect_required" })]));
-    await click(within(region).getByRole("button", { name: "Look again" }));
+    await click(within(region).getByRole("button", { name: "Refresh repositories" }));
     await waitFor(() => expect(floorAct("Reconnect GitHub")).toBeTruthy());
     expect(within(region).queryByText("acme/widget at default branch")).toBeNull();
     expect(within(region).queryByLabelText(BRANCH_FIELD)).toBeNull();
   });
 
-  it("does not erase a pasted-token draft in the automatic no-app fallback", async () => {
+  it("offers reconnect when the selected repository probe loses authorization and keeps that state across steps", async () => {
+    const { region } = await composeSource({ credentials: [GRANT], repositories: repositoriesReply({ repositories: [WIDGET] }), sourceProbe: { "cred-grant": probeReply({ reason: "reconnect_required", reachable: false }) } });
+    await click(await within(region).findByRole("button", { name: /widget/ }));
+    await waitFor(() => expect(floorAct("Reconnect GitHub")).toBeTruthy());
+    expect(within(region).queryByText("acme/widget at default branch")).toBeNull();
+    expect(within(region).queryByRole("button", { name: /widget/ })).toBeNull();
+    await click(within(region).getByRole("button", { name: "Source A repository" }));
+    await click(within(region).getByRole("button", { name: /^Repository(?: |$)/ }));
+    await waitFor(() => expect(floorAct("Reconnect GitHub")).toBeTruthy());
+    expect(within(region).queryByRole("button", { name: /widget/ })).toBeNull();
+  });
+
+  it("renders a rate-limited repository probe as a warning, never success", async () => {
+    const { region } = await composeSource({ credentials: [GRANT], repositories: repositoriesReply({ repositories: [WIDGET] }), sourceProbe: { "cred-grant": probeReply({ reason: "rate_limited", reachable: false }) } });
+    await click(await within(region).findByRole("button", { name: /widget/ }));
+    const warning = await within(region).findByText(/GitHub is rate-limiting/);
+    expect(warning.getAttribute("data-tone")).toBe("warn");
+  });
+
+  it("does not offer pasted credentials as a creation fallback when GitHub is missing", async () => {
     h.connection = fakeConnection({});
     const onDraft = vi.fn();
     render(withSession(<RepositorySource
       draft={{ ...EMPTY_DRAFT, choice: "repo", repoUrl: "https://github.com/acme/token-repo", credentialId: "token-only" }}
       onDraft={onDraft} credentials={[credentialFromRow(credentialRow({ id: "token-only", ownerUserId: "u-me" }))]}
       probe={{ reply: null, error: "", busy: false, probe: vi.fn(async () => {}), clear: vi.fn() }}
-      tokenFormOpen={false} onTokenFormOpenChange={vi.fn()}
-      connect={{ busy: false, refusal: { code: "github_app_not_configured", message: "No app." }, installUrl: "", connect: vi.fn(async () => {}), learn: vi.fn(async () => false), clear: vi.fn() }}
+        connect={{ busy: false, refusal: { code: "github_app_not_configured", message: "No app." }, installUrl: "", connect: vi.fn(async () => {}), learn: vi.fn(async () => false), clear: vi.fn() }}
     />, { userId: "u-me" }));
-    expect(await screen.findByDisplayValue("https://github.com/acme/token-repo")).toBeTruthy();
+    expect(screen.queryByDisplayValue("https://github.com/acme/token-repo")).toBeNull();
+    expect(screen.queryByRole("radio", { name: "A token" })).toBeNull();
+    expect(screen.getByText(/Ask a cluster owner to set it up/)).toBeTruthy();
     expect(onDraft).not.toHaveBeenCalled();
   });
 
@@ -1357,7 +1376,7 @@ describe("the compose Source stop, with a connection", () => {
     await waitFor(() => expect(floorAct("Connect GitHub")).toBeTruthy());
     expect(connection.callsNamed("sourceRepositories")).toEqual([]);
     expect(within(region).queryByText("This connection reaches no repositories yet.")).toBeNull();
-    await click(within(region).getByRole("radio", { name: "A token" }));
+    expect(within(region).queryByRole("radio", { name: "A token" })).toBeNull();
     expect(within(region).queryByRole("option", { name: /colleague/ })).toBeNull();
   });
 
@@ -1406,7 +1425,7 @@ describe("the compose Source stop, with a connection", () => {
     ]);
     // The token form is under it, closed: one answer on screen at a time.
     expect(within(region).queryByLabelText(URL_FIELD)).toBeNull();
-    expect(within(region).getByRole("radio", { name: "A token" })).toBeTruthy();
+    expect(within(region).queryByRole("radio", { name: "A token" })).toBeNull();
   });
 
   it("fills the URL, the credential and the branches from the one it was given", async () => {
@@ -1509,13 +1528,12 @@ describe("the compose Source stop, without one", () => {
     h.connection = null;
   });
 
-  it("offers Connect above the token form, and mints nothing until something is pressed", async () => {
+  it("offers only GitHub connection and mints nothing until something is pressed", async () => {
     const { connection, region } = await composeSource({ credentials: [] });
 
     await waitFor(() => expect(floorAct("Connect GitHub")).toBeTruthy());
-    // THE TWO WAYS IN ARE ONE CHOICE, as equals, with GitHub chosen.
-    expect(within(region).getByRole("radio", { name: "GitHub" }).getAttribute("aria-checked")).toBe("true");
-    expect(within(region).getByRole("radio", { name: "A token" }).getAttribute("aria-checked")).toBe("false");
+    expect(within(region).getByRole("heading", { name: "GitHub" })).toBeTruthy();
+    expect(within(region).queryByRole("radio", { name: "A token" })).toBeNull();
     // Beginning a connect mints a state row, so it is never how the wizard
     // finds out whether this cluster has an app. The status is a READ, asked
     // once as the wizard opens -- and this fake answers it no row, which is
@@ -1523,11 +1541,6 @@ describe("the compose Source stop, without one", () => {
     expect(connection.callsNamed("githubAppStatus")).toHaveLength(1);
     expect(connection.callsNamed("githubConnectBegin")).toHaveLength(0);
     expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
-    // The fold is closed, and one click away.
-    expect(within(region).queryByLabelText(URL_FIELD)).toBeNull();
-    await click(within(region).getByRole("radio", { name: "A token" }));
-    expect(within(region).getByLabelText(URL_FIELD)).toBeTruthy();
-    await click(within(region).getByRole("radio", { name: "GitHub" }));
     expect(within(region).queryByLabelText(URL_FIELD)).toBeNull();
   });
 
@@ -1537,10 +1550,10 @@ describe("the compose Source stop, without one", () => {
     });
     await waitFor(() => expect(floorAct("Reconnect GitHub")).toBeTruthy());
     // A lapsed grant reads no repositories, so it is offered no picker.
-    expect(within(region).queryByRole("button", { name: "Look again" })).toBeNull();
+    expect(within(region).queryByRole("button", { name: "Refresh repositories" })).toBeNull();
   });
 
-  it("makes the token form the whole stop on a cluster with no GitHub App", async () => {
+  it("explains missing GitHub setup without a token escape", async () => {
     const { region } = await composeSource({
       credentials: [],
       // ANSWERED, not thrown: the engine's connectResult carries the reason as a
@@ -1562,7 +1575,7 @@ describe("the compose Source stop, without one", () => {
     // no fold to find it behind.
     expect(within(region).queryByRole("button", { name: "Connect GitHub" })).toBeNull();
     expect(within(region).queryByRole("radio", { name: "A token" })).toBeNull();
-    expect(within(region).getByLabelText(URL_FIELD)).toBeTruthy();
+    expect(within(region).queryByLabelText(URL_FIELD)).toBeNull();
   });
 });
 
@@ -1648,17 +1661,15 @@ describe("the compose Source stop, on a cluster with no GitHub App", () => {
       githubApp: { configured: false, canSetup: false },
     });
 
-    expect(await within(region).findByText(/A cluster owner sets that up once; until then, choose A token/)).toBeTruthy();
+    expect(await within(region).findByText(/Ask a cluster owner to set it up before choosing a repository/)).toBeTruthy();
     // Rule 12: absent, never disabled. Not Connect, which cannot work, and not
     // Set up, which is not theirs.
     expect(floorAct("Connect GitHub")).toBeNull();
     expect(floorAct("Set up GitHub")).toBeNull();
     expect(within(region).queryByRole("radio", { name: "Your account" })).toBeNull();
     expect(connection.callsNamed("githubConnectBegin")).toHaveLength(0);
-    // THE TOKEN IS ONE CHOICE AWAY, and the step is an ordinary one again.
-    await click(within(region).getByRole("radio", { name: "A token" }));
-    expect(within(region).getByLabelText(URL_FIELD)).toBeTruthy();
-    expect(within(region).queryByText(/not linked to GitHub/)).toBeNull();
+    expect(within(region).queryByRole("radio", { name: "A token" })).toBeNull();
+    expect(within(region).queryByLabelText(URL_FIELD)).toBeNull();
   });
 
   it("offers Connect as ever on a cluster that has one", async () => {

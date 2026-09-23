@@ -489,6 +489,7 @@ const VIEWS: Record<
   // The same app with a GitHub account connected: press + and choose
   // "A repository" and the Repository step is the picker, not the invitation.
   connected: { seed: CONNECTED, framed: true, render: () => <Lists section="deployables" /> },
+  "connected-empty": { seed: { ...CONNECTED, repositories: repositoriesReply({ repositories: [], installations: [], pending: [] }) }, framed: true, render: () => <Lists section="deployables" /> },
   // The cluster's GitHub App, in each reading a surface has of it.
   "github-owner": { seed: NO_APP_OWNER, framed: true, render: () => <Lists section="deployables" /> },
   "github-member": { seed: NO_APP_MEMBER, role: "developer", framed: true, render: () => <Lists section="deployables" /> },

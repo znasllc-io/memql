@@ -41,24 +41,11 @@ import { RepositorySource, type ConnectionNeed } from "./RepositorySource";
 // ===========================================================================
 // THE PROBE IS A COURTESY. IT ANSWERS, IT DOES NOT DECIDE
 // ===========================================================================
-// On blur the repository branch asks `sourceProbe` whether this cluster can
-// read the tree, and renders its typed reason. What that reason is WORTH is
-// `sources/probe.ts`'s rule and not this file's: a definite answer about the
-// repository parks the flow, and an answer about the probe itself -- rate
-// limiting, or a probe that threw -- says so, leaves the field editable and
-// leaves Analyze reachable. A public repository is never blocked by a probe
-// that could not run (design H).
-//
-// ===========================================================================
-// THE REPOSITORY BRANCH IS THREE READINGS, AND IT OWNS THEM
-// ===========================================================================
-// GitHub Connect (memql#4915) landed in the slot this file left for it: with
-// a grant the branch is a picker over the repositories that grant can see,
-// without one it offers Connect, and on a cluster with no GitHub App it is
-// the URL-plus-token form it has always been. `RepositorySource` decides
-// which, because that decision is about a person's credentials rather than
-// about which of the three SOURCES they chose -- which is all this file is
-// for.
+// Choosing a repository probes it under the caller's GitHub grant. A probe
+// that could not run retains a retry and its server explanation. A definite
+// authorization refusal clears the selection and offers reconnection. New
+// repository creation has no pasted-token route; existing source details
+// retain their stored-credential controls.
 
 /** What each way in is called, as a person chose it. */
 export const SOURCE_KIND_LABEL: Readonly<Record<string, string>> = {
@@ -155,10 +142,10 @@ export function ComposeSourceDetailStep({
   siteId,
   clusterDomain,
   locked,
-  tokenFormOpen,
-  onTokenFormOpenChange,
   connect,
   disconnect,
+  invalidCredentialId,
+  onConnectionInvalid,
   onConnectionNeed,
   app,
   appOwner,
@@ -178,12 +165,11 @@ export function ComposeSourceDetailStep({
   clusterDomain: string;
   /** Chosen once: after Analyze the step is facts, not fields. */
   locked: boolean;
-  /** Which way into a repository is chosen; `true` is the token. */
-  tokenFormOpen: boolean;
-  onTokenFormOpenChange: (open: boolean) => void;
   /** The GitHub connect, held by the page because it is the floor's act. */
   connect: GithubConnectActions;
   disconnect?: CredentialRevokeActions;
+  invalidCredentialId?: string;
+  onConnectionInvalid?: (credentialId: string) => void;
   /** What the repository step needs before it can go on; see RepositorySource. */
   onConnectionNeed?: (need: ConnectionNeed) => void;
   /** The cluster's GitHub App and where an owner would register one -- held by
@@ -210,10 +196,10 @@ export function ComposeSourceDetailStep({
             credentials={credentials}
             credentialFeed={credentialFeed}
             probe={probe}
-            tokenFormOpen={tokenFormOpen}
-            onTokenFormOpenChange={onTokenFormOpenChange}
             connect={connect}
             disconnect={disconnect}
+            invalidCredentialId={invalidCredentialId}
+            onConnectionInvalid={onConnectionInvalid}
             onConnectionNeed={onConnectionNeed}
             app={app}
             appOwner={appOwner}

@@ -33,7 +33,7 @@ warnings are absent almost always, and a capture of an unbroken machine is
 what says the page has not become a wall of advisories), or `overview`,
 `store`, `quiet`, `picker`, `readonly`, `hidden`
 (the Store surface), or `list`, `sources`, `list-empty`, `sources-empty`,
-`connected`, `github-owner`, `github-member`, `settings-no-app`,
+`connected`, `connected-empty`, `github-owner`, `github-member`, `settings-no-app`,
 `settings-no-app-member`, `settings-app` (the Deployables app, whole), or
 `origins-silent`, `origins-mixed`, `origins-reporting` (Data origins); `mode`
 is `dark` or `light`. **Take at least one narrow capture** (`820,760`): two of
@@ -151,3 +151,11 @@ The `accounts` and `accounts-empty` views compare the Accounts registry with
 `list` (Deployables). `origins-mixed` exercises records with separate actions
 and absent measurements. Check light and dark modes at wide and narrow widths.
 The full app inventory and inspected exceptions are in [list-coverage.md](list-coverage.md).
+
+## GitHub repository creation
+
+Use `connected` for a populated repository picker and `connected-empty` for a
+connected GitHub account whose completed read returns no repositories. In either
+view, open Add deployable and choose A repository. Check desktop and narrow
+layouts with both `mode=light` and `mode=dark`. These use deterministic fixture
+connections and do not mint credentials or modify a real account.

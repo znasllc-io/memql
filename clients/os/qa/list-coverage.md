@@ -22,7 +22,7 @@ answer does display zero.
 | Accounts | Client registry; billing accounts; credentials; client group links and bounded ledger evidence |
 | Bin | Archived files and folders, retaining selection and adjacent inspector |
 | Files | Browsing/search results (including Desktop, Bin and materialized places); backups; version-history title count |
-| Deployables | Deployables and Sources already canonical; source-produced apps, source credentials, Library zip choices, package report records, paired development stores; repository group counts |
+| Deployables | Deployables and Sources already canonical; source-produced apps, source credentials, Library zip choices, package report records, paired development stores; GitHub repository choices and group counts |
 | Fleet | Machines; machine apps/models; recommended models; previous downloads; recent work; app sessions and produced artifacts; available models and host machines; catalog and uncatalogued models; workspaces/replicas; routing call history and policy references |
 | Users | People, groups and roles; memberships, invitations, standing managers, role holders and sessions |
 | Campaigns | Campaigns, audiences, senders, templates and rules; audience recipients and delivery ledger |
@@ -55,12 +55,12 @@ models below:
   hardware/environment facts, consent checks, routing decision comparisons,
   benchmark plots and ordered decision evidence keep the axes that give values
   meaning. They are not independent records with an open action.
-- **Pickers and editors:** repository selection has aligned visibility, branch
-  and date columns and retains `PickerRow` (the formerly generic bordered `Row`
-  is now explicitly named for this exception). Equipment banks, account/source
-  selection, policy/task-rule composition, ordered source/configuration editors,
+- **Pickers and editors:** Equipment banks, account/source selection,
+  policy/task-rule composition, ordered source/configuration editors,
   preference controls and merge-tag controls remain form controls. Library zip
-  record choices can use `RecordRow`, so those were migrated.
+  record choices and GitHub repository choices use `RecordRow`. Repository
+  choices preserve organization groups, branch/privacy/push facts, selected state,
+  paging, and explicit refresh while following the canonical list anatomy.
 - **Rich content/workflows:** conversations/transcripts, full-text chunk review,
   upload progress, import diagnostics, install/setup steps, preview checks and
   lifecycle/version rails retain content or ordered workflow semantics. Theme

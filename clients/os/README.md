@@ -2384,8 +2384,16 @@ and one person's receipts cannot dismiss another's changes.
 
 ### GitHub account connection
 
-The repository chooser names the current personal GitHub account and offers
-Disconnect beside the list. Disconnect uses the same lifecycle as Settings →
+Repository creation uses GitHub only. Its Accounts selector retains the
+account-scoped default, permission checks and saved account ID; GitHub access
+is a separate group below it. Existing stored tokens and source credentials
+remain manageable in Settings and existing source details.
+
+The repository chooser uses the shared `RecordList`/`RecordRow` anatomy with
+organization groups, branch/privacy facts and selection state. Refresh and
+Disconnect use the shared accessible icon controls; disconnect keeps its
+explicit confirmation. The connection row names the personal GitHub account.
+Disconnect Disconnect uses the same lifecycle as Settings →
 Sources: authorize the local credential revocation first, then attempt to end
 that person's GitHub authorization. It never uninstalls the shared GitHub App,
 signs the browser out of GitHub, or deletes sources or deployables. Existing

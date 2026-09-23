@@ -190,11 +190,6 @@ export function ComposePage(props: ComposePageProps) {
   const [activated, setActivated] = useState(false);
   const [wentLive, setWentLive] = useState(false);
   const [liveIds, setLiveIds] = useState<string[]>([]);
-  // "USE A TOKEN INSTEAD", HELD HERE, which is `ZipPicker`'s arrangement on
-  // the standing Source stop and holds for the same reason: a fold whose
-  // state lived in the stop would close under somebody every time a probe
-  // answered or a credential arrived on its own feed.
-  const [tokenFormOpen, setTokenFormOpen] = useState(false);
   const [journeyChoice, setJourneyChoice] = useState<{ key: string; stop: WizardStep } | null>(null);
   // THE CONNECT IS HELD HERE because it is a step's forward act, and a wizard's
   // forward act lives on its floor -- which this page draws.
@@ -202,10 +197,11 @@ export function ComposePage(props: ComposePageProps) {
   // Keep the confirmed result above the responsive step body: changing a
   // wizard stop or window width must not resurrect a disconnected picker.
   const githubDisconnect = useCredentialRevoke();
+  const [githubInvalidGrantId, setGithubInvalidGrantId] = useState("");
   const { access } = useSession();
   const githubViewer = bare(access?.userId ?? "");
   const githubGrant = githubGrantOf(credentials.filter(c => bare(c.ownerUserId) === githubViewer));
-  useEffect(() => { githubDisconnect.clear(); }, [githubViewer, githubGrant?.id, githubDisconnect.clear]);
+  useEffect(() => { githubDisconnect.clear(); setGithubInvalidGrantId(""); }, [githubViewer, githubGrant?.id, githubDisconnect.clear]);
   // What the repository step says it needs before it can go on. The step says
   // it, because only the step has GitHub's own answer about the grant.
   const [connectionNeed, setConnectionNeed] = useState<ConnectionNeed>("");
@@ -270,7 +266,9 @@ export function ComposePage(props: ComposePageProps) {
         : null,
     [draft.choice, draft.repoUrl, draft.repoRef, packages, parked, source, probe.reply?.defaultBranch],
   );
-  const sourceDone = parked !== undefined || source !== undefined || (organizationChosen(accounts, sourceAccountId) && sourceReady(draft, zip, probeParked, duplicate));
+  const githubSelectionReady = draft.choice !== "repo" || (githubGrant?.status === "active" &&
+    githubDisconnect.revokedCredentialId !== githubGrant.id && githubInvalidGrantId !== githubGrant.id && draft.credentialId === githubGrant.id && connectionNeed === "");
+  const sourceDone = parked !== undefined || source !== undefined || (githubSelectionReady && organizationChosen(accounts, sourceAccountId) && sourceReady(draft, zip, probeParked, duplicate));
 
   // THE OFF-LIST, read off the source row (D5). `activated` answers the click
   // before the row's own broadcast does.
@@ -553,8 +551,9 @@ export function ComposePage(props: ComposePageProps) {
       case "source":
         return (
           <>
-          <Field label="Organization">
-            <AccountPicker id="compose-source-organization" label="Source organization" required value={sourceAccountId} accounts={accounts} disabled={sourceLocked} onChange={setAccountId} />
+          <div className="os-compose-source-fields">
+          <Field label="Accounts">
+            <AccountPicker id="compose-source-organization" label="Accounts" required value={sourceAccountId} accounts={accounts} disabled={sourceLocked} onChange={setAccountId} />
           </Field>
           <ComposeSourceDetailStep
             draft={draft}
@@ -567,16 +566,17 @@ export function ComposePage(props: ComposePageProps) {
             siteId={created.siteId}
             clusterDomain={clusterDomain}
             locked={sourceLocked}
-            tokenFormOpen={tokenFormOpen}
-            onTokenFormOpenChange={setTokenFormOpen}
             connect={githubConnect}
             disconnect={githubDisconnect}
+            invalidCredentialId={githubInvalidGrantId}
+            onConnectionInvalid={setGithubInvalidGrantId}
             onConnectionNeed={setConnectionNeed}
             app={githubApp}
             appOwner={appOwner}
             onAppOwner={setAppOwner}
             duplicateOf={duplicate}
           />
+          </div>
           </>
         );
       case "whatItIs":
@@ -700,7 +700,7 @@ export function ComposePage(props: ComposePageProps) {
           }]
         : []
       // NO ACT when the cluster has no app and this person may not give it one:
-      // the step says who can, and A token is one choice away.
+      // the step says who can set it up.
       : connectionNeed === "unavailable"
         ? []
         : [{
@@ -803,21 +803,19 @@ export function ComposePage(props: ComposePageProps) {
         : draft.choice === "ci"
           ? { word: "Name it", detail: "and say what kind of app your CI will push" }
           : connectionNeed === "connect"
-            ? { word: "Not connected to GitHub", detail: "connect to pick from your repositories, or choose A token" }
+            ? { word: "Not connected to GitHub", detail: "connect to pick from your repositories" }
             : connectionNeed === "reconnect"
-              ? { word: "GitHub reconnection needed", detail: "reconnect to pick from your repositories, or choose A token" }
+              ? { word: "GitHub reconnection needed", detail: "reconnect to pick from your repositories" }
             : connectionNeed === "setup"
               ? ownerNamed
-                ? { word: "GitHub is not set up", detail: "set it up once for this cluster, or choose A token" }
+                ? { word: "GitHub is not set up", detail: "set it up once for this cluster" }
                 : { word: "Name the organization", detail: "by its GitHub login, or register the app under your own account" }
             // The STEP says who can change it; said again here it was one
             // sentence twice on one screen. The floor says what goes on.
             : connectionNeed === "unavailable"
-              ? { word: "GitHub is not set up", detail: "choose A token to go on" }
-              : tokenFormOpen
-                ? { word: "Describe the repository", detail: "its URL, and a token if it is private" }
-                : { word: "Choose a repository", detail: "then the branch to follow, and what to call it" };
-  const word = !sourceLocked && !organizationChosen(accounts, sourceAccountId) ? "Choose an organization" : detailNeeds !== null ? detailNeeds.word : finished && draft.choice === "ci" ? "Waiting for CI" : composePhaseWord(phase, {
+              ? { word: "GitHub is not set up", detail: "ask a cluster owner to set it up" }
+              : { word: "Choose a repository", detail: "then the branch to follow, and what to call it" };
+  const word = !sourceLocked && !organizationChosen(accounts, sourceAccountId) ? "Choose an account" : detailNeeds !== null ? detailNeeds.word : finished && draft.choice === "ci" ? "Waiting for CI" : composePhaseWord(phase, {
     inactive, archivedSource, declared: source !== undefined, wentLive, choice: draft.choice, moreToAnswer: action !== null && action.disabled,
   });
   const detail = detailNeeds !== null ? detailNeeds.detail : finished
