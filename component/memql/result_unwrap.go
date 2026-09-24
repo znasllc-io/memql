@@ -2,6 +2,10 @@ package memql
 
 import (
 	"encoding/json"
+	"maps"
+	"slices"
+
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // MaterializeRows extracts shape-projected rows from a query result,
@@ -35,6 +39,10 @@ import (
 // `result.<same-keys>` is checked next for response envelopes that
 // wrap the payload under a `result` field. An array at the top level
 // is taken as-is.
+//
+// A top-level builtin's node set (map[string]MemoryNode, the builtin
+// branch's output) is one row per node, ordered by id, each carrying
+// the node's columns and its payload's fields flat -- see nodeSetRows.
 //
 // Returns nil for an unrecognized shape or an empty array.
 func MaterializeRows(v any) []map[string]any {
@@ -70,6 +78,8 @@ func rowsFromAny(v any) []map[string]any {
 		return x
 	case []any:
 		return castRows(x)
+	case map[string]memorynodes.MemoryNode:
+		return nodeSetRows(x)
 	case map[string]any:
 		// A bare map at the top level is either (a) a single
 		// projected row OR (b) an envelope wrapping the rows. Walk
@@ -135,6 +145,40 @@ func rowsFromLoose(v any) []map[string]any {
 		}
 	}
 	return nil
+}
+
+// nodeSetRows reads a top-level builtin's answer. Without it the node map
+// JSON-roundtrips into an object keyed by node ids, which carries none of
+// the envelope keys above, and a builtin that answered reads as nothing.
+//
+// Each row is the node as JSON (the shape a []MemoryNode already
+// materializes to, `payload` nested) with the payload's fields laid over
+// the top, payload winning -- a builtin's answer IS its payload, and its
+// in-process readers read it flat (row["created"], row["catalog"]). Ordered
+// by id because the set is a map: the builtin's own order is already gone
+// (nodesToMap), and a caller taking rows[0] must get the same row twice.
+func nodeSetRows(nodes map[string]memorynodes.MemoryNode) []map[string]any {
+	out := make([]map[string]any, 0, len(nodes))
+	for _, id := range slices.Sorted(maps.Keys(nodes)) {
+		raw, err := json.Marshal(nodes[id])
+		if err != nil {
+			continue
+		}
+		var row map[string]any
+		if err := json.Unmarshal(raw, &row); err != nil {
+			continue
+		}
+		if payload, ok := row["payload"].(map[string]any); ok {
+			for k, v := range payload {
+				row[k] = v
+			}
+		}
+		out = append(out, row)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func castRows(arr []any) []map[string]any {

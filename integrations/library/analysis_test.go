@@ -30,6 +30,7 @@ import (
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
@@ -253,7 +254,7 @@ func (s *libStub) Execute(ctx context.Context, query string) (*memql.ExecuteResu
 		return libBundle(nil), nil
 
 	case "similarTo":
-		return libBundle(s.rankChunks(asString(args["text"]), intField(args, "limit"))), nil
+		return libBuiltinNodeSet(s.rankChunks(asString(args["text"]), intField(args, "limit"))), nil
 
 	case "knowledgeIngest":
 		s.ingests = append(s.ingests, args)
@@ -372,6 +373,25 @@ func cloneRow(row map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+// libBuiltinNodeSet is what a TOP-LEVEL BUILTIN really hands back: no
+// bundle, and an output that is the builtin branch's node set, a
+// map[string]MemoryNode keyed by id (engine.go, nodesToMap) -- so the rank
+// order is gone and the reader must re-sort. Answering similarTo with a
+// bundle, as this stub used to, is what hid a reader that could not read the
+// real thing: every similar-files search returned nothing.
+func libBuiltinNodeSet(rows []map[string]any) *memql.ExecuteResult {
+	nodes := make(map[string]memorynodes.MemoryNode, len(rows))
+	for _, r := range rows {
+		id := asString(r["id"])
+		raw, err := json.Marshal(r)
+		if err != nil {
+			panic(fmt.Sprintf("libStub: builtin row not representable: %v (%v)", err, r))
+		}
+		nodes[id] = memorynodes.MemoryNode{ID: id, Concept: conceptFileChunk, Payload: raw}
+	}
+	return memql.NewResultWithOutput(nodes)
 }
 
 func libBundle(rows []map[string]any) *memql.ExecuteResult {
