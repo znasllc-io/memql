@@ -65,7 +65,12 @@ export interface OsAppSection {
   wants?: readonly ModuleId[];
 }
 
+/** A personal setup reading, separate from cluster module readiness. */
+export type AppSetupState = "unknown" | "partial" | "ready";
+
 export interface OsAppProps {
+  /** Report personal setup to the shell's Settings indicator. Unknown is not empty. */
+  reportSetupState?: (state: AppSetupState) => void;
   /** Current section id ("" when the app declares no sections). */
   sectionId: string;
   windowVisible?: boolean;

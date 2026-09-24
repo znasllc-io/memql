@@ -410,7 +410,8 @@ describe("GitHub Sources in Add a deployable", () => {
     expect(connection.callsNamed("packageSourceRegister")).toHaveLength(0);
     expect(floorAct("Continue")).toBeNull();
     await forward("Back");
-    expect(await within(region).findByRole("button", { name: "Reconnect @octocat" })).toBeTruthy();
+    expect(await within(region).findByRole("button", { name: "Add GitHub account" })).toBeTruthy();
+    expect(within(within(region).getByRole("list", { name: "GitHub accounts" })).queryByText("@octocat")).toBeNull();
   });
 
   it("resumes a verified OAuth account at Organization without choosing or writing a binding", async () => {

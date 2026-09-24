@@ -8,7 +8,6 @@ import {
   DEPLOYABLES_SECTION_IDS,
   DEPLOYABLES_SECTIONS,
   LocalDeployablesSettingsStore,
-  RETIRED_SECTIONS,
   sanitizeDeployablesSettings,
 } from "../../src/apps/deployables/settings";
 
@@ -54,14 +53,11 @@ describe("the manifest", () => {
       .toMatchObject({ revision: "github-sources-3", sectionId: "sources" });
     expect(DEPLOYABLES_SECTION_IDS).not.toContain("repositories");
     expect(DEPLOYABLES_SECTION_IDS).not.toContain("accounts");
-    expect(RETIRED_SECTIONS["repositories"]).toBeUndefined();
-    expect(sanitizeDeployablesSettings({ version: 1, defaultSection: "repositories" }).defaultSection).toBe("map");
   });
 
   it("opens on the MAP", () => {
     // The signature surface, and the reason the epic exists: what serves where
-    // is a shape rather than a table. The app's own settings can send somebody
-    // to the list instead.
+    // is a shape rather than a table.
     expect(deployables?.sections?.[0]?.id).toBe("map");
   });
 
@@ -90,7 +86,7 @@ describe("the manifest", () => {
     expect(settingsSectionProblem(deployables!)).toBeNull();
   });
 
-  it("shares ONE section list with the settings picker", () => {
+  it("uses the canonical section list", () => {
     // A second literal is one that can disagree, and a preference naming a
     // section the manifest does not declare leaves the window on the first
     // section with the nav highlighting nothing.
@@ -99,34 +95,11 @@ describe("the manifest", () => {
 });
 
 describe("sanitizing a stored document", () => {
-  it("keeps a good one", () => {
-    const doc = { version: 1, defaultSection: "deployables", density: "compact" };
-    // The two reading choices added later take their defaults here: this
-    // document predates them, and repairing a field it never carried is the
-    // sanitiser doing its job rather than changing the person's mind.
-    expect(sanitizeDeployablesSettings(doc)).toEqual({ ...doc, trafficWindow: "hour", expandedSources: [] });
-  });
-
-  it("maps a retired default -- sites, packages, actions -- to Deployables", () => {
-    // A person's stored preference must not open a section that no longer
-    // exists, and must not be silently reset to the map either: somebody who
-    // asked for the list is still asking for the list.
-    for (const retired of ["sites", "packages", "actions"]) {
-      expect(sanitizeDeployablesSettings({ version: 1, defaultSection: retired, density: "compact" }))
-        .toEqual({ version: 1, defaultSection: "deployables", density: "compact", trafficWindow: "hour", expandedSources: [] });
+  it("discards removed landing and density preferences while preserving current choices", () => {
+    for (const section of ["map", "deployables", "sources", "sites", "packages", "actions"]) {
+      expect(sanitizeDeployablesSettings({ version: 1, defaultSection: section, density: "compact", trafficWindow: "week" }))
+        .toEqual({ version: 1, trafficWindow: "week", expandedSources: [] });
     }
-    // The map is exhaustive over the three, and names nothing that still exists.
-    expect(Object.keys(RETIRED_SECTIONS).sort()).toEqual(["actions", "packages", "sites"]);
-    for (const target of Object.values(RETIRED_SECTIONS)) expect(DEPLOYABLES_SECTION_IDS).toContain(target);
-    for (const retired of Object.keys(RETIRED_SECTIONS)) expect(DEPLOYABLES_SECTION_IDS).not.toContain(retired);
-  });
-
-  it("repairs each field INDEPENDENTLY", () => {
-    // A garbage section must not cost somebody their density choice.
-    expect(sanitizeDeployablesSettings({ version: 1, defaultSection: "nope", density: "compact" }))
-      .toEqual({ version: 1, defaultSection: "map", density: "compact", trafficWindow: "hour", expandedSources: [] });
-    expect(sanitizeDeployablesSettings({ version: 1, defaultSection: "deployables", density: "huge" }))
-      .toEqual({ version: 1, defaultSection: "deployables", density: "comfortable", trafficWindow: "hour", expandedSources: [] });
   });
 
   it("rejects a wrong version WHOLESALE -- the field names cannot be trusted", () => {
@@ -145,19 +118,16 @@ describe("the store", () => {
   it("round-trips", () => {
     const storage = memStorage();
     const store = new LocalDeployablesSettingsStore(storage);
-    store.save({ version: 1, defaultSection: "deployables", density: "compact", trafficWindow: "week", expandedSources: ["pkg:a"] });
+    store.save({ version: 1, trafficWindow: "week", expandedSources: ["pkg:a"] });
     expect(new LocalDeployablesSettingsStore(storage).load()).toEqual({
       version: 1,
-      defaultSection: "deployables",
-      density: "compact",
       trafficWindow: "week",
       expandedSources: ["pkg:a"],
     });
   });
 
-  it("loads a document saved before the restructure onto the list", () => {
-    // The mapping runs on LOAD, which is the only place a stored document is
-    // read, so a window that opens tomorrow lands where the person meant.
+  it("drops removed preferences from an older stored document", () => {
+    // Loading discards retired preferences instead of applying them.
     const storage = memStorage();
     storage.setItem(
       "memql-os-deployables-v1",
@@ -165,8 +135,6 @@ describe("the store", () => {
     );
     expect(new LocalDeployablesSettingsStore(storage).load()).toEqual({
       version: 1,
-      defaultSection: "deployables",
-      density: "compact",
       trafficWindow: "hour",
       expandedSources: [],
     });
@@ -200,12 +168,7 @@ describe("the store", () => {
 // THE TWO REMEMBERED READING CHOICES
 // ---------------------------------------------------------------------------
 //
-// Both are VIEW settings, like density: they change nothing about which rows
-// are read, so they cost no round trip and are safe to be instant. Both are
-// added to a version-1 document WITHOUT a version bump, which the sanitiser
-// already allows by repairing each field independently -- a document written
-// before these existed keeps its section and density and takes the defaults
-// for these.
+// These view choices are repaired independently when reading stored settings.
 describe("the traffic window a person last chose", () => {
   it("defaults to the hour, which is the window that answers 'is it up'", () => {
     // The day was the old default and it is the wrong first question: somebody
@@ -220,7 +183,7 @@ describe("the traffic window a person last chose", () => {
   it("repairs a window that is not one of the three, rather than dropping the document", () => {
     const doc = sanitizeDeployablesSettings({ version: 1, density: "compact", trafficWindow: "fortnight" });
     expect(doc.trafficWindow).toBe("hour");
-    expect(doc.density).toBe("compact");
+    expect(doc).not.toHaveProperty("density");
   });
 });
 
@@ -251,12 +214,10 @@ describe("which source groups are open", () => {
 });
 
 describe("a document written before these fields existed", () => {
-  it("keeps what it had and takes the defaults for what it did not", () => {
+  it("discards retired fields and takes current defaults", () => {
     const doc = sanitizeDeployablesSettings({ version: 1, defaultSection: "deployables", density: "compact" });
     expect(doc).toEqual({
       version: 1,
-      defaultSection: "deployables",
-      density: "compact",
       trafficWindow: "hour",
       expandedSources: [],
     });

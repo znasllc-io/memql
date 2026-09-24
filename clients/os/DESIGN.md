@@ -22,6 +22,15 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    only after its read settles; unavailable is not zero.
    Do not add Refresh or Refresh overview buttons unless the owner explicitly
    requests them; live surfaces update through their subscriptions.
+   Creation actions use the shared icon-only `AddButton` (plus), with an
+   accessible label and tooltip. Do not replace it with a text button such as
+   "Connect GitHub account". A settings page is titled **Settings**; subjects
+   such as **GitHub accounts** are sections beneath that title, with their Add
+   control on the section heading. Settings lists use the available width.
+   Shared record lists draw dividers **only between items**: no top line on
+   the first, no bottom line on the last, and no lines for a single item.
+   Keep this in the shared list styles, including rows with separate actions
+   and live-list wrappers; never add per-app row borders.
 
 2. **Filters are questions, not furniture.** Search and facet controls live
    behind one affordance on the Head line (`kit` `Refine`): collapsed by
@@ -54,13 +63,24 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
 
 7. **Say it once.** A scope is named in one place. The rail highlights it,
    the Head names it, the list does not re-caption it, placeholders stay
-   generic ("Search", not "Search your Library").
+   generic ("Search", not "Search your Library"). Keep every app page minimal:
+   show the record, its state and the actions. Tutorials carry general guidance;
+   standing descriptions must help with a current decision or actionable problem.
+   Do not restate a status badge in prose or add report-age/counting-since
+   paragraphs beneath it. Keep necessary loading, error and destructive-action
+   confirmation messages concise. Detail pages reuse `Panel`, `Subhead`,
+   `Facts` and `Fact`, as the Cluster Mesh node page does, instead of inventing
+   another data layout or button arrangement.
 
 8. **One container language.** `Panel` + `Subhead` + `Field` is the
    grouping grammar. Settings groups keep their `fieldset` and `legend`
    SEMANTICS (a legend names its group to assistive tech), but the legend
    dresses as a Subhead and the legend-breaking-the-border box is gone --
-   one look, not two. A deliberate MOMENT (the Accounts first-run card's
+   one look, not two. Panel actions align to the right edge in the shared
+   `os-panel-actions` row. An action such as Disconnect stays on that same
+   edge when it expands into Cancel and confirmation; do not shift the
+   controls left or fill the panel width. Confirmation copy sits above them.
+   A deliberate MOMENT (the Accounts first-run card's
    eyebrow and headline) may keep its voice; chrome may not.
 
 9. **Real estate belongs to content.** Lists take the window; forms take a
@@ -100,6 +120,9 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
     that changes the thing's state lives anywhere else on the page: Pause at
     y=2412, Archive at 2499 and a cascade that archives a SIBLING at 885 were
     one surface, and the person had to know which was which.
+    Account and organization details use this footer too: state on the left,
+    Back/Disconnect on the right; Cancel/confirmation stay on that same edge.
+    Read-only repository details offer navigation, not deployment actions.
 
 ## Applying them
 
@@ -121,6 +144,11 @@ can use `RecordList as="ul"` to retain list/listitem semantics. The repository
 chooser uses this same anatomy, with selection state and grouped counts. See the
 [coverage inventory](qa/list-coverage.md) for specialized grids, trees and
 workflow surfaces that retain their interaction model.
+
+Loading record collections use `RecordListSkeleton`, with the same row geometry
+and an accessible loading status. Reserve the initial list area to avoid panel
+jumps, respect reduced motion, and keep already loaded rows visible during
+refreshes. Loading and failed reads must never look like an empty collection.
 
 ## App overviews
 
@@ -160,8 +188,8 @@ combined list". Two lists now, in one row language (`RecordRow`):
   GitHub identity, organization or personal target, repository and tracked
   branch, alongside the separate MemQL owning account. Credentials and saved
   installation bindings provide access metadata rather than separate list
-  entries. There are no sibling Repositories or Accounts pages; Settings links
-  to this catalog without repeating a credential roster. A source's detail
+  entries. There are no sibling Repositories or Accounts pages. Settings manages
+  personal GitHub accounts; Sources manages the saved repository combinations. A source's detail
   holds its access, settings, apps and history. ZIP-backed apps remain in
   Deployables and retain their existing detail and lifecycle controls.
 - **Every listed source is summarised by everything it made.** A
@@ -177,8 +205,16 @@ combined list". Two lists now, in one row language (`RecordRow`):
   installation binding, package ID, automatic updates, deployables and history.
   Add deployable registers, reuses or restores the same authorized configuration
   atomically; it does not borrow a different identity's or MemQL account's
-  history. Archive remains the distinct lifecycle operation. Only Add deployable
-  offers Add source and GitHub connection setup.
+  history. Archive remains the distinct lifecycle operation. Add deployable
+  creates sources and can connect accounts inline; Settings can also add,
+  reconnect and disconnect personal GitHub accounts.
+- **Disconnect GitHub changes repository access only.** Saved sources,
+  deployables, deployed files and serving sites remain intact and online.
+  Successful disconnect returns to Settings and removes the account from
+  both Settings and Add deployable's account choices. There is no disconnected
+  detail page or Reconnect button; the shared plus action adds it again. Fetching
+  future source updates requires an active connection. Disconnect never
+  archives a package, removes a source or uninstalls a hosted app.
 - **What belongs to the source is said on the source, once.** A run parked at a
   source's gate is "Review needed" on that source's row and on its page's bar,
   with Review beside it -- not repeated on every deployable the source made.

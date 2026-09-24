@@ -9,9 +9,10 @@ import (
 )
 
 // identityXHRPaths are the identity JSON endpoints a browser must hit
-// SAME-ORIGIN (docs/public/operate/auth/identity-service.md). A top-level
-// navigation to /authorize still goes to identity.<domain>; these four
-// are fetch() calls. Cross-origin credentialed XHR to a sibling host that
+// SAME-ORIGIN (docs/public/operate/auth/identity-service.md). It also carries
+// the GitHub completion navigation so its session check sees the same host-only
+// cookie as token/refresh. A top-level navigation to /authorize still goes to
+// identity.<domain>. Cross-origin credentialed XHR to a sibling host that
 // shares a wildcard cert + IP is the Safari/Chrome HTTP/2 coalescing
 // failure: the POST lands on this site's SPA fallback (200 HTML) and the
 // portal reports "identity returned no access token (invalid_response)"
@@ -24,6 +25,7 @@ var identityXHRPaths = map[string]struct{}{
 	"/auth/refresh":          {},
 	"/auth/logout":           {},
 	"/.well-known/jwks.json": {},
+	"/auth/github/complete":  {},
 }
 
 func isIdentityXHRPath(p string) bool {
@@ -31,7 +33,7 @@ func isIdentityXHRPath(p string) bool {
 	return ok
 }
 
-// serveIdentityXHR forwards an identity JSON endpoint to the identity
+// serveIdentityXHR forwards a same-origin identity endpoint to the identity
 // binary. Every live site gets this: runtime-config.json now publishes
 // an empty identityApiBaseUrl so fetch() stays on the site origin.
 // Not gated on apiProxy -- that flag is the bff relay, a different

@@ -34,6 +34,10 @@ const (
 // component/identity/http/github_callback.go for why they cannot be split.
 const CallbackPath = "/auth/github/callback"
 
+// CompletePath is relayed through the OS edge, where the initiating browser's
+// host-only session cookie lives. GitHub still uses CallbackPath as registered.
+const CompletePath = "/auth/github/complete"
+
 // Config is the cluster's GitHub App. The zero value means "no app", which is
 // a supported install: Connect is simply absent and the Source stop offers the
 // pasted-token path alone.

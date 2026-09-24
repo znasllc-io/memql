@@ -2,6 +2,7 @@ import { getRowByConceptAndId, type Row } from "@znasllc-io/memql-sdk-core/clien
 
 import { useLiveCollection, type LiveCollectionHandle } from "../../../live/useLiveCollection";
 import { SOURCE_CREDENTIAL_CONCEPT } from "./rows";
+import { useSession } from "../../../chrome/access";
 
 // The credentials feed: ONE LiveCollection over the caller's own source
 // credentials (epic memql#4885, design section D).
@@ -21,14 +22,16 @@ import { SOURCE_CREDENTIAL_CONCEPT } from "./rows";
 /**
  * Every credential the caller may read, live.
  *
- * NO ARGUMENTS and a constant KEY: `sourceCredentialsMine` carries the
+ * NO ARGUMENTS and a caller-scoped KEY: `sourceCredentialsMine` carries the
  * concept's own tier, so the engine decides how far "mine" reaches. The call
  * is rendered by hand rather than through a generated builder because the
  * builder does not exist in this tree yet; the compose task switches to it,
  * and the text here is exactly what that builder renders.
  */
 export function useSourceCredentials(): LiveCollectionHandle<Row> {
-  return useLiveCollection<Row>("deployables:sourceCredentials", (connection) => ({
+  const { access } = useSession();
+  const viewer = access?.userId ?? "";
+  return useLiveCollection<Row>(viewer ? `deployables:sourceCredentials:${viewer}` : null, (connection) => ({
     concept: SOURCE_CREDENTIAL_CONCEPT,
     seed: async (_cursor, signal) => {
       const result = await connection.query.executeNamed(

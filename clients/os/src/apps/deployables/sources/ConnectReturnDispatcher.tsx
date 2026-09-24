@@ -42,7 +42,8 @@ export function ConnectReturnDispatcher() {
     // in `actions` identity -- and every later run correctly finds nothing.
     const result = takeParkedConnectReturn();
     if (result === null) return;
-    actions.openApp("deployables", result.section, { connect: correlateConnectReturn(result, viewer) });
+    const correlated = correlateConnectReturn(result, viewer);
+    actions.openApp("deployables", correlated.section, { connect: correlated });
   }, [actions, registry, accessEpoch, viewer]);
   return null;
 }

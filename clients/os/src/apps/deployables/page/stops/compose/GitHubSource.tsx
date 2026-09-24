@@ -20,21 +20,20 @@ export function GitHubAccountStep({ credentials, selectedId, onSelect, feed, dis
   const connect = useGithubConnect();
   const app = useGithubApp();
   const ready = !feed || feed.state === "live" && !feed.error;
-  const chosen = credentials.find(row => row.id === selectedId);
+  const connected = credentials.filter(row => row.status === "active");
   return <div className="os-stop-body">
-    <WizardStepHeader count={ready ? credentials.length : undefined}>
+    <WizardStepHeader count={ready ? connected.length : undefined}>
       {ready && app.status?.configured !== false ? <AddButton label="Add GitHub account" disabled={disabled || connect.busy} aria-busy={connect.busy} onClick={() => void connect.connect(returnPathFor("deployables"))} /> : null}
     </WizardStepHeader>
     {!ready ? <>
       <Caption>{feed?.error || (feed?.state === "seeding" ? "Reading GitHub accounts…" : "GitHub accounts are unavailable.")}</Caption>
       {feed && feed.state !== "seeding" ? <Button onClick={() => feed.retry()}>Try again</Button> : null}
     </> : <>
-      <RecordList as="ul" label="GitHub accounts">{credentials.map(row => <RecordRow key={row.id}
-        name={`@${row.login}`} state={row.status === "active" ? "Connected" : "Reconnect needed"}
+      <RecordList as="ul" label="GitHub accounts">{connected.map(row => <RecordRow key={row.id}
+        name={`@${row.login}`} state="Connected"
         selected={selectedId === row.id} disabled={disabled || connect.busy} onOpen={() => onSelect(row.id)} />)}</RecordList>
-      {credentials.length === 0 ? <Caption>Connect a GitHub account to see its repositories.</Caption> : null}
+      {connected.length === 0 ? <Caption>Connect a GitHub account to see its repositories.</Caption> : null}
       {app.status?.configured === false ? <GithubAppMissing app={app} returnPath={returnPathFor("deployables")} /> : null}
-      {chosen?.status === "revoked" ? <Button busy={connect.busy} onClick={() => void connect.connect(returnPathFor("deployables"), chosen.id)}>Reconnect @{chosen.login}</Button> : null}
     </>}
     {connect.refusal ? <ProblemNotice problem={connect.refusal} tone={toneFor(connect.refusal.code)} /> : null}
   </div>;

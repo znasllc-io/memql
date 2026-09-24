@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AddLink } from "../../../kit/AddButton";
 
-import { Button, Caption, Chips, Input, RecordList, RecordRow, RefreshButton, Subhead, useNow } from "../../../kit";
+import { Button, Caption, Chips, Input, RecordList, RecordListSkeleton, RecordRow, RefreshButton, Subhead, useNow } from "../../../kit";
 import { formatFreshness } from "../../../kit/format";
 import type { Refusal } from "../packages/actions";
 import { toneFor } from "../packages/refusals";
@@ -46,6 +46,7 @@ export function RepositoryPicker({
   onReadMore,
   showRefresh = true,
   showChosenLabel = true,
+  showGroupHeading = true,
 }: {
   page: RepositoryPage;
   /** When the list was read, as an ISO instant. Empty = not read yet. */
@@ -63,6 +64,7 @@ export function RepositoryPicker({
   onReadMore: () => void;
   showRefresh?: boolean;
   showChosenLabel?: boolean;
+  showGroupHeading?: boolean;
 }) {
   const [search, setSearch] = useState("");
   const now = useNow();
@@ -151,13 +153,13 @@ export function RepositoryPicker({
       ) : null}
 
       {groups.length === 0 && refusal ? null : groups.length === 0 && (busy || readAt === "") ? (
-        <Caption>{busy ? "Reading repositories…" : "Repositories have not been read yet."}</Caption>
+        <RecordListSkeleton label="Loading repositories" />
       ) : groups.length === 0 ? (
         <EmptyPicker total={total} searching={search.trim() !== ""} installUrl={installUrl} onFollow={() => { awaitingInstall.current = true; }} />
       ) : (
         groups.map((group) => (
           <div className="os-files-group" key={group.owner} role="group" aria-label={group.owner}>
-            <Subhead meta={readAt !== "" && !busy && !refusal && !group.pending ? group.repositories.length : undefined}>{group.owner}</Subhead>
+            {showGroupHeading ? <Subhead meta={readAt !== "" && !busy && !refusal && !group.pending ? group.repositories.length : undefined}>{group.owner}</Subhead> : null}
             {group.pending ? (
               /* A PENDING INSTALLATION IS A GROUP WITH A SENTENCE INSTEAD OF
                  ROWS -- never hidden and never an error. The repair belongs

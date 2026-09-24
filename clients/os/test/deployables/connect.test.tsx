@@ -27,6 +27,7 @@ import {
   clearParkedConnectReturn,
   connectSucceeded,
   readConnectReturn,
+  rememberConnectAttempt,
   returnPathFor,
   scrubbedSearch,
   takeParkedConnectReturn,
@@ -45,6 +46,8 @@ import {
 } from "../../src/apps/deployables/sources/rows";
 import {
   FIXTURE_GITHUB_PAT,
+  sourceConnectionRow,
+  builtinReply,
   click,
   credentialRow,
   fakeConnection,
@@ -340,6 +343,21 @@ describe("the return from GitHub", () => {
     expect(readConnectReturn("?github=installed&connect=unrecognised")).toEqual({ reason: "installed", section: "sources" });
   });
 
+  it.each(["connected", "connect_state_invalid"])("returns a Settings account connection to Settings after %s", async reason => {
+    h.connection = fakeConnection({ credentials: reason === "connected" ? [GRANT] : [] });
+    rememberConnectAttempt("settings-flow", "u-me", "", "settings");
+    history.replaceState({}, "", reason === "connected"
+      ? "/?github=connected&connect=settings&githubFlowId=settings-flow&githubCredentialId=cred-grant"
+      : "/?github=connect_state_invalid");
+    captureConnectReturn(window);
+    render(withSession(<StrictMode><ConnectReturnDispatcher /><ReturnedWindow /></StrictMode>, { userId: "u-me" }));
+    expect(await screen.findByRole("heading", { name: "Settings" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add GitHub account" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Sources" })).toBeNull();
+    if (reason === "connected") expect(await screen.findByRole("button", { name: "Manage GitHub account octocat" })).toBeTruthy();
+    expect(screen.getByTestId("window-count").textContent).toBe("1");
+  });
+
   it("builds a return PATH, never a URL", () => {
     // The cluster composes the origin from its own domain, so nothing this
     // browser says can redirect somebody off-cluster.
@@ -507,7 +525,7 @@ describe("the repository picker", () => {
   it("draws no search box when there is nothing to search", () => {
     renderPicker({ page: repositoryPageFrom(repositoriesReply({})), readAt: "" });
     expect(screen.queryByLabelText("Search repositories")).toBeNull();
-    expect(screen.getByText("Repositories have not been read yet.")).toBeTruthy();
+    expect(screen.getByText("Loading repositories")).toBeTruthy();
   });
 
   it("makes empty an invitation, with a real anchor to a new tab", () => {
@@ -704,22 +722,20 @@ function memStore() {
   });
 }
 
-function mountSources(seed: FakeSeed) {
+function mountSources(seed: FakeSeed, reportSetupState = vi.fn()) {
   const connection = fakeConnection(seed);
   h.connection = connection;
   const view = render(
     withSession(
-      <DeployablesApp sectionId="settings" navigate={vi.fn()} askContext={vi.fn()} store={memStore()} />,
+      <DeployablesApp sectionId="settings" navigate={vi.fn()} askContext={vi.fn()} store={memStore()} reportSetupState={reportSetupState} />,
       { role: "owner", userId: "u-me" },
     ),
   );
-  return { connection, ...view };
+  return { connection, reportSetupState, ...view };
 }
 
 async function sourcesGroup(): Promise<HTMLElement> {
-  // A fieldset named by its legend: the settings-group semantics DESIGN.md
-  // rule 8 keeps, which is a `group` and not a `region`.
-  return await screen.findByRole("region", { name: "Source settings" });
+  return await screen.findByRole("region", { name: "GitHub accounts settings" });
 }
 
 /**
@@ -758,6 +774,21 @@ const GRANT = githubGrantRow({ id: "cred-grant" });
 
 describe("existing credential and cluster settings", () => {
   afterEach(() => { h.connection = null; restoreLocation?.(); });
+  it("omits disconnected accounts from Add Deployable and keeps the add account action", async () => {
+    await composeAccount({ credentials: [GRANT, githubGrantRow({ id: "old", login: "disconnected-account", status: "revoked" })] });
+    const accounts = screen.getByRole("list", { name: "GitHub accounts" });
+    expect(within(accounts).getByText("@octocat")).toBeTruthy();
+    expect(within(accounts).queryByText("@disconnected-account")).toBeNull();
+    expect(screen.getByRole("button", { name: "Add GitHub account" })).toBeTruthy();
+  });
+
+  it("offers adding an account when every previous account is disconnected", async () => {
+    await composeAccount({ credentials: [githubGrantRow({ id: "old", login: "disconnected-account", status: "revoked" })] });
+    expect(screen.queryByText("@disconnected-account")).toBeNull();
+    expect(screen.getByText("Connect a GitHub account to see its repositories.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add GitHub account" })).toBeTruthy();
+  });
+
   it("starts additive GitHub authorization with correlation and preserves existing sources", async () => {
     const assigned = stubNavigation();
     const { connection } = await composeAccount({ credentials: [GRANT], repositories: repositoriesReply({ repositories: [WIDGET] }), connectUrl: "https://github.com/login/oauth/authorize?fixture=1" });
@@ -771,46 +802,163 @@ describe("existing credential and cluster settings", () => {
     expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(0);
   });
 
-  it("shows a cluster owner which app the cluster uses, and removes one registered from here", async () => {
-    const { connection } = mountSources({
-      credentials: [],
-      githubApp: { configured: true, source: "cluster", slug: "memql-on-lab", canSetup: true },
-    });
-    const block = await screen.findByRole("region", { name: "GitHub App" });
-    const link = within(block).getByRole("link", { name: "memql-on-lab" });
-    expect(link.getAttribute("href")).toBe("https://github.com/apps/memql-on-lab");
-    expect(within(block).getByText(/registered from here/)).toBeTruthy();
-
-    // ARMED FIRST: the sentence says what stops working, and what removing
-    // does NOT do -- the app stays at GitHub.
-    await click(within(block).getByRole("button", { name: "Remove" }));
-    expect(connection.callsNamed("githubAppRemove")).toHaveLength(0);
-    expect(within(block).getByText(/stays at GitHub until it is deleted there/)).toBeTruthy();
-    await click(within(block).getAllByRole("button", { name: "Remove" }).at(-1)!);
-    await waitFor(() => expect(connection.callsNamed("githubAppRemove")).toHaveLength(1));
-    // ...and the status is read again, because the answer just changed.
-    await waitFor(() => expect(connection.callsNamed("githubAppStatus").length).toBeGreaterThan(1));
-  });
-
-  it("offers no Remove for an app the deployment's environment sets", async () => {
-    mountSources({
-      credentials: [],
-      githubApp: { configured: true, source: "environment", slug: "memql-ops", canSetup: false },
-    });
-    const block = await screen.findByRole("region", { name: "GitHub App" });
-    expect(within(block).getByText(/set by the deployment's environment/)).toBeTruthy();
-    // Absent, never disabled: it is not changed from here by anybody.
-    expect(within(block).queryByRole("button", { name: "Remove" })).toBeNull();
-  });
-
-  it("directs source management to Sources without a second credential list or mutation", async () => {
-    const { connection } = mountSources({ credentials: [credentialRow({ id: "cred-1" }), GRANT] });
+  it("lists only this person's GitHub accounts and removes presentation preferences", async () => {
+    const { connection, reportSetupState } = mountSources({ credentials: [
+      GRANT, githubGrantRow({ id: "second", login: "work-account" }),
+      githubGrantRow({ id: "old", login: "disconnected-account", status: "revoked" }),
+      githubGrantRow({ id: "other", login: "someone-else", ownerUserId: "u-other" }), credentialRow({ id: "pat" }),
+    ], githubApp: { configured: true, source: "cluster", canSetup: true } });
     const group = await sourcesGroup();
-    expect(within(group).getByText("Manage saved sources in Sources. Add a deployable to connect a GitHub account and choose a repository.")).toBeTruthy();
-    expect(within(group).queryByRole("list")).toBeNull();
-    expect(within(group).queryByRole("button", { name: /Revoke|Disconnect|Add source/ })).toBeNull();
+    await within(group).findByRole("button", { name: "Manage GitHub account octocat" });
+    expect(within(group).getByRole("button", { name: "Manage GitHub account work-account" })).toBeTruthy();
+    expect(within(group).queryByText("@someone-else")).toBeNull();
+    expect(within(group).queryByText("@disconnected-account")).toBeNull();
+    expect(within(group).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(group).queryByRole("radiogroup")).toBeNull();
+    expect(within(group).queryByRole("region", { name: "GitHub App" })).toBeNull();
+    await waitFor(() => expect(reportSetupState).toHaveBeenLastCalledWith("ready"));
+    expect(connection.callsNamed("githubAppRemove")).toHaveLength(0);
+  });
+
+  it("connects another account from Settings without replacing accounts or sources", async () => {
+    const assigned = stubNavigation();
+    const { connection } = mountSources({ credentials: [GRANT], connectUrl: "https://github.com/login/oauth/authorize?fixture=settings" });
+    await click(await screen.findByRole("button", { name: "Add GitHub account" }));
+    expect(assigned).toEqual(["https://github.com/login/oauth/authorize?fixture=settings"]);
+    expect(connection.callsNamed("githubConnectBegin")[0]).toContain('returnPath: "/?connect=settings"');
     expect(connection.callsNamed("sourceCredentialRevoke")).toHaveLength(0);
     expect(connection.callsNamed("sourceConnectionRemove")).toHaveLength(0);
+    expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(0);
+  });
+
+  it("disconnects only the selected account after confirmation and marks setup partial", async () => {
+    const { connection, reportSetupState } = mountSources({ credentials: [GRANT] });
+    await click(await screen.findByRole("button", { name: "Manage GitHub account octocat" }));
+    const detail = screen.getByRole("region", { name: "GitHub account @octocat" });
+    expect(within(detail).getByRole("region", { name: "Connection" })).toBeTruthy();
+    expect(within(detail).getByRole("region", { name: "Organizations" })).toBeTruthy();
+    expect(within(detail).queryByRole("link", { name: "Install on another organization" })).toBeNull();
+    expect(within(detail).queryByText(/Revokes this connection here and at GitHub/)).toBeNull();
+    expect(screen.queryByRole("list", { name: "GitHub accounts" })).toBeNull();
+    await click(within(detail).getByRole("button", { name: "Disconnect" }));
+    expect(connection.callsNamed("sourceCredentialRevoke")).toHaveLength(0);
+    expect(within(detail).getByText(/Sources and deployables are kept/)).toBeTruthy();
+    await click(within(detail).getByRole("button", { name: "Disconnect" }));
+    await waitFor(() => expect(connection.callsNamed("sourceCredentialRevoke")).toHaveLength(1));
+    expect(connection.callsNamed("sourceCredentialRevoke")[0]).toContain('credentialId: "cred-grant"');
+    await waitFor(() => expect(reportSetupState).toHaveBeenLastCalledWith("partial"));
+    expect(connection.callsNamed("sourceConnectionRemove")).toHaveLength(0);
+    expect(connection.callsNamed("packageSetSourceRemoved")).toHaveLength(0);
+    expect(connection.callsNamed("deleteSite")).toHaveLength(0);
+    expect(await screen.findByRole("heading", { name: "Settings" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "GitHub account @octocat" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reconnect GitHub account" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Manage GitHub account octocat" })).toBeNull();
+    expect(screen.getByText("No GitHub accounts connected")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add GitHub account" })).toBeTruthy();
+  });
+
+  it("browses and searches only the selected organization's repositories without creating a deployable", async () => {
+    const { connection } = mountSources({ credentials: [GRANT], repositories: repositoriesReply({ repositories: [WIDGET,
+      repositoryFixture({ fullName: "acme/docs" }), repositoryFixture({ fullName: "other/secret", installationId: "i-other" })] }) });
+    await click(await screen.findByRole("button", { name: "Manage GitHub account octocat" }));
+    await click(await screen.findByRole("button", { name: "Manage organization acme" }));
+    await screen.findByRole("button", { name: /widget/ });
+    expect(screen.queryByRole("button", { name: /secret/ })).toBeNull();
+    expect(connection.callsNamed("sourceRepositories")[0]).toContain('credentialId: "cred-grant"');
+    expect(connection.callsNamed("sourceRepositories")[0]).toContain('connectionId:');
+    await typeInto(screen.getByRole("textbox", { name: "Search repositories" }) as HTMLInputElement, "widget");
+    expect(screen.queryByRole("button", { name: /docs/ })).toBeNull();
+    await click(screen.getByRole("button", { name: /widget/ }));
+    const detail = screen.getByRole("region", { name: "Repository" });
+    expect(within(detail).getByText("acme/widget")).toBeTruthy();
+    expect(within(detail).getByText("private")).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: "Source" })).getByText("main")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Disconnect" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Analyze" })).toBeNull();
+    expect(screen.getByText("Read only")).toBeTruthy();
+    await click(screen.getByRole("button", { name: "Back" }));
+    expect((screen.getByRole("textbox", { name: "Search repositories" }) as HTMLInputElement).value).toBe("widget");
+    expect(screen.queryByRole("button", { name: /docs/ })).toBeNull();
+    expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(0);
+    expect(connection.callsNamed("packageAnalyze")).toHaveLength(0);
+    expect(connection.callsNamed("sourceCredentialRevoke")).toHaveLength(0);
+  });
+
+  it("disconnects one organization locally and keeps the GitHub account and other bindings", async () => {
+    const { connection } = mountSources({ credentials: [GRANT], sourceConnections: [sourceConnectionRow(), sourceConnectionRow({ id: "source-beta", installationId: "i-beta", accountLogin: "beta" })], repositories: repositoriesReply({ repositories: [WIDGET] }) });
+    await click(await screen.findByRole("button", { name: "Manage GitHub account octocat" }));
+    await click(await screen.findByRole("button", { name: "Manage organization acme" }));
+    const footer = screen.getByRole("group", { name: "What you can do with this" });
+    await click(within(footer).getByRole("button", { name: "Disconnect" }));
+    expect(connection.callsNamed("sourceConnectionRemove")).toHaveLength(0);
+    await click(within(footer).getByRole("button", { name: "Disconnect" }));
+    await screen.findByRole("button", { name: "Manage organization beta" });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Manage organization acme" })).toBeNull());
+    expect(connection.callsNamed("sourceConnectionRemove")).toEqual(['builtin sourceConnectionRemove(connectionId: "source-acme")']);
+    expect(connection.callsNamed("sourceCredentialRevoke")).toHaveLength(0);
+    expect(connection.callsNamed("packageSetSourceRemoved")).toHaveLength(0);
+    expect(connection.callsNamed("deleteSite")).toHaveLength(0);
+    expect(screen.getByRole("region", { name: "GitHub account @octocat" })).toBeTruthy();
+  });
+
+  it("adds authorized organizations under the same account without reconnecting GitHub", async () => {
+    const { connection } = mountSources({ credentials: [GRANT], sourceConnections: [], repositories: repositoriesReply({ repositories: [WIDGET] }) });
+    await click(await screen.findByRole("button", { name: "Manage GitHub account octocat" }));
+    await screen.findByText("No organizations connected");
+    await click(screen.getByRole("button", { name: "Add organization" }));
+    await click(await screen.findByRole("button", { name: "Select organization acme" }));
+    expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(0);
+    await click(screen.getByRole("button", { name: "Connect" }));
+    await screen.findByRole("button", { name: "Manage organization acme" });
+    expect(connection.callsNamed("sourceConnectionCreate")[0]).toContain('credentialId: "cred-grant", installationId: "i-acme"');
+    expect(connection.callsNamed("githubConnectBegin")).toHaveLength(0);
+    expect(connection.callsNamed("sourceCredentialRevoke")).toHaveLength(0);
+  });
+
+  it("keeps organization disconnect reachable when repository lookup fails and shows mutation errors", async () => {
+    const { connection } = mountSources({ credentials: [GRANT], sourceConnections: [sourceConnectionRow()], repositoriesError: "rate_limited: Try later", sourceConnectionRemoveError: "forbidden: Cannot disconnect" });
+    await click(await screen.findByRole("button", { name: "Manage GitHub account octocat" }));
+    await click(await screen.findByRole("button", { name: "Manage organization acme" }));
+    await screen.findByRole("button", { name: "Try again" });
+    expect(screen.queryByText("This connection reaches no repositories yet.")).toBeNull();
+    await click(screen.getByRole("button", { name: "Disconnect" }));
+    await click(screen.getByRole("button", { name: "Disconnect" }));
+    await screen.findByText(/Cannot disconnect/);
+    expect(screen.getByRole("region", { name: "GitHub organization acme" })).toBeTruthy();
+    expect(connection.callsNamed("sourceCredentialRevoke")).toHaveLength(0);
+  });
+
+  it("reserves organization rows with a skeleton while GitHub access is loading", async () => {
+    const { connection } = mountSources({ credentials: [GRANT], sourceConnections: [sourceConnectionRow()] });
+    const original = vi.mocked(connection.query.executeNamed).getMockImplementation()!;
+    let finish!: () => void;
+    vi.spyOn(connection.query, "executeNamed").mockImplementation(async (name, call) => {
+      if (name === "sourceInstallations") {
+        await new Promise<void>(resolve => { finish = resolve; });
+        return builtinReply("sourceInstallations", [{ reason: "ok", installations: [{ id: "i-acme", account: "acme", accountType: "Organization" }], pending: [] }]);
+      }
+      return original(name, call);
+    });
+    await click(await screen.findByRole("button", { name: "Manage GitHub account octocat" }));
+    const organizations = screen.getByRole("region", { name: "Organizations" });
+    expect(within(organizations).getByRole("status").getAttribute("aria-busy")).toBe("true");
+    expect(within(organizations).queryByText("No organizations connected")).toBeNull();
+    await act(async () => finish());
+    await screen.findByRole("button", { name: "Manage organization acme" });
+    expect(within(organizations).queryByRole("status")).toBeNull();
+  });
+
+  it("keeps setup ready when another account is still connected", async () => {
+    const { reportSetupState } = mountSources({ credentials: [GRANT, githubGrantRow({id: "other-account", login: "work"})], credentialRevokeRemote: false });
+    await click(await screen.findByRole("button", { name: "Manage GitHub account octocat" }));
+    await click(screen.getByRole("button", { name: "Disconnect" }));
+    await click(screen.getByRole("button", { name: "Disconnect" }));
+    await screen.findByText("Disconnected here, but GitHub did not confirm the authorization ended.");
+    expect(reportSetupState).toHaveBeenLastCalledWith("ready");
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Manage GitHub account work" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Manage GitHub account octocat" })).toBeNull();
   });
 
   it("never renders anything token-shaped, on either path", async () => {
@@ -821,11 +969,9 @@ describe("existing credential and cluster settings", () => {
       ],
     });
     const group = await sourcesGroup();
-    // The wire fixture carries secrets, but Settings only shows guidance
-    // and cluster setup, never a second credential roster.
+    // Account rows use the safe credential projection, never token values.
     expect(FIXTURE_GITHUB_PAT.startsWith("ghp_")).toBe(true);
-    expect(within(group).queryByRole("list")).toBeNull();
-    expect(within(group).queryByText("@octocat")).toBeNull();
+    expect(await within(group).findByRole("button", { name: "Manage GitHub account octocat" })).toBeTruthy();
     expect(container.textContent).not.toContain("ghp_");
     expect(container.textContent).not.toContain(FIXTURE_GITHUB_PAT);
     // Nor does anything token-shaped go OUT.

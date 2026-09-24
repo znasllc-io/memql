@@ -201,13 +201,12 @@ const TWO_SOURCES: FakeSeed = { sites: [STORE, ADMIN, WIDGET_SITE], packages: [A
 // ---------------------------------------------------------------------------
 
 describe("the window's sections", () => {
-  it("opens a saved default of sites, packages or actions on Deployables", async () => {
-    // The section a person asked for is gone; the one that replaced it is
-    // where they meant to be. The window must not land on the map instead.
+  it("ignores removed landing preferences when opening Overview", async () => {
+    // Retired browser preferences no longer redirect the default Overview.
     for (const retired of ["sites", "packages", "actions"]) {
       const navigate = vi.fn();
       const view = mount(fakeConnection(WITH_PACKAGE), { section: "map", navigate, saved: { defaultSection: retired } });
-      expect(navigate).toHaveBeenCalledWith("deployables");
+      expect(navigate).not.toHaveBeenCalled();
       view.unmount();
     }
   });

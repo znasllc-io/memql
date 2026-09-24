@@ -19,6 +19,7 @@ import {
 
 export { Caption } from "./Caption";
 export { EmptyState } from "./EmptyState";
+export { RecordListSkeleton } from "./RecordListSkeleton";
 export { RefreshButton } from "./RefreshButton";
 export { Switch } from "./Switch";
 export { findRegion, revealRegion } from "./reveal";

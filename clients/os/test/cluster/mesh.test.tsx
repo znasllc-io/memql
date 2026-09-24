@@ -157,13 +157,14 @@ describe("the list", () => {
 });
 
 describe("a node's page", () => {
-  it("opens from its row, dates its report, and splits its links by who opened each stream", async () => {
+  it("opens from its row with a concise state and splits its links by who opened each stream", async () => {
     mount(fakeConnection({ clusterNodes: [BFF, AGENT, DEAF_EDGE, IDENTITY] }));
     const list = await screen.findByRole("list", { name: "Running nodes" });
     await click(within(list).getByRole("button", { name: /^Open bff-a,/ }));
 
-    expect(screen.getByText("This node hears the cluster.")).toBeTruthy();
-    expect(screen.getByText(/Report written/)).toBeTruthy();
+    expect(screen.queryByText("This node hears the cluster.")).toBeNull();
+    expect(screen.getByText("Hearing")).toBeTruthy();
+    expect(screen.queryByText(/Report written|Counting since/)).toBeNull();
     expect(fact("Heard")).toBe("1,204 events");
     expect(fact("Copies dropped")).toBe("0 copies");
 
@@ -183,7 +184,8 @@ describe("a node's page", () => {
     await click(screen.getAllByRole("button", { name: /^Open edge-a,/ })[0] as Element);
     expect(screen.getByText(/This node has heard nothing in the 60 minutes since it started/)).toBeTruthy();
     await click(screen.getByRole("button", { name: /^Open bff-a,/ }));
-    expect(screen.getByText("This node hears the cluster.")).toBeTruthy();
+    expect(screen.queryByText("This node hears the cluster.")).toBeNull();
+    expect(screen.getByText("Hearing")).toBeTruthy();
   });
 
   it("draws a peer the page does not list as text, not as a control that opens nothing", async () => {
@@ -199,15 +201,15 @@ describe("a node's page", () => {
     mount(fakeConnection({ clusterNodes: [BFF, UNREPORTED] }));
     const list = await screen.findByRole("list", { name: "Running nodes" });
     await click(within(list).getByRole("button", { name: /^Open mcp-a,/ }));
-    expect(screen.getByText(/has not reported what it hears/)).toBeTruthy();
+    expect(screen.getByText("Not reported")).toBeTruthy();
     expect(screen.getByText("This node has not reported its links.")).toBeTruthy();
     // ABSENT, the kit's em dash -- a zero here would say "looked, and heard
     // nothing", which is what a deaf node reports.
     expect(fact("Heard")).toBe("\u2014");
     expect(fact("Copies dropped")).toBe("\u2014");
     expect(fact("Last heard")).toBe("\u2014");
-    // The row was written, but not by a report -- so the date is the row's.
-    expect(screen.getByText(/^Row last written/)).toBeTruthy();
+    // Timestamp prose stays off the detail page; absent figures remain explicit.
+    expect(screen.queryByText(/^Row last written/)).toBeNull();
     expect(screen.queryByText(/Report written/)).toBeNull();
   });
 

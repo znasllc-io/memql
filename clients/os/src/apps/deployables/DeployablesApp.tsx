@@ -1,14 +1,14 @@
 import { PENDING_DEPLOYMENT_STATUSES } from "./packages/rows";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Concepts, type LiveSnapshot, type Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { Head, Panel, roleAdmits, SetupGroup } from "../../kit";
+import { roleAdmits } from "../../kit";
 import { useDeployableParts } from "./parts";
 import { useSession } from "../../chrome/access";
 import { useLiveView } from "../../live/liveView";
 import { useArrivals } from "../../live/useArrivals";
 import { AppLogsSection } from "../../logs/AppLogsSection";
-import { accessAdmits, type OsAppProps } from "../../system/registry";
+import type { OsAppProps } from "../../system/registry";
 import { DeployablesSection } from "./DeployablesSection";
 import { ActivePane } from "./paneActivity";
 import { MapSection, NO_SELECTION, type MapSelection } from "./map/MapSection";
@@ -17,20 +17,18 @@ import { deploymentFromRow, packageFromRow, type DeploymentRow, type PackageRow 
 import { usePendingDeployments } from "./packages/usePendingDeployments";
 import { usePackages } from "./packages/usePackages";
 import { siteFingerprint, siteFromRow, type SiteRow } from "./rows";
-import { SourceConnectionsProvider } from "./sources/connections";
-import { GithubAppBlock, GithubAppMissing } from "./sources/GithubAppSetup";
-import { useGithubApp } from "./sources/useGithubApp";
+import { SourceConnectionsProvider, useSourceConnections } from "./sources/connections";
+import { GitHubAccountsSettings } from "./sources/GitHubAccountsSettings";
+import { accountSetupState, githubAccountsFor } from "./sources/accountSetup";
 import { ConnectReturnNotice } from "./sources/ConnectReturnNotice";
-import { returnPathFor, type ConnectReturn } from "./sources/connectReturn";
+import type { ConnectReturn } from "./sources/connectReturn";
 import { credentialFromRow, type CredentialRow } from "./sources/rows";
 import { useSourceCredentials } from "./sources/useSourceCredentials";
 import {
-  DEPLOYABLES_SECTIONS,
-  LIST_DENSITIES,
   LocalDeployablesSettingsStore,
   type DeployablesSettings,
   type DeployablesSettingsStore,
-  type ListDensity, DEPLOYABLES_REQUIRES, DEPLOYABLES_WANTS } from "./settings";
+} from "./settings";
 import { DeployablesSettingsProvider } from "./settingsContext";
 import { useSiteHealth } from "./useSiteHealth";
 import { siteStateWord } from "./words";
@@ -86,6 +84,7 @@ function DeployablesAppContent({
   askContext,
   intent,
   consumeIntent,
+  reportSetupState,
   store,
 }: OsAppProps & { store?: DeployablesSettingsStore }) {
   // Injectable for tests, which is the whole reason the parameter exists --
@@ -168,6 +167,12 @@ function DeployablesAppContent({
     rows.map(credentialFromRow).filter((c) => c.id !== ""),
   );
   const credentialRows = credentials?.snapshot.rows ?? [];
+  const connections = useSourceConnections();
+  const githubAccounts = githubAccountsFor(credentialRows, viewerUserId, connections.revokedCredentialIds);
+  const setupState = accountSetupState(githubAccounts, credentialSnapshot);
+  useEffect(() => { reportSetupState?.(setupState); }, [reportSetupState, setupState]);
+  useEffect(() => () => reportSetupState?.("unknown"), [reportSetupState]);
+  useEffect(() => { connections.observeCredentials(credentialRows); }, [connections.observeCredentials, credentialRows]);
 
   // Pending status is held HERE as well as by the feed's `inScope`: the
   // seed and the events both narrow to it, and the projection says so once
@@ -251,36 +256,11 @@ function DeployablesAppContent({
     consumeIntent?.(intent.id);
   }, [intent, consumeIntent, sectionId]);
 
-  // THE DEFAULT-SECTION PREFERENCE, APPLIED ONCE PER WINDOW -- Fleet's pattern,
-  // and its reasoning holds unchanged. The shell opens an app on its manifest's
-  // FIRST section, so an app-level "open me here" can only be the app
-  // navigating itself on the first render of this component instance.
-  const applied = useRef(false);
-  useEffect(() => {
-    if (applied.current) return;
-    applied.current = true;
-    // ONLY when the window opened on the SHELL's default. A window opened on a
-    // named section was opened by somebody who said where they wanted to be --
-    // the Settings apps index deep-linking to this app's own settings, say --
-    // and a preference that overrode that would make the deep link silently not
-    // work (memql#4743).
-    const shellDefault = DEPLOYABLES_SECTIONS[0]?.id ?? "";
-    if (sectionId !== shellDefault) return;
-    if (settings.defaultSection && settings.defaultSection !== sectionId) {
-      navigate(settings.defaultSection);
-    }
-    // ONCE PER MOUNT, WHICH IS ONCE PER WINDOW. Re-running on a section change
-    // would drag somebody back to their default the moment they navigated away.
-  }, []);
-
   const settingsContent = (
-      <DeployablesSettingsSection
-        settings={settings}
-        update={update}
-        isClusterOwner={isClusterOwner}
-        connectResult={connectResult?.section === "settings" ? connectResult : null}
-      />
-    );
+    <GitHubAccountsSettings accounts={githubAccounts} packages={packageSnapshot.rows}
+      feed={{ state: credentialSnapshot.state, error: credentialSnapshot.error, retry: reseedCredentials }}
+      connectResult={connectResult?.section === "settings" ? connectResult : null} />
+  );
   // The app's slice of the cluster's logs (epic memql#4895). It survived the
   // compose restructure while Sites, Packages and Actions did not, and the
   // difference is whose section it is: those three were this app's own reading
@@ -310,7 +290,6 @@ function DeployablesAppContent({
           packages={packages}
           parked={parked}
           feedError={snapshot.error || packageSnapshot.error || parkedSnapshot.error}
-          density={settings.density}
           selectedSiteId={selectedSiteId}
           onSelectSite={selectSite}
           viewerUserId={viewerUserId}
@@ -341,7 +320,6 @@ function DeployablesAppContent({
           packages={packages}
           parked={parked}
           feedError={snapshot.error || packageSnapshot.error || parkedSnapshot.error}
-          density={settings.density}
           selectedSiteId=""
           onSelectSite={() => {}}
           viewerUserId={viewerUserId}
@@ -391,96 +369,4 @@ function RetainedSection({ active, children }: { active: boolean; children: Reac
   const [visited, setVisited] = useState(active);
   useEffect(() => { if (active) setVisited(true); }, [active]);
   return active || visited ? <ActivePane active={active}><div hidden={!active} inert={!active} style={{ display: active ? "contents" : "none" }}>{children}</div></ActivePane> : null;
-}
-
-function DeployablesSettingsSection({
-  settings,
-  update,
-  isClusterOwner,
-  connectResult,
-}: {
-  settings: DeployablesSettings;
-  update: (patch: Partial<DeployablesSettings>) => void;
-  isClusterOwner: boolean;
-  connectResult: ConnectReturn | null;
-}) {
-  const githubApp = useGithubApp();
-  const { readiness } = useSession();
-  // OFFER ONLY WHAT THIS SESSION CAN OPEN. A preference naming a section the
-  // reader is not admitted to would silently do nothing -- WindowFrame falls
-  // back to the first admitted section -- which reads as a broken setting
-  // rather than as one that does not apply. No section carries a role today,
-  // so this is every one of the three; the filter stays for the day one does.
-  const offered = DEPLOYABLES_SECTIONS.filter((s) => accessAdmits(s.requires));
-
-  return (
-    <div className="os-settings deployable-settings">
-      <Head title="Deployables settings" />
-      {/* THE SET UP GROUP sits above the preferences on purpose: it is the
-          reason a person was sent here from an unconfigured surface, and the
-          first thing they need is what to configure and where. Rule 4 puts
-          micro-preferences in Settings; it never said they come first. */}
-      <SetupGroup
-        app="Deployables"
-        requires={DEPLOYABLES_REQUIRES}
-        wants={DEPLOYABLES_WANTS}
-        readiness={readiness}
-        /* THIS PAGE, so the GitHub App -- configured in the Sources group
-           further down it -- is pointed at in words, not with a button that
-           opens the page somebody is already reading. */
-        here={{ app: "deployables", section: "settings" }}
-      />
-      <Panel label="Deployables settings">
-        <fieldset className="os-field-group">
-          <legend>Open Deployables on</legend>
-          <div className="os-choice-row" role="radiogroup" aria-label="Default section">
-            {offered.map((section) => (
-              <button
-                key={section.id}
-                type="button"
-                role="radio"
-                aria-checked={settings.defaultSection === section.id}
-                className="os-choice"
-                onClick={() => update({ defaultSection: section.id })}
-              >
-                {section.name}
-              </button>
-            ))}
-          </div>
-          <p className="os-caption">
-            Applies the next time you open Deployables.
-          </p>
-        </fieldset>
-
-        <fieldset className="os-field-group">
-          <legend>List density</legend>
-          <div className="os-choice-row" role="radiogroup" aria-label="List density">
-            {LIST_DENSITIES.map((density) => (
-              <button
-                key={density}
-                type="button"
-                role="radio"
-                aria-checked={settings.density === density}
-                className="os-choice"
-                onClick={() => update({ density: density as ListDensity })}
-              >
-                {density}
-              </button>
-            ))}
-          </div>
-          <p className="os-caption">
-            Choose the spacing between app rows.
-          </p>
-        </fieldset>
-
-        <section className="os-field-group" aria-label="Source settings">
-          <p className="os-caption">Manage saved sources in Sources. Add a deployable to connect a GitHub account and choose a repository.</p>
-          <ConnectReturnNotice result={connectResult} />
-          {isClusterOwner ? githubApp.status?.configured === false ? <GithubAppMissing app={githubApp} returnPath={returnPathFor("settings")} /> : <GithubAppBlock app={githubApp} /> : null}
-        </section>
-
-        <p className="os-caption">Preferences are saved in this browser.</p>
-      </Panel>
-    </div>
-  );
 }

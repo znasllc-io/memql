@@ -126,7 +126,7 @@
 .deployable-source-piece > svg:first-child { margin-bottom: 4px; }
 .deployable-settings { width: 100%; }
 .deployable-settings > .os-panel { border: 0; padding: 0; background: none; }
-.deployable-settings .os-field-group { padding-block: 18px; border: 0; border-bottom: 1px solid var(--os-line); }
+.deployable-settings .os-field-group { padding-block: 18px; border: 0; }
 .deployable-settings .os-caption { max-width: 65ch; }
 .deployable-history .os-attempt { border: 0; border-bottom: 1px solid var(--os-line); border-radius: 0; padding: 16px 0; }
 .deployable-attempt-detail > summary { cursor: pointer; color: var(--os-muted); font-size: var(--os-text-sm); padding-block: 10px; }

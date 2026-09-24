@@ -33,14 +33,14 @@ func (s *streamSession) handleMyAccess(envelope *memqlv1.MemqlClientMessage, msg
 	slug := strings.ToLower(strings.TrimSpace(string(ac.Role)))
 	result := &memqlv1.MyAccessResult{
 		RequestId:    requestId,
-		UserId:       ac.UserId,
+		UserId:       memql.BareShortId(ac.UserId),
 		PrimaryEmail: ac.PrimaryEmail,
 		// From the user row the resolver already read (memql#4317) -- the
 		// same read that produced PrimaryEmail, so the name costs no extra
 		// query. Empty when no row resolved; a client falls back to the
 		// email it is holding anyway.
 		DisplayName: ac.DisplayName,
-		SessionId:   sessionIdFromClaims(ctx),
+		SessionId:   memql.BareShortId(sessionIdFromClaims(ctx)),
 		// The role as a SLUG (epic memql#5166, D12). It was the UserRole enum,
 		// which could name only the roles this repo shipped -- a cluster's own
 		// role reported USER_ROLE_UNSPECIFIED, the value an unauthenticated
@@ -101,7 +101,8 @@ func sessionIdFromClaims(ctx context.Context) string {
 	return strings.TrimSpace(sid)
 }
 
-// applyAccessGrant copies the engine's answer onto the wire message.
+// applyAccessGrant copies the engine's answer onto the wire message, using
+// bare IDs just like query rows so clients can compare identity and ownership.
 //
 // A SEPARATE FUNCTION so the mapping is testable without a stream: the
 // interesting part is the staff case, where account_ids is EMPTY and empty
@@ -112,14 +113,17 @@ func applyAccessGrant(result *memqlv1.MyAccessResult, grant memql.AccessGrant) {
 		return
 	}
 	result.EveryAccount = grant.EveryAccount
-	result.AccountIds = grant.AccountIDs
+	result.AccountIds = make([]string, len(grant.AccountIDs))
+	for i, accountID := range grant.AccountIDs {
+		result.AccountIds[i] = memql.BareShortId(accountID)
+	}
 	result.Groups = make([]*memqlv1.MyAccessGroup, 0, len(grant.Groups))
 	for _, g := range grant.Groups {
 		result.Groups = append(result.Groups, &memqlv1.MyAccessGroup{
-			Id:          g.ID,
+			Id:          memql.BareShortId(g.ID),
 			Name:        g.Name,
 			Kind:        g.Kind,
-			AccountId:   g.AccountID,
+			AccountId:   memql.BareShortId(g.AccountID),
 			AccountName: g.AccountName,
 		})
 	}

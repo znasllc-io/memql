@@ -149,16 +149,20 @@ export function clearParkedConnectReturn(): void {
 // Correlation is UI state only. Identity validates the OAuth state, browser
 // session, target GitHub identity and PKCE; this record never grants authority.
 const ATTEMPT_KEY = "memql:github-connect-attempt";
-export function rememberConnectAttempt(flowId: string, viewer: string, credentialId = ""): void {
-  try { sessionStorage.setItem(ATTEMPT_KEY, JSON.stringify({ flowId, viewer, credentialId })); } catch { /* No auto-selection without a record. */ }
+export function rememberConnectAttempt(flowId: string, viewer: string, credentialId = "", section = ""): void {
+  try { sessionStorage.setItem(ATTEMPT_KEY, JSON.stringify({ flowId, viewer, credentialId, section })); } catch { /* No auto-selection without a record. */ }
 }
 export function correlateConnectReturn(result: ConnectReturn, viewer: string): ConnectReturn {
-  if (!result.flowId) return { reason: result.reason, section: result.section };
-  let attempt: { flowId?: string; viewer?: string; credentialId?: string } | null = null;
+  let attempt: { flowId?: string; viewer?: string; credentialId?: string; section?: string } | null = null;
   try { attempt = JSON.parse(sessionStorage.getItem(ATTEMPT_KEY) ?? "null"); sessionStorage.removeItem(ATTEMPT_KEY); } catch { /* Refuse an unreadable correlation. */ }
+  // Even a refused callback that cannot trust its state belongs where this
+  // browser started. This restores navigation only, never credential authority.
+  const section = attempt?.viewer === viewer && ["deployables", "sources", "settings"].includes(attempt.section ?? "")
+    ? attempt.section! : result.section;
+  if (!result.flowId) return { reason: result.reason, section };
   if (!attempt || attempt.flowId !== result.flowId || attempt.viewer !== viewer ||
       (connectSucceeded(result) && attempt.credentialId && attempt.credentialId !== result.credentialId)) {
-    return { reason: "connect_state_invalid", section: result.section };
+    return { reason: "connect_state_invalid", section };
   }
-  return result;
+  return { ...result, section };
 }

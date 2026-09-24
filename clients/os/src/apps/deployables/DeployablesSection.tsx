@@ -63,7 +63,6 @@ import { DeployablePage } from "./page/DeployablePage";
 import { HistoryView } from "./page/HistoryView";
 import { SourceView } from "./page/SourceView";
 import { SITE_STATUSES, type SiteRow } from "./rows";
-import type { ListDensity } from "./settings";
 import { LIST_TRAFFIC_WINDOW, type TrafficSummary } from "./traffic";
 import { useSiteTraffic } from "./useSiteTraffic";
 import type { CredentialFeedStatus, CredentialRow } from "./sources/rows";
@@ -133,7 +132,6 @@ export function DeployablesSection({
   packages,
   parked,
   feedError,
-  density,
   selectedSiteId,
   onSelectSite,
   viewerUserId,
@@ -154,7 +152,6 @@ export function DeployablesSection({
   packages: LiveView<PackageRow> | null;
   parked: LiveView<DeploymentRow> | null;
   feedError: string;
-  density: ListDensity;
   selectedSiteId: string;
   onSelectSite: (siteId: string) => void;
   viewerUserId: string;
@@ -467,7 +464,7 @@ export function DeployablesSection({
 
     const filtered = filterIsNarrowing(filter);
     return (
-      <div className="os-app-stack os-deployables-list deployable-overview os-record-list" data-density={density}>
+      <div className="os-app-stack os-deployables-list deployable-overview os-record-list" data-density="comfortable">
         <Head title={ROOT_LABEL[root]} meta={!feedError && (root !== "sources" || sourceMetadataReady) && (root === "sources" ? sourcesList : list)?.snapshot.state === "live" ? listedCount : undefined}>
           <Refine iconOnly
             search={filter.search}

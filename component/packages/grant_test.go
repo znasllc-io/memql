@@ -1112,6 +1112,9 @@ func TestDisconnectRevokesAtGitHubAndTheRowRegardless(t *testing.T) {
 		}
 		reads := 0
 		for _, statement := range engine.statements() {
+			if strings.HasPrefix(statement, "mutation ") && !strings.HasPrefix(statement, "mutation revokeSourceCredential(") {
+				t.Fatalf("disconnect must preserve sources, packages and serving sites; unexpected write: %s", statement)
+			}
 			if strings.HasPrefix(statement, "query sourceCredentialSealedById") {
 				reads++
 			}

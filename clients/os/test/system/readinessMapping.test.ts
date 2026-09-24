@@ -40,11 +40,11 @@ describe("the readiness mapping (design record section 5.1)", () => {
     expect(requirementsFor(app("fleet"), "machines").requires).toEqual([]);
   });
 
-  it("Deployables, Files, Training and Logs only want", () => {
-    expect(requirementsFor(app("deployables"), "map")).toEqual({
-      requires: [],
-      wants: ["storage", "githubApp"],
-    });
+  it("Deployables reports personal account setup independently of cluster modules", () => {
+    expect(allRequirementsFor(app("deployables"))).toEqual({ requires: [], wants: [] });
+  });
+
+  it("Files, Training and Logs only want", () => {
     expect(requirementsFor(app("files"), "browse")).toEqual({ requires: [], wants: ["storage"] });
     expect(requirementsFor(app("training"), "upload")).toEqual({ requires: [], wants: ["ai"] });
     // USERS DECLARES NOTHING AT ALL any more (epic memql#5167): the Invites

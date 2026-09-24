@@ -3,12 +3,64 @@ package http
 import (
 	"context"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/znasllc-io/memql/component/identity/githubconnect"
 )
+
+func TestGitHubReturnCompletesOnTheHostHoldingTheBrowserSession(t *testing.T) {
+	for _, section := range []string{"settings", "deployables"} {
+		t.Run(section, func(t *testing.T) {
+			eng := &githubFakeEngine{state: liveState()}
+			gh := newFakeGitHub()
+			s, _, _ := newGitHubCallbackServer(t, eng, gh)
+			eng.state["returnPath"] = "/?connect=" + section
+			eng.state["flowId"] = "originating-flow"
+			jar, _ := cookiejar.New(nil)
+			osURL, _ := url.Parse("https://os.example.test")
+			jar.SetCookies(osURL, []*http.Cookie{{Name: refreshCookieName, Value: "browser-refresh", Path: "/", Secure: true, HttpOnly: true}})
+			providerReturn := callbackRequest("code=the-code&state=" + testStateValue + "&return_to=https://untrusted.example")
+			providerReturn.Header.Del("Cookie")
+			for _, cookie := range jar.Cookies(providerReturn.URL) {
+				providerReturn.AddCookie(cookie)
+			}
+			if len(providerReturn.Cookies()) != 0 {
+				t.Fatal("the OS host-only cookie must not reach the Identity hostname")
+			}
+			relay := httptest.NewRecorder()
+			s.handleGitHubReturn(relay, providerReturn)
+			dest, err := url.Parse(relay.Header().Get("Location"))
+			if err != nil || dest.Host != osURL.Host || dest.Path != githubconnect.CompletePath || dest.Query().Get("return_to") != "" {
+				t.Fatal("callback must relay only onto the configured OS completion route")
+			}
+			if eng.consumes != 0 || eng.creates != 0 || gh.tokenHits != 0 {
+				t.Fatal("the cookieless provider hop must not consume state, exchange the code or create a grant")
+			}
+			if relay.Header().Get("Cache-Control") != "no-store" || relay.Header().Get("Referrer-Policy") != "no-referrer" {
+				t.Fatal("the authorization-code redirect must not be cached or used as a referrer")
+			}
+			completion := httptest.NewRequest(http.MethodGet, dest.String(), nil)
+			for _, cookie := range jar.Cookies(dest) {
+				completion.AddCookie(cookie)
+			}
+			result := httptest.NewRecorder()
+			s.handleGitHubCallback(result, completion)
+			final, _ := url.Parse(result.Header().Get("Location"))
+			if final.Query().Get("connect") != section || final.Query().Get("github") != "connected" || final.Query().Get("githubFlowId") != "originating-flow" || final.Query().Get("githubCredentialId") == "" {
+				t.Fatalf("connection did not return to %s with a verified account: %s", section, final)
+			}
+			if eng.consumes != 1 || eng.creates != 1 || gh.tokenHits != 1 {
+				t.Fatal("the OS session must admit exactly one code exchange and grant")
+			}
+			assertNoUnknownConstructs(t, eng)
+		})
+	}
+}
 
 func TestGitHubCallbackRequiresTheInitiatingLiveBrowserSession(t *testing.T) {
 	for _, mode := range []string{"missing cookie", "different session", "different user", "revoked session", "expired session", "missing stored binding", "missing PKCE"} {
