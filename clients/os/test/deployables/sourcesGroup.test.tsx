@@ -30,7 +30,7 @@ describe("Deployables Settings manages accounts independently of sources", () =>
     expect(screen.queryByText("@other-user")).toBeNull();
     expect(screen.queryByText("stored-token")).toBeNull();
     expect(screen.getByRole("heading", { name: "Settings", level: 3 })).toBeTruthy();
-    expect(within(settings).getByRole("heading", { name: "GitHub accounts", level: 4 })).toBeTruthy();
+    expect(within(settings).getByRole("heading", { name: "GitHub Accounts", level: 4 })).toBeTruthy();
     const add = within(settings).getByRole("button", { name: "Add GitHub account" });
     expect(add.classList.contains("os-icon-button")).toBe(true);
     expect(add.textContent).toBe("");

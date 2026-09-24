@@ -1,16 +1,16 @@
 import { useEffect, useState } from "react";
 import { UserRound } from "lucide-react";
-import { Button, Caption, EmptyState, Fact, Facts, Head, Notice, Panel, RecordList, RecordRow, Subhead } from "../../../kit";
+import { Button, EmptyState, Head, Notice, RecordList, RecordListSkeleton, RecordRow, Subhead } from "../../../kit";
 import { AddButton } from "../../../kit/AddButton";
 import { sourceName } from "../list";
 import type { PackageRow } from "../packages/rows";
 import { ProblemNotice } from "../packages/ReportView";
 import type { CredentialFeedStatus, CredentialRow } from "./rows";
-import { useSourceConnections, useSourceInstallations } from "./connections";
+import { useSourceConnections } from "./connections";
 import { useCredentialRevoke, useGithubConnect } from "./useGithubConnect";
 import { useGithubApp } from "./useGithubApp";
 import { GithubAppMissing } from "./GithubAppSetup";
-import { DisconnectGitHub } from "./ConnectedAccountCard";
+import { GitHubAccountDetails } from "./GitHubAccountDetails";
 import { returnPathFor, type ConnectReturn } from "./connectReturn";
 import { ConnectReturnNotice } from "./ConnectReturnNotice";
 
@@ -53,45 +53,17 @@ export function GitHubAccountsSettings({ accounts, packages, feed, connectResult
       <ConnectReturnNotice result={connectResult} />
       {connect.refusal ? <ProblemNotice problem={connect.refusal} tone="error" /> : null}
       {revoke.remoteRevoked === false ? <Notice tone="warn" sentence="Disconnected here, but GitHub did not confirm the authorization ended." next="Remove the authorization under Applications in your GitHub settings." /> : null}
+      {feed.state === "seeding" && connectedAccounts.length === 0 ? <RecordListSkeleton label="Reading GitHub accounts" /> : null}
       <RecordList as="ul" label="GitHub accounts">{connectedAccounts.map(account => <RecordRow key={account.id}
         icon={<UserRound size={18} aria-hidden />} name={`@${account.login || account.label}`}
         secondary="GitHub" state="Connected" tone="accent" current
         onOpen={() => { revoke.clear(); setSelectedId(account.id); }} label={`Manage GitHub account ${account.login || account.label}`}
       />)}</RecordList>
       {ready && connectedAccounts.length === 0 ? <EmptyState icon={UserRound} title="No GitHub accounts connected">Connect an account to choose its organizations and repositories when adding a deployable.</EmptyState> : null}
-      {!ready ? <Notice sentence={feed.state === "seeding" ? "Reading GitHub accounts…" : "GitHub accounts could not be read."} detail={feed.error || undefined}>
-        {feed.state !== "seeding" ? <Button onClick={feed.retry}>Try again</Button> : null}
+      {!ready && feed.state !== "seeding" ? <Notice sentence="GitHub accounts could not be read." detail={feed.error || undefined}>
+        <Button onClick={feed.retry}>Try again</Button>
       </Notice> : null}
       {app.status?.configured === false ? <GithubAppMissing app={app} returnPath={returnPathFor("settings")} /> : null}
     </section>
-  </section>;
-}
-
-function GitHubAccountDetails({ account, sourceNames, onBack, busy, refusal, onDisconnect }: {
-  account: CredentialRow; sourceNames: string[]; onBack: () => void;
-  busy: boolean; refusal: ReturnType<typeof useCredentialRevoke>["refusal"]; onDisconnect: () => void;
-}) {
-  const access = useSourceInstallations(account.id);
-  const name = `@${account.login || account.label}`;
-  return <section className="os-app-stack" aria-label={`GitHub account ${name}`}>
-    <Head title={name} back={{ label: "Settings", onSelect: onBack }} breadcrumbs={[{ label: "Settings", onSelect: onBack }, { label: name }]} />
-    <Panel label="Connection">
-      <Subhead>Connection</Subhead>
-      <Facts>
-        <Fact label="Status" value={<span className="os-record-status" data-tone="accent">Connected</span>} />
-        <Fact label="Host" value={account.host} />
-      </Facts>
-      <DisconnectGitHub inline sourceNames={sourceNames} busy={busy} refusal={refusal} onDisconnect={onDisconnect} />
-    </Panel>
-    <Panel label="Repository access">
-      <Subhead>Repository access</Subhead>
-      <RecordList as="ul" label="Organizations and personal account">{access.installations.map(installation => <RecordRow key={installation.id}
-        name={installation.login} secondary={installation.accountType === "Organization" ? "Organization" : "Personal account"}
-        state={installation.suspended ? "Suspended" : "Available"} tone={installation.suspended ? "warn" : "accent"} />)}</RecordList>
-      {access.busy ? <Caption>Reading repository access…</Caption> : null}
-      {access.refusal ? <><ProblemNotice problem={access.refusal} tone="error" /><Button onClick={() => void access.read()}>Try again</Button></> : null}
-      {access.readAt && !access.busy && !access.refusal && !access.installations.length ? <Caption>No repository access has been approved yet.</Caption> : null}
-      {access.pending.map(organization => <Caption key={organization.login}>{organization.login} is awaiting an organization owner's approval.</Caption>)}
-    </Panel>
   </section>;
 }

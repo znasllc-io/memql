@@ -1710,6 +1710,15 @@ button:not(:disabled):active {
 .os-record-list:is(ul, ol) { list-style: none; margin: 0; padding: 0; }
 .os-record-list > li { min-width: 0; }
 .os-record-list { container: os-record-list / inline-size; min-width: 0; }
+.os-record-slot { min-height: 144px; }
+.os-record-skeleton { container: os-record-list / inline-size; }
+.os-skeleton-block { display: inline-block; background: var(--os-line); border-radius: 4px; height: 12px; max-width: 100%; animation: os-skeleton-pulse 1.6s ease-in-out infinite; }
+.os-skeleton-icon { width: 20px; height: 20px; border-radius: 50%; }
+.os-skeleton-name { width: 132px; }
+.os-skeleton-detail { width: 84px; height: 9px; }
+.os-skeleton-state { width: 64px; }
+@keyframes os-skeleton-pulse { 0%, 100% { opacity: .45; } 50% { opacity: .9; } }
+@media (prefers-reduced-motion: reduce) { .os-skeleton-block { animation: none; } }
 .os-livelist-row:has(.os-record-row) { border-radius: 0; }
 /* THE STATE COLUMN HAS A FLOOR, SO THE MIDDLE COLUMN IS A COLUMN. Every row is
  * its own grid, and with the state track at `auto` each row resolved its

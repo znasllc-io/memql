@@ -85,10 +85,10 @@ describe("canonical repository choices", () => {
   it("distinguishes unread, loading, refused and authoritative empty results", () => {
     const p = { ...props(), page: { ...page, repositories: [], pending: [], nextPage: 0 }, readAt: "" };
     const view = render(<RepositoryPicker {...p} />);
-    expect(screen.getByText("Repositories have not been read yet.")).toBeTruthy();
+    expect(screen.getByText("Loading repositories")).toBeTruthy();
     expect(screen.queryByText("This connection reaches no repositories yet.")).toBeNull();
     view.rerender(<RepositoryPicker {...p} busy />);
-    expect(screen.getByText("Reading repositories…")).toBeTruthy();
+    expect(screen.getByText("Loading repositories")).toBeTruthy();
     expect(screen.queryByText("This connection reaches no repositories yet.")).toBeNull();
     view.rerender(<RepositoryPicker {...p} refusal={{ code: "rate_limited", message: "Try later" }} />);
     expect(screen.getByText("Try later")).toBeTruthy();

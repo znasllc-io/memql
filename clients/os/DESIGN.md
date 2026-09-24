@@ -120,6 +120,9 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
     that changes the thing's state lives anywhere else on the page: Pause at
     y=2412, Archive at 2499 and a cascade that archives a SIBLING at 885 were
     one surface, and the person had to know which was which.
+    Account and organization details use this footer too: state on the left,
+    Back/Disconnect on the right; Cancel/confirmation stay on that same edge.
+    Read-only repository details offer navigation, not deployment actions.
 
 ## Applying them
 
@@ -141,6 +144,11 @@ can use `RecordList as="ul"` to retain list/listitem semantics. The repository
 chooser uses this same anatomy, with selection state and grouped counts. See the
 [coverage inventory](qa/list-coverage.md) for specialized grids, trees and
 workflow surfaces that retain their interaction model.
+
+Loading record collections use `RecordListSkeleton`, with the same row geometry
+and an accessible loading status. Reserve the initial list area to avoid panel
+jumps, respect reduced motion, and keep already loaded rows visible during
+refreshes. Loading and failed reads must never look like an empty collection.
 
 ## App overviews
 

@@ -2,6 +2,7 @@ import { useMemo, useSyncExternalStore } from "react";
 import type { LiveSnapshot } from "@znasllc-io/memql-sdk-core/client";
 
 import { Caption } from "../kit/Caption";
+import { RecordListSkeleton } from "../kit/RecordListSkeleton";
 import type { ArrivalKind } from "./arrival";
 import { useArrivals } from "./useArrivals";
 
@@ -83,7 +84,9 @@ export function LiveList<T>({
       {snapshot.rows.length === 0 && snapshot.state === "live" ? (
         emptyContent ?? <Caption>{emptyText}</Caption>
       ) : null}
-      {stateLine ? <Caption>{stateLine}</Caption> : null}
+      {snapshot.state === "seeding" && snapshot.rows.length === 0
+        ? <RecordListSkeleton label="Loading from the cluster" />
+        : stateLine ? <Caption>{stateLine}</Caption> : null}
       {snapshot.error ? <p className="os-ask-error">{snapshot.error}</p> : null}
     </div>
   );
