@@ -96,9 +96,8 @@ func TestTheBoundStoreIsCachedWithTheSite(t *testing.T) {
 	}
 }
 
-// A BINDING NAMING A STORE THAT IS GONE SERVES NO STOREFRONT BLOCK AND NAMES
-// NO STORE. Drop, never guess -- the same discipline validHost already applies
-// to a malformed domain.
+// An unreadable store names no store and publishes no token. The kind remains
+// available so the bundle can render its design preview.
 func TestAnUnresolvableStoreLeavesTheSiteServable(t *testing.T) {
 	ex := &stubExec{
 		rows:  map[string]*Site{"shop.example.com": storefrontSiteBoundTo("gone")},
@@ -119,8 +118,8 @@ func TestAnUnresolvableStoreLeavesTheSiteServable(t *testing.T) {
 	if got := policyForSite(httptest.NewRequest("GET", "/", nil), site, noEnv, ""); strings.Contains(got, "myshopify") {
 		t.Errorf("the policy named a store the edge could not read: %q", got)
 	}
-	if doc := runtimeConfigForSite(context.Background(), site, noEnv, true, nil); doc.Storefront != nil {
-		t.Errorf("an unresolvable store still produced a storefront block: %+v", doc.Storefront)
+	if doc := runtimeConfigForSite(context.Background(), site, noEnv, true, nil); doc.Storefront == nil || *doc.Storefront != (StorefrontConfig{Kind: storefrontKind}) {
+		t.Errorf("an unresolvable store must expose only its kind: %+v", doc.Storefront)
 	}
 }
 
@@ -187,7 +186,7 @@ func TestOnlyABoundStorefrontReadsAStore(t *testing.T) {
 // v1:shopify:store declares @rowAuthz(clusterOwner, rankFloor="developer"),
 // which storeById's plan carries. A StoreByID
 // that quietly ran under no actor would read ZERO ROWS AND NO ERROR: every
-// storefront in the cluster would serve no storefront block and name no store
+// storefront in the cluster would serve an empty connection and name no store
 // in its policy, while every stub-driven test above kept passing.
 func TestEngineExecutorStoreByIDRunsUnderASyntheticClusterOwnerActor(t *testing.T) {
 	fe := &fakeEngine{rows: []map[string]any{
