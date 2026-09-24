@@ -861,6 +861,17 @@ query packageDeployment packageDeploymentsAwaitingConfirm {
   shape   packageDeploymentFull
 }
 
+/// Current work and review gates, without retaining deployment history at the OS root.
+/// Ownership and account visibility are enforced by the packageDeployment concept.
+@actor
+query packageDeployment packageDeploymentsPending {
+  filter row => row.status == "analyzing" || row.status == "awaiting_confirm"
+             || row.status == "building" || row.status == "staging_dsl"
+             || row.status == "rolling" || row.status == "publishing"
+  sort "row.createdAt", "desc"
+  shape packageDeploymentFull
+}
+
 /// One deployment attempt by id -- what the OS polls while a deploy advances and
 /// what the confirm gate reads the report from.
 @actor

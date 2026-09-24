@@ -1,3 +1,5 @@
+import { runIsCancellable } from "./acts";
+import { cancelDeployment } from "../packages/calls";
 import type { ConnectReturn } from "../sources/connectReturn";
 import { ConnectReturnNotice } from "../sources/ConnectReturnNotice";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -186,7 +188,7 @@ export function ComposePage(props: ComposePageProps) {
   const bindingWrite = useWrite();
   const bindingPending = useRef(false);
   const bindingNavigation = useRef(0);
-  const [selectedRunId, setSelectedRunId] = useState("");
+  const [selectedRunId, setSelectedRunId] = useState(parked?.run.id ?? "");
   const [analysisStartedAt, setAnalysisStartedAt] = useState<number | null>(null);
   const now = useNow(1000);
   const [sourceNotice, setSourceNotice] = useState("");
@@ -281,6 +283,9 @@ export function ComposePage(props: ComposePageProps) {
   const newPackage = useNewPackage();
   const repositoryRegistration = useRegisterRepositorySource();
   const pkgActions = usePackageActions();
+  const cancelWrite = useWrite();
+  const [cancelledRunId, setCancelledRunId] = useState("");
+  const cancelPending = useRef(false);
   const createSite = useCreateSite();
   const publish = usePublish();
   const addDomain = useAddDomain();
@@ -305,13 +310,13 @@ export function ComposePage(props: ComposePageProps) {
   // compose (a brand-new source) still takes the newest, which is right:
   // there is one app and one run.
   const timelineRows = deployments?.snapshot.rows ?? [];
-  const currentTimeline = selectedSource && !fixedSource && !parked ? timelineRows.filter(row => row.id === selectedRunId) : timelineRows;
+  const pinnedRunId = selectedRunId || parked?.run.id || "";
+  const currentTimeline = pinnedRunId ? timelineRows.filter(row => row.id === pinnedRunId) : selectedSource && !fixedSource && !parked ? [] : timelineRows;
   const run =
     (only !== undefined && only !== ""
       ? runForScopedFlow(currentTimeline, only)
       : (currentTimeline[0] ?? null)) ??
-    parked?.run ??
-    null;
+    (parked?.run.id === pinnedRunId ? parked.run : null);
   const report = run?.report ?? null;
 
   const zip = zipProbe.reply === null ? null : zipVerdict(zipProbe.reply);
@@ -342,7 +347,9 @@ export function ComposePage(props: ComposePageProps) {
   });
   const phase: ComposePhase = analysisStartedAt !== null ? "analyzing"
     : storedPhase === "composing" && pkgActions.refusal && packageId ? "stopped" : storedPhase;
-  const analysisInConfiguration = !fixedSource && !parked && (phase === "analyzing" || phase === "stopped" && !report);
+  const analysisInConfiguration = phase === "analyzing" || phase === "stopped" && !report;
+  const cancelling = Boolean(run && (run.cancelRequested || cancelledRunId === run.id) && runIsCancellable(run));
+  const analysisClock = phase === "analyzing" ? analysisStartedAt ?? (run?.startedAt ? Date.parse(run.startedAt) : null) : null;
   const analysisProblem = analysisInConfiguration && phase === "stopped" ? pkgActions.refusal ?? run?.error : null;
   const analysisFailure = analysisProblem && (!analysisProblem.code || analysisProblem.code === "deploy_failed") ? analysisProblem : null;
   const journeyKey = `${phase}:${run?.id ?? ""}:${inactive}`;
@@ -461,6 +468,17 @@ export function ComposePage(props: ComposePageProps) {
       setRestoredSourceId(id);
       props.packageFeed?.retry();
     } finally { analyzePending.current = false; }
+  }
+
+  async function cancelAnalysis(): Promise<void> {
+    if (cancelPending.current || cancelling || !run || !runIsCancellable(run)) return;
+    cancelPending.current = true;
+    const id = run.id;
+    const accepted = await cancelWrite.run(async query => { await cancelDeployment(query, packageId, id); return true; });
+    cancelPending.current = false;
+    if (!saveMounted.current) return;
+    if (accepted) setCancelledRunId(id);
+    refreshDeployments.current();
   }
 
   async function analyze(): Promise<void> {
@@ -657,7 +675,7 @@ export function ComposePage(props: ComposePageProps) {
   // resumes verified GitHub identity at Organization; other drafts follow their answers.
   const defaultStop: WizardStep = phase === "composing" ? fixedSource || parked ? "whatItIs" : draft.choice === "" ? "source" : draft.choice === "repo" ? !accountConfirmed || !identityReady ? "githubAccount" : !selectedConnection ? "githubOrganization" : repositoryConfirmed ? "sourceDetail" : "githubRepository" : "sourceDetail"
     : analysisInConfiguration ? "sourceDetail"
-    : phase === "analyzing" || phase === "awaiting_confirm" && path === "package" ? "whatItIs"
+    : phase === "awaiting_confirm" && path === "package" ? "whatItIs"
     : phase === "stopped" ? (railFor(input).stages.find(s => s.state === "stopped")?.id as StopId ?? "whatItIs")
     : phase === "deploying" || phase === "awaiting_confirm" && path === "handmade" ? "build" : "live";
   const journeyStop = journeyChoice?.key === journeyKey ? journeyChoice.stop : defaultStop;
@@ -971,22 +989,12 @@ export function ComposePage(props: ComposePageProps) {
         ? "restore the source to deploy its apps again"
         : composePhaseDetail(phase, action, apps, addresses, source !== undefined, draft.choice);
 
-  // THE FLOOR HAS TWO VERBS AND ONE BUTTON, the same as every add wizard.
-  //
-  //   CANCEL   leaves deployable setup before Analyze. GitHub access saved
-  //            by organization selection remains available for another draft.
-  //   LEAVE    once something exists: a source that was read, a run that is
-  //            parked or building. Going keeps it, the list reopens it, and a
-  //            build the cluster has started carries on without anybody
-  //            watching. There is no act here that undoes a run, so the floor
-  //            does not offer one by calling it Cancel.
-  //
-  // The forward act is the button and the way out beside it is text. When it
-  // is the cluster's turn there is no forward act, and Leave is the button --
-  // the same picture the machine and the domain draw while they wait.
+  // Leave changes navigation only. Cancel targets this persisted run, and
+  // remains separate from the request that started it and its busy state.
   const written = phase !== "composing" || created.packageId !== "";
   const previousStep: WizardStep | undefined = !sourceLocked && kind === "repo" ? ({ githubAccount: "source", githubOrganization: "githubAccount", githubRepository: "githubOrganization", sourceDetail: "githubRepository" } as Partial<Record<WizardStep, WizardStep>>)[journeyStop] : undefined;
   const leaveAct: Act = previousStep ? { label: "Back", text: true, onAct: () => { if (!busy || bindingWrite.busy) chooseStop(previousStep); } } : { label: written ? "Leave" : "Cancel", text: true, onAct: leaveComposer };
+  const cancelAct: Act[] = can.deploy && runIsCancellable(run) ? [{ label: cancelling ? "Cancelling" : "Cancel", text: true, busy: cancelWrite.busy || cancelling, onAct: () => void cancelAnalysis() }] : [];
   const acts: Act[] = restoredSourceId ? [{ label: "Done", tone: "primary", onAct: onBack }] : finished
     ? canGoLive
       ? [
@@ -995,9 +1003,9 @@ export function ComposePage(props: ComposePageProps) {
         ]
       : [{ label: "Done", tone: "primary", onAct: onBack }]
     : journeyActs.length > 0
-      ? [leaveAct, ...journeyActs]
+      ? [leaveAct, ...cancelAct, ...journeyActs]
       : written
-        ? [{ label: "Leave", onAct: onBack }]
+        ? [...cancelAct, { label: "Leave", onAct: onBack }]
         : [leaveAct];
 
   return (
@@ -1016,12 +1024,13 @@ export function ComposePage(props: ComposePageProps) {
       steps={steps.map(step => step.id === journeyStop && phase === "composing" ? { ...step, state: "open" } : step)}
       open={journeyStop}
       onOpen={(id) => chooseStop(id as WizardStep)}
-      status={{ word: restoredSourceId ? "Source restored" : word, detail: restoredSourceId ? "Existing deployables are unchanged." : detail, tone: phase === "analyzing" || phase === "deploying" ? "busy" : wentLive ? "live" : "none",
-        meta: analysisStartedAt !== null ? `${Math.max(0, Math.floor((now.getTime() - analysisStartedAt) / 1000))}s elapsed` : undefined }}
+      status={{ word: restoredSourceId ? "Source restored" : cancelling ? "Cancelling" : word, detail: restoredSourceId ? "Existing deployables are unchanged." : cancelling ? "Waiting for the cluster to stop this run. Nothing new will be deployed." : phase === "analyzing" ? "Downloading and checking the source. Leave keeps this running; Cancel stops it." : detail, tone: phase === "analyzing" || phase === "deploying" ? "busy" : wentLive ? "live" : "none",
+        meta: analysisClock !== null && Number.isFinite(analysisClock) ? `${Math.max(0, Math.floor((now.getTime() - analysisClock) / 1000))}s elapsed` : undefined }}
       acts={acts}
       context={{ page: title, packageId: (parked?.pkg ?? source)?.id, app: only, mode: "compose", step: journeyStop }}
       notices={
         <>
+          {cancelWrite.refusal ? <ProblemNotice problem={cancelWrite.refusal} tone="error" /> : null}
           {/* THE NOTICE AT THE TOP (D5): an inactive app says so before
               anything else on the page, and says what Activate does. */}
           {inactive ? (

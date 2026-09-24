@@ -5611,6 +5611,26 @@ QueryClient.prototype.packageDeploymentsInFlight = function (this: QueryClient, 
   return this.executeNamed("packageDeploymentsInFlight", buildPackageDeploymentsInFlight(args), opts);
 };
 
+/** Current work and review gates, without retaining deployment history at the OS root. Ownership and account visibility are enforced by the packageDeployment concept. */
+// Bound concept: v1:platform:packageDeployment (machine-readable: BoundConcepts["packageDeploymentsPending"] in generated_concepts.ts).
+export interface PackageDeploymentsPendingArgs {
+}
+
+export function buildPackageDeploymentsPending(args: PackageDeploymentsPendingArgs): string {
+  void args;
+  return "query packageDeploymentsPending()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    packageDeploymentsPending(args?: PackageDeploymentsPendingArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.packageDeploymentsPending = function (this: QueryClient, args: PackageDeploymentsPendingArgs = {} as PackageDeploymentsPendingArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("packageDeploymentsPending", buildPackageDeploymentsPending(args), opts);
+};
+
 /** The packages this caller may see, active only. The OS packages list. */
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesAll"] in generated_concepts.ts).
 export interface PackagesAllArgs {

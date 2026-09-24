@@ -405,17 +405,15 @@ of the Packages half this passage replaces and survived it unchanged.
   in its `compact` form: the same five marks, no labels, each carrying its
   label as its accessible name. A row is read as the shape it opens into.
 
-- **THE PARKED-RUNS FEED IS A FOURTH FEED AT THE APP ROOT, AND IT IS THE ONE
-  RECORDED EXCEPTION** to the rule this app's own Packages half wrote down: a
-  deployment TIMELINE is retained by the page and never by the root. That rule
-  guards against subscribing a window to every deploy in the cluster to render
-  one row, and it still does. `packageDeploymentsAwaitingConfirm` is parked
-  runs ALONE -- a handful of rows, and rows a person needs to see BEFORE they
-  open anything, because the whole point of a gate that lives on the row is
-  that somebody who closed the window finds their deploy where they left it.
-  The list marks that row "a deploy is waiting for you". **Any other timeline
-  feed at the root is the thing the rule forbids**, and the exception's code
-  comment cites this passage rather than restating it.
+- **THE PENDING-RUNS FEED IS THE FOURTH FEED AT THE APP ROOT.**
+  `packageDeploymentsPending` retains active work and review gates, never full
+  deployment histories. Leave preserves analysis and the list shows Analyzing;
+  opening its row resumes Configuration or Review from persisted run state.
+  Cancel targets the exact run, using the same durable cancellation flag on
+  every replica. `packageDeploy(background:true, confirm:false)` persists the
+  run and returns its ID before fetching; request teardown does not stop it.
+  Terminal runs leave the pending feed. Registered sources with no report keep
+  a setup row, so a failure after leaving is still reachable in its timeline.
 
 - **A CREDENTIAL IS A CARD, AND THERE IS NO TYPE THAT COULD HOLD THE VALUE**
   (`sources/rows.ts`, `sources/useSourceCredentials.ts`). `CredentialRow`

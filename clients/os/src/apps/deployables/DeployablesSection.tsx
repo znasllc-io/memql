@@ -630,7 +630,7 @@ export function DeployablesSection({
                 deployedBy={deployedByLabel(row.deployedBy, viewerUserId, nameOf)}
                 origin={originLabel(row)}
                 open={row.site !== null && row.site.id === selectedSiteId}
-                onOpen={() => (row.site !== null ? openSite(row.site.id) : undefined)}
+                onOpen={() => row.pkg && row.parked ? openDeclared(row.pkg.id, row.parked.scopedTo.length ? row.app : "") : row.site ? openSite(row.site.id) : row.pkg ? openDeclared(row.pkg.id, row.app) : undefined}
                 traffic={row.site === null ? null : (figures.get(row.site.id) ?? null)}
               />
             )}
@@ -736,7 +736,8 @@ function DeployableLine({
   const now = useNow();
   const site = row.site;
   const archived = site?.status === "archived" || row.pkg?.status === "archived";
-  const state = row.disabled ? "Inactive" : site ? siteStateWord(site) : row.parked ? "Review needed" : "Not deployed";
+  const progress: Record<string, string> = { analyzing: "Analyzing", awaiting_confirm: "Review needed", building: "Building", staging_dsl: "Staging definitions", rolling: "Restarting cluster", publishing: "Publishing" };
+  const state = row.parked ? progress[row.parked.status] ?? "In progress" : row.disabled ? "Inactive" : site ? siteStateWord(site) : "Not deployed";
   const name = row.name;
   const client = accountNameFrom(accounts, site?.accountId ?? row.pkg?.accountId ?? "");
   // THE KIT'S ROW, NOT A LOCAL ONE. This list is where `RecordRow` came from:
@@ -749,9 +750,9 @@ function DeployableLine({
     secondary={row.hostname === name ? kindLabel(row.kind) : row.hostname || "No address yet"}
     state={state}
     tone={state === "Live" ? "accent" : state === "Unavailable" ? "warn" : "muted"}
-    stateTitle={site?.status === "live" ? healthExplanation(site, now.getTime()) : undefined}
+    stateTitle={!row.parked && site?.status === "live" ? healthExplanation(site, now.getTime()) : undefined}
     stateExtra={<>
-      {waiting && state !== "Review needed" ? <span className="os-deploy-waiting">Review needed</span> : null}
+      {waiting && row.parked?.status === "awaiting_confirm" && state !== "Review needed" ? <span className="os-deploy-waiting">Review needed</span> : null}
       {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
     </>}
     trailing={row.pkg ? <AttentionMarker appId="deployables" target={updateTarget(row.pkg.id)} /> : null}
@@ -762,7 +763,7 @@ function DeployableLine({
   >
     {origin ? <span data-os-origin>{origin}</span> : null}
     {client ? <span>{client}</span> : null}
-    {deployedBy ? <span className="os-deploy-by" data-os-deployed-by>{site || row.parked ? "deployed" : "added"} by {deployedBy}</span> : null}
+    {deployedBy ? <span className="os-deploy-by" data-os-deployed-by>{row.parked ? "started" : site ? "deployed" : "added"} by {deployedBy}</span> : null}
     {traffic?.lastServedAt ? <span title={`${traffic.requests.toLocaleString()} requests over the last week`}>served {formatFreshness(traffic.lastServedAt, now)}</span> : null}
   </RecordRow>;
 }

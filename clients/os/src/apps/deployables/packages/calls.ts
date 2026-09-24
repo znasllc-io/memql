@@ -174,6 +174,7 @@ export async function deployPackage(
   const result = await query.packageDeploy({
     packageId,
     confirm: opts.confirm,
+    ...(!opts.confirm ? { background: true } : {}),
     ...(Object.keys(placements).length > 0 ? { placements } : {}),
     // CONFIRMING A PARKED RUN NAMES IT (memql#4954). Without this every call
     // minted a run -- the confirmation included -- so the answered gate stayed

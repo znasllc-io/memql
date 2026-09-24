@@ -165,8 +165,8 @@ connections and do not mint credentials or modify a real account.
 ## Analysis progress
 
 `analysis-pending`, `analysis-failed`, and `analysis-review` exercise the real
-add-deployable wizard over simulated source requests. Choose A repository,
-@octocat, acme, and field-notes, then Analyze. Configuration should remain
-current with the shared busy action bar and elapsed time; a completed report
-opens Review without a deployment broadcast. Failure offers Retry. No fixture
-contacts GitHub or starts a real deployment.
+add-deployable wizard over simulated background runs. Open the analyzing acme
+row: Configuration remains current, with the shared busy action bar, elapsed
+time, Cancel and Leave. Leave returns to the analyzing row; reopening resumes
+its state. The review/failure fixtures advance after opening, and Cancel emits
+a terminal cancelled row. No fixture contacts GitHub or starts a real deployment.

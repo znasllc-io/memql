@@ -124,6 +124,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			ArgsSchema: map[string]string{
 				"packageId":        "string (required) -- the package to deploy",
 				"confirm":          "boolean -- pass true to proceed past the always-present confirm gate",
+				"background":       "boolean -- return the persisted analysis run ID immediately; requires confirm:false and no deploymentId",
 				"placements":       "object -- deployable name -> {hostname, accountId, ownDomain, skip}; hostname is required on a deployable's FIRST deploy unless skip is true, accountId defaults to the package organization and is persisted at creation, while ownDomain is applied after the site exists, and skip:true leaves that deployable out of the run entirely (memql#4930) -- recorded as skipped, with nothing built and nothing it already serves touched",
 				"deploymentId":     "string -- confirm the PARKED run of this id rather than starting a new one (memql#4954). Ignored unless it names a run of this package waiting at the gate; anything else opens a new run",
 				"fromDeploymentId": "string -- retry an earlier run from the bytes it already fetched (task memql#4902) rather than fetching the source again",
@@ -309,7 +310,11 @@ func (i *Integration) handleDeploy(ctx context.Context, args map[string]any, _ i
 	if err != nil {
 		return nil, err
 	}
-	out, derr := Deploy(ctx, deps, DeployRequest{
+	deploy := Deploy
+	if boolArg(args, "background") {
+		deploy = StartAnalysis
+	}
+	out, derr := deploy(ctx, deps, DeployRequest{
 		PackageId: strings.TrimSpace(stringArg(args, "packageId")),
 		Actor:     actorFromContext(ctx),
 		Confirmed: boolArg(args, "confirm"),
@@ -587,6 +592,19 @@ func (i *Integration) handleCancelDeployment(ctx context.Context, args map[strin
 			status)
 	}
 
+	// Flag first, then re-read. The pipeline also checks after parking, so a
+	// cancellation racing the final analysis write cannot be left unread.
+	if cerr := deps.Store.requestDeploymentCancel(ctx, deploymentId); cerr != nil {
+		return nil, cerr
+	}
+	latest, rerr := deps.Store.deploymentById(ctx, deploymentId)
+	if rerr != nil {
+		return nil, rerr
+	}
+	if latest != nil {
+		status = rowString(latest, "status")
+	}
+
 	// A PARKED RUN HAS NO PROCESS, so nothing would ever read the flag.
 	//
 	// This is the one place the "only the running node closes the row" rule
@@ -617,9 +635,6 @@ func (i *Integration) handleCancelDeployment(ctx context.Context, args map[strin
 		}), nil
 	}
 
-	if cerr := deps.Store.requestDeploymentCancel(ctx, deploymentId); cerr != nil {
-		return nil, cerr
-	}
 	return resultNode(map[string]any{
 		"deploymentId":    deploymentId,
 		"status":          status,

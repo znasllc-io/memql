@@ -128,6 +128,7 @@ describe("GitHub Sources in Add a deployable", () => {
     expect(stage(region, "Review").getAttribute("data-open")).toBe("true");
     expect(document.querySelector(".os-actbar")?.getAttribute("data-tone")).not.toBe("busy");
     expect(connection.callsNamed("packageDeploy")).toHaveLength(1);
+    expect(connection.callsNamed("packageDeploy")[0]).toContain("background: true");
   });
 
   it("ends a timed-out source read with a visible failure and a retry instead of a stuck Analyze", async () => {

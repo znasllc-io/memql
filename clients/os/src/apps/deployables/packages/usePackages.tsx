@@ -1,7 +1,8 @@
+import { flatten } from "../../../kit/rows";
 import { createContext, useContext, type ReactNode } from "react";
 import { useSession, useSessionIfPresent } from "../../../chrome/access";
 import { accessAdmits } from "../../../system/registry";
-import { getRowByConceptAndId, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { getRowByConceptAndId, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useLiveCollection, type LiveCollectionHandle } from "../../../live/useLiveCollection";
 import { DEPLOYMENT_CONCEPT, PACKAGE_CONCEPT } from "./rows";
@@ -78,6 +79,7 @@ export function usePackageDeployments(packageId: string): LiveCollectionHandle<R
       const result = await connection.query.packageDeployments({ packageId }, { signal });
       return { rows: result.rows(), nextCursor: "" };
     },
+    inScope: (row) => rowString(flatten(row), "packageId") === packageId,
     reread: async (rowId, signal) => {
       const row = await getRowByConceptAndId(connection.query, DEPLOYMENT_CONCEPT, rowId, { signal });
       return (row as Row) ?? null;

@@ -434,7 +434,7 @@ describe("the Head's action, by state", () => {
     // The other Retry -- on a LOST run, in Every attempt -- is the one that
     // carries fromDeploymentId, and the two are deliberately never on screen
     // together.
-    expect(connection.callsNamed("packageDeploy")).toEqual(['builtin packageDeploy(packageId: "pkg-acme", confirm: false)']);
+    expect(connection.callsNamed("packageDeploy")).toEqual(['builtin packageDeploy(background: true, packageId: "pkg-acme", confirm: false)']);
   });
 
   it("a draft with a bundle: Built, and Go live flips the status", async () => {
@@ -463,7 +463,7 @@ describe("the Head's action, by state", () => {
     expect(within(page).getByText(/A newer version is available: bbbbbbb/)).toBeTruthy();
     await click(within(page).getByRole("button", { name: /^Back to / }));
     await click(await screen.findByRole("button", { name: /^Deploy the update/ }));
-    expect(connection.callsNamed("packageDeploy")).toEqual(['builtin packageDeploy(packageId: "pkg-acme", confirm: false)']);
+    expect(connection.callsNamed("packageDeploy")).toEqual(['builtin packageDeploy(background: true, packageId: "pkg-acme", confirm: false)']);
   });
 
   it("redeploys THIS app and leaves every sibling the source declares alone", async () => {
@@ -498,7 +498,7 @@ describe("the Head's action, by state", () => {
     expect(redeploy?.textContent).toBe("Redeploy");
     expect(redeploy?.getAttribute("data-tone")).toBe("primary");
     await click(redeploy);
-    expect(connection.callsNamed("packageDeploy")).toEqual(['builtin packageDeploy(packageId: "pkg-acme", confirm: false)']);
+    expect(connection.callsNamed("packageDeploy")).toEqual(['builtin packageDeploy(background: true, packageId: "pkg-acme", confirm: false)']);
   });
 
   it("a hand-made site's Redeploy opens the Source stop's zip picker", async () => {

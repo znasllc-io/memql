@@ -5674,6 +5674,23 @@ func PackageDeploymentsInFlightBuild(args PackageDeploymentsInFlightArgs) string
 	return "query packageDeploymentsInFlight()"
 }
 
+// PackageDeploymentsPending -- Current work and review gates, without retaining deployment history at the OS root. Ownership and account visibility are enforced by the packageDeployment concept.
+//
+// Bound concept: v1:platform:packageDeployment (machine-readable: BoundConcepts["packageDeploymentsPending"] in generated_concepts.go).
+type PackageDeploymentsPendingArgs struct {
+}
+
+// PackageDeploymentsPending calls the engine query packageDeploymentsPending.
+func (qc *QueryClient) PackageDeploymentsPending(ctx context.Context, args PackageDeploymentsPendingArgs) (*Result, error) {
+	call := PackageDeploymentsPendingBuild(args)
+	return qc.executeNamed(ctx, "packageDeploymentsPending", call)
+}
+
+func PackageDeploymentsPendingBuild(args PackageDeploymentsPendingArgs) string {
+	_ = args
+	return "query packageDeploymentsPending()"
+}
+
 // PackagesAll -- The packages this caller may see, active only. The OS packages list.
 //
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesAll"] in generated_concepts.go).

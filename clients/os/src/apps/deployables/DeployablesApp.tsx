@@ -1,3 +1,4 @@
+import { PENDING_DEPLOYMENT_STATUSES } from "./packages/rows";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Concepts, type LiveSnapshot, type Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -13,7 +14,7 @@ import { ActivePane } from "./paneActivity";
 import { MapSection, NO_SELECTION, type MapSelection } from "./map/MapSection";
 import type { MapNode } from "./map/layout";
 import { deploymentFromRow, packageFromRow, type DeploymentRow, type PackageRow } from "./packages/rows";
-import { useAwaitingConfirm } from "./packages/useAwaitingConfirm";
+import { usePendingDeployments } from "./packages/usePendingDeployments";
 import { usePackages } from "./packages/usePackages";
 import { siteFingerprint, siteFromRow, type SiteRow } from "./rows";
 import { SourceConnectionsProvider } from "./sources/connections";
@@ -127,15 +128,10 @@ function DeployablesAppContent({
   const { source: credentialCollection, snapshot: credentialSnapshot, reseed: reseedCredentials } = useSourceCredentials();
   // A FOURTH FEED, and the ONE recorded exception to clients/os/README.md's
   // rule that a package's deployment timeline is retained by the page and
-  // never by the root (that rule guards against subscribing a window to
-  // every deploy in the cluster to render one). This holds PARKED RUNS ONLY
-  // -- deployments at `awaiting_confirm`, a handful of rows a person needs to
-  // see before they open anything, because the list's waiting mark ("a
-  // deploy is waiting for you") is how somebody who closed the window
-  // mid-compose finds their run again. It never holds a timeline, and a run
-  // that moves on leaves it on its own event. The whole account is in
-  // `packages/useAwaitingConfirm.ts`.
-  const { source: awaitingCollection, reseed: reseedAwaiting } = useAwaitingConfirm();
+  // never by the root. This exception keeps only pending work and review
+  // gates, so leaving analysis does not hide it. Terminal runs leave this
+  // feed; their full history remains on the package's own page.
+  const { source: awaitingCollection, reseed: reseedAwaiting } = usePendingDeployments();
 
   // PROJECT, then narrow, in one pass. The collection holds RAW wire rows --
   // the fold upserts an event payload as the row type with no projection hook
@@ -173,11 +169,11 @@ function DeployablesAppContent({
   );
   const credentialRows = credentials?.snapshot.rows ?? [];
 
-  // `awaiting_confirm` is held HERE as well as by the feed's `inScope`: the
+  // Pending status is held HERE as well as by the feed's `inScope`: the
   // seed and the events both narrow to it, and the projection says so once
   // more so a row this view renders can never be a run that has moved on.
   const parked = useLiveView<Row, DeploymentRow>(awaitingCollection, "awaitingConfirm", (rows) =>
-    rows.map(deploymentFromRow).filter((d) => d.id !== "" && d.status === "awaiting_confirm"),
+    rows.map(deploymentFromRow).filter((d) => d.id !== "" && PENDING_DEPLOYMENT_STATUSES.has(d.status)),
   );
   const parkedSnapshot = parked?.snapshot ?? EMPTY_SNAPSHOT<DeploymentRow>();
 

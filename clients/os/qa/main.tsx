@@ -251,16 +251,28 @@ const SOURCE_CHOOSER: FakeSeed = {
 // Exercise the production wizard while the source read is in flight; these
 // fixture requests never contact GitHub or create a real deployment.
 function analysisConnection(result: "pending" | "failed" | "review") {
-  const seed: FakeSeed = { ...SOURCE_CHOOSER, packages: [], deployments: {} };
+  const active = { ...PARKED, id: "dep-new", status: "analyzing", report: null,
+    startedAt: new Date(Date.now() - 116000).toISOString() };
+  const seed: FakeSeed = { ...SOURCE_CHOOSER, packages: [{ ...ACME, declares: [] }], sites: [],
+    awaitingConfirm: [active], deployments: { "pkg-acme": [active] } };
   const connection = fakeConnection(seed);
   const execute = connection.query.executeNamed.bind(connection.query);
+  let scheduled = false;
+  function finish(cancelled = false) {
+    const next = cancelled ? { ...active, status: "cancelled", error: { code: "deployment_cancelled", message: "You stopped this analysis. Nothing was deployed." } }
+      : result === "failed" ? { ...active, status: "failed", error: { code: "deploy_failed", message: "Source download timed out. Nothing was deployed." } }
+      : { ...PARKED, id: "dep-new" };
+    seed.deployments!["pkg-acme"] = [next];
+    seed.awaitingConfirm = next.status === "awaiting_confirm" ? [next] : [];
+    connection.subscriptions.emit("v1:platform:packageDeployment", next);
+  }
   connection.query.executeNamed = async (name, call, opts) => {
-    if (name === "packageDeploy") {
-      if (result === "pending") await new Promise(() => {});
-      else await new Promise(resolve => setTimeout(resolve, 1500));
-      if (result === "failed") throw new Error("Source download timed out. Nothing was deployed.");
-      const packageId = /packageId: "([^"]+)"/.exec(call)?.[1] ?? "";
-      seed.deployments![packageId] = [{ ...PARKED, id: "dep-new", packageId }];
+    if (name === "packageDeployments" && result !== "pending" && !scheduled) {
+      scheduled = true;
+      setTimeout(() => finish(), 2500);
+    }
+    if (name === "packageCancelDeployment") {
+      setTimeout(() => finish(true), 1200);
     }
     return execute(name, call, opts);
   };

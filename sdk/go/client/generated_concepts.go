@@ -632,6 +632,7 @@ var BoundConcepts = map[string]string{
 	"packageDeployments":                               "v1:platform:packageDeployment",
 	"packageDeploymentsAwaitingConfirm":                "v1:platform:packageDeployment",
 	"packageDeploymentsInFlight":                       "v1:platform:packageDeployment",
+	"packageDeploymentsPending":                        "v1:platform:packageDeployment",
 	"packagesAll":                                      "v1:platform:package",
 	"packagesArchived":                                 "v1:platform:package",
 	"packagesByRepoUrl":                                "v1:platform:package",

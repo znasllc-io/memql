@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connection }));
@@ -36,10 +36,6 @@ describe("Sources catalog review regressions", () => {
     const connection = connectionFor({ packages: [{ ...SOURCE, sourceRemoved: true }], sites: [siteRow({ id: "site-web", hostname: "web.memql.example.com", packageId: SOURCE.id, packageDeployableName: "web" })], awaitingConfirm: [{ id: "run-review", packageId: SOURCE.id, sourceVersion: "abc123", status: "awaiting_confirm", report, requestedBy: "u-me", startedAt: "2026-09-23T10:00:00Z", createdAt: "2026-09-23T10:00:00Z" }] });
     mountCatalog("deployables");
     await click((await screen.findByText("web")).closest("button"));
-    await click(await screen.findByRole("button", { name: "Open acme/website at main" }));
-    const detail = await screen.findByRole("region", { name: "Source Website" });
-    expect(within(detail).getByText(/Removed from Sources/)).toBeTruthy();
-    await click(screen.getByRole("button", { name: "Review" }));
     await screen.findByRole("region", { name: "Deploy Website" });
     expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
     expect(connection.callsNamed("setPackageSourceRemoved")).toHaveLength(0);

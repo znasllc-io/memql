@@ -233,7 +233,7 @@ export interface FakeSeed {
   updateSourceError?: string;
   /**
    * v1:platform:packageDeployment rows at `awaiting_confirm`, which
-   * `packageDeploymentsAwaitingConfirm` answers with: the list's fourth feed,
+   * `packageDeploymentsPending` answers with: the list's fourth feed,
    * for the waiting mark (epic memql#4885, design section A).
    */
   awaitingConfirm?: Row[];
@@ -392,7 +392,7 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
       }
 
       if (call === "query packagesAll()") return rowsResult([...(seed.packages ?? []), ...registeredPackages]);
-      if (call === "query packageDeploymentsAwaitingConfirm()") return rowsResult(seed.awaitingConfirm ?? []);
+      if (call === "query packageDeploymentsPending()") return rowsResult(seed.awaitingConfirm ?? []);
 
       if (call.startsWith("query packageDeployments(")) {
         const id = /packageId: "([^"]*)"/.exec(call)?.[1] ?? "";

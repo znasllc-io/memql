@@ -283,6 +283,7 @@ shape package packageFull {
 /// mean the browser showing a paraphrase of a refusal whose exact words are the useful part.
 @row
 shape packageDeployment packageDeploymentFull {
+  cancelRequested
   row.id
   ownerUserId
   accountId

@@ -1931,6 +1931,8 @@ QueryClient.prototype.packageDeactivateDeployable = function (this: QueryClient,
 
 /** Run one deployment attempt for a package (epic memql#4794). WITHOUT confirm the run parks at awaiting_confirm with the analysis report on a new deployment row and nothing else happens -- that gate is always present (D12), and a redeploy passes it in one click. WITH confirm the run builds, stages, rolls and publishes in the D6 order: a failure anywhere before publish leaves every site serving exactly what it was serving, and a package with no DSL (or unchanged DSL) skips stage and roll entirely so nothing restarts. A package carrying DSL requires an actor who may author constructs -- an owner or a developer, and deliberately not an admin -- and is refused with dsl_requires_authoring at the START, before any build. placements is read only for a deployable's FIRST deploy (epic memql#4885, D8); later deploys find the site through (packageId, packageDeployableName) and never re-ask. Returns {deploymentId, status, awaitingConfirm, deployables, report}; each deployables entry carries {name, siteId, hostname, bundleRef, version, created} on success, {name, refusal} for a half that was refused or skipped, plus accountId / ownDomain for the placement halves that landed and accountRefusal / domainRefusal for the ones the guards refused. */
 export interface PackageDeployArgs {
+  /** Start analysis in the background and immediately return its durable run ID. Requires confirm:false and no deploymentId. Read the deployment row for progress and the final report; leaving the browser does not cancel the run. */
+  background?: boolean;
   /** The v1:platform:package row to deploy. */
   packageId: string;
   /** Pass true to proceed past the confirm gate. Absent or false parks the run with its report and returns. */
@@ -1945,6 +1947,7 @@ export interface PackageDeployArgs {
 
 export function buildPackageDeploy(args: PackageDeployArgs): string {
   const parts: string[] = [];
+  if (args.background !== undefined) parts.push("background: " + renderMemQLValue(args.background));
   parts.push("packageId: " + renderMemQLValue(args.packageId));
   if (args.confirm !== undefined) parts.push("confirm: " + renderMemQLValue(args.confirm));
   if (args.placements !== undefined) parts.push("placements: " + renderMemQLValue(args.placements));
