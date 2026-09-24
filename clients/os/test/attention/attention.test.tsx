@@ -67,6 +67,25 @@ describe("shared attention", () => {
     await waitFor(() => expect(screen.queryByRole("img", { name: "Unseen change" })).toBeNull());
     expect(fake.executeNamed.mock.calls.find(([name]) => name === "acknowledgeAttention")?.[1]).toContain('changeId: "deployables:github-accounts"');
   });
+  it("keeps Shopify discovery unread until the visible Store page opens", async () => {
+    const fake = setup();
+    const deployables = OS_REGISTRY.apps.find(app => app.id === "deployables")!;
+    const feature = deployables.attentionChanges!.find(change => change.id === "deployables:shopify-store")!;
+    function Destination({ target, visible = true }: { target?: string; visible?: boolean }) {
+      return <AttentionProvider apps={[{ ...deployables, attentionChanges: [feature] }]}>
+        <AttentionMarker appId="deployables" />
+        <AttentionDestination appId="deployables" sectionId="deployables" target={target} visible={visible}><span>Store</span></AttentionDestination>
+      </AttentionProvider>;
+    }
+    const view = render(withSession(<Destination />));
+    await screen.findByRole("img", { name: "Unseen change" });
+    expect(fake.executeNamed.mock.calls.filter(([name]) => name === "acknowledgeAttention")).toHaveLength(0);
+    view.rerender(withSession(<Destination target="shopify-store" visible={false} />));
+    expect(screen.getByRole("img", { name: "Unseen change" })).toBeTruthy();
+    view.rerender(withSession(<Destination target="shopify-store" />));
+    await waitFor(() => expect(screen.queryByRole("img", { name: "Unseen change" })).toBeNull());
+    expect(fake.executeNamed.mock.calls.find(([name]) => name === "acknowledgeAttention")?.[1]).toContain('changeId: "deployables:shopify-store"');
+  });
   it("waits for initial identity before loading packages and resets the feed for another user", async () => {
     const fake = setup();
     function Packages() {

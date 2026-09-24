@@ -25,7 +25,7 @@ function ShopifyStoreContent({ site, canBind, trail, back, result, revision = 0,
   const loading = connect.state === "unread" || connect.state === "reading";
   const ready = Boolean(status?.connected && status.storefrontTokenSet);
   const setup = view === "app" || Boolean(status && !status.appSaved);
-  const reset = () => { setView("connection"); setSecret(""); setToken(""); };
+  const reset = () => { if (view === "details") { connect.reread(); onWritten(); } setView("connection"); setSecret(""); setToken(""); };
   const writeDone = () => { reset(); connect.reread(); onWritten(); };
   const acts: Act[] = [{ label: "Back", text: true, onAct: view === "connection" ? back.onSelect : reset }];
   if (!loading && !connect.busy && canBind && status) {
@@ -57,12 +57,12 @@ function ShopifyStoreContent({ site, canBind, trail, back, result, revision = 0,
           {status.pendingApp ? <Caption>App changes are waiting for Shopify authorization.</Caption> : null}
           {status.connected && status.requiredScopes.some(scope => !status.grantedScopes.includes(scope)) ? <details><summary>Missing permissions</summary><Caption>{status.requiredScopes.filter(scope => !status.grantedScopes.includes(scope)).join(", ")}</Caption></details> : null}
           <div className="os-panel-actions">
-            {status.connected ? <button type="button" className="os-link" onClick={() => setView("details")}>Store details</button> : null}
             {canBind && status.connected ? <button type="button" className="os-link" onClick={() => setView("token")}>Storefront token</button> : null}
             {canBind ? <button type="button" className="os-link" onClick={() => setView("app")}>App credentials</button> : null}
           </div>
         </Panel>}
       </> : null}
+      <button type="button" className="os-link" onClick={() => setView("details")}>Store details</button>
     </div>
     <ActionBar state={connect.busy ? "Connecting" : loading ? "Loading" : ready ? "Connected" : "Setup needed"} tone={connect.busy || loading ? "busy" : ready ? "live" : "paused"} acts={acts} />
   </div>;
