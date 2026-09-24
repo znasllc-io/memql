@@ -633,7 +633,11 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 		rep.UpstreamBaseline = snapshot.UpstreamBaseline
 	}
 	if aerr == nil {
-		aerr = validateAssetRepositories(rep, rowString(pkg, "repoUrl"))
+		repository := ""
+		if rowString(pkg, "sourceKind") == "repo" {
+			repository = rowString(pkg, "repoUrl")
+		}
+		aerr = validateAssetRepositories(rep, repository)
 	}
 
 	snapshotArtifactId := d.storeSnapshot(ctx, req, out.DeploymentId, snapshot)

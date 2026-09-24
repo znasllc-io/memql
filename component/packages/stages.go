@@ -114,9 +114,8 @@ func (d *Deps) build(ctx context.Context, req DeployRequest, pkg map[string]any,
 		}
 		if dep.Prebuilt {
 			// Read the built tree straight out of the snapshot. No build, no
-			// workbench, no restart -- and no network, which is what makes a
-			// prebuilt package deployable on a cluster with no build surface
-			// configured at all.
+			// workbench or restart. Separately declared assets still need their
+			// verified import below; a build surface is never needed.
 			bundle, err := bundleFromTree(snapshot.Tree, path.Join(dep.Path, dep.Output), d.Limits)
 			if err != nil {
 				return nil, err

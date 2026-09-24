@@ -302,6 +302,13 @@ func (i *Integration) handleAnalyze(ctx context.Context, args map[string]any, _ 
 	defer snapshot.Close()
 
 	rep, aerr := Analyze(snapshot.Tree, Options{SourceVersion: snapshot.Version, Limits: deps.Limits, Logger: i.logger})
+	if aerr == nil {
+		repository := ""
+		if rowString(pkg, "sourceKind") == "repo" {
+			repository = rowString(pkg, "repoUrl")
+		}
+		aerr = validateAssetRepositories(rep, repository)
+	}
 	return resultNode(map[string]any{"report": rep, "ok": rep.OK}), aerr
 }
 

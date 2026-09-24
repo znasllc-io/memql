@@ -58,6 +58,12 @@ func runDslFetchSubcommand(args []string) int {
 		}
 	}
 
+	// Init containers receive the same seeded secret names as the engine.
+	// Subcommands run before server bootstrap, so apply its environment layers.
+	if err := applySubcommandEnv("dsl-fetch"); err != nil {
+		return 1
+	}
+
 	root := os.Getenv("MEMQL_DSL_PATH")
 	if root == "" {
 		fmt.Fprintln(os.Stderr, "dsl-fetch: MEMQL_DSL_PATH is not set; there is nowhere to put the trees")

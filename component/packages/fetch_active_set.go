@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 	"github.com/znasllc-io/memql/integrations/azureblob"
 )
 
@@ -63,8 +64,11 @@ func FetchActiveSet(ctx context.Context, root string) (FetchResult, error) {
 	}
 
 	raw, err := client.Download(ctx, container, ActiveSetPath)
-	if err != nil || len(raw) == 0 {
+	if bloberror.HasCode(err, bloberror.BlobNotFound, bloberror.ContainerNotFound) {
 		return FetchResult{PointerAbsent: true}, nil
+	}
+	if err != nil {
+		return FetchResult{}, fmt.Errorf("reading the active package pointer: %w", err)
 	}
 
 	set := map[string]string{}

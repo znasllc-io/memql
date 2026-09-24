@@ -60,17 +60,14 @@ func (a *App) engineAndBus() {
 
 	// Per-instance pack enablement (module-registry design section 4.2):
 	// read v1:platform:packState in the window where the database is live
-	// and no DSL loader has run, so Init below loads a disabled pack
+	// and no behavioral DSL loader has run, so Init below loads a disabled pack
 	// mounted-inert (concepts only) and phase 4 skips its Go factories.
 	// This ordering is the whole mechanism -- moving Init above this call
 	// would load every pack's behavioral constructs before the node knows
 	// which packs the instance has switched off.
-	// The storefront packs are linked in HERE, immediately above the
-	// packState read, because RegisterPackDefault has to be heard before the
-	// rows are folded over the declarations (epic memql#5532, issue
-	// memql#5549). Anchoring below this line would leave reviews' declared
-	// default unheard and ship it ENABLED -- silently.
-	a.anchorStorefrontPacks()
+	// The database phase already registered the storefront pack trees and
+	// their disabled defaults before resolving product concept imports. Fold
+	// instance rows over those defaults before any behavioral constructs load.
 
 	a.loadPackEnablement()
 

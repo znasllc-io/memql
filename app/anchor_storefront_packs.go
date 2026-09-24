@@ -33,11 +33,13 @@ import (
 // written, which is a fact about where the work happens rather than a
 // per-instance choice.
 //
-// # It must run BEFORE loadPackEnablement, and app/engine.go calls it there
+// # It must run BEFORE concept loading and loadPackEnablement
 //
 // RegisterPackDefault is what makes "absence of a row means the pack's
 // declared default" mean anything, and the rows are folded over the
-// declarations in phase 3. Anchoring after that read would leave the
+// declarations in phase 3. The database phase anchors before its first
+// concept load, so product imports can also resolve pack concepts. Anchoring
+// after the enablement read would leave the
 // declaration unheard and reviews would ship ENABLED -- the exact outcome
 // the default exists to prevent, arriving silently.
 func (a *App) anchorStorefrontPacks() {
