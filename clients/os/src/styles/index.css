@@ -1710,6 +1710,7 @@ button:not(:disabled):active {
 .os-record-list:is(ul, ol) { list-style: none; margin: 0; padding: 0; }
 .os-record-list > li { min-width: 0; }
 .os-record-list { container: os-record-list / inline-size; min-width: 0; }
+.os-livelist-row:has(.os-record-row) { border-radius: 0; }
 /* THE STATE COLUMN HAS A FLOOR, SO THE MIDDLE COLUMN IS A COLUMN. Every row is
  * its own grid, and with the state track at `auto` each row resolved its
  * tracks around ITS OWN word: "Live" against "Not deployed" moved the quiet
