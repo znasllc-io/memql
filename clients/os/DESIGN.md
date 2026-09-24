@@ -202,8 +202,9 @@ combined list". Two lists now, in one row language (`RecordRow`):
   reconnect and disconnect personal GitHub accounts.
 - **Disconnect GitHub changes repository access only.** Saved sources,
   deployables, deployed files and serving sites remain intact and online.
-  The disconnected account is absent from Add deployable's account choices;
-  the shared plus action there or in Settings can connect it again. Fetching
+  Successful disconnect returns to Settings and removes the account from
+  both Settings and Add deployable's account choices. There is no disconnected
+  detail page or Reconnect button; the shared plus action adds it again. Fetching
   future source updates requires an active connection. Disconnect never
   archives a package, removes a source or uninstalls a hosted app.
 - **What belongs to the source is said on the source, once.** A run parked at a

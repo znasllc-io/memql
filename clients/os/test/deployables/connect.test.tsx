@@ -787,12 +787,14 @@ describe("existing credential and cluster settings", () => {
   it("lists only this person's GitHub accounts and removes presentation preferences", async () => {
     const { connection, reportSetupState } = mountSources({ credentials: [
       GRANT, githubGrantRow({ id: "second", login: "work-account" }),
+      githubGrantRow({ id: "old", login: "disconnected-account", status: "revoked" }),
       githubGrantRow({ id: "other", login: "someone-else", ownerUserId: "u-other" }), credentialRow({ id: "pat" }),
     ], githubApp: { configured: true, source: "cluster", canSetup: true } });
     const group = await sourcesGroup();
     await within(group).findByRole("button", { name: "Manage GitHub account octocat" });
     expect(within(group).getByRole("button", { name: "Manage GitHub account work-account" })).toBeTruthy();
     expect(within(group).queryByText("@someone-else")).toBeNull();
+    expect(within(group).queryByText("@disconnected-account")).toBeNull();
     expect(within(group).getAllByRole("listitem")).toHaveLength(2);
     expect(within(group).queryByRole("radiogroup")).toBeNull();
     expect(within(group).queryByRole("region", { name: "GitHub App" })).toBeNull();
@@ -830,7 +832,12 @@ describe("existing credential and cluster settings", () => {
     expect(connection.callsNamed("sourceConnectionRemove")).toHaveLength(0);
     expect(connection.callsNamed("packageSetSourceRemoved")).toHaveLength(0);
     expect(connection.callsNamed("deleteSite")).toHaveLength(0);
-    expect(within(detail).getByRole("button", { name: "Reconnect GitHub account" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Settings" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "GitHub account @octocat" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reconnect GitHub account" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Manage GitHub account octocat" })).toBeNull();
+    expect(screen.getByText("No GitHub accounts connected")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add GitHub account" })).toBeTruthy();
   });
 
   it("keeps setup ready when another account is still connected", async () => {
@@ -840,6 +847,9 @@ describe("existing credential and cluster settings", () => {
     await click(screen.getByRole("button", { name: "Disconnect" }));
     await screen.findByText("Disconnected here, but GitHub did not confirm the authorization ended.");
     expect(reportSetupState).toHaveBeenLastCalledWith("ready");
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Manage GitHub account work" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Manage GitHub account octocat" })).toBeNull();
   });
 
   it("never renders anything token-shaped, on either path", async () => {
