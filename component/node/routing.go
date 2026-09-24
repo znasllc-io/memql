@@ -218,13 +218,13 @@ func defaultRoutingRules() []RoutingRule {
 		// them from a live feed on whichever replica it is attached to. No
 		// delete rule: rows are rewritten as versions, never removed.
 		//
-		// A BROADCAST RULE REACHES THE NODES THAT DIAL THE WRITER OR ITS
-		// RELAYS, NOT EVERY NODE (memql#5259): forwarding follows outbound
-		// dials only, so a node nobody dials hears none of these, nor the
-		// registration events above, and identity is excluded from every
-		// broadcast. The readiness recompute loop carries its own retry and
-		// safety net for that reason (component/memql/
-		// readiness_recompute_subscriber.go), and
+		// A BROADCAST REACHES EVERY NODE HOLDING ANY STREAM TO THE MESH
+		// (memql#5338) -- until then it reached only the nodes that dialed
+		// the writer or its relays (memql#5259). It is still best effort: a
+		// node whose every stream is down at that moment misses it, and
+		// identity is excluded from every broadcast. The readiness recompute
+		// loop carries its own retry and safety net for that reason
+		// (component/memql/readiness_recompute_subscriber.go), and
 		// TestEveryReadinessParticipantConvergesWhateverTheMeshDelivers holds
 		// it to converging every replica anyway.
 		{Pattern: "graph.node.created.v1:platform:moduleReadiness", TargetType: ""},

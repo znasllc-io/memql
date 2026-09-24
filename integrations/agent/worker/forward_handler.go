@@ -66,6 +66,19 @@ type ForwardHandler struct {
 	// call's: one map would let a probe's cancel reach a pull.
 	modelProbeMu       sync.Mutex
 	modelProbeInflight map[string]context.CancelFunc
+
+	// groups resolves the verified caller's ACTIVE groups for a machine lent
+	// to a group (epic memql#5344). Nil is workerservice.InstalledGroups --
+	// THIS replica's membership source, never anything the envelope says.
+	groups workerservice.GroupResolver
+}
+
+// SetGroupResolver replaces how the receiver reads a caller's groups. Tests
+// use it to say who is in which group; nil restores the installed source.
+func (h *ForwardHandler) SetGroupResolver(fn workerservice.GroupResolver) {
+	if h != nil {
+		h.groups = fn
+	}
 }
 
 // NewForwardHandler wraps this replica's registry and fleet store.
@@ -252,11 +265,17 @@ func (h *ForwardHandler) verifyRegistration(ctx context.Context, ownerUserId, re
 // to be local, which on the default two-replica topology is a coin toss.
 //
 // So: admit when the machine is the caller's OWN, or when it is unrevoked and
-// cluster-shared. The second arm resolves through SharedFleetStore -- the SAME
-// cross-owner read the router used to pick it, deliberately on a second
-// interface so user-scoped paths cannot reach it -- and it is a narrow
+// lent to the caller -- to everyone, to them by name, or to a group they are
+// in (epic memql#5344). The second arm resolves through SharedFleetStore --
+// the SAME cross-owner read the router used to pick it, deliberately on a
+// second interface so user-scoped paths cannot reach it -- and it is a narrow
 // widening rather than a relaxed check: revocation, both halves of the
 // consent, and the owner's identity are all still decided here.
+//
+// THE PERSON IS THE VERIFIED AUTHORITY'S SUBJECT, and their groups are read
+// on THIS replica. Nothing in the envelope says who is in which group: a
+// membership a sending replica asserted would be a claim, and the receiver
+// re-decides everything it is able to re-decide.
 //
 // A replica with no SharedFleetStore answers exactly as it did before: only
 // owned machines. That is the honest degradation, because a node that cannot
@@ -283,6 +302,7 @@ func (h *ForwardHandler) verifySharedRegistration(ctx context.Context, actingUse
 	if err != nil {
 		return err
 	}
+	person := workerservice.NewPerson(ctx, actingUserId, h.groups)
 	for _, m := range machines {
 		if !sameSubject(m.RegistrationId, registrationId) {
 			continue
@@ -290,7 +310,7 @@ func (h *ForwardHandler) verifySharedRegistration(ctx context.Context, actingUse
 		if !m.RevokedAt.IsZero() {
 			return errRegistrationRevoked
 		}
-		if !m.ServesCluster() {
+		if !m.ServesPerson(person) {
 			return errRegistrationNotShared
 		}
 		return nil
@@ -427,7 +447,7 @@ var (
 	// to the asserted owner" because it leads somewhere else: that one says
 	// the machine is not yours and this one says it is somebody else's and
 	// they have not offered it, which is a thing its owner can change.
-	errRegistrationNotShared = forwardRefusal("that machine belongs to somebody else and is not shared with the cluster")
+	errRegistrationNotShared = forwardRefusal("that machine belongs to somebody else and is not lent to you")
 )
 
 type forwardRefusal string

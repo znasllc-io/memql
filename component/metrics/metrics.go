@@ -253,6 +253,8 @@ func init() {
 		resultCacheQueryReads,
 		cacheCollector{},
 		automationLoopsStopped,
+		meshEventsTotal,
+		meshCopiesTotal,
 		dslDeprecatedUses,
 	)
 	// Explicit zero so the series exists before the first keyset is

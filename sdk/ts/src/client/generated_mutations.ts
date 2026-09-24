@@ -8308,12 +8308,13 @@ QueryClient.prototype.updateMyPreferences = function (this: QueryClient, args: U
   return this.executeNamed("updateMyPreferences", buildUpdateMyPreferences(args), opts);
 };
 
-/** Record a node health transition. Read-merges the existing v1:cluster:node row (created on startup by registerNode under the same NodeId) so only health + lastSeen change; nodeType/address/parentId/capabilities/labels inherit from the persisted row instead of being wiped when a caller omits them (memql#1628 -- previously the insert form re-stamped address to "" and reset capabilities/labels on every transition). */
+/** Record a node health transition. Read-merges the existing v1:cluster:node row (created on startup by registerNode under the same NodeId) so only health + lastSeen change; nodeType/address/parentId/capabilities/labels inherit from the persisted row instead of being wiped when a caller omits them (memql#1628 -- previously the insert form re-stamped address to "" and reset capabilities/labels on every transition). `mesh` is the node's own delivery report (memql#5338), sent only by the node about itself on its heartbeat; a write that omits it -- another node recording this one's health -- keeps the stored report. */
 // Bound concept: v1:cluster:node (machine-readable: BoundConcepts["updateNodeHealth"] in generated_concepts.ts).
 export interface UpdateNodeHealthArgs {
   id: string;
   health: string;
   lastSeen: string;
+  mesh?: Record<string, unknown>;
 }
 
 export function buildUpdateNodeHealth(args: UpdateNodeHealthArgs): string {
@@ -8321,6 +8322,7 @@ export function buildUpdateNodeHealth(args: UpdateNodeHealthArgs): string {
   parts.push("id: " + renderMemQLValue(args.id));
   parts.push("health: " + renderMemQLValue(args.health));
   parts.push("lastSeen: " + renderMemQLValue(args.lastSeen));
+  if (args.mesh !== undefined) parts.push("mesh: " + renderMemQLValue(args.mesh));
   return "mutation updateNodeHealth(" + parts.join(", ") + ")";
 }
 

@@ -25,25 +25,28 @@ import (
 // WHAT "BROADCAST" DELIVERS, AND WHY EVENTS ALONE ARE NOT ENOUGH
 // ===========================================================================
 // A routing rule with TargetType "" is broadcast, and D5 was written on the
-// premise that a broadcast reaches every replica. It does not (memql#5259,
-// memql#5338):
+// premise that a broadcast reaches every replica. Until memql#5338 it did not
+// (memql#5259): the mesh pushed events only along a DIAL, so a node nobody
+// dialed -- in the cloud, the edge and a product bff -- heard no mesh event at
+// all. On 2026-09-09 that left seven of fourteen `ai` rows at their boot
+// answer after a machine was paired; on 2026-09-13 every node's boot write
+// failed inside a rolling deploy's database saturation, the dialed nodes
+// recovered on the next registration heartbeat, and the undialed ones kept a
+// failed evaluation until the next deploy.
 //
-//   - The mesh pushes events only client->server along a DIAL, plus a relay
-//     of at most three hops along the receiver's own outbound dials; nothing
-//     pushes server->client. A node nobody dials -- in the cloud, the edge and
-//     a product bff -- receives no mesh event at all.
+// memql#5338 made every stream carry events both ways, so a broadcast now
+// reaches every node holding any stream to the mesh. Events are still not
+// enough on their own:
+//
 //   - identity is excluded from every broadcast by design
 //     (component/node/eventbridge.go meshEventParticipants), so it never
 //     hears one even though the bff dials it.
-//   - Forwarding is best effort: a peer whose outbound connection is absent
-//     or reconnecting at that moment is skipped, and the event is not queued.
+//   - Delivery is best effort: a node whose every stream is down at that
+//     moment -- mid-reconnect, or on the far side of a rolling update, where
+//     an old pod drops what a new one sends -- misses the event, and nothing
+//     queues it.
 //
-// On 2026-09-09 that left seven of fourteen `ai` rows at their boot answer
-// after a machine was paired; on 2026-09-13 every node's boot write failed
-// inside a rolling deploy's database saturation, the dialed nodes recovered on
-// the next registration heartbeat, and the undialed ones kept a failed
-// evaluation until the next deploy. The transport fix is its own change
-// (memql#5338); this loop does not wait for it:
+// So this loop keeps its own floor:
 //
 //	RETRY   A failed or unknown pass re-runs on an exponential, jittered
 //	        backoff (ReadinessRetryBase doubling to ReadinessRetryMax) until

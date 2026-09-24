@@ -409,7 +409,9 @@ func (r *TopologyReconciler) reconcile(ctx context.Context) {
 // retire appends a terminal health="stopped" row for the node. Returns whether
 // the write succeeded.
 func (r *TopologyReconciler) retire(ctx context.Context, n reconcileNode, reason string) bool {
-	call, err := buildUpdateNodeHealthCall(n.id, n.nodeType, n.address, "stopped", r.now().UTC().Format(time.RFC3339))
+	// No mesh report: the reconciler is recording ANOTHER node as stopped, and
+	// that node's last report of its own stays on the row as it was.
+	call, err := buildUpdateNodeHealthCall(n.id, n.nodeType, n.address, "stopped", r.now().UTC().Format(time.RFC3339), nil)
 	if err != nil {
 		r.warn("topology reconciler: failed to build retire mutation", "node_id", n.id, "error", err)
 		return false

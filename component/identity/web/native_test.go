@@ -161,3 +161,22 @@ func TestSetupRequiresOrganizationBeforeAnySettingsOrEnrollmentWrite(t *testing.
 		})
 	}
 }
+
+// HTTPS installations must never issue a bootstrap proof over an insecure
+// cookie. Plain HTTP remains useful only for the local test server.
+func TestBootstrapEnrollmentCookieTransport(t *testing.T) {
+	for _, tc := range []struct {
+		baseURL string
+		secure  bool
+	}{{"https://identity.example.test", true}, {"http://localhost", false}} {
+		t.Run(tc.baseURL, func(t *testing.T) {
+			s := &Server{Cfg: identity.Config{BaseURL: tc.baseURL}}
+			w := httptest.NewRecorder()
+			s.setBootstrapCookie(w, "bootstrap-proof")
+			cookies := w.Result().Cookies()
+			if len(cookies) != 1 || cookies[0].Name != identity.BootstrapCookie || cookies[0].Secure != tc.secure || !cookies[0].HttpOnly || cookies[0].SameSite != http.SameSiteLaxMode {
+				t.Fatalf("incorrect bootstrap cookie: %+v", cookies)
+			}
+		})
+	}
+}

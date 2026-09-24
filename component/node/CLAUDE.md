@@ -54,12 +54,15 @@ component/node/
 ├── connection.go          # peerConnection -- gRPC stream with reconnect backoff
 ├── server.go              # NodeServer -- gRPC server for NodeService
 ├── stream_handler.go      # nodeService -- stream message dispatch
+├── inbound_stream.go      # inboundStream -- the PUSH half of an accepted stream:
+│                          #   bounded outbox + its own sender goroutine (memql#5340)
 ├── eventbridge.go         # EventBridge -- bridges local events.Bus across nodes
 ├── eventbridge_bus.go     # EventBridge channel-based publish path
 ├── eventbridge_fastpath.go # Mesh push fast-path over the delivery substrate
 ├── routing.go             # Event routing rules (block/forward/broadcast)
 ├── routing_automation_run.go # Routing rules for automation-run events
-├── dedup.go               # Ring buffer dedup for distributed events
+├── dedup.go               # Dedup window for distributed events; remembers the
+│                          #   shortest route each event arrived by (memql#5341)
 ├── bootstrap.go           # NodeBootstrap interface, BootstrapFor() factory, DiscoverPeerAddress()
 │                          #   bootstrap_{bff,voice,cognition,agent,planner,
 │                          #   mcp,workbench,token}.go -- per-type bootstraps
@@ -85,6 +88,7 @@ component/node/
 ├── plan_delivery.go       # Plan-scoped delivery helpers
 ├── reconciler.go          # Peer/worker reconciliation loop
 ├── status_writer.go       # Node status/heartbeat writer
+├── self_status_writer.go  # This node's own row, once a minute, with its mesh report
 ├── stream_channel.go      # Streaming-over-substrate primitive (RoutingKey, Deliverable)
 ├── stream_lifecycle.go    # Typed Start/Delta/Complete lifecycle over stream_channel.go
 └── substrate_rpc.go       # RPC-over-substrate primitive
@@ -176,7 +180,8 @@ Each dial re-uses `peerConnection` (the same type ParentConnector uses). On
 connection is bound via `AttachConnection` so `AiForwardRouter.Forward` finds a
 live `Send` handle. Inbound `AiForwardResponse` messages on any managed stream
 are dispatched to the `AiForwardResponseSink` (set by `app/cluster.go` on BFF
-binaries).
+binaries), and an `EventForward` the worker PUSHES down the stream goes to the
+PeerManager's event sink like every other arrival (memql#5340).
 
 ### ParentConnector (`parent_connector.go`)
 Installed only when `MEMQL_PARENT_ADDRESS` is set. Dials the configured parent
@@ -194,25 +199,60 @@ cancelled (Stop), so readiness reflects serving-capability (the node reconnects
 on its own) rather than "every mesh dependency is currently connected".
 
 ### EventBridge (`eventbridge.go`, `eventbridge_bus.go`)
-Subscribes to local `events.Bus` with `#` pattern. Forwards matching events to connected
-peers based on routing rules. Inbound events are published locally after dedup and TTL checks.
-When `SetWiring()` is configured, inbound peer events are published via `bus.EventPublishCh`
-channel instead of calling `localBus.Publish()` directly, with fallback to direct publish
-if the channel is full.
+Subscribes to local `events.Bus` with `#` pattern and puts every event a routing
+rule forwards on the mesh. When `SetWiring()` is configured, an event heard from
+a peer is published via `bus.EventPublishCh` instead of `localBus.Publish()`,
+with fallback to direct publish if the channel is full.
 
-**A broadcast rule reaches the nodes that dial the writer or its relays, not
-every node** (memql#5259, memql#5338). Forwarding follows `sendTarget`, which
-is set only by the OUTBOUND dial path (`AttachConnection`); inbound peers and
-children get no push, nothing constructs a server->client `EventForward`, and
-a relay goes at most three hops. In the cloud the edge and a product bff are
-dialed by nobody and receive no mesh event, identity is excluded from every
-broadcast by `meshEventParticipants`, and a peer whose connection is absent or
-reconnecting at that moment is skipped with nothing queued. A consumer that
-must eventually be right on every node needs its own floor -- the readiness
-recompute loop's retry and safety net, held by
+**A broadcast reaches every node holding ANY stream to the mesh, exactly once**
+(epic memql#5338; rulings in
+[the design record](../../docs/superpowers/specs/2026-09-22-mesh-event-delivery-design.md)).
+Before it, forwarding followed only the OUTBOUND dials, and the nodes nobody
+dialed -- the product bff, the edge, the mcp -- heard nothing, ever. Now:
+
+- **Every stream carries events both ways.** `nodeService.Stream` attaches an
+  `inboundStream` to the PeerManager once the handshake completes, and pushes
+  down it. `PeerManager.eventTarget` picks ONE transport per peer: the live
+  dialed connection, else the newest open accepted stream, else the dialed
+  connection while it reconnects.
+- **One entry point for an arrival.** `NewEventBridge` registers the bridge as
+  the PeerManager's event sink; the NodeServer, the ParentConnector and the
+  WorkerDialer all call `PeerManager.receiveEvent`, which lands in
+  `EventBridge.ReceiveForward`. There is no per-component setter to forget.
+- **Published once, relayed once.** Dedup runs FIRST: a first sighting is
+  published and relayed to every participant but the sender and the origin; a
+  repeat is dropped, unless it came by a strictly SHORTER route, in which case
+  it is relayed again and never republished. No loop to prevent, on any
+  topology (`TestFloodingIsExactlyOnceOnArbitraryTopologies`).
+- **`hops` replaced `ttl`.** `EventForward.hops` (9) counts links travelled,
+  the origin sending 1; nothing is relayed past `meshMaxHops` (16). `ttl` (7)
+  and `EventAck` (31) are reserved. During a rolling update a pre-epic node
+  reads the absent `ttl` as expired: old pods are deaf to new pods for the
+  rollout, never a storm. Do not reintroduce `ttl` "for old readers".
+- **Identity sends and never hears.** `meshEventParticipants` keeps it out as
+  a target; its own events leave down the streams the bffs open to it.
+  `DiscoverPeerAddress` never picks an identity row as a parent.
+
+The mesh is still BEST-EFFORT: a peer with no live stream at that moment
+misses the event and nothing queues it. A consumer that must eventually be
+right on every node keeps its own floor -- the readiness recompute loop's retry
+and safety net, held by
 `TestEveryReadinessParticipantConvergesWhateverTheMeshDelivers`
-(`readiness_mesh_hop_test.go`), which also writes down which replicas the
-cloud topology leaves without the event.
+(`readiness_mesh_hop_test.go`).
+
+**Every node reports what it hears.** The bridge's counters feed
+`memql_mesh_events_total{outcome}` and `memql_mesh_copies_total{transport,
+result}` (`component/metrics/mesh.go`), and `MeshReport()` is written onto the
+node's own `v1:cluster:node` row as `mesh` by the self heartbeat
+(`SelfStatusWriter.SetMeshReporter`, wired in `app/cluster.go`). MemQL OS reads
+it in Cluster > Mesh. Operator doc:
+[mesh-event-delivery.md](../../docs/public/operate/mesh-event-delivery.md).
+
+**The gates.** `mesh_delivery_test.go` runs the cloud's dial topology over REAL
+gRPC loopback streams and fails with the island named;
+`mesh_relay_test.go` holds the suppression rules; and
+`app/mesh_delivery_consumers_test.go` carries readiness, site invalidation and
+a providers reload to every node through the transport.
 
 Routing rules use `*` to match any partition segment in event topics. For example,
 `graph.node.created.*.v1:cluster:*` matches cluster node creation in any partition.
@@ -304,7 +344,10 @@ In a cluster the BFF acts as the **client** of each worker node for forwarding
 purposes: `WorkerDialer` on the BFF opens one outbound stream per worker so that
 `NodeClientMessage{AiForwardRequest}` can flow BFF->worker and the response
 arrives as `NodeServerMessage{AiForwardResponse}` on the same stream. Workers
-themselves are servers; they do not dial the BFF or each other by default.
+are servers for that traffic; each also dials one PARENT
+(`MEMQL_PARENT_ADDRESS=bff-active:50058` on the agent, planner, workbench and
+edge), which is why two nodes often hold two streams between them -- the case
+`PeerManager.eventTarget`'s one-transport-per-peer rule exists for.
 
 ```
               BFF (WorkerDialer)
@@ -315,9 +358,10 @@ themselves are servers; they do not dial the BFF or each other by default.
   :50059    :50055    :50054      :50056
 ```
 
-EventBridge runs on every node and rides the streams WorkerDialer (on BFF) and
-the inbound handlers (on workers) maintain, so distributed events flow in both
-directions once the mesh is up.
+EventBridge runs on every node and rides every stream in both directions --
+the ones a node dialed (WorkerDialer, ParentConnector) and the ones dialed to
+it (`inboundStream`) -- so a node linked to the mesh by any stream hears every
+broadcast (memql#5338).
 
 ---
 
@@ -349,7 +393,7 @@ PeerIntroduction, AiForwardResponse, etc.).
 | NodeHeartbeat | Bidirectional | Liveness with health status (client + server-side tickers). `health` carries this node's advertised lifecycle state via `NodeLifecycle.Health()` (memql#1268). |
 | PeerIntroduction | Bidirectional | Peer table updates |
 | SpawnRequest/Result | Bidirectional | Node spawning |
-| EventForward/Ack | Bidirectional | Distributed events |
+| EventForward | Bidirectional | Distributed events, pushed down accepted streams too (memql#5340). Carries `hops`; `ttl` (7) and `EventAck` (31) are reserved |
 | CapabilityQuery/Response | Bidirectional | Capability discovery |
 | AiForwardRequest / AiForwardResponse / AiForwardCancel | C->S / S->C / C->S | BFF->worker AI/voice forwarding (see `component/grpc/ai_forward.go`) |
 | NodeShutdown | Server -> Client | Graceful shutdown |

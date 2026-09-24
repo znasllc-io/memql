@@ -1294,19 +1294,31 @@ mutation modelProbe finishModelProbe {
 /// cluster-owner escape on the composite owner form -- and a filter in this body cannot narrow a
 /// tier. fleetSetSharing resolves the machine through the caller's own and is this mutation's one
 /// renderer.
+///
+/// The PEOPLE a machine is lent to (epic memql#5344) are validated there too, and could not be
+/// validated here: whether a user or a group is somebody the owner may pick is a question about
+/// the owner's groups, which a mutation body has no way to ask. The lists are written empty under
+/// owner and cluster, so a share that was taken back leaves no names behind.
 @actor
 @serverOnly
 mutation registration setWorkerSharing {
   args {
     registrationId  string!
-    /// owner or cluster. Anything else is read as owner by every reader, so the
-    /// enum is enforced here rather than left to be misread later.
-    mode            enum("owner", "cluster")!
+    /// owner, people or cluster. Anything else is read as owner by every reader, so
+    /// the enum is enforced here rather than left to be misread later.
+    mode            enum("owner", "people", "cluster")!
+    /// Under people: the users the machine is lent to. fleetSetSharing sends an
+    /// empty list under the other two modes.
+    userIds         []string
+    /// Under people: the groups whose active members may use the machine.
+    groupIds        []string
   }
   update {
     id: args.registrationId
     sharing: {
       mode: args.mode,
+      userIds: args.userIds ?? [],
+      groupIds: args.groupIds ?? [],
       sharedAt: now,
       sharedBy: actor.userId
     }

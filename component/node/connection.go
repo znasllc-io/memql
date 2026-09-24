@@ -10,6 +10,7 @@ import (
 
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 	"github.com/znasllc-io/memql/core/grpctls"
+	"github.com/znasllc-io/memql/core/id"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -621,7 +622,17 @@ func (pc *peerConnection) sendLoop(ctx context.Context, stream nodev1.NodeServic
 	}
 }
 
-// Send queues a message for sending to the peer.
+// Send queues a message for sending to the peer, logging a message the outbox
+// had no room for.
+func (pc *peerConnection) Send(msg *nodev1.NodeClientMessage) {
+	if !pc.trySend(msg) && !pc.isClosed() {
+		pc.logger.Warn("peer send channel full, dropping message",
+			"peer_id", pc.nodeId,
+		)
+	}
+}
+
+// trySend queues a message without blocking and reports whether it was queued.
 //
 // The non-blocking channel send is performed UNDER pc.mu, paired with Close
 // taking the same lock before it closes sendCh. This closes a send-on-closed-
@@ -630,21 +641,45 @@ func (pc *peerConnection) sendLoop(ctx context.Context, stream nodev1.NodeServic
 // goroutine can still call Send while Close (or the next attempt) runs. The
 // critical section is just a non-blocking select, so it never blocks under the
 // lock.
-func (pc *peerConnection) Send(msg *nodev1.NodeClientMessage) {
+func (pc *peerConnection) trySend(msg *nodev1.NodeClientMessage) bool {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
 
 	if pc.closed {
-		return
+		return false
 	}
 
 	select {
 	case pc.sendCh <- msg:
+		return true
 	default:
-		pc.logger.Warn("peer send channel full, dropping message",
-			"peer_id", pc.nodeId,
-		)
+		return false
 	}
+}
+
+// sendEvent queues one EventForward for the peer without blocking and reports
+// whether it was queued. The mesh counts a false as a dropped copy (memql#5338,
+// D7) rather than logging each one: a peer that stops reading drops every copy.
+func (pc *peerConnection) sendEvent(evt *nodev1.EventForward) bool {
+	return pc.trySend(&nodev1.NodeClientMessage{
+		MessageId: id.NewShortId(),
+		Payload:   &nodev1.NodeClientMessage_EventForward{EventForward: evt},
+	})
+}
+
+// connected reports whether a stream attempt is live right now, as opposed to
+// the connection backing off between attempts. The event path prefers a live
+// stream over one that is reconnecting (memql#5338, D2).
+func (pc *peerConnection) connected() bool {
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	return !pc.closed && pc.current != nil
+}
+
+func (pc *peerConnection) isClosed() bool {
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	return pc.closed
 }
 
 // SendOnStream queues work only on the current transport attempt and returns

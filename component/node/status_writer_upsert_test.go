@@ -54,7 +54,7 @@ func TestPersist_UpsertsWhenRowMissing(t *testing.T) {
 		},
 	}
 	w := newTestWriter(exec)
-	updateQ, _ := buildUpdateNodeHealthCall("n1", "cognition", "addr:1", "healthy", "2026-06-19T00:00:00Z")
+	updateQ, _ := buildUpdateNodeHealthCall("n1", "cognition", "addr:1", "healthy", "2026-06-19T00:00:00Z", nil)
 	if err := w.persistHealthTransition(context.Background(), updateQ, "n1", "cognition", "addr:1", "healthy", "2026-06-19T00:00:00Z"); err != nil {
 		t.Fatalf("upsert should succeed via insert fallback, got %v", err)
 	}
@@ -81,7 +81,7 @@ func TestPersist_RetriesTransient(t *testing.T) {
 		},
 	}
 	w := newTestWriter(exec)
-	updateQ, _ := buildUpdateNodeHealthCall("n2", "agent", "addr:2", "degraded", "2026-06-19T00:00:00Z")
+	updateQ, _ := buildUpdateNodeHealthCall("n2", "agent", "addr:2", "degraded", "2026-06-19T00:00:00Z", nil)
 	if err := w.persistHealthTransition(context.Background(), updateQ, "n2", "agent", "addr:2", "degraded", "2026-06-19T00:00:00Z"); err != nil {
 		t.Fatalf("transient error should be retried to success, got %v", err)
 	}
@@ -99,7 +99,7 @@ func TestPersist_NonTransientNoRetry(t *testing.T) {
 		},
 	}
 	w := newTestWriter(exec)
-	updateQ, _ := buildUpdateNodeHealthCall("n3", "voice", "addr:3", "healthy", "2026-06-19T00:00:00Z")
+	updateQ, _ := buildUpdateNodeHealthCall("n3", "voice", "addr:3", "healthy", "2026-06-19T00:00:00Z", nil)
 	if err := w.persistHealthTransition(context.Background(), updateQ, "n3", "voice", "addr:3", "healthy", "2026-06-19T00:00:00Z"); err == nil {
 		t.Fatal("non-transient error should propagate")
 	}

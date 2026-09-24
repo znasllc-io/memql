@@ -1175,6 +1175,7 @@
         "health",
         "labels",
         "lastSeen",
+        "mesh",
         "nodeType",
         "parentId",
         "provider",

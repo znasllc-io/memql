@@ -69,9 +69,15 @@ const { RoutingSection } = await import("../../src/apps/fleet/routing/RoutingSec
 const { AppsSection } = await import("../../src/apps/fleet/apps/AppsSection");
 const { WorkbenchesSection } = await import("../../src/apps/fleet/workbenches/WorkbenchesSection");
 const { FleetApp } = await import("../../src/apps/fleet/FleetApp");
-const { fakeConnection, machineRow, modelPullRow, delegationPolicyRow, withSession, MachinesWithFlow } = await import(
-  "./harness"
-);
+const {
+  fakeConnection,
+  machineRow,
+  modelPullRow,
+  delegationPolicyRow,
+  shareDirectoryRow,
+  withSession,
+  MachinesWithFlow,
+} = await import("./harness");
 
 type Conn = ReturnType<typeof fakeConnection>;
 
@@ -509,14 +515,19 @@ const CASES: ActsCase[] = [
         note: "one per advertised model, and this fixture advertises one",
       },
       {
-        name: "Share with the cluster",
+        name: "Change sharing",
         count: 1,
-        note: "the owner's half of the two consents; the machine's half is a file on the machine",
+        note: "the owner's half of the two consents, in every mode (epic memql#5344): the two-way toggle became one act that opens the share dialog; the machine's half is still a file on the machine",
+      },
+      {
+        name: "Share with the cluster",
+        count: 0,
+        note: "the old toggle's opening half, replaced by Change sharing and never beside it",
       },
       {
         name: "Stop sharing with the cluster",
         count: 0,
-        note: "the other half of the same toggle -- this machine is not shared, so it replaces nothing here",
+        note: "the old toggle's other half, replaced the same way",
       },
       {
         name: "Pull recommended set",
@@ -549,6 +560,42 @@ const CASES: ActsCase[] = [
       { name: "the uninstall command", count: 1, note: "the machine's half of the act, as a copy field (D12)" },
       { name: "Copy the uninstall command", count: 1 },
       { name: "Remove this machine", count: 0, note: "replaced by the confirm, never beside it" },
+    ],
+  },
+
+  {
+    // Everything the toggle did, and what it could not: the three modes, the
+    // search over whom the owner may pick, and the one act that commits them
+    // (epic memql#5344, design section 5).
+    what: "Machines -- the share dialog",
+    open: async () => {
+      await openMachineDetail(
+        fakeConnection({
+          myWorkersWithStatus: [MACHINE],
+          fleetShareDirectory: [
+            shareDirectoryRow({ id: MACHINE_ID, people: [{ id: "ana", name: "Ana Ruiz", detail: "" }] }),
+          ],
+        }),
+      );
+      await click(screen.getByRole("button", { name: "Change sharing" }));
+      await settle();
+      await click(screen.getByRole("radio", { name: /^Specific people and groups/ }));
+    },
+    acts: [
+      {
+        name: "Change sharing",
+        count: 1,
+        note: "the opener, still on the page behind its dialog -- and the dialog does not answer to the same name",
+      },
+      { name: "Who can use this machine", count: 1, note: "the three modes, one radio group" },
+      { name: /^Only me/, count: 1, within: "Who can use this machine" },
+      { name: /^Specific people and groups/, count: 1, within: "Who can use this machine" },
+      { name: /^Everyone in this cluster/, count: 1, within: "Who can use this machine" },
+      { name: "Search people and groups", count: 1, note: "people and groups together, in one search" },
+      { name: "People and groups you can choose", count: 1 },
+      { name: "Ana Ruiz", count: 1, within: "People and groups you can choose" },
+      { name: "Cancel", count: 1, note: "the way out: a label on the floor, never a second button" },
+      { name: "Save", count: 1, note: "the one act, disabled until the draft differs and names somebody" },
     ],
   },
 

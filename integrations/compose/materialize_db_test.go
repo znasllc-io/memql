@@ -60,9 +60,16 @@ func TestMaterializeDB_SharedCompositionKeepsSourcesPrivate(t *testing.T) {
 	account, group := "compose-account-"+suffix, "compose-group-"+suffix
 	seed := auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: owner, Role: auth.RoleOwner}))
 	seed = auth.ContextWithToken(seed, &auth.TokenInfo{Subject: owner})
+	for _, user := range []string{owner, member} {
+		payload, _ := json.Marshal(map[string]any{"displayName": user, "primaryEmail": user + "@example.test", "role": "writer", "active": true})
+		if _, err := e.Execute(seed, fmt.Sprintf(`insert("v1:identity:user", id=%q, payload=%s)`, user, payload)); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for _, query := range []string{
+		fmt.Sprintf(`insert("v1:accounts:account", id=%q, payload={"name": "Shared composition", "status": "active", "domainStatus": "unverified"})`, account),
 		"mutation " + call("writeGroup", map[string]any{"groupId": group, "name": "Shared composition", "kind": "account", "accountId": account, "status": "active"}),
-		"mutation " + call("writeGroupMembership", map[string]any{"membershipId": group + "-" + member, "groupId": group, "userId": member, "origin": "added", "status": "active"}),
+		"mutation " + call("writeGroupMembership", map[string]any{"membershipId": group + "-" + member, "groupId": group, "userId": member, "accountId": account, "origin": "added", "status": "active"}),
 	} {
 		if _, err := e.Execute(seed, query); err != nil {
 			t.Fatal(err)

@@ -240,20 +240,26 @@ func (e *MemQLEngine) revokeWorkerCredential(ctx context.Context, identityId str
 // evaluateFleetSetSharingExpression serves the `fleetSetSharing` builtin: the
 // OWNER's half of a machine's sharing consent, written through the caller's
 // own machines.
+//
+// THREE MODES (epic memql#5344). `owner` keeps it, `cluster` offers it to
+// everyone and to the cluster's own work, and `people` lends it to the users
+// and groups named -- each NEW one checked against what the owner may pick
+// (fleet_share_directory.go), and the lists written empty under the other two
+// modes so a share taken back leaves no names behind (design G10).
 func (e *MemQLEngine) evaluateFleetSetSharingExpression(ctx context.Context, args map[string]any) ([]memorynodes.MemoryNode, error) {
 	if e == nil {
 		return nil, fmt.Errorf("engine is nil")
 	}
 	mode := strings.TrimSpace(stringArg(args, "mode"))
-	// REFUSED rather than read as `owner`. The two values mean opposite things
-	// and a typo has to be told about: silently keeping a machine private on a
+	// REFUSED rather than read as `owner`. The modes mean different things and
+	// a typo has to be told about: silently keeping a machine private on a
 	// misspelling is safe, and silently doing anything else is not -- but an
 	// owner who typed `clustre` and saw nothing happen would try again, and
 	// eventually conclude the feature is broken.
-	if mode != SharingModeOwner && mode != SharingModeCluster {
+	if mode != SharingModeOwner && mode != SharingModePeople && mode != SharingModeCluster {
 		return nil, modelPullRefusal{
 			Code:    "invalid_sharing_mode",
-			Message: fmt.Sprintf("sharing mode must be %q or %q, not %q", SharingModeOwner, SharingModeCluster, mode),
+			Message: fmt.Sprintf("sharing mode must be %q, %q or %q, not %q", SharingModeOwner, SharingModePeople, SharingModeCluster, mode),
 		}
 	}
 	registrationId := strings.TrimSpace(stringArg(args, "registrationId"))
@@ -268,9 +274,71 @@ func (e *MemQLEngine) evaluateFleetSetSharingExpression(ctx context.Context, arg
 		}
 	}
 
+	userIds, groupIds := []string{}, []string{}
+	if mode == SharingModePeople {
+		// The owner is dropped rather than refused: their own machine is
+		// theirs already, and a list naming them would be a list that says
+		// nothing about anybody else.
+		userIds = normalizeShareIds(stringSliceFromAny(args["userIds"]), machine.OwnerUserId, actingUserFromContext(ctx))
+		groupIds = normalizeShareIds(stringSliceFromAny(args["groupIds"]))
+		total := len(userIds) + len(groupIds)
+		if total == 0 {
+			return nil, modelPullRefusal{
+				Code:    "share_needs_someone",
+				Message: "choose at least one person or group to lend this machine to, or keep it to yourself",
+			}
+		}
+		if total > shareSubjectsMax {
+			return nil, modelPullRefusal{
+				Code:    "share_too_many",
+				Message: fmt.Sprintf("a machine can be lent to at most %d people and groups at once, and this names %d; a group is the way to lend it to more", shareSubjectsMax, total),
+			}
+		}
+		// ONLY NEW SUBJECTS ARE CHECKED (design G9). One already on the list
+		// is the owner's earlier decision; the directory names it even when
+		// it is no longer offered, and the owner removes it by saving without
+		// it -- not by being refused every save until they do.
+		var newUsers, newGroups []string
+		for _, id := range userIds {
+			if !containsShareSubject(machine.SharedUserIds, id) {
+				newUsers = append(newUsers, id)
+			}
+		}
+		for _, id := range groupIds {
+			if !containsShareSubject(machine.SharedGroupIds, id) {
+				newGroups = append(newGroups, id)
+			}
+		}
+		if len(newUsers)+len(newGroups) > 0 {
+			dir, err := e.shareDirectoryFor(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("fleetSetSharing: read who you can share with: %w", err)
+			}
+			// ONE SENTENCE for "no such id" and "not yours to pick": a write
+			// that distinguished them would tell anybody with a machine who
+			// is on the cluster, one guess at a time.
+			unknown := modelPullRefusal{
+				Code:    "share_subject_unknown",
+				Message: "some of the people or groups chosen are not ones you can lend this machine to; choose from the people and groups offered",
+			}
+			for _, id := range newUsers {
+				if !dir.offersPerson(id) {
+					return nil, unknown
+				}
+			}
+			for _, id := range newGroups {
+				if !dir.offersGroup(id) {
+					return nil, unknown
+				}
+			}
+		}
+	}
+
 	call, err := langparser.RenderCall("setWorkerSharing", map[string]any{
 		"registrationId": registrationId,
 		"mode":           mode,
+		"userIds":        userIds,
+		"groupIds":       groupIds,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("fleetSetSharing: render the write: %w", err)
@@ -284,17 +352,50 @@ func (e *MemQLEngine) evaluateFleetSetSharingExpression(ctx context.Context, arg
 		return nil, fmt.Errorf("fleetSetSharing: %w", err)
 	}
 
-	// THE SENTENCE NAMES THE OTHER HALF, because a consent that is half given
-	// looks exactly like one that is not given at all. An owner who turns
-	// sharing on and sees nothing happen has no way to learn from this surface
-	// that the machine's own policy.yaml is the thing still saying no.
-	sentence := "Kept to you. Nobody else's work will run on this machine."
-	if mode == SharingModeCluster {
-		sentence = "Offered to the cluster. The machine itself has to agree too -- set `inference.serve: cluster` in its policy.yaml -- and until it does, nothing runs on it."
-	}
 	return singleVirtualRow(SetSharingConcept, registrationId, map[string]any{
 		"machineId": registrationId,
 		"mode":      mode,
-		"sentence":  sentence,
+		"people":    len(userIds),
+		"groups":    len(groupIds),
+		"sentence":  sharingReceiptSentence(mode, len(userIds), len(groupIds), machine.InferenceServe == "cluster"),
 	})
+}
+
+// sharingReceiptSentence is what the act says it did.
+//
+// IT NAMES THE OTHER HALF ONLY WHEN IT IS MISSING. A consent that is half given
+// looks exactly like one that is not given at all, so an owner who lends a
+// machine whose policy.yaml still says no is told so here -- and one whose
+// machine has already agreed is not sent to edit a file that needs no edit.
+func sharingReceiptSentence(mode string, people, groups int, machineAgreed bool) string {
+	machineHalf := ""
+	if !machineAgreed {
+		machineHalf = " The machine itself has to agree too -- set `inference.serve: cluster` in its policy.yaml -- and until it does, nothing runs on it for anybody else."
+	}
+	switch mode {
+	case SharingModePeople:
+		return "Lent to " + shareCountPhrase(people, groups) + "." + machineHalf
+	case SharingModeCluster:
+		return "Offered to everyone on this cluster, and to the cluster's own work." + machineHalf
+	default:
+		return "Kept to you. Nobody else's work will run on this machine."
+	}
+}
+
+// shareCountPhrase says "2 people and 1 group", with the plurals right.
+func shareCountPhrase(people, groups int) string {
+	var parts []string
+	switch {
+	case people == 1:
+		parts = append(parts, "1 person")
+	case people > 1:
+		parts = append(parts, fmt.Sprintf("%d people", people))
+	}
+	switch {
+	case groups == 1:
+		parts = append(parts, "1 group")
+	case groups > 1:
+		parts = append(parts, fmt.Sprintf("%d groups", groups))
+	}
+	return strings.Join(parts, " and ")
 }

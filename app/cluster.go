@@ -165,25 +165,13 @@ func (a *App) cluster() {
 		}
 	}
 
-	// Phase 1 of epic memql#1259 (memql#1264): route the chat-reply path
-	// (utterance / presence / canvasState) through the durable DeliverySubstrate
-	// (memql#1263), fixing the live cross-replica drop where a reply produced on
-	// a worker never reached the bff replica that owns the user's WebSocket.
-	//
-	//   - Producer side (every mesh node): on a locally-produced chat-reply
-	//     event, ChatReplyDelivery durably Publishes a Deliverable keyed by
-	//     space:<id>. The durable outbox row is the cross-replica guarantee.
-	//   - Consumer side (bff only): the bff Subscribes per space and fans the
-	//     durable stream back onto its local bus, where the browser's gRPC
-	//     subscription already consumes it -- so it gets the reply regardless of
-	//     which node produced it. EventBridge then SUPPRESSES the inbound mesh
-	//     copy of these topics on the bff (SuppressInboundChatReply) so the
-	//     browser receives them exactly once via the substrate.
-	//
-	// The mesh forward itself is left fully intact: it still carries the human
-	// utterance to the cognition/agent worker that produces the reply (the chat
-	// TRIGGER path), and still publishes these topics on worker local buses.
-	// Only the bff's redundant inbound copy is dropped.
+	// The durable DeliverySubstrate (memql#1263) is the cross-replica
+	// GUARANTEE for keyed traffic that must survive a replica switch. Phase 1 of
+	// epic memql#1259 (memql#1264) put the chat-reply path on it; that path went
+	// with the conversational product, and what rides it now is streamed
+	// responses (memql#1266) and the run lifecycle (below). Ordinary bus events
+	// stay on the mesh broadcast, which since memql#5338 reaches every
+	// participant over every stream, in both directions.
 	//
 	// memql#1289 wires the EventBridge as the substrate's mesh FAST-PATH (the
 	// low-latency half deferred from #1264): on a durable Publish the substrate
@@ -520,6 +508,11 @@ func (a *App) cluster() {
 	if peerMgr != nil {
 		a.nodeLifecycle = peerMgr.Lifecycle()
 		selfStatus := a.wireNodeSelfStatus(nodeIdentity, a.nodeLifecycle)
+		// What this node hears, on its own row (memql#5338, D7): the report
+		// Cluster > Mesh draws, refreshed by the heartbeat above.
+		if selfStatus != nil && eventBridge != nil {
+			selfStatus.SetMeshReporter(eventBridge.MeshReport)
+		}
 		a.nodeLifecycle.SetObserver(func(_, newState node.LifecycleState) {
 			if newState == node.LifecycleDraining || newState == node.LifecycleStopped {
 				server.SetDraining(true)

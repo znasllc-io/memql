@@ -34,7 +34,7 @@ import (
 // instance, so the eviction must fire on EVERY replica that holds a
 // cache, not just the one that handled the write. The node EventBridge
 // bridges the cache.invalidate.* event across the mesh -- a remote write
-// is re-published onto this node's local bus by EventBridge.HandleInbound
+// is re-published onto this node's local bus by EventBridge.ReceiveForward
 // -- because the single broadcast rule (cache.invalidate.*) forwards it
 // to all node types. Subscribing to the LOCAL bus here is therefore
 // sufficient on every replica; the cross-node test in

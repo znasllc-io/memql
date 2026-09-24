@@ -2235,8 +2235,8 @@ app the actor cannot see, so a link is not a way past the launcher's gate.
 ## Cluster, the thirteenth app (memql#5011)
 
 `src/apps/cluster/` is what this cluster is made of and how it is going:
-**Readiness**, **Modules**, **Data origins**, **Agents** and the **Audit
-trail**. Read-only inspection, no preferences.
+**Readiness**, **Modules**, **Mesh**, **Data origins**, **Agents** and the
+**Audit trail**. Read-only inspection, no preferences.
 
 **Settings is what you SET; this is what the cluster IS.** That is the split
 against Settings' own Cluster section, which holds policy and this session's
@@ -2302,6 +2302,43 @@ other app carries.
   node reads at its NEXT BOOT rather than what a running node has loaded.
   An `integration` or `node-type` gets a sentence explaining why there is no
   switch instead of a disabled one (rule 12).
+
+### Mesh (epic memql#5338)
+
+`src/apps/cluster/mesh/` answers the question an operator arrives with -- is
+any node deaf to the cluster's broadcast events, and which -- from the `mesh`
+report every node writes on its own `v1:cluster:node` row once a minute
+(operator doc: `docs/public/operate/mesh-event-delivery.md`). A band counts the
+states, one sentence names the nodes that need a look (each name opens its
+node), and the list groups the running nodes by type. A node's page holds its
+counts and its links, laid out as the streams it opened and the streams opened
+to it.
+
+- **MESH HAS NO FLOOR OF ITS OWN.** `v1:cluster:node` declares no row tier, so
+  every signed-in user can already read these rows; a section floor would be
+  editorial, not a mirror of a gate. It inherits the app's.
+- **EVERY VERDICT IS JUDGED AGAINST THE REPORT, NOT THE BROWSER.** "Quiet" is
+  five minutes with nothing heard before the node's OWN report (`lastSeen`),
+  and "Starting" is three minutes of uptime at that report. Against the
+  browser's clock an old report of a busy node would read as quiet.
+- **NOT REPORTED IS NOT ZERO.** A row with no `mesh` object -- an older
+  release, or a node before its first heartbeat -- draws every figure as the
+  kit's absent dash and says "Row last written", never "Report written". A
+  zero would say "looked, and heard nothing", which is what a deaf node says.
+  Identity reads "Sends only", and its page is "What it sends".
+- **A HEARTBEAT IS NOT NEWS.** `meshFingerprint` is the verdict, the health and
+  the set of links. Every counter moves on every report, forever; naming one
+  would ring the arrival cue once a minute per node.
+- **THE SEED COLLAPSES HISTORY; THE FOLD KEYS BY THE PAYLOAD'S OWN `id`.** The
+  row is append-only, so the seed keeps the newest version per id. The spec
+  passes no `rowId`: the fold keys an event by its payload's bare `id` whatever
+  a spec says, and a custom key that disagreed would put every live update
+  beside the row it updates rather than on it.
+- **NO DRAWING OF THE WHOLE MESH.** The bffs link to nearly everything, so a
+  graph of every link at sixteen replicas is a hairball that hides the one node
+  worth finding. A node's OWN links are drawn on its page, where there are few
+  enough to read, and a peer linked both ways sits in both columns because two
+  streams exist.
 
 ## Unseen changes: shared attention markers
 

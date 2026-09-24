@@ -123,8 +123,8 @@ func TestForwardToPeers_SendsConnectedSkipsUnconnected(t *testing.T) {
 	pm.Register(&nodev1.PeerInfo{NodeId: freshId, NodeType: "bff", Address: "bff-fresh:50052"})
 
 	decision := routingDecision{Forward: true, Broadcast: true}
-	forward := &nodev1.EventForward{EventId: "utt-1", Topic: "graph.node.created.v1:library:artifact", Ttl: 3}
-	eb.forwardToPeers(forward, decision)
+	forward := &nodev1.EventForward{EventId: "utt-1", Topic: "graph.node.created.v1:library:artifact"}
+	eb.sendToPeers(forward, decision)
 
 	// Live peer received exactly one message; the unconnected ones got nothing.
 	got := drainSendCh(livePC)
@@ -133,10 +133,10 @@ func TestForwardToPeers_SendsConnectedSkipsUnconnected(t *testing.T) {
 	}
 }
 
-// TestForwardInboundToPeers_SkipsUnconnected mirrors the send-if-connected
-// behavior on the mesh-relay path (ForwardInboundToPeers) after #1267: a
-// Connection==nil peer is harmlessly skipped (no buffering, no panic).
-func TestForwardInboundToPeers_SkipsUnconnected(t *testing.T) {
+// TestReceiveForward_RelaySkipsUnconnected mirrors the send-if-connected
+// behavior on the mesh-relay path after #1267: a peer with no stream in either
+// direction is harmlessly skipped (no buffering, no panic).
+func TestReceiveForward_RelaySkipsUnconnected(t *testing.T) {
 	pm := NewPeerManager(testIdentity(), testLogger())
 
 	bus := events.NewBus(events.WithLogger(testLogger()))
@@ -152,8 +152,8 @@ func TestForwardInboundToPeers_SkipsUnconnected(t *testing.T) {
 	const gossipedId = "bff-relay-nonparent"
 	pm.Register(&nodev1.PeerInfo{NodeId: gossipedId, NodeType: "bff", Address: "relay:50052"})
 
-	eb.ForwardInboundToPeers(&nodev1.EventForward{
-		EventId: "relay-1", Topic: "graph.node.created.v1:library:artifact", Ttl: 3,
+	eb.ReceiveForward(&nodev1.EventForward{
+		EventId: "relay-1", Topic: "graph.node.created.v1:library:artifact", OriginNodeId: "some-origin",
 	}, "some-origin")
 
 	// The live peer received the relay; the gossiped peer was skipped (no buffer).

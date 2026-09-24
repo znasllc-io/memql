@@ -988,18 +988,24 @@ QueryClient.prototype.fleetRevokeMachine = function (this: QueryClient, args: Fl
   return this.executeNamed("fleetRevokeMachine", buildFleetRevokeMachine(args), opts);
 };
 
-/** Set the OWNER's half of a machine's sharing consent: `owner` keeps it to yourself, `cluster` offers it to everybody on this cluster. The machine's own half comes from its policy.yaml and is not settable from here -- deliberately, because it is a decision about where the machine IS and only the machine can make it; both halves must say cluster before anybody else's work runs on it. It resolves the machine through YOUR OWN machines, which is the whole reason this is a builtin: the row's tier grants a cluster owner the write, and lending somebody else's hardware to the cluster is not a decision a cluster owner gets to make for them. */
+/** Set the OWNER's half of a machine's sharing consent: `owner` keeps it to yourself, `people` lends it to the users and groups you name, `cluster` offers it to everybody on this cluster and to the cluster's own work. The machine's own half comes from its policy.yaml and is not settable from here -- deliberately, because it is a decision about where the machine IS and only the machine can make it; it must say cluster before anybody else's work runs on it. It resolves the machine through YOUR OWN machines, which is the whole reason this is a builtin: the row's tier grants a cluster owner the write, and lending somebody else's hardware is not a decision a cluster owner gets to make for them. Under `people`, a user or group not already on the machine's list must be one fleetShareDirectory offers you, and one sentence refuses both an id that does not exist and one you may not pick, so this is never a way to learn who is on the cluster. */
 export interface FleetSetSharingArgs {
   /** v1:worker:registration.id of the machine to set sharing on. It must be one of the caller's own. */
   registrationId: string;
-  /** owner or cluster. Anything else is refused rather than read as owner -- a misspelling that silently meant `keep it private` would be safe, and one that silently meant anything else would not. */
+  /** owner, people or cluster. Anything else is refused rather than read as owner -- a misspelling that silently meant `keep it private` would be safe, and one that silently meant anything else would not. */
   mode: string;
+  /** Under people: the v1:identity:user ids to lend the machine to. At most 50 subjects across both lists, and at least one. Your own id is dropped rather than refused -- your own machine is yours already. Ignored under owner and cluster. */
+  userIds?: string[];
+  /** Under people: the v1:identity:group ids whose active members may use the machine. Ignored under owner and cluster. */
+  groupIds?: string[];
 }
 
 export function buildFleetSetSharing(args: FleetSetSharingArgs): string {
   const parts: string[] = [];
   parts.push("registrationId: " + renderMemQLValue(args.registrationId));
   parts.push("mode: " + renderMemQLValue(args.mode));
+  if (args.userIds !== undefined) parts.push("userIds: " + renderMemQLValue(args.userIds));
+  if (args.groupIds !== undefined) parts.push("groupIds: " + renderMemQLValue(args.groupIds));
   return "builtin fleetSetSharing(" + parts.join(", ") + ")";
 }
 
@@ -1011,6 +1017,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.fleetSetSharing = function (this: QueryClient, args: FleetSetSharingArgs = {} as FleetSetSharingArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("fleetSetSharing", buildFleetSetSharing(args), opts);
+};
+
+/** Who you can lend one of YOUR OWN machines to: the people and groups you may pick, and the ones already on this machine's list. When you may already read every person on the cluster (`read` on `principal`: owner, developer and admin by default, and whoever a grant gives it to) that is every active person, with their email, and every active group; otherwise it is the active groups you are in and the active people in them, by display name only. Also names every subject already on the machine's list, marked when it is no longer one you could pick -- somebody who left your group stays on the list until you remove them. The machine is resolved through your own machines, so another user's id answers exactly as a made-up one does, and a person with no machine cannot list anybody through it. */
+export interface FleetShareDirectoryArgs {
+  /** v1:worker:registration.id of the machine being shared. It must be one of the caller's own. */
+  registrationId: string;
+}
+
+export function buildFleetShareDirectory(args: FleetShareDirectoryArgs): string {
+  const parts: string[] = [];
+  parts.push("registrationId: " + renderMemQLValue(args.registrationId));
+  return "builtin fleetShareDirectory(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    fleetShareDirectory(args: FleetShareDirectoryArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.fleetShareDirectory = function (this: QueryClient, args: FleetShareDirectoryArgs = {} as FleetShareDirectoryArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("fleetShareDirectory", buildFleetShareDirectory(args), opts);
 };
 
 /** What one of YOUR OWN machines has done this week: how many calls ran on it, for how many people, and how those calls split across the four levels. COUNTS AND LEVELS, and nothing else -- somebody who lends their machine to the team is entitled to know it is being used and NOT entitled to read what it was used for, so the narrowing happens in the engine before anything leaves it rather than in a renderer that could later be rewritten. People are counted and never named. A read that FAILS answers `readable: false` rather than zero: telling somebody who lent their machine that nobody used it is a specific claim, and a failed read is not evidence for it. */

@@ -6,6 +6,7 @@ import type { OsAppProps } from "../../system/registry";
 import { Head, Panel } from "../../kit";
 import { AgentsSection } from "./agents/AgentsSection";
 import { AuditSection } from "./audit/AuditSection";
+import { MeshSection } from "./mesh/MeshSection";
 import { ModulesSection } from "./modules/ModulesSection";
 import { AutomationsSection } from "./automations/AutomationsSection";
 import { OriginsSection } from "./origins/OriginsSection";
@@ -21,7 +22,8 @@ import {
 // Cluster: what this cluster is made of, and how it is going.
 //
 // Readiness answers "can this thing do work at all"; Modules answers "what is
-// it made of"; Data origins answers "what does it own and what does it
+// it made of"; Mesh answers "does every node hear what the cluster
+// broadcasts"; Data origins answers "what does it own and what does it
 // mirror"; Agents answers "what does it run"; the Audit trail answers "what
 // has been decided here". None of them is a wizard and none of them blocks
 // anything -- the portal's first-run gate is deliberately not rebuilt here
@@ -104,6 +106,7 @@ export function ClusterApp({
     );
   }
   if (sectionId === "modules") return <ModulesSection />;
+  if (sectionId === "mesh") return <MeshSection intent={intent} consumeIntent={consumeIntent} />;
   if (sectionId === "automations") return <AutomationsSection />;
   if (sectionId === "origins") return <OriginsSection />;
   if (sectionId === "agents") return <AgentsSection showInactive={settings.showInactiveAgents} />;

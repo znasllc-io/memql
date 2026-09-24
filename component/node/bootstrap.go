@@ -85,7 +85,8 @@ func BootstrapFor(nodeType NodeType) NodeBootstrap {
 // If the identity already has a parent address (from MEMQL_PARENT_ADDRESS),
 // this is a no-op. Otherwise it queries v1:cluster:node for any healthy
 // node whose address is non-empty and not this node's own address, and
-// sets identity.ParentAddress to the first match.
+// that relays mesh events (not identity), and sets identity.ParentAddress to
+// the first match.
 //
 // This uses DB-based peer discovery to find mesh peers.
 // The first node in a fresh cluster finds no peers, starts as the mesh
@@ -129,6 +130,14 @@ func DiscoverPeerAddress(ctx BootstrapContext) {
 		addr := fields["address"].GetStringValue()
 		health := fields["health"].GetStringValue()
 		if addr == "" || addr == selfAddr {
+			continue
+		}
+		// NEVER A NODE THAT RELAYS NOTHING (memql#5338, D8). A parent is often
+		// a node's only stream to the mesh -- mcp's, in the cloud -- and
+		// identity takes no mesh events, so it relays none: a node parented on
+		// it would hear identity's own events and nothing else, an island by
+		// construction. Every other node type relays.
+		if !takesMeshEvents(NodeType(fields["nodeType"].GetStringValue())) {
 			continue
 		}
 		// Accept healthy or connecting nodes.

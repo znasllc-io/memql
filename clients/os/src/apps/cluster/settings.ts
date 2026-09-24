@@ -54,10 +54,16 @@ import type { OsAppSection } from "../../system/registry";
  * (`automationGraph`, `automationLoopStops`) declare
  * `@requiresCapability("read", "app:cluster/automations")` themselves, so the
  * engine refuses exactly the people this entry hides it from (memql#5384).
+ *
+ * MESH HAS NO FLOOR OF ITS OWN (epic memql#5338), for the reason Readiness and
+ * Agents have none: `v1:cluster:node` declares no row tier, so every signed-in
+ * person can already read these rows, and a section floor would be editorial
+ * rather than a mirror of a gate. It inherits the app's own `app:cluster`.
  */
 export const CLUSTER_SECTIONS: OsAppSection[] = [
   { id: "readiness", name: "Readiness" },
   { id: "modules", name: "Modules", requires: "app:cluster/modules" },
+  { id: "mesh", name: "Mesh" },
   { id: "origins", name: "Data origins", requires: "app:cluster/origins" },
   { id: "automations", name: "Automations", requires: "app:cluster/automations" },
   { id: "agents", name: "Agents" },

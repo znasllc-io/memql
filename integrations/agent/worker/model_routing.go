@@ -89,10 +89,12 @@ func (r *Router) PlanModel(
 // with no acting user: system automations, cluster maintenance.
 //
 // Eligibility here is one extra thing on top of everything PlanModel checks:
-// the owner set `sharedInference=true` on the machine's operatorLabels. A
-// machine that never opted in is reported as ruled out with that reason, so an
-// operator wondering why their fleet is idle for system work reads the answer
-// rather than inferring it.
+// the machine is lent to EVERYONE, by its owner and by its cockpit. A machine
+// lent to named people is not (epic memql#5344, design G3): a list of names is
+// consent for those people, and the cluster's own work is nobody on it. Every
+// machine ruled out is reported with its reason, so an operator wondering why
+// their fleet is idle for system work reads the answer rather than inferring
+// it.
 func (r *Router) PlanSharedModel(
 	ctx context.Context,
 	modelId string,
@@ -129,8 +131,10 @@ func (r *Router) PlanSharedModel(
 			// NAMED, not "not shared". The owner's repair is an act on the
 			// Fleet page and the cockpit's is a line in a file on that
 			// machine's own disk; one sentence for both sends half the
-			// operators to the wrong machine.
-			rejected[c.RegistrationId] = c.SharingRefusal()
+			// operators to the wrong machine. A machine lent to named people
+			// gets its own sentence, because turning sharing on is not the
+			// repair for one whose owner already did -- for somebody else.
+			rejected[c.RegistrationId] = c.SystemRefusal()
 		case !c.RevokedAt.IsZero():
 			rejected[c.RegistrationId] = "revoked"
 		case !workerservice.StreamHeld(c.ConnectedNodeId, c.RevokedAt):

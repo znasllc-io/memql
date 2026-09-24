@@ -291,7 +291,7 @@ func twoReplicaMesh(t *testing.T) (a, b *replica, deliver func(*testing.T)) {
 			select {
 			case msg := <-a.out:
 				if fwd := msg.GetEventForward(); fwd != nil {
-					b.bridge.HandleInbound(fwd)
+					b.bridge.ReceiveForward(fwd, "bff-1")
 				}
 			case <-stop:
 				return

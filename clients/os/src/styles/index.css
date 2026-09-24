@@ -1746,6 +1746,9 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 .os-record-status { display: inline-flex; align-items: center; gap: 6px; font-size: var(--os-text-sm); white-space: nowrap; color: var(--os-muted); }
 .os-record-status::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .os-record-status[data-tone="accent"] { color: var(--os-accent); }
+/* `warn` was declared on RecordTone and styled nowhere, so a state that asks
+ * for a person read exactly like one that does not. Cluster > Mesh is its
+ * first use (epic memql#5338): a node that is not hearing the cluster. */
 .os-record-status[data-tone="warn"] { color: var(--os-warn); }
 .os-record-chevron { color: var(--os-muted); }
 /* A list that is a SECTION of a page. It keeps `.os-report-part`'s spacing and
@@ -2202,10 +2205,8 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   color: var(--os-muted);
 }
 
-/* =========================================================================
- * THE DRAWN SELECT -- the open half of the kit's `Select`
- * =========================================================================
- *
+/* ================================================================== * THE DRAWN SELECT -- the open half of the kit's `Select`
+ * ================================================================== *
  * Everything above this banner is the CLOSED control and is unchanged: the
  * trigger wears the same `.os-select` field rule the native `<select>` wore,
  * so it and an `Input` on the same line are still one object (rule 5). What is
@@ -2719,10 +2720,8 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   font-size: var(--os-text-sm);
 }
 
-/* ===========================================================================
- * MODELS: what the fleet can serve, ranked (epic memql#5096)
- * ===========================================================================
- * The screen's one job is to show WHICH MODEL WILL BE USED, so the ORDER is
+/* ==================================================================== * MODELS: what the fleet can serve, ranked (epic memql#5096)
+ * ==================================================================== * The screen's one job is to show WHICH MODEL WILL BE USED, so the ORDER is
  * the design and the styling stays out of its way. There is exactly one
  * standing mark -- the "next for ..." tag on the rows the router would pick --
  * and everything else is the app's ordinary quiet: hairline, raised ground,
@@ -2915,10 +2914,8 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   font-size: var(--os-text-xs);
 }
 
-/* ===========================================================================
- * A PROGRESS TRACK, PROMOTED (epic memql#5103)
- * ===========================================================================
- * This look is the Files uploader's: a 2px hairline track with an accent fill
+/* ==================================================================== * A PROGRESS TRACK, PROMOTED (epic memql#5103)
+ * ==================================================================== * This look is the Files uploader's: a 2px hairline track with an accent fill
  * and no percentage theatre, sitting under an honest byte counter in
  * monospace tabular figures. The model pull is its third site, which is where
  * DESIGN.md's rule says a piece is promoted rather than respelled.
@@ -3202,14 +3199,22 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   flex-direction: column;
   gap: 6px;
 }
+/* THE ONE LINE THE PANEL IS FOR: who can use this machine. Set a step above
+ * the body and below the section's own title, so it reads as the answer to
+ * the heading rather than as one more caption. In full ink only while it is
+ * in force -- a share the cockpit has not agreed to is the owner's decision
+ * still waiting on the machine, and the consent line beneath says so. */
 .os-fleet-sharing-state {
-  margin: 0;
-  font-size: var(--os-text-base);
-  color: var(--os-muted);
-}
-.os-fleet-sharing-state[data-serving] {
-  color: var(--os-ink);
+  margin: 0 0 2px;
+  max-width: 80ch;
+  font-size: var(--os-text-md);
   font-weight: 600;
+  line-height: 1.35;
+  color: var(--os-muted);
+  overflow-wrap: anywhere;
+}
+.os-fleet-sharing-state[data-in-force] {
+  color: var(--os-ink);
 }
 .os-fleet-consents {
   list-style: none;
@@ -3217,6 +3222,7 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   padding: 0;
   display: grid;
   gap: 4px;
+  max-width: 80ch;
 }
 .os-fleet-consent {
   display: grid;
@@ -3232,7 +3238,10 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 .os-fleet-consent-mark {
   width: 7px;
   height: 7px;
-  border: 1px solid var(--os-line);
+  /* The HOLLOW mark's edge is the muted ink, not the hairline: at seven
+   * pixels a hairline border all but vanishes in dark mode, and a missing
+   * consent must not read as no mark at all. */
+  border: 1px solid var(--os-muted);
   border-radius: 1px;
 }
 .os-fleet-consent[data-given] {
@@ -3247,6 +3256,231 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   flex-direction: column;
   gap: 4px;
   align-items: flex-start;
+  margin-top: 6px;
+}
+.os-fleet-sharing > .os-caption,
+.os-fleet-sharing > .os-notice,
+.fleet-share-receipt {
+  max-width: 80ch;
+}
+
+/* ---- the share dialog (epic memql#5344) ----
+ *
+ * A native modal in the top layer, sized for a FORM: a readable measure wide,
+ * never wider than the viewport less a 16px gutter each side, and never
+ * taller than it. The body scrolls and the floor does not, so Save and Cancel
+ * are on screen however long the list of people grows. The plate is the
+ * window's own ground, so the choice cards and chips look exactly as they do
+ * on a page; the floor is the raised plane beneath them. */
+.fleet-share-dialog {
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100dvh - 48px);
+  padding: 0;
+  overflow: hidden;
+  color: var(--os-ink);
+  background: var(--os-plate);
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  box-shadow: var(--os-shadow-float);
+  font-family: var(--os-font);
+  font-size: var(--os-text-base);
+}
+.fleet-share-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+.fleet-share-dialog::backdrop {
+  background: color-mix(in srgb, var(--os-ground) 72%, transparent);
+}
+.fleet-share-head {
+  flex: none;
+  padding: 18px 20px 0;
+}
+.fleet-share-head h3 {
+  margin: 0;
+  font-size: var(--os-text-lg);
+  font-weight: 600;
+}
+/* Which machine, under the act's own name -- a dialog that did not say would
+ * invite the change to the wrong one of two. */
+.fleet-share-head p {
+  margin: 2px 0 0;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+  overflow-wrap: anywhere;
+}
+.fleet-share-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 20px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.fleet-share-dialog > .os-actbar {
+  padding-inline: 20px;
+}
+
+/* The picker: the chosen, then the search, then who is left to choose. One
+ * left edge with the choices above it, and the subhead repeating the chosen
+ * mode's own words, so it reads as that choice's detail and nothing else. */
+.fleet-share-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fleet-share-picker .os-subhead {
+  margin: 0;
+}
+
+/* A CHIP HERE HOLDS A NAME, which is prose. The kit's chip is the data voice
+ * -- a label like `tier=gold` is typed somewhere else and the code face says
+ * so -- and "Ana Ruiz" in a monospace face reads as an identifier. The same
+ * call ChoiceStack's `voice="prose"` makes; promoted to the kit on a second
+ * use. The remove control sits INSIDE the pill, so the pair reads as one
+ * token and not as a chip beside a stray cross. */
+.fleet-share-chip {
+  display: inline-flex;
+  max-width: 100%;
+}
+.fleet-share-chip .os-chip {
+  max-width: 100%;
+  flex-wrap: wrap;
+  row-gap: 0;
+  padding: 2px 3px 2px 10px;
+  font-family: var(--os-font);
+  font-size: var(--os-text-sm);
+  line-height: 1.5;
+  color: var(--os-ink);
+}
+.fleet-share-chip .os-chip > svg {
+  flex: none;
+  color: var(--os-muted);
+}
+.fleet-share-chip-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* Still on the list, no longer one to pick: the pill goes quiet and dashed,
+ * and says why in words -- a style alone would be a riddle. */
+.fleet-share-chip[data-stale] .os-chip {
+  border-style: dashed;
+  color: var(--os-muted);
+}
+.fleet-share-chip-note {
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+.fleet-share-chip .os-chip-remove {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 50%;
+}
+.fleet-share-chip .os-chip-remove:hover:not(:disabled) {
+  background: var(--os-hover);
+}
+
+/* `flex: none` because `.os-input` is `flex: 1 1 12ch`, which is right in a
+ * control ROW and wrong in this COLUMN: along a column's main axis that basis
+ * is the input's HEIGHT, and the search drew about a hundred pixels tall. One
+ * control line (DESIGN.md rule 5) is what the rendered pass is for. */
+.fleet-share-search {
+  flex: none;
+  width: 100%;
+  min-width: 0;
+}
+/* THE LIST STAYS OPEN under the search, at about five rows: a person who does
+ * not know whom they may pick reads the answer instead of guessing names, and
+ * a long directory scrolls inside its own box rather than pushing the floor
+ * off the dialog. */
+/* `position: relative` MAKES THE LIST THE OPTIONS' offsetParent. Without it
+ * an option's offsetTop is measured from the dialog, counting everything
+ * above the list, and arrowing scrolled the active option OUT of view -- the
+ * kit Select escapes this only because its list is `position: fixed`. */
+.fleet-share-results {
+  position: relative;
+  max-height: 212px;
+  overflow-y: auto;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-xs);
+  background: var(--os-plate);
+}
+.fleet-share-option {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) 14px;
+  align-items: center;
+  column-gap: 10px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.fleet-share-option + .fleet-share-option {
+  border-top: 1px solid var(--os-line);
+}
+.fleet-share-option:hover {
+  background: var(--os-hover);
+}
+/* The active option is the one Enter adds: the selection language (accent
+ * wash, accent edge), and never the focus ring, which stays on the search the
+ * keys are typed into. */
+.fleet-share-option[data-active] {
+  background: var(--os-accent-soft);
+  box-shadow: inset 2px 0 var(--os-accent);
+}
+.fleet-share-option-icon {
+  grid-column: 1;
+  grid-row: 1;
+  color: var(--os-muted);
+}
+.fleet-share-option-name {
+  grid-column: 2;
+  min-width: 0;
+  color: var(--os-ink);
+  overflow-wrap: anywhere;
+}
+.fleet-share-option-detail {
+  grid-column: 2;
+  min-width: 0;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+  overflow-wrap: anywhere;
+}
+.fleet-share-option-add {
+  grid-column: 3;
+  grid-row: 1;
+  color: var(--os-muted);
+}
+.fleet-share-option:hover .fleet-share-option-add,
+.fleet-share-option[data-active] .fleet-share-option-add {
+  color: var(--os-accent);
+}
+/* The refusal takes focus (so it is scrolled to and read); its outline is the
+ * notice's own edge, not a second ring around it. */
+/* Between the scrolling body and the floor: it never scrolls away, and the
+ * body gives up the height it needs. flow-root keeps the notice's margins
+ * inside, so the pinned band is exactly as tall as what it says. */
+.fleet-share-refusal {
+  flex: none;
+  display: flow-root;
+  padding: 12px 20px 14px;
+  /* The body scrolls behind this band; the hairline says where it stops. */
+  border-top: 1px solid var(--os-line);
+}
+.fleet-share-refusal:focus {
+  outline: none;
+}
+.fleet-share-refusal:focus-visible > .os-notice {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 2px;
+}
+.fleet-share-terms {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 80ch;
 }
 
 /* At a narrow window the recommendation's four columns become two lines rather
@@ -4459,10 +4693,8 @@ a.os-button {
   margin-top: 6px;
 }
 
-/* ===========================================================================
- * REGION: THE INSPECTOR RE-PRESENTED -- COPYABLE VALUES, GROUPS, ACTION GRID
- * ===========================================================================
- *
+/* ==================================================================== * REGION: THE INSPECTOR RE-PRESENTED -- COPYABLE VALUES, GROUPS, ACTION GRID
+ * ==================================================================== *
  * Everything this round added lives between these banners, and one of it is
  * not app-local:
  *
@@ -5359,8 +5591,7 @@ a.os-button {
   color: var(--os-muted);
 }
 
-/* ===========================================================================
- * The MemQL address stop -- an account's reserved name and the three hosts
+/* ==================================================================== * The MemQL address stop -- an account's reserved name and the three hosts
  * this cluster serves beneath it (epic memql#5168).
  *
  * THE SHAPE IS THE ARGUMENT, and it deliberately differs from .os-record
@@ -5580,10 +5811,8 @@ a.os-button {
   }
 }
 
-/* ==========================================================================
- * Packages (epic memql#4794)
- * ==========================================================================
- *
+/* =================================================================== * Packages (epic memql#4794)
+ * =================================================================== *
  * The one new visual idea here is THE STAGE RAIL, and everything else is the
  * app's existing voice. That restraint is deliberate: a section that arrived
  * with its own palette would read as a different product bolted on, and the
@@ -7082,10 +7311,8 @@ a.os-button {
   margin: 6px 0;
   font-size: var(--os-text-md);
 }
-/* ===========================================================================
- * The Bin (memql#4784)
- * ===========================================================================
- *
+/* ==================================================================== * The Bin (memql#4784)
+ * ==================================================================== *
  * THE BIN IS NOT DRAWN AS A DANGEROUS THING, because it does not do one.
  * Amber is `warn` and red is `error` everywhere in this shell, and an archive
  * is neither -- the bytes stay, the history stays, and the item comes back on
@@ -7756,10 +7983,8 @@ a.os-button {
   }
 }
 
-/* ===========================================================================
- * LOGS (epic memql#4895 / #4897)
- * ===========================================================================
- *
+/* ==================================================================== * LOGS (epic memql#4895 / #4897)
+ * ==================================================================== *
  * The per-app Logs section and the Logs app share one row renderer and one
  * windowed list, so this is one section rather than one per surface. Level
  * colours are --os-warn and --os-error only, never the accent: amber is warn
@@ -8318,10 +8543,8 @@ a.os-button {
  * standing still, so there is nothing here to disable. Stated so the next
  * person does not add a grow-in animation to sixty columns. */
 
-/* ===========================================================================
- * Deployables, recomposed (epic memql#4937)
- * ===========================================================================
- * Three structures, each encoding a rule rather than a preference:
+/* ==================================================================== * Deployables, recomposed (epic memql#4937)
+ * ==================================================================== * Three structures, each encoding a rule rather than a preference:
  *
  *   .os-deploy-pane    the view owns its scroll, so the bar can be pinned
  *   .os-actbar         DESIGN.md rule 12 -- acts follow the state, in one place
@@ -8445,10 +8668,8 @@ a.os-button {
   line-height: 1.45;
 }
 
-/* ===========================================================================
- * THE WIZARD (kit/Wizard) -- one way to add a thing
- * ===========================================================================
- * The first-run gate's composition inside a window: the orb, the title, one
+/* ==================================================================== * THE WIZARD (kit/Wizard) -- one way to add a thing
+ * ==================================================================== * The first-run gate's composition inside a window: the orb, the title, one
  * sentence, then the rail as the page's spine, over the action bar as its
  * floor. There are exactly TWO left edges -- the marks and the text -- and
  * everything a step holds sits on the second. No card, no border: the rail's
@@ -9142,10 +9363,8 @@ a.os-button {
   }
 }
 
-/* ===========================================================================
- * Work -- the human surface of the work spine (sub-project A)
- * ===========================================================================
- *
+/* ==================================================================== * Work -- the human surface of the work spine (sub-project A)
+ * ==================================================================== *
  * ONE DEVICE IS THIS APP'S OWN AND EVERYTHING ELSE IS THE KIT: the spine down
  * the left of a run timeline, whose WEIGHT is the product's whole claim.
  *
@@ -10655,10 +10874,8 @@ a.os-button {
   font-size: var(--os-text-base);
 }
 
-/* =====================================================================
- * THE PROVENANCE CHAIN -- this app's one device
- * =====================================================================
- * The chain is drawn as a chain because the DIRECTION is a rule: sources
+/* ============================================================== * THE PROVENANCE CHAIN -- this app's one device
+ * ============================================================== * The chain is drawn as a chain because the DIRECTION is a rule: sources
  * feed the template, which produces the file. The Files app's backup wire
  * draws a direction for exactly that reason.
  *
@@ -11297,10 +11514,8 @@ a.os-button {
 
 /* ---- cluster: what this cluster is made of and how it is going (memql#5011) ---- */
 
-/* ===========================================================================
- * The Cluster app (epic memql#5009, memql#5011)
- * ===========================================================================
- *
+/* ==================================================================== * The Cluster app (epic memql#5009, memql#5011)
+ * ==================================================================== *
  * Every rule here uses the existing --os-* tokens and introduces no colour of
  * its own. It is all `.os-cluster-*`: this app's own vocabulary, in the sense
  * the kit's header states -- what is genuinely about ITS subject, after every
@@ -11779,10 +11994,313 @@ a.os-button {
   overflow-wrap: anywhere;
 }
 
+/* ---------------------------------------------------------------------------
+ * Mesh: what every node hears (epic memql#5338)
+ *
+ * The list is the kit's record list inside a live list, grouped by node type;
+ * the node's page draws its links as a patch bay -- the node on a spine, the
+ * streams it opened branching to one side and the streams opened to it to the
+ * other. No colour of its own: a state that asks for a person takes warn ink
+ * on its word and its dot, and everything else is the page's ordinary ink.
+ * ------------------------------------------------------------------------- */
+
+/* Record rows draw their own hairline; the live list's row gap would put a
+ * sliver of page between every pair of them. */
+.os-cluster-mesh .os-livelist-rows {
+  gap: 0;
+}
+
+.os-cluster-mesh-context {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--os-muted);
+  font-size: var(--os-text-sm);
+}
+
+.os-cluster-mesh-context p {
+  margin: 0;
+}
+
+/* The answer before the list: the distribution, then the one sentence. */
+.os-cluster-mesh-band {
+  display: grid;
+  gap: 10px;
+}
+
+.os-cluster-mesh-band .os-overview-breakdown {
+  padding-top: 0;
+}
+
+.os-cluster-mesh-verdict {
+  margin: 0;
+  max-width: 80ch;
+}
+
+/* A node the sentence names, and the way to its page. It keeps the
+ * sentence's own ink -- an accent link inside an attention line would read as
+ * a second, cheerier message -- and says it opens with an underline. An id
+ * stays whole on one line: broken at its hyphen it reads as two names. */
+.os-cluster-mesh-name {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font-size: 0.95em;
+  white-space: nowrap;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-underline-offset: 3px;
+}
+.os-cluster-mesh-name:hover {
+  text-decoration-color: currentColor;
+}
+.os-cluster-mesh-name:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* A node type's heading inside the list: the type, and how many are running.
+ * The heading is the type's NAME, so it keeps ink; the count is quiet. */
+.os-cluster-mesh-group {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 18px 4px 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--os-line);
+  color: var(--os-ink);
+  font-size: var(--os-text-sm);
+  font-weight: 600;
+}
+
+.os-livelist-row:first-child .os-cluster-mesh-group {
+  margin-top: 4px;
+}
+
+.os-cluster-mesh-group-count {
+  color: var(--os-muted);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The node page's verdict: the state word with its dot, then the sentence at
+ * a sentence's measure. */
+.os-cluster-mesh-verdict-line {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+.os-cluster-mesh-verdict-line p {
+  margin: 0;
+  flex: 1 1 32ch;
+  max-width: 80ch;
+}
+
+.os-cluster-mesh-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.os-cluster-mesh-links-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.os-cluster-mesh-links-head .os-subhead {
+  margin: 0;
+}
+
+/* The patch bay. Its own container, so the stacked form follows the width
+ * the panel actually has -- a half-width window, a split desk -- not the
+ * screen's. The grid is a child because a container query cannot restyle its
+ * own container. */
+.os-cluster-mesh-bay {
+  container: os-mesh-bay / inline-size;
+  min-width: 0;
+  padding-top: 8px;
+}
+
+.os-cluster-mesh-bay-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.os-cluster-mesh-side {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.os-cluster-mesh-side-title {
+  margin: 0;
+  min-height: 18px;
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+}
+
+.os-cluster-mesh-side-empty {
+  margin: 0;
+  color: var(--os-muted);
+  font-size: var(--os-text-sm);
+}
+
+.os-cluster-mesh-peers {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Each slot carries its branch to the spine: from the inner edge of the peer
+ * to the centre line of the middle column (half of its 64px). */
+.os-cluster-mesh-peer-slot {
+  position: relative;
+  min-width: 0;
+}
+
+.os-cluster-mesh-peer-slot::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 32px;
+  border-top: 1px solid var(--os-line);
+}
+
+.os-cluster-mesh-peer-slot[data-side="opened"]::after {
+  right: -32px;
+}
+
+.os-cluster-mesh-peer-slot[data-side="accepted"]::after {
+  left: -32px;
+}
+
+/* The node itself: a mark at the head of the spine, which runs down the
+ * middle column as far as the longer side reaches. */
+.os-cluster-mesh-hub {
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+
+.os-cluster-mesh-hub::before {
+  content: "";
+  position: absolute;
+  top: 18px;
+  bottom: calc(var(--os-control-h) / 2);
+  left: 50%;
+  border-left: 1px solid var(--os-line);
+}
+
+.os-cluster-mesh-hub-mark {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--os-line);
+  border-radius: 50%;
+  background: var(--os-raised);
+  color: var(--os-ink);
+}
+
+/* One peer: its state's dot, its id, its type. A control line tall, flat,
+ * with the shell's hairline -- a patch point, not a card. */
+.os-cluster-mesh-peer {
+  display: grid;
+  grid-template-columns: 6px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: var(--os-control-h);
+  padding: 0 10px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-xs);
+  background: var(--os-plate);
+  color: var(--os-ink);
+  font: inherit;
+  font-size: var(--os-text-sm);
+  text-align: left;
+}
+
+button.os-cluster-mesh-peer {
+  cursor: pointer;
+}
+
+button.os-cluster-mesh-peer:hover {
+  background: var(--os-hover);
+}
+
+button.os-cluster-mesh-peer:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 2px;
+}
+
+/* A peer this page does not list (stopped, or never wrote a row): still a
+ * link the node reported, drawn as text rather than as a control. */
+.os-cluster-mesh-peer[data-unlisted] {
+  grid-template-columns: minmax(0, 1fr) auto;
+  border-style: dashed;
+  background: none;
+  color: var(--os-muted);
+}
+
+.os-cluster-mesh-peer-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--os-muted);
+}
+
+.os-cluster-mesh-peer-dot[data-tone="accent"] {
+  background: var(--os-accent);
+}
+
+.os-cluster-mesh-peer-dot[data-tone="warn"] {
+  background: var(--os-warn);
+}
+
+.os-cluster-mesh-peer-id {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.os-cluster-mesh-peer-type {
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+  white-space: nowrap;
+}
+
+/* Narrow: the two sides stack, and the spine and its branches go with the
+ * side-by-side arrangement they only make sense in. The side titles carry the
+ * direction alone. */
+@container os-mesh-bay (max-width: 560px) {
+  .os-cluster-mesh-bay-grid {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 18px;
+  }
+
+  .os-cluster-mesh-hub,
+  .os-cluster-mesh-peer-slot::after {
+    display: none;
+  }
+}
+
 /* ---- the store a storefront fronts, on its deployable (memql#5541) ---- */
 
-/* ===========================================================================
- * The Store pane (epic memql#5530, issue memql#5541).
+/* ==================================================================== * The Store pane (epic memql#5530, issue memql#5541).
  *
  * It was the Stores app's own block (epic memql#5009 / memql#5012). That app
  * is gone and its function is re-homed on the storefront deployable, so this
@@ -12037,8 +12555,7 @@ a.os-button {
 
 /* ---- labels in Files, and Fleet -> Apps (memql#5013) ---- */
 
-/* ===========================================================================
- * The two gaps in existing apps (epic memql#5009 / memql#5013).
+/* ==================================================================== * The two gaps in existing apps (epic memql#5009 / memql#5013).
  *
  *   1. Files: the artifact label editor in the inspector, and the way out of
  *      a filter that emptied the list.
@@ -12189,11 +12706,9 @@ a.os-button {
 
 /* ---- accounts: credentials on behalf of a billing account (memql#5013) ---- */
 
-/* ===========================================================================
- * The Accounts app's credentials panel (epic memql#5009, memql#5013),
+/* ==================================================================== * The Accounts app's credentials panel (epic memql#5009, memql#5013),
  * pending fold-in to index.css
- * ===========================================================================
- *
+ * ==================================================================== *
  * Every rule here uses the existing --os-* tokens and introduces no colour of
  * its own. It is all `.os-account-*`: this app's own vocabulary, in the sense
  * the kit's header states -- what is genuinely about ITS subject, after every
@@ -12339,8 +12854,7 @@ a.os-button {
   max-width: 62ch;
 }
 
-/* ==========================================================================
-   Configuration readiness: the setup surface, the Set up group, the marks
+/* ===================================================================   Configuration readiness: the setup surface, the Set up group, the marks
    (design record 2026-09-06-configuration-readiness, sections 5.3 to 5.5)
    ========================================================================== */
 
@@ -12467,11 +12981,9 @@ a.os-button {
   right: 3px;
 }
 
-/* ==========================================================================
-   THE CORE GATE -- the shell held before the desk
+/* ===================================================================   THE CORE GATE -- the shell held before the desk
    (design record 2026-09-07-core-gate-and-honest-install, D1, D2 and D6)
-   ==========================================================================
-
+   ===================================================================
    NOT AN ERROR, AND NOT DRESSED AS ONE. Nobody has told this cluster what to
    talk to yet, which is a thing to do rather than a thing that broke. So the
    surface uses the Ask orb's theme-colored brand mark above a muted sentence
@@ -12588,10 +13100,8 @@ a.os-button {
   }
 }
 
-/* ===========================================================================
- * THE FIRST-RUN WIZARD (epic memql#5106)
- * ===========================================================================
- * A rail of the core modules, inside a desk widget. Everything it draws
+/* ==================================================================== * THE FIRST-RUN WIZARD (epic memql#5106)
+ * ==================================================================== * A rail of the core modules, inside a desk widget. Everything it draws
  * comes from somewhere else -- the rail from `.os-rail-*`, the buttons and
  * captions from the kit -- so what is here is the widget's own measure, its
  * one sentence, and how it leaves.
@@ -12775,10 +13285,8 @@ a.os-button {
   overflow-wrap: anywhere;
 }
 
-/* ===========================================================================
- * SETTINGS -> AI: DOORS, LEVELS, RULES, DECISIONS (epic memql#5153)
- * ===========================================================================
- * IF THIS BLOCK CONFLICTS ON A MERGE, REBUILD THE FILE AS THE OTHER SIDE PLUS
+/* ==================================================================== * SETTINGS -> AI: DOORS, LEVELS, RULES, DECISIONS (epic memql#5153)
+ * ==================================================================== * IF THIS BLOCK CONFLICTS ON A MERGE, REBUILD THE FILE AS THE OTHER SIDE PLUS
  * THIS BLOCK WHOLE. Two appended CSS blocks INTERLEAVE on a three-way merge
  * rather than taking both, and the result still compiles while silently
  * dropping rules -- and only `make os-build` parses this file at all, so
@@ -13361,10 +13869,8 @@ a.os-button {
   max-width: none;
 }
 
-/* ===========================================================================
- * Fleet -> Models: the curated catalog (epic memql#5137, task memql#5140)
- * ===========================================================================
- * A DELIBERATELY DIFFERENT TREATMENT FROM THE RANKED LIST ABOVE IT, and the
+/* ==================================================================== * Fleet -> Models: the curated catalog (epic memql#5137, task memql#5140)
+ * ==================================================================== * A DELIBERATELY DIFFERENT TREATMENT FROM THE RANKED LIST ABOVE IT, and the
  * difference carries the meaning. `.os-fleet-model` is a card because each of
  * its entries is a thing with machines under it; these entries are mostly one
  * line, and the interesting ones carry a sentence. Giving them cards too would
@@ -13465,10 +13971,8 @@ a.os-button {
  * `data-blocked` stays on the element: it is the state, readable by a test and
  * by whatever styles this later, and its being unstyled today is the point. */
 
-/* ===========================================================================
- * THE USERS APP: the ladder, the grid, and the two pickers (epic memql#5167)
- * ===========================================================================
- *
+/* ==================================================================== * THE USERS APP: the ladder, the grid, and the two pickers (epic memql#5167)
+ * ==================================================================== *
  * The one surface here worth a shape of its own is the PERMISSIONS GRID: a
  * role's authority is a matrix, and it is the only thing this app says that a
  * list of rows cannot. Everything else -- the ladder, the members, the
@@ -13912,10 +14416,8 @@ a.os-button {
   margin: 6px 0 0;
 }
 
-/* ==========================================================================
- * The guided cockpit install (design record 2026-09-08-cockpit-install-wizard)
- * ==========================================================================
- *
+/* =================================================================== * The guided cockpit install (design record 2026-09-08-cockpit-install-wizard)
+ * =================================================================== *
  * NO NEW VISUAL IDEA, deliberately. The page is the compose reading on the
  * Fleet: the pane and the scroll are Deployables' (`.os-deploy-pane`), the
  * stops are the kit rail's, the bar is the kit's. What is new is only what

@@ -151,8 +151,8 @@ export function MachineDetail({
           for either reads them together. */}
       {view === "all" || view === "models" ? <ModelsGroup machine={machine} standalone={view === "models"} /> : null}
 
-      {/* SHARING AFTER MODELS, because the question it asks -- will you lend
-          this machine to everybody -- only means something once a reader knows
+      {/* SHARING AFTER MODELS, because the question it asks -- whom will you
+          lend this machine to -- only means something once a reader knows
           what the machine can serve. Offering it above an empty Models group
           would be asking somebody to volunteer a machine that runs nothing. */}
       {view === "all" || view === "sharing" ? <SharingGroup machine={machine} writes={writes} ledger={inference.ledger} standalone={view === "sharing"} /> : null}
@@ -161,7 +161,12 @@ export function MachineDetail({
 
       {view === "all" || view === "details" ? <RemoveControl machine={machine} busy={busy} revoke={writes.revoke} /> : null}
 
-      {writes.actionError ? (
+      {/* NOT ON THE SHARING VIEW, whose one write is made from its dialog and
+          refused there, beside the draft it refused -- the dialog keeps the
+          engine's words until the next save. Repeated down here it would say
+          it twice while the dialog is open, and go on saying it after the
+          person had cancelled the change it was about. */}
+      {writes.actionError && view !== "sharing" ? (
         <Notice
           tone="error"
           sentence="The cluster refused that change."

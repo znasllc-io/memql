@@ -53,25 +53,23 @@ func (f *fakeStream) SetTrailer(md metadata.MD)       {}
 func (f *fakeStream) Context() context.Context        { return f.ctx }
 
 // TestHandleEventForward_PublishesLocally is the regression guard for the
-// shipped "a peer receives the graph event but the handler
-// Cognition never runs" bug. Peer events arrived at nodeService.handle
-// EventForward, were logged and ACKed, and never republished on the local
-// bus -- so no local subscriber (integration handler, automation trigger,
-// gRPC subscriber) ever saw them. Fix: nodeService now invokes the
-// EventInbound hook; this test pins the contract so the wiring can't
-// silently disappear again.
+// shipped "a peer receives the graph event but the handler never runs" bug.
+// Peer events arrived at nodeService.handleEventForward, were logged, and were
+// never republished on the local bus -- so no local subscriber (integration
+// handler, automation trigger, gRPC subscriber) ever saw them. The handler now
+// hands every arrival to the PeerManager's event sink, which NewEventBridge
+// installs; this test pins that the wiring cannot silently disappear again.
 func TestHandleEventForward_PublishesLocally(t *testing.T) {
 	bus := events.NewBus(events.WithLogger(testLogger()))
 	defer bus.Close()
 
 	pm := NewPeerManager(testIdentity(), testLogger())
-	eventBridge := NewEventBridge(testIdentity(), bus, pm, testLogger())
+	_ = NewEventBridge(testIdentity(), bus, pm, testLogger())
 
 	svc := &nodeService{
-		logger:       testLogger(),
-		identity:     testIdentity(),
-		peerManager:  pm,
-		eventInbound: eventBridge,
+		logger:      testLogger(),
+		identity:    testIdentity(),
+		peerManager: pm,
 	}
 
 	// Subscribe to the local bus. The handler should be invoked once the
@@ -89,8 +87,7 @@ func TestHandleEventForward_PublishesLocally(t *testing.T) {
 		Ts:           timestamppb.New(time.Now()),
 		Payload:      payload,
 		OriginNodeId: "bff-local",
-		Ttl:          3,
-	}, newFakeStream())
+	})
 
 	select {
 	case e := <-received:
@@ -105,66 +102,16 @@ func TestHandleEventForward_PublishesLocally(t *testing.T) {
 	}
 }
 
-// TestHandleEventForward_NoInboundDoesNotPanic guards the nil-inbound
-// path. NodeServer doesn't force SetEventInbound, so a misconfigured
-// binary must still handle incoming events (they will just be dropped).
-func TestHandleEventForward_NoInboundDoesNotPanic(t *testing.T) {
+// TestHandleEventForward_NoBridgeDoesNotPanic guards a node whose peer table
+// has no event bridge installed: an arriving event is dropped, not a crash.
+func TestHandleEventForward_NoBridgeDoesNotPanic(t *testing.T) {
 	svc := &nodeService{
-		logger:       testLogger(),
-		identity:     testIdentity(),
-		eventInbound: nil, // not wired
+		logger:      testLogger(),
+		identity:    testIdentity(),
+		peerManager: NewPeerManager(testIdentity(), testLogger()),
 	}
-
-	stream := newFakeStream()
 	svc.handleEventForward("peer", &nodev1.EventForward{
 		EventId: "evt-x",
 		Topic:   "graph.node.created.v1:library:artifact",
-		Ttl:     3,
-	}, stream)
-
-	// ACK should still fire so the sender doesn't retry forever.
-	stream.mu.Lock()
-	defer stream.mu.Unlock()
-	if len(stream.sent) != 1 {
-		t.Fatalf("expected 1 ACK sent, got %d", len(stream.sent))
-	}
-	if stream.sent[0].GetEventAck() == nil {
-		t.Error("expected EventAck payload on sent message")
-	}
-}
-
-// TestHandleEventForward_SendsAck pins the ACK contract for the happy
-// path (sender relies on it for backpressure + retry decisions).
-func TestHandleEventForward_SendsAck(t *testing.T) {
-	bus := events.NewBus(events.WithLogger(testLogger()))
-	defer bus.Close()
-	pm := NewPeerManager(testIdentity(), testLogger())
-	eb := NewEventBridge(testIdentity(), bus, pm, testLogger())
-
-	svc := &nodeService{
-		logger:       testLogger(),
-		identity:     testIdentity(),
-		peerManager:  pm,
-		eventInbound: eb,
-	}
-
-	stream := newFakeStream()
-	svc.handleEventForward("peer", &nodev1.EventForward{
-		EventId: "evt-ack",
-		Topic:   "graph.node.created.v1:library:artifact",
-		Ttl:     3,
-	}, stream)
-
-	stream.mu.Lock()
-	defer stream.mu.Unlock()
-	if len(stream.sent) != 1 {
-		t.Fatalf("expected 1 ACK, got %d", len(stream.sent))
-	}
-	ack := stream.sent[0].GetEventAck()
-	if ack == nil {
-		t.Fatal("expected EventAck payload")
-	}
-	if ack.EventId != "evt-ack" {
-		t.Errorf("expected EventAck EventId=evt-ack, got %q", ack.EventId)
-	}
+	})
 }

@@ -129,7 +129,7 @@ export function FleetApp({
           : id === "workbenches" ? <WorkbenchesSection />
           : id === "apps" ? <AppsSection sessionTarget={sessionTarget} navigation={active ? navigation : undefined} />
           : <FleetWorkspace onOpenSession={id => { setSessionTarget(held => ({ id, revision: (held?.revision ?? 0) + 1 })); navigate("apps", { fromContent: true }); }} selection={selection} select={select} navigate={navigate}
-              showRevoked={settings.showRevoked} flow={addMachine}
+              showRevoked={settings.showRevoked} flow={addMachine} active={active}
               intent={active ? intent : undefined} consumeIntent={consumeIntent} />}
       </div>;
     })}

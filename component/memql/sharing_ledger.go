@@ -4,6 +4,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // THE SHARING LEDGER (epic memql#5146, design D6).
@@ -68,6 +70,14 @@ type LedgerEntry struct {
 	Calls int
 	// People is the number of DISTINCT callers, counted and not named.
 	People int
+	// The split a person lending their machine actually asks about (epic
+	// memql#5344, design G4): how much of the week was for SOMEBODY ELSE.
+	// OtherCalls and OtherPeople count calls and distinct callers who are not
+	// the owner; SystemCalls counts calls with no acting person -- the
+	// cluster's own work. The owner's own calls are Calls minus both.
+	OtherCalls  int
+	OtherPeople int
+	SystemCalls int
 	// ByLevel is calls per level, over the closed four. A map of counts is the
 	// most detail this ledger will ever carry.
 	ByLevel map[string]int
@@ -104,32 +114,49 @@ func LedgerCallFromRow(row map[string]any) LedgerCall {
 
 // FoldLedger counts one machine's week.
 //
-// PEOPLE ARE COUNTED, NOT NAMED. The distinct-caller set exists inside this
-// function and does not leave it: the owner of a shared machine learns that
+// PEOPLE ARE COUNTED, NOT NAMED. The distinct-caller sets exist inside this
+// function and do not leave it: the owner of a shared machine learns that
 // three people used it, and learns nothing about which three or what for.
 // Naming them would turn a usage figure into a surveillance surface, on
 // hardware somebody volunteered.
 //
 // The OWNER's own calls are counted in `Calls` and in `People` alongside
-// everybody else's, because the figure answers "how busy has this machine
-// been" rather than "how much have I lent it out". A ledger that excluded the
-// owner would show zero on a machine they use constantly.
-func FoldLedger(machineId, week string, calls []LedgerCall) LedgerEntry {
+// everybody else's, because the total answers "how busy has this machine
+// been". The SPLIT answers the other question (design G4) -- how much of it
+// was lent -- and it needs the owner to know which calls were theirs. A call
+// with no acting person is the cluster's own work, which is neither.
+func FoldLedger(machineId, ownerUserId, week string, calls []LedgerCall) LedgerEntry {
 	entry := LedgerEntry{MachineId: machineId, Week: week, ByLevel: map[string]int{}}
 	people := map[string]struct{}{}
+	others := map[string]struct{}{}
+	owner := BareShortId(strings.TrimSpace(ownerUserId))
 	for _, c := range calls {
 		if c.MachineId != machineId || (week != "" && c.Week != week) {
 			continue
 		}
 		entry.Calls++
-		if id := strings.TrimSpace(c.ActingUserId); id != "" {
-			people[id] = struct{}{}
+		id := strings.TrimSpace(c.ActingUserId)
+		switch {
+		case id == "" || auth.IsSystemActorId(id):
+			// THE CLUSTER'S OWN WORK: no acting person, or a SYNTHETIC actor --
+			// automations run as `system:automation:<name>` and maintenance as
+			// `system:maintenance:<name>`, so their calls carry an id that is
+			// nobody's. Counting it as another person would tell the owner a
+			// stranger used their machine.
+			entry.SystemCalls++
+		case owner != "" && BareShortId(id) == owner:
+			people[BareShortId(id)] = struct{}{}
+		default:
+			people[BareShortId(id)] = struct{}{}
+			others[BareShortId(id)] = struct{}{}
+			entry.OtherCalls++
 		}
 		if level := strings.TrimSpace(c.Level); level != "" {
 			entry.ByLevel[level]++
 		}
 	}
 	entry.People = len(people)
+	entry.OtherPeople = len(others)
 	return entry
 }
 
@@ -148,34 +175,83 @@ func (e LedgerEntry) Row() map[string]any {
 		byLevel = append(byLevel, map[string]any{"level": level, "calls": e.ByLevel[level]})
 	}
 	return map[string]any{
-		"machineId": e.MachineId,
-		"week":      e.Week,
-		"calls":     e.Calls,
-		"people":    e.People,
-		"byLevel":   byLevel,
+		"machineId":   e.MachineId,
+		"week":        e.Week,
+		"calls":       e.Calls,
+		"people":      e.People,
+		"otherCalls":  e.OtherCalls,
+		"otherPeople": e.OtherPeople,
+		"systemCalls": e.SystemCalls,
+		"byLevel":     byLevel,
 	}
 }
 
 // Sentence is the ledger as the machine page says it.
 //
 // One line, in words, because the figure is for a person deciding whether to
-// keep sharing rather than for a dashboard. It says the plural correctly and it
-// says NOTHING about who or what -- and the "you" case is separated, because
-// "served 41 calls for 1 person" when that person is you reads as a stranger.
+// keep lending rather than for a dashboard. It says the plurals correctly and
+// it says NOTHING about who or what. It leads with the total and then says how
+// much of it was for SOMEBODY ELSE (design G4), because "served 41 calls" on a
+// machine its owner uses all day does not tell them whether lending it did
+// anything. The owner's own share is implied, never restated.
 func (e LedgerEntry) Sentence() string {
 	if e.Calls == 0 {
 		return "No calls have run on this machine this week."
 	}
-	calls := "calls"
-	if e.Calls == 1 {
-		calls = "call"
+	head := "Served " + ledgerCount(e.Calls, "call", "calls") + " this week"
+	own := e.Calls - e.OtherCalls - e.SystemCalls
+
+	var others, system string
+	if e.OtherCalls > 0 {
+		others = "for " + ledgerCount(e.OtherPeople, "other person", "other people")
 	}
-	switch e.People {
-	case 0, 1:
-		return "Served " + strconv.Itoa(e.Calls) + " " + calls + " this week."
+	if e.SystemCalls > 0 {
+		system = "for the cluster's own work"
+	}
+
+	switch {
+	case others == "" && system == "":
+		// Every call was the owner's.
+		if e.Calls == 1 {
+			return head + ", for you."
+		}
+		return head + ", all of them yours."
+	case own > 0:
+		// Some of the week was theirs: say how much of it was not.
+		parts := []string{}
+		if others != "" {
+			parts = append(parts, strconv.Itoa(e.OtherCalls)+" of them "+others)
+		}
+		if system != "" {
+			if len(parts) == 0 {
+				parts = append(parts, strconv.Itoa(e.SystemCalls)+" of them "+system)
+			} else {
+				parts = append(parts, strconv.Itoa(e.SystemCalls)+" "+system)
+			}
+		}
+		return head + ", " + strings.Join(parts, " and ") + "."
+	case others != "" && system != "":
+		// None of it was theirs, and it went two ways.
+		return head + ": " + strconv.Itoa(e.OtherCalls) + " " + others + " and " + strconv.Itoa(e.SystemCalls) + " " + system + "."
 	default:
-		return "Served " + strconv.Itoa(e.Calls) + " " + calls + " for " + strconv.Itoa(e.People) + " people this week."
+		// None of it was theirs, and it went one way.
+		only := others
+		if only == "" {
+			only = system
+		}
+		if e.Calls == 1 {
+			return head + ", " + only + "."
+		}
+		return head + ", all " + only + "."
 	}
+}
+
+// ledgerCount says a count with the right noun.
+func ledgerCount(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return strconv.Itoa(n) + " " + many
 }
 
 func rowLedgerString(row map[string]any, key string) string {

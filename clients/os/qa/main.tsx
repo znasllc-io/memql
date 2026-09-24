@@ -41,15 +41,20 @@ import {
 } from "../test/deployables/harness";
 import { siteFromRow } from "../src/apps/deployables/rows";
 import { MachineDetail } from "../src/apps/fleet/machines/MachineDetail";
+import { ShareDialog } from "../src/apps/fleet/machines/ShareDialog";
+import type { MachineWrites } from "../src/apps/fleet/machines/useMachineWrites";
 import { machineFromRow } from "../src/apps/fleet/rows";
 import { MachinesProvider } from "../src/live/machines";
 import {
   fakeConnection as fleetConnection,
   machineRow as fleetMachineRow,
+  shareDirectoryRow,
   withSession as fleetSession,
 } from "../test/fleet/harness";
 import { OriginsSection } from "../src/apps/cluster/origins/OriginsSection";
+import { MeshSection } from "../src/apps/cluster/mesh/MeshSection";
 import {
+  clusterNodeRow,
   dataOriginRow as clusterOriginRow,
   fakeConnection as clusterConnection,
   syncStateRow as clusterSyncStateRow,
@@ -592,6 +597,62 @@ const VIEWS: Record<
     wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
     render: () => <MachinePane over={{ credentialExpiresAt: "", rttAt: "", rttMs: 0 }} />,
   },
+  // Sharing a machine (epic memql#5344). The panel in each reading of who can
+  // use it, then the dialog. `sharing-people` is the one to read first: names,
+  // both consents given, and the week's split ledger line.
+  "sharing-owner": {
+    connect: () => fleetConnection({}),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharingPane over={{ sharing: { mode: "owner" } }} />,
+  },
+  "sharing-people": {
+    connect: () => fleetConnection({ fleetShareDirectory: [SHARE_DIRECTORY], fleetSharingLedger: [SHARE_LEDGER] }),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharingPane over={{ sharing: SHARED_WITH_PEOPLE, capabilityDescriptor: { inferenceServe: "cluster" } }} />,
+  },
+  // Lent by its owner, not yet agreed to by the machine: the one-line state is
+  // muted and the cockpit's line says what to change and where.
+  "sharing-waiting": {
+    connect: () => fleetConnection({ fleetShareDirectory: [SHARE_DIRECTORY] }),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharingPane over={{ sharing: SHARED_WITH_PEOPLE, capabilityDescriptor: { inferenceServe: "owner" } }} />,
+  },
+  "sharing-everyone": {
+    connect: () => fleetConnection({ fleetSharingLedger: [SHARE_LEDGER] }),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharingPane over={{ sharing: { mode: "cluster", sharedAt: "2026-09-20T10:00:00Z" }, capabilityDescriptor: { inferenceServe: "cluster" } }} />,
+  },
+  // Somebody else's machine, as a cluster owner sees it in the fleet: counts,
+  // never names, and no act.
+  "sharing-viewer": {
+    connect: () => fleetConnection({}),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharingPane over={{ ownerUserId: "v1:identity:user:olivia", sharing: SHARED_WITH_PEOPLE, capabilityDescriptor: { inferenceServe: "cluster" } }} />,
+  },
+  // The dialog, opened on a people share with a stale subject on it.
+  "share-dialog": {
+    connect: () => fleetConnection({ fleetShareDirectory: [SHARE_DIRECTORY] }),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharePane over={{ sharing: SHARED_WITH_PEOPLE, capabilityDescriptor: { inferenceServe: "cluster" } }} />,
+  },
+  // An admin's directory: everyone, with the emails they already see in Users.
+  "share-dialog-admin": {
+    connect: () => fleetConnection({ fleetShareDirectory: [{ ...SHARE_DIRECTORY, everyone: true, people: SHARE_PEOPLE_ADMIN, current: { people: [], groups: [] } }] }),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharePane over={{ sharing: { mode: "owner" } }} startPeople />,
+  },
+  // A person in no group, below admin: nobody to pick, and the way out named.
+  "share-dialog-empty": {
+    connect: () => fleetConnection({ fleetShareDirectory: [shareDirectoryRow({ id: "v1:worker:registration:studio", machineId: "v1:worker:registration:studio" })] }),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharePane over={{ sharing: { mode: "owner" } }} startPeople />,
+  },
+  // The engine refused the save: the draft stays, and the engine's words.
+  "share-dialog-refused": {
+    connect: () => fleetConnection({ fleetShareDirectory: [SHARE_DIRECTORY] }),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharePane over={{ sharing: SHARED_WITH_PEOPLE, capabilityDescriptor: { inferenceServe: "cluster" } }} refuse />,
+  },
   overview: { seed: BOUND, render: () => <Overview site={siteFromRow(SHOP)} /> },
   // The preview section, in the five states worth judging as pixels.
   preview: { seed: PREVIEW_MEASURED, render: () => <PreviewPage site={siteFromRow(SHOP_PREVIEWING)} /> },
@@ -641,6 +702,22 @@ const VIEWS: Record<
     wrap: (el, role) => clusterSession(el, { role }),
     render: () => <OriginsPane />,
   },
+  // --- Cluster > Mesh (epic memql#5338) ------------------------------------
+  //
+  // `mesh-healthy` is the control, and it is read FIRST: a cluster whose every
+  // node hears, where the band has to be quiet enough that nobody learns to
+  // scroll past it. `mesh-island` is the production state that opened the
+  // epic -- an edge and a product bff that hear nothing -- beside a node on an
+  // older release that has not reported and one gone quiet, so the one line
+  // worth finding has to be findable among the others. `mesh-node-*` open a
+  // node's page through the section's own intent, so no click is needed.
+  "mesh-healthy": { connect: () => clusterConnection({ clusterNodes: meshNodes("healthy") }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane /> },
+  "mesh-island": { connect: () => clusterConnection({ clusterNodes: meshNodes("island") }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane /> },
+  "mesh-empty": { connect: () => clusterConnection({ clusterNodes: [] }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane /> },
+  "mesh-node-bff": { connect: () => clusterConnection({ clusterNodes: meshNodes("island") }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane nodeId="bff-5658459dd4-92gnh" /> },
+  "mesh-node-edge": { connect: () => clusterConnection({ clusterNodes: meshNodes("island") }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane nodeId="edge-6cc7f56755-rlnsv" /> },
+  "mesh-node-identity": { connect: () => clusterConnection({ clusterNodes: meshNodes("healthy") }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane nodeId="identity-7f9c6d5b8-2xk4q" /> },
+  "mesh-node-unreported": { connect: () => clusterConnection({ clusterNodes: meshNodes("island") }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane nodeId="mcp-64b9d8f7c-8wq2z" /> },
   hidden: {
     seed: BOUND,
     role: "reader",
@@ -755,7 +832,7 @@ function MachinePane({ over }: { over: Record<string, unknown> }) {
     rename: async () => true,
     setOperatorLabels: async () => true,
     revoke: async () => null,
-    setSharing: async () => true,
+    setSharing: async () => null,
   };
   return (
     <div className="os-window-content">
@@ -767,6 +844,250 @@ function MachinePane({ over }: { over: Record<string, unknown> }) {
 function AccountsPane() {
   const [store] = useState(() => new LocalAccountsSettingsStore({ getItem: () => null, setItem: () => {} }));
   return <WindowBody fallback="Accounts"><AccountsApp sectionId="accounts" navigate={() => {}} askContext={() => {}} store={store} /></WindowBody>;
+}
+
+// --- Sharing a machine (epic memql#5344) -----------------------------------
+//
+// The panel and the dialog, over the suite's own fixture connection. The
+// dialog views render ShareDialog directly -- the harness does not click --
+// and `?modal=0` draws it in the page rather than the top layer, for a capture
+// tool that does not paint the top layer.
+
+const SHARED_WITH_PEOPLE = {
+  mode: "people",
+  userIds: ["ana", "dee"],
+  groupIds: ["design"],
+  sharedAt: "2026-09-21T16:30:00Z",
+  sharedBy: "v1:identity:user:me",
+};
+
+const SHARE_PEOPLE = [
+  { id: "ana", name: "Ana Ruiz", detail: "" },
+  { id: "bo", name: "Bo Chen", detail: "" },
+  { id: "cy", name: "Cy Okafor", detail: "" },
+  { id: "eli", name: "Eli Marsh", detail: "" },
+];
+
+const SHARE_PEOPLE_ADMIN = [
+  { id: "ana", name: "Ana Ruiz", detail: "ana.ruiz@example.com" },
+  { id: "bo", name: "Bo Chen", detail: "bo@example.com" },
+  { id: "cy", name: "Cy Okafor", detail: "cy.okafor@example.com" },
+  { id: "dee", name: "Dee Park", detail: "dee.park@example.com" },
+  { id: "eli", name: "Eli Marsh", detail: "eli@example.com" },
+  { id: "fay", name: "Fay Lindqvist", detail: "fay.lindqvist@example.com" },
+];
+
+const SHARE_DIRECTORY = shareDirectoryRow({
+  id: "v1:worker:registration:studio",
+  machineId: "v1:worker:registration:studio",
+  everyone: false,
+  people: SHARE_PEOPLE,
+  groups: [
+    { id: "design", name: "Design", members: 4 },
+    { id: "ops", name: "Operations", members: 7 },
+  ],
+  current: {
+    people: [
+      { id: "ana", name: "Ana Ruiz", known: true, inDirectory: true },
+      { id: "dee", name: "Dee Park", known: true, inDirectory: false },
+    ],
+    groups: [{ id: "design", name: "Design", known: true, inDirectory: true }],
+  },
+});
+
+const SHARE_LEDGER = {
+  id: "v1:worker:registration:studio",
+  machineId: "v1:worker:registration:studio",
+  week: "2026-W39",
+  calls: 41,
+  people: 3,
+  otherCalls: 12,
+  otherPeople: 2,
+  systemCalls: 0,
+  readable: true,
+  sentence: "Served 41 calls this week, 12 of them for 2 other people.",
+};
+
+function qaWrites(refuse = false): MachineWrites {
+  return {
+    busyId: "",
+    actionError: refuse
+      ? "some of the people or groups chosen are not ones you can lend this machine to; choose from the people and groups offered"
+      : "",
+    rename: async () => true,
+    setOperatorLabels: async () => true,
+    revoke: async () => null,
+    setSharing: async (_id, choice) =>
+      refuse ? null : { mode: choice.mode, people: choice.userIds.length, groups: choice.groupIds.length, sentence: "Lent to 2 people and 1 group." },
+  };
+}
+
+function SharingPane({ over }: { over: Record<string, unknown> }) {
+  const machine = fleetMachine({ ownerUserId: "v1:identity:user:me", ...over });
+  return (
+    <div className="os-window-content">
+      <MachineDetail machine={machine} writes={qaWrites()} now={FLEET_NOW} view="sharing" />
+    </div>
+  );
+}
+
+function SharePane({ over, startPeople = false, refuse = false }: { over: Record<string, unknown>; startPeople?: boolean; refuse?: boolean }) {
+  const machine = fleetMachine({ ownerUserId: "v1:identity:user:me", ...over });
+  const modal = new URLSearchParams(window.location.search).get("modal") !== "0";
+  if (!modal) {
+    // In-page for a capture tool that does not paint the top layer: the SAME
+    // component and stylesheet, opened with show() instead of showModal().
+    HTMLDialogElement.prototype.showModal = HTMLDialogElement.prototype.show;
+  }
+  useEffect(() => {
+    // One-shot captures cannot click: choose "Specific people and groups"
+    // for the views that open on it, and press Save for the refused one.
+    const timer = window.setTimeout(() => {
+      if (startPeople) {
+        const people = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="radio"]')).find((b) =>
+          (b.textContent ?? "").startsWith("Specific people"),
+        );
+        people?.click();
+      }
+      // `?arrow=N` arrows N times through the results from the search, so a
+      // capture shows whether the active option is kept in view (the list is
+      // its options' offsetParent only while it is positioned).
+      const arrows = Number(new URLSearchParams(window.location.search).get("arrow") ?? "0");
+      if (arrows > 0) {
+        window.setTimeout(() => {
+          const box = document.querySelector<HTMLInputElement>(".fleet-share-search");
+          box?.focus();
+          for (let i = 0; i < arrows; i += 1) {
+            window.setTimeout(() => {
+              box?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+            }, 150 * (i + 1));
+          }
+        }, 500);
+      }
+      if (refuse) {
+        const remove = document.querySelector<HTMLButtonElement>(".fleet-share-chip-remove");
+        remove?.click();
+        window.setTimeout(() => {
+          const save = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((b) => b.textContent === "Save");
+          save?.click();
+        }, 300);
+      }
+    }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [startPeople, refuse]);
+  return (
+    <div className="os-window-content">
+      <MachineDetail machine={machine} writes={qaWrites(refuse)} now={FLEET_NOW} view="sharing" />
+      <ShareDialog machine={machine} writes={qaWrites(refuse)} onDiscard={() => undefined} onSaved={() => undefined} />
+    </div>
+  );
+}
+
+// --- Cluster > Mesh (epic memql#5338) --------------------------------------
+//
+// The cloud's topology as memql#5316 measured it, pod names and all: two
+// engine bffs dialing every worker and identity, two product bffs doing the
+// same, agents and planners and workbenches parented on a bff, edges and mcps
+// on theirs, and identity dialed by every bff.
+const MESH_PODS = {
+  bffA: "bff-5658459dd4-92gnh",
+  bffB: "bff-5658459dd4-tprvz",
+  prodA: "bff-shop-545bf75455-88bfj",
+  prodB: "bff-shop-545bf75455-tprvz",
+  agentA: "agent-7c9d8f6b54-abcde",
+  agentB: "agent-7c9d8f6b54-fghij",
+  plannerA: "planner-58f7b9c6d4-k2m4p",
+  plannerB: "planner-58f7b9c6d4-q8r3t",
+  benchA: "workbench-6d5f4c7b9-x7v2n",
+  benchB: "workbench-6d5f4c7b9-z3w8y",
+  edgeA: "edge-6cc7f56755-79j5s",
+  edgeB: "edge-6cc7f56755-rlnsv",
+  mcpA: "mcp-64b9d8f7c-8wq2z",
+  mcpB: "mcp-64b9d8f7c-m5n6b",
+  idA: "identity-7f9c6d5b8-2xk4q",
+  idB: "identity-7f9c6d5b8-9pl3r",
+};
+
+function meshNodes(shape: "healthy" | "island") {
+  const P = MESH_PODS;
+  const workers = [P.agentA, P.agentB, P.plannerA, P.plannerB, P.benchA, P.benchB];
+  const typeOf = (id: string) => id.replace(/-[a-z0-9]+-[a-z0-9]+$/, "").replace(/^bff-shop$/, "bff");
+  const link = (node: string, via: string) => ({ node, type: typeOf(node), via });
+  const now = Date.now();
+  const at = (secondsAgo: number) => new Date(now - secondsAgo * 1000).toISOString();
+  const bff = (id: string, children: string[]) => ({
+    id,
+    nodeType: "bff",
+    address: `10.244.0.${Object.values(MESH_PODS).indexOf(id) + 11}:50058`,
+    mesh: {
+      links: [
+        ...workers.map((w) => link(w, [P.agentA, P.agentB, P.plannerA, P.benchA].includes(w) && id === P.bffA ? "both" : "dialed")),
+        link(P.idA, "dialed"),
+        link(P.idB, "dialed"),
+        ...children.map((c) => link(c, "accepted")),
+      ],
+      heard: 48210 + id.length * 37,
+      duplicates: 9120,
+      originated: 1840,
+      relayed: 46100,
+    },
+  });
+  const worker = (id: string, extra: object[] = []) => ({
+    id,
+    nodeType: typeOf(id),
+    address: `10.244.1.${Object.values(MESH_PODS).indexOf(id) + 11}:${{ agent: 50055, planner: 50056, workbench: 50060 }[typeOf(id)] ?? 50052}`,
+    mesh: {
+      links: [link(P.bffA, id === P.agentA || id === P.agentB || id === P.plannerA || id === P.benchA ? "both" : "accepted"), link(P.bffB, "accepted"), link(P.prodA, "accepted"), link(P.prodB, "accepted"), ...extra],
+      heard: 51002 - id.length * 11,
+      duplicates: 22040,
+      originated: 610,
+      relayed: 300,
+    },
+  });
+  const rows = [
+    bff(P.bffA, [P.edgeA, P.mcpA]),
+    bff(P.bffB, [P.edgeB, P.mcpB]),
+    bff(P.prodA, []),
+    bff(P.prodB, []),
+    worker(P.agentA, [link(P.benchA, "dialed")]),
+    worker(P.agentB, [link(P.benchA, "dialed")]),
+    worker(P.plannerA, [link(P.agentA, "dialed"), link(P.agentB, "dialed")]),
+    worker(P.plannerB, [link(P.agentA, "dialed"), link(P.agentB, "dialed")]),
+    worker(P.benchA),
+    worker(P.benchB),
+    { id: P.edgeA, nodeType: "edge", address: "10.244.2.7:50062", mesh: { links: [link(P.bffA, "dialed")], heard: 47880, duplicates: 0, originated: 22, relayed: 0 } },
+    { id: P.edgeB, nodeType: "edge", address: "10.244.2.9:50062", mesh: { links: [link(P.bffB, "dialed")], heard: 47880, duplicates: 0, originated: 22, relayed: 0 } },
+    { id: P.mcpA, nodeType: "mcp", address: "10.244.3.4:50060", mesh: { links: [link(P.bffA, "dialed")], heard: 47700, duplicates: 0, originated: 5, relayed: 0 } },
+    { id: P.mcpB, nodeType: "mcp", address: "10.244.3.5:50060", mesh: { links: [link(P.bffB, "dialed")], heard: 47700, duplicates: 0, originated: 5, relayed: 0 } },
+    { id: P.idA, nodeType: "identity", address: "10.244.4.2:50061", mesh: { receives: false, links: [P.bffA, P.bffB, P.prodA, P.prodB].map((b) => link(b, "accepted")), heard: 0, duplicates: 0, originated: 412, relayed: 0, lastHeardAt: undefined } },
+    { id: P.idB, nodeType: "identity", address: "10.244.4.3:50061", mesh: { receives: false, links: [P.bffA, P.bffB, P.prodA, P.prodB].map((b) => link(b, "accepted")), heard: 0, duplicates: 0, originated: 398, relayed: 0, lastHeardAt: undefined } },
+  ] as Array<{ id: string; nodeType: string; address: string; mesh: Record<string, unknown> | null }>;
+
+  if (shape === "island") {
+    // The epic's production state: an edge and a product bff that are linked
+    // and have heard nothing in hours; an mcp still on the release before the
+    // report existed; a planner gone quiet for eleven minutes.
+    for (const r of rows) {
+      if (r.id === P.edgeB) r.mesh = { ...r.mesh, heard: 0, relayed: 0, lastHeardAt: undefined, since: at(3 * 3600) };
+      if (r.id === P.prodB) r.mesh = { ...r.mesh, heard: 0, relayed: 0, duplicates: 0, lastHeardAt: undefined, since: at(3 * 3600) };
+      if (r.id === P.mcpA) r.mesh = null;
+      if (r.id === P.plannerB) r.mesh = { ...r.mesh, lastHeardAt: at(11 * 60), dropped: 14 };
+    }
+  }
+  return rows.map((r) => {
+    const row = clusterNodeRow({ id: r.id, nodeType: r.nodeType, address: r.address, mesh: r.mesh });
+    const mesh = row.mesh as Record<string, unknown> | undefined;
+    if (mesh && mesh.lastHeardAt === undefined) delete mesh.lastHeardAt;
+    return row;
+  });
+}
+
+function MeshPane({ nodeId }: { nodeId?: string }) {
+  return (
+    <div className="os-window-content">
+      <MeshSection intent={nodeId ? { id: "qa-open", payload: { nodeId } } : undefined} consumeIntent={() => {}} />
+    </div>
+  );
 }
 
 function OriginsPane() {
