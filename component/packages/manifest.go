@@ -86,6 +86,9 @@ type ManifestDeployable struct {
 	Kind    string           `yaml:"kind"    json:"kind"`
 	Build   *ManifestBuild   `yaml:"build,omitempty"   json:"build,omitempty"`
 	Binding *ManifestBinding `yaml:"binding,omitempty" json:"binding,omitempty"`
+	// Assets are immutable files imported after build, at paths relative to
+	// the published site. Analysis reads these declarations, never the bytes.
+	Assets []ManifestAsset `yaml:"assets,omitempty" json:"assets,omitempty"`
 	// ResolutionTail is what the edge answers for a path matching no file in
 	// this deployable's built output: "fallback" (index.html) or "not_found"
 	// (404). OMITTED means the kind decides, which is every manifest written
@@ -208,6 +211,9 @@ func ReadManifest(tree fs.FS) (*Manifest, error) {
 				ManifestName, d.Name)
 		}
 		seen[d.Name] = struct{}{}
+		if err := validateAssets(d.Assets); err != nil {
+			return nil, refuse(CodeManifestInvalid, "deployable %q: %v", d.Name, err)
+		}
 		// REFUSED HERE RATHER THAN IGNORED AT SERVE TIME. The edge reads an
 		// unrecognised tail as absent, deliberately -- a typo must not take a
 		// live site's every client-side route dark. But that is the rule for a

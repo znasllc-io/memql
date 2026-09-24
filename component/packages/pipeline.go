@@ -120,6 +120,7 @@ type StoreResolver func(ctx context.Context, domain string) (string, error)
 type Deps struct {
 	Store   *store
 	Fetcher Fetcher
+	Assets  AssetImporter
 	Builder Builder
 	// FleetBuilder builds a deployable whose target needs the person's own
 	// machine (task memql#4904). Nil on every node that holds no worker
@@ -630,6 +631,9 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 	out.Report = rep
 	if rep != nil {
 		rep.UpstreamBaseline = snapshot.UpstreamBaseline
+	}
+	if aerr == nil {
+		aerr = validateAssetRepositories(rep, rowString(pkg, "repoUrl"))
 	}
 
 	snapshotArtifactId := d.storeSnapshot(ctx, req, out.DeploymentId, snapshot)

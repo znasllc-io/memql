@@ -266,6 +266,7 @@ export interface ReportDeployable {
   command?: string;
   output: string;
   prebuilt: boolean;
+  assets?: Array<{ path: string; source: string; sha256: string; size: number }>;
   binding?: { store?: string };
   problem?: ReportProblem;
 }

@@ -122,6 +122,9 @@ func (d *Deps) build(ctx context.Context, req DeployRequest, pkg map[string]any,
 				return nil, err
 			}
 			bundles[dep.Name] = bundle
+			if err := d.importAssets(ctx, req, pkg, dep, bundle); err != nil {
+				return nil, err
+			}
 			out.recordBuiltOn(BuiltOn{Surface: SurfacePrebuilt})
 			continue
 		}
@@ -151,6 +154,9 @@ func (d *Deps) build(ctx context.Context, req DeployRequest, pkg map[string]any,
 			return nil, refuseScoped(buildRefusalCode(err), dep.Name, "%s", buildFailureMessage(dep, res, err))
 		}
 		bundles[dep.Name] = res.Bundle
+		if err := d.importAssets(ctx, req, pkg, dep, res.Bundle); err != nil {
+			return nil, err
+		}
 	}
 	return bundles, nil
 }
