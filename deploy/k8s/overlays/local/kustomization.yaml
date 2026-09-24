@@ -69,7 +69,8 @@ resources:
   - os-front-door.yaml
   - vscode-front-door.yaml
   - edge-front-door.yaml
-  - ../../base
+  - engine
+  - package-storage.yaml
   # Local-only infrastructure (absent in base and the cloud overlay)
   - azurite.yaml
 
@@ -77,6 +78,18 @@ resources:
 # Remove cloud-only resources
 # ---------------------------------------------------------------------------
 patches:
+  - target: { kind: Deployment, name: "^(bff|agent|planner|workbench)$" }
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: MEMQL_PACKAGES_ROLL_TARGETS
+          value: agent,planner,workbench,bff
+  - target: { kind: Role, name: memql-packages-roll }
+    patch: |
+      - op: replace
+        path: /rules/0/resourceNames
+        value: [agent, planner, workbench, bff]
   - path: patches/site-health-local.yaml
     target:
       kind: Deployment
@@ -331,6 +344,10 @@ patches:
 # NO @sha256 digest here -- that is intentional and exempted from CI gate.
 # ---------------------------------------------------------------------------
 images:
+  # dsl-fetch is a subcommand of the already imported local BFF image.
+  - name: memql-engine
+    newName: memql-bff
+    newTag: local
   # The database operand image, built by `make db-image` and imported into k3d.
   # The tag MUST start with the PostgreSQL major -- CNPG parses it off
   # spec.imageName and refuses what it cannot read (deploy/db-image/README.md).
@@ -360,7 +377,10 @@ images:
     newTag: local
 
 components:
-  - ../../components/engine-bff
+  # engine/ labels the DSL consumers before these selector-based components.
+  - ../../components/dsl-mount
+  - ../../components/dsl-packages
+  - ../../components/packages-roll-rbac
   # THE DOMAIN, both halves (memql#4281). Must follow engine-bff, which
   # adds the `bff` Deployment this patches; components apply in order.
   - ../../components/domain-derive
