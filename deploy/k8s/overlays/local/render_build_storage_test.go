@@ -8,9 +8,10 @@ import (
 )
 
 // Small inline builds hide a missing workbench container setting. The sender
-// and receiver must both reach Azurite when source or output crosses that cap.
+// and receiver must both reach Azurite when source or output crosses that cap,
+// and Edge must read the published bundles from the same container.
 func TestBuildAndAttachmentNodesShareLocalBlobStorage(t *testing.T) {
-	want := map[string]bool{"bff": false, "agent": false, "workbench": false}
+	want := map[string]bool{"bff": false, "agent": false, "workbench": false, "edge": false}
 	for _, doc := range strings.Split(render(t), "\n---\n") {
 		var resource struct {
 			Kind     string `yaml:"kind"`

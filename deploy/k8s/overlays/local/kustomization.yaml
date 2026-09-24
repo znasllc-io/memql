@@ -286,11 +286,12 @@ patches:
   # Blob storage against the in-cluster Azurite (memql#4843): the container
   # name and the autocreate flag -- the two values the secret cannot carry.
   # bff serves Library and sends builds; agent shares attachments; workbench
-  # reads/writes the same blob container for builds above the inline cap.
+  # reads/writes the same blob container for builds above the inline cap;
+  # edge reads the published bundles from it to serve the resulting sites.
   - path: patches/blob-storage-local.yaml
     target:
       kind: Deployment
-      name: "^(bff|agent|workbench)$"
+      name: "^(bff|agent|workbench|edge)$"
 
   # -------------------------------------------------------------------------
   # DATABASE -- local VALUES over the cnpg-db component (memql#3846 / #3851)
