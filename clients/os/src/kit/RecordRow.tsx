@@ -10,8 +10,8 @@ import { ChevronRight } from "lucide-react";
 // machines are the second use, and the promotion rule is second use.
 //
 // WHAT IT IS, AGAINST `PickerRow`. The compact picker is a bordered pill: a border, a radius and
-// a plate behind every line. This is FLAT -- no border but the hairline under
-// it, no background until it is hovered -- with the name standing over a
+// a plate behind every line. This is FLAT -- dividers only BETWEEN records,
+// no background until hovered -- with the name standing over a
 // quieter second line. A long list of pills reads as a wall of boxes; a long
 // list of these reads as a list. All app record lists use this component, including non-opening
 // worklists whose actions sit beside the record.

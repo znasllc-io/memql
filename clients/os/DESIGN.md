@@ -27,6 +27,10 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    "Connect GitHub account". A settings page is titled **Settings**; subjects
    such as **GitHub accounts** are sections beneath that title, with their Add
    control on the section heading. Settings lists use the available width.
+   Shared record lists draw dividers **only between items**: no top line on
+   the first, no bottom line on the last, and no lines for a single item.
+   Keep this in the shared list styles, including rows with separate actions
+   and live-list wrappers; never add per-app row borders.
 
 2. **Filters are questions, not furniture.** Search and facet controls live
    behind one affordance on the Head line (`kit` `Refine`): collapsed by
