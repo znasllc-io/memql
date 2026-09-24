@@ -278,6 +278,25 @@ const REFUSED = run({
 
 const WITH_PACKAGE: FakeSeed = { sites: [STORE, ADMIN], packages: [ACME], deployments: { "pkg-acme": [SUCCEEDED] } };
 
+describe("incomplete deployment outcomes", () => {
+  it.each([false, true])("keeps a live app manageable with a skipped historical outcome (source removed: %s)", async (sourceRemoved) => {
+    // A scoped redeploy records a sibling skip with no bundleRef or version.
+    // The wire deliberately omits those fields; source removal retains history.
+    const skipped = run({ id: "dep-skipped", scopedTo: ["admin"], deployables: [
+      { name: "storefront", refusal: { code: "deployable_skipped", message: "Not selected" } },
+    ] });
+    const { connection, page } = await mountAndOpen({
+      ...WITH_PACKAGE,
+      packages: [{ ...ACME, sourceRemoved }],
+      deployments: { "pkg-acme": [skipped, SUCCEEDED] },
+    }, "store.memql.example.com");
+    expect(within(page).getByRole("button", { name: /Take offline/ })).toBeTruthy();
+    expect(within(page).getByRole("region", { name: "Preview" })).toBeTruthy();
+    expect(connection.callsNamed("packageDeactivateDeployable")).toHaveLength(0);
+    expect(connection.callsNamed("deleteSite")).toHaveLength(0);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // The Head's one action, for every row of the design's table
 // ---------------------------------------------------------------------------
