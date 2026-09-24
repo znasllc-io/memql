@@ -963,6 +963,15 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		}
 		return nil, meta, fmt.Errorf("update(): no existing row for concept %q id %q (use insert() to create)", conceptName, id)
 	}
+	// CREATE RANK FLOORS (create_rank_floor.go). Here rather than beside the
+	// write guard above because a create may carry no id at all, and that
+	// path never enters the prior-row block; at this point priorExisted is
+	// final for both.
+	if !meta.priorExisted {
+		if err := e.refuseCreateBelowRankFloor(ctx, conceptMeta.Name); err != nil {
+			return nil, meta, err
+		}
+	}
 
 	if err := e.validateOrganizationOwnership(ctx, conceptName, payload, meta.priorExisted); err != nil {
 		return nil, meta, err

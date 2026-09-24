@@ -969,6 +969,12 @@ mutation site deleteSite {
 /// v1:platform:packState:<packDomain>, so one row per pack with the version history as the flip
 /// audit trail. RESTART-REQUIRED lifecycle: the write changes what each node reads at its next
 /// boot, never what a running node has loaded.
+///
+/// The FIRST flip of a pack is a create, and a create needs a cluster owner or server code,
+/// enforced in executeWrite (component/memql/create_rank_floor.go): the tier does not judge a
+/// create, and a floor on this mutation would never see a raw insert() of the same concept (Connect
+/// Shopify design, D13). Internal origin passes. Once a pack has a row, the tier's write guard
+/// refuses every non-owner flip of it, so a direct call below owner is refused either way.
 mutation packState setPackEnabled {
   args {
     id          string!

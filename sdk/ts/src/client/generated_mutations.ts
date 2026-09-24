@@ -3389,7 +3389,8 @@ QueryClient.prototype.createSpawnEvent = function (this: QueryClient, args: Crea
   return this.executeNamed("createSpawnEvent", buildCreateSpawnEvent(args), opts);
 };
 
-/** Register a Shopify store. Cluster-owner tier, and the three token arguments are REFERENCES to globalSecret rows rather than the tokens themselves -- a mutation that took a token would put it in the call string, which is rendered into logs on a parse error. */
+/** Register a Shopify store. Cluster-owner tier, and the three token arguments are REFERENCES to globalSecret rows rather than the tokens themselves -- a mutation that took a token would put it in the call string, which is rendered into logs on a parse error.
+A CREATE needs a cluster owner or server code, enforced in executeWrite (component/memql/create_rank_floor.go), not here: the tier does not judge a create, and a floor on this mutation would never see a raw insert() of the same concept (Connect Shopify design, D13). Internal origin passes -- the first-boot seed, the connector and Connect Shopify write that way. Changing a store that EXISTS is owner-only too: the write guard judges the stored row for `updateStore` and `setStoreStatus`. */
 // Bound concept: v1:shopify:store (machine-readable: BoundConcepts["createStore"] in generated_concepts.ts).
 export interface CreateStoreArgs {
   storeId: string;
@@ -6924,7 +6925,8 @@ QueryClient.prototype.setLibraryWatchedFolderStatus = function (this: QueryClien
   return this.executeNamed("setLibraryWatchedFolderStatus", buildSetLibraryWatchedFolderStatus(args), opts);
 };
 
-/** Flip a pack's per-instance enablement in v1:platform:packState. clusterOwner tier via the concept's @rowAuthz -- these rows are the deployment's, not any operator's, and the tier injects the actor gate. The caller (component/grpc's SetPackEnabledMsg handler) verifies the owner role and writes the audit event BEFORE invoking this; the tier here is the independent second layer. The id is the bare pack domain -- the engine canonicalizes it to v1:platform:packState:<packDomain>, so one row per pack with the version history as the flip audit trail. RESTART-REQUIRED lifecycle: the write changes what each node reads at its next boot, never what a running node has loaded. */
+/** Flip a pack's per-instance enablement in v1:platform:packState. clusterOwner tier via the concept's @rowAuthz -- these rows are the deployment's, not any operator's, and the tier injects the actor gate. The caller (component/grpc's SetPackEnabledMsg handler) verifies the owner role and writes the audit event BEFORE invoking this; the tier here is the independent second layer. The id is the bare pack domain -- the engine canonicalizes it to v1:platform:packState:<packDomain>, so one row per pack with the version history as the flip audit trail. RESTART-REQUIRED lifecycle: the write changes what each node reads at its next boot, never what a running node has loaded.
+The FIRST flip of a pack is a create, and a create needs a cluster owner or server code, enforced in executeWrite (component/memql/create_rank_floor.go): the tier does not judge a create, and a floor on this mutation would never see a raw insert() of the same concept (Connect Shopify design, D13). Internal origin passes. Once a pack has a row, the tier's write guard refuses every non-owner flip of it, so a direct call below owner is refused either way. */
 // Bound concept: v1:platform:packState (machine-readable: BoundConcepts["setPackEnabled"] in generated_concepts.ts).
 export interface SetPackEnabledArgs {
   id: string;

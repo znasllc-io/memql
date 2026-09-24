@@ -3,11 +3,12 @@
 - **Date:** 2026-09-23
 - **Status:** design, awaiting review
 - **Branch:** `epic/connect-shopify` (worktree `../epic-connect-shopify`), cut from `origin/main` at `fe32fe3de`
-- **Cluster that hit the problem:** memql.znas.io runs engine 0.22.9 (`ee56dd0a41e5`). It is an ancestor of `fe32fe3de`, and none of the files this design touches differ between the two.
+- **Cluster that hit the problem:** the operator's cloud cluster runs engine 0.22.9 (`ee56dd0a41e5`). It is an ancestor of `fe32fe3de`, and none of the files this design touches differ between the two.
+- **Redaction:** the operator's domain is a value, not part of this record (`TestNoVendorDomainLiterals`). Where the text says what that cluster actually served it reads "the cloud cluster", and a hostname on it is written `<name>.<domain>`.
 
 ## In plain terms
 
-A developer deploying the Fylo storefront to memql.znas.io was refused with "a storefront names a store this cluster does not have". The store was not really missing:
+A developer deploying the Fylo storefront to the cloud cluster was refused with "a storefront names a store this cluster does not have". The store was not really missing:
 
 - the developer was not allowed to see it
 - nobody, the owner included, could put a Shopify store's keys into MemQL from a screen
@@ -36,7 +37,7 @@ Four walls produce that refusal:
    - Every server-side sealer is fixed-purpose: email settings, AI providers, the GitHub App, source credentials, and the Shopify first-boot seed (`integrations/shopify/config.go:109-163`). The seed runs only when the cluster has no store at all.
    - The runbook's "the console's Secrets surface, or `memql env`" (`docs/public/operate/shopify-connector.md:153-154`) names two routes that do not exist.
 3. **The existing site cannot become a storefront.**
-   - `graceful-fjord.memql.znas.io` was created as `kind: static` from an older manifest.
+   - `graceful-fjord.<domain>` was created as `kind: static` from an older manifest.
    - Kind is set only at creation (`createSite`, `dsl/platform/mutations.memql:406`).
    - The edge serves storefront runtime config only for `shopify_storefront` (`component/edge/runtimeconfig.go:298`).
 4. **The refusal came after the cluster had restarted.** The run staged Fylo's DSL and rolled `bff-znas`, `planner` and `agent` before the publish step refused.
@@ -48,12 +49,12 @@ Two more walls sit behind the first:
 
 ## 2. Goal and definition of done
 
-A person signed in to MemQL OS on memql.znas.io **as a developer** can:
+A person signed in to MemQL OS on the cloud cluster **as a developer** can:
 
 1. Retire the old static site.
 2. Deploy `fylo`, and get a draft storefront instead of an error.
 3. Save the Fylo Shopify app's ID and secret, press Connect Shopify, and approve on Shopify.
-4. Go live, and see `graceful-fjord.memql.znas.io` serve Fylo's real products.
+4. Go live, and see `graceful-fjord.<domain>` serve Fylo's real products.
 5. Turn on the wholesale and reviews packs in Cluster > Modules, and switch on the storefront's shopper forms on its deployable.
 
 The packs take effect after the node that answers storefront forms restarts. That restart is the one step outside MemQL OS (section 20).
@@ -67,7 +68,7 @@ The packs take effect after the node that answers storefront forms restarts. Tha
 |---|---|---|
 | D1 | Store credentials enter MemQL through Shopify's OAuth install ("Connect Shopify"), not by pasting tokens | Jose, 2026-09-23 |
 | D2 | One new HTTP endpoint: the Shopify callback | Jose, 2026-09-23 |
-| D3 | Developers may read `v1:shopify:store` rows. Writes stay owner-only except through Connect | Jose, 2026-09-23 |
+| D3 | Developers may read `v1:shopify:store` rows. Writes stay owner-only except through Connect. A developer holding the store part may bind any storefront they can write to any store: that includes every account-tied client storefront, live ones included, which is the same reach developers already have to pause, archive or delete those sites | Jose, 2026-09-23; the storefront reach confirmed by the user, 2026-09-23 |
 | D4 | Developers may turn storefront packs on and off | Jose, 2026-09-23 |
 | D5 | A storefront's first deploy creates a draft with no store; going live requires a connected store | the user, 2026-09-23; Jose reviews in the PR |
 | D6 | Jose cuts the engine release | the user, 2026-09-23 |
@@ -78,7 +79,8 @@ The packs take effect after the node that answers storefront forms restarts. Tha
 | D11 | Build and prove everything locally, then split into stacked, one-concern draft PRs, then wait for Jose's approval to merge | the user, 2026-09-23 |
 | D12 | Saving app credentials never touches a live store. They are held as *pending* and take effect only after the shop's own staff approve on Shopify | proposed by design review; approved by the user, 2026-09-23 |
 | D13 | Two security fixes ride this epic as their own PRs (sections 6 and 11), because the new features are only safe with them | proposed by design review; approved by the user, 2026-09-23 |
-| D14 | PR 1's floor is developer, not owner: developers and owners may create store and pack records; everyone below is refused | the user, 2026-09-23 |
+| D14 | PR 1's floor is developer, not owner: developers and owners may create store and pack records; everyone below is refused | the user, 2026-09-23; **superseded by D15** |
+| D15 | PR 1's floor is **owner**: only a cluster owner or server code creates store and pack records. Implementation review found two exploits in a developer authoring these rows directly (section 6), and no developer step needs a direct create: Connect writes the store and the Modules flip writes the pack, both as server code | proposed by implementation review; confirmed by the user, 2026-09-23 |
 
 ### Facts from Shopify that shape the design
 
@@ -128,7 +130,7 @@ These are from shopify.dev, read 2026-09-23. Sources are in section 21.
 
 | # | PR | Base |
 |---|---|---|
-| 1 | Store and pack records refuse creates below developer rank | main |
+| 1 | Store and pack records refuse creates by anyone but an owner or server code | main |
 | 2 | Developers can read Shopify store records | 1 |
 | 3 | Developers hold the store permission | 2 |
 | 4 | Developers can turn storefront packs on and off | 1 |
@@ -173,25 +175,32 @@ Each is its own PR because it can be reviewed and reverted alone.
 | 4 | `component/grpc/`, `component/auth/`, `docs/public/operate/auth/` |
 | 7 | `component/identity/`, `app/`, `CLAUDE.md` |
 
-## 6. PR 1: store and pack records refuse creates below developer rank
+## 6. PR 1: store and pack records refuse creates by anyone but an owner or server code
 
 **The hole.**
 
 - The row-authz write guard does not judge a create on a cluster-owner-tier concept: with no row at the id it returns nil (`component/memql/rowauthz_write_guard.go:199-219`).
 - `createStore` (`dsl/shopify/overlay/mutations.memql:7`) and `setPackEnabled` (`dsl/platform/mutations.memql:981`) are plain inserts with no gate.
+- The raw `insert(...)` literal reaches the same rows with no mutation at all: it is public language and names no construct.
 - So today any signed-in caller, of any role, can register a store, or enable a pack that nobody has flipped yet. Enabling `wholesale` publishes a shopper write endpoint.
 
-**The fix (D14).**
+**The fix (D15).**
 
-- Add `@requiresRank("developer")` to `createStore` and `setPackEnabled`. The floor admits developer (300) and owner (400); admin (200), writer and everyone below are refused.
-- Internal origin passes the rank gate (`component/memql/requires_rank.go:70-77`). So the first-boot seed, the connector, the Connect writes (section 12) and the new pack-flip method (section 9) are unaffected.
+- A **create floor at the write seam**: `executeWrite` refuses a create of `v1:shopify:store` or `v1:platform:packState` by a caller below owner (`component/memql/create_rank_floor.go`). Developer (300), admin (200), writer and everyone below are refused.
+- **Not `@requiresRank` on the two mutations.** That was the first version, and review showed the raw `insert(...)` literal walks past it: a construct floor fires only when a named construct is resolved. `executeWrite` is where the named mutation and the raw literal converge, which is also why the write guard lives there.
+- The check reuses `refuseBelowRequiredRank` the way the plan gate does, so internal origin passes (`component/memql/requires_rank.go:70-77`). The first-boot seed, the connector, the Connect writes (section 12) and the new pack-flip method (section 9) are unaffected.
 - `updateStore` and `setStoreStatus` write existing rows, which the write guard already protects, so changing an existing store stays owner-only (or through Connect).
 
-**A consequence, stated.** With a developer floor, a developer calling `setPackEnabled` directly can create the FIRST `packState` row of any pack, not only a storefront pack, and that direct path skips the audit event the Modules path writes. Once a pack has a row, the write guard refuses non-owner flips of it. Marking `setPackEnabled` `@serverOnly`, so every flip goes through the audited, storefront-checked path of PR 4, is proposed as a separate task (section 15).
+**Why owner and not developer (D15).** The first version used a developer floor (D14). Review found two exploits in a developer creating these rows directly, each shown with a database test:
+
+- **A store row naming someone else's secret.** A store's `storefrontTokenRef` is a globalSecret NAME. A developer-created store could name any secret; with PR 2 the developer binds a storefront to it, and the edge decrypts whatever the name resolves to into the public `/runtime-config.json`.
+- **A pack row under a fresh id.** `setPackEnabled` takes `id` and `packDomain` separately, and the pack reader keys on `packDomain`. A developer's create under a new id naming an existing pack overrides that pack's switch, owner-set or not, with no audit event.
+
+No developer step needs a direct create: Connect writes the store (section 12) and the Modules flip writes the pack (section 9), both under internal origin. So the floor is the tier's own answer. With it, a direct `setPackEnabled` below owner is refused whether or not the pack has a row.
 
 **Tests.** Database-backed:
-- an admin and a writer are refused `createStore` on a fresh id, and `setPackEnabled` for a pack with no `packState` row
-- a developer and an owner succeed at both
+- an admin and a writer are refused `createStore` on a fresh id, `setPackEnabled` for a pack with no `packState` row, and a raw `insert(...)` of either concept, with nothing written
+- a developer and an owner succeed at all four
 - internal origin succeeds
 
 ## 7. PR 2: developers can read Shopify store records
@@ -235,12 +244,12 @@ Each is its own PR because it can be reviewed and reverted alone.
 
 **The consequence, stated.**
 
-- After PRs 2 and 3, any developer may bind a storefront they own to any store on the cluster. D3 accepts this.
+- After PRs 2 and 3, any developer may bind any storefront they can write to any store on the cluster. That includes every account-tied client storefront, live ones included, because the site tier's account grant admits staff (developer and above) to write them -- the same reach that already lets a developer pause, archive or delete those sites. D3 accepts this (confirmed by the user, 2026-09-23). Every store row is registered by a cluster owner or server code (D15), so the token references a binding exposes are ones an owner or Connect chose.
 - The PR rewrites the invariant the code states today at `component/packages/production.go:370-381` and the refusal text at `component/memql/platform_site_binding_guard.go:125`.
 
 **In the OS,** the part check is data-driven, so the Store slot and panel appear for developers.
 
-- Hide pause and resume (`StorePanel.tsx`) from non-owners: they write an existing store row, which stays owner-only. The register-by-secret-names form (`store/StorePicker.tsx`) stays visible to anyone holding the store part, since PR 1 lets developers create store rows.
+- Hide pause and resume (`StorePanel.tsx`) from non-owners: they write an existing store row, which stays owner-only. The register-by-secret-names form (`store/StorePicker.tsx`) is owner-only too: it creates a store row, which PR 1 refuses below owner (D15).
 - The copy at `StorePanel.tsx:176, 193` becomes "Only someone holding the store permission can attach one."
 
 **Tests.**
@@ -255,7 +264,7 @@ Each is its own PR because it can be reviewed and reverted alone.
 
 ## 9. PR 4: developers can turn storefront packs on and off
 
-**What a storefront pack is.** A pack that declares itself with a new `dsl.RegisterStorefrontPack(domain)`, called from `wholesalepack.Register` and `reviewspack.Register`.
+**What a storefront pack is.** A pack that declares itself with a new `RegisterStorefrontPack(domain)` in the `dsl` package, called from `wholesalepack.Register` and `reviewspack.Register`.
 
 - A test pins the declared set to `anchor.Domains()` (`packs/anchor/anchor.go:51`).
 - The pack's default plays no part. A future pack that ships disabled for safety must not become developer-flippable silently.
@@ -617,8 +626,8 @@ The Store panel (`clients/os/src/apps/deployables/store/StorePanel.tsx`) reads i
 - **Callback order.** The callback verifies Shopify's signature before spending the state, re-derives every stored field, and judges the person by their real role at the moment of the callback (12.6).
 - **Secrets stay hidden.** They never appear in URLs, logs, audit events or errors. Exchanges use the request body, and failures are recorded as fixed tokens.
 - **The privacy-export owner never moves:** `ownerUserId` is never overwritten.
-- **Two security holes close first:** creates on store and pack records below developer rank (PR 1), and forged states (PR 6).
-- **An accepted consequence (D3):** any developer can bind a storefront they own to any store (section 8).
+- **Two security holes close first:** creates on store and pack records by anyone but an owner or server code, by any path including the raw `insert(...)` literal (PR 1), and forged states (PR 6).
+- **An accepted consequence (D3):** any developer holding the store part can bind any storefront they can write, client storefronts included, to any store (section 8).
 
 ## 15. Out of scope
 
@@ -628,14 +637,17 @@ Each item is proposed as its own task:
 - **The preview guard's presence checks** assume a delta while receiving the merged payload. This may misclassify ordinary deploys as promotions after a candidate was cleared. Inferred, not run.
 - **Fatal publish-stage refusals still arrive after the roll** (`stages.go:610, 655-660`). PR 5 removes only the one that hit this deploy. Moving the store and hostname checks ahead of `staging_dsl` is its own task.
 - **Shopify builtins with no gate:** `shopifyStoreHealth`, `shopifyEnsureSubscriptions`, `shopifyRunComplianceJobs`.
-- **`setPackEnabled` as `@serverOnly`,** so every pack flip goes through the audited, storefront-checked path (section 6's consequence).
+- **The same create hole on every other `@rowAuthz(clusterOwner)` concept.** The write guard judges no create, so a raw `insert(...)` by any signed-in caller creates a row on any cluster-owner-tier concept that has no create guard of its own. PR 1 closes it for the two concepts this epic needs; an engine-wide fix has to sweep who legitimately creates each such concept first, and is its own task (memql#5624).
+- **The secret lookup interpolates the name unescaped** (`readNamedRowFields`, `component/memql/engine_variables.go`): memql#5625.
+- **The edge publishes whatever secret `storefrontTokenRef` names,** with no check that it is a Storefront token. D15 keeps the writer an owner or server code, but the edge should not depend on that: memql#5626.
+- **`setPackEnabled` as `@serverOnly`,** so an owner's direct flip goes through the audited path too. Below owner, PR 1 already refuses the direct call.
 - **Secret naming.**
   - Shopify's seed uses `sec-<slug>` ids where every other sealer uses `secret-global-<slug>`.
   - The store id's hyphen stays in secret names (`SHOPIFY_FYLO-9423_...`), while Fylo's runbook says `_`.
 - **Untiered `globalSecret` writes.** Already filed separately. PR 7's `secret_name_ambiguous` refusal limits, but does not close, the resolver ambiguity it causes.
 - **The first-boot seed writes under `connectorContext`** (`config.go:132`), which the store concept refuses (`connector.go:64-68`).
 - **The misleading OS stage label:** a refused run is shown stopped at Roll when Roll finished (`clients/os/src/apps/deployables/page/rail.ts:448`).
-- **The wholesale form drops Fylo's 14 extension fields,** because memql.znas.io's edge forwards shopper forms to the engine `bff`, which does not mount Fylo's DSL. This is a `memql-znas` config change.
+- **The wholesale form drops Fylo's 14 extension fields,** because the cloud cluster's edge forwards shopper forms to the engine `bff`, which does not mount Fylo's DSL. This is a `memql-znas` config change.
 - **Development stores through Connect,** with preview binding.
 - **Wholesale write scopes and provisioning.** The `shopifyB2B` approval cannot work under any permission, because the approval automation runs as a reader.
 - **A site that is already live:** detaching its store, or re-binding it to another store.
@@ -689,17 +701,17 @@ The model is `test/clustere2e/magic_link_replica_test.go`, as an optional cluste
 
 The first real connection settles these:
 
-- Whether Shopify accepts a `.localhost` redirect URL. If not, the first real connection happens on memql.znas.io after release, and a bug found there costs another PR round.
+- Whether Shopify accepts a `.localhost` redirect URL. If not, the first real connection happens on the cloud cluster after release, and a bug found there costs another PR round.
 - Whether a direct `/admin/oauth/authorize` works for a custom-distribution app before its install link was opened. The fallback is the install landing, then Connect.
 - How a Dev Dashboard app's managed installation treats our `scope` parameter.
 - Whether the minted Storefront token sees the same products as the Headless channel token. The fallback is the pasted-token field.
 - Whether the trade buyer-context reads need `unauthenticated_read_customers`, or more.
 - Whether custom apps need approval for `read_all_orders`.
-- **Webhooks locally.** On the local cluster, webhooks point at `api.memql.localhost`, which Shopify cannot reach and may refuse to create. A failed local subscription health is expected, and step 15 is proven only on memql.znas.io.
+- **Webhooks locally.** On the local cluster, webhooks point at `api.memql.localhost`, which Shopify cannot reach and may refuse to create. A failed local subscription health is expected, and step 15 is proven only on the cloud cluster.
 
 ## 19. What a developer still cannot do, deliberately
 
-- Change an EXISTING store record directly. Creating one is allowed (PR 1); later changes go through Connect.
+- Create or change a store record directly (PR 1, D15). Both go through Connect.
 - Read the mirrored Shopify orders and customers data.
 - Change `ownerUserId`.
 - Flip non-storefront packs.
@@ -711,7 +723,7 @@ The first real connection settles these:
 2. Check that the eight branches reproduce the integration tree exactly.
 3. Open eight draft PRs, each naming its wire additions and lead-developer paths.
 4. Jose reviews and merges, and cuts the engine release. The version bump in `memql-znas` rolls it out.
-5. On memql.znas.io, as a developer:
+5. On the cloud cluster, as a developer:
    - Run the section 4 journey against the live Fylo store.
    - Then restart the node that answers storefront forms, so the packs take effect, through a small `memql-znas` change, which merges without approvals.
 
