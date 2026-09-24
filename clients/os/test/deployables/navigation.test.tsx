@@ -79,11 +79,8 @@ describe("shared shell navigation", () => {
     const draft = screen.getByRole("region", { name: "Add a deployable" });
     await click(within(draft).getByRole("radio", { name: /A repository/ }));
     await click(await within(draft).findByRole("button", { name: /^@octocat Connected/ }));
-    await click(screen.getByRole("button", { name: "Continue" }));
     await click(await within(draft).findByRole("button", { name: /^acme Organization/ }));
-    await click(screen.getByRole("button", { name: "Continue" }));
     await click(await within(draft).findByRole("button", { name: /storefront/ }));
-    await click(await screen.findByRole("button", { name: "Continue" }));
     const input = within(draft).getByRole("textbox", { name: "What this deployable is called" });
     fireEvent.change(input, { target: { value: "Unfinished storefront" } });
     go("settings");

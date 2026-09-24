@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Button, Caption, Notice, RecordList, RecordRow, RefreshButton } from "../../../../../kit";
+import { Button, Caption, Notice, RecordList, RecordRow } from "../../../../../kit";
 import { AddButton } from "../../../../../kit/AddButton";
 import { WizardStepHeader } from "../../../../../kit/WizardStepHeader";
 import { ProblemNotice } from "../../../packages/ReportView";
@@ -12,7 +12,7 @@ import { GithubAppMissing } from "../../../sources/GithubAppSetup";
 import { returnPathFor } from "../../../sources/connectReturn";
 import { InstallLink } from "../../../sources/RepositoryPicker";
 
-/** Each body asks one question. Navigation belongs to the wizard's footer. */
+/** A row answers one question and advances; Back belongs to the wizard footer. */
 export function GitHubAccountStep({ credentials, selectedId, onSelect, feed, disabled }: {
   credentials: readonly CredentialRow[]; selectedId: string; onSelect: (id: string) => void;
   feed?: CredentialFeedStatus; disabled: boolean;
@@ -24,14 +24,14 @@ export function GitHubAccountStep({ credentials, selectedId, onSelect, feed, dis
   return <div className="os-stop-body">
     <WizardStepHeader count={ready ? credentials.length : undefined}>
       {ready && app.status?.configured !== false ? <AddButton label="Add GitHub account" disabled={disabled || connect.busy} aria-busy={connect.busy} onClick={() => void connect.connect(returnPathFor("deployables"))} /> : null}
-      {feed ? <RefreshButton label="Refresh GitHub accounts" busy={feed.state === "seeding"} onClick={() => feed.retry()} /> : null}
     </WizardStepHeader>
     {!ready ? <>
       <Caption>{feed?.error || (feed?.state === "seeding" ? "Reading GitHub accounts…" : "GitHub accounts are unavailable.")}</Caption>
+      {feed && feed.state !== "seeding" ? <Button onClick={() => feed.retry()}>Try again</Button> : null}
     </> : <>
       <RecordList as="ul" label="GitHub accounts">{credentials.map(row => <RecordRow key={row.id}
         name={`@${row.login}`} state={row.status === "active" ? "Connected" : "Reconnect needed"}
-        selected={selectedId === row.id} stateExtra={selectedId === row.id ? <span className="os-livelist-tick">Chosen</span> : undefined} disabled={disabled || connect.busy} onOpen={() => onSelect(row.id)} />)}</RecordList>
+        selected={selectedId === row.id} disabled={disabled || connect.busy} onOpen={() => onSelect(row.id)} />)}</RecordList>
       {credentials.length === 0 ? <Caption>Connect a GitHub account to see its repositories.</Caption> : null}
       {app.status?.configured === false ? <GithubAppMissing app={app} returnPath={returnPathFor("deployables")} /> : null}
       {chosen?.status === "revoked" ? <Button busy={connect.busy} onClick={() => void connect.connect(returnPathFor("deployables"), chosen.id)}>Reconnect @{chosen.login}</Button> : null}
@@ -40,8 +40,8 @@ export function GitHubAccountStep({ credentials, selectedId, onSelect, feed, dis
   </div>;
 }
 
-export function GitHubOrganizationStep({ lookup, selectedId, onSelect, disabled }: {
-  lookup: ReturnType<typeof useSourceInstallations>; selectedId: string; onSelect: (id: string) => void; disabled: boolean;
+export function GitHubOrganizationStep({ lookup, selectedId, onSelect, disabled, pending = false }: {
+  lookup: ReturnType<typeof useSourceInstallations>; selectedId: string; onSelect: (id: string) => void; disabled: boolean; pending?: boolean;
 }) {
   const app = useGithubApp();
   const followed = useRef(false);
@@ -59,12 +59,12 @@ export function GitHubOrganizationStep({ lookup, selectedId, onSelect, disabled 
   return <div className="os-stop-body">
     <WizardStepHeader count={lookup.readAt && !lookup.busy && !lookup.refusal ? lookup.installations.length : undefined}>
       <InstallLink compact installUrl={app.status?.installUrl ?? ""} onFollow={() => { followed.current = true; }} />
-      <RefreshButton label="Refresh organizations" busy={lookup.busy} onClick={() => void lookup.read()} />
     </WizardStepHeader>
-    {lookup.refusal ? <ProblemNotice problem={lookup.refusal} tone={toneFor(lookup.refusal.code)} /> : null}
+    {lookup.refusal ? <><ProblemNotice problem={lookup.refusal} tone={toneFor(lookup.refusal.code)} /><Button disabled={lookup.busy} onClick={() => void lookup.read()}>Try again</Button></> : null}
+    {pending ? <Caption>Checking organization access…</Caption> : null}
     {lookup.busy ? <Caption>Reading GitHub access…</Caption> : !lookup.readAt && !lookup.refusal ? <Caption>Access has not been read yet.</Caption> : lookup.readAt && lookup.installations.length === 0 && !lookup.refusal ? <Caption>No approved access yet. Install the GitHub app on your account or organization.</Caption> : null}
     <RecordList as="ul" label="Organizations and personal account">{lookup.installations.map(row => <RecordRow key={row.id} name={row.login} secondary={row.accountType === "Organization" ? "Organization" : "Personal account"}
-      state={row.suspended ? "Suspended" : undefined} selected={selectedId === row.id} disabled={disabled || row.suspended || lookup.busy || Boolean(lookup.refusal)} onOpen={() => onSelect(row.id)} />)}</RecordList>
+      state={row.suspended ? "Suspended" : pending && selectedId === row.id ? "Checking access" : undefined} selected={selectedId === row.id} disabled={disabled || pending || row.suspended || lookup.busy || Boolean(lookup.refusal)} onOpen={() => onSelect(row.id)} />)}</RecordList>
     {lookup.pending.map(row => <Notice key={row.login} tone="info" sentence={`${row.login} is awaiting an organization owner's approval.`} />)}
   </div>;
 }

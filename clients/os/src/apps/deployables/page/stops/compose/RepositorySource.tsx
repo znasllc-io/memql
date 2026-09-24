@@ -11,14 +11,16 @@ import type { SourceProbeHandle } from "../../../sources/useProbes";
 import { suggestName, type ComposeDraft } from "../../compose";
 import { NameField } from "./fields";
 
+const accessRefusals = ["credential_not_found", "credential_revoked", "reconnect_required", "source_connection_unavailable", "source_repository_mismatch", "repository_not_accessible"];
+
 export type ConnectionNeed = "" | "connect" | "reconnect" | "setup" | "unavailable";
 
 /** A repository belongs to the explicitly chosen GitHub identity/installation.
  * The parent retains that choice; a responsive remount cannot pick another grant. */
-export function RepositorySource({ connection, draft, onDraft, probe, onConnectionNeed }: {
+export function RepositorySource({ connection, draft, onSelected, probe, onConnectionNeed }: {
   connection: SourceConnectionRow;
   draft: ComposeDraft;
-  onDraft: (patch: Partial<ComposeDraft>) => void;
+  onSelected: (patch: Partial<ComposeDraft>) => void;
   probe: SourceProbeHandle;
   onConnectionNeed?: (need: ConnectionNeed) => void;
 }) {
@@ -33,15 +35,14 @@ export function RepositorySource({ connection, draft, onDraft, probe, onConnecti
     });
     return () => { current = false; };
   }, [connection.id, connection.credentialId, read]);
-  const refused = ["credential_not_found", "credential_revoked", "reconnect_required", "source_connection_unavailable", "source_repository_mismatch", "repository_not_accessible"];
-  const needsRepair = refused.includes(repositories.refusal?.code ?? "") || refused.includes(probe.reply?.reason ?? "");
+  const needsRepair = accessRefusals.includes(repositories.refusal?.code ?? "") || accessRefusals.includes(probe.reply?.reason ?? "");
   useEffect(() => {
     onConnectionNeed?.(needsRepair ? "reconnect" : repositories.busy || repositories.refusal || !repositories.readAt ? "unavailable" : "");
   }, [needsRepair, repositories.busy, repositories.refusal, repositories.readAt, onConnectionNeed]);
 
   function choose(repo: RepositoryRow) {
     if (repo.installationId !== connection.installationId || needsRepair || repositories.busy || repositories.refusal) return;
-    onDraft({ repoUrl: repo.url, repoRef: "", credentialId: connection.credentialId,
+    onSelected({ repoUrl: repo.url, repoRef: draft.repoUrl === repo.url ? draft.repoRef : "", credentialId: connection.credentialId,
       sourceConnectionId: connection.id,
       name: draft.name || suggestName({ ...draft, choice: "repo", repoUrl: repo.url }, "") });
     probe.clear();
@@ -52,8 +53,8 @@ export function RepositorySource({ connection, draft, onDraft, probe, onConnecti
       <RefreshButton label="Refresh repositories" busy={repositories.busy} onClick={() => void read(connection.credentialId, 1, connection.id)} />
     </WizardStepHeader>
     <Caption>Repositories from {connection.accountLogin}.</Caption>
-    {needsRepair ? <Notice tone="warn" sentence="This source needs attention." next="Go Back to choose another organization or GitHub account." /> : null}
-    <RepositoryPicker showRefresh={false} page={repositories.page} readAt={repositories.readAt} busy={repositories.busy}
+    {accessRefusals.includes(repositories.refusal?.code ?? "") ? <Notice tone="warn" sentence="This source needs attention." next="Go Back to choose another organization or GitHub account." /> : null}
+    <RepositoryPicker showRefresh={false} showChosenLabel={false} page={repositories.page} readAt={repositories.readAt} busy={repositories.busy}
       refusal={repositories.refusal} installUrl=""
       chosen={draft.repoUrl ? shortRepo(draft.repoUrl) : ""} idPrefix="os-compose-repo"
       onChoose={choose} onLookAgain={() => void read(connection.credentialId, 1, connection.id)}
@@ -68,6 +69,7 @@ export function RepositoryProbeStatus({ draft, probe }: { draft: ComposeDraft; p
   const parked = probeParks(probe.reply?.reason ?? "");
   return <>
     {probe.busy ? <Caption>Checking the repository…</Caption> : null}
+    {accessRefusals.includes(probe.reply?.reason ?? "") ? <Notice tone="warn" sentence="This source needs attention." next="Go Back to choose another organization or GitHub account." /> : null}
     {probe.reply && probeNote(probe.reply) ? <p className="os-stop-verdict" data-tone={probe.reply.reason === "ok" ? "ok" : "warn"} role="status">{probeNote(probe.reply)}</p> : null}
     {probe.error ? <Notice tone="warn" sentence="This cluster could not check the repository just now." detail={probe.error} /> : null}
     {probe.error || parked ? <RefreshButton label="Check repository again" busy={probe.busy} onClick={() => void probe.probe(draft.repoUrl, draft.credentialId, draft.sourceConnectionId)} /> : null}

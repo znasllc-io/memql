@@ -62,13 +62,17 @@ function connectedSeed(): FakeSeed {
     sourceProbe: { "github-me": probeReply({ branches: ["main", "release"] }) } };
 }
 
-async function addRepository(region: HTMLElement, name = "new-project", configure = true) {
-  await click(await within(region).findByRole("button", { name: /^@octocat (?:Chosen )?Connected/ }));
-  await forward("Continue");
+async function addRepository(region: HTMLElement, name = "new-project") {
+  expect(floorAct("Continue")).toBeNull();
+  expect(within(region).queryByText(/^chosen$/i)).toBeNull();
+  await click(await within(region).findByRole("button", { name: /^@octocat Connected/ }));
+  expect(floorAct("Continue")).toBeNull();
+  expect(within(region).queryByText(/^chosen$/i)).toBeNull();
   await click(await within(region).findByRole("button", { name: /^acme Organization/ }));
-  await forward("Continue");
-  await click(await within(region).findByRole("button", { name: new RegExp(name) }));
-  if (configure) await forward("Continue");
+  expect(floorAct("Continue")).toBeNull();
+  expect(within(region).queryByText(/^chosen$/i)).toBeNull();
+  const repositories = await within(region).findByRole("list", { name: "acme repositories" });
+  await click(await within(repositories).findByRole("button", { name: new RegExp(name) }));
 }
 
 function stage(region: HTMLElement, name: string): HTMLElement {
@@ -90,42 +94,33 @@ function mintedId(connection: FakeConnection): string {
 }
 
 describe("GitHub Sources in Add a deployable", () => {
-  it("keeps account, organization and repository selection separate until each Continue", async () => {
+  it("advances on each row activation without Continue or an extra Source chooser", async () => {
     const { region, connection } = await open({ sourceConnections: [] });
     expectCurrentStage(region, "GitHub account");
     expect(within(region).queryByRole("button", { name: "Add source" })).toBeNull();
     expect(within(region).queryByRole("list", { name: "Saved sources" })).toBeNull();
-    expect(document.querySelector(".os-actbar")?.textContent).toContain("Choose a GitHub account");
-    expect(document.querySelector(".os-actbar")?.textContent).not.toContain("personal or organization access");
     expect(floorAct("Continue")).toBeNull();
-    await click(await within(region).findByRole("button", { name: /^@octocat (?:Chosen )?Connected/ }));
-    expect(within(region).getByRole("list", { name: "GitHub accounts" })).toBeTruthy();
-    expectCurrentStage(region, "GitHub account");
     expect(connection.callsNamed("sourceInstallations")).toHaveLength(0);
-    await forward("Continue");
-    expect(floorAct("Continue")).toBeNull();
-    await click(await within(region).findByRole("button", { name: /^acme Organization/ }));
-    expect(within(region).getByRole("list", { name: "Organizations and personal account" })).toBeTruthy();
+    await click(await within(region).findByRole("button", { name: /^@octocat Connected/ }));
     expectCurrentStage(region, "Organization");
+    expect(await within(region).findByRole("list", { name: "Organizations and personal account" })).toBeTruthy();
+    expect(floorAct("Continue")).toBeNull();
     expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(0);
-    expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
-    await forward("Continue");
-    expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(1);
-    await click(await within(region).findByRole("button", { name: /^new-project main/ }));
-    expect(within(region).getByRole("list", { name: "acme repositories" })).toBeTruthy();
+    await click(await within(region).findByRole("button", { name: /^acme Organization/ }));
+    expect(await within(region).findByRole("list", { name: "acme repositories" })).toBeTruthy();
     expectCurrentStage(region, "Repository");
+    expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(1);
     expect(stage(region, "Configuration").getAttribute("data-state")).toBe("ahead");
-    expect(stage(region, "Review").getAttribute("data-state")).toBe("ahead");
+    expect(floorAct("Continue")).toBeNull();
     expect(within(region).queryByLabelText("Accounts")).toBeNull();
-    expect(within(region).queryByLabelText("Which branch or tag to deploy")).toBeNull();
-    expect(floorAct("Analyze")).toBeNull();
-    await forward("Continue");
-    expect(within(region).getByLabelText("Accounts")).toBeTruthy();
-    expect(within(region).getByLabelText("Which branch or tag to deploy")).toBeTruthy();
-    expect(within(region).getByText("Source: @octocat · acme · acme/new-project")).toBeTruthy();
+    await click(await within(region).findByRole("button", { name: /^new-project main/ }));
     expectCurrentStage(region, "Configuration");
+    expect(within(region).getByLabelText("Accounts")).toBeTruthy();
+    expect(await within(region).findByLabelText("Which branch or tag to deploy")).toBeTruthy();
+    expect(within(region).getByText("Source: @octocat · acme · acme/new-project")).toBeTruthy();
     expect(stage(region, "Repository").getAttribute("data-state")).toBe("complete");
     expect(stage(region, "Review").getAttribute("data-state")).toBe("ahead");
+    expect(connection.callsNamed("packageSourceRegister")).toHaveLength(0);
     expect(connection.callsNamed("createPackage")).toHaveLength(0);
     expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
   });
@@ -143,11 +138,32 @@ describe("GitHub Sources in Add a deployable", () => {
     expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
   });
 
+  it("shows Configuration immediately but waits for the selected repository probe before Analyze", async () => {
+    let finish!: () => void;
+    const pending = new Promise<void>(resolve => { finish = resolve; });
+    const { region, connection } = await open({}, connection => {
+      const execute = vi.mocked(connection.query.executeNamed).getMockImplementation()!;
+      vi.mocked(connection.query.executeNamed).mockImplementation(async (name, call, opts) => {
+        const reply = await execute(name, call, opts);
+        if (name === "sourceProbe") await pending;
+        return reply;
+      });
+    });
+    await addRepository(region);
+    expectCurrentStage(region, "Configuration");
+    expect(within(region).getByText("Checking the repository…")).toBeTruthy();
+    expect(floorAct("Analyze")).toBeNull();
+    expect(connection.callsNamed("packageSourceRegister")).toHaveLength(0);
+    expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
+    await act(async () => finish());
+    await waitFor(() => expect(floorAct("Analyze")).toBeTruthy());
+  });
+
   it("parks a matching repository on its refused probe and retries its exact binding", async () => {
     const answers = { "github-me": probeReply({ reachable: false, reason: "credential_cannot_see_it" }) };
     const { region, connection } = await open({ sourceProbe: answers });
-    await addRepository(region, "source-alpha", false);
-    expectCurrentStage(region, "Repository");
+    await addRepository(region, "source-alpha");
+    expectCurrentStage(region, "Configuration");
     expect(await within(region).findByText("this token cannot see it", { selector: '[role="status"]' })).toBeTruthy();
     expect(floorAct("Continue")).toBeNull();
     expect(floorAct("Analyze")).toBeNull();
@@ -155,7 +171,6 @@ describe("GitHub Sources in Add a deployable", () => {
     expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
     answers["github-me"] = probeReply({ branches: ["main", "release"] });
     await click(within(region).getByRole("button", { name: "Check repository again" }));
-    await forward("Continue");
     await waitFor(() => expect(floorAct("Analyze")).toBeTruthy());
     expect(connection.callsNamed("sourceProbe")).toEqual(Array(2).fill('builtin sourceProbe(repoUrl: "https://github.com/acme/source-alpha", credentialId: "github-me", connectionId: "source-github-me-i-acme")'));
     expect(within(region).queryByText("this token cannot see it")).toBeNull();
@@ -240,25 +255,78 @@ describe("GitHub Sources in Add a deployable", () => {
     expect(within(region).getByRole("list", { name: "acme repositories" })).toBeTruthy();
     expect(within(region).queryByLabelText("Accounts")).toBeNull();
     expect(stage(region, "Configuration").getAttribute("data-state")).not.toBe("complete");
-    await forward("Continue");
+    await click(await within(region).findByRole("button", { name: /^new-project main/ }));
     expectCurrentStage(region, "Configuration");
     expect(within(region).getByLabelText("Which branch or tag to deploy").textContent).toContain("release");
     expect((within(region).getByLabelText("What this deployable is called") as HTMLInputElement).value).toBe("My draft");
     await forward("Back");
     await forward("Back");
     await forward("Back");
-    await click(within(region).getByRole("button", { name: /^@other (?:Chosen )?Connected/ }));
+    // Activating each same row advances again without resetting the draft.
+    await addRepository(region);
+    expect(within(region).getByLabelText("Which branch or tag to deploy").textContent).toContain("release");
+    expect((within(region).getByLabelText("What this deployable is called") as HTMLInputElement).value).toBe("My draft");
+    expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(0);
+    await forward("Back");
+    await forward("Back");
+    await forward("Back");
+    await click(within(region).getByRole("button", { name: /^@other Connected/ }));
     expect(within(region).queryByLabelText("Accounts")).toBeNull();
     expect(within(region).queryByLabelText("Which branch or tag to deploy")).toBeNull();
     expect(floorAct("Analyze")).toBeNull();
-    await forward("Continue");
     expect(floorAct("Continue")).toBeNull();
     await click(await within(region).findByRole("button", { name: /^acme Organization/ }));
-    await forward("Continue");
     expect(floorAct("Continue")).toBeNull();
     expect(connection.callsNamed("sourceRepositories").at(-1)).toContain('credentialId: "github-other"');
     expect(connection.callsNamed("sourceRepositories").at(-1)).toContain('connectionId: "source-github-other-i-acme"');
     expect(connection.callsNamed("createPackage")).toHaveLength(0);
+  });
+
+  it("keeps Back on the account step when a pending organization binding replies late", async () => {
+    let finish!: () => void;
+    const pending = new Promise<void>(resolve => { finish = resolve; });
+    const { region, connection } = await open({ sourceConnections: [] }, connection => {
+      const execute = vi.mocked(connection.query.executeNamed).getMockImplementation()!;
+      vi.mocked(connection.query.executeNamed).mockImplementation(async (name, call, opts) => {
+        const reply = await execute(name, call, opts);
+        if (name === "sourceConnectionCreate") await pending;
+        return reply;
+      });
+    });
+    await click(await within(region).findByRole("button", { name: /^@octocat/ }));
+    await click(await within(region).findByRole("button", { name: /^acme Organization/ }));
+    expect(await within(region).findByText("Checking organization access…")).toBeTruthy();
+    expectCurrentStage(region, "Organization");
+    await forward("Back");
+    expectCurrentStage(region, "GitHub account");
+    await act(async () => finish());
+    expectCurrentStage(region, "GitHub account");
+    expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
+    expect(connection.callsNamed("packageSourceRegister")).toHaveLength(0);
+    expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
+  });
+
+  it("keeps a failed organization selected with retry and advances only after a successful binding", async () => {
+    let attempts = 0;
+    const { region, connection } = await open({ sourceConnections: [] }, connection => {
+      const execute = vi.mocked(connection.query.executeNamed).getMockImplementation()!;
+      vi.mocked(connection.query.executeNamed).mockImplementation(async (name, call, opts) => {
+        if (name === "sourceConnectionCreate" && attempts++ === 0) throw new Error("source_access_unavailable: GitHub access could not be verified");
+        return execute(name, call, opts);
+      });
+    });
+    await click(await within(region).findByRole("button", { name: /^@octocat/ }));
+    await click(await within(region).findByRole("button", { name: /^acme Organization/ }));
+    expect(await within(region).findByText("GitHub access could not be verified")).toBeTruthy();
+    expectCurrentStage(region, "Organization");
+    expect(floorAct("Continue")).toBeNull();
+    expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
+    await click(within(region).getByRole("button", { name: "Try organization again" }));
+    expect(await within(region).findByRole("list", { name: "acme repositories" })).toBeTruthy();
+    expectCurrentStage(region, "Repository");
+    expect(attempts).toBe(2);
+    expect(connection.callsNamed("packageSourceRegister")).toHaveLength(0);
+    expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
   });
 
   it("ignores an organization registration that finishes after its GitHub identity is revoked", async () => {
@@ -273,9 +341,7 @@ describe("GitHub Sources in Add a deployable", () => {
       });
     });
     await click(await within(region).findByRole("button", { name: /^@octocat/ }));
-    await forward("Continue");
     await click(await within(region).findByRole("button", { name: /^acme Organization/ }));
-    await forward("Continue");
     expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(1);
     await emit(connection, SOURCE_CREDENTIAL_CONCEPT, { ...GRANT, status: "revoked" });
     await act(async () => finish());
@@ -286,21 +352,21 @@ describe("GitHub Sources in Add a deployable", () => {
     expect(await within(region).findByRole("button", { name: "Reconnect @octocat" })).toBeTruthy();
   });
 
-  it("returns from OAuth to its account without advancing to an organization or repository", async () => {
+  it("resumes a verified OAuth account at Organization without choosing or writing a binding", async () => {
     const connection = fakeConnection({ accounts: [SELF], ...connectedSeed() });
     h.connection = connection;
     render(withSession(<DeployablesApp sectionId="deployables" navigate={vi.fn()} askContext={vi.fn()}
       intent={{ id: "oauth-return", payload: { connect: { reason: "connected", section: "deployables", credentialId: "github-me", flowId: "verified-flow" } } }}
       consumeIntent={vi.fn()} />, { userId: "u-me", role: "owner" }));
     const region = await screen.findByRole("region", { name: "Add a deployable" });
-    const account = await within(region).findByRole("button", { name: /^@octocat (?:Chosen )?Connected/ });
-    expect(account.getAttribute("aria-pressed")).toBe("true");
-    expect(connection.callsNamed("sourceInstallations")).toHaveLength(0);
+    expect(await within(region).findByRole("list", { name: "Organizations and personal account" })).toBeTruthy();
+    expectCurrentStage(region, "Organization");
+    expect(connection.callsNamed("sourceInstallations")).toEqual(['builtin sourceInstallations(credentialId: "github-me")']);
     expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
     expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(0);
-    await forward("Continue");
-    expect(await within(region).findByRole("list", { name: "Organizations and personal account" })).toBeTruthy();
     expect(floorAct("Continue")).toBeNull();
+    await forward("Back");
+    expectCurrentStage(region, "GitHub account");
   });
 
   it("asks for GitHub account before repository and MemQL ownership, then registers once at Analyze", async () => {
@@ -324,11 +390,9 @@ describe("GitHub Sources in Add a deployable", () => {
     expect(stage(region, "Configuration").getAttribute("data-state")).toBe("complete");
   });
 
-  it("backs out of an unconfirmed organization and cancels without binding or repository writes", async () => {
+  it("backs out before choosing an organization and cancels without binding or repository writes", async () => {
     const { region, connection } = await open({ sourceConnections: [] });
     await click(await within(region).findByRole("button", { name: /^@octocat/ }));
-    await forward("Continue");
-    await click(await within(region).findByRole("button", { name: /^acme Organization/ }));
     await forward("Back");
     expectCurrentStage(region, "GitHub account");
     await forward("Back");
@@ -470,7 +534,6 @@ describe("GitHub Sources in Add a deployable", () => {
     await forward("Back");
     await forward("Back");
     await click(within(region).getByRole("button", { name: /^beta Organization/ }));
-    await forward("Continue");
     expect(await within(region).findByRole("button", { name: /^portal main/ })).toBeTruthy();
     expect(within(region).queryByRole("button", { name: /^new-project main/ })).toBeNull();
     expect(within(region).queryByLabelText("Which branch or tag to deploy")).toBeNull();

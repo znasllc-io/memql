@@ -45,6 +45,7 @@ export function RepositoryPicker({
   onLookAgain,
   onReadMore,
   showRefresh = true,
+  showChosenLabel = true,
 }: {
   page: RepositoryPage;
   /** When the list was read, as an ISO instant. Empty = not read yet. */
@@ -61,6 +62,7 @@ export function RepositoryPicker({
   onLookAgain: () => void;
   onReadMore: () => void;
   showRefresh?: boolean;
+  showChosenLabel?: boolean;
 }) {
   const [search, setSearch] = useState("");
   const now = useNow();
@@ -186,6 +188,7 @@ export function RepositoryPicker({
                     key={repo.fullName}
                     repo={repo}
                     chosen={repo.fullName === chosen}
+                    showChosenLabel={showChosenLabel}
                     now={now}
                     onChoose={onChoose}
                   />
@@ -207,11 +210,13 @@ export function RepositoryPicker({
 function RepositoryChoice({
   repo,
   chosen,
+  showChosenLabel,
   now,
   onChoose,
 }: {
   repo: RepositoryRow;
   chosen: boolean;
+  showChosenLabel: boolean;
   now: Date;
   onChoose: (repo: RepositoryRow) => void;
 }) {
@@ -221,10 +226,11 @@ function RepositoryChoice({
       name={<span title={repo.fullName}>{repo.name || repo.fullName}</span>}
       secondary={repo.defaultBranch ? <span title={repo.defaultBranch}>{repo.defaultBranch}</span> : undefined}
       current={chosen}
-      open={chosen}
+      open={showChosenLabel ? chosen : undefined}
+      selected={showChosenLabel ? undefined : chosen}
       onOpen={() => onChoose(repo)}
       state={unusual ? repo.visibility : repo.private ? "private" : undefined}
-      stateExtra={chosen ? <span className="os-livelist-tick">chosen</span> : null}
+      stateExtra={chosen && showChosenLabel ? <span className="os-livelist-tick">chosen</span> : null}
     >
       {repo.pushedAt ? <span>pushed {formatFreshness(repo.pushedAt, now)}</span> : null}
     </RecordRow>

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { act } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -8,7 +8,6 @@ import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settin
 import { builtinReply, click, fakeConnection, githubGrantRow, repositoriesReply, repositoryFixture, withSession, type FakeConnection, type FakeSeed } from "./harness";
 
 function floor(name: string) { return within(document.querySelector(".os-actbar") as HTMLElement).queryByRole("button", { name }); }
-async function forward() { await waitFor(() => expect(floor("Continue")).toBeTruthy()); await click(floor("Continue")!); }
 async function open(seed: FakeSeed = {}, prepare?: (connection: FakeConnection) => void) {
   const connection = fakeConnection({ credentials: [githubGrantRow({ id: "grant", login: "alice" })], sourceConnections: [],
     githubApp: { configured: true, installUrl: "https://github.com/apps/example/installations/new" },
@@ -19,7 +18,7 @@ async function open(seed: FakeSeed = {}, prepare?: (connection: FakeConnection) 
   await click(screen.getByRole("radio", { name: /^A repository/ }));
   return connection;
 }
-async function organization() { await click(await screen.findByRole("button", { name: "@alice Connected" })); await forward(); }
+async function organization() { await click(await screen.findByRole("button", { name: "@alice Connected" })); }
 beforeEach(() => { h.connection = null; });
 
 describe("guided source availability and recovery", () => {
@@ -27,6 +26,7 @@ describe("guided source availability and recovery", () => {
     await open({ credentials: [] });
     expect(screen.getByText("Connect a GitHub account to see its repositories.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Add GitHub account" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Refresh GitHub accounts" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Add organization access" })).toBeNull();
     expect(floor("Continue")).toBeNull();
   });
@@ -38,6 +38,7 @@ describe("guided source availability and recovery", () => {
     });
     await organization();
     expect(screen.getByText("Reading GitHub access…")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Refresh organizations" })).toBeNull();
     expect(screen.queryByText(/No approved access/)).toBeNull();
     expect(floor("Continue")).toBeNull();
     await act(async () => finish(builtinReply("sourceInstallations", [{ reason: "ok", installations: [], pending: [] }])));
@@ -55,13 +56,14 @@ describe("guided source availability and recovery", () => {
     await open({ sourceInstallationsError: "source_connection_unavailable: Access was removed." });
     await organization();
     expect(await screen.findByText("Access was removed.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Refresh organizations" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Refresh organizations" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
     expect(screen.queryByText(/No approved access/)).toBeNull();
     expect(floor("Continue")).toBeNull();
     await click(floor("Back")!);
     expect(screen.getByRole("button", { name: "Add GitHub account" })).toBeTruthy();
   });
-  it("guards binding creation from double Continue and prevents navigation being overtaken", async () => {
+  it("guards binding creation from double activation and advances after scope validation", async () => {
     let finish!: () => void;
     const pending = new Promise<void>(resolve => { finish = resolve; });
     const connection = await open({}, conn => {
@@ -69,11 +71,13 @@ describe("guided source availability and recovery", () => {
       vi.mocked(conn.query.executeNamed).mockImplementation(async (name, call, opts) => { const answer = await original(name, call, opts); if (name === "sourceConnectionCreate") await pending; return answer; });
     });
     await organization();
-    await click(await screen.findByRole("button", { name: "acme Organization" }));
-    const next = floor("Continue")!;
-    act(() => { next.click(); next.click(); });
+    const row = await screen.findByRole("button", { name: "acme Organization" });
+    act(() => { row.click(); row.click(); });
+    expect(screen.getByText("Checking organization access…")).toBeTruthy();
+    expect(floor("Continue")).toBeNull();
     expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(1);
-    expect(screen.queryByRole("button", { name: /^Method A repository/ })).toBeNull();
+    expect(floor("Back")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /acme Organization Checking access/ }).hasAttribute("disabled")).toBe(true);
     expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
     await act(async () => finish());
     await screen.findByRole("button", { name: /^project main/ });
@@ -83,7 +87,6 @@ describe("guided source availability and recovery", () => {
     await open({ repositoriesError: "repository_not_accessible: Permission was removed." });
     await organization();
     await click(await screen.findByRole("button", { name: "acme Organization" }));
-    await forward();
     expect(await screen.findByText("Permission was removed.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Refresh repositories" })).toBeTruthy();
     expect(screen.queryByLabelText("Accounts")).toBeNull();

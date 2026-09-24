@@ -869,11 +869,6 @@ async function composeAccount(seed: FakeSeed): Promise<{ connection: FakeConnect
   return { connection, region };
 }
 
-async function continueWizard() {
-  await waitFor(() => expect(document.querySelector(".os-actbar-acts")).toBeTruthy());
-  await click(await within(document.querySelector(".os-actbar-acts") as HTMLElement).findByRole("button", { name: "Continue" }));
-}
-
 async function composeSource(seed: FakeSeed): Promise<{ connection: FakeConnection; region: HTMLElement }> {
   const { connection, region } = await composeAccount(seed);
   const accounts = await within(region).findByRole("list", { name: "GitHub accounts" });
@@ -881,9 +876,7 @@ async function composeSource(seed: FakeSeed): Promise<{ connection: FakeConnecti
   expect(choices).toHaveLength(1);
   await click(choices[0]!);
   expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
-  await continueWizard();
   await click(await within(region).findByRole("button", { name: /^acme Organization/ }));
-  await continueWizard();
   return { connection, region };
 }
 
@@ -947,8 +940,8 @@ describe("the compose Source stop, with a connection", () => {
         'builtin sourceProbe(repoUrl: "https://github.com/acme/widget", credentialId: "cred-grant", connectionId: "source-cred-grant-i-acme")',
       ]),
     );
-    expect(within(region).getByRole("button", { name: /widget.*chosen/ }).getAttribute("aria-expanded")).toBe("true");
-    await continueWizard();
+    expect(within(region).queryByRole("list", { name: "acme repositories" })).toBeNull();
+    expect(within(region).queryByText(/^chosen$/i)).toBeNull();
     // Configuration retains the name supplied by the chosen repository.
     expect(within(region).getByDisplayValue("widget")).toBeTruthy();
   });
@@ -961,7 +954,6 @@ describe("the compose Source stop, with a connection", () => {
     });
     await click(await within(region).findByRole("button", { name: /widget/ }));
 
-    await continueWizard();
     await click(await within(region).findByLabelText(BRANCH_FIELD));
     const options = (await screen.findAllByRole("option")).map((o) => o.textContent);
     // Following the default is a DIFFERENT answer from pinning the branch
@@ -977,7 +969,6 @@ describe("the compose Source stop, with a connection", () => {
       sourceProbe: { "cred-grant": probeReply() },
     });
     await click(await within(region).findByRole("button", { name: /widget/ }));
-    await continueWizard();
     await within(region).findByLabelText(NAME_FIELD);
     // An empty select is a control that can only be wrong.
     expect(within(region).queryByLabelText(BRANCH_FIELD)).toBeNull();
@@ -1000,7 +991,6 @@ describe("the compose Source stop, with a connection", () => {
     });
     await click(await within(region).findByRole("button", { name: /widget/ }));
 
-    await continueWizard();
     expect(within(region).queryByRole("button", { name: /^Review/ })).toBeNull();
     await click(await within(region).findByText("Repository contents", { selector: "summary" }));
     expect(await within(region).findByText("acme-storefront")).toBeTruthy();
@@ -1018,7 +1008,6 @@ describe("the compose Source stop, with a connection", () => {
       sourceProbe: { "cred-grant": probeReply({ branches: ["main"] }) },
     });
     await click(await within(region).findByRole("button", { name: /widget/ }));
-    await continueWizard();
     await within(region).findByLabelText(NAME_FIELD);
 
     // No preview AND no complaint: the analysis is the authority, and a
