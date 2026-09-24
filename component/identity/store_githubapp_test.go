@@ -42,7 +42,7 @@ func (r *appRowRecorder) Execute(_ context.Context, q string) (*memqlengine.Exec
 			fields[k] = structpb.NewStringValue(v)
 		}
 		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{
-			Nodes: []*memqlv1.MemoryNode{{Id: r.state["id"], Payload: &structpb.Struct{Fields: fields}}},
+			Nodes: []*memqlv1.MemoryNode{{Id: r.state["id"], CreatedAt: fixtureCreatedAt(r.state["createdAt"]), Payload: &structpb.Struct{Fields: fields}}},
 		}}, nil
 	}
 	return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}, nil
@@ -253,6 +253,8 @@ func stateRowFor(purpose string) map[string]string {
 		"id":        "v1:identity:githubConnectState:abc",
 		"userId":    "v1:identity:user:owner",
 		"stateHash": HashConnectState("plain"),
+		// A server writer sets expiresAt ten minutes after createdAt; consume refuses any other lifetime.
+		"createdAt": time.Now().UTC().Add(-5 * time.Minute).Format(time.RFC3339),
 		"expiresAt": time.Now().UTC().Add(5 * time.Minute).Format(time.RFC3339),
 		"purpose":   purpose,
 	}

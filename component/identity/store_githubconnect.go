@@ -102,6 +102,37 @@ type GithubConnectStateRow struct {
 	// Organization is, for an app-setup state, the GitHub organization the
 	// app is to be registered under; blank is the person's own account.
 	Organization string
+	// CreatedAt is the row's own intrinsic, read so consume can tell a state
+	// the server wrote from one it could not have (serverShaped). It rides the
+	// NODE, not the payload: the read's payload carries no createdAt key.
+	CreatedAt time.Time
+}
+
+// nodeCreatedAt is the node's createdAt intrinsic, or the zero time when the
+// node carries none (AsTime on a nil timestamp would answer 1970 instead).
+func nodeCreatedAt(n *memqlv1.MemoryNode) time.Time {
+	if ts := n.GetCreatedAt(); ts != nil {
+		return ts.AsTime()
+	}
+	return time.Time{}
+}
+
+// maxGithubConnectStateLifetime bounds what a server-written state can claim.
+// Every writer sets expiresAt to createdAt plus ten minutes; the rest is skew.
+const maxGithubConnectStateLifetime = 15 * time.Minute
+
+// serverShaped reports whether the row's lifetime is one a server writer
+// sets. A row planted through the raw insert literal before the executeWrite
+// guard shipped (memql#5623) carries an expiry its planter chose -- the forgery
+// that proved the hole used the year 2099 -- or none at all, and the guard
+// cannot reach back to rows already in the table. Consume treats such a row as
+// a state it has never seen.
+func (r *GithubConnectStateRow) serverShaped() bool {
+	if r.CreatedAt.IsZero() || r.ExpiresAt.IsZero() {
+		return false
+	}
+	life := r.ExpiresAt.Sub(r.CreatedAt)
+	return life > 0 && life <= maxGithubConnectStateLifetime
 }
 
 // IsFor reports whether the row belongs to `purpose`. Blank on the row means
@@ -254,7 +285,7 @@ func (s *Store) ConsumeGithubConnectStateFor(ctx context.Context, stateHash, con
 		if err != nil {
 			return fmt.Errorf("identity.store: consume github connect state: re-read: %w", err)
 		}
-		if found == nil || !found.IsFor(purpose) {
+		if found == nil || !found.IsFor(purpose) || !found.serverShaped() {
 			return ErrGithubConnectStateNotFound
 		}
 		if !found.ConsumedAt.IsZero() {
@@ -301,6 +332,7 @@ func firstGithubConnectStateRow(nodes []*memqlv1.MemoryNode) *GithubConnectState
 		Organization:   g.str("organization"),
 		SessionId:      g.str("sessionId"), PKCEVerifier: g.str("pkceVerifier"),
 		CredentialId: g.str("credentialId"), ExpectedExternalId: g.str("expectedExternalId"), TargetRevokedAt: g.str("targetRevokedAt"), FlowId: g.str("flowId"),
+		CreatedAt: nodeCreatedAt(nodes[0]),
 	}
 }
 

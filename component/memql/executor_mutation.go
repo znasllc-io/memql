@@ -748,6 +748,18 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		return nil, meta, err
 	}
 
+	// CONNECT STATE: server-written only (memql#5623). Here, beside the two
+	// above and before the read-merge, for their reasons: the refusal is a
+	// property of the concept and the call's origin, not of the payload, so a
+	// refused write reads nothing. Covers insert() and update() alike -- a raw
+	// insert naming an existing state's id is a rewrite of it. See
+	// github_connect_state_write_guard.go.
+	if conceptMeta.Name == conceptIdentityGithubConnectState {
+		if err := validateGithubConnectStateServerOnly(ctx); err != nil {
+			return nil, meta, err
+		}
+	}
+
 	rawPayload := strings.TrimSpace(mutation.PayloadRaw)
 	if rawPayload == "" {
 		return nil, meta, fmt.Errorf("mutation payload is required")

@@ -342,6 +342,13 @@ const undeclared3408EnrolmentReason = "memql#3408 -- /enroll redeem lookup; pre-
 // plaintext; the row's TTL is ten minutes; the query is @serverOnly, so no
 // client can reach it at all; and the consume that follows spends it exactly
 // once under a Postgres advisory lock.
+//
+// "Only for a caller who already holds the plaintext" is worth nothing if a
+// caller can WRITE a row carrying a digest they chose, and until memql#5623 any
+// signed-in caller could, through the raw insert(...) literal, which no tier on
+// this concept stops. executeWrite now refuses every write to it without
+// internal origin (github_connect_state_write_guard.go); that guard is what
+// this argument rests on.
 const undeclared4913GithubConnectReason = "memql#4913 -- GitHub Connect callback lookup; pre-actor by construction (GitHub redirects a browser carrying no MemQL bearer), so no owner tier can be compared against"
 
 // undeclared4301MagicLinkByIdReason covers the by-id read the device-bound
