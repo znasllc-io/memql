@@ -7,6 +7,7 @@ import { OwnershipWizard } from "./OwnershipWizard";
 import { loginWithPasskey, registerPasskey } from "./passkeys";
 import { Field, Button, Head } from "../kit/controls";
 import { IdentityAccount } from "../apps/identity/IdentityAccount";
+import { SignInPage, signInProblem, type SignInProblem } from "./SignInPage";
 import "./identity.css";
 
 export function IdentityScreen({ initialPath, embedded = false }: { initialPath: string; embedded?: boolean }) {
@@ -15,13 +16,16 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
   const [path, setPath] = useState(initialPath);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [loginProblem, setLoginProblem] = useState<SignInProblem>();
+  const [passkeyPending, setPasskeyPending] = useState(false);
+  const actionPending = useRef(false);
   const [fields, setFields] = useState<Record<string, string>>({});
   const csrf = useRef("");
   const generation = useRef(0);
 
   const load = useCallback(async (next: string, form?: Record<string, string>) => {
     const revision = ++generation.current;
-    setBusy(true); setError("");
+    setBusy(true); setError(""); setLoginProblem(undefined);
     try {
       const bearer = status === "signed-in" ? await authSource.bearer() : null;
       let result = await nativeIdentity(config, next, { form, csrf: csrf.current, bearer: bearer || undefined });
@@ -48,10 +52,14 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
   useEffect(() => { void load(initialPath); return () => { generation.current++; }; }, [initialPath, load]);
   const data = page?.data || {};
   const submit = (next: string, form: Record<string, string>) => { if (!busy) void load(next, form); };
-  const run = async (action: () => Promise<void>) => {
-    setBusy(true); setError("");
-    try { await action(); } catch (err) { setError(err instanceof Error ? err.message : "Identity operation failed"); }
-    finally { setBusy(false); }
+  const run = async (action: () => Promise<void>, signingIn = false) => {
+    if (actionPending.current || busy) return;
+    actionPending.current = true;
+    setBusy(true); setError(""); setLoginProblem(undefined); setPasskeyPending(signingIn);
+    try { await action(); } catch (err) {
+      if (signingIn) setLoginProblem(signInProblem(err));
+      else setError(err instanceof Error ? err.message : "Identity operation failed");
+    } finally { actionPending.current = false; setBusy(false); setPasskeyPending(false); }
   };
   const field = (name: string, label: string, type = "text") => <Field label={label}><input className="os-input" aria-label={label}
     type={type} value={fields[name] || ""} onChange={e => setFields(f => ({ ...f, [name]: e.target.value }))} /></Field>;
@@ -100,6 +108,13 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
       acts={busy ? [] : [{ label: data.HasProof ? "Finish setup" : "Create passkey and finish", tone: "primary", onAct: complete }, ...(error ? [{ label: "Reload setup", text: true, onAct: () => window.location.assign("/") }] : [])]} /></div>;
   }
 
+  if (page?.page === "login") return <SignInPage data={data} clientId={config.oauthClientId} fields={fields}
+    busy={busy} passkeyPending={passkeyPending} problem={loginProblem ?? (error ? signInProblem(error) : undefined)}
+    onField={(name, text) => setFields(held => ({ ...held, [name]: text }))}
+    onSubmit={() => submit("/login", { ...oauthFields(data), ...fields, form: data.Stage === "waitlist_signup" ? "waitlist" : data.Stage === "needs_invite" ? "invite" : "email" })}
+    onPasskey={() => void run(async () => window.location.assign(await loginWithPasskey(config, oauthFields(data))), true)}
+    onLegal={next => void load(next)} />;
+
   let title = data.Layout?.Title || "Identity";
   let body: ReactNode;
   switch (page?.page) {
@@ -110,22 +125,6 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
         {data.Local !== true && <>{field("email", "Original owner email", "email")}{act("Verify email again", () => submit("/auth/setup/resume", fields))}</>}
         {data.Local === true && <p>Use the passkey already created for this setup. A different browser cannot replace that claim.</p>}</>;
       break;
-    case "login": {
-      const stage = value(data, "Stage");
-      title = stage === "waitlist_signup" ? "Request access" : stage === "needs_invite" ? "Use your invitation" : "Sign in to MemQL OS";
-      body = <>
-        {data.AuthorizeMode === true && <div><p>Continue to <strong>{value(data, "ClientName")}</strong></p>
-          {data.ClientSelfRegistered === true && <p>This app’s name is self-registered and has not been verified.</p>}
-          <p>Client: <code>{value(data, "ClientID")}</code></p><p>Return address: <code>{value(data, "RedirectURI")}</code></p></div>}
-        {data.Local !== true && field("email", "Email", "email")}
-        {stage === "waitlist_signup" && <>{field("name", "Your name")}{field("additional_context", "Why would you like access?")}</>}
-        {stage === "needs_invite" && field("invitation", "Invitation token")}
-        <div className="os-identity-actions">{data.Local !== true && act(stage === "waitlist_signup" ? "Request access" : stage === "needs_invite" ? "Use invitation" : "Send sign-in link",
-          () => submit("/login", { ...oauthFields(data), ...fields, form: stage === "waitlist_signup" ? "waitlist" : stage === "needs_invite" ? "invite" : "email" }))}
-          {stage === "email" && act("Use a passkey", () => void run(async () => window.location.assign(await loginWithPasskey(config, oauthFields(data)))))}
-        </div><p>By continuing you agree to the <button className="os-link" onClick={() => void load("/legal/tos")}>Terms of Service</button> and <button className="os-link" onClick={() => void load("/legal/privacy")}>Privacy Notice</button>.</p>
-      </>; break;
-    }
     case "check_email":
       title = "Check your email";
       body = <><p>{data.Action === "access_request_created" ? "Your access request has been received. An administrator will follow up at" : "Open the verification link sent to"} <strong>{value(data, "Email")}</strong>.</p>

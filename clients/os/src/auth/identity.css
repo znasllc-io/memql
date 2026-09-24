@@ -14,3 +14,24 @@
 .os-identity-fields dl { display: grid; gap: 1rem; margin: 0; }
 .os-identity-fields dt { color: var(--os-muted); font-size: var(--os-text-sm); }
 .os-identity-fields dd { margin: .25rem 0 0; }
+
+/* Native sign-in uses the same mark, controls and tokens as the OS setup flow.
+   Flex auto margins center short content and leave tall/zoomed content scrollable.
+   vh is the fallback for browsers without dynamic viewport units. */
+.os-signin { height: 100vh; height: 100dvh; overflow: auto; display: flex; padding: clamp(24px, 6vw, 72px); background: var(--os-ground); color: var(--os-ink); }
+.os-signin-content { width: 100%; max-width: 28rem; margin: auto; display: flex; flex-direction: column; gap: 24px; }
+.os-signin .os-signin-mark { width: 56px; height: 56px; margin-bottom: 8px; }
+.os-signin .os-signin-mark > svg { width: 34px; height: 34px; }
+.os-signin-heading h1 { margin: 0; font-size: clamp(24px, 3vw, 30px); font-weight: 600; line-height: 1.2; letter-spacing: -.025em; }
+.os-signin-heading p { margin: 12px 0 0; color: var(--os-muted); line-height: 1.6; }
+.os-signin-content > .os-button, .os-signin-form > .os-button { min-height: 48px; height: auto; padding: 12px 16px; justify-content: center; }
+.os-signin-form { display: grid; gap: 18px; }
+.os-signin-problem { border-left: 2px solid var(--os-warn); padding-left: 16px; }
+.os-signin-problem p { margin: 0; line-height: 1.55; }
+.os-signin-problem p:first-child { font-weight: 500; }
+.os-signin-problem p + p { margin-top: 6px; color: var(--os-muted); font-size: var(--os-text-sm); }
+.os-signin-pending { margin: -10px 0 0; color: var(--os-muted); line-height: 1.5; font-size: var(--os-text-sm); }
+.os-signin-legal { margin: 0; padding-top: 4px; color: var(--os-muted); font-size: var(--os-text-xs); line-height: 1.7; }
+.os-signin-legal .os-link { font: inherit; }
+.os-signin-destination { display: grid; gap: 8px; overflow-wrap: anywhere; font-size: var(--os-text-sm); }
+.os-signin-destination p { margin: 0; line-height: 1.5; }
