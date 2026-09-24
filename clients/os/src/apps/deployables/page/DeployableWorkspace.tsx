@@ -124,7 +124,7 @@ function DomainPiece({ site, onClick }: { site: SiteRow; onClick: () => void }) 
  * from the slot being drawn at all.
  *
  * FOUR STATES AND THEY ARE DIFFERENT ANSWERS. Nothing bound reads Not
- * connected, which is what keeps it from going live (Connect Shopify, D5).
+ * connected. Publication and Shopify connection are independent.
  * A read in flight says so. A store that reads back gets its domain and its
  * state. A store that does not read back is NOT drawn as unbound -- that
  * would hide a real misconfiguration behind a state that looks deliberate.

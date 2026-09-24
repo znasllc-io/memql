@@ -774,31 +774,19 @@ const GRANT = githubGrantRow({ id: "cred-grant" });
 
 describe("existing credential and cluster settings", () => {
   afterEach(() => { h.connection = null; restoreLocation?.(); });
-  it("omits disconnected accounts from Add Deployable and keeps the add account action", async () => {
-    await composeAccount({ credentials: [GRANT, githubGrantRow({ id: "old", login: "disconnected-account", status: "revoked" })] });
+  it("omits disconnected accounts and points account management to Settings", async () => {
+    await composeAccount({ repositories: repositoriesReply({ repositories: [WIDGET] }), credentials: [GRANT, githubGrantRow({ id: "old", login: "disconnected-account", status: "revoked" })] });
     const accounts = screen.getByRole("list", { name: "GitHub accounts" });
     expect(within(accounts).getByText("@octocat")).toBeTruthy();
     expect(within(accounts).queryByText("@disconnected-account")).toBeNull();
-    expect(screen.getByRole("button", { name: "Add GitHub account" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add or manage GitHub accounts and organizations in Settings" })).toBeTruthy();
   });
 
-  it("offers adding an account when every previous account is disconnected", async () => {
-    await composeAccount({ credentials: [githubGrantRow({ id: "old", login: "disconnected-account", status: "revoked" })] });
+  it("routes missing setup out of the wizard without starting OAuth", async () => {
+    const { connection } = await composeAccount({ credentials: [githubGrantRow({ id: "old", login: "disconnected-account", status: "revoked" })] });
     expect(screen.queryByText("@disconnected-account")).toBeNull();
-    expect(screen.getByText("Connect a GitHub account to see its repositories.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Add GitHub account" })).toBeTruthy();
-  });
-
-  it("starts additive GitHub authorization with correlation and preserves existing sources", async () => {
-    const assigned = stubNavigation();
-    const { connection } = await composeAccount({ credentials: [GRANT], repositories: repositoriesReply({ repositories: [WIDGET] }), connectUrl: "https://github.com/login/oauth/authorize?fixture=1" });
-    await click(screen.getByRole("button", { name: "Add GitHub account" }));
-    expect(assigned).toEqual(["https://github.com/login/oauth/authorize?fixture=1"]);
-    expect(connection.callsNamed("githubConnectBegin")[0]).toMatch(/flowId: "[a-f0-9-]+"/);
-    expect(connection.callsNamed("githubConnectBegin")[0]).not.toContain("credentialId:");
-    expect(connection.callsNamed("githubConnectBegin")[0]).toContain('returnPath: "/?connect=deployables"');
-    expect(connection.callsNamed("sourceConnectionRemove")).toHaveLength(0);
-    expect(connection.callsNamed("sourceCredentialRevoke")).toHaveLength(0);
+    expect(screen.getByRole("img", { name: "GitHub setup needed" })).toBeTruthy();
+    expect(connection.callsNamed("githubConnectBegin")).toHaveLength(0);
     expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(0);
   });
 

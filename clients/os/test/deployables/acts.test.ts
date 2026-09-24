@@ -383,7 +383,7 @@ describe("every act names its part, and a missing part withholds it (epic memql#
 
 // GO LIVE IS OFFERED ONLY WHEN THE ENGINE SAYS SO (Connect Shopify, D5). A
 // storefront's first deploy can land as a draft with no store, and the engine
-// refuses taking that live as storefront_not_connected -- the same function
+// refuses taking that live as serving_binding_is_development_store -- the same function
 // the write guard refuses with answers `sitePreviewReadiness`, so the bar
 // offers Go live only when that answer is yes, and otherwise carries the
 // refusal for the page to draw beside the act that clears it.
@@ -391,9 +391,9 @@ describe("Go live follows the engine's readiness answer", () => {
   const built = { status: "draft", bundleRef: "blob://sites/site-1/v1/" };
   const storefront = site({ ...built, kind: "shopify_storefront" });
   const refusal = {
-    code: "storefront_not_connected",
-    message: "this storefront is not attached to a Shopify store, so it has no catalog to put in front of shoppers.",
-    remedy: "Connect Shopify on the Store panel.",
+    code: "serving_binding_is_development_store",
+    message: "This storefront is bound to a development store.",
+    remedy: "Bind a production store on the Store panel.",
   };
   const said = (canGoLive: boolean) => ({
     hasCandidate: false,
@@ -409,7 +409,7 @@ describe("Go live follows the engine's readiness answer", () => {
     // Offline is the other state Go live is offered from.
     const offline = actsFor({ ...BASE, site: site({ status: "disabled", kind: "shopify_storefront" }), preview: said(false) });
     expect(offline.acts.map((a) => a.name)).toEqual(["Archive"]);
-    expect(offline.withheld?.code).toBe("storefront_not_connected");
+    expect(offline.withheld?.code).toBe("serving_binding_is_development_store");
   });
 
   it("offers Go live when the engine says yes", () => {

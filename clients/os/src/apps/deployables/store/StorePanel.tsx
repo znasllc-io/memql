@@ -138,18 +138,6 @@ export function StorePanel({ site, canBind, trail, back }: StorePanelProps) {
         </Button>
       )}
       {choosing || store === null ? null : (
-        <Button
-          tone="quiet"
-          onClick={() => {
-            bound.reread();
-            health.reread();
-          }}
-          ariaLabel={`Re-read the store ${name} fronts`}
-        >
-          <RefreshCw size={13} aria-hidden /> Re-read
-        </Button>
-      )}
-      {choosing || store === null ? null : (
         <OpenLogsButton
           iconOnly
           subject={store.id}

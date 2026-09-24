@@ -81,11 +81,6 @@ const (
 	// PreviewRefusalNoPreviewBinding -- a storefront with no development store
 	// attached has nothing to exercise against.
 	PreviewRefusalNoPreviewBinding = "no_preview_binding"
-	// PreviewRefusalStorefrontNotConnected -- a storefront going live, or
-	// promoting, whose serving binding names no store, or a store with no
-	// Storefront token: there is no catalog to put in front of shoppers
-	// (Connect Shopify, D5).
-	PreviewRefusalStorefrontNotConnected = "storefront_not_connected"
 )
 
 // PreviewBoundStore is what a caller could learn about the store a binding names.
@@ -159,12 +154,10 @@ func SiteGoLiveRefusal(storefront bool, serving PreviewBoundStore) PreviewRefusa
 	if !storefront {
 		return PreviewRefusal{}
 	}
+	// An unattached storefront can serve its design and navigation. Commerce
+	// readiness is shown separately on its Store panel.
 	if strings.TrimSpace(serving.ID) == "" {
-		return PreviewRefusal{
-			Code:    PreviewRefusalStorefrontNotConnected,
-			Message: "this storefront is not attached to a Shopify store, so it has no catalog to put in front of shoppers.",
-			Remedy:  storefrontNotConnectedRemedy,
-		}
+		return PreviewRefusal{}
 	}
 	if !serving.Readable {
 		return PreviewRefusal{
@@ -182,20 +175,8 @@ func SiteGoLiveRefusal(storefront bool, serving PreviewBoundStore) PreviewRefusa
 			Remedy: "Bind the storefront to the store shoppers reach, then try again. The development store stays on the preview binding.",
 		}
 	}
-	if !serving.HasStorefrontToken {
-		return PreviewRefusal{
-			Code: PreviewRefusalStorefrontNotConnected,
-			Message: "this storefront is bound to " + serving.name() +
-				", which has no Storefront API token, so the storefront could not load its catalog.",
-			Remedy: storefrontNotConnectedRemedy,
-		}
-	}
 	return PreviewRefusal{}
 }
-
-// storefrontNotConnectedRemedy is the act that clears storefront_not_connected,
-// in the words of the surface that offers it.
-const storefrontNotConnectedRemedy = "Connect Shopify on the Store panel."
 
 // SitePreviewBindingRefusal answers whether a candidate may be exercised against the store
 // the PREVIEW binding names -- the other direction of the same guard.
@@ -206,8 +187,8 @@ const storefrontNotConnectedRemedy = "Connect Shopify on the Store panel."
 // moment a test payment lands in the merchant's real orders, and by then it has
 // happened.
 //
-// AN UNBOUND PREVIEW BINDING IS REFUSED HERE, as an unbound serving binding is
-// in SiteGoLiveRefusal, and under its own code: the act that clears it is
+// An unbound preview binding is refused even though the design may go live.
+// Commerce checks need a development store: the act that clears this is
 // attaching a development store, not connecting the shop. Exercising an
 // unbound preview would fall back to no store at all and report four
 // observations of nothing.

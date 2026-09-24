@@ -12,7 +12,7 @@ import (
 type userStorePartGrant struct{}
 
 func (userStorePartGrant) ActiveGrantsForUser(context.Context, string) ([]auth.Grant, error) {
-	return []auth.Grant{{Verb: auth.VerbExecute, Resource: storeBindingCapability.Resource, Effect: auth.GrantAllow}}, nil
+	return []auth.Grant{{Verb: auth.VerbExecute, Resource: "app:deployables/store", Effect: auth.GrantAllow}}, nil
 }
 
 func (userStorePartGrant) ActiveGrantsForGroups(context.Context, []string) ([]auth.Grant, error) {
@@ -26,7 +26,7 @@ func (userStorePartGrant) ActiveGrantsForGroups(context.Context, []string) ([]au
 // A pre-check asking only the first hands createSite a store the organization
 // refuses, and the whole deploy is refused instead of placing the unattached
 // draft. Here the caller holds the part, and acme does not admit them.
-func TestMayChangeStoreBindingAsksTheSitesOrganizationToo(t *testing.T) {
+func TestMayChangeStoreBindingAsksTheSitesOrganization(t *testing.T) {
 	oldGrant := auth.InstalledGrantSource()
 	auth.SetGrantSource(userStorePartGrant{})
 	t.Cleanup(func() { auth.SetGrantSource(oldGrant) })
@@ -36,9 +36,6 @@ func TestMayChangeStoreBindingAsksTheSitesOrganizationToo(t *testing.T) {
 	const store = "v1:shopify:store:acme"
 
 	create := map[string]any{"accountId": "acme", "binding": map[string]any{bindingStoreIdKey: store}}
-	if err := e.validateSiteStoreBindingChange(ctx, create, ""); err != nil {
-		t.Fatalf("fixture: the caller must hold the store part: %v", err)
-	}
 	if e.validateOrganizationSensitiveChanges(ctx, conceptPlatformSite, nil, create) == nil {
 		t.Fatal("fixture: the organization boundary must refuse this caller's binding at acme")
 	}
@@ -46,7 +43,7 @@ func TestMayChangeStoreBindingAsksTheSitesOrganizationToo(t *testing.T) {
 	if e.MayChangeStoreBinding(ctx, "acme", "", store) {
 		t.Error("the pre-check says yes to a binding the organization boundary refuses")
 	}
-	if !e.MayChangeStoreBinding(ctx, "", "", store) {
-		t.Error("a site in no organization meets only the caller's own store part, which this caller holds")
+	if e.MayChangeStoreBinding(ctx, "", "", store) {
+		t.Error("a caller without a default organization cannot attach a store")
 	}
 }

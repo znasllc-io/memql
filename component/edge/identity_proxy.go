@@ -26,6 +26,7 @@ var identityXHRPaths = map[string]struct{}{
 	"/auth/logout":           {},
 	"/.well-known/jwks.json": {},
 	"/auth/github/complete":  {},
+	"/auth/shopify/complete": {},
 }
 
 func isIdentityXHRPath(p string) bool {

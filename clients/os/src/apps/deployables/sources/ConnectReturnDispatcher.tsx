@@ -1,3 +1,4 @@
+import { takeShopifyReturn } from "../store/connectReturn";
 import { useEffect } from "react";
 
 import { useSession } from "../../../chrome/access";
@@ -40,6 +41,8 @@ export function ConnectReturnDispatcher() {
     // TAKE, not read: the parked value is consumed here and this effect is
     // free to run again -- a StrictMode remount does, and so does any change
     // in `actions` identity -- and every later run correctly finds nothing.
+    const shopify = takeShopifyReturn();
+    if (shopify) actions.openApp("deployables", "deployables", { shopify });
     const result = takeParkedConnectReturn();
     if (result === null) return;
     const correlated = correlateConnectReturn(result, viewer);

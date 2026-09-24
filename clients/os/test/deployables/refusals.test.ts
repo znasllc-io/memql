@@ -135,11 +135,7 @@ describe("refusal copy coverage", () => {
     const unknown = copyFor("deployable_store_unknown");
     expect(unknown?.title).toBe("This storefront's store was not attached");
     expect(unknown?.next).toContain("Store panel");
-    expect(unknown?.next).toContain("cannot go live");
-    // The go-live refusal the engine gives that draft. The server's sentence
-    // carries the remedy, so the table adds only the headline.
-    expect(copyFor("storefront_not_connected")?.title).toBe("This storefront is not connected to a store");
-    expect(copyFor("storefront_not_connected")?.next).toBe("");
+    expect(unknown?.next).toContain("design review");
   });
 
   it("says the DEPLOY SUCCEEDED for the two placement halves", () => {

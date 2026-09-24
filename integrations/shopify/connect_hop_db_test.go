@@ -145,6 +145,7 @@ func TestConnectShopifyBeginsOnOneEngineAndFinishesOnAnother(t *testing.T) {
 	// Engine A: the bff, where the Store panel's builtins run.
 	recA := &recordingEngine{MemQLEngine: engA}
 	connA := NewConnector(recA, logger, NewStoreRegistry(recA, engA.ResolveSystemSecret), NewAdminClient())
+	connA.WithDatabase(func() *sql.DB { return rawA })
 	if err := recA.RegisterIntegration(NewIntegration(connA)); err != nil {
 		t.Fatalf("register the shopify integration on A: %v", err)
 	}
@@ -152,6 +153,7 @@ func TestConnectShopifyBeginsOnOneEngineAndFinishesOnAnother(t *testing.T) {
 	// Engine B: the identity node, its own connector and its own registry.
 	recB := &recordingEngine{MemQLEngine: engB}
 	connB := NewConnector(recB, logger, NewStoreRegistry(recB, engB.ResolveSystemSecret), NewAdminClient())
+	connB.WithDatabase(func() *sql.DB { return rawB })
 	token := newFakeTokenEndpoint(t)
 	admin := newFakeAdmin(t)
 	connB.connectTokenURL = func(string) string { return token.server.URL + "/admin/oauth/access_token" }
@@ -269,7 +271,7 @@ func TestConnectShopifyBeginsOnOneEngineAndFinishesOnAnother(t *testing.T) {
 	callbackFrom := func(cookie, secret, state, code string) url.Values {
 		t.Helper()
 		params := map[string]string{"code": code, "shop": shop, "state": state, "timestamp": fmt.Sprint(time.Now().Unix())}
-		r := httptest.NewRequest(http.MethodGet, identityBase+githubconnect.ShopifyCallbackPath+"?"+signedQuery(secret, params).Encode(), nil)
+		r := httptest.NewRequest(http.MethodGet, identityBase+"/auth/shopify/complete"+"?"+signedQuery(secret, params).Encode(), nil)
 		r.Header.Set("X-Forwarded-Proto", "https")
 		r.AddCookie(&http.Cookie{Name: "memql_refresh", Value: cookie})
 		rec := httptest.NewRecorder()

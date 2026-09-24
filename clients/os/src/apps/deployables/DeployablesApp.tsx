@@ -2,7 +2,7 @@ import { PENDING_DEPLOYMENT_STATUSES } from "./packages/rows";
 import { useEffect, useMemo, useState } from "react";
 import { Concepts, type LiveSnapshot, type Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { roleAdmits } from "../../kit";
+import { Notice, roleAdmits } from "../../kit";
 import { useDeployableParts } from "./parts";
 import { useSession } from "../../chrome/access";
 import { useLiveView } from "../../live/liveView";
@@ -32,6 +32,7 @@ import {
 import { DeployablesSettingsProvider } from "./settingsContext";
 import { useSiteHealth } from "./useSiteHealth";
 import { siteStateWord } from "./words";
+import { shopifyMessage } from "./store/useShopifyConnect";
 import { useSites } from "./useSites";
 
 // Deployables: the things this cluster serves, the map of what serves where,
@@ -182,7 +183,7 @@ function DeployablesAppContent({
   );
   const parkedSnapshot = parked?.snapshot ?? EMPTY_SNAPSHOT<DeploymentRow>();
 
-  const [openRequest, setOpenRequest] = useState<{ siteId: string; revision: number } | undefined>();
+  const [openRequest, setOpenRequest] = useState<{ siteId: string; revision: number; detail?: "store"; result?: string } | undefined>();
   const [selection, setSelection] = useState<MapSelection>(NO_SELECTION);
   const selectedSiteId = selection.siteIds.length === 1 ? (selection.siteIds[0] ?? "") : "";
 
@@ -240,9 +241,19 @@ function DeployablesAppContent({
   // pixels. Consumed by id, so acting on a stale render can never eat a
   // newer instruction, and an unrecognised payload is consumed and ignored
   // rather than left standing to re-fire on every render.
+  const [shopifyError, setShopifyError] = useState("");
   const [connectResult, setConnectResult] = useState<ConnectReturn | null>(null);
   useEffect(() => {
     if (!intent) return;
+    const shopify = intent.payload["shopify"];
+    if (shopify && typeof shopify === "object" && "siteId" in shopify && typeof shopify.siteId === "string" && shopify.siteId) {
+      setShopifyError("");
+      setOpenRequest(held => ({ siteId: shopify.siteId as string, revision: (held?.revision ?? 0) + 1, detail: "store", result: "reason" in shopify && typeof shopify.reason === "string" ? shopify.reason : "" }));
+      reseedAll();
+    }
+    if (shopify && typeof shopify === "object" && (!("siteId" in shopify) || !shopify.siteId)) {
+      setShopifyError(shopifyMessage("reason" in shopify && typeof shopify.reason === "string" ? shopify.reason : "connect_state_invalid"));
+    }
     const carried = intent.payload["connect"];
     if (carried !== null && typeof carried === "object") {
       const answer = carried as Partial<ConnectReturn>;
@@ -300,6 +311,7 @@ function DeployablesAppContent({
           credentialFeed={{ state: credentialSnapshot.state, error: credentialSnapshot.error, retry: reseedCredentials }}
           onAsk={askContext}
           onReseed={reseedAll}
+          onSettings={() => navigate("settings", { fromContent: true })}
         />
       </DeployablesSettingsProvider>
     );
@@ -330,6 +342,7 @@ function DeployablesAppContent({
           credentialFeed={{ state: credentialSnapshot.state, error: credentialSnapshot.error, retry: reseedCredentials }}
           onAsk={askContext}
           onReseed={reseedAll}
+          onSettings={() => navigate("settings", { fromContent: true })}
         />
       </DeployablesSettingsProvider>
     );
@@ -355,7 +368,7 @@ function DeployablesAppContent({
   return <ActivePane active={windowVisible}>
     <RetainedSection active={sectionId === "settings"}>{settingsContent}</RetainedSection>
     <RetainedSection active={sectionId === "logs"}>{logsContent}</RetainedSection>
-    <RetainedSection active={sectionId === "deployables"}>{deployablesContent}</RetainedSection>
+    <RetainedSection active={sectionId === "deployables"}>{shopifyError ? <Notice tone="warn" sentence={shopifyError} /> : null}{deployablesContent}</RetainedSection>
     <RetainedSection active={sectionId === "sources"}>
       <ConnectReturnNotice result={connectResult?.section === "sources" ? connectResult : null} />
       {sourcesContent}

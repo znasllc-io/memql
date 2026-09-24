@@ -151,67 +151,9 @@ func requireReadableStore(ctx context.Context, storeId, actor, act string, reada
 	return nil
 }
 
-// storeBindingCapability is what CHANGING a storefront's store takes: the store
-// part, the requirement updateSiteStoreBinding and updateSitePreviewBinding
-// declare on themselves.
-var storeBindingCapability = CapabilityRequirement{Verb: "execute", Resource: "app:deployables/store"}
-
-// validateSiteStoreBindingChange asks for the store part when a write CHANGES
-// which store a site is bound to: a create that binds, or a rewrite that
-// re-points.
-//
-// validateSiteStoreBinding answers "to what" -- a store the caller can read --
-// and before developers could read stores, reading implied the store part,
-// because only owners read them and owners hold every part. Once developers
-// read every store (D3), reading alone would let one bind through createSite,
-// which takes a binding and declares no capability, or through a raw insert(),
-// which names no construct at all. So the capability is asked here, at the
-// seam every write passes, the way the two binding mutations ask it of
-// themselves.
-//
-// The organization boundary (memql#5598, validateOrganizationSensitiveChanges)
-// asks for the same part at the site's ORGANIZATION on every attributed write
-// by a non-synthetic actor. This check does not depend on that one: it asks
-// the caller's own capability on every write that reaches the seam, so the D3
-// property holds wherever the store tier is widened, whatever the boundary
-// decides to exempt.
-//
-// Only a CHANGE is judged. The payload here is the merged row, so a check on
-// "the payload names a store" would demand the store part for a publish or a
-// settings edit on a site someone else bound. Clearing the binding is not a
-// change this check judges, because detaching names no store (the
-// organization boundary still asks for the part at the site's organization).
-func (e *MemQLEngine) validateSiteStoreBindingChange(ctx context.Context, payload map[string]any, priorStoreId string) error {
-	storeId := changedStoreId(payload, "binding", priorStoreId)
-	if storeId == "" {
-		return nil
-	}
-	return e.refuseBelowRequiredCapability(ctx, &Function{RequiresCapability: storeBindingCapability},
-		"binding a storefront to v1:shopify:store "+storeId)
-}
-
-// validateSitePreviewBindingChange gives the PREVIEW binding the serving
-// binding's two checks, on a write that changes it: the caller must be able to
-// read the store it names, and must hold the store part (Connect Shopify 009).
-//
-// The preview guard reads the store too, but as the deployment, to learn
-// whether it is a development store -- a fact that answers the same for every
-// caller, so it never said whether THIS caller could read it. And
-// updateSitePreviewBinding's own @requiresCapability is never met by a raw
-// insert(), which names no construct. So both checks are asked here, at the
-// seam every write passes.
-//
-// The organization boundary (memql#5598, validateOrganizationSensitiveChanges)
-// asks for the store part at the site's ORGANIZATION too, and nothing there
-// asks whether the caller can read the store. As with the serving binding,
-// neither check here depends on the boundary.
-//
-// Both judge only a CHANGE, against the prior preview binding, for
-// validateSiteStoreBindingChange's reason: the payload is the merged row, and
-// re-judging an inherited binding would refuse the site owner's own rename
-// because a cluster owner once pointed the preview at a store they cannot read.
-// Clearing names no store, so neither check judges it (the organization
-// boundary still asks for the part at the site's organization).
+// validateSitePreviewBindingChange checks readability when the preview store
+// changes. The organization boundary separately checks the Store capability
+// against the final resulting site's organization, including personal denies.
 func (e *MemQLEngine) validateSitePreviewBindingChange(
 	ctx context.Context,
 	payload map[string]any,
@@ -223,11 +165,7 @@ func (e *MemQLEngine) validateSitePreviewBindingChange(
 	if storeId == "" {
 		return nil
 	}
-	if err := requireReadableStore(ctx, storeId, actor, "point this storefront's preview at", readable); err != nil {
-		return err
-	}
-	return e.refuseBelowRequiredCapability(ctx, &Function{RequiresCapability: storeBindingCapability},
-		"pointing a storefront's preview at v1:shopify:store "+storeId)
+	return requireReadableStore(ctx, storeId, actor, "point this storefront's preview at", readable)
 }
 
 // changedStoreId is the store a write moves a {storeId} reference field TO, or
@@ -240,24 +178,19 @@ func changedStoreId(payload map[string]any, field, priorStoreId string) string {
 	return storeId
 }
 
-// MayChangeStoreBinding answers, without refusing, whether a write moving a
-// storefront's serving binding from priorStoreId to storeId would pass the two
-// store-part checks every such write meets: validateSiteStoreBindingChange
-// (internal origin, or the caller holds the part) and, for a site attributed
-// to accountId, the organization boundary's (validateOrganizationSensitiveChanges,
-// memql#5598), which asks for the part at that organization.
-//
-// The deploy path asks it BEFORE it writes (component/packages, resolveStore).
-// Reading a store is not attaching one, and a storefront whose manifest names a
-// store the deployer may read but not attach is placed as an unattached draft
-// with a note (Connect Shopify, D5) rather than refused by those guards. It
-// asks the two guards themselves, so the pre-check and the write cannot
-// disagree about a caller.
+// MayChangeStoreBinding asks the same organization boundary that judges the
+// final site row. A newly created site uses its resolved default organization.
 func (e *MemQLEngine) MayChangeStoreBinding(ctx context.Context, accountId, priorStoreId, storeId string) bool {
+	if strings.TrimSpace(accountId) == "" {
+		var err error
+		accountId, err = organizationDefaultAccount(organizationOperator(ctx), e.accountScopeFor(ctx))
+		if err != nil {
+			return false
+		}
+	}
 	prior := map[string]any{"accountId": accountId, "binding": map[string]any{bindingStoreIdKey: priorStoreId}}
-	next := map[string]any{"binding": map[string]any{bindingStoreIdKey: storeId}}
-	return e.validateSiteStoreBindingChange(ctx, next, priorStoreId) == nil &&
-		e.validateOrganizationSensitiveChanges(ctx, conceptPlatformSite, prior, next) == nil
+	next := map[string]any{"accountId": accountId, "binding": map[string]any{bindingStoreIdKey: storeId}}
+	return e.validateOrganizationSensitiveChanges(ctx, conceptPlatformSite, prior, next) == nil
 }
 
 // canReadStore is the engine's own reader: the named query, under the CALLER's

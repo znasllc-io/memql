@@ -433,7 +433,6 @@ export function RefusalNotice({
     refusal.code === "preview_binding_is_not_development_store" ||
     refusal.code === "no_preview_binding" ||
     refusal.code === "bound_store_unreadable" ||
-    refusal.code === "storefront_not_connected" ||
     refusal.code === "serving_binding_is_development_store";
   return (
     <Notice tone="warn" sentence={refusal.message} next={refusal.remedy}>

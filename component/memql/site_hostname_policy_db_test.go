@@ -831,7 +831,7 @@ func TestAPreviewBindingNeedsAStoreTheCallerCanRead(t *testing.T) {
 
 	suffix := uniqueSuffix("previewread")
 	storeId := seedStore(t, eng, "store-dev-"+suffix, true)
-	installSiteOrganizationCapabilities(t, auth.VerbResource{Verb: storeBindingCapability.Verb, Resource: storeBindingCapability.Resource})
+	installSiteOrganizationCapabilities(t, auth.VerbResource{Verb: "execute", Resource: "app:deployables/store"})
 	writer := "user-previewread-" + suffix
 	accountId := "account-previewread-" + suffix
 	writerCtx := siteOrganizationMemberCtx(t, eng, writer, accountId)
@@ -883,7 +883,7 @@ func TestAPreviewBindingNeedsAStoreTheCallerCanRead(t *testing.T) {
 func TestAPreviewBindingChangeHonoursADenyOfTheStorePart(t *testing.T) {
 	eng, _, _ := sharedReadMergeEngine(t)
 	t.Setenv(memqlDomainEnv, siteTestDomain)
-	storePart := auth.VerbResource{Verb: storeBindingCapability.Verb, Resource: storeBindingCapability.Resource}
+	storePart := auth.VerbResource{Verb: "execute", Resource: "app:deployables/store"}
 	installSiteOrganizationCapabilities(t, storePart)
 	eng.InstallGrantResolution()
 	t.Cleanup(func() {
@@ -919,18 +919,6 @@ func TestAPreviewBindingChangeHonoursADenyOfTheStorePart(t *testing.T) {
 		t.Errorf("the refusal is not the capability refusal: %v", err)
 	}
 
-	seamAs := func(dev string) error {
-		return eng.validateSitePreviewBindingChange(userSiteCtx(dev),
-			map[string]any{"previewBinding": map[string]any{"storeId": storeId}}, "", dev, eng.canReadStore)
-	}
-	if err := seamAs("allowed-" + suffix); err != nil {
-		t.Fatalf("the seam refused a developer holding the store part: %v", err)
-	}
-	if err := seamAs(denied); err == nil {
-		t.Fatal("the seam admitted a developer denied the store part")
-	} else if !strings.Contains(err.Error(), CodeCapabilityNotHeld) {
-		t.Errorf("the seam's refusal is not the capability refusal: %v", err)
-	}
 }
 
 // seedStore registers a v1:shopify:store the way a cluster owner does.

@@ -1,3 +1,12 @@
+> Implementation update (2026-09-24): publication is independent of Shopify
+> readiness. An unconnected storefront may go live for design review, with an
+> amber Store action beside Traffic. Commerce still needs connection, and
+> development/unreadable bindings still refuse publication. GitHub setup lives
+> in Settings; the repository wizard selects saved access. The callback relays
+> unchanged to the OS-hosted completion route to recover its host-only cookie.
+> These decisions supersede the earlier launch gate and callback/UI descriptions
+> below. See the public Shopify Connect runbook for the shipped behavior.
+
 # Connect Shopify, and a storefront a developer can take live
 
 - **Date:** 2026-09-23

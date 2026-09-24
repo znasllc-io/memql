@@ -358,7 +358,8 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	// Shopify redirects a BROWSER here, the flow started over the stream
 	// (shopifyConnectBegin), and declaring it in component/server would publish
 	// it on api.<domain>. No s.cors -- a top-level navigation.
-	mux.HandleFunc("GET "+githubconnect.ShopifyCallbackPath, wrap(s.handleShopifyCallback))
+	mux.HandleFunc("GET "+githubconnect.ShopifyCallbackPath, wrap(s.handleShopifyReturn))
+	mux.HandleFunc("GET /auth/shopify/complete", wrap(s.handleShopifyCallback))
 	mux.HandleFunc("POST /oauth/token", wrap(s.cors(s.handleToken)))
 	mux.HandleFunc("OPTIONS /oauth/token", wrap(s.cors(s.handleOptions)))
 

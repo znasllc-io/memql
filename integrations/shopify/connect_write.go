@@ -91,12 +91,22 @@ func (c *Connector) WriteShopifyConnect(ctx context.Context, state *componentIde
 		c.logger.Warn("shopify: Connect could not seal the Admin token Shopify issued; nothing was kept", "store", storeID, "error", err.Error())
 		return connectReasonExchangeFailed, ""
 	}
-	update := map[string]any{"storeId": storeID, "adminTokenRef": adminRef, "apiVersion": generated.APIVersion}
+	// Re-sealing an existing referenced token is already a credential change,
+	// even if a later store-row write fails. Preserve that outcome in the audit.
+	keptResult := ""
+	if found && prior.AdminTokenRef == adminRef {
+		keptResult = connectResultReconnected
+	}
+	scopes := grant.Scopes
+	if scopes == nil {
+		scopes = []string{}
+	}
+	update := map[string]any{"storeId": storeID, "adminTokenRef": adminRef, "apiVersion": generated.APIVersion, "scopesGranted": scopes}
 	if promoted {
 		webhookRef, err := seedSecret(opCtx, c.engine, storeSecretName(storeID, suffixWebhookSecret), grant.ClientSecret, connectSealDescription, person)
 		if err != nil {
 			c.logger.Warn("shopify: Connect could not promote the approved app's secret; the store is unchanged", "store", storeID, "error", err.Error())
-			return connectReasonExchangeFailed, ""
+			return connectReasonExchangeFailed, keptResult
 		}
 		update["appClientId"], update["webhookSecretRef"] = state.ClientID, webhookRef
 	}
@@ -114,20 +124,17 @@ func (c *Connector) WriteShopifyConnect(ctx context.Context, state *componentIde
 		}
 		if _, err := c.engine.Execute(opCtx, renderCall("createStore", create)); err != nil {
 			c.logger.Warn("shopify: Connect could not create the store row", "store", storeID, "error", err.Error())
-			return connectReasonExchangeFailed, ""
+			return connectReasonExchangeFailed, keptResult
 		}
-		update = map[string]any{"storeId": storeID}
-	} else if prior.OwnerUserID == "" {
-		update["ownerUserId"] = person
-	}
-	scopes := grant.Scopes
-	if scopes == nil {
-		scopes = []string{}
-	}
-	update["scopesGranted"] = scopes
-	if _, err := c.engine.Execute(opCtx, renderCall("updateStore", update)); err != nil {
-		c.logger.Warn("shopify: Connect could not update the store row", "store", storeID, "error", err.Error())
-		return connectReasonExchangeFailed, ""
+		keptResult = result
+	} else {
+		if prior.OwnerUserID == "" {
+			update["ownerUserId"] = person
+		}
+		if _, err := c.engine.Execute(opCtx, renderCall("updateStore", update)); err != nil {
+			c.logger.Warn("shopify: Connect could not update the store row", "store", storeID, "error", err.Error())
+			return connectReasonExchangeFailed, keptResult
+		}
 	}
 	if promoted {
 		c.clearPendingApp(opCtx, storeID, state.ClientID, grant.ClientSecret, person)
@@ -228,11 +235,13 @@ func (c *Connector) shopPlan(ctx context.Context, shop, storeID, token string) s
 // Only the pair that was APPROVED is cleared: one that no longer names the
 // state's client id and the promoted secret is a Save made since, which waits
 // for its own approval rather than being wiped as though it had one.
-//
-// ponytail: checked, then written, with no lock between -- a Save landing in
-// that gap is cleared and has to be saved again (never promoted). An advisory
-// lock shared with shopifyStoreAppSave closes it if that ever matters.
 func (c *Connector) clearPendingApp(ctx context.Context, storeID, clientID, clientSecret, person string) {
+	release, err := c.acquireConnectApp(ctx, storeID)
+	if err != nil {
+		c.logger.Warn("shopify: pending app clear could not acquire its lock", "store", storeID)
+		return
+	}
+	defer release()
 	if !c.pendingIs(ctx, storeID, clientID, clientSecret) {
 		c.logger.Info("shopify: Connect kept the store and left a newer pending app for its own approval", "store", storeID)
 		return

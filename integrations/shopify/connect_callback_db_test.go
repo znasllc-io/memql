@@ -2,6 +2,7 @@ package shopify
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -35,6 +36,7 @@ func TestTheCallbackJudgesThePersonAtTheCallbackAgainstARealEngine(t *testing.T)
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano()%1_000_000_000)
 
 	conn := NewConnector(eng, slog.New(slog.DiscardHandler), NewStoreRegistry(eng, eng.ResolveSystemSecret), NewAdminClient())
+	conn.WithDatabase(func() *sql.DB { return raw })
 	if err := eng.RegisterIntegration(NewIntegration(conn)); err != nil {
 		t.Fatalf("register the shopify integration: %v", err)
 	}
@@ -198,6 +200,7 @@ func TestAFirstConnectIsJudgedOnTheStoreTierBeforeAnyWrite(t *testing.T) {
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano()%1_000_000_000)
 
 	conn := NewConnector(eng, slog.New(slog.DiscardHandler), NewStoreRegistry(eng, eng.ResolveSystemSecret), NewAdminClient())
+	conn.WithDatabase(func() *sql.DB { return raw })
 	if err := eng.RegisterIntegration(NewIntegration(conn)); err != nil {
 		t.Fatalf("register the shopify integration: %v", err)
 	}
@@ -286,9 +289,18 @@ func TestAFirstConnectIsJudgedOnTheStoreTierBeforeAnyWrite(t *testing.T) {
 		"deployables": []any{map[string]any{"name": "storefront", "siteId": "v1:platform:site:" + site}},
 	})
 
-	// The grant is real: the builtins' @requiresCapability admits the writer,
-	// who saves and begins with NO store row anywhere.
+	// A capability grant cannot bypass the store's read tier, including Save.
 	writerCtx := actorCtx(writer, auth.RoleWriter)
+	denied := builtinReply(t, eng, writerCtx, fmt.Sprintf(`builtin shopifyStoreAppSave(siteId: %s, clientId: "fc-client", clientSecret: "fc-app-secret")`, langparser.QuoteString(site)))
+	if denied["reason"] != connectReasonPermissionLost {
+		t.Fatalf("writer saved pending credentials: %v", denied)
+	}
+	if pending, err := conn.pendingClientID(context.Background(), storeID); err != nil || pending != "" {
+		t.Fatalf("refused save wrote credentials: %q %v", pending, err)
+	}
+	// Start as a developer, then lose the role before completing the callback.
+	setRole(auth.RoleDeveloper)
+	writerCtx = actorCtx(writer, auth.RoleDeveloper)
 	if out := builtinReply(t, eng, writerCtx, fmt.Sprintf(`builtin shopifyStoreAppSave(siteId: %s, clientId: "fc-client", clientSecret: "fc-app-secret")`,
 		langparser.QuoteString(site))); out["reason"] != connectReasonOK {
 		t.Fatalf("save: %v", out)
@@ -314,6 +326,7 @@ func TestAFirstConnectIsJudgedOnTheStoreTierBeforeAnyWrite(t *testing.T) {
 		return result
 	}
 
+	setRole(auth.RoleWriter)
 	if got := authorizeAs(); got != connectReasonPermissionLost {
 		t.Fatalf("a writer who cannot read stores finished a first Connect's checks: %q", got)
 	}

@@ -124,8 +124,8 @@ func TestReadinessAndTheGuardGiveTheSameGoLiveRefusal(t *testing.T) {
 	for _, tc := range []struct {
 		name, store, wantCode string
 	}{
-		{"an unattached storefront", "", memql.PreviewRefusalStorefrontNotConnected},
-		{"a storefront bound to a store with no Storefront token", tokenless, memql.PreviewRefusalStorefrontNotConnected},
+		{"an unattached storefront", "", ""},
+		{"a storefront bound to a store with no Storefront token", tokenless, ""},
 		{"a storefront bound to a connected store", connected, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

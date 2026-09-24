@@ -25,6 +25,7 @@ mutation store createStore {
     protectedDataLevel  string
     plan                string
     ownerUserId         string
+    scopesGranted       []string
     isDevelopment         boolean
     developmentOfStoreId  string
   }
@@ -42,7 +43,7 @@ mutation store createStore {
       plan:               args.plan ?? ""
       ownerUserId:        args.ownerUserId ?? ""
       status:             "configured"
-      scopesGranted:      []
+      scopesGranted:      args.scopesGranted ?? []
       health:             {}
       isDevelopment:        args.isDevelopment ?? false
       developmentOfStoreId: args.developmentOfStoreId ?? ""

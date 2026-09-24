@@ -16,7 +16,9 @@ does the Store panel say Not connected".
 section 12 and decisions D1-D15.
 
 A storefront deployable (`kind: shopify_storefront`) is created as a draft with
-no store, and it cannot go live until a store is connected. Connect Shopify is
+no store. It can go live for design review before Shopify is connected; catalog,
+cart and checkout require the connection. The Store icon beside Traffic carries
+an amber setup marker until connected. Connect Shopify is
 how the store's credentials get into the cluster: the person saves the store's
 Shopify app on the storefront's **Store** panel, presses **Connect Shopify**,
 approves on Shopify, and comes back to a connected store. MemQL seals the keys,
@@ -188,10 +190,11 @@ store, and an empty token is refused while a live storefront is bound.
 
 ### 4. Go live
 
-**Go live** is offered once the storefront is attached to a store that has a
-Storefront token. Before that it is refused as `storefront_not_connected`.
+**Go live** publishes the page independently of Shopify setup. An unbound
+storefront, or a readable store without a Storefront token, may serve its design.
+A bound development store or unreadable store still refuses publication.
+The commerce preview checklist still requires its development-store binding.
 
----
 
 ## Reconnecting
 
@@ -300,3 +303,12 @@ for tested:
 - [Storefront preview](storefront-preview.md) -- the development store and
   the candidate version.
 - [GitHub Connect](github-connect.md) -- the same shape, for sources.
+
+## Browser return
+
+The identity callback relays the exact signed query to
+`https://os.<domain>/auth/shopify/complete`. The OS-hosted edge proxies this path
+to identity, where the host-only session cookie proves which browser began the
+connection. Only completion verifies and spends the state. Both responses are
+uncacheable and suppress referrers. The OS opens the original deployable's Store
+page and reads current connection state, including token-only changes.

@@ -167,6 +167,10 @@ func (c *Connector) ResolveConnectSite(ctx context.Context, siteID string) (Conn
 	if err != nil {
 		return ConnectTarget{}, connectReasonStoreNotNamed, nil
 	}
+	if !c.mayReadStores(ctx) {
+		return ConnectTarget{}, "permission_lost", nil
+	}
+
 	target.ShopDomain, target.StoreID = shop, storeID
 
 	res, err = c.engine.Execute(operatorContext(ctx), renderCall("storeById", map[string]any{"storeId": storeID}))
@@ -391,6 +395,11 @@ func (i *Integration) handleStoreAppSave(ctx context.Context, args map[string]an
 		return connectReply(connectReasonAppCredentialsInvalid, ConnectTarget{})
 	}
 
+	release, err := c.acquireConnectApp(ctx, target.StoreID)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	opCtx := operatorContext(ctx)
 	idName := storeSecretName(target.StoreID, suffixPendingClientID)
 	// Both names are looked up BEFORE either is written, so an ambiguous one

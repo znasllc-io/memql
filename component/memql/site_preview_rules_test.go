@@ -71,10 +71,10 @@ func TestSiteGoLiveRefusal(t *testing.T) {
 			why:        "The ordinary launch. A rule that refused this would refuse every go-live.",
 		},
 		{
-			name:       "an unbound serving binding refuses go-live",
+			name:       "an unbound serving binding allows design review",
 			storefront: true,
 			serving:    PreviewBoundStore{},
-			wantCode:   PreviewRefusalStorefrontNotConnected,
+			wantCode:   "",
 			why: "A storefront's first deploy is a draft with no store (Connect Shopify, " +
 				"D5). Putting it in front of shoppers would publish a shop with no " +
 				"catalog behind it and call that a launch.",
@@ -83,15 +83,15 @@ func TestSiteGoLiveRefusal(t *testing.T) {
 			name:       "a blank store id is the unbound state too",
 			storefront: true,
 			serving:    PreviewBoundStore{ID: "   ", Readable: false},
-			wantCode:   PreviewRefusalStorefrontNotConnected,
+			wantCode:   "",
 			why: "The id arrives off a row, so whitespace is a realistic value; reading " +
 				"it as a bound-but-unreadable store would name a store nobody bound.",
 		},
 		{
-			name:       "a live store with no Storefront token refuses go-live",
+			name:       "a live store with no Storefront token allows design review",
 			storefront: true,
 			serving:    tokenlessStore("live", "acme.myshopify.com"),
-			wantCode:   PreviewRefusalStorefrontNotConnected,
+			wantCode:   "",
 			why: "A store row with no Storefront token is a store nobody connected: the " +
 				"edge would hand every shopper an empty token and the catalog would not load.",
 		},
@@ -192,23 +192,13 @@ func TestSitePreviewBindingRefusal(t *testing.T) {
 // AN UNBOUND STOREFRONT MAY NEITHER GO LIVE NOR BE PREVIEWED, and for two
 // different reasons, so the two refusals carry two different codes.
 //
-// Go-live asks "is there a store behind this", and an unbound storefront has
-// none (Connect Shopify, D5, which retired the old asymmetry: an unbound
-// storefront used to be allowed live). A preview asks "is there a development
-// store to exercise against". The acts that clear them differ -- connecting the
-// shop, and attaching a development store -- which is why they are two codes
-// and the OS keys different copy on each.
-func TestAnUnboundStorefrontMayNeitherGoLiveNorBePreviewed(t *testing.T) {
+// Public design review does not require a store. Exercising commerce does.
+func TestAnUnboundStorefrontMayGoLiveButCannotExerciseCommerce(t *testing.T) {
 	unbound := PreviewBoundStore{}
 
 	goLive := SiteGoLiveRefusal(true, unbound)
-	if goLive.Code != PreviewRefusalStorefrontNotConnected {
-		t.Errorf("an unbound storefront's go-live refusal is %q, want %q -- a storefront with no "+
-			"store would go in front of shoppers with no catalog behind it",
-			goLive.Code, PreviewRefusalStorefrontNotConnected)
-	}
-	if !strings.Contains(goLive.Remedy, "Connect Shopify on the Store panel") {
-		t.Errorf("the go-live refusal does not name the act that clears it: %q", goLive.Remedy)
+	if !goLive.Empty() {
+		t.Fatalf("unbound design review refused: %v", goLive)
 	}
 	refusal := SitePreviewBindingRefusal(true, unbound)
 	if refusal.Empty() {
@@ -237,11 +227,8 @@ func TestAMissingTokenIsJudgedAfterTheStoreItself(t *testing.T) {
 	}
 	tokenless := tokenlessStore("live", "acme.myshopify.com")
 	refusal := SiteGoLiveRefusal(true, tokenless)
-	if refusal.Code != PreviewRefusalStorefrontNotConnected {
-		t.Fatalf("a readable live store with no token refused as %q, want %q", refusal.Code, PreviewRefusalStorefrontNotConnected)
-	}
-	if !strings.Contains(refusal.Message, "acme.myshopify.com") {
-		t.Errorf("the refusal does not name the store it is about: %q", refusal.Message)
+	if !refusal.Empty() {
+		t.Fatalf("tokenless design review refused: %v", refusal)
 	}
 	tokenless.HasStorefrontToken = true
 	if got := SiteGoLiveRefusal(true, tokenless); !got.Empty() {
@@ -373,8 +360,6 @@ func TestEveryPreviewRefusalCarriesAMessageAndARemedy(t *testing.T) {
 	refusals := []PreviewRefusal{
 		SiteGoLiveRefusal(true, unreadableStore("v1:shopify:store:gone")),
 		SiteGoLiveRefusal(true, readableStore("dev", "acme-dev.myshopify.com", true)),
-		SiteGoLiveRefusal(true, PreviewBoundStore{}),
-		SiteGoLiveRefusal(true, tokenlessStore("live", "acme.myshopify.com")),
 		SitePreviewBindingRefusal(true, PreviewBoundStore{}),
 		SitePreviewBindingRefusal(true, unreadableStore("v1:shopify:store:gone")),
 		SitePreviewBindingRefusal(true, readableStore("live", "acme.myshopify.com", false)),
@@ -405,7 +390,6 @@ func TestEveryPreviewRefusalCarriesAMessageAndARemedy(t *testing.T) {
 	for _, code := range []string{
 		PreviewRefusalStoreUnreadable,
 		PreviewRefusalServingBindingIsDevelopment,
-		PreviewRefusalStorefrontNotConnected,
 		PreviewRefusalNoPreviewBinding,
 		PreviewRefusalBindingIsNotDevelopment,
 		PreviewRefusalCandidateIsServing,

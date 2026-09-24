@@ -66,7 +66,7 @@ import { partsForOrganization, type PartsHeld } from "../parts";
 import { ManifestPreview } from "./stops/compose/ManifestPreview";
 import { RepositoryProbeStatus, RepositorySource, type ConnectionNeed } from "./stops/compose/RepositorySource";
 import { GitHubAccountStep, GitHubOrganizationStep } from "./stops/compose/GitHubSource";
-import { createSourceConnection, useSourceConnections, useSourceInstallations, type SourceConnectionRow } from "../sources/connections";
+import { useSourceConnections, type SourceConnectionRow } from "../sources/connections";
 import { ComposeSourceDetailStep, ComposeSourceKindStep, SOURCE_DETAIL_NAME, SOURCE_KIND_LABEL } from "./stops/compose/Source";
 import { ComposeWhereItLivesStop } from "./stops/compose/WhereItLives";
 
@@ -136,6 +136,7 @@ export interface ComposePageProps {
   credentialFeed?: CredentialFeedStatus;
   /** The quiet Back: the list is what this replaced. */
   onBack: () => void;
+  onSettings?: () => void;
   backLabel?: string;
   onAsk?: (tag: string) => void;
   /** A parked run and its source, when a "will serve" row reopened the reading. */
@@ -185,10 +186,6 @@ export function ComposePage(props: ComposePageProps) {
   const [accountConfirmed, setAccountConfirmed] = useState(false);
   const [repositoryConfirmed, setRepositoryConfirmed] = useState(false);
   const [installationId, setInstallationId] = useState("");
-  const [confirmedConnection, setConfirmedConnection] = useState<SourceConnectionRow | null>(null);
-  const bindingWrite = useWrite();
-  const bindingPending = useRef(false);
-  const bindingNavigation = useRef(0);
   const [selectedRunId, setSelectedRunId] = useState(parked?.run.id ?? "");
   const [analysisStartedAt, setAnalysisStartedAt] = useState<number | null>(null);
   const now = useNow(1000);
@@ -213,16 +210,15 @@ export function ComposePage(props: ComposePageProps) {
   const [journeyChoice, setJourneyChoice] = useState<{ key: string; stop: WizardStep } | null>(null);
   const { access } = useSession();
   const githubViewer = bare(access?.userId ?? "");
-  const selectedConnection = connections.rows.find(c => c.id === selectedConnectionId && c.status === "active" && bare(c.ownerUserId) === githubViewer) ?? (confirmedConnection?.id === selectedConnectionId && bare(confirmedConnection.ownerUserId) === githubViewer ? confirmedConnection : undefined);
+  const selectedConnection = connections.rows.find(c => c.id === selectedConnectionId && c.status === "active" && bare(c.ownerUserId) === githubViewer);
   const githubAccounts = credentials.filter(c => bare(c.ownerUserId) === githubViewer && isGithubAppGrant(c)).map(c => connections.revokedCredentialIds.includes(c.id) ? { ...c, status: "revoked" } : c);
   const chosenGithubAccount = githubAccounts.find(c => c.id === githubCredentialId);
-  const installations = useSourceInstallations(accountConfirmed && chosenGithubAccount?.status === "active" ? githubCredentialId : "");
+  const configuredOrganizations = connections.rows.filter(row => row.credentialId === githubCredentialId);
+  const githubSetupKnown = (!props.credentialFeed || props.credentialFeed.state === "live" && !props.credentialFeed.error) && connections.state === "live" && !connections.error;
+  const repositoryNeedsSetup = githubSetupKnown && !connections.rows.some(row => githubAccounts.some(account => account.id === row.credentialId && account.status === "active"));
   const identityReady = chosenGithubAccount?.status === "active" && (!props.credentialFeed || props.credentialFeed.state === "live" && !props.credentialFeed.error);
   useEffect(() => { connections.observeCredentials(credentials); }, [credentials, connections.observeCredentials]);
   const githubGrant = credentials.find(c => c.id === selectedConnection?.credentialId && bare(c.ownerUserId) === githubViewer && !connections.revokedCredentialIds.includes(c.id));
-  useEffect(() => {
-    if (confirmedConnection && connections.rows.some(row => row.id === confirmedConnection.id)) setConfirmedConnection(null);
-  }, [confirmedConnection, connections.rows]);
   const resumedGithubReturn = useRef(false);
   useEffect(() => {
     if (resumedGithubReturn.current || !props.connectResult?.credentialId || !identityReady ||
@@ -256,8 +252,6 @@ export function ComposePage(props: ComposePageProps) {
   const placementsKnown = !props.siteFeed || (props.siteFeed.state === "live" && !props.siteFeed.error);
   const saveBoundary = useRef("");
   saveBoundary.current = JSON.stringify([githubViewer, githubCredentialId, chosenGithubAccount?.status, identityReady, installationId, draft.repoUrl, draft.repoRef, selectedConnection?.id, sourceAccountId, githubGrant?.id, githubGrant?.status, access?.everyAccount, access?.accountIds]);
-  const bindingAuthority = useRef("");
-  bindingAuthority.current = JSON.stringify([githubViewer, githubCredentialId, chosenGithubAccount?.status, identityReady, access, globalCan.sources]);
   const saveMounted = useRef(true);
   const analyzePending = useRef(false);
   useEffect(() => { saveMounted.current = true; return () => { saveMounted.current = false; }; }, []);
@@ -266,7 +260,7 @@ export function ComposePage(props: ComposePageProps) {
     if (previousViewer.current === githubViewer) return;
     previousViewer.current = githubViewer; setRestoredSourceId("");
     setAnalysisStartedAt(null);
-    setGithubCredentialId(""); setAccountConfirmed(false); setRepositoryConfirmed(false); setInstallationId(""); setConfirmedConnection(null);
+    setGithubCredentialId(""); setAccountConfirmed(false); setRepositoryConfirmed(false); setInstallationId("");
     setSelectedConnectionId(""); setSelectedRunId(""); setAddresses({});
     setDraft({ ...EMPTY_DRAFT }); setCreated({packageId: "", siteId: ""});
     setAccountId(""); setAccountChosenManually(false); setJourneyChoice(null); probe.clear();
@@ -441,7 +435,7 @@ export function ComposePage(props: ComposePageProps) {
 
   const action = actionFor(phase, readyToAnalyze, readyToDeploy);
   const busy =
-    analysisStartedAt !== null || bindingWrite.busy || repositoryRegistration.busy || newPackage.busy || pkgActions.busy || createSite.busy || publish.busy || addDomain.busy || lifecycle.busy;
+    analysisStartedAt !== null || repositoryRegistration.busy || newPackage.busy || pkgActions.busy || createSite.busy || publish.busy || addDomain.busy || lifecycle.busy;
 
   const outcomes: readonly DeployableOutcome[] = run?.deployables ?? [];
   // Every site this run put in place: what Go live flips. Only its storefronts
@@ -691,15 +685,14 @@ export function ComposePage(props: ComposePageProps) {
     : phase === "deploying" || phase === "awaiting_confirm" && path === "handmade" ? "build" : "live";
   const journeyStop = journeyChoice?.key === journeyKey ? journeyChoice.stop : defaultStop;
   const chooseStop = (stop: WizardStep) => {
-    bindingNavigation.current += 1;
     setJourneyChoice({ key: journeyKey, stop });
   };
-  const leaveComposer = () => { bindingNavigation.current += 1; onBack(); };
+  const leaveComposer = onBack;
 
   function clearRepository() {
     setRepositoryConfirmed(false); setRestoredSourceId("");
-    setSelectedConnectionId(""); setConfirmedConnection(null); setSelectedRunId(""); setSourceNotice("");
-    setCreated({ packageId: "", siteId: "" }); setAddresses({}); probe.clear(); bindingWrite.clear(); setConnectionNeed("");
+    setSelectedConnectionId(""); setSelectedRunId(""); setSourceNotice("");
+    setCreated({ packageId: "", siteId: "" }); setAddresses({}); probe.clear(); setConnectionNeed("");
     setDraft(held => ({ ...held, repoUrl: "", repoRef: "", name: "", credentialId: "", sourceConnectionId: "" }));
   }
   function chooseIdentity(id: string) {
@@ -712,28 +705,15 @@ export function ComposePage(props: ComposePageProps) {
     if (account.status === "active") chooseStop("githubOrganization");
   }
   function holdConnection(connection: SourceConnectionRow) {
-    setConfirmedConnection(connection); setSelectedConnectionId(connection.id);
+    setSelectedConnectionId(connection.id);
     setDraft(held => ({ ...held, credentialId: connection.credentialId, sourceConnectionId: connection.id }));
   }
-  async function chooseOrganization(id: string) {
-    const installation = installations.installations.find(row => row.id === id && !row.suspended);
-    if (busy || bindingPending.current || !identityReady || !installation || !installations.readAt || installations.busy || installations.refusal) return;
-    if (id !== installationId) { clearRepository(); setInstallationId(id); }
-    const existing = connections.rows.find(row => row.credentialId === githubCredentialId && row.installationId === id);
-    if (existing) { holdConnection(existing); chooseStop("githubRepository"); return; }
-    bindingPending.current = true;
-    const authority = bindingAuthority.current;
-    const navigation = bindingNavigation.current;
-    const connectionId = await bindingWrite.run(query => createSourceConnection(query, githubCredentialId, id));
-    bindingPending.current = false;
-    if (!saveMounted.current || bindingAuthority.current !== authority || bindingNavigation.current !== navigation) {
-      bindingWrite.clear();
-      return;
-    }
-    if (!connectionId) return;
-    holdConnection({ id: connectionId, ownerUserId: githubViewer, credentialId: githubCredentialId, installationId: id,
-      providerAccountId: installation.providerAccountId, accountLogin: installation.login, accountType: installation.accountType, status: "active" });
-    connections.retry(); chooseStop("githubRepository");
+  function chooseOrganization(id: string) {
+    const existing = configuredOrganizations.find(row => row.id === id);
+    if (busy || !identityReady || !githubSetupKnown || !existing) return;
+    if (existing.installationId !== installationId) { clearRepository(); setInstallationId(existing.installationId); }
+    holdConnection(existing);
+    chooseStop("githubRepository");
   }
   function chooseRepository(patch: Partial<ComposeDraft>) {
     if (busy || !identityReady || !selectedConnection || !patch.repoUrl ||
@@ -915,14 +895,16 @@ export function ComposePage(props: ComposePageProps) {
           state: settled || (chosen && journeyStop !== "source") ? "complete" : "open",
           answer: chosen ? SOURCE_KIND_LABEL[kind] : "",
           // Chosen once something has been read from it: the kind is a fact.
-          openable: !sourceLocked && (!busy || bindingWrite.busy),
+          openable: !sourceLocked && !busy,
           body: sourceLocked ? undefined : (
             <ActivityTarget target="deployables:compose:source" className="deployable-journey-current">
               <ComposeSourceKindStep
                 draft={draft}
                 isClusterOwner={isClusterOwner}
+                repositoryNeedsSetup={repositoryNeedsSetup}
                 onChoose={(choice) => {
-                  setSelectedConnectionId(""); setConfirmedConnection(null); setGithubCredentialId(""); setAccountConfirmed(false); setInstallationId(""); setSelectedRunId(""); probe.clear();
+                  if (choice === "repo" && repositoryNeedsSetup) { props.onSettings?.(); return; }
+                  setSelectedConnectionId(""); setGithubCredentialId(""); setAccountConfirmed(false); setInstallationId(""); setSelectedRunId(""); probe.clear();
                   setDraft((held) => ({ ...held, choice, name: "", kind: "", artifactId: "", repoUrl: "", repoRef: "", credentialId: "", sourceConnectionId: "", storeId: "" }));
                   // CHOOSING ANSWERS THE STEP, so the wizard moves on to the
                   // one the answer names.
@@ -933,12 +915,12 @@ export function ComposePage(props: ComposePageProps) {
           ),
         },
         ...(kind === "repo" && !fixedSource && !parked ? [
-          { id: "githubAccount", name: "GitHub account", state: accountConfirmed ? "complete" as const : "ahead" as const, answer: chosenGithubAccount ? `@${chosenGithubAccount.login}` : "", openable: !sourceLocked && (!busy || bindingWrite.busy),
-            body: <GitHubAccountStep credentials={githubAccounts} selectedId={githubCredentialId} onSelect={chooseIdentity} feed={props.credentialFeed} disabled={busy} /> },
-          { id: "githubOrganization", name: "Organization", state: selectedConnection ? "complete" as const : "ahead" as const, answer: selectedConnection?.accountLogin ?? "", openable: accountConfirmed && identityReady && !sourceLocked && (!busy || bindingWrite.busy),
-            body: <><GitHubOrganizationStep lookup={installations} selectedId={installationId} onSelect={id => void chooseOrganization(id)} disabled={busy} pending={bindingWrite.busy} />{bindingWrite.refusal ? <><ProblemNotice problem={bindingWrite.refusal} tone="error" /><Button disabled={busy} onClick={() => void chooseOrganization(installationId)}>Try organization again</Button></> : null}</> },
+          { id: "githubAccount", name: "GitHub account", state: accountConfirmed ? "complete" as const : "ahead" as const, answer: chosenGithubAccount ? `@${chosenGithubAccount.login}` : "", openable: !sourceLocked && !busy,
+            body: <GitHubAccountStep credentials={githubAccounts} selectedId={githubCredentialId} onSelect={chooseIdentity} feed={props.credentialFeed} disabled={busy} onSettings={props.onSettings} /> },
+          { id: "githubOrganization", name: "Organization", state: selectedConnection ? "complete" as const : "ahead" as const, answer: selectedConnection?.accountLogin ?? "", openable: accountConfirmed && identityReady && !sourceLocked && !busy,
+            body: <GitHubOrganizationStep organizations={configuredOrganizations} selectedId={selectedConnectionId} onSelect={chooseOrganization} disabled={busy} feed={connections} onSettings={props.onSettings} /> },
           { id: "githubRepository", name: "Repository", state: repositoryConfirmed ? "complete" as const : "ahead" as const, answer: shortRepo(draft.repoUrl), openable: Boolean(selectedConnection) && !sourceLocked && !busy,
-            body: selectedConnection ? <RepositorySource key={selectedConnection.id} connection={selectedConnection} draft={draft} onSelected={chooseRepository} probe={probe} onConnectionNeed={setConnectionNeed} /> : undefined },
+            body: selectedConnection ? <RepositorySource key={selectedConnection.id} connection={selectedConnection} draft={draft} onSelected={chooseRepository} probe={probe} onConnectionNeed={setConnectionNeed} onSettings={props.onSettings} /> : undefined },
         ] : []),
         {
           id: "sourceDetail",
@@ -989,7 +971,7 @@ export function ComposePage(props: ComposePageProps) {
           : !selectedConnection
             ? { word: "Choose a GitHub account", detail: "" }
             : connectionNeed === "reconnect"
-              ? { word: "GitHub account needs attention", detail: "return to GitHub account to reconnect or choose another" }
+              ? { word: "GitHub account needs attention", detail: "manage the account in Settings or choose another" }
               : { word: "Choose a repository", detail: "then configure its branch, name and owning account" };
   const stepNeeds = !sourceLocked && draft.choice === "repo" ? ({ source: "Choose a method", githubAccount: "Choose a GitHub account", githubOrganization: "Choose an organization or personal account", githubRepository: "Choose a repository", sourceDetail: "Configure the deployable" } as Partial<Record<WizardStep, string>>)[journeyStop] : undefined;
   const word = stepNeeds ?? (!sourceLocked && (draft.choice !== "repo" || draft.repoUrl !== "") && !organizationChosen(accounts, sourceAccountId) ? "Choose an account" : detailNeeds !== null ? detailNeeds.word : finished && draft.choice === "ci" ? "Waiting for CI" : composePhaseWord(phase, {
@@ -1007,7 +989,7 @@ export function ComposePage(props: ComposePageProps) {
   // remains separate from the request that started it and its busy state.
   const written = phase !== "composing" || created.packageId !== "";
   const previousStep: WizardStep | undefined = !sourceLocked && kind === "repo" ? ({ githubAccount: "source", githubOrganization: "githubAccount", githubRepository: "githubOrganization", sourceDetail: "githubRepository" } as Partial<Record<WizardStep, WizardStep>>)[journeyStop] : undefined;
-  const leaveAct: Act = previousStep ? { label: "Back", text: true, onAct: () => { if (!busy || bindingWrite.busy) chooseStop(previousStep); } } : { label: written ? "Leave" : "Cancel", text: true, onAct: leaveComposer };
+  const leaveAct: Act = previousStep ? { label: "Back", text: true, onAct: () => { if (!busy) chooseStop(previousStep); } } : { label: written ? "Leave" : "Cancel", text: true, onAct: leaveComposer };
   const cancelAct: Act[] = can.deploy && runIsCancellable(run) ? [{ label: cancelling ? "Cancelling" : "Cancel", text: true, busy: cancelWrite.busy || cancelling, onAct: () => void cancelAnalysis() }] : [];
   const acts: Act[] = restoredSourceId ? [{ label: "Done", tone: "primary", onAct: onBack }] : finished
     ? canGoLive

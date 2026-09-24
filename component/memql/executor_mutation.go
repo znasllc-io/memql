@@ -1411,13 +1411,8 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		if err := e.validateSiteStoreBinding(ctx, payload, actor, e.canReadStore); err != nil {
 			return nil, meta, err
 		}
-		// And WHO may change it: reading a store is not binding to it. Judged
-		// against the prior binding, because the payload here is merged.
-		if err := e.validateSiteStoreBindingChange(ctx, payload, meta.priorBindingStoreId); err != nil {
-			return nil, meta, err
-		}
-		// The preview binding names a store too, and gets both checks above --
-		// on a change only, for the same merged-payload reason.
+		// The organization boundary checks the capability on the final row.
+		// Preview binding changes also require the caller to read the store.
 		if err := e.validateSitePreviewBindingChange(ctx, payload, meta.priorPreviewBindingStoreId, actor, e.canReadStore); err != nil {
 			return nil, meta, err
 		}

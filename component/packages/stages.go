@@ -567,16 +567,10 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 		// ATTACH it (the store part) gets the same "" from the resolver. Either
 		// way the run goes on, and what it records depends on what is bound.
 		//
-		// NOTHING BOUND YET: the storefront is placed as a DRAFT WITH NO STORE,
-		// and the outcome says so. This used to refuse the whole run -- which is
-		// what stopped a developer's first deploy of a storefront whose store
-		// they could not see -- and it is safe to place it now because the
-		// go-live rule refuses an unattached storefront
-		// (memql.SiteGoLiveRefusal, storefront_not_connected): a storefront
-		// serving nothing cannot go in front of shoppers and report success,
-		// which is the failure the refusal used to guard. The same holds for a
-		// redeploy of a site that is still unattached.
-		//
+		// With no binding, place the design as a draft. It can go live for
+		// design review while its Store panel still reports setup needed.
+		// Commerce remains unavailable until the storefront is connected.
+
 		// SOMETHING BOUND: leaving a binding ALONE is not a privileged act --
 		// the binding already exists, somebody who could attach that store made
 		// it, and this run is publishing bytes rather than changing it. Refusing
@@ -610,7 +604,7 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 					Scope: dep.Name,
 					Fatal: false,
 					Message: fmt.Sprintf(
-						"deployable %q names store %q, and this cluster has no store by that name that you may read and attach, so the storefront is not attached to a store. It cannot go live until a store is connected on its Store panel.",
+						"deployable %q names store %q, and this cluster has no store by that name that you may read and attach, so the storefront is not attached to a store. It can go live for design review; connect a store on its Store panel to enable shopping.",
 						dep.Name, named),
 				}
 			default:

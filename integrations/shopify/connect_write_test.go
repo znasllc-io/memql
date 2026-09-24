@@ -225,7 +225,7 @@ func TestAFirstConnectKeepsEverythingItWasGiven(t *testing.T) {
 	if createAt < sealAdmin || createAt < sealWebhook {
 		t.Error("the store row was written before the secrets it points at")
 	}
-	if h.statementIndex("updateStore", `scopesGranted: [`, `"`+StorefrontScopes[0]+`"`) < 0 {
+	if h.statementIndex("createStore", `scopesGranted: [`, `"`+StorefrontScopes[0]+`"`) < 0 {
 		t.Error("the granted scopes were not recorded")
 	}
 
@@ -458,5 +458,14 @@ func TestAStoreRowThatCouldNotBeWrittenKeepsNothing(t *testing.T) {
 	h.engine.fail["createStore"] = errors.New("the database went away")
 	if got, kept := h.writeKept(credentialSourcePending); got != connectReasonExchangeFailed || kept != "" {
 		t.Fatalf("result = %q kept %q, want %s and nothing kept", got, kept, connectReasonExchangeFailed)
+	}
+}
+
+func TestReconnectAuditsResealedCredentialsWhenStoreUpdateFails(t *testing.T) {
+	h := newWriteHarness(t)
+	h.store(map[string]any{"adminTokenRef": storeSecretName(connectStoreID, suffixAdminToken)})
+	h.engine.fail["updateStore"] = errors.New("store write failed")
+	if got, kept := h.writeKept(credentialSourceCurrent); got != connectReasonExchangeFailed || kept != connectResultReconnected {
+		t.Fatalf("result = %q kept %q; an already referenced credential changed", got, kept)
 	}
 }

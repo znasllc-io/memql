@@ -108,7 +108,7 @@ import { DEPLOYABLE_KINDS, kindLabel } from "./targets";
 /** Which view the section is showing. One at a time, one Head each. */
 type DeployablesView =
   | { kind: "list" }
-  | { kind: "deployable"; siteId: string; from?: string }
+  | { kind: "deployable"; siteId: string; from?: string; detail?: "store"; result?: string; revision?: number }
   | { kind: "source"; packageId: string; fromSite?: string }
   | { kind: "history"; packageId: string; siteId?: string; returnTo?: DeployablesView }
   | { kind: "compose"; parkedPackageId?: string; only?: string; fromSource?: string; connectResult?: ConnectReturn };
@@ -142,11 +142,12 @@ export function DeployablesSection({
   credentialFeed,
   onAsk,
   onReseed,
+  onSettings,
 }: {
   root?: SectionRoot;
   active?: boolean;
   navigation?: OsAppProps["navigation"];
-  openRequest?: { siteId: string; revision: number };
+  openRequest?: { siteId: string; revision: number; detail?: "store"; result?: string };
   connectResult?: ConnectReturn | null;
   sites: LiveView<SiteRow> | null;
   packages: LiveView<PackageRow> | null;
@@ -163,6 +164,7 @@ export function DeployablesSection({
   credentialFeed?: CredentialFeedStatus;
   onAsk?: (tag: string) => void;
   onReseed: () => void;
+  onSettings?: () => void;
 }) {
   const [filter, setFilter] = useState<ListFilter>(DEFAULT_LIST_FILTER);
   const [showArchived, setShowArchived] = useState(false);
@@ -182,7 +184,7 @@ export function DeployablesSection({
     if (!active) return;
     if (openRequest && openRequest.revision !== lastOpenRequest.current) {
       lastOpenRequest.current = openRequest.revision;
-      setView({ kind: "deployable", siteId: openRequest.siteId });
+      setView({ kind: "deployable", siteId: openRequest.siteId, detail: openRequest.detail, result: openRequest.result, revision: openRequest.revision });
       lastNavigation.current = navigation?.revision;
       return;
     }
@@ -311,6 +313,7 @@ export function DeployablesSection({
       return (
         <ComposePage
           clusterDomain={clusterDomain}
+          onSettings={onSettings}
           connectResult={view.connectResult}
           can={can}
           isClusterOwner={isClusterOwner}
@@ -389,6 +392,9 @@ export function DeployablesSection({
       return (
         <DeployablePage
           key={site.id}
+          initialDetail={view.detail}
+          shopifyResult={view.result}
+          openRevision={view.revision}
           site={site}
           pkg={pkg}
           credentials={credentials}

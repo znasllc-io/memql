@@ -75,8 +75,8 @@ const (
 	// connect a store on the deployable's Store panel.
 	//
 	// A NOTE, NEVER FATAL (D5). An unbound storefront is placed as a draft
-	// with no store, which the go-live rule keeps away from shoppers
-	// (storefront_not_connected); a bound one keeps the store it has.
+	// with no store, which may go live for design review; a bound one keeps
+	// the store it has. Commerce requires a connection.
 	//
 	// IT IS RAISED AT PUBLISH, NOT AT ANALYSIS, and that is the split this
 	// code records: whether a manifest names a store is a manifest fact

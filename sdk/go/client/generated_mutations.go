@@ -6380,6 +6380,7 @@ type CreateStoreArgs struct {
 	ProtectedDataLevel   string
 	Plan                 string
 	OwnerUserId          string
+	ScopesGranted        []string
 	IsDevelopment        bool
 	IsDevelopmentSet     bool // set true to send isDevelopment; required because zero-value bool is ambiguous
 	DevelopmentOfStoreId string
@@ -6463,6 +6464,13 @@ func CreateStoreBuild(args CreateStoreArgs) string {
 		}
 		b.WriteString("ownerUserId: ")
 		b.WriteString(quoteMemQL(args.OwnerUserId))
+	}
+	if args.ScopesGranted != nil {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("scopesGranted: ")
+		b.WriteString(renderMemQLValue(args.ScopesGranted))
 	}
 	if args.IsDevelopmentSet {
 		if b.Len() > 21 {

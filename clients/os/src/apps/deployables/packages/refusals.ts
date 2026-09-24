@@ -92,7 +92,7 @@ const COPY: Record<string, RefusalCopy> = {
     // all. The title says what is true in both; the next line names the
     // repair, which is also the same in both.
     title: "This storefront's store was not attached",
-    next: "Connect a store on the deployable's Store panel. Until then it stays as it was: a draft that cannot go live, or still bound to the store it had.",
+    next: "Connect a store on the deployable's Store panel. The page can go live for design review; shopping needs a connected store. An existing binding is kept.",
   },
   deployable_hostname_unchosen: {
     // THE OTHER HALF, and a placement problem rather than a manifest one: the
@@ -524,19 +524,6 @@ const COPY: Record<string, RefusalCopy> = {
     // recording it is that a reader can tell it from a step that went missing.
     title: "You left this one out",
     next: "Nothing was built for it, and anything it already serves is untouched. Deploy it on its own whenever you want it.",
-  },
-
-  // -- the go-live rule (Connect Shopify, D5). NOT one of component/packages'
-  //    codes: component/memql/site_preview_rules.go refuses taking an
-  //    unconnected storefront live, and the OS withholds Go live on the same
-  //    answer -- so this meets somebody only when a stale page reached the
-  //    engine anyway. --
-
-  storefront_not_connected: {
-    // The server's sentence names the store, when there is one, and ends
-    // with the act that clears it, so the table adds only the headline.
-    title: "This storefront is not connected to a store",
-    next: "",
   },
 
   // -- the capability gate (epic memql#5289, task memql#5305). NOT one of

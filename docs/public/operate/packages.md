@@ -78,8 +78,8 @@ read, or one they may read without holding the store part -- does not refuse
 the deploy. A first deploy places the storefront as a **draft with no store**,
 and the run records a non-fatal `deployable_store_unknown` note saying so; a
 redeploy of a storefront that is already bound keeps the store it has. An
-unattached storefront cannot go live (`storefront_not_connected`) until a store
-is connected on its Store panel. Once a later deploy can attach the manifest's
+unattached storefront can go live for design review. Shopping requires a store
+connected on its Store panel. Once a later deploy can attach the manifest's
 store, it re-points the storefront to it.
 
 Two halves, and the asymmetry is deliberate:
@@ -258,7 +258,7 @@ somebody's mistake.
 | `deploy_failed` | Not a refusal -- a store or a storage call that broke mid-run. Nothing about the source was changed, and a new attempt is the way forward, because the timeline is append-only |
 | `deployable_account_refused` | The `accountId` half of a placement was refused by the account write's own guard. Recorded on that app's OUTCOME, **not fatal**: the site is live at its cluster address either way |
 | `deployable_domain_refused` | The `ownDomain` half was refused -- a hostname under the cluster's own domain, a collision, or the per-site cap. Recorded the same way, **not fatal** |
-| `deployable_store_unknown` | A storefront naming a store the caller may not attach: no row for it, a row they may not read, or one they may read without holding the store part. Recorded on that app's OUTCOME, **not fatal**: an unbound storefront is placed as a draft with no store, which cannot go live until a store is connected, and a bound one keeps its store. Decided at publish, because it is a cluster read the offline analysis does not make. One code for every case deliberately: separating them would answer "is this store on this cluster" for somebody outside the tier that decides who may look |
+| `deployable_store_unknown` | A storefront naming a store the caller may not attach: no row for it, a row they may not read, or one they may read without holding the store part. Recorded on that app's OUTCOME, **not fatal**: an unbound storefront is placed as a draft with no store, which may go live for design review before a store is connected, and a bound one keeps its store. Decided at publish, because it is a cluster read the offline analysis does not make. One code for every case deliberately: separating them would answer "is this store on this cluster" for somebody outside the tier that decides who may look |
 
 An **unknown `formatVersion` refuses** rather than parsing the subset it
 recognises, and so does an **unknown KEY**: `deployabels:` parses fine and

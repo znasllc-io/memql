@@ -158,7 +158,7 @@ func assertUnattachedNote(t *testing.T, outcomes []DeployableOutcome, named stri
 	if note.Code != CodeDeployableStoreUnknown {
 		t.Errorf("note code = %q, want %q", note.Code, CodeDeployableStoreUnknown)
 	}
-	for _, want := range []string{named, "not attached to a store", "cannot go live until a store is connected on its Store panel"} {
+	for _, want := range []string{named, "not attached to a store", "can go live for design review"} {
 		if !strings.Contains(note.Message, want) {
 			t.Errorf("the note does not say %q: %s", want, note.Message)
 		}

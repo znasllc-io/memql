@@ -175,6 +175,7 @@ func newConnectHarness(t *testing.T) *connectHarness {
 	storefront := newFakeStorefront(t)
 	logs := &bytes.Buffer{}
 	conn := NewConnector(engine, slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})), NewStoreRegistry(engine, nil), NewAdminClient())
+	conn.connectAppGate = func(context.Context, string) (func(), error) { return func() {}, nil }
 	conn.now = func() time.Time { return time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC) }
 	conn.storefrontEndpoint = func(domain, version string) (string, error) {
 		if _, err := StorefrontEndpoint(domain, version); err != nil {

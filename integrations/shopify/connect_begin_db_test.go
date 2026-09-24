@@ -38,6 +38,7 @@ func TestConnectBeginWritesTheStateAgainstARealEngine(t *testing.T) {
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano()%1_000_000_000)
 
 	conn := NewConnector(eng, slog.New(slog.DiscardHandler), NewStoreRegistry(eng, eng.ResolveSystemSecret), NewAdminClient())
+	conn.WithDatabase(func() *sql.DB { return raw })
 	if err := eng.RegisterIntegration(NewIntegration(conn)); err != nil {
 		t.Fatalf("register the shopify integration: %v", err)
 	}

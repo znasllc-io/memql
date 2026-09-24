@@ -798,9 +798,9 @@ describe("the compose flow: where each app will live", () => {
           status: "draft",
           canGoLive: false,
           goLiveRefusal: {
-            code: "storefront_not_connected",
-            message: "this storefront is not attached to a Shopify store, so it has no catalog to put in front of shoppers.",
-            remedy: "Connect Shopify on the Store panel.",
+            code: "serving_binding_is_development_store",
+            message: "This storefront is bound to a development store.",
+            remedy: "Bind a production store on the Store panel.",
           },
         } as never),
       },
@@ -1044,7 +1044,7 @@ describe("what the compose flow does not do", () => {
     const connection = fakeConnection({ credentials: [], githubApp: { configured: false, canSetup: true } });
     const { region } = await compose(connection);
     await chooseSource(region, /A repository/);
-    expect(await within(region).findByRole("button", { name: "Set up GitHub" })).toBeTruthy();
+    expect(await within(region).findByRole("img", { name: "GitHub setup needed" })).toBeTruthy();
     expect(forwardAct("Connect GitHub")).toBeNull();
     expect(forwardAct("Analyze")).toBeNull();
     expect(within(region).queryByRole("radio", { name: "A token" })).toBeNull();
@@ -1057,7 +1057,7 @@ describe("what the compose flow does not do", () => {
     const connection = fakeConnection({ credentials: [], githubApp: { configured: false, canSetup: false } });
     const { region } = await compose(connection, { role: "developer" });
     await chooseSource(region, /A repository/);
-    expect(await within(region).findByText(/Ask a cluster owner/)).toBeTruthy();
+    expect(await within(region).findByRole("img", { name: "GitHub setup needed" })).toBeTruthy();
     expect(forwardAct("Set up GitHub")).toBeNull();
     expect(forwardAct("Connect GitHub")).toBeNull();
     expect(forwardAct("Analyze")).toBeNull();
@@ -1072,7 +1072,7 @@ describe("what the compose flow does not do", () => {
     const { region } = await compose(connection);
     await chooseSource(region, /A repository/);
     expect(document.querySelector("[data-toast], .os-toast, dialog, [role='dialog']")).toBeNull();
-    expect(await within(region).findByRole("button", { name: "Add GitHub account" })).toBeTruthy();
+    expect(await within(region).findByRole("img", { name: "GitHub setup needed" })).toBeTruthy();
     expect(within(region).queryByRole("radio", { name: "A token" })).toBeNull();
     expect(within(region).queryByLabelText(URL_FIELD)).toBeNull();
     expect(within(region).queryByLabelText("The github.com access token")).toBeNull();

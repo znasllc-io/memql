@@ -3404,6 +3404,7 @@ export interface CreateStoreArgs {
   protectedDataLevel?: string;
   plan?: string;
   ownerUserId?: string;
+  scopesGranted?: string[];
   isDevelopment?: boolean;
   developmentOfStoreId?: string;
 }
@@ -3421,6 +3422,7 @@ export function buildCreateStore(args: CreateStoreArgs): string {
   if (args.protectedDataLevel !== undefined) parts.push("protectedDataLevel: " + renderMemQLValue(args.protectedDataLevel));
   if (args.plan !== undefined) parts.push("plan: " + renderMemQLValue(args.plan));
   if (args.ownerUserId !== undefined) parts.push("ownerUserId: " + renderMemQLValue(args.ownerUserId));
+  if (args.scopesGranted !== undefined) parts.push("scopesGranted: " + renderMemQLValue(args.scopesGranted));
   if (args.isDevelopment !== undefined) parts.push("isDevelopment: " + renderMemQLValue(args.isDevelopment));
   if (args.developmentOfStoreId !== undefined) parts.push("developmentOfStoreId: " + renderMemQLValue(args.developmentOfStoreId));
   return "mutation createStore(" + parts.join(", ") + ")";

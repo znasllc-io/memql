@@ -328,7 +328,6 @@ when the caller can read it.
 |---|---|---|
 | `preview_binding_is_not_development_store` | the preview binding names the store shoppers reach | point the preview binding at a development store -- Shopify marks one on the store row as `isDevelopment` |
 | `no_preview_binding` | a storefront has no development store on its preview binding, so there is nothing to exercise a candidate against | attach a development store to the preview binding |
-| `storefront_not_connected` | going live, or promoting, while the **serving** binding names no store, or names a store with no Storefront token. A storefront's first deploy lands as a draft with no store when the manifest's store could not be attached, and taking it live would put a shop with no catalog in front of shoppers | connect Shopify on the Store panel |
 | `serving_binding_is_development_store` | going live, or promoting, while the **serving** binding names a development store. It would serve a catalog nobody can buy from and take orders into a store that is not the merchant's -- and it would look like a successful launch while doing it | bind the storefront to the store shoppers reach. The development store stays on the preview binding |
 | `bound_store_unreadable` | the store a binding names cannot be read here, so whether it is a development store cannot be answered | have an operator who can read the store check the binding, or re-bind to a store you can read |
 | `candidate_is_serving_version` | the candidate named is the version already serving. There would be nothing to exercise, and promoting it would be a write that changes nothing while reading like a release | publish a new version and set that as the candidate |
@@ -336,21 +335,12 @@ when the caller can read it.
 | `candidate_moved` | the stored candidate is not the one the promotion named -- it changed after the page read it | reload the deployable, look at the candidate that is there now, and promote that |
 | `site_is_system_owned` | the platform's own site is exempt from this whole axis, as it is from the status axis and the settings axis | nothing. The platform's own site is deployed with the image and re-seeded at every boot, so a candidate written on it would silently undo itself |
 
-An unbound storefront is refused on both sides, under two codes, because the
-acts that clear them differ:
+An unbound storefront may go live for design review. This does not enable
+commerce: the storefront must present an unconnected state without inventing
+products or prices. A readable store without its Storefront token is also allowed.
 
-- **An unbound *serving* binding is refused going live** as
-  `storefront_not_connected`. A storefront's first deploy is a draft with no
-  store whenever the manifest's store could not be attached, so "unbound" is
-  not a page nobody has wired up yet: it is a deploy that succeeded with no
-  catalog behind it. The same code covers a bound store with no Storefront
-  token, because the edge would serve an empty token and the catalog would not
-  load. The token is judged last: an unreadable store and a development store
-  are refusals about *which* store is bound, which a token does not clear.
-- **An unbound *preview* binding is refused a preview** as `no_preview_binding`.
-  A preview asks "is there a development store to exercise against", and for an
-  unbound one the answer is no -- exercising it would fall back to no store at
-  all and report four observations of nothing.
+An unbound **preview** binding is refused as `no_preview_binding`: the commerce
+checklist needs a development store against which to exercise cart and checkout.
 
 **An unreadable store refuses; it does not default.** `bound_store_unreadable`
 is a third state, not a synonym for "not a development store". Reading an

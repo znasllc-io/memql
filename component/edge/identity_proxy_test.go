@@ -219,3 +219,25 @@ func TestIdentityXHRForwardsRefreshCookieToIdentity(t *testing.T) {
 		t.Errorf("identity did not see memql_session; Cookie=%q", sawCookie)
 	}
 }
+
+func TestShopifyCompletionProxiesSessionAndSignedQuery(t *testing.T) {
+	raw := "state=s&hmac=h&extra=a%2Bb&extra=x%20y"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cookie, err := r.Cookie("memql_refresh")
+		if err != nil || cookie.Value != "session" || r.URL.RawQuery != raw || r.URL.Path != "/auth/shopify/complete" {
+			t.Error("Shopify completion lost its session or signed parameters")
+		}
+		w.Header().Set("Location", "https://os.example.test/?shopify=connected&site=s1")
+		w.WriteHeader(http.StatusSeeOther)
+	}))
+	defer upstream.Close()
+	h := NewHandler(Options{Resolver: staticResolver{site: spaSite()}, Opener: mapOpener(map[string]string{"index.html": "SPA"}), IdentityTarget: upstream.URL})
+	req := httptest.NewRequest("GET", "/auth/shopify/complete?"+raw, nil)
+	req.Host = "shop.example.com"
+	req.AddCookie(&http.Cookie{Name: "memql_refresh", Value: "session"})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("completion returned %d, want identity redirect", rec.Code)
+	}
+}

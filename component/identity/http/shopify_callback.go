@@ -68,7 +68,30 @@ const shopifyStoreTargetType = "shopifyStore"
 // maxLoggedShopLength bounds an unverified `shop` in a log line.
 const maxLoggedShopLength = 255
 
+// handleShopifyReturn relays the signed callback to the OS host, whose
+// host-only refresh cookie binds the original browser session. Preserve every
+// signed query parameter; filtering provider fields would invalidate the HMAC.
+func (s *Server) handleShopifyReturn(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSecureRequest(w, r) {
+		return
+	}
+	if s.ShopifyConnect == nil || s.Store == nil {
+		http.NotFound(w, r)
+		return
+	}
+	origin := s.osOrigin(r)
+	if origin == "" {
+		http.Error(w, "OS origin unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	http.Redirect(w, r, origin+"/auth/shopify/complete?"+r.URL.RawQuery, http.StatusSeeOther)
+}
+
 func (s *Server) handleShopifyCallback(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Referrer-Policy", "no-referrer")
 	// 1.
 	if !s.requireSecureRequest(w, r) {
 		return

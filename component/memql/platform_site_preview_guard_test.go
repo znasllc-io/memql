@@ -476,9 +476,8 @@ func TestGoingLiveIsJudgedAgainstTheBindingTheWriteLeavesBehind(t *testing.T) {
 		t.Fatalf("detaching the store and going live reached for store %q -- the guard is judging "+
 			"the stored binding rather than the one the write leaves behind", storeId)
 	}
-	if detach == nil || !strings.Contains(detach.Error(), PreviewRefusalStorefrontNotConnected) {
-		t.Fatalf("detaching the store and going live in one delta was not refused as %s: %v",
-			PreviewRefusalStorefrontNotConnected, detach)
+	if detach != nil {
+		t.Fatalf("detached design review refused: %v", detach)
 	}
 
 	// THE REACHABLE NEGATIVE: with no binding key in the delta, the STORED one
@@ -523,7 +522,7 @@ func TestANonStorefrontGoingLiveReadsNoStore(t *testing.T) {
 // A creation directly at live with no binding is the same act, and so is a
 // promotion on an unattached storefront. The spa beside them is the negative
 // control: the rule is about storefronts.
-func TestAnUnattachedStorefrontMayNotGoLive(t *testing.T) {
+func TestAnUnattachedStorefrontMayGoLiveForDesignReview(t *testing.T) {
 	for name, d := range map[string]previewGuardDelta{
 		"a draft going live": {
 			priorExisted: true, priorStatus: "draft", priorKind: storefrontSiteKind,
@@ -544,8 +543,8 @@ func TestAnUnattachedStorefrontMayNotGoLive(t *testing.T) {
 			if storeId, reached := storeReadRefusal(err); reached {
 				t.Fatalf("an unattached storefront reached for store %q", storeId)
 			}
-			if err == nil || !strings.Contains(err.Error(), PreviewRefusalStorefrontNotConnected) {
-				t.Fatalf("want %s, got %v", PreviewRefusalStorefrontNotConnected, err)
+			if err != nil {
+				t.Fatalf("unattached design review refused: %v", err)
 			}
 		})
 	}
@@ -577,9 +576,8 @@ func TestTurningALiveSiteIntoAStorefrontIsGoingLive(t *testing.T) {
 	}
 
 	err := runPreviewGuard(t, flip(""))
-	if err == nil || !strings.Contains(err.Error(), PreviewRefusalStorefrontNotConnected) {
-		t.Fatalf("a live spa turned into an unattached storefront: want %s, got %v",
-			PreviewRefusalStorefrontNotConnected, err)
+	if err != nil {
+		t.Fatalf("unattached design review refused: %v", err)
 	}
 	if storeId, reached := storeReadRefusal(runPreviewGuard(t, flip("acme-dev"))); !reached || storeId != "acme-dev" {
 		t.Fatalf("a live spa turned into a storefront bound to acme-dev was not judged against it (reached=%v, store=%q)", reached, storeId)
