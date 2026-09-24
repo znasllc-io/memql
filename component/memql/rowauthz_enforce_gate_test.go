@@ -268,6 +268,7 @@ var tierDecidesTheRead = map[string]string{
 	"packagesArchived":                  "memql#5303, as packagesAll.",
 	"packageById":                       "memql#5303, as packagesAll -- and the by-id read every packages builtin (packageDeploy among them) resolves its target through under the caller's actor.",
 	"packageDeployments":                "memql#5303, D4 / D12, as sitesAll over v1:platform:packageDeployment, whose account is copied from its package at open.",
+	"packageDeploymentsPending":         "memql#5598: the mandatory organization and app boundary scopes pending runs, including shared organization work; creator-only filtering would hide resumable runs from authorized peers.",
 	"packageDeploymentsAwaitingConfirm": "memql#5303, as packageDeployments.",
 	"packageDeploymentById":             "memql#5303, as packageDeployments -- the confirm gate's read.",
 	"packageDeploymentsInFlight":        "memql#5303, as packageDeployments -- the abandoned sweep's read, under the maintenance actor the clusterOwner arm admits.",
