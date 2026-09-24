@@ -113,17 +113,26 @@ func (e *MemQLEngine) validateSiteStoreBinding(
 		// created before its store is attached, and a store can be detached.
 		return nil
 	}
+	return requireReadableStore(ctx, storeId, actor, "bind this storefront to", readable)
+}
+
+// requireReadableStore refuses a store the caller cannot read. Shared by the
+// serving binding and the preview binding: both name a store, and the edge
+// serves the Storefront token of either (the preview one under a preview
+// grant) under the site's own hostname. `act` names which of the two was
+// refused, so the refusal says what the caller tried to do.
+func requireReadableStore(ctx context.Context, storeId, actor, act string, readable storeReadable) error {
 	if readable == nil {
 		return fmt.Errorf("v1:platform:site: cannot check that %q is readable -- no store reader is wired", storeId)
 	}
 	ok, err := readable(ctx, storeId)
 	if err != nil {
-		return fmt.Errorf("v1:platform:site: could not read v1:shopify:store %q to bind it: %w", storeId, err)
+		return fmt.Errorf("v1:platform:site: could not read v1:shopify:store %q to %s it: %w", storeId, strings.TrimSuffix(act, " to"), err)
 	}
 	if !ok {
 		return fmt.Errorf(
-			"v1:platform:site: %q may not bind this storefront to v1:shopify:store %q -- it is not a store this caller can read. A store is cluster-owner-tier; binding a storefront to one you cannot read would publish that store's Storefront token under your own hostname.",
-			actor, storeId,
+			"v1:platform:site: %q may not %s v1:shopify:store %q -- it is not a store this caller can read. A store is cluster-owner-tier; binding a storefront to one you cannot read would publish that store's Storefront token under your own hostname.",
+			actor, act, storeId,
 		)
 	}
 	return nil
@@ -160,13 +169,62 @@ var storeBindingCapability = CapabilityRequirement{Verb: "execute", Resource: "a
 // change this check judges, because detaching names no store (the
 // organization boundary still asks for the part at the site's organization).
 func (e *MemQLEngine) validateSiteStoreBindingChange(ctx context.Context, payload map[string]any, priorStoreId string) error {
-	binding, _ := payload["binding"].(map[string]any)
-	storeId := strings.TrimSpace(stringFromAny(binding[bindingStoreIdKey]))
-	if storeId == "" || storeId == strings.TrimSpace(priorStoreId) {
+	storeId := changedStoreId(payload, "binding", priorStoreId)
+	if storeId == "" {
 		return nil
 	}
 	return e.refuseBelowRequiredCapability(ctx, &Function{RequiresCapability: storeBindingCapability},
 		"binding a storefront to v1:shopify:store "+storeId)
+}
+
+// validateSitePreviewBindingChange gives the PREVIEW binding the serving
+// binding's two checks, on a write that changes it: the caller must be able to
+// read the store it names, and must hold the store part (Connect Shopify 009).
+//
+// The preview guard reads the store too, but as the deployment, to learn
+// whether it is a development store -- a fact that answers the same for every
+// caller, so it never said whether THIS caller could read it. And
+// updateSitePreviewBinding's own @requiresCapability is never met by a raw
+// insert(), which names no construct. So both checks are asked here, at the
+// seam every write passes.
+//
+// The organization boundary (memql#5598, validateOrganizationSensitiveChanges)
+// asks for the store part at the site's ORGANIZATION too, and nothing there
+// asks whether the caller can read the store. As with the serving binding,
+// neither check here depends on the boundary.
+//
+// Both judge only a CHANGE, against the prior preview binding, for
+// validateSiteStoreBindingChange's reason: the payload is the merged row, and
+// re-judging an inherited binding would refuse the site owner's own rename
+// because a cluster owner once pointed the preview at a store they cannot read.
+// Clearing names no store, so neither check judges it (the organization
+// boundary still asks for the part at the site's organization).
+func (e *MemQLEngine) validateSitePreviewBindingChange(
+	ctx context.Context,
+	payload map[string]any,
+	priorStoreId string,
+	actor string,
+	readable storeReadable,
+) error {
+	storeId := changedStoreId(payload, "previewBinding", priorStoreId)
+	if storeId == "" {
+		return nil
+	}
+	if err := requireReadableStore(ctx, storeId, actor, "point this storefront's preview at", readable); err != nil {
+		return err
+	}
+	return e.refuseBelowRequiredCapability(ctx, &Function{RequiresCapability: storeBindingCapability},
+		"pointing a storefront's preview at v1:shopify:store "+storeId)
+}
+
+// changedStoreId is the store a write moves a {storeId} reference field TO, or
+// "" when it moves it nowhere: absent, cleared, or the prior row's value.
+func changedStoreId(payload map[string]any, field, priorStoreId string) string {
+	storeId, _ := previewBindingStoreIdFrom(payload, field)
+	if storeId == strings.TrimSpace(priorStoreId) {
+		return ""
+	}
+	return storeId
 }
 
 // canReadStore is the engine's own reader: the named query, under the CALLER's

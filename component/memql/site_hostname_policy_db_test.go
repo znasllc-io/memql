@@ -650,7 +650,8 @@ func TestSiteCreateAcceptsAShopifyStorefrontWithItsBinding(t *testing.T) {
 // store" would demand the store part for a settings edit or a publish. The
 // site is the developer's own, created unbound, and then bound by server code
 // -- the only way to hand a developer a bound site before the store part is
-// seeded on developer.
+// seeded on developer. Both bindings: the serving one and the preview one
+// (Connect Shopify 009), which names a store the same way.
 func TestAWriteThatKeepsTheBindingNeedsNoStorePart(t *testing.T) {
 	eng, _, _ := sharedReadMergeEngine(t)
 	t.Setenv(memqlDomainEnv, siteTestDomain)
@@ -684,12 +685,19 @@ func TestAWriteThatKeepsTheBindingNeedsNoStorePart(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("bind it as server code: %v", err)
 	}
+	devStore := seedStore(t, eng, "store-dev-"+suffix, true)
+	if _, err := runSiteMutation(t, auth.ContextWithInternalOrigin(systemSiteCtx()), eng, "updateSitePreviewBinding", map[string]any{
+		"siteId":  siteId,
+		"storeId": devStore,
+	}); err != nil {
+		t.Fatalf("point its preview as server code: %v", err)
+	}
 
 	if _, err := runSiteMutation(t, devCtx, eng, "updateSiteSettings", map[string]any{
 		"siteId":   siteId,
 		"settings": map[string]any{"theme": "dark"},
 	}); err != nil {
-		t.Fatalf("a settings edit on a site whose binding it does not touch was refused: %v", err)
+		t.Fatalf("a settings edit on a site whose bindings it does not touch was refused: %v", err)
 	}
 
 	// Re-pointing it is a change, and a raw insert names no construct, so the
@@ -701,12 +709,163 @@ func TestAWriteThatKeepsTheBindingNeedsNoStorePart(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed second store: %v", err)
 	}
-	b, _ := json.Marshal(map[string]any{"binding": map[string]any{"storeId": other}})
-	q := fmt.Sprintf(`insert(%s, id=%s, payload=%s)`,
-		langparser.QuoteString("v1:platform:site"), langparser.QuoteString(siteId), string(b))
-	if _, err := eng.Execute(devCtx, q); err == nil {
+	if err := rawSiteWrite(devCtx, eng, siteId, map[string]any{"binding": map[string]any{"storeId": other}}); err == nil {
 		t.Fatal("a raw insert re-pointed a storefront's binding without the store part")
 	} else if !strings.Contains(err.Error(), CodeCapabilityNotHeld) {
 		t.Errorf("the refusal is not the capability refusal: %v", err)
 	}
+
+	// The preview binding is the same: re-pointing it is a change. (Clearing
+	// is judged by neither of this seam's checks, but the organization
+	// boundary asks the store part for it too, which this developer lacks at
+	// the site's organization; TestAPreviewBindingNeedsAStoreTheCallerCanRead
+	// clears as a caller the boundary admits.)
+	otherDev := seedStore(t, eng, "store-dev-other-"+suffix, true)
+	if err := rawSiteWrite(devCtx, eng, siteId, map[string]any{"previewBinding": map[string]any{"storeId": otherDev}}); err == nil {
+		t.Fatal("a raw insert re-pointed a storefront's preview binding without the store part")
+	} else if !strings.Contains(err.Error(), CodeCapabilityNotHeld) {
+		t.Errorf("the refusal is not the capability refusal: %v", err)
+	}
+}
+
+// TestAPreviewBindingNeedsAStoreTheCallerCanRead is the serving binding's
+// readability rule, held on the preview binding (Connect Shopify 009). The
+// preview guard reads the store as the deployment to learn whether it is a
+// development store, which answers for every caller, so it never asked whether
+// THIS caller could read it -- and a raw insert() meets no construct's
+// capability. A writer sits below v1:shopify:store's developer read floor.
+// The writer is a member of the site's organization and holds the store part
+// there, so the organization boundary (memql#5598) admits the write and the
+// refusal can only be the readability one.
+func TestAPreviewBindingNeedsAStoreTheCallerCanRead(t *testing.T) {
+	eng, _, _ := sharedReadMergeEngine(t)
+	t.Setenv(memqlDomainEnv, siteTestDomain)
+
+	suffix := uniqueSuffix("previewread")
+	storeId := seedStore(t, eng, "store-dev-"+suffix, true)
+	installSiteOrganizationCapabilities(t, auth.VerbResource{Verb: storeBindingCapability.Verb, Resource: storeBindingCapability.Resource})
+	writer := "user-previewread-" + suffix
+	accountId := "account-previewread-" + suffix
+	writerCtx := siteOrganizationMemberCtx(t, eng, writer, accountId)
+	siteId := "site-previewread-" + suffix
+	if _, err := createSiteRaw(t, writerCtx, eng, map[string]any{
+		"siteId":    siteId,
+		"accountId": accountId,
+		"hostname":  "previewread-" + suffix + "." + siteTestDomain,
+		"kind":      "shopify_storefront",
+		"bundleRef": "blob://sites/" + siteId + "/v1/",
+	}); err != nil {
+		t.Fatalf("the writer's storefront: %v", err)
+	}
+
+	err := rawSiteWrite(writerCtx, eng, siteId, map[string]any{"previewBinding": map[string]any{"storeId": storeId}})
+	if err == nil {
+		t.Fatal("a writer pointed their storefront's preview at a store they cannot read")
+	}
+	if !strings.Contains(err.Error(), storeId) || !strings.Contains(err.Error(), "not a store this caller can read") {
+		t.Errorf("the refusal is not the readability refusal naming the store: %v", err)
+	}
+
+	// Only the CHANGE is judged. Once a cluster owner has pointed the preview,
+	// the writer's own later writes inherit it through the read-merge, and
+	// re-judging it would lock them out of their own site.
+	if err := rawSiteWrite(auth.ContextWithInternalOrigin(systemSiteCtx()), eng, siteId,
+		map[string]any{"previewBinding": map[string]any{"storeId": storeId}}); err != nil {
+		t.Fatalf("point the preview as the deployment: %v", err)
+	}
+	if err := rawSiteWrite(writerCtx, eng, siteId, map[string]any{"title": "renamed"}); err != nil {
+		t.Fatalf("a rename that keeps the preview binding was refused: %v", err)
+	}
+	// And clearing it names no store, so the writer who could not have set it
+	// can still take it off their own site.
+	if err := rawSiteWrite(writerCtx, eng, siteId, map[string]any{"previewBinding": map[string]any{"storeId": ""}}); err != nil {
+		t.Fatalf("clearing the preview binding was refused: %v", err)
+	}
+}
+
+// TestAPreviewBindingChangeHonoursADenyOfTheStorePart holds the store part on
+// the preview binding at the write seam, where a raw insert() meets it
+// (Connect Shopify 009). The catalog gives developer the part, as the next PR
+// seeds it, so the refusal is the per-person DENY and not the role: the
+// developer without one, on the same catalog, is the control.
+//
+// The organization boundary (memql#5598) honours the same deny and refuses
+// the raw write before this seam's check is reached, so the check is also
+// asked directly: it does not depend on the boundary.
+func TestAPreviewBindingChangeHonoursADenyOfTheStorePart(t *testing.T) {
+	eng, _, _ := sharedReadMergeEngine(t)
+	t.Setenv(memqlDomainEnv, siteTestDomain)
+	storePart := auth.VerbResource{Verb: storeBindingCapability.Verb, Resource: storeBindingCapability.Resource}
+	installSiteOrganizationCapabilities(t, storePart)
+	eng.InstallGrantResolution()
+	t.Cleanup(func() {
+		auth.SetGrantSource(nil)
+		auth.SetMembershipSource(nil)
+	})
+
+	suffix := uniqueSuffix("previewdeny")
+	storeId := seedStore(t, eng, "store-dev-"+suffix, true)
+	previewAs := func(dev string) error {
+		seedPrincipal(t, eng, dev, auth.RoleDeveloper)
+		ctx := userSiteCtx(dev)
+		siteId := "site-" + dev
+		if _, err := createSiteRaw(t, ctx, eng, map[string]any{
+			"siteId":    siteId,
+			"hostname":  dev + "." + siteTestDomain,
+			"kind":      "shopify_storefront",
+			"bundleRef": "blob://sites/" + siteId + "/v1/",
+		}); err != nil {
+			t.Fatalf("%s's storefront: %v", dev, err)
+		}
+		return rawSiteWrite(ctx, eng, siteId, map[string]any{"previewBinding": map[string]any{"storeId": storeId}})
+	}
+
+	if err := previewAs("allowed-" + suffix); err != nil {
+		t.Fatalf("a developer holding the store part was refused a preview binding: %v", err)
+	}
+	denied := "denied-" + suffix
+	writeGrant(t, eng, auth.SubjectKindUser, denied, storePart.Verb, storePart.Resource, auth.GrantDeny)
+	if err := previewAs(denied); err == nil {
+		t.Fatal("a raw insert pointed a preview binding for a developer denied the store part")
+	} else if !strings.Contains(err.Error(), CodeCapabilityNotHeld) {
+		t.Errorf("the refusal is not the capability refusal: %v", err)
+	}
+
+	seamAs := func(dev string) error {
+		return eng.validateSitePreviewBindingChange(userSiteCtx(dev),
+			map[string]any{"previewBinding": map[string]any{"storeId": storeId}}, "", dev, eng.canReadStore)
+	}
+	if err := seamAs("allowed-" + suffix); err != nil {
+		t.Fatalf("the seam refused a developer holding the store part: %v", err)
+	}
+	if err := seamAs(denied); err == nil {
+		t.Fatal("the seam admitted a developer denied the store part")
+	} else if !strings.Contains(err.Error(), CodeCapabilityNotHeld) {
+		t.Errorf("the seam's refusal is not the capability refusal: %v", err)
+	}
+}
+
+// seedStore registers a v1:shopify:store the way a cluster owner does.
+func seedStore(t *testing.T, eng *MemQLEngine, storeId string, development bool) string {
+	t.Helper()
+	if _, err := runSiteMutation(t, systemSiteCtx(), eng, "createStore", map[string]any{
+		"storeId":       storeId,
+		"domain":        storeId + ".myshopify.com",
+		"isDevelopment": development,
+	}); err != nil {
+		t.Fatalf("seed store %s: %v", storeId, err)
+	}
+	return storeId
+}
+
+// rawSiteWrite is a raw insert() onto a site id: the path that names no
+// construct, so no construct's @requiresCapability is asked.
+func rawSiteWrite(ctx context.Context, eng *MemQLEngine, siteId string, payload map[string]any) error {
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	_, err = eng.Execute(ctx, fmt.Sprintf(`insert(%s, id=%s, payload=%s)`,
+		langparser.QuoteString(conceptPlatformSite), langparser.QuoteString(siteId), string(b)))
+	return err
 }

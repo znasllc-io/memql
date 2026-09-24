@@ -112,6 +112,10 @@ type writeMeta struct {
 	priorBundleRef      string
 	priorCandidateRef   string
 	priorBindingStoreId string
+	// priorPreviewBindingStoreId is previewBinding.storeId, for the same
+	// reason: a CHANGE of the preview store is what the store part and the
+	// readability check judge (Connect Shopify 009).
+	priorPreviewBindingStoreId string
 	// priorKind is v1:platform:site.kind, which decides whether the go-live
 	// guard has a question to ask at all -- an spa or a static site has no
 	// store binding and is never refused by it.
@@ -920,6 +924,9 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			if b, ok := priorPayload["binding"].(map[string]any); ok {
 				meta.priorBindingStoreId = stringFromAny(b[bindingStoreIdKey])
 			}
+			if b, ok := priorPayload["previewBinding"].(map[string]any); ok {
+				meta.priorPreviewBindingStoreId = stringFromAny(b[bindingStoreIdKey])
+			}
 			// Capture the PRIOR client domain (epic memql#5165) for the
 			// reason above it: the walk's reset is a comparison against
 			// the stored value, which the merged payload has already
@@ -1397,10 +1404,15 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		if err := e.validateSiteStoreBindingChange(ctx, payload, meta.priorBindingStoreId); err != nil {
 			return nil, meta, err
 		}
+		// The preview binding names a store too, and gets both checks above --
+		// on a change only, for the same merged-payload reason.
+		if err := e.validateSitePreviewBindingChange(ctx, payload, meta.priorPreviewBindingStoreId, actor, e.canReadStore); err != nil {
+			return nil, meta, err
+		}
 		// The candidate version, the preview binding and the go-live guard
-		// (epic memql#5531), beside the five above and for their reason: every
+		// (epic memql#5531), beside the checks above and for their reason: every
 		// rule it carries is a comparison against the PRIOR row or against a
-		// DIFFERENT row, and a mutation body can make neither. LAST of the six,
+		// DIFFERENT row, and a mutation body can make neither. LAST of them,
 		// deliberately -- it is the only one that reads a second concept, and
 		// it short-circuits before that read when the write touches none of its
 		// fields, which is every ordinary publish, rename and settings edit.

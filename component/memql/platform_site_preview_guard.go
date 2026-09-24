@@ -44,9 +44,9 @@ import (
 // here is not the caller's: it is "is this cluster about to point a storefront
 // at a development store", a fact about the deployment. The caller's own
 // authority was already settled twice over -- @requiresCapability names the
-// surface, and platform_site_binding_guard.go refuses a binding naming a store
-// the CALLER cannot read, so a binding this guard judges was set by somebody
-// who could see it.
+// surface, and platform_site_binding_guard.go refuses a binding -- serving or
+// preview -- naming a store the CALLER cannot read, so a binding this guard
+// judges was set by somebody who could see it.
 //
 // It mirrors component/edge exactly, which resolves the same row under the same
 // kind of synthetic operator for the same reason.
