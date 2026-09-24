@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Concepts } from "@znasllc-io/memql-sdk-core/client";
-import { ExternalLink } from "lucide-react";
+import { Activity, ExternalLink } from "lucide-react";
 
 import { Button, Caption, Chip, Chips, Head, Input, Panel, useLiveView } from "../../../kit";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
@@ -25,7 +25,7 @@ import { TrafficPanel } from "./stops/Traffic";
 import "../composition.css";
 import { railFor, refusalStopFor, type RailStage, type StandingInput } from "./rail";
 import { BuildStop } from "./stops/Build";
-import { LiveStop } from "./stops/Live";
+import { IconButton } from "../../../kit/IconButton";
 import { SourceStop } from "./stops/Source";
 import { WhatItIsStop } from "./stops/WhatItIs";
 import { WhereItLivesStop } from "./stops/WhereItLives";
@@ -83,8 +83,6 @@ export interface DeployablePageProps {
   backLabel?: string;
   /** Opens the source's own view. */
   onOpenSource: (packageId: string) => void;
-  /** Opens the source's history view. */
-  onOpenHistory: (packageId: string) => void;
   /** True while this deployable's delete is still tearing its domains down. */
   deleting?: boolean;
   /**
@@ -106,7 +104,6 @@ export function DeployablePage({
   onBack,
   backLabel = "Deployables",
   onOpenSource,
-  onOpenHistory,
   deleting = false,
   onDeleted,
 }: DeployablePageProps) {
@@ -324,8 +321,6 @@ export function DeployablePage({
         );
       case "build":
         return <BuildStop run={run} app={site.packageDeployableName} refusal={refusal} />;
-      case "live":
-        return <LiveStop site={site} canPublish={can.publish} lifecycle={lifecycle} refusal={refusal} includeConfiguration={false} />;
       default:
         return null;
     }
@@ -392,6 +387,7 @@ export function DeployablePage({
               </a>
             )}
             <OpenLogsButton iconOnly subject={site.id} subjectConcept={Concepts.PLATFORM_SITE} ariaLabel={`Logs for ${name}`} />
+            <IconButton label="Traffic" onClick={() => setDetail("traffic")}><Activity size={16} aria-hidden /></IconButton>
           </Head>
 
           <Chips label="Deployable facts">
@@ -432,7 +428,7 @@ export function DeployablePage({
             timelineState={deployments?.snapshot.state ?? "disconnected"}
             timelineError={deployments?.snapshot.error ?? ""} onRetryRead={reseed}
             onInspect={setDetail} onOpenSource={() => pkg && onOpenSource(pkg.id)}
-            onHistory={() => pkg ? onOpenHistory(pkg.id) : setDetail("live")}
+            lifecycle={lifecycle}
           />
 
           {/* A refusal renders IN SURFACE, beside the rail -- never a toast,
@@ -588,5 +584,5 @@ function newestFirst(rows: DeploymentRow[]): DeploymentRow[] {
 // both take the pane and draw their own Head, and an entry here would be a
 // second title for a surface that already has one.
 function detailTitle(detail: WorkspaceDetail): string {
-  return { source: "Source", whatItIs: "App and deployment plan", whereItLives: "Addresses and client", build: "Build", live: "Versions", runtime: "App values", traffic: "Traffic", store: "Store" }[detail];
+  return { source: "Source", whatItIs: "App and deployment plan", whereItLives: "Addresses and client", build: "Build", runtime: "App values", traffic: "Traffic", store: "Store" }[detail];
 }

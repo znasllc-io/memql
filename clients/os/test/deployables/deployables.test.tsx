@@ -112,7 +112,7 @@ async function open(hostname: string): Promise<HTMLElement> {
 async function openStop(page: HTMLElement, label: string): Promise<void> {
   const dialog = screen.queryByRole("dialog");
   if (dialog) await click(within(dialog).getByRole("button", { name: /^Close / }));
-  const selector = { Source: ".deployable-source-piece", "What it is": ".deployable-piece-chip", "Where it lives": ".deployable-slot", Build: ".deployable-version-row:last-of-type button", Live: ".deployable-version-row button" }[label];
+  const selector = { Source: ".deployable-source-piece", "What it is": ".deployable-piece-chip", "Where it lives": ".deployable-slot", Build: ".deployable-version-row:last-of-type button",  }[label];
   if (!selector) throw new Error(`no detail named ${label}`);
   await click(page.querySelector(selector));
 }
@@ -408,7 +408,7 @@ describe("the Head's action, by state", () => {
     // action at all here -- a run could only end by finishing or by dying.
     expect(barState(page)).toBe("Building");
     expect(barActs(page)).toEqual(["Cancel"]);
-    expect(within(page).getAllByText("Unknown").length).toBeGreaterThan(0);
+    expect(within(page).getByRole("button", { name: "Version v2, current" })).toBeTruthy();
     expect(within(page).getAllByText("Building")[0]).toBeTruthy();
   });
 
@@ -932,25 +932,45 @@ describe("Where it lives", () => {
 // ---------------------------------------------------------------------------
 
 describe("the Live stop", () => {
-  it("reports availability, walks the versions on demand, and rolls back to one", async () => {
+  it("lists distinct versions automatically, marks the current bundle, and rolls back from a version row", async () => {
     const history = [
       { ...STORE, bundleRef: "blob://sites/site-store/v2/", createdAt: "2026-09-01T12:01:00Z" },
+      { ...STORE, bundleRef: "blob://sites/site-store/v2/", createdAt: "2026-09-01T12:00:00Z" },
       { ...STORE, bundleRef: "blob://sites/site-store/v1/", createdAt: "2026-08-20T12:00:00Z" },
     ];
     const { connection, page } = await mountAndOpen({ ...WITH_PACKAGE, siteHistory: history }, "store.memql.example.com");
-    await openStop(page, "Live");
-    expect(within(page).getByText("Last website check")).toBeTruthy();
-    // Loaded on DEMAND: nothing walked until asked.
-    expect(connection.callsNamed("siteById")).toHaveLength(0);
-    await click(within(page).getByRole("button", { name: /Show the last 6/ }));
-    expect(await within(page).findByText("published version")).toBeTruthy();
-    expect(within(page).getByText("v1")).toBeTruthy();
+    const versions = within(page).getByRole("list", { name: "Versions" });
+    const previous = await within(versions).findByRole("button", { name: "Version v1, available" });
+    expect(within(versions).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(versions).getByRole("button", { name: "Version v2, current" })).toBeTruthy();
     expect(connection.calls.filter((c) => c.startsWith("asOf(siteById(")).length).toBeGreaterThan(0);
-
-    await click(within(page).getByRole("button", { name: /Roll store\.memql\.example\.com back/ }));
+    expect(within(page).queryByRole("button", { name: /Version history|Stored version details/ })).toBeNull();
+    await click(previous);
+    await click(screen.getByRole("button", { name: "Roll store.memql.example.com back to v1" }));
     expect(connection.callsNamed("updateSiteBundle")).toEqual([
       'mutation updateSiteBundle(siteId: "site-store", bundleRef: "blob://sites/site-store/v1/")',
     ]);
+  });
+
+  it("labels built-in bundles honestly and keeps Traffic immediately after Logs", async () => {
+    const { connection, page } = await mountAndOpen({ sites: [PLATFORM_SITE] }, String(PLATFORM_SITE.hostname));
+    const versions = within(page).getByRole("list", { name: "Versions" });
+    expect(within(versions).getByRole("button", { name: "Version Bundled with MemQL, current" })).toBeTruthy();
+    expect(within(versions).getByText("No separate version number is recorded")).toBeTruthy();
+    expect(connection.callsNamed("siteById")).toHaveLength(0);
+    const logs = within(page).getByRole("button", { name: /^Logs for / });
+    const traffic = within(page).getByRole("button", { name: "Traffic" });
+    expect(logs.nextElementSibling).toBe(traffic);
+    await click(traffic);
+    expect(await screen.findByRole("dialog", { name: "Traffic" })).toBeTruthy();
+  });
+
+  it("keeps history readable without publication permission", async () => {
+    const history = [{ ...STORE, bundleRef: "blob://sites/site-store/v1/", createdAt: "2026-08-20T12:00:00Z" }];
+    const { page } = await mountAndOpen({ ...WITH_PACKAGE, siteHistory: history }, "store.memql.example.com", { role: "user" });
+    const versions = within(page).getByRole("list", { name: "Versions" });
+    await click(await within(versions).findByRole("button", { name: "Version v1, available" }));
+    expect(screen.queryByRole("button", { name: /^Roll .* back/ })).toBeNull();
   });
 
   it("takes a live deployable offline from the BAR, and offers no Archive until it is offline", async () => {
@@ -1515,17 +1535,13 @@ describe("apps it produces", () => {
 });
 
 
-describe("composition history scope", () => {
-  it("starts at this app's history and provides an explicit route to every source attempt", async () => {
+describe("source history remains available", () => {
+  it("opens all source attempts from the source after removing the version history shortcut", async () => {
     const sibling=run({id:"dep-admin",sourceVersion:"aaaaaaaaaaaa",scopedTo:["admin"],deployables:[],status:"failed"});
-    const whole=run({id:"dep-whole",sourceVersion:"bbbbbbbbbbbb",status:"abandoned",snapshotArtifactId:"snapshot",scopedTo:[]});
-    const {page}=await mountAndOpen({...WITH_PACKAGE,deployments:{"pkg-acme":[sibling,whole,SUCCEEDED]}},"store.memql.example.com");
-    await click(within(page).getByRole("button",{name:"Deployment history"}));
-    const history=await screen.findByRole("region",{name:/History of/});
-    expect(within(history).queryByText("aaaaaaaaaaaa")).toBeNull();
-    expect(within(history).queryByRole("button",{name:/Retry the run/})).toBeNull();
-    await click(within(history).getByRole("button",{name:"All source attempts"}));
-    expect(await screen.findByRole("button",{name:/Retry the run/})).toBeTruthy();
+    const {page}=await mountAndOpen({...WITH_PACKAGE,deployments:{"pkg-acme":[sibling,SUCCEEDED]}},"store.memql.example.com");
+    expect(within(page).queryByRole("button",{name:"Deployment history"})).toBeNull();
+    const history = await openHistoryView(await openSourceView(page));
+    expect(within(history).getByText("aaaaaaaaaaaa")).toBeTruthy();
   });
 });
 
@@ -1549,6 +1565,6 @@ describe("observed availability reaches every retained view", () => {
     await click(row);
     const page = await screen.findByRole("region", {name:`Deployable ${PLATFORM_SITE.hostname}`});
     expect(barState(page)).toBe(word);
-    expect(within(page).getByText(new RegExp(state === "reachable" ? "Website answered successfully" : "Website returned HTTP 404"))).toBeTruthy();
+    expect(within(within(page).getByRole("list", { name: "Versions" })).queryByText(/Website answered|Website returned/)).toBeNull();
   });
 });

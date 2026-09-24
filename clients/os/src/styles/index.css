@@ -6478,49 +6478,6 @@ a.os-button {
   min-width: 0;
 }
 
-/* ---- the version list -------------------------------------------------- */
-
-.os-versions {
-  display: grid;
-  gap: 4px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.os-version {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  padding: 6px 9px;
-  border-radius: var(--os-radius-xs);
-  background: var(--os-plate);
-  border: 1px solid var(--os-line);
-  font-size: var(--os-text-xs);
-}
-.os-version[data-current="true"] {
-  border-color: var(--os-accent);
-}
-
-.os-version-when {
-  color: var(--os-muted);
-}
-
-.os-version-ref {
-  color: var(--os-ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-.os-version .os-button,
-.os-version .os-chip {
-  margin-left: auto;
-}
-
 .os-form-label {
   font-size: var(--os-text-xs);
   color: var(--os-muted);

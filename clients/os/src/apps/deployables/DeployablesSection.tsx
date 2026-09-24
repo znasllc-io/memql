@@ -403,7 +403,6 @@ export function DeployablesSection({
           onBack={() => view.from ? setView({ kind: "source", packageId: view.from }) : backToList()}
           backLabel={view.from ? "Source" : ROOT_LABEL[root]}
           onOpenSource={(packageId) => setView({ kind: "source", packageId, fromSite: site.id })}
-          onOpenHistory={(packageId) => setView({ kind: "history", packageId, siteId: site.id, returnTo: view })}
           onDeleted={(goneId, what) => {
             const gone = siteRows.find((s) => s.id === goneId);
             setJustGone(gone === undefined ? null : { name: gone.hostname, what });
