@@ -50,6 +50,9 @@ describe("configured Sources catalog", () => {
   });
   it("confirms catalog removal and calls only the narrow visibility mutation", async () => {
     const { connection } = mount({ packages: [A] });
+    const source = await screen.findByRole("button", { name: /Open Website, @alice/ });
+    expect(screen.queryByRole("button", { name: "Remove source Website" })).toBeNull();
+    await click(source);
     const remove = await screen.findByRole("button", { name: "Remove source Website" });
     expect(remove.title).toBe("Remove source Website");
     expect(remove.querySelector(".lucide-trash2, .lucide-trash-2")).toBeTruthy();

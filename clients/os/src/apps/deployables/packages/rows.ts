@@ -301,7 +301,21 @@ export function deploymentFromRow(row: Row): DeploymentRow {
     cancelRequested: boolOr(flat, "cancelRequested", false),
     report: objectOf<AnalysisReport>(flat, "report"),
     dslVersion: rowString(flat, "dslVersion"),
-    deployables: listOf<DeployableOutcome>(flat, "deployables"),
+    // The engine omits unset outcome fields (for example a sibling skipped
+    // during a scoped redeploy has only a name and refusal). Normalize them
+    // at the read boundary, just like the enclosing deployment row, so a
+    // historical non-publish cannot crash the live site's management page.
+    deployables: listOf<Row>(flat, "deployables")
+      .filter((outcome) => outcome !== null && typeof outcome === "object" && !Array.isArray(outcome))
+      .map((outcome) => ({
+        ...outcome,
+        name: rowString(outcome, "name"),
+        siteId: rowString(outcome, "siteId"),
+        hostname: rowString(outcome, "hostname"),
+        bundleRef: rowString(outcome, "bundleRef"),
+        version: rowString(outcome, "version"),
+        created: boolOr(outcome, "created", false),
+      })),
     snapshotArtifactId: rowString(flat, "snapshotArtifactId"),
     buildLogTail: rowString(flat, "buildLogTail"),
     builtOn: objectOf<BuiltOn>(flat, "builtOn"),

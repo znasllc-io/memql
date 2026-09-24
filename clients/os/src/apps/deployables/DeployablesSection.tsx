@@ -1,7 +1,5 @@
 import { useSourceConnections } from "./sources/connections";
 import { sourceRecord } from "./sources/sourceRecord";
-import { RemoveSource } from "./sources/RemoveSource";
-import { bare } from "./people";
 import { AccountChip } from "../accounts/AccountPicker";
 import { AttentionMarker } from "../../attention/Attention";
 import { updateTarget } from "./attention";
@@ -601,7 +599,7 @@ export function DeployablesSection({
               {showArchived ? "Archived sources will appear here." : filtered ? "Try a different search." : "Configured GitHub account, organization and repository paths appear here. Start with Add deployable."}
             </EmptyState>}
             renderRow={(group, tick) => (
-              <SourceLine accounts={accounts} group={group} tick={tick} provenance={sourceSearch(group.pkg!)} canRemove={partsForOrganization(group.pkg!.accountId, can).sources && bare(group.pkg!.ownerUserId) === bare(viewerUserId)} onRemoved={refreshSources} onOpen={() => setView({ kind: "source", packageId: group.pkg!.id })} />
+              <SourceLine accounts={accounts} group={group} tick={tick} provenance={sourceSearch(group.pkg!)} onOpen={() => setView({ kind: "source", packageId: group.pkg!.id })} />
             )}
           />
         ) : (
@@ -679,7 +677,7 @@ function newestParked(
  * ONE SOURCE, as a row: what it is called and where it lives, how much it
  * produced, and the one thing about it a person might have to act on.
  */
-function SourceLine({ group, tick, onOpen, accounts, provenance, canRemove, onRemoved }: { accounts: AccountRow[]; group: DeployableListGroup; tick: ArrivalKind | null; onOpen: () => void; provenance: string; canRemove: boolean; onRemoved: () => void }) {
+function SourceLine({ group, tick, onOpen, accounts, provenance }: { accounts: AccountRow[]; group: DeployableListGroup; tick: ArrivalKind | null; onOpen: () => void; provenance: string }) {
   const pkg = group.pkg!;
   const { apps, deployed } = sourceSummary(group);
   const state = sourceStateWord(group);
@@ -689,8 +687,6 @@ function SourceLine({ group, tick, onOpen, accounts, provenance, canRemove, onRe
     name={name}
     // Said once: a source with no name of its own is already called by where it lives.
     secondary={provenance}
-    actions={canRemove ? <RemoveSource pkg={pkg} onRemoved={onRemoved} /> : undefined}
-    actionLayout="compact"
     state={state.word}
     tone={state.tone}
     stateExtra={tick === "added" ? <span className="os-livelist-tick">new</span> : null}
