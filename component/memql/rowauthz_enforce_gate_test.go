@@ -305,6 +305,35 @@ var tierDecidesTheRead = map[string]string{
 	"siteByHostname":                "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"templateById":                  "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"templates":                     "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+
+	// The four store reads (Connect Shopify, decision D3, design record
+	// docs/superpowers/specs/2026-09-23-connect-shopify-design.md section 7),
+	// the bench argument without the surface floor.
+	//
+	// v1:shopify:store has no per-caller slice: every store is the
+	// deployment's. Its tier is `clusterOwner, rankFloor="developer"`, so the
+	// arms are "is a cluster owner" and "ranks developer or above", and the
+	// tier decides the row set for EVERY caller: all of it at the floor, none
+	// of it below. No filter can spell a stricter correct answer.
+	//
+	// WHY NO @requiresRank TO MATCH, unlike bench. Below the floor these reads
+	// must answer ZERO ROWS, not an error: canReadStore
+	// (platform_site_binding_guard.go), resolveStore (component/packages) and
+	// the auto-deploy feed's rankless writer all read "not readable" off an
+	// empty result, and an error would fail every deploy they sit on.
+	//
+	// WHAT A CONJUNCT WOULD COST. These four used to carry
+	// `actor.isClusterOwner == true`, which is the tier minus its floor arm,
+	// and an AND with it hides every store from the developers D3 admits.
+	//
+	// The test that fails if this reasoning is wrong is
+	// TestStoreReadsAnswerForDeveloperAndAnswerNothingBelowTheFloor
+	// (store_read_floor_db_test.go): developer and owner read, admin and writer
+	// get zero rows and no error, and a developer's writes stay refused.
+	"storeById":            "Connect Shopify D3. An ownerless clusterOwner-tier concept with rankFloor=\"developer\": the tier decides every row for every caller, and below the floor the answer must be zero rows, not an error, for canReadStore's sake.",
+	"storeByDomain":        "Connect Shopify D3, as storeById -- the read resolveStore and the auto-deploy feed resolve a manifest's store through.",
+	"stores":               "Connect Shopify D3, as storeById.",
+	"developmentStoresFor": "Connect Shopify D3, as storeById.",
 }
 
 func TestRowAuthzEnforcementLandGate(t *testing.T) {

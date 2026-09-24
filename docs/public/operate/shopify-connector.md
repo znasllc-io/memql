@@ -162,11 +162,31 @@ keep in step. It used to carry its own `{storeDomain, storefrontTokenRef}`,
 which meant one store was recorded twice, edited in two places, at two
 authorization tiers.
 
+**Who may read and change a store row.** `v1:shopify:store` is
+`@rowAuthz(clusterOwner, rankFloor="developer")` (design decision D3):
+
+| Act | Who |
+|---|---|
+| read a store row (`storeById`, `storeByDomain`, `stores`, `developmentStoresFor`) | developer, cluster owner |
+| register a store (`createStore`) | cluster owner, or server code (Connect Shopify) |
+| change a store that exists (`updateStore`, `setStoreStatus`) | cluster owner |
+
+Below developer a store read answers **zero rows, not an error**: the binding
+guard and the deploy path read "not readable" off an empty result. The read
+floor widens reads only, so a developer who can see a store still cannot
+change it.
+
 **Binding is a cluster owner's act, and the rule is narrow.** Attaching a
 store needs `execute` on `app:deployables/store`, which the owner role holds;
 beside it, the engine refuses a binding that names a store the caller cannot
-read. A store is cluster-owner-tier, so binding a storefront to one you may
-not read would publish that store's Storefront token under your own hostname.
+read. Binding a storefront to a store you may not read would publish that
+store's Storefront token under your own hostname. Reading is not enough on its
+own: CHANGING which store a site is bound to -- a create that binds, a rewrite
+that re-points, `updateSiteStoreBinding` -- also needs the store part,
+`execute app:deployables/store`. Every store row is registered by a cluster
+owner or by server code, so the token references a binding exposes are ones
+an owner or Connect chose. D3 accepts that a developer holding the store part
+may bind a storefront they own to any of them.
 
 ### The environment seed
 

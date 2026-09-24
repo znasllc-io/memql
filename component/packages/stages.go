@@ -566,8 +566,9 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 		//
 		// IT IS ALSO A REGRESSION IF IT IS FATAL, and a measured one. The
 		// auto-deploy feed borrows the package owner as a RANKLESS WRITER (see
-		// Deps.Roles), so `actor.isClusterOwner == true` is false and
-		// storeByDomain answers zero rows for every automatic run. Fatal here
+		// Deps.Roles), which is neither a cluster owner nor at the store
+		// tier's developer read floor, so storeByDomain answers zero rows for
+		// every automatic run. Fatal here
 		// means an armed source can never republish a storefront again, which
 		// it could before this epic -- and the manifest's store cannot have
 		// changed on that path anyway, because `bindingWord` puts it in the

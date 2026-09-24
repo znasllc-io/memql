@@ -129,11 +129,51 @@ func (e *MemQLEngine) validateSiteStoreBinding(
 	return nil
 }
 
+// storeBindingCapability is what CHANGING a storefront's store takes: the store
+// part, the requirement updateSiteStoreBinding and updateSitePreviewBinding
+// declare on themselves.
+var storeBindingCapability = CapabilityRequirement{Verb: "execute", Resource: "app:deployables/store"}
+
+// validateSiteStoreBindingChange asks for the store part when a write CHANGES
+// which store a site is bound to: a create that binds, or a rewrite that
+// re-points.
+//
+// validateSiteStoreBinding answers "to what" -- a store the caller can read --
+// and before developers could read stores, reading implied the store part,
+// because only owners read them and owners hold every part. Once developers
+// read every store (D3), reading alone would let one bind through createSite,
+// which takes a binding and declares no capability, or through a raw insert(),
+// which names no construct at all. So the capability is asked here, at the
+// seam every write passes, the way the two binding mutations ask it of
+// themselves.
+//
+// The organization boundary (memql#5598, validateOrganizationSensitiveChanges)
+// asks for the same part at the site's ORGANIZATION on every attributed write
+// by a non-synthetic actor. This check does not depend on that one: it asks
+// the caller's own capability on every write that reaches the seam, so the D3
+// property holds wherever the store tier is widened, whatever the boundary
+// decides to exempt.
+//
+// Only a CHANGE is judged. The payload here is the merged row, so a check on
+// "the payload names a store" would demand the store part for a publish or a
+// settings edit on a site someone else bound. Clearing the binding is not a
+// change this check judges, because detaching names no store (the
+// organization boundary still asks for the part at the site's organization).
+func (e *MemQLEngine) validateSiteStoreBindingChange(ctx context.Context, payload map[string]any, priorStoreId string) error {
+	binding, _ := payload["binding"].(map[string]any)
+	storeId := strings.TrimSpace(stringFromAny(binding[bindingStoreIdKey]))
+	if storeId == "" || storeId == strings.TrimSpace(priorStoreId) {
+		return nil
+	}
+	return e.refuseBelowRequiredCapability(ctx, &Function{RequiresCapability: storeBindingCapability},
+		"binding a storefront to v1:shopify:store "+storeId)
+}
+
 // canReadStore is the engine's own reader: the named query, under the CALLER's
 // actor, deliberately -- the whole point is that the answer is the caller's,
-// not the deployment's. storeById filters on actor.isClusterOwner, so a
-// non-operator gets zero rows rather than an error, which is the answer this
-// guard wants: not readable.
+// not the deployment's. v1:shopify:store's tier (clusterOwner, with a read
+// floor at developer) answers anyone below the floor with zero rows rather
+// than an error, which is the answer this guard wants: not readable.
 //
 // The argument is quoted with languageParser.QuoteString rather than Go's %q,
 // because a call string is MemQL source and Go's escapes are not MemQL's.

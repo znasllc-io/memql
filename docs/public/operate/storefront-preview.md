@@ -93,9 +93,12 @@ Two fields matter here and nowhere else:
   gate: without it the two rows sit in one list with nothing saying which
   belongs to which. `developmentStoresFor` is the read behind that pairing.
 
-Registering a store is cluster-owner work, exactly as it is for any other store.
-The token arguments are references to `v1:platform:globalSecret` rows, never
-tokens -- see [The Shopify connector](shopify-connector.md).
+A development store is registered and read like any other store: developers
+and cluster owners read store rows (design decision D3), and only a cluster
+owner -- or server code, which is how Connect Shopify writes them -- registers
+or changes one (D15). The token arguments are
+references to `v1:platform:globalSecret` rows, never tokens -- see
+[The Shopify connector](shopify-connector.md).
 
 ## 2. Point the preview binding at it
 
@@ -417,7 +420,8 @@ which is one click and leaves a record of itself.
 | set or clear a candidate, open or end a preview, run the probe | `execute app:deployables/preview` (owner, developer) |
 | point the preview binding at a store | `execute app:deployables/store` (owner) |
 | promote a candidate, go live, pause, roll back | `execute app:deployables/publish` |
-| register a store, read a store row | cluster owner |
+| read a store row | developer, cluster owner |
+| register a store, or change one that exists | cluster owner |
 
 That is the surface half. Underneath it, `v1:platform:site`,
 `v1:platform:sitePreviewGrant` and `v1:platform:sitePreviewObservation` all

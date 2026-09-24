@@ -37,9 +37,10 @@ import (
 //
 // # The store is read as the DEPLOYMENT, and that is deliberate
 //
-// v1:shopify:store is @rowAuthz(clusterOwner), so a read under the caller
-// answers nothing for a site owner or a developer -- and "nobody could tell me"
-// would then refuse every go-live by anybody but a cluster owner. The question
+// v1:shopify:store is @rowAuthz(clusterOwner, rankFloor="developer"), so a
+// read under the caller answers nothing for a site owner below developer rank
+// -- and "nobody could tell me" would then refuse their go-live whenever a
+// store is involved. The question
 // here is not the caller's: it is "is this cluster about to point a storefront
 // at a development store", a fact about the deployment. The caller's own
 // authority was already settled twice over -- @requiresCapability names the

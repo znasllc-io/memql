@@ -184,8 +184,8 @@ func TestOnlyABoundStorefrontReadsAStore(t *testing.T) {
 // THE SAME FALSE SIGNAL TestEngineExecutorRunsUnderASyntheticClusterOwnerActor
 // EXISTS TO CLOSE OFF, one concept over.
 //
-// storeById's filter carries `actor.isClusterOwner == true` written out, and
-// v1:shopify:store declares @rowAuthz(clusterOwner) on top of it. A StoreByID
+// v1:shopify:store declares @rowAuthz(clusterOwner, rankFloor="developer"),
+// which storeById's plan carries. A StoreByID
 // that quietly ran under no actor would read ZERO ROWS AND NO ERROR: every
 // storefront in the cluster would serve no storefront block and name no store
 // in its policy, while every stub-driven test above kept passing.
@@ -204,7 +204,7 @@ func TestEngineExecutorStoreByIDRunsUnderASyntheticClusterOwnerActor(t *testing.
 		t.Fatalf("engine.Execute ran with no AccessContext on ctx; the engine will refuse the clusterOwner-tier read")
 	}
 	if !ac.IsClusterOwner() {
-		t.Errorf("engine.Execute ran as role %q, want a cluster owner -- storeById's actor.isClusterOwner==true conjunct will refuse this actor", ac.Role)
+		t.Errorf("engine.Execute ran as role %q, want a cluster owner -- v1:shopify:store's tier answers this actor with zero rows", ac.Role)
 	}
 }
 

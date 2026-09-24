@@ -3,11 +3,14 @@ package memql
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // site_hostname_policy_db_test.go -- memql#4344, the half that has to run
@@ -574,17 +577,56 @@ func TestSiteCreateAcceptsAShopifyStorefrontWithItsBinding(t *testing.T) {
 	// store you may not read would publish that store's Storefront token under
 	// your own hostname, because the edge resolves it into a document served
 	// unauthenticated to every visitor.
-	userCtx := userSiteCtx("user-site-shop-" + uniqueSuffix("site"))
-	if _, err := createSiteRaw(t, userCtx, eng, map[string]any{
+	//
+	// The caller is an ADMIN, the rung directly below v1:shopify:store's
+	// developer read floor (Connect Shopify, D3), so a floor set one rung too
+	// low would fail here. It used to be a developer, who since D3 reads every
+	// store -- and so may bind to one, which the next case pins.
+	//
+	// Each refusal below must be the one it claims, so the catalog installed
+	// above is re-cut per role: the admin holds every grant the organization
+	// boundary (memql#5598) asks of a binding create, the store part included,
+	// which leaves the read floor as the only thing refusing them; the
+	// developer holds the same set WITHOUT the store part.
+	storePart := auth.VerbResource{Verb: auth.VerbExecute, Resource: "app:deployables/store"}
+	installed := auth.InstalledCapabilityCatalog().(*capabilityFake)
+	withoutStorePart := maps.Clone(installed.grants["owner"])
+	delete(withoutStorePart, storePart)
+	auth.SetCapabilityCatalog(&capabilityFake{ranks: installed.ranks, grants: map[string]map[auth.VerbResource]bool{
+		"owner":     installed.grants["owner"],
+		"admin":     installed.grants["owner"],
+		"developer": withoutStorePart,
+	}})
+	adminCtx := rankActorCtx("admin-site-shop-"+uniqueSuffix("site"), auth.RoleAdmin)
+	if _, err := createSiteRaw(t, adminCtx, eng, map[string]any{
 		"siteId":    "site-unreadable-" + uniqueSuffix("site"),
 		"hostname":  "unreadable-" + uniqueSuffix("site") + "." + siteTestDomain,
 		"kind":      "shopify_storefront",
 		"bundleRef": "blob://sites/unreadable/v1/",
 		"binding":   map[string]any{"storeId": storeId},
 	}); err == nil {
-		t.Fatal("a non-owner bound a storefront to a cluster-owner-tier store")
+		t.Fatal("an admin bound a storefront to a store below whose read floor they sit")
 	} else if !strings.Contains(err.Error(), storeId) {
 		t.Errorf("the refusal does not name the store it refused: %v", err)
+	}
+
+	// READING A STORE IS NOT BINDING TO IT. A developer reads every store (D3),
+	// and binding also needs the store part (execute app:deployables/store),
+	// which this PR does not seed on developer -- the next PR does. createSite
+	// takes a binding and declares no capability, so the write seam asks for
+	// the part: validateSiteStoreBindingChange, and the organization boundary's
+	// own check at the site's organization (review of PR 2).
+	devCtx := userSiteCtx("user-site-shop-" + uniqueSuffix("site"))
+	if _, err := createSiteRaw(t, devCtx, eng, map[string]any{
+		"siteId":    "site-developer-" + uniqueSuffix("site"),
+		"hostname":  "developer-" + uniqueSuffix("site") + "." + siteTestDomain,
+		"kind":      "shopify_storefront",
+		"bundleRef": "blob://sites/developer/v1/",
+		"binding":   map[string]any{"storeId": storeId},
+	}); err == nil {
+		t.Fatal("a developer without the store part bound a storefront at create")
+	} else if !strings.Contains(err.Error(), CodeCapabilityNotHeld) {
+		t.Errorf("the refusal is not the capability refusal: %v", err)
 	}
 
 	// A kind the concept does not declare is refused, which is what makes the
@@ -599,5 +641,72 @@ func TestSiteCreateAcceptsAShopifyStorefrontWithItsBinding(t *testing.T) {
 		t.Fatal("kind \"android\" was accepted. Android / iOS / macOS are artifact DISTRIBUTION, " +
 			"not hostname-resolved web surfaces -- a value the edge cannot resolve would be the " +
 			"wrong kind of additive (design D5)")
+	}
+}
+
+// TestAWriteThatKeepsTheBindingNeedsNoStorePart pins the other half of the
+// capability check: it judges a CHANGE of binding, not every write to a bound
+// site. The guard sees the merged row, so a check on "the payload names a
+// store" would demand the store part for a settings edit or a publish. The
+// site is the developer's own, created unbound, and then bound by server code
+// -- the only way to hand a developer a bound site before the store part is
+// seeded on developer.
+func TestAWriteThatKeepsTheBindingNeedsNoStorePart(t *testing.T) {
+	eng, _, _ := sharedReadMergeEngine(t)
+	t.Setenv(memqlDomainEnv, siteTestDomain)
+
+	suffix := uniqueSuffix("keepbinding")
+	storeId := "store-" + suffix
+	if _, err := runSiteMutation(t, systemSiteCtx(), eng, "createStore", map[string]any{
+		"storeId": storeId,
+		"domain":  "keep-" + suffix + ".myshopify.com",
+	}); err != nil {
+		t.Fatalf("seed store: %v", err)
+	}
+	dev := "user-keep-" + suffix
+	seedPrincipal(t, eng, dev, auth.RoleDeveloper)
+	devCtx := userSiteCtx(dev)
+	siteId := "site-keep-" + suffix
+	if _, err := createSiteRaw(t, devCtx, eng, map[string]any{
+		"siteId":    siteId,
+		"hostname":  "keep-" + suffix + "." + siteTestDomain,
+		"kind":      "shopify_storefront",
+		"bundleRef": "blob://sites/" + siteId + "/v1/",
+	}); err != nil {
+		t.Fatalf("the developer's unbound storefront: %v", err)
+	}
+	// Server code is the SeedMaterializer's shape: a synthetic actor, which
+	// the organization boundary (memql#5598) exempts, under internal origin,
+	// which the row write guard and the capability gate exempt.
+	if _, err := runSiteMutation(t, auth.ContextWithInternalOrigin(systemSiteCtx()), eng, "updateSiteStoreBinding", map[string]any{
+		"siteId":  siteId,
+		"storeId": storeId,
+	}); err != nil {
+		t.Fatalf("bind it as server code: %v", err)
+	}
+
+	if _, err := runSiteMutation(t, devCtx, eng, "updateSiteSettings", map[string]any{
+		"siteId":   siteId,
+		"settings": map[string]any{"theme": "dark"},
+	}); err != nil {
+		t.Fatalf("a settings edit on a site whose binding it does not touch was refused: %v", err)
+	}
+
+	// Re-pointing it is a change, and a raw insert names no construct, so the
+	// capability must be asked at the write seam, not on the mutation.
+	other := "store-other-" + suffix
+	if _, err := runSiteMutation(t, systemSiteCtx(), eng, "createStore", map[string]any{
+		"storeId": other,
+		"domain":  "other-" + suffix + ".myshopify.com",
+	}); err != nil {
+		t.Fatalf("seed second store: %v", err)
+	}
+	b, _ := json.Marshal(map[string]any{"binding": map[string]any{"storeId": other}})
+	q := fmt.Sprintf(`insert(%s, id=%s, payload=%s)`,
+		langparser.QuoteString("v1:platform:site"), langparser.QuoteString(siteId), string(b))
+	if _, err := eng.Execute(devCtx, q); err == nil {
+		t.Fatal("a raw insert re-pointed a storefront's binding without the store part")
+	} else if !strings.Contains(err.Error(), CodeCapabilityNotHeld) {
+		t.Errorf("the refusal is not the capability refusal: %v", err)
 	}
 }

@@ -8,36 +8,48 @@ use shopify.overlay.shapes.{ storeFull }
 use shopify.generated.productVariant.{ productVariant, productVariantMirror }
 use common.traits.{ isNotDeleted, statusIsPending }
 
+// THE FOUR STORE READS CARRY NO CALLER-SCOPE CONJUNCT, and that is the design
+// (Connect Shopify, decision D3). v1:shopify:store declares
+// `@rowAuthz(clusterOwner, rankFloor="developer")`, which the engine ANDs into
+// every plan: a cluster owner or a developer reads every store, and everyone
+// below reads ZERO ROWS -- not an error. They used to write
+// `actor.isClusterOwner == true` out, and an AND with that term can never be
+// widened by the floor. Adjudicated in tierDecidesTheRead
+// (component/memql/rowauthz_enforce_gate_test.go).
+//
+// Zero rows rather than a refusal is load-bearing, which is why these are not
+// `@requiresRank`: the binding guard's canReadStore, the deploy path's
+// resolveStore and the auto-deploy feed's rankless writer all read "not
+// readable" off an empty result. Writes are unchanged: the floor widens reads
+// only, so changing a store that exists stays owner-only.
+
 /// One configured store by id.
-@actor
 query store storeById {
   args {
     storeId  string!
   }
-  filter  row => row.id == args.storeId && actor.isClusterOwner == true
+  filter  row => row.id == args.storeId
   shape   storeFull
 }
 
 /// One configured store by its myshopify.com domain. The connector resolves
 /// a delivery's X-Shopify-Shop-Domain header through this.
-@actor
 query store storeByDomain {
   args {
     domain  string!
   }
-  filter    row => row.domain == args.domain && actor.isClusterOwner == true
+  filter    row => row.domain == args.domain
   paginate  1
   shape     storeFull
 }
 
 /// Every configured store. Small by construction -- a deployment mirrors
 /// the stores an operator entered -- so the page size is generous.
-@actor
 query store stores {
   args {
     status  string
   }
-  filter    row => actor.isClusterOwner == true && (args.status == nil || row.status == args.status)
+  filter    row => args.status == nil || row.status == args.status
   sort      "domain", "asc"
   paginate  100
   shape     storeFull
@@ -48,14 +60,12 @@ query store stores {
 /// A storefront shows the store it is bound to and the development store it
 /// is exercised against; without this read the two rows sit in one list with
 /// nothing saying which belongs to which.
-@actor
 query store developmentStoresFor {
   args {
     storeId  string!
   }
   filter    row => row.developmentOfStoreId == args.storeId
                 && row.isDevelopment == true
-                && actor.isClusterOwner == true
   sort      "domain", "asc"
   paginate  25
   shape     storeFull

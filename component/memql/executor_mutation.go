@@ -1392,6 +1392,11 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		if err := e.validateSiteStoreBinding(ctx, payload, actor, e.canReadStore); err != nil {
 			return nil, meta, err
 		}
+		// And WHO may change it: reading a store is not binding to it. Judged
+		// against the prior binding, because the payload here is merged.
+		if err := e.validateSiteStoreBindingChange(ctx, payload, meta.priorBindingStoreId); err != nil {
+			return nil, meta, err
+		}
 		// The candidate version, the preview binding and the go-live guard
 		// (epic memql#5531), beside the five above and for their reason: every
 		// rule it carries is a comparison against the PRIOR row or against a

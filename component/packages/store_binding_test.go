@@ -231,9 +231,9 @@ func TestARedeployRePointsABindingTheManifestChanged(t *testing.T) {
 // AN UNRESOLVABLE STORE IS FATAL ONLY WHEN NOTHING IS BOUND YET.
 //
 // This is the case the auto-deploy feed is in on EVERY automatic run. It
-// borrows the package owner as a rankless writer (Deps.Roles), so
-// `actor.isClusterOwner == true` is false and the cluster-owner-tier
-// storeByDomain read answers zero rows. Fatal here would mean an armed source
+// borrows the package owner as a rankless writer (Deps.Roles), which is
+// neither a cluster owner nor at v1:shopify:store's developer read floor, so
+// storeByDomain answers zero rows. Fatal here would mean an armed source
 // can never republish a storefront again -- something it could do before this
 // epic, when a redeploy never read a store at all.
 //
