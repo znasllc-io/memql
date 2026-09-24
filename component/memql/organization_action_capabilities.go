@@ -133,7 +133,12 @@ func (e *MemQLEngine) refuseOrganizationActionCapability(ctx context.Context, fn
 // Sensitive deployable changes meet the same capability regardless of whether
 // they arrived through a named action or raw upsert. Empty draft creation is
 // ordinary data creation; serving bytes or arming deployment is not.
-func (e *MemQLEngine) validateOrganizationSensitiveChanges(ctx context.Context, concept string, prior, delta map[string]any) error {
+//
+// next is the FINAL row -- merged, stamped and past every before-write hook --
+// and prior the stored one, nil on a create (memql#5636). So a field next
+// lacks and prior carries was REMOVED, which is a change like any other: a
+// hook's field write with an absent value deletes the field.
+func (e *MemQLEngine) validateOrganizationSensitiveChanges(ctx context.Context, concept string, prior, next map[string]any) error {
 	if concept != "v1:platform:site" && concept != "v1:platform:package" {
 		return nil
 	}
@@ -142,55 +147,52 @@ func (e *MemQLEngine) validateOrganizationSensitiveChanges(ctx context.Context, 
 	}
 	account := stringFromAny(prior["accountId"])
 	if account == "" {
-		account = stringFromAny(delta["accountId"])
+		account = stringFromAny(next["accountId"])
 	}
 	if account == "" {
 		return nil
 	}
 	creating := prior == nil
 	changed := func(field string) bool {
-		next, set := delta[field]
-		return set && !reflect.DeepEqual(prior[field], next)
+		return !reflect.DeepEqual(prior[field], next[field])
 	}
 	checks := [][]string{}
 	require := func(parts ...string) { checks = append(checks, parts) }
 	if concept == "v1:platform:site" {
 		if changed("status") {
-			next, old := stringFromAny(delta["status"]), stringFromAny(prior["status"])
-			if next == "live" || (!creating && old != "archived" && (next == "draft" || next == "disabled")) {
+			status, old := stringFromAny(next["status"]), stringFromAny(prior["status"])
+			if status == "live" || (!creating && old != "archived" && (status == "draft" || status == "disabled")) {
 				require("publish")
 			}
-			if !creating && (next == "archived" || old == "archived") {
+			if !creating && (status == "archived" || old == "archived") {
 				require("retire")
 			}
 		}
 		if changed("deleted") && !creating {
 			require("retire")
 		}
-		if changed("bundleRef") && (!creating || strings.TrimSpace(stringFromAny(delta["bundleRef"])) != "") {
+		if changed("bundleRef") && (!creating || strings.TrimSpace(stringFromAny(next["bundleRef"])) != "") {
 			require("deploy", "publish")
 		}
-		if changed("candidateRef") && (!creating || strings.TrimSpace(stringFromAny(delta["candidateRef"])) != "") {
-			if changed("bundleRef") && stringFromAny(delta["candidateRef"]) == "" {
+		if changed("candidateRef") && (!creating || strings.TrimSpace(stringFromAny(next["candidateRef"])) != "") {
+			if changed("bundleRef") && stringFromAny(next["candidateRef"]) == "" {
 				require("preview", "publish")
 			} else {
 				require("preview")
 			}
 		}
 		for _, field := range []string{"binding", "previewBinding"} {
-			if next, present := delta[field]; present {
-				oldBinding, _ := prior[field].(map[string]any)
-				newBinding, _ := next.(map[string]any)
-				if BareShortId(stringFromAny(oldBinding[bindingStoreIdKey])) != BareShortId(stringFromAny(newBinding[bindingStoreIdKey])) {
-					require("store")
-				}
+			oldBinding, _ := prior[field].(map[string]any)
+			newBinding, _ := next[field].(map[string]any)
+			if BareShortId(stringFromAny(oldBinding[bindingStoreIdKey])) != BareShortId(stringFromAny(newBinding[bindingStoreIdKey])) {
+				require("store")
 			}
 		}
 	} else {
 		if !creating && changed("status") {
 			require("retire")
 		}
-		if changed("autoDeploy") && (!creating || boolFromAny(delta["autoDeploy"])) {
+		if changed("autoDeploy") && (!creating || boolFromAny(next["autoDeploy"])) {
 			require("sources")
 		}
 		if !creating {
@@ -205,7 +207,7 @@ func (e *MemQLEngine) validateOrganizationSensitiveChanges(ctx context.Context, 
 		}
 	}
 	accounts := []string{account}
-	if target := stringFromAny(delta["accountId"]); target != "" && BareShortId(target) != BareShortId(account) {
+	if target := stringFromAny(next["accountId"]); target != "" && BareShortId(target) != BareShortId(account) {
 		accounts = append(accounts, target)
 	}
 	for _, target := range accounts {

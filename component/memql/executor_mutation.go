@@ -808,6 +808,15 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	var organizationOwnerField string
 	var organizationOwner any
 	var organizationOwnerPresent bool
+	// The stored row, for the organization boundary (memql#5636), which judges
+	// the row the before-write hooks PRODUCED rather than the caller's delta: a
+	// hook may set a guarded field the delta never named. Copied because the
+	// read-merge below writes the delta into priorPayload itself.
+	// ponytail: shallow copy. The merge and an authored field write replace or
+	// delete top-level values and never edit a nested object in place; a Go
+	// hook that did (row["binding"].(map)["storeId"] = x) would edit this copy
+	// too and slip past. Deep-copy here if such a hook is ever written.
+	var organizationPrior map[string]any
 
 	id := strings.TrimSpace(mutation.ID)
 	if id != "" {
@@ -849,9 +858,7 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			if err := e.validateSourceConnectionWrite(ctx, conceptMeta.Name, priorPayload, payload); err != nil {
 				return nil, meta, err
 			}
-			if err := e.validateOrganizationSensitiveChanges(ctx, conceptMeta.Name, priorPayload, payload); err != nil {
-				return nil, meta, err
-			}
+			organizationPrior = maps.Clone(priorPayload)
 			if err := e.validateOrganizationTransfer(ctx, conceptMeta.Name, id, priorPayload, payload); err != nil {
 				return nil, meta, err
 			}
@@ -964,12 +971,17 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		if err := e.validateSourceConnectionWrite(ctx, conceptMeta.Name, nil, payload); err != nil {
 			return nil, meta, err
 		}
-		if err := e.validateOrganizationSensitiveChanges(ctx, conceptMeta.Name, nil, payload); err != nil {
-			return nil, meta, err
-		}
 	}
 	beforeWriteIncomingStatus := payload["status"]
 	if err := e.applyBeforeWrite(ctx, conceptName, id, meta.priorExisted, payload); err != nil {
+		return nil, meta, err
+	}
+	// THE ORGANIZATION BOUNDARY judges the final row (memql#5636): after the
+	// read-merge, the organization stamp and every before-write hook, against
+	// the stored row (nil on a create). Before the hooks, an authored
+	// before-write automation could set status, bundleRef or a binding on its
+	// author's own write after the boundary had passed it.
+	if err := e.validateOrganizationSensitiveChanges(ctx, conceptMeta.Name, organizationPrior, payload); err != nil {
 		return nil, meta, err
 	}
 
