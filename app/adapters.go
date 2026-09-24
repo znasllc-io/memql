@@ -315,6 +315,10 @@ func (a *CampaignsEngineAdapter) Execute(ctx context.Context, query string) (any
 	return result, nil
 }
 
+func (a *CampaignsEngineAdapter) OrganizationCapable(ctx context.Context, account, verb, resource string) bool {
+	return a.Engine.OrganizationCapable(ctx, account, verb, resource)
+}
+
 // campaignEmailSender resolves the email sender off the integration
 // registry at SEND time (memql#3348), mirroring outbound.EmailTransport:
 // on a booting node the plug-in registry may not be populated yet, so a

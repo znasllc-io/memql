@@ -7,7 +7,8 @@ import {
   Head,
   LiveList,
   Refine,
-  Row as KitRow,
+  RecordRow as KitRow,
+  listCount,
   SortControl,
   formatFreshness,
   formatMoment,
@@ -132,11 +133,10 @@ export function GoalsSection({
     return projected;
   });
 
-  const rows = view?.snapshot.rows ?? [];
 
   return (
     <div className="os-nexus-goals">
-      <Head title="Goals" meta={`${rows.length} ${rows.length === 1 ? "goal" : "goals"}`}>
+      <Head title="Goals" meta={listCount(view?.snapshot)}>
         <Refine
           search={search}
           onSearch={setSearch}
@@ -247,30 +247,21 @@ function GoalLine({
       open={selected}
       current={goal.status === "active" || parked}
       dim={goal.status === "closed" && !parked}
-      state={
+      state={goalStatusWord(goal.status)}
+      tone={goal.status === "active" || parked ? "accent" : "muted"}
+      secondary={goal.origin === "user" ? undefined : originWord(goal.origin)}
+      stateExtra={
         <>
           {/* A STANDING MARK, NOT A CUE. A goal whose run is parked stays
               marked until somebody answers it; the arrival ring decays on the
               clock and would only be seen by whoever was looking. */}
           {parked ? <Chip tone="accent">waiting for you</Chip> : null}
           <RunMarks runs={runs} />
-          <span className="os-nexus-goal-status" data-status={goal.status}>
-            {goalStatusWord(goal.status)}
-          </span>
-          <span className="os-caption" title={formatMoment(goal.createdAt)}>
-            {formatFreshness(goal.createdAt, now)}
-          </span>
+
         </>
       }
     >
-      {/* SAID ONLY WHEN IT IS NOT YOURS (rule 7, say it once). "You asked for
-          this" on a list of your own goals is a label on every row carrying
-          no information, and it was crowding out the state cluster beside it.
-          A goal a responsibility or the platform raised is the case worth
-          marking. */}
-      {goal.origin === "user" ? null : (
-        <span className="os-nexus-goal-origin">{originWord(goal.origin)}</span>
-      )}
+      <span title={formatMoment(goal.createdAt)}>{formatFreshness(goal.createdAt, now)}</span>
     </KitRow>
   );
 }

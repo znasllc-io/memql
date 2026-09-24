@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { act } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -20,7 +20,10 @@ import {
   artifactRow,
   click,
   emit,
-  fakeConnection,
+  fakeConnection as harnessConnection,
+  githubGrantRow,
+  repositoriesReply,
+  repositoryFixture,
   STORE,
   probeReply,
   withSession,
@@ -112,19 +115,12 @@ async function chooseSource(region: HTMLElement, name: RegExp): Promise<void> {
   await click(within(region).getByRole("radio", { name }));
 }
 
-/**
- * Choose the repository source, and ask for the URL-plus-token form.
- *
- * Since GitHub Connect (memql#4915) the repository branch leads with the
- * connection -- a picker for somebody who has one, Connect GitHub for
- * somebody who does not -- and the pasted URL and token live behind "Use a
- * token instead", closed. Every case below answers with a URL, so every case
- * asks for that form the way a person would; nothing they assert about it
- * changed.
- */
+/** Choose a repository returned under the person's GitHub grant. */
 async function chooseRepository(region: HTMLElement): Promise<void> {
   await chooseSource(region, /A repository/);
-  await click(within(region).getByRole("radio", { name: "A token" }));
+  await click(await within(region).findByRole("button", { name: /^@octocat Connected/ }));
+  await click(await within(region).findByRole("button", { name: /^acme Organization/i }));
+  await click(await within(region).findByRole("button", { name: /storefront/ }));
 }
 
 /** Follow the wizard to its address step without writing anything. */
@@ -144,13 +140,6 @@ async function fill(label: string, value: string): Promise<void> {
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
     setter.call(input, value);
     input.dispatchEvent(new Event("input", { bubbles: true }));
-  });
-}
-
-/** Leave the field -- what makes the Source stop ask the cluster about a repository. */
-async function blur(label: string): Promise<void> {
-  await act(async () => {
-    fireEvent.blur(screen.getByLabelText(label));
   });
 }
 
@@ -186,19 +175,18 @@ beforeEach(() => {
 const REPO = "https://github.com/acme/storefront";
 const URL_FIELD = "The repository this deployable is built from";
 const NAME_FIELD = "What this deployable is called";
-const CREDENTIAL_FIELD = "The credential this source is fetched under, on github.com";
+const GRANT = githubGrantRow({ id: "cred-acme", login: "octocat" });
 
-const CREDENTIAL: Row = {
-  id: "cred-acme",
-  ownerUserId: "u-me",
-  host: "github.com",
-  label: "acme deploy token",
-  fingerprint: "...ab12",
-  status: "active",
-  lastUsedAt: "",
-  revokedAt: "",
-  createdAt: "2026-08-20T00:00:00Z",
-} as unknown as Row;
+/** Only this compose suite starts with a connected account; other suites retain their own defaults. */
+function fakeConnection(seed: FakeSeed = {}): FakeConnection {
+  return harnessConnection({
+    credentials: [GRANT],
+    repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "acme/storefront" })] }),
+    // The action response and subsequent live row name the same run.
+    deployResult: { deploymentId: "dep-1", status: "awaiting_confirm", awaitingConfirm: "true" } as Row,
+    ...seed,
+  });
+}
 
 const REPORT = {
   name: "acme",
@@ -269,7 +257,7 @@ const ZIP = artifactRow({ id: "artifact-zip", title: "storefront-build.zip" });
 
 /** The id `createPackage` minted, read back off the wire. */
 function mintedPackageId(connection: FakeConnection): string {
-  return /packageId: "([^"]*)"/.exec(connection.callsNamed("createPackage")[0] ?? "")?.[1] ?? "";
+  return /packageId: "([^"]*)"/.exec(connection.callsNamed("packageDeploy")[0] ?? connection.callsNamed("createPackage")[0] ?? "")?.[1] ?? "";
 }
 
 // ---------------------------------------------------------------------------
@@ -306,6 +294,7 @@ function forwardAct(name: string): HTMLButtonElement | null {
  * state the design exists to prevent.
  */
 async function forward(name: string): Promise<HTMLButtonElement> {
+  // Saving persists a new repository source; analysis is a separate act.
   await waitFor(() => expect(forwardAct(name)).toBeTruthy());
   return forwardAct(name)!;
 }
@@ -320,90 +309,60 @@ describe("the compose flow: the Source stop's probe", () => {
     const connection = fakeConnection({ sourceProbe: { "": probeReply() } });
     const { region } = await compose(connection);
     await chooseRepository(region);
-    await fill(URL_FIELD, REPO);
-    await blur(URL_FIELD);
 
     expect(await within(region).findByText("public, default branch main")).toBeTruthy();
-    // The call reached the wire through the generated builder, and carried no
-    // credential: a public repository needs none.
-    expect(connection.callsNamed("sourceProbe")).toEqual([`builtin sourceProbe(repoUrl: "${REPO}")`]);
-    // Nothing is parked: Analyze is reachable once it has a name.
+    // The picker carries its personal grant even when the chosen repository is public.
+    expect(connection.callsNamed("sourceProbe")).toEqual([`builtin sourceProbe(repoUrl: "${REPO}", credentialId: "cred-acme", connectionId: "source-cred-acme-i-acme")`]);
+    // Nothing is parked: saving is reachable; analysis follows explicit persistence.
     await fill(NAME_FIELD, "storefront");
     expect(forwardAct("Analyze")).toBeTruthy();
+    expect(connection.callsNamed("createPackage")).toHaveLength(0);
+    expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
   });
 
-  it("says 'private, or not there' and reveals the credential field", async () => {
+  it("parks a repository the connected account cannot reach", async () => {
     const connection = fakeConnection({
       sourceProbe: { "": probeReply({ reachable: false, reason: "not_found_or_private" }) },
-      credentials: [CREDENTIAL],
+      credentials: [GRANT],
     });
     const { region } = await compose(connection);
     await chooseRepository(region);
-    await fill(URL_FIELD, REPO);
-    await blur(URL_FIELD);
 
-    expect(await within(region).findByText("private, or not there")).toBeTruthy();
-    expect(within(region).getByLabelText(CREDENTIAL_FIELD)).toBeTruthy();
-    // A definite answer ABOUT THE REPOSITORY parks the flow: the rail stops
-    // at the Repository step -- the one that holds the URL it is about -- and
-    // Analyze is out of reach. The choice above it stays answered.
-    expect(railStates(region).slice(0, 2)).toEqual(["complete", "stopped"]);
-    await fill(NAME_FIELD, "storefront");
+    expect(await within(region).findByText("private, or not there", { selector: '[role="status"]' })).toBeTruthy();
+    expect(connection.callsNamed("sourceCredentialCreate")).toHaveLength(0);
+    // A definite refusal remains visible on Configuration and prevents Analyze;
+    // the user's selected repository and editable configuration stay intact.
+    expect(forwardAct("Continue")).toBeNull();
+    expect(within(region).getByLabelText(NAME_FIELD)).toBeTruthy();
     expect(forwardAct("Analyze")).toBeNull();
   });
 
-  it("says 'this token cannot see it' when a chosen credential still cannot", async () => {
+  it("shows an authorization refusal for the chosen GitHub account", async () => {
     const connection = fakeConnection({
       sourceProbe: {
         "": probeReply({ reachable: false, reason: "not_found_or_private" }),
         "cred-acme": probeReply({ reachable: false, reason: "credential_cannot_see_it" }),
       },
-      credentials: [CREDENTIAL],
+      credentials: [GRANT],
     });
     const { region } = await compose(connection);
     await chooseRepository(region);
-    await fill(URL_FIELD, REPO);
-    await blur(URL_FIELD);
-    await within(region).findByText("private, or not there");
-
-    await choose(CREDENTIAL_FIELD, /acme deploy token/);
-    expect(await within(region).findByText("this token cannot see it")).toBeTruthy();
+    expect(await within(region).findByText("this token cannot see it", { selector: '[role="status"]' })).toBeTruthy();
     expect(connection.callsNamed("sourceProbe")).toContain(
-      `builtin sourceProbe(repoUrl: "${REPO}", credentialId: "cred-acme")`,
+      `builtin sourceProbe(repoUrl: "${REPO}", credentialId: "cred-acme", connectionId: "source-cred-acme-i-acme")`,
     );
   });
 
-  it("renders the OS copy for a credential this cluster refuses to resolve", async () => {
-    for (const [reason, headline] of [
-      ["credential_not_found", "This source's credential is not one you can use"],
-      ["credential_revoked", "This source's credential was revoked"],
-    ] as const) {
+  it("requires reconnection for a credential this cluster refuses to resolve", async () => {
+    for (const reason of ["credential_not_found", "credential_revoked"] as const) {
       const connection = fakeConnection({ sourceProbe: { "": probeReply({ reachable: false, reason }) } });
       const { region, view } = await compose(connection);
       await chooseRepository(region);
-      await fill(URL_FIELD, REPO);
-      await blur(URL_FIELD);
-      expect(await within(region).findByText(headline)).toBeTruthy();
+      expect(await within(region).findByText("This source needs attention.")).toBeTruthy();
+      expect(within(region).getByText("Go Back to choose another organization or GitHub account.")).toBeTruthy();
+      expect(forwardAct("Continue")).toBeNull();
       view.unmount();
     }
-  });
-
-  it("refuses a non-GitHub URL its own way: the sentence, and Analyze out of reach", async () => {
-    const connection = fakeConnection({
-      sourceProbe: {
-        "": probeReply({ host: "gitlab.com", reachable: false, defaultBranch: "", reason: "source_host_unsupported" }),
-      },
-    });
-    const { region } = await compose(connection);
-    await chooseRepository(region);
-    await fill(URL_FIELD, "https://gitlab.com/acme/storefront");
-    await blur(URL_FIELD);
-
-    expect(await within(region).findByText("only github.com today, or upload a zip")).toBeTruthy();
-    await fill(NAME_FIELD, "storefront");
-    expect(forwardAct("Analyze")).toBeNull();
-    // ...and no credential field: no token makes github.com out of a gitlab URL.
-    expect(within(region).queryByLabelText(CREDENTIAL_FIELD)).toBeNull();
   });
 
   it("says it is rate-limited and lets the deploy go ahead anyway", async () => {
@@ -412,8 +371,6 @@ describe("the compose flow: the Source stop's probe", () => {
     });
     const { region } = await compose(connection);
     await chooseRepository(region);
-    await fill(URL_FIELD, REPO);
-    await blur(URL_FIELD);
 
     expect(await within(region).findByText(/rate-limiting this cluster/)).toBeTruthy();
     await fill(NAME_FIELD, "storefront");
@@ -422,81 +379,18 @@ describe("the compose flow: the Source stop's probe", () => {
     expect(forwardAct("Analyze")).toBeTruthy();
   });
 
-  it("NEVER blocks Analyze on a probe that could not run, and shows the server's sentence", async () => {
+  it("does not block saving on a probe that could not run, and shows the server's sentence", async () => {
     // Design H: the fetch is the authority and the probe is a courtesy. A
     // probe that threw must not stop somebody deploying a public repository.
     const connection = fakeConnection({ sourceProbeError: "source_unreadable: api.github.com is unreachable" });
     const { region } = await compose(connection);
     await chooseRepository(region);
-    await fill(URL_FIELD, REPO);
-    await blur(URL_FIELD);
 
     expect(await within(region).findByText("source_unreadable: api.github.com is unreachable")).toBeTruthy();
+    // A transient probe failure remains visible on Configuration with retry.
+    expect(within(region).getByRole("button", { name: "Check repository again" })).toBeTruthy();
     await fill(NAME_FIELD, "storefront");
     expect(forwardAct("Analyze")).toBeTruthy();
-    // The field is still editable -- nothing is wrong with what was typed.
-    expect((screen.getByLabelText(URL_FIELD) as HTMLInputElement).disabled).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// The token
-// ---------------------------------------------------------------------------
-
-describe("the compose flow: a token, pasted once", () => {
-  it("sends the token in sourceCredentialCreate and in NO other call", async () => {
-    const secret = "github_pat_" + "11ABCDEF" + "0123456789";
-    const connection = fakeConnection({
-      sourceProbe: {
-        "": probeReply({ reachable: false, reason: "not_found_or_private" }),
-        "cred-new": probeReply({ private: true }),
-      },
-      credentials: [],
-    });
-    const { region } = await compose(connection);
-    await chooseRepository(region);
-    await fill(URL_FIELD, REPO);
-    await blur(URL_FIELD);
-    await within(region).findByText("private, or not there");
-
-    await choose(CREDENTIAL_FIELD, /Add a credential/);
-    // The stop states the shape of token to make, where the token is typed.
-    expect(within(region).getByText(/fine-grained personal access token/)).toBeTruthy();
-    expect(within(region).getByText(/contents: read/)).toBeTruthy();
-    await fill("A name for this github.com credential", "work laptop");
-    await fill("The github.com access token", secret);
-    await click(within(region).getByRole("button", { name: "Add credential" }));
-
-    expect(connection.calls.filter((call) => call.includes(secret))).toEqual([
-      `builtin sourceCredentialCreate(host: "github.com", label: "work laptop", token: ${JSON.stringify(secret)})`,
-    ]);
-    // ...and the new credential is the chosen one, re-probed under it.
-    expect(connection.callsNamed("sourceProbe")).toContain(
-      `builtin sourceProbe(repoUrl: "${REPO}", credentialId: "cred-new")`,
-    );
-    expect(await within(region).findByText(/private, and reachable under this credential/)).toBeTruthy();
-  });
-
-  it("renders the server's refusal beside the field", async () => {
-    const connection = fakeConnection({
-      sourceProbe: { "": probeReply({ reachable: false, reason: "not_found_or_private" }) },
-      credentialCreateError: "source_host_unsupported: only github.com is admitted today",
-    });
-    const { region } = await compose(connection);
-    await chooseRepository(region);
-    await fill(URL_FIELD, REPO);
-    await blur(URL_FIELD);
-    await within(region).findByText("private, or not there");
-
-    await choose(CREDENTIAL_FIELD, /Add a credential/);
-    await fill("A name for this github.com credential", "work laptop");
-    await fill("The github.com access token", "github_pat_" + "nope");
-    await click(within(region).getByRole("button", { name: "Add credential" }));
-
-    expect(await within(region).findByText("That credential was not stored.")).toBeTruthy();
-    // The server's sentence, verbatim beneath the OS's own line -- the code
-    // prefix the engine puts in front of it becomes the headline's job.
-    expect(within(region).getByText("only github.com is admitted today")).toBeTruthy();
   });
 });
 
@@ -568,7 +462,7 @@ describe("the compose flow: a zip in Files", () => {
     const floorNow = () => [...document.querySelectorAll(".os-actbar-acts button")].map((b) => [(b.textContent ?? "").trim(), b.classList.contains("os-actbar-text")]);
     await waitFor(() => expect(forwardAct("Analyze")).toBeTruthy());
     expect(floorNow()).toEqual([["Cancel", true], ["Analyze", false]]);
-    await click(forwardAct("Analyze"));
+    await click(await forward("Analyze"));
 
     const create = connection.callsNamed("createSite")[0] ?? "";
     expect(create).toContain('hostname: "landing.memql.example.com"');
@@ -643,11 +537,10 @@ describe("the compose flow: pushed by your CI", () => {
     expect(create).toContain('hostname: "marketing.memql.example.com"');
     expect(create).toContain('status: "draft"');
     expect(create).toContain("/pending/");
-    // ...and tied to the cluster's own account, through the same call the
-    // site detail's picker makes, because no client was picked (memql#5303,
-    // D12).
-    await waitFor(() => expect(connection.callsNamed("updateSiteAccount")).toHaveLength(1));
-    expect(connection.callsNamed("updateSiteAccount")[0]).toContain('accountId: "self"');
+    // Ownership is part of the create, so no untied row exists between two writes.
+    expect(create).toContain('accountId: "self"');
+    expect(create).not.toContain("ownerUserId");
+    expect(connection.callsNamed("updateSiteAccount")).toHaveLength(0);
 
     expect(await within(region).findByText(/^POST https:\/\/api\.memql\.example\.com\/sites\/[^/]+\/bundles$/)).toBeTruthy();
     expect(
@@ -679,10 +572,8 @@ async function analyzed(
   const connection = fakeConnection({ sourceProbe: { "": probeReply() }, ...seed });
   const { region, view } = await compose(connection, opts);
   await chooseRepository(region);
-  await fill(URL_FIELD, REPO);
-  await blur(URL_FIELD);
   await fill(NAME_FIELD, "acme");
-  await click(forwardAct("Analyze"));
+  await click(await forward("Analyze"));
   await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(mintedPackageId(connection)), "NODE_CREATED");
   await within(region).findByText("clients/web");
   return { connection, region, view };
@@ -743,10 +634,8 @@ describe("the compose flow: where each app will live", () => {
     const connection = fakeConnection({ sourceProbe: { "": probeReply() } });
     const { region } = await compose(connection);
     await chooseRepository(region);
-    await fill(URL_FIELD, REPO);
-    await blur(URL_FIELD);
     await fill(NAME_FIELD, "acme");
-    await click(forwardAct("Analyze"));
+    await click(await forward("Analyze"));
     await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(mintedPackageId(connection), { report: REPORT_TWO }), "NODE_CREATED");
     await within(region).findByText("clients/marketing");
 
@@ -772,10 +661,8 @@ describe("the compose flow: where each app will live", () => {
     const connection = fakeConnection({ sourceProbe: { "": probeReply() } });
     const { region } = await compose(connection);
     await chooseRepository(region);
-    await fill(URL_FIELD, REPO);
-    await blur(URL_FIELD);
     await fill(NAME_FIELD, "acme");
-    await click(forwardAct("Analyze"));
+    await click(await forward("Analyze"));
     await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(mintedPackageId(connection), { report: REPORT_TWO }), "NODE_CREATED");
     await within(region).findByText("clients/marketing");
 
@@ -808,10 +695,8 @@ describe("the compose flow: where each app will live", () => {
     const connection = fakeConnection({ sourceProbe: { "": probeReply() } });
     const { region } = await compose(connection);
     await chooseRepository(region);
-    await fill(URL_FIELD, REPO);
-    await blur(URL_FIELD);
     await fill(NAME_FIELD, "acme");
-    await click(forwardAct("Analyze"));
+    await click(await forward("Analyze"));
     const pkgId = mintedPackageId(connection);
     await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(pkgId, { report: REPORT_TWO }), "NODE_CREATED");
     await within(region).findByText("clients/marketing");
@@ -852,10 +737,8 @@ describe("the compose flow: where each app will live", () => {
     const connection = fakeConnection({ sourceProbe: { "": probeReply() } });
     const { region } = await compose(connection);
     await chooseRepository(region);
-    await fill(URL_FIELD, REPO);
-    await blur(URL_FIELD);
     await fill(NAME_FIELD, "acme");
-    await click(forwardAct("Analyze"));
+    await click(await forward("Analyze"));
     const pkgId = mintedPackageId(connection);
     await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(pkgId, { report: REPORT_TWO }), "NODE_CREATED");
     await within(region).findByText("clients/marketing");
@@ -896,7 +779,7 @@ describe("the compose flow: where each app will live", () => {
   it("offers the client to everybody who composes, and their own domain only with the domains part", async () => {
     const { region, view } = await analyzed();
     await openAddresses();
-    expect(within(region).getByLabelText("The client storefront is for")).toBeTruthy();
+    expect(within(region).getByLabelText("The account storefront is for")).toBeTruthy();
     expect(within(region).getByLabelText("A domain of the client's own for storefront")).toBeTruthy();
     view.unmount();
 
@@ -907,7 +790,7 @@ describe("the compose flow: where each app will live", () => {
       { role: "developer", capabilities: seededAccessWithout("developer", "app:deployables/domains") },
     );
     await openAddresses();
-    expect(within(developer).getByLabelText("The client storefront is for")).toBeTruthy();
+    expect(within(developer).getByLabelText("The account storefront is for")).toBeTruthy();
     expect(within(developer).queryByLabelText("A domain of the client's own for storefront")).toBeNull();
   });
 
@@ -926,13 +809,16 @@ describe("the compose flow: where each app will live", () => {
     expect(confirmed).toContain('accountId: "self"');
   });
 
-  it("ties a new source to the cluster's own account when it is registered", async () => {
-    // The package is registered at Analyze, before any client can be picked
-    // -- the picker is on the Where-it-lives stop, which the parked run
-    // opens. So the source itself is the cluster's own (memql#5303, D12): the
-    // people its group admits, and staff, read it and its runs from now on.
-    const { connection } = await analyzed();
-    expect(connection.callsNamed("createPackage")[0]).toContain('accountId: "self"');
+  it("registers the repository under the default account when analysis starts", async () => {
+    const connection = fakeConnection({ sourceProbe: { "": probeReply() } });
+    const { region } = await compose(connection);
+    await chooseRepository(region);
+    await fill(NAME_FIELD, "acme");
+    expect(connection.callsNamed("createPackage")).toHaveLength(0);
+    await click(await forward("Analyze"));
+    expect(connection.callsNamed("packageSourceRegister")).toHaveLength(1);
+    expect(connection.callsNamed("packageSourceRegister")[0]).toContain('accountId: "self"');
+    expect(connection.callsNamed("packageDeploy")).toHaveLength(1);
   });
 });
 
@@ -1013,10 +899,8 @@ describe("the compose flow: what the run answers", () => {
     const connection = fakeConnection({ sourceProbe: { "": probeReply() } });
     const { region } = await compose(connection);
     await chooseRepository(region);
-    await fill(URL_FIELD, REPO);
-    await blur(URL_FIELD);
     await fill(NAME_FIELD, "acme");
-    await click(forwardAct("Analyze"));
+    await click(await forward("Analyze"));
 
     await emit(
       connection,
@@ -1030,9 +914,9 @@ describe("the compose flow: what the run answers", () => {
     );
 
     expect(await within(region).findByText("no memql-package.yaml at the root of acme/storefront")).toBeTruthy();
-    // What it is is where a manifest refusal belongs, and every stop after it
-    // is unreached.
-    expect(railStates(region)).toEqual(["complete", "complete", "stopped", "pending", "pending", "pending"]);
+    // With no report, analysis stops on Configuration. Review has nothing to
+    // show yet, and stays ahead along with the remaining steps.
+    expect(railStates(region)).toEqual(["complete", "complete", "complete", "complete", "stopped", "ahead", "ahead", "ahead", "ahead"]);
     // ...and the one forward act is Retry, on the bar beside Cancel -- so
     // leaving a stopped flow is as reachable as trying it again.
     expect(forwardAct("Retry")).toBeTruthy();
@@ -1068,23 +952,43 @@ describe("the compose flow: leaving and coming back", () => {
 // ---------------------------------------------------------------------------
 
 describe("what the compose flow does not do", () => {
-  it("mounts no toast and no dialog, and keeps the pasted URL one click away", async () => {
-    const connection = fakeConnection({ sourceProbe: { "": probeReply() } });
+  it("requires GitHub setup by a cluster owner without offering token creation", async () => {
+    const connection = fakeConnection({ credentials: [], githubApp: { configured: false, canSetup: true } });
     const { region } = await compose(connection);
     await chooseSource(region, /A repository/);
+    expect(await within(region).findByRole("button", { name: "Set up GitHub" })).toBeTruthy();
+    expect(forwardAct("Connect GitHub")).toBeNull();
+    expect(forwardAct("Analyze")).toBeNull();
+    expect(within(region).queryByRole("radio", { name: "A token" })).toBeNull();
+    expect(within(region).queryByLabelText("The github.com access token")).toBeNull();
+    expect(connection.callsNamed("sourceCredentialCreate")).toHaveLength(0);
+    expect(connection.callsNamed("createPackage")).toHaveLength(0);
+  });
 
+  it("asks a cluster owner to set up GitHub when the composer cannot", async () => {
+    const connection = fakeConnection({ credentials: [], githubApp: { configured: false, canSetup: false } });
+    const { region } = await compose(connection, { role: "developer" });
+    await chooseSource(region, /A repository/);
+    expect(await within(region).findByText(/Ask a cluster owner/)).toBeTruthy();
+    expect(forwardAct("Set up GitHub")).toBeNull();
+    expect(forwardAct("Connect GitHub")).toBeNull();
+    expect(forwardAct("Analyze")).toBeNull();
+    expect(within(region).queryByRole("radio", { name: "A token" })).toBeNull();
+    expect(within(region).queryByLabelText("The github.com access token")).toBeNull();
+    expect(connection.callsNamed("sourceCredentialCreate")).toHaveLength(0);
+    expect(connection.callsNamed("createPackage")).toHaveLength(0);
+  });
+
+  it("offers GitHub connection without a pasted-token creation route", async () => {
+    const connection = fakeConnection({ credentials: [] });
+    const { region } = await compose(connection);
+    await chooseSource(region, /A repository/);
     expect(document.querySelector("[data-toast], .os-toast, dialog, [role='dialog']")).toBeNull();
-    // GitHub Connect (memql#4915) landed, so a person with no connection is
-    // offered one -- and the pasted URL is still a legitimate first answer
-    // rather than something behind "Advanced": one plain control, in the
-    // surface, saying what it does.
-    // ON THE FLOOR, where every step's forward act is -- and the two ways in
-    // are one choice in the step, as equals.
-    await waitFor(() => expect(forwardAct("Connect GitHub")).toBeTruthy());
-    expect(within(region).getByRole("radio", { name: "GitHub" }).getAttribute("aria-checked")).toBe("true");
+    expect(await within(region).findByRole("button", { name: "Add GitHub account" })).toBeTruthy();
+    expect(within(region).queryByRole("radio", { name: "A token" })).toBeNull();
     expect(within(region).queryByLabelText(URL_FIELD)).toBeNull();
-    await click(within(region).getByRole("radio", { name: "A token" }));
-    expect(within(region).getByLabelText(URL_FIELD)).toBeTruthy();
+    expect(within(region).queryByLabelText("The github.com access token")).toBeNull();
+    expect(connection.callsNamed("sourceCredentialCreate")).toHaveLength(0);
   });
 
   it("reads no zip Library until the zip branch is showing", async () => {
@@ -1102,34 +1006,20 @@ describe("what the compose flow does not do", () => {
 // ---------------------------------------------------------------------------
 
 describe("a private repository whose build output is committed", () => {
-  it("goes Add a deployable -> published, with its token pasted once", async () => {
-    const secret = "github_pat_" + "11PRIVATE" + "0123456789";
+  it("goes Add a deployable -> published using its GitHub account without a token form", async () => {
     const connection = fakeConnection({
-      sourceProbe: {
-        "": probeReply({ reachable: false, reason: "not_found_or_private" }),
-        "cred-new": probeReply({ private: true, defaultBranch: "main" }),
-      },
-      credentials: [],
+      sourceProbe: { "cred-acme": probeReply({ private: true, defaultBranch: "main" }) },
+      repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "acme/storefront", private: true })] }),
     });
     const { region } = await compose(connection);
-
-    // Source: a repository this cluster cannot see anonymously.
     await chooseRepository(region);
-    await fill(URL_FIELD, REPO);
-    await blur(URL_FIELD);
-    await within(region).findByText("private, or not there");
-
-    // ...and a token, pasted once.
-    await choose(CREDENTIAL_FIELD, /Add a credential/);
-    await fill("A name for this github.com credential", "work laptop");
-    await fill("The github.com access token", secret);
-    await click(within(region).getByRole("button", { name: "Add credential" }));
     await within(region).findByText(/private, and reachable under this credential/);
+    expect(within(region).queryByLabelText("The github.com access token")).toBeNull();
 
     // Analyze.
     await fill(NAME_FIELD, "acme");
-    await click(forwardAct("Analyze"));
-    expect(connection.callsNamed("createPackage")[0]).toContain('credentialId: "cred-new"');
+    await click(await forward("Analyze"));
+    expect(connection.callsNamed("packageSourceRegister")[0]).toContain('credentialId: "cred-acme"');
     await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(mintedPackageId(connection)), "NODE_CREATED");
     await within(region).findByText("clients/web");
 
@@ -1162,15 +1052,13 @@ describe("a private repository whose build output is committed", () => {
     await waitFor(() =>
       expect((document.querySelector(".os-actbar")?.textContent ?? "")).toContain("in place at shop.memql.example.com"),
     );
-    expect(railStates(region)).toEqual(["complete", "complete", "complete", "complete", "skipped", "open"]);
+    expect(railStates(region)).toEqual(["complete", "complete", "complete", "complete", "complete", "complete", "complete", "skipped", "open"]);
     // The addresses are facts now, and the one that landed is the run's own.
     expect(within(region).queryByLabelText("The name storefront answers at")).toBeNull();
     expect(within(region).getAllByText("shop.memql.example.com").length).toBeGreaterThan(0);
 
-    // THE WHOLE POINT: the token reached exactly one call.
-    const carrying = connection.calls.filter((call) => call.includes(secret));
-    expect(carrying).toHaveLength(1);
-    expect(carrying[0]).toContain("sourceCredentialCreate");
+    expect(connection.callsNamed("sourceCredentialCreate")).toHaveLength(0);
+    expect(connection.callsNamed("sourceRepositories")).toContain('builtin sourceRepositories(credentialId: "cred-acme", page: 1, connectionId: "source-cred-acme-i-acme")');
   });
 });
 
@@ -1306,19 +1194,19 @@ describe("the address, checked as it is typed", () => {
 // ---------------------------------------------------------------------------
 
 describe("a source this cluster already tracks", () => {
-  it("is named on the Source stop, and Analyze stays out of reach", async () => {
-    const connection = fakeConnection({ packages: [ACME], sourceProbe: { "": probeReply({ defaultBranch: "main" }) } });
+  it("allows the same repository under a distinct credential and ownership tuple", async () => {
+    const connection = fakeConnection({
+      packages: [ACME], sourceProbe: { "": probeReply({ defaultBranch: "main" }) },
+      repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "ACME/storefront", url: "https://github.com/ACME/storefront.git" })] }),
+    });
     const { region } = await compose(connection);
     await chooseRepository(region);
     // The same repository under a different spelling, at the default branch
     // ACME tracks by name -- which the probe's answer is what lets the stop
     // read as one ref.
-    await fill(URL_FIELD, "https://github.com/ACME/storefront.git");
-    await blur(URL_FIELD);
     await fill(NAME_FIELD, "acme again");
-    expect(await within(region).findByText(/already tracked by/)).toBeTruthy();
-    expect(within(region).getByText("acme")).toBeTruthy();
-    expect(forwardAct("Analyze")).toBeNull();
+    expect(within(region).queryByText(/already tracked by/)).toBeNull();
+    expect(await forward("Analyze")).toBeTruthy();
     expect(connection.callsNamed("createPackage")).toHaveLength(0);
   });
 
@@ -1329,12 +1217,11 @@ describe("a source this cluster already tracks", () => {
     });
     const { region } = await compose(connection);
     await chooseRepository(region);
-    await fill(URL_FIELD, REPO);
-    await blur(URL_FIELD);
-    await fill(NAME_FIELD, "acme again");
     await within(region).findByText(/public, default branch main/);
+    await fill(NAME_FIELD, "acme again");
     expect(within(region).queryByText(/already tracked by/)).toBeNull();
     expect(await forward("Analyze")).toBeTruthy();
+    expect(connection.callsNamed("createPackage")).toHaveLength(0);
   });
 });
 

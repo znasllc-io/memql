@@ -171,7 +171,7 @@ function doorRow(id: DoorId): HTMLElement {
 
 /** The state word that row carries -- the channel that survives greyscale. */
 function doorWordIn(id: DoorId): string {
-  return doorRow(id).querySelector(".os-door-state")?.textContent ?? "";
+  return doorRow(id).querySelector(".os-record-status")?.textContent ?? "";
 }
 
 /** The state that row is in. */
@@ -188,7 +188,7 @@ function doorOrder(): string[] {
 
 /** ...and the names beside them, which is what a person actually reads. */
 function doorNamesInOrder(): string[] {
-  return [...document.querySelectorAll(".os-doorrow-name")].map((el) => el.textContent ?? "");
+  return [...document.querySelectorAll("[data-os-doorid] .os-row-name")].map((el) => el.textContent ?? "");
 }
 
 /** Press a vendor row's act, which is what opens its panel. */
@@ -630,7 +630,7 @@ describe("Settings -> Doors: the try order is the product", () => {
     // spend nothing and the last two bill.
     await renderDoors();
     for (const id of DOOR_ORDER) {
-      const cost = doorRow(id).querySelector(".os-doorrow-cost")?.textContent ?? "";
+      const cost = doorRow(id).querySelector(".os-record-summary > span:first-child")?.textContent ?? "";
       expect(cost, id).toBe(DOOR_COST[id]);
       expect(cost, id).not.toBe("");
     }

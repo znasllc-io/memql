@@ -60,6 +60,9 @@ export async function probeSession(
   fetchImpl: IdentityFetch = fetch,
 ): Promise<{ signedIn: boolean }> {
   const response = await fetchIdentityRefresh(config, fetchImpl);
+  if (response.status >= 500 || response.status === 429) {
+    throw new Error("Identity is temporarily unavailable");
+  }
   return { signedIn: response.ok };
 }
 

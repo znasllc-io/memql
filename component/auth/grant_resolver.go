@@ -225,6 +225,9 @@ func CapableFor(ctx context.Context, subject Subject, verb, resource string) boo
 // level answered. CapableFor is this function's Held field and nothing else,
 // so the gates and the effective read cannot disagree about one caller.
 func DecideFor(ctx context.Context, subject Subject, verb, resource string) Decision {
+	if !ScopedRoleMayUse(subject.Role, resource) {
+		return Decision{Verb: verb, Resource: resource, Source: SourceRole}
+	}
 	d := Decision{
 		Verb:     verb,
 		Resource: resource,
@@ -303,6 +306,10 @@ func EffectiveCapabilities(ctx context.Context, subject Subject) []Decision {
 		}
 		if !subject.Unranked {
 			d = decideOver(d, userGrants, groupGrants)
+		}
+		if !ScopedRoleMayUse(subject.Role, vr.Resource) {
+			d.Held = false
+			d.Source = SourceRole
 		}
 		out = append(out, d)
 	}

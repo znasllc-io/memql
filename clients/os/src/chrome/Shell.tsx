@@ -1,4 +1,5 @@
 import { AttentionProvider } from "../attention/Attention";
+import { IdentityOpenDispatcher } from "../apps/identity/IdentityOpenDispatcher";
 import { SharedPackagesProvider } from "../apps/deployables/packages/usePackages";
 import { DeployablesAttentionFeed } from "../apps/deployables/attention";
 import { FleetSharingAttentionFeed } from "../apps/fleet/machines/sharingAttention";
@@ -294,6 +295,7 @@ function ShellRoster({
           answer to a portal route that no longer exists. Renders nothing,
           and does nothing on a browser that arrived without the marker. */}
       <ConceptOpenDispatcher />
+      <IdentityOpenDispatcher />
       {/* Where a captured line comes from: the focused window's app and
           section, read from this provider's state at capture time. */}
       <CaptureContextInstaller />

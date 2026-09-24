@@ -23,8 +23,8 @@ import (
 // parsed from dsl/platform/mutations.memql and dispatched through the
 // mutation entry point. A `user`-role caller holding `read app:deployables`
 // and `execute app:deployables/deploy` -- and nothing on the publish part --
-// reaches the deploy executor and is refused the publish mutation before
-// any row is read.
+// reaches the deploy executor and is refused the publish mutation for the
+// same persisted organization target.
 //
 // THE GRANT IS INSTALLED ON THE CATALOG, NOT WRITTEN AS A ROW. The shared
 // engine never runs the seed materializer, so the seeded rows are not there
@@ -49,7 +49,10 @@ func installPartGateCatalog(t *testing.T, granted bool) {
 	open := auth.VerbResource{Verb: auth.VerbRead, Resource: "app:deployables"}
 	deploy := auth.VerbResource{Verb: auth.VerbExecute, Resource: "app:deployables/deploy"}
 	publish := auth.VerbResource{Verb: auth.VerbExecute, Resource: "app:deployables/publish"}
-	writer := map[auth.VerbResource]bool{}
+	dataRead := auth.VerbResource{Verb: auth.VerbRead, Resource: auth.ResourceData}
+	dataCreate := auth.VerbResource{Verb: auth.VerbCreate, Resource: auth.ResourceData}
+	dataUpdate := auth.VerbResource{Verb: auth.VerbUpdate, Resource: auth.ResourceData}
+	writer := map[auth.VerbResource]bool{open: true, dataRead: true, dataCreate: true, dataUpdate: true}
 	if granted {
 		writer[open] = true
 		writer[deploy] = true
@@ -57,8 +60,8 @@ func installPartGateCatalog(t *testing.T, granted bool) {
 	auth.SetCapabilityCatalog(&capabilityFake{
 		ranks: map[string]int{"owner": 400, "developer": 300, "admin": 200, "user": 100, "writer": 100, "viewer": 50},
 		grants: map[string]map[auth.VerbResource]bool{
-			"owner":     {open: true, deploy: true, publish: true},
-			"developer": {open: true, deploy: true, publish: true},
+			"owner":     {open: true, deploy: true, publish: true, dataRead: true, dataCreate: true, dataUpdate: true},
+			"developer": {open: true, deploy: true, publish: true, dataRead: true, dataCreate: true, dataUpdate: true},
 			"admin":     {},
 			"user":      writer,
 			"writer":    writer,
@@ -102,7 +105,29 @@ func partGateActor(userId string, role auth.Role) context.Context {
 }
 
 func isCapabilityRefusal(err error, part string) bool {
-	return err != nil && strings.Contains(err.Error(), "requires the execute on app:deployables/"+part+" capability")
+	return err != nil && (strings.Contains(err.Error(), "requires the execute on app:deployables/"+part+" capability") ||
+		strings.Contains(err.Error(), "capability_not_held:") && strings.Contains(err.Error(), "not permitted for the selected organization's target"))
+}
+
+// Persist the target and caller's membership so permission tests reach the
+// requested action rather than failing on an invented package or site id.
+func seedPartGateTargets(t *testing.T, eng *MemQLEngine, member, packageID, siteID string) {
+	t.Helper()
+	account := "part-org-" + BareShortId(member)
+	seedPrincipal(t, eng, member, auth.RoleWriter)
+	if err := organizationInsert(t, eng, groupSeedCtx(), conceptAccountsAccount, account, map[string]any{"name": account, "status": "active", "domainStatus": "unverified"}); err != nil {
+		t.Fatal(err)
+	}
+	seedGroup(t, eng, "g-"+account, account, "account", account)
+	seedMembership(t, eng, "g-"+account, BareShortId(member), "active")
+	if err := organizationInsert(t, eng, groupSeedCtx(), "v1:platform:package", packageID, map[string]any{"name": "Part gate package", "sourceKind": "repo", "status": "active", "ownerUserId": member, "accountId": account}); err != nil {
+		t.Fatal(err)
+	}
+	if siteID != "" {
+		if err := organizationInsert(t, eng, groupSeedCtx(), conceptPlatformSite, siteID, map[string]any{"hostname": BareShortId(siteID) + "." + siteHostnamePolicyDomain(), "kind": "spa", "status": "draft", "bundleRef": "blob://part-gate/v1", "ownerUserId": member, "accountId": account}); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func TestAUserGrantedTheDeployPartRunsPackageDeployAndIsRefusedGoLive(t *testing.T) {
@@ -115,6 +140,9 @@ func TestAUserGrantedTheDeployPartRunsPackageDeployAndIsRefusedGoLive(t *testing
 	deployCall := fmt.Sprintf(`builtin packageDeploy(packageId: %s, confirm: true)`, langparser.QuoteString(packageId))
 	goLive := fmt.Sprintf(`mutation updateSiteStatus(siteId: %s, status: "live")`, langparser.QuoteString(siteId))
 
+	seedPartGateTargets(t, eng, member, packageId, siteId)
+	developer := "v1:identity:user:part-dev-" + suffix
+	seedPrincipal(t, eng, developer, auth.RoleDeveloper)
 	// ---- granted: the deploy part opens packageDeploy ...
 	installPartGateCatalog(t, true)
 	reached := installDeployRecorder(t, eng)
@@ -126,19 +154,17 @@ func TestAUserGrantedTheDeployPartRunsPackageDeployAndIsRefusedGoLive(t *testing
 	}
 
 	// ... and NOT updateSiteStatus(live), which is the publish part. Refused
-	// before the row is read: there is no site row, and the error must be
-	// the capability refusal rather than "not found".
+	// against a real target the caller can read, so this refusal proves the
+	// action boundary rather than a missing-row fallback.
 	_, err := eng.Execute(partGateActor(member, auth.RoleWriter), goLive)
 	if !isCapabilityRefusal(err, "publish") {
 		t.Fatalf("a user-role caller holding only the deploy part was not refused the publish part on updateSiteStatus(live): %v", err)
 	}
 
-	// ---- a developer holds the publish part, so the gate lets the mutation
-	// through to the row layer -- where THIS site does not exist. Whatever
-	// that answers, it is not the capability refusal.
-	_, err = eng.Execute(partGateActor("v1:identity:user:part-dev-"+suffix, auth.RoleDeveloper), goLive)
-	if isCapabilityRefusal(err, "publish") {
-		t.Fatalf("a developer, who the seeds grant every part, was refused the publish part: %v", err)
+	// A developer holds publish and data update: the same stored target now
+	// transitions successfully, proving the member refusal was about the part.
+	if _, err := eng.Execute(partGateActor(developer, auth.RoleDeveloper), goLive); err != nil {
+		t.Fatalf("a developer granted publish could not update the existing site: %v", err)
 	}
 }
 
@@ -151,6 +177,7 @@ func TestAUserWithoutTheDeployPartIsRefusedPackageDeploy(t *testing.T) {
 	member := "v1:identity:user:part-nobody-" + suffix
 	packageId := "v1:platform:package:part-pkg-" + suffix
 
+	seedPartGateTargets(t, eng, member, packageId, "")
 	installPartGateCatalog(t, false)
 	reached := installDeployRecorder(t, eng)
 	_, err := eng.Execute(partGateActor(member, auth.RoleWriter),

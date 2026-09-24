@@ -18,7 +18,8 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
 1. **Every section opens with the Head.** Title, at most one primary
    action, nothing else standing. No section renders a control strip before
    its content. Encoded by `kit` `Head` (its `meta` slot carries a quiet
-   count or scope note).
+   count or scope note). Counts come from the authorized filtered collection
+   only after its read settles; unavailable is not zero.
 
 2. **Filters are questions, not furniture.** Search and facet controls live
    behind one affordance on the Head line (`kit` `Refine`): collapsed by
@@ -108,6 +109,17 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
   diff. The audit that produced these rules was visual, and the drift it
   found had survived every code review.
 
+## Record lists
+
+App record collections use `RecordList` and `RecordRow`, the Deployables list
+pattern. `LiveList` already provides the list container and arrival semantics.
+Use the row's `actions` slot for independent controls, outside its opening
+button, and `Subhead.meta` for subordinate collection counts. Static collections
+can use `RecordList as="ul"` to retain list/listitem semantics. The repository
+chooser uses this same anatomy, with selection state and grouped counts. See the
+[coverage inventory](qa/list-coverage.md) for specialized grids, trees and
+workflow surfaces that retain their interaction model.
+
 ## App overviews
 
 Overview is the shared summary destination. Use `kit/Overview` for the header
@@ -142,12 +154,15 @@ combined list". Two lists now, in one row language (`RecordRow`):
   address of its own. Where it came from is a FACT ON THE ROW (the source's
   name, "Zip", "CI", "Built in") and a facet in Refine -- never a heading over
   it and an indent.
-- **Sources** is every repository or zip that produces deployables: what it is
-  called and where it lives, how much it produced, and the one state word a
-  person might have to act on (Review needed, then Update available, then the
-  quiet ones). Its page lists its apps, including the ones it declares and has
-  not deployed, and carries the act its state asks for on its bar.
-- **Every source is on it, and each is summarised by everything it made.** A
+- **Sources** is the single configured repository catalog. Each row shows its
+  GitHub identity, organization or personal target, repository and tracked
+  branch, alongside the separate MemQL owning account. Credentials and saved
+  installation bindings provide access metadata rather than separate list
+  entries. There are no sibling Repositories or Accounts pages; Settings links
+  to this catalog without repeating a credential roster. A source's detail
+  holds its access, settings, apps and history. ZIP-backed apps remain in
+  Deployables and retain their existing detail and lifecycle controls.
+- **Every listed source is summarised by everything it made.** A
   source whose analysis was refused has made nothing and is still a source:
   this tab is where somebody looks for it to try again. A search is asked of
   the SOURCE (its name, where it lives, what it made) and never trims the
@@ -155,6 +170,13 @@ combined list". Two lists now, in one row language (`RecordRow`):
   apps'. The list has its own fold for this (`foldSources`): read as a filter
   over the deployables list's answer it inherited that list's questions, and
   showed three of five seeded sources.
+- **Remove source changes catalog visibility only.** It hides the configured
+  repository from Sources and saved choices while preserving its grant,
+  installation binding, package ID, automatic updates, deployables and history.
+  Add deployable registers, reuses or restores the same authorized configuration
+  atomically; it does not borrow a different identity's or MemQL account's
+  history. Archive remains the distinct lifecycle operation. Only Add deployable
+  offers Add source and GitHub connection setup.
 - **What belongs to the source is said on the source, once.** A run parked at a
   source's gate is "Review needed" on that source's row and on its page's bar,
   with Review beside it -- not repeated on every deployable the source made.
@@ -250,9 +272,9 @@ surface in the shell that read as a single thought.
   cards about updates, with a picker and three fields arriving in between --
   the owner's word was "overcrowded". It is two steps now: **Source** is the
   choice and nothing else, and the step after it is NAMED BY THE ANSWER
-  (Repository, Zip, Your CI) and holds what that answer needs. Alternatives
-  that answer one question are ONE choice -- GitHub or a token is a choice
-  row, not a button with a second button beneath it -- and a question that
+  (Repository, Zip, Your CI) and holds what that answer needs. Repository
+  creation uses GitHub alone; it does not ask someone to choose a connection
+  mechanism. A question that
   only makes sense once another is answered (what happens when something newer
   lands) waits until it is.
 - **A step that is one choice is answered by choosing.** There is no Continue
@@ -271,7 +293,7 @@ surface in the shell that read as a single thought.
   first now, with a read that writes nothing, and offers what can be done:
   Connect where there is an app, Set up GitHub where there is none and this
   person may register one, and for anybody else no act at all -- the step says
-  who can, and the other way in is one choice away. "Not known" is not "no":
+  who can set it up. "Not known" is not "no":
   when the question goes unanswered the old offer stands, and the refusal
   still lands in place.
 - **The orb names the subject.** The gate wears the MemQL mark, because what is

@@ -11,7 +11,9 @@ import {
   Head,
   LiveList,
   Panel,
-  Row as KitRow,
+  RecordList,
+  RecordRow,
+  listCount,
   Subhead,
   formatMoment,
   useLiveView,
@@ -100,7 +102,7 @@ export function AgentsSection({ showInactive }: { showInactive: boolean }) {
 
   return (
     <div className="os-cluster">
-      <Head title="Agents" meta={showInactive ? "every agent row" : "active agents"} />
+      <Head title="Agents" meta={listCount(view?.snapshot)} />
 
       <div className="os-cluster-body">
         <div className="os-cluster-list">
@@ -119,22 +121,19 @@ export function AgentsSection({ showInactive }: { showInactive: boolean }) {
                 : "No active agents. Turn on inactive agents in this app's settings if you are looking for one that was switched off."
             }
             renderRow={(agent) => (
-              <KitRow
+              <RecordRow
                 icon={<Bot size={13} aria-hidden className="os-cluster-row-glyph" />}
                 name={agent.name || agent.id}
                 current={agent.active}
                 dim={!agent.active}
                 open={openId === agent.id}
                 onOpen={() => setOpenId((held) => (held === agent.id ? "" : agent.id))}
-                state={
-                  <>
-                    {agent.kind === "" ? null : <Chip tone="muted">{agent.kind}</Chip>}
-                    {agent.active ? null : <Chip tone="accent">inactive</Chip>}
-                  </>
-                }
+                secondary={agent.role || agent.roleSlug}
+                state={agent.active ? "Active" : "Inactive"} tone={agent.active ? "accent" : "muted"}
+
               >
-                <span className="os-cluster-row-note">{agent.role || agent.roleSlug}</span>
-              </KitRow>
+                <span>{agent.kind}</span>
+              </RecordRow>
             )}
           />
         </div>
@@ -201,7 +200,7 @@ function StandingAuthorizations() {
 
   return (
     <Panel label="Your standing authorizations">
-      <Subhead>Your standing authorizations</Subhead>
+      <Subhead meta={grants.state === "read" && !grants.error ? rows.length : undefined}>Your standing authorizations</Subhead>
       {/* SELF-ONLY, SAID OUT LOUD. `v1:agents:agentAuthorization` declares
           @rowAuthz(owner="userId") and `agentAuthorizationsForSelf` filters
           userId==actor.userId, so this list is the CALLER's own grants and
@@ -225,9 +224,9 @@ function StandingAuthorizations() {
         <Caption>You have granted no agent a standing authorization.</Caption>
       ) : null}
 
+      <RecordList as="ul" label="Your standing authorizations">
       {rows.map((grant) => (
-        <div key={grant.id} className="os-cluster-grant">
-          <span className="os-cluster-grant-agent os-mono">{grant.agentId}</span>
+        <RecordRow key={grant.id} name={grant.agentId} secondary={`${grant.planKind || "unstated"} · ${grant.spaceScope || "unstated"}`} state={grant.active ? "Active" : "Revoked"} dim={!grant.active}>
           <Chips label={`Grant ${grant.id}`}>
             <Chip tone="muted" title="The plan kind this grant covers. * covers any kind.">
               {grant.planKind || "unstated"}
@@ -254,8 +253,9 @@ function StandingAuthorizations() {
               value={grant.expiresAt === "" ? "never" : formatMoment(grant.expiresAt)}
             />
           </Facts>
-        </div>
+        </RecordRow>
       ))}
+      </RecordList>
     </Panel>
   );
 }

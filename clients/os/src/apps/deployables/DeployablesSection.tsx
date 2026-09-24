@@ -1,3 +1,8 @@
+import { useSourceConnections } from "./sources/connections";
+import { sourceRecord } from "./sources/sourceRecord";
+import { RemoveSource } from "./sources/RemoveSource";
+import { bare } from "./people";
+import { AccountChip } from "../accounts/AccountPicker";
 import { AttentionMarker } from "../../attention/Attention";
 import { updateTarget } from "./attention";
 import type { ConnectReturn } from "./sources/connectReturn";
@@ -52,9 +57,10 @@ import {
   type DeployableListRow,
   type ListFilter,
 } from "./list";
-import { runIsScopedToApp, sourceLabel, type DeploymentRow, type PackageRow } from "./packages/rows";
+import { runIsScopedToApp, type DeploymentRow, type PackageRow } from "./packages/rows";
 import { ComposePage } from "./page/ComposePage";
-import type { PartsHeld } from "./parts";
+import { partsForOrganization, type PartsHeld } from "./parts";
+import { availableInAnyOrganization } from "../../system/roles";
 import { DeployablePage } from "./page/DeployablePage";
 import { HistoryView } from "./page/HistoryView";
 import { SourceView } from "./page/SourceView";
@@ -190,11 +196,12 @@ export function DeployablesSection({
       setLanding(navigation.origin === "peer");
     }
   }, [active, navigation?.revision, navigation?.origin, openRequest?.revision, openRequest?.siteId]);
+  const canOpenCompose = can.deploy || availableInAnyOrganization("execute", "app:deployables/deploy");
   // OAuth is a full-page return. Resume the repository step once; the
   // live credential feed decides whether this account actually connected.
   useLayoutEffect(() => {
-    if (connectResult && can.deploy) setView({ kind: "compose", connectResult });
-  }, [connectResult, can.deploy]);
+    if (connectResult && canOpenCompose) setView({ kind: "compose", connectResult });
+  }, [connectResult, canOpenCompose]);
   // WHAT WAS JUST DELETED, so the list can say what happened to it. The name
   // is free the instant the row is stamped; the domains come down on the
   // reconciliation sweep's own schedule, and this says so rather than implying
@@ -211,6 +218,11 @@ export function DeployablesSection({
   const packageRows = packages?.snapshot.rows ?? [];
   const parkedRows = parked?.snapshot.rows ?? [];
 
+  const connections = useSourceConnections();
+  const provenanceKey = JSON.stringify(packageRows.map(pkg => sourceRecord(pkg, credentials, connections.rows).provenance));
+  const sourceMetadataReady = connections.state === "live" && !connections.error && (!credentialFeed || credentialFeed.state === "live" && !credentialFeed.error);
+  const sourceSearch = (pkg: PackageRow) => sourceRecord(pkg, credentials, connections.rows).provenance;
+  const refreshSources = () => { onReseed(); credentialFeed?.retry(); connections.retry(); };
   const viewKey = listViewKey(filter, showArchived);
   const list = useThreeFeedView<SiteRow, PackageRow, DeploymentRow, DeployableListGroup>(
     sites,
@@ -230,8 +242,8 @@ export function DeployablesSection({
   // every app it made, so the deployables list's questions (its search narrows
   // ROWS, its archived flip is the row's) must not reach it. See `foldSources`.
   const sourcesList = useThreeFeedView<SiteRow, PackageRow, DeploymentRow, DeployableListGroup>(
-    sites, packages, parked, `sources:${viewKey}`,
-    (s, p, r) => foldSources(s, p, r, filter.search, showArchived),
+    sites, packages, parked, `sources:${viewKey}:${provenanceKey}`,
+    (s, p, r) => foldSources(s, p.filter(pkg => pkg.sourceKind === "repo" && pkg.repoUrl), r, filter.search, showArchived, sourceSearch),
   );
   const listedCount = root === "sources" ? (sourcesList?.snapshot.rows.length ?? 0) : (flat?.snapshot.rows.length ?? 0);
 
@@ -248,7 +260,7 @@ export function DeployablesSection({
   const archivedCount = useMemo(
     () =>
       root === "sources"
-        ? packageRows.filter((p) => p.status === "archived").length
+        ? packageRows.filter((p) => p.status === "archived" && p.sourceKind === "repo" && !p.sourceRemoved).length
         : foldDeployables(siteRows, packageRows, parkedRows, DEFAULT_LIST_FILTER, true).reduce(
             (n, g) => n + g.rows.length,
             0,
@@ -321,9 +333,13 @@ export function DeployablesSection({
           }
           only={view.only}
           packages={packageRows}
+          packageFeed={{ state: packages?.snapshot.state ?? "seeding", error: packages?.snapshot.error ?? "", retry: onReseed }}
+          siteFeed={{ state: sites?.snapshot.state ?? "seeding", error: sites?.snapshot.error ?? "" }}
+          placedSources={siteRows.map(s => ({ packageId: s.packageId, name: s.packageDeployableName, siteId: s.id }))}
+          onOpenDeployable={openSite}
           placed={
             parkedFor === null
-              ? []
+              ? undefined
               : siteRows.filter((s) => s.packageId === parkedFor.pkg.id).map((s) => s.packageDeployableName)
           }
         />
@@ -338,17 +354,21 @@ export function DeployablesSection({
       if (pkg === null) return renderList();
       const apps = siteRows.filter((s) => s.packageId === pkg.id);
       if (view.kind === "history") {
-        return <HistoryView pkg={pkg} can={can} app={siteRows.find(s => s.id === view.siteId)}
+        return <HistoryView pkg={pkg} can={partsForOrganization(pkg.accountId, can)} app={siteRows.find(s => s.id === view.siteId)}
           backLabel={view.returnTo?.kind === "history" ? "App history" : undefined}
           onOpenSourceHistory={() => setView({ kind: "history", packageId: pkg.id, returnTo: view })}
           onBack={() => setView(view.returnTo ?? (view.siteId ? { kind: "deployable", siteId: view.siteId } : { kind: "source", packageId: pkg.id }))} />;
       }
       return (
         <SourceView
+          key={`${pkg.id}:${viewerUserId}`}
           pkg={pkg}
+          viewerUserId={viewerUserId}
+          onRemoved={() => { refreshSources(); backToList(); }}
           apps={apps}
+          appsSettled={!feedError && sites?.snapshot.state === "live" && packages?.snapshot.state === "live"}
           credentials={credentials}
-          can={can}
+          can={partsForOrganization(pkg.accountId, can)}
           backLabel={view.fromSite ? (siteRows.find(s => s.id === view.fromSite)?.title || "Deployable") : ROOT_LABEL[root]}
           onBack={() => view.fromSite ? setView({ kind: "deployable", siteId: view.fromSite }) : backToList()}
           onOpenHistory={() => setView({ kind: "history", packageId: pkg.id, returnTo: view })}
@@ -378,7 +398,7 @@ export function DeployablesSection({
           credentials={credentials}
           viewerUserId={viewerUserId}
           nameOf={nameOf}
-          can={can}
+          can={partsForOrganization(site.accountId, can)}
           clusterDomain={clusterDomain}
           onAsk={onAsk}
           onBack={() => view.from ? setView({ kind: "source", packageId: view.from }) : backToList()}
@@ -412,7 +432,7 @@ export function DeployablesSection({
     const pkg = packageRows.find((p) => p.id === packageId);
     const group = pkg === undefined
       ? undefined
-      : foldSources(siteRows, packageRows, parkedRows, "", pkg.status === "archived").find((g) => g.pkg?.id === packageId);
+      : foldSources(siteRows, [{ ...pkg, sourceRemoved: false }], parkedRows, "", pkg.status === "archived").find((g) => g.pkg?.id === packageId);
     const waiting = group?.rows.find((row) => row.parked !== null);
     if (waiting === undefined || waiting.parked === null) return undefined;
     const only = runIsScopedToApp(waiting.parked, waiting.app) ? waiting.app : "";
@@ -443,14 +463,14 @@ export function DeployablesSection({
       ? "No archived deployables."
       : filterIsNarrowing(filter)
         ? "No matching deployables. Clear the filters to see everything."
-        : can.deploy
+        : canOpenCompose
           ? "No deployables yet. Add a repository, upload built files or connect your CI."
           : "No deployables are available to this account.";
 
     const filtered = filterIsNarrowing(filter);
     return (
       <div className="os-app-stack os-deployables-list deployable-overview os-record-list" data-density={density}>
-        <Head title={ROOT_LABEL[root]} meta={!feedError && list?.snapshot.state === "live" ? listedCount : undefined}>
+        <Head title={ROOT_LABEL[root]} meta={!feedError && (root !== "sources" || sourceMetadataReady) && (root === "sources" ? sourcesList : list)?.snapshot.state === "live" ? listedCount : undefined}>
           <Refine iconOnly
             search={filter.search}
             onSearch={(search) => patch({ search })}
@@ -517,10 +537,13 @@ export function DeployablesSection({
               keeps its name through the whole flow. */}
           {/* `deploy`, because composing ENDS in a deploy: a person holding
               only `sources` has nothing to reach here that is theirs. */}
-          {can.deploy ? (
+          {root === "deployables" && canOpenCompose ? (
             <AddButton label="Add a deployable" className="deployable-new" onClick={() => setView({ kind: "compose" })} />
           ) : null}
+          {root === "sources" ? <RefreshButton label="Refresh sources" busy={sourcesList?.snapshot.state === "seeding"} onClick={refreshSources} /> : null}
         </Head>
+        {root === "sources" ? <Caption>Manage sources here. Add new ones through Add deployable.</Caption> : null}
+        {root === "sources" && (connections.error || credentialFeed?.error) ? <Notice tone="warn" sentence="Some GitHub provenance could not be refreshed." detail={connections.error || credentialFeed?.error} next="Refresh sources to try again. Configured repositories remain available." /> : null}
 
         {/* WHAT HAPPENED TO THE THING THAT IS NO LONGER HERE. The name is free
             the instant the row is stamped; the certificate and route come down
@@ -550,17 +573,17 @@ export function DeployablesSection({
         {feedError ? (
           <Notice
             tone="error"
-            sentence="Deployables could not be loaded."
+            sentence={root === "sources" ? "Sources could not be loaded." : "Deployables could not be loaded."}
             detail={feedError}
             next="Check your connection and try again."
           >
-            <RefreshButton label="Reload deployables" onClick={onReseed} />
+            {root === "sources" ? null : <RefreshButton label="Reload deployables" onClick={onReseed} />}
           </Notice>
         ) : null}
 
-        {listedCount === 0 && (feedError || list?.snapshot.state !== "live") ? (feedError ? null : <div data-os-livelist data-state={list?.snapshot.state ?? "disconnected"}>
+        {root === "sources" && listedCount === 0 && !sourceMetadataReady ? <Caption>{connections.error || credentialFeed?.error ? "Source provenance is unavailable. Refresh sources to finish this reading." : connections.state === "disconnected" || credentialFeed?.state === "disconnected" ? "Sources are unavailable while disconnected. Reconnect to the cluster and refresh." : "Reading sources and GitHub access…"}</Caption> : listedCount === 0 && (feedError || list?.snapshot.state !== "live") ? (feedError ? null : <div data-os-livelist data-state={list?.snapshot.state ?? "disconnected"}>
           <EmptyState icon={root === "sources" ? GitBranch : Globe} title={list?.snapshot.state === "seeding" ? "Loading from the cluster" : "Not connected to the cluster"}>
-            {list?.snapshot.state === "seeding" ? "Your apps and sources will appear here." : "Your apps will appear when the connection returns."}
+            {list?.snapshot.state === "seeding" ? "Your apps and repositories will appear here." : "Your apps will appear when the connection returns."}
           </EmptyState>
         </div>) : root === "sources" ? (
           /* THE SOURCES, as their own list: a row each, in the list language
@@ -574,10 +597,10 @@ export function DeployablesSection({
             emptyText={showArchived ? "No archived sources." : filtered ? "No matching sources." : "No sources yet."}
             emptyContent={<EmptyState icon={GitBranch} title={showArchived ? "No archived sources" : filtered ? "No matching sources" : "No sources yet"}
               action={filtered ? <Button onClick={() => setFilter(DEFAULT_LIST_FILTER)}>Clear the search</Button> : undefined}>
-              {showArchived ? "Archived sources will appear here." : filtered ? "Try a different search." : "A source is a repository or a zip that declares one or more apps. Add a deployable from one and it is listed here, with everything it produced."}
+              {showArchived ? "Archived sources will appear here." : filtered ? "Try a different search." : "Configured GitHub account, organization and repository paths appear here. Start with Add deployable."}
             </EmptyState>}
             renderRow={(group, tick) => (
-              <SourceLine group={group} tick={tick} onOpen={() => setView({ kind: "source", packageId: group.pkg!.id })} />
+              <SourceLine accounts={accounts} group={group} tick={tick} provenance={sourceSearch(group.pkg!)} canRemove={partsForOrganization(group.pkg!.accountId, can).sources && bare(group.pkg!.ownerUserId) === bare(viewerUserId)} onRemoved={refreshSources} onOpen={() => setView({ kind: "source", packageId: group.pkg!.id })} />
             )}
           />
         ) : (
@@ -591,7 +614,7 @@ export function DeployablesSection({
             emptyText={emptyText}
             emptyContent={<EmptyState icon={Globe} title={showArchived ? "No archived deployables" : filtered ? "No matching deployables" : "No deployables yet"}
               action={filtered ? <Button onClick={() => setFilter(DEFAULT_LIST_FILTER)}>Clear filters</Button> : undefined}>
-              {showArchived ? "Archived apps will appear here. Restore one to bring it back offline." : filtered ? "Try a different search or clear the filters." : can.deploy ? "Add a deployable from a repository, built files or a CI pipeline." : "Apps shared with your account will appear here."}
+              {showArchived ? "Archived apps will appear here. Restore one to bring it back offline." : filtered ? "Try a different search or clear the filters." : canOpenCompose ? "Add a deployable from a repository, built files or a CI pipeline." : "Apps shared with your account will appear here."}
             </EmptyState>}
             renderRow={(row, tick) => (
               <DeployableLine
@@ -607,7 +630,7 @@ export function DeployablesSection({
                 deployedBy={deployedByLabel(row.deployedBy, viewerUserId, nameOf)}
                 origin={originLabel(row)}
                 open={row.site !== null && row.site.id === selectedSiteId}
-                onOpen={() => (row.site !== null ? openSite(row.site.id) : undefined)}
+                onOpen={() => row.pkg && row.parked ? openDeclared(row.pkg.id, row.parked.scopedTo.length ? row.app : "") : row.site ? openSite(row.site.id) : row.pkg ? openDeclared(row.pkg.id, row.app) : undefined}
                 traffic={row.site === null ? null : (figures.get(row.site.id) ?? null)}
               />
             )}
@@ -655,7 +678,7 @@ function newestParked(
  * ONE SOURCE, as a row: what it is called and where it lives, how much it
  * produced, and the one thing about it a person might have to act on.
  */
-function SourceLine({ group, tick, onOpen }: { group: DeployableListGroup; tick: ArrivalKind | null; onOpen: () => void }) {
+function SourceLine({ group, tick, onOpen, accounts, provenance, canRemove, onRemoved }: { accounts: AccountRow[]; group: DeployableListGroup; tick: ArrivalKind | null; onOpen: () => void; provenance: string; canRemove: boolean; onRemoved: () => void }) {
   const pkg = group.pkg!;
   const { apps, deployed } = sourceSummary(group);
   const state = sourceStateWord(group);
@@ -664,18 +687,21 @@ function SourceLine({ group, tick, onOpen }: { group: DeployableListGroup; tick:
     icon={pkg.sourceKind === "artifact" ? <FileArchive size={18} aria-hidden /> : <GitBranch size={18} aria-hidden />}
     name={name}
     // Said once: a source with no name of its own is already called by where it lives.
-    secondary={pkg.name.trim() === "" ? undefined : sourceLabel(pkg)}
+    secondary={provenance}
+    actions={canRemove ? <RemoveSource pkg={pkg} onRemoved={onRemoved} /> : undefined}
+    actionLayout="compact"
     state={state.word}
     tone={state.tone}
     stateExtra={tick === "added" ? <span className="os-livelist-tick">new</span> : null}
     trailing={<AttentionMarker appId="deployables" target={updateTarget(pkg.id)} />}
     current={state.tone === "accent"}
     dim={pkg.status === "archived"}
-    label={`Open ${name}, ${state.word.toLowerCase()}`}
+    label={`Open ${name}, ${provenance}, ${state.word.toLowerCase()}`}
     onOpen={onOpen}
   >
     {/* A sentence when there is nothing to count: "0 apps" reads as a result,
         and a source that has made nothing has not been asked yet. */}
+    <AccountChip name={accountNameFrom(accounts, pkg.accountId)} />
     <span>{apps === 0 ? (pkg.status === "archived" ? "No apps" : "No apps yet") : `${apps} app${apps === 1 ? "" : "s"}, ${deployed} deployed`}</span>
   </RecordRow>;
 }
@@ -710,9 +736,10 @@ function DeployableLine({
   const now = useNow();
   const site = row.site;
   const archived = site?.status === "archived" || row.pkg?.status === "archived";
-  const state = row.disabled ? "Inactive" : site ? siteStateWord(site) : row.parked ? "Review needed" : "Not deployed";
+  const progress: Record<string, string> = { analyzing: "Analyzing", awaiting_confirm: "Review needed", building: "Building", staging_dsl: "Staging definitions", rolling: "Restarting cluster", publishing: "Publishing" };
+  const state = row.parked ? progress[row.parked.status] ?? "In progress" : row.disabled ? "Inactive" : site ? siteStateWord(site) : "Not deployed";
   const name = row.name;
-  const client = accountNameFrom(accounts, site?.accountId ?? "");
+  const client = accountNameFrom(accounts, site?.accountId ?? row.pkg?.accountId ?? "");
   // THE KIT'S ROW, NOT A LOCAL ONE. This list is where `RecordRow` came from:
   // it was drawn here by hand and styled in composition.css under
   // `.deployable-overview`, so no other app could use it. It is the kit's now,
@@ -723,9 +750,9 @@ function DeployableLine({
     secondary={row.hostname === name ? kindLabel(row.kind) : row.hostname || "No address yet"}
     state={state}
     tone={state === "Live" ? "accent" : state === "Unavailable" ? "warn" : "muted"}
-    stateTitle={site?.status === "live" ? healthExplanation(site, now.getTime()) : undefined}
+    stateTitle={!row.parked && site?.status === "live" ? healthExplanation(site, now.getTime()) : undefined}
     stateExtra={<>
-      {waiting && state !== "Review needed" ? <span className="os-deploy-waiting">Review needed</span> : null}
+      {waiting && row.parked?.status === "awaiting_confirm" && state !== "Review needed" ? <span className="os-deploy-waiting">Review needed</span> : null}
       {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
     </>}
     trailing={row.pkg ? <AttentionMarker appId="deployables" target={updateTarget(row.pkg.id)} /> : null}
@@ -736,7 +763,7 @@ function DeployableLine({
   >
     {origin ? <span data-os-origin>{origin}</span> : null}
     {client ? <span>{client}</span> : null}
-    {deployedBy ? <span className="os-deploy-by" data-os-deployed-by>{site || row.parked ? "deployed" : "added"} by {deployedBy}</span> : null}
+    {deployedBy ? <span className="os-deploy-by" data-os-deployed-by>{row.parked ? "started" : site ? "deployed" : "added"} by {deployedBy}</span> : null}
     {traffic?.lastServedAt ? <span title={`${traffic.requests.toLocaleString()} requests over the last week`}>served {formatFreshness(traffic.lastServedAt, now)}</span> : null}
   </RecordRow>;
 }

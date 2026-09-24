@@ -1,5 +1,8 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
+import { useSession } from "../../../chrome/access";
+import { bare } from "../people";
+import { rememberConnectAttempt } from "./connectReturn";
 import { useWrite, type WriteState } from "../packages/actions";
 import { githubConnectBegin, readSourceRepositories, revokeSourceCredential } from "./calls";
 import { EMPTY_PAGE, type RepositoryPage } from "./repositories";
@@ -33,7 +36,7 @@ export interface GithubConnectActions extends WriteState {
    * treated the same way -- there is nothing to navigate to, and sending a
    * browser to "" would reload the OS and look like the button did nothing.
    */
-  connect: (returnPath: string) => Promise<void>;
+  connect: (returnPath: string, credentialId?: string) => Promise<void>;
   /**
    * Begin WITHOUT navigating, to learn `installUrl`.
    *
@@ -77,8 +80,21 @@ export function reasonSentence(reason: string): string {
 }
 
 export function useGithubConnect(): GithubConnectActions {
-  const { busy, refusal, clear, run } = useWrite();
+  const { access } = useSession();
+  const viewer = bare(access?.userId ?? "");
+  const { refusal, clear: clearWrite, run } = useWrite();
   const [installUrl, setInstallUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const generation = useRef(0);
+  useEffect(() => () => { generation.current++; }, []);
+  const clearWriteRef = useRef(clearWrite);
+  clearWriteRef.current = clearWrite;
+  const clear = useCallback(() => {
+    generation.current++;
+    setBusy(false);
+    setInstallUrl("");
+    clearWriteRef.current();
+  }, []);
 
   // A BEGIN THAT ANSWERS A REASON IS A REFUSAL. The engine never throws for
   // "this cluster has no GitHub App" or "the state row could not be written":
@@ -86,33 +102,41 @@ export function useGithubConnect(): GithubConnectActions {
   // code (integrations/identity/githubconnect.go, `connectResult`). `useWrite`
   // only records what is THROWN, so the reason is raised here, inside `run`,
   // in the `<code>: <sentence>` shape `describe` reads -- which is what puts
-  // the same ProblemNotice under the button that a thrown refusal gets, and
-  // what lets the Source stop recognise `github_app_not_configured` and make
-  // the token form the whole stop. Before this, a not-configured cluster's
+  // the same ProblemNotice under the button that a thrown refusal gets.
+  // Before this, a not-configured cluster's
   // Connect button went busy for one round trip and then did nothing at all.
-  const begin = useCallback(
-    (returnPath: string) =>
-      run(async (query) => {
-        const begun = await githubConnectBegin(query, returnPath);
-        // The installation page is learnable from a refused begin too
-        // (connect_state_invalid still names it), so it is kept first.
+  const begin = useCallback(async (returnPath: string, credentialId?: string, flowId?: string) => {
+    const request = ++generation.current;
+    setBusy(true);
+    const answer = await run(async query => {
+      try {
+        const begun = await githubConnectBegin(query, returnPath, credentialId, flowId);
+        if (request !== generation.current) return null;
         if (begun.installUrl !== "") setInstallUrl(begun.installUrl);
         if (begun.reason !== "" && begun.reason !== "ok") {
           throw new Error(`${begun.reason}: ${reasonSentence(begun.reason)}`);
         }
         return begun;
-      }),
-    [run],
-  );
+      } catch (error) {
+        if (request !== generation.current) return null;
+        throw error;
+      }
+    });
+    if (request !== generation.current) return null;
+    setBusy(false);
+    return answer;
+  }, [run]);
 
   const connect = useCallback(
-    async (returnPath: string) => {
-      const begun = await begin(returnPath);
+    async (returnPath: string, credentialId?: string) => {
+      const flowId = crypto.randomUUID();
+      const begun = await begin(returnPath, credentialId, flowId);
       if (begun === null) return;
       if (begun.authorizeUrl === "") return;
+      rememberConnectAttempt(flowId, viewer, credentialId);
       window.location.assign(begun.authorizeUrl);
     },
-    [begin],
+    [begin, viewer],
   );
 
   const learn = useCallback(
@@ -127,8 +151,7 @@ export function useGithubConnect(): GithubConnectActions {
 }
 
 export interface SourceRepositoriesActions extends WriteState {
-  /** What the last read answered. Never null: an unread picker and one that
-   *  answered nothing both render the same empty invitation. */
+  /** Last successful reading; readAt distinguishes unread from empty. */
   page: RepositoryPage;
   /** When the list was read, as an ISO instant. Empty = never read. */
   readAt: string;
@@ -140,21 +163,41 @@ export interface SourceRepositoriesActions extends WriteState {
    * the same question over, and reading more is continuing a walk. Appending
    * on a re-read would show every repository twice.
    */
-  read: (credentialId: string, page: number) => Promise<boolean>;
+  read: (credentialId: string, page: number, connectionId?: string) => Promise<boolean>;
 }
 
 export function useSourceRepositories(): SourceRepositoriesActions {
-  const { busy, refusal, clear, run } = useWrite();
+  const { refusal, clear: clearWrite, run } = useWrite();
+  const [busy, setBusy] = useState(false);
   const [page, setPage] = useState<RepositoryPage>(EMPTY_PAGE);
   const [readAt, setReadAt] = useState("");
   const latestRead = useRef(0);
+  useEffect(() => () => { latestRead.current++; }, []);
+  const credential = useRef("");
+  const clearWriteRef = useRef(clearWrite);
+  clearWriteRef.current = clearWrite;
+  const clear = useCallback(() => {
+    latestRead.current++;
+    credential.current = "";
+    setBusy(false);
+    setPage(EMPTY_PAGE);
+    setReadAt("");
+    clearWriteRef.current();
+  }, []);
 
   const read = useCallback(
-    async (credentialId: string, wanted: number) => {
+    async (credentialId: string, wanted: number, connectionId?: string) => {
+      const boundary = JSON.stringify([credentialId, connectionId ?? ""]);
+      const changedCredential = credential.current !== boundary;
+      if (changedCredential) {
+        clear();
+        credential.current = boundary;
+      }
       const request = ++latestRead.current;
+      setBusy(true);
       const answered = await run(async (query) => {
         try {
-          const result = await readSourceRepositories(query, credentialId, wanted);
+          const result = await readSourceRepositories(query, credentialId, wanted, connectionId);
           if (request !== latestRead.current) return null;
           if (result.reason !== "" && result.reason !== "ok") {
             throw new Error(`${result.reason}: ${reasonSentence(result.reason)}`);
@@ -168,9 +211,11 @@ export function useSourceRepositories(): SourceRepositoriesActions {
       // A REFUSED READ KEEPS THE LAST GOOD LIST. A refusal is not a zero
       // (clients/os/README.md): blanking the picker would say the grant
       // reaches nothing, which is a different and untrue answer.
-      if (answered === null || request !== latestRead.current) return false;
+      if (request !== latestRead.current) return false;
+      setBusy(false);
+      if (answered === null) return false;
       setPage((held) =>
-        wanted > 1
+        wanted > 1 && !changedCredential
           ? {
               ...answered,
               repositories: [...held.repositories, ...answered.repositories],
@@ -184,14 +229,16 @@ export function useSourceRepositories(): SourceRepositoriesActions {
       setReadAt(new Date().toISOString());
       return true;
     },
-    [run],
+    [run, clear],
   );
 
   return { busy, refusal, clear, page, readAt, read };
 }
 
 export interface CredentialRevokeActions extends WriteState {
-  revoke: (credentialId: string) => Promise<void>;
+  /** True once local revocation succeeds, including an unconfirmed remote revoke. */
+  revoke: (credentialId: string) => Promise<boolean>;
+  revokedCredentialId: string;
   /**
    * Whether the last revoke also ended the authorization AT GITHUB, or null
    * while nothing has been revoked in this session.
@@ -213,25 +260,39 @@ export interface CredentialRevokeActions extends WriteState {
  * group, and one busy flag across both would grey out a button nobody
  * pressed while showing its refusal underneath.
  *
- * Nothing is removed locally on success. The row flips to `revoked` and
- * arrives on the credential feed's own broadcast, which is what makes the
- * card and the list agree with every other browser looking at it.
+ * Success is returned immediately so a surface can stop offering the credential
+ * while its revoked row is still travelling over the live feed.
  */
 export function useCredentialRevoke(): CredentialRevokeActions {
-  const { busy, refusal, clear, run } = useWrite();
+  const { busy, refusal, clear: clearWrite, run } = useWrite();
   const [remoteRevoked, setRemoteRevoked] = useState<boolean | null>(null);
+  const [revokedCredentialId, setRevokedCredentialId] = useState("");
+  const generation = useRef(0);
+  useEffect(() => () => { generation.current++; }, []);
+  const clearWriteRef = useRef(clearWrite);
+  clearWriteRef.current = clearWrite;
+  const clear = useCallback(() => {
+    generation.current++;
+    setRemoteRevoked(null);
+    setRevokedCredentialId("");
+    clearWriteRef.current();
+  }, []);
   return {
-    busy,
-    refusal,
-    clear,
-    remoteRevoked,
-    revoke: async (credentialId) => {
-      const answered = await run((query) => revokeSourceCredential(query, credentialId));
-      // A REFUSED REVOKE ANSWERS NOTHING ABOUT GITHUB. `run` returns null for
-      // one, and recording `false` there would say the authorization is still
-      // standing when nothing was attempted -- beside a refusal that already
-      // says what happened.
-      if (answered !== null) setRemoteRevoked(answered);
+    busy, refusal, clear, remoteRevoked, revokedCredentialId,
+    revoke: async credentialId => {
+      const request = ++generation.current;
+      const answered = await run(async query => {
+        try {
+          return await revokeSourceCredential(query, credentialId);
+        } catch (error) {
+          if (request !== generation.current) return null;
+          throw error;
+        }
+      });
+      if (answered === null || request !== generation.current) return false;
+      setRemoteRevoked(answered);
+      setRevokedCredentialId(credentialId);
+      return true;
     },
   };
 }

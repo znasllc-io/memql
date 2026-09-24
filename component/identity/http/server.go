@@ -64,9 +64,8 @@ type Server struct {
 	// section G) -- what places an arriving person into the group of the
 	// account whose verified domain matches their address.
 	//
-	// Reached only from provisionOidcUser, which returns early unless the
-	// provider VERIFIED the address, so the true it passes is proven rather
-	// than assumed. Nil on a node with no groups plug-in wired, and it
+	// OIDC and hosted bootstrap pass true only after email verification.
+	// Local passkey bootstrap passes false: its contact email is unverified. Nil on a node with no groups plug-in wired, and it
 	// returns nothing: it must never fail a sign-in that has succeeded.
 	OnUserProvisioned func(ctx context.Context, userId, email string, emailVerified bool)
 
@@ -298,6 +297,7 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	wrapHandler := func(h http.Handler) http.Handler {
 		return identity.SystemActorMiddleware(abuse.SecurityHeadersMiddleware(h))
 	}
+	mux.HandleFunc("GET /.well-known/webauthn", wrap(s.handleWebAuthnOrigins))
 
 	magicLink := http.HandlerFunc(s.cors(s.handleMagicLink))
 	var magicLinkHandler http.Handler = magicLink

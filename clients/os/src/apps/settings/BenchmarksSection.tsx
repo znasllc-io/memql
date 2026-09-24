@@ -53,7 +53,7 @@ export function BenchmarksSection() {
     <div className="os-settings">
       <Head
         title="Benchmarks"
-        meta={b.newest === null ? undefined : `${b.runs.length} run${b.runs.length === 1 ? "" : "s"}`}
+        meta={b.count}
       />
 
       <Panel label="Where the numbers come from">

@@ -123,8 +123,7 @@ export function GithubAppMissing({ app, returnPath }: { app: GithubAppActions; r
         </div>
       ) : (
         <Caption>
-          This cluster is not linked to GitHub yet. A cluster owner sets that up once; until then, add an access token
-          below.
+          This cluster is not linked to GitHub yet. Ask a cluster owner to set it up before choosing a repository.
         </Caption>
       )}
     </section>

@@ -3,7 +3,7 @@ import { PolicyEditor, type PolicyDraft } from "./PolicyEditor";
 import { PolicyChain } from "./PolicyChain";
 import { useState } from "react";
 import { FleetTabs, RefreshButton } from "./FleetControls";
-import { Button, Caption, EmptyState, Head, Notice, Select } from "../../kit";
+import { Button, Caption, EmptyState, Head, Notice, Select, Subhead, RecordList, RecordRow } from "../../kit";
 import { InfoDetail } from "../../kit/InfoDetail";
 import { ActivityTarget } from "../../kit/SemanticActivity";
 import { useSession } from "../../chrome/access";
@@ -42,7 +42,7 @@ function TaskRoutingEditor() {
   }
   return <div className="fleet-task-routing">
     <div className="fleet-section-header">
-    <Head title="Policies">{tab === "policies" && !policyDraft ? <AddButton label="Create policy" disabled={catalog.loading || !!catalog.error} onClick={() => setPolicyDraft({ name: "", description: "", primary: "fleet:strongest", fallbacks: [], revision: catalog.policies[0]?.revision ?? 0 })} /> : null}<RefreshButton label="Refresh policies" onClick={() => { setEpoch(e => e + 1); rules.reload(); }} busy={catalog.loading || rules.loading} /></Head>
+    <Head title="Policies" meta={tab === "policies" ? !catalog.loading && !catalog.error ? catalog.policies.length : undefined : !rules.loading && !rules.error && rules.supported ? ordered.length : undefined}>{tab === "policies" && !policyDraft ? <AddButton label="Create policy" disabled={catalog.loading || !!catalog.error} onClick={() => setPolicyDraft({ name: "", description: "", primary: "fleet:strongest", fallbacks: [], revision: catalog.policies[0]?.revision ?? 0 })} /> : null}<RefreshButton label="Refresh policies" onClick={() => { setEpoch(e => e + 1); rules.reload(); }} busy={catalog.loading || rules.loading} /></Head>
     <FleetTabs label="Routing composition" value={tab} onChange={setTab} options={[["policies", "Policies"], ["rules", "Task rules"]]} />
     </div>
     <p className="fleet-task-intro">Match a kind of call to a policy’s preferred source and fallbacks.</p>
@@ -55,7 +55,7 @@ function TaskRoutingEditor() {
       {selectedPolicy ? <ActivityTarget target={`fleet:policy:${selectedPolicy.name}`} className="fleet-policy-detail"><h4>{selectedPolicy.name}</h4><p>{policyDescription(selectedPolicy)}</p><PolicyChain policy={selectedPolicy} />
       <div className="os-head-actions">{!selectedPolicy.protected ? <Button onClick={() => setPolicyDraft({ name: selectedPolicy.name, description: policyDescription(selectedPolicy), primary: selectedPolicy.primary || selectedPolicy.chain[0] || "", fallbacks: selectedPolicy.fallbacks ?? selectedPolicy.chain.slice(1), revision: selectedPolicy.revision ?? 0 })}>Edit sources</Button> : null}{selectedPolicy.customized ? <Button onClick={() => setPolicyDraft({ name: selectedPolicy.name, description: "", primary: "", fallbacks: [], revision: selectedPolicy.revision ?? 0, action: "reset" })}>Restore shipped defaults</Button> : null}</div>
       {selectedPolicy.protected ? <Caption>The active embedding binding is protected. Changing it requires an embedding migration, not a fallback edit.</Caption> : null}
-      <h5>Used by task rules</h5>{ordered.filter(r => r.policy === selectedPolicy.name).map(r => <button className="os-link" type="button" key={r.name} onClick={() => { select(r.name); setTab("rules"); }}>{r.name}</button>)}{!ordered.some(r => r.policy === selectedPolicy.name) ? <Caption>No task rule currently uses this policy.</Caption> : null}
+      <Subhead meta={!rules.loading && !rules.error && rules.supported ? ordered.filter(r => r.policy === selectedPolicy.name).length : undefined}>Used by task rules</Subhead><RecordList as="ul" label="Rules using this policy">{ordered.filter(r => r.policy === selectedPolicy.name).map(r => <RecordRow key={r.name} name={r.name} onOpen={() => { select(r.name); setTab("rules"); }} />)}</RecordList>{!ordered.some(r => r.policy === selectedPolicy.name) ? <Caption>No task rule currently uses this policy.</Caption> : null}
       </ActivityTarget> : catalog.loading ? <Caption>Reading policies…</Caption> : !catalog.error ? <EmptyState title="No policies yet">Create a policy to choose a preferred source and fallbacks for your tasks.</EmptyState> : null}</div>
     </>}</div><div hidden={tab !== "rules"}>{editing ? <ActivityTarget target="fleet:task-rule:draft"><RuleFieldsPanel actions={actions} seed={editing.seed} existing={ordered} policies={catalog.policies} onActivated={() => { edit(null); actions.clear(); }} onCancel={() => { edit(null); actions.clear(); }} /></ActivityTarget> : <>
       <div className="fleet-task-create"><Select id="fleet-task-kind" label="Kind of task" value={task} onChange={setTask}>{[{id:"chat",label:"Chat"},{id:"streamingChat",label:"Streaming chat"},{id:"tools",label:"Tool calls"},{id:"streamingTools",label:"Streaming tool calls"},{id:"structured",label:"Structured output"},{id:"vision",label:"Vision"},{id:"speech",label:"Speech"},{id:"transcribe",label:"Transcription"}].map(kind => <option key={kind.id} value={kind.id}>{kind.label}</option>)}<option value="custom">Custom conditions</option></Select><Button tone="primary" disabled={!rules.supported || !actions.supported || catalog.loading || !!catalog.error || !!rules.error} onClick={create}>Add task rule</Button></div>

@@ -27,7 +27,7 @@ import (
 
 func deleteHarness(t *testing.T, site map[string]any, siblings ...map[string]any) (*Integration, *recordingEngine) {
 	t.Helper()
-	engine := &recordingEngine{rows: map[string][]map[string]any{
+	engine := &recordingEngine{allowOrganizationActions: true, rows: map[string][]map[string]any{
 		"query siteById":        {site},
 		"query sitesForPackage": append([]map[string]any{site}, siblings...),
 		"builtin customDomainReleaseForSite": {{

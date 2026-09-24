@@ -48,6 +48,10 @@ func (s *Server) handleMeSignInPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	policy := strings.TrimSpace(r.PostForm.Get("policy"))
+	if s.Cfg.LocalPasskeyOnly() && policy != identity.SignInPolicyPasskeyOnly {
+		redirectSettings(w, r, "This local installation requires passkeys.", "error")
+		return
+	}
 	if policy != identity.SignInPolicyAny && policy != identity.SignInPolicyPasskeyOnly {
 		redirectSettings(w, r, "That is not a sign-in policy we recognise.", "error")
 		return

@@ -52,8 +52,8 @@ export const USER_CONCEPT = "v1:identity:user";
  * simply not allowed to look. The live collection catches a rejected seed and
  * reports it as an error on the surface, which is the honest rendering.
  */
-export function usePeople(): LiveCollectionHandle<Row> {
-  return useLiveCollection<Row>("users:people", (connection) => ({
+export function usePeople(enabled = true): LiveCollectionHandle<Row> {
+  return useLiveCollection<Row>(enabled ? "users:people" : null, (connection) => ({
     concept: USER_CONCEPT,
     seed: async (_cursor, signal) => {
       const result = await connection.query.searchUsers({}, { signal });

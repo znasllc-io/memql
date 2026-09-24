@@ -357,7 +357,11 @@ func (s *Server) handleWebAuthnLoginFinish(w http.ResponseWriter, r *http.Reques
 	store := &webauthn.Store{Engine: s.Store.Engine, Logger: s.Logger}
 	asserted, err := ceremony.FinishLogin(body.ChallengeId, bytes.NewReader(body.Credential),
 		func(credentialId string) (*webauthn.Row, error) {
-			return store.LookupByCredentialId(ctx, credentialId)
+			row, err := store.LookupByCredentialId(ctx, credentialId)
+			if err != nil || row != nil {
+				return row, err
+			}
+			return s.pendingBootstrapCredential(ctx, credentialId)
 		})
 	if err != nil {
 		status, code := passkeyLoginErrorCode(err)
@@ -386,6 +390,10 @@ func (s *Server) handleWebAuthnLoginFinish(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if err := s.resumeBootstrapAfterAssertion(ctx, userId); err != nil {
+		s.bootstrapError(w, err)
+		return
+	}
 	now := time.Now().UTC()
 
 	// WHICH ARM THIS CEREMONY WAS BEGUN AS is read off the CHALLENGE, never

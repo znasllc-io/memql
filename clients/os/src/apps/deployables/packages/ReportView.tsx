@@ -1,3 +1,4 @@
+import { RecordList, RecordRow } from "../../../kit/RecordRow";
 import { AlertTriangle, Box, FileCode2, Package as PackageIcon, Zap } from "lucide-react";
 
 import { Chip, Chips, Notice } from "../../../kit";
@@ -90,7 +91,7 @@ export function ReportView({ report, only }: { report: AnalysisReport | null; on
 
       <section className="os-report-part">
         <h4 className="os-report-heading">
-          <Box size={12} aria-hidden /> Web apps
+          <Box size={12} aria-hidden /> Web apps <span className="os-head-meta">{deployables.length}</span>
         </h4>
         {deployables.length === 0 ? (
           /* Scoped to an app the report does not name, the old sentence was
@@ -102,29 +103,23 @@ export function ReportView({ report, only }: { report: AnalysisReport | null; on
               : "This package declares no web apps."}
           </p>
         ) : (
-          <ul className="os-report-list">
+          <RecordList as="ul" label="Declared records">
             {deployables.map((d) => (
-              <li key={d.name} className="os-report-item" data-problem={d.problem ? "true" : "false"}>
-                <div className="os-report-item-head">
-                  <span className="os-report-name">{d.name}</span>
-                  <Chip>{d.kind}</Chip>
-                  {d.prebuilt ? <Chip tone="accent">already built</Chip> : null}
-                </div>
-                <p className="os-report-path">{d.path}</p>
-                <p className="os-report-plan">{d.buildPlan}</p>
-                {d.binding?.store ? (
-                  <p className="os-report-plan">Fronts {d.binding.store}</p>
-                ) : null}
+              <li key={d.name} data-problem={d.problem ? "true" : "false"}>
+                <RecordRow name={d.name} secondary={d.path} state={d.prebuilt ? "already built" : d.kind}>
+                  <span>{d.buildPlan}</span>
+                  {d.binding?.store ? <span>Fronts {d.binding.store}</span> : null}
+                </RecordRow>
                 {d.problem ? <ProblemNotice problem={d.problem} tone="error" /> : null}
               </li>
             ))}
-          </ul>
+          </RecordList>
         )}
       </section>
 
       <section className="os-report-part">
         <h4 className="os-report-heading">
-          <FileCode2 size={12} aria-hidden /> MemQL this adds
+          <FileCode2 size={12} aria-hidden /> MemQL this adds <span className="os-head-meta">{domains.length}</span>
         </h4>
         {domains.length === 0 ? (
           /* Not an absence to apologise for: it is the reason this deploy will
@@ -132,15 +127,10 @@ export function ReportView({ report, only }: { report: AnalysisReport | null; on
              the rail read as a design rather than a gap. */
           <p className="os-caption">None. Nothing restarts, and the deploy lands in seconds.</p>
         ) : (
-          <ul className="os-report-list">
+          <RecordList as="ul" label="Declared records">
             {domains.map((d) => (
-              <li key={d.domain} className="os-report-item">
-                <div className="os-report-item-head">
-                  <span className="os-report-name">{d.domain}</span>
-                  <span className="os-caption">
-                    {d.files} {d.files === 1 ? "file" : "files"}
-                  </span>
-                </div>
+              <li key={d.domain} >
+                <RecordRow name={d.domain} secondary={`${d.files} ${d.files === 1 ? "file" : "files"}`} />
                 <Chips label={`What ${d.domain} adds`}>
                   {constructEntries(d.constructs).map(([kind, count]) => (
                     <Chip key={kind}>
@@ -150,7 +140,7 @@ export function ReportView({ report, only }: { report: AnalysisReport | null; on
                 </Chips>
               </li>
             ))}
-          </ul>
+          </RecordList>
         )}
       </section>
 

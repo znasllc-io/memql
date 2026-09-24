@@ -126,7 +126,7 @@ async function openApp(name: string) {
   const open = await screen.findByRole("button", { name: "Launcher" });
   fireEvent.click(open);
   const dialog = await screen.findByRole("dialog", { name: "Launcher" });
-  fireEvent.click(within(dialog).getByRole("button", { name }));
+  fireEvent.click(within(dialog).getByRole("button", { name: new RegExp(`^(?:Unseen change )?${name}$`) }));
 }
 
 beforeEach(() => {

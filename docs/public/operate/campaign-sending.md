@@ -25,6 +25,23 @@ campaigns deliberately do not use — see below)
 
 ---
 
+## Organization permissions
+
+A send requires access to the Campaigns app and permission to update data in
+its organization. Reading a shared campaign or recipient list does not grant
+permission to send. Campaigns, audiences, templates and sending identities
+must belong to the same organization. The worker checks the campaign owner's
+current authority again before each delivery, so revoked membership also
+stops queued work. Test messages and single-recipient sends use the same
+organization permission check.
+
+Delivery records preserve the organization and authenticated owning user.
+Editing a shared resource preserves its existing owner; each new version
+separately records the user who made that change.
+Rule-triggered deliveries name their email rule; they do not invent a campaign
+relationship. Historical records are attributed only when an existing parent
+proves which organization owns them.
+
 ## The shape of a send
 
 ```

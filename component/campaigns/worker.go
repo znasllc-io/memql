@@ -430,6 +430,15 @@ func (w *Worker) processJob(ctx context.Context, systemCtx context.Context, job 
 		return
 	}
 
+	if err := w.validateCampaignOrganization(ownerCtx, campaign, tmpl); err != nil {
+		w.failJob(systemCtx, job, err.Error())
+		return
+	}
+	if !sameOrganization(job.CampaignAccountID, campaign.AccountID) || bare(job.AudienceID) != bare(campaign.AudienceID) || bare(job.TemplateID) != bare(campaign.TemplateID) {
+		w.failJob(systemCtx, job, "campaign organization or resources changed after this send was queued")
+		return
+	}
+
 	// The roster is WALKED, one page at a time, with the delivery ledger
 	// read for each page rather than for the campaign (memql#3460). Neither
 	// read is bounded by the audience's size any more, which is what removed
@@ -577,7 +586,13 @@ func (w *Worker) processRecipient(
 	identity resolvedIdentity,
 	item batchItem,
 ) (bool, error) {
+	if err := w.requireSendAuthority(ownerCtx, campaign.AccountID); err != nil {
+		return true, err
+	}
 	r := item.recipient
+	if !sameOrganization(campaign.AccountID, r.AccountID) {
+		return true, errors.New("campaign recipient belongs to another organization; refusing to send")
+	}
 	now := w.now().UTC()
 
 	digest := EmailDigest(r.Email)

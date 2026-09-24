@@ -45,6 +45,11 @@ import { ACCOUNT_CONCEPT, accountFromRow, type AccountRow } from "./rows";
  * unresolvable id.
  */
 export function useAccountOptions(): AccountRow[] {
+  return useAccountOptionsFeed().accounts;
+}
+
+/** Options together with their read state for creation flows. */
+export function useAccountOptionsFeed() {
   const { snapshot } = useLiveCollection<Row>("accounts:options", (connection) => ({
     concept: ACCOUNT_CONCEPT,
     seed: async (_cursor, signal) => {
@@ -55,7 +60,7 @@ export function useAccountOptions(): AccountRow[] {
   }));
   const { access } = useSession();
 
-  return useMemo(() => {
+  const accounts = useMemo(() => {
     const readable = snapshot.rows.map(accountFromRow).filter((a) => a.id !== "");
     if (readable.length > 0) return readable;
 
@@ -98,6 +103,7 @@ export function useAccountOptions(): AccountRow[] {
     }
     return fromGroups;
   }, [snapshot, access]);
+  return { accounts, state: snapshot.state, error: snapshot.error };
 }
 
 /**

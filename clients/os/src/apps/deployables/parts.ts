@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 
 import { useSessionIfPresent } from "../../chrome/access";
-import { holds } from "../../system/roles";
+import { availableInAnyOrganization, hasOrganizationDecisions, holds, holdsForOrganization } from "../../system/roles";
 
 // THE PARTS OF DEPLOYABLES (epic memql#5289, task memql#5305; app access
 // grants design, section 2's table and section 4 "A missing part").
@@ -108,4 +108,25 @@ export function useDeployableParts(): PartsHeld {
   // `epoch` is the reactivity signal, not an input: the parts are read out of
   // band and this memo has to recompute when the set lands (memql#4857).
   return useMemo(() => heldParts(), [epoch]);
+}
+
+/** Resolve controls for the row or selected organization, never by unioning
+ * permissions on unrelated clients. Supplied global parts remain the operator
+ * and isolated-component contract when no organization decisions are present. */
+export function partsForOrganization(accountId: string, fallback: PartsHeld, dataVerb: "create" | "update" = "update"): PartsHeld {
+  if (!hasOrganizationDecisions()) return fallback;
+  const allowed = holdsForOrganization(accountId, "read", "data") && holdsForOrganization(accountId, "read", "app:deployables") && holdsForOrganization(accountId, dataVerb, "data");
+  return Object.fromEntries(DEPLOYABLE_PARTS.map(part => [part, allowed && holdsForOrganization(accountId, "execute", partResource(part))])) as Record<DeployablePart, boolean>;
+}
+
+/** Personal GitHub grants and installation bindings have no owning MemQL
+ * account. The server admits their management when one authorized account
+ * permits all three capabilities; this never authorizes a package write. */
+export function canManagePersonalSources(): boolean {
+  return (holds("read", "data") && holds("read", "app:deployables") && holds("execute", partResource("sources"))) ||
+    availableInAnyOrganization("execute", partResource("sources"));
+}
+export function useCanManagePersonalSources(): boolean {
+  const epoch = useSessionIfPresent()?.accessEpoch ?? 0;
+  return useMemo(canManagePersonalSources, [epoch]);
 }

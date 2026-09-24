@@ -8,10 +8,8 @@ import {
   DEFAULT_FILTERS,
   constraintsOf,
   isNarrowed,
-  lineCount,
   toTailArgs,
   windowBounds,
-  windowLabel,
   windowPhrase,
   withinWindow,
   type LogFilters,
@@ -73,7 +71,7 @@ export function StreamSection({ settings }: { settings: LogsSettings }) {
 
   return (
     <div className="os-app-stack os-logs" data-density={settings.density}>
-      <Head title="Stream" meta={`${windowLabel(filters.window)} · ${lineCount(visible.length)}`}>
+      <Head title="Stream" meta={(tail.state === "following" || tail.state === "paused") && !tail.error ? visible.length : undefined}>
         <Refine
           search={filters.text}
           onSearch={(next) => patch({ text: next })}

@@ -1,10 +1,11 @@
+import { PENDING_DEPLOYMENT_STATUSES } from "./packages/rows";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Concepts, type LiveSnapshot, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { Head, Panel, roleAdmits, SetupGroup } from "../../kit";
 import { useDeployableParts } from "./parts";
 import { useSession } from "../../chrome/access";
-import { useLiveView, type LiveView } from "../../live/liveView";
+import { useLiveView } from "../../live/liveView";
 import { useArrivals } from "../../live/useArrivals";
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import { accessAdmits, type OsAppProps } from "../../system/registry";
@@ -13,11 +14,14 @@ import { ActivePane } from "./paneActivity";
 import { MapSection, NO_SELECTION, type MapSelection } from "./map/MapSection";
 import type { MapNode } from "./map/layout";
 import { deploymentFromRow, packageFromRow, type DeploymentRow, type PackageRow } from "./packages/rows";
-import { useAwaitingConfirm } from "./packages/useAwaitingConfirm";
+import { usePendingDeployments } from "./packages/usePendingDeployments";
 import { usePackages } from "./packages/usePackages";
 import { siteFingerprint, siteFromRow, type SiteRow } from "./rows";
-import { SourcesGroup } from "./settings/SourcesGroup";
-import type { ConnectReturn } from "./sources/connectReturn";
+import { SourceConnectionsProvider } from "./sources/connections";
+import { GithubAppBlock, GithubAppMissing } from "./sources/GithubAppSetup";
+import { useGithubApp } from "./sources/useGithubApp";
+import { ConnectReturnNotice } from "./sources/ConnectReturnNotice";
+import { returnPathFor, type ConnectReturn } from "./sources/connectReturn";
 import { credentialFromRow, type CredentialRow } from "./sources/rows";
 import { useSourceCredentials } from "./sources/useSourceCredentials";
 import {
@@ -70,7 +74,11 @@ const DEPLOYABLES_LOG_CONCEPTS = [
   Concepts.PLATFORM_CUSTOM_DOMAIN,
 ] as const;
 
-export function DeployablesApp({
+export function DeployablesApp(props: Parameters<typeof DeployablesAppContent>[0]) {
+  return <SourceConnectionsProvider><DeployablesAppContent {...props} /></SourceConnectionsProvider>;
+}
+
+function DeployablesAppContent({
   sectionId,
   navigation,
   windowVisible = true,
@@ -115,20 +123,15 @@ export function DeployablesApp({
   const { source: packageCollection, reseed: reseedPackages } = usePackages();
   // A THIRD FEED, over a third concept (epic memql#4885): the caller's own
   // source credentials, read once here as CARDS and passed down so the
-  // Source stop's chip and, later, the Sources settings group are two
+  // wizard and the Sources list are two
   // readings of one feed rather than two subscriptions free to disagree.
   const { source: credentialCollection, snapshot: credentialSnapshot, reseed: reseedCredentials } = useSourceCredentials();
   // A FOURTH FEED, and the ONE recorded exception to clients/os/README.md's
   // rule that a package's deployment timeline is retained by the page and
-  // never by the root (that rule guards against subscribing a window to
-  // every deploy in the cluster to render one). This holds PARKED RUNS ONLY
-  // -- deployments at `awaiting_confirm`, a handful of rows a person needs to
-  // see before they open anything, because the list's waiting mark ("a
-  // deploy is waiting for you") is how somebody who closed the window
-  // mid-compose finds their run again. It never holds a timeline, and a run
-  // that moves on leaves it on its own event. The whole account is in
-  // `packages/useAwaitingConfirm.ts`.
-  const { source: awaitingCollection, reseed: reseedAwaiting } = useAwaitingConfirm();
+  // never by the root. This exception keeps only pending work and review
+  // gates, so leaving analysis does not hide it. Terminal runs leave this
+  // feed; their full history remains on the package's own page.
+  const { source: awaitingCollection, reseed: reseedAwaiting } = usePendingDeployments();
 
   // PROJECT, then narrow, in one pass. The collection holds RAW wire rows --
   // the fold upserts an event payload as the row type with no projection hook
@@ -166,11 +169,11 @@ export function DeployablesApp({
   );
   const credentialRows = credentials?.snapshot.rows ?? [];
 
-  // `awaiting_confirm` is held HERE as well as by the feed's `inScope`: the
+  // Pending status is held HERE as well as by the feed's `inScope`: the
   // seed and the events both narrow to it, and the projection says so once
   // more so a row this view renders can never be a run that has moved on.
   const parked = useLiveView<Row, DeploymentRow>(awaitingCollection, "awaitingConfirm", (rows) =>
-    rows.map(deploymentFromRow).filter((d) => d.id !== "" && d.status === "awaiting_confirm"),
+    rows.map(deploymentFromRow).filter((d) => d.id !== "" && PENDING_DEPLOYMENT_STATUSES.has(d.status)),
   );
   const parkedSnapshot = parked?.snapshot ?? EMPTY_SNAPSHOT<DeploymentRow>();
 
@@ -241,6 +244,8 @@ export function DeployablesApp({
       setConnectResult({
         reason: typeof answer.reason === "string" ? answer.reason : "",
         section: typeof answer.section === "string" ? answer.section : sectionId,
+        ...(typeof answer.credentialId === "string" ? { credentialId: answer.credentialId } : {}),
+        ...(typeof answer.flowId === "string" ? { flowId: answer.flowId } : {}),
       });
     }
     consumeIntent?.(intent.id);
@@ -272,11 +277,8 @@ export function DeployablesApp({
       <DeployablesSettingsSection
         settings={settings}
         update={update}
-        viewerUserId={viewerUserId}
         isClusterOwner={isClusterOwner}
-        credentials={credentials}
-        packages={packageSnapshot.rows}
-        connectResult={connectResult}
+        connectResult={connectResult?.section === "settings" ? connectResult : null}
       />
     );
   // The app's slice of the cluster's logs (epic memql#4895). It survived the
@@ -328,8 +330,7 @@ export function DeployablesApp({
   // Deployables tab off whatever it was showing. It takes no open request and
   // no connect return: those are addressed to Deployables, which is where the
   // map sends people and where GitHub sends them back.
-  const sourcesContent =
-    snapshot.state === "disconnected" ? null : (
+  const sourcesContent = (
       <DeployablesSettingsProvider value={{ settings, update, toggleSource }}>
         <DeployablesSection
           root="sources"
@@ -378,7 +379,10 @@ export function DeployablesApp({
     <RetainedSection active={sectionId === "settings"}>{settingsContent}</RetainedSection>
     <RetainedSection active={sectionId === "logs"}>{logsContent}</RetainedSection>
     <RetainedSection active={sectionId === "deployables"}>{deployablesContent}</RetainedSection>
-    <RetainedSection active={sectionId === "sources"}>{sourcesContent}</RetainedSection>
+    <RetainedSection active={sectionId === "sources"}>
+      <ConnectReturnNotice result={connectResult?.section === "sources" ? connectResult : null} />
+      {sourcesContent}
+    </RetainedSection>
     <RetainedSection active={!["settings", "logs", "deployables", "sources"].includes(sectionId)}>{mapContent}</RetainedSection>
   </ActivePane>;
 }
@@ -393,25 +397,15 @@ function RetainedSection({ active, children }: { active: boolean; children: Reac
 function DeployablesSettingsSection({
   settings,
   update,
-  viewerUserId,
   isClusterOwner,
-  credentials,
-  packages,
   connectResult,
 }: {
   settings: DeployablesSettings;
   update: (patch: Partial<DeployablesSettings>) => void;
-  /** Whose credentials come first in the Sources group. */
-  viewerUserId: string;
-  /** Whether other people's credentials are listed at all (the concept's clusterOwner branch). */
   isClusterOwner: boolean;
-  /** The app root's one credentials feed, for the Sources group. */
-  credentials: LiveView<CredentialRow> | null;
-  /** The app root's package rows, joined onto each credential by `credentialId`. */
-  packages: readonly PackageRow[];
-  /** The answer from a GitHub connect, rendered by the group that asked. */
   connectResult: ConnectReturn | null;
 }) {
+  const githubApp = useGithubApp();
   const { readiness } = useSession();
   // OFFER ONLY WHAT THIS SESSION CAN OPEN. A preference naming a section the
   // reader is not admitted to would silently do nothing -- WindowFrame falls
@@ -480,15 +474,11 @@ function DeployablesSettingsSection({
           </p>
         </fieldset>
 
-        {/* THE SOURCES GROUP IS NOT A PREFERENCE, and it is here anyway: the
-            two credential acts a person takes outside a compose flow --
-            add one ahead of time, revoke one that leaked -- have nowhere
-            else to live, and Settings is where an app keeps what is about
-            the app rather than about one row (DESIGN.md rule 4's home, one
-            step out). The two above ARE preferences and stay above it. */}
-        <SourcesGroup
-          viewerUserId={viewerUserId}
-          isClusterOwner={isClusterOwner} credentials={credentials} packages={packages} connectResult={connectResult} />
+        <section className="os-field-group" aria-label="Source settings">
+          <p className="os-caption">Manage saved sources in Sources. Add a deployable to connect a GitHub account and choose a repository.</p>
+          <ConnectReturnNotice result={connectResult} />
+          {isClusterOwner ? githubApp.status?.configured === false ? <GithubAppMissing app={githubApp} returnPath={returnPathFor("settings")} /> : <GithubAppBlock app={githubApp} /> : null}
+        </section>
 
         <p className="os-caption">Preferences are saved in this browser.</p>
       </Panel>

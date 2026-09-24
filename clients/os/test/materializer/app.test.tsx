@@ -563,3 +563,32 @@ describe("a composition whose executing node stopped", () => {
     await waitFor(() => expect(screen.queryByText("Failed")).toBeNull());
   });
 });
+
+
+describe("record list count and action boundaries", () => {
+  it("counts visible templates and recipes only after their independent reads settle", async () => {
+    const conn = fakeConnection({
+      templates: [templateRow({ id: "visible", name: "Visible template" }), templateRow({ id: "hidden", name: "Archived template", archived: true })],
+      recipes: [recipeRow({ id: "recipe", name: "Runnable recipe" })],
+    });
+    const { view } = mount(conn, "templates");
+    expect(view.container.querySelector(".os-head-meta")).toBeNull();
+    await waitFor(() => expect(view.container.querySelector(".os-head-meta")?.textContent).toBe("1"));
+    expect(view.container.querySelector(".os-subhead-meta")?.textContent).toBe("1");
+    expect(screen.queryByText("Archived template")).toBeNull();
+    const run = screen.getByRole("button", { name: "Run it again" });
+    expect(run.closest(".os-record-actions")).not.toBeNull();
+    expect(run.closest(".os-record-summary")).toBeNull();
+    fireEvent.click(run);
+    await waitFor(() => expect(conn.query.composeRunRecipe).toHaveBeenCalled());
+  });
+
+  it("leaves a denied templates count absent while still counting readable recipes", async () => {
+    const conn = fakeConnection({ recipes: [recipeRow({ id: "recipe", name: "Readable recipe" })] });
+    conn.query.composeTemplates.mockRejectedValue(new Error("templates denied"));
+    const { view } = mount(conn, "templates");
+    await screen.findByText("Readable recipe");
+    expect(view.container.querySelector(".os-head .os-head-meta")).toBeNull();
+    expect(view.container.querySelector(".os-subhead-meta")?.textContent).toBe("1");
+  });
+});

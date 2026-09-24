@@ -248,6 +248,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// rows keep their composite owner tier, which is what decides who can
 		// READ what this writes.
 		{Path: "accounts/mutations.memql", Name: "recordAccountDomainCheck"}: true,
+		// The successful first-claim coordinator writes the reserved self row
+		// before a completed owner session exists. Only it may associate the
+		// verified claim user after mandatory passkey completion, under the
+		// database claim lock; ordinary forms cannot choose the owner.
+		{Path: "accounts/mutations.memql", Name: "configureClusterAccount"}: true,
 
 		// epic memql#5165, D2. Both group writers, and the argument is the
 		// concept's shape rather than the caller's: v1:identity:group and
@@ -636,6 +641,13 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// person does needs them: a grant is unsealed only inside a fetch, a
 		// poll, a probe or the connect callback, into a local that dies with
 		// the call.
+		// Personal installation bindings are verified facts, not arbitrary owned
+		// data. actor.userId cannot prove live grant/install membership or derive
+		// provider identity; record is reached only after GitHub verification.
+		// Removal likewise requires the separate execute Sources capability;
+		// owning a row plus generic data update is insufficient for that action.
+		{Path: "platform/mutations.memql", Name: "recordSourceConnection"}:       true,
+		{Path: "platform/mutations.memql", Name: "removeSourceConnection"}:       true,
 		{Path: "platform/mutations.memql", Name: "createGithubAppGrant"}:         true,
 		{Path: "platform/mutations.memql", Name: "updateGithubAppGrant"}:         true,
 		{Path: "platform/mutations.memql", Name: "refreshGithubAppGrantToken"}:   true,

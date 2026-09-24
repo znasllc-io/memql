@@ -56,7 +56,7 @@ function sectionFor(sectionId: string, intent: OsAppProps["intent"], consumeInte
   if (sectionId === "apps") return <AppsIndexSection />;
   // Access (epic memql#5289): who may open which app over and above their
   // role -- the two grant builtins' one surface.
-  if (sectionId === "access") return <AccessSection />;
+  if (sectionId === "access") return <AccessSection intent={intent} consumeIntent={consumeIntent} />;
   if (sectionId === "cluster") return <ClusterSection />;
   // Language (memql#5390): the MemQL line this cluster speaks, where its DSL
   // still spells a deprecated form, and the grammar copied for a model.

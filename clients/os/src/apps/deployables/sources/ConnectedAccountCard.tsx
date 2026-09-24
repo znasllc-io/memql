@@ -1,6 +1,9 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+
+import { Link2Off } from "lucide-react";
 
 import { Button, Caption, Chip, Chips, Fact, Facts } from "../../../kit";
+import { IconButton } from "../../../kit/IconButton";
 import type { Refusal } from "../packages/actions";
 import { toneFor } from "../packages/refusals";
 import { ProblemNotice } from "../packages/ReportView";
@@ -76,7 +79,8 @@ export function ConnectedAccountCard({
   onDisconnect: () => void;
 }) {
   const revoked = credentialIsRevoked(grant);
-  const reachCount = grant.installationIds.length;
+  const reachCount = revoked ? 0 : grant.installationIds.length;
+  if (revoked) { installations = []; pending = []; installUrl = ""; reaches = null; }
   return (
     <section className="os-field-group" aria-label="GitHub">
       <h4 className="os-subhead">GitHub</h4>
@@ -85,7 +89,7 @@ export function ConnectedAccountCard({
         {/* THE ONE ACCENT CHIP ON THIS SURFACE. Accent is not a status
             colour here -- it names the account this cluster acts as, which
             is the single fact the card exists for. */}
-        <Chip tone="accent" title="The GitHub account this cluster acts as for your sources.">
+        <Chip tone={revoked ? "muted" : "accent"} title={revoked ? "The disconnected GitHub account." : "The GitHub account this cluster acts as for your sources."}>
           @{grant.login || "unknown"}
         </Chip>
         {installations === null ? (
@@ -142,7 +146,7 @@ export function ConnectedAccountCard({
 
       {reaches}
 
-      {reachCount === 0 && installations === null ? (
+      {!revoked && reachCount === 0 && installations === null ? (
         <Caption>This connection reaches no organizations yet.</Caption>
       ) : null}
 
@@ -153,7 +157,7 @@ export function ConnectedAccountCard({
       )}
 
       {/* THE HALF THAT DID NOT HAPPEN, and only when it did not. The engine
-          revokes at GitHub first and flips this row even when that failed, so
+          revokes this row first and then tries GitHub, so
           this cluster has stopped fetching either way -- what is left is at
           GitHub, and this is the only place that says so. `--os-warn` and not
           `--os-error`: the disconnect worked, and this is somebody's next
@@ -166,7 +170,7 @@ export function ConnectedAccountCard({
       ) : null}
 
       {revoked ? null : (
-        <Disconnect sourceNames={sourceNames} busy={busy} refusal={refusal} onDisconnect={onDisconnect} />
+        <DisconnectGitHub sourceNames={sourceNames} busy={busy} refusal={refusal} onDisconnect={onDisconnect} />
       )}
       {/* A revoked grant still shows what went with it, so the refusal from
           the act that revoked it has somewhere to land. */}
@@ -230,33 +234,49 @@ function formatDay(value: string): string {
   return parsed.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
-function Disconnect({
+export function DisconnectGitHub({
+  compact = false,
+  summary,
   sourceNames,
   busy,
   refusal,
   onDisconnect,
 }: {
-  sourceNames: readonly string[];
+  compact?: boolean;
+  /** The connected identity, inline with the compact action. */
+  summary?: ReactNode;
+  sourceNames?: readonly string[];
   busy: boolean;
   refusal: Refusal | null;
   onDisconnect: () => void;
 }) {
   const [armed, setArmed] = useState(false);
-  const named = sourceNames.join(", ");
+  const named = sourceNames?.join(", ") ?? "";
+  const region = useRef<HTMLElement>(null);
+  const previouslyArmed = useRef(false);
+  useEffect(() => {
+    if (compact && previouslyArmed.current !== armed) {
+      region.current?.querySelector<HTMLButtonElement>(armed ? ".os-confirm-row button" : 'button[aria-label="Disconnect GitHub"]')?.focus();
+    }
+    previouslyArmed.current = armed;
+  }, [armed, compact]);
   return (
-    <section className="os-settings-danger">
+    <section ref={region} className={compact && !armed ? "os-form-row" : "os-settings-danger"}>
+      {summary}
       {armed ? (
         <>
           <Caption>
-            {sourceNames.length === 0
+            {sourceNames === undefined
+              ? "Sources using this connection will ask you to reconnect at their next fetch."
+              : sourceNames.length === 0
               ? "Nothing fetches under this connection today."
               : `${sourceNames.length} source${sourceNames.length === 1 ? "" : "s"} fetch under this connection: ${named}.`}{" "}
-            {sourceNames.length === 0
-              ? "It is revoked here and at GitHub. Nothing is deleted."
-              : "They will ask you to reconnect at their next fetch. Nothing is deleted."}
+            {sourceNames !== undefined && sourceNames.length > 0 ? "They will ask you to reconnect at their next fetch. " : ""}
+            Your personal authorization is revoked here and at GitHub. Sources and deployables are kept.
+            The GitHub App stays installed, and your browser stays signed in to GitHub.
           </Caption>
           <div className="os-confirm-row">
-            <Button tone="quiet" onClick={() => setArmed(false)}>
+            <Button tone="quiet" disabled={busy} onClick={() => setArmed(false)}>
               Cancel
             </Button>
             <Button tone="danger" busy={busy} onClick={onDisconnect}>
@@ -266,11 +286,15 @@ function Disconnect({
         </>
       ) : (
         <>
-          <Caption>
+          {compact ? null : <Caption>
             Revokes this connection here and at GitHub. Your sources keep their settings and ask you to
             reconnect at their next fetch.
-          </Caption>
-          <Button onClick={() => setArmed(true)}>Disconnect</Button>
+          </Caption>}
+          {compact ? (
+            <IconButton label="Disconnect GitHub" disabled={busy} aria-busy={busy || undefined} onClick={() => setArmed(true)}>
+              <Link2Off size={16} aria-hidden />
+            </IconButton>
+          ) : <Button disabled={busy} onClick={() => setArmed(true)}>Disconnect</Button>}
         </>
       )}
       {refusal ? <ProblemNotice problem={refusal} tone={toneFor(refusal.code)} /> : null}

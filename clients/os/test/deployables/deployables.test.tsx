@@ -434,7 +434,7 @@ describe("the Head's action, by state", () => {
     // The other Retry -- on a LOST run, in Every attempt -- is the one that
     // carries fromDeploymentId, and the two are deliberately never on screen
     // together.
-    expect(connection.callsNamed("packageDeploy")).toEqual(['builtin packageDeploy(packageId: "pkg-acme", confirm: false)']);
+    expect(connection.callsNamed("packageDeploy")).toEqual(['builtin packageDeploy(background: true, packageId: "pkg-acme", confirm: false)']);
   });
 
   it("a draft with a bundle: Built, and Go live flips the status", async () => {
@@ -463,7 +463,7 @@ describe("the Head's action, by state", () => {
     expect(within(page).getByText(/A newer version is available: bbbbbbb/)).toBeTruthy();
     await click(within(page).getByRole("button", { name: /^Back to / }));
     await click(await screen.findByRole("button", { name: /^Deploy the update/ }));
-    expect(connection.callsNamed("packageDeploy")).toEqual(['builtin packageDeploy(packageId: "pkg-acme", confirm: false)']);
+    expect(connection.callsNamed("packageDeploy")).toEqual(['builtin packageDeploy(background: true, packageId: "pkg-acme", confirm: false)']);
   });
 
   it("redeploys THIS app and leaves every sibling the source declares alone", async () => {
@@ -498,7 +498,7 @@ describe("the Head's action, by state", () => {
     expect(redeploy?.textContent).toBe("Redeploy");
     expect(redeploy?.getAttribute("data-tone")).toBe("primary");
     await click(redeploy);
-    expect(connection.callsNamed("packageDeploy")).toEqual(['builtin packageDeploy(packageId: "pkg-acme", confirm: false)']);
+    expect(connection.callsNamed("packageDeploy")).toEqual(['builtin packageDeploy(background: true, packageId: "pkg-acme", confirm: false)']);
   });
 
   it("a hand-made site's Redeploy opens the Source stop's zip picker", async () => {
@@ -632,7 +632,7 @@ describe("the Source stop", () => {
   it("shows a package-produced site's source as facts", async () => {
     const { page } = await mountAndOpen(WITH_PACKAGE, "store.memql.example.com");
     await openStop(page, "Source");
-    expect(within(screen.getByRole("region", { name: /^Source / })).getByRole("heading", { name: "acme/storefront at main" })).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: /^Source / })).getByRole("heading", { name: "acme" })).toBeTruthy();
     expect(within(page).getByText("Tracking")).toBeTruthy();
     expect(within(page).getByText("Deployed")).toBeTruthy();
     expect(within(page).getAllByText("aaaaaaa").length).toBeGreaterThan(0);
@@ -880,7 +880,7 @@ describe("Where it lives", () => {
 
   it("writes the tie through updateSiteAccount and inserts nothing locally", async () => {
     // Tied to a client this reader cannot see: the picker keeps the id in
-    // place, and choosing "No client" is a change. The write is the same
+    // place, and choosing the operator organization is a change. The write is the same
     // call the detail panel made; the Select is the kit's own, so the choice
     // goes through its listbox.
     const tied = siteRow({ ...STORE, id: "site-store", accountId: "acct-1" });
@@ -888,9 +888,10 @@ describe("Where it lives", () => {
     await openStop(page, "Where it lives");
     expect(within(screen.getByRole("region", { name: "Addresses for store.memql.example.com" })).getByText("acct-1")).toBeTruthy();
     await click(within(page).getByLabelText("The client this deployable is for"));
-    await click(await screen.findByRole("option", { name: "No client" }));
+    await click(await screen.findByRole("option", { name: "Operator organization" }));
     await waitFor(() => expect(connection.callsNamed("updateSiteAccount")).toHaveLength(1));
     expect(connection.callsNamed("updateSiteAccount")[0]).toContain('siteId: "site-store"');
+    expect(connection.callsNamed("updateSiteAccount")[0]).toContain('accountId: "self"');
   });
 
   // THE ADDRESS IS FOR EVERYBODY; BINDING A DOMAIN IS FOR A CLUSTER OWNER. The

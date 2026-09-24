@@ -14,9 +14,9 @@ import { accountIsArchived, accountName, type AccountRow } from "./rows";
 //
 // PRESENTATION OVER ENGINE TRUTH, throughout. The options come from the
 // caller's own `clientAccountsAll` snapshot; nothing here reads, and nothing
-// here decides what a person may see. An account is a record with no read
-// effect, so a picker offering fewer accounts than another person would see
-// is not a leak or a gate -- it is two people with different rows.
+// here decides what a person may see. Organization ownership uses the
+// required mode; optional labels keep their existing empty choice. The engine
+// authorizes both the selected organization and the target resource.
 
 /** What "no account" is called, in one place. */
 export const NO_ACCOUNT_LABEL = "No client";
@@ -40,28 +40,35 @@ export const NO_ACCOUNT_LABEL = "No client";
 export function AccountPicker({
   value,
   onChange,
+  onCommit,
   accounts,
   id,
   label,
   emptyLabel = NO_ACCOUNT_LABEL,
   disabled = false,
+  required = false,
+  requiredLabel = "Choose an organization",
 }: {
   value: string;
   onChange: (next: string) => void;
   accounts: AccountRow[];
   id: string;
   label: string;
+  /** Explicit choice, including confirming the current account. */
+  onCommit?: () => void;
   /**
-   * What the empty value MEANS on this surface. "No client" is the truth on
-   * a tie that can be cleared; on the compose flow an empty pick is the
-   * cluster's own account (memql#5303, D12), and the option has to say so
-   * rather than promise an untied row it will not make.
+   * The empty option for optional labels and scopes. Required ownership
+   * uses requiredLabel and cannot be cleared.
    */
   emptyLabel?: string;
   disabled?: boolean;
+  /** Organization ownership requires an explicit, active account. */
+  required?: boolean;
+  /** Wording for the required, unselected prompt in the calling flow. */
+  requiredLabel?: string;
 }) {
   const options = useMemo(() => {
-    const known = accounts.map((a) => ({
+    const known = accounts.filter((a) => !required || !accountIsArchived(a) || a.id === value).map((a) => ({
       id: a.id,
       label: accountIsArchived(a) ? `${accountName(a)} (archived)` : accountName(a),
     }));
@@ -70,16 +77,14 @@ export function AccountPicker({
       known.unshift({ id: held, label: `${held} (not visible to you)` });
     }
     return known;
-  }, [accounts, value]);
+  }, [accounts, value, required]);
 
   return (
-    <Select value={value} onChange={onChange} id={id} label={label}>
-      {/* The empty value is FIRST and is a real choice, not a prompt. Clearing
-          a tie is something people do, and a picker whose only untie is
-          "scroll back to the top and hope" is one that cannot express it. */}
-      <option value="">{emptyLabel}</option>
+    <Select value={value} onChange={onChange} onCommit={onCommit} id={id} label={label}>
+      {/* Optional labels can be cleared; required ownership uses a prompt. */}
+      <option value="" disabled={required || disabled}>{required ? requiredLabel : emptyLabel}</option>
       {options.map((o) => (
-        <option key={o.id} value={o.id} disabled={disabled}>
+        <option key={o.id} value={o.id} disabled={disabled || (required && !accounts.some((account) => account.id === o.id && !accountIsArchived(account)))}>
           {o.label}
         </option>
       ))}
@@ -183,7 +188,7 @@ export function AccountLabelPicker({
 export function AccountChip({ name }: { name: string }) {
   if (name.trim() === "") return null;
   return (
-    <Chip tone="accent" title="The client this is for">
+    <Chip tone="accent" title="Organization">
       {name}
     </Chip>
   );

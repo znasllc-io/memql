@@ -2,9 +2,11 @@ package packages
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,10 +17,8 @@ import (
 	"github.com/znasllc-io/memql/core/num"
 )
 
-// Engine is the ONLY engine surface the pipeline needs -- one method, the same
-// narrow seam component/sitepublish and every other Go component in this tree
-// uses. Narrow on purpose: a test fakes the named calls it cares about and
-// nothing else.
+// Engine resolves named graph operations and current action authority for
+// each organization targeted by the pipeline.
 type Engine interface {
 	Execute(ctx context.Context, query string) (*memql.ExecuteResult, error)
 }
@@ -49,7 +49,9 @@ type Engine interface {
 // guard its internal-origin escape and let anyone revoke anything).
 // internal_origin_test.go asserts all four lists.
 type store struct {
-	engine Engine
+	directDB  func() *sql.DB
+	grantGate func(context.Context, string, string, func(context.Context) error) error
+	engine    Engine
 	// logger is for the one thing the store does on its own account -- the
 	// best-effort heartbeat behind resolveCredential. Nil means slog.Default.
 	logger *slog.Logger
@@ -631,17 +633,6 @@ func (s *store) writeAsCaller(ctx context.Context, query string) error {
 	return nil
 }
 
-// setSiteAccount points a freshly created site at the client it is FOR. The
-// same updateSiteAccount the site detail's account picker issues, under the
-// caller's actor, so v1:platform:site's composite write guard admits the row's
-// owner (or a cluster owner) and refuses everyone else -- exactly as it does
-// from the page.
-func (s *store) setSiteAccount(ctx context.Context, siteId, accountId string) error {
-	return s.writeAsCaller(ctx, fmt.Sprintf(
-		"mutation updateSiteAccount(siteId: %s, accountId: %s)",
-		langparser.QuoteString(siteId), langparser.QuoteString(accountId)))
-}
-
 // addCustomDomain binds a client's own domain to a freshly created site. The
 // same customDomainAdd builtin the Domains panel issues, under the caller's
 // actor, so the three guards in platform_custom_domain_policy.go -- not under
@@ -945,4 +936,17 @@ func rowBool(row map[string]any, key string) bool {
 		return strings.EqualFold(v, "true")
 	}
 	return false
+}
+
+func (s *store) sourceConnectionByID(ctx context.Context, id string) (map[string]any, error) {
+	return s.queryOne(ctx, "query sourceConnectionById(connectionId: "+langparser.QuoteString(id)+")")
+}
+
+func (s *store) recordSourceConnection(ctx context.Context, id, credential string, inst githubapp.Installation) error {
+	return s.writeInternal(ctx, fmt.Sprintf("mutation recordSourceConnection(connectionId: %s, credentialId: %s, installationId: %s, providerAccountId: %s, accountLogin: %s, accountType: %s)",
+		langparser.QuoteString(id), langparser.QuoteString(credential), langparser.QuoteString(formatInstallationId(inst.Id)), langparser.QuoteString(strconv.FormatInt(inst.Account.Id, 10)), langparser.QuoteString(inst.Account.Login), langparser.QuoteString(inst.Account.Type)))
+}
+
+func (s *store) removeSourceConnection(ctx context.Context, id string) error {
+	return s.writeInternal(ctx, "mutation removeSourceConnection(connectionId: "+langparser.QuoteString(id)+")")
 }

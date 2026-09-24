@@ -32,7 +32,7 @@ import (
 // `recordCampaignDelivery` derives:
 //
 //	id: hash(
-//	      hash(canonicalId(args.campaignId, "campaign")) +
+//	      hash(canonicalId(args.campaignId ?? args.emailRuleId ?? "", "campaign")) +
 //	      hash(canonicalId(args.recipientId, "recipient"))
 //	    )
 //

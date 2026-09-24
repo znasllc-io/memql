@@ -13,7 +13,7 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { SITE_CONCEPT } from "../../src/apps/deployables/concepts";
-import { DEPLOYMENT_CONCEPT } from "../../src/apps/deployables/packages/rows";
+import { DEPLOYMENT_CONCEPT, PACKAGE_CONCEPT } from "../../src/apps/deployables/packages/rows";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import { PLATFORM_SITE, SHOP, click, emit, fakeConnection, siteRow, withSession, type FakeConnection, type FakeSeed } from "./harness";
 
@@ -369,16 +369,21 @@ describe("the list", () => {
   // deployables, with a life of its own -- so it has a list of its own, in the
   // same row language, rather than a header row inside somebody else's.
   it("lists each source once on the Sources tab, with what it produced and where it stands", async () => {
-    mount(fakeConnection(TWO_SOURCES), { section: "sources" });
+    const connection = fakeConnection(TWO_SOURCES);
+    mount(connection, { section: "sources" });
     const acme = await screen.findByRole("button", { name: /^Open acme,/ });
     expect(screen.getByRole("heading", { name: "Sources" })).toBeTruthy();
+    expect(screen.getByText("Manage sources here. Add new ones through Add deployable.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Add a deployable" })).toBeNull();
     expect(rowNames()).toEqual(["acme", "widgets-co"]);
     // Where it lives, how much it produced, and the one state word.
-    expect(within(acme).getByText("acme/storefront at main")).toBeTruthy();
+    expect(within(acme).getByText("Unknown GitHub identity · acme · acme/storefront · main")).toBeTruthy();
     expect(within(acme).getByText("2 apps, 2 deployed")).toBeTruthy();
     expect(within(acme).getByText("Current")).toBeTruthy();
     // No deployable is a row here.
     expect(rowNames()).not.toContain("storefront");
+    await emit(connection, PACKAGE_CONCEPT, { ...ACME, id: "pkg-new", name: "new-repository", repoUrl: "https://github.com/acme/new-repository" });
+    await screen.findByRole("button", { name: /^Open new-repository,/ });
   });
 
   it("opens a source's page from its row, rooted at Sources, and its apps from there", async () => {
@@ -443,7 +448,7 @@ describe("the list", () => {
   it("says what a source is when there are none", async () => {
     mount(fakeConnection({ sites: [SHOP], packages: [] }), { section: "sources" });
     expect(await screen.findByText("No sources yet")).toBeTruthy();
-    expect(screen.getByText(/A source is a repository or a zip that declares one or more apps/)).toBeTruthy();
+    expect(screen.getByText(/Configured GitHub account, organization and repository paths appear here/)).toBeTruthy();
   });
 
   it("says what to do when there is nothing yet", async () => {
@@ -475,7 +480,7 @@ describe("the list", () => {
 
     expect(connection.calls.filter((c) => c === "query sitesAll()")).toHaveLength(1);
     expect(connection.calls.filter((c) => c === "query packagesAll()")).toHaveLength(1);
-    expect(connection.calls.filter((c) => c === "query packageDeploymentsAwaitingConfirm()")).toHaveLength(1);
+    expect(connection.calls.filter((c) => c === "query packageDeploymentsPending()")).toHaveLength(1);
     expect(connection.calls.filter((c) => c === "query sourceCredentialsMine()")).toHaveLength(1);
     expect(connection.callsNamed("packageDeployments")).toHaveLength(0);
 
@@ -506,7 +511,7 @@ describe("a deploy waiting for you", () => {
   // not a row on the Deployables list at all.
   it("says Review needed once, on the source, and offers Review on its page", async () => {
     mount(fakeConnection({ ...WITH_PACKAGE, awaitingConfirm: [parkedRun()] }), { section: "sources" });
-    const acme = await screen.findByRole("button", { name: /^Open acme, review needed/ });
+    const acme = await screen.findByRole("button", { name: /^Open acme, .*review needed/ });
     expect(screen.getAllByText("Review needed")).toHaveLength(1);
     expect(within(acme).getByText("Review needed")).toBeTruthy();
 
@@ -516,14 +521,14 @@ describe("a deploy waiting for you", () => {
     expect(within(document.querySelector(".os-actbar") as HTMLElement).getByRole("button", { name: "Review" })).toBeTruthy();
   });
 
-  it("does not mark a deployable that is already serving, and lists no row for the one that is not", async () => {
+  it("shows the pending review on its existing deployable without marking unrelated sites", async () => {
     mount(fakeConnection({ ...WITH_PACKAGE, awaitingConfirm: [parkedRun()] }));
     const storefront = (await screen.findByText("storefront")).closest(".os-row") as HTMLElement;
-    expect(within(storefront).queryByText("Review needed")).toBeNull();
+    expect(within(storefront).getByText("Review needed")).toBeTruthy();
     const shop = screen.getByText("Storefront").closest(".os-row") as HTMLElement;
     expect(within(shop).queryByText("Review needed")).toBeNull();
     // `reports` is what the run is about, and it has no address yet.
-    expect(rowNames()).not.toContain("reports");
+    expect(rowNames()).toContain("reports");
   });
 
   it("keeps the mark ON the row when the row IS the scope: a hand-made deployable", async () => {
@@ -789,4 +794,51 @@ describe("what the section does not do", () => {
     mount(null);
     expect(await screen.findByText("Not connected to the cluster")).toBeTruthy();
   });
+});
+
+
+describe("leaving and resuming analysis", () => {
+  it("keeps analysis in the list, resumes Configuration, and opens Review when the report arrives", async () => {
+    const pkg = { ...ACME, declares: [] } as Row;
+    const pending = { ...parkedRun(), status: "analyzing", report: null, startedAt: new Date(Date.now() - 116000).toISOString() } as Row;
+    const seed: FakeSeed = { packages: [pkg], sites: [], awaitingConfirm: [pending], deployments: { "pkg-acme": [pending] } };
+    const connection = fakeConnection(seed);
+    mount(connection);
+    const row = await screen.findByRole("button", { name: /^acme/ });
+    expect(within(row).getByText("Analyzing")).toBeTruthy();
+    await click(row);
+    await waitFor(() => expect(document.querySelector('.os-actbar-word')?.textContent).toBe("Analyzing"));
+    expect(screen.getByText("Configuration", {selector:".os-rail-label"}).closest("li")?.getAttribute("data-open")).toBe("true");
+    expect(document.querySelector('.os-actbar')?.textContent).toMatch(/\d+s elapsed/);
+    const floor = () => within(document.querySelector('.os-actbar') as HTMLElement);
+    expect(floor().getByRole("button", {name:"Cancel"})).toBeTruthy();
+    await click(floor().getByRole("button", {name:"Leave"}));
+    expect(await screen.findByText("Analyzing")).toBeTruthy();
+    expect(connection.callsNamed("packageCancelDeployment")).toHaveLength(0);
+    expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
+    seed.deployments!["pkg-acme"] = [parkedRun()];
+    await emit(connection, DEPLOYMENT_CONCEPT, parkedRun());
+    await click(await screen.findByRole("button", {name:/^storefront/}));
+    await waitFor(() => expect(screen.getByText("Review", {selector:".os-rail-label"}).closest("li")?.getAttribute("data-open")).toBe("true"));
+    expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
+  });
+});
+
+
+it("cancels the exact resumed analysis, keeps Leave available, and waits for the terminal row", async () => {
+  const pending = parkedRun({ status:"analyzing", report:null });
+  const connection = fakeConnection({ packages:[ACME], sites:[], awaitingConfirm:[pending], deployments:{"pkg-acme":[pending]} });
+  mount(connection);
+  await click(await screen.findByRole("button", {name:/^acme/}));
+  const floor = () => within(document.querySelector('.os-actbar') as HTMLElement);
+  await emit(connection, DEPLOYMENT_CONCEPT, parkedRun({id:"sibling-run", status:"building", startedAt:"2099-01-01T00:00:00Z", scopedTo:["other-app"]}));
+  await click(await floor().findByRole("button", {name:"Cancel"}));
+  await waitFor(() => expect(document.querySelector('.os-actbar-word')?.textContent).toBe("Cancelling"));
+  expect(connection.callsNamed("packageCancelDeployment")).toEqual(['builtin packageCancelDeployment(packageId: "pkg-acme", deploymentId: "dep-parked")']);
+  expect(floor().getByRole("button", {name:"Leave"})).toBeTruthy();
+  expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
+  await emit(connection, DEPLOYMENT_CONCEPT, parkedRun({status:"cancelled", report:null, error:{code:"deployment_cancelled",message:"You stopped this analysis."}}));
+  await waitFor(() => expect(document.querySelector('.os-actbar-word')?.textContent).not.toBe("Cancelling"));
+  expect(await screen.findByText("You stopped this analysis.")).toBeTruthy();
+  expect(screen.getByText("Configuration",{selector:".os-rail-label"}).closest("li")?.getAttribute("data-state")).toBe("stopped");
 });

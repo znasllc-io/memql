@@ -1,3 +1,4 @@
+import { RecordList, RecordRow, Subhead } from "../../kit";
 import { Button, Caption } from "../../kit";
 import { useSession } from "../../chrome/access";
 import { useOsConnection } from "../../live/connection";
@@ -126,16 +127,8 @@ export function ClusterSection() {
             {deployment.specs.length === 0 ? (
               <Caption>No per-node pins recorded for this deployment.</Caption>
             ) : (
-              <ul className="os-hidden-list" aria-label="Node type versions">
-                {deployment.specs.map((spec) => (
-                  <li key={spec.nodeType}>
-                    <span className="os-mono">{spec.nodeType}</span>{" "}
-                    {resolvedVersion(spec, deployment.latest?.version ?? "") || "unknown"}
-                    {ridesTheSpine(spec) ? " (engine version)" : " (pinned)"} &times;{" "}
-                    {spec.replicas}
-                  </li>
-                ))}
-              </ul>
+              <><Subhead meta={!deployment.loading && !deployment.error ? deployment.specs.length : undefined}>Node type versions</Subhead>
+              <RecordList as="ul" label="Node type versions">{deployment.specs.map(spec => <RecordRow key={spec.nodeType} name={spec.nodeType} secondary={resolvedVersion(spec, deployment.latest?.version ?? "") || "unknown"} state={ridesTheSpine(spec) ? "engine version" : "pinned"}><span>{spec.replicas} replicas</span></RecordRow>)}</RecordList></>
             )}
           </>
         )}

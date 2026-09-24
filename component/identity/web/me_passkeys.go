@@ -109,7 +109,7 @@ func (s *Server) handleMeDevicesPasskeys(w http.ResponseWriter, r *http.Request)
 	}
 	data := s.meDevicesData(r, claims)
 	data.Flash = flashFromQuery(r)
-	s.render(w, r, "me/devices", webtempl.MeDevices(data))
+	s.render(w, r, "me/devices", webtempl.MeDevices(data), data)
 }
 
 // meDevicesData assembles the page payload for a signed-in caller: the
@@ -259,7 +259,7 @@ func (s *Server) handleMePasskeysRevoke(w http.ResponseWriter, r *http.Request) 
 	if !confirmed {
 		data := s.meDevicesData(r, claims)
 		data.RevokeWarning = revokeWarning(row, remaining)
-		s.render(w, r, "me/devices", webtempl.MeDevices(data))
+		s.render(w, r, "me/devices", webtempl.MeDevices(data), data)
 		return
 	}
 

@@ -7,7 +7,7 @@ import {
   Field,
   LiveList,
   Notice,
-  Row as ListRow,
+  RecordRow as ListRow,
   formatBytes,
   useLiveView,
 } from "../../../../../kit";
@@ -15,16 +15,12 @@ import { flatten } from "../../../../../kit/rows";
 import { zipUnusableNote, type ZipVerdict } from "../../../sources/probe";
 import type { ArtifactProbeHandle, SourceProbeHandle } from "../../../sources/useProbes";
 import { PICKER_PAGE_SIZE, useZipArtifacts } from "../../../sources/useZipArtifacts";
-import type { CredentialFeedStatus, CredentialRow } from "../../../sources/rows";
-import type { GithubAppOwner } from "../../../sources/GithubAppSetup";
-import type { GithubAppActions } from "../../../sources/useGithubApp";
-import type { GithubConnectActions } from "../../../sources/useGithubConnect";
 import type { PackageRow } from "../../../packages/rows";
 import { sourceLabel } from "../../../packages/rows";
 import { suggestName, type ComposeDraft } from "../../compose";
 import { CiHandoff } from "./CiHandoff";
 import { KindField, NameField } from "./fields";
-import { RepositorySource, type ConnectionNeed } from "./RepositorySource";
+import { RepositoryConfiguration } from "./RepositorySource";
 
 // The compose Source stop: where this deployable comes from, asked once
 // (epic memql#4885, design section C).
@@ -41,24 +37,11 @@ import { RepositorySource, type ConnectionNeed } from "./RepositorySource";
 // ===========================================================================
 // THE PROBE IS A COURTESY. IT ANSWERS, IT DOES NOT DECIDE
 // ===========================================================================
-// On blur the repository branch asks `sourceProbe` whether this cluster can
-// read the tree, and renders its typed reason. What that reason is WORTH is
-// `sources/probe.ts`'s rule and not this file's: a definite answer about the
-// repository parks the flow, and an answer about the probe itself -- rate
-// limiting, or a probe that threw -- says so, leaves the field editable and
-// leaves Analyze reachable. A public repository is never blocked by a probe
-// that could not run (design H).
-//
-// ===========================================================================
-// THE REPOSITORY BRANCH IS THREE READINGS, AND IT OWNS THEM
-// ===========================================================================
-// GitHub Connect (memql#4915) landed in the slot this file left for it: with
-// a grant the branch is a picker over the repositories that grant can see,
-// without one it offers Connect, and on a cluster with no GitHub App it is
-// the URL-plus-token form it has always been. `RepositorySource` decides
-// which, because that decision is about a person's credentials rather than
-// about which of the three SOURCES they chose -- which is all this file is
-// for.
+// Choosing a repository probes it under the caller's GitHub grant. A probe
+// that could not run retains a retry and its server explanation. A definite
+// authorization refusal clears the selection and offers reconnection. New
+// repository creation has no pasted-token route; existing source details
+// retain their stored-credential controls.
 
 /** What each way in is called, as a person chose it. */
 export const SOURCE_KIND_LABEL: Readonly<Record<string, string>> = {
@@ -147,27 +130,16 @@ export function ComposeSourceKindStep({
 export function ComposeSourceDetailStep({
   draft,
   onDraft,
-  credentials,
-  credentialFeed,
   probe,
   zipProbe,
   zip,
   siteId,
   clusterDomain,
   locked,
-  tokenFormOpen,
-  onTokenFormOpenChange,
-  connect,
-  onConnectionNeed,
-  app,
-  appOwner,
-  onAppOwner,
   duplicateOf = null,
 }: {
   draft: ComposeDraft;
   onDraft: (patch: Partial<ComposeDraft>) => void;
-  credentials: readonly CredentialRow[];
-  credentialFeed?: CredentialFeedStatus;
   probe: SourceProbeHandle;
   zipProbe: ArtifactProbeHandle;
   /** The zip's verdict once it has been probed; null before that. */
@@ -177,18 +149,6 @@ export function ComposeSourceDetailStep({
   clusterDomain: string;
   /** Chosen once: after Analyze the step is facts, not fields. */
   locked: boolean;
-  /** Which way into a repository is chosen; `true` is the token. */
-  tokenFormOpen: boolean;
-  onTokenFormOpenChange: (open: boolean) => void;
-  /** The GitHub connect, held by the page because it is the floor's act. */
-  connect: GithubConnectActions;
-  /** What the repository step needs before it can go on; see RepositorySource. */
-  onConnectionNeed?: (need: ConnectionNeed) => void;
-  /** The cluster's GitHub App and where an owner would register one -- held by
-   *  the page for the floor's reason, and only passed through here. */
-  app?: GithubAppActions;
-  appOwner?: GithubAppOwner;
-  onAppOwner?: (owner: GithubAppOwner) => void;
   /**
    * The ACTIVE source that already tracks this repository at this ref
    * (2026-09-05 design, D8), when there is one. The engine refuses the second
@@ -202,20 +162,7 @@ export function ComposeSourceDetailStep({
     <div className="os-stop-body">
       {draft.choice === "repo" ? (
         <>
-          <RepositorySource
-            draft={draft}
-            onDraft={onDraft}
-            credentials={credentials}
-            credentialFeed={credentialFeed}
-            probe={probe}
-            tokenFormOpen={tokenFormOpen}
-            onTokenFormOpenChange={onTokenFormOpenChange}
-            connect={connect}
-            onConnectionNeed={onConnectionNeed}
-            app={app}
-            appOwner={appOwner}
-            onAppOwner={onAppOwner}
-          />
+          <RepositoryConfiguration draft={draft} onDraft={onDraft} branches={probe.reply?.branches ?? []} />
           {/* ASKED ONCE THERE IS A REPOSITORY TO ASK IT ABOUT. It used to stand
               under an empty picker as two more full-width cards. It is a
               choice row now -- the two answers are short, and the line beneath
@@ -244,7 +191,7 @@ export function ComposeSourceDetailStep({
           {duplicateOf === null ? null : (
             <p className="os-stop-verdict" data-tone="warn" role="status">
               This repository at this ref is already tracked by <strong>{duplicateOf.name || sourceLabel(duplicateOf)}</strong>.
-              A source is added once -- open that one instead, or archive it first to start over.
+              A repository and ref are registered once. Open its existing deployables or choose a different ref.
             </p>
           )}
         </>
@@ -320,7 +267,7 @@ function ZipBranch({
             current={draft.artifactId === row.id}
             open={draft.artifactId === row.id}
             onOpen={() => choose(row)}
-            state={draft.artifactId === row.id ? <span className="os-livelist-tick">chosen</span> : null}
+            stateExtra={draft.artifactId === row.id ? <span className="os-livelist-tick">chosen</span> : null}
           >
             <span className="os-caption os-mono">{row.mimeType}</span>
           </ListRow>

@@ -498,6 +498,8 @@ func defaultRoutingRules() []RoutingRule {
 		// broadcast reaches the same people the read does and nobody else.
 		{Pattern: "graph.node.created.v1:platform:sourceCredential", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:platform:sourceCredential", TargetType: ""},
+		{Pattern: "graph.node.created.v1:platform:sourceConnection", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:platform:sourceConnection", TargetType: ""},
 		// ---- The browser-facing completion (memql#4542) -------------------
 		//
 		// Everything from here to the end of this block was added by ONE

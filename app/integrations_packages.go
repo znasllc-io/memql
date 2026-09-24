@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/znasllc-io/memql/component/identity/githubconnect"
@@ -75,6 +76,13 @@ func (a *App) wirePackageGitHubApp() {
 	if pkgs == nil || a.engine == nil {
 		return
 	}
+	getDB := a.directDBGetter()
+	pkgs.SetGitHubGrantDB(func() *sql.DB {
+		if db := getDB(); db != nil {
+			return db.DB
+		}
+		return nil
+	})
 	resolver := &githubconnect.Resolver{Rows: githubconnect.RowReader{
 		Variable: a.engine.ResolveSystemVariable,
 		Secret:   a.engine.ResolveSystemSecret,

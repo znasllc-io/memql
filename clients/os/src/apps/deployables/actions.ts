@@ -55,6 +55,7 @@ export interface CreateSiteInput {
    * store the cluster already had. The site names the store now.
    */
   storeId: string;
+  accountId: string;
 }
 
 export interface CreateSiteState {
@@ -80,6 +81,10 @@ export function useCreateSite(): CreateSiteState {
         setError("Not connected to the cluster, so nothing was written.");
         return "";
       }
+      if (input.accountId.trim() === "") {
+        setError("Choose an organization before creating the deployable.");
+        return "";
+      }
       const hostname = hostnameFor(input.slug, domain);
       if (hostname === "") {
         // A composed hostname needs both halves, and the domain half is the
@@ -100,6 +105,7 @@ export function useCreateSite(): CreateSiteState {
       try {
         await query.createSite({
           siteId,
+          accountId: input.accountId.trim(),
           hostname,
           kind: omitBlank(input.kind),
           // `bundleRef` is required -- the schema has no "nothing published

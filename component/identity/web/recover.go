@@ -175,7 +175,7 @@ func (s *Server) handleRecover(w http.ResponseWriter, r *http.Request) {
 		SingleUseNote: "This recovery key works once. Using it now sets up a passkey and mints a " +
 			"replacement key, which you can claim from the cluster when you are back in.",
 	}
-	s.render(w, r, "enroll", webtempl.Enroll(data))
+	s.render(w, r, "enroll", webtempl.Enroll(data), data)
 }
 
 // requireSecureRecovery refuses a plaintext hop, sharing /enroll's transport
@@ -255,7 +255,7 @@ func (s *Server) renderRecoverRejection(w http.ResponseWriter, r *http.Request, 
 		Message:   message,
 		NextStep:  nextStep,
 	}
-	s.render(w, r, "enroll", webtempl.Enroll(data))
+	s.render(w, r, "enroll", webtempl.Enroll(data), data)
 }
 
 // auditRecover emits one v1:identity:auditEvent per outcome, always with

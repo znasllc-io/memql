@@ -1,3 +1,4 @@
+import { listCount } from "../../kit/RecordRow";
 import { AddButton } from "../../kit/AddButton";
 import { useEffect, useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -10,7 +11,7 @@ import {
   LiveList,
   Notice,
   Refine,
-  Row as ListRow,
+  RecordRow,
   RoleTag,
   Select,
   SortControl,
@@ -199,11 +200,13 @@ export function PeopleSection({
     chips.push({ id: "state", label: filter.state, onRemove: () => setFilter((f) => ({ ...f, state: "" })) });
   }
 
-  const count = source?.snapshot.rows.length ?? 0;
+  const count = filter.group !== "" && listCount(members.snapshot) === undefined
+    ? undefined
+    : listCount(source?.snapshot);
 
   return (
     <div className="os-app-stack">
-      <Head title="People" meta={count === 0 ? undefined : `${count}`}>
+      <Head title="People" meta={count}>
         {emailReady ? (
           <AddButton onClick={() => setView({ kind: "invite" })} label="Invite" />
         ) : (
@@ -352,51 +355,50 @@ function RosterLine({
     const invite = row.invite;
     const named = groups.filter((g) => invite.groupIds.includes(g.id));
     return (
-      <ListRow
+      <RecordRow
         icon={<Mail size={16} aria-hidden />}
         name={rosterName(row)}
+        state="Invited"
         onOpen={onOpen}
-        state={
+        stateExtra={
           <>
             <span className="os-caption">{daysLeft(invite, now)}</span>
             {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
           </>
         }
       >
-        <span className="os-caption">Invited</span>
         <RoleTag role={invite.inviteeRole || ""} actorRole={viewerRole} />
         {named.map((group) => (
           <Chip key={group.id} title="They join this group when they accept">
             {group.name}
           </Chip>
         ))}
-      </ListRow>
+      </RecordRow>
     );
   }
 
   const person = row.person;
   const dim = personIsDim(person);
   return (
-    <ListRow
+    <RecordRow
       icon={<UserRound size={16} aria-hidden />}
       name={rosterName(row)}
+      secondary={rosterEmail(row)}
+      state={dim ? "Inactive" : "Active"}
+      tone={dim ? "muted" : "accent"}
       current={!dim}
       dim={dim}
       onOpen={onOpen}
-      state={
+      stateExtra={
         <>
           <span className="os-caption">{formatFreshness(person.lastSeenAt, now)}</span>
           {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
         </>
       }
     >
-      {rosterEmail(row) === "" ? null : (
-        <span className="os-caption os-mono">{rosterEmail(row)}</span>
-      )}
       <RoleTag role={person.role || ""} actorRole={viewerRole} />
       <SignInPolicyChip person={person} />
-      {dim ? <span className="os-users-inactive-tag">inactive</span> : null}
-    </ListRow>
+    </RecordRow>
   );
 }
 

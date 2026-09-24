@@ -1,4 +1,5 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { WizardStepHeaderContext } from "./WizardStepHeader";
 
 import { ActionBar, type Act, type ActionBarTone } from "./ActionBar";
 import type { Breadcrumb } from "./Breadcrumbs";
@@ -105,6 +106,8 @@ export interface WizardStatus {
 export interface WizardProps {
   /** What is being added, drawn in the orb. The first-run gate wears the MemQL mark; an add wears its subject. */
   icon: ReactNode;
+  /** Optional companion mark, in a matching orb immediately before the subject. */
+  leadingIcon?: ReactNode;
   /** The same words as the control that opened this: "Add a domain". */
   title: string;
   /** One sentence on what adding this does. Optional, and never a second title. */
@@ -142,6 +145,7 @@ export const SPLIT_AT = 760;
 
 export function Wizard({
   icon,
+  leadingIcon,
   title,
   lead,
   breadcrumbs,
@@ -207,6 +211,8 @@ export function Wizard({
   }, [split]);
 
   const opened_ = steps.find((step) => step.id === open);
+  const [headerTarget, setHeaderTarget] = useState<HTMLElement | null>(null);
+  const headerOutlet = <span className="os-step-header-extras" ref={setHeaderTarget} />;
   const drawn: Stop[] = steps.map((step) => ({
     ...step,
     // A STEP NOBODY HAS REACHED IS ITS NAME. What it will ask is said when it
@@ -216,6 +222,7 @@ export function Wizard({
     // SIDE BY SIDE, what the open step asks heads the stage instead, so the
     // rail's line is the name and the answer and nothing is said twice.
     sentence: split ? undefined : stopIsReachable(step.state) ? step.sentence : undefined,
+    headerActions: split ? undefined : step.id === open ? headerOutlet : undefined,
     // ...and the body is the stage's, not the line's.
     body: split || step.body === undefined || step.body === null ? undefined : <div className="os-wizard-body">{step.body}</div>,
   }));
@@ -238,6 +245,7 @@ export function Wizard({
   );
 
   return (
+    <WizardStepHeaderContext.Provider value={headerTarget}>
     <div
       ref={pane}
       className={className ? `os-deploy-pane os-wizard ${className}` : "os-deploy-pane os-wizard"}
@@ -255,9 +263,10 @@ export function Wizard({
           {split ? (
             <>
               <div className="os-wizard-aside">
-                <span className="os-wizard-mark" aria-hidden>
-                  {icon}
-                </span>
+                <div className="os-wizard-marks" aria-hidden>
+                  {leadingIcon ? <span className="os-wizard-mark">{leadingIcon}</span> : null}
+                  <span className="os-wizard-mark">{icon}</span>
+                </div>
                 <Head title={title} breadcrumbs={breadcrumbs} back={back} />
                 {lead ? <p className="os-wizard-lead">{lead}</p> : null}
                 {steps.length > 0 ? rail : null}
@@ -269,7 +278,10 @@ export function Wizard({
                     {/* NAMED AGAIN, ON PURPOSE. The rail says which step is open;
                         a pane of fields with nothing over it says nothing about
                         what they are for, and the rail may be a screen away. */}
-                    <h4 className="os-wizard-stage-title">{opened_.name}</h4>
+                    <div className="os-head">
+                      <h4 className="os-wizard-stage-title">{opened_.name}</h4>
+                      {headerOutlet}
+                    </div>
                     {opened_.sentence ? <p className="os-wizard-stage-lead">{opened_.sentence}</p> : null}
                     {opened_.body === undefined || opened_.body === null ? null : <div className="os-wizard-body">{opened_.body}</div>}
                   </>
@@ -279,9 +291,10 @@ export function Wizard({
             </>
           ) : (
             <>
-              <span className="os-wizard-mark" aria-hidden>
-                {icon}
-              </span>
+              <div className="os-wizard-marks" aria-hidden>
+                {leadingIcon ? <span className="os-wizard-mark">{leadingIcon}</span> : null}
+                <span className="os-wizard-mark">{icon}</span>
+              </div>
               <Head title={title} breadcrumbs={breadcrumbs} back={back} />
               {lead ? <p className="os-wizard-lead">{lead}</p> : null}
               {notices}
@@ -296,5 +309,6 @@ export function Wizard({
         {confirm}
       </ActionBar>
     </div>
+    </WizardStepHeaderContext.Provider>
   );
 }

@@ -77,6 +77,8 @@ package dslconformance
 
 import (
 	"fmt"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"regexp"
 	"sort"
 	"strings"
@@ -130,6 +132,13 @@ var piiProjectionExemptions = map[string]string{}
 // contact details, credentials, preferences or role does not qualify however
 // narrow its filter.
 var piiProjectionAccepted = map[string]string{
+	"accounts/queries.memql clientAccountsAll":              "engine-enforced organization boundary; only current account members or global cluster operators see account contact fields. TestOrganizationPiiBoundariesRemainEnforced pins the policy and declaration.",
+	"accounts/queries.memql clientAccountById":              "same engine-enforced organization boundary as the account picker.",
+	"campaigns/queries.memql audienceRosterForSend":         "recipient organization membership plus app permission enforced before pagination and again on each row; worker borrowed authority resolves current user role and grants.",
+	"campaigns/queries.memql deliveriesForCampaign":         "delivery organization membership plus app permission enforced by the engine.",
+	"campaigns/queries.memql recipientById":                 "recipient organization membership plus app permission enforced by the engine.",
+	"campaigns/queries.memql recipientsForAudience":         "recipient organization membership plus app permission enforced by the engine.",
+	"campaigns/queries.memql sendableRecipientsForAudience": "recipient organization membership plus app permission enforced by the engine.",
 	// This gate flags userDisplayById where the #2840 gate also landed on it,
 	// and both times the answer is the projection. It is worth stating why
 	// rather than narrowing the detector, because the tension is real:
@@ -399,4 +408,21 @@ func piiProjectionFindings(t *testing.T, c corpus) (flagged []string, seen map[s
 
 	sort.Strings(flagged)
 	return flagged, seen, scanned
+}
+
+// These are not unguarded PII exemptions: the runtime applies a mandatory
+// organization predicate independently of the authored query filter.
+func TestOrganizationPiiBoundariesRemainEnforced(t *testing.T) {
+	if _, err := memqlengine.LoadUnifiedConcepts(nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"v1:accounts:account", "v1:campaigns:recipient", "v1:campaigns:delivery"} {
+		c := memorynodes.All()[name]
+		if c == nil || c.RowAuthz == nil || !memqlengine.HasOrganizationBoundary(name) {
+			t.Fatalf("PII acceptance lost enforced boundary for %s", name)
+		}
+		if name != "v1:accounts:account" && c.RowAuthz.Account != "accountId" {
+			t.Fatalf("%s lost organization field declaration", name)
+		}
+	}
 }

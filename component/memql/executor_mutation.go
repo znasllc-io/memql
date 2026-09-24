@@ -128,8 +128,9 @@ type writeMeta struct {
 	// source pair (empty when absent), so the source-uniqueness guard can
 	// tell "this write is choosing a source" from "this write inherited one
 	// through the read-merge" (2026-09-05 design, D8).
-	priorRepoUrl string
-	priorRepoRef string
+	priorRepoUrl     string
+	priorRepoRef     string
+	priorSourceScope string
 }
 
 // executeUpdate runs the update() form: read the latest existing row by
@@ -753,6 +754,16 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		return nil, meta, fmt.Errorf("invalid payload JSON for mutation: %w", err)
 	}
 
+	// Hold source claims through persistence so two replicas cannot both pass
+	// the uniqueness read before either registration becomes visible.
+	if conceptMeta.Name == conceptPlatformPackage && packageSourceClaims(payload) {
+		release, err := e.lockPackageSourceClaim(ctx)
+		if err != nil {
+			return nil, meta, err
+		}
+		defer release()
+	}
+
 	// Reserved-field check at mutation time. The concept-load validator
 	// already rejects reserved field names in concept definitions, but
 	// the payload on a mutation call bypasses that check. Without this
@@ -794,6 +805,9 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// stamped", and an update whose delta never mentioned the owner stamped
 	// nothing. See the pipeline case in site_owner_stamp_pipeline_update_test.go.
 	_, deltaNamedOwner := payload["ownerUserId"]
+	var organizationOwnerField string
+	var organizationOwner any
+	var organizationOwnerPresent bool
 
 	id := strings.TrimSpace(mutation.ID)
 	if id != "" {
@@ -831,8 +845,29 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		if err := guardRowAuthzWrite(ctx, conceptMeta.Name, id, priorPayload, existed, requirePrior); err != nil {
 			return nil, meta, err
 		}
+		if existed {
+			if err := e.validateSourceConnectionWrite(ctx, conceptMeta.Name, priorPayload, payload); err != nil {
+				return nil, meta, err
+			}
+			if err := e.validateOrganizationSensitiveChanges(ctx, conceptMeta.Name, priorPayload, payload); err != nil {
+				return nil, meta, err
+			}
+			if err := e.validateOrganizationTransfer(ctx, conceptMeta.Name, id, priorPayload, payload); err != nil {
+				return nil, meta, err
+			}
+		}
 
 		if existed {
+			// Organization collaboration changes the editor, not the original
+			// owning principal. Capture before merge and restore after every
+			// actor stamp below; accounts themselves use their governed claim
+			// writer and legacy untied rows keep their existing contract.
+			if organizationOwnedConcept(conceptMeta.Name) && strings.TrimSpace(stringFromAny(priorPayload["accountId"])) != "" {
+				if decl := rowAuthzDeclFor(conceptMeta.Name); decl != nil && decl.Owner != "" {
+					organizationOwnerField = decl.Owner
+					organizationOwner, organizationOwnerPresent = priorPayload[decl.Owner]
+				}
+			}
 			// Capture the PRIOR status before the delta overwrites it
 			// (#1158) so executeUpdate can surface it as oldStatus.
 			meta.priorStatus, _ = priorPayload["status"].(string)
@@ -887,6 +922,7 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			// source-uniqueness guard judges only a write that changes it.
 			meta.priorRepoUrl = stringFromAny(priorPayload["repoUrl"])
 			meta.priorRepoRef = stringFromAny(priorPayload["repoRef"])
+			meta.priorSourceScope = packageSourceScope(priorPayload)
 			// @createOnly fields are written on create only (fylo#63): drop
 			// them from the delta BEFORE the merge so the stored value wins.
 			// A deterministic-id re-stage of a row another writer owns after
@@ -921,6 +957,17 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		return nil, meta, fmt.Errorf("update(): no existing row for concept %q id %q (use insert() to create)", conceptName, id)
 	}
 
+	if err := e.validateOrganizationOwnership(ctx, conceptName, payload, meta.priorExisted); err != nil {
+		return nil, meta, err
+	}
+	if !meta.priorExisted {
+		if err := e.validateSourceConnectionWrite(ctx, conceptMeta.Name, nil, payload); err != nil {
+			return nil, meta, err
+		}
+		if err := e.validateOrganizationSensitiveChanges(ctx, conceptMeta.Name, nil, payload); err != nil {
+			return nil, meta, err
+		}
+	}
 	beforeWriteIncomingStatus := payload["status"]
 	if err := e.applyBeforeWrite(ctx, conceptName, id, meta.priorExisted, payload); err != nil {
 		return nil, meta, err
@@ -989,6 +1036,13 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// canonicalizeRelationshipFields, while the stamped value is still the
 	// bare actor id the comparison expects.
 	undoNonPrincipalOwnerStamp(ctx, conceptMeta.Name, payload)
+	if organizationOwnerField != "" {
+		if organizationOwnerPresent {
+			payload[organizationOwnerField] = organizationOwner
+		} else {
+			delete(payload, organizationOwnerField)
+		}
+	}
 
 	// Annotation-driven PII scrub (memql#1711). A mutation tagged
 	// @scrubPii (the hard-delete / data-deletion path) clears EVERY field
@@ -1338,7 +1392,7 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// read no mutation body can make, so it lives here beside the hostname
 	// policy. See platform_package_source_policy.go.
 	if conceptMeta.Name == conceptPlatformPackage {
-		if err := e.validatePackageSourceUnique(ctx, payload, mutation.ID, actor, meta.priorExisted, meta.priorRepoUrl, meta.priorRepoRef); err != nil {
+		if err := e.validatePackageSourceUnique(ctx, payload, mutation.ID, actor, meta.priorExisted && meta.priorStatus == "active", meta.priorRepoUrl, meta.priorRepoRef, meta.priorSourceScope); err != nil {
 			return nil, meta, err
 		}
 	}

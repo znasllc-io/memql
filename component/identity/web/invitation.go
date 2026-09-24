@@ -360,7 +360,7 @@ func (s *Server) handleInvitationGet(w http.ResponseWriter, r *http.Request) {
 		ExpiresIn:    humanizeUntil(res.ExpiresAt, time.Now().UTC()),
 		StepUp:       res.StepUp,
 	}
-	s.render(w, r, "invitation", webtempl.Invitation(data))
+	s.render(w, r, "invitation", webtempl.Invitation(data), data)
 }
 
 // handleInvitationAccept spends the invitation and hands off.
@@ -698,7 +698,7 @@ func (s *Server) renderInvitationRejection(w http.ResponseWriter, r *http.Reques
 		Message:   message,
 		NextStep:  nextStep,
 	}
-	s.render(w, r, "invitation", webtempl.Invitation(data))
+	s.render(w, r, "invitation", webtempl.Invitation(data), data)
 }
 
 // auditInvitation emits one v1:identity:auditEvent per outcome, always with

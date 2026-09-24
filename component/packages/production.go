@@ -13,6 +13,7 @@ import (
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/deploycontrol"
 	"github.com/znasllc-io/memql/component/edge"
 	"github.com/znasllc-io/memql/component/packages/githubapp"
@@ -405,6 +406,7 @@ type enginePublisher struct {
 	logger    *slog.Logger
 	uploader  *azureblob.AzureBlobUploader
 	container string
+	blobs     edge.BlobWriter
 }
 
 func newEnginePublisher(engine Engine, s *store, logger *slog.Logger) SitePublisher {
@@ -412,7 +414,11 @@ func newEnginePublisher(engine Engine, s *store, logger *slog.Logger) SitePublis
 }
 
 func (p *enginePublisher) resolve(ctx context.Context) error {
+	if p.blobs != nil {
+		return nil
+	}
 	if p.uploader != nil {
+		p.blobs = edge.NewAzureBlobWriter(p.uploader, p.container)
 		return nil
 	}
 	container := azureblob.ContainerFromEnv()
@@ -425,6 +431,7 @@ func (p *enginePublisher) resolve(ctx context.Context) error {
 		return err
 	}
 	p.uploader, p.container = up, container
+	p.blobs = edge.NewAzureBlobWriter(up, container)
 	return nil
 }
 
@@ -441,16 +448,29 @@ func (p *enginePublisher) EnsureSite(ctx context.Context, req EnsureSiteRequest)
 	}
 	for _, row := range sites {
 		if rowString(row, "packageDeployableName") == req.DeployableName {
+			if err := requireSiteRowAction(ctx, p.store, row, "deploy"); err != nil {
+				return "", "", false, err
+			}
 			return rowString(row, "id"), rowString(row, "hostname"), false, nil
 		}
 	}
 
+	if strings.TrimSpace(req.AccountId) == "" {
+		return "", "", false, refuse("organization_required", "a new deployable needs its owning organization before publication")
+	}
+	if err := p.requireAccountAction(ctx, req.AccountId, "deploy"); err != nil {
+		return "", "", false, err
+	}
 	siteId := newRowId("v1:platform:site")
 	var b strings.Builder
 	b.WriteString("mutation createSite(siteId: ")
 	b.WriteString(langparser.QuoteString(siteId))
 	b.WriteString(", hostname: ")
 	b.WriteString(langparser.QuoteString(req.Hostname))
+	if req.AccountId != "" {
+		b.WriteString(", accountId: ")
+		b.WriteString(langparser.QuoteString(req.AccountId))
+	}
 	b.WriteString(", kind: ")
 	b.WriteString(langparser.QuoteString(req.Kind))
 	// A site row must carry a bundleRef, and there is nothing to point at
@@ -489,18 +509,70 @@ func (p *enginePublisher) EnsureSite(ctx context.Context, req EnsureSiteRequest)
 }
 
 func (p *enginePublisher) PublishBundle(ctx context.Context, siteId string, bundle edge.Bundle) (PublishResult, error) {
+	if err := p.requireSiteAction(ctx, siteId, "deploy"); err != nil {
+		return PublishResult{}, err
+	}
 	if err := p.resolve(ctx); err != nil {
 		return PublishResult{}, err
 	}
 	publisher := edge.NewPublisher(
-		edge.NewAzureBlobWriter(p.uploader, p.container),
-		edge.NewEngineSiteStore(engineAdapter{p.engine}),
+		p.blobs,
+		packageSiteWriter{publisher: p},
 	)
 	res, err := publisher.Publish(ctx, siteId, bundle)
 	if err != nil {
 		return PublishResult{}, err
 	}
 	return PublishResult{SiteId: siteId, BundleRef: res.BundleRef, Version: res.Version}, nil
+}
+
+func requireSiteRowAction(ctx context.Context, s *store, row map[string]any, action string) error {
+	if row == nil {
+		return refuse(CodeSourceUnreadable, "the target deployable is not readable by this caller")
+	}
+	authority, ok := s.engine.(interface {
+		OrganizationCapable(context.Context, string, string, string) bool
+	})
+	if !ok || !authority.OrganizationCapable(ctx, rowString(row, "accountId"), auth.VerbUpdate, auth.ResourceData) {
+		return refuse("organization_forbidden", "the deployable's organization does not permit changing its data")
+	}
+	return (&enginePublisher{engine: s.engine, store: s}).requireAccountAction(ctx, rowString(row, "accountId"), action)
+}
+
+// A package and its deployable may serve different organizations. Authorize
+// both targets; a source's permission never grants its client's permission.
+func (p *enginePublisher) requireAccountAction(ctx context.Context, accountID, action string) error {
+	authority, ok := p.engine.(interface {
+		OrganizationCapable(context.Context, string, string, string) bool
+	})
+	if !ok || !authority.OrganizationCapable(ctx, accountID, auth.VerbExecute, "app:deployables/"+action) {
+		return refuse("organization_forbidden", "the deployable's organization does not permit this %s action", action)
+	}
+	return nil
+}
+
+func (p *enginePublisher) requireSiteAction(ctx context.Context, siteID, action string) error {
+	row, err := p.store.siteById(ctx, siteID)
+	if err != nil {
+		return err
+	}
+	if row == nil {
+		return refuse(CodeSourceUnreadable, "no deployable %q is readable by this caller", siteID)
+	}
+	return requireSiteRowAction(ctx, p.store, row, action)
+}
+
+// The package pipeline has a real caller. Preserve that actor through the
+// final write and recheck authority after uploads, rather than using the edge
+// publisher's synthetic service-account writer.
+type packageSiteWriter struct{ publisher *enginePublisher }
+
+func (s packageSiteWriter) UpdateBundleRef(ctx context.Context, siteID, bundleRef string) error {
+	if err := s.publisher.requireSiteAction(ctx, siteID, "deploy"); err != nil {
+		return err
+	}
+	_, err := s.publisher.engine.Execute(ctx, fmt.Sprintf("mutation updateSiteBundle(siteId: %s, bundleRef: %s)", langparser.QuoteString(siteID), langparser.QuoteString(bundleRef)))
+	return err
 }
 
 // BindSiteToStore re-points an existing site at the store its manifest names.
@@ -521,6 +593,9 @@ func (p *enginePublisher) BindSiteToStore(ctx context.Context, siteId, storeId s
 // RepointSite is the rollback write: updateSiteBundle pointed back at a
 // version whose bytes are still there.
 func (p *enginePublisher) RepointSite(ctx context.Context, siteId, bundleRef string) error {
+	if err := p.requireSiteAction(ctx, siteId, "publish"); err != nil {
+		return err
+	}
 	_, err := p.engine.Execute(ctx, fmt.Sprintf("mutation updateSiteBundle(siteId: %s, bundleRef: %s)",
 		langparser.QuoteString(siteId), langparser.QuoteString(bundleRef)))
 	return err

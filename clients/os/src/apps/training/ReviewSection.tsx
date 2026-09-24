@@ -31,6 +31,7 @@ export function ReviewSection({
   decisions,
   onDecide,
   domainsError,
+  domainsAvailable = false,
 }: {
   queue: ReviewQueue;
   decisions: ChunkDecisions;
@@ -39,13 +40,14 @@ export function ReviewSection({
    *  it was never told about, and reporting an empty queue in that case would
    *  be a wrong answer rather than a missing one. */
   domainsError: string;
+  domainsAvailable?: boolean;
 }) {
   const groups = useMemo(() => groupChunksByDocument(queue.chunks), [queue.chunks]);
   const awaiting = queue.chunks.filter((c) => c.validationStatus === "unvalidated").length;
 
   return (
     <div className="os-app-stack">
-      <Head title="Review">
+      <Head title="Review" meta={domainsAvailable && queue.state === "ready" && !queue.error && !domainsError ? `${awaiting} loaded` : undefined}>
         <Button onClick={queue.reload}>Re-read</Button>
       </Head>
 
@@ -128,6 +130,7 @@ function ReviewGroup({
           output.
         </Caption>
       ) : null}
+      {/* Full-text decisions are review cards, not summary record rows. */}
       <ul className="os-train-cards" aria-label={`Chunks from ${group.label}`}>
         {group.chunks.map((chunk) => (
           <li key={chunk.id}>

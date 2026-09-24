@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { Button, Caption, Field, Head, Input, Notice, Panel, Subhead } from "../../kit";
+import { Button, Caption, RecordList, RecordRow, Field, Head, Input, Notice, Panel, Subhead } from "../../kit";
 import { findRegion, revealRegion } from "../../kit";
 import { useAppReach } from "../../kit/ReadinessStates";
 import { useSession } from "../../chrome/access";
@@ -172,11 +172,10 @@ export function DoorsSection({
     consumeIntent?.(intent.id);
   }, [intent, wanted, openVendor, consumeIntent]);
 
-  const openCount = doors.filter((d) => d.state === "open").length;
 
   return (
     <div className="os-settings">
-      <Head title="Doors" meta={`${openCount} of ${doors.length} open`}>
+      <Head title="Doors" meta={inference.status.read && !inference.status.error ? doors.length : undefined}>
         <Button
           tone="primary"
           onClick={() => void actions.apply()}
@@ -210,7 +209,7 @@ export function DoorsSection({
         />
       ) : null}
 
-      <ol className="os-doorlist" aria-label="Doors, in the order a call tries them">
+      <RecordList as="ul" label="Doors, in the order a call tries them">
         {doors.map((door) => (
           <DoorRow
             key={door.id}
@@ -230,7 +229,7 @@ export function DoorsSection({
             }
           />
         ))}
-      </ol>
+      </RecordList>
 
       {openVendor === "" ? null : (
         <div data-os-vendor={openVendor}>
@@ -245,36 +244,18 @@ export function DoorsSection({
       )}
 
       <Panel label="What this node can call">
-        <Subhead>What this node can call</Subhead>
+        <Subhead meta={!registry.loading && !registry.error && registry.fetchedAt !== null ? registry.rows.length : undefined}>What this node can call</Subhead>
         <Caption>
           {registry.loading && registry.rows.length === 0
             ? "Reading the registry."
             : summarize(registry.rows).headline}
         </Caption>
         {registry.rows.length === 0 ? null : (
-          <ul className="os-hidden-list" aria-label="Registered providers">
-            {registry.rows.map((p) => (
-              <li key={p.name}>
-                <span
-                  className="os-dot"
-                  data-os-dot={p.available ? "reachable" : "unreachable"}
-                  role="img"
-                  aria-label={p.available ? "can be called" : "cannot be called"}
-                />{" "}
-                <span className="os-mono">{p.name}</span> -- {vendorLabel(p.vendor)} {p.model},
-                credential from {sourceCopy(p.authSource)}
-                {p.reason ? ` -- ${p.reason}` : ""}{" "}
-                <Button
-                  onClick={() => void actions.verify(p.name)}
-                  busy={actions.state.busy}
-                  busyLabel="Asking"
-                  ariaLabel={`Verify ${p.name} with the vendor`}
-                >
-                  Verify
-                </Button>
-              </li>
-            ))}
-          </ul>
+          <RecordList as="ul" label="Registered providers">{registry.rows.map(p => <RecordRow key={p.name} name={p.name} secondary={`${vendorLabel(p.vendor)} ${p.model}, credential from ${sourceCopy(p.authSource)}`}
+            state={p.available ? "can be called" : "cannot be called"} tone={p.available ? "accent" : "muted"}
+            actions={<Button onClick={() => void actions.verify(p.name)} busy={actions.state.busy} busyLabel="Asking" ariaLabel={`Verify ${p.name} with the vendor`}>Verify</Button>}>
+            {p.reason ? <span>{p.reason}</span> : null}
+          </RecordRow>)}</RecordList>
         )}
         <div className="os-refresh-row">
           <Button onClick={registry.reload} busy={registry.loading} busyLabel="Reading">
@@ -340,29 +321,13 @@ function DoorRow({
             : DOOR_WORDS.unset;
 
   return (
-    <li className="os-doorrow" data-os-door={door.state} data-os-doorid={door.id}>
-      <div className="os-doorrow-main">
-        <p className="os-doorrow-name">{door.name}</p>
-        <p className="os-doorrow-said">
-          {door.kind === "federation" && reach === "local"
-            ? "A local cluster's OIDC issuer is private, so neither vendor can discover it and no id typed here would ever be accepted. Nothing here will work, and that is not a fault to fix."
-            : door.said}
-        </p>
-        <p className="os-doorrow-cost">{DOOR_COST[door.id]}</p>
-        {door.detail === "" ? null : <p className="os-door-detail os-mono">{door.detail}</p>}
-      </div>
-      <div className="os-doorrow-state">
-        <p className="os-door-state">{word}</p>
-        <DoorAct
-          door={door}
-          reach={reach}
-          open={open}
-          onOpenVendor={onOpenVendor}
-          onAddMachine={onAddMachine}
-          onOpenApps={onOpenApps}
-        />
-      </div>
-    </li>
+    <div data-os-door={door.state} data-os-doorid={door.id}>
+      <RecordRow name={door.name} secondary={door.kind === "federation" && reach === "local" ? "A local cluster's OIDC issuer is private, so neither vendor can discover it and no id typed here would ever be accepted. Nothing here will work, and that is not a fault to fix." : door.said}
+        state={word} tone={door.state === "open" ? "accent" : "muted"}
+        actions={<DoorAct door={door} reach={reach} open={open} onOpenVendor={onOpenVendor} onAddMachine={onAddMachine} onOpenApps={onOpenApps} />}>
+        <span>{DOOR_COST[door.id]}</span>{door.detail ? <span className="os-mono">{door.detail}</span> : null}
+      </RecordRow>
+    </div>
   );
 }
 

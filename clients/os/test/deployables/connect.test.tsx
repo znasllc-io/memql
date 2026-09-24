@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { useOs } from "../../src/chrome/state";
 import { ConnectReturnDispatcher } from "../../src/apps/deployables/sources/ConnectReturnDispatcher";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
@@ -15,10 +15,6 @@ vi.mock("../../src/live/connection", () => ({
   useOsConnection: () => h.connection,
 }));
 
-import type { Row } from "@znasllc-io/memql-sdk-core/client";
-
-import { RepositorySource } from "../../src/apps/deployables/page/stops/compose/RepositorySource";
-import { EMPTY_DRAFT } from "../../src/apps/deployables/page/compose";
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import { RepositoryPicker } from "../../src/apps/deployables/sources/RepositoryPicker";
@@ -48,11 +44,9 @@ import {
   pastedCredentials,
 } from "../../src/apps/deployables/sources/rows";
 import {
-  builtinReply,
   FIXTURE_GITHUB_PAT,
   click,
   credentialRow,
-  emit,
   fakeConnection,
   githubGrantRow,
   probeReply,
@@ -326,106 +320,24 @@ describe("the return from GitHub", () => {
     expect(screen.getByText("GitHub sent you back without setting this cluster up.")).toBeTruthy();
   });
 
-  it("reopens Deployables once after the production reconnect redirect", async () => {
-    const userId = "11111111-1111-4111-8111-111111111111";
-    const myGrant = "22222222-2222-4222-8222-222222222222";
-    const connection = fakeConnection({ credentials: [
-      githubGrantRow({ id: "colleague-grant", ownerUserId: "v1:identity:user:colleague", login: "colleague" }),
-      githubGrantRow({ id: myGrant, ownerUserId: `v1:identity:user:${userId}`, login: "owner" }),
-    ], repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "acme/private-site" })] }) });
+  it("reopens source management exactly once without registering another source", async () => {
+    const connection = fakeConnection({ credentials: [githubGrantRow({ id: "own", login: "alice" }), githubGrantRow({ id: "foreign", ownerUserId: "other", login: "colleague" })], sourceConnections: [] });
     h.connection = connection;
-    history.replaceState({}, "", "/?connect=deployables&github=reconnected");
+    history.replaceState({}, "", "/?github=connected");
     captureConnectReturn(window);
-    render(withSession(<StrictMode><ConnectReturnDispatcher /><ReturnedWindow /></StrictMode>, { userId }));
-    expect(await screen.findByRole("button", { name: /private-site/ })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Connect GitHub" })).toBeNull();
+    render(withSession(<StrictMode><ConnectReturnDispatcher /><ReturnedWindow /></StrictMode>));
+    expect(await screen.findByRole("heading", { name: "Sources" })).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Connected GitHub accounts" })).toBeNull();
+    expect(screen.queryByText("@colleague")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add source" })).toBeNull();
     expect(screen.getByTestId("window-count").textContent).toBe("1");
+    expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(0);
+    expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
     expect(window.location.search).toBe("");
-    expect(connection.callsNamed("sourceRepositories").every(call => call.includes(myGrant))).toBe(true);
-    h.connection = null;
-  });
-
-  it.each(["connected", "reconnected"])("waits for the credential feed after %s instead of inventing a grant", async reason => {
-    const connection = fakeConnection({ credentials: [], repositories: repositoriesReply({
-      repositories: [repositoryFixture({ fullName: "acme/private-site" })],
-    }) });
-    h.connection = connection;
-    history.replaceState({}, "", `/?connect=deployables&github=${reason}`);
-    captureConnectReturn(window);
-    render(withSession(<><ConnectReturnDispatcher /><ReturnedWindow /></>));
-    await screen.findByRole("button", { name: "Connect GitHub" });
-    expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
-    await emit(connection, "v1:platform:sourceCredential",
-      githubGrantRow({ id: "my-new-grant", ownerUserId: "v1:identity:user:u-me" }), "NODE_CREATED");
-    expect(await screen.findByRole("button", { name: /private-site/ })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Connect GitHub" })).toBeNull();
-    expect(connection.callsNamed("sourceRepositories")[0]).toContain("my-new-grant");
-  });
-
-  it("shows a pending credential read, then the connected repositories", async () => {
-    const connection = fakeConnection({ credentials: [GRANT],
-      repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "acme/private-site" })] }) });
-    const execute = vi.mocked(connection.query.executeNamed).getMockImplementation()!;
-    let finishRead!: () => void;
-    const pending = new Promise<void>(resolve => { finishRead = resolve; });
-    vi.spyOn(connection.query, "executeNamed").mockImplementation(async (name, call, options) => {
-      if (name === "sourceCredentialsMine") await pending;
-      return execute(name, call, options);
-    });
-    h.connection = connection;
-    history.replaceState({}, "", "/?connect=deployables&github=reconnected");
-    captureConnectReturn(window);
-    render(withSession(<><ConnectReturnDispatcher /><ReturnedWindow /></>));
-    expect(await screen.findByText("Loading your source connections")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Connect GitHub" })).toBeNull();
-    expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
-    await act(async () => finishRead());
-    expect(await screen.findByRole("button", { name: /private-site/ })).toBeTruthy();
-  });
-
-  it("shows a failed credential read and retries it instead of offering a new connection", async () => {
-    const connection = fakeConnection({ credentials: [GRANT],
-      repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "acme/private-site" })] }) });
-    const execute = vi.mocked(connection.query.executeNamed).getMockImplementation()!;
-    let fail = true;
-    vi.spyOn(connection.query, "executeNamed").mockImplementation((name, call, options) => {
-      if (name === "sourceCredentialsMine" && fail) return Promise.reject(new Error("source connection read unavailable"));
-      return execute(name, call, options);
-    });
-    h.connection = connection;
-    history.replaceState({}, "", "/?connect=deployables&github=reconnected");
-    captureConnectReturn(window);
-    render(withSession(<><ConnectReturnDispatcher /><ReturnedWindow /></>));
-    expect(await screen.findByText("Your source connections could not be read.")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Connect GitHub" })).toBeNull();
-    expect(connection.callsNamed("githubConnectBegin")).toHaveLength(0);
-    fail = false;
-    await click(screen.getByRole("button", { name: "Read source connections again" }));
-    expect(await screen.findByRole("button", { name: /private-site/ })).toBeTruthy();
-    expect(screen.queryByText("Your source connections could not be read.")).toBeNull();
-  });
-
-  it.each(["settings", "deployables"])("keeps an installation-only return neutral in %s", async section => {
-    h.connection = fakeConnection({ credentials: [] });
-    history.replaceState({}, "", `/?connect=${section}&github=installed`);
-    captureConnectReturn(window);
-    render(withSession(<><ConnectReturnDispatcher /><ReturnedWindow /></>));
-    expect(await screen.findByText("GitHub installation finished. Connect your account to choose its repositories.")).toBeTruthy();
-    expect(await screen.findByRole("button", { name: "Connect GitHub" })).toBeTruthy();
-    expect(screen.queryByText("GitHub sent you back without completing the connection.")).toBeNull();
-  });
-
-  it("returns an OAuth failure to the repository step with its repair", async () => {
-    h.connection = fakeConnection({ credentials: [] });
-    history.replaceState({}, "", "/?connect=deployables&github=connect_state_invalid");
-    captureConnectReturn(window);
-    render(withSession(<><ConnectReturnDispatcher /><ReturnedWindow /></>));
-    expect(await screen.findByText("That sign-in link is no longer valid")).toBeTruthy();
-    expect(await screen.findByRole("button", { name: "Connect GitHub" })).toBeTruthy();
   });
 
   it("does not open unrelated sections from a callback parameter", () => {
-    expect(readConnectReturn("?github=installed&connect=unrecognised")).toEqual({ reason: "installed", section: "settings" });
+    expect(readConnectReturn("?github=installed&connect=unrecognised")).toEqual({ reason: "installed", section: "sources" });
   });
 
   it("builds a return PATH, never a URL", () => {
@@ -443,7 +355,7 @@ describe("the return from GitHub", () => {
       reason: "connect_state_invalid",
       // The section hint is a courtesy: a callback that rebuilt the URL and
       // dropped it still returns somebody to a sensible place.
-      section: "settings",
+      section: "sources",
     });
     // Somebody who navigated to the OS directly has not failed at anything.
     expect(readConnectReturn("")).toBeNull();
@@ -471,7 +383,7 @@ describe("the return from GitHub", () => {
     // value that survived would open a second window every time.
     history.replaceState({}, "", "/?github=reconnected");
     captureConnectReturn(window);
-    expect(takeParkedConnectReturn()).toEqual({ reason: "reconnected", section: "settings" });
+    expect(takeParkedConnectReturn()).toEqual({ reason: "reconnected", section: "sources" });
     expect(takeParkedConnectReturn()).toBeNull();
   });
 
@@ -577,7 +489,7 @@ describe("the repository picker", () => {
 
   it("offers to look again, because this is a reading and not a feed", async () => {
     const { onLookAgain } = renderPicker();
-    await click(screen.getByRole("button", { name: "Look again" }));
+    await click(screen.getByRole("button", { name: "Refresh repositories" }));
     expect(onLookAgain).toHaveBeenCalledTimes(1);
     // No walk to offer when the page said there was none.
     expect(screen.queryByRole("button", { name: "Read more" })).toBeNull();
@@ -595,7 +507,7 @@ describe("the repository picker", () => {
   it("draws no search box when there is nothing to search", () => {
     renderPicker({ page: repositoryPageFrom(repositoriesReply({})), readAt: "" });
     expect(screen.queryByLabelText("Search repositories")).toBeNull();
-    expect(screen.getByText("This connection reaches no repositories yet.")).toBeTruthy();
+    expect(screen.getByText("Repositories have not been read yet.")).toBeTruthy();
   });
 
   it("makes empty an invitation, with a real anchor to a new tab", () => {
@@ -632,7 +544,7 @@ describe("the repository picker", () => {
     expect(link.getAttribute("rel")).toBe("noreferrer noopener");
     // ON THE ROW THAT READS AGAIN, because reading again is what follows it...
     const row = link.closest(".os-refresh-row") as HTMLElement;
-    expect(within(row).getByRole("button", { name: "Look again" })).toBeTruthy();
+    expect(within(row).getByRole("button", { name: "Refresh repositories" })).toBeTruthy();
     // ...and NOT a second button there: it leaves the product, and the row has
     // its one act already.
     expect(link.classList.contains("os-button")).toBe(false);
@@ -714,7 +626,7 @@ describe("reading the picker's list", () => {
       repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "acme/widget" })] }),
     });
     expect(screen.getByText("Not read yet.")).toBeTruthy();
-    await click(screen.getByRole("button", { name: "Look again" }));
+    await click(screen.getByRole("button", { name: "Refresh repositories" }));
     // `credentialId: ""` is a documented value -- "the grant I hold" -- and
     // not an omission, so it is sent rather than left out.
     expect(connection.callsNamed("sourceRepositories")).toEqual([
@@ -730,7 +642,7 @@ describe("reading the picker's list", () => {
         nextPage: 2,
       }),
     });
-    await click(screen.getByRole("button", { name: "Look again" }));
+    await click(screen.getByRole("button", { name: "Refresh repositories" }));
     await screen.findByRole("button", { name: /widget/ });
     await click(screen.getByRole("button", { name: "Read more" }));
     expect(connection.callsNamed("sourceRepositories").at(-1)).toBe(
@@ -739,7 +651,7 @@ describe("reading the picker's list", () => {
     // The same fixture came back, so the walk shows it twice -- which is
     // exactly what a re-read must NOT do.
     await waitFor(() => expect(screen.getAllByRole("button", { name: /widget/ })).toHaveLength(2));
-    await click(screen.getByRole("button", { name: "Look again" }));
+    await click(screen.getByRole("button", { name: "Refresh repositories" }));
     await waitFor(() => expect(screen.getAllByRole("button", { name: /widget/ })).toHaveLength(1));
   });
 
@@ -757,11 +669,11 @@ describe("reading the picker's list", () => {
     };
     h.connection = fakeConnection(seed);
     render(<PickerHost />);
-    await click(screen.getByRole("button", { name: "Look again" }));
+    await click(screen.getByRole("button", { name: "Refresh repositories" }));
     await screen.findByRole("button", { name: /widget/ });
 
     seed.repositoriesError = "reconnect_required: GitHub refused this connection.";
-    await click(screen.getByRole("button", { name: "Look again" }));
+    await click(screen.getByRole("button", { name: "Refresh repositories" }));
     expect(await screen.findByText("Your GitHub connection needs renewing")).toBeTruthy();
     expect(screen.getByText("GitHub refused this connection.")).toBeTruthy();
     expect(screen.getByRole("button", { name: /widget/ })).toBeTruthy();
@@ -772,7 +684,7 @@ describe("reading the picker's list", () => {
     mountPicker({
       repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "acme/widget" })] }),
     });
-    await click(screen.getByRole("button", { name: "Look again" }));
+    await click(screen.getByRole("button", { name: "Refresh repositories" }));
     const row = await screen.findByRole("button", { name: /widget/ });
     await click(row);
     expect(screen.getByRole("button", { name: /widget/ }).getAttribute("data-current")).toBe("true");
@@ -807,7 +719,7 @@ function mountSources(seed: FakeSeed) {
 async function sourcesGroup(): Promise<HTMLElement> {
   // A fieldset named by its legend: the settings-group semantics DESIGN.md
   // rule 8 keeps, which is a `group` and not a `region`.
-  return await screen.findByRole("group", { name: "Sources" });
+  return await screen.findByRole("region", { name: "Source settings" });
 }
 
 /**
@@ -844,106 +756,19 @@ function stubNavigation(): string[] {
 
 const GRANT = githubGrantRow({ id: "cred-grant" });
 
-describe("Settings > Sources", () => {
-  beforeEach(() => {
-    clearParkedConnectReturn();
-  });
-
-  afterEach(() => {
-    restoreLocation?.();
-    h.connection = null;
-  });
-
-  it("offers Connect GitHub, and the token fallback, to somebody with no connection", async () => {
-    mountSources({ credentials: [] });
-    const group = await sourcesGroup();
-    expect(within(group).getByRole("button", { name: "Connect GitHub" })).toBeTruthy();
-    expect(
-      within(group).getByText("Pick repositories from a list instead of pasting a URL and a token."),
-    ).toBeTruthy();
-    // The token path is NOT behind "Advanced": it is a legitimate first
-    // choice for a host the app does not cover, and calling it advanced
-    // would be a judgement about the person. It is named, listed and
-    // addable in the same breath as the connection.
-    expect(within(group).getByText("Access tokens")).toBeTruthy();
-    expect(within(group).getByRole("button", { name: "Add a credential" })).toBeTruthy();
-    expect(within(group).getByText(/No credentials yet. A public repository needs none/)).toBeTruthy();
-    // No connection means nothing was asked of the cluster.
-    expect(h.connection).toBeTruthy();
-  });
-
-  it("begins a connect on the click and navigates the whole page", async () => {
+describe("existing credential and cluster settings", () => {
+  afterEach(() => { h.connection = null; restoreLocation?.(); });
+  it("starts additive GitHub authorization with correlation and preserves existing sources", async () => {
     const assigned = stubNavigation();
-    const { connection } = mountSources({
-      credentials: [],
-      connectUrl: "https://github.com/login/oauth/authorize?client_id=x&state=y",
-    });
-    const group = await sourcesGroup();
-    await click(within(group).getByRole("button", { name: "Connect GitHub" }));
-    // The wire string, rendered by hand until the generated builder lands.
-    expect(connection.callsNamed("githubConnectBegin")).toEqual([
-      'builtin githubConnectBegin(returnPath: "/?connect=settings")',
-    ]);
-    await waitFor(() =>
-      expect(assigned).toEqual(["https://github.com/login/oauth/authorize?client_id=x&state=y"]),
-    );
-  });
-
-  it("renders a refused connect in place, under the OS headline", async () => {
-    const { connection } = mountSources({
-      credentials: [],
-      // ANSWERED, not thrown: the engine's connectResult carries the reason as a
-      // typed code on the row, and a fake that threw it modelled a wire that
-      // does not exist.
-      connectReason: "github_app_not_configured",
-    });
-    const group = await sourcesGroup();
-    await click(within(group).getByRole("button", { name: "Connect GitHub" }));
-    expect(await within(group).findByText("This cluster has no GitHub connection set up")).toBeTruthy();
-    // The sentence for the answered code, beneath.
-    expect(within(group).getByText("This cluster has no GitHub App configured.")).toBeTruthy();
-    // WHO CAN CHANGE IT, by the name this product gives them -- it said "ask
-    // an operator" once, to a cluster owner.
-    expect(within(group).getByText(/A cluster owner sets GitHub up in Settings > Sources/)).toBeTruthy();
-    expect(connection.callsNamed("githubConnectBegin")).toHaveLength(1);
-  });
-
-  // THE CLUSTER'S GITHUB APP, as this group meets it. The case above is what a
-  // cluster that cannot say in advance still gets; one that can is asked as
-  // the group opens.
-  it("offers a cluster owner Set up GitHub in place of a Connect that cannot work", async () => {
-    const assigned = stubNavigation();
-    const { connection } = mountSources({
-      credentials: [],
-      githubApp: { configured: false, canSetup: true },
-      appSetupUrl: "https://identity.example.test/auth/github/app/new?state=s1",
-    });
-    const group = await sourcesGroup();
-    const setUp = await within(group).findByRole("button", { name: "Set up GitHub" });
-    expect(within(group).queryByRole("button", { name: "Connect GitHub" })).toBeNull();
-
-    // An organization with no login has nothing to be registered under, so
-    // the act is ABSENT until there is one.
-    await click(within(group).getByRole("radio", { name: "An organization" }));
-    expect(within(group).queryByRole("button", { name: "Set up GitHub" })).toBeNull();
-    await click(within(group).getByRole("radio", { name: "Your account" }));
-
-    await click(within(group).getByRole("button", { name: "Set up GitHub" }));
-    expect(setUp).toBeTruthy();
-    await waitFor(() => expect(assigned).toEqual(["https://identity.example.test/auth/github/app/new?state=s1"]));
-    expect(connection.callsNamed("githubAppSetupBegin")).toEqual([
-      'builtin githubAppSetupBegin(returnPath: "/?connect=settings", organization: "")',
-    ]);
-  });
-
-  it("tells somebody who is not a cluster owner who can, and offers them nothing to press", async () => {
-    mountSources({ credentials: [], githubApp: { configured: false, canSetup: false } });
-    const group = await sourcesGroup();
-    expect(await within(group).findByText(/A cluster owner sets that up once; until then, add an access token below/)).toBeTruthy();
-    expect(within(group).queryByRole("button", { name: "Connect GitHub" })).toBeNull();
-    expect(within(group).queryByRole("button", { name: "Set up GitHub" })).toBeNull();
-    // The other way in is still here, and is what the sentence points at.
-    expect(within(group).getByRole("button", { name: "Add a credential" })).toBeTruthy();
+    const { connection } = await composeAccount({ credentials: [GRANT], repositories: repositoriesReply({ repositories: [WIDGET] }), connectUrl: "https://github.com/login/oauth/authorize?fixture=1" });
+    await click(screen.getByRole("button", { name: "Add GitHub account" }));
+    expect(assigned).toEqual(["https://github.com/login/oauth/authorize?fixture=1"]);
+    expect(connection.callsNamed("githubConnectBegin")[0]).toMatch(/flowId: "[a-f0-9-]+"/);
+    expect(connection.callsNamed("githubConnectBegin")[0]).not.toContain("credentialId:");
+    expect(connection.callsNamed("githubConnectBegin")[0]).toContain('returnPath: "/?connect=deployables"');
+    expect(connection.callsNamed("sourceConnectionRemove")).toHaveLength(0);
+    expect(connection.callsNamed("sourceCredentialRevoke")).toHaveLength(0);
+    expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(0);
   });
 
   it("shows a cluster owner which app the cluster uses, and removes one registered from here", async () => {
@@ -978,149 +803,14 @@ describe("Settings > Sources", () => {
     expect(within(block).queryByRole("button", { name: "Remove" })).toBeNull();
   });
 
-  it("shows the connected account, its reach, and where to install another", async () => {
-    const { connection } = mountSources({
-      credentials: [GRANT],
-      installUrl: "https://github.com/apps/memql/installations/new",
-    });
-    const card = await screen.findByRole("region", { name: "GitHub" });
-    // ONCE. The accent chip IS the fact -- a `Connected as @octocat` row
-    // directly beneath a chip reading `@octocat` is the same duplication this
-    // design already removed when it dropped `Reaches`, whose content the
-    // installation chips were carrying (rule 7).
-    expect(within(card).getAllByText("@octocat")).toHaveLength(1);
-    expect(within(card).queryByText("Connected as")).toBeNull();
-    expect(within(card).queryByText("Reaches")).toBeNull();
-    // Until somebody asks GitHub, the reach is the COUNT the row itself
-    // carries -- which is the honest resolution of a fact this cluster holds
-    // installation ids for and no logins.
-    expect(within(card).getByText("2 installations")).toBeTruthy();
-    const link = await within(card).findByRole("link", { name: "Install on another organization" });
-    expect(link.getAttribute("target")).toBe("_blank");
-    expect(link.getAttribute("rel")).toBe("noreferrer noopener");
-    // The install URL is only learnable from a begin call, asked once.
-    expect(connection.callsNamed("githubConnectBegin")).toEqual([
-      'builtin githubConnectBegin(returnPath: "/?connect=settings")',
-    ]);
-  });
-
-  it("asks GitHub which organizations only when somebody presses, and says when it looked", async () => {
-    const { connection } = mountSources({
-      credentials: [GRANT],
-      repositories: repositoriesReply({
-        installations: [{ id: "i-acme", login: "acme", accountType: "Organization" }],
-        pending: [{ login: "beta-corp" }],
-      }),
-    });
+  it("directs source management to Sources without a second credential list or mutation", async () => {
+    const { connection } = mountSources({ credentials: [credentialRow({ id: "cred-1" }), GRANT] });
     const group = await sourcesGroup();
-    const card = within(group).getByRole("region", { name: "GitHub" });
-
-    // OPENING SETTINGS DIALS NOBODY. The row carries installation ids, not
-    // logins, so the count is what it can honestly say -- and the caption
-    // says whose answer the rest would be.
-    expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
-    expect(within(card).getByText("2 installations")).toBeTruthy();
-    expect(within(group).getByText(/Which organizations, and any waiting for an owner/)).toBeTruthy();
-
-    await click(within(group).getByRole("button", { name: "Check what it reaches" }));
-    expect(connection.callsNamed("sourceRepositories")).toEqual([
-      'builtin sourceRepositories(credentialId: "cred-grant", page: 1)',
-    ]);
-    // The logins replace the count, and the organization still waiting for
-    // its owner becomes reachable on the surface built to show it -- in the
-    // warn tone, because nobody has done anything wrong.
-    expect(await within(card).findByText("acme")).toBeTruthy();
-    expect(within(card).queryByText("2 installations")).toBeNull();
-    expect(within(card).getByText("beta-corp pending").getAttribute("data-tone")).toBe("warn");
-    expect(within(card).getByText(/An owner of beta-corp has to approve/)).toBeTruthy();
-    // ...and the reading dates itself, exactly as the picker's footer does.
-    expect(within(group).getByText(/Asked GitHub/)).toBeTruthy();
-  });
-
-  it("follows the connection live, with no reload", async () => {
-    const { connection } = mountSources({ credentials: [GRANT] });
-    const card = await screen.findByRole("region", { name: "GitHub" });
-    expect(within(card).getByText("2 installations")).toBeTruthy();
-    // Somebody installed the app on a third organization. That IS the change
-    // this card exists to show, so it arrives on the credential broadcast.
-    await emit(
-      connection,
-      "v1:platform:sourceCredential",
-      githubGrantRow({ id: "cred-grant", installationIds: ["i-acme", "i-octocat", "i-beta"] }),
-    );
-    expect(await within(card).findByText("3 installations")).toBeTruthy();
-    expect(within(card).queryByText("2 installations")).toBeNull();
-  });
-
-  it("disconnects in two steps, naming what will break, and asks for no typed name", async () => {
-    const { connection } = mountSources({
-      credentials: [GRANT],
-      packages: [
-        { id: "pkg-a", ownerUserId: "u-me", name: "widget", sourceKind: "repo", credentialId: "cred-grant", status: "active", createdAt: "2026-08-01T00:00:00Z" } as unknown as Row,
-        { id: "pkg-b", ownerUserId: "u-me", name: "docs", sourceKind: "repo", credentialId: "cred-grant", status: "active", createdAt: "2026-08-01T00:00:00Z" } as unknown as Row,
-      ],
-    });
-    const card = await screen.findByRole("region", { name: "GitHub" });
-    await click(within(card).getByRole("button", { name: "Disconnect" }));
-    // Naming every affected thing is what archive really contributes, and it
-    // is what was kept; the TYPING was not, because this is one click to undo.
-    expect(within(card).getByText(/2 sources fetch under this connection: widget, docs\./)).toBeTruthy();
-    expect(within(card).getByText(/They will ask you to reconnect at their next fetch/)).toBeTruthy();
-    expect(within(card).queryByText(/to confirm/)).toBeNull();
-    expect(card.querySelectorAll("input")).toHaveLength(0);
-    const confirm = within(card).getAllByRole("button", { name: "Disconnect" }).at(-1)!;
-    expect(confirm.getAttribute("data-tone")).toBe("danger");
-    await click(confirm);
-    expect(connection.callsNamed("sourceCredentialRevoke")).toEqual([
-      'builtin sourceCredentialRevoke(credentialId: "cred-grant")',
-    ]);
-  });
-
-  it("renders a refused disconnect beside the button that produced it", async () => {
-    mountSources({
-      credentials: [GRANT],
-      credentialRevokeError: "credential_not_found: That credential is not one you can use.",
-    });
-    const card = await screen.findByRole("region", { name: "GitHub" });
-    await click(within(card).getByRole("button", { name: "Disconnect" }));
-    await click(within(card).getAllByRole("button", { name: "Disconnect" }).at(-1)!);
-    expect(await within(card).findByText("This source's credential is not one you can use")).toBeTruthy();
-    expect(within(card).getByText("That credential is not one you can use.")).toBeTruthy();
-  });
-
-  it("offers a reconnect once the connection has been ended", async () => {
-    // `reconnect_required`'s copy sends a person to Settings > Sources, so
-    // the control it names has to be here.
-    mountSources({ credentials: [githubGrantRow({ id: "cred-grant", status: "revoked" })] });
-    const group = await sourcesGroup();
-    expect(await within(group).findByRole("button", { name: "Reconnect GitHub" })).toBeTruthy();
-    const card = within(group).getByRole("region", { name: "GitHub" });
-    expect(within(card).getByText("disconnected").getAttribute("data-tone")).toBe("warn");
-    // Nothing to disconnect twice, and nothing to ask GitHub: a lapsed grant
-    // reads nothing, so a control that could only refuse is not offered.
-    expect(within(card).queryByRole("button", { name: "Disconnect" })).toBeNull();
-    expect(within(group).queryByRole("button", { name: "Check what it reaches" })).toBeNull();
-  });
-
-  it("lists a pasted credential beside what fetches under it, and revokes it by name", async () => {
-    const { connection } = mountSources({
-      credentials: [credentialRow({ id: "cred-1" })],
-      packages: [
-        { id: "pkg-a", ownerUserId: "u-me", name: "widget", sourceKind: "repo", repoUrl: "https://github.com/acme/widget", repoRef: "main", credentialId: "cred-1", status: "active", createdAt: "2026-08-01T00:00:00Z" } as unknown as Row,
-      ],
-    });
-    const group = await sourcesGroup();
-    // The name and the digest are two nodes, because they are two kinds of
-    // thing: the label somebody chose, and the id that tells two cards apart.
-    expect(await within(group).findByText("acme deploy token")).toBeTruthy();
-    expect(within(group).getByText("sha256:ab12cd34").className).toContain("os-mono");
-    // What a revoke would break, named before it is offered.
-    expect(within(group).getByText("acme/widget at main")).toBeTruthy();
-    await click(within(group).getByRole("button", { name: /Revoke acme deploy token/ }));
-    await click(within(group).getByRole("button", { name: "Revoke" }));
-    expect(connection.callsNamed("sourceCredentialRevoke")).toEqual([
-      'builtin sourceCredentialRevoke(credentialId: "cred-1")',
-    ]);
+    expect(within(group).getByText("Manage saved sources in Sources. Add a deployable to connect a GitHub account and choose a repository.")).toBeTruthy();
+    expect(within(group).queryByRole("list")).toBeNull();
+    expect(within(group).queryByRole("button", { name: /Revoke|Disconnect|Add source/ })).toBeNull();
+    expect(connection.callsNamed("sourceCredentialRevoke")).toHaveLength(0);
+    expect(connection.callsNamed("sourceConnectionRemove")).toHaveLength(0);
   });
 
   it("never renders anything token-shaped, on either path", async () => {
@@ -1131,11 +821,11 @@ describe("Settings > Sources", () => {
       ],
     });
     const group = await sourcesGroup();
-    // The reachable positive: the seed really does carry a token-shaped
-    // string, and the cards it is attached to really did render.
+    // The wire fixture carries secrets, but Settings only shows guidance
+    // and cluster setup, never a second credential roster.
     expect(FIXTURE_GITHUB_PAT.startsWith("ghp_")).toBe(true);
-    expect(within(group).getByText(/acme deploy token/)).toBeTruthy();
-    expect((await within(group).findAllByText("@octocat")).length).toBeGreaterThan(0);
+    expect(within(group).queryByRole("list")).toBeNull();
+    expect(within(group).queryByText("@octocat")).toBeNull();
     expect(container.textContent).not.toContain("ghp_");
     expect(container.textContent).not.toContain(FIXTURE_GITHUB_PAT);
     // Nor does anything token-shaped go OUT.
@@ -1164,7 +854,7 @@ const URL_FIELD = "The repository this deployable is built from";
 const BRANCH_FIELD = "Which branch or tag to deploy";
 const NAME_FIELD = "What this deployable is called";
 
-async function composeSource(seed: FakeSeed): Promise<{ connection: FakeConnection; region: HTMLElement }> {
+async function composeAccount(seed: FakeSeed): Promise<{ connection: FakeConnection; region: HTMLElement }> {
   const connection = fakeConnection(seed);
   h.connection = connection;
   render(
@@ -1179,88 +869,27 @@ async function composeSource(seed: FakeSeed): Promise<{ connection: FakeConnecti
   return { connection, region };
 }
 
+async function composeSource(seed: FakeSeed): Promise<{ connection: FakeConnection; region: HTMLElement }> {
+  const { connection, region } = await composeAccount(seed);
+  const accounts = await within(region).findByRole("list", { name: "GitHub accounts" });
+  const choices = within(accounts).getAllByRole("button");
+  expect(choices).toHaveLength(1);
+  await click(choices[0]!);
+  expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
+  await click(await within(region).findByRole("button", { name: /^acme Organization/ }));
+  return { connection, region };
+}
+
 /**
  * An act on the wizard's FLOOR. Connecting is the repository step's forward
  * act, and a wizard's forward act lives on its floor and nowhere else -- so
  * that is where these tests look for it, and where they press it.
  */
-function floorAct(name: string): HTMLButtonElement | null {
-  const hit = [...document.querySelectorAll(".os-actbar-acts button")].find((b) => (b.textContent ?? "").trim() === name);
-  return (hit as HTMLButtonElement | undefined) ?? null;
-}
-
 const WIDGET = repositoryFixture({ fullName: "acme/widget", private: true, visibility: "private" });
-
-function personalSource(credentials: Row[], userId = "u-me") {
-  return withSession(<RepositorySource
-    draft={EMPTY_DRAFT} onDraft={vi.fn()}
-    credentials={credentials.map(credentialFromRow)}
-    probe={{ reply: null, error: "", busy: false, probe: vi.fn(async () => {}), clear: vi.fn() }}
-    tokenFormOpen={false} onTokenFormOpenChange={vi.fn()}
-    /* The connect is the page's: it is the step's forward act, and a wizard's
-       forward act lives on its floor. A step mounted alone gets an idle one. */
-    connect={{ busy: false, refusal: null, installUrl: "", connect: vi.fn(async () => false), learn: vi.fn(async () => false), clear: vi.fn() } as never}
-  />, { userId });
-}
-
-describe("personal repository connection lifecycle", () => {
-  afterEach(() => { h.connection = null; });
-
-  it("reads the grant when the socket becomes available after mount", async () => {
-    h.connection = null;
-    const view = render(personalSource([GRANT]));
-    h.connection = fakeConnection({ repositories: repositoriesReply({ repositories: [WIDGET] }) });
-    view.rerender(personalSource([GRANT]));
-    expect(await screen.findByRole("button", { name: /widget/ })).toBeTruthy();
-  });
-
-  it("drops the old grant's list and ignores its late answer after replacement", async () => {
-    const connection = fakeConnection({
-      repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "new-owner/new-project" })] }),
-    });
-    let finishOld!: (value: ReturnType<typeof builtinReply>) => void;
-    vi.spyOn(connection.query, "sourceRepositories").mockImplementationOnce(() =>
-      new Promise(resolve => { finishOld = resolve; }));
-    h.connection = connection;
-    const view = render(personalSource([GRANT]));
-    view.rerender(personalSource([githubGrantRow({ id: "new-grant" })]));
-    expect(await screen.findByRole("button", { name: /new-project/ })).toBeTruthy();
-    await act(async () => finishOld(builtinReply("sourceRepositories", [repositoriesReply({ repositories: [WIDGET] })])));
-    expect(screen.queryByRole("button", { name: /widget/ })).toBeNull();
-    expect(screen.getByRole("button", { name: /new-project/ })).toBeTruthy();
-  });
-
-  it("removes the previous person's list and installation link on a viewer change", async () => {
-    h.connection = fakeConnection({
-      repositories: repositoriesReply({ repositories: [WIDGET] }),
-      installUrl: "https://github.com/apps/memql/installations/new",
-    });
-    const view = render(personalSource([GRANT]));
-    await screen.findByRole("button", { name: /widget/ });
-    view.rerender(personalSource([GRANT], "other-user"));
-    // Mounted alone there is no floor to carry the act; the step says what
-    // connecting is for, which is the half of it that is the step's.
-    expect(screen.getByText(/Connect your GitHub account and pick from a list/)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /widget/ })).toBeNull();
-    expect(screen.queryByRole("link", { name: "Install on another organization" })).toBeNull();
-  });
-});
-
 
 describe("the compose Source stop, with a connection", () => {
   afterEach(() => {
     h.connection = null;
-  });
-
-  it("offers a personal connection when an owner sees only a colleague's grant", async () => {
-    const { connection, region } = await composeSource({
-      credentials: [githubGrantRow({ id: "colleague-grant", ownerUserId: "u-colleague", login: "colleague" })],
-    });
-    await waitFor(() => expect(floorAct("Connect GitHub")).toBeTruthy());
-    expect(connection.callsNamed("sourceRepositories")).toEqual([]);
-    expect(within(region).queryByText("This connection reaches no repositories yet.")).toBeNull();
-    await click(within(region).getByRole("radio", { name: "A token" }));
-    expect(within(region).queryByRole("option", { name: /colleague/ })).toBeNull();
   });
 
   it("chooses the current user's grant even when another user's card sorts first", async () => {
@@ -1277,38 +906,21 @@ describe("the compose Source stop, with a connection", () => {
     expect(connection.callsNamed("sourceProbe").join()).not.toContain("colleague-grant");
   });
 
-  it.each(["credential_not_found", "credential_revoked", "reconnect_required"])("offers reconnect for an answered %s refusal", async reason => {
-    const { region } = await composeSource({
-      credentials: [GRANT], repositories: repositoriesReply({ reason }),
-    });
-    // GITHUB'S OWN ANSWER ABOUT THE GRANT arrives on the repository read, inside
-    // the step -- so the step tells the page, and the floor offers the way back.
-    await waitFor(() => expect(floorAct("Reconnect GitHub")).toBeTruthy());
-    expect(within(region).getByText(/Your GitHub connection has lapsed/)).toBeTruthy();
-    expect(within(region).queryByText("This connection reaches no repositories yet.")).toBeNull();
-  });
-
-  it("offers the GitHub installation page when the personal grant reaches nothing", async () => {
-    const { region } = await composeSource({ credentials: [GRANT], installUrl: "https://github.com/apps/memql/installations/new" });
-    const link = await within(region).findByRole("link", { name: "Install on another organization" });
-    expect(link.getAttribute("href")).toContain("github.com");
-  });
-
-  it("reads the list on its own, so a connected person opens the stop and picks", async () => {
+  it("reads repositories after explicit account and organization confirmation", async () => {
     const { connection, region } = await composeSource({
       credentials: [GRANT],
       repositories: repositoriesReply({ repositories: [WIDGET] }),
     });
 
-    // NOTHING WAS TYPED AND NOTHING WAS PRESSED. The measure of this surface
-    // is that a connected person never notices it.
+    // Confirming the installation loads its authorized repositories without
+    // asking for a URL or another credential.
     expect(await within(region).findByRole("button", { name: /widget/ })).toBeTruthy();
     expect(connection.callsNamed("sourceRepositories")).toEqual([
-      'builtin sourceRepositories(credentialId: "cred-grant", page: 1)',
+      'builtin sourceRepositories(credentialId: "cred-grant", page: 1, connectionId: "source-cred-grant-i-acme")',
     ]);
-    // The token form is under it, closed: one answer on screen at a time.
+    // Repository creation offers no pasted-token alternative.
     expect(within(region).queryByLabelText(URL_FIELD)).toBeNull();
-    expect(within(region).getByRole("radio", { name: "A token" })).toBeTruthy();
+    expect(within(region).queryByRole("radio", { name: "A token" })).toBeNull();
   });
 
   it("fills the URL, the credential and the branches from the one it was given", async () => {
@@ -1325,14 +937,13 @@ describe("the compose Source stop, with a connection", () => {
     // the grant -- which is what makes its answer about this connection.
     await waitFor(() =>
       expect(connection.callsNamed("sourceProbe")).toEqual([
-        'builtin sourceProbe(repoUrl: "https://github.com/acme/widget", credentialId: "cred-grant")',
+        'builtin sourceProbe(repoUrl: "https://github.com/acme/widget", credentialId: "cred-grant", connectionId: "source-cred-grant-i-acme")',
       ]),
     );
-    // The name came with it, so nothing else has to be typed -- read as what
-    // is on screen in the field, never off a `.value`.
+    expect(within(region).queryByRole("list", { name: "acme repositories" })).toBeNull();
+    expect(within(region).queryByText(/^chosen$/i)).toBeNull();
+    // Configuration retains the name supplied by the chosen repository.
     expect(within(region).getByDisplayValue("widget")).toBeTruthy();
-    // ...and the rail's own answer says what was chosen.
-    expect(within(region).getByText("acme/widget at default branch")).toBeTruthy();
   });
 
   it("offers the branches the probe answered, default first, and following it as its own answer", async () => {
@@ -1363,7 +974,7 @@ describe("the compose Source stop, with a connection", () => {
     expect(within(region).queryByLabelText(BRANCH_FIELD)).toBeNull();
   });
 
-  it("previews what the manifest claims at What it is, in the report's own vocabulary", async () => {
+  it("previews manifest claims under Repository contents on Configuration", async () => {
     const { region } = await composeSource({
       credentials: [GRANT],
       repositories: repositoriesReply({ repositories: [WIDGET] }),
@@ -1380,7 +991,8 @@ describe("the compose Source stop, with a connection", () => {
     });
     await click(await within(region).findByRole("button", { name: /widget/ }));
 
-    await click(await within(region).findByRole("button", { name: /^Review/ }));
+    expect(within(region).queryByRole("button", { name: /^Review/ })).toBeNull();
+    await click(await within(region).findByText("Repository contents", { selector: "summary" }));
     expect(await within(region).findByText("acme-storefront")).toBeTruthy();
     expect(within(region).getByText("web")).toBeTruthy();
     expect(within(region).getByText("clients/web")).toBeTruthy();
@@ -1400,215 +1012,8 @@ describe("the compose Source stop, with a connection", () => {
 
     // No preview AND no complaint: the analysis is the authority, and a
     // warning here would report a manifest problem twice.
+    expect(within(region).queryByText("Repository contents", { selector: "summary" })).toBeNull();
     expect(within(region).queryByText(/Analyze reads the tree itself/)).toBeNull();
     expect(within(region).queryByText(/manifest/i)).toBeNull();
-  });
-});
-
-describe("the compose Source stop, without one", () => {
-  afterEach(() => {
-    restoreLocation?.();
-    h.connection = null;
-  });
-
-  it("offers Connect above the token form, and mints nothing until something is pressed", async () => {
-    const { connection, region } = await composeSource({ credentials: [] });
-
-    await waitFor(() => expect(floorAct("Connect GitHub")).toBeTruthy());
-    // THE TWO WAYS IN ARE ONE CHOICE, as equals, with GitHub chosen.
-    expect(within(region).getByRole("radio", { name: "GitHub" }).getAttribute("aria-checked")).toBe("true");
-    expect(within(region).getByRole("radio", { name: "A token" }).getAttribute("aria-checked")).toBe("false");
-    // Beginning a connect mints a state row, so it is never how the wizard
-    // finds out whether this cluster has an app. The status is a READ, asked
-    // once as the wizard opens -- and this fake answers it no row, which is
-    // "not known", which keeps Connect on offer.
-    expect(connection.callsNamed("githubAppStatus")).toHaveLength(1);
-    expect(connection.callsNamed("githubConnectBegin")).toHaveLength(0);
-    expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
-    // The fold is closed, and one click away.
-    expect(within(region).queryByLabelText(URL_FIELD)).toBeNull();
-    await click(within(region).getByRole("radio", { name: "A token" }));
-    expect(within(region).getByLabelText(URL_FIELD)).toBeTruthy();
-    await click(within(region).getByRole("radio", { name: "GitHub" }));
-    expect(within(region).queryByLabelText(URL_FIELD)).toBeNull();
-  });
-
-  it("says Reconnect, not Connect, once a connection has lapsed", async () => {
-    const { region } = await composeSource({
-      credentials: [githubGrantRow({ id: "cred-grant", status: "revoked" })],
-    });
-    await waitFor(() => expect(floorAct("Reconnect GitHub")).toBeTruthy());
-    // A lapsed grant reads no repositories, so it is offered no picker.
-    expect(within(region).queryByRole("button", { name: "Look again" })).toBeNull();
-  });
-
-  it("makes the token form the whole stop on a cluster with no GitHub App", async () => {
-    const { region } = await composeSource({
-      credentials: [],
-      // ANSWERED, not thrown: the engine's connectResult carries the reason as a
-      // typed code on the row, and a fake that threw it modelled a wire that
-      // does not exist.
-      connectReason: "github_app_not_configured",
-    });
-    await waitFor(() => expect(floorAct("Connect GitHub")).toBeTruthy());
-    await click(floorAct("Connect GitHub")!);
-
-    // The OS headline, the sentence for the answered code beneath it.
-    const headline = await within(region).findByText("This cluster has no GitHub connection set up");
-    expect(within(region).getByText("This cluster has no GitHub App configured.")).toBeTruthy();
-    // WARN, never ERROR: an operator's condition rather than this person's,
-    // and the fault colour would say they broke the cluster.
-    expect(headline.closest("[data-tone]")?.getAttribute("data-tone")).toBe("warn");
-    // A disabled Connect would invite somebody to fix a cluster that is not
-    // theirs, so the control is gone -- and the form is the stop, open, with
-    // no fold to find it behind.
-    expect(within(region).queryByRole("button", { name: "Connect GitHub" })).toBeNull();
-    expect(within(region).queryByRole("radio", { name: "A token" })).toBeNull();
-    expect(within(region).getByLabelText(URL_FIELD)).toBeTruthy();
-  });
-});
-
-// A CLUSTER WITH NO GITHUB APP, KNOWN BEFORE ANYBODY PRESSES. The reading
-// above -- press Connect, be refused -- is what an engine that cannot say in
-// advance still gets. One that can is asked as the wizard opens, and the step
-// offers what can actually be done.
-describe("the compose Source stop, on a cluster with no GitHub App", () => {
-  afterEach(() => {
-    restoreLocation?.();
-    h.connection = null;
-  });
-
-  const NO_APP_OWNER = { configured: false, canSetup: true };
-
-  it("offers a cluster owner Set up GitHub on the floor, and never Connect", async () => {
-    const assigned = stubNavigation();
-    const { connection, region } = await composeSource({
-      credentials: [],
-      githubApp: NO_APP_OWNER,
-      appSetupUrl: "https://identity.example.test/auth/github/app/new?state=s1",
-    });
-
-    await waitFor(() => expect(floorAct("Set up GitHub")).toBeTruthy());
-    expect(floorAct("Connect GitHub")).toBeNull();
-    expect(within(region).getByText(/This cluster is not linked to GitHub yet/)).toBeTruthy();
-    // ONE QUESTION: whose GitHub account the app is registered under. Their
-    // own is the default, and it asks for nothing more.
-    expect(within(region).getByRole("radio", { name: "Your account" }).getAttribute("aria-checked")).toBe("true");
-    expect(within(region).queryByLabelText("The organization's GitHub login")).toBeNull();
-    // Nothing has been minted by looking.
-    expect(connection.callsNamed("githubAppSetupBegin")).toHaveLength(0);
-
-    await click(floorAct("Set up GitHub")!);
-    await waitFor(() => expect(assigned).toEqual(["https://identity.example.test/auth/github/app/new?state=s1"]));
-    // The return path is THIS step, and an own-account registration names no
-    // organization -- sent empty rather than omitted, one call shape.
-    const call = connection.callsNamed("githubAppSetupBegin")[0]!;
-    expect(call).toContain(`returnPath: ${JSON.stringify(returnPathFor("deployables"))}`);
-    expect(call).toContain('organization: ""');
-  });
-
-  it("asks for the organization by login, and has no act until it is named", async () => {
-    const assigned = stubNavigation();
-    const { connection, region } = await composeSource({
-      credentials: [],
-      githubApp: NO_APP_OWNER,
-      appSetupUrl: "https://identity.example.test/auth/github/app/new?state=s2",
-    });
-    await waitFor(() => expect(floorAct("Set up GitHub")).toBeTruthy());
-
-    await click(within(region).getByRole("radio", { name: "An organization" }));
-    // ABSENT, never disabled: there is nothing to register the app under yet,
-    // and the floor says what it is waiting for.
-    expect(floorAct("Set up GitHub")).toBeNull();
-    expect(screen.getByText("Name the organization")).toBeTruthy();
-
-    await typeInto(within(region).getByLabelText("The organization's GitHub login") as HTMLInputElement, " acme-labs ");
-    await click(floorAct("Set up GitHub")!);
-    await waitFor(() => expect(assigned).toHaveLength(1));
-    expect(connection.callsNamed("githubAppSetupBegin")[0]).toContain('organization: "acme-labs"');
-  });
-
-  it("renders a refused setup in place, and navigates nowhere", async () => {
-    const assigned = stubNavigation();
-    const { region } = await composeSource({
-      credentials: [],
-      githubApp: NO_APP_OWNER,
-      appSetupReason: "github_app_setup_invalid",
-    });
-    await waitFor(() => expect(floorAct("Set up GitHub")).toBeTruthy());
-    await click(floorAct("Set up GitHub")!);
-
-    expect(await within(region).findByText("That is not a GitHub organization's login.")).toBeTruthy();
-    expect(assigned).toEqual([]);
-    // The act is still there: the person corrects the login and asks again.
-    expect(floorAct("Set up GitHub")).toBeTruthy();
-  });
-
-  it("offers somebody who is not a cluster owner no act at all, and says who can", async () => {
-    const { connection, region } = await composeSource({
-      credentials: [],
-      githubApp: { configured: false, canSetup: false },
-    });
-
-    expect(await within(region).findByText(/A cluster owner sets that up once; until then, choose A token/)).toBeTruthy();
-    // Rule 12: absent, never disabled. Not Connect, which cannot work, and not
-    // Set up, which is not theirs.
-    expect(floorAct("Connect GitHub")).toBeNull();
-    expect(floorAct("Set up GitHub")).toBeNull();
-    expect(within(region).queryByRole("radio", { name: "Your account" })).toBeNull();
-    expect(connection.callsNamed("githubConnectBegin")).toHaveLength(0);
-    // THE TOKEN IS ONE CHOICE AWAY, and the step is an ordinary one again.
-    await click(within(region).getByRole("radio", { name: "A token" }));
-    expect(within(region).getByLabelText(URL_FIELD)).toBeTruthy();
-    expect(within(region).queryByText(/not linked to GitHub/)).toBeNull();
-  });
-
-  it("offers Connect as ever on a cluster that has one", async () => {
-    const { region } = await composeSource({
-      credentials: [],
-      githubApp: { configured: true, source: "cluster", slug: "memql-on-example", canSetup: true },
-    });
-    await waitFor(() => expect(floorAct("Connect GitHub")).toBeTruthy());
-    expect(floorAct("Set up GitHub")).toBeNull();
-    expect(within(region).queryByText(/not linked to GitHub/)).toBeNull();
-  });
-
-  it("keeps Connect on offer when the status could not be read", async () => {
-    // "Did not answer" is not "no app": reading it that way would take Connect
-    // away from every cluster whose status read merely failed.
-    const { region } = await composeSource({ credentials: [], githubAppError: "unknown builtin githubAppStatus" });
-    await waitFor(() => expect(floorAct("Connect GitHub")).toBeTruthy());
-    expect(within(region).queryByText(/not linked to GitHub/)).toBeNull();
-  });
-});
-
-describe("what a disconnect says about GitHub", () => {
-  afterEach(() => {
-    h.connection = null;
-  });
-
-  async function disconnect(seed: FakeSeed): Promise<{ card: HTMLElement; connection: FakeConnection }> {
-    const { connection } = mountSources(seed);
-    const card = await screen.findByRole("region", { name: "GitHub" });
-    await click(within(card).getByRole("button", { name: "Disconnect" }));
-    await click(within(card).getAllByRole("button", { name: "Disconnect" }).at(-1)!);
-    await waitFor(() => expect(connection.callsNamed("sourceCredentialRevoke")).toHaveLength(1));
-    return { card, connection };
-  }
-
-  it("says nothing extra when both halves happened", async () => {
-    const { card } = await disconnect({ credentials: [GRANT] });
-    expect(within(card).queryByText(/GitHub did not confirm/)).toBeNull();
-  });
-
-  it("names the half that did not, because only the person can finish it", async () => {
-    // The engine revokes at GitHub FIRST and flips the row either way, so a
-    // disconnect that could not reach GitHub succeeded HERE and left the
-    // authorization standing THERE. `--os-warn` and not `--os-error`: the
-    // disconnect worked, and this is somebody's next step.
-    const { card } = await disconnect({ credentials: [GRANT], credentialRevokeRemote: false });
-    const said = await within(card).findByText(/GitHub did not confirm the authorization was ended/);
-    expect(said.getAttribute("data-tone")).toBe("warn");
-    expect(said.textContent).toContain("Applications in your GitHub settings");
   });
 });

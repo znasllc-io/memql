@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { Boxes, Link2Off } from "lucide-react";
 
-import { Button, Caption, Chip, Chips, Head, Notice, Select, Subhead } from "../../kit";
+import { Button, Caption, Chip, Chips, Head, Notice, RecordList, RecordRow, Select, Subhead } from "../../kit";
 import { AccountChip } from "../accounts/AccountPicker";
 import { accountIsArchived, accountName, accountNameFrom } from "../accounts/rows";
 import { useAccountOptions } from "../accounts/tie";
@@ -77,9 +77,10 @@ export function DomainsSection({
     return accountFilter === ACCOUNT_UNTAGGED ? tag === "" : tag === accountFilter;
   });
 
+
   return (
     <div className="os-app-stack">
-      <Head title="Domains">
+      <Head title="Domains" meta={feed.state === "ready" && !feed.error ? shown.length : undefined}>
         <Select
           id="training-domain-account"
           label="Client"
@@ -125,9 +126,9 @@ export function DomainsSection({
         </div>
       ) : null}
 
-      <ul className="os-train-domains" aria-label="Knowledge domains in this cluster">
+      <RecordList as="ul" label="Knowledge domains in this cluster">
         {shown.map((rollup) => (
-          <li key={rollup.domainId}>
+          <div key={rollup.domainId}>
             <DomainCard
               rollup={rollup}
               meta={feed.domains.get(rollup.domainId)}
@@ -136,13 +137,11 @@ export function DomainsSection({
                 feed.domains.get(rollup.domainId)?.accountId ?? "",
               )}
               open={openDomainId === rollup.domainId}
-              onToggle={() =>
-                setOpenDomainId((held) => (held === rollup.domainId ? "" : rollup.domainId))
-              }
+              onToggle={() => setOpenDomainId((held) => held === rollup.domainId ? "" : rollup.domainId)}
             />
-          </li>
+          </div>
         ))}
-      </ul>
+      </RecordList>
 
       {/* NOT LIVE, AND SAYS SO. `v1:knowledge:*` carries no broadcast routing
           rule, so nothing here moves on its own -- and a caption claiming
@@ -171,41 +170,21 @@ function DomainCard({
 }) {
   return (
     <div className="os-train-domain" data-open={open || undefined}>
-      <button
-        type="button"
-        className="os-row"
-        data-clickable
-        data-current={rollup.unvalidated > 0 || undefined}
-        aria-expanded={open}
-        onClick={onToggle}
+      <RecordRow
+        icon={<Boxes size={16} aria-hidden />}
+        name={meta?.name.trim() ? meta.name : <span className="os-mono">{rollup.domainId}</span>}
+        secondary={<AccountChip name={accountLabel} />}
+        current={rollup.unvalidated > 0}
+        open={open}
+        onOpen={onToggle}
+        state={rollup.unvalidated > 0 ? "Awaiting review" : "Reviewed"}
+        tone={rollup.unvalidated > 0 ? "accent" : "muted"}
       >
-        <Boxes size={16} aria-hidden />
-        {/* THE NAME WHERE THERE IS ONE, the id where there is not -- and the
-            id keeps the mono face so a reader can tell which they are looking
-            at without being told. */}
-        {meta && meta.name.trim() !== "" ? (
-          <span className="os-row-name">{meta.name}</span>
-        ) : (
-          <span className="os-row-name os-mono">{rollup.domainId}</span>
-        )}
-        <AccountChip name={accountLabel} />
-        <span className="os-row-state">
-          {/* THE THREE PARTS SUM TO THE COUNT, by construction (see
-              `rollupDomains`): an unrecognised or absent status counts as
-              unvalidated, which is what the concept's default says it is. A
-              reader checking the arithmetic is the reader this is for. */}
-          <span className="os-caption">{rollup.total} chunks</span>
-          <Chip tone={rollup.unvalidated > 0 ? "accent" : "muted"}>
-            {rollup.unvalidated} {UNVALIDATED}
-          </Chip>
-          <Chip tone="muted">
-            {rollup.validated} {VALIDATED}
-          </Chip>
-          <Chip tone="muted">
-            {rollup.rejected} {REJECTED}
-          </Chip>
-        </span>
-      </button>
+        <span className="os-caption">{rollup.total} chunks</span>
+        <Chip tone={rollup.unvalidated > 0 ? "accent" : "muted"}>{rollup.unvalidated} {UNVALIDATED}</Chip>
+        <Chip tone="muted">{rollup.validated} {VALIDATED}</Chip>
+        <Chip tone="muted">{rollup.rejected} {REJECTED}</Chip>
+      </RecordRow>
       {open ? <DomainDetail domainId={rollup.domainId} /> : null}
     </div>
   );
@@ -270,42 +249,19 @@ function DomainDetail({ domainId }: { domainId: string }) {
 
       {groups.map((group) => (
         <section key={group.id === "" ? "corpus" : group.id} aria-label={group.label}>
-          <Subhead>{group.id === "" ? CORPUS_GROUP_LABEL : group.label}</Subhead>
-          <ul className="os-train-chunk-rows" aria-label={`Chunks from ${group.label}`}>
+          <Subhead meta={!busy && !error ? `${group.chunks.length} loaded` : undefined}>{group.id === "" ? CORPUS_GROUP_LABEL : group.label}</Subhead>
+          <RecordList as="ul" label={`Chunks from ${group.label}`}>
             {group.chunks.map((chunk) => (
-              <li key={chunk.id} className="os-row" data-dim={chunk.superseded || undefined}>
-                {/* CLAMPED BY CSS, NOT BY A SLICE. A JS slice at a fixed
-                    length cuts mid-word and shows no ellipsis, so the row
-                    reads as broken text rather than as shortened text -- and
-                    it beats the stylesheet's own `text-overflow` to it, which
-                    would have adapted to the window's width. The full text is
-                    on `title`. */}
-                <span className="os-row-name" title={chunk.text.trim()}>
-                  {chunk.text.trim() || "(empty)"}
-                </span>
-                <span className="os-row-state">
-                  <Chip tone="muted">{chunk.source || "source unrecorded"}</Chip>
-                  {chunk.sourceRef === "" ? null : (
-                    <Chip tone="muted" title={chunk.sourceRef}>
-                      {chunk.sourceRef}
-                    </Chip>
-                  )}
-                  <Chip tone={chunk.validationStatus === UNVALIDATED ? "accent" : "muted"}>
-                    {chunk.validationStatus}
-                  </Chip>
-                  {/* Supersession is a SEPARATE axis from validation, and the
-                      chip appears only when it is true: a chunk the Trainer
-                      Agent retired is out of retrieval whatever its validation
-                      status says. */}
-                  {chunk.superseded ? (
-                    <Chip tone="muted" title={chunk.supersededReason}>
-                      superseded
-                    </Chip>
-                  ) : null}
-                </span>
-              </li>
+              <RecordRow key={chunk.id}
+                dim={chunk.superseded}
+                name={<span className="os-record-excerpt" title={chunk.text.trim()}>{chunk.text.trim() || "(empty)"}</span>}
+                secondary={[chunk.source || "source unrecorded", chunk.sourceRef].filter(Boolean).join(" · ")}
+                state={chunk.validationStatus}
+                tone={chunk.validationStatus === UNVALIDATED ? "accent" : "muted"}
+                stateExtra={chunk.superseded ? <Chip tone="muted" title={chunk.supersededReason}>superseded</Chip> : null}
+              />
             ))}
-          </ul>
+          </RecordList>
         </section>
       ))}
 

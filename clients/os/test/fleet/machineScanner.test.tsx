@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -230,6 +230,7 @@ async function mountModels(opts: { recommended?: Row[]; measurements?: Row[] } =
     ),
   );
   await settle();
+  fireEvent.click(screen.getByRole("button", { name: /^qwen3.5:9b/ }));
   return connection;
 }
 

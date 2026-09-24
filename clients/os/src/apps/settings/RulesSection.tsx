@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 
-import { Button, Caption, Chip, Head, Notice, Refine, Select } from "../../kit";
+import { Button, Caption, Chip, RecordList, RecordRow, Head, Notice, Refine, Select } from "../../kit";
 import { useSession } from "../../chrome/access";
 import { LEVELS } from "./routingFacts";
 import { DescribeRulePanel } from "./DescribeRulePanel";
@@ -114,7 +114,7 @@ export function RulesSection() {
 
   return (
     <div className="os-settings os-settings-wide">
-      <Head title="Rules" meta={rules.rules.length === 0 ? undefined : `${ordered.length} in order`}>
+      <Head title="Rules" meta={rules.read && !rules.loading && !rules.error && rules.supported ? shown.length : undefined}>
         {/* The one primary act. Absent where the cluster cannot take a custom
             rule at all -- offering it would produce a refusal at the last
             step of a flow somebody has already invested in. */}
@@ -182,7 +182,7 @@ export function RulesSection() {
           ) : shown.length === 0 ? (
             <Caption>No rule matches that.</Caption>
           ) : (
-            <ol className="os-rules" aria-label="Rules, in the order they are tried">
+            <RecordList as="ol" label="Rules, in the order they are tried">
               {shown.map((rule, i) => (
                 <RuleLine
                   key={rule.name}
@@ -205,7 +205,7 @@ export function RulesSection() {
                   }}
                 />
               ))}
-            </ol>
+            </RecordList>
           )}
         </>
       )}
@@ -281,29 +281,10 @@ function RuleLine({
   onRemove: () => void;
 }) {
   return (
-    <li
-      className="os-rule"
-      data-os-locked={rule.locked || undefined}
-      data-os-floor={isFloorRule(rule) || undefined}
-      data-os-first-custom={firstCustom || undefined}
-    >
-      <span className="os-rule-precedence os-mono" aria-hidden>
-        {rule.precedence}
-      </span>
-      <div className="os-rule-body">
-        <p className="os-rule-name">
-          <span className="os-mono">{rule.name}</span>
-          {rule.locked ? <Chip tone="muted">shipped</Chip> : null}
-          {isFloorRule(rule) ? <Chip tone="muted">the floor</Chip> : null}
-        </p>
-        <p className="os-rule-said">{ruleSentence(rule)}</p>
-        {isFloorRule(rule) ? <p className="os-rule-described">{FLOOR_RULE_SENTENCE}</p> : null}
-        {rule.described === "" ? null : (
-          <p className="os-rule-described">You wrote: {rule.described}</p>
-        )}
-      </div>
-      <div className="os-rule-line-acts">
-        {rule.locked ? null : confirming ? (
+    <div data-os-locked={rule.locked || undefined} data-os-floor={isFloorRule(rule) || undefined} data-os-first-custom={firstCustom || undefined}>
+      <RecordRow name={rule.name} secondary={ruleSentence(rule)} icon={<span className="os-mono">{rule.precedence}</span>}
+        stateExtra={<>{rule.locked ? <Chip tone="muted">shipped</Chip> : null}{isFloorRule(rule) ? <Chip tone="muted">the floor</Chip> : null}</>}
+        actions={<>        {rule.locked ? null : confirming ? (
           <span className="os-rule-confirm" role="group" aria-label={`Remove ${rule.name}`}>
             <Button onClick={onKeep}>Keep it</Button>
             <Button tone="danger" busy={busy} busyLabel="Removing" onClick={onRemove}>
@@ -319,8 +300,10 @@ function RuleLine({
               Remove
             </Button>
           </>
-        )}
-      </div>
-    </li>
+        )}</>}>
+        {isFloorRule(rule) ? <span>{FLOOR_RULE_SENTENCE}</span> : null}
+        {rule.described ? <span>You wrote: {rule.described}</span> : null}
+      </RecordRow>
+    </div>
   );
 }

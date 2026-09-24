@@ -1,3 +1,4 @@
+import { listCount } from "../../kit/RecordRow";
 import { AddButton } from "../../kit/AddButton";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -6,19 +7,19 @@ import { FileText } from "lucide-react";
 import { AccountChip, AccountPicker } from "../accounts/AccountPicker";
 import { accountNameFrom } from "../accounts/rows";
 import { useAccountOptions } from "../accounts/tie";
+import { organizationChosen, useDefaultOrganization } from "../accounts/organization";
 import {
   Button,
   EmptyState,
   Caption,
   Check,
-  Chip,
   Field,
   Head,
   Input,
   LiveList,
   Notice,
   Panel,
-  Row as ListRow,
+  RecordRow,
   Select,
   Subhead,
 } from "../../kit";
@@ -124,7 +125,7 @@ export function TemplatesSection({
 
   return (
     <div className="os-app-stack">
-      <Head title="Templates">
+      <Head title="Templates" meta={listCount(source?.snapshot)}>
         <AddButton onClick={() => setAdding((v) => !v)} label="New template" />
       </Head>
 
@@ -179,24 +180,19 @@ function TemplateLine({
 }) {
   const archived = templateIsArchived(template);
   return (
-    <ListRow
+    <RecordRow
       icon={<FileText size={16} aria-hidden />}
       name={templateName(template)}
       current={!archived}
       dim={archived}
       open={open}
       onOpen={onToggle}
-      state={
-        <>
-          <Chip tone={template.status === "ready" ? "accent" : "muted"}>
-            {template.status || "draft"}
-          </Chip>
-          {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
-        </>
-      }
+      secondary={template.subject}
+      state={template.status || "draft"}
+      tone={template.status === "ready" ? "accent" : "muted"}
+      stateExtra={tick === "added" ? <span className="os-livelist-tick">new</span> : null}
     >
-      {template.subject === "" ? null : <span className="os-caption">{template.subject}</span>}
-    </ListRow>
+    </RecordRow>
   );
 }
 
@@ -220,6 +216,7 @@ export function TemplateEditor({
   template,
   audiences,
   campaigns,
+  initialAccountId = "",
   writes,
   onDone,
   onDirtyChange,
@@ -227,11 +224,13 @@ export function TemplateEditor({
   template?: TemplateRow;
   audiences: ReturnType<typeof audienceProjection>;
   campaigns: CampaignRow[];
+  initialAccountId?: string;
   writes: CampaignWrites;
   onDone: (createdId: string) => void;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const accounts = useAccountOptions();
+  const defaultAccountId = useDefaultOrganization(accounts);
   const editing = template !== undefined;
   const write = editing ? writes.updateTemplate : writes.createTemplate;
   const textArea = useRef<HTMLTextAreaElement | null>(null);
@@ -256,18 +255,21 @@ export function TemplateEditor({
     );
   }, [draft, template, onDirtyChange]);
 
-  const ready =
+  const accountId = draft.accountId || (template === undefined ? (initialAccountId || defaultAccountId) : "");
+
+  const ready = organizationChosen(accounts, accountId) &&
     draft.name.trim() !== "" &&
     draft.subject.trim() !== "" &&
     (draft.status !== "ready" || draft.textBody.trim() !== "" || draft.htmlBody.trim() !== "");
 
   async function submit() {
+    if (!ready) return;
     if (editing && template) {
-      const ok = await writes.updateTemplate.update(template.id, draft);
+      const ok = await writes.updateTemplate.update(template.id, { ...draft, accountId });
       if (ok) onDone(template.id);
       return;
     }
-    const id = await writes.createTemplate.create(draft);
+    const id = await writes.createTemplate.create({ ...draft, accountId });
     if (id !== "") onDone(id);
   }
 
@@ -322,11 +324,12 @@ export function TemplateEditor({
             placeholder="What we shipped in August"
           />
         </Field>
-        <Field label="Client">
+        <Field label="Organization">
           <AccountPicker
             id="os-template-account"
-            label="Client this template is for"
-            value={draft.accountId}
+            label="Organization this template is for"
+            required
+            value={accountId}
             onChange={(v) => setDraft({ ...draft, accountId: v })}
             accounts={accounts}
           />

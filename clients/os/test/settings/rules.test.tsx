@@ -183,7 +183,7 @@ function ruleRows(): HTMLElement[] {
 
 function ruleRow(name: string): HTMLElement {
   const found = ruleRows().find(
-    (li) => li.querySelector(".os-rule-name .os-mono")?.textContent === name,
+    (li) => li.querySelector(".os-row-name")?.textContent === name,
   );
   if (found === undefined) throw new Error(`no rule row named ${name}`);
   return found;
@@ -297,9 +297,23 @@ describe("Settings -> Rules: a cluster that does not route by rules", () => {
 });
 
 describe("Settings -> Rules: the list", () => {
+  it("counts filtered records beside the title and uses the shared list rows", async () => {
+    await renderRules();
+    const heading = screen.getByRole("heading", { name: "Rules" }).parentElement!;
+    expect(heading.querySelector(".os-head-meta")?.textContent).toBe("4");
+    expect(ruleList().classList.contains("os-record-list")).toBe(true);
+    expect(ruleList().querySelectorAll(".os-record-row")).toHaveLength(4);
+    fireEvent.click(screen.getByRole("button", { name: /Refine/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Search" }), { target: { value: "planningStaysLocal" } });
+    expect(heading.querySelector(".os-head-meta")?.textContent).toBe("1");
+    expect(ruleList().querySelectorAll(".os-record-row")).toHaveLength(1);
+    fireEvent.change(screen.getByRole("textbox", { name: "Search" }), { target: { value: "no such rule" } });
+    expect(heading.querySelector(".os-head-meta")?.textContent).toBe("0");
+  });
+
   it("renders the rules in the order the engine tries them, with the number that decides it", async () => {
     await renderRules();
-    expect(ruleRows().map((li) => li.querySelector(".os-rule-name .os-mono")?.textContent)).toEqual([
+    expect(ruleRows().map((li) => li.querySelector(".os-row-name")?.textContent)).toEqual([
       "operatorReasoning",
       "planningStaysLocal",
       "nightlyIsCheap",
@@ -307,7 +321,7 @@ describe("Settings -> Rules: the list", () => {
     ]);
     // The precedences are NOT in descending order, which is the point: locked
     // first and the floor last are what the order is actually made of.
-    expect(ruleRows().map((li) => li.querySelector(".os-rule-precedence")?.textContent)).toEqual([
+    expect(ruleRows().map((li) => li.querySelector(".os-record-icon")?.textContent)).toEqual([
       "5",
       "30",
       "10",
@@ -317,7 +331,7 @@ describe("Settings -> Rules: the list", () => {
 
   it("writes each rule as a claim somebody can agree with, not a row of fields", async () => {
     await renderRules();
-    expect(ruleRow("planningStaysLocal").querySelector(".os-rule-said")?.textContent).toBe(
+    expect(ruleRow("planningStaysLocal").querySelector(".os-record-secondary")?.textContent).toBe(
       "When the level asked for is reasoning, try localOnly. If nothing there is available, park and wait for a person.",
     );
   });

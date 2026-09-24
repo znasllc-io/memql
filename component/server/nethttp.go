@@ -396,7 +396,7 @@ func (s *NetHTTP) prepareForRun(ctx context.Context) (context.Context, context.C
 	}
 
 	// Apply CORS middleware as the outermost layer (runs first)
-	handler = corsMiddleware(cfg.allowedOrigins, handler)
+	handler = corsMiddleware(cfg.allowedOrigins, handler, routerHandler)
 
 	server := &http.Server{
 		Addr:              cfg.address,
@@ -1164,7 +1164,7 @@ func normalizeOrigins(origins []string) []string {
 
 // corsMiddleware returns an HTTP middleware that handles CORS preflight requests
 // and adds appropriate CORS headers to all responses.
-func corsMiddleware(allowedOrigins []string, next http.Handler) http.Handler {
+func corsMiddleware(allowedOrigins []string, next http.Handler, router http.Handler) http.Handler {
 	// Build a set of allowed origins for O(1) lookup
 	allowAll := false
 	originSet := make(map[string]struct{}, len(allowedOrigins))
@@ -1177,6 +1177,21 @@ func corsMiddleware(allowedOrigins []string, next http.Handler) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A method-specific OPTIONS registration owns this route's CORS
+		// policy. Let it handle preflights and actual responses alike: the
+		// generic defaults must neither swallow its allowed headers nor add
+		// credentials/origins that its narrower policy refused.
+		if routes, ok := router.(interface {
+			Handler(*http.Request) (http.Handler, string)
+		}); ok {
+			preflight := r.Clone(r.Context())
+			preflight.Method = http.MethodOptions
+			_, pattern := routes.Handler(preflight)
+			if strings.HasPrefix(pattern, http.MethodOptions+" ") {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
 		origin := r.Header.Get("Origin")
 
 		// Determine if origin is allowed

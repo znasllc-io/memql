@@ -99,7 +99,7 @@ type scenarioSeed struct {
 
 // scenarioActor is who a write runs as: a user id and a role.
 type scenarioActor struct {
-	UserID string `json:"userId"`
+	UserID any    `json:"userId"`
 	Role   string `json:"role"`
 }
 
@@ -407,6 +407,11 @@ type scenarioRig struct {
 func newScenarioRig(t *testing.T, env *Env, autos map[string]*automations.Automation) *scenarioRig {
 	t.Helper()
 	installForgeBeforeWrite(t, env)
+	// Resolve the persisted scenario memberships and grants exactly as a node
+	// does; an author label alone is not organization authority.
+	priorGrants, priorMemberships := auth.InstalledGrantSource(), auth.InstalledMembershipSource()
+	env.Eng.InstallGrantResolution()
+	t.Cleanup(func() { auth.SetGrantSource(priorGrants); auth.SetMembershipSource(priorMemberships) })
 	r := &scenarioRig{
 		env:   env,
 		autos: autos,
@@ -583,8 +588,8 @@ func (v *variant) write(label, mutation string, rawArgs map[string]any, as *scen
 	v.t.Helper()
 	user, role := scenarioOwner, auth.RoleOwner
 	if as != nil {
-		if as.UserID != "" {
-			user = as.UserID
+		if resolved, _ := v.resolve(as.UserID).(string); resolved != "" {
+			user = resolved
 		}
 		if as.Role != "" {
 			role = auth.Role(as.Role)
@@ -679,8 +684,10 @@ func (v *variant) generated(f scenarioFire) (*automations.Automation, context.Co
 	v.t.Helper()
 	ruleID, _ := v.resolve(f.EmailRule).(string)
 	author := scenarioOwner
-	if f.As != nil && f.As.UserID != "" {
-		author = f.As.UserID
+	if f.As != nil {
+		if resolved, _ := v.resolve(f.As.UserID).(string); resolved != "" {
+			author = resolved
+		}
 	}
 	ctx := automations.AuthorContext(context.Background(), author)
 	rule, ok, err := emailrules.NewStore(storeEngine{v.rig.env.Eng}).RuleByID(ctx, ruleID)

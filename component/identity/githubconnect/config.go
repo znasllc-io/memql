@@ -196,14 +196,20 @@ func RedirectURI(identityBaseURL string) string {
 // `state` is the PLAINTEXT state value; only its digest is stored, so this is
 // the one place the plaintext appears outside the reply to the caller who
 // asked for it.
-func (c Config) AuthorizeURL(redirectURI, state string) string {
-	if !c.Configured() || strings.TrimSpace(redirectURI) == "" || strings.TrimSpace(state) == "" {
+// Every explicit connect offers GitHub's account picker. Without this prompt,
+// an existing authorization can immediately return the same account, making
+// a switch-account action indistinguishable from reconnecting it.
+func (c Config) AuthorizeURL(redirectURI, state, verifier string) string {
+	if !c.Configured() || strings.TrimSpace(redirectURI) == "" || strings.TrimSpace(state) == "" || strings.TrimSpace(verifier) == "" {
 		return ""
 	}
 	q := url.Values{}
 	q.Set("client_id", c.ClientID)
 	q.Set("redirect_uri", redirectURI)
 	q.Set("state", state)
+	q.Set("prompt", "select_account")
+	q.Set("code_challenge", Challenge(verifier))
+	q.Set("code_challenge_method", "S256")
 	return "https://github.com/login/oauth/authorize?" + q.Encode()
 }
 

@@ -16,7 +16,7 @@ func TestCORS_NoCredentialsWithWildcard(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	wrapped := corsMiddleware([]string{"*"}, inner)
+	wrapped := corsMiddleware([]string{"*"}, inner, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("Origin", "https://attacker.example.com")
@@ -38,7 +38,7 @@ func TestCORS_CredentialsWithExplicitAllowlist(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	wrapped := corsMiddleware([]string{"https://app.example.com"}, inner)
+	wrapped := corsMiddleware([]string{"https://app.example.com"}, inner, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("Origin", "https://app.example.com")
@@ -60,7 +60,7 @@ func TestCORS_DisallowedOriginGetsNothing(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	wrapped := corsMiddleware([]string{"https://app.example.com"}, inner)
+	wrapped := corsMiddleware([]string{"https://app.example.com"}, inner, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("Origin", "https://evil.example.com")

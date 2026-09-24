@@ -33,7 +33,7 @@ warnings are absent almost always, and a capture of an unbroken machine is
 what says the page has not become a wall of advisories), or `overview`,
 `store`, `quiet`, `picker`, `readonly`, `hidden`
 (the Store surface), or `list`, `sources`, `list-empty`, `sources-empty`,
-`connected`, `github-owner`, `github-member`, `settings-no-app`,
+`connected`, `connected-empty`, `source-chooser`, `github-owner`, `github-member`, `settings-no-app`,
 `settings-no-app-member`, `settings-app` (the Deployables app, whole), or
 `origins-silent`, `origins-mixed`, `origins-reporting` (Data origins), or
 `mesh-healthy`, `mesh-island`, `mesh-empty`, `mesh-node-bff`, `mesh-node-edge`,
@@ -184,3 +184,30 @@ On the two lists, the first time they were rendered with real rows:
 - **The rail lit the wrong step.** With a repository chosen the stage said
   "Repository" and the rail's accent was on "Review".
 - "uploaded zip" on one tab and "Uploaded zip" on the other, for the same thing.
+
+
+## All-app record lists
+
+The `accounts` and `accounts-empty` views compare the Accounts registry with
+`list` (Deployables). `origins-mixed` exercises records with separate actions
+and absent measurements. Check light and dark modes at wide and narrow widths.
+The full app inventory and inspected exceptions are in [list-coverage.md](list-coverage.md).
+
+## GitHub repository creation
+
+Use `connected` for a populated repository picker and `connected-empty` for a
+connected GitHub account whose completed read returns no repositories. In either
+view, open Add deployable and choose A repository. Check desktop and narrow
+layouts with both `mode=light` and `mode=dark`. These use deterministic fixture
+connections and do not mint credentials or modify a real account.
+
+`source-chooser` supplies multiple GitHub identities, personal/org bindings and repositories. Open Add a deployable, choose A repository, then Add source. Select GitHub account, Continue, select organization/personal account, Continue, select repository, Continue. Configuration holds MemQL ownership afterward. Confirm each stage shows only its own actions, top-left list refresh, a selected-row cue and a footer Continue/Back; the progress rail must identify the visible step. Organization Continue saves access; Analyze creates the repository. Check per-source removal and cancellation, account cue placement, repository/ref clearing on Source change, keyboard navigation, desktop/narrow layouts and both themes. `source-management` and `repository-management` open the management pages; `source-settings` checks the shared Settings surface. All three have purpose subtitles and no creation control. `source-empty` directs creation through Add deployable without another CTA. Confirm the wizard still offers plus-style Add source and Add GitHub account, and newly saved bindings appear in the live list.
+
+## Analysis progress
+
+`analysis-pending`, `analysis-failed`, and `analysis-review` exercise the real
+add-deployable wizard over simulated background runs. Open the analyzing acme
+row: Configuration remains current, with the shared busy action bar, elapsed
+time, Cancel and Leave. Leave returns to the analyzing row; reopening resumes
+its state. The review/failure fixtures advance after opening, and Cancel emits
+a terminal cancelled row. No fixture contacts GitHub or starts a real deployment.

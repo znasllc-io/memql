@@ -181,7 +181,7 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 		AccountLabel: res.AccountLabel,
 		ExpiresIn:    humanizeUntil(res.ExpiresAt, time.Now().UTC()),
 	}
-	s.render(w, r, "enroll", webtempl.Enroll(data))
+	s.render(w, r, "enroll", webtempl.Enroll(data), data)
 }
 
 // requireSecureEnrolment refuses a plaintext hop. The enrolment code is a
@@ -262,7 +262,7 @@ func (s *Server) renderEnrolRejection(w http.ResponseWriter, r *http.Request, st
 		Message:   message,
 		NextStep:  nextStep,
 	}
-	s.render(w, r, "enroll", webtempl.Enroll(data))
+	s.render(w, r, "enroll", webtempl.Enroll(data), data)
 }
 
 // auditEnrol emits one v1:identity:auditEvent per outcome, always with

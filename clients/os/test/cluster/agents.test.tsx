@@ -157,9 +157,21 @@ describe("standing authorizations", () => {
       }),
     );
     const grant = (await screen.findByText("v1:agents:agent:a1")).closest(
-      ".os-cluster-grant",
+      ".os-record-row",
     ) as HTMLElement;
     expect(within(grant).getByText("your default budget")).toBeTruthy();
     expect(within(grant).getByText(/computer use: observe/)).toBeTruthy();
   });
+});
+
+
+it("updates the title count from the same live records it displays", async () => {
+  const connection = fakeConnection({ activeAgents: [ASSISTANT] });
+  mount(connection);
+  await screen.findByText("General Assistant");
+  const count = () => screen.getByRole("heading", { name: "Agents" }).closest(".os-head")?.querySelector(".os-head-meta")?.textContent;
+  expect(count()).toBe("1");
+  await act(async () => connection.subscriptions.emit(AGENT_CONCEPT, agentRow({ id: "second", name: "Second" }), "NODE_CREATED"));
+  expect(count()).toBe("2");
+  expect(screen.getByText("Second").closest(".os-record-row")?.tagName).toBe("BUTTON");
 });

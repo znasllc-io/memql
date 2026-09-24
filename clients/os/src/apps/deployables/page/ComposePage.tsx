@@ -1,19 +1,25 @@
+import { runIsCancellable } from "./acts";
+import { cancelDeployment } from "../packages/calls";
 import type { ConnectReturn } from "../sources/connectReturn";
 import { ConnectReturnNotice } from "../sources/ConnectReturnNotice";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Rocket } from "lucide-react";
+import { useSession } from "../../../chrome/access";
+import { bare } from "../people";
 
-import { Caption, Notice, useLiveView, type Stop } from "../../../kit";
+import { Button, Caption, Field, Notice, RefreshButton, useLiveView, type Stop } from "../../../kit";
 import type { Act } from "../../../kit/ActionBar";
 import { ActivityTarget } from "../../../kit/SemanticActivity";
 import { Wizard } from "../../../kit/Wizard";
-import { SELF_ACCOUNT_ID } from "../../accounts/rows";
-import { useAccountOptions } from "../../accounts/tie";
-import { useCreateSite, usePublish, useSiteAccount } from "../actions";
+import { useNow } from "../../../kit/useNow";
+import { AccountPicker } from "../../accounts/AccountPicker";
+import { organizationChosen, useDefaultOrganization } from "../../accounts/organization";
+import { useAccountOptionsFeed } from "../../accounts/tie";
+import { useCreateSite, usePublish } from "../actions";
 import { useAddDomain } from "../domainActions";
 import { hostnameFor } from "../hostname";
-import { useNewPackage, usePackageActions, useSiteLifecycle } from "../packages/actions";
+import { useWrite, useNewPackage, useRegisterRepositorySource, usePackageActions, useSiteLifecycle } from "../packages/actions";
 import { ProblemNotice, ReportView } from "../packages/ReportView";
 import {
   deploymentFromRow,
@@ -24,8 +30,8 @@ import {
   type PackageRow,
 } from "../packages/rows";
 import { usePackageDeployments } from "../packages/usePackages";
-import { probeNote, probeParks, zipVerdict } from "../sources/probe";
-import type { CredentialFeedStatus, CredentialRow } from "../sources/rows";
+import { manifestIsEmpty, probeNote, probeParks, zipVerdict } from "../sources/probe";
+import { isGithubAppGrant, type CredentialFeedStatus, type CredentialRow } from "../sources/rows";
 import { useAddressChecks, useArtifactProbe, useSourceProbe } from "../sources/useProbes";
 import { kindLabel, type StopId } from "../targets";
 import { siteStateDetail } from "../words";
@@ -48,7 +54,6 @@ import {
   type ComposeDraft,
   type ComposePath,
   type ComposePhase,
-  accountOrSelf,
 } from "./compose";
 import { everyOtherAppSkipped } from "../packages/calls";
 import { BuildStop } from "./stops/Build";
@@ -56,13 +61,11 @@ import { CiHandoff } from "./stops/compose/CiHandoff";
 import { Rail } from "./RailView";
 import "../composition.css";
 import { headActionFor, railFor, type ComposeInput, type HeadAction, type RailProblem, type RailStage } from "./rail";
-import type { PartsHeld } from "../parts";
+import { partsForOrganization, type PartsHeld } from "../parts";
 import { ManifestPreview } from "./stops/compose/ManifestPreview";
-import { returnPathFor } from "../sources/connectReturn";
-import { OWN_ACCOUNT, organizationOf, ownerIsNamed, type GithubAppOwner } from "../sources/GithubAppSetup";
-import { useGithubApp } from "../sources/useGithubApp";
-import { useGithubConnect } from "../sources/useGithubConnect";
-import type { ConnectionNeed } from "./stops/compose/RepositorySource";
+import { RepositoryProbeStatus, RepositorySource, type ConnectionNeed } from "./stops/compose/RepositorySource";
+import { GitHubAccountStep, GitHubOrganizationStep } from "./stops/compose/GitHubSource";
+import { createSourceConnection, useSourceConnections, useSourceInstallations, type SourceConnectionRow } from "../sources/connections";
 import { ComposeSourceDetailStep, ComposeSourceKindStep, SOURCE_DETAIL_NAME, SOURCE_KIND_LABEL } from "./stops/compose/Source";
 import { ComposeWhereItLivesStop } from "./stops/compose/WhereItLives";
 
@@ -167,11 +170,29 @@ export interface ComposePageProps {
    * and names the source, before Analyze would be refused for it.
    */
   packages?: readonly PackageRow[];
+  packageFeed?: { state: string; error: string; retry: () => void };
+  siteFeed?: { state: string; error: string };
+  placedSources?: readonly { packageId: string; name: string; siteId?: string }[];
+  onOpenDeployable?: (siteId: string) => void;
 }
 
 export function ComposePage(props: ComposePageProps) {
-  const { clusterDomain, can, isClusterOwner, credentials, onBack, backLabel = "Deployables", parked, placed, only, source, packages } = props;
-
+  const { clusterDomain, can: globalCan, isClusterOwner, credentials, onBack, backLabel = "Deployables", parked, only, source: fixedSource, packages } = props;
+  const [selectedConnectionId, setSelectedConnectionId] = useState("");
+  const connections = useSourceConnections();
+  const [githubCredentialId, setGithubCredentialId] = useState(props.connectResult?.credentialId ?? "");
+  const [accountConfirmed, setAccountConfirmed] = useState(false);
+  const [repositoryConfirmed, setRepositoryConfirmed] = useState(false);
+  const [installationId, setInstallationId] = useState("");
+  const [confirmedConnection, setConfirmedConnection] = useState<SourceConnectionRow | null>(null);
+  const bindingWrite = useWrite();
+  const bindingPending = useRef(false);
+  const bindingNavigation = useRef(0);
+  const [selectedRunId, setSelectedRunId] = useState(parked?.run.id ?? "");
+  const [analysisStartedAt, setAnalysisStartedAt] = useState<number | null>(null);
+  const now = useNow(1000);
+  const [sourceNotice, setSourceNotice] = useState("");
+  const [restoredSourceId, setRestoredSourceId] = useState("");
   const [draft, setDraft] = useState<ComposeDraft>(() => props.connectResult ? { ...EMPTY_DRAFT, choice: "repo" } : EMPTY_DRAFT);
   const [addresses, setAddresses] = useState<Record<string, AddressDraft>>({});
   // What this flow has CREATED. Held rather than derived, because it is the
@@ -188,40 +209,95 @@ export function ComposePage(props: ComposePageProps) {
   const [activated, setActivated] = useState(false);
   const [wentLive, setWentLive] = useState(false);
   const [liveIds, setLiveIds] = useState<string[]>([]);
-  // "USE A TOKEN INSTEAD", HELD HERE, which is `ZipPicker`'s arrangement on
-  // the standing Source stop and holds for the same reason: a fold whose
-  // state lived in the stop would close under somebody every time a probe
-  // answered or a credential arrived on its own feed.
-  const [tokenFormOpen, setTokenFormOpen] = useState(false);
   const [journeyChoice, setJourneyChoice] = useState<{ key: string; stop: WizardStep } | null>(null);
-  // THE CONNECT IS HELD HERE because it is a step's forward act, and a wizard's
-  // forward act lives on its floor -- which this page draws.
-  const githubConnect = useGithubConnect();
-  // What the repository step says it needs before it can go on. The step says
-  // it, because only the step has GitHub's own answer about the grant.
+  const { access } = useSession();
+  const githubViewer = bare(access?.userId ?? "");
+  const selectedConnection = connections.rows.find(c => c.id === selectedConnectionId && c.status === "active" && bare(c.ownerUserId) === githubViewer) ?? (confirmedConnection?.id === selectedConnectionId && bare(confirmedConnection.ownerUserId) === githubViewer ? confirmedConnection : undefined);
+  const githubAccounts = credentials.filter(c => bare(c.ownerUserId) === githubViewer && isGithubAppGrant(c)).map(c => connections.revokedCredentialIds.includes(c.id) ? { ...c, status: "revoked" } : c);
+  const chosenGithubAccount = githubAccounts.find(c => c.id === githubCredentialId);
+  const installations = useSourceInstallations(accountConfirmed && chosenGithubAccount?.status === "active" ? githubCredentialId : "");
+  const identityReady = chosenGithubAccount?.status === "active" && (!props.credentialFeed || props.credentialFeed.state === "live" && !props.credentialFeed.error);
+  useEffect(() => { connections.observeCredentials(credentials); }, [credentials, connections.observeCredentials]);
+  const githubGrant = credentials.find(c => c.id === selectedConnection?.credentialId && bare(c.ownerUserId) === githubViewer && !connections.revokedCredentialIds.includes(c.id));
+  useEffect(() => {
+    if (confirmedConnection && connections.rows.some(row => row.id === confirmedConnection.id)) setConfirmedConnection(null);
+  }, [confirmedConnection, connections.rows]);
+  const resumedGithubReturn = useRef(false);
+  useEffect(() => {
+    if (resumedGithubReturn.current || !props.connectResult?.credentialId || !identityReady ||
+      githubCredentialId !== props.connectResult.credentialId) return;
+    resumedGithubReturn.current = true;
+    if (!journeyChoice) setAccountConfirmed(true);
+  }, [props.connectResult?.credentialId, githubCredentialId, identityReady, journeyChoice]);
   const [connectionNeed, setConnectionNeed] = useState<ConnectionNeed>("");
-  // THE CLUSTER'S GITHUB APP, asked for as the wizard opens, so the repository
-  // step knows whether Connect can work before it offers it. Held here with the
-  // connect, and for its reason: when the cluster has none, registering one is
-  // that step's forward act, and the floor is this page's.
-  const githubApp = useGithubApp();
-  const [appOwner, setAppOwner] = useState<GithubAppOwner>(OWN_ACCOUNT);
 
   const probe = useSourceProbe();
   const zipProbe = useArtifactProbe();
   const checks = useAddressChecks();
-  const accounts = useAccountOptions();
+  const { accounts, state: accountState, error: accountError } = useAccountOptionsFeed();
+  const defaultAccountId = useDefaultOrganization(accounts);
+  const [pickedAccountId, setAccountId] = useState("");
+  const [accountChosenManually, setAccountChosenManually] = useState(false);
+  // Capture a verified default once. A feed refresh must not switch a draft.
+  useEffect(() => {
+    if (defaultAccountId && !accountChosenManually) setAccountId(held => held || defaultAccountId);
+  }, [defaultAccountId, accountChosenManually]);
+  const sourceAccountId = parked?.pkg.accountId || fixedSource?.accountId || pickedAccountId || defaultAccountId;
+  // Reuse only this person's exact ownership and GitHub access tuple. The
+  // same repository may be registered through another identity or account.
+  const matchingPackage = draft.choice === "repo" && draft.repoUrl
+    ? duplicateSource((packages ?? []).filter(pkg => pkg.accountId === sourceAccountId &&
+      bare(pkg.ownerUserId) === githubViewer && pkg.credentialId === draft.credentialId &&
+      pkg.sourceConnectionId === draft.sourceConnectionId), draft.repoUrl, draft.repoRef, probe.reply?.defaultBranch ?? "") : null;
+  const selectedSource = matchingPackage ?? undefined;
+  const source = fixedSource ?? selectedSource;
+  const placed = props.placed ?? props.placedSources?.filter(site => site.packageId === source?.id).map(site => site.name) ?? [];
+  const placementsKnown = !props.siteFeed || (props.siteFeed.state === "live" && !props.siteFeed.error);
+  const saveBoundary = useRef("");
+  saveBoundary.current = JSON.stringify([githubViewer, githubCredentialId, chosenGithubAccount?.status, identityReady, installationId, draft.repoUrl, draft.repoRef, selectedConnection?.id, sourceAccountId, githubGrant?.id, githubGrant?.status, access?.everyAccount, access?.accountIds]);
+  const bindingAuthority = useRef("");
+  bindingAuthority.current = JSON.stringify([githubViewer, githubCredentialId, chosenGithubAccount?.status, identityReady, access, globalCan.sources]);
+  const saveMounted = useRef(true);
+  const analyzePending = useRef(false);
+  useEffect(() => { saveMounted.current = true; return () => { saveMounted.current = false; }; }, []);
+  const previousViewer = useRef(githubViewer);
+  useEffect(() => {
+    if (previousViewer.current === githubViewer) return;
+    previousViewer.current = githubViewer; setRestoredSourceId("");
+    setAnalysisStartedAt(null);
+    setGithubCredentialId(""); setAccountConfirmed(false); setRepositoryConfirmed(false); setInstallationId(""); setConfirmedConnection(null);
+    setSelectedConnectionId(""); setSelectedRunId(""); setAddresses({});
+    setDraft({ ...EMPTY_DRAFT }); setCreated({packageId: "", siteId: ""});
+    setAccountId(""); setAccountChosenManually(false); setJourneyChoice(null); probe.clear();
+  }, [githubViewer]);
+  useEffect(() => {
+    if (!selectedConnectionId || fixedSource || parked || created.packageId) return;
+    if (selectedConnection && githubGrant?.status === "active") return;
+    setSelectedConnectionId(""); setSelectedRunId(""); setAddresses({});
+    setDraft(held => ({...held, repoUrl: "", repoRef: "", credentialId: "", sourceConnectionId: ""}));
+    setSourceNotice("Repository access is no longer available. Choose or reconnect a GitHub account.");
+    setJourneyChoice(null); probe.clear();
+  }, [selectedConnectionId, selectedConnection, githubGrant?.status, fixedSource, parked, created.packageId, probe.clear]);
+  const can = partsForOrganization(sourceAccountId, globalCan, source || parked || created.packageId || created.siteId ? "update" : "create");
 
   const newPackage = useNewPackage();
+  const repositoryRegistration = useRegisterRepositorySource();
   const pkgActions = usePackageActions();
+  const cancelWrite = useWrite();
+  const [cancelledRunId, setCancelledRunId] = useState("");
+  const cancelPending = useRef(false);
   const createSite = useCreateSite();
   const publish = usePublish();
-  const tie = useSiteAccount();
   const addDomain = useAddDomain();
   const lifecycle = useSiteLifecycle();
 
   const packageId = created.packageId || parked?.pkg.id || source?.id || "";
-  const { source: timeline, reseed } = usePackageDeployments(packageId);
+  const { source: timeline, reseed, snapshot: deploymentFeed } = usePackageDeployments(packageId);
+  // Registering a source changes the collection. An async callback still holds
+  // the old (often empty-package) collection, so refresh the current one.
+  const refreshDeployments = useRef(reseed);
+  refreshDeployments.current = reseed;
+  useEffect(() => { if (selectedRunId) refreshDeployments.current(); }, [packageId, selectedRunId]);
   const deployments = useLiveView(timeline, `compose-deployments:${packageId}`, (rows) =>
     newestFirst(rows.map(deploymentFromRow).filter((d) => d.id !== "")),
   );
@@ -234,12 +310,13 @@ export function ComposePage(props: ComposePageProps) {
   // compose (a brand-new source) still takes the newest, which is right:
   // there is one app and one run.
   const timelineRows = deployments?.snapshot.rows ?? [];
+  const pinnedRunId = selectedRunId || parked?.run.id || "";
+  const currentTimeline = pinnedRunId ? timelineRows.filter(row => row.id === pinnedRunId) : selectedSource && !fixedSource && !parked ? [] : timelineRows;
   const run =
     (only !== undefined && only !== ""
-      ? runForScopedFlow(timelineRows, only)
-      : (timelineRows[0] ?? null)) ??
-    parked?.run ??
-    null;
+      ? runForScopedFlow(currentTimeline, only)
+      : (currentTimeline[0] ?? null)) ??
+    (parked?.run.id === pinnedRunId ? parked.run : null);
   const report = run?.report ?? null;
 
   const zip = zipProbe.reply === null ? null : zipVerdict(zipProbe.reply);
@@ -249,16 +326,9 @@ export function ComposePage(props: ComposePageProps) {
   // form under a title that named the source.
   const path: ComposePath = parked !== undefined || source !== undefined ? "package" : pathOf(draft, zip);
   const probeParked = probeParks(probe.reply?.reason ?? "");
-  // ONE SOURCE, ONCE (D8): the check runs only while a NEW repository is being
-  // chosen; a flow opened for an existing source is not registering one.
-  const duplicate = useMemo(
-    () =>
-      draft.choice === "repo" && parked === undefined && source === undefined
-        ? duplicateSource(packages ?? [], draft.repoUrl, draft.repoRef, probe.reply?.defaultBranch ?? "")
-        : null,
-    [draft.choice, draft.repoUrl, draft.repoRef, packages, parked, source, probe.reply?.defaultBranch],
-  );
-  const sourceDone = parked !== undefined || source !== undefined || sourceReady(draft, zip, probeParked, duplicate);
+  const githubSelectionReady = draft.choice !== "repo" || (selectedConnection !== undefined && githubGrant?.status === "active" &&
+    draft.credentialId === githubGrant.id && draft.sourceConnectionId === selectedConnection.id && connectionNeed === "" && !probe.busy);
+  const sourceDone = parked !== undefined || fixedSource !== undefined || (githubSelectionReady && organizationChosen(accounts, sourceAccountId) && sourceReady(draft, zip, probeParked));
 
   // THE OFF-LIST, read off the source row (D5). `activated` answers the click
   // before the row's own broadcast does.
@@ -266,15 +336,22 @@ export function ComposePage(props: ComposePageProps) {
   const inactive = scoped && source !== undefined && source.disabledDeployables.includes(only) && !activated;
   const archivedSource = source?.status === "archived";
 
-  const phase = phaseOf({
+  const storedPhase = phaseOf({
     path,
-    runStatus: run?.status ?? "",
+    runStatus: run?.status ?? (selectedRunId ? "analyzing" : ""),
     siteId: created.siteId,
     // A CI-PUSHED SOURCE HAS NOTHING TO PUBLISH FROM HERE. Its bytes are on
     // somebody's CI, so the moment the draft site exists this flow is done
     // and the Live stop is what waits.
     published: draft.choice === "ci" ? created.siteId !== "" : publishedZip,
   });
+  const phase: ComposePhase = analysisStartedAt !== null ? "analyzing"
+    : storedPhase === "composing" && pkgActions.refusal && packageId ? "stopped" : storedPhase;
+  const analysisInConfiguration = phase === "analyzing" || phase === "stopped" && !report;
+  const cancelling = Boolean(run && (run.cancelRequested || cancelledRunId === run.id) && runIsCancellable(run));
+  const analysisClock = phase === "analyzing" ? analysisStartedAt ?? (run?.startedAt ? Date.parse(run.startedAt) : null) : null;
+  const analysisProblem = analysisInConfiguration && phase === "stopped" ? pkgActions.refusal ?? run?.error : null;
+  const analysisFailure = analysisProblem && (!analysisProblem.code || analysisProblem.code === "deploy_failed") ? analysisProblem : null;
   const journeyKey = `${phase}:${run?.id ?? ""}:${inactive}`;
 
 
@@ -293,8 +370,13 @@ export function ComposePage(props: ComposePageProps) {
       let changed = false;
       const next = { ...held };
       for (const app of apps) {
-        if (next[app] !== undefined) continue;
-        next[app] = seedAddress();
+        if (next[app] !== undefined && (next[app]!.accountId !== "" || sourceAccountId === "")) continue;
+        if (next[app] !== undefined) {
+          next[app] = { ...next[app]!, accountId: sourceAccountId };
+          changed = true;
+          continue;
+        }
+        next[app] = { ...seedAddress(), accountId: sourceAccountId };
         changed = true;
       }
       return changed ? next : held;
@@ -303,7 +385,7 @@ export function ComposePage(props: ComposePageProps) {
     // event, and keying on its identity would re-run this for a report
     // naming exactly the same apps.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appsKey]);
+  }, [appsKey, apps.length, sourceAccountId]);
 
   // DEPLOYING ONE DECLARED APP, and nothing else.
   //
@@ -316,16 +398,21 @@ export function ComposePage(props: ComposePageProps) {
   // by hand, and it is why this could not be built until skip actually
   // reached the engine.
   const everyApp = useMemo(() => (report?.deployables ?? []).map((d) => d.name).filter((n) => n !== ""), [report]);
-  const placementApps = scoped ? everyApp : apps;
+  const placementApps = scoped ? everyApp : selectedSource ? [...new Set([...apps, ...placed])] : apps;
   const placementAddresses = useMemo(() => {
-    if (!scoped) return addresses;
+    if (!scoped) {
+      if (!selectedSource) return addresses;
+      const next = { ...addresses };
+      for (const app of placed) next[app] = { ...EMPTY_ADDRESS, accountId: sourceAccountId, skip: true };
+      return next;
+    }
     const out: Record<string, AddressDraft> = { ...addresses };
     for (const app of everyApp) {
       if (app === only) continue;
       out[app] = { ...(out[app] ?? EMPTY_ADDRESS), skip: true };
     }
     return out;
-  }, [scoped, addresses, everyApp, only]);
+  }, [scoped, addresses, everyApp, only, selectedSource, placedKey, sourceAccountId]);
 
   // THE CLUSTER'S VERDICTS, per app (D7): folded from the check hook's keys
   // into the shape `placementsComplete` reads, so Deploy stays out of reach
@@ -344,14 +431,16 @@ export function ComposePage(props: ComposePageProps) {
   const placementsDone = placementsComplete(apps, addresses, clusterDomain, verdicts);
   // Analyzing is `deploy`; registering a NEW source on the way is `sources`
   // (createPackage), so a flow opened with no source behind it needs both.
-  const canStart = can.deploy && (source !== undefined || parked !== undefined || can.sources);
+  const canStart = can.deploy && (draft.choice === "repo" && !fixedSource && !parked ? can.sources : source !== undefined || parked !== undefined || can.sources);
   const readyToAnalyze =
-    canStart && !archivedSource && path !== "unknown" && sourceDone && (path !== "handmade" || placementsDone);
-  const readyToDeploy = path === "handmade" ? draft.artifactId !== "" : placementsDone;
+    canStart && !archivedSource && path !== "unknown" && sourceDone && (path !== "handmade" || placementsDone) && (!selectedSource || placementsKnown) && (!selectedSource || selectedSource.declares.length === 0 || selectedSource.declares.some(app => !placed.includes(app.name)));
+  const readyToRestoreSource = !fixedSource && !parked && !created.packageId && can.sources && sourceDone && placementsKnown &&
+    selectedSource?.sourceRemoved === true && selectedSource.declares.length > 0 && selectedSource.declares.every(app => placed.includes(app.name));
+  const readyToDeploy = path === "handmade" ? draft.artifactId !== "" : placementsDone && (!selectedSource || placementsKnown);
 
   const action = actionFor(phase, readyToAnalyze, readyToDeploy);
   const busy =
-    newPackage.busy || pkgActions.busy || createSite.busy || publish.busy || tie.busy || addDomain.busy || lifecycle.busy;
+    analysisStartedAt !== null || bindingWrite.busy || repositoryRegistration.busy || newPackage.busy || pkgActions.busy || createSite.busy || publish.busy || addDomain.busy || lifecycle.busy;
 
   const outcomes: readonly DeployableOutcome[] = run?.deployables ?? [];
   const placementsLocked =
@@ -362,16 +451,66 @@ export function ComposePage(props: ComposePageProps) {
   // The acts
   // -------------------------------------------------------------------------
 
+  function repositoryInput() {
+    return { name: draft.name.trim(), sourceKind: "repo" as const, repoUrl: draft.repoUrl.trim(), repoRef: draft.repoRef.trim(),
+      autoDeploy: draft.autoDeploy === true, credentialId: draft.credentialId,
+      sourceConnectionId: selectedConnection?.id, artifactId: "", accountId: sourceAccountId };
+  }
+
+  async function restoreSource() {
+    if (!readyToRestoreSource || busy || analyzePending.current) return;
+    analyzePending.current = true;
+    try {
+      const boundary = saveBoundary.current;
+      const id = await repositoryRegistration.create(repositoryInput());
+      if (!id || !saveMounted.current || boundary !== saveBoundary.current) return;
+      setCreated(held => ({ ...held, packageId: id }));
+      setRestoredSourceId(id);
+      props.packageFeed?.retry();
+    } finally { analyzePending.current = false; }
+  }
+
+  async function cancelAnalysis(): Promise<void> {
+    if (cancelPending.current || cancelling || !run || !runIsCancellable(run)) return;
+    cancelPending.current = true;
+    const id = run.id;
+    const accepted = await cancelWrite.run(async query => { await cancelDeployment(query, packageId, id); return true; });
+    cancelPending.current = false;
+    if (!saveMounted.current) return;
+    if (accepted) setCancelledRunId(id);
+    refreshDeployments.current();
+  }
+
   async function analyze(): Promise<void> {
+    if (busy || analyzePending.current || (!fixedSource && !parked && draft.choice === "repo" && !githubSelectionReady)) return;
+    analyzePending.current = true;
+    setAnalysisStartedAt(Date.now());
+    try {
+    const boundary = saveBoundary.current;
+    if (!fixedSource && !parked && draft.choice === "repo" && !created.packageId) {
+      const id = await repositoryRegistration.create(repositoryInput());
+      if (!id || !saveMounted.current || boundary !== saveBoundary.current) return;
+      setCreated(held => ({ ...held, packageId: id }));
+      const outcome = await pkgActions.deploy(id, {
+        confirm: false,
+        ...(selectedSource ? { placements: Object.fromEntries(placed.map(name => [name, { hostname: "", accountId: sourceAccountId, ownDomain: "", skip: true }])) } : {}),
+      });
+      if (!saveMounted.current || boundary !== saveBoundary.current) return;
+      if (outcome) setSelectedRunId(outcome.deploymentId);
+      reseed();
+      return;
+    }
     if (source !== undefined || created.packageId !== "") {
       // AN APP OF A SOURCE THAT EXISTS: no package to create. The analysis
       // is SCOPED on the wire (memql#4953): the engine derives a run's
       // `scopedTo` from its placements' skips, so an unscoped call would park
       // a gate about the whole source that every sibling reads as its own.
-      await pkgActions.deploy(source?.id ?? created.packageId, {
+      const outcome = await pkgActions.deploy(source?.id ?? created.packageId, {
         confirm: false,
-        ...(scoped ? { placements: everyOtherAppSkipped(source?.declares ?? [], only) } : {}),
+        ...(scoped ? { placements: everyOtherAppSkipped(source?.declares ?? [], only) } : selectedSource ? { placements: Object.fromEntries(placed.map(name => [name, { hostname: "", accountId: sourceAccountId, ownDomain: "", skip: true }])) } : {}),
       });
+      if (!saveMounted.current || boundary !== saveBoundary.current) return;
+      if (outcome) setSelectedRunId(outcome.deploymentId);
       reseed();
       return;
     }
@@ -383,37 +522,30 @@ export function ComposePage(props: ComposePageProps) {
         repoRef: draft.choice === "repo" ? draft.repoRef.trim() : "",
         autoDeploy: draft.choice === "repo" && draft.autoDeploy === true,
         credentialId: draft.choice === "repo" ? draft.credentialId.trim() : "",
+        sourceConnectionId: draft.choice === "repo" ? selectedConnection?.id : undefined,
         artifactId: draft.choice === "zip" ? draft.artifactId : "",
-        // THE SOURCE IS THE CLUSTER'S OWN (memql#5303, D12). It is registered
-        // here, before the run parks and the Where-it-lives stop can ask
-        // about a client, so there is no pick to honour yet; the per-app
-        // placement is where a client is chosen, and it ties the SITE.
-        accountId: SELF_ACCOUNT_ID,
+        accountId: sourceAccountId,
       });
-      if (id === "") return;
+      if (id === "" || !saveMounted.current || boundary !== saveBoundary.current) return;
       setCreated((held) => ({ ...held, packageId: id }));
       // WITHOUT confirm: the run parks with its report and nothing is built.
       // The gate is always present (design D12), and this is it.
-      await pkgActions.deploy(id, { confirm: false });
+      const outcome = await pkgActions.deploy(id, { confirm: false });
+      if (!saveMounted.current || boundary !== saveBoundary.current) return;
+      if (outcome) setSelectedRunId(outcome.deploymentId);
       reseed();
       return;
     }
 
     const address = addresses[""] ?? EMPTY_ADDRESS;
     const siteId = await createSite.create(
-      { slug: address.slug, kind: draft.kind, title: draft.name.trim(), storeId: draft.storeId ?? "" },
+      { slug: address.slug, kind: draft.kind, title: draft.name.trim(), storeId: draft.storeId ?? "", accountId: address.accountId },
       clusterDomain,
     );
     if (siteId === "") return;
     setCreated((held) => ({ ...held, siteId }));
-    // THE TWO HALVES, applied exactly as the pipeline applies a placement's:
-    // the same two calls, under the same actor, so the same guards decide.
-    // Either being refused leaves the deployable created, and says so rather
-    // than reading as a failed create. The client half always runs: a site
-    // nobody tied to a client is the cluster's own (memql#5303, D12), the
-    // same default `placementsFrom` sends for a package's apps.
-    await tie.setAccount(siteId, accountOrSelf(address.accountId));
     if (address.ownDomain.trim() !== "") await addDomain.add(siteId, address.ownDomain.trim());
+    } finally { analyzePending.current = false; if (saveMounted.current) setAnalysisStartedAt(null); }
   }
 
   /**
@@ -462,16 +594,23 @@ export function ComposePage(props: ComposePageProps) {
   }
 
   async function retry(): Promise<void> {
-    if (packageId === "") return;
+    if (packageId === "" || busy || analyzePending.current) return;
+    analyzePending.current = true;
+    setAnalysisStartedAt(Date.now());
+    try {
+    const boundary = saveBoundary.current;
     // A RETRY KEEPS THE SCOPE. Retrying a gate opened for one app used to
     // park an unscoped run -- the flow stayed titled and narrowed for that
     // app while the run underneath it was about the whole source, which is
     // the same fan-out the scoped analysis exists to prevent.
-    await pkgActions.deploy(packageId, {
+    const outcome = await pkgActions.deploy(packageId, {
       confirm: false,
-      ...(scoped ? { placements: everyOtherAppSkipped(source?.declares ?? parked?.pkg.declares ?? [], only) } : {}),
+      ...(scoped ? { placements: everyOtherAppSkipped(source?.declares ?? parked?.pkg.declares ?? [], only) } : selectedSource ? { placements: Object.fromEntries(placed.map(name => [name, { hostname: "", accountId: sourceAccountId, ownDomain: "", skip: true }])) } : {}),
     });
+    if (!saveMounted.current || boundary !== saveBoundary.current) return;
+    if (outcome) setSelectedRunId(outcome.deploymentId);
     reseed();
+    } finally { analyzePending.current = false; if (saveMounted.current) setAnalysisStartedAt(null); }
   }
 
   /**
@@ -533,39 +672,99 @@ export function ComposePage(props: ComposePageProps) {
   // A NEW DEPLOYABLE OPENS ON THE CHOICE, AND THE CHOICE OPENS THE STEP IT
   // NAMES. Reading it off the draft rather than off a click means a flow that
   // comes back with its choice already made -- from GitHub, after connecting --
-  // lands on the repository step rather than on a question already answered.
-  const defaultStop: WizardStep = phase === "composing" ? source || parked ? "whatItIs" : draft.choice === "" ? "source" : "sourceDetail"
-    : phase === "analyzing" || phase === "awaiting_confirm" && path === "package" ? "whatItIs"
+  // resumes verified GitHub identity at Organization; other drafts follow their answers.
+  const defaultStop: WizardStep = phase === "composing" ? fixedSource || parked ? "whatItIs" : draft.choice === "" ? "source" : draft.choice === "repo" ? !accountConfirmed || !identityReady ? "githubAccount" : !selectedConnection ? "githubOrganization" : repositoryConfirmed ? "sourceDetail" : "githubRepository" : "sourceDetail"
+    : analysisInConfiguration ? "sourceDetail"
+    : phase === "awaiting_confirm" && path === "package" ? "whatItIs"
     : phase === "stopped" ? (railFor(input).stages.find(s => s.state === "stopped")?.id as StopId ?? "whatItIs")
     : phase === "deploying" || phase === "awaiting_confirm" && path === "handmade" ? "build" : "live";
   const journeyStop = journeyChoice?.key === journeyKey ? journeyChoice.stop : defaultStop;
-  const chooseStop = (stop: WizardStep) => setJourneyChoice({ key: journeyKey, stop });
+  const chooseStop = (stop: WizardStep) => {
+    bindingNavigation.current += 1;
+    setJourneyChoice({ key: journeyKey, stop });
+  };
+  const leaveComposer = () => { bindingNavigation.current += 1; onBack(); };
 
-  const sourceLocked = parked !== undefined || source !== undefined || phase !== "composing";
+  function clearRepository() {
+    setRepositoryConfirmed(false); setRestoredSourceId("");
+    setSelectedConnectionId(""); setConfirmedConnection(null); setSelectedRunId(""); setSourceNotice("");
+    setCreated({ packageId: "", siteId: "" }); setAddresses({}); probe.clear(); bindingWrite.clear(); setConnectionNeed("");
+    setDraft(held => ({ ...held, repoUrl: "", repoRef: "", name: "", credentialId: "", sourceConnectionId: "" }));
+  }
+  function chooseIdentity(id: string) {
+    const account = githubAccounts.find(row => row.id === id);
+    if (busy || !account || props.credentialFeed && (props.credentialFeed.state !== "live" || props.credentialFeed.error)) return;
+    if (id !== githubCredentialId) {
+      clearRepository(); setGithubCredentialId(id); setInstallationId("");
+    }
+    setAccountConfirmed(account.status === "active");
+    if (account.status === "active") chooseStop("githubOrganization");
+  }
+  function holdConnection(connection: SourceConnectionRow) {
+    setConfirmedConnection(connection); setSelectedConnectionId(connection.id);
+    setDraft(held => ({ ...held, credentialId: connection.credentialId, sourceConnectionId: connection.id }));
+  }
+  async function chooseOrganization(id: string) {
+    const installation = installations.installations.find(row => row.id === id && !row.suspended);
+    if (busy || bindingPending.current || !identityReady || !installation || !installations.readAt || installations.busy || installations.refusal) return;
+    if (id !== installationId) { clearRepository(); setInstallationId(id); }
+    const existing = connections.rows.find(row => row.credentialId === githubCredentialId && row.installationId === id);
+    if (existing) { holdConnection(existing); chooseStop("githubRepository"); return; }
+    bindingPending.current = true;
+    const authority = bindingAuthority.current;
+    const navigation = bindingNavigation.current;
+    const connectionId = await bindingWrite.run(query => createSourceConnection(query, githubCredentialId, id));
+    bindingPending.current = false;
+    if (!saveMounted.current || bindingAuthority.current !== authority || bindingNavigation.current !== navigation) {
+      bindingWrite.clear();
+      return;
+    }
+    if (!connectionId) return;
+    holdConnection({ id: connectionId, ownerUserId: githubViewer, credentialId: githubCredentialId, installationId: id,
+      providerAccountId: installation.providerAccountId, accountLogin: installation.login, accountType: installation.accountType, status: "active" });
+    connections.retry(); chooseStop("githubRepository");
+  }
+  function chooseRepository(patch: Partial<ComposeDraft>) {
+    if (busy || !identityReady || !selectedConnection || !patch.repoUrl ||
+      patch.credentialId !== selectedConnection.credentialId || patch.sourceConnectionId !== selectedConnection.id) return;
+    setDraft(held => held.repoUrl === patch.repoUrl && held.sourceConnectionId === patch.sourceConnectionId
+      ? { ...held, ...patch, repoRef: held.repoRef, name: held.name }
+      : { ...held, ...patch });
+    setRepositoryConfirmed(true); chooseStop("sourceDetail");
+  }
+  const sourceLocked = parked !== undefined || fixedSource !== undefined || created.packageId !== "" || phase !== "composing";
+  const accountField = () => <Field label="Accounts">
+    <div className="os-compose-account-control">
+      <AccountPicker id="compose-source-organization" label="Accounts" required requiredLabel="Choose an account"
+        value={sourceAccountId} accounts={accounts} disabled={sourceLocked || busy} onChange={setAccountId}
+        onCommit={() => setAccountChosenManually(true)} />
+      {!sourceLocked && !fixedSource && !parked && !accountChosenManually && organizationChosen(accounts, sourceAccountId) ? <Caption>Selected by default. Review account.</Caption> : null}
+      {accountError ? <Caption>Accounts could not be refreshed. {String(accountError)}</Caption> : accounts.length === 0 ? <Caption>{accountState === "seeding" ? "Loading accounts…" : "No account is available for this deployable."}</Caption> : null}
+    </div>
+  </Field>;
   const stopBody = (stage: RailStage) => {
     switch (stage.id) {
       case "source":
         return (
-          <ComposeSourceDetailStep
-            draft={draft}
-            onDraft={(patch) => setDraft((held) => ({ ...held, ...patch }))}
-            credentials={credentials}
-            credentialFeed={props.credentialFeed}
-            probe={probe}
-            zipProbe={zipProbe}
-            zip={zip}
-            siteId={created.siteId}
-            clusterDomain={clusterDomain}
-            locked={sourceLocked}
-            tokenFormOpen={tokenFormOpen}
-            onTokenFormOpenChange={setTokenFormOpen}
-            connect={githubConnect}
-            onConnectionNeed={setConnectionNeed}
-            app={githubApp}
-            appOwner={appOwner}
-            onAppOwner={setAppOwner}
-            duplicateOf={duplicate}
-          />
+          <>
+          <div className="os-compose-source-fields">
+          {draft.choice !== "repo" ? accountField() : <Caption>Source: @{githubGrant?.login} · {selectedConnection?.accountLogin} · {shortRepo(draft.repoUrl)}</Caption>}
+          {sourceLocked && source ? <Caption>{source.name} · {sourceLabel(source)}</Caption> : <ComposeSourceDetailStep
+            draft={draft} onDraft={(patch) => setDraft(held => ({ ...held, ...patch }))}
+            probe={probe} zipProbe={zipProbe} zip={zip}
+            siteId={created.siteId} clusterDomain={clusterDomain} locked={sourceLocked}
+            />}
+          {draft.choice === "repo" && !sourceLocked ? <RepositoryProbeStatus draft={draft} probe={probe} /> : null}
+          {draft.choice === "repo" && (draft.repoUrl || sourceLocked) ? accountField() : null}
+          {draft.choice === "repo" && !sourceLocked && !report && probe.reply && !manifestIsEmpty(probe.reply.manifest) ? <details><summary>Repository contents</summary><ManifestPreview manifest={probe.reply.manifest} /></details> : null}
+          {restoredSourceId ? <div className="os-stop-body"><Caption>Source restored. Existing deployables are unchanged.</Caption>
+            {props.onOpenDeployable ? (props.placedSources ?? []).filter(site => site.packageId === restoredSourceId && site.siteId).map(site => <Button key={site.siteId} onClick={() => props.onOpenDeployable?.(site.siteId!)}>Open {site.name}</Button>) : null}
+          </div> : null}
+          {selectedSource && !placementsKnown ? <Caption>{props.siteFeed?.error ? "Existing deployables could not be read. Refresh Deployables before continuing." : "Checking existing deployables…"}</Caption> : null}
+          {selectedSource && props.siteFeed?.error && props.packageFeed?.retry ? <RefreshButton label="Refresh deployables" onClick={props.packageFeed.retry} /> : null}
+          {selectedSource && placementsKnown && selectedSource.declares.length > 0 && selectedSource.declares.every(app => placed.includes(app.name)) ? <Caption>All apps from this repository already have deployables. Open them from Deployables.</Caption> : null}
+          </div>
+          </>
         );
       case "whatItIs":
         // THE PREVIEW STANDS IN UNTIL THE REPORT EXISTS, and never beside it.
@@ -663,42 +862,16 @@ export function ComposePage(props: ComposePageProps) {
         ? []
         : [{ label: action.label, tone: action.tone, busy, onAct: act }];
 
-  const title = composeTitle(parked?.pkg ?? source, only);
+  const title = composeTitle(parked?.pkg ?? fixedSource, only);
   // AN INACTIVE APP, OR ONE OF AN ARCHIVED SOURCE, IS HELD: whatever the
   // timeline says, the only act is Activate (or the way back), and the bar
   // must not read a finished flow off a run that never placed this app.
   const held = inactive || archivedSource;
   const finished = phase === "published" && !held;
   const canGoLive = finished && !wentLive && can.publish && (path !== "handmade" || draft.choice !== "ci");
-  // CONNECTING IS THE REPOSITORY STEP'S FORWARD ACT, so it is on the floor with
-  // every other one. The step says when it is needed; nothing is offered while
-  // the person's connections are still being read, because the step has not
-  // mounted the part of itself that could say so.
-  const needsGithub = !sourceLocked && journeyStop === "sourceDetail" && draft.choice === "repo" && connectionNeed !== "";
-  // An organization is named by its login, and until one is typed there is
-  // nothing to register the app under -- so the act is ABSENT (rule 12), and the
-  // floor says what it is waiting for.
-  const ownerNamed = ownerIsNamed(appOwner);
-  const githubActs: Act[] =
-    connectionNeed === "setup"
-      ? ownerNamed
-        ? [{
-            label: "Set up GitHub", tone: "primary", busy: githubApp.busy,
-            onAct: () => void githubApp.setup(returnPathFor("deployables"), organizationOf(appOwner)),
-          }]
-        : []
-      // NO ACT when the cluster has no app and this person may not give it one:
-      // the step says who can, and A token is one choice away.
-      : connectionNeed === "unavailable"
-        ? []
-        : [{
-            label: connectionNeed === "reconnect" ? "Reconnect GitHub" : "Connect GitHub", tone: "primary", busy: githubConnect.busy,
-            onAct: () => void githubConnect.connect(returnPathFor("deployables")),
-          }];
   const journeyActs: Act[] = !held && !finished && (
-    needsGithub
-      ? githubActs
-    : journeyStop === "source" ? []
+    ["source", "githubAccount", "githubOrganization", "githubRepository"].includes(journeyStop) ? []
+    : journeyStop === "sourceDetail" && readyToRestoreSource ? [{ label: "Restore source", tone: "primary", busy: repositoryRegistration.busy, onAct: () => void restoreSource() }]
     : journeyStop === "sourceDetail" && path === "handmade" && sourceDone && phase === "composing"
       ? [{ label: "Continue", tone: "primary", onAct: () => chooseStop("whatItIs") }]
       : journeyStop === "whatItIs" && (phase === "awaiting_confirm" && path === "package" || phase === "composing" && path === "handmade")
@@ -717,46 +890,54 @@ export function ComposePage(props: ComposePageProps) {
     const id = stage.id as StopId;
     const state = id === "live" && awaitingLive ? ("open" as const) : stage.state;
     if (id === "source") {
-      // THE SOURCE STAGE IS TWO STEPS: the choice, and the step the choice
-      // names. One question each -- which is the whole reason the old single
-      // step read as crowded.
+      // GitHub setup asks identity, installation, and repository separately.
+      // Activating a row answers its step and opens the next one.
       const settled = state === "complete" || state === "done";
       const chosen = kind !== "";
       return [
         {
           id: "source",
-          name: STEP_NAMES.source,
+          name: "Method",
           state: settled || (chosen && journeyStop !== "source") ? "complete" : "open",
           answer: chosen ? SOURCE_KIND_LABEL[kind] : "",
           // Chosen once something has been read from it: the kind is a fact.
-          openable: !sourceLocked,
+          openable: !sourceLocked && (!busy || bindingWrite.busy),
           body: sourceLocked ? undefined : (
             <ActivityTarget target="deployables:compose:source" className="deployable-journey-current">
               <ComposeSourceKindStep
                 draft={draft}
                 isClusterOwner={isClusterOwner}
                 onChoose={(choice) => {
-                  setDraft((held) => ({ ...held, choice, name: "", kind: "", artifactId: "", repoUrl: "", storeId: "" }));
+                  setSelectedConnectionId(""); setConfirmedConnection(null); setGithubCredentialId(""); setAccountConfirmed(false); setInstallationId(""); setSelectedRunId(""); probe.clear();
+                  setDraft((held) => ({ ...held, choice, name: "", kind: "", artifactId: "", repoUrl: "", repoRef: "", credentialId: "", sourceConnectionId: "", storeId: "" }));
                   // CHOOSING ANSWERS THE STEP, so the wizard moves on to the
                   // one the answer names.
-                  chooseStop("sourceDetail");
+                  chooseStop(choice === "repo" ? "githubAccount" : "sourceDetail");
                 }}
               />
             </ActivityTarget>
           ),
         },
+        ...(kind === "repo" && !fixedSource && !parked ? [
+          { id: "githubAccount", name: "GitHub account", state: accountConfirmed ? "complete" as const : "ahead" as const, answer: chosenGithubAccount ? `@${chosenGithubAccount.login}` : "", openable: !sourceLocked && (!busy || bindingWrite.busy),
+            body: <GitHubAccountStep credentials={githubAccounts} selectedId={githubCredentialId} onSelect={chooseIdentity} feed={props.credentialFeed} disabled={busy} /> },
+          { id: "githubOrganization", name: "Organization", state: selectedConnection ? "complete" as const : "ahead" as const, answer: selectedConnection?.accountLogin ?? "", openable: accountConfirmed && identityReady && !sourceLocked && (!busy || bindingWrite.busy),
+            body: <><GitHubOrganizationStep lookup={installations} selectedId={installationId} onSelect={id => void chooseOrganization(id)} disabled={busy} pending={bindingWrite.busy} />{bindingWrite.refusal ? <><ProblemNotice problem={bindingWrite.refusal} tone="error" /><Button disabled={busy} onClick={() => void chooseOrganization(installationId)}>Try organization again</Button></> : null}</> },
+          { id: "githubRepository", name: "Repository", state: repositoryConfirmed ? "complete" as const : "ahead" as const, answer: shortRepo(draft.repoUrl), openable: Boolean(selectedConnection) && !sourceLocked && !busy,
+            body: selectedConnection ? <RepositorySource key={selectedConnection.id} connection={selectedConnection} draft={draft} onSelected={chooseRepository} probe={probe} onConnectionNeed={setConnectionNeed} /> : undefined },
+        ] : []),
         {
           id: "sourceDetail",
           // Named by the answer above it, and by nothing until there is one.
-          name: chosen ? SOURCE_DETAIL_NAME[kind]! : "Details",
-          state: !chosen ? "ahead" : settled ? "complete" : journeyStop === "source" ? "waiting" : state,
-          sentence: chosen ? DETAIL_SENTENCES[kind] : undefined,
+          name: kind === "repo" ? "Configuration" : chosen ? SOURCE_DETAIL_NAME[kind]! : "Details",
+          state: analysisInConfiguration ? phase === "stopped" ? "stopped" : "current" : kind === "repo" && !sourceLocked && repositoryConfirmed ? "waiting" : !chosen || kind === "repo" && (!selectedConnection || !repositoryConfirmed) && !sourceLocked ? "ahead" : settled ? "complete" : journeyStop === "source" ? "waiting" : state,
+          sentence: kind === "repo" ? "Configure this deployable." : chosen ? DETAIL_SENTENCES[kind] : undefined,
           // The pipeline's own word on this stage -- what it settled as, or
           // why it stopped ("private, or not there") -- belongs to the step
           // that holds the fields it is about.
-          answer: chosen ? stage.reason : "",
-          openable: chosen,
-          body: chosen ? (
+          answer: chosen && (kind !== "repo" || repositoryConfirmed || sourceLocked) ? stage.reason : "",
+          openable: chosen && (kind !== "repo" || Boolean(selectedConnection && repositoryConfirmed) || sourceLocked),
+          body: chosen && (kind !== "repo" || Boolean(selectedConnection && repositoryConfirmed) || sourceLocked) ? (
             <ActivityTarget target="deployables:compose:sourceDetail" className="deployable-journey-current">
               {stopBody({ ...stage, state })}
             </ActivityTarget>
@@ -764,6 +945,7 @@ export function ComposePage(props: ComposePageProps) {
         },
       ];
     }
+    if (kind === "repo" && (!sourceLocked || analysisInConfiguration)) return [{ id, name: STEP_NAMES[id], state: "ahead", openable: false }];
     const reachable = (state !== "pending" && state !== "ahead") || id === journeyStop;
     return [{
       id,
@@ -790,25 +972,16 @@ export function ComposePage(props: ComposePageProps) {
         ? { word: "Choose a zip", detail: "one you have put in Files" }
         : draft.choice === "ci"
           ? { word: "Name it", detail: "and say what kind of app your CI will push" }
-          : connectionNeed === "connect"
-            ? { word: "Not connected to GitHub", detail: "connect to pick from your repositories, or choose A token" }
+          : !selectedConnection
+            ? { word: "Choose a GitHub account", detail: "" }
             : connectionNeed === "reconnect"
-              ? { word: "GitHub connection lapsed", detail: "reconnect to pick from your repositories, or choose A token" }
-            : connectionNeed === "setup"
-              ? ownerNamed
-                ? { word: "GitHub is not set up", detail: "set it up once for this cluster, or choose A token" }
-                : { word: "Name the organization", detail: "by its GitHub login, or register the app under your own account" }
-            // The STEP says who can change it; said again here it was one
-            // sentence twice on one screen. The floor says what goes on.
-            : connectionNeed === "unavailable"
-              ? { word: "GitHub is not set up", detail: "choose A token to go on" }
-              : tokenFormOpen
-                ? { word: "Describe the repository", detail: "its URL, and a token if it is private" }
-                : { word: "Choose a repository", detail: "then the branch to follow, and what to call it" };
-  const word = detailNeeds !== null ? detailNeeds.word : finished && draft.choice === "ci" ? "Waiting for CI" : composePhaseWord(phase, {
+              ? { word: "GitHub account needs attention", detail: "return to GitHub account to reconnect or choose another" }
+              : { word: "Choose a repository", detail: "then configure its branch, name and owning account" };
+  const stepNeeds = !sourceLocked && draft.choice === "repo" ? ({ source: "Choose a method", githubAccount: "Choose a GitHub account", githubOrganization: "Choose an organization or personal account", githubRepository: "Choose a repository", sourceDetail: "Configure the deployable" } as Partial<Record<WizardStep, string>>)[journeyStop] : undefined;
+  const word = stepNeeds ?? (!sourceLocked && (draft.choice !== "repo" || draft.repoUrl !== "") && !organizationChosen(accounts, sourceAccountId) ? "Choose an account" : detailNeeds !== null ? detailNeeds.word : finished && draft.choice === "ci" ? "Waiting for CI" : composePhaseWord(phase, {
     inactive, archivedSource, declared: source !== undefined, wentLive, choice: draft.choice, moreToAnswer: action !== null && action.disabled,
-  });
-  const detail = detailNeeds !== null ? detailNeeds.detail : finished
+  }));
+  const detail = stepNeeds ? undefined : detailNeeds !== null ? detailNeeds.detail : finished
     ? finishedSentence(path, draft, outcomes, siteHostname, wentLive)
     : inactive
       ? siteStateDetail("Inactive", "")
@@ -816,21 +989,13 @@ export function ComposePage(props: ComposePageProps) {
         ? "restore the source to deploy its apps again"
         : composePhaseDetail(phase, action, apps, addresses, source !== undefined, draft.choice);
 
-  // THE FLOOR HAS TWO VERBS AND ONE BUTTON, the same as every add wizard.
-  //
-  //   CANCEL   while nothing has been written -- which is everything before
-  //            Analyze -- so leaving costs nothing and the word is true.
-  //   LEAVE    once something exists: a source that was read, a run that is
-  //            parked or building. Going keeps it, the list reopens it, and a
-  //            build the cluster has started carries on without anybody
-  //            watching. There is no act here that undoes a run, so the floor
-  //            does not offer one by calling it Cancel.
-  //
-  // The forward act is the button and the way out beside it is text. When it
-  // is the cluster's turn there is no forward act, and Leave is the button --
-  // the same picture the machine and the domain draw while they wait.
-  const written = phase !== "composing";
-  const acts: Act[] = finished
+  // Leave changes navigation only. Cancel targets this persisted run, and
+  // remains separate from the request that started it and its busy state.
+  const written = phase !== "composing" || created.packageId !== "";
+  const previousStep: WizardStep | undefined = !sourceLocked && kind === "repo" ? ({ githubAccount: "source", githubOrganization: "githubAccount", githubRepository: "githubOrganization", sourceDetail: "githubRepository" } as Partial<Record<WizardStep, WizardStep>>)[journeyStop] : undefined;
+  const leaveAct: Act = previousStep ? { label: "Back", text: true, onAct: () => { if (!busy || bindingWrite.busy) chooseStop(previousStep); } } : { label: written ? "Leave" : "Cancel", text: true, onAct: leaveComposer };
+  const cancelAct: Act[] = can.deploy && runIsCancellable(run) ? [{ label: cancelling ? "Cancelling" : "Cancel", text: true, busy: cancelWrite.busy || cancelling, onAct: () => void cancelAnalysis() }] : [];
+  const acts: Act[] = restoredSourceId ? [{ label: "Done", tone: "primary", onAct: onBack }] : finished
     ? canGoLive
       ? [
           { label: "Done", text: true, onAct: onBack },
@@ -838,10 +1003,10 @@ export function ComposePage(props: ComposePageProps) {
         ]
       : [{ label: "Done", tone: "primary", onAct: onBack }]
     : journeyActs.length > 0
-      ? [{ label: written ? "Leave" : "Cancel", text: true, onAct: onBack }, ...journeyActs]
+      ? [leaveAct, ...cancelAct, ...journeyActs]
       : written
-        ? [{ label: "Leave", onAct: onBack }]
-        : [{ label: "Cancel", text: true, onAct: onBack }];
+        ? [...cancelAct, { label: "Leave", onAct: onBack }]
+        : [leaveAct];
 
   return (
     <Wizard
@@ -853,17 +1018,19 @@ export function ComposePage(props: ComposePageProps) {
          which is exactly what the report beside it appeared to confirm. */
       title={title}
       lead={source === undefined && parked === undefined && only === undefined ? "Put a site or an app on this cluster." : undefined}
-      breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label: title }]}
-      back={{ label: backLabel, onSelect: onBack }}
+      breadcrumbs={[{ label: backLabel, onSelect: leaveComposer }, { label: title }]}
+      back={{ label: backLabel, onSelect: leaveComposer }}
       label="Deployable setup progress"
-      steps={steps}
+      steps={steps.map(step => step.id === journeyStop && phase === "composing" ? { ...step, state: "open" } : step)}
       open={journeyStop}
       onOpen={(id) => chooseStop(id as WizardStep)}
-      status={{ word, detail, tone: phase === "analyzing" || phase === "deploying" ? "busy" : wentLive ? "live" : "none" }}
+      status={{ word: restoredSourceId ? "Source restored" : cancelling ? "Cancelling" : word, detail: restoredSourceId ? "Existing deployables are unchanged." : cancelling ? "Waiting for the cluster to stop this run. Nothing new will be deployed." : phase === "analyzing" ? "Downloading and checking the source. Leave keeps this running; Cancel stops it." : detail, tone: phase === "analyzing" || phase === "deploying" ? "busy" : wentLive ? "live" : "none",
+        meta: analysisClock !== null && Number.isFinite(analysisClock) ? `${Math.max(0, Math.floor((now.getTime() - analysisClock) / 1000))}s elapsed` : undefined }}
       acts={acts}
       context={{ page: title, packageId: (parked?.pkg ?? source)?.id, app: only, mode: "compose", step: journeyStop }}
       notices={
         <>
+          {cancelWrite.refusal ? <ProblemNotice problem={cancelWrite.refusal} tone="error" /> : null}
           {/* THE NOTICE AT THE TOP (D5): an inactive app says so before
               anything else on the page, and says what Activate does. */}
           {inactive ? (
@@ -884,22 +1051,22 @@ export function ComposePage(props: ComposePageProps) {
           {/* A refusal the engine gave BEFORE any row exists has no stop to
               belong to yet, so it renders beneath the action that asked for
               it. Every other refusal in this flow lands at its stop. */}
+          {sourceNotice ? <Caption>{sourceNotice}</Caption> : null}
+          {phase === "analyzing" && analysisStartedAt === null && selectedRunId && !run ? <Notice tone="info"
+            sentence="Waiting for the analysis report."
+            next={deploymentFeed.error ? `The status read failed: ${deploymentFeed.error}` : "The request returned. Refresh its status without starting another analysis."}
+            ><Button onClick={() => reseed()}>Read status again</Button></Notice> : null}
+          {repositoryRegistration.refusal ? <ProblemNotice problem={{ ...repositoryRegistration.refusal, fatal: true }} tone="error" /> : null}
           {newPackage.refusal ? <ProblemNotice problem={{ ...newPackage.refusal, fatal: true }} tone="error" /> : null}
-          {pkgActions.refusal ? <ProblemNotice problem={{ ...pkgActions.refusal, fatal: true }} tone="error" /> : null}
+          {analysisFailure ? <Notice tone="error" sentence="Analysis couldn’t finish" detail={analysisFailure.message} /> :
+            pkgActions.refusal ? <ProblemNotice problem={{ ...pkgActions.refusal, fatal: true }} tone="error" /> :
+            analysisInConfiguration && phase === "stopped" && run?.error ? <ProblemNotice problem={run.error} tone="error" /> : null}
           {createSite.error === "" ? null : (
             <Notice
               tone="error"
               sentence="This deployable was not created."
               next="Nothing was written. The name may already be taken -- this cluster's own answer is below."
               detail={createSite.error}
-            />
-          )}
-          {tie.error === "" ? null : (
-            <Notice
-              tone="warn"
-              sentence="It was created, but not tied to that client."
-              next="Set the client on the deployable's own page. Nothing else was affected."
-              detail={tie.error}
             />
           )}
           {addDomain.error === "" ? null : (
@@ -931,7 +1098,7 @@ export function ComposePage(props: ComposePageProps) {
 
 /** A step of this wizard: the pipeline's own stops, plus the one the Source
  *  stage splits into. */
-type WizardStep = StopId | "sourceDetail";
+type WizardStep = StopId | "githubAccount" | "githubOrganization" | "githubRepository" | "sourceDetail";
 
 /** What the step a choice names is for, beside its name. */
 const DETAIL_SENTENCES: Readonly<Record<string, string>> = {
@@ -988,7 +1155,7 @@ function composePhaseWord(
   if (at.inactive) return "Inactive";
   switch (phase) {
     case "analyzing":
-      return "Reading the source";
+      return "Analyzing";
     case "awaiting_confirm":
       return "Ready to deploy";
     case "deploying":
@@ -1003,8 +1170,8 @@ function composePhaseWord(
       // is the page's own title said a second time (rule 7) in the one place
       // that is meant to say what is NEEDED. So it says that.
       if (at.declared) return "Not deployed";
-      if ((at.choice ?? "") === "") return "Choose a source";
-      return at.moreToAnswer ? "Describe the source" : "Ready";
+      if ((at.choice ?? "") === "") return "Choose a method";
+      return at.moreToAnswer ? "Configure the deployable" : "Ready";
   }
 }
 
@@ -1025,9 +1192,9 @@ function composePhaseDetail(
   choice = "-",
 ): string {
   // NOTHING IS CHOSEN YET, so the bar's word already says what is needed
-  // ("Choose a source") and the three choices are on the page. What is worth
+  // ("Choose a method") and the three choices are on the page. What is worth
   // saying beside it is the thing somebody about to start wants to know.
-  if (phase === "composing" && !declared && choice === "") return "nothing is written until you deploy";
+  if (phase === "composing" && !declared && choice === "") return "nothing is deployed until you confirm";
   if (phase === "awaiting_confirm") {
     if (apps.length > 1) {
       const going = apps.filter((app) => addresses[app]?.skip !== true).length;
@@ -1040,13 +1207,13 @@ function composePhaseDetail(
   if (action !== null && action.disabled) return "the open step has more to answer";
   switch (phase) {
     case "analyzing":
-      return "reading the tree and running the gates a node runs at boot";
+      return "Reading the source and checking its configuration. Review opens when the report is ready; nothing is deployed.";
     case "deploying":
       return "building, then putting the files in place -- nothing goes live until you say";
     case "stopped":
       return "the last attempt did not finish; retrying starts a fresh one";
     default:
-      return declared ? "reading the source is the first step; nothing is written until you deploy" : "nothing is written until you deploy";
+      return declared ? "reading the source is the first step; nothing is deployed until you confirm" : "nothing is deployed until you confirm";
   }
 }
 

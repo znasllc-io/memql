@@ -773,7 +773,6 @@
         "status"
       ],
       "required": [
-        "campaignId",
         "email",
         "ownerUserId",
         "recipientId",
@@ -2339,12 +2338,18 @@
       "fields": [
         "consumedAt",
         "consumedFromIP",
+        "credentialId",
+        "expectedExternalId",
         "expiresAt",
+        "flowId",
         "organization",
+        "pkceVerifier",
         "purpose",
         "returnPath",
+        "sessionId",
         "sourceIP",
         "stateHash",
+        "targetRevokedAt",
         "userId"
       ],
       "required": [
@@ -2385,6 +2390,7 @@
       "concept": "v1:identity:groupMembership",
       "file": "identity/concepts.memql",
       "fields": [
+        "accountId",
         "addedBy",
         "groupId",
         "origin",
@@ -4023,7 +4029,9 @@
         "ownerUserId",
         "repoRef",
         "repoUrl",
+        "sourceConnectionId",
         "sourceKind",
+        "sourceRemoved",
         "status",
         "updateAvailable"
       ],
@@ -4358,6 +4366,34 @@
           "catalog_read",
           "checkout_url",
           "order_mirrored"
+        ]
+      }
+    },
+    {
+      "concept": "v1:platform:sourceConnection",
+      "file": "platform/concepts.memql",
+      "fields": [
+        "accountLogin",
+        "accountType",
+        "credentialId",
+        "installationId",
+        "ownerUserId",
+        "providerAccountId",
+        "status"
+      ],
+      "required": [
+        "accountLogin",
+        "accountType",
+        "credentialId",
+        "installationId",
+        "ownerUserId",
+        "providerAccountId",
+        "status"
+      ],
+      "enums": {
+        "status": [
+          "active",
+          "removed"
         ]
       }
     },

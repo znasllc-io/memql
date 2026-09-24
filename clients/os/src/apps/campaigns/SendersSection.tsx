@@ -1,3 +1,4 @@
+import { listCount } from "../../kit/RecordRow";
 import { AddButton } from "../../kit/AddButton";
 import { useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -6,11 +7,11 @@ import { AtSign } from "lucide-react";
 import { AccountChip, AccountPicker } from "../accounts/AccountPicker";
 import { accountNameFrom } from "../accounts/rows";
 import { useAccountOptions } from "../accounts/tie";
+import { organizationChosen, useDefaultOrganization } from "../accounts/organization";
 import {
   Button,
   EmptyState,
   Caption,
-  Chip,
   Fact,
   Facts,
   Field,
@@ -19,7 +20,7 @@ import {
   LiveList,
   Notice,
   Panel,
-  Row as ListRow,
+  RecordRow,
   Subhead,
   formatMoment,
 } from "../../kit";
@@ -113,7 +114,7 @@ export function SendersSection({
 
   return (
     <div className="os-app-stack">
-      <Head title="Senders">
+      <Head title="Senders" meta={listCount(source?.snapshot)}>
         <AddButton onClick={() => setAdding((v) => !v)} label="Add a mailbox" />
       </Head>
 
@@ -166,22 +167,19 @@ function SenderLine({
 }) {
   const retired = senderIsRetired(sender);
   return (
-    <ListRow
+    <RecordRow
       icon={<AtSign size={16} aria-hidden />}
       name={<span className="os-mono">{senderLabel(sender)}</span>}
       current={!retired}
       dim={retired}
       open={open}
       onOpen={onToggle}
-      state={
-        <>
-          {retired ? <Chip tone="muted">retired</Chip> : null}
-          {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
-        </>
-      }
+      secondary={sender.fromName}
+      state={retired ? "Retired" : "Active"}
+      tone={retired ? "muted" : "accent"}
+      stateExtra={tick === "added" ? <span className="os-livelist-tick">new</span> : null}
     >
-      {sender.fromName === "" ? null : <span className="os-caption">{sender.fromName}</span>}
-    </ListRow>
+    </RecordRow>
   );
 }
 
@@ -336,14 +334,17 @@ function RetirePanel({
 
 export function SenderForm({
   sender,
+  initialAccountId = "",
   writes,
   onDone,
 }: {
   sender?: SenderIdentityRow;
+  initialAccountId?: string;
   writes: CampaignWrites;
   onDone: (createdId: string) => void;
 }) {
   const accounts = useAccountOptions();
+  const defaultAccountId = useDefaultOrganization(accounts);
   const editing = sender !== undefined;
   const write = editing ? writes.updateSender : writes.createSender;
   const [draft, setDraft] = useState(() => ({
@@ -354,15 +355,18 @@ export function SenderForm({
     notes: sender?.notes ?? "",
   }));
 
-  const ready = draft.address.trim() !== "" && draft.fromName.trim() !== "";
+  const accountId = draft.accountId || (sender === undefined ? (initialAccountId || defaultAccountId) : "");
+
+  const ready = organizationChosen(accounts, accountId) && draft.address.trim() !== "" && draft.fromName.trim() !== "";
 
   async function submit() {
+    if (!ready) return;
     if (editing && sender) {
-      const ok = await writes.updateSender.update(sender.id, draft);
+      const ok = await writes.updateSender.update(sender.id, { ...draft, accountId });
       if (ok) onDone(sender.id);
       return;
     }
-    const id = await writes.createSender.create(draft);
+    const id = await writes.createSender.create({ ...draft, accountId });
     if (id !== "") onDone(id);
   }
 
@@ -395,11 +399,12 @@ export function SenderForm({
             onChange={(v) => setDraft({ ...draft, replyTo: v })}
           />
         </Field>
-        <Field label="Client">
+        <Field label="Organization">
           <AccountPicker
             id="os-sender-account"
-            label="Client this mailbox is for"
-            value={draft.accountId}
+            label="Organization this mailbox is for"
+            required
+            value={accountId}
             onChange={(v) => setDraft({ ...draft, accountId: v })}
             accounts={accounts}
           />

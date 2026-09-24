@@ -76,10 +76,11 @@ import (
 // this package is what pins them.
 
 // Engine is the narrow engine surface the sending engine needs. Kept to
-// one method so tests fake it with flat row envelopes (the outbound
-// worker's precedent).
+// query envelopes plus an explicit organization action decision. Reading
+// shared campaign data does not itself authorize sending mail.
 type Engine interface {
 	Execute(ctx context.Context, query string) (any, error)
+	OrganizationCapable(ctx context.Context, account, verb, resource string) bool
 }
 
 // Store issues the domain's named constructs.
@@ -162,9 +163,7 @@ type Campaign struct {
 	// and prefill is UX while resolution is explicit (design D4).
 	SenderIdentityID string
 
-	// AccountID is the client this campaign is FOR. A record, never a
-	// visibility scope (accounts D1). It reaches the send path for exactly
-	// one reason: {{accountName}} (design D10).
+	// AccountID is the organization that owns the campaign and its sending resources.
 	AccountID string
 
 	// TrackOpens and TrackClicks decide whether the HTML part carries a
@@ -202,16 +201,18 @@ func (s SenderIdentity) Disabled() bool { return s.Status == "disabled" }
 
 // Template is the authored content.
 type Template struct {
-	ID       string
-	Subject  string
-	TextBody string
-	HTMLBody string
-	Status   string
+	AccountID string
+	ID        string
+	Subject   string
+	TextBody  string
+	HTMLBody  string
+	Status    string
 }
 
 // Recipient is one address in the audience roster.
 type Recipient struct {
-	ID string
+	AccountID string
+	ID        string
 	// CanonicalID is the stored `v1:campaigns:recipient:<short>` form. Kept
 	// alongside the bare id because the ledger page read compares a LIST of
 	// recipient ids, and the engine's relationship-canonicalizing pre-walk
@@ -430,11 +431,12 @@ func (s *Store) TemplateByID(ctx context.Context, templateID string) (Template, 
 	}
 	r := rows[0]
 	return Template{
-		ID:       bare(str(r, "id")),
-		Subject:  str(r, "subject"),
-		TextBody: str(r, "textBody"),
-		HTMLBody: str(r, "htmlBody"),
-		Status:   str(r, "status"),
+		AccountID: bare(str(r, "accountId")),
+		ID:        bare(str(r, "id")),
+		Subject:   str(r, "subject"),
+		TextBody:  str(r, "textBody"),
+		HTMLBody:  str(r, "htmlBody"),
+		Status:    str(r, "status"),
 	}, true, nil
 }
 
@@ -468,6 +470,7 @@ func (s *Store) RosterPage(ctx context.Context, audienceID, cursor string) ([]Re
 func recipientFromRow(r map[string]any) Recipient {
 	canonical := str(r, "id")
 	return Recipient{
+		AccountID:          bare(str(r, "accountId")),
 		ID:                 bare(canonical),
 		CanonicalID:        canonical,
 		Email:              str(r, "email"),
@@ -806,11 +809,13 @@ type Delivery struct {
 // (memql#3348).
 func (s *Store) RecordDelivery(ctx context.Context, d Delivery) error {
 	args := []arg{
-		{"campaignId", d.CampaignID},
 		{"recipientId", d.RecipientID},
 		{"email", d.Email},
 		{"status", d.Status},
 		{"attempts", d.Attempts},
+	}
+	if d.CampaignID != "" {
+		args = append(args, arg{"campaignId", d.CampaignID})
 	}
 	if d.SkipReason != "" {
 		args = append(args, arg{"skipReason", d.SkipReason})

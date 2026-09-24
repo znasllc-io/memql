@@ -9,6 +9,47 @@ Sign-in requires a secure browser context with the Web Locks API. The OS
 serializes refresh-cookie responses across its tabs, including the initial
 session probe. Browsers without that capability refuse sign-in rather than
 race cookie rotation; credentials stay in memory and HttpOnly cookies.
+Signed-out users enter the OAuth/PKCE login flow automatically, without a
+separate landing-page button. The production login form shows both email-link
+and passkey actions; the local installation remains passkey-only. Unavailable
+identity services retain a retry view instead of an automatic redirect loop.
+
+Identity and ownership setup live in OS. Before probing a session, OS reads
+identity's `/auth/setup/state`: only an explicit `unclaimed` answer opens the
+ownership wizard. Either unreadable bootstrap/owner signal shows an unavailable
+view. The server reads the operator's `MEMQL_DEPLOY_PROVIDER`: only an exact
+`docker-local` enables local setup without email. Local setup requires a passkey
+and all subsequent local interactive sign-in uses passkeys; its contact email is
+not verified. `azure`, absent and unknown values retain hosted verification:
+email first, then mandatory passkey registration. Neither email verification nor
+an enrollment grant is an owner session. After both required steps, the existing
+`CoreGate` still controls inference onboarding and retains its owner/developer
+admission rules. Organization name is required; setup configures the existing
+`self` account, stamps its owner, and ensures its account group and owner
+membership before sealing the claim or issuing a session. Every step is
+idempotent under the same claim lock. The optional “Title in organization” is
+profile text (`primaryRole`), never an authorization role.
+
+The Identity app contains your profile, passkeys, sessions, personal access
+tokens, and sign-in policy. Email verification, invitations, recovery, and
+external OAuth consent also render in OS. Old identity page URLs hand off to
+`/identity/...`, carrying their parameters in the fragment rather than OS access
+logs. Identity remains the authority: its structured representation requires the
+exact configured OS origin (or a verified account front door), credentialed
+requests, and CSRF on mutations. Cookies retain their identity-host paths;
+OAuth/PKCE and device-bound email verification keep their existing protocol.
+
+Passkeys keep their existing RP IDs. The identity host publishes
+`/.well-known/webauthn` for WebAuthn Related Origin Requests from OS. Passkey
+operations require a current browser with related-origin and WebAuthn JSON
+support. Hosted email sign-in remains subject to account policy. Shared challenge
+storage, a durable enrollment record and a fail-closed PostgreSQL ownership lock
+coordinate replicas. Failed ceremonies can be retried; an attestation saved before
+a transient graph-write failure resumes with the same credential and user IDs.
+A lost enrollment cookie resumes through the registered passkey, or through a
+new verification of the original hosted email. No competing claim can replace a
+reserved owner. The setup table is private authentication state, never graph data
+or client-visible session authority.
 
 - **Desks** hold at most two auto-placed windows (solo centered, two-up
   split, swap/throw by drag); a third app spills onto a new desk. Windows
@@ -364,17 +405,15 @@ of the Packages half this passage replaces and survived it unchanged.
   in its `compact` form: the same five marks, no labels, each carrying its
   label as its accessible name. A row is read as the shape it opens into.
 
-- **THE PARKED-RUNS FEED IS A FOURTH FEED AT THE APP ROOT, AND IT IS THE ONE
-  RECORDED EXCEPTION** to the rule this app's own Packages half wrote down: a
-  deployment TIMELINE is retained by the page and never by the root. That rule
-  guards against subscribing a window to every deploy in the cluster to render
-  one row, and it still does. `packageDeploymentsAwaitingConfirm` is parked
-  runs ALONE -- a handful of rows, and rows a person needs to see BEFORE they
-  open anything, because the whole point of a gate that lives on the row is
-  that somebody who closed the window finds their deploy where they left it.
-  The list marks that row "a deploy is waiting for you". **Any other timeline
-  feed at the root is the thing the rule forbids**, and the exception's code
-  comment cites this passage rather than restating it.
+- **THE PENDING-RUNS FEED IS THE FOURTH FEED AT THE APP ROOT.**
+  `packageDeploymentsPending` retains active work and review gates, never full
+  deployment histories. Leave preserves analysis and the list shows Analyzing;
+  opening its row resumes Configuration or Review from persisted run state.
+  Cancel targets the exact run, using the same durable cancellation flag on
+  every replica. `packageDeploy(background:true, confirm:false)` persists the
+  run and returns its ID before fetching; request teardown does not stop it.
+  Terminal runs leave the pending feed. Registered sources with no report keep
+  a setup row, so a failure after leaving is still reachable in its timeline.
 
 - **A CREDENTIAL IS A CARD, AND THERE IS NO TYPE THAT COULD HOLD THE VALUE**
   (`sources/rows.ts`, `sources/useSourceCredentials.ts`). `CredentialRow`
@@ -400,16 +439,15 @@ of the Packages half this passage replaces and survived it unchanged.
   browser unnamed. No toasts, no dialogs, no `window.confirm` -- a refusal
   inside a modal that then closes is a refusal nobody can re-read.
 
-- **THE SOURCES GROUP LIVES IN THIS APP'S SETTINGS, NOT IN THE SHELL'S**
-  (`settings/SourcesGroup.tsx`). A source credential is this app's own record
-  -- the person's token for the repositories THEY deploy -- rather than a
-  cluster credential an operator rotates from a shell, which is the same line
-  Campaigns draws between its sending identities and Settings -> Integrations.
-  Revoking says what it will cost before it is done: sources fetching under it
-  will refuse at their next fetch until you switch them. Rotation is adding a
-  credential and repointing the source on its Source stop; there is no
-  in-place replace, because a replace would change what a source fetches under
-  without a row saying so.
+- **SOURCES HAS ONE CATALOG; SETTINGS DOES NOT REPEAT IT.** A configured
+  repository is the record, with its GitHub identity, organization or personal
+  target, repository and branch shown together. Credentials and installation
+  bindings supply verified access metadata; they are not separate Sources
+  rows or sibling Accounts/Repositories lists. Open a source to manage its
+  access and repository settings. Settings links to that same catalog rather
+  than rendering a second credential roster. Creating or restoring a source
+  belongs to Add deployable. Removing its catalog entry is separate from
+  archiving its deployment lifecycle or disconnecting its shared GitHub grant.
 
 - **A CUE AND A STANDING MARK ARE DIFFERENT STATEMENTS, and the update needs
   both.** The arrival ring says "this just changed" and decays on the clock;
@@ -984,8 +1022,7 @@ rules rather than repetitions of the five before it.
   fill it -- `groupsForAccount`, then `membersOfGroup` per group -- and it
   counts DISTINCT people, because somebody in two of a client's groups is one
   person and summing memberships would report a number nobody could reconcile.
-  It does NOT count the standing staff: developer rank and above reach every
-  client's work by rule with no rows anywhere, so including them would mean
+  It does NOT synthesize memberships for standing cluster operators, so including them would mean
   this band deciding who the cluster's staff are, on a screen about a client.
   Opening it hands off to Users on the group by intent rather than listing
   members here -- membership is managed on the group's own page, and a members
@@ -1007,15 +1044,16 @@ rules rather than repetitions of the five before it.
   are in it, because a domain that became proven is what a person would call a
   change.
 
-- **THE TIE PICKER FALLS BACK TO MyAccess, AND ONLY WHEN THE READ IS EMPTY.**
-  A client-rank person cannot read `v1:accounts:account` at all, so
-  `useAccountOptions` answers nothing for them -- and a picker with no options
-  would let a Member of Acme tie their campaign to nobody, landing their work
-  where their colleagues cannot see it. What they CAN be told is which groups
-  they are in, because MyAccess tells them as part of who they are, and each
-  group carries the client's id and NAME so the option is nameable without a
-  second read that would be refused for the same reason the first one was. It
-  is a fallback, never a merge: a caller who can read accounts gets the rows.
+- **ORGANIZATION OWNERSHIP IS ENFORCED BY THE ENGINE.** Campaigns and
+  deployables require one organization. The UI defaults from authoritative
+  `MyAccess.everyAccount/accountIds`: operators use `self`, a client with one
+  authorized organization uses that organization, and multiple memberships
+  require an explicit choice. The engine independently resolves the default,
+  checks current membership and app grants, verifies references belong to the
+  same organization, and stamps the persisted `accountId`. Creating or owning
+  a row does not bypass another organization's boundary. Group grants do not
+  grant cluster administration. See [Organization ownership](../../docs/public/operate/auth/organization-ownership.md)
+  for the full resource audit and existing-data policy.
 
 - **THE LEDGER IS AN ON-DEMAND READ, AND ALL FOUR BANDS ARE, DELIBERATELY.**
   Three of the four rolled-up concepts DO broadcast (`v1:platform:site`,
@@ -1039,7 +1077,7 @@ rules rather than repetitions of the five before it.
 - **THE FIRST-RUN CARD IS GATED ON A ROW, NOT ON A FLAG.** It renders when
   `v1:accounts:account:self` carries no `configuredAt`, read off the feed the
   list already holds rather than through a second by-id read -- one source of
-  truth for the row that decides whether a form or a list renders. Saving is
+  truth for the row that decides whether a form or a list renders. First-owner setup configures this same row; older installations can save
   an ordinary `updateClientAccount`, which stamps the field, so the answer
   lives in the cluster and the card is gone for everybody at once. Nothing is
   remembered in this browser, and no other OS surface gains a prompt: a
@@ -2381,6 +2419,70 @@ Acknowledgments are `v1:os:attentionReceipt` rows, keyed by server-derived
 clears marks only after a successful write, preserves them on failure, and
 offers an in-surface retry. An old revision cannot acknowledge a newer one,
 and one person's receipts cannot dismiss another's changes.
+
+### GitHub Sources
+
+A repository source identifies a verified GitHub account, its organization or
+personal account, and a repository. Saved access bindings allow multiple GitHub
+identities and installations to coexist and be reused across repositories.
+Selection never infers the first or latest credential.
+
+Add a deployable offers saved repository paths or Add source. New source setup
+asks one question per screen: GitHub account, organization (or personal account),
+then repository, each confirmed by Continue. Together those choices describe the
+source. Account connection appears only on the first screen; installation access
+only on the second. Refresh sits at the top left of the list it reads. Back
+preserves drafts; changing an identity clears organization and repository choices,
+and changing an organization clears the repository. Configuration follows, with
+branch/name/deployment mode and the separate MemQL owning account. Its default
+review cue remains immediately below the selector.
+
+Organization Continue verifies and saves the identity/installation access binding
+when needed; cancelling setup retains that access. Analyze registers the repository
+and starts its analysis. A saved repository is silently reused only with the same
+GitHub binding and MemQL ownership; its history never impersonates a different
+selected identity. Progress marks the visible step, not merely prefilled values.
+
+**Sources is the single configured repository catalog.** Each row projects the
+GitHub identity, organization or personal target, repository and tracked branch
+from the saved package and its verified access records. The MemQL owning account
+is separate attribution. There are no sibling Repositories or Accounts sections,
+and Settings links here without duplicating the credential roster. Opening a
+source exposes its access, repository settings, deployables and history. Missing
+personal metadata is labelled unknown; the repository URL cannot establish the
+GitHub identity that authorized it.
+
+Sources is management-only: new source setup remains in Add deployable. Remove
+source hides that configured package from the catalog and saved choices; it
+preserves the package ID, automatic updates, deployment history, running sites,
+shared credential and installation binding. Adding the same active configuration
+again restores or reuses that record atomically. Identity, installation binding,
+MemQL owner/account, repository and ref participate in reuse, so another identity
+or account never silently inherits its history. Archive and restore remain
+separate lifecycle actions. An installation binding without a configured
+repository never creates a Sources row.
+
+Existing repositories retain their original installation relationship and
+revalidate live access on fetch. Disconnect GitHub is a separate identity-wide
+operation: it revokes that identity's authorization and affects future fetches
+for every repository using it. Removing a source does not disconnect GitHub;
+neither operation uninstalls the shared GitHub App.
+
+Connect adds another identity. Reconnect explicitly names a stored credential
+and refuses a different numeric GitHub identity. OAuth uses PKCE and single-use
+shared state bound to the initiating live MemQL session. The installation setup
+return is neutral; protected Connect establishes the personal authorization.
+Per-identity database locks serialize callback upsert, refresh and disconnect
+across replicas, with uncached credential reads inside that boundary.
+
+The backend verifies owner, credential, installation and repository access on
+list, probe and create. Browser-provided provider claims cannot mint bindings.
+Source and credential changes, viewer changes and unmount invalidate pending
+reads and draft selections. Source creation and repository registration prevent
+duplicate submission; late responses cannot deploy a replacement flow. GitHub
+setup, refused access and pending organization approval stay visible in Add
+source. New connections do not offer pasted tokens; existing stored credentials
+remain manageable.
 
 ### Branch deployment policy
 

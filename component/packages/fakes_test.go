@@ -22,6 +22,12 @@ type recordingEngine struct {
 	rows map[string][]map[string]any
 	// fail, when set, makes any statement containing the key return an error.
 	fail map[string]error
+	// Denied by default; lifecycle ordering tests opt in explicitly.
+	allowOrganizationActions bool
+}
+
+func (e *recordingEngine) OrganizationCapable(context.Context, string, string, string) bool {
+	return e.allowOrganizationActions
 }
 
 func (e *recordingEngine) Execute(_ context.Context, query string) (*memql.ExecuteResult, error) {

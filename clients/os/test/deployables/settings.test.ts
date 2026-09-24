@@ -49,6 +49,15 @@ describe("the manifest", () => {
     expect(sectionsFor(deployables!).map((s) => s.id)).toEqual(["map", "deployables", "sources", "logs", "settings"]);
   });
 
+  it("announces the unified Sources destination without a second repository or account section", () => {
+    expect(deployables?.attentionChanges?.find(change => change.id === "deployables:saved-sources"))
+      .toMatchObject({ revision: "github-sources-3", sectionId: "sources" });
+    expect(DEPLOYABLES_SECTION_IDS).not.toContain("repositories");
+    expect(DEPLOYABLES_SECTION_IDS).not.toContain("accounts");
+    expect(RETIRED_SECTIONS["repositories"]).toBeUndefined();
+    expect(sanitizeDeployablesSettings({ version: 1, defaultSection: "repositories" }).defaultSection).toBe("map");
+  });
+
   it("opens on the MAP", () => {
     // The signature surface, and the reason the epic exists: what serves where
     // is a shape rather than a table. The app's own settings can send somebody

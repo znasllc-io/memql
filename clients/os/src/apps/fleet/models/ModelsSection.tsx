@@ -18,6 +18,8 @@ import {
   Refine,
   Select,
   Subhead,
+  RecordList,
+  RecordRow,
 } from "../../../kit";
 import { figureFrom, type Figure } from "../../../kit/measure";
 import { CatalogSection } from "./CatalogSection";
@@ -156,7 +158,7 @@ export function ModelsSection({ onHome }: { onHome?: () => void } = {}) {
       <div className="fleet-section-header">
       <Head
         title="Model library"
-        meta={models.length === 0 ? undefined : `${models.length} on your fleet`}
+        meta={view === "available" && catalog.state === "read" && !catalog.error ? shown.length : undefined}
       >
         {/* A REFRESH CONTROL BELONGS HERE, unlike on the live sections: both
             readings are on-demand projections that are never broadcast, so
@@ -257,7 +259,7 @@ export function ModelsSection({ onHome }: { onHome?: () => void } = {}) {
         <EmptyState title="No matching models" action={<Button onClick={() => { setSearch(""); setCapability(""); setOnlineOnly(false); }}>Clear filters</Button>}>Try another name or include more capabilities and offline machines.</EmptyState>
       ) : null}
 
-      <ul className="os-fleet-models">
+      <RecordList as="ul" label="Available models">
         {shown.map((model) => (
           <ModelLine
             key={model.modelId}
@@ -269,7 +271,7 @@ export function ModelsSection({ onHome }: { onHome?: () => void } = {}) {
             showMeasured={anyMeasured}
           />
         ))}
-      </ul>
+      </RecordList>
 
       {/* SAID ONCE, UNDER THE LIST, rather than as a column of identical
           absence marks. When the probe lands (epic memql#5146) the column
@@ -459,26 +461,20 @@ function ModelLine({
   /** Whether ANY model on this fleet is measured -- see `anyMeasured`. */
   showMeasured: boolean;
 }) {
+  const [open, setOpen] = useState(false);
   const size = formatParams(model.params);
   const window = formatContext(model.contextWindow);
 
   return (
-    <li className="os-fleet-model" data-offline={model.online ? undefined : true}>
-      <details className="fleet-model-detail"><summary className="os-fleet-model-head">
-        <span className="os-fleet-model-rank" aria-hidden="true">
-          {rank}
-        </span>
-        <span className="os-fleet-model-id os-mono">{model.modelId}</span>
-        {/* The ONE standing mark on this screen. It names what the model is
-            about to be used for, which is the question the whole section
-            answers; everything else here is quiet. */}
-        {serves.length > 0 ? (
-          <span className="os-fleet-model-next">next for {serves.join(", ").toLowerCase()}</span>
-        ) : null}
+    <div>
+      <RecordRow name={model.modelId} icon={<span aria-hidden>{rank}</span>}
+        secondary={serves.length ? `next for ${serves.join(", ").toLowerCase()}` : undefined}
+        state={model.online ? "Online" : "Offline"} tone={model.online ? "accent" : "muted"}
+        open={open} onOpen={() => setOpen(value => !value)}>
         {preferred ? <Chip tone="accent">preferred</Chip> : null}
-        {model.online ? null : <Chip tone="muted">offline</Chip>}
-      </summary>
-
+        <span>{size}</span><span>{window ? `${window} tokens` : ""}</span>
+      </RecordRow>
+      {open ? <div className="fleet-model-detail">
       <Facts>
         {/* SIZE IS NOT PRINTED AS ZERO. Zero parameters is not a thing, and a
             "0" here would make the unmeasured model look like the smallest
@@ -521,10 +517,9 @@ function ModelLine({
       </Chips>
 
       {model.machines.length === 0 ? null : (
-        <ul className="os-fleet-model-machines">
+        <RecordList as="ul" label="Machines serving this model">
           {model.machines.map((machine) => (
-            <li key={machine.registrationId} className="os-fleet-model-machine">
-              <span className="os-mono">{machine.displayName || machine.name || machine.registrationId}</span>
+            <RecordRow key={machine.registrationId} name={machine.displayName || machine.name || machine.registrationId} state={machine.online ? (machine.busy ? "Busy" : "Online") : "Offline"}>
               <span className="os-caption">
                 {machine.online ? (machine.busy ? "busy" : "online") : "offline"}
                 {machine.maxConcurrent > 0
@@ -532,12 +527,12 @@ function ModelLine({
                   : ""}
                 {machine.runtimes.length > 0 ? ` · ${machine.runtimes.join(", ")}` : ""}
               </span>
-            </li>
+            </RecordRow>
           ))}
-        </ul>
+        </RecordList>
       )}
-      </details>
-    </li>
+      </div> : null}
+    </div>
   );
 }
 

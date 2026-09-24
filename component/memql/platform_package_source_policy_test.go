@@ -73,7 +73,7 @@ func TestPackageSourceGuardSkipsWhatIsNotAClaim(t *testing.T) {
 		{"a repo source with no URL", map[string]any{"sourceKind": "repo", "status": "active"}, false, "", ""},
 	}
 	for _, tc := range cases {
-		if err := e.validatePackageSourceUnique(ctx, tc.payload, "p", "u-1", tc.prior, tc.pUrl, tc.pRef); err != nil {
+		if err := e.validatePackageSourceUnique(ctx, tc.payload, "p", "u-1", tc.prior, tc.pUrl, tc.pRef, packageSourceScope(tc.payload)); err != nil {
 			t.Errorf("%s: the guard read the database for a write that claims nothing: %v", tc.name, err)
 		}
 	}
@@ -86,14 +86,14 @@ func TestPackageSourceGuardFailsClosedWithoutADatabase(t *testing.T) {
 	ctx := auth.ContextWithUserActor(context.Background(), "u-1")
 	err := e.validatePackageSourceUnique(ctx,
 		map[string]any{"sourceKind": "repo", "repoUrl": "https://github.com/a/b", "status": "active"},
-		"p", "u-1", false, "", "")
+		"p", "u-1", false, "", "", "")
 	if err == nil || !strings.Contains(err.Error(), "cannot verify") {
 		t.Fatalf("a create must be checked, and an unreachable database must refuse rather than admit: %v", err)
 	}
 	// A ref change on an existing package is a claim too.
 	err = e.validatePackageSourceUnique(ctx,
 		map[string]any{"sourceKind": "repo", "repoUrl": "https://github.com/a/b", "repoRef": "release", "status": "active"},
-		"p", "u-1", true, "https://github.com/a/b", "main")
+		"p", "u-1", true, "https://github.com/a/b", "main", "")
 	if err == nil || !strings.Contains(err.Error(), "cannot verify") {
 		t.Fatalf("changing the ref chooses a source and must be checked: %v", err)
 	}

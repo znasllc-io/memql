@@ -2,6 +2,7 @@ package packages
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -54,7 +55,8 @@ type Integration struct {
 	// and the resolver that knows where the app comes from (the environment,
 	// or the rows a cluster owner's registration wrote -- design record
 	// 2026-09-20-github-app-setup, D2). Nil reads the environment alone.
-	githubApp func() githubapp.Config
+	githubApp     func() githubapp.Config
+	githubGrantDB func() *sql.DB
 
 	depsOnce sync.Once
 	deps     *Deps
@@ -102,6 +104,11 @@ func (i *Integration) IntegrationName() string { return integrationName }
 // Capabilities implements memql.IntegrationProvider.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
+		{Name: "sourceRegister", Description: "Register or restore a repository source without changing its deployables.", Handler: i.handleSourceRegister, ArgsSchema: map[string]string{"name": "string (required)", "repoUrl": "string (required)", "repoRef": "string", "credentialId": "string (required)", "sourceConnectionId": "string (required)", "accountId": "string (required)", "autoDeploy": "bool"}},
+		{Name: "sourceConnectionCreate", Description: "Save one personal GitHub installation binding, verified live under its grant.", Handler: i.handleSourceConnectionCreate, ArgsSchema: map[string]string{"credentialId": "string (required)", "installationId": "string (required)"}},
+		{Name: "sourceConnectionRemove", Description: "Remove a saved installation binding without revoking its grant or deleting deployments.", Handler: i.handleSourceConnectionRemove, ArgsSchema: map[string]string{"connectionId": "string (required)"}},
+		{Name: "sourceInstallations", Description: "Discover installations under a named personal GitHub grant, without listing repositories.", Handler: i.handleSourceInstallations, ArgsSchema: map[string]string{"credentialId": "string (required)"}},
+		{Name: "validateSourceConnectionRepository", Description: "Validate a personal source binding and its live repository access before package persistence.", Handler: i.handleValidateSourceConnectionRepository, ArgsSchema: map[string]string{"connectionId": "string (required)", "credentialId": "string (required)", "repoUrl": "string (required)"}},
 		{
 			Name:        "analyze",
 			Description: "Analyze a package source offline and return the report, without deploying anything (epic memql#4794, D12). Runs the same Init-grade gates strict boot runs, so 'this DSL would refuse boot' is an answer here rather than a crashlooping node later. Returns the section E report; a refusal carries a stable code.",
@@ -112,12 +119,13 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "deploy",
-			Description: "Run one deployment attempt for a package (epic memql#4794). Without confirm, the run parks at awaiting_confirm with the analysis report on the deployment row and nothing else happens; with confirm, it builds, stages, rolls and publishes in the D6 order. placements (epic memql#4885, D8) is per deployable name -- {hostname, accountId, ownDomain} -- read on a deployable's FIRST deploy only: the site is created at hostname, then the account write and the domain binding run under the caller's actor as the same two calls the page makes, and a refused one lands on the outcome (accountRefusal / domainRefusal) without failing the publish. Returns {deploymentId, status, awaitingConfirm, deployables, report}.",
+			Description: "Run one deployment attempt for a package (epic memql#4794). Without confirm, the run parks at awaiting_confirm with the analysis report on the deployment row and nothing else happens; with confirm, it builds, stages, rolls and publishes in the D6 order. placements (epic memql#4885, D8) is per deployable name -- {hostname, accountId, ownDomain} -- read on a deployable's FIRST deploy only: the site is created at hostname with its authorized organization in the same write; accountId defaults to the package organization. A refused organization fails creation; optional domain-binding failures are recorded without failing publication. Returns {deploymentId, status, awaitingConfirm, deployables, report}.",
 			Handler:     i.handleDeploy,
 			ArgsSchema: map[string]string{
 				"packageId":        "string (required) -- the package to deploy",
 				"confirm":          "boolean -- pass true to proceed past the always-present confirm gate",
-				"placements":       "object -- deployable name -> {hostname, accountId, ownDomain, skip}; hostname is required on a deployable's FIRST deploy unless skip is true, accountId and ownDomain are optional and applied after the site exists, and skip:true leaves that deployable out of the run entirely (memql#4930) -- recorded as skipped, with nothing built and nothing it already serves touched",
+				"background":       "boolean -- return the persisted analysis run ID immediately; requires confirm:false and no deploymentId",
+				"placements":       "object -- deployable name -> {hostname, accountId, ownDomain, skip}; hostname is required on a deployable's FIRST deploy unless skip is true, accountId defaults to the package organization and is persisted at creation, while ownDomain is applied after the site exists, and skip:true leaves that deployable out of the run entirely (memql#4930) -- recorded as skipped, with nothing built and nothing it already serves touched",
 				"deploymentId":     "string -- confirm the PARKED run of this id rather than starting a new one (memql#4954). Ignored unless it names a run of this package waiting at the gate; anything else opens a new run",
 				"fromDeploymentId": "string -- retry an earlier run from the bytes it already fetched (task memql#4902) rather than fetching the source again",
 			},
@@ -242,6 +250,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Handler:     i.handleSourceProbe,
 			ArgsSchema: map[string]string{
 				"repoUrl":      "string (required) -- the repository URL as typed",
+				"connectionId": "string -- a saved installation binding of the caller",
 				"credentialId": "string -- one of the caller's v1:platform:sourceCredential rows to probe under; empty probes anonymously",
 			},
 		},
@@ -250,6 +259,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "List the repositories the caller's GitHub App grant can reach (epic memql#4912, C7). Resolves the caller's active grant -- or the one named by credentialId -- reads its installations LIVE from GitHub and walks each one's repositories, and answers {repositories, installations, pending, nextPage, reason}. Every refusal is a typed reason rather than an error, so the picker renders in place: github_app_not_configured (this cluster has no app, so only the token path is offered), credential_not_found (no grant, or not the caller's), credential_revoked, reconnect_required, rate_limited. Writes nothing except the grant's own installation ids, refreshed from what it just read.",
 			Handler:     i.handleSourceRepositories,
 			ArgsSchema: map[string]string{
+				"connectionId": "string -- a saved installation binding of the caller",
 				"credentialId": "string -- a github_app grant of the caller's; empty resolves their active grant",
 				"page":         "int -- 1-based page through each installation's repositories, 100 per page; 0 means the first",
 			},
@@ -300,7 +310,11 @@ func (i *Integration) handleDeploy(ctx context.Context, args map[string]any, _ i
 	if err != nil {
 		return nil, err
 	}
-	out, derr := Deploy(ctx, deps, DeployRequest{
+	deploy := Deploy
+	if boolArg(args, "background") {
+		deploy = StartAnalysis
+	}
+	out, derr := deploy(ctx, deps, DeployRequest{
 		PackageId: strings.TrimSpace(stringArg(args, "packageId")),
 		Actor:     actorFromContext(ctx),
 		Confirmed: boolArg(args, "confirm"),
@@ -362,6 +376,9 @@ func (i *Integration) handleArchiveSite(ctx context.Context, args map[string]any
 	// The disable-first rule and the systemOwned exemption are NOT checked
 	// here. They are the write guard's, beside executeWrite, so they hold for
 	// every writer rather than only for callers who came through this door.
+	if err := requireSiteRowAction(ctx, deps.Store, site, "retire"); err != nil {
+		return nil, err
+	}
 	if err := deps.Store.setSiteStatus(ctx, siteId, siteStatusArchived); err != nil {
 		return nil, err
 	}
@@ -374,6 +391,13 @@ func (i *Integration) handleRestoreSite(ctx context.Context, args map[string]any
 		return nil, err
 	}
 	siteId := strings.TrimSpace(stringArg(args, "siteId"))
+	site, err := deps.Store.siteById(ctx, siteId)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireSiteRowAction(ctx, deps.Store, site, "retire"); err != nil {
+		return nil, err
+	}
 	if err := deps.Store.setSiteStatus(ctx, siteId, siteStatusDisabled); err != nil {
 		return nil, err
 	}
@@ -448,6 +472,9 @@ func (i *Integration) handleDeleteSite(ctx context.Context, args map[string]any,
 
 	// 1. The domains, so the hostname stops resolving at this write rather
 	//    than at the Ingress deletion, and the client's own names come free.
+	if err := requireSiteRowAction(ctx, deps.Store, site, "retire"); err != nil {
+		return nil, err
+	}
 	domainsReleased, err := deps.Store.releaseDomainsForSite(ctx, siteId)
 	if err != nil {
 		return nil, err
@@ -565,6 +592,19 @@ func (i *Integration) handleCancelDeployment(ctx context.Context, args map[strin
 			status)
 	}
 
+	// Flag first, then re-read. The pipeline also checks after parking, so a
+	// cancellation racing the final analysis write cannot be left unread.
+	if cerr := deps.Store.requestDeploymentCancel(ctx, deploymentId); cerr != nil {
+		return nil, cerr
+	}
+	latest, rerr := deps.Store.deploymentById(ctx, deploymentId)
+	if rerr != nil {
+		return nil, rerr
+	}
+	if latest != nil {
+		status = rowString(latest, "status")
+	}
+
 	// A PARKED RUN HAS NO PROCESS, so nothing would ever read the flag.
 	//
 	// This is the one place the "only the running node closes the row" rule
@@ -595,9 +635,6 @@ func (i *Integration) handleCancelDeployment(ctx context.Context, args map[strin
 		}), nil
 	}
 
-	if cerr := deps.Store.requestDeploymentCancel(ctx, deploymentId); cerr != nil {
-		return nil, cerr
-	}
 	return resultNode(map[string]any{
 		"deploymentId":    deploymentId,
 		"status":          status,
@@ -654,6 +691,9 @@ func (i *Integration) handleArchivePackage(ctx context.Context, args map[string]
 	}
 	var released []string
 	for _, s := range sites {
+		if err := requireSiteRowAction(ctx, deps.Store, s, "retire"); err != nil {
+			return nil, err
+		}
 		if rowBool(s, "systemOwned") {
 			return nil, refuse(CodeSiteSystemOwned,
 				"%q is one of this cluster's own surfaces and cannot be torn down by archiving a source.",
@@ -796,6 +836,9 @@ func (i *Integration) handleDeactivateDeployable(ctx context.Context, args map[s
 			return nil, refuse(CodeSiteSystemOwned,
 				"%q is one of this cluster's own surfaces. It is re-seeded at every boot, so deactivating it would leave nobody a way in until the next restart.",
 				hostname)
+		}
+		if err := requireSiteRowAction(ctx, deps.Store, site, "retire"); err != nil {
+			return nil, err
 		}
 		if domainsReleased, err = deps.Store.releaseDomainsForSite(ctx, siteId); err != nil {
 			return nil, err
@@ -942,7 +985,7 @@ func (i *Integration) resolve() (*Deps, error) {
 		if i.githubApp != nil {
 			gh = githubapp.New(githubapp.Config{}, githubapp.WithConfigSource(i.githubApp))
 		}
-		s := &store{engine: i.engine, logger: i.logger, github: gh}
+		s := &store{engine: i.engine, logger: i.logger, github: gh, directDB: i.githubGrantDB}
 		i.deps = &Deps{
 			Store:           s,
 			Fetcher:         newProductionFetcher(s, i.logger, gh),

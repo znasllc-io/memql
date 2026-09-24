@@ -22,12 +22,15 @@ export const DEPLOYMENT_CONCEPT = "v1:platform:packageDeployment";
 export interface PackageRow {
   id: string;
   ownerUserId: string;
+  accountId: string;
   name: string;
   sourceKind: string;
   repoUrl: string;
   repoRef: string;
   /** A v1:platform:sourceCredential id, or "" for a public repository. Never a value. */
   credentialId: string;
+  sourceConnectionId?: string;
+  sourceRemoved?: boolean;
   artifactId: string;
   deployedVersion: string;
   latestKnownVersion: string;
@@ -75,11 +78,14 @@ export function packageFromRow(row: Row): PackageRow {
   return {
     id: rowString(flat, "id"),
     ownerUserId: rowString(flat, "ownerUserId"),
+    accountId: rowString(flat, "accountId"),
     name: rowString(flat, "name"),
     sourceKind: rowString(flat, "sourceKind"),
     repoUrl: rowString(flat, "repoUrl"),
     repoRef: rowString(flat, "repoRef"),
     credentialId: rowString(flat, "credentialId"),
+    sourceConnectionId: rowString(flat, "sourceConnectionId"),
+    sourceRemoved: boolOr(flat, "sourceRemoved", false),
     artifactId: rowString(flat, "artifactId"),
     deployedVersion: rowString(flat, "deployedVersion"),
     latestKnownVersion: rowString(flat, "latestKnownVersion"),
@@ -108,10 +114,13 @@ export function packageFromRow(row: Row): PackageRow {
 export function packageFingerprint(p: PackageRow): string {
   return [
     p.name,
+    p.accountId,
     p.sourceKind,
     p.repoUrl,
     p.repoRef,
     p.credentialId,
+    p.sourceConnectionId,
+    p.sourceRemoved,
     p.deployedVersion,
     p.latestKnownVersion,
     p.updateAvailable ? "update" : "current",
@@ -154,6 +163,7 @@ export interface DeployableOutcome {
 }
 
 export interface DeploymentRow {
+  cancelRequested?: boolean;
   id: string;
   packageId: string;
   sourceVersion: string;
@@ -287,6 +297,7 @@ export function deploymentFromRow(row: Row): DeploymentRow {
     packageId: rowString(flat, "packageId"),
     sourceVersion: rowString(flat, "sourceVersion"),
     status: rowString(flat, "status"),
+    cancelRequested: boolOr(flat, "cancelRequested", false),
     report: objectOf<AnalysisReport>(flat, "report"),
     dslVersion: rowString(flat, "dslVersion"),
     deployables: listOf<DeployableOutcome>(flat, "deployables"),
@@ -410,3 +421,7 @@ export function shortVersion(v: string): string {
   if (/^[0-9a-f]{16,}$/i.test(t)) return t.slice(0, 7);
   return t;
 }
+
+export const PENDING_DEPLOYMENT_STATUSES = new Set([
+  "analyzing", "awaiting_confirm", "building", "staging_dsl", "rolling", "publishing",
+]);

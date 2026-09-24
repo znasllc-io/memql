@@ -93,7 +93,7 @@ describe("the modules inventory", () => {
 
     const headings = screen
       .getAllByRole("heading", { level: 4 })
-      .map((el) => el.textContent);
+      .map((el) => el.childNodes[0]?.textContent);
     // Pack -> integration -> node-type -> component. Alphabetical would put
     // Components first and Packs last, so this fails on a plain sort.
     expect(headings).toEqual(["Packs", "Integrations", "Node types", "Components"]);
@@ -286,17 +286,17 @@ describe("the cluster-wide readiness column", () => {
     expect(await screen.findByText("Across the cluster")).toBeTruthy();
     expect(screen.getByText("Set up. The one node that counts says so.")).toBeTruthy();
     const list = screen.getByRole("list", { name: "storage on each live node" });
-    const rows = Array.from(list.querySelectorAll(".os-cluster-readiness-row"));
-    expect(rows.map((r) => r.querySelector(".os-cluster-readiness-node")?.textContent)).toEqual(["agent-a", "edge-a", "bff-b"]);
+    const rows = Array.from(list.querySelectorAll(".os-record-row"));
+    expect(rows.map((r) => r.querySelector(".os-row-name")?.textContent)).toEqual(["agent-a", "edge-a", "bff-b"]);
     // Counted and set aside are told apart in the markup, not only the words.
-    expect(rows.map((r) => r.hasAttribute("data-aside"))).toEqual([false, true, true]);
+    expect(rows.map((r) => r.hasAttribute("data-dim"))).toEqual([false, true, true]);
     expect(within(rows[1] as HTMLElement).getByText("Catching up")).toBeTruthy();
     expect(within(rows[1] as HTMLElement).getByText(/last checked 3h ago/)).toBeTruthy();
     expect(within(rows[2] as HTMLElement).getByText(/the fleet could not be read/)).toBeTruthy();
     // Every row carries its exact reported moment, so an operator comparing
     // two nodes that both read "3h ago" has something to compare.
     for (const row of rows) {
-      expect(row.getAttribute("title")).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(row.querySelector(".os-record-status")?.getAttribute("title")).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     }
   });
 

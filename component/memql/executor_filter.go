@@ -228,6 +228,10 @@ func (e *MemQLEngine) tryCompileCombinedFilterIn(ctx context.Context, expr Expre
 		return compiledExpression{sql: "FALSE"}, true
 
 	case *accountScopeMatch:
+		if node.rowID {
+			return compiledExpression{sql: `id = ANY(?::text[])`, args: []any{pq.Array(node.accounts)}}, true
+		}
+
 		// The account grant, lowered for this request (epic memql#5165).
 		//
 		// ONE EXPRESSION FOR BOTH FIELD SHAPES. `jsonb_exists_any` is true
@@ -269,6 +273,9 @@ func (e *MemQLEngine) tryCompileCombinedFilterIn(ctx context.Context, expr Expre
 					jsonbExpr, jsonbExpr, jsonbExpr, jsonbExpr),
 				args: []any{"array", "string"},
 			}, true
+		}
+		if node.allowUntied {
+			return compiledExpression{sql: fmt.Sprintf("(%s IS NULL OR %s = 'null'::jsonb OR %s = '\"\"'::jsonb OR jsonb_exists_any(%s, ?::text[]))", jsonbExpr, jsonbExpr, jsonbExpr, jsonbExpr), args: []any{pq.Array(node.accounts)}}, true
 		}
 		if len(node.accounts) == 0 {
 			return compiledExpression{sql: "FALSE"}, true

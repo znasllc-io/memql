@@ -32,7 +32,8 @@ import {
   Notice,
   ProvenanceDot,
   Refine,
-  Row as ListRow,
+  RecordRow,
+  listCount,
   Select,
   SortControl,
   type RefineChip,
@@ -731,7 +732,7 @@ export function BrowseSection({
           and count, the quiet sort, one Refine affordance, the Upload
           primary. The nine-control strip this replaces is the reason rule 2
           exists. */}
-      <Head title={headTitle} breadcrumbs={headTrail} meta={listedCount}>
+      <Head title={headTitle} breadcrumbs={headTrail} meta={listCount(list?.snapshot, listedCount)}>
         <SortControl
           ascending={filter.sortAscending}
           onToggle={() => patch({ sortAscending: !filter.sortAscending })}
@@ -1386,14 +1387,15 @@ function FileLine({
       }}
       {...draggable.listeners}
     >
-    <ListRow
+    <RecordRow
       icon={kindGlyph(row.kind)}
       name={artifactName(row)}
       current={!row.archived}
       dim={row.archived}
       open={open}
       onOpen={onToggle}
-      state={
+      secondary={story.sentence}
+      stateExtra={
         <>
           <ProvenanceDot tone={story.tone} label={story.sentence || undefined} />
           {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
@@ -1423,7 +1425,7 @@ function FileLine({
           {LINK_LABEL[linkState]}
         </Chip>
       )}
-    </ListRow>
+    </RecordRow>
     </div>
   );
 }

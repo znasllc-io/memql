@@ -179,7 +179,7 @@ func newAppCallbackServer(t *testing.T, eng *appFakeEngine, gh *appFakeGitHub) (
 	logger := slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	return &Server{
 		Cfg:          identity.Config{BaseURL: "https://identity.example.test"},
-		Store:        &identity.Store{Engine: eng, Logger: logger},
+		Store:        &identity.Store{Engine: eng, Logger: logger, GithubGate: githubHTTPUnitGate},
 		Audit:        audit,
 		Logger:       logger,
 		GitHubClient: gh.start(t),
@@ -233,32 +233,14 @@ func TestARegistrationIsStoredSealedAndTheOwnerIsSentOnToInstall(t *testing.T) {
 		t.Error("the githubApp readiness module was not asked to look again")
 	}
 
-	// AND THEN IT KEEPS GOING: the installation page, carrying an ordinary
-	// CONNECT state for the same person and the same return path.
+	// Continue to installation; it cannot mint a grant without a subsequent
+	// explicit, session-bound PKCE authorization.
 	loc, err := url.Parse(rec.Header().Get("Location"))
 	if err != nil || loc.Host != "github.com" || loc.Path != "/apps/memql-on-example-test/installations/new" {
 		t.Fatalf("Location = %q, want the app's installation page", rec.Header().Get("Location"))
 	}
-	chained := loc.Query().Get("state")
-	if chained == "" || chained == appSetupState {
-		t.Fatalf("the installation page carries state %q", chained)
-	}
-	writes := eng.all("mutation createGithubConnectState(")
-	if len(writes) != 1 {
-		t.Fatalf("%d connect states written", len(writes))
-	}
-	for _, want := range []string{
-		`userId: "v1:identity:user:owner"`,
-		`returnPath: "/?connect=deployables"`,
-		`purpose: "connect"`,
-		`stateHash: "` + identity.HashConnectState(chained) + `"`,
-	} {
-		if !strings.Contains(writes[0], want) {
-			t.Errorf("the chained state is missing %s:\n  %s", want, writes[0])
-		}
-	}
-	if strings.Contains(writes[0], chained) {
-		t.Error("the chained state's PLAINTEXT was written to its row")
+	if loc.Query().Get("state") != "" || len(eng.all("mutation createGithubConnectState(")) != 0 {
+		t.Fatal("installation must return neutral installed; explicit Connect establishes browser binding and PKCE")
 	}
 
 	if got := audit.actions(); len(got) != 1 || got[0] != "github_app_registered" {

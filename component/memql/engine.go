@@ -1342,6 +1342,9 @@ func (e *MemQLEngine) planCacheSignature(ctx context.Context, plan *QueryPlan) s
 	if treeHasAccountScope(plan.Root) {
 		signature = "account:" + e.accountScopeFor(ctx).fingerprint + "\x1f" + signature
 	}
+	if treeHasAccountScope(plan.Root) || planIsUnbound(plan) {
+		signature = "organization:" + e.organizationAuthorizationFingerprint(ctx) + "\x1f" + signature
+	}
 	return signature
 }
 
@@ -1450,7 +1453,7 @@ func (e *MemQLEngine) executeLogicFunctionCall(ctx context.Context, call *Functi
 	}
 	// The capability grant, repeated at each entry point for the reason the
 	// rank floor is (epic memql#5166, D11).
-	if err := e.refuseBelowRequiredCapability(ctx, fn, call.Name); err != nil {
+	if err := e.refuseBelowRequiredCapability(ctx, fn, call.Name, call.Args); err != nil {
 		return nil, err
 	}
 	if fn.LogicBody == nil {
@@ -1518,7 +1521,7 @@ func (e *MemQLEngine) executeMutationFunctionCall(ctx context.Context, call *Fun
 	}
 	// The capability grant, repeated at each entry point for the reason the
 	// rank floor is (epic memql#5166, D11).
-	if err := e.refuseBelowRequiredCapability(ctx, fn, call.Name); err != nil {
+	if err := e.refuseBelowRequiredCapability(ctx, fn, call.Name, call.Args); err != nil {
 		return nil, err
 	}
 	if fn.MutationTemplate == nil {

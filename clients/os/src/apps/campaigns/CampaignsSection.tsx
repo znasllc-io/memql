@@ -1,3 +1,4 @@
+import { RecordList, listCount } from "../../kit/RecordRow";
 import { NeedsConfiguration } from "./NeedsConfiguration";
 import { useSession } from "../../chrome/access";
 import { campaignSendingConfigured } from "./readiness";
@@ -12,6 +13,7 @@ import { Send } from "lucide-react";
 
 import { AccountChip, AccountPicker } from "../accounts/AccountPicker";
 import { useAccountOptions } from "../accounts/tie";
+import { organizationChosen, useDefaultOrganization } from "../accounts/organization";
 import { accountNameFrom } from "../accounts/rows";
 import {
   Button,
@@ -27,7 +29,7 @@ import {
   LiveList,
   Notice,
   Panel,
-  Row as ListRow,
+  RecordRow,
   Select,
   Subhead,
   formatMoment,
@@ -145,7 +147,7 @@ export function CampaignsSection({
 
   return (
     <div className="os-app-stack">
-      <Head title="Campaigns">
+      <Head title="Campaigns" meta={listCount(source?.snapshot)}>
         <AddButton onClick={() => setAdding((v) => !v)} label="New campaign" />
       </Head>
       <NeedsConfiguration email={email} />
@@ -235,11 +237,7 @@ export function labelOfSender(senders: SenderIdentityRow[], id: string): string 
 /** The tone a status reads in. Only two states are worth colouring: one that
  *  is happening and one that went wrong. Everything else is a plain chip --
  *  seven coloured statuses is a list with no emphasis at all. */
-function statusTone(status: string): "neutral" | "accent" | "muted" {
-  if (status === "sending") return "accent";
-  if (status === "draft") return "muted";
-  return "neutral";
-}
+
 
 function CampaignLine({
   campaign,
@@ -256,7 +254,7 @@ function CampaignLine({
 }) {
   const audience = nameOfAudience(audiences, campaign.audienceId);
   return (
-    <ListRow
+    <RecordRow
       icon={<Send size={16} aria-hidden />}
       name={campaignName(campaign)}
       // `current` is the row's own liveness, and for a campaign that is
@@ -266,14 +264,11 @@ function CampaignLine({
       dim={campaignIsFinished(campaign)}
       open={open}
       onOpen={onToggle}
-      state={
-        <>
-          <Chip tone={statusTone(campaign.status)}>{campaign.status || "unknown"}</Chip>
-          {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
-        </>
-      }
+      secondary={audience}
+      state={campaign.status || "unknown"}
+      tone={campaign.status === "sending" ? "accent" : campaign.lastError ? "warn" : "muted"}
+      stateExtra={tick === "added" ? <span className="os-livelist-tick">new</span> : null}
     >
-      {audience === "" ? null : <span className="os-caption">{audience}</span>}
       {campaign.scheduledAt === "" || campaign.status !== "scheduled" ? null : (
         <span className="os-caption">{formatMoment(campaign.scheduledAt)}</span>
       )}
@@ -286,7 +281,7 @@ function CampaignLine({
         </span>
       )}
       {campaign.lastError === "" ? null : <Chip tone="neutral">problem</Chip>}
-    </ListRow>
+    </RecordRow>
   );
 }
 
@@ -800,7 +795,7 @@ function DeliveriesPanel({ campaignId }: { campaignId: string }) {
   return (
     <Panel label="Who got it">
       <div className="os-campaign-detail-head">
-        <Subhead>Who got it</Subhead>
+        <Subhead meta={ledger.state === "ready" && !ledger.error ? `${rows.length} read` : undefined}>Who got it</Subhead>
         <Button busy={ledger.state === "loading"} busyLabel="Reading" onClick={ledger.reload}>
           Read again
         </Button>
@@ -820,27 +815,19 @@ function DeliveriesPanel({ campaignId }: { campaignId: string }) {
             : "Nothing has been written to the record yet."}
         </Caption>
       ) : (
-        <ul className="os-campaign-ledger" aria-label="Per-recipient outcomes">
+        <RecordList as="ul" label="Per-recipient outcomes">
           {rows.slice(0, LEDGER_ROWS).map((delivery) => (
-            <li key={delivery.id} className="os-campaign-ledger-row" data-outcome={delivery.status}>
-              <span className="os-mono os-campaign-ledger-address">{delivery.email || "--"}</span>
-              <span className="os-campaign-ledger-outcome">
-                {delivery.status === "skipped"
-                  ? skipReasonSentence(delivery.skipReason)
-                  : delivery.status || "unknown"}
-              </span>
-              {delivery.lastError === "" ? null : (
-                <span className="os-caption os-mono">{delivery.lastError}</span>
-              )}
-              {delivery.sentAt === "" ? null : (
-                <span className="os-caption">{formatMoment(delivery.sentAt)}</span>
-              )}
-            </li>
+            <RecordRow key={delivery.id}
+              name={<span className="os-mono">{delivery.email || "--"}</span>}
+              state={delivery.status || "unknown"}
+              tone={delivery.status === "sent" ? "accent" : delivery.lastError ? "warn" : "muted"}
+              secondary={delivery.lastError || (delivery.status === "skipped" ? skipReasonSentence(delivery.skipReason) : undefined)}
+            >
+              {delivery.sentAt === "" ? null : <span className="os-caption">{formatMoment(delivery.sentAt)}</span>}
+            </RecordRow>
           ))}
-          {rows.length > LEDGER_ROWS ? (
-            <li className="os-caption">and {rows.length - LEDGER_ROWS} more in this page</li>
-          ) : null}
-        </ul>
+          {rows.length > LEDGER_ROWS ? <p className="os-caption">and {rows.length - LEDGER_ROWS} more in this page</p> : null}
+        </RecordList>
       )}
 
       {ledger.readAt === "" ? null : (
@@ -884,6 +871,7 @@ export function CampaignForm({
     audienceId: string;
     templateId: string;
     senderIdentityId: string;
+    accountId?: string;
   };
   audiences: AudienceRow[];
   templates: TemplateRow[];
@@ -893,6 +881,7 @@ export function CampaignForm({
   onDone: (createdId: string) => void;
 }) {
   const accounts = useAccountOptions();
+  const defaultAccountId = useDefaultOrganization(accounts);
   const editing = campaign !== undefined;
   const write = editing ? writes.updateCampaign : writes.createCampaign;
   const [draft, setDraft] = useState(() => ({
@@ -902,7 +891,7 @@ export function CampaignForm({
     fromName: campaign?.fromName ?? "",
     replyTo: campaign?.replyTo ?? "",
     scheduledAt: campaign?.scheduledAt ?? "",
-    accountId: campaign?.accountId ?? "",
+    accountId: campaign?.accountId ?? initial?.accountId ?? "",
     senderIdentityId: campaign?.senderIdentityId ?? initial?.senderIdentityId ?? "",
     trackOpens: campaign?.trackOpens ?? trackByDefault,
     trackClicks: campaign?.trackClicks ?? trackByDefault,
@@ -911,17 +900,25 @@ export function CampaignForm({
   useEffect(() => {
     if (!initial || campaign) return;
     setDraft((previous) => ({ ...previous, ...initial }));
-  }, [initial?.audienceId, initial?.templateId, initial?.senderIdentityId, campaign]);
+  }, [initial?.audienceId, initial?.templateId, initial?.senderIdentityId, initial?.accountId, campaign]);
 
-  const ready = draft.name.trim() !== "" && draft.audienceId !== "" && draft.templateId !== "";
+  const accountId = draft.accountId || (campaign === undefined ? defaultAccountId : "");
+
+  const ready = organizationChosen(accounts, accountId) &&
+    draft.name.trim() !== "" &&
+    audiences.some((a) => a.id === draft.audienceId && a.accountId === accountId) &&
+    templates.some((t) => t.id === draft.templateId && t.accountId === accountId) &&
+    ((accountId === "self" && draft.senderIdentityId === "") ||
+      senders.some((s) => s.id === draft.senderIdentityId && s.accountId === accountId));
 
   async function submit() {
+    if (!ready) return;
     if (editing && campaign) {
-      const ok = await writes.updateCampaign.update(campaign.id, draft);
+      const ok = await writes.updateCampaign.update(campaign.id, { ...draft, accountId });
       if (ok) onDone(campaign.id);
       return;
     }
-    const id = await writes.createCampaign.create(draft);
+    const id = await writes.createCampaign.create({ ...draft, accountId });
     if (id !== "") onDone(id);
   }
 
@@ -930,13 +927,23 @@ export function CampaignForm({
   // ALREADY naming one keeps it (the value is on the draft and the option is
   // synthesized below), so an edit never silently re-points a campaign.
   const pickable = {
-    audiences: audiences.filter((a) => a.status !== "archived" || a.id === draft.audienceId),
-    templates: templates.filter((t) => t.status !== "archived" || t.id === draft.templateId),
-    senders: senders.filter((s) => s.status !== "disabled" || s.id === draft.senderIdentityId),
+    audiences: audiences.filter((a) => a.accountId === accountId && (a.status !== "archived" || a.id === draft.audienceId)),
+    templates: templates.filter((t) => t.accountId === accountId && (t.status !== "archived" || t.id === draft.templateId)),
+    senders: senders.filter((s) => s.accountId === accountId && (s.status !== "disabled" || s.id === draft.senderIdentityId)),
   };
 
   return (
     <Panel label={editing ? "Edit campaign" : "New campaign"}>
+      <Field label="Organization">
+          <AccountPicker
+            id="os-campaign-account"
+            label="Organization this campaign is for"
+            required
+            value={accountId}
+            onChange={(v) => setDraft({ ...draft, accountId: v, audienceId: "", templateId: "", senderIdentityId: "" })}
+            accounts={accounts}
+          />
+        </Field>
       <div className="os-campaign-form">
         <Field label="Name">
           <Input
@@ -986,7 +993,7 @@ export function CampaignForm({
             value={draft.senderIdentityId}
             onChange={(v) => setDraft({ ...draft, senderIdentityId: v })}
           >
-            <option value="">This cluster's default mailbox</option>
+            <option value="" disabled={accountId !== "self"}>{accountId === "self" ? "This cluster's default mailbox" : "Choose an organization mailbox"}</option>
             {pickable.senders.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.address}
@@ -1003,15 +1010,7 @@ export function CampaignForm({
             onChange={(v) => setDraft({ ...draft, replyTo: v })}
           />
         </Field>
-        <Field label="Client">
-          <AccountPicker
-            id="os-campaign-account"
-            label="Client this campaign is for"
-            value={draft.accountId}
-            onChange={(v) => setDraft({ ...draft, accountId: v })}
-            accounts={accounts}
-          />
-        </Field>
+
       </div>
 
       <div className="os-campaign-tracking">

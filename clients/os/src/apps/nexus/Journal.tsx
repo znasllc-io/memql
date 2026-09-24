@@ -1,4 +1,4 @@
-import { Button, Caption, Chip, Notice, Subhead, formatDuration, formatMoment } from "../../kit";
+import { Button, Caption, RecordList, RecordRow, Notice, Subhead, formatDuration, formatMoment } from "../../kit";
 import type { Journal as JournalState } from "./useNexus";
 import { formatMoney, formatTokens, observationKindWord, servedWord } from "./rows";
 
@@ -35,7 +35,7 @@ export function JournalPanel({ journal }: { journal: JournalState }) {
   return (
     <section className="os-nexus-journal" aria-label="The journal for this run">
       <div className="os-nexus-journal-head">
-        <Subhead>Journal</Subhead>
+        <Subhead meta={journal.state === "ready" && !journal.error ? journal.modelCalls.length + journal.observations.length : undefined}>Journal</Subhead>
         <span className="os-nexus-journal-when">
           {journal.state === "idle" ? (
             <Caption>Not read yet</Caption>
@@ -80,59 +80,18 @@ export function JournalPanel({ journal }: { journal: JournalState }) {
 
       {journal.modelCalls.length === 0 ? null : (
         <div className="os-nexus-journal-group">
-          <p className="os-nexus-journal-count">
-            {journal.modelCalls.length} model {journal.modelCalls.length === 1 ? "call" : "calls"}
-          </p>
-          <ul className="os-nexus-journal-list" aria-label="Model calls">
-            {journal.modelCalls.map((call) => (
-              <li key={call.id} className="os-nexus-journal-row" data-served={call.served}>
-                <span className="os-nexus-journal-model os-mono">{call.model || "--"}</span>
-                <span className="os-nexus-journal-served">{servedWord(call.served)}</span>
-                {call.stepKey === "" ? null : (
-                  <Chip tone="muted" title="The step that made this call">
-                    {call.stepKey}
-                  </Chip>
-                )}
-                <span className="os-nexus-journal-figures os-mono">
-                  <span>
-                    {formatTokens(
-                      call.inputTokens === null && call.outputTokens === null
-                        ? null
-                        : (call.inputTokens ?? 0) + (call.outputTokens ?? 0),
-                    )}{" "}
-                    tok
-                  </span>
-                  <span>{formatMoney(call.cost)}</span>
-                  <span>{call.latencyMs === null ? "--" : formatDuration(call.latencyMs)}</span>
-                </span>
-                {call.error === "" ? null : (
-                  <span className="os-nexus-journal-error os-mono">{call.error}</span>
-                )}
-              </li>
-            ))}
-          </ul>
+          <Subhead meta={journal.state === "ready" && !journal.error ? journal.modelCalls.length : undefined}>Model calls</Subhead>
+          <RecordList as="ul" label="Model calls">{journal.modelCalls.map(call => <RecordRow key={call.id} name={call.model || "--"} secondary={call.error || call.stepKey} state={servedWord(call.served)}>
+            <span>{formatTokens(call.inputTokens === null && call.outputTokens === null ? null : (call.inputTokens ?? 0) + (call.outputTokens ?? 0))} tok</span>
+            <span>{formatMoney(call.cost)}</span><span>{call.latencyMs === null ? "--" : formatDuration(call.latencyMs)}</span>
+          </RecordRow>)}</RecordList>
         </div>
       )}
 
       {journal.observations.length === 0 ? null : (
         <div className="os-nexus-journal-group">
-          <p className="os-nexus-journal-count">
-            {journal.observations.length}{" "}
-            {journal.observations.length === 1 ? "observation" : "observations"}
-          </p>
-          <ul className="os-nexus-journal-list" aria-label="Observations">
-            {journal.observations.map((observation) => (
-              <li key={observation.id} className="os-nexus-journal-row">
-                <span className="os-nexus-journal-obs-kind">
-                  {observationKindWord(observation.kind)}
-                </span>
-                {observation.stepKey === "" ? null : (
-                  <Chip tone="muted">{observation.stepKey}</Chip>
-                )}
-                <span className="os-nexus-journal-content">{observation.content}</span>
-              </li>
-            ))}
-          </ul>
+          <Subhead meta={journal.state === "ready" && !journal.error ? journal.observations.length : undefined}>Observations</Subhead>
+          <RecordList as="ul" label="Observations">{journal.observations.map(observation => <RecordRow key={observation.id} name={observationKindWord(observation.kind)} secondary={observation.content} state={observation.stepKey} />)}</RecordList>
         </div>
       )}
 

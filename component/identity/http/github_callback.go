@@ -1,14 +1,17 @@
 package http
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/githubconnect"
+	"github.com/znasllc-io/memql/component/identity/refresh"
 	"github.com/znasllc-io/memql/component/secret"
 )
 
@@ -161,6 +164,21 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.Store == nil {
+		s.redirectToOS(w, r, "", resultStateInvalid)
+		return
+	}
+	candidate, lookupErr := s.Store.LookupGithubConnectState(r.Context(), identity.HashConnectState(state))
+	if lookupErr != nil || !s.githubSessionMatches(r, candidate) {
+		reason := "session_invalid"
+		if candidate == nil {
+			reason = "state_unknown"
+		}
+		s.auditGitHubConnect(r, "github_connect_refused", "", "", map[string]any{"reason": reason})
+		s.redirectToOS(w, r, "", resultStateInvalid)
+		return
+	}
+
 	// THE STATE IS CONSUMED BEFORE ANYTHING ELSE HAPPENS, so a replayed
 	// callback cannot reach the token exchange at all.
 	stateRow, err := s.consumeGitHubConnectState(r, state)
@@ -181,7 +199,6 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 		s.redirectToOS(w, r, "", resultStateInvalid)
 		return
 	}
-	returnPath := identity.SafeRelativeRedirect(stateRow.ReturnPath)
 
 	if code == "" {
 		// A setup landing carrying a valid state but no code: the person
@@ -191,12 +208,17 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 		s.auditGitHubConnect(r, "github_connect_setup_landing", stateRow.UserId, "", map[string]any{
 			"setupAction": setupAction,
 		})
-		s.redirectToOS(w, r, returnPath, resultInstalled)
+		s.redirectGitHubResult(w, r, stateRow, resultInstalled, "")
 		return
 	}
 
 	client := s.gitHubClient()
-	tokens, err := client.ExchangeCode(r.Context(), cfg, githubconnect.RedirectURI(s.Cfg.BaseURL), code)
+	verifier, err := secret.Decrypt(stateRow.PKCEVerifier)
+	if err != nil || strings.TrimSpace(verifier) == "" {
+		s.redirectGitHubResult(w, r, stateRow, resultStateInvalid, "")
+		return
+	}
+	tokens, err := client.ExchangeCode(r.Context(), cfg, githubconnect.RedirectURI(s.Cfg.BaseURL), code, verifier)
 	if err != nil {
 		// NOTHING IS WRITTEN on a failed exchange. There is no half-grant to
 		// clean up later, and no row claiming an authorization this cluster
@@ -205,7 +227,7 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 			"reason": "exchange",
 			"error":  err.Error(),
 		})
-		s.redirectToOS(w, r, returnPath, resultExchangeFailed)
+		s.redirectGitHubResult(w, r, stateRow, resultExchangeFailed, "")
 		return
 	}
 
@@ -215,8 +237,23 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 			"reason": "read_user",
 			"error":  err.Error(),
 		})
-		s.redirectToOS(w, r, returnPath, resultExchangeFailed)
+		s.redirectGitHubResult(w, r, stateRow, resultExchangeFailed, "")
 		return
+	}
+
+	if stateRow.ExpectedExternalId != "" && stateRow.ExpectedExternalId != formatGitHubUserId(user.ID) {
+		s.redirectGitHubResult(w, r, stateRow, "github_account_mismatch", "")
+		return
+	}
+	// A reconnect's target is checked again on this replica. The stored expected
+	// identity is never accepted as authority to replace an unrelated row.
+	if stateRow.CredentialId != "" {
+		targetCtx := auth.ContextWithUserActor(r.Context(), stateRow.UserId)
+		target, err := s.Store.GithubReconnectTarget(targetCtx, stateRow.CredentialId)
+		if err != nil || target.ExternalId != stateRow.ExpectedExternalId || target.RevokedAt != stateRow.TargetRevokedAt {
+			s.redirectGitHubResult(w, r, stateRow, resultStateInvalid, "")
+			return
+		}
 	}
 
 	// A grant with NO reachable installation is still a grant worth storing:
@@ -238,7 +275,7 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 			"reason": "seal",
 			"error":  err.Error(),
 		})
-		s.redirectToOS(w, r, returnPath, resultExchangeFailed)
+		s.redirectGitHubResult(w, r, stateRow, resultExchangeFailed, "")
 		return
 	}
 	sealedRefresh := ""
@@ -249,14 +286,16 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 				"reason": "seal_refresh",
 				"error":  err.Error(),
 			})
-			s.redirectToOS(w, r, returnPath, resultExchangeFailed)
+			s.redirectGitHubResult(w, r, stateRow, resultExchangeFailed, "")
 			return
 		}
 	}
 
 	credentialId, created, err := s.Store.UpsertGithubAppGrant(r.Context(), identity.GithubAppGrant{
-		OwnerUserId: stateRow.UserId,
-		Host:        githubGrantHost,
+		OwnerUserId:        stateRow.UserId,
+		TargetCredentialId: stateRow.CredentialId,
+		TargetRevokedAt:    stateRow.TargetRevokedAt,
+		Host:               githubGrantHost,
 		// The label is what the person sees in their Sources list. Derived
 		// from the login rather than asked for: the flow has no field to type
 		// one into, and "GitHub (@octocat)" is what the card would say anyway.
@@ -270,11 +309,15 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 		InstallationIds: installations,
 	})
 	if err != nil {
+		if errors.Is(err, identity.ErrGithubReconnectCancelled) {
+			s.redirectGitHubResult(w, r, stateRow, resultStateInvalid, "")
+			return
+		}
 		s.auditGitHubConnect(r, "github_connect_failed", stateRow.UserId, "", map[string]any{
 			"reason": "write_grant",
 			"error":  err.Error(),
 		})
-		s.redirectToOS(w, r, returnPath, resultExchangeFailed)
+		s.redirectGitHubResult(w, r, stateRow, resultExchangeFailed, "")
 		return
 	}
 
@@ -286,7 +329,7 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 		"login":         user.Login,
 		"installations": len(installations),
 	})
-	s.redirectToOS(w, r, returnPath, result)
+	s.redirectGitHubResult(w, r, stateRow, result, credentialId)
 }
 
 // consumeGitHubConnectState spends the state, or reports why it could not.
@@ -421,4 +464,52 @@ func formatGitHubUserId(id int64) string {
 		return ""
 	}
 	return strconv.FormatInt(id, 10)
+}
+
+// githubSessionMatches binds authorization to the browser that began it. A
+// state URL alone is insufficient: another person's browser must never attach
+// its GitHub account to the initiating user's MemQL account.
+func (s *Server) githubSessionMatches(r *http.Request, state *identity.GithubConnectStateRow) bool {
+	if s.Store == nil || state == nil || state.SessionId == "" || state.UserId == "" {
+		return false
+	}
+	cookie, err := r.Cookie(refreshCookieName)
+	if err != nil || cookie.Value == "" {
+		return false
+	}
+	hash := refresh.HashRefreshToken(cookie.Value)
+	session, err := s.Store.LookupAuthSessionByRefreshTokenHash(r.Context(), hash)
+	if err != nil {
+		return false
+	}
+	now := time.Now().UTC()
+	if session == nil {
+		session, err = s.Store.LookupAuthSessionByPreviousRefreshTokenHash(r.Context(), hash)
+		if err != nil || session == nil || session.PreviousRotatedAt.IsZero() || now.Sub(session.PreviousRotatedAt) < 0 || now.Sub(session.PreviousRotatedAt) > 30*time.Second {
+			return false
+		}
+	}
+	return sameGithubID(session.ID, state.SessionId, "v1:identity:authSession:") &&
+		sameGithubID(session.UserId, state.UserId, "v1:identity:user:") && session.RevokedAt.IsZero() && !session.ExpiresAt.IsZero() && now.Before(session.ExpiresAt)
+}
+
+func sameGithubID(a, b, prefix string) bool {
+	return a != "" && b != "" && strings.TrimPrefix(a, prefix) == strings.TrimPrefix(b, prefix)
+}
+
+func (s *Server) redirectGitHubResult(w http.ResponseWriter, r *http.Request, state *identity.GithubConnectStateRow, result, credentialID string) {
+	dest, err := url.Parse(s.osReturnURL(r, state.ReturnPath, result))
+	if err != nil {
+		s.redirectToOS(w, r, "", resultStateInvalid)
+		return
+	}
+	q := dest.Query()
+	if credentialID != "" {
+		q.Set("githubCredentialId", strings.TrimPrefix(credentialID, "v1:platform:sourceCredential:"))
+	}
+	if state.FlowId != "" {
+		q.Set("githubFlowId", state.FlowId)
+	}
+	dest.RawQuery = q.Encode()
+	http.Redirect(w, r, dest.String(), http.StatusSeeOther)
 }

@@ -169,7 +169,9 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // the two intentions gives 64 and so does asking the loader, but only one of
 // those is evidence. The loader was asked, the way this file's own #5168 note
 // insists -- two arithmetics agreeing is not a measurement.
-const shippedAutomationCount = 64
+// 64 -> 67 after merging organization management: group renames and operator
+// membership on user create/update. Measured by the strict loader on this tree.
+const shippedAutomationCount = 67
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

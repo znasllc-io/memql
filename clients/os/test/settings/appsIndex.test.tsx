@@ -32,6 +32,8 @@ describe("the apps index", () => {
   it("lists exactly the apps this session may open", () => {
     const list = openIndex({ access: ADMIN });
     expect(within(list).getByText("Files")).toBeTruthy();
+    expect(list.classList.contains("os-record-list")).toBe(true);
+    expect(screen.getByRole("heading", { name: "Apps" }).parentElement?.querySelector(".os-head-meta")?.textContent).toBe(String(within(list).getAllByRole("listitem").length));
     expect(within(list).getByText("Users")).toBeTruthy();
     // Scoped to the entry: "Settings" is also the label on every app's own
     // settings button in this list.

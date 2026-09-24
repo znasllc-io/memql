@@ -38,6 +38,10 @@ import (
 
 // handleOIDCCallback completes an upstream sign-in.
 func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
+	if s.Cfg.LocalPasskeyOnly() {
+		http.Error(w, "This local installation uses passkeys only", http.StatusForbidden)
+		return
+	}
 	if !s.requireSecureRequest(w, r) {
 		return
 	}

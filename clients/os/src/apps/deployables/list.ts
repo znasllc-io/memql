@@ -1,3 +1,4 @@
+import { PENDING_DEPLOYMENT_STATUSES } from "./packages/rows";
 import { packageFingerprint, runCoversApp, shortRepo, sourceLabel, type DeploymentRow, type PackageRow } from "./packages/rows";
 import { isPlaceholderBundle, type StandingInput } from "./page/rail";
 import { bundleForm, siteFingerprint, siteName, type SiteRow } from "./rows";
@@ -233,7 +234,7 @@ function matches(row: DeployableListRow, filter: ListFilter): boolean {
   // A will-serve row has no status yet, so a status facet leaves it out: it
   // is none of draft, live or disabled, and claiming one would be a guess.
   if (filter.status !== "" && (row.site?.status ?? "") !== filter.status) return false;
-  const accountId = row.site?.accountId ?? "";
+  const accountId = row.site?.accountId ?? row.pkg?.accountId ?? "";
   if (filter.accountId === ACCOUNT_NONE && accountId !== "") return false;
   if (filter.accountId !== ACCOUNT_ANY && filter.accountId !== ACCOUNT_NONE && accountId !== filter.accountId) return false;
   if (filter.source !== "" && sourceOf(row) !== filter.source) return false;
@@ -423,6 +424,16 @@ function collectRows(
     }
   }
 
+  // A registered source with no report still has a resumable setup, including
+  // failures that occur after the person leaves. Its timeline owns the result.
+  for (const pkg of packages) {
+    if (rowsByGroup.has(`pkg:${pkg.id}`) || pkg.sourceRemoved || pkg.status === "archived") continue;
+    push(`pkg:${pkg.id}`, pkg, {
+      key: `${pkg.id}/`, site: null, pkg, app: "", name: pkg.name || pkg.id,
+      hostname: "", kind: "", parked: null, deployedBy: deployerOf(null, null, pkg), disabled: false,
+    });
+  }
+
   return { rowsByGroup, groupPackage };
 }
 
@@ -437,7 +448,7 @@ function collectRows(
 export function newestParkedRun(runs: readonly DeploymentRow[], packageId: string): DeploymentRow | null {
   let newest: DeploymentRow | null = null;
   for (const run of runs) {
-    if (run.packageId !== packageId || run.status !== "awaiting_confirm") continue;
+    if (run.packageId !== packageId || !PENDING_DEPLOYMENT_STATUSES.has(run.status)) continue;
     if (newest === null || at(run) > at(newest) || (at(run) === at(newest) && run.id > newest.id)) {
       newest = run;
     }
@@ -462,7 +473,7 @@ export function groupFingerprint(group: DeployableListGroup): string {
   return [
     group.pkg === null ? "" : packageFingerprint(group.pkg),
     ...group.rows.map((row) =>
-      [row.key, row.site === null ? "will-serve" : siteFingerprint(row.site), row.parked === null ? "" : `waiting:${row.parked.id}`].join(":"),
+      [row.key, row.site === null ? "will-serve" : siteFingerprint(row.site), row.parked === null ? "" : `pending:${row.parked.id}:${row.parked.status}`].join(":"),
     ),
   ].join("|");
 }
@@ -485,17 +496,12 @@ export function groupFingerprint(group: DeployableListGroup): string {
 // stops being a heading and an indent, and becomes a fact on its row and a
 // facet in Refine, which already carried that facet.
 
-/**
- * Every deployable, flat. A row is here because it HAS AN ADDRESS OF ITS OWN
- * -- a site row. An app a source declares and has never deployed has none, and
- * neither does one a parked run is still asking about: those are facts about
- * their source, and they are read on its page, where Activate and the run's
- * gate are.
- */
+/** Serving deployables and setup in progress share this list. A persisted
+ * source without a report retains a setup row so failed analysis is resumable. */
 export function flatDeployables(groups: readonly DeployableListGroup[]): DeployableListRow[] {
   return groups
     .flatMap((group) => group.rows)
-    .filter((row) => row.site !== null)
+    .filter((row) => row.site !== null || row.parked !== null || row.app === "")
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || a.hostname.localeCompare(b.hostname));
 }
 
@@ -542,15 +548,16 @@ export function foldSources(
   parkedRuns: readonly DeploymentRow[],
   search: string,
   showArchived: boolean,
+  provenance?: (pkg: PackageRow) => string,
 ): DeployableListGroup[] {
   const { rowsByGroup } = collectRows(sites, packages, parkedRuns);
   const needle = search.trim().toLowerCase();
   const groups: DeployableListGroup[] = [];
   for (const pkg of packages) {
-    if ((pkg.status === "archived") !== showArchived) continue;
+    if (pkg.sourceRemoved || (pkg.status === "archived") !== showArchived) continue;
     const rows = [...(rowsByGroup.get(`pkg:${pkg.id}`) ?? [])].sort(compareRows);
     if (needle !== "") {
-      const hay = [pkg.name, sourceLabel(pkg), sourceName(pkg), ...rows.flatMap((row) => [row.name, row.hostname])]
+      const hay = [pkg.name, sourceLabel(pkg), sourceName(pkg), provenance?.(pkg) ?? "", ...rows.flatMap((row) => [row.name, row.hostname])]
         .join(" ")
         .toLowerCase();
       if (!hay.includes(needle)) continue;
@@ -589,7 +596,7 @@ export function rowFingerprint(row: DeployableListRow): string {
     row.key,
     row.site === null ? "will-serve" : siteFingerprint(row.site),
     row.pkg === null ? "" : packageFingerprint(row.pkg),
-    row.parked === null ? "" : `waiting:${row.parked.id}`,
+    row.parked === null ? "" : `pending:${row.parked.id}:${row.parked.status}`,
   ].join(":");
 }
 
@@ -604,9 +611,9 @@ export interface SourceSummary {
 
 export function sourceSummary(group: DeployableListGroup): SourceSummary {
   return {
-    apps: group.rows.length,
+    apps: group.rows.filter(row => row.app !== "" || row.site !== null).length,
     deployed: group.rows.filter((row) => row.site !== null && row.site.status !== "archived").length,
-    waiting: group.rows.some((row) => row.parked !== null),
+    waiting: group.rows.some((row) => row.parked?.status === "awaiting_confirm"),
   };
 }
 
@@ -620,6 +627,7 @@ export function sourceStateWord(group: DeployableListGroup): { word: string; ton
   const pkg = group.pkg;
   if (pkg === null) return { word: "", tone: "muted" };
   if (pkg.status === "archived") return { word: "Archived", tone: "muted" };
+  if (group.rows.some(row => row.parked?.status === "analyzing")) return { word: "Analyzing", tone: "muted" };
   if (sourceSummary(group).waiting) return { word: "Review needed", tone: "warn" };
   if (pkg.updateAvailable) return { word: "Update available", tone: "accent" };
   return { word: sourceSummary(group).deployed === 0 ? "Nothing deployed" : "Current", tone: "muted" };

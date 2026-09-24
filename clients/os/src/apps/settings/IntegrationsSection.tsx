@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { Button, Caption, Chip, Chips, Fact, Facts, Field, Input, Notice, findRegion, revealRegion } from "../../kit";
+import { Button, Caption, Head, Subhead, RecordList, RecordRow, Chip, Chips, Fact, Facts, Field, Input, Notice, findRegion, revealRegion } from "../../kit";
 import { useSession } from "../../chrome/access";
 import type { OsAppProps } from "../../system/registry";
 import {
@@ -109,7 +109,7 @@ export function IntegrationsSection({
 
   return (
     <div className="os-settings">
-      <h3 className="os-settings-title">Integrations</h3>
+      <Head title="Integrations" meta={!facts.loading && !facts.error && facts.report !== null ? cards.length + silent.length : undefined} />
       <p className="os-caption">
         What this cluster can talk to, and what each one needs before it will.
         Read from the node that answered -- integrations are process state, so
@@ -132,9 +132,9 @@ export function IntegrationsSection({
               cluster that is missing something.
             </Caption>
           ) : (
-            cards.map((card) => (
+            <RecordList as="ul" label="Configurable integrations">{cards.map((card) => (
               <IntegrationPanel key={card.name} card={card} facts={facts} />
-            ))
+            ))}</RecordList>
           )}
           <SilentRollCall cards={silent} />
         </>
@@ -156,13 +156,7 @@ function IntegrationPanel({
   const blurb = integrationBlurb(card.name);
   return (
     <section className="os-field-group" aria-label={label} data-os-integration={card.name}>
-      <h4 className="os-subhead">{label}</h4>
-      <Chips label={`${label} state`}>
-        <Chip tone={card.state === "configured" ? "accent" : "neutral"}>
-          {stateLabel(card.state)}
-        </Chip>
-        {card.mode ? <Chip tone="muted">{card.mode}</Chip> : null}
-      </Chips>
+      <RecordRow name={label} state={stateLabel(card.state)} tone={card.state === "configured" ? "accent" : "muted"} stateExtra={card.mode ? <Chip tone="muted">{card.mode}</Chip> : undefined} />
 
       {/* The engine's own sentences, verbatim and whole. They name the lane
           rule, the log-only trap and the probe verdict, and every paraphrase
@@ -477,14 +471,12 @@ function SilentRollCall({ cards }: { cards: readonly IntegrationCard[] }) {
   if (cards.length === 0) return null;
   return (
     <section className="os-field-group" aria-label="Also registered on this node">
-      <h4 className="os-subhead">Also registered on this node</h4>
-      <ul className="os-hidden-list" aria-label="Integrations with no configuration report">
+      <Subhead meta={cards.length}>Also registered on this node</Subhead>
+      <RecordList as="ul" label="Integrations with no configuration report">
         {cards.map((card) => (
-          <li key={card.name}>
-            <span className="os-mono">{card.name}</span>
-          </li>
+          <RecordRow key={card.name} name={card.name} />
         ))}
-      </ul>
+      </RecordList>
       <Caption>
         These publish no configuration report, so whether their credentials
         resolved is not knowable from here. That is the accurate answer, not a

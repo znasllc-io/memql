@@ -1673,7 +1673,7 @@ func CalendarEventByIdBuild(args CalendarEventByIdArgs) string {
 	return b.String()
 }
 
-// CampaignById -- One campaign by id, gated to its owner. Backs the campaign editor. Owned: `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)` is the load-bearing guard, so a caller cannot read another operator's campaign even with its id.
+// CampaignById -- One authorized campaign by id. Organization members share its editor. Legacy untied rows use: `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)` is the load-bearing guard, so a caller cannot read another operator's campaign even with its id.
 //
 // Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["campaignById"] in generated_concepts.go).
 type CampaignByIdArgs struct {
@@ -1835,7 +1835,7 @@ func CampaignSkipCountByReasonBuild(args CampaignSkipCountByReasonArgs) string {
 	return b.String()
 }
 
-// Campaigns -- The caller's campaigns, newest first. The portal's campaign list. Owned: the row set is gated by `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)` server-side, so cross-operator reads are impossible. Optional status filter narrows to one lifecycle bucket; omit it to see everything.
+// Campaigns -- The caller's campaigns, newest first. The portal's campaign list. Owned: the row set is gated by `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)` server-side for legacy untied rows; organization-owned rows follow current membership and app permissions. Optional status filter narrows to one lifecycle bucket; omit it to see everything.
 //
 // Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["campaigns"] in generated_concepts.go).
 type CampaignsArgs struct {
@@ -2022,14 +2022,7 @@ func ClientAccountByIdBuild(args ClientAccountByIdArgs) string {
 	return b.String()
 }
 
-// ClientAccountsAll -- Every account this caller may see -- their own, or every account in the cluster when the caller is a cluster owner. The Accounts app's primary screen, and the source every account picker in the OS reads.
-// ARCHIVED ROWS ARE EXCLUDED BY DEFAULT and returned under the filter (D8). The archive term compares the argument with true rather than testing its presence (`args.includeArchived != nil`, the optional-argument guard), and the difference is not stylistic: a presence test answers whether the argument was PASSED, not whether it is true, so a caller passing `includeArchived: false` -- which is exactly what a checkbox bound to a boolean sends -- would have widened the read to every archived row. Written as `isNotArchived(row) || args.includeArchived == true` the three cases are the three answers: unset fails the comparison (active only), false fails it (active only), true admits everything.
-// "Everything", note, and not "the archived ones": a person looking for a client they filed away wants it in its place in the list, marked, not in a separate list of the forgotten.
-// The caller term is the composite tier's own predicate written out, which is what TestRowAuthzEnforcementLandGate requires of an authored query over a tier-declaring concept.
-// IT CARRIES A THIRD DISJUNCT NOW, and the reason is worth stating because the term looks wider than it is. The concept declares `rankVisible` plus an `unowned="admin"` floor (epic memql#4832), so the tier admits more than owner-or-cluster-owner -- and an authored conjunct narrower than the tier would silently re-close what the declaration opened, leaving an admin the zero rows memql#4837 exists to end.
-// The WIDTH is not where the narrowing was lost: the engine ANDs the tier's own predicate at the root, and that term carries the rank membership as a pushed-down `in` list. So for an admin this conjunct folds to a constant and the injected term does the real work IN SQL -- which is what keeps a page of peer-owned rows from reading as exhaustion to the cursor.
-// THE OWNER-CHECK CONJUNCT IS GONE (epic memql#5166), and what replaced it is nothing -- the concept's tier decides. That disjunction read `ownerUserId==actor.userId || actor.isClusterOwner==true || requiresDeveloperOrAbove`, and its third arm admitted a set the tier already admitted: `unowned="admin"` plus `rankVisible` is enforced BESIDE this filter, so the branch narrowed nothing the tier would have widened. Accounts are created at admin rank, so there is no Member-owned row for the owner arm to have narrowed either.
-// The `@requiresRank("admin")` floor above is what gates the CALL, and it is unchanged. Deleting the conjunct removes a caller-scoping term that was doing no work, not a gate.
+// ClientAccountsAll -- Accounts authorized for this caller, including clients a cluster operator may manage. Organization members use the same query for their pickers. Archived rows are excluded unless includeArchived is explicitly true; omitted and false both return only current organizations.
 //
 // Bound concept: v1:accounts:account (machine-readable: BoundConcepts["clientAccountsAll"] in generated_concepts.go).
 type ClientAccountsAllArgs struct {
@@ -2509,7 +2502,7 @@ func CompositionsForRecipeBuild(args CompositionsForRecipeArgs) string {
 	return b.String()
 }
 
-// ConsentEventsBySubscriber -- Consent event stream for one subscriber, newest first. Export answers status/date/source from these rows: current status is the latest kind. Owned: `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)` is a top-level conjunct.
+// ConsentEventsBySubscriber -- Consent event stream for one subscriber, newest first. Export answers status/date/source from these rows: current status is the latest kind. The concept tier and organization boundary authorize every returned row.
 //
 // Bound concept: v1:campaigns:consentEvent (machine-readable: BoundConcepts["consentEventsBySubscriber"] in generated_concepts.go).
 type ConsentEventsBySubscriberArgs struct {
@@ -5681,6 +5674,23 @@ func PackageDeploymentsInFlightBuild(args PackageDeploymentsInFlightArgs) string
 	return "query packageDeploymentsInFlight()"
 }
 
+// PackageDeploymentsPending -- Current work and review gates, without retaining deployment history at the OS root. Ownership and account visibility are enforced by the packageDeployment concept.
+//
+// Bound concept: v1:platform:packageDeployment (machine-readable: BoundConcepts["packageDeploymentsPending"] in generated_concepts.go).
+type PackageDeploymentsPendingArgs struct {
+}
+
+// PackageDeploymentsPending calls the engine query packageDeploymentsPending.
+func (qc *QueryClient) PackageDeploymentsPending(ctx context.Context, args PackageDeploymentsPendingArgs) (*Result, error) {
+	call := PackageDeploymentsPendingBuild(args)
+	return qc.executeNamed(ctx, "packageDeploymentsPending", call)
+}
+
+func PackageDeploymentsPendingBuild(args PackageDeploymentsPendingArgs) string {
+	_ = args
+	return "query packageDeploymentsPending()"
+}
+
 // PackagesAll -- The packages this caller may see, active only. The OS packages list.
 //
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesAll"] in generated_concepts.go).
@@ -5736,6 +5746,23 @@ func PackagesByRepoUrlBuild(args PackagesByRepoUrlArgs) string {
 	b.WriteString(quoteMemQL(args.RepoUrl))
 	b.WriteString(")")
 	return b.String()
+}
+
+// PackagesForSourceRegistration -- The caller's configured repository records, including removed entries so registration can restore their stable IDs. No lifecycle or provider authorization is widened.
+//
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["packagesForSourceRegistration"] in generated_concepts.go).
+type PackagesForSourceRegistrationArgs struct {
+}
+
+// PackagesForSourceRegistration calls the engine query packagesForSourceRegistration.
+func (qc *QueryClient) PackagesForSourceRegistration(ctx context.Context, args PackagesForSourceRegistrationArgs) (*Result, error) {
+	call := PackagesForSourceRegistrationBuild(args)
+	return qc.executeNamed(ctx, "packagesForSourceRegistration", call)
+}
+
+func PackagesForSourceRegistrationBuild(args PackagesForSourceRegistrationArgs) string {
+	_ = args
+	return "query packagesForSourceRegistration()"
 }
 
 // PackagesTrackingRepos -- Every repo-sourced package, for the D11 polling feed's sweep. Runs under the engine's own operator identity, which the admin branch admits; a person calling it reads exactly their own, which is harmless and correct.
@@ -6369,7 +6396,7 @@ func RecentSendJobsBuild(args RecentSendJobsArgs) string {
 
 // RecipientById -- One recipient by id.
 // IT EXISTS TO REMOVE A SCAN FROM A SEND PATH (memql#4829). Every other read of this concept is audience-scoped, which is right for a roster and wrong for the single-recipient send the marketing lane makes: that path holds a recipient id and needs the row, and without this query it had to find the audience first -- from the rule when one named it, and otherwise by walking the caller's audiences and refusing past a bound rather than answering "not found". A bounded scan standing in for a by-id read is a correct answer that gets slower as an operator succeeds, and it refuses at exactly the point somebody has enough audiences to care.
-// The tier conjunct is what keeps it safe to expose an unscoped by-id read: an id is not a capability here, and a recipient the caller does not own is simply not found -- the same answer campaignById gives.
+// The tier conjunct is what keeps it safe to expose an unscoped by-id read: an id is not a capability here, and a recipient outside the caller's authorized organization scope is simply not found -- the same answer campaignById gives.
 //
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["recipientById"] in generated_concepts.go).
 type RecipientByIdArgs struct {
@@ -6941,7 +6968,7 @@ func SalesRepsForStoreBuild(args SalesRepsForStoreArgs) string {
 	return b.String()
 }
 
-// ScheduledSendJobs -- ENGINE: send jobs committed to a time and not yet fired, oldest first (memql#3459). Cluster-owner gated, and it spans owners for the same reason drainableSendJobs does -- "which campaigns are due" is a question about the cluster, and it is not one an OWNED row can answer at all, since the owned tier injects `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)` into every read with no cluster-owner bypass. That is why the schedule lives on the engine's job row rather than being scanned off v1:campaigns:campaign.
+// ScheduledSendJobs -- ENGINE: send jobs committed to a time and not yet fired, oldest first (memql#3459). Cluster-owner gated, and it spans owners for the same reason drainableSendJobs does -- "which campaigns are due" is an engine-wide scheduling question. The queue lives on engine-owned job rows, then each campaign is revalidated under its recorded owner's current organization authority.
 // It deliberately does NOT filter on the due time. The authority on when a send fires is the CAMPAIGN's scheduledAt, which an operator can move with updateCampaign without the job row hearing about it -- so the worker reads every scheduled job and asks the campaign. The set is small by nature (one row per pending scheduled campaign), which is what makes that affordable.
 //
 // Bound concept: v1:campaigns:sendJob (machine-readable: BoundConcepts["scheduledSendJobs"] in generated_concepts.go).
@@ -10782,7 +10809,7 @@ func SignInIdentitiesForSelfBuild(args SignInIdentitiesForSelfArgs) string {
 }
 
 // SiteByHostname -- Resolve a request Host to the site that answers it. The edge's hot path -- called once per cache miss, not once per request.
-// The caller term is the COMPOSITE tier's own predicate, written out (memql#4344). It used to be a bare `actor.isClusterOwner==true`, which under the composite tier would narrow the query to cluster owners ALONE and leave a user unable to resolve their own deployable -- the admin gate is one BRANCH of the tier now, not the whole of it. The engine ANDs this same term in from the concept's declaration; restating it is what the land gate asks for, so that a reader of the query can see the scope without resolving the concept (TestRowAuthzEnforcementLandGate). It is an OWNERSHIP floor rather than a fail-open selection: a false admin gate leaves exactly the caller's own rows. The edge still reads every site because it calls this under a synthetic cluster-owner actor (component/edge's systemEdgeActor), which the second branch admits.
+// The engine applies the site's organization boundary and app permissions. The edge resolves every served site under its synthetic routing actor; ordinary callers see only authorized organization sites or legacy untied rows admitted by their existing owner rules.
 //
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["siteByHostname"] in generated_concepts.go).
 type SiteByHostnameArgs struct {
@@ -10961,10 +10988,10 @@ func SitePreviewObservationsForSiteBuild(args SitePreviewObservationsForSiteArgs
 	return b.String()
 }
 
-// SitesAll -- The deployables this caller may see: their OWN sites, or every site in the cluster when the caller is a cluster owner. The Deployables app's primary screen.
+// SitesAll -- The deployables within this caller's current organization and app scope, with standing access for cluster operators. The Deployables app's primary screen.
 // ARCHIVED ROWS ARE EXCLUDED HERE and listed by sitesArchived instead (epic memql#4794, D10). The exclusion is written out rather than folded into a trait, because it is the one conjunct whose counterpart query deliberately inverts it -- and a reader comparing the two needs to see the same term in both -- here `isNotArchived`, there `statusIsArchived`. The trait is `row.status != "archived"` rather than an allow-list of the other three: status is required, so every row carries one, and != is null-safe against a non-empty literal (memql#1685) -- while an allow-list would silently drop a row the day a fifth value is added.
 // The name predates self-serve deployables and is kept: it is the same read, and the concept's tier is what decides how far "all" reaches for a given actor.
-// NO CALLER TERM, DELIBERATELY (memql#5303, design 2026-09-11-app-access-grants D4 / D12). The tier `@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")` is the whole answer for every caller -- their own rows, every row for a cluster owner, and the rows tied to an account whose group they are in. This read used to restate the tier's first two arms as `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)`, and an AND with that conjunct can never be widened by the third: a member of Acme's group was admitted to Acme's sites by the tier and then filtered back out by the query, so the list showed the tie to nobody. The engine ANDs the tier in from the declaration; tierDecidesTheRead (component/memql) records this construct as one the tier decides, and TestAPackageTiedToTheSelfAccountIsReadableByItsGroupAndByStaff reads it against a real database for a member, a developer and a stranger.
+// NO CALLER TERM, DELIBERATELY (memql#5303, design 2026-09-11-app-access-grants D4 / D12). The declaration and the engine's strict organization boundary decide the authorized rows. Ownership alone does not bypass organization membership for ordinary callers. This read used to restate the tier's first two arms as `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)`, and an AND with that conjunct can never be widened by the third: a member of Acme's group was admitted to Acme's sites by the tier and then filtered back out by the query, so the list showed the tie to nobody. The engine ANDs the tier in from the declaration; tierDecidesTheRead (component/memql) records this construct as one the tier decides, and TestAPackageTiedToTheSelfAccountIsReadableByItsGroupAndByStaff reads it against a real database for a member, a developer and a stranger.
 //
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["sitesAll"] in generated_concepts.go).
 type SitesAllArgs struct {
@@ -11210,6 +11237,45 @@ func SoldByVariantBuild(args SoldByVariantArgs) string {
 	b.WriteString(quoteMemQL(args.VariantGid))
 	b.WriteString(")")
 	return b.String()
+}
+
+// SourceConnectionById -- Resolve a saved binding under its owner's identity, including a removed row for idempotent removal. No cluster-owner branch borrows another user's grant.
+//
+// Bound concept: v1:platform:sourceConnection (machine-readable: BoundConcepts["sourceConnectionById"] in generated_concepts.go).
+type SourceConnectionByIdArgs struct {
+	ConnectionId string
+}
+
+// SourceConnectionById calls the engine query sourceConnectionById.
+func (qc *QueryClient) SourceConnectionById(ctx context.Context, args SourceConnectionByIdArgs) (*Result, error) {
+	call := SourceConnectionByIdBuild(args)
+	return qc.executeNamed(ctx, "sourceConnectionById", call)
+}
+
+func SourceConnectionByIdBuild(args SourceConnectionByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query sourceConnectionById(")
+	b.WriteString("connectionId: ")
+	b.WriteString(quoteMemQL(args.ConnectionId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SourceConnectionsMine -- The caller's active saved source connections, independent of MemQL accounts.
+//
+// Bound concept: v1:platform:sourceConnection (machine-readable: BoundConcepts["sourceConnectionsMine"] in generated_concepts.go).
+type SourceConnectionsMineArgs struct {
+}
+
+// SourceConnectionsMine calls the engine query sourceConnectionsMine.
+func (qc *QueryClient) SourceConnectionsMine(ctx context.Context, args SourceConnectionsMineArgs) (*Result, error) {
+	call := SourceConnectionsMineBuild(args)
+	return qc.executeNamed(ctx, "sourceConnectionsMine", call)
+}
+
+func SourceConnectionsMineBuild(args SourceConnectionsMineArgs) string {
+	_ = args
+	return "query sourceConnectionsMine()"
 }
 
 // SourceCredentialById -- One credential by id -- the Source stop's credential chip. Card shape, so metadata only.

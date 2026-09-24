@@ -1,3 +1,6 @@
+import { AccountsApp } from "../src/apps/accounts/AccountsApp";
+import { LocalAccountsSettingsStore } from "../src/apps/accounts/settings";
+import { fakeConnection as accountConnection, accountRow, withSession as accountSession } from "../test/accounts/harness";
 import { createRoot } from "react-dom/client";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
@@ -13,6 +16,8 @@ import {
   STORE,
   fakeConnection,
   githubGrantRow,
+  sourceConnectionRow,
+  probeReply,
   repositoriesReply,
   repositoryFixture,
   siteRow,
@@ -233,6 +238,52 @@ const CONNECTED: FakeSeed = {
   }),
 };
 
+const SOURCE_CHOOSER: FakeSeed = {
+  ...CONNECTED,
+  githubApp: { configured: true, installUrl: "https://github.com/apps/memql/installations/new" },
+  accounts: [{ id: "client", name: "Client account", status: "active" }, { id: "self", name: "Operator organization", status: "active" }],
+  credentials: [githubGrantRow({ id: "cred-grant", login: "octocat" }), githubGrantRow({ id: "cred-work", login: "workcat" })],
+  sourceConnections: [sourceConnectionRow({ credentialId: "cred-grant" }), sourceConnectionRow({ id: "source-personal", credentialId: "cred-grant", installationId: "i-octocat", accountLogin: "octocat", accountType: "User" }), sourceConnectionRow({ id: "source-work", credentialId: "cred-work", installationId: "i-studio", accountLogin: "studio" })],
+  sourceInstallations: {
+    "cred-grant": { reason: "ok", installations: [{ id: "i-acme", account: "acme", accountType: "Organization" }, { id: "i-octocat", account: "octocat", accountType: "User" }], pending: [] },
+    "cred-work": { reason: "ok", installations: [{ id: "i-studio", account: "studio", accountType: "Organization" }], pending: [{ login: "partner" }] },
+  },
+  repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "acme/storefront" }), repositoryFixture({ fullName: "acme/field-notes" }), repositoryFixture({ fullName: "octocat/dotfiles", installationId: "i-octocat" }), repositoryFixture({ fullName: "studio/portal", installationId: "i-studio" })] }),
+  packages: [ACME, WIDGETS, FRESH].map(p => ({ ...p, accountId: "self" })),
+  sourceProbe: { "": probeReply({ branches: ["main", "release"] }) },
+};
+
+// Exercise the production wizard while the source read is in flight; these
+// fixture requests never contact GitHub or create a real deployment.
+function analysisConnection(result: "pending" | "failed" | "review") {
+  const active = { ...PARKED, id: "dep-new", status: "analyzing", report: null,
+    startedAt: new Date(Date.now() - 116000).toISOString() };
+  const seed: FakeSeed = { ...SOURCE_CHOOSER, packages: [{ ...ACME, declares: [] }], sites: [],
+    awaitingConfirm: [active], deployments: { "pkg-acme": [active] } };
+  const connection = fakeConnection(seed);
+  const execute = connection.query.executeNamed.bind(connection.query);
+  let scheduled = false;
+  function finish(cancelled = false) {
+    const next = cancelled ? { ...active, status: "cancelled", error: { code: "deployment_cancelled", message: "You stopped this analysis. Nothing was deployed." } }
+      : result === "failed" ? { ...active, status: "failed", error: { code: "deploy_failed", message: "Source download timed out. Nothing was deployed." } }
+      : { ...PARKED, id: "dep-new" };
+    seed.deployments!["pkg-acme"] = [next];
+    seed.awaitingConfirm = next.status === "awaiting_confirm" ? [next] : [];
+    connection.subscriptions.emit("v1:platform:packageDeployment", next);
+  }
+  connection.query.executeNamed = async (name, call, opts) => {
+    if (name === "packageDeployments" && result !== "pending" && !scheduled) {
+      scheduled = true;
+      setTimeout(() => finish(), 2500);
+    }
+    if (name === "packageCancelDeployment") {
+      setTimeout(() => finish(true), 1200);
+    }
+    return execute(name, call, opts);
+  };
+  return connection;
+}
+
 /** A cluster with NO GitHub App, seen by somebody who may register one. Press
  *  + and choose "A repository": the step asks the one question and the floor
  *  says Set up GitHub. */
@@ -278,9 +329,9 @@ function WindowBody({ fallback, children }: { fallback: string; children: ReactN
   );
 }
 
-function Lists({ section }: { section: "deployables" | "sources" | "settings" }) {
+function Lists({ section }: { section: "deployables" | "sources" | "repositories" | "settings" }) {
   return (
-    <WindowBody fallback={section === "sources" ? "Sources" : section === "settings" ? "Settings" : "Deployables"}>
+    <WindowBody fallback={section === "sources" ? "Sources" : section === "repositories" ? "Repositories" : section === "settings" ? "Settings" : "Deployables"}>
       <DeployablesApp sectionId={section} navigate={() => {}} askContext={() => {}} store={settingsStore()} />
     </WindowBody>
   );
@@ -468,6 +519,20 @@ const VIEWS: Record<
     render: () => JSX.Element;
   }
 > = {
+  accounts: {
+    connect: () => accountConnection({ clientAccountsAll: [
+      accountRow({ id: "v1:accounts:account:self", name: "Our Studio", domain: "studio.example.com", primaryContactName: "Dana" }),
+      accountRow({ id: "client-acme", name: "Acme Consulting", domain: "acme.example.com", primaryContactName: "Avery" }),
+      accountRow({ id: "client-borden", name: "Borden Ltd", domain: "borden.example.com", primaryContactName: "Morgan" }),
+    ] }),
+    wrap: (el, role) => accountSession(el, { role }),
+    render: () => <AccountsPane />,
+  },
+  "accounts-empty": {
+    connect: () => accountConnection({ clientAccountsAll: [] }),
+    wrap: (el, role) => accountSession(el, { role }),
+    render: () => <AccountsPane />,
+  },
   // The two lists. `framed` views bring their own window body, because the
   // app's wizard needs a floor and its pages publish to the window's trail.
   list: { seed: LISTS, framed: true, render: () => <Lists section="deployables" /> },
@@ -477,6 +542,24 @@ const VIEWS: Record<
   // The same app with a GitHub account connected: press + and choose
   // "A repository" and the Repository step is the picker, not the invitation.
   connected: { seed: CONNECTED, framed: true, render: () => <Lists section="deployables" /> },
+  "guided-account-empty": { seed: { ...SOURCE_CHOOSER, credentials: [], sourceConnections: [] }, framed: true, render: () => <Lists section="deployables" /> },
+  "guided-org-empty": { seed: { ...SOURCE_CHOOSER, sourceInstallations: { "cred-grant": { reason: "ok", installations: [], pending: [] } } }, framed: true, render: () => <Lists section="deployables" /> },
+  "source-chooser": { seed: SOURCE_CHOOSER, framed: true, render: () => <Lists section="deployables" /> },
+  "analysis-pending": { connect: () => analysisConnection("pending"), framed: true, render: () => <Lists section="deployables" /> },
+  "analysis-failed": { connect: () => analysisConnection("failed"), framed: true, render: () => <Lists section="deployables" /> },
+  "analysis-review": { connect: () => analysisConnection("review"), framed: true, render: () => <Lists section="deployables" /> },
+  "source-settings": { seed: SOURCE_CHOOSER, framed: true, render: () => <Lists section="settings" /> },
+  "source-management": { seed: { ...SOURCE_CHOOSER,
+    sourceConnections: [...(SOURCE_CHOOSER.sourceConnections ?? []), sourceConnectionRow({ id: "source-work-acme", credentialId: "cred-work" })],
+    packages: [
+      { ...ACME, accountId: "self", credentialId: "cred-grant", sourceConnectionId: "source-acme" },
+      { ...ACME, id: "pkg-acme-work", name: "acme work", accountId: "self", credentialId: "cred-work", sourceConnectionId: "source-work-acme" },
+      { ...FRESH, accountId: "self", credentialId: "cred-grant", sourceConnectionId: "source-acme" },
+      { ...WIDGETS, accountId: "self" },
+    ],
+  }, framed: true, render: () => <Lists section="sources" /> },
+  "source-empty": { seed: { ...SOURCE_CHOOSER, packages: [], sites: [], awaitingConfirm: [], sourceConnections: [] }, framed: true, render: () => <Lists section="sources" /> },
+  "connected-empty": { seed: { ...CONNECTED, repositories: repositoriesReply({ repositories: [], installations: [], pending: [] }) }, framed: true, render: () => <Lists section="deployables" /> },
   // The cluster's GitHub App, in each reading a surface has of it.
   "github-owner": { seed: NO_APP_OWNER, framed: true, render: () => <Lists section="deployables" /> },
   "github-member": { seed: NO_APP_MEMBER, role: "developer", framed: true, render: () => <Lists section="deployables" /> },
@@ -756,6 +839,11 @@ function MachinePane({ over }: { over: Record<string, unknown> }) {
       <MachineDetail machine={machine} writes={writes} now={FLEET_NOW} view="details" />
     </div>
   );
+}
+
+function AccountsPane() {
+  const [store] = useState(() => new LocalAccountsSettingsStore({ getItem: () => null, setItem: () => {} }));
+  return <WindowBody fallback="Accounts"><AccountsApp sectionId="accounts" navigate={() => {}} askContext={() => {}} store={store} /></WindowBody>;
 }
 
 // --- Sharing a machine (epic memql#5344) -----------------------------------

@@ -18,8 +18,9 @@ import {
 import { authorizeUrl, exchangeCode, logout, probeSession, redirectUriFor } from "./identityClient";
 import { forgetPending, rememberPending, takePending } from "./pending";
 import { challengeFor, generateCodeVerifier, generateState } from "./pkce";
+import { identityLocation, ownershipState } from "./nativeIdentity";
 
-export type AuthStatus = "loading" | "signed-out" | "signed-in" | "unavailable";
+export type AuthStatus = "loading" | "signed-out" | "signed-in" | "unavailable" | "unclaimed";
 
 export interface AuthContextValue {
   status: AuthStatus;
@@ -57,7 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setStatus("unavailable");
           return;
         }
-        const pending = takePending();
+        const pending = window.location.pathname === "/auth/callback" ? takePending() : null;
         const params = new URLSearchParams(window.location.search);
         const code = params.get("code");
         const returnedState = params.get("state");
@@ -77,9 +78,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setStatus("signed-in");
             return;
           }
-        } else {
-          forgetPending();
         }
+        const ownership = await ownershipState(loaded);
+        if (cancelled) return;
+        if (ownership === "unclaimed") { setStatus("unclaimed"); return; }
         const probe = await probeSession(loaded);
         setStatus(probe.signedIn ? "signed-in" : "signed-out");
       } catch {
@@ -92,18 +94,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = useCallback(async () => {
-    if (!isRuntimeConfigReady(config)) return;
+    if (!isRuntimeConfigReady(config)) throw new Error("Identity configuration is unavailable");
     const verifier = await generateCodeVerifier();
     const challenge = await challengeFor(verifier);
     const state = generateState();
-    if (!rememberPending(verifier, state)) return;
-    window.location.assign(
+    if (!rememberPending(verifier, state)) throw new Error("Browser sign-in storage is unavailable");
+    window.location.assign(identityLocation(
       authorizeUrl(config, {
         redirectUri: redirectUriFor(window.location.origin),
         state,
         codeChallenge: challenge,
       }),
-    );
+    ));
   }, [config]);
 
   const signOut = useCallback(async () => {

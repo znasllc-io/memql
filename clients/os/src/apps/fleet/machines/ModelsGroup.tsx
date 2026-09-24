@@ -1,3 +1,4 @@
+import { RecordList, RecordRow } from "../../../kit/RecordRow";
 import { Cpu } from "lucide-react";
 import { useMemo, useState, type FormEvent } from "react";
 
@@ -83,12 +84,13 @@ export function ModelsGroup({ machine, standalone = false }: { machine: MachineR
 
   return (
     <div className="os-fleet-machinemodels">
-      {!standalone ? <Subhead>Models</Subhead> : null}
+      {!standalone ? <Subhead meta={models.length}>Models</Subhead> : null}
 
       <RuntimeLine runtimes={runtimes} modelCount={models.length} />
 
       <RecommendedBlock
         set={inference.recommended}
+        settled={!inference.loading && !inference.error}
         isOwner={isOwner}
         busy={inference.pullingSet}
         blocked={live !== null}
@@ -102,7 +104,7 @@ export function ModelsGroup({ machine, standalone = false }: { machine: MachineR
       {isOwner && chatModel ? <AskIt modelId={chatModel.modelId} registrationId={machine.id} machineLabel={machineName(machine)} /> : null}
 
       {models.length > 0 ? (
-        <ul className="os-fleet-machinemodel-list">
+        <RecordList as="ul" label="Models on this machine">
           {models.map((model) => (
             <ModelRow
               key={model.modelId}
@@ -113,7 +115,7 @@ export function ModelsGroup({ machine, standalone = false }: { machine: MachineR
               onProbe={inference.probe}
             />
           ))}
-        </ul>
+        </RecordList>
       ) : null}
 
       {inference.error ? (
@@ -149,7 +151,7 @@ export function ModelsGroup({ machine, standalone = false }: { machine: MachineR
         </p>
       )}
 
-      <PullHistory pulls={pulls} live={live} loading={loading} />
+      <PullHistory pulls={pulls} live={live} loading={loading} error={feedError} />
     </div>
   );
 }
@@ -215,6 +217,7 @@ function ModelRow({
   onProbe: (modelId: string) => Promise<string>;
 }) {
   const [refusal, setRefusal] = useState("");
+  const [open, setOpen] = useState(false);
   const size = formatParams(model.params);
   const window = formatContext(model.contextWindow);
   const facts = [size, model.quant, window ? `${window} context` : ""].filter((f) => f !== "");
@@ -225,7 +228,9 @@ function ModelRow({
   ].filter((c) => c !== "");
 
   return (
-    <li className="os-fleet-machinemodel"><details className="fleet-record"><summary><span className="fleet-record-identity"><strong>{model.modelId}</strong><small>{facts.join(" · ") || "Size not reported"}</small></span><span className="fleet-record-meta">{can.join(", ") || "Capabilities not reported"}</span></summary><div className="fleet-record-detail">
+    <div><RecordRow name={model.modelId} secondary={facts.join(" · ") || "Size not reported"}
+      open={open} onOpen={() => setOpen(value => !value)}>{can.join(", ") || "Capabilities not reported"}</RecordRow>
+      {open ? <div className="fleet-record-detail">
       <span className="os-fleet-machinemodel-readings">
         <MeasuredLine measurement={measurement} />
       </span>
@@ -251,7 +256,7 @@ function ModelRow({
           detail={refusal}
         />
       ) : null}
-    </div></details></li>
+    </div> : null}</div>
   );
 }
 
@@ -320,12 +325,14 @@ function MeasuredLine({ measurement }: { measurement: Measurement | null }) {
  */
 function RecommendedBlock({
   set,
+  settled,
   isOwner,
   busy,
   blocked,
   onPull,
 }: {
   set: RecommendedSet;
+  settled: boolean;
   isOwner: boolean;
   busy: boolean;
   blocked: boolean;
@@ -347,11 +354,12 @@ function RecommendedBlock({
         For a {set.machineClass} GB machine, the catalog recommends:
       </p>
 
-      <ul className="os-fleet-recommendedlist">
+      <Subhead meta={settled ? set.entries.length : undefined}>Recommended models</Subhead>
+      <RecordList as="ul" label="Recommended models">
         {set.entries.map((entry) => (
           <RecommendedRow key={`${entry.level}:${entry.modelId}`} entry={entry} />
         ))}
-      </ul>
+      </RecordList>
 
       {set.runtimeGap.length > 0 ? (
         <p className="os-caption">
@@ -414,20 +422,9 @@ function RecommendedBlock({
 function RecommendedRow({ entry }: { entry: Recommendation }) {
   const size = entry.sizeBytes > 0 ? formatBytes(entry.sizeBytes) : "";
   return (
-    <li className="os-fleet-recommendedrow" data-blocked={!entry.pullable || undefined}>
-      <span className="os-fleet-recommended-level">{levelLabel(entry.level)}</span>
-      <span className="os-fleet-recommended-body">
-        <span className="os-fleet-machinemodel-id os-mono">{entry.modelId}</span>
-        <span className="os-fleet-recommended-readings">
-          {size ? <span className="os-fleet-recommended-size">{size}</span> : null}
-          {entry.pullable ? (
-            <span className="os-fleet-recommended-note">{entry.notes}</span>
-          ) : (
-            <span className="os-fleet-recommended-blocked">{entry.blocked}</span>
-          )}
-        </span>
-      </span>
-    </li>
+    <RecordRow name={entry.modelId} secondary={levelLabel(entry.level)} state={entry.pullable ? "Available" : "Blocked"} tone={entry.pullable ? "muted" : "warn"}>
+      {size ? <span>{size}</span> : null}<span>{entry.pullable ? entry.notes : entry.blocked}</span>
+    </RecordRow>
   );
 }
 
@@ -481,10 +478,12 @@ function PullHistory({
   pulls,
   live,
   loading,
+  error,
 }: {
   pulls: ModelPull[];
   live: ModelPull | null;
   loading: boolean;
+  error: string;
 }) {
   const past = pulls.filter((p) => p.pullId !== live?.pullId);
   if (loading && pulls.length === 0) {
@@ -493,17 +492,11 @@ function PullHistory({
   if (past.length === 0) return null;
 
   return (
-    <ul className="os-fleet-pullhistory">
-      {past.map((pull) => (
-        <li key={pull.pullId} className="os-fleet-pastpull" data-status={pull.status}>
-          <span className="os-fleet-machinemodel-id os-mono">{pull.model}</span>
-          <span className="os-fleet-pastpull-when">
-            {formatMoment(pull.endedAt || pull.requestedAt)}
-          </span>
-          <span className="os-fleet-pastpull-what">{pastPullSentence(pull)}</span>
-        </li>
-      ))}
-    </ul>
+    <><Subhead meta={!loading && !error ? past.length : undefined}>Past downloads</Subhead>
+    <RecordList as="ul" label="Past downloads">
+      {past.map(pull => <RecordRow key={pull.pullId} name={pull.model} secondary={formatMoment(pull.endedAt || pull.requestedAt)}
+        state={pull.status} tone={pull.status === "failed" ? "warn" : "muted"}>{pastPullSentence(pull)}</RecordRow>)}
+    </RecordList></>
   );
 }
 

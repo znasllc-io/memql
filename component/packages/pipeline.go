@@ -357,22 +357,50 @@ func (o *DeployOutcome) recordBuiltOn(on BuiltOn) {
 // answer, and re-running a TERMINAL row is refused by the append-only guard
 // rather than by anything here.
 func Deploy(ctx context.Context, d *Deps, req DeployRequest) (*DeployOutcome, error) {
-	pkg, err := d.Store.packageById(ctx, req.PackageId)
+	pkg, out, prepared, err := prepareDeployment(ctx, d, req)
 	if err != nil {
 		return nil, err
+	}
+	return executeDeployment(ctx, d, prepared, pkg, out)
+}
+
+// StartAnalysis persists the run before returning its ID. Its lifetime is the
+// cluster's, not the browser request's; Cancel is a durable flag another replica
+// can write. A node lost mid-run is handled by the existing abandoned sweep.
+func StartAnalysis(ctx context.Context, d *Deps, req DeployRequest) (*DeployOutcome, error) {
+	if req.Confirmed || req.Automatic || req.DeploymentId != "" {
+		return nil, fmt.Errorf("background analysis cannot confirm an existing deployment")
+	}
+	pkg, out, prepared, err := prepareDeployment(ctx, d, req)
+	if err != nil {
+		return nil, err
+	}
+	accepted := *out
+	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Minute)
+	go func() {
+		defer cancel()
+		_, _ = executeDeployment(runCtx, d, prepared, pkg, out)
+	}()
+	return &accepted, nil
+}
+
+func prepareDeployment(ctx context.Context, d *Deps, req DeployRequest) (map[string]any, *DeployOutcome, DeployRequest, error) {
+	pkg, err := d.Store.packageById(ctx, req.PackageId)
+	if err != nil {
+		return nil, nil, req, err
 	}
 	if pkg == nil {
 		// The composite tier returns zero rows for a package the caller may
 		// not read, so "not found" and "not yours" are the same answer here
 		// and the message must not claim to know which.
-		return nil, refuse(CodeSourceUnreadable,
+		return nil, nil, req, refuse(CodeSourceUnreadable,
 			"no package %q is readable by this caller", req.PackageId)
 	}
 
 	deploymentId := strings.TrimSpace(req.DeploymentId)
 	resumed, rerr := d.resumeParked(ctx, deploymentId, req.PackageId)
 	if rerr != nil {
-		return nil, rerr
+		return nil, nil, req, rerr
 	}
 	if deploymentId == "" {
 		deploymentId = d.newId(packageDeploymentConcept)
@@ -389,7 +417,7 @@ func Deploy(ctx context.Context, d *Deps, req DeployRequest) (*DeployOutcome, er
 		// would have the run report progress on apps it was told not to build.
 		if len(scope) > 0 {
 			if serr := d.Store.recordScope(ctx, deploymentId, scope); serr != nil {
-				return nil, serr
+				return nil, nil, req, serr
 			}
 		}
 		// AND IT DEPLOYS ITS OWN BYTES. The parked run analysed a snapshot and
@@ -434,10 +462,16 @@ func Deploy(ctx context.Context, d *Deps, req DeployRequest) (*DeployOutcome, er
 		FromDeploymentId: strings.TrimSpace(req.FromDeploymentId),
 		StartedAt:        d.now(),
 	}); err != nil {
-		return nil, err
+		return nil, nil, req, err
 	}
 
 	out := &DeployOutcome{DeploymentId: deploymentId, Status: StatusAnalyzing}
+
+	return pkg, out, req, nil
+}
+
+func executeDeployment(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]any, out *DeployOutcome) (*DeployOutcome, error) {
+	deploymentId := out.DeploymentId
 
 	// THE HEARTBEAT RUNS FOR THE LENGTH OF THE RUN (epic memql#4900, task
 	// memql#4902). Started here rather than inside runDeploy so it covers
@@ -462,6 +496,12 @@ func Deploy(ctx context.Context, d *Deps, req DeployRequest) (*DeployOutcome, er
 	})
 	runErr := runDeploy(runCtx, d, req, pkg, out, &cancelled)
 	stopHeartbeat()
+	if runErr == nil && out.AwaitingConfirm {
+		if asked, err := d.Store.cancelRequestedFor(ctx, deploymentId); err == nil && asked {
+			out.AwaitingConfirm = false
+			runErr = refuse(CodeDeploymentCancelled, "You stopped this analysis. Nothing was built or published.")
+		}
+	}
 
 	if err := runErr; err != nil {
 		var ref *Refusal
@@ -939,6 +979,9 @@ func (d *Deps) fetchFor(ctx context.Context, req DeployRequest, pkg map[string]a
 func (d *Deps) fetch(ctx context.Context, pkg map[string]any) (*SourceSnapshot, error) {
 	switch rowString(pkg, "sourceKind") {
 	case "repo":
+		if err := d.validatePackageSourceConnection(ctx, pkg); err != nil {
+			return nil, err
+		}
 		// The owner rides along with the credential NAME, because the name
 		// is resolved under the owner's actor and not the caller's: a
 		// cluster owner deploying a colleague's package fetches under the

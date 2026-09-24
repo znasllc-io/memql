@@ -43,7 +43,8 @@ function setup() {
   h.connection = { query, subscriptions: null };
   return { executeNamed, user: (next: string) => { user = next; } };
 }
-const wrap = (node: React.ReactNode, userId = "alice") => withSession(<AttentionProvider apps={OS_REGISTRY.apps}>{node}</AttentionProvider>, { userId });
+const runtimeApps = OS_REGISTRY.apps.map(app => ({ ...app, attentionChanges: [] }));
+const wrap = (node: React.ReactNode, userId = "alice") => withSession(<AttentionProvider apps={runtimeApps}>{node}</AttentionProvider>, { userId });
 afterEach(cleanup);
 
 describe("shared attention", () => {
@@ -113,7 +114,7 @@ describe("shared attention", () => {
     fireEvent.click(screen.getByRole("button", { name: /Available version/ }));
     await waitFor(() => expect(screen.queryAllByRole("img", { name: "Unseen change" })).toHaveLength(0));
     expect(pkg.updateAvailable).toBe(true);
-    expect(fake.executeNamed.mock.calls.filter(([name]) => name !== "myAttentionReceipts").map(([name]) => name)).toEqual(["acknowledgeAttention"]);
+    expect(fake.executeNamed.mock.calls.filter(([name]) => !["myAttentionReceipts", "clientAccountsAll"].includes(name)).map(([name]) => name)).toEqual(["acknowledgeAttention"]);
   });
   it("acknowledges only the viewed leaf; retains other ancestors, persists, and scopes receipts to the user", async () => {
     const fake = setup();

@@ -693,3 +693,22 @@ seed capability cap-developer-execute-app-deployables-preview { roleSlug: "devel
 @description("owner: the store part of the Deployables app -- attach or change the Shopify store a storefront fronts (memql#5541).")
 seed capability cap-owner-execute-app-deployables-store { roleSlug: "owner"  verb: "execute"  resourceType: "app:deployables/store"  predefined: true }
 
+
+// ---- app:identity (registry floor: no floor) ----
+@description("owner: open the bin app -- reproduces the OS registry floor no floor (memql#5300).")
+seed capability cap-owner-read-app-identity { roleSlug: "owner"  verb: "read"  resourceType: "app:identity"  predefined: true }
+@description("developer: open the bin app -- reproduces the OS registry floor no floor (memql#5300).")
+seed capability cap-developer-read-app-identity { roleSlug: "developer"  verb: "read"  resourceType: "app:identity"  predefined: true }
+@description("admin: open the bin app -- reproduces the OS registry floor no floor (memql#5300).")
+seed capability cap-admin-read-app-identity { roleSlug: "admin"  verb: "read"  resourceType: "app:identity"  predefined: true }
+@description("user: open the bin app -- reproduces the OS registry floor no floor (memql#5300).")
+seed capability cap-user-read-app-identity { roleSlug: "user"  verb: "read"  resourceType: "app:identity"  predefined: true }
+@description("viewer: open the bin app -- reproduces the OS registry floor no floor (memql#5300).")
+seed capability cap-viewer-read-app-identity { roleSlug: "viewer"  verb: "read"  resourceType: "app:identity"  predefined: true }
+@description("owner: open the logs section of the bin app -- reproduces the OS registry floor min admin (memql#5300).")
+seed capability cap-owner-read-app-identity-logs { roleSlug: "owner"  verb: "read"  resourceType: "app:identity/logs"  predefined: true }
+@description("developer: open the logs section of the bin app -- reproduces the OS registry floor min admin (memql#5300).")
+seed capability cap-developer-read-app-identity-logs { roleSlug: "developer"  verb: "read"  resourceType: "app:identity/logs"  predefined: true }
+@description("admin: open the logs section of the bin app -- reproduces the OS registry floor min admin (memql#5300).")
+seed capability cap-admin-read-app-identity-logs { roleSlug: "admin"  verb: "read"  resourceType: "app:identity/logs"  predefined: true }
+

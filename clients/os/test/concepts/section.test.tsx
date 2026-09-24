@@ -245,3 +245,19 @@ describe("the walk starts once", () => {
     expect(browses.length).toBe(1);
   });
 });
+
+
+it("counts the filtered registry only after a followed snapshot arrives", async () => {
+  const connection = fakeConnection();
+  mount(connection);
+  const count = () => screen.getByRole("heading", { name: "Concepts" }).closest(".os-head")?.querySelector(".os-head-meta")?.textContent;
+  expect(count()).toBeUndefined();
+  await snapshot(connection);
+  expect(count()).toBe("2");
+  await click(screen.getByRole("button", { name: "Search concepts" }));
+  fireEvent.change(screen.getByPlaceholderText("Concept, domain or description"), { target: { value: "artifact" } });
+  expect(count()).toBe("1");
+  expect(screen.getByText("artifact", { selector: ".os-row-name" }).closest(".os-record-row")?.tagName).toBe("BUTTON");
+  await act(async () => connection.pushDelta({ generation: 2, added: [], removed: [ARTIFACT.id], reset: false }));
+  expect(count()).toBe("0");
+});

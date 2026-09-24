@@ -279,3 +279,8 @@ func TestSkippedCountReachesTheCampaignRow(t *testing.T) {
 			strings.Join(callsWithPrefix(engine, "mutation updateCampaignProgress"), "\n"))
 	}
 }
+
+// This store/query fixture never authorizes sending.
+func (e *countingEngine) OrganizationCapable(context.Context, string, string, string) bool {
+	return false
+}

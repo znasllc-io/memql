@@ -114,11 +114,12 @@ func (t TokenResponse) ExpiresAt(now time.Time) time.Time {
 // Form body plus `Accept: application/json`, which is what GitHub's token
 // endpoint takes; without the Accept header it answers
 // application/x-www-form-urlencoded and every field reads as empty.
-func (c *Client) ExchangeCode(ctx context.Context, cfg Config, redirectURI, code string) (TokenResponse, error) {
+func (c *Client) ExchangeCode(ctx context.Context, cfg Config, redirectURI, code, verifier string) (TokenResponse, error) {
 	form := url.Values{}
 	form.Set("client_id", cfg.ClientID)
 	form.Set("client_secret", cfg.ClientSecret)
 	form.Set("code", code)
+	form.Set("code_verifier", verifier)
 	if strings.TrimSpace(redirectURI) != "" {
 		form.Set("redirect_uri", redirectURI)
 	}

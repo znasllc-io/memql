@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { FleetTabs, RefreshButton, useFleetScroll } from "../FleetControls";
 import { InfoDetail } from "../../../kit/InfoDetail";
 
-import { Button, Check, Switch, EmptyState, Chip, Field, Head, Input, Notice, Panel, Select, Subhead } from "../../../kit";
+import { Button, Check, Switch, EmptyState, Chip, Field, Head, Input, Notice, Panel, RecordList, RecordRow, Select, Subhead } from "../../../kit";
 import { formatFreshness, formatMoment } from "../../../kit/format";
 import { useNow } from "../../../kit/useNow";
 import { Measure } from "../../../kit/MeasureView";
@@ -50,7 +50,7 @@ export function AppsSection({ sessionTarget, navigation }: { sessionTarget?: { i
     {openSessionId ? <SessionPage sessionId={openSessionId} onBack={() => setOpenSessionId("")} /> : null}
     <div className="fleet-pane-overview" hidden={openSessionId !== ""}>
       <div className="fleet-section-header">
-      <Head title="Activity" meta={sessions.sessions.length}>
+      <Head title="Activity" meta={view === "sessions" && sessions.readAt && !sessions.loading && !sessions.error ? sessions.sessions.length : undefined}>
         {/* NOT A STANDING REFRESH. Neither read on this screen is live --
             v1:worker:delegationPolicy and v1:worker:appSession carry no
             broadcast rule -- so unlike the Routing and Workbenches sections,
@@ -93,13 +93,11 @@ export function AppsSection({ sessionTarget, navigation }: { sessionTarget?: { i
         <EmptyState title="No app sessions yet" action={<Button onClick={() => setView("delegation")}>Review delegation</Button>}>Sessions appear when MemQL hands a task to an allowed app on one of your machines.</EmptyState>
       ) : null}
 
-      <ul className="os-fleet-sessions" aria-label="Delegated runs">
+      <RecordList as="ul" label="Delegated runs">
         {sessions.sessions.map((session) => (
-          <li key={session.id}>
-            <SessionLine session={session} now={now} onOpen={() => setOpenSessionId(session.id)} />
-          </li>
+          <SessionLine key={session.id} session={session} now={now} onOpen={() => setOpenSessionId(session.id)} />
         ))}
-      </ul>
+      </RecordList>
       </div></div>
     </div>
   );
@@ -115,14 +113,11 @@ function SessionLine({
   onOpen: () => void;
 }) {
   return (
-    <button type="button" className="fleet-activity-record" onClick={onOpen}>
-      <span className="fleet-record-identity"><strong>{appLabel(session.app)}</strong><small>{session.runId || session.kind || "App session"}</small></span>
-      <span className="os-fleet-session-status" data-tone={statusTone(session.status)}>{session.status}</span>
+    <RecordRow name={appLabel(session.app)} secondary={session.runId || session.kind || "App session"} onOpen={onOpen} state={session.status} tone={statusTone(session.status) === "ok" ? "accent" : statusTone(session.status) === "neutral" ? "muted" : "warn"}>
       <Chip tone={session.billing === "subscription" ? "accent" : "muted"}>{session.billing}</Chip>
       {totalTokens(session).kind === "measured" ? <span className="os-fleet-session-tokens fleet-record-meta"><Measure figure={totalTokens(session)} suffix=" tokens" /></span> : null}
       <span className="fleet-record-meta">{formatFreshness(session.startedAt, now)}</span>
-      <span aria-hidden>›</span>
-    </button>
+    </RecordRow>
   );
 }
 

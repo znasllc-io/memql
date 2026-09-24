@@ -158,7 +158,7 @@ func catalogHolds(slug, verb, resource string) (held bool, answered bool) {
 	if cat == nil {
 		return false, false
 	}
-	return cat.Holds(normalizeSlug(slug), verb, resource), true
+	return ScopedRoleMayUse(Role(slug), resource) && cat.Holds(normalizeSlug(slug), verb, resource), true
 }
 
 // catalogRank resolves a slug's rung for AUTHORIZATION, reporting whether it

@@ -77,7 +77,7 @@ func registeredApp() githubconnect.Config {
 func TestARegistrationIsSixRowsUnderTheSixNames(t *testing.T) {
 	t.Setenv(secret.EnvMasterKey, strings.Repeat("ab", 32))
 	rec := &appRowRecorder{}
-	store := &Store{Engine: rec}
+	store := &Store{GithubGate: githubUnitGate, Engine: rec}
 	if err := store.WriteGithubAppRegistration(context.Background(), registeredApp(), "v1:identity:user:owner"); err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestARegistrationIsSixRowsUnderTheSixNames(t *testing.T) {
 func TestNoCredentialReachesAStatementInTheClear(t *testing.T) {
 	t.Setenv(secret.EnvMasterKey, strings.Repeat("ab", 32))
 	rec := &appRowRecorder{}
-	store := &Store{Engine: rec}
+	store := &Store{GithubGate: githubUnitGate, Engine: rec}
 	app := registeredApp()
 	if err := store.WriteGithubAppRegistration(context.Background(), app, "v1:identity:user:owner"); err != nil {
 		t.Fatal(err)
@@ -186,7 +186,7 @@ func TestAPartialRegistrationWritesNothing(t *testing.T) {
 			app.WebhookSecret = ""
 		}
 		rec := &appRowRecorder{}
-		err := (&Store{Engine: rec}).WriteGithubAppRegistration(context.Background(), app, "u")
+		err := (&Store{GithubGate: githubUnitGate, Engine: rec}).WriteGithubAppRegistration(context.Background(), app, "u")
 		if err == nil || !strings.Contains(err.Error(), name) {
 			t.Errorf("without %s: err = %v, want a refusal naming it", name, err)
 		}
@@ -201,7 +201,7 @@ func TestAPartialRegistrationWritesNothing(t *testing.T) {
 func TestAFailedWriteStopsAndSaysWhich(t *testing.T) {
 	t.Setenv(secret.EnvMasterKey, strings.Repeat("ab", 32))
 	rec := &appRowRecorder{failOn: githubconnect.EnvClientSecret}
-	err := (&Store{Engine: rec}).WriteGithubAppRegistration(context.Background(), registeredApp(), "u")
+	err := (&Store{GithubGate: githubUnitGate, Engine: rec}).WriteGithubAppRegistration(context.Background(), registeredApp(), "u")
 	if err == nil || !strings.Contains(err.Error(), githubconnect.EnvClientSecret) {
 		t.Fatalf("err = %v", err)
 	}
@@ -217,7 +217,7 @@ func TestAFailedWriteStopsAndSaysWhich(t *testing.T) {
 
 func TestClearingBlanksAllSixThePrivateKeyFirst(t *testing.T) {
 	rec := &appRowRecorder{}
-	if err := (&Store{Engine: rec}).ClearGithubAppRegistration(context.Background(), "v1:identity:user:owner"); err != nil {
+	if err := (&Store{GithubGate: githubUnitGate, Engine: rec}).ClearGithubAppRegistration(context.Background(), "v1:identity:user:owner"); err != nil {
 		t.Fatal(err)
 	}
 	writes := rec.writes()
@@ -274,7 +274,7 @@ func TestAStateIsSpentOnlyByItsOwnFlow(t *testing.T) {
 		{"a SETUP state, by the CONNECT callback", githubconnect.PurposeAppSetup, githubconnect.PurposeConnect, false},
 	} {
 		rec := &appRowRecorder{state: stateRowFor(tc.rowPurpose)}
-		row, err := (&Store{Engine: rec}).ConsumeGithubConnectStateFor(context.Background(), HashConnectState("plain"), "203.0.113.9", tc.asked)
+		row, err := (&Store{GithubGate: githubUnitGate, Engine: rec}).ConsumeGithubConnectStateFor(context.Background(), HashConnectState("plain"), "203.0.113.9", tc.asked)
 		consumed := len(rec.writes()) == 1 && strings.HasPrefix(rec.writes()[0], "mutation consumeGithubConnectState(")
 		if tc.spent {
 			if err != nil || row == nil || !consumed {
@@ -293,14 +293,14 @@ func TestAStateIsSpentOnlyByItsOwnFlow(t *testing.T) {
 
 func TestTheOldConsumeIsTheConnectFlows(t *testing.T) {
 	rec := &appRowRecorder{state: stateRowFor(githubconnect.PurposeAppSetup)}
-	if _, err := (&Store{Engine: rec}).ConsumeGithubConnectState(context.Background(), HashConnectState("plain"), ""); !errors.Is(err, ErrGithubConnectStateNotFound) {
+	if _, err := (&Store{GithubGate: githubUnitGate, Engine: rec}).ConsumeGithubConnectState(context.Background(), HashConnectState("plain"), ""); !errors.Is(err, ErrGithubConnectStateNotFound) {
 		t.Errorf("ConsumeGithubConnectState spent an app-setup state: %v", err)
 	}
 }
 
 func TestASetupStateCarriesItsPurposeAndOrganization(t *testing.T) {
 	rec := &appRowRecorder{}
-	if _, err := (&Store{Engine: rec}).CreateGithubConnectState(context.Background(), GithubConnectStateSeed{
+	if _, err := (&Store{GithubGate: githubUnitGate, Engine: rec}).CreateGithubConnectState(context.Background(), GithubConnectStateSeed{
 		UserId:       "v1:identity:user:owner",
 		StateHash:    HashConnectState("plain"),
 		ExpiresAt:    time.Now().UTC().Add(10 * time.Minute),

@@ -8,6 +8,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -234,7 +236,7 @@ func grantHarness(t *testing.T, hub *grantHub, row map[string]any) (*Integration
 		githubapp.WithHTTPClient(&http.Client{Transport: hub}),
 		githubapp.WithAPIBase("https://api.github.com"),
 		githubapp.WithOAuthBase("https://github.com"))
-	s := &store{engine: engine, logger: discardLogger(), github: client}
+	s := &store{grantGate: grantUnitGate, engine: engine, logger: discardLogger(), github: client}
 	deps := &Deps{
 		Store:           s,
 		Credentials:     s.resolveCredential,
@@ -251,6 +253,8 @@ func grantHarness(t *testing.T, hub *grantHub, row map[string]any) (*Integration
 
 // installedRepo wires the two app-side routes a background fetch needs.
 func installedRepo(hub *grantHub, owner, repo string) *grantHub {
+	hub.body("/user/installations", http.StatusOK, installationsBody)
+	hub.body("/repos/"+owner+"/"+repo, http.StatusOK, `{"full_name":`+jsonQuote(owner+"/"+repo)+`}`)
 	hub.body("/repos/"+owner+"/"+repo+"/installation", http.StatusOK, `{"id":42}`)
 	hub.body("/app/installations/42/access_tokens", http.StatusCreated,
 		`{"token":"`+grantInstallToken+`","expires_at":"`+time.Now().UTC().Add(time.Hour).Format(time.RFC3339)+`"}`)
@@ -529,7 +533,7 @@ func TestAGrantOnANodeWithNoAppRefusesAsNotConfigured(t *testing.T) {
 	engine := &actorEngine{recordingEngine: recordingEngine{rows: map[string][]map[string]any{
 		"query sourceCredentialSealedById": {sealedGrantRow(t, grantRowOpts{ExpiresAt: time.Now().UTC().Add(-time.Hour)})},
 	}}}
-	s := &store{engine: engine, logger: discardLogger(), github: githubapp.New(githubapp.Config{})}
+	s := &store{grantGate: grantUnitGate, engine: engine, logger: discardLogger(), github: githubapp.New(githubapp.Config{})}
 
 	_, err := s.peekCredential(context.Background(), grantCredentialId, grantOwner)
 	if got := RefusalCode(err); got != CodeGithubAppNotConfigured {
@@ -583,7 +587,7 @@ func TestThePollUnderAGrantUsesAnInstallationTokenAndSkipsAReconnect(t *testing.
 		"query sourceCredentialSealedById": {sealedGrantRow(t, grantRowOpts{})},
 	}}}
 	client := githubapp.New(grantAppConfig(t), githubapp.WithHTTPClient(&http.Client{Transport: hub}))
-	s := &store{engine: engine, logger: discardLogger(), github: client}
+	s := &store{grantGate: grantUnitGate, engine: engine, logger: discardLogger(), github: client}
 	i := NewIntegration(engine, discardLogger())
 	i.depsOnce.Do(func() {
 		i.deps = &Deps{Store: s, Credentials: s.resolveCredential, PeekCredentials: s.peekCredential,
@@ -608,7 +612,7 @@ func TestThePollUnderAGrantUsesAnInstallationTokenAndSkipsAReconnect(t *testing.
 		"query sourceCredentialSealedById": {sealedGrantRow(t, grantRowOpts{ExpiresAt: time.Now().UTC().Add(-time.Hour)})},
 	}}}
 	client2 := githubapp.New(grantAppConfig(t), githubapp.WithHTTPClient(&http.Client{Transport: hub2}))
-	s2 := &store{engine: engine2, logger: discardLogger(), github: client2}
+	s2 := &store{grantGate: grantUnitGate, engine: engine2, logger: discardLogger(), github: client2}
 	i2 := NewIntegration(engine2, discardLogger())
 	i2.depsOnce.Do(func() {
 		i2.deps = &Deps{Store: s2, Credentials: s2.resolveCredential, PeekCredentials: s2.peekCredential,
@@ -706,7 +710,7 @@ func TestProbeWithNoCredentialResolvesTheCallersGrant(t *testing.T) {
 		"query sourceCredentialSealedById": {row},
 	}}}
 	client := githubapp.New(grantAppConfig(t), githubapp.WithHTTPClient(&http.Client{Transport: hub}))
-	s := &store{engine: engine, logger: discardLogger(), github: client}
+	s := &store{grantGate: grantUnitGate, engine: engine, logger: discardLogger(), github: client}
 	deps := &Deps{Store: s, Credentials: s.resolveCredential, PeekCredentials: s.peekCredential,
 		GitHubApp: client, HTTP: &http.Client{Transport: hub}, Logger: discardLogger()}
 
@@ -935,7 +939,7 @@ func TestSourceRepositoriesAnswersTypedReasons(t *testing.T) {
 	t.Run("no app configured", func(t *testing.T) {
 		hub := newGrantHub()
 		engine := &actorEngine{}
-		s := &store{engine: engine, logger: discardLogger()}
+		s := &store{grantGate: grantUnitGate, engine: engine, logger: discardLogger()}
 		deps := &Deps{Store: s, PeekCredentials: s.peekCredential, GitHubApp: githubapp.New(githubapp.Config{}),
 			HTTP: &http.Client{Transport: hub}, Logger: discardLogger()}
 		res, err := SourceRepositories(callerCtx(grantOwner), deps, "", 0)
@@ -1086,6 +1090,12 @@ func TestDisconnectRevokesAtGitHubAndTheRowRegardless(t *testing.T) {
 	t.Run("the happy path revokes both halves", func(t *testing.T) {
 		hub := newGrantHub().body("/applications/Iv1.memqlconnect/grant", http.StatusNoContent, ``)
 		i, _, engine, _ := grantHarness(t, hub, sealedGrantRow(t, grantRowOpts{}))
+		hub.on("/applications/Iv1.memqlconnect/grant", func(*http.Request) (int, string) {
+			if !engine.sawStatement("mutation revokeSourceCredential") {
+				t.Error("GitHub revoke preceded the authorized local write")
+			}
+			return http.StatusNoContent, ""
+		})
 		nodes, err := i.handleSourceCredentialRevoke(callerCtx(grantOwner), map[string]any{"credentialId": grantCredentialId}, 0)
 		if err != nil {
 			t.Fatalf("revoke: %v", err)
@@ -1099,6 +1109,15 @@ func TestDisconnectRevokesAtGitHubAndTheRowRegardless(t *testing.T) {
 		}
 		if !engine.sawStatement("mutation revokeSourceCredential") {
 			t.Fatalf("the row must be flipped; statements: %v", engine.statements())
+		}
+		reads := 0
+		for _, statement := range engine.statements() {
+			if strings.HasPrefix(statement, "query sourceCredentialSealedById") {
+				reads++
+			}
+		}
+		if reads != 2 {
+			t.Fatalf("must read the grant key then capture the current bearer inside the lock before revocation, got %d reads", reads)
 		}
 	})
 
@@ -1138,6 +1157,64 @@ func TestDisconnectRevokesAtGitHubAndTheRowRegardless(t *testing.T) {
 	})
 }
 
+func TestDisconnectDeniedLocallyNeverContactsGitHub(t *testing.T) {
+	t.Setenv(secret.EnvMasterKey, testMasterKey)
+	for _, expired := range []bool{false, true} {
+		t.Run(fmt.Sprintf("expired=%t", expired), func(t *testing.T) {
+			opts := grantRowOpts{}
+			if expired {
+				opts.ExpiresAt = time.Now().UTC().Add(-time.Hour)
+			}
+			hub := newGrantHub()
+			i, _, engine, _ := grantHarness(t, hub, sealedGrantRow(t, opts))
+			denied := errors.New("update/data denied")
+			engine.fail = map[string]error{"mutation revokeSourceCredential": denied}
+			nodes, err := i.handleSourceCredentialRevoke(callerCtx(grantOwner), map[string]any{"credentialId": grantCredentialId}, 0)
+			if !errors.Is(err, denied) || len(nodes) != 0 {
+				t.Fatalf("must preserve local refusal, got nodes=%d err=%v", len(nodes), err)
+			}
+			if len(hub.seen()) != 0 {
+				t.Fatalf("local refusal caused %d GitHub requests (including refresh)", len(hub.seen()))
+			}
+		})
+	}
+}
+
+func TestDisconnectExpiredGrantIsLocalOnly(t *testing.T) {
+	t.Setenv(secret.EnvMasterKey, testMasterKey)
+	for _, tc := range []struct {
+		name      string
+		expiresAt string
+	}{
+		{"expired", time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)},
+		{"expiring during request", time.Now().UTC().Add(refreshMargin / 2).Format(time.RFC3339)},
+		{"unreadable expiry", "invalid-expiry"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			row := sealedGrantRow(t, grantRowOpts{})
+			row["expiresAt"] = tc.expiresAt
+			// GitHub may return 404 for an expired access token. That cannot
+			// establish that its underlying authorization has been revoked.
+			hub := newGrantHub().body("/applications/Iv1.memqlconnect/grant", http.StatusNotFound, `{}`)
+			i, _, engine, _ := grantHarness(t, hub, row)
+			nodes, err := i.handleSourceCredentialRevoke(callerCtx(grantOwner), map[string]any{"credentialId": grantCredentialId}, 0)
+			if err != nil {
+				t.Fatalf("local disconnect: %v", err)
+			}
+			reply := replyPayload(t, nodes)
+			if reply["status"] != credentialStatusRevoked || reply["remoteRevoked"] != false {
+				t.Fatalf("expected local success without claiming remote revocation, got %v", reply)
+			}
+			if !engine.sawStatement("mutation revokeSourceCredential") {
+				t.Fatal("expired credentials must still be revoked locally")
+			}
+			if len(hub.seen()) != 0 {
+				t.Fatalf("disconnect with unusable token made %d GitHub requests", len(hub.seen()))
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Nothing leaks
 // ---------------------------------------------------------------------------
@@ -1165,7 +1242,7 @@ func TestNoGrantSecretReachesALogOrARow(t *testing.T) {
 		"query sourceCredentialSealedById": {sealedGrantRow(t, grantRowOpts{ExpiresAt: time.Now().UTC().Add(-time.Hour)})},
 	}}}
 	client := githubapp.New(grantAppConfig(t), githubapp.WithHTTPClient(&http.Client{Transport: hub}))
-	s := &store{engine: engine, logger: logger, github: client}
+	s := &store{grantGate: grantUnitGate, engine: engine, logger: logger, github: client}
 	deps := &Deps{Store: s, Credentials: s.resolveCredential, PeekCredentials: s.peekCredential,
 		GitHubApp: client, HTTP: &http.Client{Transport: hub}, Logger: logger, Limits: DefaultLimits()}
 
@@ -1249,4 +1326,9 @@ func TestRowStringsReadsBothSpellings(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Statement/HTTP unit harness only; the replica regression uses Postgres.
+func grantUnitGate(ctx context.Context, _, _ string, fn func(context.Context) error) error {
+	return fn(ctx)
 }

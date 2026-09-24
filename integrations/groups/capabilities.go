@@ -94,6 +94,24 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 		{
+			Name:        "groupPeople",
+			Description: "List up to 100 existing members of the group's organization for authorized membership management.",
+			Handler:     i.handleGroupPeople,
+			ArgsSchema:  map[string]string{"groupId": "string (required)"},
+		},
+		{
+			Name:        "groupEnsureOperatorMembership",
+			Description: "Ensure a global cluster operator belongs to the cluster organization. Internal lifecycle only.",
+			Handler:     i.handleGroupEnsureOperatorMembership,
+			ArgsSchema:  map[string]string{"userId": "string (required)"},
+		},
+		{
+			Name:        "configureSelfAccount",
+			Description: "Configure the cluster's organization and place its owner in the existing account group. Internal setup only.",
+			Handler:     i.handleConfigureSelfAccount,
+			ArgsSchema:  map[string]string{"name": "string (required)", "ownerUserId": "string (required)"},
+		},
+		{
 			Name:        "groupEnsureForAccount",
 			Description: "Ensure the account-kind group for one account exists. Idempotent.",
 			Handler:     i.handleGroupEnsureForAccount,
@@ -116,14 +134,14 @@ func (i *Integration) handleGroupCreate(ctx context.Context, args map[string]any
 	if err != nil {
 		return nil, err
 	}
-	if err := c.requireCapability(ctx, auth.VerbCreate); err != nil {
-		return nil, err
-	}
 	name := strings.TrimSpace(asString(args["name"]))
 	if name == "" {
 		return nil, refusal(CodeGroupNotFound, "a group needs a name")
 	}
 	accountID := memql.BareShortId(strings.TrimSpace(asString(args["accountId"])))
+	if err := i.requireOrganizationCapability(ctx, c, accountID, auth.VerbCreate); err != nil {
+		return nil, err
+	}
 	if accountID != "" {
 		if err := i.requireActiveAccount(ctx, accountID); err != nil {
 			return nil, err
@@ -158,11 +176,11 @@ func (i *Integration) handleGroupUpdate(ctx context.Context, args map[string]any
 	if err != nil {
 		return nil, err
 	}
-	if err := c.requireCapability(ctx, auth.VerbUpdate); err != nil {
-		return nil, err
-	}
 	g, err := i.requireActiveGroup(ctx, asString(args["groupId"]))
 	if err != nil {
+		return nil, err
+	}
+	if err := i.requireOrganizationCapability(ctx, c, g.AccountID, auth.VerbUpdate); err != nil {
 		return nil, err
 	}
 	// An omitted argument leaves the field, which is what makes this a
@@ -188,11 +206,11 @@ func (i *Integration) handleGroupArchive(ctx context.Context, args map[string]an
 	if err != nil {
 		return nil, err
 	}
-	if err := c.requireCapability(ctx, auth.VerbUpdate); err != nil {
-		return nil, err
-	}
 	g, err := i.requireActiveGroup(ctx, asString(args["groupId"]))
 	if err != nil {
+		return nil, err
+	}
+	if err := i.requireOrganizationCapability(ctx, c, g.AccountID, auth.VerbUpdate); err != nil {
 		return nil, err
 	}
 	// An ACCOUNT-KIND group belongs to its account (D5). Archiving it while
@@ -225,11 +243,11 @@ func (i *Integration) handleGroupMemberAdd(ctx context.Context, args map[string]
 	if err != nil {
 		return nil, err
 	}
-	if err := c.requireCapability(ctx, auth.VerbUpdate); err != nil {
-		return nil, err
-	}
 	g, err := i.requireActiveGroup(ctx, asString(args["groupId"]))
 	if err != nil {
+		return nil, err
+	}
+	if err := i.requireOrganizationCapability(ctx, c, g.AccountID, auth.VerbUpdate); err != nil {
 		return nil, err
 	}
 	target := memql.BareShortId(strings.TrimSpace(asString(args["userId"])))
@@ -251,6 +269,9 @@ func (i *Integration) handleGroupMemberAdd(ctx context.Context, args map[string]
 		return nil, refusal(CodeTargetUserNotFound, fmt.Sprintf("%s names no user on this cluster", target))
 	}
 	if err := c.requireTargetBelow(target, role); err != nil {
+		return nil, err
+	}
+	if err := i.requireOrganizationTarget(ctx, c, g.AccountID, target); err != nil {
 		return nil, err
 	}
 
@@ -286,9 +307,6 @@ func (i *Integration) handleGroupMemberRemove(ctx context.Context, args map[stri
 	// it. Leaving a group grants nobody anything, and the alternative is
 	// somebody who cannot get out of a group they were placed in.
 	if !self {
-		if err := c.requireCapability(ctx, auth.VerbUpdate); err != nil {
-			return nil, err
-		}
 		role, err := i.store.UserRole(ctx, target)
 		if err != nil {
 			return nil, err
@@ -310,6 +328,11 @@ func (i *Integration) handleGroupMemberRemove(ctx context.Context, args map[stri
 	}
 	if g == nil {
 		return nil, refusal(CodeGroupNotFound, fmt.Sprintf("%s names no group", groupID))
+	}
+	if !self {
+		if err := i.requireOrganizationCapability(ctx, c, g.AccountID, auth.VerbUpdate); err != nil {
+			return nil, err
+		}
 	}
 
 	m := Membership{

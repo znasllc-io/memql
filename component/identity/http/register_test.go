@@ -56,7 +56,7 @@ func (f *registerFakeEngine) Execute(_ context.Context, q string) (*memqlengine.
 // serialized mutation/query call. Good enough for the test fake's
 // single-level string args.
 func extractField(q, key string) string {
-	for _, pat := range []string{`"` + key + `":"`, key + `: "`} {
+	for _, pat := range []string{`"` + key + `":"`, key + `: "`, key + `:"`} {
 		i := strings.Index(q, pat)
 		if i < 0 {
 			continue
