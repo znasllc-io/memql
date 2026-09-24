@@ -226,6 +226,9 @@ func storedAppRows() githubconnect.RowReader {
 // setting six values in a deployment -- and Connect has to work all the same.
 func TestGithubConnectBeginSeesAnAppRegisteredFromTheProduct(t *testing.T) {
 	unconfigureApp(t)
+	// The app comes from rows, but PKCE still uses the cluster encryption key.
+	// Supply a fixture key rather than inheriting a developer's environment.
+	t.Setenv("MEMQL_MASTER_KEY", strings.Repeat("ab", 32))
 	eng := &beginFakeEngine{}
 	i := NewIdentityIntegrationWithEngine(eng, nil, nil)
 	i.SetGitHubAppRows(storedAppRows())
