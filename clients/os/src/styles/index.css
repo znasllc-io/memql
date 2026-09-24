@@ -2140,6 +2140,15 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   background: var(--os-plate);
 }
 
+/* Panel actions keep the same trailing edge before and during confirmation. */
+.os-panel-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .os-form {
   display: flex;
   flex-direction: column;

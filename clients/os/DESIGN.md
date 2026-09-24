@@ -76,7 +76,11 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    grouping grammar. Settings groups keep their `fieldset` and `legend`
    SEMANTICS (a legend names its group to assistive tech), but the legend
    dresses as a Subhead and the legend-breaking-the-border box is gone --
-   one look, not two. A deliberate MOMENT (the Accounts first-run card's
+   one look, not two. Panel actions align to the right edge in the shared
+   `os-panel-actions` row. An action such as Disconnect stays on that same
+   edge when it expands into Cancel and confirmation; do not shift the
+   controls left or fill the panel width. Confirmation copy sits above them.
+   A deliberate MOMENT (the Accounts first-run card's
    eyebrow and headline) may keep its voice; chrome may not.
 
 9. **Real estate belongs to content.** Lists take the window; forms take a
@@ -196,6 +200,12 @@ combined list". Two lists now, in one row language (`RecordRow`):
   history. Archive remains the distinct lifecycle operation. Add deployable
   creates sources and can connect accounts inline; Settings can also add,
   reconnect and disconnect personal GitHub accounts.
+- **Disconnect GitHub changes repository access only.** Saved sources,
+  deployables, deployed files and serving sites remain intact and online.
+  The disconnected account is absent from Add deployable's account choices;
+  the shared plus action there or in Settings can connect it again. Fetching
+  future source updates requires an active connection. Disconnect never
+  archives a package, removes a source or uninstalls a hosted app.
 - **What belongs to the source is said on the source, once.** A run parked at a
   source's gate is "Review needed" on that source's row and on its page's bar,
   with Review beside it -- not repeated on every deployable the source made.

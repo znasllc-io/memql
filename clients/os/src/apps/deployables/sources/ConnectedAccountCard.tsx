@@ -263,7 +263,7 @@ export function DisconnectGitHub({
     previouslyArmed.current = armed;
   }, [armed, compact]);
   return (
-    <section ref={region} className={(compact || inline) && !armed ? "os-form-row" : "os-settings-danger"}>
+    <section ref={region} className={!armed && inline ? "os-panel-actions" : !armed && compact ? "os-form-row" : "os-settings-danger"}>
       {summary}
       {armed ? (
         <>
@@ -275,7 +275,7 @@ export function DisconnectGitHub({
               ? ` ${sourceNames.length} source${sourceNames.length === 1 ? " will" : "s will"} need this account reconnected to fetch updates.`
               : ""}
           </Caption>
-          <div className="os-confirm-row">
+          <div className={`os-confirm-row${inline ? " os-panel-actions" : ""}`}>
             <Button tone="quiet" disabled={busy} onClick={() => setArmed(false)}>
               Cancel
             </Button>
