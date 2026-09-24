@@ -6,10 +6,8 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
-	"net/http"
 	"os"
 	"strings"
-	"time"
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 
@@ -42,7 +40,7 @@ const (
 func newProductionFetcher(s *store, logger *slog.Logger, gh *githubapp.Client) Fetcher {
 	blobs := &blobReader{}
 	return &githubFetcher{
-		http: &http.Client{Timeout: 5 * time.Minute},
+		http: sourceHTTPClient(),
 		// The same resolver the D11 poll uses (Deps.Credentials), wired here
 		// as well so the fetcher is complete on its own: a fetch resolves its
 		// credential under the package owner's actor, never through a
