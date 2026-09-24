@@ -78,6 +78,20 @@ resources:
 # Remove cloud-only resources
 # ---------------------------------------------------------------------------
 patches:
+  # Share the BFF image key so both make dev and the release installer's
+  # image override select a real image for the dsl-fetch subcommand.
+  - target: { kind: Deployment, labelSelector: "memql/product-dsl=true" }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: dsl-consumer
+      spec:
+        template:
+          spec:
+            initContainers:
+              - name: dsl-packages-fetch
+                image: acrmemql.azurecr.io/memql-bff:latest
   - target: { kind: Deployment, name: "^(bff|agent|planner|workbench)$" }
     patch: |
       - op: add
@@ -345,10 +359,6 @@ patches:
 # NO @sha256 digest here -- that is intentional and exempted from CI gate.
 # ---------------------------------------------------------------------------
 images:
-  # dsl-fetch is a subcommand of the already imported local BFF image.
-  - name: memql-engine
-    newName: memql-bff
-    newTag: local
   # The database operand image, built by `make db-image` and imported into k3d.
   # The tag MUST start with the PostgreSQL major -- CNPG parses it off
   # spec.imageName and refuses what it cannot read (deploy/db-image/README.md).
