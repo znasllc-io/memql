@@ -69,7 +69,8 @@ resources:
   - os-front-door.yaml
   - vscode-front-door.yaml
   - edge-front-door.yaml
-  - ../../base
+  - engine
+  - package-storage.yaml
   # Local-only infrastructure (absent in base and the cloud overlay)
   - azurite.yaml
 
@@ -77,6 +78,32 @@ resources:
 # Remove cloud-only resources
 # ---------------------------------------------------------------------------
 patches:
+  # Share the BFF image key so both make dev and the release installer's
+  # image override select a real image for the dsl-fetch subcommand.
+  - target: { kind: Deployment, labelSelector: "memql/product-dsl=true" }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: dsl-consumer
+      spec:
+        template:
+          spec:
+            initContainers:
+              - name: dsl-packages-fetch
+                image: acrmemql.azurecr.io/memql-bff:latest
+  - target: { kind: Deployment, name: "^(bff|agent|planner|workbench)$" }
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: MEMQL_PACKAGES_ROLL_TARGETS
+          value: agent,planner,workbench,bff
+  - target: { kind: Role, name: memql-packages-roll }
+    patch: |
+      - op: replace
+        path: /rules/0/resourceNames
+        value: [agent, planner, workbench, bff]
   - path: patches/site-health-local.yaml
     target:
       kind: Deployment
@@ -272,11 +299,13 @@ patches:
       name: memql-db-pool
   # Blob storage against the in-cluster Azurite (memql#4843): the container
   # name and the autocreate flag -- the two values the secret cannot carry.
-  # bff serves the Library artifact routes; agent shares the attachment route.
+  # bff serves Library and sends builds; agent shares attachments; workbench
+  # reads/writes the same blob container for builds above the inline cap;
+  # edge reads the published bundles from it to serve the resulting sites.
   - path: patches/blob-storage-local.yaml
     target:
       kind: Deployment
-      name: "^(bff|agent)$"
+      name: "^(bff|agent|workbench|edge)$"
 
   # -------------------------------------------------------------------------
   # DATABASE -- local VALUES over the cnpg-db component (memql#3846 / #3851)
@@ -359,7 +388,10 @@ images:
     newTag: local
 
 components:
-  - ../../components/engine-bff
+  # engine/ labels the DSL consumers before these selector-based components.
+  - ../../components/dsl-mount
+  - ../../components/dsl-packages
+  - ../../components/packages-roll-rbac
   # THE DOMAIN, both halves (memql#4281). Must follow engine-bff, which
   # adds the `bff` Deployment this patches; components apply in order.
   - ../../components/domain-derive

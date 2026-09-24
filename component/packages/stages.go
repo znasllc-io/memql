@@ -114,14 +114,16 @@ func (d *Deps) build(ctx context.Context, req DeployRequest, pkg map[string]any,
 		}
 		if dep.Prebuilt {
 			// Read the built tree straight out of the snapshot. No build, no
-			// workbench, no restart -- and no network, which is what makes a
-			// prebuilt package deployable on a cluster with no build surface
-			// configured at all.
+			// workbench or restart. Separately declared assets still need their
+			// verified import below; a build surface is never needed.
 			bundle, err := bundleFromTree(snapshot.Tree, path.Join(dep.Path, dep.Output), d.Limits)
 			if err != nil {
 				return nil, err
 			}
 			bundles[dep.Name] = bundle
+			if err := d.importAssets(ctx, req, pkg, dep, bundle); err != nil {
+				return nil, err
+			}
 			out.recordBuiltOn(BuiltOn{Surface: SurfacePrebuilt})
 			continue
 		}
@@ -151,6 +153,9 @@ func (d *Deps) build(ctx context.Context, req DeployRequest, pkg map[string]any,
 			return nil, refuseScoped(buildRefusalCode(err), dep.Name, "%s", buildFailureMessage(dep, res, err))
 		}
 		bundles[dep.Name] = res.Bundle
+		if err := d.importAssets(ctx, req, pkg, dep, res.Bundle); err != nil {
+			return nil, err
+		}
 	}
 	return bundles, nil
 }

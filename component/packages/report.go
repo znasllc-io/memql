@@ -92,9 +92,10 @@ func declaredFrom(rep *Report) []DeclaredDeployable {
 }
 
 type DeployableReport struct {
-	Name string `json:"name"`
-	Kind string `json:"kind"`
-	Path string `json:"path"`
+	Name   string          `json:"name"`
+	Kind   string          `json:"kind"`
+	Path   string          `json:"path"`
+	Assets []ManifestAsset `json:"assets,omitempty"`
 
 	// BuildPlan is the sentence the confirm gate shows. Either the command
 	// that will run, or the D4 fast-path's own answer -- "prebuilt output

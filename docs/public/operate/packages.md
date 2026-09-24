@@ -95,6 +95,59 @@ A `bff/` with a `go.mod` is **detected, reported and deferred**: it appears in
 the report saying where Go delivery happens today (engine images built by CI),
 and every other half of the package deploys around it.
 
+### Large files supplied separately
+
+A GitHub repository package can keep videos and other large static files in
+release assets instead of including them in every source archive. Declare the
+files on their deployable:
+
+```yaml
+formatVersion: 1
+name: example
+deployables:
+  - name: website
+    path: clients/website
+    kind: static
+    build: {output: out}
+    assets:
+      - path: media/walkthrough.mp4
+        source: https://github.com/example/project/releases/download/media-v1/walkthrough.mp4
+        sha256: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+        size: 13831438
+```
+
+Use the file's actual SHA-256 and byte count. `path` is relative to the final
+published site, **not** the repository or build workspace. The build must not
+emit a file or directory that conflicts with that path. Files that the build
+command needs as inputs still belong in its source or its own input workflow.
+
+Configuration validates these declarations without downloading the assets.
+Review includes their import in the build plan. After confirmation, Build
+builds the small site, downloads missing assets, verifies their sizes and
+digests, and stores them in the instance's private blob storage. Cached files
+are scoped to the package and shared across replicas. Subsequent builds reuse
+verified bytes, while rechecking the package's source credential. A changed
+asset declaration changes the automatic deployment approval fingerprint.
+
+Asset URLs must name a release in the **same GitHub repository** as the package.
+The existing package source connection also authorizes private release reads;
+never put a token or signed URL in the manifest. GitHub supplies the original
+distribution copy. MemQL serves the imported copy through the existing site
+publisher, at the declared path, with the site's normal access and HTTP range
+behavior. A release tag moving or an asset being replaced cannot silently
+change a declared file: its digest must still match.
+
+The existing per-file, complete-output, and file-count limits also apply to
+assets. An unavailable, oversized, or mismatched file stops the deployment
+before publishing. Keep generated payloads and authoring originals outside the
+current source tree once their durable copies have been verified; merely adding
+this block while retaining large files in Git does not shrink a source archive.
+
+Local development uses Azurite. Both the BFF and workbench need the shared blob
+connection and `MEMQL_AZURE_BLOB_CONTAINER`; the local overlay also enables
+container creation for the emulator. Cloud instances supply their own storage
+configuration.
+
 ## Upgrading to an engine that reads the language line
 
 Every DSL domain a package ships declares the language it is written in, in
