@@ -110,8 +110,40 @@ const (
 	githubGrantHost = "github.com"
 )
 
-// handleGitHubCallback completes a GitHub Connect.
+// handleGitHubReturn moves the provider callback onto the OS origin before
+// completing it. The OS's same-origin token/refresh proxy sets a host-only
+// cookie there; identity.<domain> has no copy of that browser session. Never
+// exchange the code or consume state on this first, unauthenticated hop.
+func (s *Server) handleGitHubReturn(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSecureRequest(w, r) {
+		return
+	}
+	cfg, _ := s.gitHubApp(r.Context())
+	if !cfg.Configured() {
+		http.NotFound(w, r)
+		return
+	}
+	origin := s.osOrigin(r)
+	if origin == "" {
+		http.Error(w, "OS origin unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	q := url.Values{}
+	for _, key := range []string{"code", "state", "error", "error_description", "setup_action", "installation_id"} {
+		if value := r.URL.Query().Get(key); value != "" {
+			q.Set(key, value)
+		}
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	http.Redirect(w, r, origin+githubconnect.CompletePath+"?"+q.Encode(), http.StatusSeeOther)
+}
+
+// handleGitHubCallback completes GitHub Connect after the OS proxy forwards
+// its session cookie. State, session, PKCE and replay checks remain here.
 func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Referrer-Policy", "no-referrer")
 	if !s.requireSecureRequest(w, r) {
 		return
 	}

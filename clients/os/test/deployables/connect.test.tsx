@@ -27,6 +27,7 @@ import {
   clearParkedConnectReturn,
   connectSucceeded,
   readConnectReturn,
+  rememberConnectAttempt,
   returnPathFor,
   scrubbedSearch,
   takeParkedConnectReturn,
@@ -338,6 +339,21 @@ describe("the return from GitHub", () => {
 
   it("does not open unrelated sections from a callback parameter", () => {
     expect(readConnectReturn("?github=installed&connect=unrecognised")).toEqual({ reason: "installed", section: "sources" });
+  });
+
+  it.each(["connected", "connect_state_invalid"])("returns a Settings account connection to Settings after %s", async reason => {
+    h.connection = fakeConnection({ credentials: reason === "connected" ? [GRANT] : [] });
+    rememberConnectAttempt("settings-flow", "u-me", "", "settings");
+    history.replaceState({}, "", reason === "connected"
+      ? "/?github=connected&connect=settings&githubFlowId=settings-flow&githubCredentialId=cred-grant"
+      : "/?github=connect_state_invalid");
+    captureConnectReturn(window);
+    render(withSession(<StrictMode><ConnectReturnDispatcher /><ReturnedWindow /></StrictMode>, { userId: "u-me" }));
+    expect(await screen.findByRole("heading", { name: "Settings" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add GitHub account" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Sources" })).toBeNull();
+    if (reason === "connected") expect(await screen.findByRole("button", { name: "Manage GitHub account octocat" })).toBeTruthy();
+    expect(screen.getByTestId("window-count").textContent).toBe("1");
   });
 
   it("builds a return PATH, never a URL", () => {

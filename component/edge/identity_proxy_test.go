@@ -97,7 +97,7 @@ func TestIdentityXHRWithoutTargetIsBadGatewayNotHTML(t *testing.T) {
 }
 
 func TestIsIdentityXHRPathExact(t *testing.T) {
-	for _, p := range []string{"/oauth/token", "/auth/refresh", "/auth/logout", "/.well-known/jwks.json"} {
+	for _, p := range []string{"/oauth/token", "/auth/refresh", "/auth/logout", "/.well-known/jwks.json", "/auth/github/complete"} {
 		if !isIdentityXHRPath(p) {
 			t.Errorf("%s should be an identity XHR path", p)
 		}
@@ -106,6 +106,29 @@ func TestIsIdentityXHRPathExact(t *testing.T) {
 		if isIdentityXHRPath(p) {
 			t.Errorf("%s must not be forwarded to identity", p)
 		}
+	}
+}
+
+func TestGitHubCompletionForwardsTheOSCookieAndCallbackToIdentity(t *testing.T) {
+	called := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		cookie, err := r.Cookie("memql_refresh")
+		if err != nil || cookie.Value != "os-host-session" || r.URL.Path != "/auth/github/complete" || r.URL.Query().Get("code") != "provider-code" || r.URL.Query().Get("state") != "single-use-state" || r.Header.Get("X-Forwarded-Proto") != "https" {
+			t.Error("completion lost the OS browser session or callback data at the proxy hop")
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		http.Redirect(w, r, "https://os.example.com/?connect=settings&github=connected", http.StatusSeeOther)
+	}))
+	defer upstream.Close()
+	h := NewHandler(Options{Resolver: staticResolver{site: spaSite()}, Opener: mapOpener(map[string]string{"index.html": "ROOT-SPA"}), IdentityTarget: upstream.URL})
+	req := httptest.NewRequest(http.MethodGet, "https://shop.example.com/auth/github/complete?code=provider-code&state=single-use-state", nil)
+	req.AddCookie(&http.Cookie{Name: "memql_refresh", Value: "os-host-session"})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if !called || rec.Code != http.StatusSeeOther || !strings.Contains(rec.Header().Get("Location"), "connect=settings") || rec.Header().Get("Referrer-Policy") != "no-referrer" {
+		t.Fatal("GitHub completion must proxy to Identity and return its redirect, never the SPA fallback")
 	}
 }
 

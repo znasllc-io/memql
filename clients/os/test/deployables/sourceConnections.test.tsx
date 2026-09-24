@@ -83,6 +83,15 @@ it("ignores an installation reading that completes after switching identities", 
 });
 
 describe("GitHub callback identity correlation", () => {
+  it.each(["settings", "deployables"])("returns a refused callback to its originating %s surface without trusting a credential", section => {
+    rememberConnectAttempt("flow", "u-me", "", section);
+    expect(correlateConnectReturn({ reason: "connect_state_invalid", section: "sources", credentialId: "unverified" }, "u-me"))
+      .toEqual({ reason: "connect_state_invalid", section });
+  });
+  it("does not restore another person's return destination", () => {
+    rememberConnectAttempt("flow", "someone-else", "", "settings");
+    expect(correlateConnectReturn({ reason: "connect_state_invalid", section: "sources" }, "u-me").section).toBe("sources");
+  });
   it("returns to Sources and scrubs identity metadata without disturbing auth parameters", () => {
     const search = "?github=connected&githubCredentialId=grant-bob&githubFlowId=flow&code=auth-code";
     expect(readConnectReturn(search)).toEqual({ reason: "connected", section: "sources", credentialId: "grant-bob", flowId: "flow" });

@@ -323,8 +323,9 @@ func (s *Server) Mount(mux *http.ServeMux) {
 
 	// GITHUB CONNECT (epic memql#4912, decision C3). The same exception class
 	// as the two above -- GitHub redirects a BROWSER here, and there is no gRPC
-	// form of "the person came back from GitHub" -- and the only HTTP surface
-	// this feature has: the flow is STARTED over the stream by
+	// form of "the person came back from GitHub". The callback relays to the
+	// OS completion route so validation sees its host-only session cookie;
+	// the flow is STARTED over the stream by
 	// githubConnectBegin. No s.cors: it is a top-level navigation, not a fetch.
 	// Registered unconditionally and 404s when no App is configured, so the
 	// route table does not vary with configuration. It needs no front-door
@@ -332,7 +333,8 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	// Service, so every path here is already reachable -- see the header of
 	// github_callback.go for why declaring it in component/server would be
 	// wrong rather than merely unnecessary.
-	mux.HandleFunc("GET "+githubconnect.CallbackPath, wrap(s.handleGitHubCallback))
+	mux.HandleFunc("GET "+githubconnect.CallbackPath, wrap(s.handleGitHubReturn))
+	mux.HandleFunc("GET "+githubconnect.CompletePath, wrap(s.handleGitHubCallback))
 	// THE GITHUB APP SETUP CALLBACK (design record 2026-09-20-github-app-setup,
 	// D4; owner-approved HTTP exception, CLAUDE.md). The same class as the
 	// route above and registered beside it for the same two reasons: GitHub

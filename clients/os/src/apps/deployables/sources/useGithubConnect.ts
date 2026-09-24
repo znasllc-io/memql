@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useSession } from "../../../chrome/access";
 import { bare } from "../people";
-import { rememberConnectAttempt } from "./connectReturn";
+import { CONNECT_SECTION_PARAM, rememberConnectAttempt } from "./connectReturn";
 import { useWrite, type WriteState } from "../packages/actions";
 import { githubConnectBegin, readSourceRepositories, revokeSourceCredential } from "./calls";
 import { EMPTY_PAGE, type RepositoryPage } from "./repositories";
@@ -133,7 +133,7 @@ export function useGithubConnect(): GithubConnectActions {
       const begun = await begin(returnPath, credentialId, flowId);
       if (begun === null) return;
       if (begun.authorizeUrl === "") return;
-      rememberConnectAttempt(flowId, viewer, credentialId);
+      rememberConnectAttempt(flowId, viewer, credentialId, new URL(returnPath, window.location.origin).searchParams.get(CONNECT_SECTION_PARAM) ?? "");
       window.location.assign(begun.authorizeUrl);
     },
     [begin, viewer],
