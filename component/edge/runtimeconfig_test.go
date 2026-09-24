@@ -656,3 +656,25 @@ func TestSettingsReachTheServedDocumentAfterOneInvalidation(t *testing.T) {
 		t.Errorf("read = %q after invalidation, want the new value -- a bundle would keep reading the old endpoint", got)
 	}
 }
+
+func TestRuntimeConfigUnboundStorefrontKeepsKindWithoutResolvingSecrets(t *testing.T) {
+	site := &Site{ID: "unbound", Hostname: "shop.example.com", Kind: storefrontKind, Status: "live"}
+	h := NewHandler(Options{Resolver: staticResolver{site: site}, SecretResolver: func(context.Context, string) (string, error) {
+		t.Fatal("an unbound storefront must never resolve a secret")
+		return "", nil
+	}})
+	req := httptest.NewRequest(http.MethodGet, runtimeConfigPath, nil)
+	req.Host = site.Hostname
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("runtime config status = %d", rec.Code)
+	}
+	var doc RuntimeConfig
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Storefront == nil || *doc.Storefront != (StorefrontConfig{Kind: storefrontKind}) {
+		t.Fatalf("unbound storefront config = %+v, want kind without commerce credentials", doc.Storefront)
+	}
+}

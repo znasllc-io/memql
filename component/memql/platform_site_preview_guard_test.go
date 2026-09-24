@@ -453,12 +453,14 @@ func TestGoingLiveIsJudgedAgainstTheBindingTheWriteLeavesBehind(t *testing.T) {
 			storeId)
 	}
 
-	// AND THE WRITE THAT LEAVES NO BINDING IS ALLOWED OUTRIGHT, which is the
+	// AND THE WRITE THAT LEAVES NO BINDING IS JUDGED ON THAT, which is the
 	// same property with the answer available locally: detaching the
-	// development store and going live in one delta reaches no store, so the
-	// zero-value engine is never asked and the write passes. A guard reading
-	// the stored value would have tried to read `acme-dev` and failed here.
-	if err := runPreviewGuard(t, previewGuardDelta{
+	// development store and going live in one delta leaves the storefront
+	// connected to nothing, so it is refused as not connected (Connect
+	// Shopify, D5) -- and the zero-value engine is never asked, because an
+	// empty binding needs no store read. A guard reading the stored value
+	// would have tried to read `acme-dev` instead.
+	detach := runPreviewGuard(t, previewGuardDelta{
 		priorExisted:   true,
 		priorStatus:    "draft",
 		priorKind:      storefrontSiteKind,
@@ -469,9 +471,13 @@ func TestGoingLiveIsJudgedAgainstTheBindingTheWriteLeavesBehind(t *testing.T) {
 			"status":  "live",
 			"binding": map[string]any{"storeId": ""},
 		},
-	}); err != nil {
-		t.Fatalf("detaching the development store and going live in one delta was refused: %v\n"+
-			"the guard is judging the stored binding rather than the one the write leaves behind", err)
+	})
+	if storeId, reached := storeReadRefusal(detach); reached {
+		t.Fatalf("detaching the store and going live reached for store %q -- the guard is judging "+
+			"the stored binding rather than the one the write leaves behind", storeId)
+	}
+	if detach != nil {
+		t.Fatalf("detached design review refused: %v", detach)
 	}
 
 	// THE REACHABLE NEGATIVE: with no binding key in the delta, the STORED one
@@ -507,5 +513,81 @@ func TestANonStorefrontGoingLiveReadsNoStore(t *testing.T) {
 		payload:        map[string]any{"id": "s", "status": "live"},
 	}); err != nil {
 		t.Fatalf("an spa going live read a store: %v", err)
+	}
+}
+
+// AN UNATTACHED STOREFRONT MAY NOT GO LIVE, and it is refused WITHOUT a store
+// read: there is nothing bound to read (Connect Shopify, D5). This is the
+// draft a first deploy leaves when the manifest's store could not be attached.
+// A creation directly at live with no binding is the same act, and so is a
+// promotion on an unattached storefront. The spa beside them is the negative
+// control: the rule is about storefronts.
+func TestAnUnattachedStorefrontMayGoLiveForDesignReview(t *testing.T) {
+	for name, d := range map[string]previewGuardDelta{
+		"a draft going live": {
+			priorExisted: true, priorStatus: "draft", priorKind: storefrontSiteKind,
+			priorBundleRef: "blob://sites/s/v/1/",
+			payload:        map[string]any{"id": "s", "status": "live"},
+		},
+		"a creation directly at live": {
+			payload: map[string]any{"id": "s", "kind": storefrontSiteKind, "status": "live"},
+		},
+		"a promotion": {
+			priorExisted: true, priorStatus: "live", priorKind: storefrontSiteKind,
+			priorBundleRef: "blob://sites/s/v/1/", priorCandidate: "blob://sites/s/v/2/",
+			payload: map[string]any{"id": "s", "bundleRef": "blob://sites/s/v/2/", "candidateRef": ""},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := runPreviewGuard(t, d)
+			if storeId, reached := storeReadRefusal(err); reached {
+				t.Fatalf("an unattached storefront reached for store %q", storeId)
+			}
+			if err != nil {
+				t.Fatalf("unattached design review refused: %v", err)
+			}
+		})
+	}
+	if err := runPreviewGuard(t, previewGuardDelta{
+		priorExisted: true, priorStatus: "draft", priorKind: "spa",
+		priorBundleRef: "blob://sites/s/v/1/",
+		payload:        map[string]any{"id": "s", "status": "live"},
+	}); err != nil {
+		t.Fatalf("an spa with no store was refused going live: %v", err)
+	}
+}
+
+// TURNING A LIVE SITE INTO A STOREFRONT IS GOING LIVE AS ONE, and it is the
+// transition a status-only reading misses: the status does not change, so a
+// write that re-runs createSite over a live spa, or a raw insert naming
+// `kind: shopify_storefront`, would otherwise leave a live storefront with no
+// store without ever being judged. The live storefront re-written as itself is
+// the negative control: that is an ordinary write, not a transition.
+func TestTurningALiveSiteIntoAStorefrontIsGoingLive(t *testing.T) {
+	flip := func(binding string) previewGuardDelta {
+		payload := map[string]any{"id": "s", "kind": storefrontSiteKind, "status": "live"}
+		if binding != "" {
+			payload["binding"] = map[string]any{"storeId": binding}
+		}
+		return previewGuardDelta{
+			priorExisted: true, priorStatus: "live", priorKind: "spa",
+			priorBundleRef: "blob://sites/s/v/1/", payload: payload,
+		}
+	}
+
+	err := runPreviewGuard(t, flip(""))
+	if err != nil {
+		t.Fatalf("unattached design review refused: %v", err)
+	}
+	if storeId, reached := storeReadRefusal(runPreviewGuard(t, flip("acme-dev"))); !reached || storeId != "acme-dev" {
+		t.Fatalf("a live spa turned into a storefront bound to acme-dev was not judged against it (reached=%v, store=%q)", reached, storeId)
+	}
+
+	if err := runPreviewGuard(t, previewGuardDelta{
+		priorExisted: true, priorStatus: "live", priorKind: storefrontSiteKind,
+		priorBundleRef: "blob://sites/s/v/1/", priorBindingID: "acme",
+		payload: map[string]any{"id": "s", "kind": storefrontSiteKind, "status": "live"},
+	}); err != nil {
+		t.Fatalf("a live storefront re-written as a storefront was judged: %v", err)
 	}
 }

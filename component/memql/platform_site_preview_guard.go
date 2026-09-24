@@ -23,7 +23,8 @@ import (
 //   - A promotion must NAME the candidate it is promoting. (prior row)
 //   - A preview binding must name a DEVELOPMENT store. (another row)
 //   - Going live, and promoting, are refused while the SERVING binding names
-//     a development store. (another row)
+//     a development store, or no store, or a store with no Storefront token.
+//     (another row)
 //
 // # Where the rule itself lives
 //
@@ -37,15 +38,16 @@ import (
 //
 // # The store is read as the DEPLOYMENT, and that is deliberate
 //
-// v1:shopify:store is @rowAuthz(clusterOwner), so a read under the caller
-// answers nothing for a site owner or a developer -- and "nobody could tell me"
-// would then refuse every go-live by anybody but a cluster owner. The question
+// v1:shopify:store is @rowAuthz(clusterOwner, rankFloor="developer"), so a
+// read under the caller answers nothing for a site owner below developer rank
+// -- and "nobody could tell me" would then refuse their go-live whenever a
+// store is involved. The question
 // here is not the caller's: it is "is this cluster about to point a storefront
 // at a development store", a fact about the deployment. The caller's own
 // authority was already settled twice over -- @requiresCapability names the
-// surface, and platform_site_binding_guard.go refuses a binding naming a store
-// the CALLER cannot read, so a binding this guard judges was set by somebody
-// who could see it.
+// surface, and platform_site_binding_guard.go refuses a binding -- serving or
+// preview -- naming a store the CALLER cannot read, so a binding this guard
+// judges was set by somebody who could see it.
 //
 // It mirrors component/edge exactly, which resolves the same row under the same
 // kind of synthetic operator for the same reason.
@@ -55,23 +57,20 @@ import (
 // it is used for: one named query over one concept, answering one boolean.
 const systemSiteGuardActor = "system:sitePreviewGuard"
 
-// storeFacts is what the rules need to know about a bound store.
-type storeFacts struct {
-	readable      bool
-	isDevelopment bool
-	domain        string
-}
-
-// boundStoreFacts resolves a store under the deployment's own operator
-// identity. A miss is (readable=false), which the rules read as "nobody could
-// answer" and refuse on -- never as "it is not a development store".
-func (e *MemQLEngine) boundStoreFacts(ctx context.Context, storeId string) (storeFacts, error) {
+// BoundStoreAsDeployment resolves a bound store under the deployment's own
+// operator identity, into the facts the rules judge on. A miss is
+// Readable=false, which the rules read as "nobody could answer" and refuse on
+// -- never as "it is not a development store".
+//
+// ONE READ FOR THE GUARD AND THE READINESS ANSWER. The guard judges on it, and
+// integrations/sitepreview builds its go-live facts from it, so readiness
+// cannot withhold a Go live the guard would accept from a caller who may go
+// live but not read the store. Domain is the deployment's view: an answer
+// shown to a caller replaces it with what the caller's own read disclosed.
+func BoundStoreAsDeployment(ctx context.Context, execute func(context.Context, string) (any, error), storeId string) (PreviewBoundStore, error) {
 	storeId = strings.TrimSpace(storeId)
 	if storeId == "" {
-		return storeFacts{}, nil
-	}
-	if !e.canResolve() {
-		return storeFacts{}, ErrEngineNotInitialized
+		return PreviewBoundStore{}, nil
 	}
 	claims := map[string]any{"sub": systemSiteGuardActor, "role": "owner"}
 	readCtx := auth.ContextWithClaims(ctx, claims)
@@ -80,28 +79,29 @@ func (e *MemQLEngine) boundStoreFacts(ctx context.Context, storeId string) (stor
 		UserId: systemSiteGuardActor,
 		Role:   auth.RoleOwner,
 	})
-	res, err := e.Execute(readCtx, fmt.Sprintf("query storeById(storeId: %s)", languageParser.QuoteString(storeId)))
+	res, err := execute(readCtx, fmt.Sprintf("query storeById(storeId: %s)", languageParser.QuoteString(storeId)))
 	if err != nil {
-		return storeFacts{}, err
+		return PreviewBoundStore{}, err
 	}
 	rows := MaterializeRows(res)
 	if len(rows) == 0 {
-		return storeFacts{}, nil
+		return PreviewBoundStore{ID: storeId}, nil
 	}
-	return storeFacts{
-		readable:      true,
-		isDevelopment: boolFromAny(rows[0]["isDevelopment"]),
-		domain:        stringFromAny(rows[0]["domain"]),
+	return PreviewBoundStore{
+		ID:                 storeId,
+		Readable:           true,
+		IsDevelopment:      boolFromAny(rows[0]["isDevelopment"]),
+		Domain:             stringFromAny(rows[0]["domain"]),
+		HasStorefrontToken: strings.TrimSpace(stringFromAny(rows[0]["storefrontTokenRef"])) != "",
 	}, nil
 }
 
-func (f storeFacts) bound(id string) PreviewBoundStore {
-	return PreviewBoundStore{
-		ID:            strings.TrimSpace(id),
-		Readable:      f.readable,
-		IsDevelopment: f.isDevelopment,
-		Domain:        f.domain,
+// boundStoreFacts is BoundStoreAsDeployment over this engine.
+func (e *MemQLEngine) boundStoreFacts(ctx context.Context, storeId string) (PreviewBoundStore, error) {
+	if strings.TrimSpace(storeId) != "" && !e.canResolve() {
+		return PreviewBoundStore{}, ErrEngineNotInitialized
 	}
+	return BoundStoreAsDeployment(ctx, func(ctx context.Context, q string) (any, error) { return e.Execute(ctx, q) }, storeId)
 }
 
 // validateSitePreview is the whole of this file's contribution to executeWrite.
@@ -161,6 +161,16 @@ func (e *MemQLEngine) validateSitePreview(
 	goingLive := nextStatus == siteStatusLive &&
 		(!priorExisted || strings.TrimSpace(priorStatus) != siteStatusLive)
 
+	priorStorefront := strings.TrimSpace(priorKind) == storefrontSiteKind
+	storefront := priorStorefront
+	if k, ok := previewFieldString(payload, "kind"); ok && strings.TrimSpace(k) != "" {
+		storefront = strings.TrimSpace(k) == storefrontSiteKind
+	}
+	// BECOMING A STOREFRONT WHILE LIVE is going live as one: the status does
+	// not move, so the transition above misses a write (a re-run createSite, a
+	// raw insert) that turns a live spa into a storefront with no store.
+	goingLive = goingLive || (storefront && !priorStorefront && nextStatus == siteStatusLive)
+
 	touches := candidatePresent || previewBindingPresent || promoting || goingLive
 	if !touches {
 		return nil
@@ -174,11 +184,6 @@ func (e *MemQLEngine) validateSitePreview(
 	if priorExisted && priorSystemOwned && (candidatePresent || previewBindingPresent || promoting) {
 		return fmt.Errorf(
 			"v1:platform:site: this is the surface the cluster is managed through and is exempt from the preview axis, as it is from the status and settings axes -- it is deployed with the image and re-seeded at every boot, so a candidate written here would silently undo itself")
-	}
-
-	storefront := strings.TrimSpace(priorKind) == storefrontSiteKind
-	if k, ok := previewFieldString(payload, "kind"); ok && strings.TrimSpace(k) != "" {
-		storefront = strings.TrimSpace(k) == storefrontSiteKind
 	}
 
 	// Rule 1 -- a candidate may not be the version already serving.
@@ -209,13 +214,15 @@ func (e *MemQLEngine) validateSitePreview(
 		if err != nil {
 			return fmt.Errorf("v1:platform:site: could not read v1:shopify:store %q to check the preview binding: %w", previewBinding, err)
 		}
-		if refusal := SitePreviewBindingRefusal(true, facts.bound(previewBinding)); !refusal.Empty() {
+		if refusal := SitePreviewBindingRefusal(true, facts); !refusal.Empty() {
 			return previewRefusalError(refusal)
 		}
 	}
 
 	// Rule 4 -- going live, and promoting, are refused while the SERVING
-	// binding names a development store.
+	// binding names a development store, or nothing, or a store with no
+	// Storefront token (Connect Shopify, D5). An empty binding reads no
+	// store: boundStoreFacts answers it without a query.
 	//
 	// The binding judged is the one this write LEAVES BEHIND: a caller may
 	// re-bind and go live in one delta, and judging the stored value would
@@ -229,7 +236,7 @@ func (e *MemQLEngine) validateSitePreview(
 		if err != nil {
 			return fmt.Errorf("v1:platform:site: could not read v1:shopify:store %q to check what this storefront is bound to: %w", servingStore, err)
 		}
-		if refusal := SiteGoLiveRefusal(true, facts.bound(servingStore)); !refusal.Empty() {
+		if refusal := SiteGoLiveRefusal(true, facts); !refusal.Empty() {
 			return previewRefusalError(refusal)
 		}
 	}

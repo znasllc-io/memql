@@ -602,6 +602,10 @@ shape githubConnectState githubConnectStateFull {
   sourceIP
   purpose
   organization
+  shopDomain
+  siteId
+  clientId
+  credentialSource
   row.createdAt
 }
 

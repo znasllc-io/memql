@@ -2688,6 +2688,55 @@ QueryClient.prototype.routingRules = function (this: QueryClient, args: RoutingR
   return this.executeNamed("routingRules", buildRoutingRules(args), opts);
 };
 
+/** Begin Connect Shopify for a storefront's store (design 12.4, D1, D10): answer the URL the browser navigates to -- Shopify's approve page for the shop the server resolved -- with a single-use state bound to the caller.
+The app Shopify is asked to approve is the PENDING one a save left, when there is one, otherwise the store's current app and its webhook secret; with neither the reason is shopify_app_not_saved and nothing is written. The state (v1:identity:githubConnectState, purpose shopify_connect) names the shop, the site, the app's client id and which secret verifies the callback, and lives ten minutes. The plaintext state appears only inside authorizeUrl; only its digest is stored. The redirect is this cluster's own identity service, never anything the request said. */
+export interface ShopifyConnectBeginArgs {
+  /** The storefront deployable. The shop is resolved on the server from the package run that last published it. */
+  siteId: string;
+  /** Where in MemQL OS to land when Connect finishes -- a same-origin path. Anything absolute, protocol-relative or carrying a control character is dropped for the OS root. */
+  returnPath?: string;
+}
+
+export function buildShopifyConnectBegin(args: ShopifyConnectBeginArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  if (args.returnPath !== undefined) parts.push("returnPath: " + renderMemQLValue(args.returnPath));
+  return "builtin shopifyConnectBegin(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyConnectBegin(args: ShopifyConnectBeginArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyConnectBegin = function (this: QueryClient, args: ShopifyConnectBeginArgs = {} as ShopifyConnectBeginArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyConnectBegin", buildShopifyConnectBegin(args), opts);
+};
+
+/** Where one storefront stands with Connect Shopify (design 12.2) -- what the Store panel draws, and the only thing it draws from: a binding says nothing about whether a store is connected.
+`reason` is 'ok' when the storefront resolved, and otherwise one of site_not_writable, not_a_storefront, store_not_named or store_redacted, with every other key present and empty. `appSaved` is true when the store has a live appClientId or a pending app was saved; `pendingApp` when a pending app is waiting for an approval; `connected` when the store has an Admin token; `storefrontTokenSet` when it names a Storefront token. `requiredScopes` is the one scope list the Shopify app must request, Storefront scopes first; `grantedScopes` is what the store was granted. Never returns a credential. */
+export interface ShopifyConnectStatusArgs {
+  /** The storefront deployable. The shop is resolved on the server from the package run that last published it. */
+  siteId: string;
+}
+
+export function buildShopifyConnectStatus(args: ShopifyConnectStatusArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  return "builtin shopifyConnectStatus(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyConnectStatus(args: ShopifyConnectStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyConnectStatus = function (this: QueryClient, args: ShopifyConnectStatusArgs = {} as ShopifyConnectStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyConnectStatus", buildShopifyConnectStatus(args), opts);
+};
+
 /** Register every mirrored webhook topic for every ingesting store at the pinned API version, update the ones whose URL, version or includeFields have drifted, and remove ours the allowlist no longer wants. Shopify deletes a subscription after eight consecutive delivery failures, so this is what brings a store back after an outage. Records the outcome on each store's health. */
 export interface ShopifyEnsureSubscriptionsArgs {
 }
@@ -2819,6 +2868,35 @@ QueryClient.prototype.shopifyRunComplianceJobs = function (this: QueryClient, ar
   return this.executeNamed("shopifyRunComplianceJobs", buildShopifyRunComplianceJobs(args), opts);
 };
 
+/** Save the Shopify app's client ID and secret from a storefront's Store panel (design 12.3, D7).
+PENDING ONLY (D12). The client ID lands as the globalVariable SHOPIFY_<ID>_PENDING_CLIENT_ID and the secret, sealed on the server, as the globalSecret SHOPIFY_<ID>_PENDING_CLIENT_SECRET. The store row, its live appClientId and the secret that verifies its webhooks are never touched: saving proves nothing about the shop, so it can move nothing a webhook is checked with. They change only after the shop's own staff approve Connect Shopify. */
+export interface ShopifyStoreAppSaveArgs {
+  /** The storefront deployable whose store the app belongs to. */
+  siteId: string;
+  /** The Shopify app's client ID, from the Dev Dashboard. */
+  clientId: string;
+  /** The Shopify app's client secret. Read once, sealed, and discarded; never stored or echoed in the clear. */
+  clientSecret: string;
+}
+
+export function buildShopifyStoreAppSave(args: ShopifyStoreAppSaveArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  parts.push("clientId: " + renderMemQLValue(args.clientId));
+  parts.push("clientSecret: " + renderMemQLValue(args.clientSecret));
+  return "builtin shopifyStoreAppSave(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyStoreAppSave(args: ShopifyStoreAppSaveArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyStoreAppSave = function (this: QueryClient, args: ShopifyStoreAppSaveArgs = {} as ShopifyStoreAppSaveArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyStoreAppSave", buildShopifyStoreAppSave(args), opts);
+};
+
 /** Report every configured store's status, granted-versus-needed scopes, subscription reconcile time, cost-bucket state and per-domain sync state with drift counters. The read behind the portal's Stores page. */
 export interface ShopifyStoreHealthArgs {
   storeId?: string;
@@ -2838,6 +2916,32 @@ declare module "./query.js" {
 
 QueryClient.prototype.shopifyStoreHealth = function (this: QueryClient, args: ShopifyStoreHealthArgs = {} as ShopifyStoreHealthArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("shopifyStoreHealth", buildShopifyStoreHealth(args), opts);
+};
+
+/** Use a pasted Storefront API token for a storefront's store, or clear the one it has (design 12.5, D8).
+Refused `store_in_use` unless the caller is a cluster owner or can write EVERY site bound to the store, serving or preview: a store's token is served under each of their hostnames. A token is checked with one Storefront request before it is sealed; an empty token clears the reference so the next Connect mints one, and is refused while a live storefront is bound to the store. */
+export interface ShopifyStorefrontTokenSetArgs {
+  /** The storefront deployable whose store the token is for. */
+  siteId: string;
+  /** The Storefront API token. Empty clears the store's token. Read once, sealed, and discarded. */
+  token?: string;
+}
+
+export function buildShopifyStorefrontTokenSet(args: ShopifyStorefrontTokenSetArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  if (args.token !== undefined) parts.push("token: " + renderMemQLValue(args.token));
+  return "builtin shopifyStorefrontTokenSet(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyStorefrontTokenSet(args: ShopifyStorefrontTokenSetArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyStorefrontTokenSet = function (this: QueryClient, args: ShopifyStorefrontTokenSetArgs = {} as ShopifyStorefrontTokenSetArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyStorefrontTokenSet", buildShopifyStorefrontTokenSet(args), opts);
 };
 
 /** The plan-independent grant: add one tag to the buyer's customer record. Writes the tag and NOTHING else -- what the tag does is the merchant's own automatic discount, which this connector deliberately does not create on their behalf. Refuses when no customer on the store has that email, because a tag on an account that does not exist entitles nobody. */

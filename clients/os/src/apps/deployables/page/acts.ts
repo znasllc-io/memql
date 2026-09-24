@@ -1,6 +1,7 @@
 import type { ActionBarTone } from "../../../kit/ActionBar";
 import { runCoversApp, runIsScopedToApp, type DeploymentRow, type PackageRow } from "../packages/rows";
 import type { DeployablePart, PartsHeld } from "../parts";
+import type { PreviewRefusal } from "../preview/rows";
 import type { SiteRow } from "../rows";
 import { siteIsBuilt, siteStateDetail, siteStateWord } from "../words";
 import { TERMINAL_RUN_STATUSES } from "./rail";
@@ -79,6 +80,13 @@ export interface BarReading {
   tone: ActionBarTone;
   /** The acts legal from this state, primary LAST. At most three. */
   acts: ActSpec[];
+  /**
+   * Why Go live is absent from a state that would offer it, in the engine's
+   * own words -- present only when the engine refused it and the person holds
+   * the part to take it. The bar draws no reason (its detail ellipsizes); the
+   * page draws this beside the way to the act that clears it.
+   */
+  withheld?: PreviewRefusal;
 }
 
 export interface ActsInput {
@@ -126,7 +134,17 @@ export interface ActsInput {
    * `sitePreviewReadiness` answers -- from the same functions the write guard
    * refuses with, so an act offered here is one the engine will accept.
    */
-  preview?: { hasCandidate: boolean; canPromote: boolean } | null;
+  preview?: {
+    hasCandidate: boolean;
+    canPromote: boolean;
+    /**
+     * Whether the engine would take this deployable live (Connect Shopify,
+     * D5): a storefront with no store, or a store with no Storefront token,
+     * or a development store, is refused -- and the refusal is below.
+     */
+    canGoLive: boolean;
+    goLiveRefusal: PreviewRefusal;
+  } | null;
   /** True while this deployable's own delete is still tearing its domains down. */
   deleting?: boolean;
   /** The domain the teardown is releasing right now, for the progress line. */
@@ -283,7 +301,7 @@ function gateClause(read: BarReading): BarReading {
 
 /** What the bar reads and offers. The whole of DESIGN.md rule 12 for this app. */
 export function actsFor(input: ActsInput): BarReading {
-  const offered = withPromotion(reading(input), input);
+  const offered = withGoLiveAnswered(withPromotion(reading(input), input), input);
   const read = holdWhileTheSourceIsBusy({ ...offered, acts: heldOnly(offered.acts, input.can) }, input.siblingRun ?? null);
   // The gate did not get to be the state; it still gets to be mentioned, or a
   // person on this page would have no sign that one is waiting at all.
@@ -326,6 +344,31 @@ function withPromotion(read: BarReading, input: ActsInput): BarReading {
   const quieted = read.acts.map((act): ActSpec => (act.tone === "primary" ? { name: act.name, requires: act.requires } : act));
   const room = quieted.length < 3 ? quieted : quieted.filter((act) => act.tone !== "danger").slice(0, 2);
   return { ...read, acts: [...room, promote] };
+}
+
+/**
+ * Offer Go live only where the engine would accept it (Connect Shopify, D5).
+ *
+ * THE SHELL DOES NOT DECIDE THIS EITHER. Whether a storefront is connected is
+ * a fact about a store row, so `sitePreviewReadiness` answers -- from the same
+ * function the write guard refuses with. A storefront whose answer has not
+ * landed is offered nothing yet, as the promotion is; a NON-storefront is not
+ * made to wait, because that rule never refuses one and waiting would only
+ * hide a legal act. Once the answer is in, it decides for every kind.
+ *
+ * ABSENT, never disabled, and the reason is carried as `withheld` -- only for
+ * a person holding `publish`, since a reason for an act somebody could not
+ * take anyway is noise.
+ */
+function withGoLiveAnswered(read: BarReading, input: ActsInput): BarReading {
+  if (!read.acts.some((act) => act.name === "Go live")) return read;
+  const preview = input.preview ?? null;
+  const legal = preview !== null ? preview.canGoLive : input.site.kind !== "shopify_storefront";
+  if (legal) return read;
+  const acts = read.acts.filter((act) => act.name !== "Go live");
+  return preview !== null && preview.goLiveRefusal.code !== "" && input.can.publish
+    ? { ...read, acts, withheld: preview.goLiveRefusal }
+    : { ...read, acts };
 }
 
 /**

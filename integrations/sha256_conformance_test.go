@@ -36,9 +36,8 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 		t.Fatalf("getwd: %v", err)
 	}
 
-	// Allow-list: filename -> reason. Every entry is a WIRE-FORMAT hash --
-	// the carve-out this test's own header names -- never a shortId or
-	// cache key, which stay on core/id.
+	// Allow-list: filename -> reason. These are protocol or cryptographic
+	// operations, never a shortId or cache key, which stay on core/id.
 	//
 	// (The artifacts-labels feature briefly needed an entry here for a
 	// Go-side re-derivation of createArtifact's hash-based id. Review
@@ -47,6 +46,10 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 	// -- specifically to remove the unguarded coupling a duplicated hash
 	// expression created, so the entry is gone rather than kept.)
 	allow := map[string]string{
+		"shopify/connect_callback.go":      "Shopify signs its OAuth callback query with HMAC-SHA256; verification must match the provider's wire algorithm",
+		"shopify/connect_callback_test.go": "constructs signed Shopify callback fixtures using the provider's HMAC-SHA256 protocol",
+		"shopify/connect_write.go":         "compares fixed-width SHA-256 digests of pending app secrets in constant time; this is credential comparison, not identifier generation",
+
 		// v1:library:file.sha256 is a REAL SHA-256 hex digest of the stored
 		// bytes -- the concept documents it as a dedup hint and integrity
 		// check a person can compare against `sha256sum` -- and the one-shot

@@ -147,6 +147,18 @@ type Connector struct {
 
 	// deliver overrides the webhook delivery URL. Tests only.
 	deliver func(store Store) string
+	// storefrontEndpoint overrides StorefrontEndpoint, so a test can serve the
+	// Storefront API from httptest. Tests only.
+	storefrontEndpoint func(domain, apiVersion string) (string, error)
+	// connectTokenURL overrides Connect's code-exchange URL for a shop, so a
+	// test can serve Shopify's token endpoint from httptest. Tests only.
+	connectTokenURL func(shop string) string
+	// connectAppGate overrides the distributed pending-app lock in unit tests.
+	connectAppGate func(context.Context, string) (func(), error)
+	// background runs work off the request that asked for it: Connect's
+	// webhook registration, which a browser must not wait on. Nil is a
+	// goroutine; tests run it inline.
+	background func(func())
 }
 
 // NewConnector builds the connector.

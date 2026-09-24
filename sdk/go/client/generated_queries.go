@@ -11025,6 +11025,29 @@ func SitesArchivedBuild(args SitesArchivedArgs) string {
 	return "query sitesArchived()"
 }
 
+// SitesBoundToStore -- The sites whose serving or preview binding names one store (Connect Shopify, design 12.5) -- the read that decides whether changing a store's Storefront token reaches anybody else's hostname.
+// `storeIds` carries the store's bare AND canonical id, because a binding is an object field the write path does not canonicalize: it holds whichever spelling its writer used, and a site missed here is a site whose token changes under somebody who never asked. No caller term: the tier decides, as sitesAll's note records -- Connect reads this as the deployment, which sees every row.
+//
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["sitesBoundToStore"] in generated_concepts.go).
+type SitesBoundToStoreArgs struct {
+	StoreIds []any
+}
+
+// SitesBoundToStore calls the engine query sitesBoundToStore.
+func (qc *QueryClient) SitesBoundToStore(ctx context.Context, args SitesBoundToStoreArgs) (*Result, error) {
+	call := SitesBoundToStoreBuild(args)
+	return qc.executeNamed(ctx, "sitesBoundToStore", call)
+}
+
+func SitesBoundToStoreBuild(args SitesBoundToStoreArgs) string {
+	var b strings.Builder
+	b.WriteString("query sitesBoundToStore(")
+	b.WriteString("storeIds: ")
+	b.WriteString(renderMemQLValue(args.StoreIds))
+	b.WriteString(")")
+	return b.String()
+}
+
 // SitesForAccount -- The deployables tied to one account.
 // `isNotDeleted` is `sitesAll`'s own conjunct, repeated here rather than referenced: this is the same read that query makes, narrowed by the tie field, and a soft-deleted site must stay gone from a rollup for the reason it is gone from the list.
 // NO CALLER TERM, DELIBERATELY (memql#5303, design 2026-09-11-app-access-grants D4). This is the account VIEW -- the one read whose whole purpose is the tie -- and it used to carry `(ownerUserId==actor.userId || actor.isClusterOwner==true)` beside the tie field, which is the tier's first two arms restated minus the third: a member of Acme's group was admitted to Acme's sites by `account="accountId"` and then filtered out by this query. The tier decides the row set; TestAccountGrantReachesTheAccountView reads it for a member and a stranger, and tierDecidesTheRead records the construct.

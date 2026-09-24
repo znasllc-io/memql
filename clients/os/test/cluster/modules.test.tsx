@@ -44,7 +44,14 @@ const MODULES = [
   { kind: "node-type", name: "planner", state: "compiled_out", scope: "cluster", description: "Task planning." },
   { kind: "integration", name: "shopify", state: "credential_gated", scope: "node", description: "The Shopify connector." },
   { kind: "pack", name: "referencepack", state: "enabled", scope: "cluster", description: "The reference pack." },
+  { kind: "pack", name: "reviews", state: "disabled", scope: "cluster", description: "Product reviews." },
 ];
+
+/** The same rows, with the engine saying THIS caller may flip `name`. The
+ *  answer is the engine's, per caller, so each test states whose view it is. */
+function mayFlip(name: string) {
+  return MODULES.map((m) => (m.name === name ? { ...m, mayFlip: true } : m));
+}
 
 const ENV = {
   "component/identity": [
@@ -140,7 +147,7 @@ describe("the modules inventory", () => {
 
 describe("the pack switch", () => {
   it("says a restart is required, before and after the flip", async () => {
-    const connection = fakeConnection({}, { modules: MODULES });
+    const connection = fakeConnection({}, { modules: mayFlip("referencepack") });
     mount(connection);
     await click(await screen.findByText("referencepack"));
 
@@ -163,14 +170,34 @@ describe("the pack switch", () => {
     expect(sentFlip()).toBe(true);
   });
 
-  it("is ABSENT for a non-owner, not disabled", async () => {
-    mount(fakeConnection({}, { modules: MODULES }), "admin");
-    await click(await screen.findByText("referencepack"));
+  it("is ABSENT where the engine says this person may not flip it, not disabled", async () => {
+    // The ROLE is not read: the engine's per-caller mayFlip is the whole
+    // answer, so even an owner's view draws no switch the engine did not offer.
+    for (const role of ["admin", "owner"]) {
+      const view = mount(fakeConnection({}, { modules: MODULES }), role);
+      await click(await screen.findByText("referencepack"));
 
-    // Not "present and disabled" -- absent. A greyed control is one an admin
-    // has to read past to learn it is not for them (DESIGN.md rule 12).
+      // Not "present and disabled" -- absent. A greyed control is one an admin
+      // has to read past to learn it is not for them (DESIGN.md rule 12).
+      expect(screen.queryByRole("button", { name: /this pack/i })).toBeNull();
+      expect(screen.getByText(/You cannot change what this pack does/)).toBeTruthy();
+      view.unmount();
+    }
+  });
+
+  // Connect Shopify design, D4: a developer turns a STOREFRONT pack on and
+  // off, and every other pack stays the owner's.
+  it("draws the switch on reviews for a developer the engine lets flip it, and not on referencepack", async () => {
+    mount(fakeConnection({}, { modules: mayFlip("reviews") }), "developer");
+
+    await click(await screen.findByText("reviews"));
+    expect(screen.getByRole("button", { name: "Enable this pack" })).toBeTruthy();
+    expect(screen.queryByText(/You cannot change what this pack does/)).toBeNull();
+    await click(screen.getByRole("button", { name: "Modules" }));
+
+    await click(await screen.findByText("referencepack"));
     expect(screen.queryByRole("button", { name: /this pack/i })).toBeNull();
-    expect(screen.getByText(/Only a cluster owner can change what a pack does/)).toBeTruthy();
+    expect(screen.getByText(/You cannot change what this pack does/)).toBeTruthy();
   });
 
   it("is ABSENT for an integration and for a node type, with a sentence saying what does change them", async () => {

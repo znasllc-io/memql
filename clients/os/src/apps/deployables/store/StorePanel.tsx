@@ -15,7 +15,9 @@ import {
   Panel,
   Subhead,
   absent,
+  roleAdmits,
 } from "../../../kit";
+import { useSession } from "../../../chrome/access";
 import { OpenLogsButton } from "../../../logs/OpenLogs";
 import type { Breadcrumb } from "../../../kit/Breadcrumbs";
 import { boundStoreId, siteName, type SiteRow } from "../rows";
@@ -79,7 +81,12 @@ import {
 
 export interface StorePanelProps {
   site: SiteRow;
-  /** `execute app:deployables/store`. False hides every control here. */
+  /**
+   * `execute app:deployables/store`, held by owner and developer. False hides
+   * every control here. It attaches a store; it does not register, pause or
+   * resume one, or reconcile the cluster's subscriptions, which are a cluster
+   * owner's and drawn only for one.
+   */
   canBind: boolean;
   trail: readonly Breadcrumb[];
   back: { label: string; onSelect: () => void };
@@ -103,6 +110,14 @@ export function StorePanel({ site, canBind, trail, back }: StorePanelProps) {
   const store = bound.store;
   const report = healthFor(health.all, storeId);
   const name = siteName(site);
+  // THE CLUSTER OWNER, and not the store part (Connect Shopify, D15).
+  // Registering a store creates a v1:shopify:store row, which the engine
+  // refuses below a cluster owner, and pausing or resuming one writes a store
+  // row that exists, which its tier keeps a cluster owner's. Reconciling
+  // subscriptions walks every ingesting store on the cluster, not the one this
+  // storefront fronts. A developer holds the part and none of those, so all
+  // three are absent for them rather than offered (DESIGN.md rule 12).
+  const isOwner = roleAdmits(useSession().access?.role ?? "", { min: "owner" });
 
   // THE PICKER REPLACES THE PANEL RATHER THAN SITTING INSIDE IT. Choosing
   // what a live storefront talks to is the whole of what somebody is doing
@@ -120,18 +135,6 @@ export function StorePanel({ site, canBind, trail, back }: StorePanelProps) {
       {choosing || store === null || !canBind ? null : (
         <Button tone="quiet" onClick={() => setPicking(true)} ariaLabel={`Change the store ${name} fronts`}>
           Change store
-        </Button>
-      )}
-      {choosing || store === null ? null : (
-        <Button
-          tone="quiet"
-          onClick={() => {
-            bound.reread();
-            health.reread();
-          }}
-          ariaLabel={`Re-read the store ${name} fronts`}
-        >
-          <RefreshCw size={13} aria-hidden /> Re-read
         </Button>
       )}
       {choosing || store === null ? null : (
@@ -153,6 +156,7 @@ export function StorePanel({ site, canBind, trail, back }: StorePanelProps) {
           site={site}
           currentStoreId={storeId}
           writes={writes}
+          mayRegister={isOwner}
           onDone={() => {
             setPicking(false);
             bound.reread();
@@ -174,7 +178,7 @@ export function StorePanel({ site, canBind, trail, back }: StorePanelProps) {
         <Panel label="No store attached">
           <Caption>
             This storefront is not attached to a Shopify store, so it serves no catalog and its
-            pages can reach nothing. Only a cluster owner can attach one.
+            pages can reach nothing. Only someone holding the store permission can attach one.
           </Caption>
         </Panel>
       ) : bound.state === "failed" ? (
@@ -191,7 +195,7 @@ export function StorePanel({ site, canBind, trail, back }: StorePanelProps) {
           next={
             canBind
               ? "Attach one to serve a catalog."
-              : "Only a cluster owner can attach one."
+              : "Only someone holding the store permission can attach one."
           }
         />
       ) : store === null ? (
@@ -214,11 +218,11 @@ export function StorePanel({ site, canBind, trail, back }: StorePanelProps) {
           <div className="os-store-grid">
             <Connection store={store} report={report} />
             <Scopes report={report} />
-            <Subscriptions report={report} writes={writes} />
+            <Subscriptions report={report} writes={writes} isOwner={isOwner} />
             <DevelopmentStore store={store} />
           </div>
           <Mirror report={report} />
-          <Acts store={store} report={report} writes={writes} canBind={canBind} />
+          <Acts store={store} report={report} writes={writes} isOwner={isOwner} />
           {health.at === null ? null : (
             <Caption>
               Read at {health.at.toLocaleTimeString()}. A store&rsquo;s health is computed from the
@@ -428,9 +432,11 @@ function Scopes({ report }: { report: StoreHealth | null }) {
 function Subscriptions({
   report,
   writes,
+  isOwner,
 }: {
   report: StoreHealth | null;
   writes: ReturnType<typeof useStoreWrites>;
+  isOwner: boolean;
 }) {
   const record = report?.subscriptions ?? null;
   return (
@@ -469,21 +475,26 @@ function Subscriptions({
       {/* THE ACT NAMES ITS OWN SCOPE, because it is wider than this store.
           `shopifyEnsureSubscriptions` takes NO store argument -- it walks
           every ingesting store -- so a control here reading "reconcile this
-          store" would be a claim the builtin cannot keep. */}
-      <div className="os-store-bandact">
-        <Button
-          tone="quiet"
-          busy={writes.busy === "subscriptions"}
-          busyLabel="Reconciling subscriptions"
-          onClick={() => void writes.ensureSubscriptions()}
-        >
-          <RefreshCw size={13} aria-hidden /> Reconcile subscriptions
-        </Button>
-        <Caption>
-          Reconciles every ingesting store, not only this one -- the builtin takes no store. It runs
-          on its own at boot and daily at 03:15.
-        </Caption>
-      </div>
+          store" would be a claim the builtin cannot keep. And for the same
+          reason it is a CLUSTER OWNER'S, like pause and resume: the store
+          part a developer holds attaches this storefront's store and reaches
+          no other. */}
+      {!isOwner ? null : (
+        <div className="os-store-bandact">
+          <Button
+            tone="quiet"
+            busy={writes.busy === "subscriptions"}
+            busyLabel="Reconciling subscriptions"
+            onClick={() => void writes.ensureSubscriptions()}
+          >
+            <RefreshCw size={13} aria-hidden /> Reconcile subscriptions
+          </Button>
+          <Caption>
+            Reconciles every ingesting store, not only this one -- the builtin takes no store. It runs
+            on its own at boot and daily at 03:15.
+          </Caption>
+        </div>
+      )}
     </Panel>
   );
 }
@@ -611,8 +622,8 @@ function Mirror({ report }: { report: StoreHealth | null }) {
       <Caption>
         This table is read-only. Backfilling a domain, reconciling it, pausing it on its own, and
         retrying or discarding a dead letter belong to every connector, so they live in Cluster
-        &rarr; Data origins. What is here is the store-wide pause below, and the subscription
-        reconcile above.
+        &rarr; Data origins. What is here, for a cluster owner, is the subscription reconcile
+        above and the store-wide pause below.
       </Caption>
     </Panel>
   );
@@ -664,19 +675,23 @@ function DomainRow({ domain }: { domain: DomainState }) {
  * lifecycle, and two bars in one window is what rule 12 exists to prevent.
  * These sit inline, under the state they act from, exactly as the runtime
  * settings panel's controls do.
+ *
+ * A CLUSTER OWNER'S ALONE. Both write a store row that exists, which the
+ * store's tier keeps a cluster owner's; the store part a developer holds
+ * attaches a store and changes nothing on it.
  */
 function Acts({
   store,
   report,
   writes,
-  canBind,
+  isOwner,
 }: {
   store: StoreRow;
   report: StoreHealth | null;
   writes: ReturnType<typeof useStoreWrites>;
-  canBind: boolean;
+  isOwner: boolean;
 }) {
-  if (report === null || !canBind) return null;
+  if (report === null || !isOwner) return null;
   const reading = readingFor(report);
   if (reading.acts.length === 0) {
     return (

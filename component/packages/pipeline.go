@@ -99,7 +99,11 @@ type Actor struct {
 
 // StoreResolver answers which v1:shopify:store row a myshopify.com domain
 // names on THIS cluster, as a bare row id, or "" when there is no such row the
-// caller may read.
+// caller may read and attach. `bound` is the store the site is bound to now
+// ("" for none): answering that same store is leaving the binding alone, which
+// takes no store part, so the resolver asks for the part only on a change.
+// `account` is the organization the site belongs to, or will on create; the
+// part is asked there as well as of the caller (memql#5598).
 //
 // Declared here rather than beside its siblings, and the difference is the
 // reason they are scattered: CredentialResolver lives in credentials.go
@@ -111,7 +115,7 @@ type Actor struct {
 // A MISS IS "", NOT AN ERROR. An error means the read itself failed and the
 // run stops on it; an empty answer means the question was asked and this
 // cluster has no store by that name, which is the refusal a person repairs.
-type StoreResolver func(ctx context.Context, domain string) (string, error)
+type StoreResolver func(ctx context.Context, domain, bound, account string) (string, error)
 
 // Deps is the pipeline's whole outside world. Every field is an interface so
 // the state machine is testable end to end with no cluster, no network and no
@@ -167,13 +171,15 @@ type Deps struct {
 	//
 	// It runs under the CALLER's actor, deliberately, which is the same answer
 	// updateSiteStoreBinding's Go guard gives: a caller who may not read a
-	// store may not bind a storefront to it. A store is cluster-owner-tier, so
+	// store, or may read it but not attach it, may not bind a storefront to
+	// it. A store reads at developer and above (Connect Shopify, D3), so
 	// resolving under the deployment instead would let anyone who can deploy a
-	// package point a storefront at any merchant on the cluster.
+	// package reach the stores the deployment can.
 	//
-	// NIL IS A REFUSAL, NOT A GAP, as it is for Credentials: a storefront
-	// deployed on a node that cannot resolve stores is refused by name rather
-	// than published unbound.
+	// NIL IS AN ANSWER, NOT A GAP, as it is for Credentials: a node that
+	// cannot resolve stores attaches none, so a first deploy places an
+	// unattached draft with a note (Connect Shopify, D5), which the go-live
+	// rule keeps away from shoppers until a store is connected.
 	Stores StoreResolver
 
 	// PeekCredentials is the PROBE's resolver (epic memql#4885, D11): the

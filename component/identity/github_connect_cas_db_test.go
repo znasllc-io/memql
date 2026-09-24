@@ -104,8 +104,9 @@ func githubConnectNodeFromFake(r map[string]string) *memqlv1.MemoryNode {
 		fields[k] = structpb.NewStringValue(v)
 	}
 	return &memqlv1.MemoryNode{
-		Id:      r["id"],
-		Payload: &structpb.Struct{Fields: fields},
+		Id:        r["id"],
+		CreatedAt: fixtureCreatedAt(r["createdAt"]),
+		Payload:   &structpb.Struct{Fields: fields},
 	}
 }
 
@@ -129,6 +130,8 @@ func liveConnectStateRow() map[string]string {
 		"id":        "v1:identity:githubConnectState:cas",
 		"userId":    "v1:identity:user:asked",
 		"stateHash": HashConnectState("the-plaintext-state"),
+		// A server writer sets expiresAt ten minutes after createdAt; consume refuses any other lifetime.
+		"createdAt": time.Now().UTC().Add(-5 * time.Minute).Format(time.RFC3339),
 		"expiresAt": time.Now().UTC().Add(5 * time.Minute).Format(time.RFC3339),
 	}
 }

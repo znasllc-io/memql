@@ -33,6 +33,7 @@ import (
 	identityweb "github.com/znasllc-io/memql/component/identity/web"
 	"github.com/znasllc-io/memql/component/identity/webauthn"
 	"github.com/znasllc-io/memql/integrations/groups"
+	"github.com/znasllc-io/memql/integrations/shopify"
 )
 
 // newSSOAuthCode mints a plaintext URL-safe base64 code + its
@@ -274,6 +275,11 @@ func (a *App) integrationsIdentity() {
 		Variable: a.engine.ResolveSystemVariable,
 		Secret:   a.engine.ResolveSystemSecret,
 	}}
+	// CONNECT SHOPIFY's half of GET /auth/shopify/callback (design record
+	// 2026-09-23-connect-shopify, 12.7). component/identity cannot import
+	// integrations/shopify, so the connector the plug-in built on this node
+	// (plugins_core.go loads it on every node type) is handed over here.
+	httpSrv.ShopifyConnect = shopifyConnectHook(a.engine.IntegrationByName(shopify.ConnectorName))
 	svc.SetHTTPMounter(httpSrv)
 
 	// Phase 3 + Phase 6: web UI. Phase 6 swaps the static

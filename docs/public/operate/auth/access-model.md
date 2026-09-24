@@ -257,11 +257,68 @@ registry now NAMES those resources (`requires: "app:<id>"`) rather than
 stating floors, and `TestOsRegistryRequiresMatchTheAppSeeds`
 (`component/memql`) fails the build when a manifest names a resource no seed
 declares or a seeded app resource has no manifest. Deployables is the first app to
-carry parts (`sources`, `deploy`, `publish`, `retire`, `domains`), seeded on
-owner and developer; the mapping from part to construct is the table in the
-design record. An app grant opens the DOOR; row authorization still decides
-the CONTENTS (D4): a developer holding the deploy part deploys only a package
-they can read.
+carry parts (`sources`, `deploy`, `publish`, `retire`, `domains`, `preview`,
+`store`), all seeded on owner and developer; the mapping from part to construct
+is the table in the design record. An app grant opens the DOOR; row
+authorization still decides the CONTENTS (D4): a developer holding the deploy
+part deploys only a package they can read.
+
+`store` -- attaching the Shopify store a storefront fronts -- was owner alone
+until `v1:shopify:store` took a read floor at developer (Connect Shopify, D3).
+With both, **a developer may bind any storefront they can write to any store on
+the cluster**, and that reaches further than the storefronts they own.
+`v1:platform:site` carries the account grant, and staff (developer and above)
+are standing members of every account's group, so a developer can write every
+account-tied site: every client storefront, live ones included, may be
+re-pointed at any store. That is the same reach that already lets a developer
+pause, archive or delete those sites, and it is accepted rather than
+overlooked. What bounds the stores is who makes them: every store row is
+registered by a cluster owner or by server code (D15), so the Storefront token
+a binding exposes is always one an owner or Connect Shopify chose. The part
+attaches; it does not register, change, pause or resume a store, which the row
+tier keeps a cluster owner's.
+
+An owner who wants one developer kept out writes a user `deny` on `execute
+app:deployables/store`. It is honoured on every write that CHANGES which store
+a binding names:
+
+- the serving binding: `updateSiteStoreBinding`, a `createSite` that binds, and
+  a raw `insert()` that re-points `binding`;
+- the preview binding: `updateSitePreviewBinding`, and a raw `insert()` that
+  re-points `previewBinding`.
+
+On every one of those the named store must also be one the caller can read.
+A write that leaves a binding where it was is not asked for the part. Clearing
+one through a raw write names no store, so it is not asked for readability, but
+the organization boundary (memql#5598) asks the store part at the site's
+organization for any change of either binding, clearing included, so the deny
+holds there too. The two named mutations ask for the part on every call,
+clearing included.
+
+**The Modules pack switch is a grant plus a declaration** (Connect Shopify
+design, D4). Reading the inventory is `read` on `app:cluster/modules`, seeded
+on owner, developer and admin -- the same name the OS registry puts on the
+section, so the engine and the shell read one rule. Flipping a pack is the
+cluster owner's for any pack. Anyone else needs BOTH `execute` on
+`app:cluster/modules` (seeded on owner and developer) AND a pack that declared
+itself a storefront pack (`dsl.RegisterStorefrontPack`); every other pack stays
+owner-only, and an admin holds no switch at all. `AuthorizeSetPackEnabled`
+(`component/memql/module_registry.go`) is the one function that decides, and it
+also answers each pack row's `mayFlip`, so the OS draws a switch only where the
+write would be admitted.
+
+The write itself runs in `component/memql`, not in the gRPC handler, because it
+is stamped internal origin and `component/grpc` may never stamp it
+(`call_origin_conformance_test.go`). `SetPackEnabled` calls the gate, returns on
+its refusal, and only then passes the stamp inline to the one `setPackEnabled`
+Execute, keeping the caller's actor so the row's provenance is the person
+(`component/memql/pack_flip_internal_origin_test.go` asserts the ordering).
+`v1:platform:packState` stays `@rowAuthz(clusterOwner)`, and a direct
+`mutation setPackEnabled` below owner is refused either way: on a pack that has a
+row by the write guard, and as a create -- a pack's first row, or a row under an
+id that differs from its `packDomain` -- by the create floor
+(`component/memql/create_rank_floor.go`). The audited, storefront-checked path is
+the only way through for a developer.
 
 **A rank is a floor and a capability is a grant, and a cluster can hold one
 without the other.** "developer and above" is a statement about the ladder;

@@ -3650,6 +3650,13 @@ message ModuleInfo {
   // Architecture-model id where one exists (node-types, from
   // v1:cluster:nodeType.codeReference).
   string code_reference = 9;
+  // Whether THIS caller may flip this pack, answered by the same function
+  // the SetPackEnabledMsg write asks (component/memql
+  // AuthorizeSetPackEnabled): an owner may flip any pack, a developer holding
+  // execute on app:cluster/modules only a storefront pack. False on every
+  // non-pack row. Absent reads as false, so a client draws no switch it was
+  // not told about (Connect Shopify design, D4).
+  bool may_flip = 10;
 }
 
 message ModulesListResult {

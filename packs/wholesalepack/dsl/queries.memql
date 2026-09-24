@@ -99,7 +99,7 @@ query wholesaleSettings wholesaleSettingsForStore {
   shape   wholesaleSettingsFull
 }
 
-@description("The bound store's plan, through the pack's own narrow projection. THIS READ ANSWERING NOTHING IS ORDINARY: v1:shopify:store is @rowAuthz(clusterOwner) and epic memql#5530's D10 left that tier unchanged, so a merchant reads no rows here. What an unknown plan MEANS is each adapter's to say -- shopifyB2B refuses, because it cannot establish the catalog ceiling it has to respect; customerTag proceeds, because it needs no plan at all. That difference is what plan-independence is.")
+@description("The bound store's plan, through the pack's own narrow projection. THIS READ ANSWERING NOTHING IS ORDINARY: v1:shopify:store is readable by a cluster owner or a developer only (its read floor is developer), so a merchant reads no rows here. What an unknown plan MEANS is each adapter's to say -- shopifyB2B refuses, because it cannot establish the catalog ceiling it has to respect; customerTag proceeds, because it needs no plan at all. That difference is what plan-independence is.")
 @unbounded("store by id -- bounded to a single row (id is the row's own primary key)")
 @actor
 query store storePlanById {

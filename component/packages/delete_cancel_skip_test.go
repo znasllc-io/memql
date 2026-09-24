@@ -69,6 +69,11 @@ func TestDeleteReleasesTheNameAndTakesTheDomainsDownFirst(t *testing.T) {
 	if reply["hostname"] != "shop.example.com" {
 		t.Fatalf("reply %v", reply)
 	}
+	// The count is the BUILTIN's answer, read back through the shape a
+	// top-level builtin really returns (a node set, not a bundle).
+	if reply["domainsReleased"] != float64(2) {
+		t.Fatalf("customDomainReleaseForSite answered requested=2, the reply says domainsReleased=%v", reply["domainsReleased"])
+	}
 
 	stmts := engine.statements()
 	domainsAt, deleteAt := -1, -1

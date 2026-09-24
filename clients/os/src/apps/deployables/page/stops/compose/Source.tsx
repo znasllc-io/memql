@@ -3,6 +3,7 @@ import { FileArchive } from "lucide-react";
 
 import {
   Caption,
+  ProvenanceDot,
   ChoiceStack,
   Field,
   LiveList,
@@ -76,11 +77,13 @@ export function ComposeSourceKindStep({
   draft,
   onChoose,
   isClusterOwner,
+  repositoryNeedsSetup = false,
 }: {
   draft: ComposeDraft;
   onChoose: (choice: ComposeDraft["choice"]) => void;
   /** A CI-pushed source is a cluster owner's act (design section C). */
   isClusterOwner: boolean;
+  repositoryNeedsSetup?: boolean;
 }) {
   return (
     <div className="os-stop-body">
@@ -97,6 +100,7 @@ export function ComposeSourceKindStep({
           {
             value: "repo",
             label: SOURCE_KIND_LABEL.repo!,
+            indicator: repositoryNeedsSetup ? <ProvenanceDot tone="partlySetUp" label="GitHub setup needed" /> : undefined,
             description:
               "The repository stays the source of truth, and this cluster notices when something newer lands there. github.com today.",
           },

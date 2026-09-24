@@ -131,15 +131,18 @@ func SeedStoreFromEnv(ctx context.Context, engine memql.IntegrationEngineAccess,
 	}
 	actorCtx := connectorContext(ctx)
 
-	adminRef, err := seedSecret(actorCtx, engine, "SHOPIFY_"+strings.ToUpper(storeID)+"_ADMIN_TOKEN", cfg.AdminToken)
+	seal := func(suffix, value string) (string, error) {
+		return seedSecret(actorCtx, engine, storeSecretName(storeID, suffix), value, envSeedDescription, envSeedAddedBy)
+	}
+	adminRef, err := seal(suffixAdminToken, cfg.AdminToken)
 	if err != nil {
 		return "", err
 	}
-	storefrontRef, err := seedSecret(actorCtx, engine, "SHOPIFY_"+strings.ToUpper(storeID)+"_STOREFRONT_TOKEN", cfg.StorefrontToken)
+	storefrontRef, err := seal(suffixStorefrontToken, cfg.StorefrontToken)
 	if err != nil {
 		return "", err
 	}
-	webhookRef, err := seedSecret(actorCtx, engine, "SHOPIFY_"+strings.ToUpper(storeID)+"_WEBHOOK_SECRET", cfg.WebhookSecret)
+	webhookRef, err := seal(suffixWebhookSecret, cfg.WebhookSecret)
 	if err != nil {
 		return "", err
 	}
@@ -162,28 +165,50 @@ func SeedStoreFromEnv(ctx context.Context, engine memql.IntegrationEngineAccess,
 	return storeID, nil
 }
 
+// The first-boot seed's provenance on the rows it seals.
+const (
+	envSeedDescription = "Seeded from the environment at first boot by the Shopify connector."
+	envSeedAddedBy     = "system:connector:" + ConnectorName
+)
+
 // seedSecret writes a credential into a globalSecret row and returns its
 // name. The token goes into the graph SEALED -- the row holds ciphertext and
 // a four-character fingerprint, and the store row holds only this name.
-func seedSecret(ctx context.Context, engine memql.IntegrationEngineAccess, name, value string) (string, error) {
+// `description` and `addedBy` say where it came from and who put it there.
+//
+// It writes AT THE ROW ALREADY CARRYING THE NAME when exactly one does, and
+// refuses errSecretNameAmbiguous when more than one does: the resolver reads
+// the first row by name (component/memql/engine_variables.go), so a write
+// beside another row would change nothing anybody reads, or change it only
+// sometimes. The lookup is refused before anything is sealed.
+func seedSecret(ctx context.Context, engine memql.IntegrationEngineAccess, name, value, description, addedBy string) (string, error) {
 	if strings.TrimSpace(value) == "" {
 		return "", nil
+	}
+	id, err := namedRowID(ctx, engine, conceptGlobalSecret, name, secretRowID(name))
+	if err != nil {
+		return "", err
 	}
 	ciphertext, fingerprint, err := secret.Encrypt(value)
 	if err != nil {
 		return "", fmt.Errorf("shopify: seal %s: %w", name, err)
 	}
 	call := renderCall("setGlobalSecret", map[string]any{
-		"id":             "sec-" + strings.ToLower(strings.ReplaceAll(name, "_", "-")),
+		"id":             id,
 		"name":           name,
 		"encryptedValue": ciphertext,
 		"fingerprint":    fingerprint,
 		"kind":           "vendor_api_key",
-		"description":    "Seeded from the environment at first boot by the Shopify connector.",
-		"addedBy":        "system:connector:" + ConnectorName,
+		"description":    description,
+		"addedBy":        addedBy,
 	})
 	if _, err := engine.Execute(ctx, call); err != nil {
 		return "", fmt.Errorf("shopify: seed secret %s: %w", name, err)
 	}
 	return name, nil
+}
+
+// secretRowID is the id seedSecret writes a name at when no row carries it yet.
+func secretRowID(name string) string {
+	return "sec-" + strings.ToLower(strings.ReplaceAll(name, "_", "-"))
 }

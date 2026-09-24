@@ -110,7 +110,9 @@ export function Input({
   disabled = false,
   onEnter,
   code = false,
+  type = "text",
 }: {
+  type?: "text" | "password";
   value: string;
   onChange: (next: string) => void;
   /** Explicit confirmation, including choosing the current value. Dismissal does not commit. */
@@ -136,6 +138,7 @@ export function Input({
       </label>
       <input
         id={id}
+        type={type}
         className={code ? "os-input os-mono" : "os-input"}
         value={value}
         disabled={disabled}
@@ -889,6 +892,7 @@ export interface ChoiceOption {
   /** The value's own name. Rendered in the data voice -- these are enum
    *  members, and dressing them up as prose hides what to type elsewhere. */
   label: string;
+  indicator?: ReactNode;
   /** What it MEANS, in the reader's terms. "leastLoaded" does not say what it
    *  is least-loaded against. */
   description?: string;
@@ -946,7 +950,7 @@ export function ChoiceStack({
           onClick={() => onChange(option.value)}
         >
           <span className={voice === "prose" ? "os-choice-card-name" : "os-choice-card-name os-mono"}>
-            {option.label}
+            {option.label}{option.indicator ? <> {option.indicator}</> : null}
           </span>
           {option.description ? (
             <span className="os-choice-card-note">{option.description}</span>

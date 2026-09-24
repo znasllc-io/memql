@@ -1,3 +1,4 @@
+import { ManageGitHub } from "./GitHubSource";
 import { useEffect, useRef } from "react";
 import { Caption, Field, Notice, RefreshButton, Select } from "../../../../../kit";
 import { WizardStepHeader } from "../../../../../kit/WizardStepHeader";
@@ -17,7 +18,8 @@ export type ConnectionNeed = "" | "connect" | "reconnect" | "setup" | "unavailab
 
 /** A repository belongs to the explicitly chosen GitHub identity/installation.
  * The parent retains that choice; a responsive remount cannot pick another grant. */
-export function RepositorySource({ connection, draft, onSelected, probe, onConnectionNeed }: {
+export function RepositorySource({ connection, draft, onSelected, probe, onConnectionNeed, onSettings }: {
+  onSettings?: () => void;
   connection: SourceConnectionRow;
   draft: ComposeDraft;
   onSelected: (patch: Partial<ComposeDraft>) => void;
@@ -50,7 +52,7 @@ export function RepositorySource({ connection, draft, onSelected, probe, onConne
   }
   return <>
     <WizardStepHeader count={repositories.readAt && !repositories.busy && !repositories.refusal ? repositories.page.repositories.length : undefined}>
-      <RefreshButton label="Refresh repositories" busy={repositories.busy} onClick={() => void read(connection.credentialId, 1, connection.id)} />
+
     </WizardStepHeader>
     <Caption>Repositories from {connection.accountLogin}.</Caption>
     {accessRefusals.includes(repositories.refusal?.code ?? "") ? <Notice tone="warn" sentence="This source needs attention." next="Go Back to choose another organization or GitHub account." /> : null}
@@ -60,6 +62,7 @@ export function RepositorySource({ connection, draft, onSelected, probe, onConne
       onChoose={choose} onLookAgain={() => void read(connection.credentialId, 1, connection.id)}
       onReadMore={() => void read(connection.credentialId, repositories.page.nextPage, connection.id)} />
     <RepositoryProbeStatus draft={draft} probe={probe} />
+    <ManageGitHub onSettings={onSettings} />
 
   </>;
 }

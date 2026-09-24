@@ -112,6 +112,10 @@ type writeMeta struct {
 	priorBundleRef      string
 	priorCandidateRef   string
 	priorBindingStoreId string
+	// priorPreviewBindingStoreId is previewBinding.storeId, for the same
+	// reason: a CHANGE of the preview store is what the store part and the
+	// readability check judge (Connect Shopify 009).
+	priorPreviewBindingStoreId string
 	// priorKind is v1:platform:site.kind, which decides whether the go-live
 	// guard has a question to ask at all -- an spa or a static site has no
 	// store binding and is never refused by it.
@@ -744,6 +748,18 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		return nil, meta, err
 	}
 
+	// CONNECT STATE: server-written only (memql#5623). Here, beside the two
+	// above and before the read-merge, for their reasons: the refusal is a
+	// property of the concept and the call's origin, not of the payload, so a
+	// refused write reads nothing. Covers insert() and update() alike -- a raw
+	// insert naming an existing state's id is a rewrite of it. See
+	// github_connect_state_write_guard.go.
+	if conceptMeta.Name == conceptIdentityGithubConnectState {
+		if err := validateGithubConnectStateServerOnly(ctx); err != nil {
+			return nil, meta, err
+		}
+	}
+
 	rawPayload := strings.TrimSpace(mutation.PayloadRaw)
 	if rawPayload == "" {
 		return nil, meta, fmt.Errorf("mutation payload is required")
@@ -808,6 +824,15 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	var organizationOwnerField string
 	var organizationOwner any
 	var organizationOwnerPresent bool
+	// The stored row, for the organization boundary (memql#5636), which judges
+	// the row the before-write hooks PRODUCED rather than the caller's delta: a
+	// hook may set a guarded field the delta never named. Copied because the
+	// read-merge below writes the delta into priorPayload itself.
+	// ponytail: shallow copy. The merge and an authored field write replace or
+	// delete top-level values and never edit a nested object in place; a Go
+	// hook that did (row["binding"].(map)["storeId"] = x) would edit this copy
+	// too and slip past. Deep-copy here if such a hook is ever written.
+	var organizationPrior map[string]any
 
 	id := strings.TrimSpace(mutation.ID)
 	if id != "" {
@@ -849,9 +874,7 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			if err := e.validateSourceConnectionWrite(ctx, conceptMeta.Name, priorPayload, payload); err != nil {
 				return nil, meta, err
 			}
-			if err := e.validateOrganizationSensitiveChanges(ctx, conceptMeta.Name, priorPayload, payload); err != nil {
-				return nil, meta, err
-			}
+			organizationPrior = maps.Clone(priorPayload)
 			if err := e.validateOrganizationTransfer(ctx, conceptMeta.Name, id, priorPayload, payload); err != nil {
 				return nil, meta, err
 			}
@@ -913,6 +936,9 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			if b, ok := priorPayload["binding"].(map[string]any); ok {
 				meta.priorBindingStoreId = stringFromAny(b[bindingStoreIdKey])
 			}
+			if b, ok := priorPayload["previewBinding"].(map[string]any); ok {
+				meta.priorPreviewBindingStoreId = stringFromAny(b[bindingStoreIdKey])
+			}
 			// Capture the PRIOR client domain (epic memql#5165) for the
 			// reason above it: the walk's reset is a comparison against
 			// the stored value, which the merged payload has already
@@ -956,6 +982,15 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		}
 		return nil, meta, fmt.Errorf("update(): no existing row for concept %q id %q (use insert() to create)", conceptName, id)
 	}
+	// CREATE RANK FLOORS (create_rank_floor.go). Here rather than beside the
+	// write guard above because a create may carry no id at all, and that
+	// path never enters the prior-row block; at this point priorExisted is
+	// final for both.
+	if !meta.priorExisted {
+		if err := e.refuseCreateBelowRankFloor(ctx, conceptMeta.Name); err != nil {
+			return nil, meta, err
+		}
+	}
 
 	if err := e.validateOrganizationOwnership(ctx, conceptName, payload, meta.priorExisted); err != nil {
 		return nil, meta, err
@@ -964,12 +999,17 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		if err := e.validateSourceConnectionWrite(ctx, conceptMeta.Name, nil, payload); err != nil {
 			return nil, meta, err
 		}
-		if err := e.validateOrganizationSensitiveChanges(ctx, conceptMeta.Name, nil, payload); err != nil {
-			return nil, meta, err
-		}
 	}
 	beforeWriteIncomingStatus := payload["status"]
 	if err := e.applyBeforeWrite(ctx, conceptName, id, meta.priorExisted, payload); err != nil {
+		return nil, meta, err
+	}
+	// THE ORGANIZATION BOUNDARY judges the final row (memql#5636): after the
+	// read-merge, the organization stamp and every before-write hook, against
+	// the stored row (nil on a create). Before the hooks, an authored
+	// before-write automation could set status, bundleRef or a binding on its
+	// author's own write after the boundary had passed it.
+	if err := e.validateOrganizationSensitiveChanges(ctx, conceptMeta.Name, organizationPrior, payload); err != nil {
 		return nil, meta, err
 	}
 
@@ -1371,10 +1411,15 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		if err := e.validateSiteStoreBinding(ctx, payload, actor, e.canReadStore); err != nil {
 			return nil, meta, err
 		}
+		// The organization boundary checks the capability on the final row.
+		// Preview binding changes also require the caller to read the store.
+		if err := e.validateSitePreviewBindingChange(ctx, payload, meta.priorPreviewBindingStoreId, actor, e.canReadStore); err != nil {
+			return nil, meta, err
+		}
 		// The candidate version, the preview binding and the go-live guard
-		// (epic memql#5531), beside the five above and for their reason: every
+		// (epic memql#5531), beside the checks above and for their reason: every
 		// rule it carries is a comparison against the PRIOR row or against a
-		// DIFFERENT row, and a mutation body can make neither. LAST of the six,
+		// DIFFERENT row, and a mutation body can make neither. LAST of them,
 		// deliberately -- it is the only one that reads a second concept, and
 		// it short-circuits before that read when the write touches none of its
 		// fields, which is every ordinary publish, rename and settings edit.

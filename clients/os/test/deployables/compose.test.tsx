@@ -25,6 +25,7 @@ import {
   repositoriesReply,
   repositoryFixture,
   STORE,
+  previewReadinessRow,
   probeReply,
   withSession,
   zipReply,
@@ -234,6 +235,14 @@ const REPORT_TWO = {
     ...REPORT.deployables,
     { name: "web", kind: "spa", path: "clients/marketing", buildPlan: "already built: dist", output: "dist", prebuilt: true },
   ],
+};
+
+/** REPORT_TWO with its first app a storefront, the one kind that can be refused going live. */
+const REPORT_STOREFRONT = {
+  ...REPORT_TWO,
+  deployables: REPORT_TWO.deployables.map((d) =>
+    d.name === "storefront" ? { ...d, kind: "shopify_storefront", binding: { store: "acme.myshopify.com" } } : d,
+  ),
 };
 
 /** A source added days ago, already on the list. */
@@ -758,10 +767,11 @@ describe("the compose flow: where each app will live", () => {
 
     const bar = () => document.querySelector(".os-actbar") as HTMLElement;
     await waitFor(() => expect(bar().textContent ?? "").toContain("Built"));
+    // GO LIVE IS RIGHT HERE (D10), so the two-step is one screen. The app is
+    // an spa, so nothing waits on a readiness answer.
+    await waitFor(() => expect([...bar().querySelectorAll("button")].map((b) => (b.textContent ?? "").trim())).toContain("Go live"));
     const buttons = [...bar().querySelectorAll("button")].map((b) => (b.textContent ?? "").trim());
     expect(buttons).toContain("Done");
-    // GO LIVE IS RIGHT HERE (D10), so the two-step is one screen.
-    expect(buttons).toContain("Go live");
     expect(buttons).not.toContain("Cancel");
     // ...and the summary is not ALSO in the panel.
     expect(within(region).queryByText(/Go live starts serving/)).toBeNull();
@@ -774,6 +784,84 @@ describe("the compose flow: where each app will live", () => {
     await waitFor(() => expect((document.querySelector(".os-actbar-word")?.textContent ?? "").trim()).toBe("Live"));
     expect(within(region).getByText("Live at shop.memql.example.com.")).toBeTruthy();
     expect([...bar().querySelectorAll("button")].map((b) => (b.textContent ?? "").trim())).toEqual(["Done"]);
+  });
+
+  it("offers no Go live for a placed site the engine will not take live", async () => {
+    // Connect Shopify, D5: a storefront placed with no store is refused going
+    // live, and the floor asks the engine before offering the act. The app is
+    // a STOREFRONT here: only a storefront is asked about.
+    const connection = fakeConnection({
+      sourceProbe: { "": probeReply() },
+      previewReadiness: {
+        "site-a": previewReadinessRow({
+          siteId: "site-a",
+          status: "draft",
+          canGoLive: false,
+          goLiveRefusal: {
+            code: "serving_binding_is_development_store",
+            message: "This storefront is bound to a development store.",
+            remedy: "Bind a production store on the Store panel.",
+          },
+        } as never),
+      },
+    });
+    const { region } = await compose(connection);
+    await chooseRepository(region);
+    await fill(NAME_FIELD, "acme");
+    await click(await forward("Analyze"));
+    const pkgId = mintedPackageId(connection);
+    await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(pkgId, { report: REPORT_STOREFRONT }), "NODE_CREATED");
+    await within(region).findByText("clients/marketing");
+    await emit(
+      connection,
+      DEPLOYMENT_CONCEPT,
+      parkedRun(pkgId, {
+        status: "succeeded",
+        report: REPORT_STOREFRONT,
+        finishedAt: "2026-09-01T13:05:00Z",
+        deployables: [
+          { name: "storefront", siteId: "site-a", hostname: "shop.memql.example.com", bundleRef: "blob://a/v1/", version: "v1", created: true },
+        ],
+      }),
+      "NODE_UPDATED",
+    );
+    const bar = () => document.querySelector(".os-actbar") as HTMLElement;
+    await waitFor(() => expect(bar().textContent ?? "").toContain("Built"));
+    await waitFor(() => expect(connection.calls.some((c) => c.includes("sitePreviewReadiness") && c.includes("site-a"))).toBe(true));
+    expect([...bar().querySelectorAll("button")].map((b) => (b.textContent ?? "").trim())).toEqual(["Done"]);
+  });
+
+  it("offers Go live for an spa-only deploy without asking readiness", async () => {
+    // Only a storefront can be refused going live, so a run that placed none
+    // is not made to wait on a round trip -- and loses nothing when that read
+    // fails -- as the deployable page's bar is not (withGoLiveAnswered).
+    const connection = fakeConnection({
+      sourceProbe: { "": probeReply() },
+      previewReadinessError: "readiness is unreachable",
+    });
+    const { region } = await compose(connection);
+    await chooseRepository(region);
+    await fill(NAME_FIELD, "acme");
+    await click(await forward("Analyze"));
+    const pkgId = mintedPackageId(connection);
+    await emit(connection, DEPLOYMENT_CONCEPT, parkedRun(pkgId, { report: REPORT_TWO }), "NODE_CREATED");
+    await within(region).findByText("clients/marketing");
+    await emit(
+      connection,
+      DEPLOYMENT_CONCEPT,
+      parkedRun(pkgId, {
+        status: "succeeded",
+        report: REPORT_TWO,
+        finishedAt: "2026-09-01T13:05:00Z",
+        deployables: [
+          { name: "web", siteId: "site-web", hostname: "web.memql.example.com", bundleRef: "blob://w/v1/", version: "v1", created: true },
+        ],
+      }),
+      "NODE_UPDATED",
+    );
+    const bar = () => document.querySelector(".os-actbar") as HTMLElement;
+    await waitFor(() => expect([...bar().querySelectorAll("button")].map((b) => (b.textContent ?? "").trim())).toContain("Go live"));
+    expect(connection.calls.some((c) => c.includes("sitePreviewReadiness"))).toBe(false);
   });
 
   it("offers the client to everybody who composes, and their own domain only with the domains part", async () => {
@@ -956,7 +1044,7 @@ describe("what the compose flow does not do", () => {
     const connection = fakeConnection({ credentials: [], githubApp: { configured: false, canSetup: true } });
     const { region } = await compose(connection);
     await chooseSource(region, /A repository/);
-    expect(await within(region).findByRole("button", { name: "Set up GitHub" })).toBeTruthy();
+    expect(await within(region).findByRole("img", { name: "GitHub setup needed" })).toBeTruthy();
     expect(forwardAct("Connect GitHub")).toBeNull();
     expect(forwardAct("Analyze")).toBeNull();
     expect(within(region).queryByRole("radio", { name: "A token" })).toBeNull();
@@ -969,7 +1057,7 @@ describe("what the compose flow does not do", () => {
     const connection = fakeConnection({ credentials: [], githubApp: { configured: false, canSetup: false } });
     const { region } = await compose(connection, { role: "developer" });
     await chooseSource(region, /A repository/);
-    expect(await within(region).findByText(/Ask a cluster owner/)).toBeTruthy();
+    expect(await within(region).findByRole("img", { name: "GitHub setup needed" })).toBeTruthy();
     expect(forwardAct("Set up GitHub")).toBeNull();
     expect(forwardAct("Connect GitHub")).toBeNull();
     expect(forwardAct("Analyze")).toBeNull();
@@ -984,7 +1072,7 @@ describe("what the compose flow does not do", () => {
     const { region } = await compose(connection);
     await chooseSource(region, /A repository/);
     expect(document.querySelector("[data-toast], .os-toast, dialog, [role='dialog']")).toBeNull();
-    expect(await within(region).findByRole("button", { name: "Add GitHub account" })).toBeTruthy();
+    expect(await within(region).findByRole("img", { name: "GitHub setup needed" })).toBeTruthy();
     expect(within(region).queryByRole("radio", { name: "A token" })).toBeNull();
     expect(within(region).queryByLabelText(URL_FIELD)).toBeNull();
     expect(within(region).queryByLabelText("The github.com access token")).toBeNull();

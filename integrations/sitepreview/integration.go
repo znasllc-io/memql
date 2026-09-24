@@ -197,10 +197,20 @@ func (i *Integration) handleReadiness(ctx context.Context, args map[string]any, 
 	}
 
 	storefront := site.Kind == storefrontKind
-	serving, err := i.boundStore(ctx, site.StoreID)
+	// THE SERVING STORE IS JUDGED AS THE GUARD JUDGES IT: from the
+	// deployment's read, so a caller who may go live but not read the store
+	// is told what the guard would tell them. Only what the answer DISCLOSES
+	// -- the domain, and whether the caller can read the store at all -- comes
+	// from the caller's own read.
+	serving, err := memql.BoundStoreAsDeployment(ctx, i.engine.Execute, site.StoreID)
 	if err != nil {
 		return nil, err
 	}
+	seen, err := i.boundStore(ctx, site.StoreID)
+	if err != nil {
+		return nil, err
+	}
+	serving.Domain = seen.Domain
 	preview, err := i.boundStore(ctx, site.PreviewStoreID)
 	if err != nil {
 		return nil, err
@@ -240,7 +250,7 @@ func (i *Integration) handleReadiness(ctx context.Context, args map[string]any, 
 		"hasCandidate":       site.HasCandidate(),
 		"storeId":            site.StoreID,
 		"storeDomain":        serving.Domain,
-		"storeReadable":      serving.Readable,
+		"storeReadable":      seen.Readable,
 		"storeIsDevelopment": serving.Readable && serving.IsDevelopment,
 		"previewStoreId":     site.PreviewStoreID,
 		"previewStoreDomain": preview.Domain,
@@ -273,10 +283,11 @@ func (i *Integration) boundStore(ctx context.Context, storeID string) (memql.Pre
 		return memql.PreviewBoundStore{ID: storeID}, nil
 	}
 	return memql.PreviewBoundStore{
-		ID:            store.ID,
-		Readable:      true,
-		IsDevelopment: store.IsDevelopment,
-		Domain:        store.Domain,
+		ID:                 store.ID,
+		Readable:           true,
+		IsDevelopment:      store.IsDevelopment,
+		Domain:             store.Domain,
+		HasStorefrontToken: strings.TrimSpace(store.StorefrontTokenRef) != "",
 	}, nil
 }
 

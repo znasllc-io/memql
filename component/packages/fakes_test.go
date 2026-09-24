@@ -2,10 +2,14 @@ package packages
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/memql"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -42,6 +46,9 @@ func (e *recordingEngine) Execute(_ context.Context, query string) (*memql.Execu
 	}
 	for key, rows := range e.rows {
 		if contains(query, key) {
+			if strings.HasPrefix(query, "builtin ") {
+				return memql.NewResultWithOutput(asBuiltinNodeSet(rows)), nil
+			}
 			return &memql.ExecuteResult{Bundle: asBundle(rows)}, nil
 		}
 	}
@@ -49,10 +56,8 @@ func (e *recordingEngine) Execute(_ context.Context, query string) (*memql.Execu
 }
 
 // asBundle builds the wire shape the engine hands back for a bundle-backed
-// read. ExecuteResult's `output` field -- what a SHAPED query fills instead --
-// is unexported with no setter, so no fake in any package can produce that
-// branch; memqlRows covers it directly in rows_test.go instead, which is the
-// honest split rather than a fake that quietly tests one of two paths.
+// read. The SHAPED-query branch (rows under `output`) is covered directly in
+// rows_test.go rather than through this fake.
 func asBundle(rows []map[string]any) *memqlv1.GraphBundle {
 	bundle := &memqlv1.GraphBundle{}
 	for _, r := range rows {
@@ -75,6 +80,29 @@ func asBundle(rows []map[string]any) *memqlv1.GraphBundle {
 		bundle.Nodes = append(bundle.Nodes, &memqlv1.MemoryNode{Id: id, Concept: concept, Payload: st})
 	}
 	return bundle
+}
+
+// asBuiltinNodeSet builds what a TOP-LEVEL BUILTIN really hands back: no
+// bundle, and an output that is the builtin branch's node set, a
+// map[string]MemoryNode keyed by id (engine.go, nodesToMap). Answering a
+// builtin with a bundle, as this fake used to, is what hid a reader that
+// could not read the real thing: releaseDomainsForSite reported 0 released
+// whatever the builtin said.
+func asBuiltinNodeSet(rows []map[string]any) map[string]memorynodes.MemoryNode {
+	out := make(map[string]memorynodes.MemoryNode, len(rows))
+	for n, r := range rows {
+		id, _ := r["id"].(string)
+		if id == "" {
+			id = fmt.Sprintf("builtin:result:%d", n)
+		}
+		concept, _ := r["concept"].(string)
+		raw, err := json.Marshal(r)
+		if err != nil {
+			panic(fmt.Sprintf("recordingEngine: builtin row not representable: %v (%v)", err, r))
+		}
+		out[id] = memorynodes.MemoryNode{ID: id, Concept: concept, Payload: raw}
+	}
+	return out
 }
 
 func (e *recordingEngine) statements() []string {

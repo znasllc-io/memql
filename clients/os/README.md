@@ -2430,15 +2430,15 @@ Selection never infers the first or latest credential.
 Add a deployable offers saved repository paths or Add source. New source setup
 asks one question per screen: GitHub account, organization (or personal account),
 then repository, each confirmed by Continue. Together those choices describe the
-source. Account connection appears only on the first screen; installation access
-only on the second. Refresh sits at the top left of the list it reads. Back
-preserves drafts; changing an identity clears organization and repository choices,
-and changing an organization clears the repository. Configuration follows, with
-branch/name/deployment mode and the separate MemQL owning account. Its default
-review cue remains immediately below the selector.
+source. Settings owns adding accounts and organization access. The wizard selects only saved
+accounts and organizations; an accent text action takes people to Settings to add
+or manage them. With no configured account and organization, the repository method
+shows an amber marker and opens Settings. ZIP and CI remain usable. Back preserves
+drafts; changing an identity clears organization and repository choices, and changing
+an organization clears the repository. Configuration follows with branch, name,
+deployment mode and the separate MemQL owning account.
 
-Organization Continue verifies and saves the identity/installation access binding
-when needed; cancelling setup retains that access. Analyze registers the repository
+Analyze registers the repository
 and starts its analysis. A saved repository is silently reused only with the same
 GitHub binding and MemQL ownership; its history never impersonates a different
 selected identity. Progress marks the visible step, not merely prefilled values.

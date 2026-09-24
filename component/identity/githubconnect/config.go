@@ -38,6 +38,14 @@ const CallbackPath = "/auth/github/callback"
 // host-only session cookie lives. GitHub still uses CallbackPath as registered.
 const CompletePath = "/auth/github/complete"
 
+// ShopifyCallbackPath is where Shopify sends the browser back from Connect
+// Shopify (design record 2026-09-23-connect-shopify, 12.4, 12.6). It rides
+// this package's state row and lives on the identity node beside
+// CallbackPath, and is spelled here once because both halves need it: the
+// begin in integrations/shopify composes it into redirect_uri, and the
+// identity server mounts it, and neither can import the other.
+const ShopifyCallbackPath = "/auth/shopify/callback"
+
 // Config is the cluster's GitHub App. The zero value means "no app", which is
 // a supported install: Connect is simply absent and the Source stop offers the
 // pasted-token path alone.

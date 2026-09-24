@@ -138,8 +138,9 @@ func bundleOf(row map[string]string) *memqlengine.ExecuteResult {
 	}
 	return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{
 		Nodes: []*memqlv1.MemoryNode{{
-			Id:      row["id"],
-			Payload: &structpb.Struct{Fields: fields},
+			Id:        row["id"],
+			CreatedAt: fixtureCreatedAt(row["createdAt"]),
+			Payload:   &structpb.Struct{Fields: fields},
 		}},
 	}}
 }
@@ -281,7 +282,9 @@ func liveState() map[string]string {
 		"userId":     "v1:identity:user:asked",
 		"stateHash":  identity.HashConnectState(testStateValue),
 		"returnPath": "/packages/new",
-		"expiresAt":  time.Now().UTC().Add(5 * time.Minute).Format(time.RFC3339),
+		// A server writer sets expiresAt ten minutes after createdAt; consume refuses any other lifetime.
+		"createdAt": time.Now().UTC().Add(-5 * time.Minute).Format(time.RFC3339),
+		"expiresAt": time.Now().UTC().Add(5 * time.Minute).Format(time.RFC3339),
 	}
 }
 

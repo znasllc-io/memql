@@ -6365,6 +6365,7 @@ func CreateSpawnEventBuild(args CreateSpawnEventArgs) string {
 }
 
 // CreateStore -- Register a Shopify store. Cluster-owner tier, and the three token arguments are REFERENCES to globalSecret rows rather than the tokens themselves -- a mutation that took a token would put it in the call string, which is rendered into logs on a parse error.
+// A CREATE needs a cluster owner or server code, enforced in executeWrite (component/memql/create_rank_floor.go), not here: the tier does not judge a create, and a floor on this mutation would never see a raw insert() of the same concept (Connect Shopify design, D13). Internal origin passes -- the first-boot seed, the connector and Connect Shopify write that way. Changing a store that EXISTS is owner-only too: the write guard judges the stored row for `updateStore` and `setStoreStatus`.
 //
 // Bound concept: v1:shopify:store (machine-readable: BoundConcepts["createStore"] in generated_concepts.go).
 type CreateStoreArgs struct {
@@ -6379,6 +6380,7 @@ type CreateStoreArgs struct {
 	ProtectedDataLevel   string
 	Plan                 string
 	OwnerUserId          string
+	ScopesGranted        []string
 	IsDevelopment        bool
 	IsDevelopmentSet     bool // set true to send isDevelopment; required because zero-value bool is ambiguous
 	DevelopmentOfStoreId string
@@ -6462,6 +6464,13 @@ func CreateStoreBuild(args CreateStoreArgs) string {
 		}
 		b.WriteString("ownerUserId: ")
 		b.WriteString(quoteMemQL(args.OwnerUserId))
+	}
+	if args.ScopesGranted != nil {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("scopesGranted: ")
+		b.WriteString(renderMemQLValue(args.ScopesGranted))
 	}
 	if args.IsDevelopmentSet {
 		if b.Len() > 21 {
@@ -12124,7 +12133,8 @@ func SetLibraryWatchedFolderStatusBuild(args SetLibraryWatchedFolderStatusArgs) 
 	return b.String()
 }
 
-// SetPackEnabled -- Flip a pack's per-instance enablement in v1:platform:packState. clusterOwner tier via the concept's @rowAuthz -- these rows are the deployment's, not any operator's, and the tier injects the actor gate. The caller (component/grpc's SetPackEnabledMsg handler) verifies the owner role and writes the audit event BEFORE invoking this; the tier here is the independent second layer. The id is the bare pack domain -- the engine canonicalizes it to v1:platform:packState:<packDomain>, so one row per pack with the version history as the flip audit trail. RESTART-REQUIRED lifecycle: the write changes what each node reads at its next boot, never what a running node has loaded.
+// SetPackEnabled -- Flip a pack's per-instance enablement in v1:platform:packState. clusterOwner tier via the concept's @rowAuthz -- these rows are the deployment's, not any operator's, and the tier injects the actor gate. The Modules flip reaches this through MemQLEngine.SetPackEnabled (component/memql), which admits the owner for any pack and a developer holding execute on app:cluster/modules for a STOREFRONT pack only, then runs this under internal origin with the caller's actor kept, so the row's provenance is the person; component/grpc's SetPackEnabledMsg handler writes one audit event per attempt. The id is the bare pack domain -- the engine canonicalizes it to v1:platform:packState:<packDomain>, so one row per pack with the version history as the flip audit trail. RESTART-REQUIRED lifecycle: the write changes what each node reads at its next boot, never what a running node has loaded.
+// The FIRST flip of a pack is a create, and a create needs a cluster owner or server code, enforced in executeWrite (component/memql/create_rank_floor.go): the tier does not judge a create, and a floor on this mutation would never see a raw insert() of the same concept (Connect Shopify design, D13). Internal origin passes. Once a pack has a row, the tier's write guard refuses every non-owner flip of it, so a direct call below owner is refused either way: a developer flips a storefront pack through the Modules path above, never by calling this.
 //
 // Bound concept: v1:platform:packState (machine-readable: BoundConcepts["setPackEnabled"] in generated_concepts.go).
 type SetPackEnabledArgs struct {
@@ -15115,7 +15125,7 @@ func UpdateSiteBundleBuild(args UpdateSiteBundleArgs) string {
 // UpdateSitePreviewBinding -- Point a storefront's CANDIDATE at the development store it is exercised against, or clear it (epic memql#5531, design D8).
 // The preview binding's twin is `binding`, and the two are separate fields for the reason the whole epic exists: `binding` is the store shoppers reach, and a version being exercised must never be able to reach it. Written whole as {storeId} rather than merged, for updateSiteStoreBinding's reason -- a read-merge would let a retired shape survive beside the reference. An empty storeId writes an empty object, the unbound state, so detaching a development store stays expressible.
 // THE STORE MUST BE A DEVELOPMENT STORE. v1:shopify:store.isDevelopment is a fact about somebody else's system, recorded on the store row when it is attached, and a preview binding naming a store without it is REFUSED -- that is the second direction of the go-live guard, and the reason it matters is that the failure it prevents is silent: a preview against the live store looks exactly like a preview, right up to the test payment landing in the merchant's real orders.
-// AUTHORIZATION is `app:deployables/store`, the same gate updateSiteStoreBinding carries and for the same reason -- this names a v1:shopify:store row, which is cluster-owner tier, and the Go guard beside it refuses a store the CALLER CANNOT READ whatever capability they hold. `preview` is deliberately not enough: preparing a version is one thing, choosing which of the cluster's stores it talks to is another.
+// AUTHORIZATION is `app:deployables/store` (owner and developer), the same gate updateSiteStoreBinding carries and for the same reason -- this names a v1:shopify:store row, which reads at developer and above, and the Go guard beside it refuses a store the CALLER CANNOT READ whatever capability they hold. `preview` is deliberately not enough: preparing a version is one thing, choosing which of the cluster's stores it talks to is another. The reach is the serving binding's: any storefront the caller can write, client storefronts included.
 //
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSitePreviewBinding"] in generated_concepts.go).
 type UpdateSitePreviewBindingArgs struct {
@@ -15274,7 +15284,8 @@ func UpdateSiteStatusBuild(args UpdateSiteStatusArgs) string {
 
 // UpdateSiteStoreBinding -- Point a storefront deployable at the v1:shopify:store row it fronts, or clear the binding (epic memql#5530, issue memql#5538).
 // ONE VALUE, AND IT IS A REFERENCE. The binding is written whole as {storeId} rather than merged, so the legacy {storeDomain, storefrontTokenRef} shape cannot survive a write: a read-merge would have kept the copy beside the reference and left two records of one store, which is the thing this epic exists to end. An empty storeId writes an empty object, which is the unbound state -- clearing must be expressible, for updateSiteSettings' reason.
-// AUTHORIZATION IS TWO GATES, AND THE SECOND IS THE SUBSTANTIVE ONE. @requiresCapability names the surface: `app:deployables/store` is seeded on owner alone, which is exactly the population the retired Stores app admitted. Beside it, a Go guard refuses a binding naming a store row the CALLER CANNOT READ -- so the answer to "who may bind a storefront they own to a store they may not read" is nobody. That check needs a cross-row read no mutation body can make, which is why it sits with the hostname policy rather than here (component/memql/platform_site_binding_guard.go).
+// AUTHORIZATION IS TWO GATES, AND THE SECOND IS THE SUBSTANTIVE ONE. @requiresCapability names the surface: `app:deployables/store` is seeded on owner and developer (Connect Shopify, D3). Beside it, a Go guard refuses a binding naming a store row the CALLER CANNOT READ -- so the answer to "who may bind a storefront to a store they may not read" is nobody. That check needs a cross-row read no mutation body can make, which is why it sits with the hostname policy rather than here (component/memql/platform_site_binding_guard.go).
+// A developer reads every store, so a developer may bind ANY storefront they can write to ANY store on the cluster, and D3 accepts it. That is not only their own: the site tier's account grant admits staff (developer and above) to write every account-tied site, so it is every client storefront, live ones included -- the same reach that lets a developer pause, archive or delete those sites. Every store row is registered by a cluster owner or server code (D15), so the Storefront token a binding exposes is always one an owner or Connect chose.
 //
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteStoreBinding"] in generated_concepts.go).
 type UpdateSiteStoreBindingArgs struct {

@@ -93,9 +93,12 @@ Two fields matter here and nowhere else:
   gate: without it the two rows sit in one list with nothing saying which
   belongs to which. `developmentStoresFor` is the read behind that pairing.
 
-Registering a store is cluster-owner work, exactly as it is for any other store.
-The token arguments are references to `v1:platform:globalSecret` rows, never
-tokens -- see [The Shopify connector](shopify-connector.md).
+A development store is registered and read like any other store: developers
+and cluster owners read store rows (design decision D3), and only a cluster
+owner -- or server code, which is how Connect Shopify writes them -- registers
+or changes one (D15). The token arguments are
+references to `v1:platform:globalSecret` rows, never tokens -- see
+[The Shopify connector](shopify-connector.md).
 
 ## 2. Point the preview binding at it
 
@@ -114,8 +117,25 @@ works, the checkout opens -- right up to the moment a test payment lands in the
 merchant's real orders, and by then it has happened.
 
 Setting the preview binding needs `execute` on `app:deployables/store`, the same
-capability that binds the serving store. Preparing a version is one thing;
-choosing which of the cluster's stores it talks to is another.
+capability that binds the serving store, and the store it names must be one the
+caller can read. Both are asked of `updateSitePreviewBinding` and of any other
+write that changes the store `previewBinding` names, a raw `insert()` included,
+so a person an owner has denied the part by name points no preview anywhere.
+They are judged against the binding the row already carries: a write that keeps
+it asks neither, and one that clears it names no store to read. Changing either
+binding, clearing included, also needs the store capability in the site's
+organization. Preparing a version is one thing; choosing which of the cluster's
+stores it talks to is another.
+
+Developers hold the part (Connect Shopify, D3), so a developer may point the
+preview of ANY storefront they can write at any development store on the
+cluster -- every account-tied client storefront included, live ones too, the
+same reach that lets a developer pause, archive or delete those sites.
+
+One limitation remains on the SERVING store: its readability is still asked on
+every write to a bound storefront, not only on a change, so a site owner who
+cannot read the store a cluster owner bound cannot edit the site until that is
+fixed.
 
 ## 3. Publish a candidate version
 
@@ -298,7 +318,11 @@ closed set, answered identically by two callers: the **write guard** wired into
 the engine's write path, which refuses the act however it arrives, and the
 **readiness read** (`sitePreviewReadiness`), which lets a surface make an
 illegal act *absent* rather than drawing it and having it fail. Both call the
-same function, so they cannot disagree.
+same function, so they cannot disagree. For going live and promoting they also
+judge the same facts: the serving store as the deployment reads it, not as the
+caller does, so a person who may go live but cannot read the store is offered
+what the guard would accept. The readiness read names the store's domain only
+when the caller can read it.
 
 | Code | What causes it | The act that clears it |
 |---|---|---|
@@ -311,18 +335,12 @@ same function, so they cannot disagree.
 | `candidate_moved` | the stored candidate is not the one the promotion named -- it changed after the page read it | reload the deployable, look at the candidate that is there now, and promote that |
 | `site_is_system_owned` | the platform's own site is exempt from this whole axis, as it is from the status axis and the settings axis | nothing. The platform's own site is deployed with the image and re-seeded at every boot, so a candidate written on it would silently undo itself |
 
-Two asymmetries in that table are deliberate, not oversights:
+An unbound storefront may go live for design review. This does not enable
+commerce: the storefront must present an unconnected state without inventing
+products or prices. A readable store without its Storefront token is also allowed.
 
-- **An unbound *serving* binding is never refused.** A storefront with no store
-  reaches no store at all: it serves its bundle and its runtime document carries
-  no storefront block, which is the state every storefront is in before anybody
-  attaches one. Refusing go-live for it would be refusing to publish a page that
-  is not yet wired up.
-- **An unbound *preview* binding IS refused.** Go-live asks "is this safe to
-  show", and an unwired storefront is safe to show. A preview asks "is there a
-  development store to exercise against", and for an unbound one the answer is
-  no -- exercising it would fall back to no store at all and report four
-  observations of nothing.
+An unbound **preview** binding is refused as `no_preview_binding`: the commerce
+checklist needs a development store against which to exercise cart and checkout.
 
 **An unreadable store refuses; it does not default.** `bound_store_unreadable`
 is a third state, not a synonym for "not a development store". Reading an
@@ -415,9 +433,10 @@ which is one click and leaves a record of itself.
 | Act | Capability |
 |---|---|
 | set or clear a candidate, open or end a preview, run the probe | `execute app:deployables/preview` (owner, developer) |
-| point the preview binding at a store | `execute app:deployables/store` (owner) |
+| attach the serving store, or point the preview binding at a store, on any storefront the caller can write | `execute app:deployables/store` (owner, developer), and a store the caller can read |
 | promote a candidate, go live, pause, roll back | `execute app:deployables/publish` |
-| register a store, read a store row | cluster owner |
+| read a store row | developer, cluster owner |
+| register a store, or change, pause or resume one that exists | cluster owner |
 
 That is the surface half. Underneath it, `v1:platform:site`,
 `v1:platform:sitePreviewGrant` and `v1:platform:sitePreviewObservation` all

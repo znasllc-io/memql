@@ -290,6 +290,17 @@ live, deliberately -- a stranger's code should not go live the moment it
 builds. The compose flow offers Go live beside Done, so the two-step is one
 screen.
 
+**Go live is offered only when the engine would accept it.** Both the
+deployable's bar and the end of the compose flow ask `sitePreviewReadiness`,
+which answers from the same rule the write guard refuses with. A storefront
+with no connected store may go live for design review. Catalog, cart and checkout
+become available after connection through the Store icon beside Traffic.
+An amber marker identifies incomplete Shopify setup independently of Live status.
+A bound development store or unreadable store still refuses publication.
+GitHub accounts and organization access are managed in Settings; the repository
+wizard selects that saved access, with an accent text action back to Settings.
+
+
 ---
 
 ## The target model

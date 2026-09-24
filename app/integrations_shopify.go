@@ -5,6 +5,8 @@ import (
 	stdsync "sync"
 	"time"
 
+	"github.com/znasllc-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/integrations/shopify"
 )
@@ -39,6 +41,16 @@ type shopifyBootstrap struct {
 	mu      stdsync.Mutex
 	running bool
 	cancel  context.CancelFunc
+}
+
+// shopifyConnectHook is Connect Shopify's half of the identity node's callback
+// (design 12.7): the connector of the Shopify integration, or an UNTYPED nil
+// when there is none, so the identity server's nil check still holds.
+func shopifyConnectHook(provider memql.IntegrationProvider) identity.ShopifyConnect {
+	if integ, ok := provider.(*shopify.Integration); ok && integ.Connector() != nil {
+		return integ.Connector()
+	}
+	return nil
 }
 
 func (a *App) registerShopifyConnector() {

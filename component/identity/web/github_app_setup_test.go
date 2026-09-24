@@ -49,7 +49,7 @@ func (e *setupEngine) Execute(_ context.Context, q string) (*memqlengine.Execute
 			payload[k] = structpb.NewStringValue(v)
 		}
 		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{
-			Nodes: []*memqlv1.MemoryNode{{Id: id, Payload: &structpb.Struct{Fields: payload}}},
+			Nodes: []*memqlv1.MemoryNode{{Id: id, CreatedAt: fixtureCreatedAt(fields["createdAt"]), Payload: &structpb.Struct{Fields: payload}}},
 		}}
 	}
 	switch {
@@ -75,10 +75,12 @@ func (e *setupEngine) writes() []string {
 
 func liveSetupState(over map[string]string) map[string]string {
 	row := map[string]string{
-		"id":           "v1:identity:githubConnectState:setup",
-		"userId":       "v1:identity:user:owner",
-		"stateHash":    identity.HashConnectState(setupStatePlain),
-		"returnPath":   "/?connect=deployables",
+		"id":         "v1:identity:githubConnectState:setup",
+		"userId":     "v1:identity:user:owner",
+		"stateHash":  identity.HashConnectState(setupStatePlain),
+		"returnPath": "/?connect=deployables",
+		// A server writer sets expiresAt ten minutes after createdAt; consume refuses any other lifetime.
+		"createdAt":    time.Now().UTC().Add(-5 * time.Minute).Format(time.RFC3339),
 		"expiresAt":    time.Now().UTC().Add(5 * time.Minute).Format(time.RFC3339),
 		"purpose":      githubconnect.PurposeAppSetup,
 		"organization": "",
@@ -225,6 +227,7 @@ func TestAStateThatIsNotLiveGetsNoPage(t *testing.T) {
 		"already spent":           liveSetupState(map[string]string{"consumedAt": time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)}),
 		"expired":                 liveSetupState(map[string]string{"expiresAt": time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)}),
 		"a CONNECT state":         liveSetupState(map[string]string{"purpose": githubconnect.PurposeConnect}),
+		"a SHOPIFY state":         liveSetupState(map[string]string{"purpose": githubconnect.PurposeShopifyConnect}),
 		"a state with no purpose": liveSetupState(map[string]string{"purpose": ""}),
 	} {
 		eng := &setupEngine{state: state}

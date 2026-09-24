@@ -73,8 +73,14 @@ cluster's database, while the myshopify.com domain is the same identifier
 everywhere and one an operator can check by eye.
 
 A store is attached on the deployable's Store panel. A manifest naming a store
-this cluster does not have (or one you may not read) is refused at deploy with
-`deployable_store_unknown`, before anything is published.
+the deployer may not attach -- one this cluster does not have, one they may not
+read, or one they may read without holding the store part -- does not refuse
+the deploy. A first deploy places the storefront as a **draft with no store**,
+and the run records a non-fatal `deployable_store_unknown` note saying so; a
+redeploy of a storefront that is already bound keeps the store it has. An
+unattached storefront can go live for design review. Shopping requires a store
+connected on its Store panel. Once a later deploy can attach the manifest's
+store, it re-points the storefront to it.
 
 Two halves, and the asymmetry is deliberate:
 
@@ -217,7 +223,6 @@ somebody's mistake.
 | `deployable_path_missing` | A declared `path` is not a directory in the tree |
 | `deployable_kind_unknown` | `kind` is a value nobody has heard of -- not one of the three live values, and not one of the known-but-unoffered ones below |
 | `deployable_binding_missing` | A storefront whose `binding` names no store. A manifest fact, decided offline |
-| `deployable_store_unknown` | A storefront naming a store this cluster has no row for, or one the caller may not read. Decided at publish, because it is a cluster read the offline analysis does not make. One code for both cases deliberately: separating them would answer "is this store on this cluster" for somebody outside the tier that decides who may look |
 | `deployable_hostname_unchosen` | A never-deployed app whose placement names no hostname. Split out of `deployable_binding_missing`, because its repair is choosing an address rather than editing the tree |
 | `dsl_domain_reserved` | A `dsl/<domain>/` whose name the engine already owns |
 | `dsl_refuses_boot` | The package's DSL does not survive the Init-grade gates; carries the construct-level errors |
@@ -253,6 +258,7 @@ somebody's mistake.
 | `deploy_failed` | Not a refusal -- a store or a storage call that broke mid-run. Nothing about the source was changed, and a new attempt is the way forward, because the timeline is append-only |
 | `deployable_account_refused` | The `accountId` half of a placement was refused by the account write's own guard. Recorded on that app's OUTCOME, **not fatal**: the site is live at its cluster address either way |
 | `deployable_domain_refused` | The `ownDomain` half was refused -- a hostname under the cluster's own domain, a collision, or the per-site cap. Recorded the same way, **not fatal** |
+| `deployable_store_unknown` | A storefront naming a store the caller may not attach: no row for it, a row they may not read, or one they may read without holding the store part. Recorded on that app's OUTCOME, **not fatal**: an unbound storefront is placed as a draft with no store, which may go live for design review before a store is connected, and a bound one keeps its store. Decided at publish, because it is a cluster read the offline analysis does not make. One code for every case deliberately: separating them would answer "is this store on this cluster" for somebody outside the tier that decides who may look |
 
 An **unknown `formatVersion` refuses** rather than parsing the subset it
 recognises, and so does an **unknown KEY**: `deployabels:` parses fine and

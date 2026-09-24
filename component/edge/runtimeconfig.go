@@ -289,20 +289,19 @@ const storefrontKind = "shopify_storefront"
 // nothing and publishes nothing. The token is only ever fetched for a site
 // that is declared to be a storefront.
 //
-// NO STORE IS NIL, NOT AN EMPTY BLOCK (epic memql#5530). A storefront whose
-// binding names nothing, or names a store the edge could not read, has
-// nothing for the block to SAY: an empty storeDomain reads as a store at the
-// empty host, which a bundle would then address its Storefront API calls to.
-// The same answer a non-storefront kind gets is the honest one, and it is
-// what a storefront nobody has bound yet already got.
+// An unbound or unreadable store keeps the kind, with empty connection fields.
+// That lets the bundle render its design preview without publishing a store
+// name or resolving any credential. Clients must require a domain and token
+// before making commerce requests.
 func storefrontForSite(ctx context.Context, site *Site, resolveSecret SecretResolver) *StorefrontConfig {
-	if site == nil || site.Kind != storefrontKind || site.Store == nil {
+	if site == nil || site.Kind != storefrontKind {
 		return nil
 	}
-	out := &StorefrontConfig{
-		Kind:        storefrontKind,
-		StoreDomain: strings.TrimSpace(site.Store.Domain),
+	out := &StorefrontConfig{Kind: storefrontKind}
+	if site.Store == nil {
+		return out
 	}
+	out.StoreDomain = strings.TrimSpace(site.Store.Domain)
 	ref := strings.TrimSpace(site.Store.StorefrontTokenRef)
 	if ref == "" || resolveSecret == nil {
 		return out
@@ -327,7 +326,7 @@ func storefrontForSite(ctx context.Context, site *Site, resolveSecret SecretReso
 // reads them through Site.Store.
 //
 // A binding still carrying the retired {storeDomain, storefrontTokenRef}
-// shape answers "" here, which is the unbound state: no storefront block, no
+// shape answers "" here, which is the unbound state: no store domain, no
 // store named in the policy. That is deliberate and it is why the change
 // ships with a migration rather than a fallback read -- an unconverted row is
 // VISIBLE (the storefront stops resolving a store and the OS says so) where a

@@ -8,7 +8,6 @@ vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connectio
 
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { DEPLOYMENT_CONCEPT } from "../../src/apps/deployables/packages/rows";
-import { SOURCE_CREDENTIAL_CONCEPT } from "../../src/apps/deployables/sources/rows";
 import { SOURCE_CONNECTION_CONCEPT } from "../../src/apps/deployables/sources/connections";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import { click, emit, fakeConnection, githubGrantRow, probeReply, repositoriesReply, repositoryFixture, siteRow, rowsResult, sourceConnectionRow, withSession, type FakeConnection, type FakeSeed } from "./harness";
@@ -156,7 +155,7 @@ describe("GitHub Sources in Add a deployable", () => {
   });
 
   it("advances on each row activation without Continue or an extra Source chooser", async () => {
-    const { region, connection } = await open({ sourceConnections: [] });
+    const { region, connection } = await open();
     expectCurrentStage(region, "GitHub account");
     expect(within(region).queryByRole("button", { name: "Add source" })).toBeNull();
     expect(within(region).queryByRole("list", { name: "Saved sources" })).toBeNull();
@@ -170,7 +169,7 @@ describe("GitHub Sources in Add a deployable", () => {
     await click(await within(region).findByRole("button", { name: /^acme Organization/ }));
     expect(await within(region).findByRole("list", { name: "acme repositories" })).toBeTruthy();
     expectCurrentStage(region, "Repository");
-    expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(1);
+    expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(0);
     expect(stage(region, "Configuration").getAttribute("data-state")).toBe("ahead");
     expect(floorAct("Continue")).toBeNull();
     expect(within(region).queryByLabelText("Accounts")).toBeNull();
@@ -343,94 +342,6 @@ describe("GitHub Sources in Add a deployable", () => {
     expect(connection.callsNamed("createPackage")).toHaveLength(0);
   });
 
-  it("keeps Back on the account step when a pending organization binding replies late", async () => {
-    let finish!: () => void;
-    const pending = new Promise<void>(resolve => { finish = resolve; });
-    const { region, connection } = await open({ sourceConnections: [] }, connection => {
-      const execute = vi.mocked(connection.query.executeNamed).getMockImplementation()!;
-      vi.mocked(connection.query.executeNamed).mockImplementation(async (name, call, opts) => {
-        const reply = await execute(name, call, opts);
-        if (name === "sourceConnectionCreate") await pending;
-        return reply;
-      });
-    });
-    await click(await within(region).findByRole("button", { name: /^@octocat/ }));
-    await click(await within(region).findByRole("button", { name: /^acme Organization/ }));
-    expect(await within(region).findByText("Checking organization access…")).toBeTruthy();
-    expectCurrentStage(region, "Organization");
-    await forward("Back");
-    expectCurrentStage(region, "GitHub account");
-    await act(async () => finish());
-    expectCurrentStage(region, "GitHub account");
-    expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
-    expect(connection.callsNamed("packageSourceRegister")).toHaveLength(0);
-    expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
-  });
-
-  it("keeps a failed organization selected with retry and advances only after a successful binding", async () => {
-    let attempts = 0;
-    const { region, connection } = await open({ sourceConnections: [] }, connection => {
-      const execute = vi.mocked(connection.query.executeNamed).getMockImplementation()!;
-      vi.mocked(connection.query.executeNamed).mockImplementation(async (name, call, opts) => {
-        if (name === "sourceConnectionCreate" && attempts++ === 0) throw new Error("source_access_unavailable: GitHub access could not be verified");
-        return execute(name, call, opts);
-      });
-    });
-    await click(await within(region).findByRole("button", { name: /^@octocat/ }));
-    await click(await within(region).findByRole("button", { name: /^acme Organization/ }));
-    expect(await within(region).findByText("GitHub access could not be verified")).toBeTruthy();
-    expectCurrentStage(region, "Organization");
-    expect(floorAct("Continue")).toBeNull();
-    expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
-    await click(within(region).getByRole("button", { name: "Try organization again" }));
-    expect(await within(region).findByRole("list", { name: "acme repositories" })).toBeTruthy();
-    expectCurrentStage(region, "Repository");
-    expect(attempts).toBe(2);
-    expect(connection.callsNamed("packageSourceRegister")).toHaveLength(0);
-    expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
-  });
-
-  it("ignores an organization registration that finishes after its GitHub identity is revoked", async () => {
-    let finish!: () => void;
-    const pending = new Promise<void>(resolve => { finish = resolve; });
-    const { region, connection } = await open({ sourceConnections: [] }, connection => {
-      const execute = vi.mocked(connection.query.executeNamed).getMockImplementation()!;
-      vi.mocked(connection.query.executeNamed).mockImplementation(async (name, call, opts) => {
-        const reply = await execute(name, call, opts);
-        if (name === "sourceConnectionCreate") await pending;
-        return reply;
-      });
-    });
-    await click(await within(region).findByRole("button", { name: /^@octocat/ }));
-    await click(await within(region).findByRole("button", { name: /^acme Organization/ }));
-    expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(1);
-    await emit(connection, SOURCE_CREDENTIAL_CONCEPT, { ...GRANT, status: "revoked" });
-    await act(async () => finish());
-    expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
-    expect(connection.callsNamed("packageSourceRegister")).toHaveLength(0);
-    expect(floorAct("Continue")).toBeNull();
-    await forward("Back");
-    expect(await within(region).findByRole("button", { name: "Add GitHub account" })).toBeTruthy();
-    expect(within(within(region).getByRole("list", { name: "GitHub accounts" })).queryByText("@octocat")).toBeNull();
-  });
-
-  it("resumes a verified OAuth account at Organization without choosing or writing a binding", async () => {
-    const connection = fakeConnection({ accounts: [SELF], ...connectedSeed() });
-    h.connection = connection;
-    render(withSession(<DeployablesApp sectionId="deployables" navigate={vi.fn()} askContext={vi.fn()}
-      intent={{ id: "oauth-return", payload: { connect: { reason: "connected", section: "deployables", credentialId: "github-me", flowId: "verified-flow" } } }}
-      consumeIntent={vi.fn()} />, { userId: "u-me", role: "owner" }));
-    const region = await screen.findByRole("region", { name: "Add a deployable" });
-    expect(await within(region).findByRole("list", { name: "Organizations and personal account" })).toBeTruthy();
-    expectCurrentStage(region, "Organization");
-    expect(connection.callsNamed("sourceInstallations")).toEqual(['builtin sourceInstallations(credentialId: "github-me")']);
-    expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
-    expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(0);
-    expect(floorAct("Continue")).toBeNull();
-    await forward("Back");
-    expectCurrentStage(region, "GitHub account");
-  });
-
   it("asks for GitHub account before repository and MemQL ownership, then registers once at Analyze", async () => {
     const { region, connection } = await open();
     expect(within(region).queryByLabelText("Accounts")).toBeNull();
@@ -453,7 +364,7 @@ describe("GitHub Sources in Add a deployable", () => {
   });
 
   it("backs out before choosing an organization and cancels without binding or repository writes", async () => {
-    const { region, connection } = await open({ sourceConnections: [] });
+    const { region, connection } = await open();
     await click(await within(region).findByRole("button", { name: /^@octocat/ }));
     await forward("Back");
     expectCurrentStage(region, "GitHub account");

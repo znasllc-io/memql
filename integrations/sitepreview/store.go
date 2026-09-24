@@ -21,7 +21,8 @@ import (
 // THE SITE AND THE STORE ARE READ UNDER THE CALLER. That is what makes them
 // authorization checks rather than lookups: `siteById` carries
 // v1:platform:site's composite tier and `storeById` carries
-// v1:shopify:store's clusterOwner tier, so a caller who may not see either
+// v1:shopify:store's clusterOwner tier with its developer read floor, so a
+// caller who may not see either
 // resolves zero rows and is refused BY NAME, before anything is minted or
 // written. Reading them under a system actor would turn both gates off while
 // leaving the code looking identical, which is the failure

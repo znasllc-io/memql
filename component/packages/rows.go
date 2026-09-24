@@ -1,6 +1,7 @@
 package packages
 
 import (
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -16,6 +17,14 @@ import (
 // that only handled the bundle branch would read an empty result from a
 // perfectly good query (memql#4794 hit this the same way the Files epic did).
 // Every branch below is reachable from some query in this package.
+//
+// Why it does not simply call memql.MaterializeRows: that one keeps a bundle
+// row's payload NESTED and reads a {rows: [...]} object as one row, and every
+// reader here expects the payload flat and the rows expanded. What it does
+// borrow is the top-level BUILTIN's answer, a map[string]MemoryNode that no
+// branch below used to recognise -- so releaseDomainsForSite reported 0
+// released whatever customDomainReleaseForSite said. One implementation of
+// that case, not a fourth copy.
 func memqlRows(raw any) []map[string]any {
 	if raw == nil {
 		return nil
@@ -46,6 +55,8 @@ func memqlRows(raw any) []map[string]any {
 		return out
 	}
 	switch v := raw.(type) {
+	case map[string]memorynodes.MemoryNode:
+		return memql.MaterializeRows(v)
 	case []map[string]any:
 		return v
 	case []any:

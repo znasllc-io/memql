@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import type { Module, ModuleDetail as ModuleDetailWire, ModulesClient } from "@znasllc-io/memql-sdk-core/client";
 
 import { ActionBar, type Act, type ActionBarTone } from "../../../kit/ActionBar";
-import { Button, Caption, Chip, Fact, Facts, Head, Notice, Panel, Subhead, RecordList, RecordRow, roleAdmits, stateWords } from "../../../kit";
+import { Button, Caption, Chip, Fact, Facts, Head, Notice, Panel, Subhead, RecordList, RecordRow, stateWords } from "../../../kit";
 import { useSession } from "../../../chrome/access";
 import { useReading } from "../../../cluster/reading";
 import type { Verdict } from "../../../system/readinessFold";
@@ -56,12 +56,14 @@ export function ModuleDetail({
   onFlipped: () => void;
 }) {
   const session = useSession();
-  // OWNER-ONLY, AND ABSENT RATHER THAN DISABLED (DESIGN.md rule 12). The
-  // engine's write gate on the registry is cluster-owner; an admin who can
-  // READ this page cannot flip a pack. A greyed-out switch would be a control
-  // they have to read past to learn it is not for them, and an enabled one
-  // would be a refusal they find out about by being told no.
-  const isOwner = roleAdmits(session.access?.role ?? "", { min: "owner" });
+  // THE ENGINE'S ANSWER, AND ABSENT RATHER THAN DISABLED (DESIGN.md rule 12).
+  // `mayFlip` is computed per caller by the same function the write asks: an
+  // owner may flip any pack, a developer a storefront pack (Connect Shopify
+  // design, D4), an admin who can READ this page none. No role is read here --
+  // a second copy of that rule would be one that drifts. A greyed-out switch
+  // would be a control they have to read past to learn it is not for them,
+  // and an enabled one would be a refusal they find out about by being told no.
+  const mayFlip = module.mayFlip;
   // The cluster-wide reading of this module, when the registry's name is also
   // a readiness module -- the one feed the shell retains, never a second read.
   const verdict = readinessForModule(module, session.readiness);
@@ -103,7 +105,7 @@ export function ModuleDetail({
 
   // The acts legal from this state, computed rather than rendered-then-hidden.
   const acts: Act[] = useMemo(() => {
-    if (!flippable || !isOwner) return [];
+    if (!flippable || !mayFlip) return [];
     return [
       {
         label: enabled ? "Disable this pack" : "Enable this pack",
@@ -111,7 +113,7 @@ export function ModuleDetail({
         onAct: () => setConfirming(true),
       },
     ];
-  }, [flippable, isOwner, enabled]);
+  }, [flippable, mayFlip, enabled]);
 
   const envVars = detail.value?.envVars ?? [];
 
@@ -145,10 +147,10 @@ export function ModuleDetail({
             <Caption>{noSwitchSentence(module.kind)}</Caption>
           )}
 
-          {flippable && !isOwner ? (
+          {flippable && !mayFlip ? (
             <Caption>
-              Only a cluster owner can change what a pack does. Nothing on this page will change it
-              for you.
+              You cannot change what this pack does. An owner can change any pack, and a developer
+              a storefront pack. Nothing on this page will change it for you.
             </Caption>
           ) : null}
 

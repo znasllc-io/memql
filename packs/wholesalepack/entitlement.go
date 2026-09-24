@@ -43,9 +43,9 @@ import (
 //
 // # AVAILABILITY, AND WHY AN UNREADABLE PLAN IS NOT FATAL TO EVERY ADAPTER
 //
-// v1:shopify:store is @rowAuthz(clusterOwner) and epic memql#5530's D10
-// left that tier deliberately UNCHANGED. So a caller may not be able to
-// read the plan, and what that means is the ADAPTER'S to say rather than
+// v1:shopify:store is readable by a cluster owner or a developer only
+// (@rowAuthz(clusterOwner, rankFloor="developer"), Connect Shopify D3). So a
+// caller may not be able to read the plan, and what that means is the ADAPTER'S to say rather than
 // this file's: shopifyB2B refuses, because it cannot establish the catalog
 // ceiling it has to respect; customerTag proceeds, because it needs no plan
 // at all. That difference IS what "plan-independent" means, and putting the
@@ -380,9 +380,9 @@ func (p *Provider) adapterFor(ctx context.Context, storeID string) (string, erro
 
 // storePlan reads v1:shopify:store.plan, or "" when this caller cannot.
 //
-// NOT AN ERROR WHEN IT ANSWERS NOTHING. The store row is
-// @rowAuthz(clusterOwner) and D10 left that tier unchanged, so an
-// unreadable plan is the ORDINARY case for a merchant rather than a fault
+// NOT AN ERROR WHEN IT ANSWERS NOTHING. The store row is readable by a
+// cluster owner or a developer only, so an unreadable plan is the ORDINARY
+// case for a merchant rather than a fault
 // -- and what it means is the adapter's to say, not this function's.
 func (p *Provider) storePlan(ctx context.Context, storeID string) string {
 	rows, err := p.rowsFor(ctx, "storePlanById", map[string]string{"storeId": storeID})

@@ -552,6 +552,9 @@ func TestStorefrontPreview_TheGuardRefusesEachCaseByName(t *testing.T) {
 		StoreId: liveStoreID,
 		Domain:  fmt.Sprintf("clustere2e-guard-%s.myshopify.com", suffix),
 		Name:    "clustere2e guard, the store shoppers reach",
+		// A CONNECTED store names a Storefront token; one without is refused
+		// going live as storefront_not_connected (Connect Shopify, D5).
+		StorefrontTokenRef: "clustere2e_guard_storefront_token_absent",
 	}); err != nil {
 		t.Fatalf("createStore (needs a CLUSTER OWNER token): %v", err)
 	}

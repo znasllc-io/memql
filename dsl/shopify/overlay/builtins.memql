@@ -162,3 +162,87 @@ builtin shopifyUntagWholesaleCustomer {
 builtin shopifyWholesaleCatalogHeadroom {
   storeId  string!  @description("The store to measure.")
 }
+
+// ---- Connect Shopify: the Store panel's four calls (design 12.1-12.5) ----
+//
+// EVERY CALL NAMES A SITE, NEVER A SHOP. The store is resolved on the server
+// (integrations/shopify ResolveConnectSite): the caller must be able to WRITE
+// the site, it must be a shopify_storefront, and the shop is the one named by
+// the package run that last published it. A browser that could name the shop
+// could point its own storefront's credentials at somebody else's store.
+//
+// ALL FOUR TAKE THE STORE PART. The writes behind them run as the deployment
+// (the connector's operatorContext), because a store row and its sealed secrets
+// are the cluster's rather than a person's -- which is exactly why the part, and
+// the site checks after it, are the whole of who may reach those writes. Begin's
+// one write, the connect state, is the exception: it names the person, so it is
+// written as them, through component/identity's Store.
+
+/// Where one storefront stands with Connect Shopify (design 12.2) -- what the Store panel draws, and
+/// the only thing it draws from: a binding says nothing about whether a store is connected.
+///
+/// `reason` is 'ok' when the storefront resolved, and otherwise one of site_not_writable,
+/// not_a_storefront, store_not_named or store_redacted, with every other key present and empty.
+/// `appSaved` is true when the store has a live appClientId or a pending app was saved; `pendingApp`
+/// when a pending app is waiting for an approval; `connected` when the store has an Admin token;
+/// `storefrontTokenSet` when it names a Storefront token. `requiredScopes` is the one scope list the
+/// Shopify app must request, Storefront scopes first; `grantedScopes` is what the store was granted.
+/// Never returns a credential.
+@sdk
+@executor("integration.shopify.connectStatus")
+@requiresCapability("execute", "app:deployables/store")
+@description("Where one storefront stands with Connect Shopify, read from the store the server resolves for the site -- never from its binding. Returns {reason, storeId, shopDomain, appSaved, pendingApp, connected, storefrontTokenSet, requiredScopes, grantedScopes}; reason is 'ok', or site_not_writable, not_a_storefront, store_not_named or store_redacted. Never returns a credential.")
+builtin shopifyConnectStatus {
+  siteId  string!  @description("The storefront deployable. The shop is resolved on the server from the package run that last published it.")
+}
+
+/// Save the Shopify app's client ID and secret from a storefront's Store panel (design 12.3, D7).
+///
+/// PENDING ONLY (D12). The client ID lands as the globalVariable SHOPIFY_<ID>_PENDING_CLIENT_ID and
+/// the secret, sealed on the server, as the globalSecret SHOPIFY_<ID>_PENDING_CLIENT_SECRET. The store
+/// row, its live appClientId and the secret that verifies its webhooks are never touched: saving
+/// proves nothing about the shop, so it can move nothing a webhook is checked with. They change only
+/// after the shop's own staff approve Connect Shopify.
+@sdk
+@executor("integration.shopify.storeAppSave")
+@requiresCapability("execute", "app:deployables/store")
+@description("Save a Shopify app's client ID and client secret for a storefront's store, as PENDING credentials that take effect only after the shop's staff approve Connect Shopify. The secret crosses the wire once, is sealed server-side under MEMQL_MASTER_KEY, and appears in no row, log line or reply; the store row and its live credentials are untouched. Returns {reason, storeId, shopDomain}; reason is 'ok', a resolution refusal (site_not_writable, not_a_storefront, store_not_named, store_redacted), app_credentials_invalid, or secret_name_ambiguous when more than one secret row carries the name.")
+builtin shopifyStoreAppSave {
+  siteId        string!  @description("The storefront deployable whose store the app belongs to.")
+  clientId      string!  @description("The Shopify app's client ID, from the Dev Dashboard.")
+  clientSecret  string!  @description("The Shopify app's client secret. Read once, sealed, and discarded; never stored or echoed in the clear.")
+}
+
+/// Begin Connect Shopify for a storefront's store (design 12.4, D1, D10): answer the URL the browser
+/// navigates to -- Shopify's approve page for the shop the server resolved -- with a single-use state
+/// bound to the caller.
+///
+/// The app Shopify is asked to approve is the PENDING one a save left, when there is one, otherwise
+/// the store's current app and its webhook secret; with neither the reason is shopify_app_not_saved
+/// and nothing is written. The state (v1:identity:githubConnectState, purpose shopify_connect) names
+/// the shop, the site, the app's client id and which secret verifies the callback, and lives ten
+/// minutes. The plaintext state appears only inside authorizeUrl; only its digest is stored. The
+/// redirect is this cluster's own identity service, never anything the request said.
+@sdk
+@executor("integration.shopify.connectBegin")
+@requiresCapability("execute", "app:deployables/store")
+@description("Begin Connect Shopify for a storefront's store. Writes a ten-minute single-use state bound to the caller and answers {authorizeUrl, reason}: navigate the browser to authorizeUrl, Shopify's approve page for the shop the server resolved; Shopify redirects back to this cluster's identity service, which finishes the connection. reason is 'ok', a resolution refusal (site_not_writable, not_a_storefront, store_not_named, store_redacted), shopify_app_not_saved when neither a pending app nor the store's current app is saved (authorizeUrl empty), or connect_state_invalid when the state could not be stored. Never returns a credential, and never echoes the state anywhere but inside authorizeUrl.")
+builtin shopifyConnectBegin {
+  siteId      string!  @description("The storefront deployable. The shop is resolved on the server from the package run that last published it.")
+  returnPath  string   @description("Where in MemQL OS to land when Connect finishes -- a same-origin path. Anything absolute, protocol-relative or carrying a control character is dropped for the OS root.")
+}
+
+/// Use a pasted Storefront API token for a storefront's store, or clear the one it has (design 12.5, D8).
+///
+/// Refused `store_in_use` unless the caller is a cluster owner or can write EVERY site bound to the
+/// store, serving or preview: a store's token is served under each of their hostnames. A token is
+/// checked with one Storefront request before it is sealed; an empty token clears the reference so
+/// the next Connect mints one, and is refused while a live storefront is bound to the store.
+@sdk
+@executor("integration.shopify.storefrontTokenSet")
+@requiresCapability("execute", "app:deployables/store")
+@description("Seal a pasted Storefront API token for a storefront's store and point the store at it, or, with an empty token, clear the store's Storefront token so the next Connect Shopify mints one. A token is checked with one Storefront API request first. Returns {reason, storeId, shopDomain}; reason is 'ok', a resolution refusal, store_not_connected (the store has no row yet), store_in_use (another site bound to the store is not the caller's to write), storefront_token_required (clearing while a live storefront is bound), storefront_token_invalid, or secret_name_ambiguous.")
+builtin shopifyStorefrontTokenSet {
+  siteId  string!  @description("The storefront deployable whose store the token is for.")
+  token   string   @description("The Storefront API token. Empty clears the store's token. Read once, sealed, and discarded.")
+}

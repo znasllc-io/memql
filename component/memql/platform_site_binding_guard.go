@@ -34,11 +34,24 @@ import (
 // @requiresCapability("execute", "app:deployables/store") names the SURFACE:
 // who may reach updateSiteStoreBinding at all. It is a grant on an app part,
 // and a grant cannot know which rows a cluster holds. A site is owner-tier, a
-// store is cluster-owner-tier, so without this check a site owner could bind
-// their own deployable to ANY store in the cluster -- and the edge, which
-// resolves the binding under a synthetic cluster-owner actor, would then serve
-// that store's Storefront token and domain under the site owner's own
-// hostname. The capability says who may bind; this says to what.
+// store reads at developer and above (clusterOwner with a developer read floor,
+// Connect Shopify D3), so without this check anyone the part is GRANTED to --
+// an admin, a writer -- could bind a deployable they can write to a store they
+// cannot read, and the edge, which resolves the binding under a synthetic
+// cluster-owner actor, would then serve that store's Storefront token and
+// domain under that deployable's hostname. The capability says who may bind;
+// this says to what.
+//
+// A developer reads every store and holds the part, so a developer may bind
+// ANY storefront they can write to ANY store on the cluster. That is wider
+// than the storefronts they own: the site tier's account grant
+// (account="accountId") admits staff -- developer and above -- to write every
+// account-tied site, so every client storefront is in reach, live ones
+// included. It is the same reach that already lets a developer pause, archive
+// or delete those sites. D3 accepts it. What bounds the STORES is who makes a
+// store row: only a cluster owner or server code creates one (D15,
+// create_rank_floor.go), so every token reference a binding can expose is one
+// an owner or Connect Shopify chose.
 //
 // # Why the retired shape is refused rather than ignored
 //
@@ -113,27 +126,78 @@ func (e *MemQLEngine) validateSiteStoreBinding(
 		// created before its store is attached, and a store can be detached.
 		return nil
 	}
+	return requireReadableStore(ctx, storeId, actor, "bind this storefront to", readable)
+}
+
+// requireReadableStore refuses a store the caller cannot read. Shared by the
+// serving binding and the preview binding: both name a store, and the edge
+// serves the Storefront token of either (the preview one under a preview
+// grant) under the site's own hostname. `act` names which of the two was
+// refused, so the refusal says what the caller tried to do.
+func requireReadableStore(ctx context.Context, storeId, actor, act string, readable storeReadable) error {
 	if readable == nil {
 		return fmt.Errorf("v1:platform:site: cannot check that %q is readable -- no store reader is wired", storeId)
 	}
 	ok, err := readable(ctx, storeId)
 	if err != nil {
-		return fmt.Errorf("v1:platform:site: could not read v1:shopify:store %q to bind it: %w", storeId, err)
+		return fmt.Errorf("v1:platform:site: could not read v1:shopify:store %q to %s it: %w", storeId, strings.TrimSuffix(act, " to"), err)
 	}
 	if !ok {
 		return fmt.Errorf(
-			"v1:platform:site: %q may not bind this storefront to v1:shopify:store %q -- it is not a store this caller can read. A store is cluster-owner-tier; binding a storefront to one you cannot read would publish that store's Storefront token under your own hostname.",
-			actor, storeId,
+			"v1:platform:site: %q may not %s v1:shopify:store %q -- it is not a store this caller can read. Stores are read by developers and cluster owners; binding a storefront to one you cannot read would publish that store's Storefront token under this storefront's hostname.",
+			actor, act, storeId,
 		)
 	}
 	return nil
 }
 
+// validateSitePreviewBindingChange checks readability when the preview store
+// changes. The organization boundary separately checks the Store capability
+// against the final resulting site's organization, including personal denies.
+func (e *MemQLEngine) validateSitePreviewBindingChange(
+	ctx context.Context,
+	payload map[string]any,
+	priorStoreId string,
+	actor string,
+	readable storeReadable,
+) error {
+	storeId := changedStoreId(payload, "previewBinding", priorStoreId)
+	if storeId == "" {
+		return nil
+	}
+	return requireReadableStore(ctx, storeId, actor, "point this storefront's preview at", readable)
+}
+
+// changedStoreId is the store a write moves a {storeId} reference field TO, or
+// "" when it moves it nowhere: absent, cleared, or the prior row's value.
+func changedStoreId(payload map[string]any, field, priorStoreId string) string {
+	storeId, _ := previewBindingStoreIdFrom(payload, field)
+	if storeId == strings.TrimSpace(priorStoreId) {
+		return ""
+	}
+	return storeId
+}
+
+// MayChangeStoreBinding asks the same organization boundary that judges the
+// final site row. A newly created site uses its resolved default organization.
+func (e *MemQLEngine) MayChangeStoreBinding(ctx context.Context, accountId, priorStoreId, storeId string) bool {
+	if strings.TrimSpace(accountId) == "" {
+		var err error
+		accountId, err = organizationDefaultAccount(organizationOperator(ctx), e.accountScopeFor(ctx))
+		if err != nil {
+			return false
+		}
+	}
+	prior := map[string]any{"accountId": accountId, "binding": map[string]any{bindingStoreIdKey: priorStoreId}}
+	next := map[string]any{"accountId": accountId, "binding": map[string]any{bindingStoreIdKey: storeId}}
+	return e.validateOrganizationSensitiveChanges(ctx, conceptPlatformSite, prior, next) == nil
+}
+
 // canReadStore is the engine's own reader: the named query, under the CALLER's
 // actor, deliberately -- the whole point is that the answer is the caller's,
-// not the deployment's. storeById filters on actor.isClusterOwner, so a
-// non-operator gets zero rows rather than an error, which is the answer this
-// guard wants: not readable.
+// not the deployment's. v1:shopify:store's tier (clusterOwner, with a read
+// floor at developer) answers anyone below the floor with zero rows rather
+// than an error, which is the answer this guard wants: not readable.
 //
 // The argument is quoted with languageParser.QuoteString rather than Go's %q,
 // because a call string is MemQL source and Go's escapes are not MemQL's.

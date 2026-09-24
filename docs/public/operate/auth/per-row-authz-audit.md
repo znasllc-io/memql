@@ -123,6 +123,35 @@ graph-backed `GrantSource` under the engine's own identity, as the role catalog
 is read -- a read floored at admin could not serve a user-role actor their own
 deny.
 
+### The Shopify store concept (Connect Shopify, D3)
+
+`v1:shopify:store` -- MemQL's own record of how to reach a Shopify store --
+declares `@rowAuthz(clusterOwner, rankFloor="developer")`. Every store is the
+deployment's: its `ownerUserId` names who a privacy export is filed under, not
+who may read the row. Developers and cluster
+owners read every store; everyone below reads **zero rows, not an error**.
+
+- **Reads widen, writes do not.** The floor widens reads only. Changing a
+  store that exists (`updateStore`, `setStoreStatus`) stays cluster-owner,
+  because the write guard judges the stored row under plain `clusterOwner`.
+  Creating one is refused below owner at the write seam
+  (`component/memql/create_rank_floor.go`), since the write guard does not
+  judge a create; the raw `insert(...)` literal reaches it too.
+- **The four reads carry no caller-scope conjunct.** `storeById`,
+  `storeByDomain`, `stores` and `developmentStoresFor` used to write
+  `actor.isClusterOwner == true` out, and an AND with that term hides every
+  store from a developer whatever the tier says. They are adjudicated in
+  `tierDecidesTheRead` (`component/memql/rowauthz_enforce_gate_test.go`).
+- **They are deliberately not `@requiresRank`.** Below the floor they must
+  answer an empty result: the storefront binding guard's `canReadStore`,
+  `resolveStore` on the deploy path and the auto-deploy feed's rankless writer
+  all read "not readable" off zero rows, and an error would fail the deploy
+  they sit on.
+
+`TestStoreReadsAnswerForDeveloperAndAnswerNothingBelowTheFloor` and
+`TestADeveloperCannotChangeAStoreThatExists`
+(`component/memql/store_read_floor_db_test.go`) hold all three halves.
+
 The two reported states that are not buckets: **`srvOnly`**, checked
 first as above, and **`other`** — everything the classifier did not
 place. `other` is by far the largest column and is not a finding.

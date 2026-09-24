@@ -380,3 +380,59 @@ describe("every act names its part, and a missing part withholds it (epic memql#
     });
   });
 });
+
+// GO LIVE IS OFFERED ONLY WHEN THE ENGINE SAYS SO (Connect Shopify, D5). A
+// storefront's first deploy can land as a draft with no store, and the engine
+// refuses taking that live as serving_binding_is_development_store -- the same function
+// the write guard refuses with answers `sitePreviewReadiness`, so the bar
+// offers Go live only when that answer is yes, and otherwise carries the
+// refusal for the page to draw beside the act that clears it.
+describe("Go live follows the engine's readiness answer", () => {
+  const built = { status: "draft", bundleRef: "blob://sites/site-1/v1/" };
+  const storefront = site({ ...built, kind: "shopify_storefront" });
+  const refusal = {
+    code: "serving_binding_is_development_store",
+    message: "This storefront is bound to a development store.",
+    remedy: "Bind a production store on the Store panel.",
+  };
+  const said = (canGoLive: boolean) => ({
+    hasCandidate: false,
+    canPromote: false,
+    canGoLive,
+    goLiveRefusal: canGoLive ? { code: "", message: "", remedy: "" } : refusal,
+  });
+
+  it("withholds Go live from a storefront the engine refuses, and says why", () => {
+    const reading = actsFor({ ...BASE, site: storefront, preview: said(false) });
+    expect(reading.acts.map((a) => a.name)).toEqual(["Discard"]);
+    expect(reading.withheld).toEqual(refusal);
+    // Offline is the other state Go live is offered from.
+    const offline = actsFor({ ...BASE, site: site({ status: "disabled", kind: "shopify_storefront" }), preview: said(false) });
+    expect(offline.acts.map((a) => a.name)).toEqual(["Archive"]);
+    expect(offline.withheld?.code).toBe("serving_binding_is_development_store");
+  });
+
+  it("offers Go live when the engine says yes", () => {
+    const reading = actsFor({ ...BASE, site: storefront, preview: said(true) });
+    expect(reading.acts.map((a) => a.name)).toEqual(["Discard", "Go live"]);
+    expect(reading.withheld).toBeUndefined();
+  });
+
+  it("offers no Go live on a storefront before the answer has landed, and no reason either", () => {
+    const reading = actsFor({ ...BASE, site: storefront, preview: null });
+    expect(reading.acts.map((a) => a.name)).toEqual(["Discard"]);
+    expect(reading.withheld).toBeUndefined();
+  });
+
+  it("leaves a non-storefront's Go live alone while the answer is out", () => {
+    // The rule never refuses a non-storefront, so waiting on the answer would
+    // only hide a legal act.
+    expect(names({ site: site(built) })).toEqual(["Discard", "Go live"]);
+  });
+
+  it("carries no reason for an act the person could not take anyway", () => {
+    const reading = actsFor({ ...BASE, site: storefront, preview: said(false), can: partsWithout("publish") });
+    expect(reading.acts.map((a) => a.name)).toEqual(["Discard"]);
+    expect(reading.withheld).toBeUndefined();
+  });
+});

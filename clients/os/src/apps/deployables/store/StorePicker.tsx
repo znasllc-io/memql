@@ -37,6 +37,11 @@ import { BLANK_STORE, useStoreList, type NewStore, type StoreWrites } from "./us
 // attaches it. It is two writes and it says so, because the first can succeed
 // and the second fail.
 //
+// A CLUSTER OWNER'S, and absent for everyone else (Connect Shopify, D15). The
+// first write creates a v1:shopify:store row, which the engine refuses below a
+// cluster owner, so a developer -- who holds the store part and attaches -- is
+// not offered a form whose first write is refused (DESIGN.md rule 12).
+//
 // ===========================================================================
 // EVERY CREDENTIAL FIELD TAKES THE NAME OF A SECRET, NEVER A TOKEN
 // ===========================================================================
@@ -53,6 +58,7 @@ export function StorePicker({
   site,
   currentStoreId,
   writes,
+  mayRegister,
   onDone,
   onCancel,
 }: {
@@ -60,6 +66,8 @@ export function StorePicker({
   /** The store this storefront is bound to now, or "". */
   currentStoreId: string;
   writes: StoreWrites;
+  /** A cluster owner: whether the register-and-attach form is offered. */
+  mayRegister: boolean;
   onDone: () => void;
   /** Absent when there is nothing to go back to -- an unbound storefront. */
   onCancel?: () => void;
@@ -252,8 +260,9 @@ export function StorePicker({
               <Notice tone="error" sentence="The cluster's stores could not be read." detail={list.error} />
             ) : list.stores.length === 0 ? (
               <Caption>
-                No Shopify store is registered on this cluster yet. Register the one this storefront
-                fronts, and it becomes the record everything else reads.
+                {mayRegister
+                  ? "No Shopify store is registered on this cluster yet. Register the one this storefront fronts, and it becomes the record everything else reads."
+                  : "No Shopify store is registered on this cluster yet, and registering one is a cluster owner's act."}
               </Caption>
             ) : (
               <div className="os-store-choices">
@@ -272,9 +281,11 @@ export function StorePicker({
                   Cancel
                 </Button>
               ) : null}
-              <Button tone="quiet" onClick={() => setRegistering(true)}>
-                Register a store
-              </Button>
+              {mayRegister ? (
+                <Button tone="quiet" onClick={() => setRegistering(true)}>
+                  Register a store
+                </Button>
+              ) : null}
               {canAttach ? (
                 <Button tone="primary" busy={writes.busy === "bind"} busyLabel="Attaching" onClick={() => void attach()}>
                   Attach

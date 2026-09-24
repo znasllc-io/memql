@@ -14,9 +14,18 @@ import (
 // these, which is why they are tested once, here, and not twice.
 
 // readable is a store somebody could read: the answer to "is it a development
-// store" is the boolean.
+// store" is the boolean. It carries a Storefront token, because a store without
+// one is not connected and refuses go-live on that ground alone -- see
+// connectedButTokenless for that case.
 func readableStore(id, domain string, development bool) PreviewBoundStore {
-	return PreviewBoundStore{ID: id, Readable: true, IsDevelopment: development, Domain: domain}
+	return PreviewBoundStore{ID: id, Readable: true, IsDevelopment: development, Domain: domain, HasStorefrontToken: true}
+}
+
+// tokenlessStore is a store somebody could read, that is not a development
+// store, and that has no Storefront token: a store row with nothing to serve a
+// catalog with (Connect Shopify, D5).
+func tokenlessStore(id, domain string) PreviewBoundStore {
+	return PreviewBoundStore{ID: id, Readable: true, Domain: domain}
 }
 
 // unreadableStore is the third state: the store row did not come back. Its
@@ -62,13 +71,13 @@ func TestSiteGoLiveRefusal(t *testing.T) {
 			why:        "The ordinary launch. A rule that refused this would refuse every go-live.",
 		},
 		{
-			name:       "an unbound serving binding does not refuse go-live",
+			name:       "an unbound serving binding allows design review",
 			storefront: true,
 			serving:    PreviewBoundStore{},
 			wantCode:   "",
-			why: "A storefront nobody wired up reaches no store at all, so publishing " +
-				"it is safe. Refusing here would be refusing to publish a page that " +
-				"is not yet connected to anything.",
+			why: "A storefront's first deploy is a draft with no store (Connect Shopify, " +
+				"D5). Putting it in front of shoppers would publish a shop with no " +
+				"catalog behind it and call that a launch.",
 		},
 		{
 			name:       "a blank store id is the unbound state too",
@@ -76,7 +85,15 @@ func TestSiteGoLiveRefusal(t *testing.T) {
 			serving:    PreviewBoundStore{ID: "   ", Readable: false},
 			wantCode:   "",
 			why: "The id arrives off a row, so whitespace is a realistic value; reading " +
-				"it as a bound-but-unreadable store would refuse a storefront nobody bound.",
+				"it as a bound-but-unreadable store would name a store nobody bound.",
+		},
+		{
+			name:       "a live store with no Storefront token allows design review",
+			storefront: true,
+			serving:    tokenlessStore("live", "acme.myshopify.com"),
+			wantCode:   "",
+			why: "A store row with no Storefront token is a store nobody connected: the " +
+				"edge would hand every shopper an empty token and the catalog would not load.",
 		},
 		{
 			name:       "a non-storefront deployable is never refused",
@@ -172,21 +189,16 @@ func TestSitePreviewBindingRefusal(t *testing.T) {
 	}
 }
 
-// THE ASYMMETRY IS A DECISION, NOT AN ACCIDENT, so it is asserted as one
-// statement rather than inferred from two tables.
+// AN UNBOUND STOREFRONT MAY NEITHER GO LIVE NOR BE PREVIEWED, and for two
+// different reasons, so the two refusals carry two different codes.
 //
-// An UNBOUND storefront may go live -- it reaches no store, which is the state
-// every storefront is in before anybody attaches one -- and may NOT be
-// previewed, because a preview asks "is there a development store to exercise
-// against" and the answer is no. Collapsing the two would either refuse every
-// unwired publish or let a preview run against nothing and report four
-// observations of a store that is not there.
-func TestAnUnboundStorefrontMayGoLiveAndMayNotBePreviewed(t *testing.T) {
+// Public design review does not require a store. Exercising commerce does.
+func TestAnUnboundStorefrontMayGoLiveButCannotExerciseCommerce(t *testing.T) {
 	unbound := PreviewBoundStore{}
 
-	if refusal := SiteGoLiveRefusal(true, unbound); !refusal.Empty() {
-		t.Errorf("an unbound storefront was refused go-live (%s) -- publishing a page nobody "+
-			"has wired up is not this guard's judgement to make", refusal.Code)
+	goLive := SiteGoLiveRefusal(true, unbound)
+	if !goLive.Empty() {
+		t.Fatalf("unbound design review refused: %v", goLive)
 	}
 	refusal := SitePreviewBindingRefusal(true, unbound)
 	if refusal.Empty() {
@@ -197,6 +209,30 @@ func TestAnUnboundStorefrontMayGoLiveAndMayNotBePreviewed(t *testing.T) {
 		t.Errorf("the unbound preview refusal is %q, want %q -- the code is what the OS keys its "+
 			"copy on, and 'no preview binding' is the one with an act behind it",
 			refusal.Code, PreviewRefusalNoPreviewBinding)
+	}
+}
+
+// A STORE WITH NO TOKEN IS JUDGED AFTER THE TWO QUESTIONS ABOUT WHICH STORE IT
+// IS. An unreadable store must still say it is unreadable, and a development
+// store must still say it is one: those are refusals about the binding, which
+// connecting a token would not clear. So a store failing all three reports the
+// first, and the reachable positive -- the same store with a token -- passes.
+func TestAMissingTokenIsJudgedAfterTheStoreItself(t *testing.T) {
+	tokenlessDev := PreviewBoundStore{ID: "dev", Readable: true, IsDevelopment: true, Domain: "acme-dev.myshopify.com"}
+	if got := SiteGoLiveRefusal(true, tokenlessDev).Code; got != PreviewRefusalServingBindingIsDevelopment {
+		t.Errorf("a tokenless development store refused as %q, want %q", got, PreviewRefusalServingBindingIsDevelopment)
+	}
+	if got := SiteGoLiveRefusal(true, unreadableStore("v1:shopify:store:gone")).Code; got != PreviewRefusalStoreUnreadable {
+		t.Errorf("an unreadable store refused as %q, want %q", got, PreviewRefusalStoreUnreadable)
+	}
+	tokenless := tokenlessStore("live", "acme.myshopify.com")
+	refusal := SiteGoLiveRefusal(true, tokenless)
+	if !refusal.Empty() {
+		t.Fatalf("tokenless design review refused: %v", refusal)
+	}
+	tokenless.HasStorefrontToken = true
+	if got := SiteGoLiveRefusal(true, tokenless); !got.Empty() {
+		t.Fatalf("the same store WITH a token was refused (%s), so the case above proves nothing", got.Code)
 	}
 }
 

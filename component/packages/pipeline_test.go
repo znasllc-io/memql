@@ -127,8 +127,11 @@ type fakePublisher struct {
 	ensured   []EnsureSiteRequest
 	ensureErr error
 	created   []string
-	published []string
-	repointed []string
+	// createdStores is the StoreId each EnsureSite was handed, in order: ""
+	// is a site created with no binding (an unattached storefront draft).
+	createdStores []string
+	published     []string
+	repointed     []string
 	// bound records every BindSiteToStore as "<siteId> -> <storeId>", which is
 	// how the redeploy cases assert that an unchanged manifest writes nothing
 	// and a changed one writes exactly once.
@@ -153,6 +156,7 @@ func (p *fakePublisher) EnsureSite(_ context.Context, req EnsureSiteRequest) (st
 	}
 	p.ensured = append(p.ensured, req)
 	p.created = append(p.created, req.DeployableName)
+	p.createdStores = append(p.createdStores, req.StoreId)
 	return "v1:platform:site:" + req.DeployableName, req.Hostname, true, nil
 }
 
@@ -246,7 +250,7 @@ func newHarness(t *testing.T, tree fs.FS, pkgRow map[string]any) *harness {
 		// refuses a storefront whose store it cannot resolve -- so without
 		// this every end-to-end case in this file would be measuring the
 		// store refusal instead of what it is named for.
-		Stores: func(_ context.Context, domain string) (string, error) {
+		Stores: func(_ context.Context, domain, _, _ string) (string, error) {
 			if domain == "acme.myshopify.com" {
 				return "v1:shopify:store:acme", nil
 			}

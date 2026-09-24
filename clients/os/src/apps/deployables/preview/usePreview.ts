@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 
 import { useReading, type Reading } from "../../../cluster/reading";
 import { useOsConnection } from "../../../live/connection";
+import { boundStoreId, previewStoreId, type SiteRow } from "../rows";
 import {
   openedPreviewFromRow,
   previewGrantFromRow,
@@ -41,10 +42,15 @@ export interface ReadinessReading extends Reading<PreviewReadiness | null> {
  * comes from `sitePreviewReadiness`, which runs the same functions the write
  * guard refuses with -- so a control this surface offers is one the engine will
  * accept, and a control it withholds is one the engine would refuse.
+ *
+ * THE KEY CARRIES WHAT THE ANSWER JUDGES: both bindings and the status, off the
+ * site's own live row. Attaching a store on the Store panel changes the answer,
+ * and a key of the id alone kept the old refusal on the page until a reload.
  */
-export function usePreviewReadiness(siteId: string): ReadinessReading {
+export function usePreviewReadiness(site: SiteRow): ReadinessReading {
   const connection = useOsConnection();
-  const id = siteId.trim();
+  const id = site.id.trim();
+  const judged = `${boundStoreId(site)}:${previewStoreId(site)}:${site.status}`;
   const read = useMemo(() => {
     if (connection === null || id === "") return null;
     return async (signal: AbortSignal): Promise<PreviewReadiness | null> => {
@@ -54,10 +60,38 @@ export function usePreviewReadiness(siteId: string): ReadinessReading {
     };
   }, [connection, id]);
   const reading = useReading<PreviewReadiness | null>(
-    connection === null || id === "" ? "no-site" : `preview-readiness:${id}`,
+    connection === null || id === "" ? "no-site" : `preview-readiness:${id}:${judged}`,
     read,
   );
   return { ...reading, readiness: reading.value ?? null };
+}
+
+/**
+ * Whether EVERY one of these deployables may go live, as the engine answers it
+ * -- null until every answer has landed (Connect Shopify, D5). No deployables
+ * is a yes with nothing to ask.
+ *
+ * For the end of the compose flow, whose one Go live flips every site the run
+ * placed: one refusal is a no for the act, so one combined answer is the right
+ * shape here, unlike the per-surface readings `useReading` keeps apart.
+ */
+export function useEveryCanGoLive(siteIds: readonly string[]): boolean | null {
+  const connection = useOsConnection();
+  const key = siteIds.map((id) => id.trim()).filter((id) => id !== "").join(",");
+  const read = useMemo(() => {
+    if (connection === null || key === "") return null;
+    return async (signal: AbortSignal): Promise<boolean> => {
+      const answers = await Promise.all(
+        key.split(",").map((siteId) => connection.query.sitePreviewReadiness({ siteId }, { signal })),
+      );
+      return answers.every((result) => {
+        const first = result.rows()[0];
+        return first !== undefined && readinessFromRow(first).canGoLive;
+      });
+    };
+  }, [connection, key]);
+  const answer = useReading<boolean>(connection === null || key === "" ? "no-sites" : `go-live-readiness:${key}`, read).value;
+  return key === "" ? true : answer;
 }
 
 export interface ObservationsReading extends Reading<PreviewObservationRow[]> {

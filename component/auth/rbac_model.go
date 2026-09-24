@@ -174,7 +174,7 @@ var appReadFloors = map[string][]Role{
 	"app:campaigns":             {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
 	"app:campaigns/logs":        {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:cluster":               {RoleOwner, RoleDeveloper, RoleAdmin},
-	"app:cluster/modules":       {RoleOwner, RoleAdmin},
+	"app:cluster/modules":       {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:cluster/origins":       {RoleOwner},
 	"app:cluster/audit":         {RoleOwner},
 	"app:cluster/logs":          {RoleOwner, RoleDeveloper, RoleAdmin},
@@ -218,9 +218,8 @@ var appReadFloors = map[string][]Role{
 	"app:setup":                 {RoleOwner, RoleDeveloper},
 }
 
-// appPartGrants is the mirror of the Deployables PART seeds (task
-// memql#5301): `execute` on each named part, on owner and developer -- with
-// one exception, `store`, which is owner alone.
+// appPartGrants is the mirror of the `execute` app seeds: the Deployables
+// PARTS (task memql#5301), on owner and developer, and the Modules pack switch.
 var appPartGrants = map[string][]Role{
 	"app:deployables/sources": {RoleOwner, RoleDeveloper},
 	"app:deployables/deploy":  {RoleOwner, RoleDeveloper},
@@ -236,18 +235,29 @@ var appPartGrants = map[string][]Role{
 	// names a v1:shopify:store row, so it carries `store` like every other act
 	// that does.
 	"app:deployables/preview": {RoleOwner, RoleDeveloper},
-	// OWNER ONLY (memql#5541). This part took over from the retired
-	// app:stores set, which was seeded on owner and nobody else because
-	// v1:shopify:store is @rowAuthz(clusterOwner): a developer holding the
-	// part would be drawn the control and then served no rows, which is a
-	// refusal rendered as an empty panel (memql#5216).
-	"app:deployables/store": {RoleOwner},
+	// Attaching the Shopify store a storefront fronts (memql#5541). Owner
+	// alone until v1:shopify:store took a read floor at developer (Connect
+	// Shopify, D3): before it, a developer holding the part would have been
+	// drawn a control and served no rows (memql#5216). A developer may now
+	// bind ANY storefront they can write to any store on the cluster: every
+	// account-tied client storefront, live ones included, because the site
+	// tier's account grant admits staff to write them -- the same reach that
+	// lets a developer pause, archive or delete those sites. D3 accepts that,
+	// and every store row is made by a cluster owner or server code (D15), so
+	// the Storefront token references a binding can expose are ones an owner
+	// or Connect chose.
+	"app:deployables/store": {RoleOwner, RoleDeveloper},
+	// The pack switch in Cluster > Modules (Connect Shopify design, D4). A
+	// developer holding it flips only a STOREFRONT pack: the other half of
+	// that rule is component/memql's AuthorizeSetPackEnabled, and an owner
+	// flips any pack there without asking this table.
+	"app:cluster/modules": {RoleOwner, RoleDeveloper},
 }
 
 // The app tables fold into capabilitySets before anything reads it, so the
 // mirror stays ONE map to every reader (roleHasCapability, principalGrantsOf,
 // the parity gate) and the tables above are only a more legible way of
-// writing 149 entries.
+// writing 167 entries.
 func init() {
 	for resource, roles := range appReadFloors {
 		for _, role := range roles {

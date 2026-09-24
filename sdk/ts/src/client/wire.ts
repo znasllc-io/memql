@@ -1412,8 +1412,8 @@ export type SubscriptionKindWire =
 // absences and reported success.
 
 // ---------------------------------------------------------------------------
-// Module registry (epic memql#4183). Reads are owner/admin-gated;
-// setPackEnabled is owner-only. Every result carries errorCode/errorMessage
+// Module registry (epic memql#4183). Reads need read on app:cluster/modules;
+// setPackEnabled is the owner's, or a developer's on a storefront pack. Every result carries errorCode/errorMessage
 // INSIDE the payload (a handler error would tear down the multiplexed
 // stream) plus the reporting-node facts, because per-node vs cluster-wide
 // honesty is part of the contract. A secret env var carries set/unset and
@@ -1434,6 +1434,7 @@ export interface ModuleInfoWire {
   envComponents?: string[];
   fqnPrefixes?: string[];
   codeReference?: string;
+  mayFlip?: boolean;
 }
 
 export interface ModulesListResultPayload {
