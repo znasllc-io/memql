@@ -94,6 +94,62 @@ function mintedId(connection: FakeConnection): string {
 }
 
 describe("GitHub Sources in Add a deployable", () => {
+  it("shows analysis progress immediately on Configuration, then opens Review after the current collection is reread", async () => {
+    let finishSave!: () => void;
+    let finishAnalysis!: () => void;
+    const saveWait = new Promise<void>(resolve => { finishSave = resolve; });
+    const analysisWait = new Promise<void>(resolve => { finishAnalysis = resolve; });
+    const deployments: Record<string, Row[]> = {};
+    const { region, connection } = await open({ deployments, packages: [] }, connection => {
+      const execute = vi.mocked(connection.query.executeNamed).getMockImplementation()!;
+      vi.mocked(connection.query.executeNamed).mockImplementation(async (name, call, opts) => {
+        const reply = await execute(name, call, opts);
+        if (name === "packageSourceRegister") await saveWait;
+        if (name === "packageDeploy") await analysisWait;
+        return reply;
+      });
+    });
+    await addRepository(region);
+    await forward("Analyze");
+    expect(document.querySelector(".os-actbar")?.getAttribute("data-tone")).toBe("busy");
+    expect(document.querySelector(".os-actbar-word")?.textContent).toBe("Analyzing");
+    expect(stage(region, "Configuration").getAttribute("data-state")).toBe("current");
+    expect(stage(region, "Configuration").getAttribute("data-open")).toBe("true");
+    expect(stage(region, "Review").getAttribute("data-state")).toBe("ahead");
+    expect(floorAct("Analyze")).toBeNull();
+    await act(async () => finishSave());
+    const packageId = mintedId(connection);
+    await waitFor(() => expect(connection.callsNamed("packageDeployments").some(call => call.includes(packageId))).toBe(true));
+    // The initial seed sees no run. No broadcast follows: finishing the RPC
+    // must re-read the NEW package's collection, not the empty-id closure.
+    deployments[packageId] = [{ id: "dep-new", packageId, status: "awaiting_confirm", report: REPORT, createdAt: "2026-09-24T03:00:00Z" }];
+    await act(async () => finishAnalysis());
+    expect(await within(region).findByText("clients/web")).toBeTruthy();
+    expect(stage(region, "Review").getAttribute("data-open")).toBe("true");
+    expect(document.querySelector(".os-actbar")?.getAttribute("data-tone")).not.toBe("busy");
+    expect(connection.callsNamed("packageDeploy")).toHaveLength(1);
+  });
+
+  it("ends a timed-out source read with a visible failure and a retry instead of a stuck Analyze", async () => {
+    let finish!: () => void;
+    const pending = new Promise<void>(resolve => { finish = resolve; });
+    const { region, connection } = await open({}, connection => {
+      const execute = vi.mocked(connection.query.executeNamed).getMockImplementation()!;
+      vi.mocked(connection.query.executeNamed).mockImplementation(async (name, call, opts) => {
+        if (name === "packageDeploy") { await pending; throw new Error("Source download timed out"); }
+        return execute(name, call, opts);
+      });
+    });
+    await addRepository(region, "source-alpha");
+    await forward("Analyze");
+    expect(document.querySelector(".os-actbar-word")?.textContent).toBe("Analyzing");
+    await act(async () => finish());
+    expect(await within(region).findByText("Source download timed out")).toBeTruthy();
+    expect(floorAct("Retry")).toBeTruthy();
+    expect(document.querySelector(".os-actbar")?.getAttribute("data-tone")).not.toBe("busy");
+    expect(connection.callsNamed("packageSourceRegister")).toHaveLength(1);
+  });
+
   it("advances on each row activation without Continue or an extra Source chooser", async () => {
     const { region, connection } = await open({ sourceConnections: [] });
     expectCurrentStage(region, "GitHub account");
@@ -386,8 +442,8 @@ describe("GitHub Sources in Add a deployable", () => {
     expect(connection.callsNamed("packageDeploy")[0]).toContain(`packageId: "${mintedId(connection)}"`);
     expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(0);
     await emit(connection, DEPLOYMENT_CONCEPT, { id: "dep-new", packageId: mintedId(connection), status: "analyzing", createdAt: "2026-09-23T10:00:00Z" }, "NODE_CREATED");
-    expect(stage(region, "Review").getAttribute("data-state")).not.toBe("ahead");
-    expect(stage(region, "Configuration").getAttribute("data-state")).toBe("complete");
+    expect(stage(region, "Review").getAttribute("data-state")).toBe("ahead");
+    expect(stage(region, "Configuration").getAttribute("data-state")).toBe("current");
   });
 
   it("backs out before choosing an organization and cancels without binding or repository writes", async () => {

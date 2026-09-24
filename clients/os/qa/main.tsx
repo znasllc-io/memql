@@ -248,6 +248,25 @@ const SOURCE_CHOOSER: FakeSeed = {
   sourceProbe: { "": probeReply({ branches: ["main", "release"] }) },
 };
 
+// Exercise the production wizard while the source read is in flight; these
+// fixture requests never contact GitHub or create a real deployment.
+function analysisConnection(result: "pending" | "failed" | "review") {
+  const seed: FakeSeed = { ...SOURCE_CHOOSER, packages: [], deployments: {} };
+  const connection = fakeConnection(seed);
+  const execute = connection.query.executeNamed.bind(connection.query);
+  connection.query.executeNamed = async (name, call, opts) => {
+    if (name === "packageDeploy") {
+      if (result === "pending") await new Promise(() => {});
+      else await new Promise(resolve => setTimeout(resolve, 1500));
+      if (result === "failed") throw new Error("Source download timed out. Nothing was deployed.");
+      const packageId = /packageId: "([^"]+)"/.exec(call)?.[1] ?? "";
+      seed.deployments![packageId] = [{ ...PARKED, id: "dep-new", packageId }];
+    }
+    return execute(name, call, opts);
+  };
+  return connection;
+}
+
 /** A cluster with NO GitHub App, seen by somebody who may register one. Press
  *  + and choose "A repository": the step asks the one question and the floor
  *  says Set up GitHub. */
@@ -509,6 +528,9 @@ const VIEWS: Record<
   "guided-account-empty": { seed: { ...SOURCE_CHOOSER, credentials: [], sourceConnections: [] }, framed: true, render: () => <Lists section="deployables" /> },
   "guided-org-empty": { seed: { ...SOURCE_CHOOSER, sourceInstallations: { "cred-grant": { reason: "ok", installations: [], pending: [] } } }, framed: true, render: () => <Lists section="deployables" /> },
   "source-chooser": { seed: SOURCE_CHOOSER, framed: true, render: () => <Lists section="deployables" /> },
+  "analysis-pending": { connect: () => analysisConnection("pending"), framed: true, render: () => <Lists section="deployables" /> },
+  "analysis-failed": { connect: () => analysisConnection("failed"), framed: true, render: () => <Lists section="deployables" /> },
+  "analysis-review": { connect: () => analysisConnection("review"), framed: true, render: () => <Lists section="deployables" /> },
   "source-settings": { seed: SOURCE_CHOOSER, framed: true, render: () => <Lists section="settings" /> },
   "source-management": { seed: { ...SOURCE_CHOOSER,
     sourceConnections: [...(SOURCE_CHOOSER.sourceConnections ?? []), sourceConnectionRow({ id: "source-work-acme", credentialId: "cred-work" })],

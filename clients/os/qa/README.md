@@ -161,3 +161,12 @@ layouts with both `mode=light` and `mode=dark`. These use deterministic fixture
 connections and do not mint credentials or modify a real account.
 
 `source-chooser` supplies multiple GitHub identities, personal/org bindings and repositories. Open Add a deployable, choose A repository, then Add source. Select GitHub account, Continue, select organization/personal account, Continue, select repository, Continue. Configuration holds MemQL ownership afterward. Confirm each stage shows only its own actions, top-left list refresh, a selected-row cue and a footer Continue/Back; the progress rail must identify the visible step. Organization Continue saves access; Analyze creates the repository. Check per-source removal and cancellation, account cue placement, repository/ref clearing on Source change, keyboard navigation, desktop/narrow layouts and both themes. `source-management` and `repository-management` open the management pages; `source-settings` checks the shared Settings surface. All three have purpose subtitles and no creation control. `source-empty` directs creation through Add deployable without another CTA. Confirm the wizard still offers plus-style Add source and Add GitHub account, and newly saved bindings appear in the live list.
+
+## Analysis progress
+
+`analysis-pending`, `analysis-failed`, and `analysis-review` exercise the real
+add-deployable wizard over simulated source requests. Choose A repository,
+@octocat, acme, and field-notes, then Analyze. Configuration should remain
+current with the shared busy action bar and elapsed time; a completed report
+opens Review without a deployment broadcast. Failure offers Retry. No fixture
+contacts GitHub or starts a real deployment.

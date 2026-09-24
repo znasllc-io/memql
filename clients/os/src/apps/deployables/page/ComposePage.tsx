@@ -10,6 +10,7 @@ import { Button, Caption, Field, Notice, RefreshButton, useLiveView, type Stop }
 import type { Act } from "../../../kit/ActionBar";
 import { ActivityTarget } from "../../../kit/SemanticActivity";
 import { Wizard } from "../../../kit/Wizard";
+import { useNow } from "../../../kit/useNow";
 import { AccountPicker } from "../../accounts/AccountPicker";
 import { organizationChosen, useDefaultOrganization } from "../../accounts/organization";
 import { useAccountOptionsFeed } from "../../accounts/tie";
@@ -186,6 +187,8 @@ export function ComposePage(props: ComposePageProps) {
   const bindingPending = useRef(false);
   const bindingNavigation = useRef(0);
   const [selectedRunId, setSelectedRunId] = useState("");
+  const [analysisStartedAt, setAnalysisStartedAt] = useState<number | null>(null);
+  const now = useNow(1000);
   const [sourceNotice, setSourceNotice] = useState("");
   const [restoredSourceId, setRestoredSourceId] = useState("");
   const [draft, setDraft] = useState<ComposeDraft>(() => props.connectResult ? { ...EMPTY_DRAFT, choice: "repo" } : EMPTY_DRAFT);
@@ -259,6 +262,7 @@ export function ComposePage(props: ComposePageProps) {
   useEffect(() => {
     if (previousViewer.current === githubViewer) return;
     previousViewer.current = githubViewer; setRestoredSourceId("");
+    setAnalysisStartedAt(null);
     setGithubCredentialId(""); setAccountConfirmed(false); setRepositoryConfirmed(false); setInstallationId(""); setConfirmedConnection(null);
     setSelectedConnectionId(""); setSelectedRunId(""); setAddresses({});
     setDraft({ ...EMPTY_DRAFT }); setCreated({packageId: "", siteId: ""});
@@ -283,7 +287,12 @@ export function ComposePage(props: ComposePageProps) {
   const lifecycle = useSiteLifecycle();
 
   const packageId = created.packageId || parked?.pkg.id || source?.id || "";
-  const { source: timeline, reseed } = usePackageDeployments(packageId);
+  const { source: timeline, reseed, snapshot: deploymentFeed } = usePackageDeployments(packageId);
+  // Registering a source changes the collection. An async callback still holds
+  // the old (often empty-package) collection, so refresh the current one.
+  const refreshDeployments = useRef(reseed);
+  refreshDeployments.current = reseed;
+  useEffect(() => { if (selectedRunId) refreshDeployments.current(); }, [packageId, selectedRunId]);
   const deployments = useLiveView(timeline, `compose-deployments:${packageId}`, (rows) =>
     newestFirst(rows.map(deploymentFromRow).filter((d) => d.id !== "")),
   );
@@ -322,7 +331,7 @@ export function ComposePage(props: ComposePageProps) {
   const inactive = scoped && source !== undefined && source.disabledDeployables.includes(only) && !activated;
   const archivedSource = source?.status === "archived";
 
-  const phase = phaseOf({
+  const storedPhase = phaseOf({
     path,
     runStatus: run?.status ?? (selectedRunId ? "analyzing" : ""),
     siteId: created.siteId,
@@ -331,6 +340,8 @@ export function ComposePage(props: ComposePageProps) {
     // and the Live stop is what waits.
     published: draft.choice === "ci" ? created.siteId !== "" : publishedZip,
   });
+  const phase: ComposePhase = analysisStartedAt !== null ? "analyzing"
+    : storedPhase === "composing" && pkgActions.refusal && packageId ? "stopped" : storedPhase;
   const journeyKey = `${phase}:${run?.id ?? ""}:${inactive}`;
 
 
@@ -419,7 +430,7 @@ export function ComposePage(props: ComposePageProps) {
 
   const action = actionFor(phase, readyToAnalyze, readyToDeploy);
   const busy =
-    bindingWrite.busy || repositoryRegistration.busy || newPackage.busy || pkgActions.busy || createSite.busy || publish.busy || addDomain.busy || lifecycle.busy;
+    analysisStartedAt !== null || bindingWrite.busy || repositoryRegistration.busy || newPackage.busy || pkgActions.busy || createSite.busy || publish.busy || addDomain.busy || lifecycle.busy;
 
   const outcomes: readonly DeployableOutcome[] = run?.deployables ?? [];
   const placementsLocked =
@@ -452,6 +463,7 @@ export function ComposePage(props: ComposePageProps) {
   async function analyze(): Promise<void> {
     if (busy || analyzePending.current || (!fixedSource && !parked && draft.choice === "repo" && !githubSelectionReady)) return;
     analyzePending.current = true;
+    setAnalysisStartedAt(Date.now());
     try {
     const boundary = saveBoundary.current;
     if (!fixedSource && !parked && draft.choice === "repo" && !created.packageId) {
@@ -477,7 +489,7 @@ export function ComposePage(props: ComposePageProps) {
         ...(scoped ? { placements: everyOtherAppSkipped(source?.declares ?? [], only) } : selectedSource ? { placements: Object.fromEntries(placed.map(name => [name, { hostname: "", accountId: sourceAccountId, ownDomain: "", skip: true }])) } : {}),
       });
       if (!saveMounted.current || boundary !== saveBoundary.current) return;
-      if (selectedSource && outcome) setSelectedRunId(outcome.deploymentId);
+      if (outcome) setSelectedRunId(outcome.deploymentId);
       reseed();
       return;
     }
@@ -512,7 +524,7 @@ export function ComposePage(props: ComposePageProps) {
     if (siteId === "") return;
     setCreated((held) => ({ ...held, siteId }));
     if (address.ownDomain.trim() !== "") await addDomain.add(siteId, address.ownDomain.trim());
-    } finally { analyzePending.current = false; }
+    } finally { analyzePending.current = false; if (saveMounted.current) setAnalysisStartedAt(null); }
   }
 
   /**
@@ -561,7 +573,10 @@ export function ComposePage(props: ComposePageProps) {
   }
 
   async function retry(): Promise<void> {
-    if (packageId === "" || busy) return;
+    if (packageId === "" || busy || analyzePending.current) return;
+    analyzePending.current = true;
+    setAnalysisStartedAt(Date.now());
+    try {
     const boundary = saveBoundary.current;
     // A RETRY KEEPS THE SCOPE. Retrying a gate opened for one app used to
     // park an unscoped run -- the flow stayed titled and narrowed for that
@@ -572,8 +587,9 @@ export function ComposePage(props: ComposePageProps) {
       ...(scoped ? { placements: everyOtherAppSkipped(source?.declares ?? parked?.pkg.declares ?? [], only) } : selectedSource ? { placements: Object.fromEntries(placed.map(name => [name, { hostname: "", accountId: sourceAccountId, ownDomain: "", skip: true }])) } : {}),
     });
     if (!saveMounted.current || boundary !== saveBoundary.current) return;
-    if (selectedSource && outcome) setSelectedRunId(outcome.deploymentId);
+    if (outcome) setSelectedRunId(outcome.deploymentId);
     reseed();
+    } finally { analyzePending.current = false; if (saveMounted.current) setAnalysisStartedAt(null); }
   }
 
   /**
@@ -637,6 +653,7 @@ export function ComposePage(props: ComposePageProps) {
   // comes back with its choice already made -- from GitHub, after connecting --
   // resumes verified GitHub identity at Organization; other drafts follow their answers.
   const defaultStop: WizardStep = phase === "composing" ? fixedSource || parked ? "whatItIs" : draft.choice === "" ? "source" : draft.choice === "repo" ? !accountConfirmed || !identityReady ? "githubAccount" : !selectedConnection ? "githubOrganization" : repositoryConfirmed ? "sourceDetail" : "githubRepository" : "sourceDetail"
+    : phase === "analyzing" && !fixedSource && !parked ? "sourceDetail"
     : phase === "analyzing" || phase === "awaiting_confirm" && path === "package" ? "whatItIs"
     : phase === "stopped" ? (railFor(input).stages.find(s => s.state === "stopped")?.id as StopId ?? "whatItIs")
     : phase === "deploying" || phase === "awaiting_confirm" && path === "handmade" ? "build" : "live";
@@ -892,7 +909,7 @@ export function ComposePage(props: ComposePageProps) {
           id: "sourceDetail",
           // Named by the answer above it, and by nothing until there is one.
           name: kind === "repo" ? "Configuration" : chosen ? SOURCE_DETAIL_NAME[kind]! : "Details",
-          state: kind === "repo" && !sourceLocked && repositoryConfirmed ? "waiting" : !chosen || kind === "repo" && (!selectedConnection || !repositoryConfirmed) && !sourceLocked ? "ahead" : settled ? "complete" : journeyStop === "source" ? "waiting" : state,
+          state: phase === "analyzing" && !fixedSource && !parked ? "current" : kind === "repo" && !sourceLocked && repositoryConfirmed ? "waiting" : !chosen || kind === "repo" && (!selectedConnection || !repositoryConfirmed) && !sourceLocked ? "ahead" : settled ? "complete" : journeyStop === "source" ? "waiting" : state,
           sentence: kind === "repo" ? "Configure this deployable." : chosen ? DETAIL_SENTENCES[kind] : undefined,
           // The pipeline's own word on this stage -- what it settled as, or
           // why it stopped ("private, or not there") -- belongs to the step
@@ -907,7 +924,7 @@ export function ComposePage(props: ComposePageProps) {
         },
       ];
     }
-    if (kind === "repo" && !sourceLocked) return [{ id, name: STEP_NAMES[id], state: "ahead", openable: false }];
+    if (kind === "repo" && (!sourceLocked || phase === "analyzing" && !fixedSource && !parked)) return [{ id, name: STEP_NAMES[id], state: "ahead", openable: false }];
     const reachable = (state !== "pending" && state !== "ahead") || id === journeyStop;
     return [{
       id,
@@ -996,7 +1013,8 @@ export function ComposePage(props: ComposePageProps) {
       steps={steps.map(step => step.id === journeyStop && phase === "composing" ? { ...step, state: "open" } : step)}
       open={journeyStop}
       onOpen={(id) => chooseStop(id as WizardStep)}
-      status={{ word: restoredSourceId ? "Source restored" : word, detail: restoredSourceId ? "Existing deployables are unchanged." : detail, tone: phase === "analyzing" || phase === "deploying" ? "busy" : wentLive ? "live" : "none" }}
+      status={{ word: restoredSourceId ? "Source restored" : word, detail: restoredSourceId ? "Existing deployables are unchanged." : detail, tone: phase === "analyzing" || phase === "deploying" ? "busy" : wentLive ? "live" : "none",
+        meta: analysisStartedAt !== null ? `${Math.max(0, Math.floor((now.getTime() - analysisStartedAt) / 1000))}s elapsed` : undefined }}
       acts={acts}
       context={{ page: title, packageId: (parked?.pkg ?? source)?.id, app: only, mode: "compose", step: journeyStop }}
       notices={
@@ -1022,6 +1040,10 @@ export function ComposePage(props: ComposePageProps) {
               belong to yet, so it renders beneath the action that asked for
               it. Every other refusal in this flow lands at its stop. */}
           {sourceNotice ? <Caption>{sourceNotice}</Caption> : null}
+          {phase === "analyzing" && analysisStartedAt === null && selectedRunId && !run ? <Notice tone="info"
+            sentence="Waiting for the analysis report."
+            next={deploymentFeed.error ? `The status read failed: ${deploymentFeed.error}` : "The request returned. Refresh its status without starting another analysis."}
+            ><Button onClick={() => reseed()}>Read status again</Button></Notice> : null}
           {repositoryRegistration.refusal ? <ProblemNotice problem={{ ...repositoryRegistration.refusal, fatal: true }} tone="error" /> : null}
           {newPackage.refusal ? <ProblemNotice problem={{ ...newPackage.refusal, fatal: true }} tone="error" /> : null}
           {pkgActions.refusal ? <ProblemNotice problem={{ ...pkgActions.refusal, fatal: true }} tone="error" /> : null}
@@ -1119,7 +1141,7 @@ function composePhaseWord(
   if (at.inactive) return "Inactive";
   switch (phase) {
     case "analyzing":
-      return "Reading the source";
+      return "Analyzing";
     case "awaiting_confirm":
       return "Ready to deploy";
     case "deploying":
@@ -1171,7 +1193,7 @@ function composePhaseDetail(
   if (action !== null && action.disabled) return "the open step has more to answer";
   switch (phase) {
     case "analyzing":
-      return "reading the tree and running the gates a node runs at boot";
+      return "Reading the source and checking its configuration. Review opens when the report is ready; nothing is deployed.";
     case "deploying":
       return "building, then putting the files in place -- nothing goes live until you say";
     case "stopped":
