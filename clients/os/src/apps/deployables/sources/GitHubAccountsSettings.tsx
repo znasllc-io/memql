@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { UserRound } from "lucide-react";
 import { Button, Caption, EmptyState, Fact, Facts, Head, Notice, RecordList, RecordRow, Subhead } from "../../../kit";
+import { AddButton } from "../../../kit/AddButton";
 import { formatMoment } from "../../../kit/format";
 import { sourceName } from "../list";
 import type { PackageRow } from "../packages/rows";
@@ -31,23 +32,29 @@ export function GitHubAccountsSettings({ accounts, packages, feed, connectResult
     sourceNames={packages.filter(pkg => pkg.credentialId === selected.id && pkg.status !== "archived").map(sourceName)}
     onBack={() => setSelectedId("")} retry={feed.retry} installUrl={app.status?.installUrl ?? ""} />;
 
-  return <section className="os-settings os-settings-wide deployable-settings" aria-label="GitHub accounts settings">
-    <Head title="GitHub accounts">
-      {app.status?.configured !== false ? <Button busy={connect.busy} busyLabel="Opening GitHub" onClick={() => void connect.connect(returnPathFor("settings"))}>Connect GitHub account</Button> : null}
-    </Head>
-    <ConnectReturnNotice result={connectResult} />
-    {connect.refusal ? <ProblemNotice problem={connect.refusal} tone="error" /> : null}
-    <RecordList as="ul" label="GitHub accounts">{accounts.map(account => <RecordRow key={account.id}
-      icon={<UserRound size={18} aria-hidden />} name={`@${account.login || account.label}`}
-      secondary="GitHub" state={account.status === "active" ? "Connected" : "Disconnected"}
-      tone={account.status === "active" ? "accent" : "muted"} current={account.status === "active"}
-      onOpen={() => setSelectedId(account.id)} label={`Manage GitHub account ${account.login || account.label}`}
-    />)}</RecordList>
-    {ready && accounts.length === 0 ? <EmptyState title="No GitHub accounts connected">Connect an account to choose its organizations and repositories when adding a deployable.</EmptyState> : null}
-    {!ready ? <Notice sentence={feed.state === "seeding" ? "Reading GitHub accounts…" : "GitHub accounts could not be read."} detail={feed.error || undefined}>
-      {feed.state !== "seeding" ? <Button onClick={feed.retry}>Try again</Button> : null}
-    </Notice> : null}
-    {app.status?.configured === false ? <GithubAppMissing app={app} returnPath={returnPathFor("settings")} /> : null}
+  return <section className="os-settings os-settings-wide deployable-settings" aria-label="Deployables settings">
+    <Head title="Settings" />
+    <section className="os-field-group" aria-label="GitHub accounts settings">
+      <div className="os-head">
+        <Subhead>GitHub accounts</Subhead>
+        <div className="os-head-actions">
+          {app.status?.configured !== false ? <AddButton label="Add GitHub account" disabled={connect.busy} aria-busy={connect.busy} onClick={() => void connect.connect(returnPathFor("settings"))} /> : null}
+        </div>
+      </div>
+      <ConnectReturnNotice result={connectResult} />
+      {connect.refusal ? <ProblemNotice problem={connect.refusal} tone="error" /> : null}
+      <RecordList as="ul" label="GitHub accounts">{accounts.map(account => <RecordRow key={account.id}
+        icon={<UserRound size={18} aria-hidden />} name={`@${account.login || account.label}`}
+        secondary="GitHub" state={account.status === "active" ? "Connected" : "Disconnected"}
+        tone={account.status === "active" ? "accent" : "muted"} current={account.status === "active"}
+        onOpen={() => setSelectedId(account.id)} label={`Manage GitHub account ${account.login || account.label}`}
+      />)}</RecordList>
+      {ready && accounts.length === 0 ? <EmptyState title="No GitHub accounts connected">Connect an account to choose its organizations and repositories when adding a deployable.</EmptyState> : null}
+      {!ready ? <Notice sentence={feed.state === "seeding" ? "Reading GitHub accounts…" : "GitHub accounts could not be read."} detail={feed.error || undefined}>
+        {feed.state !== "seeding" ? <Button onClick={feed.retry}>Try again</Button> : null}
+      </Notice> : null}
+      {app.status?.configured === false ? <GithubAppMissing app={app} returnPath={returnPathFor("settings")} /> : null}
+    </section>
   </section>;
 }
 
@@ -61,7 +68,7 @@ function GitHubAccountDetails({ account, sourceNames, onBack, retry, installUrl 
   const access = useSourceInstallations(connected ? account.id : "");
   const name = `@${account.login || account.label}`;
   return <section className="os-settings os-settings-wide deployable-settings" aria-label={`GitHub account ${name}`}>
-    <Head title={name} back={{ label: "GitHub accounts", onSelect: onBack }} breadcrumbs={[{ label: "GitHub accounts", onSelect: onBack }, { label: name }]}>
+    <Head title={name} back={{ label: "Settings", onSelect: onBack }} breadcrumbs={[{ label: "Settings", onSelect: onBack }, { label: name }]}>
       {!connected ? <Button busy={connect.busy} onClick={() => void connect.connect(returnPathFor("settings"), account.id)}>Reconnect GitHub account</Button> : null}
     </Head>
     <Facts>

@@ -22,6 +22,11 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    only after its read settles; unavailable is not zero.
    Do not add Refresh or Refresh overview buttons unless the owner explicitly
    requests them; live surfaces update through their subscriptions.
+   Creation actions use the shared icon-only `AddButton` (plus), with an
+   accessible label and tooltip. Do not replace it with a text button such as
+   "Connect GitHub account". A settings page is titled **Settings**; subjects
+   such as **GitHub accounts** are sections beneath that title, with their Add
+   control on the section heading. Settings lists use the available width.
 
 2. **Filters are questions, not furniture.** Search and facet controls live
    behind one affordance on the Head line (`kit` `Refine`): collapsed by
@@ -160,8 +165,8 @@ combined list". Two lists now, in one row language (`RecordRow`):
   GitHub identity, organization or personal target, repository and tracked
   branch, alongside the separate MemQL owning account. Credentials and saved
   installation bindings provide access metadata rather than separate list
-  entries. There are no sibling Repositories or Accounts pages; Settings links
-  to this catalog without repeating a credential roster. A source's detail
+  entries. There are no sibling Repositories or Accounts pages. Settings manages
+  personal GitHub accounts; Sources manages the saved repository combinations. A source's detail
   holds its access, settings, apps and history. ZIP-backed apps remain in
   Deployables and retain their existing detail and lifecycle controls.
 - **Every listed source is summarised by everything it made.** A
@@ -177,8 +182,9 @@ combined list". Two lists now, in one row language (`RecordRow`):
   installation binding, package ID, automatic updates, deployables and history.
   Add deployable registers, reuses or restores the same authorized configuration
   atomically; it does not borrow a different identity's or MemQL account's
-  history. Archive remains the distinct lifecycle operation. Only Add deployable
-  offers Add source and GitHub connection setup.
+  history. Archive remains the distinct lifecycle operation. Add deployable
+  creates sources and can connect accounts inline; Settings can also add,
+  reconnect and disconnect personal GitHub accounts.
 - **What belongs to the source is said on the source, once.** A run parked at a
   source's gate is "Review needed" on that source's row and on its page's bar,
   with Review beside it -- not repeated on every deployable the source made.

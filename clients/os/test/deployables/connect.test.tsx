@@ -788,7 +788,7 @@ describe("existing credential and cluster settings", () => {
   it("connects another account from Settings without replacing accounts or sources", async () => {
     const assigned = stubNavigation();
     const { connection } = mountSources({ credentials: [GRANT], connectUrl: "https://github.com/login/oauth/authorize?fixture=settings" });
-    await click(await screen.findByRole("button", { name: "Connect GitHub account" }));
+    await click(await screen.findByRole("button", { name: "Add GitHub account" }));
     expect(assigned).toEqual(["https://github.com/login/oauth/authorize?fixture=settings"]);
     expect(connection.callsNamed("githubConnectBegin")[0]).toContain('returnPath: "/?connect=settings"');
     expect(connection.callsNamed("sourceCredentialRevoke")).toHaveLength(0);

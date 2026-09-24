@@ -29,7 +29,11 @@ describe("Deployables Settings manages accounts independently of sources", () =>
     expect(screen.queryByRole("region", { name: "Source connections" })).toBeNull();
     expect(screen.queryByText("@other-user")).toBeNull();
     expect(screen.queryByText("stored-token")).toBeNull();
-    expect(screen.getByRole("button", { name: "Connect GitHub account" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Settings", level: 3 })).toBeTruthy();
+    expect(within(settings).getByRole("heading", { name: "GitHub accounts", level: 4 })).toBeTruthy();
+    const add = within(settings).getByRole("button", { name: "Add GitHub account" });
+    expect(add.classList.contains("os-icon-button")).toBe(true);
+    expect(add.textContent).toBe("");
     for (const name of ["sourceCredentialRevoke", "sourceConnectionCreate", "sourceConnectionRemove", "createPackage", "packageArchive"]) expect(connection.callsNamed(name)).toHaveLength(0);
   });
 
