@@ -126,7 +126,6 @@ func (c *Connector) WriteShopifyConnect(ctx context.Context, state *componentIde
 			c.logger.Warn("shopify: Connect could not create the store row", "store", storeID, "error", err.Error())
 			return connectReasonExchangeFailed, keptResult
 		}
-		keptResult = result
 	} else {
 		if prior.OwnerUserID == "" {
 			update["ownerUserId"] = person
