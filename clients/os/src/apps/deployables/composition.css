@@ -54,7 +54,6 @@
 .deployable-version-row strong, .deployable-version-row small { display: block; overflow-wrap: anywhere; }
 .deployable-version-row strong { font-weight: 500; }
 .deployable-version-row small { color: var(--os-muted); margin-top: 5px; }
-.deployable-reading-tools { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
 .deployable-dialog { color: var(--os-ink); background: var(--os-raised); border: 1px solid var(--os-line); border-radius: 16px; padding: 22px 24px; width: min(680px,calc(100vw - 36px)); max-height: calc(100dvh - 48px); overflow-y: auto; box-shadow: var(--os-shadow-float); font-family: var(--os-font); }
 .deployable-dialog::backdrop { background: color-mix(in srgb,var(--os-ground) 75%,transparent); }
 .deployable-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
@@ -125,7 +124,6 @@
 .deployable-object-icon { padding: 12px; }
 .deployable-source-piece { padding: 16px; border-radius: 10px; gap: 6px; }
 .deployable-source-piece > svg:first-child { margin-bottom: 4px; }
-.deployable-reading-tools { justify-content: flex-end; }
 .deployable-settings { width: 100%; }
 .deployable-settings > .os-panel { border: 0; padding: 0; background: none; }
 .deployable-settings .os-field-group { padding-block: 18px; border: 0; border-bottom: 1px solid var(--os-line); }

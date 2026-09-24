@@ -20,6 +20,8 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    its content. Encoded by `kit` `Head` (its `meta` slot carries a quiet
    count or scope note). Counts come from the authorized filtered collection
    only after its read settles; unavailable is not zero.
+   Do not add Refresh or Refresh overview buttons unless the owner explicitly
+   requests them; live surfaces update through their subscriptions.
 
 2. **Filters are questions, not furniture.** Search and facet controls live
    behind one affordance on the Head line (`kit` `Refine`): collapsed by

@@ -68,11 +68,8 @@ function mount(connection: FakeConnection, opts: { role?: string } = {}) {
  * The Store slot, found by its own label rather than by an accessible-name
  * match.
  *
- * `getByRole("button", {name: /Store/})` ALSO MATCHES "Stored version
- * details", which is a different control on the same page. The slot's label
- * is the `<strong>`, so that is what this asks about -- and it returns null
- * rather than throwing, because "the slot is absent" is an assertion three
- * cases here make.
+ * The slot label is the `<strong>`. Return null rather than throwing,
+ * because absence is asserted for viewers without store access.
  */
 function storeSlot(page: HTMLElement): HTMLElement | null {
   return (

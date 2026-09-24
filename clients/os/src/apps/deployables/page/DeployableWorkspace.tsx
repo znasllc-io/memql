@@ -1,10 +1,11 @@
+import { Versions } from "./Versions";
+import type { SiteLifecycleActions } from "../packages/actions";
 import { AvailableVersion } from "./AvailableVersion";
 import { AutoDeploySwitch } from "./stops/Source";
 import { useState } from "react";
-import { healthExplanation } from "../health";
 import { IconButton } from "../../../kit/IconButton";
 import type { ReactNode } from "react";
-import { AppWindow, Building2, ChevronRight, FileArchive, GitBranch, Globe, Hammer, History, Info, Link, Radio, Shapes, ShoppingBag, SlidersHorizontal, Activity } from "lucide-react";
+import { AppWindow, Building2, ChevronRight, FileArchive, GitBranch, Globe, Hammer, Info, Link, Shapes, ShoppingBag, SlidersHorizontal } from "lucide-react";
 import { Button, Caption, Notice, useLiveView } from "../../../kit";
 import { ActivityTarget } from "../../../kit/SemanticActivity";
 import { accountNameFrom, type AccountRow } from "../../accounts/rows";
@@ -13,16 +14,15 @@ import { shortVersion, sourceLabel, type DeploymentRow, type PackageRow } from "
 import { boundStoreId, bundleForm, type SiteRow } from "../rows";
 import { kindLabel } from "../targets";
 import { useCustomDomains } from "../useCustomDomains";
-import { siteIsBuilt, siteStateWord } from "../words";
 import { railFor, type RailInput } from "./rail";
 import { storeLabel } from "../store/rows";
 import { PreviewSection } from "../preview/PreviewSection";
 import { NO_PARTS, type PartsHeld } from "../parts";
 import { useStore } from "../store/useStore";
 
-export type WorkspaceDetail = "source" | "whatItIs" | "whereItLives" | "build" | "live" | "runtime" | "traffic" | "store";
+export type WorkspaceDetail = "source" | "whatItIs" | "whereItLives" | "build" | "runtime" | "traffic" | "store";
 
-export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDomains, canStore, timelineState, timelineError, onRetryRead, onInspect, onOpenSource, onHistory, canSources = false, onUpdate }: {
+export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDomains, canStore, timelineState, timelineError, onRetryRead, onInspect, onOpenSource, lifecycle, canSources = false, onUpdate }: {
   canSources?: boolean; onUpdate?: () => void;
   site: SiteRow; pkg: PackageRow | null; run: DeploymentRow | null; accounts: AccountRow[];
   /** This source's whole timeline, for the versions this deployable has published. */
@@ -30,11 +30,9 @@ export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDo
   /** The parts this session holds, for the Preview section's own acts. */
   can?: PartsHeld;
   canDomains: boolean; canStore: boolean; timelineState: string; timelineError: string; onRetryRead: () => void;
-  onInspect: (detail: WorkspaceDetail) => void; onOpenSource: () => void; onHistory: () => void;
+  onInspect: (detail: WorkspaceDetail) => void; onOpenSource: () => void; lifecycle: SiteLifecycleActions;
 }) {
   const [modeOpen, setModeOpen] = useState(false);
-  const built = siteIsBuilt(site);
-  const state = site.status === "" ? "Unknown" : siteStateWord(site);
   const storefront = site.kind === "shopify_storefront";
   const storeId = storefront ? boundStoreId(site) : "";
   const input: RailInput = { mode: "standing", site, pkg, run, app: site.packageDeployableName };
@@ -82,9 +80,9 @@ export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDo
     </section>
     {modeOpen && pkg?.sourceKind === "repo" ? canSources ? <AutoDeploySwitch pkg={pkg} /> : <Caption>{pkg.autoDeploy ? "Automatic" : "Manual"} deployment. Only someone with source access can change this mode.</Caption> : null}
     <section className="deployable-versions" aria-label="Serving version and latest attempt">
-      <header><h3>Versions</h3><IconButton label={pkg ? "Deployment history" : "Version history"} onClick={onHistory}><History size={16} aria-hidden /></IconButton></header>
+      <header><h3>Versions</h3></header>
       {pkg ? <AvailableVersion key={pkg.id} pkg={pkg} onUpdate={onUpdate} /> : null}
-      <div className="deployable-version-row"><span><Radio size={14} aria-hidden />{site.status === "live" ? state : "Stored version"}</span><div><strong className="os-mono">{built ? versionOf(site.bundleRef) : "No bundle yet"}</strong><small>{site.status === "live" ? healthExplanation(site) : built ? "Not published" : "Waiting for built files"}</small></div><IconButton label="Stored version details" onClick={() => onInspect("live")}><Info size={16} aria-hidden /></IconButton></div>
+      <Versions site={site} runs={runs ?? []} canPublish={can?.publish ?? false} lifecycle={lifecycle} />
       {pkg ? <div className="deployable-version-row"><span><Hammer size={14} aria-hidden />Latest attempt</span><div><strong>{run ? attemptWord(run.status) : knownTimeline ? "No attempt yet" : "History unavailable"}</strong><small>{run ? [shortVersion(run.sourceVersion), build?.reason].filter(Boolean).join(" · ") : timelineState === "loading" || timelineState === "seeding" ? "Reading deployment history…" : "Deploy an update to start a new attempt"}</small></div>{run ? <IconButton label="Latest attempt details" onClick={() => onInspect(run.status === "awaiting_confirm" ? "whatItIs" : "build")}><Info size={16} aria-hidden /></IconButton> : null}</div> : null}
       {failed && site.status === "live" ? <Caption>The latest attempt did not replace the published version.</Caption> : null}
       {pkg && timelineError ? <Notice tone="error" sentence="Deployment history could not be read." detail={timelineError}><Button onClick={onRetryRead}>Try again</Button></Notice> : null}
@@ -100,7 +98,6 @@ export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDo
         engine refuses those writes, and drawing the section on the console
         somebody is reading this in would be a panel of controls that only fail. */}
     {!site.systemOwned ? <PreviewSection site={site} runs={runs ?? []} can={can ?? NO_PARTS} onOpenStore={() => onInspect("store")} /> : null}
-    <div className="deployable-reading-tools"><IconButton label="Traffic" onClick={() => onInspect("traffic")}><Activity size={16} aria-hidden /></IconButton></div>
   </>;
 }
 
@@ -146,7 +143,6 @@ function StorePiece({ storeId, siteId, onClick }: { storeId: string; siteId: str
   return <ActivityTarget target={`deployables:${siteId}:store`}><Piece icon={<ShoppingBag size={18} aria-hidden />} label="Store" detail={detail} onClick={onClick} /></ActivityTarget>;
 }
 
-export function versionOf(ref: string): string { return ref.replace(/\/$/, "").split("/").pop() || ref; }
 export function attemptWord(status: string): string {
   const words: Record<string, string> = { succeeded: "Finished", abandoned: "Lost", refused: "Refused", failed: "Failed", cancelled: "Cancelled", analyzing: "Analyzing", awaiting_confirm: "Waiting for review", building: "Building", staging_dsl: "Staging definitions", rolling: "Restarting cluster", publishing: "Putting files in place" };
   return words[status] ?? (status ? `Unknown state: ${status}` : "State unavailable");
