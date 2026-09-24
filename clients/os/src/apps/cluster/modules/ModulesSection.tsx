@@ -55,7 +55,8 @@ export function ModulesSection() {
 
   // The client is constructed from the dispatcher, not from `query`: the
   // module registry is its own surface with its own authorization tier
-  // (reads owner/admin, the write owner-only), which is why the SDK keeps it
+  // (reads need read on app:cluster/modules; the write is the owner's, or a
+  // developer's on a storefront pack), which is why the SDK keeps it
   // out of the generated query vocabulary.
   const modules = useMemo(
     () => (connection === null ? null : new ModulesClient(connection.dispatcher)),

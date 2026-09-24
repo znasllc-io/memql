@@ -343,8 +343,8 @@ func NewProvider(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
 
 // Register wires the pack into the engine registries.
 //
-// FOUR REGISTRATIONS NOW, and the two new ones are what promote this from
-// an example to a pack a cluster can actually serve (epic memql#5532):
+// The registrations below include the two that promote this from an example
+// to a pack a cluster can actually serve (epic memql#5532):
 //
 //   - RegisterPackDefault(domain, false) -- storefront packs ship DISABLED.
 //     Reviews carries a shopper write path and a public read, and "absence
@@ -355,9 +355,14 @@ func NewProvider(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
 //     surface. NOTHING ELSE on this pack is reachable without a bearer, and
 //     these two are reachable only on a deployable whose shopperForms is
 //     on.
+//   - RegisterStorefrontPack -- a developer may flip it, not only the owner
+//     (Connect Shopify design, D4).
 func Register(domain string) {
 	memqldsl.RegisterTree(domain, Tree())
 	memqldsl.RegisterPackDefault(domain, DefaultEnabled)
+	// A developer may turn it on and off (Connect Shopify design, D4). A
+	// declaration of its own, never inferred from the default above.
+	memqldsl.RegisterStorefrontPack(domain)
 	registerShopperSurface()
 	// Bind the Go half to the pack domain so a v1:platform:packState
 	// disable skips the factory and the module inventory folds this

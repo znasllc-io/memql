@@ -104,6 +104,8 @@ export interface ModuleInfo {
   state?: string;
   stateDetail?: string;
   scope?: string;
+  /** The engine's per-caller answer; absent reads as false. */
+  mayFlip?: boolean;
 }
 
 export interface EnvVar {

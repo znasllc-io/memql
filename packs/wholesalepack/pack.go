@@ -152,6 +152,9 @@ func NewProvider(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
 func Register(domain string) {
 	memqldsl.RegisterTree(domain, Tree())
 	memqldsl.RegisterPackDefault(domain, DefaultEnabled)
+	// A developer may turn it on and off (Connect Shopify design, D4). A
+	// declaration of its own, never inferred from the default above.
+	memqldsl.RegisterStorefrontPack(domain)
 	registerShopperSurface()
 	// Bind the Go half to the pack domain so a v1:platform:packState
 	// disable skips the factory and the module inventory folds this

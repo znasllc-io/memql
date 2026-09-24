@@ -192,3 +192,58 @@ func ResetPackDefaultsForTest() {
 	defer packDefaultsMu.Unlock()
 	packDefaults = map[string]bool{}
 }
+
+// STOREFRONT PACKS (Connect Shopify design, section 9, D4).
+//
+// A pack a DEVELOPER may turn on and off, which every other pack reserves to
+// the cluster owner. It is a DECLARATION, made from the pack's Register, and
+// deliberately independent of RegisterPackDefault: shipping disabled is how a
+// pack says enabling it is an exposure, so reading "ships disabled" as
+// "developer-flippable" would hand developers every future pack that ships off
+// for safety without anybody deciding it. packs/anchor pins the declared set
+// to the anchored one.
+
+var (
+	storefrontPacksMu sync.RWMutex
+	storefrontPacks   = map[string]struct{}{}
+)
+
+// RegisterStorefrontPack declares a pack a storefront pack. An empty domain is
+// ignored.
+func RegisterStorefrontPack(domain string) {
+	trimmed := strings.TrimSpace(domain)
+	if trimmed == "" {
+		return
+	}
+	storefrontPacksMu.Lock()
+	defer storefrontPacksMu.Unlock()
+	storefrontPacks[trimmed] = struct{}{}
+}
+
+// UnregisterStorefrontPack withdraws a declaration. Test teardown only, the
+// UnregisterTree pattern: production packs declare once and never withdraw.
+func UnregisterStorefrontPack(domain string) {
+	storefrontPacksMu.Lock()
+	defer storefrontPacksMu.Unlock()
+	delete(storefrontPacks, strings.TrimSpace(domain))
+}
+
+// IsStorefrontPack reports whether a pack declared itself a storefront pack.
+func IsStorefrontPack(domain string) bool {
+	storefrontPacksMu.RLock()
+	defer storefrontPacksMu.RUnlock()
+	_, ok := storefrontPacks[strings.TrimSpace(domain)]
+	return ok
+}
+
+// StorefrontPacks returns the declared set, sorted.
+func StorefrontPacks() []string {
+	storefrontPacksMu.RLock()
+	defer storefrontPacksMu.RUnlock()
+	out := make([]string, 0, len(storefrontPacks))
+	for d := range storefrontPacks {
+		out = append(out, d)
+	}
+	sort.Strings(out)
+	return out
+}

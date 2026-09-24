@@ -327,6 +327,16 @@ seed capability cap-admin-read-app-cluster { roleSlug: "admin"  verb: "read"  re
 seed capability cap-owner-read-app-cluster-modules { roleSlug: "owner"  verb: "read"  resourceType: "app:cluster/modules"  predefined: true }
 @description("admin: open the modules section of the cluster app -- reproduces the OS registry floor any of owner, admin (memql#5300).")
 seed capability cap-admin-read-app-cluster-modules { roleSlug: "admin"  verb: "read"  resourceType: "app:cluster/modules"  predefined: true }
+@description("developer: open the modules section of the cluster app -- to turn a storefront's packs on (Connect Shopify design, D4).")
+seed capability cap-developer-read-app-cluster-modules { roleSlug: "developer"  verb: "read"  resourceType: "app:cluster/modules"  predefined: true }
+// The pack switch in that section. OWNER AND DEVELOPER, and holding it is half
+// the rule: an owner flips any pack, while a developer flips only a pack that
+// declared itself a storefront pack (dsl.RegisterStorefrontPack). Admin reads the
+// inventory and holds no switch (Connect Shopify design, D4).
+@description("owner: flip a pack in the modules section of the cluster app (Connect Shopify design, D4).")
+seed capability cap-owner-execute-app-cluster-modules { roleSlug: "owner"  verb: "execute"  resourceType: "app:cluster/modules"  predefined: true }
+@description("developer: flip a STOREFRONT pack in the modules section of the cluster app; every other pack stays owner-only (Connect Shopify design, D4).")
+seed capability cap-developer-execute-app-cluster-modules { roleSlug: "developer"  verb: "execute"  resourceType: "app:cluster/modules"  predefined: true }
 @description("owner: open the origins section of the cluster app -- reproduces the OS registry floor min owner (memql#5300).")
 seed capability cap-owner-read-app-cluster-origins { roleSlug: "owner"  verb: "read"  resourceType: "app:cluster/origins"  predefined: true }
 @description("owner: open the audit section of the cluster app -- reproduces the OS registry floor min owner (memql#5300).")

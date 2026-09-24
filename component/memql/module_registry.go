@@ -14,6 +14,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/envregistry"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
@@ -66,6 +67,7 @@ type ModuleRow struct {
 	EnvComponents []string
 	FqnPrefixes   []string
 	CodeReference string
+	MayFlip       bool
 }
 
 // ModuleEnvVar is one manifest-declared environment variable on a module's
@@ -124,6 +126,7 @@ type ModuleRefusal struct {
 }
 
 const (
+	moduleCodeInvalidArgument  = 3
 	moduleCodePermissionDenied = 7
 	moduleCodeUnauthenticated  = 16
 )
@@ -141,39 +144,124 @@ func moduleActor(ctx context.Context) (auth.UserContext, bool) {
 	return auth.UserContext{}, false
 }
 
-// AuthorizeModuleRead gates the inventory's list + detail reads:
-// owner or admin. Below that the surface effectively does not exist
-// (the portal hides it entirely); the refusal rides the result payload,
-// never a stream-fatal handler error. Reads are not audited, matching
-// deploycontrol's read tier.
+// moduleResource is the capability resource the Modules section is: the OS
+// registry names it (`requires: "app:cluster/modules"`), and the engine gates
+// on the same name, so the section a person is drawn and the calls they may
+// make read one rule.
+const moduleResource = "app:cluster/modules"
+
+// moduleCapable asks the one capability resolver whether the caller holds
+// verb on the Modules section, grants folded in.
+func moduleCapable(ctx context.Context, actor auth.UserContext, verb string) bool {
+	subject, ok := auth.SubjectFromContext(ctx)
+	if !ok {
+		subject = auth.Subject{Role: actor.Role, UserId: actor.ID}
+	}
+	return auth.CapableFor(ctx, subject, verb, moduleResource)
+}
+
+// AuthorizeModuleRead gates the inventory's list + detail reads: `read` on
+// app:cluster/modules, seeded on owner, developer and admin. Below that the
+// surface effectively does not exist (the OS hides it entirely); the refusal
+// rides the result payload, never a stream-fatal handler error. Reads are not
+// audited, matching deploycontrol's read tier.
 func AuthorizeModuleRead(ctx context.Context) *ModuleRefusal {
 	actor, ok := moduleActor(ctx)
 	if !ok {
 		return &ModuleRefusal{Code: moduleCodeUnauthenticated,
 			Message: "module inventory: no authenticated caller on this connection"}
 	}
-	if !auth.AtLeastAdmin(actor) {
+	if !moduleCapable(ctx, actor, auth.VerbRead) {
 		return &ModuleRefusal{Code: moduleCodePermissionDenied,
-			Message: fmt.Sprintf("module inventory: reading modules requires the owner or admin role (you hold %q)", actor.Role)}
+			Message: fmt.Sprintf("module inventory: reading modules requires read on %s, which your role %q does not hold", moduleResource, actor.Role)}
 	}
 	return nil
 }
 
-// AuthorizeSetPackEnabled gates the one write: owner only. The caller
-// (component/grpc's handler) emits exactly one audit event per call,
-// including refusals, with the verdict this returns; the DSL mutation's
-// clusterOwner tier is the independent second layer under both.
-func AuthorizeSetPackEnabled(ctx context.Context) (auth.UserContext, *ModuleRefusal) {
+// AuthorizeSetPackEnabled gates the one write. An owner flips any pack. Anyone
+// else needs BOTH `execute` on app:cluster/modules (seeded on owner and
+// developer) AND a pack that declared itself a storefront pack
+// (dsl.RegisterStorefrontPack) -- Connect Shopify design, section 9, D4. Every
+// other pack -- referencepack, the example packs, a runtime-mounted product
+// domain -- stays owner-only. The pack's declared DEFAULT plays no part.
+//
+// The same function answers ModuleRow.MayFlip, so the switch the OS draws is
+// the answer the write would give. component/grpc's handler emits exactly one
+// audit event per call, including refusals, with the verdict this returns.
+func AuthorizeSetPackEnabled(ctx context.Context, packDomain string) (auth.UserContext, *ModuleRefusal) {
 	actor, ok := moduleActor(ctx)
 	if !ok {
 		return actor, &ModuleRefusal{Code: moduleCodeUnauthenticated,
 			Message: "set pack enabled: no authenticated caller on this connection"}
 	}
-	if !auth.IsOwner(actor) {
+	if auth.IsOwner(actor) {
+		return actor, nil
+	}
+	if !memqldsl.IsStorefrontPack(packDomain) {
 		return actor, &ModuleRefusal{Code: moduleCodePermissionDenied,
-			Message: fmt.Sprintf("set pack enabled: flipping a pack requires the owner role (you hold %q)", actor.Role)}
+			Message: fmt.Sprintf("set pack enabled: %q is not a storefront pack, so only the owner may flip it (you hold %q)", packDomain, actor.Role)}
+	}
+	if !moduleCapable(ctx, actor, auth.VerbExecute) {
+		return actor, &ModuleRefusal{Code: moduleCodePermissionDenied,
+			Message: fmt.Sprintf("set pack enabled: flipping a storefront pack requires execute on %s, which your role %q does not hold", moduleResource, actor.Role)}
 	}
 	return actor, nil
+}
+
+// SetPackEnabled is the Modules pack flip: authorize, then write.
+//
+// THE WRITE RUNS UNDER INTERNAL ORIGIN, and only after AuthorizeSetPackEnabled
+// admitted the caller, in this function. v1:platform:packState is
+// @rowAuthz(clusterOwner), so a developer's own write onto a pack that has a
+// row is refused by the write guard -- which is what keeps this audited,
+// storefront-checked path the only way a developer flips a pack. The stamp is
+// passed inline to the one Execute and the caller's actor is KEPT, so the
+// row's provenance is the person. component/grpc may not stamp internal origin
+// (call_origin_conformance_test.go), which is why the write lives here.
+//
+// priorEnabled is the graph state before the write (true when no row exists).
+// A refusal is returned, never an error; err is the write's own failure.
+func (e *MemQLEngine) SetPackEnabled(ctx context.Context, packDomain string, enabled bool, reason string) (actor auth.UserContext, priorEnabled bool, refusal *ModuleRefusal, err error) {
+	packDomain = strings.TrimSpace(packDomain)
+	actor, refusal = AuthorizeSetPackEnabled(ctx, packDomain)
+	if refusal != nil {
+		return actor, false, refusal, nil
+	}
+
+	// The flip targets a REGISTERED pack domain. Refusing an unknown name
+	// catches the typo'd flip that would otherwise persist a row the
+	// inventory forever reports as "names no registered pack". Packs are
+	// compiled uniformly into every node type (tag gating stops at app/),
+	// so what this binary has registered is what the mesh has registered.
+	registered := false
+	for _, d := range memqldsl.ListPackDomains() {
+		if d.Origin != "embedded" && d.Name == packDomain {
+			registered = true
+			break
+		}
+	}
+	if packDomain == "" || !registered {
+		return actor, false, &ModuleRefusal{Code: moduleCodeInvalidArgument,
+			Message: fmt.Sprintf("set pack enabled: %q is not a registered pack domain", packDomain)}, nil
+	}
+
+	// Prior state from the graph, for the reply's before/after honesty.
+	priorEnabled = true
+	if states, sErr := e.packStatesForInventory(ctx); sErr == nil {
+		if st, ok := states[packDomain]; ok {
+			priorEnabled = st.Enabled
+		}
+	}
+
+	q := fmt.Sprintf(
+		`mutation setPackEnabled(id:%s, packDomain:%s, enabled:%t, reason:%s)`,
+		langparser.QuoteString(packDomain),
+		langparser.QuoteString(packDomain),
+		enabled,
+		langparser.QuoteString(reason),
+	)
+	_, err = e.Execute(auth.ContextWithInternalOrigin(ctx), q)
+	return actor, priorEnabled, nil, err
 }
 
 // ---------------------------------------------------------------------------
@@ -181,7 +269,8 @@ func AuthorizeSetPackEnabled(ctx context.Context) (auth.UserContext, *ModuleRefu
 // ---------------------------------------------------------------------------
 
 // ListModules assembles the full inventory. The caller has already passed
-// AuthorizeModuleRead; this function does policy-free assembly.
+// AuthorizeModuleRead; the assembly is policy-free except MayFlip, which is
+// the caller's own answer from AuthorizeSetPackEnabled.
 func (e *MemQLEngine) ListModules(ctx context.Context) ([]ModuleRow, error) {
 	manifest, err := moduleManifest()
 	if err != nil {
@@ -204,6 +293,14 @@ func (e *MemQLEngine) ListModules(ctx context.Context) ([]ModuleRow, error) {
 		return nil, err
 	}
 	rows = append(rows, nodeTypeRows...)
+
+	// Whether THIS caller may flip each pack, by the function the write asks.
+	for i := range rows {
+		if rows[i].Kind == ModuleKindPack {
+			_, refusal := AuthorizeSetPackEnabled(ctx, rows[i].Name)
+			rows[i].MayFlip = refusal == nil
+		}
+	}
 
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].Kind != rows[j].Kind {
@@ -232,13 +329,6 @@ func (e *MemQLEngine) ModuleDetail(ctx context.Context, kind, name string) (*Mod
 		}
 	}
 	return nil, nil
-}
-
-// PackStateSnapshot exposes the live v1:platform:packState read to the
-// wire layer (the SetPackEnabled handler reports prior state honestly).
-// Same reader boot uses, same interpretation.
-func (e *MemQLEngine) PackStateSnapshot(ctx context.Context) (map[string]PackStateRow, error) {
-	return e.packStatesForInventory(ctx)
 }
 
 // packStatesForInventory reads the live v1:platform:packState rows when a

@@ -970,18 +970,21 @@ mutation site deleteSite {
 
 /// Flip a pack's per-instance enablement in v1:platform:packState. clusterOwner tier via the
 /// concept's @rowAuthz -- these rows are the deployment's, not any operator's, and the tier injects
-/// the actor gate. The caller (component/grpc's SetPackEnabledMsg handler) verifies the owner role
-/// and writes the audit event BEFORE invoking this; the tier here is the independent second layer.
-/// The id is the bare pack domain -- the engine canonicalizes it to
-/// v1:platform:packState:<packDomain>, so one row per pack with the version history as the flip
-/// audit trail. RESTART-REQUIRED lifecycle: the write changes what each node reads at its next
-/// boot, never what a running node has loaded.
+/// the actor gate. The Modules flip reaches this through MemQLEngine.SetPackEnabled
+/// (component/memql), which admits the owner for any pack and a developer holding execute on
+/// app:cluster/modules for a STOREFRONT pack only, then runs this under internal origin with the
+/// caller's actor kept, so the row's provenance is the person; component/grpc's SetPackEnabledMsg
+/// handler writes one audit event per attempt. The id is the bare pack domain -- the engine
+/// canonicalizes it to v1:platform:packState:<packDomain>, so one row per pack with the version
+/// history as the flip audit trail. RESTART-REQUIRED lifecycle: the write changes what each node
+/// reads at its next boot, never what a running node has loaded.
 ///
 /// The FIRST flip of a pack is a create, and a create needs a cluster owner or server code,
 /// enforced in executeWrite (component/memql/create_rank_floor.go): the tier does not judge a
 /// create, and a floor on this mutation would never see a raw insert() of the same concept (Connect
 /// Shopify design, D13). Internal origin passes. Once a pack has a row, the tier's write guard
-/// refuses every non-owner flip of it, so a direct call below owner is refused either way.
+/// refuses every non-owner flip of it, so a direct call below owner is refused either way: a developer
+/// flips a storefront pack through the Modules path above, never by calling this.
 mutation packState setPackEnabled {
   args {
     id          string!

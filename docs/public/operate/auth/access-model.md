@@ -295,6 +295,31 @@ organization for any change of either binding, clearing included, so the deny
 holds there too. The two named mutations ask for the part on every call,
 clearing included.
 
+**The Modules pack switch is a grant plus a declaration** (Connect Shopify
+design, D4). Reading the inventory is `read` on `app:cluster/modules`, seeded
+on owner, developer and admin -- the same name the OS registry puts on the
+section, so the engine and the shell read one rule. Flipping a pack is the
+cluster owner's for any pack. Anyone else needs BOTH `execute` on
+`app:cluster/modules` (seeded on owner and developer) AND a pack that declared
+itself a storefront pack (`dsl.RegisterStorefrontPack`); every other pack stays
+owner-only, and an admin holds no switch at all. `AuthorizeSetPackEnabled`
+(`component/memql/module_registry.go`) is the one function that decides, and it
+also answers each pack row's `mayFlip`, so the OS draws a switch only where the
+write would be admitted.
+
+The write itself runs in `component/memql`, not in the gRPC handler, because it
+is stamped internal origin and `component/grpc` may never stamp it
+(`call_origin_conformance_test.go`). `SetPackEnabled` calls the gate, returns on
+its refusal, and only then passes the stamp inline to the one `setPackEnabled`
+Execute, keeping the caller's actor so the row's provenance is the person
+(`component/memql/pack_flip_internal_origin_test.go` asserts the ordering).
+`v1:platform:packState` stays `@rowAuthz(clusterOwner)`, and a direct
+`mutation setPackEnabled` below owner is refused either way: on a pack that has a
+row by the write guard, and as a create -- a pack's first row, or a row under an
+id that differs from its `packDomain` -- by the create floor
+(`component/memql/create_rank_floor.go`). The audited, storefront-checked path is
+the only way through for a developer.
+
 **A rank is a floor and a capability is a grant, and a cluster can hold one
 without the other.** "developer and above" is a statement about the ladder;
 "holds `update` on `principal`" is a statement about what a role was given.

@@ -174,7 +174,7 @@ var appReadFloors = map[string][]Role{
 	"app:campaigns":             {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
 	"app:campaigns/logs":        {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:cluster":               {RoleOwner, RoleDeveloper, RoleAdmin},
-	"app:cluster/modules":       {RoleOwner, RoleAdmin},
+	"app:cluster/modules":       {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:cluster/origins":       {RoleOwner},
 	"app:cluster/audit":         {RoleOwner},
 	"app:cluster/logs":          {RoleOwner, RoleDeveloper, RoleAdmin},
@@ -218,8 +218,8 @@ var appReadFloors = map[string][]Role{
 	"app:setup":                 {RoleOwner, RoleDeveloper},
 }
 
-// appPartGrants is the mirror of the Deployables PART seeds (task
-// memql#5301): `execute` on each named part, on owner and developer.
+// appPartGrants is the mirror of the `execute` app seeds: the Deployables
+// PARTS (task memql#5301), on owner and developer, and the Modules pack switch.
 var appPartGrants = map[string][]Role{
 	"app:deployables/sources": {RoleOwner, RoleDeveloper},
 	"app:deployables/deploy":  {RoleOwner, RoleDeveloper},
@@ -247,6 +247,11 @@ var appPartGrants = map[string][]Role{
 	// the Storefront token references a binding can expose are ones an owner
 	// or Connect chose.
 	"app:deployables/store": {RoleOwner, RoleDeveloper},
+	// The pack switch in Cluster > Modules (Connect Shopify design, D4). A
+	// developer holding it flips only a STOREFRONT pack: the other half of
+	// that rule is component/memql's AuthorizeSetPackEnabled, and an owner
+	// flips any pack there without asking this table.
+	"app:cluster/modules": {RoleOwner, RoleDeveloper},
 }
 
 // The app tables fold into capabilitySets before anything reads it, so the

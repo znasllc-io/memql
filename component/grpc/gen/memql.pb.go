@@ -16723,6 +16723,13 @@ type ModuleInfo struct {
 	// Architecture-model id where one exists (node-types, from
 	// v1:cluster:nodeType.codeReference).
 	CodeReference string `protobuf:"bytes,9,opt,name=code_reference,json=codeReference,proto3" json:"code_reference,omitempty"`
+	// Whether THIS caller may flip this pack, answered by the same function
+	// the SetPackEnabledMsg write asks (component/memql
+	// AuthorizeSetPackEnabled): an owner may flip any pack, a developer holding
+	// execute on app:cluster/modules only a storefront pack. False on every
+	// non-pack row. Absent reads as false, so a client draws no switch it was
+	// not told about (Connect Shopify design, D4).
+	MayFlip       bool `protobuf:"varint,10,opt,name=may_flip,json=mayFlip,proto3" json:"may_flip,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -16818,6 +16825,13 @@ func (x *ModuleInfo) GetCodeReference() string {
 		return x.CodeReference
 	}
 	return ""
+}
+
+func (x *ModuleInfo) GetMayFlip() bool {
+	if x != nil {
+		return x.MayFlip
+	}
+	return false
 }
 
 type ModulesListResult struct {
@@ -18666,7 +18680,7 @@ const file_memql_proto_rawDesc = "" +
 	"\aorigins\x18\x02 \x03(\tR\aorigins\"/\n" +
 	"\x0eModulesListMsg\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\"\x96\x02\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\"\xb1\x02\n" +
 	"\n" +
 	"ModuleInfo\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x12\n" +
@@ -18677,7 +18691,9 @@ const file_memql_proto_rawDesc = "" +
 	"\x05scope\x18\x06 \x01(\tR\x05scope\x12%\n" +
 	"\x0eenv_components\x18\a \x03(\tR\renvComponents\x12!\n" +
 	"\ffqn_prefixes\x18\b \x03(\tR\vfqnPrefixes\x12%\n" +
-	"\x0ecode_reference\x18\t \x01(\tR\rcodeReference\"\x8a\x02\n" +
+	"\x0ecode_reference\x18\t \x01(\tR\rcodeReference\x12\x19\n" +
+	"\bmay_flip\x18\n" +
+	" \x01(\bR\amayFlip\"\x8a\x02\n" +
 	"\x11ModulesListResult\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x126\n" +
