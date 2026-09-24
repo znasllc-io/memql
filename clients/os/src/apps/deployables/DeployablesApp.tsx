@@ -371,7 +371,6 @@ function DeployablesAppContent({
         setOpenRequest(held => ({ siteId, revision: (held?.revision ?? 0) + 1 }));
         navigate("deployables", { fromContent: true });
       }}
-      onReseed={reseed}
       onBrowse={() => navigate("deployables", { fromContent: true })}
     />
   );

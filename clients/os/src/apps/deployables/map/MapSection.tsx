@@ -1,5 +1,5 @@
 import type { LiveSnapshot } from "@znasllc-io/memql-sdk-core/client";
-import { Button, Notice, EmptyState, RefreshButton } from "../../../kit";
+import { Button, Notice, EmptyState } from "../../../kit";
 import { Overview, OverviewBreakdown, type OverviewSegment } from "../../../kit/Overview";
 import { absent, figureOf } from "../../../kit/measure";
 import type { ArrivalTick } from "../../../live/arrival";
@@ -12,14 +12,13 @@ export interface MapSelection { nodeId: string; siteIds: string[] }
 export const NO_SELECTION: MapSelection = { nodeId: "", siteIds: [] };
 
 /** Overview reads the same measured rows as the list; it never repeats the list. */
-export function MapSection({ sites, snapshot, ticks, selection, onSelectNode, onOpenDeployable, onReseed, onBrowse }: {
+export function MapSection({ sites, snapshot, ticks, selection, onSelectNode, onOpenDeployable, onBrowse }: {
   sites: readonly SiteRow[];
   snapshot: LiveSnapshot<SiteRow>;
   ticks: Map<string, ArrivalTick>;
   selection: MapSelection;
   onSelectNode: (node: MapNode) => void;
   onOpenDeployable: (siteId: string) => void;
-  onReseed: () => void;
   onBrowse?: () => void;
 }) {
   const current = sites.filter(site => site.status !== "archived");
@@ -33,8 +32,9 @@ export function MapSection({ sites, snapshot, ticks, selection, onSelectNode, on
     { label: "Live", figure: count(states.get("Live") ?? 0) },
     { label: "Unavailable", figure: count(states.get("Unavailable") ?? 0) },
     { label: "Unknown", figure: count(states.get("Unknown") ?? 0) },
-  ]} actions={<RefreshButton label="Refresh overview" onClick={onReseed} />}>
-    {snapshot.error ? <Notice tone="error" sentence="Deployables could not be read." next="Reconnect or refresh to update this overview." /> : null}
+  ]}>
+    {snapshot.error ? <Notice tone="error" sentence="Deployables could not be read." next="Reconnect to update this overview." /> : null}
+    {fresh ? <OverviewBreakdown title="Deployment status" segments={segments} /> : null}
     {current.length === 0 && fresh ? <EmptyState title="No deployables to map yet" action={onBrowse ? <Button onClick={onBrowse}>Open deployables</Button> : undefined}>Add an app to see its address and source here.</EmptyState> : <DeployMap
       sites={current} ticks={ticks} state={snapshot.state} selectedNodeId={selection.nodeId}
       onSelect={node => {
@@ -42,6 +42,5 @@ export function MapSection({ sites, snapshot, ticks, selection, onSelectNode, on
         if (node.siteIds.length === 1) onOpenDeployable(node.siteIds[0]!);
       }}
     />}
-    {fresh ? <OverviewBreakdown title="Deployment status" segments={segments} /> : null}
   </Overview>;
 }
