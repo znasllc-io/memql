@@ -658,7 +658,7 @@ func TestSettingsReachTheServedDocumentAfterOneInvalidation(t *testing.T) {
 }
 
 func TestRuntimeConfigUnboundStorefrontKeepsKindWithoutResolvingSecrets(t *testing.T) {
-	site := &Site{ID: "unbound", Hostname: "shop.example.com", Kind: storefrontKind}
+	site := &Site{ID: "unbound", Hostname: "shop.example.com", Kind: storefrontKind, Status: "live"}
 	h := NewHandler(Options{Resolver: staticResolver{site: site}, SecretResolver: func(context.Context, string) (string, error) {
 		t.Fatal("an unbound storefront must never resolve a secret")
 		return "", nil
