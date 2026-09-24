@@ -299,4 +299,34 @@ describe("refusal copy coverage", () => {
       expect(toneFor(code), code).toBe("warn");
     }
   });
+
+  it("has copy for every way Connect Shopify's callback can end badly", () => {
+    // component/identity/http/shopify_callback.go. The signature and the
+    // scopes are fixed in Shopify, a lost permission by whoever grants it:
+    // next steps. A failed exchange or mint is a fault.
+    expect(copyFor("signature_invalid")?.next).toContain("client secret");
+    expect(copyFor("scopes_missing")?.next).toContain("scopes");
+    expect(copyFor("storefront_token_failed")?.next).toContain("Connect Shopify again");
+    for (const code of ["signature_invalid", "permission_lost", "scopes_missing"]) {
+      expect(toneFor(code), code).toBe("warn");
+    }
+    for (const code of ["exchange_failed", "storefront_token_failed"]) {
+      expect(copyFor(code), code).not.toBeNull();
+      expect(toneFor(code), code).toBe("error");
+    }
+  });
+
+  it("has copy for every reason Connect Shopify's builtins answer", () => {
+    // integrations/shopify/connect.go. Each is a step to take except the
+    // duplicated credential rows, which are the cluster's fault.
+    for (const code of [
+      "site_not_writable", "not_a_storefront", "store_not_named", "store_redacted", "app_credentials_invalid",
+      "store_not_connected", "store_in_use", "storefront_token_required", "storefront_token_invalid", "shopify_app_not_saved",
+    ]) {
+      expect(copyFor(code), code).not.toBeNull();
+      expect(toneFor(code), code).toBe("warn");
+    }
+    expect(copyFor("secret_name_ambiguous")).not.toBeNull();
+    expect(toneFor("secret_name_ambiguous")).toBe("error");
+  });
 });

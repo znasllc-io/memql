@@ -274,6 +274,14 @@ func TestAStateIsSpentOnlyByItsOwnFlow(t *testing.T) {
 		{"a CONNECT state, by the SETUP callback", githubconnect.PurposeConnect, githubconnect.PurposeAppSetup, false},
 		{"a state from before the field existed, by the SETUP callback", "", githubconnect.PurposeAppSetup, false},
 		{"a SETUP state, by the CONNECT callback", githubconnect.PurposeAppSetup, githubconnect.PurposeConnect, false},
+		// Connect Shopify rides the same row, and is its own purpose: a store
+		// connect finishing a GitHub one, or the reverse, is the same forgery.
+		{"a shopify state, by the shopify callback", githubconnect.PurposeShopifyConnect, githubconnect.PurposeShopifyConnect, true},
+		{"a SHOPIFY state, by the CONNECT callback", githubconnect.PurposeShopifyConnect, githubconnect.PurposeConnect, false},
+		{"a SHOPIFY state, by the SETUP callback", githubconnect.PurposeShopifyConnect, githubconnect.PurposeAppSetup, false},
+		{"a CONNECT state, by the SHOPIFY callback", githubconnect.PurposeConnect, githubconnect.PurposeShopifyConnect, false},
+		{"a state from before the field existed, by the SHOPIFY callback", "", githubconnect.PurposeShopifyConnect, false},
+		{"a SETUP state, by the SHOPIFY callback", githubconnect.PurposeAppSetup, githubconnect.PurposeShopifyConnect, false},
 	} {
 		rec := &appRowRecorder{state: stateRowFor(tc.rowPurpose)}
 		row, err := (&Store{GithubGate: githubUnitGate, Engine: rec}).ConsumeGithubConnectStateFor(context.Background(), HashConnectState("plain"), "203.0.113.9", tc.asked)
@@ -319,5 +327,46 @@ func TestASetupStateCarriesItsPurposeAndOrganization(t *testing.T) {
 		if !strings.Contains(write, want) {
 			t.Errorf("the state row is missing %s:\n  %s", want, write)
 		}
+	}
+}
+
+// A Connect Shopify state names the shop, the site and the app it was begun
+// for, and which credentials verify its callback -- written, and read back by
+// the getter the callback consumes through.
+func TestAShopifyStateCarriesItsShopSiteAndCredentials(t *testing.T) {
+	rec := &appRowRecorder{}
+	if _, err := (&Store{Engine: rec}).CreateGithubConnectState(context.Background(), GithubConnectStateSeed{
+		UserId:           "v1:identity:user:dev",
+		StateHash:        HashConnectState("plain"),
+		ExpiresAt:        time.Now().UTC().Add(10 * time.Minute),
+		Purpose:          githubconnect.PurposeShopifyConnect,
+		ShopDomain:       "acme-widgets.myshopify.com",
+		SiteID:           "s1",
+		ClientID:         "client-id-123",
+		CredentialSource: "pending",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	write := rec.writes()[0]
+	if _, err := langparser.ParseExpression(write); err != nil {
+		t.Fatalf("the engine could not parse this write: %v\n  %s", err, write)
+	}
+	for _, want := range []string{
+		`purpose: "shopify_connect"`, `shopDomain: "acme-widgets.myshopify.com"`, `siteId: "s1"`,
+		`clientId: "client-id-123"`, `credentialSource: "pending"`,
+	} {
+		if !strings.Contains(write, want) {
+			t.Errorf("the state row is missing %s:\n  %s", want, write)
+		}
+	}
+
+	state := stateRowFor(githubconnect.PurposeShopifyConnect)
+	state["shopDomain"], state["siteId"], state["clientId"], state["credentialSource"] = "acme-widgets.myshopify.com", "s1", "client-id-123", "current"
+	row, err := (&Store{Engine: &appRowRecorder{state: state}}).LookupGithubConnectState(context.Background(), HashConnectState("plain"))
+	if err != nil || row == nil {
+		t.Fatalf("lookup: %v", err)
+	}
+	if row.ShopDomain != "acme-widgets.myshopify.com" || row.SiteID != "s1" || row.ClientID != "client-id-123" || row.CredentialSource != "current" {
+		t.Fatalf("the getter dropped a Shopify field: %+v", row)
 	}
 }

@@ -133,9 +133,19 @@ rather than a code change.
 
 ## Step 3 -- attach the store to its storefront
 
-MemQL OS → Deployables → the storefront → **Store** → Attach a store.
-Everything about a storefront is configured on its deployable, so attaching the
-store it talks to is done there rather than in an app of its own. It asks for:
+**Connect Shopify does this step.** On the storefront's Store panel, save the
+app from step 2 and press Connect Shopify: the shop's staff approve on Shopify,
+and MemQL seals the credentials, writes the store row, mints the Storefront
+token, attaches the store and registers the webhooks. A developer can do it.
+The whole flow, and every result it can come back with, is
+[Connect Shopify](shopify-connect.md).
+
+The form below is the CLUSTER OWNER's manual route, for a store whose
+credentials are already sealed as `globalSecret` rows -- the environment
+seed's, for instance. MemQL OS → Deployables → the storefront → **Store** →
+Attach a store. Everything about a storefront is configured on its deployable,
+so attaching the store it talks to is done there rather than in an app of its
+own. It asks for:
 
 | Field | What it is |
 |---|---|
@@ -150,8 +160,9 @@ store it talks to is done there rather than in an app of its own. It asks for:
 
 **The three token fields are REFERENCES, not tokens.** The store row is read
 by the console and returned to a browser; a token on it would be a token on a
-screen. Create the secret first (the console's Secrets surface, or
-`memql env`), then name it here.
+screen. No screen seals a token by hand: Connect Shopify seals them on the
+server, and the environment seed below does for a cluster's first store. Name a
+row one of them wrote.
 
 **A store row and a site binding are one record.** The storefront's binding
 NAMES this row -- `binding: {storeId}` on `v1:platform:site` -- and does not
@@ -518,9 +529,9 @@ a real one. It is the end-to-end proof, in the order things can break:
 1. **Install.** Create the custom-distribution app on the dev store with the
    scopes above. Note the Admin token, the Storefront token and the webhook
    secret.
-2. **Configure.** Seal the three secrets, attach the store on the storefront
-   deployable, and confirm its Store panel shows `configured` with no missing
-   scopes. Mark it a development store if that is what it is, and name the
+2. **Configure.** Connect the store from the storefront deployable's Store
+   panel ([Connect Shopify](shopify-connect.md)), and confirm the panel shows
+   it connected with no missing scopes. Mark it a development store if that is what it is, and name the
    live store it stands in for.
 3. **Subscriptions.** Run `shopifyEnsureSubscriptions()`. The store's health
    should show `created` equal to the desired count and `failed` empty.

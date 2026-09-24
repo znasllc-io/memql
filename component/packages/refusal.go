@@ -234,6 +234,85 @@ const (
 	// half-registered: the stored values are all six or none.
 	CodeGithubAppSetupFailed = "github_app_setup_failed"
 
+	// The five below end Connect Shopify (design record
+	// 2026-09-23-connect-shopify, 12.6): answered by its callback on the
+	// identity node, GET /auth/shopify/callback, beside connect_state_invalid,
+	// which it answers too.
+
+	// CodeExchangeFailed: the provider did not trade the approval for a token
+	// -- it refused the code, could not be reached, or answered without one.
+	// Nothing was written, and the repair is to connect again. GitHub Connect
+	// answers it too, for the same fault.
+	CodeExchangeFailed = "exchange_failed"
+	// CodeSignatureInvalid: the callback did not carry Shopify's signature
+	// for the shop Connect was begun for -- the HMAC failed under the app's
+	// client secret, or `shop` named another store. Checked BEFORE the state
+	// is spent, so nothing was: the Connect the person began can still finish.
+	// Usually the saved client secret is not the app's.
+	CodeSignatureInvalid = "signature_invalid"
+	// CodePermissionLost: the person who began no longer may finish. Judged at
+	// the callback under their role then, not when they pressed Connect: their
+	// account is gone or inactive, or they no longer hold the store part, read
+	// the store, or write the storefront.
+	CodePermissionLost = "permission_lost"
+	// CodeScopesMissing: the approval granted less than the storefront needs
+	// -- a Storefront API scope is missing, so its catalog or cart would fail.
+	// The app's required scopes are what to fix, in Shopify. A missing Admin
+	// read scope is shown, never refused.
+	CodeScopesMissing = "scopes_missing"
+	// CodeStorefrontTokenFailed: the store IS connected and the Storefront
+	// token could not be minted (Shopify allows 100 per app). Pressing Connect
+	// again retries only the mint; pasting a token is the other repair.
+	CodeStorefrontTokenFailed = "storefront_token_failed"
+
+	// The eleven below are answered by Connect Shopify's four builtins
+	// (integrations/shopify/connect.go: shopifyConnectStatus,
+	// shopifyStoreAppSave, shopifyConnectBegin, shopifyStorefrontTokenSet)
+	// over the stream, as githubConnectBegin answers its reasons. Catalogued
+	// here with the callback's, for connect_state_invalid's reason.
+
+	// CodeSiteNotWritable: the storefront named is not one the caller may
+	// write -- or not one they can read at all -- so Connect acts on nothing.
+	// The store is resolved from the site on the server, never from the
+	// browser, and this is the first question that resolution asks.
+	CodeSiteNotWritable = "site_not_writable"
+	// CodeNotAStorefront: the site is not a shopify_storefront, so it has no
+	// store to connect.
+	CodeNotAStorefront = "not_a_storefront"
+	// CodeStoreNotNamed: no run that published this storefront named a store
+	// (its deployable's binding.store), or the name is not a myshopify.com
+	// domain. Deploying the storefront with its manifest naming the store is
+	// the repair.
+	CodeStoreNotNamed = "store_not_named"
+	// CodeStoreRedacted: the store's data was purged on Shopify's shop/redact,
+	// and a purged store is not connected again.
+	CodeStoreRedacted = "store_redacted"
+	// CodeAppCredentialsInvalid: a Save was missing the app's client ID or its
+	// client secret, or carried one far too long to be Shopify's.
+	CodeAppCredentialsInvalid = "app_credentials_invalid"
+	// CodeSecretNameAmbiguous: more than one row carries the name a credential
+	// is kept under, and the resolver reads the first, so no write could say
+	// which one it changed. Nothing was written; a cluster owner removes the
+	// duplicate.
+	CodeSecretNameAmbiguous = "secret_name_ambiguous"
+	// CodeStoreNotConnected: a Storefront token needs a store row to point
+	// from, and this store has none yet. Connect first.
+	CodeStoreNotConnected = "store_not_connected"
+	// CodeStoreInUse: the store's Storefront token is served under every
+	// storefront bound to it, and one of them is not the caller's to write, so
+	// changing the token is a cluster owner's act.
+	CodeStoreInUse = "store_in_use"
+	// CodeStorefrontTokenRequired: an empty token clears the store's, and a
+	// live storefront is bound to it and would stop serving its catalog.
+	CodeStorefrontTokenRequired = "storefront_token_required"
+	// CodeStorefrontTokenInvalid: the pasted token did not answer the store's
+	// Storefront API. Nothing was kept.
+	CodeStorefrontTokenInvalid = "storefront_token_invalid"
+	// CodeShopifyAppNotSaved: there is no app to connect with -- nothing is
+	// pending, and the store has no current app with its webhook secret. The
+	// app's client ID and secret are saved on the Store panel first (D7).
+	CodeShopifyAppNotSaved = "shopify_app_not_saved"
+
 	// -- reported, not fatal (D3, and the target model's D9) --
 
 	// CodeGoPackNotDeployable: a bff/ with a go.mod. Reported per-half and

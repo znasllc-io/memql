@@ -939,6 +939,24 @@ query site sitesForPackage {
   shape   siteFull
 }
 
+/// The sites whose serving or preview binding names one store (Connect Shopify, design 12.5) -- the
+/// read that decides whether changing a store's Storefront token reaches anybody else's hostname.
+///
+/// `storeIds` carries the store's bare AND canonical id, because a binding is an object field the
+/// write path does not canonicalize: it holds whichever spelling its writer used, and a site missed
+/// here is a site whose token changes under somebody who never asked. No caller term: the tier decides,
+/// as sitesAll's note records -- Connect reads this as the deployment, which sees every row.
+@unbounded("sites bound to one store -- a store fronts a handful of storefronts")
+@actor
+query site sitesBoundToStore {
+  args {
+    storeIds  array!
+  }
+  filter  row => (row.?binding.storeId in args.storeIds || row.?previewBinding.storeId in args.storeIds)
+              && isNotDeleted(row)
+  shape   siteFull
+}
+
 /// Archived sites -- the OS Archived filter for deployables. The default list
 /// (sitesAll) shows every non-archived site; this is its counterpart, and the two
 /// together are the whole population.

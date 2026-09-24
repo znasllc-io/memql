@@ -3310,6 +3310,10 @@ mutation githubConnectState createGithubConnectState {
     sourceIP    string
     purpose       string
     organization  string
+    shopDomain        string
+    siteId            string
+    clientId          string
+    credentialSource  string
   }
   insert {
     accept { userId, stateHash, expiresAt, sessionId, pkceVerifier, credentialId, expectedExternalId, targetRevokedAt, flowId }
@@ -3319,6 +3323,10 @@ mutation githubConnectState createGithubConnectState {
       sourceIP: args.sourceIP ?? ""
       purpose: args.purpose ?? ""
       organization: args.organization ?? ""
+      shopDomain: args.shopDomain ?? ""
+      siteId: args.siteId ?? ""
+      clientId: args.clientId ?? ""
+      credentialSource: args.credentialSource ?? ""
     }
   }
 }

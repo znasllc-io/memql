@@ -3490,6 +3490,59 @@ func RoutingRulesBuild(args RoutingRulesArgs) string {
 	return "builtin routingRules()"
 }
 
+// ShopifyConnectBegin -- Begin Connect Shopify for a storefront's store (design 12.4, D1, D10): answer the URL the browser navigates to -- Shopify's approve page for the shop the server resolved -- with a single-use state bound to the caller.
+// The app Shopify is asked to approve is the PENDING one a save left, when there is one, otherwise the store's current app and its webhook secret; with neither the reason is shopify_app_not_saved and nothing is written. The state (v1:identity:githubConnectState, purpose shopify_connect) names the shop, the site, the app's client id and which secret verifies the callback, and lives ten minutes. The plaintext state appears only inside authorizeUrl; only its digest is stored. The redirect is this cluster's own identity service, never anything the request said.
+type ShopifyConnectBeginArgs struct {
+	// The storefront deployable. The shop is resolved on the server from the package run that last published it.
+	SiteId string
+	// Where in MemQL OS to land when Connect finishes -- a same-origin path. Anything absolute, protocol-relative or carrying a control character is dropped for the OS root.
+	ReturnPath string
+}
+
+// ShopifyConnectBegin calls the engine builtin shopifyConnectBegin.
+func (qc *QueryClient) ShopifyConnectBegin(ctx context.Context, args ShopifyConnectBeginArgs) (*Result, error) {
+	call := ShopifyConnectBeginBuild(args)
+	return qc.executeNamed(ctx, "shopifyConnectBegin", call)
+}
+
+func ShopifyConnectBeginBuild(args ShopifyConnectBeginArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin shopifyConnectBegin(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if args.ReturnPath != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("returnPath: ")
+		b.WriteString(quoteMemQL(args.ReturnPath))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyConnectStatus -- Where one storefront stands with Connect Shopify (design 12.2) -- what the Store panel draws, and the only thing it draws from: a binding says nothing about whether a store is connected.
+// `reason` is 'ok' when the storefront resolved, and otherwise one of site_not_writable, not_a_storefront, store_not_named or store_redacted, with every other key present and empty. `appSaved` is true when the store has a live appClientId or a pending app was saved; `pendingApp` when a pending app is waiting for an approval; `connected` when the store has an Admin token; `storefrontTokenSet` when it names a Storefront token. `requiredScopes` is the one scope list the Shopify app must request, Storefront scopes first; `grantedScopes` is what the store was granted. Never returns a credential.
+type ShopifyConnectStatusArgs struct {
+	// The storefront deployable. The shop is resolved on the server from the package run that last published it.
+	SiteId string
+}
+
+// ShopifyConnectStatus calls the engine builtin shopifyConnectStatus.
+func (qc *QueryClient) ShopifyConnectStatus(ctx context.Context, args ShopifyConnectStatusArgs) (*Result, error) {
+	call := ShopifyConnectStatusBuild(args)
+	return qc.executeNamed(ctx, "shopifyConnectStatus", call)
+}
+
+func ShopifyConnectStatusBuild(args ShopifyConnectStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin shopifyConnectStatus(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ShopifyEnsureSubscriptions -- Register every mirrored webhook topic for every ingesting store at the pinned API version, update the ones whose URL, version or includeFields have drifted, and remove ours the allowlist no longer wants. Shopify deletes a subscription after eight consecutive delivery failures, so this is what brings a store back after an outage. Records the outcome on each store's health.
 type ShopifyEnsureSubscriptionsArgs struct {
 }
@@ -3664,6 +3717,42 @@ func ShopifyRunComplianceJobsBuild(args ShopifyRunComplianceJobsArgs) string {
 	return "builtin shopifyRunComplianceJobs()"
 }
 
+// ShopifyStoreAppSave -- Save the Shopify app's client ID and secret from a storefront's Store panel (design 12.3, D7).
+// PENDING ONLY (D12). The client ID lands as the globalVariable SHOPIFY_<ID>_PENDING_CLIENT_ID and the secret, sealed on the server, as the globalSecret SHOPIFY_<ID>_PENDING_CLIENT_SECRET. The store row, its live appClientId and the secret that verifies its webhooks are never touched: saving proves nothing about the shop, so it can move nothing a webhook is checked with. They change only after the shop's own staff approve Connect Shopify.
+type ShopifyStoreAppSaveArgs struct {
+	// The storefront deployable whose store the app belongs to.
+	SiteId string
+	// The Shopify app's client ID, from the Dev Dashboard.
+	ClientId string
+	// The Shopify app's client secret. Read once, sealed, and discarded; never stored or echoed in the clear.
+	ClientSecret string
+}
+
+// ShopifyStoreAppSave calls the engine builtin shopifyStoreAppSave.
+func (qc *QueryClient) ShopifyStoreAppSave(ctx context.Context, args ShopifyStoreAppSaveArgs) (*Result, error) {
+	call := ShopifyStoreAppSaveBuild(args)
+	return qc.executeNamed(ctx, "shopifyStoreAppSave", call)
+}
+
+func ShopifyStoreAppSaveBuild(args ShopifyStoreAppSaveArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin shopifyStoreAppSave(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("clientId: ")
+	b.WriteString(quoteMemQL(args.ClientId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("clientSecret: ")
+	b.WriteString(quoteMemQL(args.ClientSecret))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ShopifyStoreHealth -- Report every configured store's status, granted-versus-needed scopes, subscription reconcile time, cost-bucket state and per-domain sync state with drift counters. The read behind the portal's Stores page.
 type ShopifyStoreHealthArgs struct {
 	StoreId string
@@ -3681,6 +3770,37 @@ func ShopifyStoreHealthBuild(args ShopifyStoreHealthArgs) string {
 	if args.StoreId != "" {
 		b.WriteString("storeId: ")
 		b.WriteString(quoteMemQL(args.StoreId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyStorefrontTokenSet -- Use a pasted Storefront API token for a storefront's store, or clear the one it has (design 12.5, D8).
+// Refused `store_in_use` unless the caller is a cluster owner or can write EVERY site bound to the store, serving or preview: a store's token is served under each of their hostnames. A token is checked with one Storefront request before it is sealed; an empty token clears the reference so the next Connect mints one, and is refused while a live storefront is bound to the store.
+type ShopifyStorefrontTokenSetArgs struct {
+	// The storefront deployable whose store the token is for.
+	SiteId string
+	// The Storefront API token. Empty clears the store's token. Read once, sealed, and discarded.
+	Token string
+}
+
+// ShopifyStorefrontTokenSet calls the engine builtin shopifyStorefrontTokenSet.
+func (qc *QueryClient) ShopifyStorefrontTokenSet(ctx context.Context, args ShopifyStorefrontTokenSetArgs) (*Result, error) {
+	call := ShopifyStorefrontTokenSetBuild(args)
+	return qc.executeNamed(ctx, "shopifyStorefrontTokenSet", call)
+}
+
+func ShopifyStorefrontTokenSetBuild(args ShopifyStorefrontTokenSetArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin shopifyStorefrontTokenSet(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if args.Token != "" {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("token: ")
+		b.WriteString(quoteMemQL(args.Token))
 	}
 	b.WriteString(")")
 	return b.String()

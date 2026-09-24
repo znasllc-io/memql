@@ -10373,6 +10373,29 @@ QueryClient.prototype.sitesArchived = function (this: QueryClient, args: SitesAr
   return this.executeNamed("sitesArchived", buildSitesArchived(args), opts);
 };
 
+/** The sites whose serving or preview binding names one store (Connect Shopify, design 12.5) -- the read that decides whether changing a store's Storefront token reaches anybody else's hostname.
+`storeIds` carries the store's bare AND canonical id, because a binding is an object field the write path does not canonicalize: it holds whichever spelling its writer used, and a site missed here is a site whose token changes under somebody who never asked. No caller term: the tier decides, as sitesAll's note records -- Connect reads this as the deployment, which sees every row. */
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["sitesBoundToStore"] in generated_concepts.ts).
+export interface SitesBoundToStoreArgs {
+  storeIds: unknown[];
+}
+
+export function buildSitesBoundToStore(args: SitesBoundToStoreArgs): string {
+  const parts: string[] = [];
+  parts.push("storeIds: " + renderMemQLValue(args.storeIds));
+  return "query sitesBoundToStore(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    sitesBoundToStore(args: SitesBoundToStoreArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.sitesBoundToStore = function (this: QueryClient, args: SitesBoundToStoreArgs = {} as SitesBoundToStoreArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("sitesBoundToStore", buildSitesBoundToStore(args), opts);
+};
+
 /** The deployables tied to one account.
 `isNotDeleted` is `sitesAll`'s own conjunct, repeated here rather than referenced: this is the same read that query makes, narrowed by the tie field, and a soft-deleted site must stay gone from a rollup for the reason it is gone from the list.
 NO CALLER TERM, DELIBERATELY (memql#5303, design 2026-09-11-app-access-grants D4). This is the account VIEW -- the one read whose whole purpose is the tie -- and it used to carry `(ownerUserId==actor.userId || actor.isClusterOwner==true)` beside the tie field, which is the tier's first two arms restated minus the third: a member of Acme's group was admitted to Acme's sites by `account="accountId"` and then filtered out by this query. The tier decides the row set; TestAccountGrantReachesTheAccountView reads it for a member and a stranger, and tierDecidesTheRead records the construct.

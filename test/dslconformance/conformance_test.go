@@ -521,6 +521,12 @@ var idBearingFieldExemptions = map[string]string{
 	// contract anyway. See the comment on the concept.
 	"identity/group.accountId":             "plain-fk-by-design: the bare name `account` shadows in this file, so a relationship would canonicalize under the WRONG concept (epic memql#5165)",
 	"identity/groupMembership.ownerUserId": "plain-fk-by-design: always empty (epic memql#5165 D2); the owned tier needs a present-and-empty owner key, and the field names no target",
+	// A Connect Shopify state names the storefront it was begun from, and the
+	// callback RE-RESOLVES it (integrations/shopify ResolveConnectSite) rather
+	// than traversing it, then hands it back to the browser -- where the wire
+	// contract is the bare id. A relationship would canonicalize it on insert
+	// and pull the platform site into a concept every node type loads.
+	"identity/githubConnectState.siteId": "bare-by-contract: re-resolved by the Connect Shopify callback, never traversed, and echoed to the browser bare (design record 2026-09-23-connect-shopify, 12.4)",
 	// v1:rbac:grant.subjectId is POLYMORPHIC, discriminated by subjectKind
 	// (epic memql#5294) -- the auditEvent targetType / targetId shape. One
 	// field cannot carry two @relationship targets, and a relationship declared

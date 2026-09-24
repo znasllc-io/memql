@@ -262,6 +262,7 @@ var tierDecidesTheRead = map[string]string{
 	"sitesAll":                          "memql#5303, D4 / D12. The tier's account arm has no author spelling, so the written-out `own || clusterOwner` conjunct was the tier minus one arm and an AND with it filtered out every account-admitted row. The tier decides.",
 	"siteById":                          "memql#5303, as sitesAll -- and the by-id read every site builtin gates a write on.",
 	"sitesForPackage":                   "memql#5303, as sitesAll.",
+	"sitesBoundToStore":                 "Connect Shopify 12.5, as sitesAll. Connect reads it as the deployment, which the clusterOwner arm admits to every row -- a site it missed would have its Storefront token changed under somebody who never asked. TestConnectResolvesAndSavesAgainstARealEngine (integrations/shopify).",
 	"sitesArchived":                     "memql#5303, as sitesAll.",
 	"sitesForAccount":                   "memql#5303, as sitesAll -- the account VIEW, whose whole purpose is the tie the conjunct filtered out. TestAccountGrantReachesTheAccountView.",
 	"packagesAll":                       "memql#5303, D4 / D12, as sitesAll over v1:platform:package.",

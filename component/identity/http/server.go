@@ -219,6 +219,14 @@ type Server struct {
 	// Nil falls back to Cfg.GitHubApp -- the environment alone, which is what
 	// every test that builds a Server by hand means by it.
 	GitHubApp *githubconnect.Resolver
+
+	// ShopifyConnect is Connect Shopify's half of GET /auth/shopify/callback
+	// (design record 2026-09-23-connect-shopify, 12.7): the checks and writes
+	// that need the store, its sealed secrets and Shopify. Implemented in
+	// integrations/shopify, which this module cannot import, and wired in
+	// app/integrations_identity.go. Nil answers the route 404 past the
+	// install landing.
+	ShopifyConnect identity.ShopifyConnect
 }
 
 // gitHubApp is the one place a handler asks which GitHub App this cluster has.
@@ -345,6 +353,12 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	// page that STARTS the flow is component/identity/web's, because it is a
 	// page.
 	mux.HandleFunc("GET "+githubconnect.AppSetupCallbackPath, wrap(s.handleGitHubAppSetupCallback))
+	// CONNECT SHOPIFY (design record 2026-09-23-connect-shopify, D2, D10). The
+	// class and the placement of the two routes above, for their reasons:
+	// Shopify redirects a BROWSER here, the flow started over the stream
+	// (shopifyConnectBegin), and declaring it in component/server would publish
+	// it on api.<domain>. No s.cors -- a top-level navigation.
+	mux.HandleFunc("GET "+githubconnect.ShopifyCallbackPath, wrap(s.handleShopifyCallback))
 	mux.HandleFunc("POST /oauth/token", wrap(s.cors(s.handleToken)))
 	mux.HandleFunc("OPTIONS /oauth/token", wrap(s.cors(s.handleOptions)))
 

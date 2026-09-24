@@ -444,8 +444,28 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// escalation. One seam, for the identity store's reason: a stamp
 		// hand-rolled per call site is a stamp the next call site copies
 		// slightly wrong, and this gate polices packages rather than sites.
-		"integrations/release":           "cutting a release of MemQL itself -- REQUEST-DERIVED, earned by every stamped path sitting downstream of the Go owner wall in the same function (asserted by integrations/release/owner_wall_test.go), and bounded to two append-only bookkeeping writes plus an audit event (epic memql#4434)",
-		"integrations/shopify":           "the shopify CONNECTOR -- server-initiated mirror writes; its @serverOnly mutations exist because the concept is a mirror, and the connector actor stamped beside internal origin bounds the reach to that mirror alone (epic memql#4378)",
+		"integrations/release": "cutting a release of MemQL itself -- REQUEST-DERIVED, earned by every stamped path sitting downstream of the Go owner wall in the same function (asserted by integrations/release/owner_wall_test.go), and bounded to two append-only bookkeeping writes plus an audit event (epic memql#4434)",
+		// The shopify CONNECTOR, and TWO shapes under one entry.
+		//
+		// SERVER-INITIATED: the mirror writes, whose @serverOnly mutations
+		// exist because the concept is a mirror, stamped with the connector
+		// actor that bounds the reach to that mirror alone (epic memql#4378);
+		// and the connector's own bookkeeping under operatorContext.
+		//
+		// REQUEST-DERIVED, since Connect Shopify (design record
+		// 2026-09-23-connect-shopify, 12.3, 12.5, 12.6): shopifyStoreAppSave
+		// seals a person's pending app credentials, shopifyStorefrontTokenSet
+		// seals a pasted Storefront token and re-points the store at it, and
+		// the identity callback writes the store row -- each under
+		// operatorContext, because a store row and its secrets are the
+		// cluster's. What earns it is ORDER, and it is asserted rather than
+		// stated: every such write is downstream of the store part
+		// (@requiresCapability("execute", "app:deployables/store"), asked by
+		// the engine at the builtin before the handler runs) and of
+		// ResolveConnectSite's site checks in the same handler --
+		// integrations/shopify/connect_precondition_test.go drives every
+		// refusal and asserts no write is reached.
+		"integrations/shopify":           "the shopify CONNECTOR -- server-initiated mirror writes under the connector actor (epic memql#4378), plus REQUEST-DERIVED Connect Shopify writes under operatorContext, each downstream of the store part and the site checks (asserted by integrations/shopify/connect_precondition_test.go)",
 		"component/identity/recoverykey": "break-glass recovery-key store -- REQUEST-DERIVED on the redeem path; earned by the argument being a digest of a presented secret rather than a caller-chosen id, asserted by component/identity/recoverykey/store_internal_origin_test.go",
 		// REQUEST-DERIVED, and the SECOND exception -- not, as the first draft
 		// of this entry said, "a credential store whose reads are

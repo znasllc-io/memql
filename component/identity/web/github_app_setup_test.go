@@ -227,6 +227,7 @@ func TestAStateThatIsNotLiveGetsNoPage(t *testing.T) {
 		"already spent":           liveSetupState(map[string]string{"consumedAt": time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)}),
 		"expired":                 liveSetupState(map[string]string{"expiresAt": time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)}),
 		"a CONNECT state":         liveSetupState(map[string]string{"purpose": githubconnect.PurposeConnect}),
+		"a SHOPIFY state":         liveSetupState(map[string]string{"purpose": githubconnect.PurposeShopifyConnect}),
 		"a state with no purpose": liveSetupState(map[string]string{"purpose": ""}),
 	} {
 		eng := &setupEngine{state: state}

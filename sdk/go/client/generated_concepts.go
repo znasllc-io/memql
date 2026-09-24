@@ -929,6 +929,7 @@ var BoundConcepts = map[string]string{
 	"sitePreviewObservationsForSite":                   "v1:platform:sitePreviewObservation",
 	"sitesAll":                                         "v1:platform:site",
 	"sitesArchived":                                    "v1:platform:site",
+	"sitesBoundToStore":                                "v1:platform:site",
 	"sitesForAccount":                                  "v1:platform:site",
 	"sitesForPackage":                                  "v1:platform:site",
 	"skillById":                                        "v1:skills:skill",

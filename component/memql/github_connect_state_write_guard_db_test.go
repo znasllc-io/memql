@@ -181,7 +181,7 @@ func TestConnectStateServerWritesWithInternalOriginStillLand(t *testing.T) {
 }
 
 // TestAConnectStateReadCarriesItsCreatedAt pins what consume's lifetime check
-// depends on (component/identity, GithubConnectStateRow.serverShaped): the read
+// depends on (component/identity, GithubConnectStateRow.ServerShaped): the read
 // the identity store makes returns the row's createdAt. Consume refuses a state
 // whose lifetime it cannot measure, so without createdAt on this read every
 // real state would look planted and GitHub Connect would stop working.

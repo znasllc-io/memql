@@ -396,6 +396,86 @@ const COPY: Record<string, RefusalCopy> = {
     next: "Nothing was kept here. If GitHub now lists an app it made for this cluster, delete it there, then start again.",
   },
 
+  // -- the end of Connect Shopify (engine design record
+  //    2026-09-23-connect-shopify, 12.6); connect_state_invalid above too --
+  exchange_failed: {
+    // The provider did not trade the approval for a token. Nothing was
+    // written, so trying again is safe. GitHub Connect answers it as well.
+    title: "The connection was not completed",
+    next: "Nothing was changed. Try connecting again.",
+  },
+  signature_invalid: {
+    // Checked before the link is spent, so the Connect is still open. The
+    // usual cause is a saved secret that is not this app's.
+    title: "Shopify's reply could not be verified",
+    next: "Check the app's client secret on the Store panel, save it again, then connect again.",
+  },
+  permission_lost: {
+    // Judged when Shopify sent the person back, under their role then.
+    title: "You can no longer connect this storefront",
+    next: "Ask a cluster owner for access to this storefront's store.",
+  },
+  scopes_missing: {
+    title: "Shopify granted less than the storefront needs",
+    next: "Add the required Storefront scopes to the app in Shopify, release it, then connect again.",
+  },
+  storefront_token_failed: {
+    // The store IS connected; only the Storefront token is missing.
+    title: "Connected, but the Storefront token could not be made",
+    next: "Press Connect Shopify again to retry, or paste a Storefront token.",
+  },
+
+  // -- Connect Shopify's four builtins, on the Store panel (engine design
+  //    record 2026-09-23-connect-shopify, 12.1-12.5). Plain for now; the
+  //    Store panel's own pass revisits the wording. --
+  site_not_writable: {
+    title: "You cannot change this storefront",
+    next: "Ask its owner or a cluster owner for access.",
+  },
+  not_a_storefront: {
+    title: "This deployable is not a Shopify storefront",
+    next: "",
+  },
+  store_not_named: {
+    // The shop comes from the run that published the storefront, never from
+    // the browser, so deploying is the only way to name it.
+    title: "This storefront does not name a Shopify store yet",
+    next: "Name the store in the package manifest, deploy, then connect.",
+  },
+  store_redacted: {
+    title: "This store's data was removed at Shopify's request",
+    next: "A removed store cannot be connected again.",
+  },
+  app_credentials_invalid: {
+    title: "The app's client ID and secret are needed",
+    next: "Copy both from the app in Shopify's Dev Dashboard, then save again.",
+  },
+  secret_name_ambiguous: {
+    // A fault in the cluster's own records, not in what was typed.
+    title: "This store's saved credentials are duplicated",
+    next: "Nothing was changed. Ask a cluster owner to remove the duplicate.",
+  },
+  store_not_connected: {
+    title: "This store is not connected yet",
+    next: "Connect Shopify first, then paste a Storefront token if you need one.",
+  },
+  store_in_use: {
+    title: "Another storefront you cannot change uses this store",
+    next: "Ask a cluster owner to change this store's Storefront token.",
+  },
+  storefront_token_required: {
+    title: "A live storefront needs this store's Storefront token",
+    next: "Paste a new token instead of clearing it.",
+  },
+  storefront_token_invalid: {
+    title: "Shopify did not accept that Storefront token",
+    next: "Nothing was kept. Check the token in Shopify and paste it again.",
+  },
+  shopify_app_not_saved: {
+    title: "No Shopify app is saved for this store",
+    next: "Save the app's client ID and secret on the Store panel, then connect.",
+  },
+
   // -- the lifecycle's fourth rung, and the stop button (epic memql#4937) --
 
   site_not_deletable: {
@@ -545,6 +625,23 @@ const NOT_A_FAULT: ReadonlySet<string> = new Set([
   "github_app_setup_forbidden",
   "github_app_setup_invalid",
   "github_app_setup_state_invalid",
+  // Connect Shopify's: a secret or scopes to fix in Shopify, access to ask for.
+  "signature_invalid",
+  "permission_lost",
+  "scopes_missing",
+  // And its builtins': each is a step to take -- access to ask for, a deploy,
+  // an app to save, a token to fix. `secret_name_ambiguous` is left out ON
+  // PURPOSE: duplicated credential rows are a fault in the cluster's records.
+  "site_not_writable",
+  "not_a_storefront",
+  "store_not_named",
+  "store_redacted",
+  "app_credentials_invalid",
+  "store_not_connected",
+  "store_in_use",
+  "storefront_token_required",
+  "storefront_token_invalid",
+  "shopify_app_not_saved",
 ]);
 
 /**

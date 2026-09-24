@@ -348,6 +348,13 @@ func TestASetupCallbackRefuses(t *testing.T) {
 			user:  ownerRow(), gh: okGitHub(),
 			result: "github_app_setup_state_invalid", audit: "github_app_setup_refused",
 		},
+		// Connect Shopify's state rides the same row, and a developer mints one.
+		"a SHOPIFY state": {
+			query: "code=" + appSetupCode + "&state=" + appSetupState,
+			state: liveAppState(map[string]string{"purpose": githubconnect.PurposeShopifyConnect}),
+			user:  ownerRow(), gh: okGitHub(),
+			result: "github_app_setup_state_invalid", audit: "github_app_setup_refused",
+		},
 		"somebody demoted since they began": {
 			query: "code=" + appSetupCode + "&state=" + appSetupState, state: liveAppState(nil),
 			user: map[string]string{"id": "v1:identity:user:owner", "role": "developer", "active": "true"}, gh: okGitHub(),

@@ -81,6 +81,7 @@ The packs take effect after the node that answers storefront forms restarts. Tha
 | D13 | Two security fixes ride this epic as their own PRs (sections 6 and 11), because the new features are only safe with them | proposed by design review; approved by the user, 2026-09-23 |
 | D14 | PR 1's floor is developer, not owner: developers and owners may create store and pack records; everyone below is refused | the user, 2026-09-23; **superseded by D15** |
 | D15 | PR 1's floor is **owner**: only a cluster owner or server code creates store and pack records. Implementation review found two exploits in a developer authoring these rows directly (section 6), and no developer step needs a direct create: Connect writes the store and the Modules flip writes the pack, both as server code | proposed by implementation review; confirmed by the user, 2026-09-23 |
+| D16 | Connect Shopify's state is session-bound as GitHub Connect's is | the user, 2026-09-24 |
 
 ### Facts from Shopify that shape the design
 
@@ -585,6 +586,27 @@ A test pins the list.
 - **CLAUDE.md:** the HTTP exceptions row.
 - **Generated files:** `make sdk-gen` for the four builtins, and `make concept-snapshot` for the state fields.
 
+### 12.12 As built (PR 7)
+
+Where the built engine says more than 12.1 to 12.11, or differs:
+
+- **Step 8 asks the store part twice:** the person's own, and at the storefront's organization (memql#5598), through the engine's `MayChangeStoreBinding` with the site treated as bound to nothing, so a reconnect cannot skip it. It is the question the attach's two guards ask.
+- **Step 8 on a first Connect.** With no store row to read back, step 8 asks the store's read tier instead (`MemQLEngine.MayReadConcept`, which answers the `clusterOwner` tier and its read floor without a row). Without it, a writer granted the store part passed step 8, and the Admin token, the promotion, the store row and the Storefront token were all written before the attach refused them.
+- **`MayWriteRow`** (`component/memql/rowauthz_may_write.go`) answers the row-authz write guard without writing. 12.1's first check and step 8 ask it. The organization boundary is a separate question, which step 8 asks through `MayChangeStoreBinding`.
+- **D16, session binding.** Begin records the caller's browser session (the `sid` claim) as the state's `sessionId`, and refuses a call that has none. The callback proves the same live session with GitHub Connect's own check, `githubSessionMatches`, reading the HTTP-only refresh cookie. It runs in step 3, after the lookup and before the signature and the spend. A callback without that session is `connect_state_invalid`, audited as `session_invalid`, and spends nothing. No PKCE: Shopify's authorization code grant takes none, so the state carries no verifier.
+- **D12, the secret that is promoted** is the one the code was exchanged with, carried from step 9 to step 11 on the grant (hidden from `String()` as the token is). The pending row is not read again at write time. The pending pair is cleared only if it still names the state's client ID and that secret, compared as SHA-256 digests. A Save made during the approval stays pending.
+- **Step 15 runs after the redirect,** in the background with a detached context and a ten-minute timeout. Each subscribed topic is one paced Admin call, and a browser is waiting on the redirect.
+- **The audit of a partial result.** Once steps 11 and 12 have landed, the write reports that it kept a connection. The audit is then `shopify_connected` or `shopify_reconnected` (a success), even when the mint or the attach failed afterwards, and `detail.reason` names the step that failed. `shopify_connect_refused` means nothing was kept.
+- **`appSaved`** in 12.2 uses Begin's own test: pending credentials, or a current `appClientId` whose webhook secret row exists. An app ID with no secret to verify with is not saved.
+- **Reason codes beyond the spec,** answered by the builtins and catalogued with the rest:
+  - `app_credentials_invalid`: a Save missing the client ID or secret, or with one too long
+  - `store_not_connected`: a token pasted for a store with no row
+  - `storefront_token_required`: the empty token refused while a live storefront is bound (12.5 describes this refusal without naming it)
+  - `storefront_token_invalid`: the `{ shop { name } }` check failed
+  - Begin also answers `connect_state_invalid` when the state row cannot be stored, as GitHub Connect's begin does.
+- **`sitesBoundToStore`** (`dsl/platform/queries.memql`) is a new query: every site whose serving or preview binding names the store. 12.5's `store_in_use` reads it under `operatorContext`.
+- **`publishedStoreName` reads the newest 50 runs** of the package, one page of `packageDeployments`. A storefront last published further back answers `store_not_named` until it is redeployed.
+
 ## 13. PR 8: Connect Shopify, MemQL OS
 
 The Store panel (`clients/os/src/apps/deployables/store/StorePanel.tsx`) reads its state from `shopifyConnectStatus`:
@@ -624,6 +646,7 @@ The Store panel (`clients/os/src/apps/deployables/store/StorePanel.tsx`) reads i
 - **The shop comes from the server,** never the browser (12.1).
 - **Credentials change only on approval.** A store's credentials change only after Shopify approval by the shop's own staff (12.3 and 12.6 step 11).
 - **Callback order.** The callback verifies Shopify's signature before spending the state, re-derives every stored field, and judges the person by their real role at the moment of the callback (12.6).
+- **The browser that began finishes (D16).** The state is bound to the browser session that pressed Connect, and a callback without that live session spends nothing (12.12).
 - **Secrets stay hidden.** They never appear in URLs, logs, audit events or errors. Exchanges use the request body, and failures are recorded as fixed tokens.
 - **The privacy-export owner never moves:** `ownerUserId` is never overwritten.
 - **Two security holes close first:** creates on store and pack records by anyone but an owner or server code, by any path including the raw `insert(...)` literal (PR 1), and forged states (PR 6).

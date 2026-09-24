@@ -31,13 +31,21 @@ func repoRoot(t *testing.T) string {
 }
 
 // identityRaiseSites are the files that answer a code a person can see during
-// GitHub Connect or while the cluster's GitHub App is registered.
+// GitHub Connect, while the cluster's GitHub App is registered, or during
+// Connect Shopify -- whose four builtins answer their reasons over the stream
+// as githubConnectBegin does (integrations/shopify/connect.go), and whose
+// callback answers its own tokens and the Shopify half's
+// (integrations/shopify/connect_callback.go, reached through
+// identity.ShopifyConnect).
 var identityRaiseSites = []string{
 	"integrations/identity/githubconnect.go",
 	"integrations/identity/githubapp.go",
 	"component/identity/http/github_callback.go",
 	"component/identity/http/github_app_callback.go",
 	"component/identity/web/github_app_setup.go",
+	"component/identity/http/shopify_callback.go",
+	"integrations/shopify/connect.go",
+	"integrations/shopify/connect_callback.go",
 }
 
 // resultConst matches the constants those files keep their outcomes in. The
@@ -52,13 +60,6 @@ var resultConst = regexp.MustCompile(`(?m)^\s*(?:const\s+)?((?:result|connectRea
 var notRefusals = map[string]bool{
 	"ok": true, "connected": true, "reconnected": true, "installed": true,
 	"github_app_registered": true,
-	// NOT A SUCCESS, and recorded here honestly rather than fixed in passing:
-	// GitHub Connect's `exchange_failed` predates this test and was never
-	// catalogued, so MemQL OS renders it under its generic connect-return
-	// sentence (sources/ConnectReturnNotice.tsx) rather than copy of its own.
-	// Cataloguing it is a change to the Connect flow's wording, which is not
-	// what the commit that added this test is about.
-	"exchange_failed": true,
 }
 
 func TestEveryCodeTheIdentityNodeAnswersIsCatalogued(t *testing.T) {
@@ -101,11 +102,15 @@ func TestEveryCodeTheIdentityNodeAnswersIsCatalogued(t *testing.T) {
 			strings.Join(uncatalogued, "\n  "))
 	}
 
-	// AND THE OTHER WAY, for the five this design added: a catalogue entry the
-	// identity node never answers is copy nobody can reach.
+	// AND THE OTHER WAY: a catalogue entry the identity node never answers is
+	// copy nobody can reach.
 	for _, code := range []string{
 		CodeGithubAppManagedByEnvironment, CodeGithubAppSetupForbidden, CodeGithubAppSetupInvalid,
 		CodeGithubAppSetupStateInvalid, CodeGithubAppSetupFailed, CodeConnectStateInvalid, CodeGithubAppNotConfigured,
+		CodeExchangeFailed, CodeSignatureInvalid, CodePermissionLost, CodeScopesMissing, CodeStorefrontTokenFailed,
+		CodeSiteNotWritable, CodeNotAStorefront, CodeStoreNotNamed, CodeStoreRedacted, CodeAppCredentialsInvalid,
+		CodeSecretNameAmbiguous, CodeStoreNotConnected, CodeStoreInUse, CodeStorefrontTokenRequired,
+		CodeStorefrontTokenInvalid, CodeShopifyAppNotSaved,
 	} {
 		if _, ok := seen[code]; !ok {
 			t.Errorf("%s is catalogued as raised on the identity node, and no identity raise site answers it", code)

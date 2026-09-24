@@ -96,14 +96,22 @@ type GithubConnectStateRow struct {
 	ConsumedFromIP string
 	SourceIP       string
 	// Purpose is which flow minted the state: githubconnect.PurposeConnect
-	// (or blank, which every row written before the field existed is) or
-	// githubconnect.PurposeAppSetup.
+	// (or blank, which every row written before the field existed is),
+	// githubconnect.PurposeAppSetup or githubconnect.PurposeShopifyConnect.
 	Purpose string
 	// Organization is, for an app-setup state, the GitHub organization the
 	// app is to be registered under; blank is the person's own account.
 	Organization string
+	// ShopDomain, SiteID, ClientID and CredentialSource are a Connect Shopify
+	// state's (githubconnect.PurposeShopifyConnect): the normalized shop, the
+	// storefront site, the app's client id and whether its secret is the
+	// pending one or the store's current one. Blank on every other flow.
+	ShopDomain       string
+	SiteID           string
+	ClientID         string
+	CredentialSource string
 	// CreatedAt is the row's own intrinsic, read so consume can tell a state
-	// the server wrote from one it could not have (serverShaped). It rides the
+	// the server wrote from one it could not have (ServerShaped). It rides the
 	// NODE, not the payload: the read's payload carries no createdAt key.
 	CreatedAt time.Time
 }
@@ -121,13 +129,13 @@ func nodeCreatedAt(n *memqlv1.MemoryNode) time.Time {
 // Every writer sets expiresAt to createdAt plus ten minutes; the rest is skew.
 const maxGithubConnectStateLifetime = 15 * time.Minute
 
-// serverShaped reports whether the row's lifetime is one a server writer
+// ServerShaped reports whether the row's lifetime is one a server writer
 // sets. A row planted through the raw insert literal before the executeWrite
 // guard shipped (memql#5623) carries an expiry its planter chose -- the forgery
 // that proved the hole used the year 2099 -- or none at all, and the guard
 // cannot reach back to rows already in the table. Consume treats such a row as
 // a state it has never seen.
-func (r *GithubConnectStateRow) serverShaped() bool {
+func (r *GithubConnectStateRow) ServerShaped() bool {
 	if r.CreatedAt.IsZero() || r.ExpiresAt.IsZero() {
 		return false
 	}
@@ -179,6 +187,11 @@ type GithubConnectStateSeed struct {
 	// connect state, which is what every caller before app setup wrote.
 	Purpose      string
 	Organization string
+	// ShopDomain, SiteID, ClientID, CredentialSource: see GithubConnectStateRow.
+	ShopDomain       string
+	SiteID           string
+	ClientID         string
+	CredentialSource string
 }
 
 // CreateGithubConnectState writes the row a later callback will consume.
@@ -207,7 +220,7 @@ func (s *Store) CreateGithubConnectState(ctx context.Context, seed GithubConnect
 
 	stateId := "v1:identity:githubConnectState:" + id.NewShortId()
 	query := fmt.Sprintf(
-		`mutation createGithubConnectState(stateId: %s, userId: %s, stateHash: %s, expiresAt: %s, returnPath: %s, sourceIP: %s, purpose: %s, organization: %s, sessionId: %s, pkceVerifier: %s, credentialId: %s, expectedExternalId: %s, targetRevokedAt: %s, flowId: %s)`,
+		`mutation createGithubConnectState(stateId: %s, userId: %s, stateHash: %s, expiresAt: %s, returnPath: %s, sourceIP: %s, purpose: %s, organization: %s, sessionId: %s, pkceVerifier: %s, credentialId: %s, expectedExternalId: %s, targetRevokedAt: %s, flowId: %s, shopDomain: %s, siteId: %s, clientId: %s, credentialSource: %s)`,
 		langparser.QuoteString(stateId),
 		langparser.QuoteString(userId),
 		langparser.QuoteString(seed.StateHash),
@@ -218,6 +231,10 @@ func (s *Store) CreateGithubConnectState(ctx context.Context, seed GithubConnect
 		langparser.QuoteString(strings.TrimSpace(seed.Organization)),
 		langparser.QuoteString(seed.SessionId), langparser.QuoteString(seed.PKCEVerifier),
 		langparser.QuoteString(seed.CredentialId), langparser.QuoteString(seed.ExpectedExternalId), langparser.QuoteString(seed.TargetRevokedAt), langparser.QuoteString(seed.FlowId),
+		langparser.QuoteString(strings.TrimSpace(seed.ShopDomain)),
+		langparser.QuoteString(strings.TrimSpace(seed.SiteID)),
+		langparser.QuoteString(strings.TrimSpace(seed.ClientID)),
+		langparser.QuoteString(strings.TrimSpace(seed.CredentialSource)),
 	)
 	// INTERNAL ORIGIN: createGithubConnectState is @serverOnly, and the engine
 	// refuses such a construct unless the context carries it -- so without
@@ -270,11 +287,11 @@ func (s *Store) ConsumeGithubConnectState(ctx context.Context, stateHash, consum
 // ConsumeGithubConnectStateFor is ConsumeGithubConnectState for a named flow.
 //
 // A ROW OF ANOTHER PURPOSE IS A STATE THIS CALLER HAS NEVER SEEN. The Connect
-// callback and the app-setup callback share this row shape and this lock, and
-// what must never happen is one spending the other's: a connect state finishing
-// a registration would let anybody who can press Connect replace the cluster's
-// app, and a setup state finishing a connect would land a grant from a flow
-// that was never a connect. So the purpose is checked INSIDE the critical
+// callback, the app-setup callback and the Connect Shopify callback share this
+// row shape and this lock, and what must never happen is one spending
+// another's: a connect state finishing a registration would let anybody who
+// can press Connect replace the cluster's app, and a setup state finishing a
+// connect would land a grant from a flow that was never a connect. So the purpose is checked INSIDE the critical
 // section, beside the other three refusals, and a mismatch is answered exactly
 // as an unknown digest is -- and leaves the row UNSPENT, for the callback it
 // does belong to.
@@ -285,7 +302,7 @@ func (s *Store) ConsumeGithubConnectStateFor(ctx context.Context, stateHash, con
 		if err != nil {
 			return fmt.Errorf("identity.store: consume github connect state: re-read: %w", err)
 		}
-		if found == nil || !found.IsFor(purpose) || !found.serverShaped() {
+		if found == nil || !found.IsFor(purpose) || !found.ServerShaped() {
 			return ErrGithubConnectStateNotFound
 		}
 		if !found.ConsumedAt.IsZero() {
@@ -320,19 +337,27 @@ func firstGithubConnectStateRow(nodes []*memqlv1.MemoryNode) *GithubConnectState
 	}
 	g := newFieldGetter(nodes[0])
 	return &GithubConnectStateRow{
-		ID:             firstNonEmpty(g.str("id"), nodes[0].GetId()),
-		UserId:         g.str("userId"),
-		StateHash:      g.str("stateHash"),
-		ReturnPath:     g.str("returnPath"),
-		ExpiresAt:      g.time("expiresAt"),
-		ConsumedAt:     g.time("consumedAt"),
-		ConsumedFromIP: g.str("consumedFromIP"),
-		SourceIP:       g.str("sourceIP"),
-		Purpose:        g.str("purpose"),
-		Organization:   g.str("organization"),
-		SessionId:      g.str("sessionId"), PKCEVerifier: g.str("pkceVerifier"),
-		CredentialId: g.str("credentialId"), ExpectedExternalId: g.str("expectedExternalId"), TargetRevokedAt: g.str("targetRevokedAt"), FlowId: g.str("flowId"),
-		CreatedAt: nodeCreatedAt(nodes[0]),
+		ID:                 firstNonEmpty(g.str("id"), nodes[0].GetId()),
+		UserId:             g.str("userId"),
+		StateHash:          g.str("stateHash"),
+		ReturnPath:         g.str("returnPath"),
+		ExpiresAt:          g.time("expiresAt"),
+		ConsumedAt:         g.time("consumedAt"),
+		ConsumedFromIP:     g.str("consumedFromIP"),
+		SourceIP:           g.str("sourceIP"),
+		Purpose:            g.str("purpose"),
+		Organization:       g.str("organization"),
+		SessionId:          g.str("sessionId"),
+		PKCEVerifier:       g.str("pkceVerifier"),
+		CredentialId:       g.str("credentialId"),
+		ExpectedExternalId: g.str("expectedExternalId"),
+		TargetRevokedAt:    g.str("targetRevokedAt"),
+		FlowId:             g.str("flowId"),
+		ShopDomain:         g.str("shopDomain"),
+		SiteID:             g.str("siteId"),
+		ClientID:           g.str("clientId"),
+		CredentialSource:   g.str("credentialSource"),
+		CreatedAt:          nodeCreatedAt(nodes[0]),
 	}
 }
 
