@@ -236,6 +236,7 @@ function formatDay(value: string): string {
 
 export function DisconnectGitHub({
   compact = false,
+  inline = false,
   summary,
   sourceNames,
   busy,
@@ -243,6 +244,8 @@ export function DisconnectGitHub({
   onDisconnect,
 }: {
   compact?: boolean;
+  /** A text action inside an existing panel; confirmation still explains impact. */
+  inline?: boolean;
   /** The connected identity, inline with the compact action. */
   summary?: ReactNode;
   sourceNames?: readonly string[];
@@ -251,7 +254,6 @@ export function DisconnectGitHub({
   onDisconnect: () => void;
 }) {
   const [armed, setArmed] = useState(false);
-  const named = sourceNames?.join(", ") ?? "";
   const region = useRef<HTMLElement>(null);
   const previouslyArmed = useRef(false);
   useEffect(() => {
@@ -261,19 +263,17 @@ export function DisconnectGitHub({
     previouslyArmed.current = armed;
   }, [armed, compact]);
   return (
-    <section ref={region} className={compact && !armed ? "os-form-row" : "os-settings-danger"}>
+    <section ref={region} className={(compact || inline) && !armed ? "os-form-row" : "os-settings-danger"}>
       {summary}
       {armed ? (
         <>
           <Caption>
+            Revoke this account's access here and at GitHub? Sources and deployables are kept.
             {sourceNames === undefined
-              ? "Sources using this connection will ask you to reconnect at their next fetch."
-              : sourceNames.length === 0
-              ? "Nothing fetches under this connection today."
-              : `${sourceNames.length} source${sourceNames.length === 1 ? "" : "s"} fetch under this connection: ${named}.`}{" "}
-            {sourceNames !== undefined && sourceNames.length > 0 ? "They will ask you to reconnect at their next fetch. " : ""}
-            Your personal authorization is revoked here and at GitHub. Sources and deployables are kept.
-            The GitHub App stays installed, and your browser stays signed in to GitHub.
+              ? " Sources using this account will need it reconnected to fetch updates."
+              : sourceNames.length > 0
+              ? ` ${sourceNames.length} source${sourceNames.length === 1 ? " will" : "s will"} need this account reconnected to fetch updates.`
+              : ""}
           </Caption>
           <div className="os-confirm-row">
             <Button tone="quiet" disabled={busy} onClick={() => setArmed(false)}>
@@ -286,7 +286,7 @@ export function DisconnectGitHub({
         </>
       ) : (
         <>
-          {compact ? null : <Caption>
+          {compact || inline ? null : <Caption>
             Revokes this connection here and at GitHub. Your sources keep their settings and ask you to
             reconnect at their next fetch.
           </Caption>}

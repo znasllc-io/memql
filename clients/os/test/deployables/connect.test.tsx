@@ -800,6 +800,10 @@ describe("existing credential and cluster settings", () => {
     const { connection, reportSetupState } = mountSources({ credentials: [GRANT] });
     await click(await screen.findByRole("button", { name: "Manage GitHub account octocat" }));
     const detail = screen.getByRole("region", { name: "GitHub account @octocat" });
+    expect(within(detail).getByRole("region", { name: "Connection" })).toBeTruthy();
+    expect(within(detail).getByRole("region", { name: "Repository access" })).toBeTruthy();
+    expect(within(detail).queryByRole("link", { name: "Install on another organization" })).toBeNull();
+    expect(within(detail).queryByText(/Revokes this connection here and at GitHub/)).toBeNull();
     expect(screen.queryByRole("list", { name: "GitHub accounts" })).toBeNull();
     await click(within(detail).getByRole("button", { name: "Disconnect" }));
     expect(connection.callsNamed("sourceCredentialRevoke")).toHaveLength(0);

@@ -63,7 +63,14 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
 
 7. **Say it once.** A scope is named in one place. The rail highlights it,
    the Head names it, the list does not re-caption it, placeholders stay
-   generic ("Search", not "Search your Library").
+   generic ("Search", not "Search your Library"). Keep every app page minimal:
+   show the record, its state and the actions. Tutorials carry general guidance;
+   standing descriptions must help with a current decision or actionable problem.
+   Do not restate a status badge in prose or add report-age/counting-since
+   paragraphs beneath it. Keep necessary loading, error and destructive-action
+   confirmation messages concise. Detail pages reuse `Panel`, `Subhead`,
+   `Facts` and `Fact`, as the Cluster Mesh node page does, instead of inventing
+   another data layout or button arrangement.
 
 8. **One container language.** `Panel` + `Subhead` + `Field` is the
    grouping grammar. Settings groups keep their `fieldset` and `legend`
