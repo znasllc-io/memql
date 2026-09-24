@@ -9,6 +9,10 @@ Sign-in requires a secure browser context with the Web Locks API. The OS
 serializes refresh-cookie responses across its tabs, including the initial
 session probe. Browsers without that capability refuse sign-in rather than
 race cookie rotation; credentials stay in memory and HttpOnly cookies.
+Signed-out users enter the OAuth/PKCE login flow automatically, without a
+separate landing-page button. The production login form shows both email-link
+and passkey actions; the local installation remains passkey-only. Unavailable
+identity services retain a retry view instead of an automatic redirect loop.
 
 Identity and ownership setup live in OS. Before probing a session, OS reads
 identity's `/auth/setup/state`: only an explicit `unclaimed` answer opens the

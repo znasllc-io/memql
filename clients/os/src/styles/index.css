@@ -149,27 +149,13 @@ button:not(:disabled):active {
   }
 }
 
-/* ---- boot + sign-in (kept surfaces) ---- */
-.os-boot,
-.os-signin {
+/* ---- boot ---- */
+.os-boot {
   height: 100%;
   display: grid;
   place-items: center;
   background: var(--os-ground);
   color: var(--os-muted);
-}
-
-.os-signin-card {
-  display: grid;
-  gap: 1rem;
-  justify-items: center;
-  padding: 2.5rem 3rem;
-  border-radius: var(--os-radius);
-  background: var(--os-plate);
-  border: 1px solid var(--os-line);
-  box-shadow: var(--os-shadow-float);
-  color: var(--os-ink);
-  text-align: center;
 }
 
 .os-mark {

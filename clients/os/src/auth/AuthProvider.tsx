@@ -94,11 +94,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = useCallback(async () => {
-    if (!isRuntimeConfigReady(config)) return;
+    if (!isRuntimeConfigReady(config)) throw new Error("Identity configuration is unavailable");
     const verifier = await generateCodeVerifier();
     const challenge = await challengeFor(verifier);
     const state = generateState();
-    if (!rememberPending(verifier, state)) return;
+    if (!rememberPending(verifier, state)) throw new Error("Browser sign-in storage is unavailable");
     window.location.assign(identityLocation(
       authorizeUrl(config, {
         redirectUri: redirectUriFor(window.location.origin),

@@ -59,8 +59,10 @@ describe("native OS sign-in", () => {
     expect(screen.getByText(data().RedirectURI)).toBeTruthy();
     expect(screen.getByText(/name has not been verified/)).toBeTruthy();
   });
-  it("retains hosted email submission, CSRF and the OAuth handoff", async () => {
+  it("shows both email and passkey in production and preserves email CSRF/OAuth submission", async () => {
     await load({ Local: false });
+    expect(screen.getByRole("button", { name: "Sign in with a passkey" }).hasAttribute("disabled")).toBe(false);
+    expect(screen.getByRole("button", { name: "Send sign-in link" }).hasAttribute("disabled")).toBe(false);
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "owner@example.test" } });
     fireEvent.click(screen.getByRole("button", { name: "Send sign-in link" }));
     await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "POST")).toBe(true));
