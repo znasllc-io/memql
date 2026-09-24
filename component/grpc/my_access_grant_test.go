@@ -38,7 +38,7 @@ func TestMyAccessResolvesGrantFromSessionActor(t *testing.T) {
 			// Force the real ensureAccess resolution, not the helper's cached actor.
 			s.access, s.accessLoaded = nil, false
 			const userID = "v1:identity:user:my-access-session"
-			claims := map[string]any{"sub": userID, "role": string(tc.claimedRole), "sid": "session-my-access"}
+			claims := map[string]any{"sub": userID, "role": string(tc.claimedRole), "sid": "v1:identity:session:session-my-access"}
 			if tc.badgeCeiling != "" {
 				claims["class"] = "badge"
 				claims["role_ceiling"] = string(tc.badgeCeiling)
@@ -71,7 +71,7 @@ func TestMyAccessResolvesGrantFromSessionActor(t *testing.T) {
 				if result == nil {
 					t.Fatalf("expected MyAccessResult, got %v", stream.lastSent())
 				}
-				if result.GetRequestId() != requestID || result.GetUserId() != userID || result.GetSessionId() != "session-my-access" {
+				if result.GetRequestId() != requestID || result.GetUserId() != "my-access-session" || result.GetSessionId() != "session-my-access" {
 					t.Fatalf("caller or request identity lost: %+v", result)
 				}
 				if result.GetRole() != string(tc.wantRole) || result.GetDisplayName() != "Resolved caller" {
@@ -113,16 +113,16 @@ func TestApplyAccessGrantCarriesGroupsAndScope(t *testing.T) {
 	result := &memqlv1.MyAccessResult{}
 	applyAccessGrant(result, memqlengine.AccessGrant{
 		Groups: []memqlengine.AccessGrantGroup{
-			{ID: "acct-acme", Name: "Acme", Kind: "account", AccountID: "acme", AccountName: "Acme Ltd"},
+			{ID: "v1:identity:group:acct-acme", Name: "Acme", Kind: "account", AccountID: "v1:accounts:account:acme", AccountName: "Acme Ltd"},
 			{ID: "g-1", Name: "Reviewers", Kind: "custom"},
 		},
-		AccountIDs: []string{"acme"},
+		AccountIDs: []string{"v1:accounts:account:acme"},
 	})
 	if got := len(result.GetGroups()); got != 2 {
 		t.Fatalf("groups = %d, want 2", got)
 	}
 	first := result.GetGroups()[0]
-	if first.GetId() != "acct-acme" || first.GetKind() != "account" || first.GetAccountName() != "Acme Ltd" {
+	if first.GetId() != "acct-acme" || first.GetAccountId() != "acme" || first.GetKind() != "account" || first.GetAccountName() != "Acme Ltd" {
 		t.Fatalf("the first group lost fields: %+v", first)
 	}
 	// A custom group tied to no account carries empty strings rather than

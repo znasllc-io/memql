@@ -704,22 +704,20 @@ function memStore() {
   });
 }
 
-function mountSources(seed: FakeSeed) {
+function mountSources(seed: FakeSeed, reportSetupState = vi.fn()) {
   const connection = fakeConnection(seed);
   h.connection = connection;
   const view = render(
     withSession(
-      <DeployablesApp sectionId="settings" navigate={vi.fn()} askContext={vi.fn()} store={memStore()} />,
+      <DeployablesApp sectionId="settings" navigate={vi.fn()} askContext={vi.fn()} store={memStore()} reportSetupState={reportSetupState} />,
       { role: "owner", userId: "u-me" },
     ),
   );
-  return { connection, ...view };
+  return { connection, reportSetupState, ...view };
 }
 
 async function sourcesGroup(): Promise<HTMLElement> {
-  // A fieldset named by its legend: the settings-group semantics DESIGN.md
-  // rule 8 keeps, which is a `group` and not a `region`.
-  return await screen.findByRole("region", { name: "Source settings" });
+  return await screen.findByRole("region", { name: "GitHub accounts settings" });
 }
 
 /**
@@ -771,46 +769,58 @@ describe("existing credential and cluster settings", () => {
     expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(0);
   });
 
-  it("shows a cluster owner which app the cluster uses, and removes one registered from here", async () => {
-    const { connection } = mountSources({
-      credentials: [],
-      githubApp: { configured: true, source: "cluster", slug: "memql-on-lab", canSetup: true },
-    });
-    const block = await screen.findByRole("region", { name: "GitHub App" });
-    const link = within(block).getByRole("link", { name: "memql-on-lab" });
-    expect(link.getAttribute("href")).toBe("https://github.com/apps/memql-on-lab");
-    expect(within(block).getByText(/registered from here/)).toBeTruthy();
-
-    // ARMED FIRST: the sentence says what stops working, and what removing
-    // does NOT do -- the app stays at GitHub.
-    await click(within(block).getByRole("button", { name: "Remove" }));
-    expect(connection.callsNamed("githubAppRemove")).toHaveLength(0);
-    expect(within(block).getByText(/stays at GitHub until it is deleted there/)).toBeTruthy();
-    await click(within(block).getAllByRole("button", { name: "Remove" }).at(-1)!);
-    await waitFor(() => expect(connection.callsNamed("githubAppRemove")).toHaveLength(1));
-    // ...and the status is read again, because the answer just changed.
-    await waitFor(() => expect(connection.callsNamed("githubAppStatus").length).toBeGreaterThan(1));
-  });
-
-  it("offers no Remove for an app the deployment's environment sets", async () => {
-    mountSources({
-      credentials: [],
-      githubApp: { configured: true, source: "environment", slug: "memql-ops", canSetup: false },
-    });
-    const block = await screen.findByRole("region", { name: "GitHub App" });
-    expect(within(block).getByText(/set by the deployment's environment/)).toBeTruthy();
-    // Absent, never disabled: it is not changed from here by anybody.
-    expect(within(block).queryByRole("button", { name: "Remove" })).toBeNull();
-  });
-
-  it("directs source management to Sources without a second credential list or mutation", async () => {
-    const { connection } = mountSources({ credentials: [credentialRow({ id: "cred-1" }), GRANT] });
+  it("lists only this person's GitHub accounts and removes presentation preferences", async () => {
+    const { connection, reportSetupState } = mountSources({ credentials: [
+      GRANT, githubGrantRow({ id: "second", login: "work-account" }),
+      githubGrantRow({ id: "other", login: "someone-else", ownerUserId: "u-other" }), credentialRow({ id: "pat" }),
+    ], githubApp: { configured: true, source: "cluster", canSetup: true } });
     const group = await sourcesGroup();
-    expect(within(group).getByText("Manage saved sources in Sources. Add a deployable to connect a GitHub account and choose a repository.")).toBeTruthy();
-    expect(within(group).queryByRole("list")).toBeNull();
-    expect(within(group).queryByRole("button", { name: /Revoke|Disconnect|Add source/ })).toBeNull();
+    await within(group).findByRole("button", { name: "Manage GitHub account octocat" });
+    expect(within(group).getByRole("button", { name: "Manage GitHub account work-account" })).toBeTruthy();
+    expect(within(group).queryByText("@someone-else")).toBeNull();
+    expect(within(group).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(group).queryByRole("radiogroup")).toBeNull();
+    expect(within(group).queryByRole("region", { name: "GitHub App" })).toBeNull();
+    await waitFor(() => expect(reportSetupState).toHaveBeenLastCalledWith("ready"));
+    expect(connection.callsNamed("githubAppRemove")).toHaveLength(0);
+  });
+
+  it("connects another account from Settings without replacing accounts or sources", async () => {
+    const assigned = stubNavigation();
+    const { connection } = mountSources({ credentials: [GRANT], connectUrl: "https://github.com/login/oauth/authorize?fixture=settings" });
+    await click(await screen.findByRole("button", { name: "Connect GitHub account" }));
+    expect(assigned).toEqual(["https://github.com/login/oauth/authorize?fixture=settings"]);
+    expect(connection.callsNamed("githubConnectBegin")[0]).toContain('returnPath: "/?connect=settings"');
     expect(connection.callsNamed("sourceCredentialRevoke")).toHaveLength(0);
     expect(connection.callsNamed("sourceConnectionRemove")).toHaveLength(0);
+    expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(0);
+  });
+
+  it("disconnects only the selected account after confirmation and marks setup partial", async () => {
+    const { connection, reportSetupState } = mountSources({ credentials: [GRANT] });
+    await click(await screen.findByRole("button", { name: "Manage GitHub account octocat" }));
+    const detail = screen.getByRole("region", { name: "GitHub account @octocat" });
+    expect(screen.queryByRole("list", { name: "GitHub accounts" })).toBeNull();
+    await click(within(detail).getByRole("button", { name: "Disconnect" }));
+    expect(connection.callsNamed("sourceCredentialRevoke")).toHaveLength(0);
+    expect(within(detail).getByText(/Sources and deployables are kept/)).toBeTruthy();
+    await click(within(detail).getByRole("button", { name: "Disconnect" }));
+    await waitFor(() => expect(connection.callsNamed("sourceCredentialRevoke")).toHaveLength(1));
+    expect(connection.callsNamed("sourceCredentialRevoke")[0]).toContain('credentialId: "cred-grant"');
+    await waitFor(() => expect(reportSetupState).toHaveBeenLastCalledWith("partial"));
+    expect(connection.callsNamed("sourceConnectionRemove")).toHaveLength(0);
+    expect(connection.callsNamed("packageSetSourceRemoved")).toHaveLength(0);
+    expect(connection.callsNamed("deleteSite")).toHaveLength(0);
+    expect(within(detail).getByRole("button", { name: "Reconnect GitHub account" })).toBeTruthy();
+  });
+
+  it("keeps setup ready when another account is still connected", async () => {
+    const { reportSetupState } = mountSources({ credentials: [GRANT, githubGrantRow({id: "other-account", login: "work"})], credentialRevokeRemote: false });
+    await click(await screen.findByRole("button", { name: "Manage GitHub account octocat" }));
+    await click(screen.getByRole("button", { name: "Disconnect" }));
+    await click(screen.getByRole("button", { name: "Disconnect" }));
+    await screen.findByText("Disconnected here, but GitHub did not confirm the authorization ended.");
+    expect(reportSetupState).toHaveBeenLastCalledWith("ready");
   });
 
   it("never renders anything token-shaped, on either path", async () => {
@@ -821,11 +831,9 @@ describe("existing credential and cluster settings", () => {
       ],
     });
     const group = await sourcesGroup();
-    // The wire fixture carries secrets, but Settings only shows guidance
-    // and cluster setup, never a second credential roster.
+    // Account rows use the safe credential projection, never token values.
     expect(FIXTURE_GITHUB_PAT.startsWith("ghp_")).toBe(true);
-    expect(within(group).queryByRole("list")).toBeNull();
-    expect(within(group).queryByText("@octocat")).toBeNull();
+    expect(await within(group).findByRole("button", { name: "Manage GitHub account octocat" })).toBeTruthy();
     expect(container.textContent).not.toContain("ghp_");
     expect(container.textContent).not.toContain(FIXTURE_GITHUB_PAT);
     // Nor does anything token-shaped go OUT.

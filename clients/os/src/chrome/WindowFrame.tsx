@@ -28,6 +28,7 @@ import {
 } from "../system/registry";
 import type { OsWindow } from "../system/windows";
 import { useSession } from "./access";
+import { useAppSetupMark } from "./useAppSetupMark";
 import { Mark } from "./Mark";
 import { useOs } from "./state";
 import { WindowErrorBoundary } from "./WindowErrorBoundary";
@@ -114,7 +115,7 @@ export function WindowFrame({
   const gate = gateFor(readiness, sectionReqs.requires, sectionReqs.wants);
   const appReqs = allRequirementsFor(manifest);
   const appGate = gateFor(readiness, appReqs.requires, appReqs.wants);
-  const settingsTone = markToneFor(appGate);
+  const { settingsTone, reportSetupState } = useAppSetupMark(manifest.id, markToneFor(appGate));
   // The dot inside a button is DECORATIVE and the button says the state
   // itself: a labelled role="img" nested in a button appends to the button's
   // accessible name, so "Settings" would announce as "Settings Campaigns is
@@ -316,6 +317,7 @@ export function WindowFrame({
             <WindowErrorBoundary key={win.id} app={manifest.id} section={current?.id ?? ""}>
               <WindowSearchContext.Provider value={searchHost}><AttentionDestination appId={manifest.id} sectionId={current?.id ?? ""} visible={!hidden}><Body
                 sectionId={current?.id ?? ""}
+                reportSetupState={reportSetupState}
                 navigation={win.sectionNavigation}
                 windowVisible={!hidden}
                 navigate={(sectionId, options) => actions.navigateSection(win.id, sectionId, options?.fromContent ? "content" : "peer")}

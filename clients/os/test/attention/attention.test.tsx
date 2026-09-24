@@ -48,6 +48,25 @@ const wrap = (node: React.ReactNode, userId = "alice") => withSession(<Attention
 afterEach(cleanup);
 
 describe("shared attention", () => {
+  it("acknowledges GitHub account management only at visible Deployables settings", async () => {
+    const fake = setup();
+    const deployables = OS_REGISTRY.apps.find(app => app.id === "deployables")!;
+    const feature = deployables.attentionChanges!.find(change => change.id === "deployables:github-accounts")!;
+    const apps = [{ ...deployables, attentionChanges: [feature] }];
+    function Destination({ section = "map", visible = true }: { section?: string; visible?: boolean }) {
+      return <AttentionProvider apps={apps}><AttentionMarker appId="deployables" />
+        <AttentionDestination appId="deployables" sectionId={section} visible={visible}><span>Destination</span></AttentionDestination>
+      </AttentionProvider>;
+    }
+    const view = render(withSession(<Destination />));
+    await screen.findByRole("img", { name: "Unseen change" });
+    expect(fake.executeNamed.mock.calls.filter(([name]) => name === "acknowledgeAttention")).toHaveLength(0);
+    view.rerender(withSession(<Destination section="settings" visible={false} />));
+    expect(screen.getByRole("img", { name: "Unseen change" })).toBeTruthy();
+    view.rerender(withSession(<Destination section="settings" />));
+    await waitFor(() => expect(screen.queryByRole("img", { name: "Unseen change" })).toBeNull());
+    expect(fake.executeNamed.mock.calls.find(([name]) => name === "acknowledgeAttention")?.[1]).toContain('changeId: "deployables:github-accounts"');
+  });
   it("waits for initial identity before loading packages and resets the feed for another user", async () => {
     const fake = setup();
     function Packages() {

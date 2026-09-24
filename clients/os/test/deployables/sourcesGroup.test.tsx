@@ -8,8 +8,6 @@ import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import { credentialRow, fakeConnection, githubGrantRow, withSession, type FakeSeed } from "./harness";
 
-const guidance = "Manage saved sources in Sources. Add a deployable to connect a GitHub account and choose a repository.";
-
 function mount(seed: FakeSeed = {}, role = "owner", result?: string) {
   const connection = fakeConnection({ credentials: [githubGrantRow({ id: "own" }), credentialRow({ id: "stored-token" }), githubGrantRow({ id: "foreign", ownerUserId: "other", login: "other-user" })], ...seed });
   h.connection = connection;
@@ -22,43 +20,45 @@ function mount(seed: FakeSeed = {}, role = "owner", result?: string) {
 
 afterEach(() => { cleanup(); h.connection = null; });
 
-describe("Deployables Settings has no competing source list", () => {
-  it("keeps source management and creation guidance without account, token or binding lists", async () => {
+describe("Deployables Settings manages accounts independently of sources", () => {
+  it("lists only the signed-in person's GitHub accounts without sources or tokens", async () => {
     const connection = mount();
-    const settings = await screen.findByRole("region", { name: "Source settings" });
-    expect(within(settings).getByText(guidance)).toBeTruthy();
-    expect(within(settings).queryByRole("list")).toBeNull();
+    const settings = await screen.findByRole("region", { name: "GitHub accounts settings" });
+    expect(await within(settings).findByRole("button", { name: "Manage GitHub account octocat" })).toBeTruthy();
+    expect(within(settings).getByRole("list", { name: "GitHub accounts" })).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Source connections" })).toBeNull();
-    expect(screen.queryByRole("region", { name: "Other people's connections" })).toBeNull();
     expect(screen.queryByText("@other-user")).toBeNull();
-    expect(screen.queryByRole("button", { name: /Add source|Add GitHub account|Disconnect GitHub|Revoke/ })).toBeNull();
+    expect(screen.queryByText("stored-token")).toBeNull();
+    expect(screen.getByRole("button", { name: "Connect GitHub account" })).toBeTruthy();
     for (const name of ["sourceCredentialRevoke", "sourceConnectionCreate", "sourceConnectionRemove", "createPackage", "packageArchive"]) expect(connection.callsNamed(name)).toHaveLength(0);
   });
 
-  it("offers the single Sources destination among defaults without Repositories or Accounts", async () => {
+  it("removes landing-page and list-density preferences", async () => {
     mount();
-    const choices = await screen.findByRole("radiogroup", { name: "Default section" });
-    expect(within(choices).getAllByRole("radio").map(choice => choice.textContent)).toEqual(["Overview", "Deployables", "Sources", "Logs", "Settings"]);
+    await screen.findByRole("region", { name: "GitHub accounts settings" });
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+    expect(screen.queryByText("Open Deployables on")).toBeNull();
+    expect(screen.queryByText("List density")).toBeNull();
   });
 
   it("preserves cluster-owner GitHub App setup", async () => {
     mount({ githubApp: { configured: false, canSetup: true } });
     const app = await screen.findByRole("region", { name: "GitHub" });
     expect(within(app).getByRole("button", { name: "Set up GitHub" })).toBeTruthy();
-    expect(screen.getByText(guidance)).toBeTruthy();
+    expect(screen.getByRole("region", { name: "GitHub accounts settings" })).toBeTruthy();
   });
 
   it("does not expose cluster setup to an ordinary member", async () => {
     mount({ githubApp: { configured: false, canSetup: false } }, "user");
-    expect(await screen.findByText(guidance)).toBeTruthy();
+    expect(await screen.findByText("This cluster is not linked to GitHub yet. Ask a cluster owner to set it up before choosing a repository.")).toBeTruthy();
     expect(screen.queryByRole("region", { name: "GitHub App" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Set up GitHub" })).toBeNull();
   });
 
-  it("shows the GitHub setup return without creating a connection or opening another list", async () => {
+  it("shows the GitHub setup return without creating a source or reading repositories", async () => {
     const connection = mount({}, "owner", "github_app_registered");
     expect(await screen.findByText("GitHub is set up for this cluster. Connect your account to choose its repositories.")).toBeTruthy();
-    expect(screen.queryByRole("list", { name: "Connected GitHub accounts" })).toBeNull();
+    expect(screen.getByRole("list", { name: "GitHub accounts" })).toBeTruthy();
     expect(connection.callsNamed("sourceConnectionCreate")).toHaveLength(0);
     expect(connection.callsNamed("sourceRepositories")).toHaveLength(0);
   });
