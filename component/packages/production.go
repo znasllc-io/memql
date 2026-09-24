@@ -14,6 +14,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/deploycontrol"
 	"github.com/znasllc-io/memql/component/edge"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/packages/githubapp"
 	"github.com/znasllc-io/memql/integrations/azureblob"
 )
@@ -368,18 +369,31 @@ func rollTargets() []string {
 
 // resolveStore is the production Deps.Stores: the myshopify.com domain a
 // manifest names, answered as the bare v1:shopify:store row id (epic
-// memql#5530, issue memql#5540).
+// memql#5530, issue memql#5540) -- when, and only when, the caller may ATTACH
+// it.
 //
 // UNDER THE CALLER'S OWN ACTOR, with nothing borrowed and nothing stamped, and
 // that is the whole authorization shape of the feature. v1:shopify:store reads
 // at developer and above (Connect Shopify, D3), so a caller below the floor
-// resolves ZERO ROWS and the publish is refused by name -- the same answer
-// updateSiteStoreBinding's Go guard gives -- and binding also needs the store
-// part, which executeWrite asks of any write that changes a site's store.
+// resolves ZERO ROWS -- the same answer updateSiteStoreBinding's Go guard gives.
 // Borrowing the package OWNER's authority here (the pattern resolveCredential
 // uses, for a credential the owner holds) would let anyone who can deploy a
 // package reach the stores the owner can, which is the one thing this seam
 // must not do.
+//
+// READING IS NOT ATTACHING (Connect Shopify, D3 and D5). Binding a store also
+// takes the store part, which the engine asks at createSite and at the
+// re-point, of the caller and at the site's organization
+// (MemQLEngine.MayChangeStoreBinding asks those same guards, before the
+// write). A caller who may read a store but not attach it gets "" here, exactly
+// as one who may not read it does: the publish stage then places an unattached
+// draft, or keeps the binding it has, rather than having the whole deploy
+// refused by the binding guard.
+//
+// THE PART IS ASKED ONLY OF A CHANGE, as the guard asks it. A store that is
+// the one already bound is answered as `bound` itself, so the publish stage
+// sees no re-point and records no note: a developer's redeploy of a correctly
+// bound storefront changes nothing and has nothing to warn about.
 //
 // A developer DOES reach every store on the cluster, and D3 accepts that: a
 // developer holding the store part may bind ANY storefront they can write to
@@ -390,7 +404,7 @@ func rollTargets() []string {
 // those sites. What bounds the STORES is who makes a store row -- a cluster
 // owner or server code alone (D15) -- so the Storefront token a binding
 // exposes is always one an owner or Connect Shopify chose.
-func (s *store) resolveStore(ctx context.Context, domain string) (string, error) {
+func (s *store) resolveStore(ctx context.Context, domain, bound, account string) (string, error) {
 	domain = strings.TrimSpace(domain)
 	if domain == "" {
 		return "", nil
@@ -401,9 +415,21 @@ func (s *store) resolveStore(ctx context.Context, domain string) (string, error)
 	}
 	// ZERO ROWS IS "", NOT AN ERROR. The read cannot tell a store that does
 	// not exist from one this caller may not read, and that is the design:
-	// both are the same refusal, and answering which would tell somebody
+	// both are the same answer, and telling them apart would tell somebody
 	// outside the tier what is on the cluster.
-	return rowString(row, "id"), nil
+	resolved := rowString(row, "id")
+	attach, canAsk := s.engine.(interface {
+		MayChangeStoreBinding(ctx context.Context, accountId, priorStoreId, storeId string) bool
+	})
+	switch {
+	case resolved == "":
+		return "", nil
+	case memql.BareShortId(resolved) == memql.BareShortId(bound):
+		return bound, nil
+	case !canAsk || !attach.MayChangeStoreBinding(ctx, account, bound, resolved):
+		return "", nil
+	}
+	return resolved, nil
 }
 
 // ---------------------------------------------------------------------------

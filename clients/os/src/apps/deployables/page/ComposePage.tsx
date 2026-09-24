@@ -30,6 +30,7 @@ import {
   type PackageRow,
 } from "../packages/rows";
 import { usePackageDeployments } from "../packages/usePackages";
+import { useEveryCanGoLive } from "../preview/usePreview";
 import { manifestIsEmpty, probeNote, probeParks, zipVerdict } from "../sources/probe";
 import { isGithubAppGrant, type CredentialFeedStatus, type CredentialRow } from "../sources/rows";
 import { useAddressChecks, useArtifactProbe, useSourceProbe } from "../sources/useProbes";
@@ -443,6 +444,16 @@ export function ComposePage(props: ComposePageProps) {
     analysisStartedAt !== null || bindingWrite.busy || repositoryRegistration.busy || newPackage.busy || pkgActions.busy || createSite.busy || publish.busy || addDomain.busy || lifecycle.busy;
 
   const outcomes: readonly DeployableOutcome[] = run?.deployables ?? [];
+  // Every site this run put in place: what Go live flips. Only its storefronts
+  // are asked about first -- nothing else can be refused going live -- and a
+  // kind the report does not name is asked about rather than assumed.
+  const goLiveIds = path === "handmade" ? [created.siteId] : outcomes.map((o) => o.siteId ?? "").filter((id) => id !== "");
+  const kindOf = (name: string) => run?.report?.deployables?.find((d) => d.name === name)?.kind;
+  const storefrontIds =
+    path === "handmade"
+      ? draft.kind === "shopify_storefront" ? goLiveIds : []
+      : outcomes.filter((o) => (o.siteId ?? "") !== "" && (kindOf(o.name) ?? "shopify_storefront") === "shopify_storefront").map((o) => o.siteId);
+  const everyCanGoLive = useEveryCanGoLive(storefrontIds);
   const placementsLocked =
     phase === "deploying" || phase === "published" || (path === "handmade" && created.siteId !== "");
   const siteHostname = created.siteId === "" ? "" : hostnameFor(addresses[""]?.slug ?? "", clusterDomain);
@@ -619,7 +630,7 @@ export function ComposePage(props: ComposePageProps) {
    * the same guard decides; a refusal renders beneath the rail.
    */
   async function goLive(): Promise<void> {
-    const ids = path === "handmade" ? [created.siteId] : outcomes.map((o) => o.siteId ?? "").filter((id) => id !== "");
+    const ids = goLiveIds;
     if (ids.length === 0) return;
     for (const id of ids) {
       if (liveIds.includes(id)) continue;
@@ -868,7 +879,10 @@ export function ComposePage(props: ComposePageProps) {
   // must not read a finished flow off a run that never placed this app.
   const held = inactive || archivedSource;
   const finished = phase === "published" && !held;
-  const canGoLive = finished && !wentLive && can.publish && (path !== "handmade" || draft.choice !== "ci");
+  // AND THE ENGINE WOULD TAKE THEM LIVE (Connect Shopify, D5): a storefront
+  // placed with no store is refused, so Go live is absent until readiness says
+  // yes for every site the run placed.
+  const canGoLive = finished && !wentLive && can.publish && (path !== "handmade" || draft.choice !== "ci") && everyCanGoLive === true;
   const journeyActs: Act[] = !held && !finished && (
     ["source", "githubAccount", "githubOrganization", "githubRepository"].includes(journeyStop) ? []
     : journeyStop === "sourceDetail" && readyToRestoreSource ? [{ label: "Restore source", tone: "primary", busy: repositoryRegistration.busy, onAct: () => void restoreSource() }]

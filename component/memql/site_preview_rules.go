@@ -81,6 +81,11 @@ const (
 	// PreviewRefusalNoPreviewBinding -- a storefront with no development store
 	// attached has nothing to exercise against.
 	PreviewRefusalNoPreviewBinding = "no_preview_binding"
+	// PreviewRefusalStorefrontNotConnected -- a storefront going live, or
+	// promoting, whose serving binding names no store, or a store with no
+	// Storefront token: there is no catalog to put in front of shoppers
+	// (Connect Shopify, D5).
+	PreviewRefusalStorefrontNotConnected = "storefront_not_connected"
 )
 
 // PreviewBoundStore is what a caller could learn about the store a binding names.
@@ -103,6 +108,11 @@ type PreviewBoundStore struct {
 	// Empty when the store was not readable, in which case the refusal names
 	// the id instead -- an honest "this one, which you cannot see".
 	Domain string
+	// HasStorefrontToken is whether the store row names a Storefront token
+	// (storefrontTokenRef non-empty), meaningful only when Readable. A store
+	// without one is not connected: the edge would serve an empty token and
+	// the storefront's catalog would not load.
+	HasStorefrontToken bool
 }
 
 // name is how a store is referred to in a refusal: its domain when the reader
@@ -131,15 +141,30 @@ func (s PreviewBoundStore) name() string {
 // no binding and no store, so there is no question to ask; `storefront` false
 // returns no refusal without looking at anything.
 //
-// AN UNBOUND STOREFRONT IS NOT REFUSED EITHER, and that is deliberate rather
-// than an omission. A storefront with no store reaches no store at all: it
-// serves its bundle and its runtime document carries no storefront block, which
-// is the state every storefront is in before anybody attaches one. Refusing
-// go-live for it would be refusing to publish a page that is not yet wired up,
-// which is a judgement this guard has no business making.
+// A STOREFRONT THAT IS NOT CONNECTED IS REFUSED (Connect Shopify, D5), and that
+// reverses what this rule used to allow. A storefront's first deploy now lands
+// as a draft with no store whenever the manifest's store cannot be attached
+// (component/packages, the publish stage), so "unbound" is no longer the
+// harmless state before anybody wires one up: it is a storefront whose deploy
+// succeeded and which has no catalog behind it. Taking it live would put an
+// empty shop in front of shoppers and call that a launch. The same is true of
+// a store row with no Storefront token -- the edge would serve an empty token
+// and the catalog would not load. Both are one situation with one act that
+// clears it, so they are one code.
+//
+// THE TOKEN IS JUDGED LAST. An unreadable store and a development store are
+// refusals about WHICH store is bound, and connecting a token clears neither,
+// so they are reported first.
 func SiteGoLiveRefusal(storefront bool, serving PreviewBoundStore) PreviewRefusal {
-	if !storefront || strings.TrimSpace(serving.ID) == "" {
+	if !storefront {
 		return PreviewRefusal{}
+	}
+	if strings.TrimSpace(serving.ID) == "" {
+		return PreviewRefusal{
+			Code:    PreviewRefusalStorefrontNotConnected,
+			Message: "this storefront is not attached to a Shopify store, so it has no catalog to put in front of shoppers.",
+			Remedy:  storefrontNotConnectedRemedy,
+		}
 	}
 	if !serving.Readable {
 		return PreviewRefusal{
@@ -157,8 +182,20 @@ func SiteGoLiveRefusal(storefront bool, serving PreviewBoundStore) PreviewRefusa
 			Remedy: "Bind the storefront to the store shoppers reach, then try again. The development store stays on the preview binding.",
 		}
 	}
+	if !serving.HasStorefrontToken {
+		return PreviewRefusal{
+			Code: PreviewRefusalStorefrontNotConnected,
+			Message: "this storefront is bound to " + serving.name() +
+				", which has no Storefront API token, so the storefront could not load its catalog.",
+			Remedy: storefrontNotConnectedRemedy,
+		}
+	}
 	return PreviewRefusal{}
 }
+
+// storefrontNotConnectedRemedy is the act that clears storefront_not_connected,
+// in the words of the surface that offers it.
+const storefrontNotConnectedRemedy = "Connect Shopify on the Store panel."
 
 // SitePreviewBindingRefusal answers whether a candidate may be exercised against the store
 // the PREVIEW binding names -- the other direction of the same guard.
@@ -169,11 +206,10 @@ func SiteGoLiveRefusal(storefront bool, serving PreviewBoundStore) PreviewRefusa
 // moment a test payment lands in the merchant's real orders, and by then it has
 // happened.
 //
-// AN UNBOUND PREVIEW BINDING IS REFUSED HERE, unlike an unbound serving binding
-// in SiteGoLiveRefusal, and the asymmetry is the point. Go-live asks "is this safe to
-// show", and an unwired storefront is safe to show. A preview asks "is there a
-// development store to exercise against", and the answer for an unbound one is
-// no -- exercising it would fall back to no store at all and report four
+// AN UNBOUND PREVIEW BINDING IS REFUSED HERE, as an unbound serving binding is
+// in SiteGoLiveRefusal, and under its own code: the act that clears it is
+// attaching a development store, not connecting the shop. Exercising an
+// unbound preview would fall back to no store at all and report four
 // observations of nothing.
 func SitePreviewBindingRefusal(storefront bool, preview PreviewBoundStore) PreviewRefusal {
 	if !storefront {

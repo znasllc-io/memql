@@ -1984,7 +1984,7 @@ jobs:
       - name: db-gated -- the fast packages (tight budget)
         run: |
           start=$SECONDS
-          go test -count=1 -timeout=180s ./app/... ./component/automations/... ./component/backup/... ./component/campaigns/... ./component/database/... ./component/grpc/... ./component/identity/... ./component/logstore/... ./component/node/... ./component/sitetraffic/... ./component/sitehealth/... ./component/worker/fleetcatalog/... ./examples/referencepack/... ./packs/... ./integrations/compose/... ./integrations/embedding/... ./integrations/groups/... ./integrations/planner/... ./integrations/shopify/... ./integrations/work/...
+          go test -count=1 -timeout=180s ./app/... ./component/automations/... ./component/backup/... ./component/campaigns/... ./component/database/... ./component/grpc/... ./component/identity/... ./component/logstore/... ./component/node/... ./component/sitetraffic/... ./component/sitehealth/... ./component/worker/fleetcatalog/... ./examples/referencepack/... ./packs/... ./integrations/compose/... ./integrations/embedding/... ./integrations/groups/... ./integrations/planner/... ./integrations/shopify/... ./integrations/sitepreview/... ./integrations/work/...
           echo "headroom: the fast packages used $((SECONDS - start))s of their 180s budget"
 
       # SPLIT OUT RATHER THAN ADMITTED (epic memql#4885). component/packages

@@ -65,13 +65,18 @@ const (
 	// store to talk to" for an app that simply had no address yet.
 	CodeDeployableBindingMissing = "deployable_binding_missing"
 	// CodeDeployableStoreUnknown: the manifest names a store this cluster has
-	// no row for, or one this caller may not read (epic memql#5530).
+	// no row for, one this caller may not read, or one they may read and not
+	// attach (epic memql#5530; Connect Shopify, D3 and D5).
 	//
-	// DELIBERATELY ONE CODE FOR BOTH. Telling a caller which of the two it was
-	// would answer "does a store with this domain exist on this cluster" for
-	// somebody who may not read stores, and that is the question the
-	// cluster-owner tier exists to refuse. The repair is the same sentence
-	// either way: attach the store on the deployable, as somebody who may.
+	// DELIBERATELY ONE CODE FOR ALL THREE. Telling a caller which it was would
+	// answer "does a store with this domain exist on this cluster" for
+	// somebody who may not read stores, and that is the question the store
+	// tier exists to refuse. The repair is the same sentence either way:
+	// connect a store on the deployable's Store panel.
+	//
+	// A NOTE, NEVER FATAL (D5). An unbound storefront is placed as a draft
+	// with no store, which the go-live rule keeps away from shoppers
+	// (storefront_not_connected); a bound one keeps the store it has.
 	//
 	// IT IS RAISED AT PUBLISH, NOT AT ANALYSIS, and that is the split this
 	// code records: whether a manifest names a store is a manifest fact

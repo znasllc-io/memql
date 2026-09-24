@@ -77,22 +77,22 @@ const COPY: Record<string, RefusalCopy> = {
   },
   deployable_store_unknown: {
     // THE OTHER SHAPE OF THE SAME SENTENCE, and the difference is where the
-    // repair is. Above, the manifest says nothing; here it names a store and
-    // this cluster has no such store you may read. One code covers "there is
-    // no such store" and "it is not yours to read", deliberately: separating
-    // them would answer what is on the cluster for somebody outside the tier
-    // that decides who may look.
+    // repair is. Above, the manifest says nothing; here it names a store this
+    // run could not attach -- there is no such store, it is not yours to read,
+    // or you may read it and not attach it. One code covers all three,
+    // deliberately: separating them would answer what is on the cluster for
+    // somebody outside the tier that decides who may look.
     //
-    // IT ARRIVES FATAL AND NON-FATAL, and the copy has to read for both. It
-    // refuses the run when NOTHING is bound yet -- a storefront on a hostname
-    // with nothing behind it would report success. When the deployable is
-    // already bound it is a NOTE beside a run that published: the store is
+    // IT IS A NOTE, NEVER A REFUSAL (Connect Shopify, D5), beside a run that
+    // published. When NOTHING is bound yet the storefront is placed as a
+    // draft with no store, which the engine will not take live until a store
+    // is connected. When the deployable is already bound the store is
     // unchanged, because leaving a binding alone is not a privileged act and
     // an automatic deploy borrows a rankless writer that can read no store at
     // all. The title says what is true in both; the next line names the
     // repair, which is also the same in both.
-    title: "A storefront names a store this cluster does not have",
-    next: "Attach the store on the deployable's Store panel. Until then it keeps whatever store it was already bound to.",
+    title: "This storefront's store was not attached",
+    next: "Connect a store on the deployable's Store panel. Until then it stays as it was: a draft that cannot go live, or still bound to the store it had.",
   },
   deployable_hostname_unchosen: {
     // THE OTHER HALF, and a placement problem rather than a manifest one: the
@@ -444,6 +444,19 @@ const COPY: Record<string, RefusalCopy> = {
     // recording it is that a reader can tell it from a step that went missing.
     title: "You left this one out",
     next: "Nothing was built for it, and anything it already serves is untouched. Deploy it on its own whenever you want it.",
+  },
+
+  // -- the go-live rule (Connect Shopify, D5). NOT one of component/packages'
+  //    codes: component/memql/site_preview_rules.go refuses taking an
+  //    unconnected storefront live, and the OS withholds Go live on the same
+  //    answer -- so this meets somebody only when a stale page reached the
+  //    engine anyway. --
+
+  storefront_not_connected: {
+    // The server's sentence names the store, when there is one, and ends
+    // with the act that clears it, so the table adds only the headline.
+    title: "This storefront is not connected to a store",
+    next: "",
   },
 
   // -- the capability gate (epic memql#5289, task memql#5305). NOT one of

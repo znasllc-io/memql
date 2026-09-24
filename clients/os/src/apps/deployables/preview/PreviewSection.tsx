@@ -86,7 +86,7 @@ export function PreviewSection({
   /** Opens the Store panel, where a development store is attached. */
   onOpenStore: () => void;
 }) {
-  const readiness = usePreviewReadiness(site.id);
+  const readiness = usePreviewReadiness(site);
   const observations = usePreviewObservations(site.id);
   const grants = usePreviewGrants(site.id);
   const reread = (): void => {
@@ -408,8 +408,13 @@ function CandidateControls({
   );
 }
 
-/** A refusal, with the act that clears it. */
-function RefusalNotice({
+/**
+ * A refusal, with the act that clears it.
+ *
+ * Exported for the deployable's page, which draws a withheld Go live with it:
+ * the same store-shaped codes send a person to the same place.
+ */
+export function RefusalNotice({
   refusal,
   storefront,
   onOpenStore,
@@ -419,12 +424,17 @@ function RefusalNotice({
   onOpenStore: () => void;
 }) {
   if (refusal.code === "") return null;
-  // The store is where all three store-shaped refusals are answered, so the
-  // notice carries the way there rather than leaving a person to find it.
+  // The store is where every store-shaped refusal is answered, so the notice
+  // carries the way there rather than leaving a person to find it. The last
+  // two are go-live refusals (Connect Shopify, D5): an unconnected storefront
+  // is connected on the Store panel, and a development store on the serving
+  // binding is replaced there.
   const aboutTheStore =
     refusal.code === "preview_binding_is_not_development_store" ||
     refusal.code === "no_preview_binding" ||
-    refusal.code === "bound_store_unreadable";
+    refusal.code === "bound_store_unreadable" ||
+    refusal.code === "storefront_not_connected" ||
+    refusal.code === "serving_binding_is_development_store";
   return (
     <Notice tone="warn" sentence={refusal.message} next={refusal.remedy}>
       {aboutTheStore && storefront ? <Button onClick={onOpenStore}>Open the store</Button> : null}

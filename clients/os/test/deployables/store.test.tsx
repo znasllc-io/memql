@@ -17,7 +17,9 @@ import {
   STORE,
   click,
   domainStateRow,
+  emit,
   fakeConnection,
+  previewReadinessRow,
   siteRow,
   storeHealthRow,
   withSession,
@@ -153,11 +155,89 @@ const unbound = siteRow({
 });
 
 describe("a storefront with no store", () => {
-  it("invites somebody to attach one", async () => {
+  it("reads Not connected", async () => {
     const connection = fakeConnection({ sites: [unbound], stores: [STORE] });
     mount(connection);
     const page = await openDeployable("new.memql.example.com");
-    expect(storeSlot(page)?.textContent).toContain("Attach a store");
+    expect(storeSlot(page)?.textContent).toContain("Not connected");
+  });
+
+  // A BUILT STOREFRONT WITH NO STORE IS NOT OFFERED GO LIVE (Connect Shopify,
+  // D5). The first deploy of a storefront whose store could not be attached
+  // lands here, and the engine refuses taking it live -- so the bar draws no
+  // Go live, and the page draws the engine's sentence with the way to the
+  // store, where the act that clears it is.
+  it("offers no Go live, and says why beside the way to the store", async () => {
+    const built = { ...unbound, bundleRef: "blob://sites/site-unbound/v1/" } as typeof unbound;
+    const connection = fakeConnection({
+      sites: [built],
+      stores: [STORE],
+      previewReadiness: {
+        "site-unbound": previewReadinessRow({
+          siteId: "site-unbound",
+          status: "draft",
+          canGoLive: false,
+          goLiveRefusal: {
+            code: "storefront_not_connected",
+            message: "this storefront is not attached to a Shopify store, so it has no catalog to put in front of shoppers.",
+            remedy: "Connect Shopify on the Store panel.",
+          },
+        } as never),
+      },
+    });
+    mount(connection);
+    await openDeployable("new.memql.example.com");
+    expect(await screen.findByText(/not attached to a Shopify store/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Go live/ })).toBeNull();
+    await click(screen.getByRole("button", { name: "Open the store" }));
+    expect(await screen.findByRole("region", { name: "Store for new.memql.example.com" })).toBeTruthy();
+  });
+
+  // THE ANSWER FOLLOWS THE BINDING. Readiness is read once, so it has to be
+  // read again when what it judges changes: attaching a store on the Store
+  // panel and coming back must offer Go live without a reload, and the old
+  // storefront_not_connected sentence must be gone.
+  it("offers Go live once a store is attached and the person comes back", async () => {
+    const built = { ...unbound, title: "New shop", bundleRef: "blob://sites/site-unbound/v1/" } as typeof unbound;
+    const previewReadiness: Record<string, ReturnType<typeof previewReadinessRow>> = {
+      "site-unbound": previewReadinessRow({
+        siteId: "site-unbound",
+        status: "draft",
+        canGoLive: false,
+        goLiveRefusal: {
+          code: "storefront_not_connected",
+          message: "this storefront is not attached to a Shopify store, so it has no catalog to put in front of shoppers.",
+          remedy: "Connect Shopify on the Store panel.",
+        },
+      } as never),
+    };
+    const connection = fakeConnection({ sites: [built], stores: [STORE], previewReadiness });
+    mount(connection);
+    const page = await openDeployable("new.memql.example.com");
+    expect(await screen.findByText(/not attached to a Shopify store/)).toBeTruthy();
+
+    await click(storeSlot(page));
+    const pane = await screen.findByRole("region", { name: "Store for new.memql.example.com" });
+    const label = await within(pane).findByText("example.myshopify.com");
+    await click(label.closest<HTMLElement>('[role="radio"]'));
+    // What the engine answers once the store is bound, and the row's own
+    // event carrying the binding back, as the cluster sends it.
+    previewReadiness["site-unbound"] = previewReadinessRow({
+      siteId: "site-unbound",
+      status: "draft",
+      storeId: "store-example",
+      canGoLive: true,
+    } as never);
+    await click(within(pane).getByRole("button", { name: "Attach" }));
+    await emit(connection, "v1:platform:site", { ...built, binding: { storeId: "store-example" } });
+
+    await click(screen.getByRole("button", { name: "Back to New shop" }));
+    const back = (await screen.findByRole("region", { name: "Deployable new.memql.example.com" })).closest(
+      "[data-deployable-view]",
+    ) as HTMLElement;
+    await waitFor(() => expect(storeSlot(back)?.textContent).not.toContain("Not connected"));
+    expect(await screen.findByRole("button", { name: /^Go live/ })).toBeTruthy();
+    expect(screen.queryByText(/not attached to a Shopify store/)).toBeNull();
   });
 
   it("opens straight into the picker rather than an empty panel", async () => {
@@ -338,7 +418,7 @@ describe("who is drawn which store act (Connect Shopify, D3 and D15)", () => {
     const connection = fakeConnection({ sites: [unbound], stores: [STORE] });
     mount(connection, { role });
     const page = await openDeployable("new.memql.example.com");
-    expect(storeSlot(page)?.textContent).toContain("Attach a store");
+    expect(storeSlot(page)?.textContent).toContain("Not connected");
     await click(storeSlot(page));
     const pane = await screen.findByRole("region", { name: "Store for new.memql.example.com" });
     const label = await within(pane).findByText("example.myshopify.com");

@@ -31,6 +31,7 @@ import { WhatItIsStop } from "./stops/WhatItIs";
 import { WhereItLivesStop } from "./stops/WhereItLives";
 import { DomainWizard } from "./stops/Domains";
 import { StorePanel } from "../store/StorePanel";
+import { RefusalNotice } from "../preview/PreviewSection";
 import { useBundleFlip } from "./useBundleFlip";
 
 // The deployable page (epic memql#4937, design sections C and D): ONE head,
@@ -160,7 +161,7 @@ export function DeployablePage({
   // memql#5531). The bar offers a promotion only when the readiness has landed
   // AND says yes -- absent, never disabled, and the Preview section below
   // draws the reason when the answer is no.
-  const previewRead = usePreviewReadiness(site.id);
+  const previewRead = usePreviewReadiness(site);
   const previewReadiness = previewRead.readiness;
   // The promotion is the one preview write the BAR makes, so the hook lives
   // here rather than in the section: rule 12 puts every act that changes what
@@ -177,7 +178,12 @@ export function DeployablePage({
     preview:
       previewReadiness === null
         ? null
-        : { hasCandidate: previewReadiness.hasCandidate, canPromote: previewReadiness.canPromote },
+        : {
+            hasCandidate: previewReadiness.hasCandidate,
+            canPromote: previewReadiness.canPromote,
+            canGoLive: previewReadiness.canGoLive,
+            goLiveRefusal: previewReadiness.goLiveRefusal,
+          },
   });
   // WHO DEPLOYED IT, off the rows already here: this app's newest run's
   // requester, else the site's owner (the deployer since PR #5284), else the
@@ -420,6 +426,14 @@ export function DeployablePage({
 
           {headActions.refusal ? (
             <ProblemNotice problem={{ ...headActions.refusal, fatal: true }} tone="error" />
+          ) : null}
+
+          {/* GO LIVE IS ABSENT FROM THE BAR WHEN THE ENGINE WOULD REFUSE IT
+              (Connect Shopify, D5), and the reason is drawn here instead,
+              with the way to the store when that is where it is cleared. The
+              Store panel is absent without the store part, so is the way. */}
+          {reading.withheld ? (
+            <RefusalNotice refusal={reading.withheld} storefront={can.store} onOpenStore={() => setDetail("store")} />
           ) : null}
 
           <DeployableWorkspace key={site.id}

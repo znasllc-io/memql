@@ -127,6 +127,21 @@ describe("refusal copy coverage", () => {
     expect(copyFor("deployable_target_not_offered")?.next).toBe("");
   });
 
+  it("says what an unattached storefront is, and names the refusal that keeps it from going live", () => {
+    // deployable_store_unknown is a NOTE now (Connect Shopify, D5): the run
+    // succeeded and placed an unattached draft, or kept the store it had. A
+    // headline saying the store does not exist would be false for a store the
+    // person may read and not attach, and for every bound redeploy.
+    const unknown = copyFor("deployable_store_unknown");
+    expect(unknown?.title).toBe("This storefront's store was not attached");
+    expect(unknown?.next).toContain("Store panel");
+    expect(unknown?.next).toContain("cannot go live");
+    // The go-live refusal the engine gives that draft. The server's sentence
+    // carries the remedy, so the table adds only the headline.
+    expect(copyFor("storefront_not_connected")?.title).toBe("This storefront is not connected to a store");
+    expect(copyFor("storefront_not_connected")?.next).toBe("");
+  });
+
   it("says the DEPLOY SUCCEEDED for the two placement halves", () => {
     // The pipeline applies the account and the domain AFTER the publish and
     // records a refusal on the outcome without failing the run

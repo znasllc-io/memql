@@ -123,7 +123,8 @@ function DomainPiece({ site, onClick }: { site: SiteRow; onClick: () => void }) 
  * labelled "Store" tells them only that a binding exists, which they can see
  * from the slot being drawn at all.
  *
- * FOUR STATES AND THEY ARE DIFFERENT ANSWERS. Nothing bound is an invitation.
+ * FOUR STATES AND THEY ARE DIFFERENT ANSWERS. Nothing bound reads Not
+ * connected, which is what keeps it from going live (Connect Shopify, D5).
  * A read in flight says so. A store that reads back gets its domain and its
  * state. A store that does not read back is NOT drawn as unbound -- that
  * would hide a real misconfiguration behind a state that looks deliberate.
@@ -132,7 +133,7 @@ function StorePiece({ storeId, siteId, onClick }: { storeId: string; siteId: str
   const bound = useStore(storeId);
   const detail =
     storeId === ""
-      ? "Attach a store"
+      ? "Not connected"
       : bound.state === "failed"
         ? "The store could not be read"
         : bound.store !== null

@@ -240,6 +240,26 @@ func changedStoreId(payload map[string]any, field, priorStoreId string) string {
 	return storeId
 }
 
+// MayChangeStoreBinding answers, without refusing, whether a write moving a
+// storefront's serving binding from priorStoreId to storeId would pass the two
+// store-part checks every such write meets: validateSiteStoreBindingChange
+// (internal origin, or the caller holds the part) and, for a site attributed
+// to accountId, the organization boundary's (validateOrganizationSensitiveChanges,
+// memql#5598), which asks for the part at that organization.
+//
+// The deploy path asks it BEFORE it writes (component/packages, resolveStore).
+// Reading a store is not attaching one, and a storefront whose manifest names a
+// store the deployer may read but not attach is placed as an unattached draft
+// with a note (Connect Shopify, D5) rather than refused by those guards. It
+// asks the two guards themselves, so the pre-check and the write cannot
+// disagree about a caller.
+func (e *MemQLEngine) MayChangeStoreBinding(ctx context.Context, accountId, priorStoreId, storeId string) bool {
+	prior := map[string]any{"accountId": accountId, "binding": map[string]any{bindingStoreIdKey: priorStoreId}}
+	next := map[string]any{"binding": map[string]any{bindingStoreIdKey: storeId}}
+	return e.validateSiteStoreBindingChange(ctx, next, priorStoreId) == nil &&
+		e.validateOrganizationSensitiveChanges(ctx, conceptPlatformSite, prior, next) == nil
+}
+
 // canReadStore is the engine's own reader: the named query, under the CALLER's
 // actor, deliberately -- the whole point is that the answer is the caller's,
 // not the deployment's. v1:shopify:store's tier (clusterOwner, with a read

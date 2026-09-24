@@ -290,6 +290,17 @@ live, deliberately -- a stranger's code should not go live the moment it
 builds. The compose flow offers Go live beside Done, so the two-step is one
 screen.
 
+**Go live is offered only when the engine would accept it.** Both the
+deployable's bar and the end of the compose flow ask `sitePreviewReadiness`,
+which answers from the same rule the write guard refuses with. A storefront
+with no connected store -- no store attached, or a store with no Storefront
+token -- is refused as `storefront_not_connected`, and so is one bound to a
+development store. Its first deploy can land exactly there: a manifest naming a
+store the deployer may not attach places the storefront as a draft with no
+store (see [packages.md](packages.md)). Its Store slot then reads **Not
+connected**, Go live is absent, and the page draws the engine's sentence with
+**Open the store** beside it. For any other kind the rule never refuses.
+
 ---
 
 ## The target model
