@@ -145,7 +145,11 @@ describe("GitHub Sources in Add a deployable", () => {
     expect(document.querySelector(".os-actbar-word")?.textContent).toBe("Analyzing");
     await act(async () => finish());
     expect(await within(region).findByText("Source download timed out")).toBeTruthy();
+    expect(within(region).getByText("Analysis couldn’t finish")).toBeTruthy();
     expect(floorAct("Retry")).toBeTruthy();
+    expect(stage(region, "Configuration").getAttribute("data-state")).toBe("stopped");
+    expect(stage(region, "Configuration").getAttribute("data-open")).toBe("true");
+    expect(stage(region, "Review").getAttribute("data-state")).toBe("ahead");
     expect(document.querySelector(".os-actbar")?.getAttribute("data-tone")).not.toBe("busy");
     expect(connection.callsNamed("packageSourceRegister")).toHaveLength(1);
   });

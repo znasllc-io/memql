@@ -914,9 +914,9 @@ describe("the compose flow: what the run answers", () => {
     );
 
     expect(await within(region).findByText("no memql-package.yaml at the root of acme/storefront")).toBeTruthy();
-    // What it is is where a manifest refusal belongs, and every stop after it
-    // is unreached.
-    expect(railStates(region)).toEqual(["complete", "complete", "complete", "complete", "complete", "stopped", "pending", "pending", "pending"]);
+    // With no report, analysis stops on Configuration. Review has nothing to
+    // show yet, and stays ahead along with the remaining steps.
+    expect(railStates(region)).toEqual(["complete", "complete", "complete", "complete", "stopped", "ahead", "ahead", "ahead", "ahead"]);
     // ...and the one forward act is Retry, on the bar beside Cancel -- so
     // leaving a stopped flow is as reachable as trying it again.
     expect(forwardAct("Retry")).toBeTruthy();

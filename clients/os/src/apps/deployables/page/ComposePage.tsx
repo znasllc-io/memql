@@ -342,6 +342,9 @@ export function ComposePage(props: ComposePageProps) {
   });
   const phase: ComposePhase = analysisStartedAt !== null ? "analyzing"
     : storedPhase === "composing" && pkgActions.refusal && packageId ? "stopped" : storedPhase;
+  const analysisInConfiguration = !fixedSource && !parked && (phase === "analyzing" || phase === "stopped" && !report);
+  const analysisProblem = analysisInConfiguration && phase === "stopped" ? pkgActions.refusal ?? run?.error : null;
+  const analysisFailure = analysisProblem && (!analysisProblem.code || analysisProblem.code === "deploy_failed") ? analysisProblem : null;
   const journeyKey = `${phase}:${run?.id ?? ""}:${inactive}`;
 
 
@@ -653,7 +656,7 @@ export function ComposePage(props: ComposePageProps) {
   // comes back with its choice already made -- from GitHub, after connecting --
   // resumes verified GitHub identity at Organization; other drafts follow their answers.
   const defaultStop: WizardStep = phase === "composing" ? fixedSource || parked ? "whatItIs" : draft.choice === "" ? "source" : draft.choice === "repo" ? !accountConfirmed || !identityReady ? "githubAccount" : !selectedConnection ? "githubOrganization" : repositoryConfirmed ? "sourceDetail" : "githubRepository" : "sourceDetail"
-    : phase === "analyzing" && !fixedSource && !parked ? "sourceDetail"
+    : analysisInConfiguration ? "sourceDetail"
     : phase === "analyzing" || phase === "awaiting_confirm" && path === "package" ? "whatItIs"
     : phase === "stopped" ? (railFor(input).stages.find(s => s.state === "stopped")?.id as StopId ?? "whatItIs")
     : phase === "deploying" || phase === "awaiting_confirm" && path === "handmade" ? "build" : "live";
@@ -909,7 +912,7 @@ export function ComposePage(props: ComposePageProps) {
           id: "sourceDetail",
           // Named by the answer above it, and by nothing until there is one.
           name: kind === "repo" ? "Configuration" : chosen ? SOURCE_DETAIL_NAME[kind]! : "Details",
-          state: phase === "analyzing" && !fixedSource && !parked ? "current" : kind === "repo" && !sourceLocked && repositoryConfirmed ? "waiting" : !chosen || kind === "repo" && (!selectedConnection || !repositoryConfirmed) && !sourceLocked ? "ahead" : settled ? "complete" : journeyStop === "source" ? "waiting" : state,
+          state: analysisInConfiguration ? phase === "stopped" ? "stopped" : "current" : kind === "repo" && !sourceLocked && repositoryConfirmed ? "waiting" : !chosen || kind === "repo" && (!selectedConnection || !repositoryConfirmed) && !sourceLocked ? "ahead" : settled ? "complete" : journeyStop === "source" ? "waiting" : state,
           sentence: kind === "repo" ? "Configure this deployable." : chosen ? DETAIL_SENTENCES[kind] : undefined,
           // The pipeline's own word on this stage -- what it settled as, or
           // why it stopped ("private, or not there") -- belongs to the step
@@ -924,7 +927,7 @@ export function ComposePage(props: ComposePageProps) {
         },
       ];
     }
-    if (kind === "repo" && (!sourceLocked || phase === "analyzing" && !fixedSource && !parked)) return [{ id, name: STEP_NAMES[id], state: "ahead", openable: false }];
+    if (kind === "repo" && (!sourceLocked || analysisInConfiguration)) return [{ id, name: STEP_NAMES[id], state: "ahead", openable: false }];
     const reachable = (state !== "pending" && state !== "ahead") || id === journeyStop;
     return [{
       id,
@@ -1046,7 +1049,9 @@ export function ComposePage(props: ComposePageProps) {
             ><Button onClick={() => reseed()}>Read status again</Button></Notice> : null}
           {repositoryRegistration.refusal ? <ProblemNotice problem={{ ...repositoryRegistration.refusal, fatal: true }} tone="error" /> : null}
           {newPackage.refusal ? <ProblemNotice problem={{ ...newPackage.refusal, fatal: true }} tone="error" /> : null}
-          {pkgActions.refusal ? <ProblemNotice problem={{ ...pkgActions.refusal, fatal: true }} tone="error" /> : null}
+          {analysisFailure ? <Notice tone="error" sentence="Analysis couldn’t finish" detail={analysisFailure.message} /> :
+            pkgActions.refusal ? <ProblemNotice problem={{ ...pkgActions.refusal, fatal: true }} tone="error" /> :
+            analysisInConfiguration && phase === "stopped" && run?.error ? <ProblemNotice problem={run.error} tone="error" /> : null}
           {createSite.error === "" ? null : (
             <Notice
               tone="error"
