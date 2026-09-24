@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connection }));
@@ -31,6 +31,24 @@ function RevokeBob() {
 }
 
 describe("Sources catalog review regressions", () => {
+  it.each([
+    ["analyzing", "Analyzing", "Resume setup", "History"],
+    ["building", "Building", "Resume setup", "History"],
+    ["awaiting_confirm", "Review needed", "Review", "History · 1 waiting for review"],
+  ])("names a %s source run honestly on the source page", async (status, state, action, history) => {
+    const report = { name: "Website", formatVersion: 1, deployables: [{ name: "web", kind: "spa", path: "clients/web", buildPlan: "already built: dist", output: "dist", prebuilt: true }], dslDomains: [], problems: [], ok: true };
+    const connection = connectionFor({ awaitingConfirm: [{ id: "run-pending", packageId: SOURCE.id, status, report, requestedBy: "u-me", startedAt: "2026-09-23T10:00:00Z", createdAt: "2026-09-23T10:00:00Z" }] });
+    mountCatalog();
+    await click(await screen.findByRole("button", { name: /^Open Website,/ }));
+    const bar = within(screen.getByRole("group", { name: "What you can do with this" }));
+    expect(bar.getByText(state)).toBeTruthy();
+    expect(screen.getByRole("button", { name: history })).toBeTruthy();
+    if (status !== "awaiting_confirm") expect(screen.queryByText(/waiting for review/)).toBeNull();
+    await click(bar.getByRole("button", { name: action }));
+    await screen.findByRole("region", { name: "Deploy Website" });
+    expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
+  });
+
   it("retains a removed source's parked Review through its existing deployable", async () => {
     const report = { name: "Website", formatVersion: 1, deployables: [{ name: "web", kind: "spa", path: "clients/web", buildPlan: "already built: dist", output: "dist", prebuilt: true }], dslDomains: [], problems: [], ok: true };
     const connection = connectionFor({ packages: [{ ...SOURCE, sourceRemoved: true }], sites: [siteRow({ id: "site-web", hostname: "web.memql.example.com", packageId: SOURCE.id, packageDeployableName: "web" })], awaitingConfirm: [{ id: "run-review", packageId: SOURCE.id, sourceVersion: "abc123", status: "awaiting_confirm", report, requestedBy: "u-me", startedAt: "2026-09-23T10:00:00Z", createdAt: "2026-09-23T10:00:00Z" }] });

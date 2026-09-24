@@ -146,3 +146,9 @@ export function confirmationWordFor(hostname: string): string {
   const rest = host.slice(dot + 1);
   return rest.includes(".") ? host.slice(0, dot) : host;
 }
+
+/** The same in-progress state in deployable rows and their source page. */
+export function deploymentStateWord(status: string): string {
+  const words: Record<string, string> = { analyzing: "Analyzing", awaiting_confirm: "Review needed", building: "Building", staging_dsl: "Staging definitions", rolling: "Restarting cluster", publishing: "Publishing" };
+  return words[status] ?? "In progress";
+}

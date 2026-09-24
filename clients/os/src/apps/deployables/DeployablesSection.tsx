@@ -14,7 +14,7 @@ import { Archive, FileArchive, GitBranch, Globe, ShoppingBag } from "lucide-reac
 import { RecordRow } from "../../kit/RecordRow";
 
 import type { OsAppProps } from "../../system/registry";
-import { siteStateWord, statusFacetLabel } from "./words";
+import { deploymentStateWord, siteStateWord, statusFacetLabel } from "./words";
 import {
   Button,
   EmptyState,
@@ -376,7 +376,8 @@ export function DeployablesSection({
           onOpenDeclared={(app) => openDeclared(pkg.id, app)}
           onReview={reviewFor(pkg.id)}
           onAsk={onAsk}
-          attempts={parkedRows.filter((d) => d.packageId === pkg.id).length}
+          attempts={parkedRows.filter((d) => d.packageId === pkg.id && d.status === "awaiting_confirm").length}
+          pendingStatus={newestParkedRun(parkedRows, pkg.id)?.status}
           deployedBy={deployedByLabel(
             deployerOf(parkedRows.find((d) => d.packageId === pkg.id) ?? null, null, pkg),
             viewerUserId,
@@ -736,8 +737,7 @@ function DeployableLine({
   const now = useNow();
   const site = row.site;
   const archived = site?.status === "archived" || row.pkg?.status === "archived";
-  const progress: Record<string, string> = { analyzing: "Analyzing", awaiting_confirm: "Review needed", building: "Building", staging_dsl: "Staging definitions", rolling: "Restarting cluster", publishing: "Publishing" };
-  const state = row.parked ? progress[row.parked.status] ?? "In progress" : row.disabled ? "Inactive" : site ? siteStateWord(site) : "Not deployed";
+  const state = row.parked ? deploymentStateWord(row.parked.status) : row.disabled ? "Inactive" : site ? siteStateWord(site) : "Not deployed";
   const name = row.name;
   const client = accountNameFrom(accounts, site?.accountId ?? row.pkg?.accountId ?? "");
   // THE KIT'S ROW, NOT A LOCAL ONE. This list is where `RecordRow` came from:

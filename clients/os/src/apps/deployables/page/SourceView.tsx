@@ -18,7 +18,7 @@ import { shortVersion, type PackageRow } from "../packages/rows";
 import type { PartsHeld } from "../parts";
 import { siteName, type SiteRow } from "../rows";
 import type { CredentialRow } from "../sources/rows";
-import { siteStateWord, stateChip } from "../words";
+import { deploymentStateWord, siteStateWord, stateChip } from "../words";
 import { AutoDeploySwitch, CredentialChip, PackageLifecycle } from "./stops/Source";
 
 // SourceView -- a source is a THING, with its own page (epic memql#4937, D4).
@@ -68,6 +68,7 @@ export function SourceView({
   onOpenDeclared,
   onReview,
   attempts,
+  pendingStatus,
   deployedBy,
 }: {
   pkg: PackageRow;
@@ -86,7 +87,7 @@ export function SourceView({
   /** Opens the compose flow for an app the source declares and has not deployed. */
   onOpenDeclared: (app: string) => void;
   /**
-   * Reopen the run that is parked at this source's gate, when there is one.
+   * Reopen this source's pending run, either working or waiting for review.
    *
    * A parked run used to be reached from an app's row inside the old combined
    * list. Sources have a list of their own now, where a waiting one reads
@@ -95,7 +96,9 @@ export function SourceView({
    */
   onReview?: () => void;
   onAsk?: (tag: string) => void;
-  /** How many runs this source has, for the history line. */
+  /** The newest pending run may still be working; only a parked run needs review. */
+  pendingStatus?: string;
+  /** How many runs actually await confirmation, for the history line. */
   attempts: number;
   /**
    * Who deployed this source last, in words: "you", a name the roster gave,
@@ -137,7 +140,7 @@ export function SourceView({
   // The bar stays, with no acts: it still reads what this source IS and how
   // many of its apps are live, which is what somebody who opened it came to
   // find out.
-  const acts: Act[] = onReview === undefined ? [] : [{ label: "Review", tone: "primary", onAct: onReview }];
+  const acts: Act[] = onReview === undefined ? [] : [{ label: pendingStatus === "awaiting_confirm" ? "Review" : "Resume setup", tone: "primary", onAct: onReview }];
 
   return (
     <div className="os-deploy-pane deployable-source-view" data-os-page-context={JSON.stringify({ page: "Source", packageId: pkg.id, source: label })}>
@@ -238,7 +241,7 @@ export function SourceView({
       <ActionBar
         // ARCHIVED IS NOT TRACKED. The word was hard-coded, so an archived
         // source said "Tracked" with its own Restore control directly above.
-        state={pkg.status === "archived" ? "Archived" : onReview !== undefined ? "Review needed" : "Tracked"}
+        state={pkg.status === "archived" ? "Archived" : pendingStatus !== undefined ? deploymentStateWord(pendingStatus) : "Tracked"}
         // COUNTED THE WAY THE LIST COUNTS, which is everything this source
         // declares -- deployed or not.
         detail={`${total} app${total === 1 ? "" : "s"}${live > 0 ? `, ${live} live` : ""}${
