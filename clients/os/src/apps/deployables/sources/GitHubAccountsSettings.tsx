@@ -45,7 +45,7 @@ export function GitHubAccountsSettings({ accounts, packages, feed, connectResult
     <Head title="Settings" />
     <section className="os-field-group" aria-label="GitHub accounts settings">
       <div className="os-head">
-        <Subhead>GitHub accounts</Subhead>
+        <Subhead>GitHub Accounts</Subhead>
         <div className="os-head-actions">
           {app.status?.configured !== false ? <AddButton label="Add GitHub account" disabled={connect.busy} aria-busy={connect.busy} onClick={() => { revoke.clear(); void connect.connect(returnPathFor("settings")); }} /> : null}
         </div>
@@ -58,7 +58,7 @@ export function GitHubAccountsSettings({ accounts, packages, feed, connectResult
         secondary="GitHub" state="Connected" tone="accent" current
         onOpen={() => { revoke.clear(); setSelectedId(account.id); }} label={`Manage GitHub account ${account.login || account.label}`}
       />)}</RecordList>
-      {ready && connectedAccounts.length === 0 ? <EmptyState title="No GitHub accounts connected">Connect an account to choose its organizations and repositories when adding a deployable.</EmptyState> : null}
+      {ready && connectedAccounts.length === 0 ? <EmptyState icon={UserRound} title="No GitHub accounts connected">Connect an account to choose its organizations and repositories when adding a deployable.</EmptyState> : null}
       {!ready ? <Notice sentence={feed.state === "seeding" ? "Reading GitHub accounts…" : "GitHub accounts could not be read."} detail={feed.error || undefined}>
         {feed.state !== "seeding" ? <Button onClick={feed.retry}>Try again</Button> : null}
       </Notice> : null}
