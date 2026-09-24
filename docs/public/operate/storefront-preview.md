@@ -117,17 +117,25 @@ works, the checkout opens -- right up to the moment a test payment lands in the
 merchant's real orders, and by then it has happened.
 
 Setting the preview binding needs `execute` on `app:deployables/store`, the same
-capability that binds the serving store. Preparing a version is one thing;
-choosing which of the cluster's stores it talks to is another. And, as for the
-serving store, the store must be one **you** can read. The engine asks both of
-every write that changes the preview binding, a raw `insert()` included, and
-judges them against the binding the row already carries: a write that keeps
-it asks neither, and one that clears it names no store to read. Changing
-either binding, clearing included, also needs the store capability in the
-site's organization. One limitation remains on the
-SERVING store: its readability is still asked on every write to a bound
-storefront, not only on a change, so a site owner who cannot read the store a
-cluster owner bound cannot edit the site until that is fixed.
+capability that binds the serving store, and the store it names must be one the
+caller can read. Both are asked of `updateSitePreviewBinding` and of any other
+write that changes the store `previewBinding` names, a raw `insert()` included,
+so a person an owner has denied the part by name points no preview anywhere.
+They are judged against the binding the row already carries: a write that keeps
+it asks neither, and one that clears it names no store to read. Changing either
+binding, clearing included, also needs the store capability in the site's
+organization. Preparing a version is one thing; choosing which of the cluster's
+stores it talks to is another.
+
+Developers hold the part (Connect Shopify, D3), so a developer may point the
+preview of ANY storefront they can write at any development store on the
+cluster -- every account-tied client storefront included, live ones too, the
+same reach that lets a developer pause, archive or delete those sites.
+
+One limitation remains on the SERVING store: its readability is still asked on
+every write to a bound storefront, not only on a change, so a site owner who
+cannot read the store a cluster owner bound cannot edit the site until that is
+fixed.
 
 ## 3. Publish a candidate version
 
@@ -427,10 +435,10 @@ which is one click and leaves a record of itself.
 | Act | Capability |
 |---|---|
 | set or clear a candidate, open or end a preview, run the probe | `execute app:deployables/preview` (owner, developer) |
-| point the preview binding at a store you can read | `execute app:deployables/store` (owner) |
+| attach the serving store, or point the preview binding at a store, on any storefront the caller can write | `execute app:deployables/store` (owner, developer), and a store the caller can read |
 | promote a candidate, go live, pause, roll back | `execute app:deployables/publish` |
 | read a store row | developer, cluster owner |
-| register a store, or change one that exists | cluster owner |
+| register a store, or change, pause or resume one that exists | cluster owner |
 
 That is the surface half. Underneath it, `v1:platform:site`,
 `v1:platform:sitePreviewGrant` and `v1:platform:sitePreviewObservation` all

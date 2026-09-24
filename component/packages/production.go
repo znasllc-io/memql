@@ -371,13 +371,25 @@ func rollTargets() []string {
 // memql#5530, issue memql#5540).
 //
 // UNDER THE CALLER'S OWN ACTOR, with nothing borrowed and nothing stamped, and
-// that is the whole authorization shape of the feature. storeByDomain is a
-// cluster-owner-tier read, so a caller who may not read stores resolves ZERO
-// ROWS and the publish is refused by name -- the same answer
-// updateSiteStoreBinding's Go guard gives. Borrowing the package OWNER's
-// authority here (the pattern resolveCredential uses, for a credential the
-// owner holds) would let anyone who can deploy a package point a storefront at
-// any merchant on the cluster, which is the one thing this seam must not do.
+// that is the whole authorization shape of the feature. v1:shopify:store reads
+// at developer and above (Connect Shopify, D3), so a caller below the floor
+// resolves ZERO ROWS and the publish is refused by name -- the same answer
+// updateSiteStoreBinding's Go guard gives -- and binding also needs the store
+// part, which executeWrite asks of any write that changes a site's store.
+// Borrowing the package OWNER's authority here (the pattern resolveCredential
+// uses, for a credential the owner holds) would let anyone who can deploy a
+// package reach the stores the owner can, which is the one thing this seam
+// must not do.
+//
+// A developer DOES reach every store on the cluster, and D3 accepts that: a
+// developer holding the store part may bind ANY storefront they can write to
+// any of them. That is wider than the storefronts they own. v1:platform:site's
+// account grant admits staff (developer and above) to write every
+// account-tied site, so it covers every client storefront, live ones included
+// -- the same reach that already lets a developer pause, archive or delete
+// those sites. What bounds the STORES is who makes a store row -- a cluster
+// owner or server code alone (D15) -- so the Storefront token a binding
+// exposes is always one an owner or Connect Shopify chose.
 func (s *store) resolveStore(ctx context.Context, domain string) (string, error) {
 	domain = strings.TrimSpace(domain)
 	if domain == "" {

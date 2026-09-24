@@ -257,11 +257,43 @@ registry now NAMES those resources (`requires: "app:<id>"`) rather than
 stating floors, and `TestOsRegistryRequiresMatchTheAppSeeds`
 (`component/memql`) fails the build when a manifest names a resource no seed
 declares or a seeded app resource has no manifest. Deployables is the first app to
-carry parts (`sources`, `deploy`, `publish`, `retire`, `domains`), seeded on
-owner and developer; the mapping from part to construct is the table in the
-design record. An app grant opens the DOOR; row authorization still decides
-the CONTENTS (D4): a developer holding the deploy part deploys only a package
-they can read.
+carry parts (`sources`, `deploy`, `publish`, `retire`, `domains`, `preview`,
+`store`), all seeded on owner and developer; the mapping from part to construct
+is the table in the design record. An app grant opens the DOOR; row
+authorization still decides the CONTENTS (D4): a developer holding the deploy
+part deploys only a package they can read.
+
+`store` -- attaching the Shopify store a storefront fronts -- was owner alone
+until `v1:shopify:store` took a read floor at developer (Connect Shopify, D3).
+With both, **a developer may bind any storefront they can write to any store on
+the cluster**, and that reaches further than the storefronts they own.
+`v1:platform:site` carries the account grant, and staff (developer and above)
+are standing members of every account's group, so a developer can write every
+account-tied site: every client storefront, live ones included, may be
+re-pointed at any store. That is the same reach that already lets a developer
+pause, archive or delete those sites, and it is accepted rather than
+overlooked. What bounds the stores is who makes them: every store row is
+registered by a cluster owner or by server code (D15), so the Storefront token
+a binding exposes is always one an owner or Connect Shopify chose. The part
+attaches; it does not register, change, pause or resume a store, which the row
+tier keeps a cluster owner's.
+
+An owner who wants one developer kept out writes a user `deny` on `execute
+app:deployables/store`. It is honoured on every write that CHANGES which store
+a binding names:
+
+- the serving binding: `updateSiteStoreBinding`, a `createSite` that binds, and
+  a raw `insert()` that re-points `binding`;
+- the preview binding: `updateSitePreviewBinding`, and a raw `insert()` that
+  re-points `previewBinding`.
+
+On every one of those the named store must also be one the caller can read.
+A write that leaves a binding where it was is not asked for the part. Clearing
+one through a raw write names no store, so it is not asked for readability, but
+the organization boundary (memql#5598) asks the store part at the site's
+organization for any change of either binding, clearing included, so the deny
+holds there too. The two named mutations ask for the part on every call,
+clearing included.
 
 **A rank is a floor and a capability is a grant, and a cluster can hold one
 without the other.** "developer and above" is a statement about the ladder;

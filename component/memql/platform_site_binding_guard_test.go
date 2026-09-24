@@ -15,10 +15,10 @@ import (
 // question issue memql#5538 asked: who may bind a storefront they own to a store
 // they may not read. Nobody.
 //
-// The capability (`app:deployables/store`, owner-seeded) says who may reach the
-// mutation. This says which stores they may name once they have. They are
-// different questions: a grant is a grant on an APP PART, and it cannot know
-// which rows a cluster holds.
+// The capability (`app:deployables/store`, seeded on owner and developer) says
+// who may reach the mutation. This says which stores they may name once they
+// have. They are different questions: a grant is a grant on an APP PART, and
+// it cannot know which rows a cluster holds.
 
 func TestABindingNamingAnUnreadableStoreIsRefused(t *testing.T) {
 	e := &MemQLEngine{}

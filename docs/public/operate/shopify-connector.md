@@ -170,23 +170,39 @@ authorization tiers.
 | read a store row (`storeById`, `storeByDomain`, `stores`, `developmentStoresFor`) | developer, cluster owner |
 | register a store (`createStore`) | cluster owner, or server code (Connect Shopify) |
 | change a store that exists (`updateStore`, `setStoreStatus`) | cluster owner |
+| attach a store to a storefront, or change which one it fronts (`updateSiteStoreBinding`) | developer, cluster owner: the store part, a store they can read, and a storefront they can write |
 
 Below developer a store read answers **zero rows, not an error**: the binding
 guard and the deploy path read "not readable" off an empty result. The read
 floor widens reads only, so a developer who can see a store still cannot
 change it.
 
-**Binding is a cluster owner's act, and the rule is narrow.** Attaching a
-store needs `execute` on `app:deployables/store`, which the owner role holds;
-beside it, the engine refuses a binding that names a store the caller cannot
-read. Binding a storefront to a store you may not read would publish that
-store's Storefront token under your own hostname. Reading is not enough on its
-own: CHANGING which store a site is bound to -- a create that binds, a rewrite
-that re-points, `updateSiteStoreBinding` -- also needs the store part,
-`execute app:deployables/store`. Every store row is registered by a cluster
-owner or by server code, so the token references a binding exposes are ones
-an owner or Connect chose. D3 accepts that a developer holding the store part
-may bind a storefront they own to any of them.
+**Binding is a developer's or a cluster owner's act, and the rule is narrow.**
+Attaching a store needs `execute` on `app:deployables/store`, which the owner
+and developer roles hold; beside it, the engine refuses a binding that names a
+store the caller cannot read. Binding a storefront to a store you may not read
+would publish that store's Storefront token under that storefront's hostname.
+Reading is not enough on its own: CHANGING which store a site is bound to -- a
+create that binds, a rewrite that re-points, `updateSiteStoreBinding` -- also
+needs the store part, and so does changing the store a preview binding names,
+through `updateSitePreviewBinding` or a rewrite that re-points it. So an admin,
+below the read floor, binds no store even when granted the part, and a
+developer an owner has denied the part by name binds none either, on either
+binding.
+
+**The consequence, stated (D3).** A developer may bind ANY storefront they can
+write to ANY store on the cluster, and that is not only the storefronts they
+own. `v1:platform:site`'s account grant admits staff (developer and above) to
+write every account-tied site, so every client storefront -- live ones
+included -- can be re-pointed at any store by any developer holding the store
+part. That is the same reach that already lets a developer pause, archive or
+delete those sites. Every store row is registered by a cluster owner or by
+server code (D15), so the token references a binding exposes are ones an
+owner or Connect chose. An owner who wants one developer kept out denies them
+`execute app:deployables/store` by name. The Store panel in MemQL OS draws a
+developer the store slot and the attach, and not the register form, pause and
+resume, or the subscription reconcile -- the first three the engine would
+refuse them, and the last walks every store on the cluster.
 
 ### The environment seed
 

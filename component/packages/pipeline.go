@@ -167,9 +167,10 @@ type Deps struct {
 	//
 	// It runs under the CALLER's actor, deliberately, which is the same answer
 	// updateSiteStoreBinding's Go guard gives: a caller who may not read a
-	// store may not bind a storefront to it. A store is cluster-owner-tier, so
-	// resolving under the deployment instead would let anyone who can deploy a
-	// package point a storefront at any merchant on the cluster.
+	// store may not bind a storefront to it. A store reads at developer and
+	// above (Connect Shopify, D3), so resolving under the deployment instead
+	// would let anyone who can deploy a package reach the stores the
+	// deployment can.
 	//
 	// NIL IS A REFUSAL, NOT A GAP, as it is for Credentials: a storefront
 	// deployed on a node that cannot resolve stores is refused by name rather

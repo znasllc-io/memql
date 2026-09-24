@@ -34,11 +34,24 @@ import (
 // @requiresCapability("execute", "app:deployables/store") names the SURFACE:
 // who may reach updateSiteStoreBinding at all. It is a grant on an app part,
 // and a grant cannot know which rows a cluster holds. A site is owner-tier, a
-// store is cluster-owner-tier, so without this check a site owner could bind
-// their own deployable to ANY store in the cluster -- and the edge, which
-// resolves the binding under a synthetic cluster-owner actor, would then serve
-// that store's Storefront token and domain under the site owner's own
-// hostname. The capability says who may bind; this says to what.
+// store reads at developer and above (clusterOwner with a developer read floor,
+// Connect Shopify D3), so without this check anyone the part is GRANTED to --
+// an admin, a writer -- could bind a deployable they can write to a store they
+// cannot read, and the edge, which resolves the binding under a synthetic
+// cluster-owner actor, would then serve that store's Storefront token and
+// domain under that deployable's hostname. The capability says who may bind;
+// this says to what.
+//
+// A developer reads every store and holds the part, so a developer may bind
+// ANY storefront they can write to ANY store on the cluster. That is wider
+// than the storefronts they own: the site tier's account grant
+// (account="accountId") admits staff -- developer and above -- to write every
+// account-tied site, so every client storefront is in reach, live ones
+// included. It is the same reach that already lets a developer pause, archive
+// or delete those sites. D3 accepts it. What bounds the STORES is who makes a
+// store row: only a cluster owner or server code creates one (D15,
+// create_rank_floor.go), so every token reference a binding can expose is one
+// an owner or Connect Shopify chose.
 //
 // # Why the retired shape is refused rather than ignored
 //
@@ -131,7 +144,7 @@ func requireReadableStore(ctx context.Context, storeId, actor, act string, reada
 	}
 	if !ok {
 		return fmt.Errorf(
-			"v1:platform:site: %q may not %s v1:shopify:store %q -- it is not a store this caller can read. A store is cluster-owner-tier; binding a storefront to one you cannot read would publish that store's Storefront token under your own hostname.",
+			"v1:platform:site: %q may not %s v1:shopify:store %q -- it is not a store this caller can read. Stores are read by developers and cluster owners; binding a storefront to one you cannot read would publish that store's Storefront token under this storefront's hostname.",
 			actor, act, storeId,
 		)
 	}

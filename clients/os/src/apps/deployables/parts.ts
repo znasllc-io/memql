@@ -21,11 +21,25 @@ import { availableInAnyOrganization, hasOrganizationDecisions, holds, holdsForOr
 //   preview   publish a candidate version, exercise it against a development
 //             store, open and end a preview
 //
-// SIX OF THEM ARE SEEDED ON OWNER AND DEVELOPER; `store` IS OWNER ALONE
-// (memql#5541). It took over from the retired `app:stores` capabilities, and
-// those were owner-only because v1:shopify:store is @rowAuthz(clusterOwner):
-// a developer holding the part would be drawn the control and then served no
-// rows, which is a refusal rendered as an empty panel (memql#5216).
+// ALL SEVEN ARE SEEDED ON OWNER AND DEVELOPER. `store` was owner alone
+// (memql#5541) while v1:shopify:store was plain @rowAuthz(clusterOwner): a
+// developer holding the part would have been drawn the control and served no
+// rows, a refusal rendered as an empty panel (memql#5216). The store concept
+// reads at developer and above now (Connect Shopify, D3), so the part came to
+// developer with it. It ATTACHES a store. Registering one, pausing it and
+// resuming it are a cluster owner's, which the engine refuses below one;
+// reconciling subscriptions walks every store on the cluster rather than the
+// one a storefront fronts. The Store panel draws all four only for a cluster
+// owner.
+//
+// THE CONSEQUENCE, STATED (D3): a developer holding `store` may bind ANY
+// storefront they can write to any store on the cluster -- not only their
+// own. v1:platform:site's account grant admits staff (developer and above) to
+// write every account-tied site, so every client storefront, live ones
+// included, is in reach: the same reach that already lets a developer pause,
+// archive or delete those sites. Every store row is made by a cluster owner or
+// server code (D15), so the token a binding exposes is one an owner or Connect
+// Shopify chose.
 //
 // THE OS HIDES; THE ENGINE REFUSES. Every act on this app names the part it
 // needs beside itself (`requires` on an ActSpec, on a HeadAction, on the

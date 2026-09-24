@@ -131,8 +131,8 @@ describe("the store is a connection on the deployable, not a build setting", () 
   });
 
   it("is absent, not disabled, for somebody whose grants do not reach it", async () => {
-    // `execute app:deployables/store` is seeded on OWNER ALONE, which is what
-    // the retired app:stores set granted. DESIGN.md rule 12: a control the
+    // `execute app:deployables/store` is seeded on owner and developer
+    // (Connect Shopify, D3), not on a reader. DESIGN.md rule 12: a control the
     // effective set does not hold is ABSENT -- and here the row tier would
     // serve a reader nothing anyway, so a slot would be a refusal rendered as
     // an empty panel.
@@ -143,16 +143,16 @@ describe("the store is a connection on the deployable, not a build setting", () 
   });
 });
 
-describe("a storefront with no store", () => {
-  const unbound = siteRow({
-    id: "site-unbound",
-    hostname: "new.memql.example.com",
-    kind: "shopify_storefront",
-    status: "draft",
-    bundleRef: "blob://sites/site-unbound/pending/",
-    binding: {},
-  });
+const unbound = siteRow({
+  id: "site-unbound",
+  hostname: "new.memql.example.com",
+  kind: "shopify_storefront",
+  status: "draft",
+  bundleRef: "blob://sites/site-unbound/pending/",
+  binding: {},
+});
 
+describe("a storefront with no store", () => {
   it("invites somebody to attach one", async () => {
     const connection = fakeConnection({ sites: [unbound], stores: [STORE] });
     mount(connection);
@@ -321,5 +321,58 @@ describe("a binding that does not resolve", () => {
     await waitFor(() =>
       expect(within(pane).getByText(/names a store that is not on this cluster/)).toBeTruthy(),
     );
+  });
+});
+
+describe("who is drawn which store act (Connect Shopify, D3 and D15)", () => {
+  // THE STORE PART IS A DEVELOPER'S TOO, and it is the whole of what a
+  // developer holds here. It attaches a store and changes which one a
+  // storefront fronts. REGISTERING a store creates a v1:shopify:store row,
+  // which the engine refuses below a cluster owner (D15), and PAUSING or
+  // RESUMING one writes a store row that exists, which stays owner-only.
+  // RECONCILING SUBSCRIPTIONS is an owner's too: shopifyEnsureSubscriptions
+  // takes no store and walks every ingesting store on the cluster, so it is
+  // not an act on the storefront a developer attaches. An act that is not
+  // legal is absent, never disabled (DESIGN.md rule 12).
+  async function openPicker(role: string) {
+    const connection = fakeConnection({ sites: [unbound], stores: [STORE] });
+    mount(connection, { role });
+    const page = await openDeployable("new.memql.example.com");
+    expect(storeSlot(page)?.textContent).toContain("Attach a store");
+    await click(storeSlot(page));
+    const pane = await screen.findByRole("region", { name: "Store for new.memql.example.com" });
+    const label = await within(pane).findByText("example.myshopify.com");
+    await click(label.closest<HTMLElement>('[role="radio"]'));
+    return pane;
+  }
+
+  it("draws a developer the slot and the attach, and not the register form", async () => {
+    const pane = await openPicker("developer");
+    expect(within(pane).getByRole("button", { name: "Attach" })).toBeTruthy();
+    expect(within(pane).queryByRole("button", { name: "Register a store" })).toBeNull();
+  });
+
+  it("draws a developer no pause or resume, and still the change of store", async () => {
+    const { pane } = await openStore(BOUND, { role: "developer" });
+    await waitFor(() => expect(within(pane).getByText(/scopes the mirror needs are granted/)).toBeTruthy());
+    expect(within(pane).getByRole("button", { name: /Change the store/ })).toBeTruthy();
+    expect(within(pane).queryByRole("button", { name: /Pause ingestion/ })).toBeNull();
+    expect(within(pane).queryByRole("button", { name: /Resume ingestion/ })).toBeNull();
+  });
+
+  it("draws a developer no subscription reconcile, which walks every store on the cluster", async () => {
+    const { pane } = await openStore(BOUND, { role: "developer" });
+    await waitFor(() => expect(within(pane).getByText(/scopes the mirror needs are granted/)).toBeTruthy());
+    expect(within(pane).queryByRole("button", { name: /Reconcile subscriptions/ })).toBeNull();
+  });
+
+  it("draws an owner the attach, the register form, pause and the reconcile", async () => {
+    const pane = await openPicker("owner");
+    expect(within(pane).getByRole("button", { name: "Attach" })).toBeTruthy();
+    expect(within(pane).getByRole("button", { name: "Register a store" })).toBeTruthy();
+
+    const { pane: bound } = await openStore(BOUND, { role: "owner" });
+    expect(await within(bound).findByRole("button", { name: /Pause ingestion/ })).toBeTruthy();
+    expect(within(bound).getByRole("button", { name: /Reconcile subscriptions/ })).toBeTruthy();
   });
 });

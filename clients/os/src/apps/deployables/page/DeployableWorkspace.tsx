@@ -68,10 +68,10 @@ export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDo
             Shopify store is the most consequential answer a storefront has.
 
             ABSENT, NOT DISABLED, when the grants do not reach it
-            (DESIGN.md rule 12). The store row is cluster-owner tier, so
-            somebody without `execute app:deployables/store` would be shown a
-            slot the engine then serves nothing into -- a refusal rendered as
-            an empty panel. */}
+            (DESIGN.md rule 12). The store row reads at developer and
+            above, so somebody without `execute app:deployables/store` would
+            be shown a slot the engine then serves nothing into -- a refusal
+            rendered as an empty panel. */}
         {storefront && canStore ? <StorePiece storeId={storeId} onClick={() => onInspect("store")} siteId={site.id} /> : null}
         <ActivityTarget target={`deployables:${site.id}:address`}><Piece icon={<Globe size={18} aria-hidden />} label="Cluster address" detail={site.hostname || "No address recorded"} onClick={() => onInspect("whereItLives")} /></ActivityTarget>
         {canDomains ? <DomainPiece site={site} onClick={() => onInspect("whereItLives")} /> : null}

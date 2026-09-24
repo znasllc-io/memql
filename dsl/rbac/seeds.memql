@@ -683,15 +683,28 @@ seed capability cap-developer-execute-app-deployables-preview { roleSlug: "devel
 
 // ---- app:deployables/store -- attach the Shopify store a storefront fronts ----
 //
-// OWNER ONLY, and that is not an oversight beside the five above. It is what
-// the retired app:stores set granted: the Stores app was `min: "owner"` and
-// v1:shopify:store is @rowAuthz(clusterOwner), so the population that could
-// manage a store was cluster owners and nobody else. Seeding this part on
-// developer too would put a control on a developer's screen that the row tier
-// then serves nothing to -- a refusal rendered as an empty panel, which is the
-// failure mode memql#5216 was filed for.
+// OWNER AND DEVELOPER, like the parts above (Connect Shopify design, D3). It
+// was owner alone while v1:shopify:store was plain @rowAuthz(clusterOwner):
+// a developer holding the part would have been drawn a control the row tier
+// then served nothing to (memql#5216). The store concept now carries a read
+// floor at developer, so a developer reads the stores this part attaches.
+//
+// THE CONSEQUENCE, STATED: a developer holding this part may bind ANY
+// storefront they can write to ANY store on the cluster, and D3 accepts it.
+// That is not only their own storefronts: v1:platform:site's account grant
+// admits staff (developer and above) to write every account-tied site, so it
+// is every client storefront, live ones included -- the same reach that
+// already lets a developer pause, archive or delete those sites. What bounds
+// the stores is who makes a store row -- only a cluster owner or server code
+// creates one (D15, component/memql/create_rank_floor.go), so every Storefront
+// token reference a binding can expose is one an owner or Connect Shopify
+// chose.
+// The part attaches a store; it does not create, change, pause or resume one,
+// which stay a cluster owner's through the row tier.
 @description("owner: the store part of the Deployables app -- attach or change the Shopify store a storefront fronts (memql#5541).")
 seed capability cap-owner-execute-app-deployables-store { roleSlug: "owner"  verb: "execute"  resourceType: "app:deployables/store"  predefined: true }
+@description("developer: the store part of the Deployables app -- attach or change the Shopify store a storefront fronts (Connect Shopify, D3).")
+seed capability cap-developer-execute-app-deployables-store { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/store"  predefined: true }
 
 
 // ---- app:identity (registry floor: no floor) ----

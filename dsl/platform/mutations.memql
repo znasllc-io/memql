@@ -609,12 +609,18 @@ mutation site updateSiteResolutionTail {
 /// clearing must be expressible, for updateSiteSettings' reason.
 ///
 /// AUTHORIZATION IS TWO GATES, AND THE SECOND IS THE SUBSTANTIVE ONE.
-/// @requiresCapability names the surface: `app:deployables/store` is seeded on owner alone, which
-/// is exactly the population the retired Stores app admitted. Beside it, a Go guard refuses a
-/// binding naming a store row the CALLER CANNOT READ -- so the answer to "who may bind a storefront
-/// they own to a store they may not read" is nobody. That check needs a cross-row read no mutation
-/// body can make, which is why it sits with the hostname policy rather than here
-/// (component/memql/platform_site_binding_guard.go).
+/// @requiresCapability names the surface: `app:deployables/store` is seeded on owner and developer
+/// (Connect Shopify, D3). Beside it, a Go guard refuses a binding naming a store row the CALLER
+/// CANNOT READ -- so the answer to "who may bind a storefront to a store they may not read" is
+/// nobody. That check needs a cross-row read no mutation body can make, which is why it sits with
+/// the hostname policy rather than here (component/memql/platform_site_binding_guard.go).
+///
+/// A developer reads every store, so a developer may bind ANY storefront they can write to ANY
+/// store on the cluster, and D3 accepts it. That is not only their own: the site tier's account
+/// grant admits staff (developer and above) to write every account-tied site, so it is every client
+/// storefront, live ones included -- the same reach that lets a developer pause, archive or delete
+/// those sites. Every store row is registered by a cluster owner or server code (D15), so the
+/// Storefront token a binding exposes is always one an owner or Connect chose.
 @requiresCapability("execute", "app:deployables/store")
 mutation site updateSiteStoreBinding {
   args {
@@ -760,11 +766,12 @@ mutation site promoteSiteCandidate {
 /// it matters is that the failure it prevents is silent: a preview against the live store looks
 /// exactly like a preview, right up to the test payment landing in the merchant's real orders.
 ///
-/// AUTHORIZATION is `app:deployables/store`, the same gate updateSiteStoreBinding carries and for
-/// the same reason -- this names a v1:shopify:store row, which is cluster-owner tier, and the Go
-/// guard beside it refuses a store the CALLER CANNOT READ whatever capability they hold. `preview`
-/// is deliberately not enough: preparing a version is one thing, choosing which of the cluster's
-/// stores it talks to is another.
+/// AUTHORIZATION is `app:deployables/store` (owner and developer), the same gate
+/// updateSiteStoreBinding carries and for the same reason -- this names a v1:shopify:store row,
+/// which reads at developer and above, and the Go guard beside it refuses a store the CALLER CANNOT
+/// READ whatever capability they hold. `preview` is deliberately not enough: preparing a version is
+/// one thing, choosing which of the cluster's stores it talks to is another. The reach is the
+/// serving binding's: any storefront the caller can write, client storefronts included.
 @requiresCapability("execute", "app:deployables/store")
 mutation site updateSitePreviewBinding {
   args {
