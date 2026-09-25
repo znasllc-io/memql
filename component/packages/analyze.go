@@ -68,6 +68,7 @@ func Analyze(tree fs.FS, opts Options) (*Report, error) {
 		// deploy as though it nearly could.
 		return rep, r
 	}
+	rep.Manifest = manifest
 	rep.Name = manifest.Name
 	rep.FormatVersion = manifest.FormatVersion
 
@@ -98,6 +99,8 @@ func analyzeDeployables(tree fs.FS, manifest *Manifest, rep *Report) {
 		command, output := d.BuildPlanFor()
 		dr := DeployableReport{
 			Name:           d.Name,
+			DisplayName:    d.DisplayName,
+			Deployment:     d.Deployment,
 			Kind:           d.Kind,
 			Path:           d.Path,
 			Command:        command,

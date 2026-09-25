@@ -208,7 +208,7 @@ function siteRowFor(site: SiteRow, pkg: PackageRow | null, parked: DeploymentRow
   // site's label when it has one; else its address, which is what a
   // deployable IS. Never blank -- a nameless row is indistinguishable from a
   // row that failed to render.
-  const name = app || site.title.trim() || siteName(site);
+  const name = pkg?.declares.find(d => d.name === app)?.displayName?.trim() || app || site.title.trim() || siteName(site);
   // NEVER disabled: a site row means the app was deployed, and the owner's
   // off-list is a preference about apps that have none.
   return {
@@ -367,7 +367,7 @@ function collectRows(
         site: null,
         pkg,
         app: app.name,
-        name: app.name === "" ? pkg.name || packageId : app.name,
+        name: app.name === "" ? pkg.name || packageId : ((app as {displayName?: string}).displayName?.trim() || app.name),
         hostname: "",
         kind: app.kind,
         parked: run,
@@ -409,7 +409,7 @@ function collectRows(
         site: null,
         pkg,
         app: declared.name,
-        name: declared.name,
+        name: declared.displayName?.trim() || declared.name,
         // NO ADDRESS, because it has none: nobody was asked where this should
         // live. Deploying it is what asks.
         hostname: "",

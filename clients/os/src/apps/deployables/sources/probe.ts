@@ -70,6 +70,7 @@ export interface ManifestSummary {
 
 /** One declared deployable, in the three facts the preview shows. */
 export interface ManifestDeployable {
+  displayName?: string;
   name: string;
   kind: string;
   path: string;
@@ -155,7 +156,7 @@ export function manifestFrom(value: unknown): ManifestSummary {
   for (const member of membersOf(row["deployables"])) {
     const name = textOf(member, "name").trim();
     if (name === "") continue;
-    deployables.push({ name, kind: textOf(member, "kind"), path: textOf(member, "path") });
+    deployables.push({ name, ...(textOf(member, "displayName") ? {displayName: textOf(member, "displayName")} : {}), kind: textOf(member, "kind"), path: textOf(member, "path") });
   }
   return {
     name: typeof row["name"] === "string" ? row["name"] : "",

@@ -1,9 +1,8 @@
 import { useMemo, useState } from "react";
 import { Check, CircleDashed, ExternalLink, ShoppingBag, X } from "lucide-react";
 
-import { Button, Caption, CopyValue, Notice, Select, Subhead } from "../../../kit";
+import { Button, Caption, CopyValue, Facts, Fact, Notice, Select, Subhead } from "../../../kit";
 import { IconButton } from "../../../kit/IconButton";
-import { RefreshButton } from "../../../kit/RefreshButton";
 import type { DeploymentRow } from "../packages/rows";
 import type { PartsHeld } from "../parts";
 import { type SiteRow } from "../rows";
@@ -78,7 +77,9 @@ export function PreviewSection({
   runs,
   can,
   onOpenStore,
+  storeView = false,
 }: {
+  storeView?: boolean;
   site: SiteRow;
   /** This source's timeline, for the versions it has published. */
   runs: readonly DeploymentRow[];
@@ -99,16 +100,14 @@ export function PreviewSection({
   const open = grants.grants.filter((g) => grantIsOpen(g, now));
   const mine = readiness.readiness;
 
-  // The versions this deployable has published, newest first, minus the one it
-  // is already serving -- a candidate that is serving is not a candidate, and
-  // the engine refuses it, so it is not offered.
+  // A storefront may test its current build against a separate sandbox.
+  // Other app kinds require a different candidate version.
   const versions = useMemo(() => publishedVersions(runs, site), [runs, site]);
 
   return (
-    <section className="deployable-preview" aria-label="Preview">
+    <section className="deployable-preview" aria-label="Preview" data-store-view={storeView || undefined}>
       <header>
         <h3>Preview</h3>
-        <RefreshButton label="Read the preview again" onClick={reread} busy={readiness.state === "reading"} />
       </header>
 
       {readiness.state === "failed" ? (
@@ -117,7 +116,10 @@ export function PreviewSection({
         </Notice>
       ) : null}
 
-      <ol className="preview-lanes">
+      {storeView ? <Facts>
+        <Fact label={site.status === "live" ? "Published version" : "Built version"} value={site.bundleRef ? shortRef(site.bundleRef) : "None"} mono />
+        <Fact label="Testing version" value={site.candidateRef ? shortRef(site.candidateRef) : "None"} mono />
+      </Facts> : <ol className="preview-lanes">
         <li className="preview-lane" data-serving="true">
           <span className="preview-lane-mark" aria-hidden />
           <span className="preview-lane-role">Serving</span>
@@ -156,7 +158,7 @@ export function PreviewSection({
             onOpenStore={onOpenStore}
           />
         </li>
-      </ol>
+      </ol>}
 
       {/* ONE ACT LINE, UNDER THE LANES THEY ACT ON. Two stacked rows of buttons
           with a sentence between them read as two unrelated groups, which is
@@ -165,6 +167,7 @@ export function PreviewSection({
       {can.preview && !site.systemOwned ? (
         <CandidateControls
           site={site}
+          allowManualReference={!storeView}
           versions={versions}
           busy={writes.busy}
           canPreview={mine !== null && mine.canPreview}
@@ -181,22 +184,22 @@ export function PreviewSection({
 
       {/* THE REFUSAL, WHERE THE ACT WOULD HAVE BEEN. */}
       {mine !== null && site.candidateRef !== "" && !mine.canPreview ? (
-        <RefusalNotice refusal={mine.previewRefusal} onOpenStore={onOpenStore} storefront={mine.storefront} />
+        <RefusalNotice refusal={mine.previewRefusal} onOpenStore={onOpenStore} storefront={!storeView && mine.storefront} compact={storeView} />
       ) : null}
 
       {writes.error !== "" ? (
         <Notice tone="error" sentence="The cluster refused that." detail={writes.error} />
       ) : null}
-      {writes.note !== "" && writes.opened === null ? <Notice sentence={writes.note} /> : null}
+      {!storeView && writes.note !== "" && writes.opened === null ? <Notice sentence={writes.note} /> : null}
 
       {writes.opened !== null ? (
         <div className="preview-link">
           <Subhead>Your preview link</Subhead>
-          <Caption>
+          <Caption>{storeView ? <>Private preview · {writes.opened.ttlMinutes} minutes.</> : <>
             It opens {shortRef(writes.opened.candidateRef)} at {writes.opened.hostname}, for you and for
-            nobody else, for the next {writes.opened.ttlMinutes} minutes. It is shown once -- the cluster
+            nobody else, for the next {writes.opened.ttlMinutes} minutes. It is shown once — the cluster
             keeps only a digest of it, so it cannot be read back.
-          </Caption>
+          </>}</Caption>
           <div className="preview-link-row">
             <a className="preview-link-open" href={writes.opened.url} target="_blank" rel="noreferrer">
               <ExternalLink size={14} aria-hidden />
@@ -299,6 +302,7 @@ function previewStoreBlurb(mine: PreviewReadiness | null): string {
  * does not permit it is ABSENT from the line rather than drawn inert.
  */
 function CandidateControls({
+  allowManualReference = true,
   site,
   versions,
   busy,
@@ -309,6 +313,7 @@ function CandidateControls({
   onOpen,
   onCheck,
 }: {
+  allowManualReference?: boolean;
   site: SiteRow;
   versions: readonly string[];
   busy: string;
@@ -326,9 +331,9 @@ function CandidateControls({
   if (site.candidateRef !== "") {
     return (
       <>
-        <div className="preview-acts">
+        <div className="preview-acts os-panel-actions">
           <Button busy={busy === "candidate"} busyLabel="Withdrawing" onClick={onClear}>
-            Withdraw the candidate
+            {allowManualReference ? "Withdraw the candidate" : "Stop testing"}
           </Button>
           {canCheck ? (
             <Button busy={busy === "checks"} busyLabel="Checking" onClick={onCheck}>
@@ -341,10 +346,12 @@ function CandidateControls({
             </Button>
           ) : null}
         </div>
-        <Caption>Withdrawing ends every preview of it. Nothing the public sees changes.</Caption>
+        {allowManualReference ? <Caption>Withdrawing ends every preview of it. Nothing the public sees changes.</Caption> : null}
       </>
     );
   }
+
+  if (!allowManualReference && versions.length === 0) return <Caption>No unpublished version available.</Caption>;
 
   // NO VERSIONS AND NO SOURCE is not a dead end -- a deployable published by CI
   // has versions this page has no timeline for, and its operator knows the
@@ -399,7 +406,7 @@ function CandidateControls({
           </Button>
         </>
       )}
-      {versions.length > 0 ? (
+      {allowManualReference && versions.length > 0 ? (
         <Button tone="quiet" onClick={() => setByHand((v) => !v)}>
           {byHand ? "Choose from this source" : "Name a version instead"}
         </Button>
@@ -418,7 +425,9 @@ export function RefusalNotice({
   refusal,
   storefront,
   onOpenStore,
+  compact = false,
 }: {
+  compact?: boolean;
   refusal: PreviewRefusal;
   storefront: boolean;
   onOpenStore: () => void;
@@ -434,8 +443,14 @@ export function RefusalNotice({
     refusal.code === "no_preview_binding" ||
     refusal.code === "bound_store_unreadable" ||
     refusal.code === "serving_binding_is_development_store";
+  const concise: Record<string, string> = {
+    serving_binding_is_development_store: "Move the sandbox to Testing to keep it separate from production.",
+    no_preview_binding: "Connect a sandbox store to test this version.",
+    preview_binding_is_not_development_store: "Choose a sandbox store for testing.",
+    bound_store_unreadable: "The connected store is unavailable. Choose another store.",
+  };
   return (
-    <Notice tone="warn" sentence={refusal.message} next={refusal.remedy}>
+    <Notice tone="warn" sentence={compact ? concise[refusal.code] || refusal.message : refusal.message} next={compact ? undefined : refusal.remedy}>
       {aboutTheStore && storefront ? <Button onClick={onOpenStore}>Open the store</Button> : null}
     </Notice>
   );
@@ -465,7 +480,7 @@ function Observations({
 
   return (
     <div className="preview-watched">
-      <Subhead>What this cluster watched</Subhead>
+      <Subhead>Store checks</Subhead>
       {state === "failed" ? (
         <Notice tone="error" sentence="The observations could not be read." detail={error}>
           <Button onClick={onRetry}>Try again</Button>
@@ -473,8 +488,7 @@ function Observations({
       ) : null}
       {!anything && state !== "failed" ? (
         <Caption>
-          Nothing has been exercised yet. Open a preview, then run the checks to ask the development
-          store these four questions.
+          Open a preview to run the store checks.
         </Caption>
       ) : null}
       <ul className="preview-observations">
@@ -482,10 +496,7 @@ function Observations({
           <ObservationRow key={kind} kind={kind} row={latest[kind]} />
         ))}
       </ul>
-      <Caption>
-        The payment itself happens in a browser on Shopify's own checkout. This cluster cannot watch
-        it, and does not pretend to.
-      </Caption>
+
     </div>
   );
 }
@@ -499,7 +510,7 @@ function ObservationRow({ kind, row }: { kind: ObservationKind; row: PreviewObse
   const ok = measured && row.ok;
   const state = !measured ? "unmeasured" : ok ? "answered" : "failed";
   const word = !measured ? "not measured yet" : ok ? "answered" : "did not answer";
-  const said = !measured ? words.blurb : ok ? row.detail : row.failure;
+  const said = !measured ? "" : ok ? row.detail : row.failure;
   return (
     <li className="preview-observation" data-state={state}>
       <span className="preview-observation-mark" aria-hidden>
@@ -574,20 +585,20 @@ function OpenPreviews({
 }
 
 /**
- * The versions this deployable has published, newest first, minus the one it
- * serves.
- *
- * THE SERVING VERSION IS EXCLUDED because a candidate that is serving is not a
- * candidate: there would be nothing to exercise, and the engine refuses it. An
- * option the server would reject is a broken control, not a permission.
+ * Versions available for testing. Storefronts include the current build:
+ * testing the same files with a separate sandbox is a useful first preview.
  */
 export function publishedVersions(runs: readonly DeploymentRow[], site: SiteRow): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
+  if (site.kind === "shopify_storefront" && site.bundleRef.trim()) {
+    out.push(site.bundleRef.trim());
+    seen.add(site.bundleRef.trim());
+  }
   for (const run of runs) {
     for (const outcome of run.deployables) {
       if (outcome.siteId !== site.id && outcome.name !== site.packageDeployableName) continue;
-      const ref = outcome.bundleRef.trim();
+      const ref = (outcome.bundleRef ?? "").trim();
       if (ref === "" || ref === site.bundleRef || seen.has(ref)) continue;
       seen.add(ref);
       out.push(ref);

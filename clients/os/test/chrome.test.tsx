@@ -69,7 +69,7 @@ describe("the desktop lands (spec K bullet 1)", () => {
     renderShell();
     expect(document.querySelector("[data-os-desktop]")).not.toBeNull();
     expect(document.querySelector("[data-os-dock]")).not.toBeNull();
-    expect(document.querySelector("[data-os-field]")).not.toBeNull();
+    expect(document.querySelector("[data-os-wallpaper]")).not.toBeNull();
     expect(document.querySelector("[data-os-desk-numeral]")).not.toBeNull();
     expect(document.querySelector("[data-os-slot]")).toBeNull();
   });

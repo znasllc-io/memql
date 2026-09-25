@@ -38,7 +38,6 @@ export const GRAPHITE: OsThemePack = {
   author: "MemQL",
   description: "The instrument look. Graphite grounds, brand green on signal duty.",
   builtIn: true,
-  wallpaper: { seed: 9, cell: 110, density: 0.5, linkChance: 0.14, linkReach: 260 },
   tokens: {
     dark: {
       ground: "#07090a",
@@ -57,9 +56,8 @@ export const GRAPHITE: OsThemePack = {
       "shadow-item": "0 1px 2px rgba(0, 0, 0, 0.3)",
       "shadow-float": "0 12px 32px rgba(0, 0, 0, 0.42)",
       "shadow-window": "0 24px 64px rgba(0, 0, 0, 0.5)",
-      "field-dot": "rgba(232, 230, 221, 0.055)",
-      "field-link": "rgba(92, 205, 167, 0.05)",
-      "field-numeral": "rgba(232, 230, 221, 0.04)",
+      "wash": "rgba(232, 230, 221, 0.055)",
+      "desk-numeral": "rgba(232, 230, 221, 0.04)",
       rail: "rgba(232, 230, 221, 0.14)",
       "rail-hover": "rgba(232, 230, 221, 0.3)",
     },
@@ -80,9 +78,8 @@ export const GRAPHITE: OsThemePack = {
       "shadow-item": "0 1px 2px rgba(25, 29, 26, 0.08)",
       "shadow-float": "0 12px 32px rgba(25, 29, 26, 0.12)",
       "shadow-window": "0 24px 64px rgba(25, 29, 26, 0.16)",
-      "field-dot": "rgba(25, 29, 26, 0.05)",
-      "field-link": "rgba(4, 125, 90, 0.05)",
-      "field-numeral": "rgba(25, 29, 26, 0.045)",
+      "wash": "rgba(25, 29, 26, 0.05)",
+      "desk-numeral": "rgba(25, 29, 26, 0.045)",
       rail: "rgba(25, 29, 26, 0.16)",
       "rail-hover": "rgba(25, 29, 26, 0.34)",
     },
@@ -96,8 +93,7 @@ export const GRAPHITE: OsThemePack = {
  * right call for the default: cool grounds keep a dense operator console
  * calm. Vellum is the deliberate opposite and exists to prove the contract
  * carries a whole CHARACTER rather than a hue -- warm paper, warm ink, and an
- * indigo accent that reads as a pen rather than a highlight. Its wallpaper is
- * sparser and longer-linked than graphite's: fewer marks, more ruling.
+ * indigo accent that reads as a pen rather than a highlight.
  */
 export const VELLUM: OsThemePack = {
   id: "vellum",
@@ -106,7 +102,6 @@ export const VELLUM: OsThemePack = {
   author: "MemQL",
   description: "Warm paper and drafting ink. Quieter grounds, indigo instead of green.",
   builtIn: true,
-  wallpaper: { seed: 17, cell: 150, density: 0.34, linkChance: 0.2, linkReach: 320 },
   tokens: {
     dark: {
       ground: "#171410",
@@ -125,9 +120,8 @@ export const VELLUM: OsThemePack = {
       "shadow-item": "0 1px 2px rgba(0, 0, 0, 0.34)",
       "shadow-float": "0 12px 32px rgba(0, 0, 0, 0.46)",
       "shadow-window": "0 24px 64px rgba(0, 0, 0, 0.54)",
-      "field-dot": "rgba(236, 229, 214, 0.05)",
-      "field-link": "rgba(143, 158, 232, 0.05)",
-      "field-numeral": "rgba(236, 229, 214, 0.04)",
+      "wash": "rgba(236, 229, 214, 0.05)",
+      "desk-numeral": "rgba(236, 229, 214, 0.04)",
       rail: "rgba(236, 229, 214, 0.14)",
       "rail-hover": "rgba(236, 229, 214, 0.3)",
     },
@@ -148,9 +142,8 @@ export const VELLUM: OsThemePack = {
       "shadow-item": "0 1px 2px rgba(38, 34, 28, 0.09)",
       "shadow-float": "0 12px 32px rgba(38, 34, 28, 0.13)",
       "shadow-window": "0 24px 64px rgba(38, 34, 28, 0.17)",
-      "field-dot": "rgba(38, 34, 28, 0.06)",
-      "field-link": "rgba(61, 78, 168, 0.06)",
-      "field-numeral": "rgba(38, 34, 28, 0.05)",
+      "wash": "rgba(38, 34, 28, 0.06)",
+      "desk-numeral": "rgba(38, 34, 28, 0.05)",
       rail: "rgba(38, 34, 28, 0.18)",
       "rail-hover": "rgba(38, 34, 28, 0.36)",
     },
@@ -162,17 +155,15 @@ export const VELLUM: OsThemePack = {
  *
  * Where graphite is neutral and vellum is warm, cobalt is cold: grounds with
  * a blue cast and a cyan accent, for the long low-light sitting that operator
- * work actually is. Its wallpaper is the densest of the three and its links
- * are the shortest -- a close-range field rather than a sparse lattice.
+ * work actually is.
  */
 export const COBALT: OsThemePack = {
   id: "cobalt",
   name: "Cobalt",
   version: "1.0.0",
   author: "MemQL",
-  description: "A cold night bridge. Blue grounds, cyan signal, the densest field.",
+  description: "A cold night bridge. Blue grounds and cyan signal.",
   builtIn: true,
-  wallpaper: { seed: 31, cell: 88, density: 0.6, linkChance: 0.1, linkReach: 200 },
   tokens: {
     dark: {
       ground: "#050a12",
@@ -191,9 +182,8 @@ export const COBALT: OsThemePack = {
       "shadow-item": "0 1px 2px rgba(0, 0, 0, 0.35)",
       "shadow-float": "0 12px 32px rgba(0, 0, 0, 0.5)",
       "shadow-window": "0 24px 64px rgba(0, 0, 0, 0.58)",
-      "field-dot": "rgba(222, 232, 245, 0.06)",
-      "field-link": "rgba(73, 184, 240, 0.06)",
-      "field-numeral": "rgba(222, 232, 245, 0.045)",
+      "wash": "rgba(222, 232, 245, 0.06)",
+      "desk-numeral": "rgba(222, 232, 245, 0.045)",
       rail: "rgba(222, 232, 245, 0.15)",
       "rail-hover": "rgba(222, 232, 245, 0.32)",
     },
@@ -214,9 +204,8 @@ export const COBALT: OsThemePack = {
       "shadow-item": "0 1px 2px rgba(17, 26, 38, 0.08)",
       "shadow-float": "0 12px 32px rgba(17, 26, 38, 0.12)",
       "shadow-window": "0 24px 64px rgba(17, 26, 38, 0.16)",
-      "field-dot": "rgba(17, 26, 38, 0.055)",
-      "field-link": "rgba(11, 111, 168, 0.06)",
-      "field-numeral": "rgba(17, 26, 38, 0.045)",
+      "wash": "rgba(17, 26, 38, 0.055)",
+      "desk-numeral": "rgba(17, 26, 38, 0.045)",
       rail: "rgba(17, 26, 38, 0.16)",
       "rail-hover": "rgba(17, 26, 38, 0.34)",
     },

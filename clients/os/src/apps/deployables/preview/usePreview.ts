@@ -50,7 +50,7 @@ export interface ReadinessReading extends Reading<PreviewReadiness | null> {
 export function usePreviewReadiness(site: SiteRow): ReadinessReading {
   const connection = useOsConnection();
   const id = site.id.trim();
-  const judged = `${boundStoreId(site)}:${previewStoreId(site)}:${site.status}`;
+  const judged = `${boundStoreId(site)}:${previewStoreId(site)}:${site.status}:${site.bundleRef}:${site.candidateRef}`;
   const read = useMemo(() => {
     if (connection === null || id === "") return null;
     return async (signal: AbortSignal): Promise<PreviewReadiness | null> => {

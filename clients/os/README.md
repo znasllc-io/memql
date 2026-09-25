@@ -80,12 +80,12 @@ or client-visible session authority.
   when a requirement is genuinely non-monotonic, and say why where you
   declare it.
 - **Theming**: `--os-*` token packs on the root (`data-os-theme`); mode
-  (light/dark/system) is orthogonal. The wallpaper (the memory field) paints
-  from tokens and from the pack's own field parameters. A pack is DATA, and
-  Themes in the Launcher is the drawer that sells them (#4745). Windows,
-  widgets and sheets re-inherit the tokens but do NOT carry the attribute --
-  the foundation spec says they do and it is wrong; a per-window mix is three
-  one-line edits away and deliberately not built.
+  (light/dark/system) is orthogonal. The Fold wallpaper is two static tonal
+  planes derived from the active theme's ground and ink. All themes use the
+  same approved geometry; no graph, animation or canvas runs behind windows.
+  The desk numeral keeps its own theme token and placement. A pack is DATA,
+  and Themes in the Launcher is the drawer that sells them (#4745). Windows,
+  widgets and sheets re-inherit the tokens but do NOT carry the attribute.
 - **Persistence**: `system/store.ts` (`DesktopStore`) — versioned
   localStorage; desks, items, pins, theme. Never windows.
 - **The interface language**: [DESIGN.md](DESIGN.md) — the ten owner-set
@@ -425,6 +425,8 @@ of the Packages half this passage replaces and survived it unchanged.
   run and returns its ID before fetching; request teardown does not stop it.
   Terminal runs leave the pending feed. Registered sources with no report keep
   a setup row, so a failure after leaving is still reachable in its timeline.
+  An unplaced, stopped setup offers Discard with name confirmation; a scoped
+  app offers Deactivate instead, leaving sibling apps alone. Leave only navigates.
 
 - **A CREDENTIAL IS A CARD, AND THERE IS NO TYPE THAT COULD HOLD THE VALUE**
   (`sources/rows.ts`, `sources/useSourceCredentials.ts`). `CredentialRow`
@@ -1839,8 +1841,8 @@ rules rather than repetitions.
   `component/edge`'s `validHost` takes, and for the same reason.
 
 - **A THEME CHANGES HOW THE OS LOOKS, NEVER HOW IT BEHAVES.** The format
-  carries 21 colour/depth tokens twice (dark and light) plus bounded wallpaper
-  parameters. The type scale, the radii, the grid cell and the motion
+  carries 20 colour/depth tokens twice (dark and light). The Fold wallpaper
+  derives its two planes from ground and ink; packs contain no graph parameters. The type scale, the radii, the grid cell and the motion
   durations are not in it at all. A marketplace must not be able to sell a
   desktop that will not scroll.
 
@@ -2528,3 +2530,23 @@ Markers lead through Overview/map, source group and deployable row to
 source or deployable does not acknowledge it. Expanding Available version
 does, without deploying or removing the available update. Successful
 automatic updates do not create this manual-update attention item.
+
+### Storefront connections and testing
+
+The composition map's Store entry is the storefront's configuration destination;
+there is no duplicate header button. It owns Testing (`previewBinding`),
+Production (`binding`), candidate previews and catalog/cart/checkout/order checks.
+Both selections use the user's shared Shopify connections and may name stores
+from different accounts. Testing offers Shopify-reported development stores;
+Production offers identified non-development stores. An unconnected storefront
+can serve its design without a catalog. Connecting a sandbox never writes it
+into the production binding. Repairing an old sandbox production binding first
+saves it for testing, then clears the production binding after confirmation.
+The engine's publication and preview guards remain authoritative. Show concise
+store setup state in the map and actionable details in Store, rather than a
+standing developer warning on the deployable overview.
+
+Storefront testing may reuse the current built version: the files are identical,
+but preview grants resolve the sandbox binding while public requests resolve
+only the production binding. Non-storefront candidate rules are unchanged.
+A same-build preview does not offer a no-op promotion.

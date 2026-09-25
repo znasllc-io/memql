@@ -61,11 +61,8 @@ var KnownUnofferedKinds = map[string]UnofferedTarget{
 
 // Manifest is memql-package.yaml.
 //
-// It describes the SOFTWARE and never its placement: there is no hostname and
-// no slug here (D2). A hostname is chosen once, at first deploy, and
-// remembered on the site row -- so the same manifest deploys to a staging
-// instance and a production one without an edit, and a person renaming their
-// site does not have to send a pull request to the package to keep deploying.
+// It describes software plus optional deployment defaults. Slugs are relative
+// to the receiving cluster; existing site addresses remain stable on redeploy.
 type Manifest struct {
 	FormatVersion int                  `yaml:"formatVersion" json:"formatVersion"`
 	Name          string               `yaml:"name"          json:"name"`
@@ -81,11 +78,13 @@ type Manifest struct {
 // recover. DSL domains carry both facts in their own layout, so they are
 // discovered exactly as the engine's own MEMQL_DSL_PATH mount discovers them.
 type ManifestDeployable struct {
-	Name    string           `yaml:"name"    json:"name"`
-	Path    string           `yaml:"path"    json:"path"`
-	Kind    string           `yaml:"kind"    json:"kind"`
-	Build   *ManifestBuild   `yaml:"build,omitempty"   json:"build,omitempty"`
-	Binding *ManifestBinding `yaml:"binding,omitempty" json:"binding,omitempty"`
+	Name        string              `yaml:"name"    json:"name"`
+	DisplayName string              `yaml:"displayName,omitempty" json:"displayName,omitempty"`
+	Deployment  *ManifestDeployment `yaml:"deployment,omitempty" json:"deployment,omitempty"`
+	Path        string              `yaml:"path"    json:"path"`
+	Kind        string              `yaml:"kind"    json:"kind"`
+	Build       *ManifestBuild      `yaml:"build,omitempty"   json:"build,omitempty"`
+	Binding     *ManifestBinding    `yaml:"binding,omitempty" json:"binding,omitempty"`
 	// Assets are immutable files imported after build, at paths relative to
 	// the published site. Analysis reads these declarations, never the bytes.
 	Assets []ManifestAsset `yaml:"assets,omitempty" json:"assets,omitempty"`
@@ -197,6 +196,10 @@ func ReadManifest(tree fs.FS) (*Manifest, error) {
 	for i := range m.Deployables {
 		d := &m.Deployables[i]
 		d.Name = strings.TrimSpace(d.Name)
+		d.DisplayName = strings.TrimSpace(d.DisplayName)
+		if err := validateDeployment(d.Deployment); err != nil {
+			return nil, refuse(CodeManifestInvalid, "deployable %q: %v", d.Name, err)
+		}
 		d.Path = strings.TrimSpace(d.Path)
 		d.Kind = strings.TrimSpace(d.Kind)
 		d.ResolutionTail = strings.TrimSpace(d.ResolutionTail)

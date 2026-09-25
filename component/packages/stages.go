@@ -540,6 +540,7 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 			continue
 		}
 
+		placement := manifestPlacement(dep.Deployment, req.Placements[dep.Name])
 		siteId := rowString(byName[dep.Name], "id")
 		hostname := rowString(byName[dep.Name], "hostname")
 		created := false
@@ -620,7 +621,6 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 		}
 
 		if siteId == "" {
-			placement := req.Placements[dep.Name]
 			requested := strings.TrimSpace(placement.Hostname)
 			if requested == "" {
 				return outcomes, refuseScoped(CodeDeployableHostnameUnchosen, dep.Name,
@@ -644,7 +644,6 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 			if berr := d.Store.bindSiteToPackage(ctx, siteId, req.PackageId, dep.Name); berr != nil {
 				return outcomes, berr
 			}
-			d.place(ctx, siteId, dep.Name, placement, &outcome)
 		} else if storeId != "" && storeId != boundStoreId(byName[dep.Name]) {
 			// A REDEPLOY RE-POINTS, and this is deliberately not "set on
 			// create only" like Kind and ResolutionTail.
@@ -663,6 +662,8 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 				return outcomes, berr
 			}
 		}
+
+		d.place(ctx, siteId, dep.Name, placement, &outcome)
 
 		if storeNote != nil {
 			outcome.Refusal = storeNote
@@ -690,11 +691,15 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 // by EnsureSite; a refusal there fails creation. DNS failure remains a recorded
 // non-fatal outcome because the site can still serve its cluster hostname.
 func (d *Deps) place(ctx context.Context, siteId, name string, p Placement, out *DeployableOutcome) {
-	if own := strings.TrimSpace(p.OwnDomain); own != "" {
+	for _, own := range placementDomainNames(p) {
 		if err := d.Store.addCustomDomain(ctx, siteId, own); err != nil {
-			out.DomainRefusal = &Problem{Code: CodeDeployableDomainRefused, Message: err.Error(), Scope: name}
+			if out.DomainRefusal == nil {
+				out.DomainRefusal = &Problem{Code: CodeDeployableDomainRefused, Message: err.Error(), Scope: name}
+			} else {
+				out.DomainRefusal.Message += "; " + err.Error()
+			}
 		} else {
-			out.OwnDomain = own
+			out.OwnDomain = strings.TrimPrefix(out.OwnDomain+", "+own, ", ")
 		}
 	}
 }

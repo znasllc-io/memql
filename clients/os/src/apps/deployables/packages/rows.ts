@@ -69,6 +69,7 @@ export interface PackageRow {
 /** One manifest deployable, as the package records it. No address: a skipped
  *  app is not asked where it lives until somebody deploys it. */
 export interface DeclaredDeployable {
+  displayName?: string;
   name: string;
   kind: string;
 }
@@ -248,6 +249,7 @@ export interface BuiltOn {
 }
 
 export interface AnalysisReport {
+  manifest?: PackageManifest;
   name?: string;
   formatVersion?: number;
   sourceVersion?: string;
@@ -259,6 +261,9 @@ export interface AnalysisReport {
 }
 
 export interface ReportDeployable {
+  displayName?: string;
+  deployment?: { slug?: string; domains?: string[] };
+  resolutionTail?: string;
   name: string;
   kind: string;
   path: string;
@@ -440,3 +445,13 @@ export function shortVersion(v: string): string {
 export const PENDING_DEPLOYMENT_STATUSES = new Set([
   "analyzing", "awaiting_confirm", "building", "staging_dsl", "rolling", "publishing",
 ]);
+
+export interface PackageManifest {
+  formatVersion: number;
+  name: string;
+  deployables: Array<{ name: string; displayName?: string; path: string; kind: string; build?: {command?: string; output?: string}; binding?: {store?: string}; deployment?: {slug?: string; domains?: string[]}; resolutionTail?: string; assets?: ReportDeployable["assets"] }>;
+}
+
+export function deployableLabel(d: {name: string; displayName?: string}): string {
+  return d.displayName?.trim() || d.name;
+}

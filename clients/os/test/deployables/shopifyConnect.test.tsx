@@ -6,6 +6,7 @@ vi.mock("../../src/chrome/state", async importOriginal => ({ ...await importOrig
 import { ShopifyStorePanel } from "../../src/apps/deployables/store/ShopifyStorePanel";
 import { ShopifyConnections } from "../../src/modules/connections/ShopifyConnections";
 import { captureShopifyReturn, takeShopifyReturn } from "../../src/apps/deployables/store/connectReturn";
+import { ALL_PARTS } from "../../src/apps/deployables/parts";
 import { siteFromRow } from "../../src/apps/deployables/rows";
 import { builtinReply, click, fakeConnection, rowsResult, SHOP, withSession } from "./harness";
 
@@ -26,9 +27,10 @@ function fixture(connections = [saved], configured = false, development = false)
 afterEach(() => { h.connection = null; h.openApp.mockClear(); history.replaceState(null, "", "/"); takeShopifyReturn(); });
 
 describe("shared Shopify connections", () => {
-  it("routes an unconfigured storefront to its connection settings without showing credential fields", async () => {
+  it("keeps an unconfigured storefront in Store and links to shared connection settings", async () => {
     fixture([]);
     render(withSession(<ShopifyStorePanel site={siteFromRow({ ...SHOP, binding: {} })} canBind trail={[]} back={{ label: "Deployables", onSelect: vi.fn() }} onWritten={vi.fn()} />));
+    await click(screen.getByRole("button", { name: "Manage Shopify connections in Settings" }));
     await vi.waitFor(() => expect(h.openApp).toHaveBeenCalledWith("deployables", "settings", { provider: "shopify" }));
     expect(screen.queryByLabelText("Client secret")).toBeNull();
     expect(screen.queryByLabelText("Storefront API token")).toBeNull();
@@ -36,6 +38,7 @@ describe("shared Shopify connections", () => {
   it("selects an authorized store and confirms its binding in the shared wizard footer", async () => {
     const connection = fixture();
     render(withSession(<ShopifyStorePanel site={siteFromRow({ ...SHOP, binding: {} })} canBind trail={[]} back={{ label: "Deployables", onSelect: vi.fn() }} onWritten={vi.fn()} />));
+    await click(screen.getByRole("button", { name: "Configure production store" }));
     await click(await screen.findByRole("button", { name: `Select Shopify store ${saved.label}` }));
     await click(screen.getByRole("button", { name: "Continue" }));
     await click(within(document.querySelector(".os-actbar")!).getByRole("button", { name: "Connect store" }));
@@ -71,11 +74,67 @@ describe("shared Shopify connections", () => {
   it("identifies a sandbox before explicitly attaching it", async () => {
     const connection = fixture([saved], true, true);
     render(withSession(<ShopifyStorePanel site={siteFromRow({ ...SHOP, binding: {} })} canBind trail={[]} back={{ label: "Deployables", onSelect: vi.fn() }} onWritten={vi.fn()} />));
+    await click(screen.getByRole("button", { name: "Configure testing store" }));
     await click(await screen.findByRole("button", { name: `Select Shopify store ${saved.label}` }));
     expect(screen.getByText("Sandbox")).toBeTruthy();
     await click(screen.getByRole("button", { name: "Continue" }));
-    expect(screen.getByText("Uses the sandbox catalog and test checkout.")).toBeTruthy();
+    expect(screen.getByText("Uses the sandbox catalog and test checkout in previews.")).toBeTruthy();
+    await click(screen.getByRole("button", { name: "Connect store" }));
+    expect(connection.callsNamed("updateSitePreviewBinding")[0]).toContain('storeId: "my-store"');
     expect(connection.callsNamed("updateSiteStoreBinding")).toHaveLength(0);
+  });
+  it("never offers a sandbox in the production picker", async () => {
+    fixture([saved], true, true);
+    render(withSession(<ShopifyStorePanel site={siteFromRow({ ...SHOP, binding: {} })} canBind trail={[]} back={{ label: "Deployables", onSelect: vi.fn() }} onWritten={vi.fn()} />));
+    await click(screen.getByRole("button", { name: "Configure production store" }));
+    expect(await screen.findByText("No production stores connected.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: `Select Shopify store ${saved.label}` })).toBeNull();
+  });
+  it("moves an incorrectly serving sandbox to testing without binding a production store", async () => {
+    const connection = fixture([saved], true, true);
+    render(withSession(<ShopifyStorePanel site={siteFromRow({ ...SHOP, binding: { storeId: "my-store" } })} canBind trail={[]} back={{ label: "Deployables", onSelect: vi.fn() }} onWritten={vi.fn()} />));
+    await click(await screen.findByRole("button", { name: "Move sandbox to testing" }));
+    await click(await screen.findByRole("button", { name: `Select Shopify store ${saved.label}` }));
+    await click(screen.getByRole("button", { name: "Continue" }));
+    await click(screen.getByRole("button", { name: "Connect store" }));
+    await vi.waitFor(() => expect(connection.callsNamed("updateSiteStoreBinding")).toHaveLength(1));
+    expect(connection.callsNamed("updateSitePreviewBinding")[0]).toContain('storeId: "my-store"');
+    expect(connection.callsNamed("updateSiteStoreBinding")[0]).toContain('storeId: ""');
+  });
+  it("can select the first built version for sandbox testing without entering a bundle reference", async () => {
+    const connection = fixture();
+    const site = siteFromRow({ ...SHOP, binding: {} });
+    render(withSession(<ShopifyStorePanel site={site} canBind can={ALL_PARTS} trail={[]} back={{ label: "Deployables", onSelect: vi.fn() }} onWritten={vi.fn()} />));
+    const picker = await screen.findByRole("combobox", { name: "A version to exercise" });
+    await click(picker);
+    await click(screen.getByRole("option", { name: "v1" }));
+    await click(screen.getByRole("button", { name: "Exercise this version" }));
+    expect(connection.callsNamed("setSiteCandidate")[0]).toContain(`candidateRef: "${site.bundleRef}"`);
+    expect(screen.queryByRole("textbox", { name: "A bundle reference to exercise" })).toBeNull();
+  });
+  it("keeps the serving binding if saving the sandbox for testing fails", async () => {
+    const connection = fixture([saved], true, true);
+    const execute = vi.mocked(connection.query.executeNamed).getMockImplementation()!;
+    vi.mocked(connection.query.executeNamed).mockImplementation(async (name, call, options) => {
+      if (name === "updateSitePreviewBinding") throw new Error("Store access changed");
+      return execute(name, call, options);
+    });
+    render(withSession(<ShopifyStorePanel site={siteFromRow({ ...SHOP, binding: { storeId: "my-store" } })} canBind trail={[]} back={{ label: "Deployables", onSelect: vi.fn() }} onWritten={vi.fn()} />));
+    await click(await screen.findByRole("button", { name: "Move sandbox to testing" }));
+    await click(await screen.findByRole("button", { name: `Select Shopify store ${saved.label}` }));
+    await click(screen.getByRole("button", { name: "Continue" }));
+    await click(screen.getByRole("button", { name: "Connect store" }));
+    expect(await screen.findByText("Store access changed")).toBeTruthy();
+    expect(connection.callsNamed("updateSiteStoreBinding")).toHaveLength(0);
+  });
+  it("clears the old store display when its binding is removed", async () => {
+    fixture([saved], true, true);
+    const props = { canBind: true, trail: [], back: { label: "Deployables", onSelect: vi.fn() }, onWritten: vi.fn() };
+    const view = render(withSession(<ShopifyStorePanel {...props} site={siteFromRow({ ...SHOP, binding: { storeId: "my-store" } })} />));
+    expect(await screen.findByRole("button", { name: "Move sandbox to testing" })).toBeTruthy();
+    view.rerender(withSession(<ShopifyStorePanel {...props} site={siteFromRow({ ...SHOP, binding: {}, previewBinding: { storeId: "my-store" } })} />));
+    await vi.waitFor(() => expect(screen.queryByRole("button", { name: "Move sandbox to testing" })).toBeNull());
+    expect((await screen.findByRole("button", { name: "Configure production store" })).textContent).not.toContain(saved.label);
   });
   it.each(["settings", "deployables"])("returns to the %s connections surface and preserves sign-in parameters", appId => {
     const section = appId === "settings" ? "connections" : "settings";

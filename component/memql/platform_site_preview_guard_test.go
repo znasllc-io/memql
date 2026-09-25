@@ -591,3 +591,20 @@ func TestTurningALiveSiteIntoAStorefrontIsGoingLive(t *testing.T) {
 		t.Fatalf("a live storefront re-written as a storefront was judged: %v", err)
 	}
 }
+
+// The first built storefront can be tested before another build exists. Its
+// sandbox is resolved on preview open; this write changes no serving binding.
+func TestAStorefrontCanTestTheSameBuildAgainstItsSandbox(t *testing.T) {
+	for _, status := range []string{"draft", "live"} {
+		t.Run(status, func(t *testing.T) {
+			err := runPreviewGuard(t, previewGuardDelta{
+				priorExisted: true, priorStatus: status, priorKind: storefrontSiteKind,
+				priorBundleRef: "blob://sites/s/v1/", priorBindingID: "production",
+				payload: map[string]any{"id": "s", "candidateRef": "blob://sites/s/v1/"},
+			})
+			if err != nil {
+				t.Fatalf("same-build storefront test was refused: %v", err)
+			}
+		})
+	}
+}

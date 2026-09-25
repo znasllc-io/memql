@@ -1,9 +1,10 @@
 import { runIsCancellable } from "./acts";
-import { cancelDeployment } from "../packages/calls";
+import { archivePackage, deactivateDeployable, cancelDeployment } from "../packages/calls";
 import type { ConnectReturn } from "../sources/connectReturn";
 import { ConnectReturnNotice } from "../sources/ConnectReturnNotice";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { addressFromManifest, domainNames, downloadManifest } from "../packages/manifest";
 import { Rocket } from "lucide-react";
 import { useSession } from "../../../chrome/access";
 import { bare } from "../people";
@@ -48,7 +49,6 @@ import {
   placementsComplete,
   placementsFrom,
   runForScopedFlow,
-  seedAddress,
   sourceReady,
   type AddressDraft,
   type AddressVerdicts,
@@ -279,6 +279,10 @@ export function ComposePage(props: ComposePageProps) {
   const repositoryRegistration = useRegisterRepositorySource();
   const pkgActions = usePackageActions();
   const cancelWrite = useWrite();
+  const discardWrite = useWrite();
+  const [discardArmed, setDiscardArmed] = useState(false);
+  const [discardName, setDiscardName] = useState("");
+  const discardPending = useRef(false);
   const [cancelledRunId, setCancelledRunId] = useState("");
   const cancelPending = useRef(false);
   const createSite = useCreateSite();
@@ -371,7 +375,7 @@ export function ComposePage(props: ComposePageProps) {
           changed = true;
           continue;
         }
-        next[app] = { ...seedAddress(), accountId: sourceAccountId };
+        next[app] = addressFromManifest(report?.deployables?.find(d => d.name === app), sourceAccountId);
         changed = true;
       }
       return changed ? next : held;
@@ -486,6 +490,28 @@ export function ComposePage(props: ComposePageProps) {
     refreshDeployments.current();
   }
 
+  // Only an unplaced setup can be discarded here. A scoped setup always
+  // deactivates that one app; it never archives the source of its siblings.
+  const discardSource = source ?? parked?.pkg ?? packages?.find(pkg => pkg.id === packageId);
+  const sourceSites = props.placedSources?.filter(site => site.packageId === packageId) ?? [];
+  const canDiscard = can.retire && placementsKnown && !archivedSource && !inactive &&
+    !!discardSource && (phase === "stopped" || phase === "awaiting_confirm" || phase === "composing") &&
+    created.siteId === "" && (scoped
+      ? !placed.includes(only!) && !sourceSites.some(site => site.name === only)
+      : placed.length === 0 && sourceSites.length === 0);
+  const discardTarget = scoped ? only! : discardSource?.name ?? "";
+  async function discardSetup(): Promise<void> {
+    if (!canDiscard || discardPending.current || discardName.trim() !== discardTarget) return;
+    discardPending.current = true;
+    const done = await discardWrite.run(async query => {
+      if (scoped) await deactivateDeployable(query, packageId, only!, discardName.trim());
+      else await archivePackage(query, packageId, discardName.trim());
+      return true;
+    });
+    discardPending.current = false;
+    if (done && saveMounted.current) { props.packageFeed?.retry(); onBack(); }
+  }
+
   async function analyze(): Promise<void> {
     if (busy || analyzePending.current || (!fixedSource && !parked && draft.choice === "repo" && !githubSelectionReady)) return;
     analyzePending.current = true;
@@ -549,7 +575,7 @@ export function ComposePage(props: ComposePageProps) {
     );
     if (siteId === "") return;
     setCreated((held) => ({ ...held, siteId }));
-    if (address.ownDomain.trim() !== "") await addDomain.add(siteId, address.ownDomain.trim());
+    for (const domain of domainNames(address.ownDomain)) await addDomain.add(siteId, domain);
     } finally { analyzePending.current = false; if (saveMounted.current) setAnalysisStartedAt(null); }
   }
 
@@ -800,6 +826,8 @@ export function ComposePage(props: ComposePageProps) {
         return (
           <ComposeWhereItLivesStop
             apps={apps}
+            labels={Object.fromEntries((report?.deployables ?? []).map(d => [d.name, d.displayName || d.name]))}
+            onExport={report?.manifest ? () => downloadManifest(report.manifest!, addresses, outcomes, clusterDomain) : undefined}
             sourceName={sourceName}
             addresses={addresses}
             onAddress={(app, patch) =>
@@ -828,6 +856,8 @@ export function ComposePage(props: ComposePageProps) {
         return <>
           {draft.choice === "ci" && created.siteId ? <CiHandoff siteId={created.siteId} name={draft.name} clusterDomain={clusterDomain} /> : null}
           {outcomes.length || created.siteId ? <ComposeWhereItLivesStop apps={apps} sourceName={sourceName} addresses={addresses}
+            labels={Object.fromEntries((report?.deployables ?? []).map(d => [d.name, d.displayName || d.name]))}
+            onExport={report?.manifest ? () => downloadManifest(report.manifest!, addresses, outcomes, clusterDomain) : undefined}
             onAddress={() => {}} accounts={accounts} canBindDomain={can.domains} clusterDomain={clusterDomain}
             outcomes={outcomes} locked checks={checks} verdicts={verdicts} /> : null}
           {run?.error ? <ProblemNotice problem={run.error} tone="error" /> : null}
@@ -853,7 +883,7 @@ export function ComposePage(props: ComposePageProps) {
         ? []
         : [{ label: action.label, tone: action.tone, busy, onAct: act }];
 
-  const title = composeTitle(parked?.pkg ?? fixedSource, only);
+  const title = composeTitle(parked?.pkg ?? fixedSource, report?.deployables?.find(d => d.name === only)?.displayName || only);
   // AN INACTIVE APP, OR ONE OF AN ARCHIVED SOURCE, IS HELD: whatever the
   // timeline says, the only act is Activate (or the way back), and the bar
   // must not read a finished flow off a run that never placed this app.
@@ -991,7 +1021,11 @@ export function ComposePage(props: ComposePageProps) {
   const previousStep: WizardStep | undefined = !sourceLocked && kind === "repo" ? ({ githubAccount: "source", githubOrganization: "githubAccount", githubRepository: "githubOrganization", sourceDetail: "githubRepository" } as Partial<Record<WizardStep, WizardStep>>)[journeyStop] : undefined;
   const leaveAct: Act = previousStep ? { label: "Back", text: true, onAct: () => { if (!busy) chooseStop(previousStep); } } : { label: written ? "Leave" : "Cancel", text: true, onAct: leaveComposer };
   const cancelAct: Act[] = can.deploy && runIsCancellable(run) ? [{ label: cancelling ? "Cancelling" : "Cancel", text: true, busy: cancelWrite.busy || cancelling, onAct: () => void cancelAnalysis() }] : [];
-  const acts: Act[] = restoredSourceId ? [{ label: "Done", tone: "primary", onAct: onBack }] : finished
+  const discardAct: Act[] = canDiscard ? [{ label: scoped ? "Deactivate" : "Discard", text: true, onAct: () => { discardWrite.clear(); setDiscardName(""); setDiscardArmed(true); } }] : [];
+  const acts: Act[] = discardArmed && canDiscard ? [
+    { label: "Keep", text: true, busy: discardWrite.busy, onAct: () => { if (!discardPending.current) setDiscardArmed(false); } },
+    ...(discardName.trim() === discardTarget ? [{ label: scoped ? "Deactivate" : "Discard", tone: "danger" as const, busy: discardWrite.busy, onAct: () => void discardSetup() }] : []),
+  ] : restoredSourceId ? [{ label: "Done", tone: "primary", onAct: onBack }] : finished
     ? canGoLive
       ? [
           { label: "Done", text: true, onAct: onBack },
@@ -999,9 +1033,9 @@ export function ComposePage(props: ComposePageProps) {
         ]
       : [{ label: "Done", tone: "primary", onAct: onBack }]
     : journeyActs.length > 0
-      ? [leaveAct, ...cancelAct, ...journeyActs]
+      ? [leaveAct, ...(cancelAct.length ? cancelAct : discardAct), ...journeyActs]
       : written
-        ? [...cancelAct, { label: "Leave", onAct: onBack }]
+        ? [{ label: "Leave", onAct: onBack }, ...(cancelAct.length ? cancelAct : discardAct)]
         : [leaveAct];
 
   return (
@@ -1026,6 +1060,11 @@ export function ComposePage(props: ComposePageProps) {
       context={{ page: title, packageId: (parked?.pkg ?? source)?.id, app: only, mode: "compose", step: journeyStop }}
       notices={
         <>
+          {discardArmed && canDiscard ? <Notice tone="warn" sentence={scoped ? `Deactivate ${discardTarget}?` : `Discard ${discardTarget}?`}
+            next={scoped ? "Other deployables from this source stay unchanged." : "This archives the source and deactivates its deployables."}>
+            <Field label={`Type ${discardTarget} to confirm`}><input aria-label={`Type ${discardTarget} to confirm`} value={discardName} onChange={event => setDiscardName(event.target.value)} disabled={discardWrite.busy} /></Field>
+          </Notice> : null}
+          {discardWrite.refusal ? <ProblemNotice problem={discardWrite.refusal} tone="error" /> : null}
           {cancelWrite.refusal ? <ProblemNotice problem={cancelWrite.refusal} tone="error" /> : null}
           {/* THE NOTICE AT THE TOP (D5): an inactive app says so before
               anything else on the page, and says what Activate does. */}

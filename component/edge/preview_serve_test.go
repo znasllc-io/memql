@@ -682,3 +682,26 @@ func TestHonouringAGrantRecordsItAtMostOncePerThrottleWindow(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+func TestSameBuildPreviewStillIsolatesTheSandboxFromPublicTraffic(t *testing.T) {
+	site := previewSiteRow(siteStatusLiveValue)
+	site.CandidateRef = site.BundleRef
+	exec := newStubPreviewExec()
+	h := previewHandler(site, exec)
+	token := exec.issue(t, PreviewGrant{ID: "g-same-build", SiteID: site.ID, CandidateRef: site.BundleRef})
+	for _, tc := range []struct{ name, token, want, absent string }{
+		{"public", "", liveStoreDomain, devStoreDomain},
+		{"preview", token, devStoreDomain, liveStoreDomain},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			response := getWithToken(h, site, runtimeConfigPath, tc.token)
+			if response.Code != http.StatusOK {
+				t.Fatalf("runtime config: %d", response.Code)
+			}
+			body := response.Body.String()
+			if !strings.Contains(body, tc.want) || strings.Contains(body, tc.absent) {
+				t.Fatalf("same-build %s request used the wrong store", tc.name)
+			}
+		})
+	}
+}

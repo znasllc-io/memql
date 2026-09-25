@@ -270,6 +270,8 @@ type DeployRequest struct {
 // decide exactly as they do from the page, and there is no client-side
 // follow-up write for a closed window to lose.
 type Placement struct {
+	// Nil inherits manifest domains; an explicit empty list opts out for this run.
+	Domains   []string
 	Hostname  string
 	AccountId string
 	OwnDomain string

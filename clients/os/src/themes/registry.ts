@@ -30,8 +30,8 @@ export function themePackById(
  * An id naming nothing installed falls back to the built-in rather than
  * leaving the shell with no theme: a stored pack outlives its installation
  * (uninstalled here, or installed on another machine and roamed to this one
- * before the desktop document caught up), and the wallpaper still has to know
- * what to paint.
+ * before the desktop document caught up), and the appearance controls still
+ * need a complete palette.
  *
  * The ATTRIBUTE is not resolved this way -- see chrome/state.tsx. The stored
  * id is stamped verbatim, so a pack that arrives later takes effect without a

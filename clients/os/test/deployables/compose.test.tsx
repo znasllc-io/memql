@@ -12,9 +12,11 @@ vi.mock("../../src/live/connection", () => ({
 
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { ComposePage, type ComposePageProps } from "../../src/apps/deployables/page/ComposePage";
+import { ALL_PARTS } from "../../src/apps/deployables/parts";
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { everyOtherAppSkipped } from "../../src/apps/deployables/packages/calls";
-import { DEPLOYMENT_CONCEPT } from "../../src/apps/deployables/packages/rows";
+import { packageFromRow, deploymentFromRow, DEPLOYMENT_CONCEPT } from "../../src/apps/deployables/packages/rows";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import {
   artifactRow,
@@ -598,9 +600,6 @@ describe("the compose flow: where each app will live", () => {
     // at keystroke rate.
     await fill("The name storefront answers at", "shop");
     expect(within(region).getByText("shop.memql.example.com")).toBeTruthy();
-    expect(
-      within(region).getByText("Chosen once. A later deploy of this source keeps the same addresses."),
-    ).toBeTruthy();
   });
 
   it("refuses a reserved name client-side, exactly as the server would", async () => {
@@ -631,7 +630,7 @@ describe("the compose flow: where each app will live", () => {
     expect(confirmed).toContain("confirm: true");
     // The hostname the person chose, and the client half defaulted to the
     // cluster's own account (memql#5303, D12).
-    expect(confirmed).toContain('placements: {storefront: {accountId: "self", hostname: "shop.memql.example.com"}}');
+    expect(confirmed).toContain('placements: {storefront: {accountId: "self", domains: [], hostname: "shop.memql.example.com"}}');
   });
 
   it("carries a SKIP all the way to packageDeploy", async () => {
@@ -657,7 +656,7 @@ describe("the compose flow: where each app will live", () => {
     expect(confirmed).toContain("skip: true");
     // ...and the skipped app is not given an address it was never asked for,
     // nor the client default the deployed one gets.
-    expect(confirmed).toContain('storefront: {accountId: "self", hostname: "shop.memql.example.com"}');
+    expect(confirmed).toContain('storefront: {accountId: "self", domains: [], hostname: "shop.memql.example.com"}');
     expect(confirmed).not.toContain('web: {hostname');
     expect(confirmed).not.toContain('web: {accountId');
   });
@@ -893,7 +892,7 @@ describe("the compose flow: where each app will live", () => {
     // The own domain is normalized on the way out. The client half was NOT
     // answered, and that is not an absence: an app nobody tied to a client is
     // the cluster's own (memql#5303, D12), so the placement names `self`.
-    expect(confirmed).toContain('ownDomain: "shop.acme.com"');
+    expect(confirmed).toContain('domains: ["shop.acme.com"]');
     expect(confirmed).toContain('accountId: "self"');
   });
 
@@ -1391,5 +1390,56 @@ describe("composition write failures and bindings", () => {
     // removed, re-created by the surface that creates deployables.
     expect(create).toContain('storeId: "store-example"');
     expect(create).not.toContain("myshopify.com");
+  });
+});
+
+
+describe("discarding an unplaced setup", () => {
+  function setup(over: Partial<ComposePageProps> = {}, archiveError?: string) {
+    const connection = fakeConnection({ archiveError });
+    h.connection = connection;
+    const pkg = packageFromRow({ ...ACME, sourceKind: "zip", repoUrl: "" } as Row);
+    const run = deploymentFromRow(parkedRun(pkg.id, { status: "refused", error: {code: "package_manifest_invalid", message: "external assets require a repository source"} }));
+    const onBack = vi.fn();
+    render(withSession(<ComposePage clusterDomain="memql.test" can={ALL_PARTS} isClusterOwner viewerUserId="u-me" credentials={[]}
+      source={pkg} parked={{pkg, run}} siteFeed={{state: "live", error: ""}} placedSources={[]} onBack={onBack} {...over} />, { role: "owner", userId: "u-me" }));
+    return {connection, onBack};
+  }
+  it("discards a refused ZIP setup only after confirming its source name", async () => {
+    const {connection, onBack} = setup();
+    await click(await screen.findByRole("button", { name: "Discard" }));
+    expect(connection.callsNamed("packageArchive")).toHaveLength(0);
+    await fill("Type acme to confirm", "acme");
+    await click(screen.getByRole("button", {name: "Discard"}));
+    await waitFor(() => expect(onBack).toHaveBeenCalledOnce());
+    expect(connection.callsNamed("packageArchive")[0]).toContain('packageId: "pkg-acme"');
+    expect(connection.callsNamed("packageArchive")[0]).toContain('confirmName: "acme"');
+  });
+  it("keeps the setup reachable if the cluster refuses to discard it", async () => {
+    const {onBack} = setup({}, "archive_failed: Cannot archive this source");
+    await click(await screen.findByRole("button", {name: "Discard"}));
+    await fill("Type acme to confirm", "acme");
+    await click(screen.getByRole("button", {name: "Discard"}));
+    expect(await screen.findByText("Cannot archive this source")).toBeTruthy();
+    expect(onBack).not.toHaveBeenCalled();
+  });
+  it("does not offer to discard a whole source with an existing site", async () => {
+    setup({ placedSources: [{packageId: "pkg-acme", name: "web", siteId: "existing"}] });
+    expect(await screen.findByRole("button", {name: "Retry"})).toBeTruthy();
+    expect(screen.queryByRole("button", {name: "Discard"})).toBeNull();
+  });
+  it("does not offer discard while the site list is loading", async () => {
+    setup({siteFeed: {state: "seeding", error: ""}});
+    expect(await screen.findByRole("button", {name: "Retry"})).toBeTruthy();
+    expect(screen.queryByRole("button", {name: "Discard"})).toBeNull();
+  });
+  it("deactivates only the selected unplaced app even when its sibling has a site", async () => {
+    const {connection, onBack} = setup({only: "storefront", placedSources: [{packageId: "pkg-acme", name: "web", siteId: "existing"}]});
+    await click(await screen.findByRole("button", {name: "Deactivate"}));
+    await fill("Type storefront to confirm", "storefront");
+    await click(screen.getByRole("button", {name: "Deactivate"}));
+    await waitFor(() => expect(onBack).toHaveBeenCalledOnce());
+    expect(connection.callsNamed("packageArchive")).toHaveLength(0);
+    expect(connection.callsNamed("packageDeactivateDeployable")[0]).toContain('deployableName: "storefront"');
   });
 });

@@ -72,6 +72,7 @@ export async function createPackage(query: QueryClient, input: NewPackageInput):
  * lands on the outcome without failing the publish.
  */
 export interface Placement {
+  domains?: string[];
   /** The site's own hostname under the cluster domain. Required for a never-deployed app UNLESS it is skipped. */
   hostname: string;
   /** The client it is for. "" ties it to nobody. */
@@ -125,12 +126,13 @@ export function everyOtherAppSkipped(declared: readonly { name: string }[], app:
  */
 export function placementsPayload(
   placements: Record<string, Placement>,
-): Record<string, Record<string, string | boolean>> {
-  const out: Record<string, Record<string, string | boolean>> = {};
+): Record<string, Record<string, string | boolean | string[]>> {
+  const out: Record<string, Record<string, string | boolean | string[]>> = {};
   for (const [app, placement] of Object.entries(placements)) {
-    const entry: Record<string, string | boolean> = {};
+    const entry: Record<string, string | boolean | string[]> = {};
     if (placement.hostname.trim() !== "") entry["hostname"] = placement.hostname.trim();
     if (placement.accountId.trim() !== "") entry["accountId"] = placement.accountId.trim();
+    if (placement.domains !== undefined) entry["domains"] = placement.domains;
     if (placement.ownDomain.trim() !== "") entry["ownDomain"] = placement.ownDomain.trim();
     // THE VALUE TYPE IS WHY THIS WAS DROPPED. The map was `string` only, so
     // `skip` -- declared on Placement above and read by the engine's

@@ -641,6 +641,16 @@ func (s *store) writeAsCaller(ctx context.Context, query string) error {
 // sentence, which the publish stage records on the outcome rather than
 // failing over.
 func (s *store) addCustomDomain(ctx context.Context, siteId, hostname string) error {
+	rows, err := s.queryAll(ctx, fmt.Sprintf("query customDomainsForSite(siteId: %s)", langparser.QuoteString(siteId)))
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if rowString(row, "hostname") == hostname && rowString(row, "status") != "removed" && rowString(row, "status") != "removing" {
+			return nil
+		}
+	}
+
 	return s.writeAsCaller(ctx, fmt.Sprintf(
 		"builtin customDomainAdd(siteId: %s, hostname: %s)",
 		langparser.QuoteString(siteId), langparser.QuoteString(hostname)))

@@ -3,6 +3,7 @@ import { renderMemQLValue, rowNumber, rowString, type Row } from "@znasllc-io/me
 
 import { boolOr, flatten } from "../../../kit/rows";
 import { useOsConnection } from "../../../live/connection";
+import { domainNames } from "../packages/manifest";
 import { checkCustomDomain, checkSiteHostname } from "../packages/calls";
 import type { AddressVerdict } from "../page/compose";
 import { EMPTY_MANIFEST, branchNamesFrom, manifestFrom, type ArtifactProbeReply, type SourceProbeReply } from "./probe";
@@ -223,7 +224,8 @@ export function useAddressChecks(): AddressCheckHandle {
       setVerdicts((held) => ({ ...held, [key]: { state: "checking", problem: "" } }));
       let verdict: AddressVerdict;
       try {
-        const reply = kind === "site" ? await checkSiteHostname(query, host) : await checkCustomDomain(query, host);
+        const replies = kind === "site" ? [await checkSiteHostname(query, host)] : await Promise.all(domainNames(host).map(d => checkCustomDomain(query, d)));
+        const reply = replies.find(r => !r.available) ?? replies[0]!;
         verdict = reply.available ? { state: "ok", problem: "" } : { state: "no", problem: reply.problem };
       } catch (err) {
         // A check that could not RUN is not a verdict about the name. It is

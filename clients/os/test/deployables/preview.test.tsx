@@ -9,6 +9,9 @@ vi.mock("../../src/live/connection", () => ({
   useOsConnection: () => h.connection,
 }));
 
+import { PreviewSection } from "../../src/apps/deployables/preview/PreviewSection";
+import { ALL_PARTS, NO_PARTS } from "../../src/apps/deployables/parts";
+import { siteFromRow } from "../../src/apps/deployables/rows";
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import {
@@ -82,9 +85,11 @@ async function openDeployable(hostname: string): Promise<HTMLElement> {
 /** Opens the storefront and returns its Preview section. */
 async function openPreview(seed: FakeSeed, opts: { role?: string } = {}) {
   const connection = fakeConnection(seed);
-  mount(connection, opts);
-  const page = await openDeployable("shop.memql.example.com");
-  const section = await within(page).findByRole("region", { name: "Preview" });
+  h.connection = connection;
+  render(withSession(<PreviewSection site={siteFromRow(seed.sites![0]!)} runs={[]} can={opts.role === "viewer" ? NO_PARTS : ALL_PARTS} onOpenStore={vi.fn()} />));
+  const section = await screen.findByRole("region", { name: "Preview" });
+  await waitFor(() => expect(section.querySelector(".preview-lane-store")?.textContent).not.toBe("No store — this is not a storefront"));
+  const page = section;
   return { connection, page, section };
 }
 
@@ -263,16 +268,16 @@ describe("what this cluster watched", () => {
     expect(within(cart).getByText(/Not enough items available/)).toBeTruthy();
   });
 
-  it("says plainly that the payment is not something this cluster can watch", async () => {
+  it("labels the observations as store checks", async () => {
     // The design record asks this surface not to imply the engine proves a
     // payment. It is the one claim a reader would otherwise make for it.
     const { section } = await openPreview(READY_SEED);
-    expect(within(section).getByText(/cannot watch it, and does not pretend to/)).toBeTruthy();
+    expect(within(section).getByText("Store checks")).toBeTruthy();
   });
 
   it("invites the first exercise rather than drawing four failures", async () => {
     const { section } = await openPreview(READY_SEED);
-    expect(within(section).getByText(/Nothing has been exercised yet/)).toBeTruthy();
+    expect(within(section).getByText(/Open a preview to run the store checks/)).toBeTruthy();
   });
 });
 
@@ -375,11 +380,13 @@ describe("opening a preview", () => {
 
 describe("the promotion", () => {
   it("is on the action bar and not in the section, and names the version it promotes", async () => {
-    const { connection, page, section } = await openPreview(READY_SEED);
+    const connection = fakeConnection(READY_SEED);
+    mount(connection);
+    const page = await openDeployable("shop.memql.example.com");
 
     // RULE 12: every act that changes what the public is served lives on the
     // one bar, so the section must not carry a second one.
-    expect(within(section).queryByRole("button", { name: /Promote/ })).toBeNull();
+    expect(within(page).queryByRole("region", { name: "Preview" })).toBeNull();
 
     // THE BAR IS AT THE WINDOW'S EDGE, outside the deployable's own region --
     // which is rule 12's whole point, so the search is the screen's.
@@ -399,7 +406,7 @@ describe("the promotion", () => {
   });
 
   it("is absent when the engine would refuse it", async () => {
-    const { page } = await openPreview({
+    const connection = fakeConnection({
       sites: [SHOP_WITH_CANDIDATE],
       stores: [STORE, DEV_STORE],
       previewReadiness: {
@@ -424,17 +431,19 @@ describe("the promotion", () => {
         } as never),
       },
     });
-    void page;
+    mount(connection);
+    await openDeployable("shop.memql.example.com");
     expect(screen.queryByRole("button", { name: /^Promote the candidate/ })).toBeNull();
   });
 
   it("is absent with no candidate at all", async () => {
-    const { page } = await openPreview({
+    const connection = fakeConnection({
       sites: [SHOP],
       stores: [STORE],
       previewReadiness: { "site-shop": previewReadinessRow({ siteId: "site-shop" } as never) },
     });
-    void page;
+    mount(connection);
+    await openDeployable("shop.memql.example.com");
     expect(screen.queryByRole("button", { name: /^Promote the candidate/ })).toBeNull();
   });
 });

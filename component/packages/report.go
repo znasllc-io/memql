@@ -15,6 +15,7 @@ import (
 
 // Report is what an analysis pass learned about one package source.
 type Report struct {
+	Manifest *Manifest `json:"manifest,omitempty"`
 	// Name is the manifest's name. Empty when the manifest could not be read
 	// at all -- which is a report worth keeping, because it carries the
 	// problem that explains why.
@@ -66,8 +67,9 @@ type Report struct {
 // deploys it, so there is no placement to keep; a site row is what carries a
 // hostname, and a site row means deployed.
 type DeclaredDeployable struct {
-	Name string `json:"name"`
-	Kind string `json:"kind"`
+	DisplayName string `json:"displayName,omitempty"`
+	Name        string `json:"name"`
+	Kind        string `json:"kind"`
 }
 
 // declaredFrom projects the analysis report onto the catalogue.
@@ -86,16 +88,18 @@ func declaredFrom(rep *Report) []DeclaredDeployable {
 		if strings.TrimSpace(d.Name) == "" {
 			continue
 		}
-		out = append(out, DeclaredDeployable{Name: d.Name, Kind: d.Kind})
+		out = append(out, DeclaredDeployable{Name: d.Name, Kind: d.Kind, DisplayName: d.DisplayName})
 	}
 	return out
 }
 
 type DeployableReport struct {
-	Name   string          `json:"name"`
-	Kind   string          `json:"kind"`
-	Path   string          `json:"path"`
-	Assets []ManifestAsset `json:"assets,omitempty"`
+	DisplayName string              `json:"displayName,omitempty"`
+	Deployment  *ManifestDeployment `json:"deployment,omitempty"`
+	Name        string              `json:"name"`
+	Kind        string              `json:"kind"`
+	Path        string              `json:"path"`
+	Assets      []ManifestAsset     `json:"assets,omitempty"`
 
 	// BuildPlan is the sentence the confirm gate shows. Either the command
 	// that will run, or the D4 fast-path's own answer -- "prebuilt output

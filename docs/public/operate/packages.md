@@ -51,7 +51,11 @@ Deployables app.
 formatVersion: 1
 name: acme-storefront
 deployables:
-  - name: storefront             # unique within the package
+  - name: storefront             # stable identity within the package
+    displayName: Acme Storefront  # optional UI label
+    deployment:                  # optional defaults, reviewed before deploy
+      slug: quiet-cedar           # <slug>.<receiving-cluster-domain>
+      domains: [shop.acme.com, www.acme.com]
     path: clients/web
     kind: shopify_storefront     # spa | static | shopify_storefront
     build:                       # optional; these ARE the defaults
@@ -90,12 +94,28 @@ Two halves, and the asymmetry is deliberate:
 - **DSL domains are DISCOVERED** from `dsl/<domain>/`, exactly as the engine's
   own `MEMQL_DSL_PATH` mount discovers them.
 
-**There is no hostname here.** The manifest describes the software; the deploy
-describes the placement. A hostname is chosen once, at a deployable's first
-deploy, and remembered on its site row -- so the same manifest deploys to two
-clusters without an edit, and renaming a site needs no pull request against the
-package. The placement itself is `placements` on `packageDeploy`
-([deployables.md](deployables.md)).
+**Deployment configuration is optional.** `displayName` changes the displayed
+label without changing `name`, which identifies the same app on redeploy.
+`deployment.slug` is a lowercase DNS label of 3–40 characters under the receiving
+cluster's domain. Omit it to let the wizard generate an editable name. Existing
+site addresses are preserved on redeploy. `deployment.domains` lists custom
+hostnames without schemes, paths or wildcards. The wizard prefills these values,
+checks availability and shows the store binding before confirmation. Domain
+ownership verification and DNS setup still apply.
+
+Explicit wizard placements override manifest defaults. An explicit empty
+`domains: []` in a placement opts out for that run; an omitted placement inherits
+the declaration. New domain declarations are additive on redeploy. Omitting a
+setting never disconnects a store, removes a domain or relocates an existing
+site. An existing domain on the same site is reused. Changed declarations park
+automatic deployments for review. Secrets and connection credentials stay in
+MemQL, not in this file.
+
+The Address step's **Export manifest** downloads the complete analyzed manifest
+with the chosen address and domain defaults. This includes generated names and
+preserves build, asset and store declarations. Commit that file in the source
+repository to carry the choices into subsequent imports; export never writes to
+GitHub automatically.
 
 A `bff/` with a `go.mod` is **detected, reported and deferred**: it appears in
 the report saying where Go delivery happens today (engine images built by CI),

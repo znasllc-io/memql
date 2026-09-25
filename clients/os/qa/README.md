@@ -211,3 +211,12 @@ row: Configuration remains current, with the shared busy action bar, elapsed
 time, Cancel and Leave. Leave returns to the analyzing row; reopening resumes
 its state. The review/failure fixtures advance after opening, and Cancel emits
 a terminal cancelled row. No fixture contacts GitHub or starts a real deployment.
+
+## Static desktop wallpaper
+
+`/wallpaper.html?theme=graphite&mode=dark` mounts the real Fold wallpaper and desk
+numeral without a connection or saved preferences. Compare `graphite`, `vellum`
+and `cobalt` in both `dark` and `light`. Add `&window=1` to inspect the pattern
+behind the shell's window surface; also inspect a narrow viewport. All themes
+share the approved Fold geometry (3.1% / 1.7% ground–ink mixes). There are no
+nodes, lines, canvas or animation. The palette and numeral remain the theme's.
