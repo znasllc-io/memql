@@ -448,15 +448,13 @@ func (e *MemQLEngine) askExecuteBuiltin(ctx context.Context, args map[string]any
 	if !ok {
 		return nil, fmt.Errorf("arguments must be an object")
 	}
-	call, err := parser.RenderCall(fn.Name, arguments)
+	call, err := parser.RenderCall(QualifyConstruct(ConstructNamespaceForOrigin(fn.Origin), fn.Name), arguments)
 	if err != nil {
 		return nil, err
 	}
-	kind := fn.FunctionKind
-	if kind == "builtin" {
-		kind = "query"
-	}
-	call = "use " + ConstructNamespaceForOrigin(fn.Origin) + "." + fn.FunctionKind + "s.{ " + fn.Name + " }\n" + kind + " " + call
+	// Runtime calls accept qualified names; `use` belongs to declarations,
+	// not executable expressions. Keep the namespace to avoid ambiguous names.
+	call = fn.FunctionKind + " " + call
 	event := AskEvent{ID: id.NewShortId(), Kind: "action", Phase: "running", Name: name, App: askApp(fn), Navigate: askApp(fn) != ""}
 	// Only resource identifiers are navigation hints. Never mirror arbitrary
 	// content or credentials into desktop events.

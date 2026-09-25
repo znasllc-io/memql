@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -35,7 +36,7 @@ func TestAskConversationOwnershipAndServerTranscript(t *testing.T) {
 	row, err := e.askRead(mine, conversationID)
 	require.NoError(t, err)
 	require.Contains(t, fmt.Sprint(row), "Private answer")
-	_, err = e.Execute(mine, fmt.Sprintf(`mutation saveAskConversation(id: %q, title: "Forged", transcript: {})`, conversationID))
+	_, err = e.Execute(mine, fmt.Sprintf(`mutation saveAskConversation(id: %s, title: "Forged", transcript: {})`, parser.QuoteString(conversationID)))
 	require.Error(t, err)
 	_, err = e.RunAsk(theirs, conversationID, "new-turn", "show private data", "", nil, nil)
 	require.Error(t, err)
@@ -130,4 +131,27 @@ func TestAskCannotExecuteCapabilityOutsideCallerAuthority(t *testing.T) {
 	require.True(t, e.askAllowed(asCaller("developer"), fn))
 	fn.ServerOnly = true
 	require.False(t, e.askAllowed(asCaller("owner"), fn), "internal-only is not owner authority")
+}
+
+func TestAskExecutesQualifiedCapabilitiesWithCallerRowScope(t *testing.T) {
+	e, _, _ := sharedReadMergeEngine(t)
+	actor := func() context.Context {
+		user := "v1:identity:user:" + id.NewShortId()
+		return auth.ContextWithAccess(auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: user}), &auth.AccessContext{UserId: user, Role: auth.RoleWriter})
+	}
+	mine, theirs := actor(), actor()
+	todoID := id.NewShortId()
+	var events []AskEvent
+	mine = context.WithValue(mine, askEventKey{}, askEmitter(func(e AskEvent) error { events = append(events, e); return nil }))
+	_, err := e.askExecuteBuiltin(mine, map[string]any{"name": "todos.createTodo", "arguments": map[string]any{"todoId": todoID, "title": "Ask capability regression"}}, 0)
+	require.NoError(t, err)
+	read := map[string]any{"name": "todos.todoById", "arguments": map[string]any{"todoId": todoID}}
+	rows, err := e.askExecuteBuiltin(mine, read, 0)
+	require.NoError(t, err)
+	require.Contains(t, string(rows[0].Payload), "Ask capability regression")
+	rows, err = e.askExecuteBuiltin(theirs, read, 0)
+	require.NoError(t, err)
+	require.NotContains(t, string(rows[0].Payload), "Ask capability regression")
+	require.Len(t, events, 4)
+	require.Equal(t, "completed", events[3].Phase)
 }

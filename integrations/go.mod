@@ -9,6 +9,10 @@ toolchain go1.27.1
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.1
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.8.1
+	github.com/livekit/protocol v1.49.0
+	github.com/livekit/server-sdk-go/v2 v2.18.1
+	github.com/pion/opus v0.1.1-0.20260923000601-86ced7318333
+	github.com/pion/webrtc/v4 v4.2.15
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/stretchr/testify v1.12.1
 	github.com/uptrace/bun v1.2.18
@@ -91,9 +95,7 @@ require (
 	github.com/lithammer/shortuuid/v4 v4.2.0 // indirect
 	github.com/livekit/mageutil v0.0.0-20250511045019-0f1ff63f7731 // indirect
 	github.com/livekit/mediatransportutil v0.0.0-20260605212259-862d4a7bcb1e // indirect
-	github.com/livekit/protocol v1.49.0 // indirect
 	github.com/livekit/psrpc v0.7.2 // indirect
-	github.com/livekit/server-sdk-go/v2 v2.18.1 // indirect
 	github.com/magefile/mage v1.17.2 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
@@ -110,7 +112,6 @@ require (
 	github.com/pion/interceptor v0.1.45 // indirect
 	github.com/pion/logging v0.2.4 // indirect
 	github.com/pion/mdns/v2 v2.1.0 // indirect
-	github.com/pion/opus v0.1.1-0.20260923000601-86ced7318333 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
 	github.com/pion/rtcp v1.2.16 // indirect
 	github.com/pion/rtp v1.10.2 // indirect
@@ -120,7 +121,6 @@ require (
 	github.com/pion/stun/v3 v3.1.5 // indirect
 	github.com/pion/transport/v4 v4.0.2 // indirect
 	github.com/pion/turn/v5 v5.0.9 // indirect
-	github.com/pion/webrtc/v4 v4.2.15 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/prometheus/client_golang v1.24.1 // indirect
 	github.com/prometheus/client_model v0.6.3 // indirect
