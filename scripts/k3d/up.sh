@@ -625,7 +625,9 @@ function wait_for_workloads() {
     # pull while it happens, and a timeout's last report is its diagnosis.
     while :; do
         # shellcheck disable=SC2086
-        if kubectl wait --for=condition=Available --timeout=1s \
+        # kubectl shares this budget across all named resources. One second
+        # expires while fetching an already-healthy ten-deployment cluster.
+        if kubectl wait --for=condition=Available --timeout="${tick}s" \
             -n "$NAMESPACE" $names >/dev/null 2>&1; then
             info "every MemQL workload is Available (after ${waited}s)."
             WORKLOADS_READY=true
