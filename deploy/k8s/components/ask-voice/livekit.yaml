@@ -11,6 +11,9 @@ spec:
     metadata:
       labels: {app.kubernetes.io/name: livekit}
     spec:
+      # A Service named livekit injects LIVEKIT_PORT=tcp://..., colliding
+      # with the server's numeric CLI environment variable. Use DNS explicitly.
+      enableServiceLinks: false
       terminationGracePeriodSeconds: 60
       containers:
         - name: livekit
