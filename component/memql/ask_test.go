@@ -181,7 +181,7 @@ func TestAskExecutesQualifiedCapabilitiesWithCallerRowScope(t *testing.T) {
 	mine = context.WithValue(mine, askEventKey{}, askEmitter(func(e AskEvent) error { events = append(events, e); return nil }))
 	_, err := e.askExecuteBuiltin(mine, map[string]any{"name": "todos.createTodo", "arguments": map[string]any{"todoId": todoID, "title": "Ask capability regression"}}, 0)
 	require.NoError(t, err)
-	read := map[string]any{"name": "todos.todoById", "arguments": map[string]any{"todoId": todoID}}
+	read := map[string]any{"name": "todos.todoById", "arguments": map[string]any{"todoId": "v1:todos:todo:" + todoID}}
 	rows, err := e.askExecuteBuiltin(mine, read, 0)
 	require.NoError(t, err)
 	require.Contains(t, string(rows[0].Payload), "Ask capability regression")
@@ -190,4 +190,5 @@ func TestAskExecutesQualifiedCapabilitiesWithCallerRowScope(t *testing.T) {
 	require.NotContains(t, string(rows[0].Payload), "Ask capability regression")
 	require.Len(t, events, 4)
 	require.Equal(t, "completed", events[3].Phase)
+	require.Equal(t, todoID, events[3].Arguments["todoId"], "navigation must carry the bare identifier used by the UI")
 }
