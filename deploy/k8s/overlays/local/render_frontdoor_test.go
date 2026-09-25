@@ -303,3 +303,56 @@ func serviceAnnotation(t *testing.T, rendered, service, key string) string {
 	t.Fatalf("no Service named %q in the rendered overlay", service)
 	return ""
 }
+
+// Exercise the final strategic merge: Kustomize may move a patched env entry
+// ahead of the domain it references, and Kubernetes expands only earlier env.
+func TestLiveKitBootstrapEnvironmentSurvivesLocalPatch(t *testing.T) {
+	decoder := yaml.NewDecoder(strings.NewReader(render(t)))
+	for {
+		var doc struct {
+			Kind     string `yaml:"kind"`
+			Metadata struct {
+				Name string `yaml:"name"`
+			} `yaml:"metadata"`
+			Spec struct {
+				Template struct {
+					Spec struct {
+						EnableServiceLinks *bool `yaml:"enableServiceLinks"`
+						Containers         []struct {
+							Name    string `yaml:"name"`
+							EnvFrom []struct {
+								ConfigMapRef struct {
+									Name string `yaml:"name"`
+								} `yaml:"configMapRef"`
+							} `yaml:"envFrom"`
+						} `yaml:"containers"`
+					} `yaml:"spec"`
+				} `yaml:"template"`
+			} `yaml:"spec"`
+		}
+		err := decoder.Decode(&doc)
+		if errors.Is(err, io.EOF) {
+			t.Fatal("LiveKit deployment missing")
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if doc.Kind != "Deployment" || doc.Metadata.Name != "livekit" {
+			continue
+		}
+		pod := doc.Spec.Template.Spec
+		if pod.EnableServiceLinks == nil || *pod.EnableServiceLinks {
+			t.Fatal("Service injects LIVEKIT_PORT=tcp://... and prevents boot")
+		}
+		for _, container := range pod.Containers {
+			if container.Name == "livekit" {
+				for _, source := range container.EnvFrom {
+					if source.ConfigMapRef.Name == "memql-domain" {
+						return
+					}
+				}
+			}
+		}
+		t.Fatal("TURN domain must be available before a patched LIVEKIT_CONFIG")
+	}
+}

@@ -19,13 +19,14 @@ spec:
         - name: livekit
           image: livekit/livekit-server:v1.13.7
           args: ["--node-ip", "$(POD_IP)"]
+          # envFrom values are available before every explicit env entry,
+          # even when a strategic patch moves LIVEKIT_CONFIG to the front.
+          envFrom:
+            - configMapRef: {name: memql-domain}
           env:
             - name: POD_IP
               valueFrom:
                 fieldRef: {fieldPath: status.podIP}
-            - name: MEMQL_DOMAIN
-              valueFrom:
-                configMapKeyRef: {name: memql-domain, key: MEMQL_DOMAIN}
             - name: LIVEKIT_KEYS
               valueFrom:
                 secretKeyRef: {name: memql-voice, key: LIVEKIT_KEYS}
