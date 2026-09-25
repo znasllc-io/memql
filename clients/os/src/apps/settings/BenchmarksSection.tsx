@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { Button, Caption, Fact, Facts, Head, Notice, Panel, Subhead, formatFreshness, useNow } from "../../kit";
 import {
   FAMILY_ORDER,
@@ -58,13 +59,7 @@ export function BenchmarksSection() {
 
       <Panel label="Where the numbers come from">
         <Subhead>Where the numbers come from</Subhead>
-        {b.newest === null ? (
-          <Caption>
-            {b.seeding
-              ? "Reading the cluster's benchmark runs."
-              : "No benchmark run has been published to this cluster. The proving suite runs on every pull request and writes its figures here; a cluster that has never had one is empty rather than broken."}
-          </Caption>
-        ) : (
+        {b.newest === null ? (b.seeding ? <RecordListSkeleton label="Reading the cluster's benchmark runs." /> : <Caption>{"No benchmark run has been published to this cluster. The proving suite runs on every pull request and writes its figures here; a cluster that has never had one is empty rather than broken."}</Caption>) : (
           <Facts>
             <Fact label="Newest run" value={b.newest.startedAt.slice(0, 10)} />
             <Fact label="Commit" value={b.newest.commit} mono />
@@ -89,7 +84,7 @@ export function BenchmarksSection() {
         <Caption>
           Every figure is a median with its spread and its N, stamped with the commit it came from.
           {b.readAt === "" ? " " : ` Figures read ${formatFreshness(b.readAt, now)}. `}
-          <Button onClick={b.reload} busy={b.loadingSamples} busyLabel="Reading">
+          <Button onClick={b.reload} busy={b.loadingSamples}>
             Look again
           </Button>
         </Caption>

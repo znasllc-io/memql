@@ -1,3 +1,4 @@
+import { ContentSkeleton } from "../../kit/ContentSkeleton";
 import { useCallback, useEffect, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -314,7 +315,7 @@ export function LogsSettingsSection({
         ) : statusError !== "" ? (
           <Notice tone="error" sentence="The store's status could not be read." detail={statusError} />
         ) : status === null ? (
-          <Caption>Reading from the cluster.</Caption>
+          <ContentSkeleton kind="form" label="Loading from the cluster" />
         ) : (
           <>
             <Facts>
@@ -353,7 +354,7 @@ export function LogsSettingsSection({
         ) : daysError !== "" ? (
           <Notice tone="error" sentence="The archive could not be listed." detail={daysError} />
         ) : daysReadAt === null ? (
-          <Caption>Reading from the cluster.</Caption>
+          <ContentSkeleton kind="form" label="Loading from the cluster" />
         ) : days.length === 0 ? (
           <Caption>
             Nothing archived yet. The nightly sweep archives each day past retention before it deletes it, and

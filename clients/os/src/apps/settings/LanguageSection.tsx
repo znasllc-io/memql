@@ -1,3 +1,4 @@
+import { ContentSkeleton } from "../../kit/ContentSkeleton";
 import { useEffect, useId, useRef, useState } from "react";
 import { ArrowRight } from "lucide-react";
 
@@ -70,7 +71,7 @@ export function LanguageSection() {
           next="Reload the window. If this is still here, the shell and the engine are from different releases."
         />
       ) : facts === null ? (
-        <Caption>Loading from the cluster</Caption>
+        <ContentSkeleton kind="detail" label="Loading from the cluster" />
       ) : (
         <>
           <SpeaksPanel facts={facts} />

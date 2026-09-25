@@ -120,7 +120,7 @@ const defaultSiteDomain = "memql.localhost"
 // un-reserving a label is a ONE-WAY DOOR -- once somebody has claimed it,
 // taking it back is a support conversation -- while keeping it costs one
 // entry.
-var squatReservedSiteLabels = []string{"www", "admin", "mail", "portal"}
+var squatReservedSiteLabels = []string{"www", "admin", "mail", "portal", "voice", "turn"}
 
 // reservedSiteLabels is the closed set of labels a user may not claim, keyed
 // lowercase.

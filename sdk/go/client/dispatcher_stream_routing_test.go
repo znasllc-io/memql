@@ -113,6 +113,7 @@ var unroutedFamilies = map[string]string{
 	"deploy_control_result":                  "single-reply",
 	"create_account_token_result":            "single-reply",
 	"revoke_account_token_result":            "single-reply",
+	"ask_voice_start_result":                 "single-reply; short-lived LiveKit credentials, correlated to the start envelope",
 	"identity_admin_result":                  "single-reply",
 }
 

@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { useCallback, useMemo, useState } from "react";
 import { Bot } from "lucide-react";
 import { Concepts, getRowByConceptAndId, type Connection, type LiveCollectionSpec, type Row } from "@znasllc-io/memql-sdk-core/client";
@@ -218,7 +219,7 @@ function StandingAuthorizations() {
         <p className="os-cluster-row-error os-mono">{grants.error}</p>
       ) : null}
       {grants.state === "reading" && grants.value === null ? (
-        <Caption>Reading your grants.</Caption>
+        <RecordListSkeleton label="Loading your grants" />
       ) : null}
       {grants.state === "read" && rows.length === 0 ? (
         <Caption>You have granted no agent a standing authorization.</Caption>

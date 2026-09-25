@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { History } from "lucide-react";
 import { InfoDetail } from "../../../kit/InfoDetail";
 import { useState } from "react";
@@ -39,7 +40,7 @@ export function CallHistory({ workerId, machineLabel, standalone = false }: { wo
 
       {!open ? null : (
         <>
-          {loading && invocations.length === 0 ? <p className="os-caption" role="status">Reading this machine's recent calls.</p> : null}
+          {loading && invocations.length === 0 ? <RecordListSkeleton label="Loading this machine's recent calls" /> : null}
 
           {error ? (
             <Notice

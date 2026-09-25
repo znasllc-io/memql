@@ -173,6 +173,8 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 			"attribute name changed, which would silently exempt nothing and gate nothing.")
 	}
 	want := map[serverOnlyKey]bool{
+		// Ownership alone cannot prevent forged assistant replies/action evidence.
+		{"os/ask.memql", "saveAskConversation"}: true,
 		// epic memql#4800. The accounts seed's existence probe. It runs from
 		// the seedSelfAccount automation at system.startup, under the engine's
 		// own system actor, before any person has signed in -- so actor.userId

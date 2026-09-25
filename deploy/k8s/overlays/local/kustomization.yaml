@@ -63,6 +63,7 @@ kind: Kustomization
 namespace: memql
 
 resources:
+  - voice-front-door.yaml
   - front-door.yaml
   - api-front-door.yaml
   - mcp-front-door.yaml
@@ -78,6 +79,7 @@ resources:
 # Remove cloud-only resources
 # ---------------------------------------------------------------------------
 patches:
+  - path: patches/livekit-local.yaml
   # Share the BFF image key so both make dev and the release installer's
   # image override select a real image for the dsl-fetch subcommand.
   - target: { kind: Deployment, labelSelector: "memql/product-dsl=true" }
@@ -395,6 +397,7 @@ components:
   # THE DOMAIN, both halves (memql#4281). Must follow engine-bff, which
   # adds the `bff` Deployment this patches; components apply in order.
   - ../../components/domain-derive
+  - ../../components/ask-voice
   # The database, as the SAME component every install and every tenant
   # deployment composes (epic memql#3842 / #3851). Local supplies its own values
   # rather than a tier preset: the presets describe what a customer buys, and a

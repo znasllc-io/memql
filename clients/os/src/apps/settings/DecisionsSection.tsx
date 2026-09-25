@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useState } from "react";
 
 import { Button, Caption, Chip, RecordList, RecordRow, Head, Measure, Notice, Refine, Select } from "../../kit";
@@ -65,7 +66,7 @@ export function DecisionsSection() {
         title="Decisions"
         meta={!decisions.loading && !decisions.error && decisions.supported && decisions.fetchedAt !== null ? decisions.rows.length : undefined}
       >
-        <Button onClick={decisions.reload} busy={decisions.loading} busyLabel="Reading">
+        <Button onClick={decisions.reload} busy={decisions.loading}>
           Read again
         </Button>
       </Head>
@@ -121,7 +122,7 @@ export function DecisionsSection() {
           </div>
 
           {decisions.loading && decisions.rows.length === 0 ? (
-            <Caption>Reading the decisions.</Caption>
+            <RecordListSkeleton label="Loading the decisions" />
           ) : decisions.rows.length === 0 ? (
             <Caption>
               {chips.length > 0

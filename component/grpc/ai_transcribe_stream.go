@@ -2,7 +2,12 @@ package memql
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/core/airoute"
 	"strings"
 	"sync"
 	"time"
@@ -16,7 +21,7 @@ import (
 
 // transcribeStream is the per-request worker-side state for a streaming
 // transcription session. It lives on service.transcribeStreams keyed by
-// the caller's request_id, not on a streamSession, because on the
+// the authenticated caller and request_id, not on a streamSession, because on the
 // forwarded-request path each envelope (Start, each Chunk, End) lands
 // in its own streamSession but all must cooperate on the same STT
 // provider session and share the same outbound wire (forwardedStream).
@@ -59,6 +64,7 @@ type transcribeStream struct {
 	mu       sync.Mutex
 	lastText string
 	closed   bool
+	ending   bool
 }
 
 // handleAiTranscribeStreamStart opens a streaming transcription
@@ -103,7 +109,7 @@ func (s *streamSession) handleAiTranscribeStreamStart(
 	// Duplicate-start detection: an existing session for the same
 	// request_id is almost certainly a client bug (or a replay of a
 	// message the server already acted on). Reject loudly.
-	if s.service.lookupTranscribeStream(requestId) != nil {
+	if s.service.lookupTranscribeStream(transcriptionKey(s.stream.Context(), requestId)) != nil {
 		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.AlreadyExists,
 			"streaming transcription already open for request_id")
 	}
@@ -125,15 +131,7 @@ func (s *streamSession) handleAiTranscribeStreamStart(
 	// Use a long-lived context so the STT provider's goroutines outlive
 	// any per-envelope dispatch. The cancel is stored on transcribeStream
 	// and fires on End or on cleanupTranscribeStreams.
-	sessCtx, cancel := context.WithCancel(context.Background())
-	sttSess, err := s.service.sttProvider.StartStream(sessCtx, sttCfg)
-	if err != nil {
-		cancel()
-		s.logger.Warn("streaming transcription start failed",
-			"request_id", requestId, "error", err)
-		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.Internal,
-			"failed to start streaming transcription: "+err.Error())
-	}
+	sessCtx, cancel := context.WithTimeout(context.WithoutCancel(s.stream.Context()), 10*time.Minute)
 
 	// Outbound sink for this stream's Delta/Complete messages. On a mesh worker
 	// the durable substrate is the delivery path (memql#1266): translate each
@@ -152,6 +150,37 @@ func (s *streamSession) handleAiTranscribeStreamStart(
 		send = s.service.newTranscriptStreamSink(sessCtx, requestId, rawSend)
 	}
 
+	// Router observations and transcript deltas can arrive concurrently.
+	sink := send
+	var sendMu sync.Mutex
+	terminal := false
+	send = func(m *memqlv1.MemqlServerMessage) error {
+		sendMu.Lock()
+		defer sendMu.Unlock()
+		if terminal {
+			return nil
+		}
+		if m.GetAiTranscribeStreamComplete() != nil || m.GetQueryError() != nil {
+			terminal = true
+		}
+		return sink(m)
+	}
+
+	sessCtx = airoute.WithObserver(sessCtx, func(event airoute.CallObservation) {
+		data, err := json.Marshal(event)
+		if err == nil {
+			_ = send(&memqlv1.MemqlServerMessage{CorrelateTo: envelope.GetMessageId(), Payload: &memqlv1.MemqlServerMessage_AiTranscribeStreamDelta{AiTranscribeStreamDelta: &memqlv1.AiTranscribeStreamDelta{RequestId: requestId, MetadataJson: string(data)}}})
+		}
+	})
+	sttSess, err := s.service.sttProvider.StartStream(sessCtx, sttCfg)
+	if err != nil {
+		cancel()
+		s.logger.Warn("streaming transcription start failed",
+			"request_id", requestId, "error", err)
+		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.Internal,
+			"failed to start streaming transcription: "+err.Error())
+	}
+
 	ts := &transcribeStream{
 		requestId:  requestId,
 		correlate:  envelope.GetMessageId(),
@@ -165,7 +194,14 @@ func (s *streamSession) handleAiTranscribeStreamStart(
 		done:       make(chan struct{}),
 	}
 
-	s.service.registerTranscribeStream(requestId, ts)
+	if !s.service.registerTranscribeStream(transcriptionKey(s.stream.Context(), requestId), ts) {
+		ts.closeSilently()
+		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.AlreadyExists, "streaming transcription already open for request_id")
+	}
+	context.AfterFunc(sessCtx, func() {
+		ts.closeSilently()
+		s.service.removeTranscribeStream(transcriptionKey(s.stream.Context(), requestId), ts)
+	})
 	go ts.pumpDeltas(s.logger)
 
 	s.logger.Info("streaming transcription started",
@@ -197,7 +233,7 @@ func (s *streamSession) handleAiTranscribeStreamChunk(
 	// stream on. If no inflight exists, the start never went through
 	// (or already closed) -- surface that as InvalidArgument.
 	if s.shouldProxyAI(nodeTargetForTranscribe()) {
-		if !s.service.aiForwarder.HasInflight(requestId) {
+		if !s.service.aiForwarder.HasInflight(transcriptionKey(s.stream.Context(), requestId)) {
 			return s.sendQueryError(requestId, envelope.GetMessageId(), codes.FailedPrecondition,
 				"no open transcribe stream for request_id (call Start first)")
 		}
@@ -210,14 +246,14 @@ func (s *streamSession) handleAiTranscribeStreamChunk(
 			return s.sendQueryError(requestId, envelope.GetMessageId(), codes.Internal,
 				"cannot establish forwarded authority for this session: "+err.Error())
 		}
-		if err := s.service.aiForwarder.ForwardContinuation(requestId, principal, envelope); err != nil {
+		if err := s.service.aiForwarder.ForwardContinuation(transcriptionKey(s.stream.Context(), requestId), principal, envelope); err != nil {
 			return s.sendQueryError(requestId, envelope.GetMessageId(), codes.Unavailable, err.Error())
 		}
 		return nil
 	}
 
 	// Local path.
-	ts := s.service.lookupTranscribeStream(requestId)
+	ts := s.service.lookupTranscribeStream(transcriptionKey(s.stream.Context(), requestId))
 	if ts == nil {
 		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.FailedPrecondition,
 			"no open transcribe stream for request_id (call Start first)")
@@ -258,7 +294,7 @@ func (s *streamSession) handleAiTranscribeStreamEnd(
 	// AiTranscribeStreamComplete (or close silently on cancel) and the
 	// BFF's inflight entry closes on the terminal response.
 	if s.shouldProxyAI(nodeTargetForTranscribe()) {
-		if !s.service.aiForwarder.HasInflight(requestId) {
+		if !s.service.aiForwarder.HasInflight(transcriptionKey(s.stream.Context(), requestId)) {
 			return s.sendQueryError(requestId, envelope.GetMessageId(), codes.FailedPrecondition,
 				"no open transcribe stream for request_id (call Start first)")
 		}
@@ -271,20 +307,22 @@ func (s *streamSession) handleAiTranscribeStreamEnd(
 			return s.sendQueryError(requestId, envelope.GetMessageId(), codes.Internal,
 				"cannot establish forwarded authority for this session: "+err.Error())
 		}
-		if err := s.service.aiForwarder.ForwardContinuation(requestId, principal, envelope); err != nil {
+		if err := s.service.aiForwarder.ForwardContinuation(transcriptionKey(s.stream.Context(), requestId), principal, envelope); err != nil {
 			return s.sendQueryError(requestId, envelope.GetMessageId(), codes.Unavailable, err.Error())
 		}
 		return nil
 	}
 
 	// Local path.
-	ts := s.service.unregisterTranscribeStream(requestId)
+	ts := s.service.lookupTranscribeStream(transcriptionKey(s.stream.Context(), requestId))
 	if ts == nil {
 		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.FailedPrecondition,
 			"no open transcribe stream for request_id (call Start first)")
 	}
 
 	if msg.GetCancel() {
+		s.service.unregisterTranscribeStream(transcriptionKey(s.stream.Context(), requestId))
+		ts.closeSilently()
 		// Emit a terminal Complete with empty text so the BFF-side
 		// inflight closes promptly. Wait for the pump briefly so any
 		// in-flight Delta doesn't arrive AFTER Complete.
@@ -312,18 +350,35 @@ func (s *streamSession) handleAiTranscribeStreamEnd(
 		return nil
 	}
 
+	ts.mu.Lock()
+	if ts.ending {
+		ts.mu.Unlock()
+		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.AlreadyExists, "transcription is already finishing")
+	}
+	ts.ending = true
+	ts.mu.Unlock()
+	// Finalization can take longer on a Fleet CPU. Release the mesh receiver
+	// immediately so other browser sessions and cancellation can keep flowing.
+	go func() {
+		defer s.service.removeTranscribeStream(transcriptionKey(s.stream.Context(), requestId), ts)
+		_ = s.finalizeTranscription(envelope, requestId, ts)
+	}()
+	return nil
+}
+
+func (s *streamSession) finalizeTranscription(envelope *memqlv1.MemqlClientMessage, requestId string, ts *transcribeStream) error {
 	// Not cancelled: finalize on a background context so the provider
 	// HTTP call isn't tied to the NodeService stream's short-lived
 	// per-envelope ctx.
-	finalizeCtx, finalizeCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	finalizeCtx, finalizeCancel := context.WithTimeout(ts.ctx, 5*time.Minute)
 	defer finalizeCancel()
+	defer ts.closeSilently()
 	final, err := ts.sttSession.Finalize(finalizeCtx)
 	if err != nil && !errors.Is(err, context.Canceled) {
 		s.logger.Warn("streaming transcription finalize failed",
 			"request_id", requestId, "error", err)
 		ts.closeSilently()
-		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.Internal,
-			"failed to finalize streaming transcription: "+err.Error())
+		return ts.send(&memqlv1.MemqlServerMessage{CorrelateTo: ts.correlate, Payload: &memqlv1.MemqlServerMessage_QueryError{QueryError: &memqlv1.QueryErrorMsg{RequestId: requestId, Error: &memqlv1.QueryError{Code: codes.Internal.String(), Message: "failed to finalize streaming transcription: " + err.Error()}}}})
 	}
 
 	// Let the pump drain any in-flight deltas the provider might still
@@ -464,13 +519,17 @@ func (ts *transcribeStream) closeSilently() {
 // service registry helpers
 // -----------------------------------------------------------------------------
 
-func (s *service) registerTranscribeStream(requestId string, ts *transcribeStream) {
+func (s *service) registerTranscribeStream(requestId string, ts *transcribeStream) bool {
 	s.transcribeStreamsMu.Lock()
 	defer s.transcribeStreamsMu.Unlock()
 	if s.transcribeStreams == nil {
 		s.transcribeStreams = make(map[string]*transcribeStream)
 	}
+	if s.transcribeStreams[requestId] != nil {
+		return false
+	}
 	s.transcribeStreams[requestId] = ts
+	return true
 }
 
 func (s *service) lookupTranscribeStream(requestId string) *transcribeStream {
@@ -523,5 +582,25 @@ func pickPositiveInt(primary, fallback int) int {
 func init() {
 	if nodeTargetForTranscribe() != node.NodeTypeAgent {
 		panic("nodeTargetForTranscribe must resolve to NodeTypeAgent; the streaming transcription handlers rely on it")
+	}
+}
+
+// A client ID alone is not private in a shared replica or durable substrate.
+// The actor is verified on every mesh envelope, including chunks and End.
+func transcriptionKey(ctx context.Context, requestID string) string {
+	identity, err := auth.UserIdentityFromContext(ctx)
+	if err != nil || identity.Subject == "" {
+		return requestID
+	} // internal transport harnesses
+	digest := sha256.Sum256([]byte(identity.Subject + "\x00" + requestID))
+	return fmt.Sprintf("asr-%x", digest[:])
+}
+
+// A cancelled stream may have been replaced before its finalizer exits.
+func (s *service) removeTranscribeStream(key string, expected *transcribeStream) {
+	s.transcribeStreamsMu.Lock()
+	defer s.transcribeStreamsMu.Unlock()
+	if s.transcribeStreams[key] == expected {
+		delete(s.transcribeStreams, key)
 	}
 }

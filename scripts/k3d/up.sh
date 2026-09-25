@@ -846,6 +846,23 @@ function kustomize_host_overrides() {
             - op: replace
               path: /spec/tls/0/hosts/0
               value: identity.${DOMAIN}
+        - target:
+            kind: Ingress
+            name: voice-front-door
+          patch: |-
+            - op: replace
+              path: /spec/rules/0/host
+              value: voice.${DOMAIN}
+            - op: replace
+              path: /spec/tls/0/hosts/0
+              value: voice.${DOMAIN}
+        - target:
+            kind: IngressRouteTCP
+            name: voice-turn
+          patch: |-
+            - op: replace
+              path: /spec/routes/0/match
+              value: HostSNI(\`turn.${DOMAIN}\`)
 EOF
 }
 

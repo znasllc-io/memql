@@ -1738,6 +1738,7 @@ func (s *streamSession) openModelCall(ctx context.Context, req ModelCallRequest)
 			ToolCallId: m.ToolCallId,
 			Name:       m.Name,
 			ToolCalls:  toolCallsToProto(m.ToolCalls),
+			Images:     m.Images,
 		})
 	}
 	tools := make([]*memqlv1.ModelCallTool, 0, len(req.Tools))
@@ -1760,6 +1761,7 @@ func (s *streamSession) openModelCall(ctx context.Context, req ModelCallRequest)
 		StepId:               req.StepId,
 		Purpose:              req.Purpose,
 		Tools:                tools,
+		Audio:                req.Audio, Speech: req.Speech, Image: req.Image, Level: req.Level,
 		Params: &memqlv1.ModelCallParams{
 			Temperature:     req.Params.Temperature,
 			TemperatureSet:  req.Params.TemperatureSet,
@@ -1868,6 +1870,7 @@ func (s *streamSession) handleModelCallEnd(end *memqlv1.ModelCallEnd) {
 		Error:        end.GetError(),
 		ErrorCode:    end.GetErrorCode(),
 		ToolCalls:    toolCallsFromProto(end.GetToolCalls()),
+		Audio:        end.GetAudio(), Segments: end.GetSegments(), Images: end.GetImages(),
 	}
 	if len(embeddings) > 0 {
 		outcome.Embeddings = embeddings

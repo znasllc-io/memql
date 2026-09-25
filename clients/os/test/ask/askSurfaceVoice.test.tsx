@@ -61,7 +61,7 @@ function mount(opts: { commit?: "send" | "review"; ports?: Partial<VoicePorts> }
   );
   return {
     wire,
-    mic: screen.getByRole("button", { name: "Ask by voice" }),
+    mic: screen.getByRole("button", { name: "Dictate a message" }),
     advance: (ms: number) => {
       now += ms;
     },
@@ -92,7 +92,7 @@ describe("Ask voice, at the surface", () => {
 
     advance(LATCH_BELOW_MS + 200);
     letGo(mic);
-    expect(screen.getByText(ASK_VOICE_FINISHING)).toBeTruthy();
+    expect(screen.getByLabelText("Transcribing")).toBeTruthy();
 
     act(() => wire.complete("show me the fleet"));
     // The question is asked, so it appears in the log and leaves the box.
@@ -173,7 +173,7 @@ describe("Ask voice, at the surface", () => {
     act(() => wire.partial?.("half a thought"));
 
     fireEvent.click(screen.getByRole("button", { name: "Finish" }));
-    expect(screen.getByText(ASK_VOICE_FINISHING)).toBeTruthy();
+    expect(screen.getByLabelText("Transcribing")).toBeTruthy();
     // Nothing has been asked yet -- the microphone is closing first.
     expect(screen.queryByText(/Ask is not connected/)).toBeNull();
   });

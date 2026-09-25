@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -176,7 +177,7 @@ export function AuditSection() {
       ) : null}
 
       {page.state === "reading" && page.rows.length === 0 ? (
-        <Caption>Reading the trail.</Caption>
+        <RecordListSkeleton label="Loading the trail" />
       ) : null}
 
       {page.state === "read" && page.rows.length === 0 ? (
@@ -220,7 +221,7 @@ export function AuditSection() {
               <Button
                 tone="quiet"
                 busy={page.state === "reading"}
-                busyLabel="Reading"
+
                 onClick={() => void load(page.cursor)}
               >
                 Load {PAGE_SIZE} more

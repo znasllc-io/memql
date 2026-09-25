@@ -1,3 +1,4 @@
+import { ContentSkeleton } from "../../../kit/ContentSkeleton";
 import { useCallback, useMemo, useState } from "react";
 import type { Module, ModuleDetail as ModuleDetailWire, ModulesClient } from "@znasllc-io/memql-sdk-core/client";
 
@@ -165,7 +166,7 @@ export function ModuleDetail({
             />
           ) : null}
           {detail.state === "reading" && detail.value === null ? (
-            <Caption>Reading this module's environment.</Caption>
+            <ContentSkeleton kind="detail" label="Loading this module's environment" />
           ) : null}
           {detail.state === "read" && envVars.length === 0 ? (
             <Caption>This module declares no environment variables.</Caption>

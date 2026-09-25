@@ -1,0 +1,38 @@
+# Both signaling and media use the existing local HTTPS listener. TURN/TLS is
+# routed by SNI before HTTP, so no k3d recreation or additional published port
+# is necessary. The browser-trusted wildcard certificate covers both names.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: voice-front-door
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  tls:
+    - hosts: [voice.memql.localhost]
+      secretName: memql-front-door-tls
+  rules:
+    - host: voice.memql.localhost
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: livekit
+                port: {number: 7880}
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRouteTCP
+metadata:
+  name: voice-turn
+spec:
+  entryPoints: [websecure]
+  routes:
+    - match: HostSNI(`turn.memql.localhost`)
+      services:
+        - name: livekit
+          port: 443
+          proxyProtocol: {version: 2}
+  tls:
+    secretName: memql-front-door-tls

@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { useCallback, useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -121,7 +122,7 @@ export function OriginsSection() {
         <Button
           tone="quiet"
           busy={inventory.state === "reading" || health.state === "reading"}
-          busyLabel="Reading"
+
           onClick={() => {
             inventory.reread();
             health.reread();
@@ -151,7 +152,7 @@ export function OriginsSection() {
       )}
 
       {inventory.state === "reading" && inventory.value === null ? (
-        <Caption>Reading the declared inventory.</Caption>
+        <RecordListSkeleton label="Loading the declared inventory" />
       ) : null}
 
       {join.rows.length === 0 && inventory.state === "read" ? (

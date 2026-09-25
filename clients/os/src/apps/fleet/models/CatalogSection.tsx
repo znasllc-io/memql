@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { EmptyState, Button } from "../../../kit";
 import { useMemo, useState } from "react";
 
@@ -147,7 +148,7 @@ export function CatalogSection({
   // NOTHING IS SHOWN OVER AN EMPTY CATALOG, the same rule the ranked list
   // follows: every sentence below describes a set of recommendations, and
   // printing them above none describes nothing.
-  if (groups.length === 0) return profilesState === "reading" ? <Caption>Reading the model catalog…</Caption> : <EmptyState title={profiles.length ? "No matching models" : "Model catalog unavailable"} action={profiles.length && onClearFilters ? <Button onClick={onClearFilters}>Clear filters</Button> : undefined}>{profiles.length ? "Choose another category or runtime to see more models." : "This cluster has not provided a model catalog. You can still use models already installed on your machines."}</EmptyState>;
+  if (groups.length === 0) return profilesState === "reading" ? <RecordListSkeleton label="Loading the model catalog" /> : <EmptyState title={profiles.length ? "No matching models" : "Model catalog unavailable"} action={profiles.length && onClearFilters ? <Button onClick={onClearFilters}>Clear filters</Button> : undefined}>{profiles.length ? "Choose another category or runtime to see more models." : "This cluster has not provided a model catalog. You can still use models already installed on your machines."}</EmptyState>;
 
   return (
     <>

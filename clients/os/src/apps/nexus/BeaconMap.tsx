@@ -1,3 +1,4 @@
+import { ContentSkeleton } from "../../kit/ContentSkeleton";
 import { useCallback, useMemo } from "react";
 import type { LiveState } from "@znasllc-io/memql-sdk-core/client";
 
@@ -232,9 +233,7 @@ export function BeaconMap({
   if (world.goal === null) {
     return (
       <div className="os-nexus-map" data-empty>
-        <Caption>
-          {state === "seeding" ? "Loading from the cluster" : "Nothing to draw yet."}
-        </Caption>
+        {state === "seeding" ? <ContentSkeleton kind="map" label="Loading from the cluster" /> : <Caption>{"Nothing to draw yet."}</Caption>}
       </div>
     );
   }

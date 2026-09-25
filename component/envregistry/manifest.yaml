@@ -1445,9 +1445,9 @@ variables:
   - name: MEMQL_STT_PROVIDER
     component: ai
     scope: node
-    default: "openai-realtime"
+    default: "router"
     optional: true
-    description: "Speech-to-text provider selector; openai-realtime or openai-whisper."
+    description: "Speech-to-text provider selector; router uses configured Fleet and federation audio routes. Explicit openai-realtime and openai-whisper select those transports."
 
   - name: MEMQL_STT_LANGUAGE
     component: ai
@@ -1502,6 +1502,28 @@ variables:
     scope: node
     optional: true
     description: "Filesystem directory of app-profile markdown files that overrides the embedded profiles baked into the binary when set."
+
+  - name: MEMQL_LIVEKIT_URL
+    component: voice
+    scope: node
+    optional: true
+    description: "Internal LiveKit signaling URL used by the agent's Go media participant. Set all four LiveKit values or none."
+  - name: MEMQL_LIVEKIT_PUBLIC_URL
+    component: voice
+    scope: node
+    optional: true
+    description: "Browser-reachable secure LiveKit signaling URL."
+  - name: MEMQL_LIVEKIT_API_KEY
+    component: voice
+    scope: node
+    optional: true
+    description: "LiveKit API key identifier, shared with the self-hosted SFU."
+  - name: MEMQL_LIVEKIT_API_SECRET
+    component: voice
+    scope: node
+    optional: true
+    secret: true
+    description: "LiveKit signing secret, at least 32 characters; never sent to clients."
 
   # --- streaming transcription (epic memql#4988) ---
   #

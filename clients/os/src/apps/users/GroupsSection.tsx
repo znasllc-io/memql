@@ -7,6 +7,7 @@ import { Users } from "lucide-react";
 
 import {
   Button,
+  ContentSkeleton,
   Head,
   LiveList,
   Notice,
@@ -113,6 +114,7 @@ export function GroupsSection({
   if (view.kind === "group") {
     const group = all.find((g) => g.id === view.groupId) ?? null;
     if (group === null) {
+      if (groups.snapshot.state === "seeding") return <ContentSkeleton label="Opening group" />;
       return (
         <div className="os-app-stack">
           <Head title="Group" back={{ label: "Groups", onSelect: () => setView({ kind: "list" }) }} />

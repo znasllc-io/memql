@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
@@ -272,17 +273,34 @@ func (e *MemQLEngine) InvokeAIChatWithFilteredToolsOpts(ctx context.Context, tem
 	}
 
 	// The same seam as InvokeAIChatWithTools above, for the same reasons.
-	req, err := requestForPrompt(ctx, prompt, invocation, airoute.ModalityTools, systemText)
+	modality := airoute.ModalityTools
+	if opts != nil && opts.OnText != nil {
+		modality = airoute.ModalityStreamingTools
+	}
+	req, err := requestForPrompt(ctx, prompt, invocation, modality, systemText)
 	if err != nil {
 		return "", err
 	}
 	resolved, err := e.resolveAI(ctx, req)
 	if err != nil {
+		if opts != nil && opts.AllowTextOnly && opts.OnText != nil {
+			req.Modality = airoute.ModalityStreamingChat
+			plain, plainErr := e.resolveAI(ctx, req)
+			if plainErr != nil {
+				return "", plainErr
+			}
+			return streamTextOnlyTurn(ctx, plain, systemText, chatHistory, opts)
+		}
 		return "", err
 	}
 	providerName := resolved.Resolution.ProviderName
 
 	toolCaller, ok := resolved.Client.(common.ToolCallingChatAIProvider)
+	if opts != nil && opts.OnText != nil {
+		if streaming, streams := resolved.Client.(common.ChatStreamWithToolsProvider); streams {
+			toolCaller, ok = streamingToolCaller{provider: streaming, onText: opts.OnText}, true
+		}
+	}
 	if !ok || toolCaller == nil {
 		// DIAGNOSTIC: Log the provider type so we can see why tool calling is unavailable.
 		if e.Component != nil && e.Logger != nil {
@@ -306,6 +324,10 @@ func (e *MemQLEngine) InvokeAIChatWithFilteredToolsOpts(ctx context.Context, tem
 	}
 
 	tools := e.toolsForToolCallingFiltered(toolNames)
+	allowedTools := make(map[string]bool, len(tools))
+	for _, tool := range tools {
+		allowedTools[tool.Name] = true
+	}
 	messages := []common.ChatMessage{
 		{Role: "system", Content: systemText},
 	}
@@ -391,7 +413,14 @@ func (e *MemQLEngine) InvokeAIChatWithFilteredToolsOpts(ctx context.Context, tem
 				})
 			}
 		}
+		started := time.Now()
+		if opts != nil && opts.OnModel != nil {
+			opts.OnModel("running", providerName, resolved.Resolution.Model, 0, nil)
+		}
 		step, err := toolCaller.CallChatWithTools(ctx, messages, tools)
+		if opts != nil && opts.OnModel != nil {
+			opts.OnModel("completed", providerName, resolved.Resolution.Model, time.Since(started), err)
+		}
 		if err != nil {
 			if e.Component != nil && e.Logger != nil {
 				e.Logger.Warn("tool loop: API error",
@@ -506,6 +535,10 @@ func (e *MemQLEngine) InvokeAIChatWithFilteredToolsOpts(ctx context.Context, tem
 		for i, call := range calls {
 			callId := strings.TrimSpace(call.ID)
 			tn := strings.TrimSpace(call.Name)
+			if !allowedTools[tn] {
+				resultMessages[i] = common.ChatMessage{Role: "tool", Name: tn, ToolCallId: callId, Content: `{"isError":true,"error":"tool is outside this turn's allowed scope"}`}
+				continue
+			}
 			rawArgs := strings.TrimSpace(call.Arguments)
 			cacheKey := tn + "\n" + rawArgs
 
@@ -575,7 +608,7 @@ func (e *MemQLEngine) InvokeAIChatWithFilteredToolsOpts(ctx context.Context, tem
 			wg.Add(len(pending))
 
 			for ri, pc := range pending {
-				go func(resultIdx int, p pendingCall) {
+				run := func(resultIdx int, p pendingCall) {
 					defer wg.Done()
 
 					if activityCb != nil {
@@ -658,7 +691,12 @@ func (e *MemQLEngine) InvokeAIChatWithFilteredToolsOpts(ctx context.Context, tem
 						},
 						isError: isError,
 					}
-				}(ri, pc)
+				}
+				if opts != nil && opts.Sequential {
+					run(ri, pc)
+				} else {
+					go run(ri, pc)
+				}
 			}
 
 			wg.Wait()

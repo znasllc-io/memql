@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useState } from "react";
 
 import { Button, Caption, formatFreshness, Head, Notice, Panel, RecordList, RecordRow, Subhead, useNow } from "../../kit";
@@ -90,13 +91,7 @@ export function TokensSection() {
 
       <Panel label="Personal access tokens">
         <Subhead meta={counted ? facts.tokens.length : undefined}>Personal access tokens</Subhead>
-        {facts.tokens.length === 0 ? (
-          <Caption>
-            {facts.loading
-              ? "Reading across the people in this cluster"
-              : "Nobody has issued a personal access token. They are minted from the CLI, and a cluster can run without one."}
-          </Caption>
-        ) : (
+        {facts.tokens.length === 0 ? (facts.loading ? <RecordListSkeleton label="Reading across the people in this cluster" /> : <Caption>{"Nobody has issued a personal access token. They are minted from the CLI, and a cluster can run without one."}</Caption>) : (
           <RecordList as="ul" label="Personal access tokens">
             {facts.tokens.map((token) => (
               <div key={token.id}>
@@ -130,11 +125,7 @@ export function TokensSection() {
 
       <Panel label="Node credentials">
         <Subhead meta={counted ? facts.nodeTokens.length : undefined}>Node credentials</Subhead>
-        {facts.nodeTokens.length === 0 ? (
-          <Caption>
-            {facts.loading ? "Reading the credential list" : "No node has bootstrapped a credential."}
-          </Caption>
-        ) : (
+        {facts.nodeTokens.length === 0 ? (facts.loading ? <RecordListSkeleton label="Reading the credential list" /> : <Caption>{"No node has bootstrapped a credential."}</Caption>) : (
           <RecordList as="ul" label="Node credentials">
             {facts.nodeTokens.map((token) => (
               <div key={token.id}>
@@ -160,7 +151,7 @@ export function TokensSection() {
       </Panel>
 
       <div className="os-refresh-row">
-        <Button onClick={facts.reload} busy={facts.loading} busyLabel="Reading">
+        <Button onClick={facts.reload} busy={facts.loading}>
           Refresh
         </Button>
         <Caption>

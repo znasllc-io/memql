@@ -1,0 +1,22 @@
+# Go voice orchestration runs on agent nodes; LiveKit carries WebRTC media.
+# Compose this component with a TLS signaling ingress and a reachable TURN
+# endpoint. The local overlay supplies those using the existing 443 listener.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - livekit.yaml
+  - redis.yaml
+patches:
+  - target: { kind: Deployment, name: agent }
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          secretRef:
+            name: memql-voice
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: {name: MEMQL_LIVEKIT_URL, value: 'ws://livekit:7880'}
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: {name: MEMQL_LIVEKIT_PUBLIC_URL, value: 'wss://voice.$(MEMQL_DOMAIN)'}

@@ -1,3 +1,5 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
+import { LocalTabs } from "../../kit/LocalTabs";
 import type { OsAppProps } from "../../system/registry";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check } from "lucide-react";
@@ -130,30 +132,8 @@ export function AccessSection({ intent, consumeIntent }: Pick<OsAppProps, "inten
 
   return (
     <div className="os-settings">
-      <Head title="Access">
-        <div className="os-choice-row" role="radiogroup" aria-label="View">
-          {(
-            [
-              ["subject", "By person or group"],
-              ["resource", "By app"],
-            ] as const
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              role="radio"
-              aria-checked={view === value}
-              className="os-choice"
-              onClick={() => {
-                writes.clear();
-                setView(value);
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </Head>
+      <Head title="Access" />
+      <LocalTabs label="Access views" value={view} onChange={value => { writes.clear(); setView(value); }} options={[["subject", "By person or group"], ["resource", "By app"]]} />
       <Caption>
         Who may open which app, and which parts of one, over and above their role. A role decides first; a
         group the person is in can widen or narrow that; a grant to the person by name decides last.
@@ -196,13 +176,7 @@ export function AccessSection({ intent, consumeIntent }: Pick<OsAppProps, "inten
           </Select>
           </Field>
 
-          {subject === null ? (
-            <Caption>
-              {roster.state === "loading"
-                ? "Reading the roster."
-                : "Pick somebody to see what they may open, and where each answer comes from."}
-            </Caption>
-          ) : (
+          {subject === null ? (roster.state === "loading" ? <RecordListSkeleton label="Reading the roster." /> : <Caption>{"Pick somebody to see what they may open, and where each answer comes from."}</Caption>) : (
             <>
               <Caption>{subjectSentence(subject, subjectGrants.groupIds, roster.groups, roster.roles)}</Caption>
               {subjectGrants.state === "error" ? (

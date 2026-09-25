@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useEffect, useState } from "react";
 
 import { Button, Caption, RecordList, RecordRow, Field, Head, Input, Notice, Panel, Subhead } from "../../kit";
@@ -245,11 +246,7 @@ export function DoorsSection({
 
       <Panel label="What this node can call">
         <Subhead meta={!registry.loading && !registry.error && registry.fetchedAt !== null ? registry.rows.length : undefined}>What this node can call</Subhead>
-        <Caption>
-          {registry.loading && registry.rows.length === 0
-            ? "Reading the registry."
-            : summarize(registry.rows).headline}
-        </Caption>
+        {registry.loading && registry.rows.length === 0 ? <RecordListSkeleton label="Reading the registry." /> : <Caption>{summarize(registry.rows).headline}</Caption>}
         {registry.rows.length === 0 ? null : (
           <RecordList as="ul" label="Registered providers">{registry.rows.map(p => <RecordRow key={p.name} name={p.name} secondary={`${vendorLabel(p.vendor)} ${p.model}, credential from ${sourceCopy(p.authSource)}`}
             state={p.available ? "can be called" : "cannot be called"} tone={p.available ? "accent" : "muted"}
@@ -258,7 +255,7 @@ export function DoorsSection({
           </RecordRow>)}</RecordList>
         )}
         <div className="os-refresh-row">
-          <Button onClick={registry.reload} busy={registry.loading} busyLabel="Reading">
+          <Button onClick={registry.reload} busy={registry.loading}>
             Refresh
           </Button>
           <Caption>

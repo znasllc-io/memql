@@ -25,6 +25,8 @@ import (
 var toolHandlerCorpus = []struct {
 	tool, v1, rendered string
 }{
+	{"askDiscover", `query askCapabilities(search: args.search)`, `query askCapabilities(search: "v-search")`},
+	{"askExecuteCapability", `query askExecute(name: args.name, arguments: args.arguments)`, `query askExecute(name: "v-name", arguments: {"done":true,"n":2,"title":"T arguments"})`},
 	{"todosList", `query todos(done: args.done)`, `query todos(done: true)`},
 	{"todosComplete", `mutation completeTodo(todoId: args.todoId, payload: args.payload)`, `mutation completeTodo(todoId: "v-todoId", payload: {"done":true,"n":2,"title":"T payload"})`},
 	{"todosUpdate", `mutation updateTodo(todoId: args.todoId, payload: args.payload)`, `mutation updateTodo(todoId: "v-todoId", payload: {"done":true,"n":2,"title":"T payload"})`},

@@ -67,6 +67,23 @@ describe("shared attention", () => {
     await waitFor(() => expect(screen.queryByRole("img", { name: "Unseen change" })).toBeNull());
     expect(fake.executeNamed.mock.calls.find(([name]) => name === "acknowledgeAttention")?.[1]).toContain('changeId: "deployables:github-accounts"');
   });
+  it("acknowledges Ask conversations and voice only in visible Ask settings", async () => {
+    const fake = setup();
+    const settings = OS_REGISTRY.apps.find(app => app.id === "settings")!;
+    const feature = settings.attentionChanges!.find(change => change.id === "settings:ask-conversations-and-voice")!;
+    function Destination({ section = "access", visible = true }: { section?: string; visible?: boolean }) {
+      return <AttentionProvider apps={[{ ...settings, attentionChanges: [feature] }]}><AttentionMarker appId="settings" />
+        <AttentionDestination appId="settings" sectionId={section} visible={visible}><span>Destination</span></AttentionDestination>
+      </AttentionProvider>;
+    }
+    const view = render(withSession(<Destination />));
+    await screen.findByRole("img", { name: "Unseen change" });
+    expect(fake.executeNamed.mock.calls.filter(([name]) => name === "acknowledgeAttention")).toHaveLength(0);
+    view.rerender(withSession(<Destination section="ask" visible={false} />));
+    expect(screen.getByRole("img", { name: "Unseen change" })).toBeTruthy();
+    view.rerender(withSession(<Destination section="ask" />));
+    await waitFor(() => expect(screen.queryByRole("img", { name: "Unseen change" })).toBeNull());
+  });
   it("keeps Shopify discovery unread until the visible Store page opens", async () => {
     const fake = setup();
     const deployables = OS_REGISTRY.apps.find(app => app.id === "deployables")!;

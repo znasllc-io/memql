@@ -56,7 +56,7 @@ describe("compose account default", () => {
     vi.spyOn(connection.query, "clientAccountsAll").mockImplementation(() => new Promise(resolve => { answer = resolve; }));
     await open(connection);
     expect(selection()).toContain("Choose an account");
-    expect(screen.getByText("Loading accounts…")).toBeTruthy();
+    expect(screen.getByText("Loading accounts")).toBeTruthy();
     expect(screen.queryByText(cue)).toBeNull();
     await act(async () => answer(rowsResult([BETA, SELF])));
     await waitFor(() => expect(selection()).toContain("Operator organization"));

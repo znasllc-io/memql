@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "./RecordListSkeleton";
 import { useSession } from "../chrome/access";
 import { useOsIfPresent } from "../chrome/state";
 import type { Readiness } from "../live/readiness";
@@ -5,7 +6,6 @@ import { MODULE_NAMES, MODULE_SETTINGS_SECTION, type ModuleId } from "../system/
 import type { Verdict } from "../system/readinessFold";
 import { sectionsFor } from "../system/registry";
 import { Button, Panel, Subhead } from "./controls";
-import { Caption } from "./Caption";
 import { ProvenanceDot, type DotTone } from "./index";
 
 // THE SETUP SURFACE AND THE SET UP GROUP (design record
@@ -372,7 +372,7 @@ export function SetupGroup({
     <Panel label={`Set up ${app}`}>
       <Subhead>Set up</Subhead>
       {!readiness || !readiness.loaded ? (
-        <Caption>Reading this cluster&apos;s setup.</Caption>
+        <RecordListSkeleton label="Loading cluster setup" />
       ) : (
         <div className="os-setup-group-rows">
           {ids.map((id) => {

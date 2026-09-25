@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useMemo, useState } from "react";
 
 import { Button, Caption, Chip, RecordList, RecordRow, Head, Notice, Refine, Select } from "../../kit";
@@ -173,7 +174,7 @@ export function RulesSection() {
           )}
 
           {rules.loading && ordered.length === 0 ? (
-            <Caption>Reading the rules.</Caption>
+            <RecordListSkeleton label="Loading the rules" />
           ) : ordered.length === 0 ? (
             <Caption>
               No rules yet. Describe one and every call that matches it goes

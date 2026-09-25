@@ -69,6 +69,22 @@ beforeEach(() => {
 });
 
 describe("the data-origins table", () => {
+  it("uses silent skeletons during a delayed read and exposes a failed read", async () => {
+    const connection = fakeConnection();
+    let reject!: (reason: Error) => void;
+    connection.query.dataOrigins.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+    const view = mount(connection);
+    const label = screen.getByText("Loading the declared inventory");
+    expect(label.className).toBe("os-sr-only");
+    expect(label.closest('[aria-busy="true"]')).not.toBeNull();
+    expect(view.container.querySelector(".os-skeleton-block")).not.toBeNull();
+    expect(screen.queryByText(/Reading the (trail|declared inventory)/)).toBeNull();
+    await act(async () => reject(new Error("temporarily unavailable")));
+    expect(view.container.querySelector(".os-record-skeleton")).toBeNull();
+    expect(screen.getByText("temporarily unavailable")).toBeTruthy();
+  });
+
+
   it("renders absent health as an em dash and NOT as a zero", async () => {
     // THE REGRESSION THAT MATTERS. A connector that has never run has no lag,
     // no drift, no outbox depth and no dead letters. Rendering any of those

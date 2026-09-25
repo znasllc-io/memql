@@ -26,6 +26,9 @@ export interface AiChatResult {
 }
 
 export interface AiChatOptions {
+  conversationId?: string;
+  pageContext?: string;
+  requestId?: string;
   provider?: string;
   /** Strict pin to one owned machine, using its bare registration id.
    * Requires a concrete fleet:<modelId> provider; never falls back to another machine. */
@@ -64,12 +67,13 @@ export async function aiChat(
     throw new Error("aiChat: messages array must be non-empty");
   }
 
-  const requestId = newShortId();
+  const requestId = opts.requestId ?? newShortId();
   const reply = await dispatcher.sendAndWait(
     {
       aiChat: {
         requestId,
         messages: messages.map(toWireMessage),
+        ...(opts.conversationId ? { conversationId: opts.conversationId, pageContext: opts.pageContext ?? "" } : {}),
         ...(opts.provider ? { provider: opts.provider } : {}),
         ...(opts.fleetRegistrationId ? { fleetRegistrationId: opts.fleetRegistrationId } : {}),
         // Always non-streaming on this surface; callers wanting
@@ -106,7 +110,7 @@ export function aiChatStream(
     throw new Error("aiChatStream: messages array must be non-empty");
   }
 
-  const requestId = newShortId();
+  const requestId = opts.requestId ?? newShortId();
   const queue: AiChatStreamDelta[] = [];
   const waiters: Array<() => void> = [];
   let streamClosed = false;
@@ -160,6 +164,7 @@ export function aiChatStream(
   });
 
   const abortListener = () => {
+    if (!streamClosed) { try { dispatcher.send({ cancelRequest: { requestId } }); } catch { /* the connection already closed */ } }
     closeStream(new Error("aiChatStream: aborted"));
   };
 
@@ -179,6 +184,7 @@ export function aiChatStream(
         aiChat: {
           requestId,
           messages: messages.map(toWireMessage),
+        ...(opts.conversationId ? { conversationId: opts.conversationId, pageContext: opts.pageContext ?? "" } : {}),
           stream: true,
           ...(opts.provider ? { provider: opts.provider } : {}),
           ...(opts.fleetRegistrationId ? { fleetRegistrationId: opts.fleetRegistrationId } : {}),

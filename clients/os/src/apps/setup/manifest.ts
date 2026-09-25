@@ -15,7 +15,7 @@ import { SetupWidget } from "./SetupWidget";
 // It declares NO `requires`. A widget's `requires` renders the setup sentence
 // in its body when a module is missing -- which for this widget would be a
 // setup surface inside a setup surface, about the module it exists to set up.
-/** Desk footprint shared by Set up and Ask so both primary cards match. */
+/** Room for the four setup steps. */
 export const SETUP_WIDGET_SIZE = { w: 4, h: 4 } as const;
 
 export const setupWidget: OsWidgetManifest = {
@@ -30,7 +30,6 @@ export const setupWidget: OsWidgetManifest = {
   // widget wherever it fits instead -- `addItem` settles on the nearest free
   // cell -- which is a worse position and not a missing wizard.
   //
-  // Exported so Ask shares the same desk footprint (production desk parity).
   size: SETUP_WIDGET_SIZE,
   component: SetupWidget,
   gate: SetupGate,

@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { listCount } from "../../kit/RecordRow";
 import { AddButton } from "../../kit/AddButton";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -507,13 +508,7 @@ function MergeTags({
           Choose an audience to see what each tag turns into -- and to find the {"{{fields.*}}"}{" "}
           tags an import brought with it.
         </Caption>
-      ) : recipient === null ? (
-        <Caption>
-          {roster.state === "loading"
-            ? "Reading that audience"
-            : "That audience has nobody on it yet, so there is nothing to sample."}
-        </Caption>
-      ) : (
+      ) : recipient === null ? (roster.state === "loading" ? <RecordListSkeleton label="Reading that audience" /> : <Caption>{"That audience has nobody on it yet, so there is nothing to sample."}</Caption>) : (
         <Caption>
           Values are {recipient.email}&apos;s. Somebody else on the list may have different ones --
           or none, which renders as nothing at all.

@@ -1,3 +1,5 @@
+import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
+import { ContentSkeleton } from "../../../kit/ContentSkeleton";
 import { LocalTabs } from "../../../kit/LocalTabs";
 import { useEffect, useState } from "react";
 import { RefreshButton, useFleetScroll } from "../FleetControls";
@@ -87,7 +89,7 @@ export function AppsSection({ sessionTarget, navigation }: { sessionTarget?: { i
       )}
 
       {sessions.loading && sessions.sessions.length === 0 ? (
-        <p className="os-caption">Reading your delegated runs.</p>
+        <RecordListSkeleton label="Loading your delegated runs" />
       ) : null}
 
       {!sessions.loading && sessions.sessions.length === 0 && sessions.error === "" ? (
@@ -162,7 +164,7 @@ function DelegationPanel({ state }: { state: ReturnType<typeof useDelegationPoli
         </span>
       </div>
 
-      {state.loading ? <p className="os-caption">Reading your delegation policy.</p> : null}
+      {state.loading && state.readAt === null && !touched ? <ContentSkeleton kind="form" label="Loading your delegation policy" /> : <>
 
       {state.error === "" ? null : (
         <Notice
@@ -328,6 +330,7 @@ function DelegationPanel({ state }: { state: ReturnType<typeof useDelegationPoli
       </p>
 
 
+      </>}
     </Panel>
   );
 }

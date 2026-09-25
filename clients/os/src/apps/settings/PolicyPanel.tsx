@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { Button, Caption, Field, Input, Notice, Panel, Select, Subhead } from "../../kit";
 import { draftProblem, editFromDraft, useClusterPolicy } from "./clusterPolicy";
 import { useSettingsWrites } from "./settingsWrites";
@@ -241,13 +242,9 @@ export function PolicyPanel({ enabled }: { enabled: boolean }) {
             Discard changes
           </Button>
         )}
-        <Caption>
-          {policy.loading
-            ? "Reading what is stored"
-            : policy.clean
+        {policy.loading ? <RecordListSkeleton label="Reading what is stored" /> : <Caption>{policy.clean
               ? "Nothing to save."
-              : "Not saved yet."}
-        </Caption>
+              : "Not saved yet."}</Caption>}
       </div>
     </Panel>
   );

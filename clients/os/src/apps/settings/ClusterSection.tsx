@@ -1,3 +1,5 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
+import { ContentSkeleton, InlineSkeleton } from "../../kit/ContentSkeleton";
 import { RecordList, RecordRow, Subhead } from "../../kit";
 import { Button, Caption } from "../../kit";
 import { useSession } from "../../chrome/access";
@@ -108,13 +110,7 @@ export function ClusterSection() {
           <dt>Answered by</dt>
           <dd className="os-mono">{connection?.nodeId || "unknown"}</dd>
         </dl>
-        {deployment.latest === null ? (
-          <Caption>
-            {deployment.loading
-              ? "Loading from the cluster"
-              : "No deployment has been recorded for this cluster."}
-          </Caption>
-        ) : (
+        {deployment.latest === null ? (deployment.loading ? <RecordListSkeleton label="Loading from the cluster" /> : <Caption>{"No deployment has been recorded for this cluster."}</Caption>) : (
           <>
             <dl className="os-facts">
               <dt>Deployment</dt>
@@ -145,7 +141,7 @@ export function ClusterSection() {
         ) : infra.error ? (
           <Refusal role={access?.role ?? ""} message={infra.error} />
         ) : infra.loading ? (
-          <Caption>Loading from the cluster</Caption>
+          <ContentSkeleton kind="form" label="Loading from the cluster" />
         ) : (
           <>
             {infra.database === null ? (
@@ -209,7 +205,7 @@ export function ClusterSection() {
         {mail.error ? (
           <Refusal role={access?.role ?? ""} message={mail.error} />
         ) : mail.value === null ? (
-          <Caption>{mail.loading ? "Loading from the cluster" : "No mail status reported."}</Caption>
+          mail.loading ? <ContentSkeleton kind="detail" label="Loading mail status" /> : <Caption>No mail status reported.</Caption>
         ) : (
           <>
             <p className="os-stub-summary">
@@ -279,7 +275,7 @@ function Refresh({
   const stamp = serverStamp || (facts.fetchedAt === null ? "" : new Date(facts.fetchedAt).toISOString());
   return (
     <div className="os-refresh-row">
-      <Button onClick={facts.reload} busy={facts.loading} busyLabel="Reading">
+      <Button onClick={facts.reload} busy={facts.loading}>
         Refresh
       </Button>
       <Caption>
@@ -290,6 +286,6 @@ function Refresh({
   );
 }
 
-function dash(loading: boolean): string {
-  return loading ? "Loading from the cluster" : "--";
+function dash(loading: boolean) {
+  return loading ? <InlineSkeleton /> : "--";
 }

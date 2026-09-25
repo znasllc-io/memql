@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { runIsCancellable } from "./acts";
 import { archivePackage, deactivateDeployable, cancelDeployment } from "../packages/calls";
 import type { ConnectReturn } from "../sources/connectReturn";
@@ -756,7 +757,7 @@ export function ComposePage(props: ComposePageProps) {
         value={sourceAccountId} accounts={accounts} disabled={sourceLocked || busy} onChange={setAccountId}
         onCommit={() => setAccountChosenManually(true)} />
       {!sourceLocked && !fixedSource && !parked && !accountChosenManually && organizationChosen(accounts, sourceAccountId) ? <Caption>Selected by default. Review account.</Caption> : null}
-      {accountError ? <Caption>Accounts could not be refreshed. {String(accountError)}</Caption> : accounts.length === 0 ? <Caption>{accountState === "seeding" ? "Loading accounts…" : "No account is available for this deployable."}</Caption> : null}
+      {accountError ? <Caption>Accounts could not be refreshed. {String(accountError)}</Caption> : accounts.length === 0 ? accountState === "seeding" ? <RecordListSkeleton label="Loading accounts" /> : <Caption>No account is available for this deployable.</Caption> : null}
     </div>
   </Field>;
   const stopBody = (stage: RailStage) => {
@@ -777,7 +778,7 @@ export function ComposePage(props: ComposePageProps) {
           {restoredSourceId ? <div className="os-stop-body"><Caption>Source restored. Existing deployables are unchanged.</Caption>
             {props.onOpenDeployable ? (props.placedSources ?? []).filter(site => site.packageId === restoredSourceId && site.siteId).map(site => <Button key={site.siteId} onClick={() => props.onOpenDeployable?.(site.siteId!)}>Open {site.name}</Button>) : null}
           </div> : null}
-          {selectedSource && !placementsKnown ? <Caption>{props.siteFeed?.error ? "Existing deployables could not be read. Refresh Deployables before continuing." : "Checking existing deployables…"}</Caption> : null}
+          {selectedSource && !placementsKnown ? props.siteFeed?.error ? <Caption>Existing deployables could not be read. Refresh Deployables before continuing.</Caption> : <RecordListSkeleton label="Loading existing deployables" /> : null}
           {selectedSource && props.siteFeed?.error && props.packageFeed?.retry ? <RefreshButton label="Refresh deployables" onClick={props.packageFeed.retry} /> : null}
           {selectedSource && placementsKnown && selectedSource.declares.length > 0 && selectedSource.declares.every(app => placed.includes(app.name)) ? <Caption>All apps from this repository already have deployables. Open them from Deployables.</Caption> : null}
           </div>

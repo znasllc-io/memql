@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Plus, User, Users, X } from "lucide-react";
 
@@ -362,9 +363,7 @@ export function ShareDialog({
             <Subhead>People and groups</Subhead>
 
             {read.state === "loading" ? (
-              <p className="os-caption" role="status">
-                Reading who you can share with…
-              </p>
+              <RecordListSkeleton label="Loading people and groups" />
             ) : null}
 
             {read.state === "failed" ? (

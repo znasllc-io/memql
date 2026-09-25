@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useMemo } from "react";
 // `Check` is aliased: the kit exports a control by that name, and two
 // different `Check`s in one file is a rename waiting to go wrong.
@@ -76,7 +77,7 @@ export function ReviewSection({
       ) : null}
 
       {queue.state === "loading" && groups.length === 0 ? (
-        <Caption>Reading from the cluster...</Caption>
+        <RecordListSkeleton label="Loading from the cluster" />
       ) : null}
 
       {groups.map((group) => (
@@ -99,7 +100,7 @@ export function ReviewSection({
           {queue.exhausted ? " -- every page has been walked" : ""}.
         </span>
         {queue.exhausted ? null : (
-          <Button onClick={queue.loadMore} busy={queue.state === "loading"} busyLabel="Reading...">
+          <Button onClick={queue.loadMore} busy={queue.state === "loading"}>
             Load more
           </Button>
         )}

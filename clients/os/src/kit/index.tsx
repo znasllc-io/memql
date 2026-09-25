@@ -154,3 +154,5 @@ export function FileProvenanceDot({
 }
 
 export { RecordList, RecordRow, listCount } from "./RecordRow";
+
+export { ContentSkeleton, InlineSkeleton } from "./ContentSkeleton";

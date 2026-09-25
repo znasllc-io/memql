@@ -129,7 +129,7 @@ function AskSection() {
     <div className="os-settings">
       <h3 className="os-settings-title">Ask</h3>
       <fieldset className="os-field-group">
-        <legend>When you stop talking</legend>
+        <legend>Dictation</legend>
         <div className="os-choice-row" role="radiogroup" aria-label="When you stop talking">
           {(
             [
@@ -150,9 +150,15 @@ function AskSection() {
           ))}
         </div>
         <p className="os-caption">
-          The transcript appears in the box while you speak either way, so you
-          have read it before you let go.
+          Review the transcript before sending, or send it as soon as transcription finishes.
         </p>
+      </fieldset>
+      <fieldset className="os-field-group">
+        <legend>MemQL’s voice</legend>
+        <div className="os-choice-row" role="radiogroup" aria-label="MemQL’s voice">
+          {(["female", "male"] as const).map(voice => <button type="button" role="radio" key={voice} className="os-choice" aria-checked={(settings.voice ?? "female") === voice} onClick={() => updateSettings({ voice })}>{voice === "female" ? "Female" : "Male"}</button>)}
+        </div>
+        <p className="os-caption">Applies to your next voice conversation. The configured speech model provides the voice.</p>
       </fieldset>
       <fieldset className="os-field-group">
         <legend>Keyboard</legend>

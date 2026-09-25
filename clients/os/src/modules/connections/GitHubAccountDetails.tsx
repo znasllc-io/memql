@@ -52,11 +52,11 @@ export function GitHubAccountDetails({ account, sourceNames, onBack, busy, refus
   const backAct: Act = { label: "Back", text: true, busy: pending, onAct: back };
   const cancelAct: Act = { label: "Cancel", text: true, busy: pending, onAct: () => setArmed(false) };
   let acts: Act[] = [backAct];
-  let state = loading ? "Loading organizations" : "Connected";
+  let state = loading ? "" : "Connected";
   if (page.kind === "account") {
     state = busy ? "Disconnecting" : armed ? "Confirm disconnect" : state;
     acts = [armed ? cancelAct : backAct, { label: "Disconnect", busy, tone: armed ? "danger" : "quiet", onAct: armed ? onDisconnect : () => setArmed(true) }];
-  } else state = loading ? "Loading organizations" : "Choose an organization";
+  } else state = loading ? "" : "Choose an organization";
   const available = access.installations.filter(installation => !linked.some(row => row.installationId === installation.id));
   const title = page.kind === "account" ? name : page.kind === "add" ? "Add organization" : page.installation.login;
 

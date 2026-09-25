@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { RecordList, listCount } from "../../kit/RecordRow";
 import { AddButton } from "../../kit/AddButton";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -550,7 +551,7 @@ function RosterPanel({
     <Panel label="Who is on this list">
       <div className="os-campaign-detail-head">
         <Subhead meta={roster.state === "ready" && !roster.error ? `${recipients.length} read` : undefined}>Who is on this list</Subhead>
-        <Button busy={roster.state === "loading"} busyLabel="Reading" onClick={roster.reload}>
+        <Button busy={roster.state === "loading"} onClick={roster.reload}>
           Read again
         </Button>
       </div>
@@ -562,13 +563,7 @@ function RosterPanel({
           next="Nothing is shown below -- that is silence, not an empty audience."
           detail={roster.error}
         />
-      ) : recipients.length === 0 ? (
-        <Caption>
-          {roster.state === "loading"
-            ? "Reading the list"
-            : "Nobody on this list yet. Import a CSV or add an address above."}
-        </Caption>
-      ) : (
+      ) : recipients.length === 0 ? (roster.state === "loading" ? <RecordListSkeleton label="Reading the list" /> : <Caption>{"Nobody on this list yet. Import a CSV or add an address above."}</Caption>) : (
         <RecordList as="ul" label="Addresses in this audience">
           {recipients.slice(0, ROSTER_ROWS).map((recipient) => (
             <RecordRow

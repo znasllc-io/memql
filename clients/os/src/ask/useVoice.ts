@@ -1,3 +1,4 @@
+import type { AskActivity } from "./conversationSession";
 // The React binding for VoiceSession. Thin on purpose: every decision lives
 // in the pure session beside it, so this file holds only the things React
 // owns -- an instance that survives re-render, callbacks that do not restart
@@ -11,6 +12,7 @@ export interface VoiceHandlers {
   /** Replaces the field. The wire's deltas are cumulative, never increments. */
   onTranscript(text: string): void;
   onUtterance(text: string): void;
+  onActivity?(activity: AskActivity): void;
 }
 
 /**
@@ -52,6 +54,7 @@ export function useVoice(ports: VoicePorts | null, handlers: VoiceHandlers): Voi
   if (ports && !sessionRef.current) {
     sessionRef.current = new VoiceSession(ports, {
       onState: setState,
+      onActivity: activity => handlersRef.current.onActivity?.(activity),
       onTranscript: (text) => handlersRef.current.onTranscript(text),
       onUtterance: (text) => handlersRef.current.onUtterance(text),
     });

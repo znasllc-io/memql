@@ -3407,6 +3407,20 @@
       }
     },
     {
+      "concept": "v1:os:askConversation",
+      "file": "os/ask.memql",
+      "fields": [
+        "ownerUserId",
+        "title",
+        "transcript"
+      ],
+      "required": [
+        "ownerUserId",
+        "title",
+        "transcript"
+      ]
+    },
+    {
       "concept": "v1:os:attentionReceipt",
       "file": "os/concepts.memql",
       "fields": [

@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { useCallback, useMemo, useState } from "react";
 import { ModulesClient, type ModulesInventory } from "@znasllc-io/memql-sdk-core/client";
 
@@ -118,7 +119,7 @@ export function ModulesSection() {
         <Button
           tone="quiet"
           busy={inventory.state === "reading"}
-          busyLabel="Reading"
+
           onClick={() => inventory.reread()}
         >
           Read again
@@ -137,7 +138,7 @@ export function ModulesSection() {
       ) : null}
 
       {inventory.state === "reading" && inventory.value === null ? (
-        <Caption>Reading the inventory from the cluster.</Caption>
+        <RecordListSkeleton label="Loading the inventory from the cluster" />
       ) : null}
 
       {answeredBy ? <Caption>{answeredBy}</Caption> : null}

@@ -246,7 +246,7 @@ describe("Ask (spec K bullet 5)", () => {
     renderShell();
     fireEvent.click(screen.getByRole("button", { name: "Ask" }));
     const sheet = screen.getByRole("dialog", { name: "Ask" });
-    const mic = within(sheet).getByRole("button", { name: "Ask by voice" }) as HTMLButtonElement;
+    const mic = within(sheet).getByRole("button", { name: "Dictate a message" }) as HTMLButtonElement;
     expect(mic.disabled).toBe(true);
     expect(within(sheet).getByText(/Voice is not wired up in this window/)).toBeTruthy();
   });

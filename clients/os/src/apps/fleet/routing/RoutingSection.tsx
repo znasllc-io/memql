@@ -1,3 +1,4 @@
+import { ContentSkeleton } from "../../../kit/ContentSkeleton";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { feedIsBehind } from "../../../live/useLiveCollection";
@@ -90,7 +91,7 @@ export function RoutingSection() {
       <InfoDetail title="Machine routing"><p>Required labels filter candidates. Preferred labels and strategy order them. A refusal may try the next matching machine only before a call starts; a started call is never replayed.</p><p>Source policies choose the inference source. Model order ranks compatible models after a policy sends the call to your fleet.</p></InfoDetail>
       {feedIsBehind(state.liveState) ? <RefreshButton label="Reconnect machine routing" onClick={state.reseed} /> : null}
     </Head>
-    {state.loading ? <p className="os-caption">Reading your routing policy.</p> : null}
+    {state.loading && policy === null && !touched ? <ContentSkeleton kind="form" label="Loading your routing policy" /> : <>
     {state.error ? <Notice tone="error" sentence="Your routing policy could not be read." next="The controls show defaults until it loads." detail={state.error} /> : null}
     {policy === null && !state.loading && !state.error ? <p className="os-caption">Using the default: choose the first eligible machine and try the next match if it refuses. Save to apply your preferences.</p> : null}
     {diverged ? <Notice tone="warn" sentence="This policy changed somewhere else. Your draft is retained." next="Saving overwrites the newer row; discard your changes to load it first." /> : null}
@@ -122,6 +123,7 @@ export function RoutingSection() {
       <Button tone="primary" busy={state.saving} busyLabel="Saving…" onClick={() => { void state.save(draft).then(ok => { if (ok) setTouched(false); }); }}>{policy === null ? "Create policy" : "Save policy"}</Button>
     </div></div>
     <p role="status" className="os-status-line">{state.announcement}</p>
+    </>}
   </ActivityTarget>;
 }
 

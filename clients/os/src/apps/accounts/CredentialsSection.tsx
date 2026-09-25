@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useMemo, useState } from "react";
 import { Landmark } from "lucide-react";
 
@@ -152,7 +153,7 @@ function BillingAccountRows({
   }
 
   if (feed.state === "idle" || feed.state === "loading") {
-    return <p className="os-caption">Reading</p>;
+    return <RecordListSkeleton label="Loading credentials" />;
   }
 
   if (feed.accounts.length === 0) {

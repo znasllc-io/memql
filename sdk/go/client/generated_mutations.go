@@ -2093,6 +2093,28 @@ func CreateArtifactBuild(args CreateArtifactArgs) string {
 	return b.String()
 }
 
+// CreateAskConversation -- Start an empty conversation. Clients cannot supply an owner or transcript.
+//
+// Bound concept: v1:os:askConversation (machine-readable: BoundConcepts["createAskConversation"] in generated_concepts.go).
+type CreateAskConversationArgs struct {
+	Title string
+}
+
+// CreateAskConversation calls the engine mutation createAskConversation.
+func (qc *QueryClient) CreateAskConversation(ctx context.Context, args CreateAskConversationArgs) (*Result, error) {
+	call := CreateAskConversationBuild(args)
+	return qc.executeNamed(ctx, "createAskConversation", call)
+}
+
+func CreateAskConversationBuild(args CreateAskConversationArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createAskConversation(")
+	b.WriteString("title: ")
+	b.WriteString(quoteMemQL(args.Title))
+	b.WriteString(")")
+	return b.String()
+}
+
 // CreateAudience -- Create an audience owned by the caller. Owned: ownerUserId is stamped from actor.userId, so a caller can only ever create their own audiences.
 //
 // Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["createAudience"] in generated_concepts.go).

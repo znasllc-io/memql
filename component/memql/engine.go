@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/core/audio"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -57,6 +58,7 @@ type MemQLEngine struct {
 	seeds                   *SeedRegistry
 	seedMaterializer        *SeedMaterializer
 	providers               *ProviderRegistry
+	voiceTransport          audio.RoomTransport
 	policies                *PolicyRegistry
 	// rules is the routing-rule corpus (epic memql#5127). Unpopulated until
 	// the rule loader lands: every reader is nil-safe, and a nil registry

@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useState } from "react";
 import { KeyRound } from "lucide-react";
 import type { AccountTokenMintResult } from "@znasllc-io/memql-sdk-core/identity";
@@ -257,7 +258,7 @@ function CredentialList({
   }
 
   if (feed.state === "idle" || feed.state === "loading") {
-    return <p className="os-caption">Reading</p>;
+    return <RecordListSkeleton label="Loading credentials" />;
   }
 
   if (feed.tokens.length === 0) {

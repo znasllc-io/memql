@@ -1,3 +1,4 @@
+import { AskNavigator } from "../ask/AskNavigator";
 import { SharedExternalConnectionsProvider } from "../modules/connections/useExternalConnections";
 import { SharedCredentialsProvider } from "../modules/connections/useSourceCredentials";
 import { SharedSourceConnectionsProvider } from "../modules/connections/connections";
@@ -169,7 +170,8 @@ export function Shell({
       onContextMenu={suppressBrowserMenu}
     >
                     <PhoneShell onSignOut={onSignOut} />
-                    <AskSheet />
+                    <AskNavigator />
+      <AskSheet />
                   </div>
                 ) : (
                   <DesktopChrome
@@ -443,6 +445,7 @@ function DesktopChrome({
         }}
       />
       <ThemeStore open={themesOpen} onClose={() => setThemesOpen(false)} />
+      <AskNavigator />
       <AskSheet />
     </div>
   );

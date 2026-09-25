@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/znasllc-io/memql/core/common"
@@ -25,38 +26,39 @@ func (o *observedStreamChat) CallChatStream(
 	messages []common.ChatMessage,
 ) (<-chan common.StreamChunk, error) {
 	start := time.Now()
+	ctx = startObservation(ctx, o.req, o.resolved, start)
 	inputTokens := EstimateMessageTokens(messages)
 
 	innerCh, err := o.inner.CallChatStream(ctx, messages)
 	if err != nil {
-		o.router.recordCall(buildRecord(o.req, o.resolved, o.inner, inputTokens, 0, 0, start, time.Time{}, time.Now(), true, err, ctx.Err()))
+		o.router.recordObserved(ctx, buildRecord(o.req, o.resolved, o.inner, inputTokens, 0, 0, start, time.Time{}, time.Now(), true, err, ctx.Err()))
 		return nil, err
 	}
 
 	observedCh := make(chan common.StreamChunk)
 	go func() {
 		defer close(observedCh)
-
-		var (
-			firstTokenAt time.Time
-			outputChars  int
-			chunkErr     error
-		)
-
-		defer func() {
+		var firstTokenAt time.Time
+		var outputChars int
+		var chunkErr error
+		recorded, terminal := false, false
+		record := func() {
+			if recorded {
+				return
+			}
+			recorded = true
+			if !terminal && chunkErr == nil && ctx.Err() == nil {
+				chunkErr = errors.New("provider stream closed before completion")
+			}
 			end := time.Now()
 			outputTokens := EstimateTokensFromChars(outputChars)
 			rec := buildRecord(o.req, o.resolved, o.inner, inputTokens, outputTokens, 0, start, firstTokenAt, end, true, chunkErr, ctx.Err())
-			// Tokens per second is only meaningful for streaming calls
-			// with a non-trivial duration. Guard both so voice-path
-			// one-second replies don't produce gigatokens/sec noise.
-			durSec := end.Sub(start).Seconds()
-			if outputTokens > 0 && durSec > 0.1 {
-				rec.TokensPerSec = float64(outputTokens) / durSec
+			if duration := end.Sub(start).Seconds(); duration > 0.1 {
+				rec.TokensPerSec = float64(outputTokens) / duration
 			}
-			o.router.recordCall(rec)
-		}()
-
+			o.router.recordObserved(ctx, rec)
+		}
+		defer record()
 		for {
 			var chunk common.StreamChunk
 			var ok bool
@@ -75,14 +77,19 @@ func (o *observedStreamChat) CallChatStream(
 				firstTokenAt = time.Now()
 			}
 			outputChars += len(chunk.Content)
+			if chunk.Done || chunk.Error != nil {
+				terminal = true
+				record()
+			}
 			select {
 			case observedCh <- chunk:
 			case <-ctx.Done():
-				// The deferred observer records cancellation before closing.
+				return
+			}
+			if chunk.Done {
 				return
 			}
 		}
-
 	}()
 	return observedCh, nil
 }

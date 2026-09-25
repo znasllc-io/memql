@@ -66,7 +66,7 @@ func (r *Router) RecordCacheServed(
 	if strings.TrimSpace(req.CallerKind) == "" {
 		req.CallerKind = auth.CallerKindFromContext(ctx)
 	}
-	r.recordCall(cacheServedRecord(r.stampRequestId(req), resolution, cacheKind, durationMs))
+	r.recordObserved(ctx, cacheServedRecord(r.stampRequestId(req), resolution, cacheKind, durationMs))
 }
 
 // cacheServedRecord builds the CallRecord for a cache-served call.

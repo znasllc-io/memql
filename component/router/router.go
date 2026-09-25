@@ -247,15 +247,12 @@ const (
 	// non-chat surfaces the seam carries (design D2). Each maps to exactly one
 	// provider interface.
 	//
-	// THERE IS DELIBERATELY NO SPEECH OR TRANSCRIPTION MODALITY HERE, and the
-	// absence is a finding rather than an oversight. TTSAIProvider has no
-	// caller and no gRPC handler behind it; transcription runs through
-	// integrations/stt.StreamingProvider, which never touches the provider
-	// registry at all. Entry points for those two would advertise doors this
-	// router cannot open.
+
 	modalityStructured
 	modalityVision
 	modalityEmbedding
+	modalitySpeech
+	modalityTranscribe
 )
 
 // modalityName is what the report calls a modality an entry does not serve.
@@ -273,6 +270,10 @@ func modalityName(mod providerModality) string {
 		return "vision turns"
 	case modalityEmbedding:
 		return "embeddings"
+	case modalitySpeech:
+		return "speech"
+	case modalityTranscribe:
+		return "transcription"
 	default:
 		return "chat turns"
 	}
@@ -299,6 +300,10 @@ func servesModality(client any, mod providerModality) (bool, string) {
 		_, ok = client.(common.VisionAIProvider)
 	case modalityEmbedding:
 		_, ok = client.(memql.EmbeddingAIProvider)
+	case modalitySpeech:
+		_, ok = client.(memql.SpeechAIProvider)
+	case modalityTranscribe:
+		_, ok = client.(memql.TranscriptionAIProvider)
 	default:
 		_, ok = client.(common.ChatAIProvider)
 	}

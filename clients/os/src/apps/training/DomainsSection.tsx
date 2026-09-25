@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useCallback, useEffect, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { Boxes, Link2Off } from "lucide-react";
@@ -110,7 +111,7 @@ export function DomainsSection({
       ) : null}
 
       {feed.state === "loading" && feed.rollups.length === 0 ? (
-        <Caption>Reading from the cluster...</Caption>
+        <RecordListSkeleton label="Loading from the cluster" />
       ) : null}
 
       {feed.state === "ready" && feed.rollups.length > 0 && shown.length === 0 ? (
@@ -271,7 +272,7 @@ function DomainDetail({ domainId }: { domainId: string }) {
           {exhausted ? " -- that is all of them" : ""}.
         </span>
         {exhausted ? null : (
-          <Button onClick={() => void load(cursor, true)} busy={busy} busyLabel="Reading...">
+          <Button onClick={() => void load(cursor, true)} busy={busy}>
             Load more
           </Button>
         )}

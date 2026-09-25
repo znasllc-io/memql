@@ -1350,6 +1350,28 @@ QueryClient.prototype.createArtifact = function (this: QueryClient, args: Create
   return this.executeNamed("createArtifact", buildCreateArtifact(args), opts);
 };
 
+/** Start an empty conversation. Clients cannot supply an owner or transcript. */
+// Bound concept: v1:os:askConversation (machine-readable: BoundConcepts["createAskConversation"] in generated_concepts.ts).
+export interface CreateAskConversationArgs {
+  title: string;
+}
+
+export function buildCreateAskConversation(args: CreateAskConversationArgs): string {
+  const parts: string[] = [];
+  parts.push("title: " + renderMemQLValue(args.title));
+  return "mutation createAskConversation(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    createAskConversation(args: CreateAskConversationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.createAskConversation = function (this: QueryClient, args: CreateAskConversationArgs = {} as CreateAskConversationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("createAskConversation", buildCreateAskConversation(args), opts);
+};
+
 /** Create an audience owned by the caller. Owned: ownerUserId is stamped from actor.userId, so a caller can only ever create their own audiences. */
 // Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["createAudience"] in generated_concepts.ts).
 export interface CreateAudienceArgs {

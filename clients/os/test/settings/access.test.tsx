@@ -168,7 +168,7 @@ function rowFor(resource: string): HTMLElement {
 
 /** Turn to the by-app view, pick a resource, and answer its holder list. */
 async function pickResource(label: string): Promise<HTMLElement> {
-  fireEvent.click(screen.getByRole("radio", { name: "By app" }));
+  fireEvent.click(screen.getByRole("button", { name: "By app" }));
   const trigger = await screen.findByLabelText("App or part");
   await waitFor(() => chooseOption(trigger, label));
   return screen.findByRole("list", { name: "Granted by name" });
@@ -366,7 +366,7 @@ describe("by app: who holds it", () => {
       },
     });
     mount(state);
-    fireEvent.click(screen.getByRole("radio", { name: "By app" }));
+    fireEvent.click(screen.getByRole("button", { name: "By app" }));
     const trigger = await screen.findByLabelText("App or part");
     await waitFor(() => chooseOption(trigger, "Cluster: Data origins"));
     await waitFor(() => expect(screen.getByText("By role: Owner.")).toBeTruthy());

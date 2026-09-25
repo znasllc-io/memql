@@ -113,7 +113,7 @@ export function RepositoryPicker({
             infinite scroll here: a person picking one repository out of many
             should not have to make the browser fetch by accident. */}
         {page.nextPage > 0 ? (
-          <Button onClick={onReadMore} busy={busy} busyLabel="Reading...">
+          <Button onClick={onReadMore} busy={busy}>
             Read more
           </Button>
         ) : null}

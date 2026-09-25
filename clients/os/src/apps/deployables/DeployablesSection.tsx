@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useSourceConnections } from "../../modules/connections/connections";
 import { sourceRecord } from "./sources/sourceRecord";
 import { AccountChip } from "../accounts/AccountPicker";
@@ -582,7 +583,7 @@ export function DeployablesSection({
           </Notice>
         ) : null}
 
-        {root === "sources" && listedCount === 0 && !sourceMetadataReady ? <Caption>{connections.error || credentialFeed?.error ? "Source provenance is unavailable. Refresh sources to finish this reading." : connections.state === "disconnected" || credentialFeed?.state === "disconnected" ? "Sources are unavailable while disconnected. Reconnect to the cluster and refresh." : "Reading sources and GitHub access…"}</Caption> : listedCount === 0 && (feedError || list?.snapshot.state !== "live") ? (feedError ? null : <div data-os-livelist data-state={list?.snapshot.state ?? "disconnected"}>
+        {root === "sources" && listedCount === 0 && !sourceMetadataReady ? connections.error || credentialFeed?.error ? <Caption>Source provenance is unavailable. Refresh sources to finish this reading.</Caption> : connections.state === "disconnected" || credentialFeed?.state === "disconnected" ? <Caption>Sources are unavailable while disconnected. Reconnect to the cluster and refresh.</Caption> : <RecordListSkeleton label="Loading sources and GitHub access" /> : listedCount === 0 && (feedError || list?.snapshot.state !== "live") ? (feedError ? null : <div data-os-livelist data-state={list?.snapshot.state ?? "disconnected"}>
           <EmptyState icon={root === "sources" ? GitBranch : Globe} title={list?.snapshot.state === "seeding" ? "Loading from the cluster" : "Not connected to the cluster"}>
             {list?.snapshot.state === "seeding" ? "Your apps and repositories will appear here." : "Your apps will appear when the connection returns."}
           </EmptyState>

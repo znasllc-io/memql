@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../kit/RecordListSkeleton";
 import { Button, Caption, Notice } from "../kit";
 import { formatFreshness } from "../kit/format";
 import { FollowControl } from "./facets";
@@ -93,7 +94,7 @@ export function TailView({
 
       {rows.length === 0 ? (
         tail.state === "error" ? null : tail.state === "seeding" ? (
-          <Caption>Reading from the cluster.</Caption>
+          <RecordListSkeleton label="Loading logs" rows={4} />
         ) : (
           /* Empty and filtered-to-empty are DIFFERENT answers: one is about
              the store, the other about the question just asked of it. */

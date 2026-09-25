@@ -1,0 +1,124 @@
+use identity.concepts.{ user }
+
+/// A private conversation with MemQL. The transcript is written by the agent
+/// service; ownership is always taken from the authenticated caller.
+// @no-displayCard: contains a private transcript object; Ask renders named message rows and a separate conversation list, not a generic concept card.
+@rowAuthz(owner="ownerUserId")
+concept askConversation {
+  ownerUserId string! @serverSet
+  title string!
+  transcript object!
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+}
+
+@row
+shape askConversation askConversationSummary {
+  row.id
+  title
+  row.createdAt
+}
+
+@row
+shape askConversation askConversationDetail {
+  row.id
+  title
+  transcript
+  row.createdAt
+}
+
+/// Recent conversations belonging to the signed-in person.
+@actor
+query askConversation myAskConversations {
+  filter row => row.ownerUserId == actor.userId
+  sort "row.createdAt", "desc"
+  paginate 50
+  shape askConversationSummary
+}
+
+/// Timing evidence from this person's recent conversations, across replicas.
+/// The same owner-scoped history is available to the person and their assistant.
+@actor
+query askConversation askRecentTimingHistory {
+  filter row => row.ownerUserId == actor.userId
+  sort "row.createdAt", "desc"
+  paginate 20
+  shape askConversationDetail
+}
+
+/// Read one private transcript. A guessed id never widens the caller's access.
+@actor
+@unbounded("one conversation selected by its id and authenticated owner")
+query askConversation askConversationById {
+  args { conversationId string! }
+  filter row => row.id == args.conversationId && row.ownerUserId == actor.userId
+  shape askConversationDetail
+}
+
+/// Start an empty conversation. Clients cannot supply an owner or transcript.
+@actor
+mutation askConversation createAskConversation {
+  args { title string! @maxLength(120) }
+  insert {
+    accept { title }
+    stamp { ownerUserId: actor.userId, transcript: { turns: [] } }
+  }
+}
+
+/// Agent-only transcript append, after ownership and the cluster-wide turn
+/// lock have been checked. The original user context supplies the owner stamp.
+/// Scoping to actor.userId cannot prevent a client forging assistant replies
+/// or completed-action evidence inside its own transcript; only the agent writes it.
+@actor
+@serverOnly
+mutation askConversation saveAskConversation {
+  args {
+    id string!
+    title string! @maxLength(120)
+    transcript object!
+  }
+  insert {
+    accept { id, title, transcript }
+    stamp { ownerUserId: actor.userId }
+  }
+}
+
+/// Discover named, permission-checked MemQL capabilities for the current task.
+@executor("askCapabilities")
+@args(profile="object")
+builtin askCapabilities {
+  search string!
+}
+
+/// Run one named capability under the caller's original authority.
+@executor("askExecute")
+@args(profile="object")
+builtin askExecute {
+  name string!
+  arguments object!
+}
+
+/// Find the exact capability and argument contract before using it.
+@handler(type="query", query="query askCapabilities(search: args.search)")
+@allowedRoles("assistant")
+tool askDiscover {
+  search string! @description("Words describing the app, data, or operation. Use a discovered exact capability name to retrieve its argument contract.")
+}
+
+/// Execute a capability discovered with askDiscover. Authorization is checked
+/// again at execution, and row authorization applies to every result.
+@handler(type="query", query="query askExecute(name: args.name, arguments: args.arguments)")
+@allowedRoles("assistant")
+tool askExecuteCapability {
+  name string! @description("Exact name returned by askDiscover.")
+  arguments object! @description("Arguments matching the discovered contract. Never invent identifiers.")
+}
+
+/// MemQL's shared text and voice assistant. Routing follows the installation's
+/// policies and eligible Fleet machines, with no vendor pinned in the prompt.
+@level("strong")
+@templateFile("prompts/askMemql.tmpl")
+prompt askMemql {
+  context string!
+  history []object
+  historyInMessages bool
+}
