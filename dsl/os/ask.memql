@@ -54,13 +54,23 @@ query askConversation askConversationById {
   shape askConversationDetail
 }
 
-/// Start an empty conversation. Clients cannot supply an owner or transcript.
+/// Start an empty conversation for a unique client request. Retrying the same
+/// request preserves its transcript; a new request always gets its own record.
+/// Clients cannot supply an owner, record id or transcript.
 @actor
+@createOnly("title", "transcript")
 mutation askConversation createAskConversation {
-  args { title string! @maxLength(120) }
+  args {
+    requestId string! @maxLength(120)
+    title string! @maxLength(120)
+  }
   insert {
     accept { title }
-    stamp { ownerUserId: actor.userId, transcript: { turns: [] } }
+    stamp {
+      id: "ask-" + hash(actor.userId + ":" + args.requestId)
+      ownerUserId: actor.userId
+      transcript: { turns: [] }
+    }
   }
 }
 
