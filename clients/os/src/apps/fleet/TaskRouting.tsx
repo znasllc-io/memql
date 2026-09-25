@@ -1,8 +1,9 @@
+import { LocalTabs } from "../../kit/LocalTabs";
 import { AddButton } from "../../kit/AddButton";
 import { PolicyEditor, type PolicyDraft } from "./PolicyEditor";
 import { PolicyChain } from "./PolicyChain";
 import { useState } from "react";
-import { FleetTabs, RefreshButton } from "./FleetControls";
+import { RefreshButton } from "./FleetControls";
 import { Button, Caption, EmptyState, Head, Notice, Select, Subhead, RecordList, RecordRow } from "../../kit";
 import { InfoDetail } from "../../kit/InfoDetail";
 import { ActivityTarget } from "../../kit/SemanticActivity";
@@ -43,7 +44,7 @@ function TaskRoutingEditor() {
   return <div className="fleet-task-routing">
     <div className="fleet-section-header">
     <Head title="Policies" meta={tab === "policies" ? !catalog.loading && !catalog.error ? catalog.policies.length : undefined : !rules.loading && !rules.error && rules.supported ? ordered.length : undefined}>{tab === "policies" && !policyDraft ? <AddButton label="Create policy" disabled={catalog.loading || !!catalog.error} onClick={() => setPolicyDraft({ name: "", description: "", primary: "fleet:strongest", fallbacks: [], revision: catalog.policies[0]?.revision ?? 0 })} /> : null}<RefreshButton label="Refresh policies" onClick={() => { setEpoch(e => e + 1); rules.reload(); }} busy={catalog.loading || rules.loading} /></Head>
-    <FleetTabs label="Routing composition" value={tab} onChange={setTab} options={[["policies", "Policies"], ["rules", "Task rules"]]} />
+    <LocalTabs label="Routing composition" value={tab} onChange={setTab} options={[["policies", "Policies"], ["rules", "Task rules"]]} />
     </div>
     <p className="fleet-task-intro">Match a kind of call to a policy’s preferred source and fallbacks.</p>
     <div className="fleet-scope-note"><strong>Cluster-wide routing</strong><span>Changes affect every matching call.</span><InfoDetail title="Routing scope and order"><p>Shipped rules with conditions run first, then custom rules by descending precedence. The conditionless shipped default runs last. A custom rule cannot override a matching shipped rule.</p><p>A policy tries its sources in order. The router still checks compatibility and availability. Your personal model ordering and app delegation policy remain separate Fleet controls.</p></InfoDetail></div>

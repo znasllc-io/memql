@@ -5,7 +5,7 @@ import { ProblemNotice } from "../packages/ReportView";
 import type { PackageRow } from "../packages/rows";
 import { bare } from "../people";
 import { SwitchCredential } from "../page/stops/Source";
-import { useSourceConnections } from "./connections";
+import { useSourceConnections } from "../../../modules/connections/connections";
 import { returnPathFor } from "./connectReturn";
 import { isGithubAppGrant, type CredentialRow } from "./rows";
 import { sourceRecord } from "./sourceRecord";

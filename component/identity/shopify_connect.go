@@ -46,6 +46,10 @@ type ShopifyConnect interface {
 
 // ShopifyConnectGrant is what an authorized callback hands the writes.
 type ShopifyConnectGrant struct {
+	// Managed connections exchange and seal the expiring token pair under one
+	// distributed lock. None of these values appears in String or a result.
+	AuthorizationCode string
+	OfflineGrant      string
 	// StoreID is the v1:shopify:store id the state's shop derives.
 	StoreID string
 	// AccessToken is the offline Admin API token Shopify issued. Sealed by

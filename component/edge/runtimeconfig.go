@@ -110,11 +110,13 @@ type RuntimeConfig struct {
 	// Settings is the site row's runtime settings (epic memql#4906, decision
 	// P7): plain string values under identifier keys, written whole by
 	// updateSiteSettings and read by the bundle as `config.settings.<key>`.
+	// A connected storefront inherits its store's API version when the site
+	// has no explicit storefrontApiVersion setting.
 	// This is what lets ONE bundle serve TWO deployables against different
 	// endpoints with no rebuild -- the document differs per site, the bytes
 	// do not.
 	//
-	// ALWAYS PRESENT, as an empty object when the row carries none, unlike
+	// ALWAYS PRESENT, as an empty object when no settings apply, unlike
 	// Storefront above. Storefront is kind-specific, so its absence is
 	// information; settings apply to every kind, and a bundle should be able
 	// to read `config.settings.apiBase` without first asking whether the
@@ -266,7 +268,8 @@ func runtimeConfigForSite(ctx context.Context, site *Site, env func(string) stri
 // settingsForSite copies the row's settings onto the document. A copy rather
 // than the row's own map: the resolver caches the Site, and a document that
 // aliased the cached map would let one encoder's view drift from another's
-// if anything ever mutated it. Never nil, so the JSON always carries `{}`.
+// if anything ever mutated it. Connected storefronts inherit the store's API
+// version unless the site pins one explicitly. Never nil.
 func settingsForSite(site *Site) map[string]string {
 	out := map[string]string{}
 	if site == nil {
@@ -274,6 +277,11 @@ func settingsForSite(site *Site) map[string]string {
 	}
 	for k, v := range site.Settings {
 		out[k] = v
+	}
+	if site.Kind == storefrontKind && site.Store != nil && strings.TrimSpace(out["storefrontApiVersion"]) == "" {
+		if version := strings.TrimSpace(site.Store.APIVersion); version != "" {
+			out["storefrontApiVersion"] = version
+		}
 	}
 	return out
 }

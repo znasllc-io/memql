@@ -48,6 +48,7 @@ export interface ConnectReturn {
   reason: string;
   /** The Deployables section to open. */
   section: string;
+  appId?: "settings" | "deployables";
   credentialId?: string;
   flowId?: string;
 }
@@ -59,9 +60,10 @@ export interface ConnectReturn {
  * so nothing this browser says can redirect somebody off-cluster -- which is
  * the whole reason the argument is shaped this way.
  */
-export function returnPathFor(section: string): string {
+export function returnPathFor(section: string, appId: "settings" | "deployables" = "deployables"): string {
   const params = new URLSearchParams();
   params.set(CONNECT_SECTION_PARAM, section);
+  if (appId === "settings") params.set("connectApp", appId);
   return `/?${params.toString()}`;
 }
 
@@ -79,7 +81,8 @@ export function readConnectReturn(search: string): ConnectReturn | null {
   const section = (params.get(CONNECT_SECTION_PARAM) ?? "").trim();
   return {
     reason: (params.get(CONNECT_RESULT_PARAM) ?? "").trim(),
-    section: ["deployables", "sources", "settings"].includes(section) ? section : DEFAULT_CONNECT_SECTION,
+    ...(params.get("connectApp") === "settings" ? { appId: "settings" as const } : {}),
+    section: ["deployables", "sources", "settings", "connections"].includes(section) ? section : DEFAULT_CONNECT_SECTION,
     ...(params.get("githubCredentialId") ? { credentialId: params.get("githubCredentialId")! } : {}),
     ...(params.get("githubFlowId") ? { flowId: params.get("githubFlowId")! } : {}),
   };
@@ -96,6 +99,7 @@ export function scrubbedSearch(search: string): string {
   const params = new URLSearchParams(search);
   params.delete(CONNECT_RESULT_PARAM);
   params.delete(CONNECT_SECTION_PARAM);
+  params.delete("connectApp");
   params.delete("githubCredentialId");
   params.delete("githubFlowId");
   const rest = params.toString();
@@ -149,20 +153,22 @@ export function clearParkedConnectReturn(): void {
 // Correlation is UI state only. Identity validates the OAuth state, browser
 // session, target GitHub identity and PKCE; this record never grants authority.
 const ATTEMPT_KEY = "memql:github-connect-attempt";
-export function rememberConnectAttempt(flowId: string, viewer: string, credentialId = "", section = ""): void {
-  try { sessionStorage.setItem(ATTEMPT_KEY, JSON.stringify({ flowId, viewer, credentialId, section })); } catch { /* No auto-selection without a record. */ }
+export function rememberConnectAttempt(flowId: string, viewer: string, credentialId = "", section = "", appId: "settings" | "deployables" = "deployables"): void {
+  try { sessionStorage.setItem(ATTEMPT_KEY, JSON.stringify({ flowId, viewer, credentialId, section, appId })); } catch { /* No auto-selection without a record. */ }
 }
 export function correlateConnectReturn(result: ConnectReturn, viewer: string): ConnectReturn {
-  let attempt: { flowId?: string; viewer?: string; credentialId?: string; section?: string } | null = null;
+  let attempt: { flowId?: string; viewer?: string; credentialId?: string; section?: string; appId?: "settings" | "deployables" } | null = null;
   try { attempt = JSON.parse(sessionStorage.getItem(ATTEMPT_KEY) ?? "null"); sessionStorage.removeItem(ATTEMPT_KEY); } catch { /* Refuse an unreadable correlation. */ }
   // Even a refused callback that cannot trust its state belongs where this
   // browser started. This restores navigation only, never credential authority.
-  const section = attempt?.viewer === viewer && ["deployables", "sources", "settings"].includes(attempt.section ?? "")
+  const section = attempt?.viewer === viewer && ["deployables", "sources", "settings", "connections"].includes(attempt.section ?? "")
     ? attempt.section! : result.section;
-  if (!result.flowId) return { reason: result.reason, section };
+  const destination = attempt?.viewer === viewer ? attempt.appId : result.appId;
+  const app = destination === "settings" ? { appId: "settings" as const } : {};
+  if (!result.flowId) return { reason: result.reason, section, ...app };
   if (!attempt || attempt.flowId !== result.flowId || attempt.viewer !== viewer ||
       (connectSucceeded(result) && attempt.credentialId && attempt.credentialId !== result.credentialId)) {
-    return { reason: "connect_state_invalid", section };
+    return { reason: "connect_state_invalid", section, ...app };
   }
-  return { ...result, section };
+  return { ...result, section, ...app };
 }

@@ -7454,6 +7454,28 @@ func DisablePackageDeployablesBuild(args DisablePackageDeployablesArgs) string {
 	return b.String()
 }
 
+// DisconnectExternalConnection -- Removing a personal selection changes no provider grant or deployed site.
+//
+// Bound concept: v1:platform:externalConnection (machine-readable: BoundConcepts["disconnectExternalConnection"] in generated_concepts.go).
+type DisconnectExternalConnectionArgs struct {
+	ConnectionId string
+}
+
+// DisconnectExternalConnection calls the engine mutation disconnectExternalConnection.
+func (qc *QueryClient) DisconnectExternalConnection(ctx context.Context, args DisconnectExternalConnectionArgs) (*Result, error) {
+	call := DisconnectExternalConnectionBuild(args)
+	return qc.executeNamed(ctx, "disconnectExternalConnection", call)
+}
+
+func DisconnectExternalConnectionBuild(args DisconnectExternalConnectionArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation disconnectExternalConnection(")
+	b.WriteString("connectionId: ")
+	b.WriteString(quoteMemQL(args.ConnectionId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // EnablePackageDeployables -- Turn one or more of a source's deployables back ON.
 // The exact inverse of disablePackageDeployables above, and the reason that one is a membership change rather than a whole-list write: removing a member had no form at all. Removing a name that is not there is a no-op rather than an error, so two people enabling the same app both succeed and a retry is safe.
 //

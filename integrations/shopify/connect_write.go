@@ -42,7 +42,7 @@ const (
 // tell it apart in Shopify's list (at most 100 per app per shop).
 const storefrontTokenTitle = "MemQL storefront"
 
-const shopPlanQuery = `query ShopifyConnectPlan { shop { plan { publicDisplayName } } }`
+const shopPlanQuery = `query ShopifyConnectPlan { shop { plan { publicDisplayName partnerDevelopment } } }`
 
 const storefrontTokenCreateMutation = `mutation ShopifyStorefrontTokenCreate($input: StorefrontAccessTokenInput!) {
   storefrontAccessTokenCreate(input: $input) {
@@ -60,8 +60,15 @@ func (c *Connector) WriteShopifyConnect(ctx context.Context, state *componentIde
 	if state == nil {
 		return connectReasonStateInvalid, ""
 	}
+	if state.CredentialSource == managedCredentialSource {
+		return c.writeManagedConnection(ctx, state, grant)
+	}
+	return c.writeConnect(ctx, state, grant)
+}
+func (c *Connector) writeConnect(ctx context.Context, state *componentIdentity.GithubConnectStateRow, grant componentIdentity.ShopifyConnectGrant) (string, string) {
 	storeID, err := StoreIDForDomain(state.ShopDomain)
-	promoted := state.CredentialSource == credentialSourcePending
+	managed := state.CredentialSource == managedCredentialSource
+	promoted := state.CredentialSource == credentialSourcePending || managed
 	if err != nil || grant.AccessToken == "" || (promoted && grant.ClientSecret == "") {
 		return connectReasonExchangeFailed, ""
 	}
@@ -86,7 +93,11 @@ func (c *Connector) WriteShopifyConnect(ctx context.Context, state *componentIde
 	// promoted is the grant's, the one the code was exchanged with, and never a
 	// re-read of the pending row: a Save landing since the approval would
 	// otherwise become the live webhook secret unapproved.
-	adminRef, err := seedSecret(opCtx, c.engine, storeSecretName(storeID, suffixAdminToken), grant.AccessToken, connectSealDescription, person)
+	tokenName, tokenValue := storeSecretName(storeID, suffixAdminToken), grant.AccessToken
+	if managed {
+		tokenName, tokenValue = storeSecretName(storeID, "OFFLINE_GRANT"), grant.OfflineGrant
+	}
+	adminRef, err := seedSecret(opCtx, c.engine, tokenName, tokenValue, connectSealDescription, person)
 	if err != nil {
 		c.logger.Warn("shopify: Connect could not seal the Admin token Shopify issued; nothing was kept", "store", storeID, "error", err.Error())
 		return connectReasonExchangeFailed, ""
@@ -114,8 +125,12 @@ func (c *Connector) WriteShopifyConnect(ctx context.Context, state *componentIde
 	// 12. createStore only for a row that does not exist: it re-stamps status,
 	// scopes and health. ownerUserId decides whose Library receives privacy
 	// exports, so it is the person's only when the row names nobody.
-	if plan := c.shopPlan(opCtx, state.ShopDomain, storeID, grant.AccessToken); plan != "" {
+	plan, development := c.shopPlan(opCtx, state.ShopDomain, storeID, grant.AccessToken)
+	if plan != "" {
 		update["plan"] = plan
+	}
+	if development != nil {
+		update["isDevelopment"] = *development
 	}
 	if !found {
 		create := map[string]any{"domain": state.ShopDomain, "ownerUserId": person}
@@ -135,7 +150,7 @@ func (c *Connector) WriteShopifyConnect(ctx context.Context, state *componentIde
 			return connectReasonExchangeFailed, keptResult
 		}
 	}
-	if promoted {
+	if promoted && !managed {
 		c.clearPendingApp(opCtx, storeID, state.ClientID, grant.ClientSecret, person)
 	}
 
@@ -150,7 +165,7 @@ func (c *Connector) WriteShopifyConnect(ctx context.Context, state *componentIde
 	}
 
 	// 14.
-	if !c.attachStore(ctx, opCtx, state, storeID, grant.Role) {
+	if !managed && !c.attachStore(ctx, opCtx, state, storeID, grant.Role) {
 		return connectReasonPermissionLost, result
 	}
 
@@ -207,12 +222,13 @@ func (c *Connector) storeByID(ctx context.Context, storeID string) (Store, bool,
 
 // shopPlan is the shop's plan name, or "" when Shopify would not say: a label
 // the store row shows, never a reason to refuse a connection.
-func (c *Connector) shopPlan(ctx context.Context, shop, storeID, token string) string {
+func (c *Connector) shopPlan(ctx context.Context, shop, storeID, token string) (string, *bool) {
 	resp, err := c.admin.Do(ctx, Store{ID: storeID, Domain: shop, APIVersion: generated.APIVersion}, token, shopPlanQuery, "ShopifyConnectPlan", nil)
 	var out struct {
 		Shop struct {
 			Plan struct {
-				PublicDisplayName string `json:"publicDisplayName"`
+				PublicDisplayName  string `json:"publicDisplayName"`
+				PartnerDevelopment *bool  `json:"partnerDevelopment"`
 			} `json:"plan"`
 		} `json:"shop"`
 	}
@@ -221,9 +237,9 @@ func (c *Connector) shopPlan(ctx context.Context, shop, storeID, token string) s
 	}
 	if err != nil {
 		c.logger.Info("shopify: Connect could not read the shop's plan; the store keeps the one it had", "store", storeID)
-		return ""
+		return "", nil
 	}
-	return strings.TrimSpace(out.Shop.Plan.PublicDisplayName)
+	return strings.TrimSpace(out.Shop.Plan.PublicDisplayName), out.Shop.Plan.PartnerDevelopment
 }
 
 // clearPendingApp overwrites the pending pair with blanks at their own rows --

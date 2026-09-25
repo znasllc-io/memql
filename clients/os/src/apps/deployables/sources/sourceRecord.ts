@@ -1,7 +1,7 @@
 import type { PackageRow } from "../packages/rows";
 import { shortRepo } from "../packages/rows";
 import { bare } from "../people";
-import type { SourceConnectionRow } from "./connections";
+import type { SourceConnectionRow } from "../../../modules/connections/connections";
 import { isGithubAppGrant, type CredentialRow } from "./rows";
 
 /** A configured repository is the record. Credentials and installation bindings

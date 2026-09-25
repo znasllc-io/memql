@@ -115,6 +115,7 @@ describe("the settings-section contract", () => {
       "language",
       "diagnostics",
       "benchmarks",
+      "connections",
       "integrations",
       "providers",
       "levels",

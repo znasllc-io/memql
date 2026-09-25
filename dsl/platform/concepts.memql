@@ -1035,3 +1035,15 @@ concept sourceConnection {
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", as="usesGrant", field="credentialId", target=sourceCredential, direction="outgoing")
 }
+
+/// A person's saved external resource. Authorization credentials remain with
+/// the provider integration; removing this selection never uninstalls it.
+@rowAuthz(owner="ownerUserId")
+@displayCard(primary="label", secondary="provider", status="status")
+concept externalConnection {
+  ownerUserId string!
+  provider string!
+  resourceId string!
+  label string!
+  status string!
+}

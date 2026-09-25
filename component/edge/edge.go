@@ -210,7 +210,7 @@ func (e *engineExecutor) SiteForAccountFrontDoor(ctx context.Context, hostname s
 // answers a caller below developer with zero rows, so an unstamped read would
 // find no store at all.
 //
-// THREE FIELDS OF A ROW THAT CARRIES MORE. `adminTokenRef` and
+// Only serving fields from the store are projected. `adminTokenRef` and
 // `webhookSecretRef` are deliberately NOT projected: the Admin API token is
 // the credential that can read orders and customers and mutate the store, and
 // the serving path cannot leak a reference it was never handed. Only
@@ -236,6 +236,7 @@ func (e *engineExecutor) StoreByID(ctx context.Context, storeId string) (*BoundS
 		ID:                 memql.BareShortId(rowString(rows[0], "id")),
 		Domain:             rowString(rows[0], "domain"),
 		StorefrontTokenRef: rowString(rows[0], "storefrontTokenRef"),
+		APIVersion:         rowString(rows[0], "apiVersion"),
 	}, nil
 }
 

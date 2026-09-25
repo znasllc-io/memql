@@ -6,7 +6,7 @@ import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import { PACKAGE_CONCEPT, packageFromRow } from "../../src/apps/deployables/packages/rows";
 import { SOURCE_CREDENTIAL_CONCEPT, credentialFromRow } from "../../src/apps/deployables/sources/rows";
-import { sourceConnectionFromRow } from "../../src/apps/deployables/sources/connections";
+import { sourceConnectionFromRow } from "../../src/modules/connections/connections";
 import { sourceRecord } from "../../src/apps/deployables/sources/sourceRecord";
 import { RemoveSource } from "../../src/apps/deployables/sources/RemoveSource";
 import { builtinReply, click, emit, fakeConnection, githubGrantRow, sourceConnectionRow, withSession, type FakeSeed } from "./harness";

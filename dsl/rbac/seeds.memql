@@ -735,3 +735,9 @@ seed capability cap-developer-read-app-identity-logs { roleSlug: "developer"  ve
 @description("admin: open the logs section of the bin app -- reproduces the OS registry floor min admin (memql#5300).")
 seed capability cap-admin-read-app-identity-logs { roleSlug: "admin"  verb: "read"  resourceType: "app:identity/logs"  predefined: true }
 
+
+// Shared personal connection management, independent of any consuming app.
+seed capability cap-owner-read-app-settings-connections { roleSlug: "owner" verb: "read" resourceType: "app:settings/connections" predefined: true }
+seed capability cap-developer-read-app-settings-connections { roleSlug: "developer" verb: "read" resourceType: "app:settings/connections" predefined: true }
+seed capability cap-owner-execute-app-settings-connections { roleSlug: "owner" verb: "execute" resourceType: "app:settings/connections" predefined: true }
+seed capability cap-developer-execute-app-settings-connections { roleSlug: "developer" verb: "execute" resourceType: "app:settings/connections" predefined: true }

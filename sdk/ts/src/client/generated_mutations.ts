@@ -4001,6 +4001,28 @@ QueryClient.prototype.disablePackageDeployables = function (this: QueryClient, a
   return this.executeNamed("disablePackageDeployables", buildDisablePackageDeployables(args), opts);
 };
 
+/** Removing a personal selection changes no provider grant or deployed site. */
+// Bound concept: v1:platform:externalConnection (machine-readable: BoundConcepts["disconnectExternalConnection"] in generated_concepts.ts).
+export interface DisconnectExternalConnectionArgs {
+  connectionId: string;
+}
+
+export function buildDisconnectExternalConnection(args: DisconnectExternalConnectionArgs): string {
+  const parts: string[] = [];
+  parts.push("connectionId: " + renderMemQLValue(args.connectionId));
+  return "mutation disconnectExternalConnection(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    disconnectExternalConnection(args: DisconnectExternalConnectionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.disconnectExternalConnection = function (this: QueryClient, args: DisconnectExternalConnectionArgs = {} as DisconnectExternalConnectionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("disconnectExternalConnection", buildDisconnectExternalConnection(args), opts);
+};
+
 /** Turn one or more of a source's deployables back ON.
 The exact inverse of disablePackageDeployables above, and the reason that one is a membership change rather than a whole-list write: removing a member had no form at all. Removing a name that is not there is a no-op rather than an error, so two people enabling the same app both succeed and a retry is safe. */
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["enablePackageDeployables"] in generated_concepts.ts).

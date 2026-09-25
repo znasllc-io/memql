@@ -104,16 +104,27 @@ Deployables, Training, Files (#4721), Accounts (#4800), Campaigns
 was the only home for -- Concepts and Cluster (epic memql#5009) -- the
 last stub went with Files, and `StubApp` with it.
 
-**Stores was a third, and it is gone** (epic memql#5530). Everything about
-a storefront is configured on its deployable, and the store it fronts was
-the one thing that was not: the site's `binding` carried a COPY of the
-store's domain and its Storefront token reference, edited at a different
-authorization tier from the `v1:shopify:store` row that also held them. The
-binding names the store now, and the store is read and changed on the
-storefront's own Store pane in Deployables, behind `execute
-app:deployables/store`. The per-domain acts -- backfill, pause, retry,
-discard -- never lived in Stores either; they belong to every connector and
-are still in Cluster > Data origins.
+**Connections are shared platform settings.** `modules/connections` owns the
+GitHub account/organization interface, Shopify store connection wizard and the
+provider tabs reused by global Settings and Deployables Settings. The shell
+retains one collection per connection concept. Provider callbacks return to the
+app and Settings surface that began authorization. An app selects a connected
+resource for its own work; it does not create a private copy of the account.
+GitHub retains its existing personal credential and installation records.
+Shopify uses personal `v1:platform:externalConnection` selections pointing at the
+integration's store record; removing a selection changes no store or deployed
+site. New selections require verified provider authorization on the server.
+
+Ordinary connection screens never ask for client secrets or API tokens. Shopify
+registration is operator configuration; an unconfigured installation shows the
+setup requirement. Shopify store selection starts on Shopify, never in a manually entered domain
+form. The OS preserves the signed App URL launch through sign-in; the server
+verifies it before beginning session-bound authorization. Storefronts identify
+Shopify development stores as Sandbox and require review before replacing the
+active store. The sandbox and production stores may have different Shopify owners.
+Storefronts choose an authorized store using the shared wizard
+and keep serving design previews until connected. The Store icon stays beside
+Traffic. See [Connect Shopify](../../docs/public/operate/shopify-connect.md).
 
 ## Right-click belongs to the shell
 
@@ -2347,6 +2358,10 @@ meaningful change has not been viewed by this person. It is independent of the
 short-lived arrival animation, green Live health, amber setup warnings, red
 errors and Ask activity. It is not a notification feed. Users configure none
 of these markers.
+
+Icon buttons use `data-os-setup` for setup dots: the dot overlaps the upper-right
+corner without moving the icon. If an unseen-change marker is also present, it
+uses the upper-left corner; setup remains on the right.
 
 All registered apps participate through the shared desktop and phone shell:
 launcher entries, dock apps, window icons and section navigation aggregate

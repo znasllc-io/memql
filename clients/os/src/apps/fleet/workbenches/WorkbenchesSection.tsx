@@ -1,5 +1,6 @@
+import { LocalTabs } from "../../../kit/LocalTabs";
 import { useMemo, useState } from "react";
-import { FleetTabs, RefreshButton, useFleetScroll } from "../FleetControls";
+import { RefreshButton, useFleetScroll } from "../FleetControls";
 import { InfoDetail } from "../../../kit/InfoDetail";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -98,7 +99,7 @@ export function WorkbenchesSection() {
         ) : null}
       </Head>
 
-      <FleetTabs label="Cluster workspace views" value={tab} onChange={setTab} options={[["workspaces", "Workspaces"], ["replicas", "Replicas"]]} />
+      <LocalTabs label="Cluster workspace views" value={tab} onChange={setTab} options={[["workspaces", "Workspaces"], ["replicas", "Replicas"]]} />
       </div>
       <div className="fleet-section-context"><p>Temporary working folders for tasks running in the cluster.</p><InfoDetail title="Cluster workspaces"><p className="os-caption">
         A workspace is a sandboxed working directory for one plan, on one workbench replica's

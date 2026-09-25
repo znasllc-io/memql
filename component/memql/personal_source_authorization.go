@@ -21,6 +21,11 @@ func personalSourceRequirement(name string) (verb, resource string) {
 }
 
 func (e *MemQLEngine) personalSourceCapable(ctx context.Context, verb, resource string) bool {
+	// Personal accounts are also managed outside Deployables. This grants no
+	// package authority; every handler still resolves the caller's own rows.
+	if e.GlobalDataCapable(ctx, auth.VerbRead) && e.OrganizationCapable(ctx, "", auth.VerbRead, "app:settings/connections") && e.OrganizationCapable(ctx, "", verb, "app:settings/connections") {
+		return true
+	}
 	if e.GlobalDataCapable(ctx, auth.VerbRead) && e.OrganizationCapable(ctx, "", auth.VerbRead, "app:deployables") && e.OrganizationCapable(ctx, "", verb, resource) {
 		return true
 	}

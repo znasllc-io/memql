@@ -120,7 +120,7 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
         </Refine> : <Refine iconOnly label="Find machines" placeholder="Search machines" search={machineSearch} onSearch={setMachineSearch} />}
         <AddButton label="Add a machine" onClick={() => flow.start({})} />
       </Head>
-      {machine ? <nav className="fleet-local-tabs" aria-label="Machine views">{(Object.keys(VIEW_NAMES) as MachineView[]).map(view => <button key={view} type="button" className={view === "sharing" ? "os-attention-anchor" : undefined} aria-current={selection.view === view ? "page" : undefined} onClick={() => select({ machineId: machine.id, view })}>{VIEW_NAMES[view]}{view === "sharing" && canLend(machine, viewerId) ? <AttentionMarker appId="fleet" sectionId={MACHINE_SHARING_SECTION} target={MACHINE_SHARING_TARGET} /> : null}</button>)}</nav> : null}
+      {machine ? <nav className="os-local-tabs" aria-label="Machine views">{(Object.keys(VIEW_NAMES) as MachineView[]).map(view => <button key={view} type="button" className={view === "sharing" ? "os-attention-anchor" : undefined} aria-current={selection.view === view ? "page" : undefined} onClick={() => select({ machineId: machine.id, view })}>{VIEW_NAMES[view]}{view === "sharing" && canLend(machine, viewerId) ? <AttentionMarker appId="fleet" sectionId={MACHINE_SHARING_SECTION} target={MACHINE_SHARING_TARGET} /> : null}</button>)}</nav> : null}
       </div>
       {behind ? <Notice tone="warn" sentence="Machine updates are interrupted." next="Showing the last known state." detail={snapshot?.error || undefined}><RefreshButton label="Reconnect machines" onClick={reload} /></Notice> : null}
       <div className="fleet-workspace-body" data-has-machines={machines.length > 0 || undefined}>

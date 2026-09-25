@@ -1,5 +1,6 @@
+import { LocalTabs } from "../../../kit/LocalTabs";
 import { useMemo, useState } from "react";
-import { FleetTabs, RefreshButton, useFleetScroll } from "../FleetControls";
+import { RefreshButton, useFleetScroll } from "../FleetControls";
 import { InfoDetail } from "../../../kit/InfoDetail";
 
 import {
@@ -167,7 +168,7 @@ export function ModelsSection({ onHome }: { onHome?: () => void } = {}) {
         <RefreshButton label="Refresh model library" busy={reading} onClick={() => { catalog.reread(); doors.reread(); profiles.reread(); }} />
       </Head>
 
-      <FleetTabs label="Model library views" value={view} onChange={setView} options={[["available", "Available models"], ["catalog", "Catalog"], ["sources", "Inference sources"]]} />
+      <LocalTabs label="Model library views" value={view} onChange={setView} options={[["available", "Available models"], ["catalog", "Catalog"], ["sources", "Inference sources"]]} />
       </div>
       <div hidden={view !== "sources"}><DoorsPanel doors={doors.value} state={doors.state} error={doors.error} /></div>
       <div hidden={view !== "available"}>

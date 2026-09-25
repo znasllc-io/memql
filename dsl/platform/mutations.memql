@@ -2824,3 +2824,34 @@ mutation sourceConnection removeSourceConnection {
     status: "removed"
   }
 }
+
+/// Provider callback only: caller ownership alone cannot prove authorization
+/// at Shopify. The integration records this after verified OAuth approval.
+@serverOnly
+mutation externalConnection recordExternalConnection {
+  args {
+    connectionId string!
+    ownerUserId string!
+    provider string!
+    resourceId string!
+    label string!
+  }
+  insert {
+    accept { ownerUserId, provider, resourceId, label }
+    stamp {
+      id: args.connectionId
+      status: "active"
+    }
+  }
+}
+
+/// Removing a personal selection changes no provider grant or deployed site.
+@actor
+@requiresCapability("execute", "app:settings/connections")
+mutation externalConnection disconnectExternalConnection {
+  args { connectionId string! }
+  update {
+    id: args.connectionId
+    status: "removed"
+  }
+}

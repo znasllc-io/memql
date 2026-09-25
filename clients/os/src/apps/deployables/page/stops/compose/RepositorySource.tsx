@@ -5,7 +5,7 @@ import { WizardStepHeader } from "../../../../../kit/WizardStepHeader";
 import { shortRepo } from "../../../packages/rows";
 import { RepositoryPicker } from "../../../sources/RepositoryPicker";
 import type { RepositoryRow } from "../../../sources/repositories";
-import type { SourceConnectionRow } from "../../../sources/connections";
+import type { SourceConnectionRow } from "../../../../../modules/connections/connections";
 import { useSourceRepositories } from "../../../sources/useGithubConnect";
 import { probeNote, probeParks } from "../../../sources/probe";
 import type { SourceProbeHandle } from "../../../sources/useProbes";

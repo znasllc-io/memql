@@ -66,7 +66,7 @@ import { partsForOrganization, type PartsHeld } from "../parts";
 import { ManifestPreview } from "./stops/compose/ManifestPreview";
 import { RepositoryProbeStatus, RepositorySource, type ConnectionNeed } from "./stops/compose/RepositorySource";
 import { GitHubAccountStep, GitHubOrganizationStep } from "./stops/compose/GitHubSource";
-import { useSourceConnections, type SourceConnectionRow } from "../sources/connections";
+import { useSourceConnections, type SourceConnectionRow } from "../../../modules/connections/connections";
 import { ComposeSourceDetailStep, ComposeSourceKindStep, SOURCE_DETAIL_NAME, SOURCE_KIND_LABEL } from "./stops/compose/Source";
 import { ComposeWhereItLivesStop } from "./stops/compose/WhereItLives";
 

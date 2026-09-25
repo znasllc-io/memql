@@ -102,6 +102,9 @@ func (c *Connector) connectSecret(ctx context.Context, state *componentIdentity.
 	opCtx := operatorContext(ctx)
 	var name string
 	switch state.CredentialSource {
+	case managedCredentialSource:
+		client, secret, err := c.managedApp(ctx)
+		return secret, err == nil && secret != "" && client == state.ClientID
 	case credentialSourcePending:
 		name = storeSecretName(storeID, suffixPendingClientSecret)
 	case credentialSourceCurrent:
@@ -133,6 +136,18 @@ func (c *Connector) AuthorizeShopifyConnect(ctx context.Context, state *componen
 		return grant, connectReasonStateInvalid
 	}
 	grant.StoreID, _ = StoreIDForDomain(state.ShopDomain)
+	if state.CredentialSource == managedCredentialSource {
+		role, ok := c.managedPerson(ctx, state)
+		if !ok {
+			return grant, connectReasonPermissionLost
+		}
+		secret, ok := c.connectSecret(ctx, state)
+		if !ok || code == "" {
+			return grant, connectReasonExchangeFailed
+		}
+		grant.Role, grant.ClientSecret, grant.AuthorizationCode = role, secret, code
+		return grant, ""
+	}
 
 	// 7. Re-derive, don't trust: the site is still a storefront and 12.1 still
 	// gives the state's shop. Asked as the deployment, because the question is

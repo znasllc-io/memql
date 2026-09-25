@@ -2,7 +2,7 @@ import { UserRound, Building2 } from "lucide-react";
 import { Button, Caption, RecordList, RecordListSkeleton, RecordRow } from "../../../../../kit";
 import { WizardStepHeader } from "../../../../../kit/WizardStepHeader";
 import type { CredentialFeedStatus, CredentialRow } from "../../../sources/rows";
-import type { SourceConnectionRow } from "../../../sources/connections";
+import type { SourceConnectionRow } from "../../../../../modules/connections/connections";
 
 export function ManageGitHub({ onSettings }: { onSettings?: () => void }) {
   return onSettings ? <button type="button" className="os-link" onClick={onSettings}>Add or manage GitHub accounts and organizations in Settings</button> : null;

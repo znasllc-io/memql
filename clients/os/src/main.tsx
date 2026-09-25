@@ -1,3 +1,4 @@
+import { captureShopifyInstallation } from "./modules/connections/shopifyInstallation";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
@@ -17,6 +18,7 @@ applyStoredTheme();
 // path, the hash and everything else alone. The value waits in that module
 // until the Shell exists to receive it; a browser that arrived here with no
 // marker parks nothing and this is a no-op.
+captureShopifyInstallation(window);
 captureConnectReturn(window);
 captureShopifyReturn(window);
 

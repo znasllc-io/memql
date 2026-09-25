@@ -577,6 +577,54 @@ func TestSettingsForSite_CopiesRatherThanAliases(t *testing.T) {
 	}
 }
 
+func TestServeRuntimeConfig_InheritsConnectedStoreAPIVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name, kind, override, storeVersion, want string
+		unbound                                  bool
+	}{
+		{name: "connected", kind: storefrontKind, storeVersion: "2026-07", want: "2026-07"},
+		{name: "blank setting", kind: storefrontKind, override: "  ", storeVersion: " 2026-07 ", want: "2026-07"},
+		{name: "explicit pin", kind: storefrontKind, override: "2026-04", storeVersion: "2026-07", want: "2026-04"},
+		{name: "unbound preview", kind: storefrontKind, unbound: true},
+		{name: "store missing version", kind: storefrontKind},
+		{name: "other kind", kind: "spa", storeVersion: "2026-07"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			site := &Site{
+				ID: "s1", Hostname: "shop.example.com", Status: "live", Kind: tc.kind,
+				Settings: map[string]string{"country": "US"},
+			}
+			if tc.override != "" {
+				site.Settings["storefrontApiVersion"] = tc.override
+			}
+			if !tc.unbound {
+				site.Store = &BoundStore{ID: "store-1", Domain: "acme.myshopify.com", APIVersion: tc.storeVersion}
+			}
+			h := NewHandler(Options{Resolver: staticResolver{site: site}, Opener: mapOpener{"index.html": "ROOT"}})
+			req := httptest.NewRequest(http.MethodGet, runtimeConfigPath, nil)
+			req.Host = site.Hostname
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("GET runtime config = %d", rec.Code)
+			}
+			var doc RuntimeConfig
+			if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+				t.Fatal(err)
+			}
+			if got := doc.Settings["storefrontApiVersion"]; got != tc.want {
+				t.Errorf("served API version = %q, want %q", got, tc.want)
+			}
+			if doc.Settings["country"] != "US" {
+				t.Error("lost the site's other settings")
+			}
+			if site.Settings["storefrontApiVersion"] != tc.override {
+				t.Error("inherited version mutated the cached site settings")
+			}
+		})
+	}
+}
+
 // siteFromRow keeps only STRING values, and never yields nil: the guard admits
 // nothing but strings, so a number here is a raw write that bypassed it, and a
 // bundle reading config.settings.<key> must never get one coerced into a

@@ -246,3 +246,21 @@ builtin shopifyStorefrontTokenSet {
   siteId  string!  @description("The storefront deployable whose store the token is for.")
   token   string   @description("The Storefront API token. Empty clears the store's token. Read once, sealed, and discarded.")
 }
+
+/// Provider readiness contains no client credentials. Registration belongs to
+/// the cluster operator; people authorize through Shopify.
+@sdk
+@executor("integration.shopify.connectionProviderStatus")
+@requiresCapability("read", "app:settings/connections")
+builtin shopifyConnectionProviderStatus { }
+
+/// Begin a reusable personal store connection without changing any deployable.
+/// The shop is derived from a recent signed Shopify App URL launch, then authorized
+/// through the session-bound callback. No caller-supplied store address is accepted.
+@sdk
+@executor("integration.shopify.accountConnectBegin")
+@requiresCapability("execute", "app:settings/connections")
+builtin shopifyAccountConnectBegin {
+  signedQuery string!
+  returnPath string
+}

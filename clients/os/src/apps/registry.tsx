@@ -105,6 +105,7 @@ const settings: OsAppManifest = {
     // owner's prerogative rather than a rank. `roleAdmits`' `any` form is what
     // says exactly that, and it is presentation over a gate the status
     // capability's own `statusAuthorized` remains the authority on.
+    { id: "connections", name: "Connections", requires: "app:settings/connections" },
     { id: "integrations", name: "Integrations", requires: "app:settings/integrations" },
     // The three that arrived when the portal's admin console was retired
     // (epic memql#4984). Each requirement is the one the ENGINE will
@@ -163,6 +164,7 @@ const settings: OsAppManifest = {
   // changes meaningfully -- a new language line, say -- and never when a form
   // is added to the table it reads: that is data moving, not the surface.
   attentionChanges: [
+    { id: "settings:connections", revision: "shared-connections-1", sectionId: "connections", label: "Shared GitHub and Shopify connections" },
     { id: "settings:language", revision: "language-1.0", sectionId: "language", label: "MemQL 1.0 language and deprecations" },
   ],
   component: SettingsApp,

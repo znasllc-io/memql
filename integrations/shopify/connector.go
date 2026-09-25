@@ -297,7 +297,7 @@ func header(req memqlsync.InboundRequest, name string) string {
 
 // adminCall runs one Admin operation for a store, resolving the token.
 func (c *Connector) adminCall(ctx context.Context, store Store, document, operation string, variables map[string]any) (*AdminResponse, error) {
-	token, err := c.stores.AdminToken(ctx, store)
+	token, err := c.adminToken(ctx, store)
 	if err != nil {
 		return nil, err
 	}
