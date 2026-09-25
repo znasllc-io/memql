@@ -492,6 +492,21 @@ All optional. Defaults baked into `component/database/database.go`:
 | `MEMORY_NODES_DATABASE_CONN_MAX_LIFETIME_MS`          | `3600000`   |
 | `MEMORY_NODES_DATABASE_CONN_MAX_IDLE_TIME_MS`         | `120000`    |
 
+A migration runs only after acquiring the shared migration lock. A competing
+replica defers and retries later. If a connection or context deadline expires,
+the server may still be executing the migration: the runner retains the lock
+and reports the failure instead of starting overlapping attempts. An ordinary
+SQL error acknowledged by PostgreSQL releases the lock for retry.
+
+To recover a retained lock, first suspend migration attempts on every writer.
+Inspect `pg_stat_activity` using the identity node's `application_name`; wait
+for or cancel the abandoned migration and verify that it has stopped. Only
+then remove the matching `bun_migrations` row from `bun_migration_locks` and
+resume attempts. Check the failed migration's transaction and idempotency
+before retrying. Never clear a live migration's lock or mark a migration
+applied without completing its work. Increasing the migration context timeout
+alone does not change pgdriver's socket read deadline.
+
 #### Connection pooling: hybrid endpoint split (`DIRECT_DSN`)
 
 Tiger Cloud PgBouncer transaction-mode pooling decouples client

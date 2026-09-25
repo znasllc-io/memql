@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/tls"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
 	"strconv"
@@ -1347,22 +1349,29 @@ func (d *Database) runMigrations(ctx context.Context, bunDB *bun.DB) {
 			d.Logger.Error("failed to initialize migrations", "error", err)
 			d.recordMigrationErr(fmt.Errorf("migration init: %w", err))
 		} else {
-			locked := false
-			if err := migrator.Lock(runCtx); err == nil {
-				locked = true
-			} else {
-				d.Logger.Warn("failed to acquire migration lock", "error", err)
+			if err := migrator.Lock(runCtx); err != nil {
+				d.Logger.Warn("failed to acquire migration lock; deferring migrations", "error", err)
+				d.recordMigrationErr(fmt.Errorf("migration lock: %w", err))
+				return
 			}
 
-			if locked {
-				defer func() {
-					if err := migrator.Unlock(runCtx); err != nil {
-						d.Logger.Error("failed to unlock migrations", "error", err)
-					}
-				}()
-			}
+			unlockSafe := true
+			defer func() {
+				if !unlockSafe {
+					d.Logger.Error("migration connection lost; retaining lock until an operator verifies the backend has stopped")
+					return
+				}
+				// The attempt's deadline may have expired. Cleanup needs its own
+				// bounded context so a finished attempt does not strand the lock.
+				unlockCtx, cancelUnlock := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancelUnlock()
+				if err := migrator.Unlock(unlockCtx); err != nil {
+					d.Logger.Error("failed to unlock migrations", "error", err)
+				}
+			}()
 
 			if _, err := migrator.Migrate(runCtx); err != nil {
+				unlockSafe = !migrationMayStillBeRunning(err)
 				d.Logger.Error("failed to migrate", "error", err)
 				d.recordMigrationErr(fmt.Errorf("migrate: %w", err))
 			}
@@ -1385,6 +1394,17 @@ func (d *Database) runMigrations(ctx context.Context, bunDB *bun.DB) {
 	// is what makes the tryPing retry self-limiting: it fires until an attempt
 	// completes cleanly, and never again after that.
 	d.markMigrationsRan()
+}
+
+// pgdriver does not send a PostgreSQL cancel when its socket/context deadline
+// expires. Releasing the lock then would let another replica overlap the orphan.
+// Fail closed on an uncertain transport outcome; SQL errors are acknowledged by
+// the server and can release the lock for the normal retry.
+func migrationMayStillBeRunning(err error) bool {
+	var networkError net.Error
+	return errors.As(err, &networkError) || errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded) || errors.Is(err, driver.ErrBadConn) ||
+		errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
 }
 
 // recordMigrationErr stores the first error seen during the current migration
@@ -1682,8 +1702,8 @@ func sessionConnParams() map[string]any {
 // The CLIENT still stops waiting. pgdriver's read deadline (10 s, nothing here
 // overrides it) and the migration run's own context (MIGRATION_TIMEOUT_MS)
 // both end a statement's read with an i/o timeout and send no cancel, so the
-// backend carries on server-side while the migration reports a failure and is
-// retried on the next run (measured, memql#5252). A statement that is meant to
+// backend carries on server-side while the migration reports a failure. The
+// runner retains its lock on that uncertain outcome (memql#5604). A statement that is meant to
 // outlive them has to be written for that: the latest-row index build takes a
 // session lock its orphan keeps holding and verifies the catalog after waiting
 // for it (latest_row_index.go).
