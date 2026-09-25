@@ -52,10 +52,18 @@ BEGIN
       ('v1:platform:customDomain', 'v1:platform:site', 'siteId'),
       ('v1:identity:groupMembership', 'v1:identity:group', 'groupId')
     ), latest AS (
-      SELECT DISTINCT ON (concept, id) concept, id, "createdAt", payload
-      FROM "MemoryNodes"
-      WHERE concept IN (SELECT child_concept FROM relationships UNION SELECT parent_concept FROM relationships)
-      ORDER BY concept, id, "createdAt" DESC
+      -- Parameterize one indexed read per concept. A join against the small
+      -- relationship CTE otherwise makes PostgreSQL scan the whole history
+      -- table before filtering, including unrelated high-volume mesh rows.
+      SELECT row.*
+      FROM (SELECT child_concept AS concept FROM relationships
+            UNION SELECT parent_concept FROM relationships) selected
+      CROSS JOIN LATERAL (
+        SELECT DISTINCT ON (id) concept, id, "createdAt", payload
+        FROM "MemoryNodes"
+        WHERE concept = selected.concept
+        ORDER BY id, "createdAt" DESC
+      ) row
     ), repairs AS (
       SELECT child.concept, child.id, child."createdAt", min(parent.payload->>'accountId') AS account_id
       FROM latest child
