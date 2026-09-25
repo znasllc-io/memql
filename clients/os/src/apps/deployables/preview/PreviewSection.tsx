@@ -122,9 +122,9 @@ export function PreviewSection({
       </Facts> : <ol className="preview-lanes">
         <li className="preview-lane" data-serving="true">
           <span className="preview-lane-mark" aria-hidden />
-          <span className="preview-lane-role">{storeView ? site.status === "live" ? "Published" : "Built" : "Serving"}</span>
+          <span className="preview-lane-role">Serving</span>
           <strong className="os-mono">{site.bundleRef === "" ? "No version yet" : shortRef(site.bundleRef)}</strong>
-          {!storeView ? <StoreLine
+          <StoreLine
             domain={mine?.storeDomain ?? ""}
             storeId={mine?.storeId ?? ""}
             readable={mine?.storeReadable ?? false}
@@ -132,11 +132,11 @@ export function PreviewSection({
             attach="store"
             storefront={mine?.storefront ?? false}
             onOpenStore={onOpenStore}
-          /> : null}
+          />
         </li>
         <li className="preview-lane" data-serving="false">
           <span className="preview-lane-mark" aria-hidden />
-          <span className="preview-lane-role">{storeView ? "Testing" : "Candidate"}</span>
+          <span className="preview-lane-role">Candidate</span>
           {site.candidateRef === "" ? (
             <strong className="preview-lane-empty">No version being exercised</strong>
           ) : (
@@ -148,7 +148,7 @@ export function PreviewSection({
               same screen as the refusal explaining that it is not one -- a
               sentence contradicting its own notice, which is a class of defect
               only a rendered page shows. The lane carries the warning now. */}
-          {!storeView ? <StoreLine
+          <StoreLine
             domain={mine?.previewStoreDomain ?? ""}
             storeId={mine?.previewStoreId ?? ""}
             readable={mine !== null && mine.previewStoreId !== "" && mine.previewStoreDomain !== ""}
@@ -156,7 +156,7 @@ export function PreviewSection({
             attach="development store"
             storefront={mine?.storefront ?? false}
             onOpenStore={onOpenStore}
-          /> : null}
+          />
         </li>
       </ol>}
 
