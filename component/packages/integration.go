@@ -1064,6 +1064,7 @@ func placementsArg(args map[string]any, key string) map[string]Placement {
 			Hostname:  strings.TrimSpace(stringArg(fields, "hostname")),
 			AccountId: strings.TrimSpace(stringArg(fields, "accountId")),
 			OwnDomain: strings.TrimSpace(stringArg(fields, "ownDomain")),
+			Domains:   placementDomains(fields),
 			Skip:      boolArg(fields, "skip"),
 		}
 	}

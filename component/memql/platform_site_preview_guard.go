@@ -19,7 +19,7 @@ import (
 // Four rules, and every one of them is a comparison a mutation body cannot
 // make -- either against the PRIOR row or against a DIFFERENT row:
 //
-//   - A candidate may not equal the serving version. (prior row)
+//   - Non-storefront candidates may not equal the serving version. (prior row)
 //   - A promotion must NAME the candidate it is promoting. (prior row)
 //   - A preview binding must name a DEVELOPMENT store. (another row)
 //   - Going live, and promoting, are refused while the SERVING binding names
@@ -186,8 +186,10 @@ func (e *MemQLEngine) validateSitePreview(
 			"v1:platform:site: this is the surface the cluster is managed through and is exempt from the preview axis, as it is from the status and settings axes -- it is deployed with the image and re-seeded at every boot, so a candidate written here would silently undo itself")
 	}
 
-	// Rule 1 -- a candidate may not be the version already serving.
-	if candidatePresent && candidate != "" {
+	// Rule 1 -- a non-storefront candidate must differ from the serving version.
+	// Storefronts can exercise the same files against their separate sandbox.
+	// Opening a preview still validates the sandbox and the caller's grant.
+	if candidatePresent && candidate != "" && !storefront {
 		serving := priorBundleRef
 		if bundlePresent && !promoting {
 			serving = nextBundle

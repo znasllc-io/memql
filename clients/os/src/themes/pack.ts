@@ -50,24 +50,14 @@ export const OS_THEME_TOKENS = [
   "shadow-item",
   "shadow-float",
   "shadow-window",
-  "field-dot",
-  "field-link",
-  "field-numeral",
+  "wash",
+  "desk-numeral",
   "rail",
   "rail-hover",
 ] as const;
 
 export type OsThemeToken = (typeof OS_THEME_TOKENS)[number];
 export type OsThemeTokens = Record<OsThemeToken, string>;
-
-/** The wallpaper's geometry. Mirrors wallpaper/field.ts's FieldOptions. */
-export interface OsThemeWallpaper {
-  seed: number;
-  cell: number;
-  density: number;
-  linkChance: number;
-  linkReach: number;
-}
 
 export interface OsThemePack {
   /** Stable id; the value of `data-os-theme` on the document root. */
@@ -81,7 +71,6 @@ export interface OsThemePack {
   description?: string;
   /** Both looks. A pack defining one mode is not a theme (see below). */
   tokens: { dark: OsThemeTokens; light: OsThemeTokens };
-  wallpaper: OsThemeWallpaper;
   /**
    * True for a pack that ships in the bundle. Built-ins render on the first
    * frame offline and are never written to the desktop document -- the bundle
@@ -97,8 +86,7 @@ export type PackRefusal =
   | "bad-id"
   | "bad-field"
   | "missing-tokens"
-  | "bad-token-value"
-  | "bad-wallpaper";
+  | "bad-token-value";
 
 export type PackLoad =
   | { ok: true; pack: OsThemePack }
@@ -192,15 +180,6 @@ export function validateThemePack(raw: unknown): PackLoad {
     ) as OsThemeTokens;
   }
 
-  const wallpaper = validateWallpaper(doc.wallpaper);
-  if (!wallpaper) {
-    return {
-      ok: false,
-      refusal: "bad-wallpaper",
-      detail: "This theme's wallpaper settings are missing or out of range.",
-    };
-  }
-
   return {
     ok: true,
     pack: {
@@ -210,43 +189,8 @@ export function validateThemePack(raw: unknown): PackLoad {
       author: doc.author as string,
       ...(doc.description ? { description: doc.description } : {}),
       tokens: { dark: tokens.dark!, light: tokens.light! },
-      wallpaper,
     },
   };
-}
-
-/**
- * Wallpaper numbers, each bounded.
- *
- * The bounds are not taste. `cell` at 4 makes the field a solid sheet of dots
- * that pins a laptop GPU; `density` at 1 with a small cell is the same thing;
- * an unbounded `linkReach` makes every dot a candidate for every other and
- * turns generation quadratic across the whole screen. A pack must not be able
- * to ship an OS that will not scroll.
- */
-function validateWallpaper(raw: unknown): OsThemeWallpaper | null {
-  if (!raw || typeof raw !== "object") return null;
-  const w = raw as Record<string, unknown>;
-  const num = (key: string, min: number, max: number): number | null => {
-    const v = w[key];
-    if (typeof v !== "number" || !Number.isFinite(v) || v < min || v > max) return null;
-    return v;
-  };
-  const seed = num("seed", 0, 2 ** 31);
-  const cell = num("cell", 40, 400);
-  const density = num("density", 0, 1);
-  const linkChance = num("linkChance", 0, 1);
-  const linkReach = num("linkReach", 0, 600);
-  if (
-    seed === null ||
-    cell === null ||
-    density === null ||
-    linkChance === null ||
-    linkReach === null
-  ) {
-    return null;
-  }
-  return { seed, cell, density, linkChance, linkReach };
 }
 
 /**

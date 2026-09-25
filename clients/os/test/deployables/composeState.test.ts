@@ -293,7 +293,8 @@ describe("the wire form of a placement", () => {
       hostname: "shop.memql.example.com",
       // Nobody picked a client, so the app is the cluster's own (D12 below).
       accountId: "self",
-      ownDomain: "shop.acme.com",
+      ownDomain: "",
+      domains: ["shop.acme.com"],
     });
   });
 
@@ -589,7 +590,7 @@ describe("a skipped app's address", () => {
     // `addresses` is the seeded SUGGESTION -- a value the person never saw.
     // Sending it would record a placement they did not choose.
     const out = placementsFrom(["web"], { web: { slug: "web", accountId: "", ownDomain: "", skip: true } }, "memql.example.com");
-    expect(out["web"]).toEqual({ hostname: "", accountId: "", ownDomain: "", skip: true });
+    expect(out["web"]).toEqual({ hostname: "", accountId: "", ownDomain: "", domains: [], skip: true });
   });
 
   it("is still sent for an app that is NOT skipped", () => {

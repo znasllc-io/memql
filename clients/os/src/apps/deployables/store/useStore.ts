@@ -85,7 +85,7 @@ export function useStore(storeId: string): StoreReading {
     };
   }, [connection, id]);
   const reading = useReading<StoreRow | null>(connection === null || id === "" ? "no-store" : `store:${id}`, read);
-  return { ...reading, store: reading.value ?? null };
+  return { ...reading, store: id === "" ? null : reading.value ?? null };
 }
 
 /** The development stores paired to one live store. */

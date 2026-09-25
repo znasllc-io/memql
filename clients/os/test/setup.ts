@@ -74,13 +74,13 @@ if (!window.matchMedia) {
   });
 }
 
-// ResizeObserver: the wallpaper canvas observes its parent.
+// ResizeObserver: layout-aware components observe their containers.
 //
 // The parameters are DECLARED even though jsdom lays nothing out and so can
 // never fire the callback. A shim narrower than the API it stands in for is
 // not privately incomplete: CodeQL resolves the global to this class, and so
-// read the correct production call `new ResizeObserver(resize)` in
-// MemoryField as passing a superfluous argument. A gap in a test double
+// read a correct production call `new ResizeObserver(resize)` as passing a
+// superfluous argument. A gap in a test double
 // surfaced as an alert against application code that was right (memql#4777).
 //
 // `implements ResizeObserver` is the half tsc can check -- a renamed or

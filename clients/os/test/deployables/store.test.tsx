@@ -119,6 +119,17 @@ describe("the store is a connection on the deployable, not a build setting", () 
     await waitFor(() => expect(slot?.textContent).toContain("example.myshopify.com"));
   });
 
+  it("opens testing, production and store checks only through the map Store slot", async () => {
+    mount(fakeConnection(BOUND));
+    const page = await openDeployable("shop.memql.example.com");
+    expect(within(page).queryByRole("region", { name: "Preview" })).toBeNull();
+    expect(within(page).queryByRole("button", { name: "Store" })).toBeNull();
+    await click(storeSlot(page));
+    expect(await screen.findByRole("button", { name: "Configure testing store" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Configure production store" })).toBeTruthy();
+    expect(await screen.findByText("Store checks")).toBeTruthy();
+  });
+
   it("carries no Shopify chip under App configuration", async () => {
     const connection = fakeConnection(BOUND);
     mount(connection);
@@ -165,7 +176,8 @@ describe("a storefront with no store", () => {
     mount(connection);
     await openDeployable("new.memql.example.com");
     expect(await screen.findByRole("button", { name: /^Go live/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Store — setup needed" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Store — setup needed" })).toBeNull();
+    expect(storeSlot(document.body)?.getAttribute("data-os-setup")).toBe("");
   });
 });
 

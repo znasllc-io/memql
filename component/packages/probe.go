@@ -120,9 +120,10 @@ type ManifestSummary struct {
 // preview shows. Deliberately not the build plan or the binding: those are
 // Analyze's to report against a tree it has actually read.
 type ManifestSummaryDeployable struct {
-	Name string `json:"name"`
-	Kind string `json:"kind"`
-	Path string `json:"path"`
+	DisplayName string `json:"displayName,omitempty"`
+	Name        string `json:"name"`
+	Kind        string `json:"kind"`
+	Path        string `json:"path"`
 }
 
 // emptyManifestSummary is what a probe answers when there is nothing to
@@ -421,7 +422,7 @@ func probeManifest(ctx context.Context, d *Deps, bearer, owner, repo string) Man
 	out.Name = manifest.Name
 	for _, dep := range manifest.Deployables {
 		out.Deployables = append(out.Deployables, ManifestSummaryDeployable{
-			Name: dep.Name, Kind: dep.Kind, Path: dep.Path,
+			Name: dep.Name, Kind: dep.Kind, Path: dep.Path, DisplayName: dep.DisplayName,
 		})
 	}
 	// The DSL domains are the DIRECTORY NAMES under dsl/, because that is

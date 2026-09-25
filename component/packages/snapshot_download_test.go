@@ -75,3 +75,32 @@ func TestSnapshotRestoreCrossesAttachmentCeiling(t *testing.T) {
 		t.Fatal("attachment ceiling no longer enforced")
 	}
 }
+
+func TestUploadedZipReadsAzuriteURLAtItsObjectPath(t *testing.T) {
+	raw := []byte("PK uploaded zip")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/test/memql/library/user/file/source.zip" {
+			t.Errorf("wrong object path: %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Length", strconv.Itoa(len(raw)))
+		_, _ = w.Write(raw)
+	}))
+	defer server.Close()
+	key := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32))
+	t.Setenv("MEMQL_AZURE_STORAGE_CONNECTION_STRING", "AccountName=test;AccountKey="+key+";BlobEndpoint="+server.URL+"/test;")
+	t.Setenv("MEMQL_AZURE_BLOB_CONTAINER", "memql")
+	for _, limit := range []int{len(raw) - 1, len(raw)} {
+		t.Setenv(MaxSourceBytesEnv, strconv.Itoa(limit))
+		reader := &blobReader{}
+		got, err := reader.read(context.Background(), server.URL+"/test/memql/library/user/file/source.zip")
+		if limit < len(raw) {
+			if err == nil || got != nil {
+				t.Fatal("URL download bypassed source budget")
+			}
+		} else if err != nil || !bytes.Equal(got, raw) {
+			t.Fatalf("URL upload round trip: %q %v", got, err)
+		}
+	}
+}

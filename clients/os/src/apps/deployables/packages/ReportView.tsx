@@ -106,9 +106,11 @@ export function ReportView({ report, only }: { report: AnalysisReport | null; on
           <RecordList as="ul" label="Declared records">
             {deployables.map((d) => (
               <li key={d.name} data-problem={d.problem ? "true" : "false"}>
-                <RecordRow name={d.name} secondary={d.path} state={d.prebuilt ? "already built" : d.kind}>
+                <RecordRow name={d.displayName || d.name} secondary={d.path} state={d.prebuilt ? "already built" : d.kind}>
                   <span>{d.buildPlan}</span>
-                  {d.binding?.store ? <span>Fronts {d.binding.store}</span> : null}
+                  {d.binding?.store ? <span>{d.binding.store}</span> : null}
+                  {d.deployment?.slug ? <span>Address: {d.deployment.slug}</span> : null}
+                  {d.deployment?.domains?.length ? <span>{d.deployment.domains.join(", ")}</span> : null}
                 </RecordRow>
                 {d.problem ? <ProblemNotice problem={d.problem} tone="error" /> : null}
               </li>

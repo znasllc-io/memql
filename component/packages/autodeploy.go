@@ -72,6 +72,7 @@ func PlanFingerprint(rep *Report) string {
 			d.Name, d.Kind, d.Path, d.Command, d.Output,
 			boolWord(d.Prebuilt, "prebuilt", "builds"),
 			bindingWord(d.Binding),
+			d.DisplayName, deploymentFingerprint(d.Deployment),
 			assetPlanFingerprint(d.Assets),
 			problem,
 		}, "|"))

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -744,7 +745,7 @@ func TestPlacementsArgReadsTheWireShape(t *testing.T) {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
 	for name, p := range want {
-		if got[name] != p {
+		if !reflect.DeepEqual(got[name], p) {
 			t.Errorf("%s: got %+v, want %+v", name, got[name], p)
 		}
 	}

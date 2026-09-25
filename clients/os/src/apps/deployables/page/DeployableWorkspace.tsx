@@ -11,13 +11,14 @@ import { ActivityTarget } from "../../../kit/SemanticActivity";
 import { accountNameFrom, type AccountRow } from "../../accounts/rows";
 import { domainFromRow, isListedDomain } from "../domains";
 import { shortVersion, sourceLabel, type DeploymentRow, type PackageRow } from "../packages/rows";
-import { boundStoreId, bundleForm, type SiteRow } from "../rows";
+import { boundStoreId, previewStoreId, bundleForm, type SiteRow } from "../rows";
 import { kindLabel } from "../targets";
 import { useCustomDomains } from "../useCustomDomains";
 import { railFor, type RailInput } from "./rail";
 import { storeLabel } from "../store/rows";
 import { PreviewSection } from "../preview/PreviewSection";
 import { NO_PARTS, type PartsHeld } from "../parts";
+import { AttentionMarker } from "../../../attention/Attention";
 import { useStore } from "../store/useStore";
 
 export type WorkspaceDetail = "source" | "whatItIs" | "whereItLives" | "build" | "runtime" | "traffic" | "store";
@@ -72,7 +73,7 @@ export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDo
             above, so somebody without `execute app:deployables/store` would
             be shown a slot the engine then serves nothing into -- a refusal
             rendered as an empty panel. */}
-        {storefront && canStore ? <StorePiece storeId={storeId} onClick={() => onInspect("store")} siteId={site.id} /> : null}
+        {storefront && canStore ? <StorePiece storeId={storeId} testingId={previewStoreId(site)} onClick={() => onInspect("store")} siteId={site.id} /> : null}
         <ActivityTarget target={`deployables:${site.id}:address`}><Piece icon={<Globe size={18} aria-hidden />} label="Cluster address" detail={site.hostname || "No address recorded"} onClick={() => onInspect("whereItLives")} /></ActivityTarget>
         {canDomains ? <DomainPiece site={site} onClick={() => onInspect("whereItLives")} /> : null}
         <ActivityTarget target={`deployables:${site.id}:client`}><Piece icon={<Building2 size={18} aria-hidden />} label="Client" detail={accountNameFrom(accounts, site.accountId) || (site.accountId ? "Client name unavailable" : "The cluster")} onClick={() => onInspect("whereItLives")} /></ActivityTarget>
@@ -87,17 +88,9 @@ export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDo
       {failed && site.status === "live" ? <Caption>The latest attempt did not replace the published version.</Caption> : null}
       {pkg && timelineError ? <Notice tone="error" sentence="Deployment history could not be read." detail={timelineError}><Button onClick={onRetryRead}>Try again</Button></Notice> : null}
     </section>
-    {/* PREVIEW SITS UNDER VERSIONS, because it is a reading of the same thing:
-        Versions says what is serving, Preview says what is being exercised
-        beside it. Two sections rather than one, because the second answers a
-        question the first cannot -- which store each version talks to -- and
-        folding them together would bury it.
-
-        ABSENT FOR THE PLATFORM'S OWN SITE. MemQL OS is systemOwned and exempt
-        from the preview axis as it is from the status and settings axes; the
-        engine refuses those writes, and drawing the section on the console
-        somebody is reading this in would be a panel of controls that only fail. */}
-    {!site.systemOwned ? <PreviewSection site={site} runs={runs ?? []} can={can ?? NO_PARTS} onOpenStore={() => onInspect("store")} /> : null}
+    {/* Storefront testing lives with its two store connections. Other app
+        kinds keep their version preview on this page. */}
+    {!site.systemOwned && !storefront ? <PreviewSection site={site} runs={runs ?? []} can={can ?? NO_PARTS} onOpenStore={() => onInspect("store")} /> : null}
   </>;
 }
 
@@ -129,19 +122,20 @@ function DomainPiece({ site, onClick }: { site: SiteRow; onClick: () => void }) 
  * state. A store that does not read back is NOT drawn as unbound -- that
  * would hide a real misconfiguration behind a state that looks deliberate.
  */
-function StorePiece({ storeId, siteId, onClick }: { storeId: string; siteId: string; onClick: () => void }) {
+function StorePiece({ storeId, testingId, siteId, onClick }: { storeId: string; testingId: string; siteId: string; onClick: () => void }) {
   const bound = useStore(storeId);
+  const testing = useStore(testingId);
   const detail =
     storeId === ""
-      ? "Not connected"
+      ? testing.store ? `${storeLabel(testing.store)} · Testing` : testingId ? testing.state === "failed" || testing.state === "read" ? "Testing store unavailable" : "Reading testing store…" : "Not connected"
       : bound.state === "failed"
         ? "The store could not be read"
         : bound.store !== null
-          ? [storeLabel(bound.store), bound.store.status].filter((part) => part !== "").join(" \u00b7 ")
+          ? [storeLabel(bound.store), bound.store.isDevelopment ? "Sandbox · Setup needed" : !bound.store.storefrontTokenRef || !bound.store.adminTokenRef ? "Setup needed" : "Production"].filter((part) => part !== "").join(" \u00b7 ")
           : bound.state === "read"
             ? "Names a store that is not on this cluster"
             : "Reading the store";
-  return <ActivityTarget target={`deployables:${siteId}:store`}><Piece icon={<ShoppingBag size={18} aria-hidden />} label="Store" detail={detail} onClick={onClick} /></ActivityTarget>;
+  return <ActivityTarget target={`deployables:${siteId}:store`}><button type="button" className="deployable-slot" onClick={onClick} data-os-setup={!storeId || bound.state === "failed" || (bound.state === "read" && (!bound.store || bound.store.isDevelopment || !bound.store.storefrontTokenRef || !bound.store.adminTokenRef)) ? "" : undefined}><ShoppingBag size={18} aria-hidden /><span><strong>Store</strong><small>{detail}</small></span><AttentionMarker appId="deployables" sectionId="deployables" target="shopify-store" /><ChevronRight size={13} aria-hidden /></button></ActivityTarget>;
 }
 
 export function attemptWord(status: string): string {

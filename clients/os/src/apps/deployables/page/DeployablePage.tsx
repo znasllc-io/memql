@@ -1,9 +1,8 @@
-import { AttentionMarker } from "../../../attention/Attention";
 import { useEffect, useState } from "react";
 import { Concepts } from "@znasllc-io/memql-sdk-core/client";
-import { Activity, ExternalLink, Store } from "lucide-react";
+import { Activity, ExternalLink } from "lucide-react";
 
-import { Button, Caption, Chip, Chips, Head, Input, Panel, ProvenanceDot, useLiveView } from "../../../kit";
+import { Button, Caption, Chip, Chips, Head, Input, Panel, useLiveView } from "../../../kit";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
 import { OpenLogsButton } from "../../../logs/OpenLogs";
 import { useAccountOptions } from "../../accounts/tie";
@@ -32,8 +31,6 @@ import { WhatItIsStop } from "./stops/WhatItIs";
 import { WhereItLivesStop } from "./stops/WhereItLives";
 import { DomainWizard } from "./stops/Domains";
 import { ShopifyStorePanel } from "../store/ShopifyStorePanel";
-import { boundStoreId } from "../rows";
-import { useStore } from "../store/useStore";
 import { RefusalNotice } from "../preview/PreviewSection";
 import { useBundleFlip } from "./useBundleFlip";
 
@@ -161,15 +158,13 @@ export function DeployablePage({
 
   const rail: StandingInput = { mode: "standing", pkg, app, run, site };
   const refusalStop = refusalStopFor(run);
-  const name = site.title || site.packageDeployableName || siteName(site);
+  const name = pkg?.declares.find(d => d.name === app)?.displayName?.trim() || site.title || site.packageDeployableName || siteName(site);
   const url = liveUrlFor(site.hostname);
 
   // WHAT THE ENGINE SAYS IS LEGAL about this deployable's candidate (epic
   // memql#5531). The bar offers a promotion only when the readiness has landed
   // AND says yes -- absent, never disabled, and the Preview section below
   // draws the reason when the answer is no.
-  const storeReading = useStore(site.kind === "shopify_storefront" && can.store ? boundStoreId(site) : "");
-  const shopifyIncomplete = !boundStoreId(site) || storeReading.state === "failed" || (storeReading.state === "read" && !storeReading.store) || Boolean(storeReading.store && (!storeReading.store.adminTokenRef || !storeReading.store.storefrontTokenRef));
   const previewRead = usePreviewReadiness(site);
   const previewReadiness = previewRead.readiness;
   // The promotion is the one preview write the BAR makes, so the hook lives
@@ -189,7 +184,7 @@ export function DeployablePage({
         ? null
         : {
             hasCandidate: previewReadiness.hasCandidate,
-            canPromote: previewReadiness.canPromote,
+            canPromote: previewReadiness.canPromote && site.candidateRef !== site.bundleRef,
             canGoLive: previewReadiness.canGoLive,
             goLiveRefusal: previewReadiness.goLiveRefusal,
           },
@@ -369,7 +364,7 @@ export function DeployablePage({
     const toOverview = () => setDetail(null);
     return <ShopifyStorePanel
       site={site} canBind={can.store} result={shopifyResult} revision={openRevision}
-      onWritten={() => { previewRead.reread(); storeReading.reread(); }}
+      onWritten={previewRead.reread} runs={timelineRows} can={can}
       trail={[{ label: backLabel, onSelect: onBack }, { label: name, onSelect: toOverview }, { label: "Store" }]}
       back={{ label: name, onSelect: toOverview }} />;
   }
@@ -398,7 +393,6 @@ export function DeployablePage({
             )}
             <OpenLogsButton iconOnly subject={site.id} subjectConcept={Concepts.PLATFORM_SITE} ariaLabel={`Logs for ${name}`} />
             <IconButton label="Traffic" onClick={() => setDetail("traffic")}><Activity size={16} aria-hidden /></IconButton>
-            {site.kind === "shopify_storefront" && can.store ? <IconButton data-os-setup={shopifyIncomplete ? "" : undefined} label={shopifyIncomplete ? "Store — setup needed" : "Store"} onClick={() => { storeReading.reread(); setDetail("store"); }}><Store size={16} aria-hidden /><AttentionMarker appId="deployables" sectionId="deployables" target="shopify-store" />{shopifyIncomplete ? <ProvenanceDot tone="partlySetUp" label="Shopify setup needed" /> : null}</IconButton> : null}
           </Head>
 
           <Chips label="Deployable facts">
@@ -437,7 +431,7 @@ export function DeployablePage({
               (Connect Shopify, D5), and the reason is drawn here instead,
               with the way to the store when that is where it is cleared. The
               Store panel is absent without the store part, so is the way. */}
-          {reading.withheld ? (
+          {reading.withheld && site.kind !== "shopify_storefront" ? (
             <RefusalNotice refusal={reading.withheld} storefront={can.store} onOpenStore={() => setDetail("store")} />
           ) : null}
 

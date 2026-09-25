@@ -86,6 +86,9 @@ func (b *blobReader) read(ctx context.Context, key string) ([]byte, error) {
 		}
 		b.uploader, b.container = up, container
 	}
+	if strings.HasPrefix(key, "http://") || strings.HasPrefix(key, "https://") {
+		return b.uploader.DownloadURLWithLimit(ctx, key, DefaultLimits().MaxSourceBytes)
+	}
 	return b.uploader.DownloadWithLimit(ctx, b.container, key, DefaultLimits().MaxSourceBytes)
 }
 

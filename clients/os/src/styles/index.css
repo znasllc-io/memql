@@ -190,10 +190,27 @@ button:not(:disabled):active {
   overflow: hidden;
 }
 
-.os-field {
+.os-wallpaper {
   position: absolute;
   inset: 0;
+  overflow: hidden;
   pointer-events: none;
+}
+.os-wallpaper::before,
+.os-wallpaper::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+/* Approved Fold: broad matte planes, fixed geometry, no texture or motion.
+ * Mixing only the theme's ground and ink keeps every mode in its palette. */
+.os-wallpaper::before {
+  background: color-mix(in srgb, var(--os-ground), var(--os-ink) 3.1%);
+  clip-path: polygon(0 0, 15% 0, 64% 100%, 0 100%);
+}
+.os-wallpaper::after {
+  background: color-mix(in srgb, var(--os-ground), var(--os-ink) 1.7%);
+  clip-path: polygon(0 0, 15% 0, 42% 100%, 0 100%);
 }
 
 .os-plates {
@@ -218,7 +235,7 @@ button:not(:disabled):active {
   font-family: var(--os-font-display);
   font-size: clamp(200px, 36vh, 440px);
   line-height: 0.78;
-  color: var(--os-field-numeral);
+  color: var(--os-desk-numeral);
   pointer-events: none;
   user-select: none;
 }
@@ -2512,7 +2529,7 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   background: var(--os-accent-soft);
 }
 .os-chip[data-tone="muted"] {
-  background: var(--os-field-dot);
+  background: var(--os-wash);
 }
 
 /* A STATUS WORD STANDING IN A CHIP ROW WEARS THE CHIP'S BOX.
@@ -6664,14 +6681,6 @@ a.os-button {
   border-radius: var(--os-radius-xs);
   overflow: hidden;
 }
-.os-theme-mini-field {
-  position: absolute;
-  inset: 0;
-  /* The memory field, abstracted to its texture: the same dot colour the
-   * wallpaper paints, as a wash rather than a lattice. A real lattice at this
-   * size is one grey rectangle. */
-  opacity: 0.9;
-}
 .os-theme-mini-window {
   position: absolute;
   left: 8px;
@@ -10744,7 +10753,7 @@ a.os-button {
 }
 
 .os-mz-concept:hover:not(:disabled) {
-  background: var(--os-field-dot);
+  background: var(--os-wash);
   border-color: var(--os-line);
 }
 
@@ -10781,7 +10790,7 @@ a.os-button {
   gap: 6px;
   padding: 4px 8px;
   border-radius: var(--os-radius-xs);
-  background: var(--os-field-dot);
+  background: var(--os-wash);
   font-size: var(--os-text-base);
 }
 

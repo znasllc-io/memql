@@ -1,11 +1,12 @@
+import { normalizeHostname } from "../../../domains";
 import { useEffect, useRef } from "react";
 import { Shuffle } from "lucide-react";
 
 import { Button, Caption, Field, Input, Subhead } from "../../../../../kit";
+import { domainNames } from "../../../packages/manifest";
 import { generateNickname } from "../../../packages/nickname";
 import { AccountPicker } from "../../../../accounts/AccountPicker";
 import { accountNameFrom, type AccountRow } from "../../../../accounts/rows";
-import { normalizeHostname } from "../../../domains";
 import { hostnameFor, validateSlug } from "../../../hostname";
 import { ProblemNotice } from "../../../packages/ReportView";
 import type { DeployableOutcome } from "../../../packages/rows";
@@ -53,6 +54,8 @@ const GENERATE_TRIES = 6;
 
 export function ComposeWhereItLivesStop({
   apps,
+  labels = {},
+  onExport,
   sourceName,
   addresses,
   onAddress,
@@ -66,6 +69,8 @@ export function ComposeWhereItLivesStop({
 }: {
   /** Every app that needs an address. One entry, named "", for a hand-made deployable. */
   apps: readonly string[];
+  labels?: Readonly<Record<string, string>>;
+  onExport?: () => void;
   /** The source's own name, for the headings. */
   sourceName: string;
   addresses: Readonly<Record<string, AddressDraft>>;
@@ -102,7 +107,7 @@ export function ComposeWhereItLivesStop({
               version: "",
               created: true,
               accountId: held.accountId,
-              ownDomain: normalizeHostname(held.ownDomain),
+              ownDomain: domainNames(held.ownDomain).join(", "),
             };
           });
     return (
@@ -110,6 +115,7 @@ export function ComposeWhereItLivesStop({
         {placed.map((outcome) => (
           <PlacedApp key={outcome.name} outcome={outcome} accounts={accounts} many={placed.length > 1} />
         ))}
+        {onExport ? <div className="os-panel-actions"><Button tone="quiet" onClick={onExport}>Export manifest</Button></div> : null}
       </div>
     );
   }
@@ -120,7 +126,8 @@ export function ComposeWhereItLivesStop({
         <AppAddress
           key={app}
           app={app}
-          sourceName={sourceName}
+          sourceName={labels[app] || sourceName}
+          label={labels[app]}
           address={addresses[app] ?? EMPTY_ADDRESS}
           onAddress={(patch) => onAddress(app, patch)}
           accounts={accounts}
@@ -131,13 +138,14 @@ export function ComposeWhereItLivesStop({
           verdicts={verdicts[app] ?? {}}
         />
       ))}
-      <Caption>Chosen once. A later deploy of this source keeps the same addresses.</Caption>
+      {onExport ? <div className="os-panel-actions"><Button tone="quiet" onClick={onExport}>Export manifest</Button></div> : null}
     </div>
   );
 }
 
 function AppAddress({
   app,
+  label,
   sourceName,
   address,
   onAddress,
@@ -149,6 +157,7 @@ function AppAddress({
   verdicts,
 }: {
   app: string;
+  label?: string;
   sourceName: string;
   address: AddressDraft;
   onAddress: (patch: Partial<AddressDraft>) => void;
@@ -163,11 +172,11 @@ function AppAddress({
   const complaint = validateSlug(address.slug, clusterDomain);
   const preview = hostnameFor(address.slug, clusterDomain);
   const key = addressKeyFor(app);
-  const heading = app === "" ? sourceName : app;
+  const heading = label || (app === "" ? sourceName : app);
   const skipped = address.skip === true;
   const slugKey = `${key}:slug`;
   const domainKey = `${key}:domain`;
-  const ownDomain = normalizeHostname(address.ownDomain);
+  const ownDomain = domainNames(address.ownDomain).join(", ");
 
   // THE SLUG, ASKED ABOUT AFTER A PAUSE. A shape complaint is answered at
   // keystroke rate and asks the cluster nothing; a blank clears the verdict.
@@ -314,13 +323,13 @@ function AppAddress({
               three Go guards; rendering the field is the presentation half. */}
           {canBindDomain ? (
             <>
-              <Field label="Custom domain">
+              <Field label="Custom domains">
                 <Input
                   id={`os-compose-domain-${key}`}
                   label={`A domain of the client's own for ${heading || "this deployable"}`}
                   value={address.ownDomain}
                   onChange={(next) => onAddress({ ownDomain: next })}
-                  placeholder="shop.acme.com"
+                  placeholder="shop.acme.com, www.acme.com"
                 />
               </Field>
               {ownDomain === "" ? null : <DomainVerdictLine hostname={ownDomain} verdict={verdicts.ownDomain} />}

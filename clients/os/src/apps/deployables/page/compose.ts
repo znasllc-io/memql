@@ -1,3 +1,4 @@
+import { domainNames } from "../packages/manifest";
 import { hostnameFor, validateSlug } from "../hostname";
 import { normalizeHostname } from "../domains";
 import { generateNickname } from "../packages/nickname";
@@ -185,7 +186,7 @@ export function addressReady(address: AddressDraft, clusterDomain: string): bool
   const slug = address.slug.trim();
   if (slug === "" || address.accountId.trim() === "") return false;
   if (validateSlug(slug, clusterDomain) !== "") return false;
-  if (address.ownDomain.trim() !== "" && normalizeHostname(address.ownDomain) === "") return false;
+  if (address.ownDomain.trim() !== "" && domainNames(address.ownDomain).some(d => normalizeHostname(d) === "")) return false;
   return true;
 }
 
@@ -275,7 +276,8 @@ export function placementsFrom(
     out[app] = {
       hostname: skipped ? "" : hostnameFor(held.slug, clusterDomain),
       accountId: skipped ? "" : held.accountId.trim(),
-      ownDomain: normalizeHostname(held.ownDomain),
+      ownDomain: "",
+      domains: skipped ? [] : domainNames(held.ownDomain),
       ...(held.skip === true ? { skip: true } : {}),
     };
   }
