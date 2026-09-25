@@ -20,7 +20,7 @@ type SpeechAIProvider interface {
 
 func AudioResolveRequest(modality airoute.Modality, provider string) airoute.ResolveRequest {
 	return airoute.ResolveRequest{Level: airoute.LevelFast, Modality: modality, ExplicitProvider: provider,
-		PromptName: "askAudio", Needs: airoute.Needs{AudioIn: modality == airoute.ModalityTranscribe, AudioOut: modality == airoute.ModalitySpeech, MinContextTokens: 1}}
+		PromptName: "askAudio", Needs: airoute.Needs{AudioIn: modality == airoute.ModalityTranscribe, AudioOut: modality == airoute.ModalitySpeech}}
 }
 func (e *MemQLEngine) TranscribeAudio(ctx context.Context, audio FleetAudio, provider string) (FleetTranscript, error) {
 	if len(audio.Data) == 0 || len(audio.Data) > 16<<20 {

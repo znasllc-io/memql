@@ -35,12 +35,19 @@ func DecodeWAV(data []byte) ([]byte, int, error) {
 	valid := false
 	for offset := 12; offset+8 <= len(data); {
 		size := int64(binary.LittleEndian.Uint32(data[offset+4 : offset+8]))
+		kind := string(data[offset : offset+4])
 		offset += 8
+		// Non-seekable WAV writers (including Kokoro/FFmpeg) declare both
+		// RIFF and final PCM sizes as unknown. The completed, bounded HTTP
+		// response supplies that boundary. Finite oversized chunks still fail.
+		if kind == "data" && size == 0xffffffff && binary.LittleEndian.Uint32(data[4:8]) == 0xffffffff {
+			size = int64(len(data) - offset)
+		}
 		if size > int64(len(data)-offset) {
 			return nil, 0, fmt.Errorf("truncated WAV chunk")
 		}
 		chunk := data[offset : offset+int(size)]
-		switch string(data[offset-8 : offset-4]) {
+		switch kind {
 		case "fmt ":
 			if len(chunk) < 16 {
 				return nil, 0, fmt.Errorf("invalid WAV format")

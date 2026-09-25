@@ -961,6 +961,18 @@ button:not(:disabled):active {
 .os-ask-byline strong { font-size: var(--os-text-sm); font-weight: 600; }
 .os-ask-byline time { color: var(--os-muted); font-size: 10px; }
 .os-ask-message p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; font-size: var(--os-text-base); }
+.os-ask-answer { overflow-wrap: anywhere; line-height: 1.65; font-size: var(--os-text-base); }
+.os-ask-answer > :first-child { margin-top: 0; }
+.os-ask-answer > :last-child { margin-bottom: 0; }
+.os-ask-answer p { white-space: normal; margin-block: 0.65em; }
+.os-ask-answer :is(h1, h2, h3, h4, h5, h6) { font-size: 1em; font-weight: 600; margin-block: 1em 0.4em; }
+.os-ask-answer :is(ul, ol) { padding-left: 1.5em; margin-block: 0.6em; }
+.os-ask-answer li + li { margin-top: 0.3em; }
+.os-ask-answer blockquote { border-left: 2px solid var(--os-line); margin: 0.75em 0; padding-left: 1em; color: var(--os-dim); }
+.os-ask-answer pre { max-width: 100%; overflow: auto; padding: 0.75em; background: var(--os-raised); border-radius: var(--os-radius-xs); white-space: pre; }
+.os-ask-answer code { font-size: 0.9em; }
+.os-ask-answer table { display: block; max-width: 100%; overflow: auto; border-collapse: collapse; margin-block: 0.75em; }
+.os-ask-answer :is(th, td) { text-align: left; padding: 0.35em 0.75em; border-bottom: 1px solid var(--os-line); }
 .os-ask-history { flex: 0 0 210px; border-right: 1px solid var(--os-line); overflow-y: auto; padding: 16px 10px; }
 .os-ask-history > span { display: block; padding: 0 8px 10px; }
 .os-ask-history button { display: block; width: 100%; text-align: left; padding: 10px; font: inherit; font-size: var(--os-text-sm); color: var(--os-muted); background: none; border: 0; border-radius: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
@@ -15192,7 +15204,7 @@ button.os-cluster-mesh-peer:focus-visible {
 .os-ask-live > p { margin:0; color:var(--os-ink-muted); font-size:13px; }
 .os-ask-live-controls { display:flex; gap:12px; align-items:center; margin-top:18px; }
 .os-ask-live-controls .os-ask-mic { width:42px; height:42px; }
-.os-ask-live-end { display:flex; align-items:center; gap:8px; padding:10px 16px; border-radius:24px; border:1px solid var(--os-border); background:var(--os-surface); color:var(--os-ink); cursor:pointer; }
+.os-ask-live-end { display:flex; align-items:center; gap:8px; padding:10px 16px; border-radius:24px; border:1px solid var(--os-line); background:var(--os-raised); color:var(--os-ink); cursor:pointer; }
 .os-ask-retry { border:0; background:none; color:var(--os-ink-muted); font:inherit; font-size:12px; text-decoration:underline; cursor:pointer; margin-right:12px; padding:4px 0; }
 @keyframes os-ask-breathe { 50% { box-shadow:0 0 48px color-mix(in srgb,var(--os-accent) 25%,transparent); transform:scale(1.025); } }
 @media (prefers-reduced-motion: reduce) { .os-ask-live-mark { animation:none!important; } }

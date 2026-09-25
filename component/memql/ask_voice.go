@@ -141,10 +141,14 @@ func (e *MemQLEngine) driveAskVoice(ctx context.Context, room audio.Room, input 
 }
 func (e *MemQLEngine) askVoiceTurn(ctx context.Context, room audio.Room, opts AskVoiceOptions, pcm []byte) {
 	turnID := id.NewShortId()
-	state := func(value string) { _ = room.Event(AskVoiceEvent{Type: "state", State: value, TurnID: turnID}) }
+	state := func(value string) {
+		if ctx.Err() == nil {
+			_ = room.Event(AskVoiceEvent{Type: "state", State: value, TurnID: turnID})
+		}
+	}
 	var mu sync.Mutex
 	events := []AskEvent{}
- timingHistory := e.askTimingHistory(ctx)
+	timingHistory := e.askTimingHistory(ctx)
 	observe := func(call airoute.CallObservation) {
 		event := AskEvent{ID: call.ID, Kind: "model", Phase: call.Phase, At: time.Now().UTC(), Provider: call.Provider, Model: call.Model, ElapsedMS: int64(call.ElapsedMS), Error: call.Error, Call: &call}
 		if call.Phase == "running" {

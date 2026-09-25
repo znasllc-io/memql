@@ -96,7 +96,8 @@ type ResolveRequest struct {
 	// Modality is derived from the call site, not declared by an author.
 	Modality Modality
 
-	// Needs are the capability floors. MinContextTokens is never zero.
+	// Needs are the capability floors. Audio calls have no chat context floor;
+	// text-model calls always carry a positive MinContextTokens.
 	Needs Needs
 
 	// PromptName is the DSL prompt this call renders, empty for a Go call

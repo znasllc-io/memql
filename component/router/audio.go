@@ -17,6 +17,10 @@ type audioChain struct {
 }
 
 func (r *Router) resolveAudio(ctx context.Context, req ResolveRequest, modality providerModality) (any, Resolved, error) {
+	// Carry the same audio eligibility rule through provider binding and the
+	// worker hop. Clearing only the catalog filter leaves a false token floor
+	// on the actual call and rejects every runtime with no chat window.
+	req.Needs.MinContextTokens = 0
 	chain, resolved, err := r.resolveChain(ctx, req, modality)
 	if err != nil {
 		return nil, Resolved{}, err

@@ -22,3 +22,22 @@ func TestDecodeSpeechWAVWithMetadataAndRejectBadMedia(t *testing.T) {
 		}
 	}
 }
+
+func TestDecodeCompletedStreamingWAV(t *testing.T) {
+	pcm := []byte{1, 2, 3, 4, 5, 6}
+	wav := CreateWAVChunk(pcm, 24000, 1, 16)
+	binary.LittleEndian.PutUint32(wav[4:8], 0xffffffff)
+	binary.LittleEndian.PutUint32(wav[40:44], 0xffffffff)
+	decoded, rate, err := DecodeWAV(wav)
+	if err != nil || rate != 24000 || !bytes.Equal(decoded, pcm) {
+		t.Fatalf("streaming WAV: rate=%d err=%v", rate, err)
+	}
+	for _, bad := range [][]byte{wav[:len(wav)-1], append([]byte{}, wav...)} {
+		if len(bad) == len(wav) {
+			binary.LittleEndian.PutUint32(bad[40:44], uint32(len(pcm)+2))
+		}
+		if _, _, err := DecodeWAV(bad); err == nil {
+			t.Fatal("accepted incomplete PCM")
+		}
+	}
+}

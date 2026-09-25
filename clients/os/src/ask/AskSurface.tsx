@@ -8,6 +8,7 @@ import { ArrowUp, Mic, History, Plus, X, Activity, Square, AudioLines } from "lu
 import { ConversationSession } from "./conversationSession";
 import { AskWait } from "./AskWait";
 import { AskActivityLog } from "./AskActivityLog";
+import { AskMessage } from "./AskMessage";
 import type { AskTransport } from "./askController";
 import { CHECKING_ASK, type AskAvailability } from "./useAskReadiness";
 import type { MakeGoalState } from "./useMakeGoal";
@@ -280,7 +281,7 @@ export function AskSurface({
           {exchanges.map(turn => <div key={turn.id} className="os-ask-exchange" data-state={turn.state}>
             <div className="os-ask-message"><span className="os-ask-avatar" aria-hidden>You</span><div><div className="os-ask-byline"><strong>You</strong><time dateTime={turn.startedAt}>{messageTime(turn.startedAt)}</time></div><p>{turn.prompt}</p></div></div>
             <div className="os-ask-message"><span className="os-ask-avatar os-ask-avatar-memql" aria-hidden><Mark size={22} /></span><div><div className="os-ask-byline"><strong>MemQL</strong><time dateTime={turn.startedAt}>{messageTime(turn.startedAt)}</time></div>
-              {turn.answer ? <p className="os-ask-answer">{turn.answer}</p> : null}
+              {turn.answer ? <AskMessage text={turn.answer} /> : null}
               {makeGoal && turn.state === "done" ? <details className="os-ask-message-actions"><summary aria-label="Message actions">•••</summary><button type="button" disabled={makeGoal.busy} onClick={() => void makeGoal.make(turn.prompt)}>{makeGoal.busy ? "Making it a goal" : "Make this a goal"}</button></details> : null}
               {turn.state === "streaming" ? <AskWait activity={turn.activity} startedAt={turn.startedAt} hasText={Boolean(turn.answer)} /> : null}
               {turn.error ? <div className="os-ask-error"><p role="alert">{askErrorSummary(turn.error)}</p>{askErrorSummary(turn.error) !== turn.error ? <details><summary>Details</summary><p>{turn.error}</p></details> : null}{!busy ? <button type="button" className="os-ask-retry" onClick={() => { setDraft(turn.prompt); inputRef.current?.focus(); }}>Edit and try again</button> : null}{onOpenFleet ? <button type="button" className="os-ask-retry" onClick={onOpenFleet}>Open Fleet</button> : null}</div> : null}
