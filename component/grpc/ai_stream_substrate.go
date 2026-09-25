@@ -3,8 +3,10 @@ package memql
 import (
 	"context"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc/codes"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/znasllc-io/memql/core/id"
 
@@ -121,6 +123,7 @@ func (s *streamSession) proxyAIStream(
 ) error {
 	ctx, cancel := context.WithCancel(s.stream.Context())
 	correlate := envelope.GetMessageId()
+	s.activeRequests.Store(requestId, cancel)
 
 	// Refuse locally on an unprovable authority. It matters more here than on
 	// the sibling path: the forward response channel below is drained and
@@ -134,7 +137,7 @@ func (s *streamSession) proxyAIStream(
 	}
 	stampEnvelopeProvenance(ctx, envelope)
 
-	respCh, err := s.service.aiForwarder.Forward(ctx, requestId, target, principal, envelope)
+	respCh, err := s.service.aiForwarder.Forward(ctx, forwardRequestKey(ctx, requestId, envelope), target, principal, envelope)
 	if err != nil {
 		cancel()
 		return s.sendQueryError(requestId, correlate, codes.Unavailable, err.Error())
@@ -172,6 +175,7 @@ func (s *streamSession) proxyAIStream(
 	// Consume the streamed frames from the substrate and render to the client.
 	go func() {
 		defer cancel()
+		defer s.activeRequests.Delete(requestId)
 		consume(ctx, correlate, requestId)
 	}()
 	return nil
@@ -210,6 +214,11 @@ func (s *streamSession) produceTokenStreamToSubstrate(ctx context.Context, reque
 		if chunk.Error != nil {
 			_, publishErr = sess.Fail(ctx, chunk.Error.Error())
 			return
+		}
+		if len(chunk.Metadata) != 0 {
+			if _, publishErr = sess.DeltaWithMeta(ctx, "", chunk.Metadata); publishErr != nil {
+				return
+			}
 		}
 		if chunk.Content != "" {
 			fullContent.WriteString(chunk.Content)
@@ -253,11 +262,11 @@ func (s *streamSession) closeForwardInflight(requestId string) {
 // lazily on first use and the Complete message ends it; the isFinal / confidence
 // / duration / provider fields ride the frame Meta so the consumer reconstructs
 // the wire message byte-for-byte. Calls are serialized by the transcribe stream's
-// single-pump producer, so no extra lock is needed.
+// send lock, including router observations and terminal messages.
 func (s *service) newTranscriptStreamSink(ctx context.Context, requestId string, rawSend func(*memqlv1.MemqlServerMessage) error) func(*memqlv1.MemqlServerMessage) error {
-	sess := s.newTranscriptStreamSession(requestId)
+	sess := s.newTranscriptStreamSession(transcriptionKey(ctx, requestId))
 	started := false
-	ensureStart := func() error {
+	ensureStart := func(ctx context.Context) error {
 		if started {
 			return nil
 		}
@@ -280,34 +289,42 @@ func (s *service) newTranscriptStreamSink(ctx context.Context, requestId string,
 		})
 	}
 	return func(m *memqlv1.MemqlServerMessage) error {
+		// Cancellation stops inference first. The terminal still needs a short,
+		// detached delivery budget to release the remote consumer and inflight.
+		deliveryCtx := ctx
+		if m.GetAiTranscribeStreamComplete() != nil || m.GetQueryError() != nil {
+			var cancel context.CancelFunc
+			deliveryCtx, cancel = context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+			defer cancel()
+			defer closeInflight()
+		}
 		switch p := m.GetPayload().(type) {
 		case *memqlv1.MemqlServerMessage_AiTranscribeStreamDelta:
-			if err := ensureStart(); err != nil {
+			if err := ensureStart(deliveryCtx); err != nil {
 				return err
 			}
 			d := p.AiTranscribeStreamDelta
-			_, err := sess.DeltaWithMeta(ctx, d.GetText(), map[string]any{
-				"isFinal":    d.GetIsFinal(),
-				"confidence": float64(d.GetConfidence()),
+			_, err := sess.DeltaWithMeta(deliveryCtx, d.GetText(), map[string]any{
+				"isFinal":      d.GetIsFinal(),
+				"confidence":   float64(d.GetConfidence()),
+				"metadataJson": d.GetMetadataJson(),
 			})
 			return err
 		case *memqlv1.MemqlServerMessage_AiTranscribeStreamComplete:
-			if err := ensureStart(); err != nil {
+			if err := ensureStart(deliveryCtx); err != nil {
 				return err
 			}
 			c := p.AiTranscribeStreamComplete
-			_, err := sess.Complete(ctx, c.GetText(), map[string]any{
+			_, err := sess.Complete(deliveryCtx, c.GetText(), map[string]any{
 				"durationMs": float64(c.GetDurationMs()),
 				"provider":   c.GetProvider(),
 			})
-			closeInflight()
 			return err
 		case *memqlv1.MemqlServerMessage_QueryError:
-			if err := ensureStart(); err != nil {
+			if err := ensureStart(deliveryCtx); err != nil {
 				return err
 			}
-			_, err := sess.Fail(ctx, p.QueryError.GetError().GetMessage())
-			closeInflight()
+			_, err := sess.Fail(deliveryCtx, p.QueryError.GetError().GetMessage())
 			return err
 		default:
 			// Non-transcribe payloads are not part of the stream lifecycle; drop.
@@ -335,6 +352,13 @@ func (s *streamSession) consumeTokenStream(ctx context.Context, correlate, reque
 		case node.StreamPhaseStart:
 			// Opening frame: no client-visible payload.
 		case node.StreamPhaseDelta:
+			if len(frame.Meta) != 0 {
+				metadata, marshalErr := structpb.NewStruct(frame.Meta)
+				if marshalErr == nil {
+					s.renderToClient(correlate, &memqlv1.MemqlServerMessage{Payload: &memqlv1.MemqlServerMessage_AiChunk{AiChunk: &memqlv1.AiStreamChunk{StreamId: requestId, RequestId: requestId, Index: idx, Chunk: &memqlv1.AiStreamChunk_Metadata{Metadata: metadata}}}})
+					idx++
+				}
+			}
 			if frame.Data != "" {
 				s.renderToClient(correlate, &memqlv1.MemqlServerMessage{
 					Payload: &memqlv1.MemqlServerMessage_AiChunk{
@@ -375,7 +399,7 @@ func (s *streamSession) consumeTokenStream(ctx context.Context, correlate, reque
 // transcript (with isFinal/confidence packed into Meta); the Complete frame
 // carries the final transcript + duration/provider in Meta.
 func (s *streamSession) consumeTranscriptStream(ctx context.Context, correlate, requestId string) {
-	frames, ack, err := node.SubscribeStreamFrames(ctx, s.service.deliverySubstrate, requestId, s.service.streamConsumerID())
+	frames, ack, err := node.SubscribeStreamFrames(ctx, s.service.deliverySubstrate, transcriptionKey(ctx, requestId), s.service.streamConsumerID())
 	if err != nil {
 		_ = s.sendQueryError(requestId, correlate, codes.Unavailable, "transcript subscribe failed: "+err.Error())
 		return
@@ -388,10 +412,11 @@ func (s *streamSession) consumeTranscriptStream(ctx context.Context, correlate, 
 			s.renderToClient(correlate, &memqlv1.MemqlServerMessage{
 				Payload: &memqlv1.MemqlServerMessage_AiTranscribeStreamDelta{
 					AiTranscribeStreamDelta: &memqlv1.AiTranscribeStreamDelta{
-						RequestId:  requestId,
-						Text:       frame.Data,
-						IsFinal:    metaBool(frame.Meta, "isFinal"),
-						Confidence: float32(metaFloat(frame.Meta, "confidence")),
+						RequestId:    requestId,
+						Text:         frame.Data,
+						IsFinal:      metaBool(frame.Meta, "isFinal"),
+						Confidence:   float32(metaFloat(frame.Meta, "confidence")),
+						MetadataJson: metaString(frame.Meta, "metadataJson"),
 					},
 				},
 			})

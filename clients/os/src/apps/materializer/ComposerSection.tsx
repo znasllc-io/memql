@@ -1,3 +1,4 @@
+import { ContentSkeleton } from "../../kit/ContentSkeleton";
 import { useMemo, useState } from "react";
 
 import { Button, Chip, Fact, Facts, Field, FormRow, Head, Input, Notice, RecordList, RecordRow, Select, Subhead } from "../../kit";
@@ -308,7 +309,7 @@ function SourcesColumn({
           next="A query source still works, and the Logs section holds the lines for this app."
         />
       ) : loading && composables.length === 0 ? (
-        <p className="os-caption">Reading what this cluster offers</p>
+        <ContentSkeleton kind="form" label="Loading what this cluster offers" />
       ) : composables.length === 0 ? (
         <p className="os-caption">
           No concept in this cluster is marked as worth composing from. A query source still works.

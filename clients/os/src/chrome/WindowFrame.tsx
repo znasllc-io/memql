@@ -4,7 +4,7 @@ import { PageNavigationProvider } from "../kit/pageNavigation";
 import { TrailRow } from "../kit/TrailRow";
 import { WindowSearchContext, useWindowSearchHost } from "../kit/windowSearch";
 import { useDraggable } from "@dnd-kit/core";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { X, Search, ListFilter, Maximize2, Minimize2, Minus, Settings2 } from "lucide-react";
 
 import { useAsk } from "../ask/AskProvider";
@@ -92,7 +92,9 @@ export function WindowFrame({
     if (node) node.scrollTop = scroll.current.get(win.sectionId) ?? 0;
     return () => { if (node) scroll.current.set(win.sectionId, node.scrollTop); };
   }, [win.sectionId]);
-  const { openAsk } = useAsk();
+  const { openAsk, conversation } = useAsk();
+  const askActivity = useSyncExternalStore(conversation.subscribe, () => conversation.getSnapshot().activity);
+  const driving = askActivity?.navigate && askActivity.app === manifest.id ? askActivity.phase : undefined;
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `window:${win.id}`,
   });
@@ -142,6 +144,7 @@ export function WindowFrame({
       ref={setNodeRef}
       className="os-window"
       data-os-window={manifest.id}
+      data-ask-driving={driving}
       data-os-window-desk={deskId}
       hidden={hidden}
       data-focused={focused || undefined}

@@ -229,7 +229,11 @@ func fleetSelectorReason(selector string, total int) string {
 // once run. It runs now, which means a machine that reports no context window
 // for a model is passed over as soon as a call declares a floor.
 func fleetNeedsFor(req ResolveRequest) memql.FleetNeeds {
-	return memql.FleetNeeds{
+	needs := memql.FleetNeeds{
+		Vision:           req.Needs.Vision || req.Modality == airoute.ModalityVision,
+		AudioIn:          req.Needs.AudioIn || req.Modality == airoute.ModalityTranscribe,
+		AudioOut:         req.Needs.AudioOut || req.Modality == airoute.ModalitySpeech,
+		ImageGen:         req.Needs.Image,
 		StructuredOutput: req.Needs.Structured,
 		// Embeddings is DERIVED from the modality rather than carried as a
 		// field on Needs, and adding the field back is the mistake to avoid:
@@ -243,6 +247,10 @@ func fleetNeedsFor(req ResolveRequest) memql.FleetNeeds {
 		Tools:            req.Needs.Tools,
 		MinContextWindow: req.Needs.MinContextTokens,
 	}
+	if req.Modality == airoute.ModalitySpeech || req.Modality == airoute.ModalityTranscribe {
+		needs.MinContextWindow = 0
+	}
+	return needs
 }
 
 // federationCandidates orders the registry's federated records.

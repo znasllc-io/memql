@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { Button, Caption, Chip, CopyValue, Fact, Facts, Head, Notice, Panel, RecordList, RecordRow, Subhead } from "../../kit";
 import { useSession } from "../../chrome/access";
 import { agreementOf, PROBE_READS, useKeyFacts } from "./keyFacts";
@@ -103,11 +104,7 @@ export function KeysSection() {
 
       <Panel label="Published keys">
         <Subhead meta={counted ? facts.probe.keys.length : undefined}>Published keys</Subhead>
-        {facts.probe.keys.length === 0 ? (
-          <Caption>
-            {facts.loading ? "Reading the feed" : "The feed carried no keys."}
-          </Caption>
-        ) : (
+        {facts.probe.keys.length === 0 ? (facts.loading ? <RecordListSkeleton label="Reading the feed" /> : <Caption>{"The feed carried no keys."}</Caption>) : (
           <RecordList as="ul" label="Published keys">
             {facts.probe.keys.map((key) => (
               <div key={key.kid}>
@@ -165,7 +162,7 @@ export function KeysSection() {
       </Panel>
 
       <div className="os-refresh-row">
-        <Button onClick={facts.reload} busy={facts.loading} busyLabel="Reading">
+        <Button onClick={facts.reload} busy={facts.loading}>
           Read again
         </Button>
         <Caption>

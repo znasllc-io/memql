@@ -69,7 +69,7 @@ function AddShopifyConnection({ appId, onBack }: { appId: "settings" | "deployab
   } });
   return <Wizard icon={<Store size={20} />} title="Add Shopify store" label="Connect Shopify" open="authorize" onOpen={() => {}}
     back={{ label: "Settings", onSelect: onBack }} breadcrumbs={[{ label: "Settings", onSelect: onBack }, { label: "Add Shopify store" }]}
-    status={{ word: pending ? "Checking setup" : readiness.value?.configured ? "Your turn" : "Setup needed", tone: pending ? "busy" : "paused" }} acts={acts}
+    status={{ word: pending ? "" : readiness.value?.configured ? "Your turn" : "Setup needed", tone: pending ? "busy" : "paused" }} acts={acts}
     notices={<>{readiness.error ? <Notice sentence="Shopify setup could not be read."><Button onClick={readiness.reread}>Try again</Button></Notice> : null}{readiness.value?.configured === false ? <Notice tone="warn" sentence="Shopify connections are not available yet." next="Your cluster administrator needs to finish Shopify app registration." /> : null}</>}
     steps={[
       { id: "authorize", name: "Shopify", state: "open", body: pending ? <RecordListSkeleton label="Checking Shopify setup" /> : <p className="os-caption">Choose a store and approve access on Shopify. You’ll return here to finish.</p> },

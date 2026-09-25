@@ -1,3 +1,4 @@
+import { ContentSkeleton } from "../../../kit/ContentSkeleton";
 import { RecordList, RecordRow } from "../../../kit/RecordRow";
 import { RefreshButton } from "../FleetControls";
 
@@ -73,7 +74,7 @@ export function SessionPage({
         />
       )}
 
-      {loading && session === null ? <p className="os-caption">Reading this run.</p> : null}
+      {loading && session === null ? <ContentSkeleton kind="detail" label="Loading this run" /> : null}
 
       {!loading && session === null && error === "" ? (
         <EmptyState title="Session no longer available">It may have been removed since the list was last updated.</EmptyState>

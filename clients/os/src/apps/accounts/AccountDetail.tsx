@@ -1,3 +1,4 @@
+import { ContentSkeleton } from "../../kit/ContentSkeleton";
 import { RecordList, RecordRow } from "../../kit/RecordRow";
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -503,7 +504,7 @@ function PeopleBand({
         <p className="os-account-band-count" aria-hidden>
           --
         </p>
-        <p className="os-account-band-note">Reading</p>
+        <ContentSkeleton kind="detail" label="Loading account details" />
       </article>
     );
   }
@@ -566,7 +567,7 @@ function Band({ band }: { band: BandSpec }) {
         <p className="os-account-band-count" aria-hidden>
           --
         </p>
-        <p className="os-account-band-note">Reading</p>
+        <ContentSkeleton kind="detail" label="Loading account details" />
       </article>
     );
   }

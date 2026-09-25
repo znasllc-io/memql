@@ -33,14 +33,14 @@ it("blocks loading before readiness is known", () => {
 });
 it("shows waiting and Stop, preserves partial text, and retries a stopped reply", () => {
   const w = wire(); render(<AskSurface {...{ transport: w.transport, variant: "sheet" as const, availability: ready }} />);
-  typePrompt(); send(); expect(screen.getByText(/Waiting for an answer/)).toBeTruthy();
+  typePrompt(); send(); expect(screen.getByText(/Thinking/)).toBeTruthy();
   act(() => w.callbacks().delta("First part"));
   fireEvent.click(screen.getByRole("button", { name: "Stop reply" }));
   expect(w.cancel).toHaveBeenCalledOnce(); expect(screen.getByRole("alert").textContent).toMatch(/Stopped/);
   expect(screen.getByText("First part")).toBeTruthy();
   act(() => { w.callbacks().delta("late text"); w.callbacks().done(); });
   expect(screen.queryByText(/late text/)).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Retry" })); expect(w.ask).toHaveBeenCalledTimes(2);
+  fireEvent.click(screen.getByRole("button", { name: "Edit and try again" })); expect(w.ask).toHaveBeenCalledOnce(); send(); expect(w.ask).toHaveBeenCalledTimes(2);
 });
 it("ends waiting visibly on disconnect and preserves a new draft", () => {
   const w = wire(); const props = { transport: w.transport, variant: "sheet" as const, availability: ready };
@@ -54,7 +54,7 @@ it("catches synchronous transport failure", () => {
   const transport: AskTransport = { ask: () => { throw new Error("The worker disconnected."); } };
   render(<AskSurface {...{ transport, variant: "sheet" as const, availability: ready }} />); typePrompt(); send();
   expect(screen.getByRole("alert").textContent).toMatch(/worker disconnected/);
-  expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Edit and try again" })).toBeTruthy();
 });
 it("rejects empty completion and ignores callbacks after termination", () => {
   const w = wire(); render(<AskSurface {...{ transport: w.transport, variant: "sheet" as const, availability: ready }} />); typePrompt(); send();
@@ -72,6 +72,6 @@ it("keeps a long diagnostic in details and leaves a readable failure and recover
   render(<AskSurface transport={w.transport} variant="sheet" availability={ready} onOpenFleet={vi.fn()} />);
   typePrompt(); send(); act(() => w.callbacks().error(diagnostic));
   expect(screen.getByRole("alert").textContent).toBe("The cluster could not complete this reply. Retry, or check the available models in Fleet.");
-  expect(screen.getByText("Error details").closest("details")?.textContent).toContain(diagnostic);
+  expect(screen.getByText("Details").closest("details")?.textContent).toContain(diagnostic);
   expect(screen.getByRole("button", { name: "Open Fleet" })).toBeTruthy();
 });

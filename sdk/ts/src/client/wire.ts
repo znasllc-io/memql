@@ -516,6 +516,8 @@ export interface AiChatPayload {
   provider?: string;
   stream?: boolean;
   fleetRegistrationId?: string;
+  conversationId?: string;
+  pageContext?: string;
 }
 
 export interface AiSuggestPayload {
@@ -547,6 +549,7 @@ type ClientPayload =
   | { moduleDetail: ModuleDetailPayload }
   | { setPackEnabled: SetPackEnabledPayload }
   | { aiChat: AiChatPayload }
+ | { askVoiceStart: AskVoiceStartPayload }
   | { aiSuggest: AiSuggestPayload }
   | { aiTranscribeStreamStart: AiTranscribeStreamStartPayload }
   | { aiTranscribeStreamChunk: AiTranscribeStreamChunkPayload }
@@ -778,6 +781,7 @@ export interface HeartbeatPayload {
 }
 
 export interface AiTranscribeStreamDeltaPayload {
+  metadataJson?: string;
   requestId: string;
   text?: string;
   isFinal?: boolean;
@@ -1507,6 +1511,7 @@ type ServerPayload =
   | { setPackEnabledResult: SetPackEnabledResultPayload }
   | { rotateAuthResult: RotateAuthResultPayload }
   | { aiChatResult: AiChatResultPayload }
+ | { askVoiceStartResult: AskVoiceStartResultPayload }
   | { aiSuggestResult: AiSuggestResultPayload }
   | { aiChunk: AiStreamChunkPayload }
   | { aiTranscribeStreamDelta: AiTranscribeStreamDeltaPayload }
@@ -1554,6 +1559,7 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "setPackEnabledResult"; value: SetPackEnabledResultPayload }
   | { kind: "rotateAuthResult"; value: RotateAuthResultPayload }
   | { kind: "aiChatResult"; value: AiChatResultPayload }
+ | { kind: "askVoiceStartResult"; value: AskVoiceStartResultPayload }
   | { kind: "aiSuggestResult"; value: AiSuggestResultPayload }
   | { kind: "aiChunk"; value: AiStreamChunkPayload }
   | { kind: "aiTranscribeStreamDelta"; value: AiTranscribeStreamDeltaPayload }
@@ -1611,6 +1617,7 @@ export function readServerPayload(msg: ServerMessage):
     return { kind: "setPackEnabledResult", value: m.setPackEnabledResult as SetPackEnabledResultPayload };
   if (m.rotateAuthResult)
     return { kind: "rotateAuthResult", value: m.rotateAuthResult as RotateAuthResultPayload };
+  if (m.askVoiceStartResult) return { kind: "askVoiceStartResult", value: m.askVoiceStartResult as AskVoiceStartResultPayload };
   if (m.aiChatResult)
     return { kind: "aiChatResult", value: m.aiChatResult as AiChatResultPayload };
   if (m.aiSuggestResult)
@@ -1778,3 +1785,6 @@ export function streamRequestId(msg: ServerMessage): string {
   if (m.queryError?.requestId) return m.queryError.requestId;
   return "";
 }
+
+export interface AskVoiceStartPayload { requestId: string; conversationId: string; pageContext?: string; voice: "male" | "female"; chatProvider?: string; transcriptionProvider?: string; speechProvider?: string }
+export interface AskVoiceStartResultPayload { requestId: string; url: string; token: string; room: string }

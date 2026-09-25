@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { useEffect, useState } from "react";
 import { FileArchive } from "lucide-react";
 import { Button, Caption, Fact, Facts, Notice } from "../../../kit";
@@ -72,7 +73,7 @@ export function Versions({ site, runs, canPublish, lifecycle }: {
       />)}
     </RecordList>
     {versions.size === 0 && !reading && !error ? <Caption>No versions have been published yet.</Caption> : null}
-    {reading ? <Caption>Reading versions…</Caption> : null}
+    {reading ? <RecordListSkeleton label="Loading versions" /> : null}
     {error ? <Notice tone="error" sentence="Earlier versions could not be read." detail={error}><Button onClick={() => setRetry(value => value + 1)}>Try again</Button></Notice> : null}
     {selected ? <DetailDialog title={`Version ${label(selected.bundleRef)}`} onClose={() => setSelected(null)}>
       <Facts>

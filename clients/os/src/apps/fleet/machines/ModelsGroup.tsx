@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { RecordList, RecordRow } from "../../../kit/RecordRow";
 import { Cpu } from "lucide-react";
 import { useMemo, useState, type FormEvent } from "react";
@@ -487,7 +488,7 @@ function PullHistory({
 }) {
   const past = pulls.filter((p) => p.pullId !== live?.pullId);
   if (loading && pulls.length === 0) {
-    return <p className="os-caption">Reading this machine's pulls.</p>;
+    return <RecordListSkeleton label="Loading this machine's pulls" />;
   }
   if (past.length === 0) return null;
 

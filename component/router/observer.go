@@ -27,25 +27,50 @@ func (o *observedStreamWithTools) CallChatStreamWithTools(
 	tools []common.ToolDefinition,
 ) (<-chan common.StreamToolChunk, error) {
 	start := time.Now()
+	ctx = startObservation(ctx, o.req, o.resolved, start)
 	inputTokens := EstimateMessageTokens(messages)
 
 	innerCh, err := o.inner.CallChatStreamWithTools(ctx, messages, tools)
 	if err != nil {
-		o.router.recordCall(buildRecord(o.req, o.resolved, o.inner, inputTokens, 0, 0, start, time.Time{}, time.Now(), true, err, ctx.Err()))
+		o.router.recordObserved(ctx, buildRecord(o.req, o.resolved, o.inner, inputTokens, 0, 0, start, time.Time{}, time.Now(), true, err, ctx.Err()))
 		return nil, err
 	}
 
 	observedCh := make(chan common.StreamToolChunk)
 	go func() {
 		defer close(observedCh)
-
-		var (
-			firstTokenAt time.Time
-			outputChars  int
-			chunkErr     error
-		)
-
-		for chunk := range innerCh {
+		var firstTokenAt time.Time
+		var outputChars int
+		var chunkErr error
+		recorded, terminal := false, false
+		record := func() {
+			if recorded {
+				return
+			}
+			recorded = true
+			if !terminal && chunkErr == nil && ctx.Err() == nil {
+				chunkErr = errors.New("provider stream closed before completion")
+			}
+			end := time.Now()
+			outputTokens := EstimateTokensFromChars(outputChars)
+			rec := buildRecord(o.req, o.resolved, o.inner, inputTokens, outputTokens, 0, start, firstTokenAt, end, true, chunkErr, ctx.Err())
+			if duration := end.Sub(start).Seconds(); duration > 0.1 {
+				rec.TokensPerSec = float64(outputTokens) / duration
+			}
+			o.router.recordObserved(ctx, rec)
+		}
+		defer record()
+		for {
+			var chunk common.StreamToolChunk
+			var ok bool
+			select {
+			case <-ctx.Done():
+				return
+			case chunk, ok = <-innerCh:
+				if !ok {
+					return
+				}
+			}
 			if chunk.Error != nil && chunkErr == nil {
 				chunkErr = chunk.Error
 			}
@@ -53,30 +78,22 @@ func (o *observedStreamWithTools) CallChatStreamWithTools(
 				firstTokenAt = time.Now()
 			}
 			outputChars += len(chunk.Content)
-			// Tool-call argument fragments also count as output work.
 			for _, tc := range chunk.ToolCalls {
 				outputChars += len(tc.Arguments) + len(tc.Name)
+			}
+			if chunk.Done || chunk.Error != nil {
+				terminal = true
+				record()
 			}
 			select {
 			case observedCh <- chunk:
 			case <-ctx.Done():
-				// Forward-drop remaining chunks if the consumer left; we
-				// still record the call to capture cancellation.
+				return
+			}
+			if chunk.Done {
 				return
 			}
 		}
-
-		end := time.Now()
-		outputTokens := EstimateTokensFromChars(outputChars)
-		rec := buildRecord(o.req, o.resolved, o.inner, inputTokens, outputTokens, 0, start, firstTokenAt, end, true, chunkErr, ctx.Err())
-		// Tokens per second is only meaningful for streaming calls
-		// with a non-trivial duration. Guard both so voice-path
-		// one-second replies don't produce gigatokens/sec noise.
-		durSec := end.Sub(start).Seconds()
-		if outputTokens > 0 && durSec > 0.1 {
-			rec.TokensPerSec = float64(outputTokens) / durSec
-		}
-		o.router.recordCall(rec)
 	}()
 	return observedCh, nil
 }
@@ -101,6 +118,7 @@ func (o *observedWithTools) CallChatWithTools(
 	tools []common.ToolDefinition,
 ) (*common.ToolCallingChatResult, error) {
 	start := time.Now()
+	ctx = startObservation(ctx, o.req, o.resolved, start)
 	inputTokens := EstimateMessageTokens(messages)
 
 	result, err := o.inner.CallChatWithTools(ctx, messages, tools)
@@ -115,7 +133,7 @@ func (o *observedWithTools) CallChatWithTools(
 	outputTokens := EstimateTokensFromChars(outputChars)
 	// streaming=false, firstTokenAt=zero: a synchronous call has no
 	// meaningful TTFT, and buildRecord leaves timeToFirstTokenMs at 0.
-	o.router.recordCall(buildRecord(o.req, o.resolved, o.inner, inputTokens, outputTokens, 0, start, time.Time{}, time.Now(), false, err, ctx.Err()))
+	o.router.recordObserved(ctx, buildRecord(o.req, o.resolved, o.inner, inputTokens, outputTokens, 0, start, time.Time{}, time.Now(), false, err, ctx.Err()))
 	return result, err
 }
 
@@ -131,11 +149,12 @@ type observedChat struct {
 
 func (o *observedChat) CallChat(ctx context.Context, messages []common.ChatMessage) (string, error) {
 	start := time.Now()
+	ctx = startObservation(ctx, o.req, o.resolved, start)
 	inputTokens := EstimateMessageTokens(messages)
 
 	reply, err := o.inner.CallChat(ctx, messages)
 	outputTokens := EstimateTokensFromChars(len(reply))
-	o.router.recordCall(buildRecord(o.req, o.resolved, o.inner, inputTokens, outputTokens, 0, start, time.Time{}, time.Now(), false, err, ctx.Err()))
+	o.router.recordObserved(ctx, buildRecord(o.req, o.resolved, o.inner, inputTokens, outputTokens, 0, start, time.Time{}, time.Now(), false, err, ctx.Err()))
 	return reply, err
 }
 

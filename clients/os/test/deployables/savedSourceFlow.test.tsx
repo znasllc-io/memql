@@ -211,7 +211,7 @@ describe("GitHub Sources in Add a deployable", () => {
     });
     await addRepository(region);
     expectCurrentStage(region, "Configuration");
-    expect(within(region).getByText("Checking the repository…")).toBeTruthy();
+    expect(within(region).getByText("Loading the repository")).toBeTruthy();
     expect(floorAct("Analyze")).toBeNull();
     expect(connection.callsNamed("packageSourceRegister")).toHaveLength(0);
     expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
@@ -442,7 +442,7 @@ describe("GitHub Sources in Add a deployable", () => {
       vi.spyOn(connection.query, "sitesAll").mockImplementation(() => new Promise<ReturnType<typeof rowsResult>>((_resolve, reject) => { rejectRead = reject; }));
     });
     await addRepository(region, "source-alpha");
-    expect(await within(region).findByText("Checking existing deployables…")).toBeTruthy();
+    expect(await within(region).findByText("Loading existing deployables")).toBeTruthy();
     expect(floorAct("Analyze")).toBeNull();
     await act(async () => rejectRead(new Error("Placements cannot be read")));
     expect(await within(region).findByText("Existing deployables could not be read. Refresh Deployables before continuing.")).toBeTruthy();

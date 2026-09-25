@@ -48,6 +48,9 @@ var frontDoorHosts = func() []string {
 	for _, h := range frontdoor.Hosts("memql.localhost") {
 		out = append(out, h.Name)
 	}
+	// This overlay explicitly installs the optional Ask voice component. Its
+	// signaling endpoint is separate from the core roles; TURN is TCP/SNI.
+	out = append(out, "voice.memql.localhost")
 	return out
 }()
 

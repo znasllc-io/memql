@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import type { Concept, Row } from "@znasllc-io/memql-sdk-core/client";
@@ -63,7 +64,7 @@ export function RowsPanel({ concept, walk }: { concept: Concept; walk: ConceptRo
       ) : null}
 
       {walk.rows.length === 0 && walk.status === "loading" ? (
-        <Caption>Reading rows from the cluster.</Caption>
+        <RecordListSkeleton label="Loading rows from the cluster" />
       ) : null}
 
       {walk.rows.length === 0 && walk.status === "exhausted" ? (
@@ -92,7 +93,7 @@ export function RowsPanel({ concept, walk }: { concept: Concept; walk: ConceptRo
           whole answer. */}
       <div className="os-rows-foot">
         {walk.status === "loading" && walk.rows.length > 0 ? (
-          <Caption>Reading more rows.</Caption>
+          <RecordListSkeleton label="Loading more rows" />
         ) : null}
         {walk.status === "more" ? (
           <>

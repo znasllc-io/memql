@@ -43,7 +43,7 @@ import { LOGS_SECTIONS, LOGS_REQUIRES, LOGS_WANTS } from "./logs/settings";
 import { MaterializerApp } from "./materializer/MaterializerApp";
 import { MATERIALIZER_SECTIONS, MATERIALIZER_REQUIRES, MATERIALIZER_WANTS } from "./materializer/settings";
 import { SettingsApp } from "./settings/SettingsApp";
-import { SETUP_WIDGET_SIZE, setupWidget } from "./setup/manifest";
+import { setupWidget } from "./setup/manifest";
 import { TrainingApp } from "./training/TrainingApp";
 import { TRAINING_SECTIONS, TRAINING_REQUIRES, TRAINING_WANTS } from "./training/settings";
 import { UsersApp } from "./users/UsersApp";
@@ -164,6 +164,7 @@ const settings: OsAppManifest = {
   // changes meaningfully -- a new language line, say -- and never when a form
   // is added to the table it reads: that is data moving, not the surface.
   attentionChanges: [
+    { id: "settings:ask-conversations-and-voice", revision: "1", sectionId: "ask", label: "Conversations, dictation and live voice with MemQL" },
     { id: "settings:connections", revision: "shared-connections-1", sectionId: "connections", label: "Shared GitHub and Shopify connections" },
     { id: "settings:language", revision: "language-1.0", sectionId: "language", label: "MemQL 1.0 language and deprecations" },
   ],
@@ -676,7 +677,7 @@ const materializer: OsAppManifest = {
 //
 
 function AskWidgetBody() {
-  const { transport, voice, settings, availability } = useAsk();
+  const { transport, voice, settings, availability, conversation, liveVoice } = useAsk();
   const { actions } = useOs();
   // The widget hands a prompt off exactly as the sheet does (epic memql#4785).
   // One Ask, three entry points, and an act that exists on one of them is an
@@ -685,6 +686,8 @@ function AskWidgetBody() {
   return (
     <AskSurface
       transport={transport}
+      conversation={conversation}
+          liveVoice={liveVoice}
       availability={availability}
       onOpenFleet={() => { actions.openApp("fleet"); }}
       voicePorts={voice}
@@ -704,8 +707,8 @@ const askWidget: OsWidgetManifest = {
   needs: ["ai"] as const,
   icon: Mark,
   requires: "app:ask",
-  // Same desk footprint as Set up -- a smaller Ask card looked unfinished beside it.
-  size: SETUP_WIDGET_SIZE,
+  // Conversations need room for a readable transcript and composer.
+  size: { w: 6, h: 5 },
   component: AskWidgetBody,
 };
 

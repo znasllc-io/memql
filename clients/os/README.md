@@ -93,6 +93,14 @@ or client-visible session authority.
   filters behind one Refine affordance, quiet sort, the control line,
   one container grammar. When a rule and a surface disagree, the surface
   is wrong.
+- **Loading and nested navigation**: every app uses content-shaped, text-free
+  skeletons for missing content, keeping accessible status labels off screen.
+  Use `RecordListSkeleton`, `ContentSkeleton`, or `InlineSkeleton`; preserve
+  loaded content during refresh and show failures separately. Sibling views
+  inside a page use `LocalTabs`, like Fleet's Model Library and machine detail.
+  Filters and saved preferences are not tabs. See [the rules](DESIGN.md#loading-is-the-shape-of-the-content-never-a-message)
+  and [coverage](qa/loading-and-navigation.md).
+
 - Phone keeps its own chrome (tab bar, one app at a time, Ask sheet);
   layout is keyed off pointer/hover, never width alone.
 
@@ -2550,3 +2558,5 @@ Storefront testing may reuse the current built version: the files are identical,
 but preview grants resolve the sandbox binding while public requests resolve
 only the production binding. Non-storefront candidate rules are unchanged.
 A same-build preview does not offer a no-op promotion.
+
+Ask text, dictation, live voice and cluster setup: [Ask conversations and voice](../../docs/public/operate/ask-and-voice.md).

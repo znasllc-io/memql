@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useEffect, useState } from "react";
 
 import { Button, Caption, Head, Subhead, RecordList, RecordRow, Chip, Chips, Fact, Facts, Field, Input, Notice, findRegion, revealRegion } from "../../kit";
@@ -119,11 +120,7 @@ export function IntegrationsSection({
 
       {facts.error ? (
         <Refusal role={access?.role ?? ""} message={facts.error} />
-      ) : facts.report === null ? (
-        <Caption>
-          {facts.loading ? "Loading from the cluster" : "No integration report came back."}
-        </Caption>
-      ) : (
+      ) : facts.report === null ? (facts.loading ? <RecordListSkeleton label="Loading from the cluster" /> : <Caption>{"No integration report came back."}</Caption>) : (
         <>
           {cards.length === 0 ? (
             <Caption>
@@ -518,7 +515,7 @@ function Refresh({ facts }: { facts: IntegrationsFacts }) {
     (facts.fetchedAt === null ? "" : new Date(facts.fetchedAt).toISOString());
   return (
     <div className="os-refresh-row">
-      <Button onClick={facts.reload} busy={facts.loading} busyLabel="Reading">
+      <Button onClick={facts.reload} busy={facts.loading}>
         Refresh
       </Button>
       <Caption>

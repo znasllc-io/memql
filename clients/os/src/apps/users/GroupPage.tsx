@@ -1,3 +1,4 @@
+import { useAskActivity } from "../../ask/AskProvider";
 import { RecordList, listCount } from "../../kit/RecordRow";
 import { useSessionIfPresent } from "../../chrome/access";
 import { useGroupPeople } from "./useGroupPeople";
@@ -130,6 +131,8 @@ export function GroupPage({
     }
   }
 
+  const askActivity = useAskActivity();
+  const memberAction = askActivity?.arguments?.groupId === group.id && askActivity.name?.endsWith(".groupMemberAdd") ? askActivity : null;
   return (
     <div className="os-action-pane">
       <div className="os-action-body os-app-stack">
@@ -137,9 +140,9 @@ export function GroupPage({
 
           {account === null ? null : <AccountChip name={accountName(account)} />}
           {archived || !canUpdate ? null : (
-            <Button tone="primary" onClick={() => setAdding((held) => !held)}>
+            <span data-ask-control={memberAction?.phase} key={memberAction?.id ?? "add-people"}><Button tone="primary" onClick={() => setAdding((held) => !held)}>
               {adding ? "Done" : "Add people"}
-            </Button>
+            </Button></span>
           )}
         </Head>
 

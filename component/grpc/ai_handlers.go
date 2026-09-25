@@ -215,7 +215,7 @@ func (s *streamSession) handleAiChat(envelope *memqlv1.MemqlClientMessage, msg *
 		// handleAiChatStream produces to the substrate (not the forward stream)
 		// under the same gate, so there is no double delivery. Non-streaming chat
 		// and the non-substrate path keep the plain relay.
-		if msg.GetStream() && s.service.streamingOverSubstrate() {
+		if msg.GetStream() && msg.GetConversationId() == "" && s.service.streamingOverSubstrate() {
 			return s.proxyAIStream(envelope, requestId, nodeTargetForChat(), s.consumeTokenStream)
 		}
 		return s.proxyAI(envelope, requestId, nodeTargetForChat())
@@ -231,6 +231,21 @@ func (s *streamSession) handleAiChat(envelope *memqlv1.MemqlClientMessage, msg *
 	ctx, err := chatCallContext(s.stream.Context(), msg.GetProvider(), msg.GetFleetRegistrationId())
 	if err != nil {
 		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.InvalidArgument, err.Error())
+	}
+
+	if msg.GetConversationId() != "" {
+		if !msg.GetStream() || len(msg.GetMessages()) != 1 || msg.GetMessages()[0].GetRole() != "user" {
+			return s.sendQueryError(requestId, envelope.GetMessageId(), codes.InvalidArgument, "Ask accepts one user message and a server-owned conversation")
+		}
+		ctx, release, err := s.beginAskRequest(ctx, requestId)
+		if err != nil {
+			return s.sendQueryError(requestId, envelope.GetMessageId(), codes.AlreadyExists, err.Error())
+		}
+		go func() {
+			defer release()
+			s.handleAskStream(ctx, requestId, envelope.GetMessageId(), msg)
+		}()
+		return nil
 	}
 
 	// Convert proto messages to common.ChatMessage

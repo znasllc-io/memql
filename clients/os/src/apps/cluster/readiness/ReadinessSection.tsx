@@ -1,3 +1,4 @@
+import { ContentSkeleton } from "../../../kit/ContentSkeleton";
 import { useCallback, useMemo } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -74,7 +75,7 @@ export function ReadinessSection() {
         <Button
           tone="quiet"
           busy={inference.state === "reading" || passkeys.state === "reading"}
-          busyLabel="Reading"
+
           onClick={() => {
             inference.reread();
             passkeys.reread();
@@ -132,7 +133,7 @@ function InferenceLine({
           detail={reading.error}
         />
       ) : null}
-      {reading.state === "reading" && facts === null ? <Caption>Asking the cluster.</Caption> : null}
+      {reading.state === "reading" && facts === null ? <ContentSkeleton kind="detail" label="Loading the cluster" /> : null}
       {reading.state === "read" && facts === null ? (
         <Caption>The cluster answered with no reading at all, which nothing in the engine should produce. Read the bff's logs.</Caption>
       ) : null}
@@ -294,7 +295,7 @@ function PasskeyLine({
           detail={reading.error}
         />
       ) : null}
-      {reading.state === "reading" && rows === null ? <Caption>Asking the cluster.</Caption> : null}
+      {reading.state === "reading" && rows === null ? <ContentSkeleton kind="detail" label="Loading the cluster" /> : null}
 
       {rows === null ? null : live.length > 0 ? (
         <>

@@ -7,13 +7,12 @@ import { useMakeGoal } from "./useMakeGoal";
 
 // The Ask sheet: anchored above the dock (a bottom sheet on phones via
 // CSS). Never a window, never counts against the desk cap (spec D6).
-// Esc closes from anywhere -- the sheet is modal over the desk, so the
-// close key cannot depend on where focus happens to sit.
+// The desk stays interactive while MemQL works; Escape closes the overlay.
 //
 // Both entry points retain the composer while the shared readiness check runs.
 
 export function AskSheet() {
-  const { sheet, closeAsk, transport, voice, settings, availability, sheetDraft, setSheetDraft } = useAsk();
+  const { sheet, closeAsk, transport, voice, settings, availability, conversation, liveVoice } = useAsk();
   const { actions } = useOs();
   const makeGoal = useMakeGoal();
 
@@ -38,17 +37,15 @@ export function AskSheet() {
         className="os-ask-sheet"
         data-os-sheet
         role="dialog"
-        aria-modal="true"
+        aria-modal="false"
         aria-label="Ask"
-        onKeyDown={(event) => {
-          if (event.key === "Escape") closeAsk();
-        }}
       >
         <AskSurface
           transport={transport}
           availability={availability}
-          draft={sheetDraft}
-          onDraftChange={setSheetDraft}
+          conversation={conversation}
+          liveVoice={liveVoice}
+          onClose={closeAsk}
           onOpenFleet={() => { actions.openApp("fleet"); closeAsk(); }}
           voicePorts={voice}
           settings={settings}

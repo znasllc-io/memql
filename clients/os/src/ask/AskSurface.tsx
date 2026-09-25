@@ -1,9 +1,14 @@
-import { SemanticActivityProvider } from "../kit/SemanticActivity";
-import { useEffect, useRef, useState, type FormEvent } from "react";
-import { PolicyEditor, type PolicyDraft } from "../apps/fleet/PolicyEditor";
-import { ArrowUp, Mic } from "lucide-react";
+import { ContentSkeleton } from "../kit/ContentSkeleton";
+import { Mark } from "../chrome/Mark";
+import { AskLiveVoice } from "./AskLiveVoice";
+import type { LiveVoiceSession } from "./liveVoiceSession";
+import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
+import { ArrowUp, Mic, History, Plus, X, Activity, Square, AudioLines } from "lucide-react";
 
-import type { AskHandle, AskTransport } from "./askController";
+import { ConversationSession } from "./conversationSession";
+import { AskWait } from "./AskWait";
+import { AskActivityLog } from "./AskActivityLog";
+import type { AskTransport } from "./askController";
 import { CHECKING_ASK, type AskAvailability } from "./useAskReadiness";
 import type { MakeGoalState } from "./useMakeGoal";
 import { useReducedMotion, useVoice } from "./useVoice";
@@ -27,15 +32,6 @@ import { DEFAULT_ASK_SETTINGS, type AskSettings } from "../apps/settings/askSett
 // it in state would re-render the streaming answer log sixty times a second
 // to animate one ring; it is written to a CSS custom property on the button
 // instead, from a rAF loop that only runs while the mic is live.
-
-interface Exchange {
-  policyProposal?: PolicyDraft;
-  id: number;
-  prompt: string;
-  answer: string;
-  state: "streaming" | "done" | "error";
-  error?: string;
-}
 
 /** What the caption says, per phase. Exported so the tests read the copy. */
 export const ASK_VOICE_HOLD = "Listening -- let go to send.";
@@ -82,19 +78,25 @@ export function voiceProblemSentence(problem: VoiceProblem): string {
 
 export function AskSurface({
   transport,
+  conversation: providedConversation,
+  liveVoice,
+  makeGoal,
+  onOpenFleet,
+  onClose,
   voicePorts = null,
   settings = DEFAULT_ASK_SETTINGS,
   context = null,
   contextLabel,
   variant,
   autoFocus = false,
-  makeGoal = null,
   availability = CHECKING_ASK,
-  onOpenFleet,
   draft: providedDraft,
   onDraftChange,
 }: {
   transport: AskTransport;
+  conversation?: ConversationSession;
+  liveVoice?: LiveVoiceSession;
+  onClose?: () => void;
   availability?: AskAvailability;
   onOpenFleet?: () => void;
   draft?: string;
@@ -116,22 +118,26 @@ export function AskSurface({
    */
   makeGoal?: MakeGoalState | null;
 }) {
-  const [localDraft, setLocalDraft] = useState("");
-  const [composePolicy, setComposePolicy] = useState(false);
-  const draft = providedDraft ?? localDraft;
-  const setDraft = onDraftChange ?? setLocalDraft;
-  const [exchanges, setExchanges] = useState<Exchange[]>([]);
-  const activeRef = useRef<{ handle: AskHandle | null; stop: (message: string) => void; abandon: () => void } | null>(null);
+  const localConversation = useRef<ConversationSession | null>(null);
+  if (!providedConversation && !localConversation.current) localConversation.current = new ConversationSession(transport);
+  const conversation = providedConversation ?? localConversation.current!;
+  const state = useSyncExternalStore(conversation.subscribe, conversation.getSnapshot);
+  const [showHistory, setShowHistory] = useState(false);
+  const [showActivity, setShowActivity] = useState(false);
+  const draft = providedDraft ?? state.draft;
+  const setDraft = onDraftChange ?? conversation.setDraft;
+  const exchanges = state.turns;
+  const busy = state.busy;
   const ready = availability.state === "ready";
-  const busy = exchanges.some((e) => e.state === "streaming");
-  const nextIdRef = useRef(1);
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const nearBottom = useRef(true);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
   const micRef = useRef<HTMLButtonElement | null>(null);
   const reducedMotion = useReducedMotion();
 
   const voice = useVoice(voicePorts, {
     onTranscript: (text) => setDraft(text),
+    onActivity: conversation.recordDictation,
     onUtterance: (text) => {
       if (settings.commit === "send") {
         setDraft(send(text) ? "" : text);
@@ -142,22 +148,23 @@ export function AskSurface({
     },
   });
   const controls = voice?.controls ?? null;
+  useEffect(() => { if (state.voiceActive) controls?.cancel(); }, [state.voiceActive, controls]);
   const phase = voice?.state.phase ?? "idle";
   const live = phase === "listening" || phase === "transcribing";
 
   useEffect(() => {
     if (autoFocus) inputRef.current?.focus();
-    return () => activeRef.current?.abandon();
+    return () => { if (!providedConversation) localConversation.current?.dispose(); };
   }, [autoFocus]);
 
   useEffect(() => {
     if (availability.state === "disconnected") {
-      activeRef.current?.stop("Connection to the cluster was lost.");
+      conversation.stop("Connection to the cluster was lost. Completed actions remain in Activity.");
     }
   }, [availability.state]);
 
   useEffect(() => {
-    logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
+    if (nearBottom.current) logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
   }, [exchanges]);
 
   // The level ring. Runs only while the mic is live, writes only a CSS
@@ -226,36 +233,9 @@ export function AskSurface({
   }, [controls, variant, settings.spaceToTalk]);
 
   function send(prompt: string): boolean {
-    if (!ready || activeRef.current || !prompt.trim()) return false;
-    const id = nextIdRef.current++;
-    let terminal = false;
-    let answer = "";
-    const patch = (p: Partial<Exchange>) =>
-      setExchanges((prev) => prev.map((e) => (e.id === id ? { ...e, ...p } : e)));
-    const finish = (error?: string) => {
-      if (terminal) return;
-      terminal = true;
-      if (activeRef.current === active) activeRef.current = null;
-      patch(error ? { state: "error", error } : { state: "done" });
-    };
-    const active = {
-      handle: null as AskHandle | null,
-      stop: (message: string) => { finish(message); active.handle?.cancel(); },
-      abandon: () => { terminal = true; active.handle?.cancel(); },
-    };
-    activeRef.current = active;
-    setExchanges((prev) => [...prev, { id, prompt, answer: "", state: "streaming" }]);
-    try {
-      active.handle = transport.ask(prompt, composePolicy ? `${context ?? ""} action:routing-policy` : context, {
-        policyProposal: proposal => { if (!terminal) patch({ policyProposal: proposal }); },
-        delta: (text) => { if (!terminal) { answer += text; patch({ answer }); } },
-        done: () => finish(answer.trim() ? undefined : "The cluster finished without an answer. Try again."),
-        error: (message) => finish(message || "The cluster did not answer. Try again."),
-      });
-    } catch (error) {
-      finish(error instanceof Error ? error.message : "The cluster did not answer. Try again.");
-    }
-    return true;
+    if (!ready) return false;
+    nearBottom.current = true;
+    return conversation.send(prompt, context);
   }
 
   function onSubmit(event: FormEvent) {
@@ -277,68 +257,50 @@ export function AskSurface({
 
   return (
     <div className="os-ask" data-os-ask={variant}>
-      {context ? <span className="os-ask-context">{contextLabel || context}</span> : null}
-      <div className="os-ask-log" ref={logRef} aria-live="polite">
-        {exchanges.length === 0 ? (
-          <p className="os-caption os-ask-hint">
-            {variant === "widget" ? "Ask the OS anything." : "Ask about this cluster, an app, or anything on your desk."}
-          </p>
-        ) : null}
-        {exchanges.map((e) => (
-          <div key={e.id} className="os-ask-exchange" data-state={e.state}>
-            <p className="os-ask-prompt">{e.prompt}</p>
-            {e.answer ? <p className="os-ask-answer">{e.answer}</p> : null}
-            {e.state === "streaming" ? (
-              <p className="os-caption" role="status">
-                {e.answer ? "Replying…" : "Waiting for an answer. A model may take a few minutes to load."}{" "}
-                <button type="button" className="os-link" onClick={() => activeRef.current?.stop("Stopped. You can retry when you are ready.")}>Stop reply</button>
-              </p>
-            ) : null}
-            {e.policyProposal ? <SemanticActivityProvider value={[{ id: `policy-${e.id}`, target: "fleet:policy:draft", phase: "proposed", label: "Review this draft before saving" }]}><PolicyEditor seed={e.policyProposal} existing={e.policyProposal.existing || e.policyProposal.action === "reset"} /></SemanticActivityProvider> : null}
-            {e.state === "error" ? (
-              <div className="os-ask-error">
-                <p role="alert">{askErrorSummary(e.error ?? "The cluster did not answer.")}</p>
-                {e.error && askErrorSummary(e.error) !== e.error ? (
-                  <details><summary>Error details</summary><p style={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{e.error}</p></details>
-                ) : null}
-                <button type="button" className="os-link" disabled={!ready || busy} onClick={() => send(e.prompt)}>Retry</button>{" "}
-                {onOpenFleet ? <button type="button" className="os-link" onClick={onOpenFleet}>Open Fleet</button> : null}
-              </div>
-            ) : null}
-            {/* OFFERED ONCE THE ANSWER HAS LANDED, and not while it is
-                streaming: half an answer is not enough to decide whether you
-                want the thing done, and an act that appears mid-stream moves
-                under the cursor. */}
-            {makeGoal !== null && e.state === "done" ? (
-              <p className="os-ask-handoff">
-                <button
-                  type="button"
-                  className="os-link"
-                  disabled={makeGoal.busy}
-                  onClick={() => void makeGoal.make(e.prompt)}
-                >
-                  {makeGoal.busy ? "Making it a goal" : "Make this a goal"}
-                </button>
-              </p>
-            ) : null}
-          </div>
-        ))}
+      <header className="os-ask-header">
+        <div className="os-ask-heading"><strong>MemQL</strong><span>{contextLabel || "Ask"}</span></div>
+        <div className="os-ask-actions">
+          <button type="button" title="Conversations" aria-label="Conversations" aria-pressed={showHistory} onClick={() => { setShowHistory(!showHistory); void conversation.refresh(); }}><History size={17} /></button>
+          <button type="button" title="New conversation" aria-label="New conversation" disabled={busy || state.voiceActive} onClick={() => { conversation.newConversation(); setShowHistory(false); inputRef.current?.focus(); }}><Plus size={18} /></button>
+          <button type="button" title="Activity" aria-label="Activity" aria-pressed={showActivity} onClick={() => setShowActivity(!showActivity)}><Activity size={17} /></button>
+          {onClose ? <button type="button" title="Close Ask" aria-label="Close Ask" onClick={onClose}><X size={17} /></button> : null}
+        </div>
+      </header>
+      {state.voiceActive && liveVoice ? <div className="os-ask-content"><AskLiveVoice session={liveVoice} />{showActivity ? <AskActivityLog turns={exchanges} dictation={state.dictationActivity} onClose={() => setShowActivity(false)} /> : null}</div> : <div className="os-ask-content">
+        {showHistory ? <nav className="os-ask-history" aria-label="Conversations">
+          <span className="os-caption">Conversations</span>
+          {state.historyLoading && state.conversations.length === 0 ? <ContentSkeleton label="Opening conversations" /> : null}
+          {state.historyError ? <p role="alert">{state.historyError}</p> : null}
+          {!state.historyLoading && !state.historyError && state.conversations.length === 0 ? <p className="os-caption">Your conversations will appear here.</p> : null}
+          {state.conversations.map(item => <button type="button" key={item.id} disabled={busy || state.voiceActive} aria-current={item.id === state.selectedId ? "page" : undefined} onClick={() => { void conversation.select(item.id); setShowHistory(false); }}>{item.title}</button>)}
+        </nav> : null}
+        <div className="os-ask-log" ref={logRef} role="log" aria-label="Conversation" aria-live="polite" onScroll={() => { const el = logRef.current; if (el) nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 72; }}>
+          {state.loading ? <ContentSkeleton kind="conversation" label="Opening conversation" /> : null}
+          {exchanges.length === 0 && !state.loading ? <div className="os-ask-empty"><strong>What would you like to do?</strong><p>Ask a question, explore your workspace, or let MemQL help you get something done.</p></div> : null}
+          {exchanges.map(turn => <div key={turn.id} className="os-ask-exchange" data-state={turn.state}>
+            <div className="os-ask-message"><span className="os-ask-avatar" aria-hidden>You</span><div><div className="os-ask-byline"><strong>You</strong><time dateTime={turn.startedAt}>{messageTime(turn.startedAt)}</time></div><p>{turn.prompt}</p></div></div>
+            <div className="os-ask-message"><span className="os-ask-avatar os-ask-avatar-memql" aria-hidden><Mark size={22} /></span><div><div className="os-ask-byline"><strong>MemQL</strong><time dateTime={turn.startedAt}>{messageTime(turn.startedAt)}</time></div>
+              {turn.answer ? <p className="os-ask-answer">{turn.answer}</p> : null}
+              {makeGoal && turn.state === "done" ? <details className="os-ask-message-actions"><summary aria-label="Message actions">•••</summary><button type="button" disabled={makeGoal.busy} onClick={() => void makeGoal.make(turn.prompt)}>{makeGoal.busy ? "Making it a goal" : "Make this a goal"}</button></details> : null}
+              {turn.state === "streaming" ? <AskWait activity={turn.activity} startedAt={turn.startedAt} hasText={Boolean(turn.answer)} /> : null}
+              {turn.error ? <div className="os-ask-error"><p role="alert">{askErrorSummary(turn.error)}</p>{askErrorSummary(turn.error) !== turn.error ? <details><summary>Details</summary><p>{turn.error}</p></details> : null}{!busy ? <button type="button" className="os-ask-retry" onClick={() => { setDraft(turn.prompt); inputRef.current?.focus(); }}>Edit and try again</button> : null}{onOpenFleet ? <button type="button" className="os-ask-retry" onClick={onOpenFleet}>Open Fleet</button> : null}</div> : null}
+            </div></div>
+          </div>)}
+        </div>
+        {showActivity ? <AskActivityLog turns={exchanges} dictation={state.dictationActivity} onClose={() => setShowActivity(false)} /> : null}
       </div>
-      {makeGoal !== null && makeGoal.error !== "" ? (
-        <p className="os-ask-error" role="alert">
-          {makeGoal.error}
-        </p>
-      ) : null}
-      {/* Quiet readiness: Send stays disabled; the dock dot + hover tooltip
-          carry yellow/blue/red. No bouncing "Open Fleet" / Check again banners. */}
-      <label className="os-caption os-ask-policy-mode"><input type="checkbox" checked={composePolicy} onChange={event => setComposePolicy(event.target.checked)} disabled={busy} /> Compose a routing policy</label>
-      <form className="os-ask-input" onSubmit={onSubmit}>
+      }
+      {makeGoal?.error ? <p className="os-ask-error" role="alert">{makeGoal.error}</p> : null}
+      {state.error ? <p className="os-ask-error" role="alert">{askErrorSummary(state.error)}</p> : null}
+      {liveVoice && !state.voiceActive ? <AskLiveVoice session={liveVoice} errorsOnly /> : null}
+      {!state.voiceActive ? <form className="os-ask-input" onSubmit={onSubmit}>
         <button
           ref={micRef}
           type="button"
           className="os-ask-mic"
           data-voice={phase}
-          aria-label={live ? "Stop listening" : "Ask by voice"}
+          title={live ? "Stop dictation" : "Dictate a message"}
+          aria-label={live ? "Stop listening" : "Dictate a message"}
           aria-pressed={live}
           disabled={!wired}
           onPointerDown={(event) => {
@@ -387,7 +349,10 @@ export function AskSurface({
         >
           <Mic size={15} aria-hidden />
         </button>
-        <input
+        {liveVoice ? <button type="button" className="os-ask-mic" title="Talk with MemQL" aria-label="Talk with MemQL" disabled={!ready || busy || live} onClick={() => { controls?.cancel(); void liveVoice.start(context, settings.voice ?? "female"); }}><AudioLines size={17} /></button> : null}
+        <textarea
+          rows={1}
+          onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (draft.trim() && send(draft)) setDraft(""); } }}
           ref={inputRef}
           className="os-ask-field"
           placeholder={live ? "Listening" : "Ask"}
@@ -400,16 +365,17 @@ export function AskSurface({
           readOnly={live}
           onChange={(event) => setDraft(event.target.value)}
         />
-        <button
+        {busy ? <button type="button" className="os-ask-send" aria-label="Stop reply" onClick={() => conversation.stop()}><Square size={13} /></button> : <button
           type="submit"
           className="os-ask-send"
           aria-label={live ? "Finish" : "Send"}
           disabled={!live && (!ready || busy || !draft.trim())}
         >
           <ArrowUp size={15} aria-hidden />
-        </button>
-      </form>
-      {note ? (
+        </button>}
+      </form> : null}
+      {phase === "transcribing" && !state.voiceActive ? <AskWait activity={state.dictationActivity} startedAt={state.dictationActivity.at(-1)?.at ?? new Date().toISOString()} hasText={false} label="Transcribing" /> : null}
+      {note && phase !== "transcribing" && !state.voiceActive ? (
         <p
           className="os-caption os-ask-micnote"
           data-note={!wired || voice?.state.problem ? "problem" : "state"}
@@ -456,3 +422,5 @@ function askErrorSummary(message: string): string {
   }
   return message;
 }
+
+function messageTime(value: string): string { const date = new Date(value); return Number.isFinite(date.valueOf()) ? date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : ""; }

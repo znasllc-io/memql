@@ -150,6 +150,32 @@ and an accessible loading status. Reserve the initial list area to avoid panel
 jumps, respect reduced motion, and keep already loaded rows visible during
 refreshes. Loading and failed reads must never look like an empty collection.
 
+### Loading is the shape of the content, never a message
+
+This applies to **every app**, including tabs, entity details, dialogs, widgets,
+and inline values. Cluster's Mesh and Agents lists establish the visual pattern:
+quiet empty shapes in the places the content will occupy. Do not paint
+"Loading", "Reading the trail", "Asking the cluster", or equivalent fetch copy.
+
+- Use `RecordListSkeleton` for collections, `ContentSkeleton` for details,
+  forms, metrics, maps, and conversations, and `InlineSkeleton` for a value in
+  an otherwise complete row. Match the destination's geometry and reserve its
+  space; avoid showing a blank or editable default form before its read resolves.
+- Keep loading descriptions screen-reader-only, with `role="status"` and
+  `aria-busy`. Shapes have no focus targets, use the shared neutral tokens,
+  and stop animating under reduced motion. Never pulse the whole window.
+- Preserve loaded rows and drafts during refresh. A refresh must not replace
+  usable content with skeletons or add a visible fetching caption. Keep the
+  refresh control's name stable while its busy affordance is active.
+- Render a real empty state only after a successful empty read. Render failures
+  and disconnections explicitly, with recovery when available; a skeleton must
+  never conceal an error or imply that a disconnected read is progressing.
+- A running operation is different from fetching a page. Model pulls, builds,
+  approvals, dictation, and Ask inference retain meaningful status and progress.
+  Ask's reverse response estimate measures actual inference, not page loading.
+
+Audit inventory: [loading and navigation coverage](qa/loading-and-navigation.md).
+
 ## App overviews
 
 Overview is the shared summary destination. Use `kit/Overview` for the header
@@ -173,6 +199,15 @@ An app's section tabs are its NOUNS. Fleet's are machines, policies, the model
 library; Deployables' are **deployables** and **sources**. A slice of one noun
 -- standalone ones, the ones from a zip, the live ones -- is a question asked of
 a list, and belongs behind `Refine` (rule 2), not on a tab.
+
+Sibling views **inside a page or an entity** use the shared `LocalTabs`, directly
+below that page's heading and above its content. Fleet's Model Library
+(Available models / Catalog / Inference sources) and machine details are the
+reference. Keep the app's top-level section tabs in `AppFrame`; do not add a
+second app-level tab bar or disguise page navigation as radio preferences.
+Local tabs keep one active view, preserve attention destinations, and scroll
+horizontally in a narrow window. Filters stay in `Refine`, saved choices stay
+form controls, and ordered workflows keep their rail.
 
 Deployables used to draw both nouns in one list: a source was a row with its
 apps indented beneath it, then a "Standalone" heading over the rest. A tree

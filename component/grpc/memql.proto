@@ -286,6 +286,7 @@ message MemqlClientMessage {
     ModulesListMsg modules_list = 109;
     ModuleDetailMsg module_detail = 110;
     SetPackEnabledMsg set_pack_enabled = 111;
+    AskVoiceStartMsg ask_voice_start = 114;
   }
 }
 
@@ -433,6 +434,7 @@ message MemqlServerMessage {
     ModulesListResult modules_list_result = 131;
     ModuleDetailResult module_detail_result = 132;
     SetPackEnabledResult set_pack_enabled_result = 133;
+    AskVoiceStartResult ask_voice_start_result = 137;
   }
 }
 
@@ -949,6 +951,9 @@ message AiChatMsg {
   // send the bare registration id and an explicit fleet:<modelId> provider.
   // An unavailable or unauthorized target refuses; no other machine serves it.
   string fleet_registration_id = 5;
+  // Ask uses a server-owned transcript. Only one user message is accepted.
+  string conversation_id = 6;
+  string page_context = 7;
 }
 
 message AiChatMessage {
@@ -993,6 +998,7 @@ message AiTranscribeStreamDelta {
   string text = 2;
   bool is_final = 3;
   float confidence = 4;        // optional, 0.0-1.0
+  string metadata_json = 5;    // route attempt observation; a metadata-only delta has no text
 }
 
 message AiTranscribeStreamComplete {
@@ -3734,4 +3740,22 @@ message SetPackEnabledResult {
   bool restart_required = 5;
   int32 error_code = 6;
   string error_message = 7;
+}
+
+// Private LiveKit conversation. Credentials are scoped to one room and expire
+// shortly after issuance. Audio and subsequent state use LiveKit media/data.
+message AskVoiceStartMsg {
+ string request_id = 1;
+ string conversation_id = 2;
+ string page_context = 3;
+ string voice = 4;
+ string chat_provider = 5;
+ string transcription_provider = 6;
+ string speech_provider = 7;
+}
+message AskVoiceStartResult {
+ string request_id = 1;
+ string url = 2;
+ string token = 3;
+ string room = 4;
 }

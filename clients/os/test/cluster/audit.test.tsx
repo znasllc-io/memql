@@ -30,6 +30,22 @@ beforeEach(() => {
 });
 
 describe("the audit trail", () => {
+  it("uses silent skeletons during a delayed read and exposes a failed read", async () => {
+    const connection = fakeConnection();
+    let reject!: (reason: Error) => void;
+    connection.query.recentAuditEvents.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+    const view = mount(connection);
+    const label = screen.getByText("Loading the trail");
+    expect(label.className).toBe("os-sr-only");
+    expect(label.closest('[aria-busy="true"]')).not.toBeNull();
+    expect(view.container.querySelector(".os-skeleton-block")).not.toBeNull();
+    expect(screen.queryByText(/Reading the (trail|declared inventory)/)).toBeNull();
+    await act(async () => reject(new Error("temporarily unavailable")));
+    expect(view.container.querySelector(".os-record-skeleton")).toBeNull();
+    expect(screen.getByText("temporarily unavailable")).toBeTruthy();
+  });
+
+
   it("renders an owner's empty result as 'No events recorded'", async () => {
     // The sentence is only TRUE under the section's owner floor. Row
     // admission on `@rowAuthz(clusterOwner)` returns ZERO ROWS AND NO ERROR,

@@ -1011,6 +1011,31 @@ function resolve_github_app() {
     RESOLVED_GITHUB_APP_WEBHOOK_SECRET=""
 }
 
+# Media credentials are independent of identity signing and never rotate on a
+# routine make secrets. A partial existing Secret is refused, not overwritten.
+function resolve_voice_credentials() {
+    local snapshot
+    snapshot="$(kubectl get secret memql-voice --namespace="$NAMESPACE" --ignore-not-found -o json)" || cap_fail 5 "could not read voice credentials"
+    if [[ -n "$snapshot" ]]; then
+        VOICE_API_KEY="$(printf '%s' "$snapshot" | jq -r '.data.MEMQL_LIVEKIT_API_KEY // empty' | b64_decode)"
+        VOICE_API_SECRET="$(printf '%s' "$snapshot" | jq -r '.data.MEMQL_LIVEKIT_API_SECRET // empty' | b64_decode)"
+        [[ -n "$VOICE_API_KEY" && ${#VOICE_API_SECRET} -ge 32 ]] || cap_fail 3 "memql-voice is incomplete; restore its API key and secret before seeding"
+    else
+        VOICE_API_KEY="ask$(openssl rand -hex 12)"
+        VOICE_API_SECRET="$(openssl rand -hex 32)"
+    fi
+}
+
+function seed_voice_credentials() {
+    kubectl create secret generic memql-voice --namespace="$NAMESPACE" \
+        --from-literal=MEMQL_LIVEKIT_API_KEY="$VOICE_API_KEY" \
+        --from-literal=MEMQL_LIVEKIT_API_SECRET="$VOICE_API_SECRET" \
+        --from-literal=LIVEKIT_KEYS="$VOICE_API_KEY: $VOICE_API_SECRET" \
+        --dry-run=client -o yaml | kubectl apply -f - >&2
+    SEEDED_COUNT=$((SEEDED_COUNT + 1))
+    info "Voice credentials seeded."
+}
+
 function seed_memql_secrets() {
     # Both values were resolved in main BEFORE any mutation -- see the note
     # there. This function only writes.
@@ -1182,12 +1207,14 @@ function main() {
     resolve_signing_key_created_at
     resolve_node_bootstrap_token
     resolve_github_app
+    resolve_voice_credentials
 
     seed_internal_ca
     seed_domain_configmap
     seed_front_door_tls
     seed_db_creds
     seed_memql_secrets
+    seed_voice_credentials
 
     info "All local secrets seeded. The k3d cluster can now start the MemQL stack."
     info "ArgoCD reconciles automatically; check: kubectl get app memql-local -n argocd -w"

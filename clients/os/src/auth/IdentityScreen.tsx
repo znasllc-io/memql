@@ -1,3 +1,4 @@
+import { ContentSkeleton } from "../kit/ContentSkeleton";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Fingerprint } from "lucide-react";
 import { useAuth } from "./AuthProvider";
@@ -169,7 +170,7 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
         await registerPasskey(config, `Bearer ${bearer}`, "My passkey"); await load("/me/devices");
       })} />; break;
     case "legal_view": body = <pre className="os-identity-legal">{value(data, "Body")}</pre>; break;
-    default: body = page ? <p>{value(data, "Message") || "You can continue to MemQL OS."}</p> : <p>{busy ? "Opening identity…" : "Identity could not be opened."}</p>;
+    default: body = page ? <p>{value(data, "Message") || "You can continue to MemQL OS."}</p> : busy ? <ContentSkeleton kind="form" label="Opening identity" /> : <p>Identity could not be opened.</p>;
   }
   return <div className={embedded ? "os-identity-panel" : "os-identity-gate"}><div className="os-identity-page">
     <Head title={title} />{!embedded && <Fingerprint size={32} aria-hidden="true" />}

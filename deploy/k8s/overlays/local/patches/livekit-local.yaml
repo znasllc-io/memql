@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: livekit
+spec:
+  template:
+    spec:
+      containers:
+        - name: livekit
+          env:
+            - name: LIVEKIT_CONFIG
+              value: |
+                port: 7880
+                redis:
+                  address: voice-redis:6379
+                rtc:
+                  use_external_ip: false
+                  tcp_port: 7881
+                  udp_port: 7882
+                turn:
+                  enabled: true
+                  domain: turn.$(MEMQL_DOMAIN)
+                  tls_port: 443
+                  udp_port: 0
+                  external_tls: true
+                  proxy_protocol: true
+                  proxy_protocol_trusted_cidrs: [10.42.0.0/16]
+                  allow_restricted_peer_cidrs: [10.42.0.0/16]
+                  relay_range_start: 30000
+                  relay_range_end: 31000
+                room:
+                  auto_create: false
+                  empty_timeout: 30
+                  departure_timeout: 10
+                  max_participants: 2
+                  enabled_codecs:
+                    - mime: audio/opus
+                logging:
+                  level: info
+                  json: true

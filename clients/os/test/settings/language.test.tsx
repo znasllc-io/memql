@@ -840,15 +840,15 @@ describe("the unseen-change marker on Language", () => {
   it.each([
     ["a viewer", READER],
     ["a member", { ...READER, userId: "u-5", primaryEmail: "member@example.com", role: "writer" }],
-  ])("leaves %s's Settings tile unmarked", async (_who, access) => {
+  ])("marks %s's Settings tile for the accessible Ask update", async (_who, access) => {
     connect();
     renderShell({ access });
     const tile = settingsTile();
-    // Their Settings holds no section this change is about, so it marks nothing.
+    // Language stays hidden, while the new Ask feature is reachable for these roles.
     await act(async () => {
       await Promise.resolve();
     });
-    expect(within(tile).queryByRole("img", { name: "Unseen change" })).toBeNull();
+    expect(within(tile).getByRole("img", { name: "Unseen change" })).toBeTruthy();
     expect(tile.textContent).toBe("Settings");
   });
 

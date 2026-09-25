@@ -340,7 +340,7 @@ func TestTranscriptStreamSubstrate_RoundTrip(t *testing.T) {
 	if err := send(&memqlv1.MemqlServerMessage{
 		Payload: &memqlv1.MemqlServerMessage_AiTranscribeStreamDelta{
 			AiTranscribeStreamDelta: &memqlv1.AiTranscribeStreamDelta{
-				RequestId: requestId, Text: "hel", IsFinal: false, Confidence: 0.8,
+				RequestId: requestId, Text: "hel", IsFinal: false, Confidence: 0.8, MetadataJson: `{"model":"whisper"}`,
 			}}}); err != nil {
 		t.Fatalf("delta 1: %v", err)
 	}
@@ -377,7 +377,7 @@ func TestTranscriptStreamSubstrate_RoundTrip(t *testing.T) {
 		t.Fatalf("want 3 msgs (2 deltas + complete), got %d: %+v", len(msgs), msgs)
 	}
 	d1 := msgs[0].GetAiTranscribeStreamDelta()
-	if d1 == nil || d1.GetText() != "hel" || d1.GetIsFinal() || d1.GetConfidence() < 0.79 || d1.GetConfidence() > 0.81 {
+	if d1 == nil || d1.GetText() != "hel" || d1.GetMetadataJson() != `{"model":"whisper"}` || d1.GetIsFinal() || d1.GetConfidence() < 0.79 || d1.GetConfidence() > 0.81 {
 		t.Fatalf("delta 1 mismatch: %+v", d1)
 	}
 	d2 := msgs[1].GetAiTranscribeStreamDelta()

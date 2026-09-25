@@ -78,6 +78,9 @@ type Options struct {
 	// Must not block significantly -- a slow OnPartial back-pressures
 	// the stream listener.
 	OnPartial func(PartialTranscript)
+
+	// OnMetadata receives a route attempt observation without changing the transcript.
+	OnMetadata func(string)
 }
 
 // PushToTalk runs a streaming transcription session end-to-end:
@@ -157,7 +160,6 @@ func PushToTalk(
 			// Best-effort abort. Don't block on Send failure -- the
 			// dispatcher is likely already torn down.
 			_ = sendEnd(dispatcher, requestId, true)
-			<-readErrCh
 			return nil, ctx.Err()
 
 		case <-dispatcher.Done():
@@ -179,13 +181,18 @@ func PushToTalk(
 			}
 			switch p := msg.Payload.(type) {
 			case *memqlv1.MemqlServerMessage_AiTranscribeStreamDelta:
-				if opts.OnPartial != nil {
+				if metadata := p.AiTranscribeStreamDelta.GetMetadataJson(); metadata != "" && opts.OnMetadata != nil {
+					opts.OnMetadata(metadata)
+				}
+				if opts.OnPartial != nil && p.AiTranscribeStreamDelta.GetText() != "" {
 					opts.OnPartial(PartialTranscript{
 						Text:       p.AiTranscribeStreamDelta.GetText(),
 						IsFinal:    p.AiTranscribeStreamDelta.GetIsFinal(),
 						Confidence: p.AiTranscribeStreamDelta.GetConfidence(),
 					})
 				}
+			case *memqlv1.MemqlServerMessage_QueryError:
+				return nil, fmt.Errorf("voice.PushToTalk: %s", p.QueryError.GetError().GetMessage())
 			case *memqlv1.MemqlServerMessage_AiTranscribeStreamComplete:
 				final = &FinalTranscript{
 					Text:       p.AiTranscribeStreamComplete.GetText(),

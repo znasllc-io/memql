@@ -61,7 +61,7 @@ export function LiveList<T>({
 
   const stateLine =
     snapshot.state === "seeding"
-      ? "Loading from the cluster"
+      ? null
       : snapshot.state === "degraded"
         ? "Live updates degraded -- showing the last known rows"
         : snapshot.state === "disconnected"
@@ -69,7 +69,7 @@ export function LiveList<T>({
           : null;
 
   return (
-    <div className="os-livelist os-record-list" data-os-livelist data-state={snapshot.state}>
+    <div className="os-livelist os-record-list" aria-busy={snapshot.state === "seeding" || undefined} data-os-livelist data-state={snapshot.state}>
       <ul className="os-livelist-rows" aria-label={label}>
         {snapshot.rows.map((row) => {
           const id = rowId(row);

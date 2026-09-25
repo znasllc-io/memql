@@ -1,3 +1,5 @@
+import { ContentSkeleton } from "../../kit/ContentSkeleton";
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { RecordList, listCount } from "../../kit/RecordRow";
 import { NeedsConfiguration } from "./NeedsConfiguration";
 import { useSession } from "../../chrome/access";
@@ -725,7 +727,7 @@ function StatsPanel({
     <Panel label="Full breakdown">
       <div className="os-campaign-detail-head">
         <Subhead>Breakdown</Subhead>
-        <Button busy={stats.state === "loading"} busyLabel="Reading" onClick={stats.reload}>
+        <Button busy={stats.state === "loading"} onClick={stats.reload}>
           {campaignIsRunning(campaign) ? "Read again" : "Re-read"}
         </Button>
       </div>
@@ -737,11 +739,7 @@ function StatsPanel({
           next="The bar above is from the campaign's own counters and is still current."
           detail={stats.error}
         />
-      ) : value === null ? (
-        <Caption>
-          {stats.state === "loading" ? "Reading the breakdown" : "No breakdown yet."}
-        </Caption>
-      ) : (
+      ) : value === null ? (stats.state === "loading" ? <ContentSkeleton kind="metrics" label="Reading the breakdown" /> : <Caption>{"No breakdown yet."}</Caption>) : (
         <>
           <Facts>
             <Fact label="Recipients" value={formatFigure(value.recipients)} />
@@ -796,7 +794,7 @@ function DeliveriesPanel({ campaignId }: { campaignId: string }) {
     <Panel label="Who got it">
       <div className="os-campaign-detail-head">
         <Subhead meta={ledger.state === "ready" && !ledger.error ? `${rows.length} read` : undefined}>Who got it</Subhead>
-        <Button busy={ledger.state === "loading"} busyLabel="Reading" onClick={ledger.reload}>
+        <Button busy={ledger.state === "loading"} onClick={ledger.reload}>
           Read again
         </Button>
       </div>
@@ -808,13 +806,7 @@ function DeliveriesPanel({ campaignId }: { campaignId: string }) {
           next="Nothing is listed below -- that is silence, not an empty send."
           detail={ledger.error}
         />
-      ) : rows.length === 0 ? (
-        <Caption>
-          {ledger.state === "loading"
-            ? "Reading the delivery record"
-            : "Nothing has been written to the record yet."}
-        </Caption>
-      ) : (
+      ) : rows.length === 0 ? (ledger.state === "loading" ? <RecordListSkeleton label="Reading the delivery record" /> : <Caption>{"Nothing has been written to the record yet."}</Caption>) : (
         <RecordList as="ul" label="Per-recipient outcomes">
           {rows.slice(0, LEDGER_ROWS).map((delivery) => (
             <RecordRow key={delivery.id}

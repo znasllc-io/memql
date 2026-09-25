@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { useCallback, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -116,7 +117,7 @@ export function DeadLetterBand({ connector }: { connector: string }) {
         />
       ) : null}
       {entries.state === "reading" && entries.value === null ? (
-        <Caption>Reading {connector}'s dead letters.</Caption>
+        <RecordListSkeleton label="Loading dead letters" />
       ) : null}
       {entries.state === "read" && rows.length === 0 ? (
         <Caption>

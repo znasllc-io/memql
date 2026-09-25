@@ -1,3 +1,4 @@
+import { ContentSkeleton } from "../../../kit/ContentSkeleton";
 import { RecordList, RecordRow } from "../../../kit/RecordRow";
 import { useCallback, useMemo, useState } from "react";
 import { RefreshCw, ShoppingBag } from "lucide-react";
@@ -199,7 +200,7 @@ export function StorePanel({ site, canBind, trail, back }: StorePanelProps) {
           }
         />
       ) : store === null ? (
-        <Caption>Reading the store this storefront fronts.</Caption>
+        <ContentSkeleton kind="detail" label="Loading the store this storefront fronts" />
       ) : (
         <>
           <Identity store={store} report={report} />

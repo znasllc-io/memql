@@ -581,6 +581,7 @@ func (s *Server) EventBus() *events.Bus {
 }
 
 type service struct {
+	askCancels sync.Map // request id -> context.CancelFunc on the receiving agent replica
 	memqlv1.UnimplementedMemqlServiceServer
 	logger           *slog.Logger
 	engine           *memqlengine.MemQLEngine
@@ -1399,6 +1400,8 @@ func badgePayloadRequestId(envelope *memqlv1.MemqlClientMessage) string {
 	switch p := envelope.GetPayload().(type) {
 	case *memqlv1.MemqlClientMessage_ExecuteQuery:
 		return p.ExecuteQuery.GetRequestId()
+	case *memqlv1.MemqlClientMessage_AskVoiceStart:
+		return p.AskVoiceStart.GetRequestId()
 	case *memqlv1.MemqlClientMessage_AiChat:
 		return p.AiChat.GetRequestId()
 	case *memqlv1.MemqlClientMessage_AiTranscribeStreamStart:
@@ -1727,6 +1730,8 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 		return s.handleListTools(envelope, payload.ListTools)
 	case *memqlv1.MemqlClientMessage_CallTool:
 		return s.handleCallTool(envelope, payload.CallTool)
+	case *memqlv1.MemqlClientMessage_AskVoiceStart:
+		return s.handleAskVoiceStart(envelope, payload.AskVoiceStart)
 	case *memqlv1.MemqlClientMessage_AiChat:
 		return s.handleAiChat(envelope, payload.AiChat)
 	case *memqlv1.MemqlClientMessage_AiTranscribeStreamStart:
@@ -2019,7 +2024,7 @@ func (s *streamSession) handleCancelRequest(envelope *memqlv1.MemqlClientMessage
 		return s.sendQueryError("", envelope.GetMessageId(), codes.InvalidArgument, "cancel request must include request_id")
 	}
 
-	if cancel, ok := s.activeRequests.LoadAndDelete(requestId); ok {
+	if cancel, ok := s.activeRequests.Load(requestId); ok {
 		if fn, ok := cancel.(context.CancelFunc); ok && fn != nil {
 			fn()
 		}

@@ -1,7 +1,8 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useMemo, useState } from "react";
 import type { Concept } from "@znasllc-io/memql-sdk-core/client";
 
-import { Caption, Head, RecordList, RecordRow, Notice, Panel, Refine, Select, Subhead } from "../../kit";
+import { Head, RecordList, RecordRow, Notice, Panel, Refine, Select, Subhead } from "../../kit";
 import { ConceptPage } from "./ConceptPage";
 import { domainCounts, groupConcepts, originBadgeFor, originBadgeLabel } from "./registry";
 import { useConceptRegistry } from "./useConceptRegistry";
@@ -108,7 +109,7 @@ export function RegistrySection({
       ) : null}
 
       {registry.state === "seeding" && total === 0 ? (
-        <Caption>Reading the registry from the cluster.</Caption>
+        <RecordListSkeleton label="Loading the registry from the cluster" />
       ) : null}
 
       {registry.state !== "failed" && total > 0 && shown === 0 ? (

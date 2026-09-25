@@ -26,20 +26,10 @@ export type VoiceCommit = "send" | "review";
 
 export interface AskSettings {
   version: 1;
-  /**
-   * `send` -- releasing the mic asks the question. `review` -- it lands in the
-   * box for editing.
-   *
-   * `send` is the default, and the portal's own voice control (Synapse) reads
-   * the opposite way: "the transcript is shown and editable, always. Voice
-   * that ran straight through would be a black box." That rule was written
-   * against a BATCH transcribe, where nothing is visible until it is over.
-   * This path streams -- every delta replaces the field's contents while the
-   * person is still speaking -- so by the time they release they have already
-   * read what was heard. Nothing is hidden, so nothing needs reviewing, and
-   * making the fast path the default is the point of talking to it.
-   */
+  /** Dictation lands in an editable draft by default. Live conversation
+   * has a separate, explicit microphone session. */
   commit: VoiceCommit;
+  voice?: "male" | "female";
   /**
    * Hold Space to talk while Ask is open and the caret is not in a field.
    *
@@ -56,7 +46,8 @@ export const ASK_SETTINGS_KEY = "memql-os-ask-v1";
 
 export const DEFAULT_ASK_SETTINGS: AskSettings = {
   version: 1,
-  commit: "send",
+  commit: "review",
+  voice: "female",
   spaceToTalk: true,
 };
 
@@ -73,6 +64,7 @@ export function sanitizeAskSettings(raw: unknown): AskSettings {
   if (doc.version !== 1) return { ...DEFAULT_ASK_SETTINGS };
   return {
     version: 1,
+    voice: doc.voice === "male" ? "male" : "female",
     commit: doc.commit === "review" || doc.commit === "send" ? doc.commit : DEFAULT_ASK_SETTINGS.commit,
     spaceToTalk:
       typeof doc.spaceToTalk === "boolean" ? doc.spaceToTalk : DEFAULT_ASK_SETTINGS.spaceToTalk,

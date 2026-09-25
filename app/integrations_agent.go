@@ -21,6 +21,7 @@ import (
 func (a *App) integrationsAgent() {
 	a.integrationsCore()
 	a.selectSTTProvider()
+	a.wireAskVoice()
 
 	// The agent node is what EXECUTES a compiled work run (memql#5054).
 	// Safe here because engineAndBus() has already run -- it is what builds

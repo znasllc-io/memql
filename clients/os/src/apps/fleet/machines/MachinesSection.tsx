@@ -37,7 +37,7 @@ export function MachinesSection({
   intent?: OsAppProps["intent"];
   consumeIntent?: OsAppProps["consumeIntent"];
 }) {
-  const { collection, settled } = useMachines();
+  const { collection } = useMachines();
   const writes = useMachineWrites();
   const [openId, setOpenId] = useState("");
 
@@ -126,9 +126,7 @@ export function MachinesSection({
         }
         label="Your machines"
         emptyText={
-          !settled
-            ? "Loading your machines…"
-            : showRevoked
+          showRevoked
               ? "No machines yet for this signed-in account. Add one to pair a computer you own."
               : "No active machines for this signed-in account. Add one to pair a computer you own -- or turn on revoked machines in this app's settings if you are looking for one you retired. If you paired under a different sign-in, switch accounts or re-pair here."
         }

@@ -1,3 +1,4 @@
+import { ContentSkeleton } from "../../../../../kit/ContentSkeleton";
 import { ManageGitHub } from "./GitHubSource";
 import { useEffect, useRef } from "react";
 import { Caption, Field, Notice, RefreshButton, Select } from "../../../../../kit";
@@ -71,7 +72,7 @@ export function RepositoryProbeStatus({ draft, probe }: { draft: ComposeDraft; p
   if (!draft.repoUrl) return null;
   const parked = probeParks(probe.reply?.reason ?? "");
   return <>
-    {probe.busy ? <Caption>Checking the repository…</Caption> : null}
+    {probe.busy ? <ContentSkeleton kind="detail" label="Loading the repository" /> : null}
     {accessRefusals.includes(probe.reply?.reason ?? "") ? <Notice tone="warn" sentence="This source needs attention." next="Go Back to choose another organization or GitHub account." /> : null}
     {probe.reply && probeNote(probe.reply) ? <p className="os-stop-verdict" data-tone={probe.reply.reason === "ok" ? "ok" : "warn"} role="status">{probeNote(probe.reply)}</p> : null}
     {probe.error ? <Notice tone="warn" sentence="This cluster could not check the repository just now." detail={probe.error} /> : null}

@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { LocalTabs } from "../../../kit/LocalTabs";
 import { useMemo, useState } from "react";
 import { RefreshButton, useFleetScroll } from "../FleetControls";
@@ -252,6 +253,7 @@ export function ModelsSection({ onHome }: { onHome?: () => void } = {}) {
         </>
       )}
 
+      {catalog.state === "reading" && models.length === 0 ? <RecordListSkeleton label="Loading available models" rows={3} /> : null}
       {catalog.state === "read" && ranked.length === 0 ? (
         <EmptyState title="No models available" action={<><Button onClick={() => setView("catalog")}>Browse model catalog</Button>{onHome ? <Button onClick={onHome}>Go to Machines</Button> : null}</>}>Connect a machine and install a local model to make it available here.</EmptyState>
       ) : null}
@@ -341,7 +343,7 @@ function DoorsPanel({
         />
       ) : null}
       {doors === null ? (
-        state === "reading" ? <Caption>Asking the cluster.</Caption> : null
+        state === "reading" ? <RecordListSkeleton label="Loading the cluster" /> : null
       ) : (
         <>
           <p className="os-cluster-fact">{doorSentence(doors)}</p>

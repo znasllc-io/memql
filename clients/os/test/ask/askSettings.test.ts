@@ -24,14 +24,14 @@ function memStorage(): Storage {
 }
 
 describe("Ask settings", () => {
-  it("sends on release by default", () => {
-    expect(DEFAULT_ASK_SETTINGS.commit).toBe("send");
+  it("leaves dictation editable by default", () => {
+    expect(DEFAULT_ASK_SETTINGS.commit).toBe("review");
     expect(DEFAULT_ASK_SETTINGS.spaceToTalk).toBe(true);
   });
 
   it("repairs one bad field without spending the others", () => {
     const repaired = sanitizeAskSettings({ version: 1, commit: "yell", spaceToTalk: false });
-    expect(repaired.commit).toBe("send");
+    expect(repaired.commit).toBe("review");
     expect(repaired.spaceToTalk).toBe(false);
   });
 
@@ -45,7 +45,7 @@ describe("Ask settings", () => {
     const store = new LocalAskSettingsStore(memStorage());
     expect(store.load()).toEqual(DEFAULT_ASK_SETTINGS);
     store.save({ version: 1, commit: "review", spaceToTalk: false });
-    expect(store.load()).toEqual({ version: 1, commit: "review", spaceToTalk: false });
+    expect(store.load()).toEqual({ version: 1, commit: "review", spaceToTalk: false, voice: "female" });
 
     // A private window with storage disabled keeps working, on defaults.
     const none = new LocalAskSettingsStore(null);

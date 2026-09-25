@@ -74,7 +74,7 @@ describe("arrival reducer", () => {
 });
 
 describe("LiveList", () => {
-  it("renders rows, plays the added tick, and shows the state caption", () => {
+  it("uses skeletons before rows arrive and preserves rows during refresh", () => {
     const source = fakeSource(snap([], "seeding", 1));
     render(
       <LiveList<Row>
@@ -95,6 +95,12 @@ describe("LiveList", () => {
 
     act(() => source.push(snap([{ id: "a", name: "alpha", v: 1 }], "live", 2)));
     expect(screen.getByText("alpha")).toBeTruthy();
+    act(() => source.push(snap([{ id: "a", name: "alpha", v: 1 }], "seeding", 3)));
+    expect(screen.getByText("alpha")).toBeTruthy();
+    expect(screen.queryByText("Loading from the cluster")).toBeNull();
+    expect(document.querySelector(".os-record-skeleton")).toBeNull();
+    act(() => source.push(snap([{ id: "a", name: "alpha", v: 1 }], "live", 4)));
+
 
     act(() => source.push(snap([{ id: "a", name: "alpha", v: 1 }, { id: "b", name: "beta", v: 1 }], "live", 3)));
     expect(screen.getByText("beta (new)")).toBeTruthy();

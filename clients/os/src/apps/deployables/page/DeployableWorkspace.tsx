@@ -1,3 +1,4 @@
+import { InlineSkeleton } from "../../../kit/ContentSkeleton";
 import { Versions } from "./Versions";
 import type { SiteLifecycleActions } from "../packages/actions";
 import { AvailableVersion } from "./AvailableVersion";
@@ -84,7 +85,7 @@ export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDo
       <header><h3>Versions</h3></header>
       {pkg ? <AvailableVersion key={pkg.id} pkg={pkg} onUpdate={onUpdate} /> : null}
       <Versions site={site} runs={runs ?? []} canPublish={can?.publish ?? false} lifecycle={lifecycle} />
-      {pkg ? <div className="deployable-version-row"><span><Hammer size={14} aria-hidden />Latest attempt</span><div><strong>{run ? attemptWord(run.status) : knownTimeline ? "No attempt yet" : "History unavailable"}</strong><small>{run ? [shortVersion(run.sourceVersion), build?.reason].filter(Boolean).join(" · ") : timelineState === "loading" || timelineState === "seeding" ? "Reading deployment history…" : "Deploy an update to start a new attempt"}</small></div>{run ? <IconButton label="Latest attempt details" onClick={() => onInspect(run.status === "awaiting_confirm" ? "whatItIs" : "build")}><Info size={16} aria-hidden /></IconButton> : null}</div> : null}
+      {pkg ? <div className="deployable-version-row"><span><Hammer size={14} aria-hidden />Latest attempt</span><div><strong>{run ? attemptWord(run.status) : knownTimeline ? "No attempt yet" : "History unavailable"}</strong><small>{run ? [shortVersion(run.sourceVersion), build?.reason].filter(Boolean).join(" · ") : timelineState === "loading" || timelineState === "seeding" ? <InlineSkeleton label="Loading deployment history" /> : "Deploy an update to start a new attempt"}</small></div>{run ? <IconButton label="Latest attempt details" onClick={() => onInspect(run.status === "awaiting_confirm" ? "whatItIs" : "build")}><Info size={16} aria-hidden /></IconButton> : null}</div> : null}
       {failed && site.status === "live" ? <Caption>The latest attempt did not replace the published version.</Caption> : null}
       {pkg && timelineError ? <Notice tone="error" sentence="Deployment history could not be read." detail={timelineError}><Button onClick={onRetryRead}>Try again</Button></Notice> : null}
     </section>
@@ -94,7 +95,7 @@ export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDo
   </>;
 }
 
-function Piece({ icon, label, detail, onClick }: { icon: ReactNode; label: string; detail: string; onClick: () => void }) {
+function Piece({ icon, label, detail, onClick }: { icon: ReactNode; label: string; detail: ReactNode; onClick: () => void }) {
   return <button type="button" className="deployable-slot" onClick={onClick}>{icon}<span><strong>{label}</strong><small>{detail}</small></span><ChevronRight size={13} aria-hidden /></button>;
 }
 
@@ -103,7 +104,7 @@ function DomainPiece({ site, onClick }: { site: SiteRow; onClick: () => void }) 
   const view = useLiveView(source, `workspace-domains:${site.id}`, rows => rows.map(domainFromRow).filter(d => d.siteId === site.id && isListedDomain(d)));
   const rows = view?.snapshot.rows ?? [];
   const ready = view?.snapshot.state === "live";
-  const detail = view?.snapshot.error ? "Could not read domains" : rows.length ? rows.map(d => `${d.hostname}${d.status === "live" ? "" : ` · ${d.status.replace(/_/g, " ")}`}`).join(", ") : ready ? "Add a domain" : "Reading domains…";
+  const detail = view?.snapshot.error ? "Could not read domains" : rows.length ? rows.map(d => `${d.hostname}${d.status === "live" ? "" : ` · ${d.status.replace(/_/g, " ")}`}`).join(", ") : ready ? "Add a domain" : <InlineSkeleton label="Loading domains" />;
   return <ActivityTarget target={`deployables:${site.id}:domains`}><Piece icon={<Link size={18} aria-hidden />} label="Custom domains" detail={detail} onClick={onClick} /></ActivityTarget>;
 }
 
@@ -127,14 +128,14 @@ function StorePiece({ storeId, testingId, siteId, onClick }: { storeId: string; 
   const testing = useStore(testingId);
   const detail =
     storeId === ""
-      ? testing.store ? `${storeLabel(testing.store)} · Testing` : testingId ? testing.state === "failed" || testing.state === "read" ? "Testing store unavailable" : "Reading testing store…" : "Not connected"
+      ? testing.store ? `${storeLabel(testing.store)} · Testing` : testingId ? testing.state === "failed" || testing.state === "read" ? "Testing store unavailable" : <InlineSkeleton label="Loading testing store" /> : "Not connected"
       : bound.state === "failed"
         ? "The store could not be read"
         : bound.store !== null
           ? [storeLabel(bound.store), bound.store.isDevelopment ? "Sandbox · Setup needed" : !bound.store.storefrontTokenRef || !bound.store.adminTokenRef ? "Setup needed" : "Production"].filter((part) => part !== "").join(" \u00b7 ")
           : bound.state === "read"
             ? "Names a store that is not on this cluster"
-            : "Reading the store";
+            : <InlineSkeleton label="Loading store" />;
   return <ActivityTarget target={`deployables:${siteId}:store`}><button type="button" className="deployable-slot" onClick={onClick} data-os-setup={!storeId || bound.state === "failed" || (bound.state === "read" && (!bound.store || bound.store.isDevelopment || !bound.store.storefrontTokenRef || !bound.store.adminTokenRef)) ? "" : undefined}><ShoppingBag size={18} aria-hidden /><span><strong>Store</strong><small>{detail}</small></span><AttentionMarker appId="deployables" sectionId="deployables" target="shopify-store" /><ChevronRight size={13} aria-hidden /></button></ActivityTarget>;
 }
 

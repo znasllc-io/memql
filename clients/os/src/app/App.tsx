@@ -1,3 +1,4 @@
+import { ContentSkeleton } from "../kit/ContentSkeleton";
 import { useEffect, useState } from "react";
 
 import { AuthProvider, useAuth } from "../auth/AuthProvider";
@@ -41,7 +42,7 @@ function OsBoot() {
   if (status === "loading") {
     return (
       <div className="os-boot" data-os-boot="loading">
-        Loading
+        <ContentSkeleton kind="detail" label="Opening MemQL OS" />
       </div>
     );
   }

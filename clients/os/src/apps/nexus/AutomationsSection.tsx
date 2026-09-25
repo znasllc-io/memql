@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useMemo, useState } from "react";
 import { RefreshCw } from "lucide-react";
 
@@ -167,18 +168,12 @@ export function AutomationsSection({ selectedId, onSelect }: AutomationsSectionP
             ))}
           </RecordList>
 
-          {rows.length === 0 ? (
-            <Caption>
-              {catalog.state === "loading"
-                ? "Reading the catalog"
-                : search.trim() !== ""
+          {rows.length === 0 ? (catalog.state === "loading" ? <RecordListSkeleton label="Reading the catalog" /> : <Caption>{search.trim() !== ""
                   ? "No automation here matches that."
                   : // AN EMPTY SCREEN IS AN INVITATION, and here the invitation
                     // is not a button -- nobody authors an automation by hand in
                     // this app. It says where they come from instead.
-                    "Nothing here yet. An automation appears when a goal is worked out: the system compiles what it decided into a template, and a template that keeps succeeding earns its way up this list."}
-            </Caption>
-          ) : null}
+                    "Nothing here yet. An automation appears when a goal is worked out: the system compiles what it decided into a template, and a template that keeps succeeding earns its way up this list."}</Caption>) : null}
 
           <Caption>
             {catalog.readAt === ""
@@ -246,7 +241,7 @@ export function AutomationsSection({ selectedId, onSelect }: AutomationsSectionP
           selected !== null
             ? statusWord(selected.status)
             : rows.length === 0
-              ? "Nothing yet"
+              ? catalog.state === "loading" ? "" : "Nothing yet"
               : "Nothing selected"
         }
         detail={
@@ -256,7 +251,7 @@ export function AutomationsSection({ selectedId, onSelect }: AutomationsSectionP
               ? // "Select an automation" on an empty list is an instruction for
                 // a list that does not exist. Say what IS true instead.
                 catalog.state === "loading"
-                  ? "reading the catalog"
+                  ? undefined
                   : "nothing to arm yet"
               : "select an automation to arm or retire it"
         }

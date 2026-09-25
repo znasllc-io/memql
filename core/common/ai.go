@@ -123,9 +123,11 @@ type ToolCallingChatAIProvider interface {
 
 // StreamChunk represents a single chunk from a streaming AI response.
 type StreamChunk struct {
-	Content string
-	Done    bool
-	Error   error
+	// Metadata carries public execution events through the durable stream.
+	Metadata map[string]any
+	Content  string
+	Done     bool
+	Error    error
 }
 
 // ChatStreamProvider provides streaming chat completion.

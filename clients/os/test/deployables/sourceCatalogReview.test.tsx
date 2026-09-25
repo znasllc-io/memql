@@ -72,7 +72,7 @@ describe("Sources catalog review regressions", () => {
     await screen.findByRole("button", { name: /^Open Website,/ });
     await click(screen.getByRole("button", { name: "Find sources" }));
     await type(screen.getByLabelText("Search") as HTMLInputElement, "@alice");
-    await screen.findByText("Reading sources and GitHub access…");
+    await screen.findByText("Loading sources and GitHub access");
     expect(sourcesHeading().querySelector(".os-head-meta")).toBeNull();
     expect(screen.queryByText(/No matching sources|No sources yet/)).toBeNull();
     await act(async () => release());

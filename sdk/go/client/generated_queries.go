@@ -1042,6 +1042,45 @@ func ArtifactsForRunBuild(args ArtifactsForRunArgs) string {
 	return b.String()
 }
 
+// AskConversationById -- Read one private transcript. A guessed id never widens the caller's access.
+//
+// Bound concept: v1:os:askConversation (machine-readable: BoundConcepts["askConversationById"] in generated_concepts.go).
+type AskConversationByIdArgs struct {
+	ConversationId string
+}
+
+// AskConversationById calls the engine query askConversationById.
+func (qc *QueryClient) AskConversationById(ctx context.Context, args AskConversationByIdArgs) (*Result, error) {
+	call := AskConversationByIdBuild(args)
+	return qc.executeNamed(ctx, "askConversationById", call)
+}
+
+func AskConversationByIdBuild(args AskConversationByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query askConversationById(")
+	b.WriteString("conversationId: ")
+	b.WriteString(quoteMemQL(args.ConversationId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// AskRecentTimingHistory -- Timing evidence from this person's recent conversations, across replicas. The same owner-scoped history is available to the person and their assistant.
+//
+// Bound concept: v1:os:askConversation (machine-readable: BoundConcepts["askRecentTimingHistory"] in generated_concepts.go).
+type AskRecentTimingHistoryArgs struct {
+}
+
+// AskRecentTimingHistory calls the engine query askRecentTimingHistory.
+func (qc *QueryClient) AskRecentTimingHistory(ctx context.Context, args AskRecentTimingHistoryArgs) (*Result, error) {
+	call := AskRecentTimingHistoryBuild(args)
+	return qc.executeNamed(ctx, "askRecentTimingHistory", call)
+}
+
+func AskRecentTimingHistoryBuild(args AskRecentTimingHistoryArgs) string {
+	_ = args
+	return "query askRecentTimingHistory()"
+}
+
 // AssistantAgentForUser -- Resolve the active General Assistant agent owned by a user. Returns 0 or 1 rows. Used by autoJoinAI to derive a canonical agent id consistent across all callers of mutationCreateDailySpace -- the space row's ownerUserId is the same regardless of who triggered the mutation, while args.event.payload.actor (createdBy) varies. memql#273.
 //
 // Bound concept: v1:agents:agent (machine-readable: BoundConcepts["assistantAgentForUser"] in generated_concepts.go).
@@ -4954,6 +4993,23 @@ func (qc *QueryClient) ModuleReadinessAll(ctx context.Context, args ModuleReadin
 func ModuleReadinessAllBuild(args ModuleReadinessAllArgs) string {
 	_ = args
 	return "query moduleReadinessAll()"
+}
+
+// MyAskConversations -- Recent conversations belonging to the signed-in person.
+//
+// Bound concept: v1:os:askConversation (machine-readable: BoundConcepts["myAskConversations"] in generated_concepts.go).
+type MyAskConversationsArgs struct {
+}
+
+// MyAskConversations calls the engine query myAskConversations.
+func (qc *QueryClient) MyAskConversations(ctx context.Context, args MyAskConversationsArgs) (*Result, error) {
+	call := MyAskConversationsBuild(args)
+	return qc.executeNamed(ctx, "myAskConversations", call)
+}
+
+func MyAskConversationsBuild(args MyAskConversationsArgs) string {
+	_ = args
+	return "query myAskConversations()"
 }
 
 // MyAttentionReceipts -- The caller's seen UI revisions, shared across their OS windows and machines.

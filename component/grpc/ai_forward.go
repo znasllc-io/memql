@@ -545,6 +545,8 @@ func (s *service) HandleForwardedRequest(
 		_ = sess.handleAiTranscribeStreamChunk(&envelope, payload.AiTranscribeStreamChunk)
 	case *memqlv1.MemqlClientMessage_AiTranscribeStreamEnd:
 		_ = sess.handleAiTranscribeStreamEnd(&envelope, payload.AiTranscribeStreamEnd)
+	case *memqlv1.MemqlClientMessage_AskVoiceStart:
+		_ = sess.handleAskVoiceStart(&envelope, payload.AskVoiceStart)
 	case *memqlv1.MemqlClientMessage_AiChat:
 		_ = sess.handleAiChat(&envelope, payload.AiChat)
 	case *memqlv1.MemqlClientMessage_AiSuggest:
@@ -596,6 +598,7 @@ func forwardPayloadClass(payload any) (forwardPayloadKind, bool) {
 	switch payload.(type) {
 	case *memqlv1.MemqlClientMessage_AiTranscribeStreamStart,
 		*memqlv1.MemqlClientMessage_AiChat,
+		*memqlv1.MemqlClientMessage_AskVoiceStart,
 		*memqlv1.MemqlClientMessage_AiSuggest,
 		*memqlv1.MemqlClientMessage_ListTools,
 		*memqlv1.MemqlClientMessage_CallTool,
@@ -688,16 +691,17 @@ func forwardRefusalReason(err error) string {
 	}
 }
 
-// CancelForwardedRequest is the worker-side hook for AiForwardCancel
-// messages. For now we just log; the handlers exit naturally when
-// their context is cancelled (the NodeService stream's Context()
-// cancels when the peer connection drops), and a future refinement
-// can register per-request cancels for finer-grained teardown.
+// CancelForwardedRequest releases the actual per-turn model and tool context.
 func (s *service) CancelForwardedRequest(_ context.Context, requestId string) {
-	if s == nil || s.logger == nil {
+	if s == nil {
 		return
 	}
-	s.logger.Debug("ai forward cancel received (best-effort)", "request_id", requestId)
+	if ts := s.unregisterTranscribeStream(requestId); ts != nil {
+		ts.closeSilently()
+	}
+	if cancel, ok := s.askCancels.Load(requestId); ok {
+		cancel.(context.CancelFunc)()
+	}
 }
 
 // aiForwardHandlerShim defers resolution of the worker-side handler
@@ -868,6 +872,7 @@ func (f *forwardedStream) RecvMsg(_ any) error { return io.EOF }
 func isTerminalServerPayload(p any) bool {
 	switch p.(type) {
 	case *memqlv1.MemqlServerMessage_AiChatResult,
+		*memqlv1.MemqlServerMessage_AskVoiceStartResult,
 		*memqlv1.MemqlServerMessage_AiTranscribeStreamComplete,
 		*memqlv1.MemqlServerMessage_AiSuggestResult,
 		*memqlv1.MemqlServerMessage_ListToolsResult,
@@ -983,12 +988,27 @@ func (s *streamSession) proxyAI(envelope *memqlv1.MemqlClientMessage, requestId 
 	// contextWithEnvelopeProvenance at handler entry.
 	stampEnvelopeProvenance(ctx, envelope)
 
-	respCh, err := s.service.aiForwarder.Forward(ctx, requestId, target, principal, envelope)
+	// Ask journals its private transcript in the graph and relays live deltas.
+	// A fresh mesh ID avoids collisions between client-chosen IDs on other BFFs.
+	forwardID := forwardRequestKey(ctx, requestId, envelope)
+	release := func() {}
+	if isAskEnvelope(envelope) {
+		ctx, release, err = s.beginAskRequest(ctx, requestId)
+		if err != nil {
+			return s.sendQueryError(requestId, correlate, codes.AlreadyExists, err.Error())
+		}
+		forwardID = id.NewShortId()
+	}
+	respCh, err := s.service.aiForwarder.Forward(ctx, forwardID, target, principal, envelope)
 	if err != nil {
+		release()
 		return s.sendQueryError(requestId, correlate, codes.Unavailable, err.Error())
 	}
 
-	go s.relayForwardedResponses(correlate, requestId, respCh)
+	go func() {
+		defer release()
+		s.relayForwardedResponses(correlate, requestId, respCh)
+	}()
 	return nil
 }
 
@@ -1006,6 +1026,9 @@ func (s *streamSession) relayForwardedResponses(
 			continue
 		}
 		terminal = terminal || isTerminalServerPayload(msg.Payload)
+		if failure := msg.GetQueryError(); failure != nil {
+			failure.RequestId = requestId
+		}
 		// Rewrite CorrelateTo so the client matches against its
 		// original envelope's message_id, not the worker's view.
 		msg.CorrelateTo = s.safeCorrelate(correlate)
@@ -1095,4 +1118,11 @@ func (s *streamSession) forwardedPrincipal() (auth.ForwardedPrincipal, error) {
 func extractPartitionFromEnvelope(envelope *memqlv1.MemqlClientMessage) string {
 	_ = envelope
 	return ""
+}
+
+func forwardRequestKey(ctx context.Context, requestID string, envelope *memqlv1.MemqlClientMessage) string {
+	if envelope.GetAiTranscribeStreamStart() != nil {
+		return transcriptionKey(ctx, requestID)
+	}
+	return requestID
 }

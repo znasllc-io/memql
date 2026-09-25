@@ -1,3 +1,4 @@
+import { ContentSkeleton } from "../../../kit/ContentSkeleton";
 import { useAttention } from "../../../attention/Attention";
 import { updateTarget } from "../attention";
 import { useCallback, useMemo } from "react";
@@ -101,13 +102,9 @@ export function DeployMap({
   if (model.nodes.length === 0) {
     return (
       <div className="os-deploy-map" data-empty>
-        <Caption>
-          {state === "seeding"
-            ? "Loading from the cluster"
-            : behind
+        {state === "seeding" ? <ContentSkeleton kind="map" label="Loading from the cluster" /> : <Caption>{behind
               ? "Not connected to the cluster, so there is nothing to draw."
-              : "No deployables to map yet. Add one from the Deployables section."}
-        </Caption>
+              : "No deployables to map yet. Add one from the Deployables section."}</Caption>}
       </div>
     );
   }

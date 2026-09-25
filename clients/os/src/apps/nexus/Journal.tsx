@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { Button, Caption, RecordList, RecordRow, Notice, Subhead, formatDuration, formatMoment } from "../../kit";
 import type { Journal as JournalState } from "./useNexus";
 import { formatMoney, formatTokens, observationKindWord, servedWord } from "./rows";
@@ -40,7 +41,7 @@ export function JournalPanel({ journal }: { journal: JournalState }) {
           {journal.state === "idle" ? (
             <Caption>Not read yet</Caption>
           ) : journal.state === "loading" ? (
-            <Caption>Reading</Caption>
+            <RecordListSkeleton label="Loading journal" />
           ) : journal.readAt === "" ? null : (
             <Caption>Read at {formatMoment(journal.readAt)}</Caption>
           )}
@@ -48,7 +49,7 @@ export function JournalPanel({ journal }: { journal: JournalState }) {
         <Button
           onClick={journal.read}
           busy={journal.state === "loading"}
-          busyLabel="Reading"
+
           ariaLabel={journal.state === "idle" ? "Read the journal" : "Read the journal again"}
         >
           {journal.state === "idle" ? "Read the journal" : "Look again"}

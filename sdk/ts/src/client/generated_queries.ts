@@ -1077,6 +1077,48 @@ QueryClient.prototype.artifactsForRun = function (this: QueryClient, args: Artif
   return this.executeNamed("artifactsForRun", buildArtifactsForRun(args), opts);
 };
 
+/** Read one private transcript. A guessed id never widens the caller's access. */
+// Bound concept: v1:os:askConversation (machine-readable: BoundConcepts["askConversationById"] in generated_concepts.ts).
+export interface AskConversationByIdArgs {
+  conversationId: string;
+}
+
+export function buildAskConversationById(args: AskConversationByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("conversationId: " + renderMemQLValue(args.conversationId));
+  return "query askConversationById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    askConversationById(args: AskConversationByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.askConversationById = function (this: QueryClient, args: AskConversationByIdArgs = {} as AskConversationByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("askConversationById", buildAskConversationById(args), opts);
+};
+
+/** Timing evidence from this person's recent conversations, across replicas. The same owner-scoped history is available to the person and their assistant. */
+// Bound concept: v1:os:askConversation (machine-readable: BoundConcepts["askRecentTimingHistory"] in generated_concepts.ts).
+export interface AskRecentTimingHistoryArgs {
+}
+
+export function buildAskRecentTimingHistory(args: AskRecentTimingHistoryArgs): string {
+  void args;
+  return "query askRecentTimingHistory()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    askRecentTimingHistory(args?: AskRecentTimingHistoryArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.askRecentTimingHistory = function (this: QueryClient, args: AskRecentTimingHistoryArgs = {} as AskRecentTimingHistoryArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("askRecentTimingHistory", buildAskRecentTimingHistory(args), opts);
+};
+
 /** Resolve the active General Assistant agent owned by a user. Returns 0 or 1 rows. Used by autoJoinAI to derive a canonical agent id consistent across all callers of mutationCreateDailySpace -- the space row's ownerUserId is the same regardless of who triggered the mutation, while args.event.payload.actor (createdBy) varies. memql#273. */
 // Bound concept: v1:agents:agent (machine-readable: BoundConcepts["assistantAgentForUser"] in generated_concepts.ts).
 export interface AssistantAgentForUserArgs {
@@ -4890,6 +4932,26 @@ declare module "./query.js" {
 
 QueryClient.prototype.moduleReadinessAll = function (this: QueryClient, args: ModuleReadinessAllArgs = {} as ModuleReadinessAllArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("moduleReadinessAll", buildModuleReadinessAll(args), opts);
+};
+
+/** Recent conversations belonging to the signed-in person. */
+// Bound concept: v1:os:askConversation (machine-readable: BoundConcepts["myAskConversations"] in generated_concepts.ts).
+export interface MyAskConversationsArgs {
+}
+
+export function buildMyAskConversations(args: MyAskConversationsArgs): string {
+  void args;
+  return "query myAskConversations()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    myAskConversations(args?: MyAskConversationsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.myAskConversations = function (this: QueryClient, args: MyAskConversationsArgs = {} as MyAskConversationsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("myAskConversations", buildMyAskConversations(args), opts);
 };
 
 /** The caller's seen UI revisions, shared across their OS windows and machines. */
