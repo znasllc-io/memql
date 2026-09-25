@@ -3439,6 +3439,26 @@ QueryClient.prototype.expiredWorkerInvocations = function (this: QueryClient, ar
   return this.executeNamed("expiredWorkerInvocations", buildExpiredWorkerInvocations(args), opts);
 };
 
+/** Personal saved connections, including removed rows so reauthorization can restore the same selection. No operator branch borrows somebody's account. */
+// Bound concept: v1:platform:externalConnection (machine-readable: BoundConcepts["externalConnectionsMine"] in generated_concepts.ts).
+export interface ExternalConnectionsMineArgs {
+}
+
+export function buildExternalConnectionsMine(args: ExternalConnectionsMineArgs): string {
+  void args;
+  return "query externalConnectionsMine()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    externalConnectionsMine(args?: ExternalConnectionsMineArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.externalConnectionsMine = function (this: QueryClient, args: ExternalConnectionsMineArgs = {} as ExternalConnectionsMineArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("externalConnectionsMine", buildExternalConnectionsMine(args), opts);
+};
+
 /** Find the caller's own events by exact title. Self-scoped via actor.userId. Backs the calendar tool's `find` action ('find my dentist appointment'); the agent passes the title it captured. Exact match keeps the predicate SQL-pushdownable -- substring / semantic search is a downstream concern (the agent can list a window via upcomingEvents and filter conversationally). */
 // Bound concept: v1:calendar:calendarEvent (machine-readable: BoundConcepts["findEvents"] in generated_concepts.ts).
 export interface FindEventsArgs {

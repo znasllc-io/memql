@@ -398,7 +398,7 @@ export function DeployablePage({
             )}
             <OpenLogsButton iconOnly subject={site.id} subjectConcept={Concepts.PLATFORM_SITE} ariaLabel={`Logs for ${name}`} />
             <IconButton label="Traffic" onClick={() => setDetail("traffic")}><Activity size={16} aria-hidden /></IconButton>
-            {site.kind === "shopify_storefront" && can.store ? <IconButton label={shopifyIncomplete ? "Store — setup needed" : "Store"} onClick={() => { storeReading.reread(); setDetail("store"); }}><Store size={16} aria-hidden /><AttentionMarker appId="deployables" sectionId="deployables" target="shopify-store" />{shopifyIncomplete ? <ProvenanceDot tone="partlySetUp" label="Shopify setup needed" /> : null}</IconButton> : null}
+            {site.kind === "shopify_storefront" && can.store ? <IconButton data-os-setup={shopifyIncomplete ? "" : undefined} label={shopifyIncomplete ? "Store — setup needed" : "Store"} onClick={() => { storeReading.reread(); setDetail("store"); }}><Store size={16} aria-hidden /><AttentionMarker appId="deployables" sectionId="deployables" target="shopify-store" />{shopifyIncomplete ? <ProvenanceDot tone="partlySetUp" label="Shopify setup needed" /> : null}</IconButton> : null}
           </Head>
 
           <Chips label="Deployable facts">

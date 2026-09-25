@@ -1,3 +1,5 @@
+import { useOsConnection } from "../../../live/connection";
+import { authorizeShopifyInstallation, takeShopifyDestination, takeShopifyInstallation } from "../../../modules/connections/shopifyInstallation";
 import { takeShopifyReturn } from "../store/connectReturn";
 import { useEffect } from "react";
 
@@ -31,22 +33,33 @@ import { correlateConnectReturn, takeParkedConnectReturn } from "./connectReturn
 
 export function ConnectReturnDispatcher() {
   const { access } = useSession();
+  const connection = useOsConnection();
   const viewer = bare(access?.userId ?? "");
   const { actions, registry, accessEpoch } = useOs();
   useEffect(() => {
     // The shell mounts before effective capabilities arrive. Keep the return
     // parked until the same gate as openApp admits it; the access epoch
     // retries this effect when the asynchronous permission read completes.
-    if (!viewer || !canOpen(registry, "deployables")) return;
+    if (!viewer || (!canOpen(registry, "deployables") && !canOpen(registry, "settings"))) return;
     // TAKE, not read: the parked value is consumed here and this effect is
     // free to run again -- a StrictMode remount does, and so does any change
     // in `actions` identity -- and every later run correctly finds nothing.
+    if (connection) {
+      const installation = takeShopifyInstallation();
+      if (installation) {
+        const appId = takeShopifyDestination();
+        void authorizeShopifyInstallation(connection.query, installation, appId).then(url => window.location.assign(url)).catch(() => {
+          actions.openApp(appId, appId === "settings" ? "connections" : "settings", { shopify: { reason: "installation_failed" }, provider: "shopify" });
+        });
+      }
+    }
     const shopify = takeShopifyReturn();
-    if (shopify) actions.openApp("deployables", "deployables", { shopify });
+    if (shopify) actions.openApp(shopify.appId ?? "deployables", shopify.section ?? "deployables", { shopify, provider: "shopify" });
     const result = takeParkedConnectReturn();
     if (result === null) return;
     const correlated = correlateConnectReturn(result, viewer);
-    actions.openApp("deployables", correlated.section, { connect: correlated });
-  }, [actions, registry, accessEpoch, viewer]);
+    const appId = correlated.appId ?? "deployables";
+    if (canOpen(registry, appId)) actions.openApp(appId, appId === "settings" ? "connections" : correlated.section, { connect: correlated });
+  }, [actions, registry, accessEpoch, viewer, connection]);
   return null;
 }

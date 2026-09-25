@@ -1,7 +1,7 @@
 import { useSession } from "../../../chrome/access";
 import { bare } from "../people";
 import { sourceName } from "../list";
-import { useSourceConnections } from "../sources/connections";
+import { useSourceConnections } from "../../../modules/connections/connections";
 import { sourceRecord } from "../sources/sourceRecord";
 import { SourceAccess } from "../sources/SourceAccess";
 import { RemoveSource } from "../sources/RemoveSource";

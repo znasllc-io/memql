@@ -477,6 +477,10 @@ func (i *Integration) handleConnectBegin(ctx context.Context, args map[string]an
 	if source == "" {
 		return beginReply("", connectReasonShopifyAppNotSaved)
 	}
+	return c.beginConnect(ctx, args, actor, target, clientID, source)
+}
+
+func (c *Connector) beginConnect(ctx context.Context, args map[string]any, actor string, target ConnectTarget, clientID, source string) ([]memorynodes.MemoryNode, error) {
 	// The cluster's own identity service, composed as GitHub Connect composes
 	// its redirect (envregistry derives it from MEMQL_DOMAIN on every node
 	// type) and never from a request. A node that cannot say where that is
@@ -517,7 +521,11 @@ func (i *Integration) handleConnectBegin(ctx context.Context, args map[string]an
 		return beginReply("", connectReasonStateInvalid)
 	}
 	redirectURI := identityBase + githubconnect.ShopifyCallbackPath
-	return beginReply(connectAuthorizeURL(target.ShopDomain, clientID, redirectURI, state), connectReasonOK)
+	scopes := ConnectScopes()
+	if source == managedCredentialSource {
+		scopes = managedConnectScopes()
+	}
+	return beginReply(connectAuthorizeURLWithScopes(target.ShopDomain, clientID, redirectURI, state, scopes), connectReasonOK)
 }
 
 // connectCredentials is the app a Connect asks Shopify to approve: the pending
@@ -546,9 +554,13 @@ func (c *Connector) connectCredentials(ctx context.Context, target ConnectTarget
 // with every value query-escaped. It sends no grant_options[], so the token is
 // an offline one. shop is NormalizeShopDomain's, so it is a host and only that.
 func connectAuthorizeURL(shop, clientID, redirectURI, state string) string {
+	return connectAuthorizeURLWithScopes(shop, clientID, redirectURI, state, ConnectScopes())
+}
+
+func connectAuthorizeURLWithScopes(shop, clientID, redirectURI, state string, scopes []string) string {
 	return "https://" + shop + "/admin/oauth/authorize" +
 		"?client_id=" + url.QueryEscape(clientID) +
-		"&scope=" + url.QueryEscape(strings.Join(ConnectScopes(), ",")) +
+		"&scope=" + url.QueryEscape(strings.Join(scopes, ",")) +
 		"&redirect_uri=" + url.QueryEscape(redirectURI) +
 		"&state=" + url.QueryEscape(state)
 }
@@ -727,6 +739,8 @@ func (c *Connector) auditConnect(ctx context.Context, action, actor string, targ
 // handler runs.
 func (i *Integration) connectCapabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
+		{Name: "connectionProviderStatus", Description: "Read shared Shopify connection readiness without credentials.", Handler: i.handleConnectionProviderStatus},
+		{Name: "accountConnectBegin", Description: "Authorize a reusable personal Shopify store connection.", Handler: i.handleAccountConnectBegin, ArgsSchema: map[string]string{"signedQuery": "string", "returnPath": "string"}},
 		{
 			Name:        "connectStatus",
 			Description: "Where one storefront stands with Connect Shopify, from the store the server resolves for the site. Returns {reason, storeId, shopDomain, appSaved, pendingApp, connected, storefrontTokenSet, requiredScopes, grantedScopes}. Never returns a credential.",

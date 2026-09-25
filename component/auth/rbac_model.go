@@ -203,6 +203,7 @@ var appReadFloors = map[string][]Role{
 	"app:settings/language":     {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:settings/benchmarks":   {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:settings/integrations": {RoleOwner, RoleDeveloper},
+	"app:settings/connections":  {RoleOwner, RoleDeveloper},
 	"app:settings/providers":    {RoleOwner, RoleDeveloper},
 	"app:settings/levels":       {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:settings/rules":        {RoleOwner, RoleDeveloper},
@@ -221,11 +222,12 @@ var appReadFloors = map[string][]Role{
 // appPartGrants is the mirror of the `execute` app seeds: the Deployables
 // PARTS (task memql#5301), on owner and developer, and the Modules pack switch.
 var appPartGrants = map[string][]Role{
-	"app:deployables/sources": {RoleOwner, RoleDeveloper},
-	"app:deployables/deploy":  {RoleOwner, RoleDeveloper},
-	"app:deployables/publish": {RoleOwner, RoleDeveloper},
-	"app:deployables/retire":  {RoleOwner, RoleDeveloper},
-	"app:deployables/domains": {RoleOwner, RoleDeveloper},
+	"app:settings/connections": {RoleOwner, RoleDeveloper},
+	"app:deployables/sources":  {RoleOwner, RoleDeveloper},
+	"app:deployables/deploy":   {RoleOwner, RoleDeveloper},
+	"app:deployables/publish":  {RoleOwner, RoleDeveloper},
+	"app:deployables/retire":   {RoleOwner, RoleDeveloper},
+	"app:deployables/domains":  {RoleOwner, RoleDeveloper},
 	// Publishing a CANDIDATE version and exercising it against a development
 	// store (epic memql#5531). Owner and developer, and the line between this
 	// part and `publish` is the one that epic draws: preparing and proving a

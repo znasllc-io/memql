@@ -14879,9 +14879,9 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-page .os-head-actions { flex-wrap: wrap; }
 .fleet-home .fleet-workspace-body { display: block; }
 .fleet-home .fleet-equipment-area { min-width: 0; }
-.fleet-local-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 22px; }
-.fleet-local-tabs button { border: 0; border-radius: var(--os-radius-xs); padding: 7px 10px; background: transparent; color: var(--os-muted); cursor: pointer; font: inherit; font-size: var(--os-text-sm); }
-.fleet-local-tabs button[aria-current="page"] { color: var(--os-ink); background: var(--os-raised); }
+.os-local-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 22px; }
+.os-local-tabs button { border: 0; border-radius: var(--os-radius-xs); padding: 7px 10px; background: transparent; color: var(--os-muted); cursor: pointer; font: inherit; font-size: var(--os-text-sm); }
+.os-local-tabs button[aria-current="page"] { color: var(--os-ink); background: var(--os-raised); }
 .fleet-home .fleet-equipment-rig { display: grid; grid-template-columns: minmax(0,1.15fr) minmax(0,1fr); gap: 20px 32px; align-items: start; }
 .fleet-home .fleet-equipment-rig > .fleet-device { grid-column: 1; grid-row: 1; }
 .fleet-home .fleet-equipment-rig > .fleet-equipment-bank:first-child { grid-column: 1; grid-row: 2; }
@@ -14987,10 +14987,10 @@ button.os-cluster-mesh-peer:focus-visible {
  * are the chrome's (tabs, trail) and the rows'; a heading does not get one. */
 .fleet-section-header, .fleet-workspace-header { position:sticky; top:0; z-index:4; background:var(--os-glass-solid); margin-bottom:22px; }
 .fleet-section-header > .os-head, .fleet-workspace-header > .os-head { position:static; padding:18px 0 12px; margin:0; border:0; }
-.fleet-section-header > .fleet-local-tabs, .fleet-workspace-header > .fleet-local-tabs { margin:0; padding-block:2px 8px; }
-.fleet-local-tabs { flex-wrap:nowrap; overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; gap:4px; padding:3px; scroll-padding-inline:4px; }
-.fleet-local-tabs button { flex:0 0 auto; white-space:nowrap; min-height:36px; }
-.fleet-local-tabs button:focus-visible { outline:2px solid var(--os-accent); outline-offset:-2px; }
+.fleet-section-header > .os-local-tabs, .fleet-workspace-header > .os-local-tabs { margin:0; padding-block:2px 8px; }
+.os-local-tabs { flex-wrap:nowrap; overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; gap:4px; padding:3px; scroll-padding-inline:4px; }
+.os-local-tabs button { flex:0 0 auto; white-space:nowrap; min-height:36px; }
+.os-local-tabs button:focus-visible { outline:2px solid var(--os-accent); outline-offset:-2px; }
 .fleet-section-context { display:flex; align-items:center; gap:8px; margin-bottom:16px; color:var(--os-muted); font-size:var(--os-text-sm); }
 .fleet-section-context p { margin:0; }
 .fleet-list-options { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-block:8px 12px; }
@@ -15191,7 +15191,8 @@ button.os-cluster-mesh-peer:focus-visible {
 .deployable-version-picker { margin-block: 8px; }
 
 .os-icon-button:has(> .os-attention-dot) { position: relative; }
-.os-icon-button[data-os-setup]:has(> .os-attention-dot) .os-dot { right: auto; left: 3px; }
+/* Setup stays at the upper right; unseen changes share the opposite corner. */
+.os-icon-button[data-os-setup] > .os-attention-dot { right: auto; left: 3px; }
 
 .os-wizard-marks { display: flex; gap: .5rem; align-items: center; }
 

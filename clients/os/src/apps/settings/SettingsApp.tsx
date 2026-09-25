@@ -1,3 +1,4 @@
+import { ConnectionsPanel } from "../../modules/connections/ConnectionsPanel";
 import { useEffect, useState } from "react";
 
 import { useAsk } from "../../ask/AskProvider";
@@ -51,6 +52,7 @@ export function SettingsApp({ sectionId, intent, consumeIntent }: OsAppProps) {
 }
 
 function sectionFor(sectionId: string, intent: OsAppProps["intent"], consumeIntent: OsAppProps["consumeIntent"]) {
+  if (sectionId === "connections") return <ConnectionsPanel appId="settings" intent={intent} consumeIntent={consumeIntent} />;
   if (sectionId === "appearance") return <AppearanceSection />;
   if (sectionId === "ask") return <AskSection />;
   if (sectionId === "apps") return <AppsIndexSection />;

@@ -156,7 +156,7 @@ type Site struct {
 }
 
 // BoundStore is the v1:shopify:store row as the SERVING PATH sees it: the
-// three fields it needs and not one more (epic memql#5530, issue memql#5538).
+// serving fields it needs and not one more (epic memql#5530, issue memql#5538).
 //
 // The store row also holds adminTokenRef and webhookSecretRef. Neither is
 // here, and the omission is the safety property rather than an economy: a
@@ -180,6 +180,9 @@ type BoundStore struct {
 	// resolves it at serve time into the runtime-config document, and that is
 	// still the only place it is dereferenced.
 	StorefrontTokenRef string
+	// APIVersion supplies the Storefront API version unless the site explicitly
+	// pins its own. It follows the connected store without rewriting the site.
+	APIVersion string
 }
 
 // SiteAccount is the account behind a reserved front door, as the served page

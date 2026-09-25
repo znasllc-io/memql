@@ -7,7 +7,7 @@ import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settin
 import { packageFromRow } from "../../src/apps/deployables/packages/rows";
 import { credentialFromRow } from "../../src/apps/deployables/sources/rows";
 import { SourceAccess } from "../../src/apps/deployables/sources/SourceAccess";
-import { SourceConnectionsProvider, useSourceConnections } from "../../src/apps/deployables/sources/connections";
+import { SourceConnectionsProvider, useSourceConnections } from "../../src/modules/connections/connections";
 import { click, fakeConnection, githubGrantRow, siteRow, sourceConnectionRow, type, withSession, type FakeSeed } from "./harness";
 
 const ALICE = githubGrantRow({ id: "grant-alice", login: "alice" });

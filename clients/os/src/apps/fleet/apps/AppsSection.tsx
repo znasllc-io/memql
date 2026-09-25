@@ -1,5 +1,6 @@
+import { LocalTabs } from "../../../kit/LocalTabs";
 import { useEffect, useState } from "react";
-import { FleetTabs, RefreshButton, useFleetScroll } from "../FleetControls";
+import { RefreshButton, useFleetScroll } from "../FleetControls";
 import { InfoDetail } from "../../../kit/InfoDetail";
 
 import { Button, Check, Switch, EmptyState, Chip, Field, Head, Input, Notice, Panel, RecordList, RecordRow, Select, Subhead } from "../../../kit";
@@ -60,7 +61,7 @@ export function AppsSection({ sessionTarget, navigation }: { sessionTarget?: { i
         <RefreshButton label="Refresh app activity" busy={sessions.loading || policy.loading} onClick={() => { policy.reread(); sessions.reread(); }} />
       </Head>
 
-      <FleetTabs label="Activity views" value={view} onChange={setView} options={[["sessions", "App sessions"], ["delegation", "Delegation"]]} />
+      <LocalTabs label="Activity views" value={view} onChange={setView} options={[["sessions", "App sessions"], ["delegation", "Delegation"]]} />
       </div>
       <div hidden={view !== "delegation"}><DelegationPanel state={policy} /></div>
       <div hidden={view !== "sessions"}>

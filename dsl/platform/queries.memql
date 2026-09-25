@@ -1256,3 +1256,14 @@ query sourceConnection sourceConnectionById {
   filter row => row.id == args.connectionId && row.ownerUserId == actor.userId
   shape sourceConnectionCard
 }
+
+/// Personal saved connections, including removed rows so reauthorization can
+/// restore the same selection. No operator branch borrows somebody's account.
+@actor
+@cache(0)
+@requiresCapability("read", "app:settings/connections")
+@unbounded("one personal selection per provider resource")
+query externalConnection externalConnectionsMine {
+  filter row => row.ownerUserId == actor.userId
+  shape externalConnectionCard
+}

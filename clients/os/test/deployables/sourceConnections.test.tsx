@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connection }));
-import { SourceConnectionsProvider, sourceConnectionFromRow, useSourceInstallations, useSourceConnections, SOURCE_CONNECTION_CONCEPT } from "../../src/apps/deployables/sources/connections";
+import { SourceConnectionsProvider, sourceConnectionFromRow, useSourceInstallations, useSourceConnections, SOURCE_CONNECTION_CONCEPT } from "../../src/modules/connections/connections";
 import { credentialFromRow } from "../../src/apps/deployables/sources/rows";
 import { correlateConnectReturn, readConnectReturn, rememberConnectAttempt, scrubbedSearch } from "../../src/apps/deployables/sources/connectReturn";
 import { builtinReply, click, emit, fakeConnection, githubGrantRow, sourceConnectionRow, withSession } from "./harness";

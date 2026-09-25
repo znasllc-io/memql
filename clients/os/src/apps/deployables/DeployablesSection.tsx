@@ -1,4 +1,4 @@
-import { useSourceConnections } from "./sources/connections";
+import { useSourceConnections } from "../../modules/connections/connections";
 import { sourceRecord } from "./sources/sourceRecord";
 import { AccountChip } from "../accounts/AccountPicker";
 import { AttentionMarker } from "../../attention/Attention";

@@ -12,6 +12,21 @@ import (
 // A source connection records provider-verified access, not a client claim.
 // Named mutations and raw writes meet this gate, including cluster owners.
 func (e *MemQLEngine) validateSourceConnectionWrite(ctx context.Context, concept string, prior, delta map[string]any) error {
+	if concept == "v1:platform:externalConnection" && auth.OriginFromContext(ctx) != auth.OriginInternal {
+		// Only provider callbacks can create or restore verified selections.
+		// A person may remove their own selection, never change its identity.
+		actor, _ := auth.AccessFromContext(ctx)
+		if prior == nil || actor == nil || BareShortId(stringFromAny(prior["ownerUserId"])) != BareShortId(actor.UserId) ||
+			stringFromAny(delta["status"]) != "removed" || !e.OrganizationCapable(ctx, "", auth.VerbExecute, "app:settings/connections") {
+			return fmt.Errorf("external connections must be added through provider authorization")
+		}
+		for _, field := range []string{"ownerUserId", "provider", "resourceId", "label"} {
+			if value, set := delta[field]; set && !reflect.DeepEqual(value, prior[field]) {
+				return fmt.Errorf("external connection identity cannot be changed")
+			}
+		}
+		return nil
+	}
 	if concept == "v1:platform:sourceConnection" {
 		if auth.OriginFromContext(ctx) != auth.OriginInternal {
 			return fmt.Errorf("source connections must be changed through their verified source actions")

@@ -392,6 +392,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "identity/queries.memql", Name: "githubConnectStateByHash"}:    true,
 		{Path: "identity/mutations.memql", Name: "createGithubConnectState"}:  true,
 		{Path: "identity/mutations.memql", Name: "consumeGithubConnectState"}: true,
+		// actor.userId stamps the personal selection's owner, but ownership is
+		// not proof of provider authorization. Only the verified OAuth callback
+		// may assert this active connection; a self-scoped public writer would
+		// let a user forge a connection without completing Shopify approval.
+		{Path: "platform/mutations.memql", Name: "recordExternalConnection"}: true,
 		// epic memql#4378, the SYNC RUNTIME's own bookkeeping. Eight
 		// writers over two engine-owned concepts -- an outbox queue and a
 		// health timeline -- and the argument is one argument, not eight.

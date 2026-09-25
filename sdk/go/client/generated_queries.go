@@ -3461,6 +3461,23 @@ func ExpiredWorkerInvocationsBuild(args ExpiredWorkerInvocationsArgs) string {
 	return b.String()
 }
 
+// ExternalConnectionsMine -- Personal saved connections, including removed rows so reauthorization can restore the same selection. No operator branch borrows somebody's account.
+//
+// Bound concept: v1:platform:externalConnection (machine-readable: BoundConcepts["externalConnectionsMine"] in generated_concepts.go).
+type ExternalConnectionsMineArgs struct {
+}
+
+// ExternalConnectionsMine calls the engine query externalConnectionsMine.
+func (qc *QueryClient) ExternalConnectionsMine(ctx context.Context, args ExternalConnectionsMineArgs) (*Result, error) {
+	call := ExternalConnectionsMineBuild(args)
+	return qc.executeNamed(ctx, "externalConnectionsMine", call)
+}
+
+func ExternalConnectionsMineBuild(args ExternalConnectionsMineArgs) string {
+	_ = args
+	return "query externalConnectionsMine()"
+}
+
 // FindEvents -- Find the caller's own events by exact title. Self-scoped via actor.userId. Backs the calendar tool's `find` action ('find my dentist appointment'); the agent passes the title it captured. Exact match keeps the predicate SQL-pushdownable -- substring / semantic search is a downstream concern (the agent can list a window via upcomingEvents and filter conversationally).
 //
 // Bound concept: v1:calendar:calendarEvent (machine-readable: BoundConcepts["findEvents"] in generated_concepts.go).

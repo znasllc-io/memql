@@ -3490,6 +3490,34 @@ func RoutingRulesBuild(args RoutingRulesArgs) string {
 	return "builtin routingRules()"
 }
 
+// ShopifyAccountConnectBegin -- Begin a reusable personal store connection without changing any deployable. The shop is derived from a recent signed Shopify App URL launch, then authorized through the session-bound callback. No caller-supplied store address is accepted.
+type ShopifyAccountConnectBeginArgs struct {
+	SignedQuery string
+	ReturnPath  string
+}
+
+// ShopifyAccountConnectBegin calls the engine builtin shopifyAccountConnectBegin.
+func (qc *QueryClient) ShopifyAccountConnectBegin(ctx context.Context, args ShopifyAccountConnectBeginArgs) (*Result, error) {
+	call := ShopifyAccountConnectBeginBuild(args)
+	return qc.executeNamed(ctx, "shopifyAccountConnectBegin", call)
+}
+
+func ShopifyAccountConnectBeginBuild(args ShopifyAccountConnectBeginArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin shopifyAccountConnectBegin(")
+	b.WriteString("signedQuery: ")
+	b.WriteString(quoteMemQL(args.SignedQuery))
+	if args.ReturnPath != "" {
+		if b.Len() > 35 {
+			b.WriteString(", ")
+		}
+		b.WriteString("returnPath: ")
+		b.WriteString(quoteMemQL(args.ReturnPath))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // ShopifyConnectBegin -- Begin Connect Shopify for a storefront's store (design 12.4, D1, D10): answer the URL the browser navigates to -- Shopify's approve page for the shop the server resolved -- with a single-use state bound to the caller.
 // The app Shopify is asked to approve is the PENDING one a save left, when there is one, otherwise the store's current app and its webhook secret; with neither the reason is shopify_app_not_saved and nothing is written. The state (v1:identity:githubConnectState, purpose shopify_connect) names the shop, the site, the app's client id and which secret verifies the callback, and lives ten minutes. The plaintext state appears only inside authorizeUrl; only its digest is stored. The redirect is this cluster's own identity service, never anything the request said.
 type ShopifyConnectBeginArgs struct {
@@ -3541,6 +3569,21 @@ func ShopifyConnectStatusBuild(args ShopifyConnectStatusArgs) string {
 	b.WriteString(quoteMemQL(args.SiteId))
 	b.WriteString(")")
 	return b.String()
+}
+
+// ShopifyConnectionProviderStatus -- Provider readiness contains no client credentials. Registration belongs to the cluster operator; people authorize through Shopify.
+type ShopifyConnectionProviderStatusArgs struct {
+}
+
+// ShopifyConnectionProviderStatus calls the engine builtin shopifyConnectionProviderStatus.
+func (qc *QueryClient) ShopifyConnectionProviderStatus(ctx context.Context, args ShopifyConnectionProviderStatusArgs) (*Result, error) {
+	call := ShopifyConnectionProviderStatusBuild(args)
+	return qc.executeNamed(ctx, "shopifyConnectionProviderStatus", call)
+}
+
+func ShopifyConnectionProviderStatusBuild(args ShopifyConnectionProviderStatusArgs) string {
+	_ = args
+	return "builtin shopifyConnectionProviderStatus()"
 }
 
 // ShopifyEnsureSubscriptions -- Register every mirrored webhook topic for every ingesting store at the pinned API version, update the ones whose URL, version or includeFields have drifted, and remove ours the allowlist no longer wants. Shopify deletes a subscription after eight consecutive delivery failures, so this is what brings a store back after an outage. Records the outcome on each store's health.

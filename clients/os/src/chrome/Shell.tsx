@@ -1,3 +1,6 @@
+import { SharedExternalConnectionsProvider } from "../modules/connections/useExternalConnections";
+import { SharedCredentialsProvider } from "../modules/connections/useSourceCredentials";
+import { SharedSourceConnectionsProvider } from "../modules/connections/connections";
 import { AttentionProvider } from "../attention/Attention";
 import { IdentityOpenDispatcher } from "../apps/identity/IdentityOpenDispatcher";
 import { SharedPackagesProvider } from "../apps/deployables/packages/usePackages";
@@ -275,7 +278,7 @@ function ShellRoster({
           memql#4915). Renders nothing, and does nothing at all on a browser
           that did not arrive from a callback -- which is every other one. It
           sits INSIDE OsProvider because opening an app is a shell act. */}
-      <AttentionProvider apps={OS_REGISTRY.apps}><SharedPackagesProvider><DeployablesAttentionFeed />
+      <AttentionProvider apps={OS_REGISTRY.apps}><SharedPackagesProvider><SharedCredentialsProvider><SharedSourceConnectionsProvider><SharedExternalConnectionsProvider><DeployablesAttentionFeed />
       {/* Sharing a machine with people and groups (epic memql#5344, G15): a
           runtime change, published only while the viewer owns a machine still
           in the fleet. At shell lifetime, like the Deployables feed, so a
@@ -300,7 +303,7 @@ function ShellRoster({
           section, read from this provider's state at capture time. */}
       <CaptureContextInstaller />
       {children}
-      </SharedPackagesProvider></AttentionProvider>
+      </SharedExternalConnectionsProvider></SharedSourceConnectionsProvider></SharedCredentialsProvider></SharedPackagesProvider></AttentionProvider>
     </OsProvider>
   );
 }

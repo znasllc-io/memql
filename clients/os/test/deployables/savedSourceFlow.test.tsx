@@ -8,7 +8,7 @@ vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connectio
 
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { DEPLOYMENT_CONCEPT } from "../../src/apps/deployables/packages/rows";
-import { SOURCE_CONNECTION_CONCEPT } from "../../src/apps/deployables/sources/connections";
+import { SOURCE_CONNECTION_CONCEPT } from "../../src/modules/connections/connections";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import { click, emit, fakeConnection, githubGrantRow, probeReply, repositoriesReply, repositoryFixture, siteRow, rowsResult, sourceConnectionRow, withSession, type FakeConnection, type FakeSeed } from "./harness";
 

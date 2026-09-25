@@ -3639,6 +3639,24 @@
       ]
     },
     {
+      "concept": "v1:platform:externalConnection",
+      "file": "platform/concepts.memql",
+      "fields": [
+        "label",
+        "ownerUserId",
+        "provider",
+        "resourceId",
+        "status"
+      ],
+      "required": [
+        "label",
+        "ownerUserId",
+        "provider",
+        "resourceId",
+        "status"
+      ]
+    },
+    {
       "concept": "v1:platform:fleetModel",
       "file": "platform/concepts.memql",
       "fields": [

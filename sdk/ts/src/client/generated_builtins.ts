@@ -2688,6 +2688,29 @@ QueryClient.prototype.routingRules = function (this: QueryClient, args: RoutingR
   return this.executeNamed("routingRules", buildRoutingRules(args), opts);
 };
 
+/** Begin a reusable personal store connection without changing any deployable. The shop is derived from a recent signed Shopify App URL launch, then authorized through the session-bound callback. No caller-supplied store address is accepted. */
+export interface ShopifyAccountConnectBeginArgs {
+  signedQuery: string;
+  returnPath?: string;
+}
+
+export function buildShopifyAccountConnectBegin(args: ShopifyAccountConnectBeginArgs): string {
+  const parts: string[] = [];
+  parts.push("signedQuery: " + renderMemQLValue(args.signedQuery));
+  if (args.returnPath !== undefined) parts.push("returnPath: " + renderMemQLValue(args.returnPath));
+  return "builtin shopifyAccountConnectBegin(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyAccountConnectBegin(args: ShopifyAccountConnectBeginArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyAccountConnectBegin = function (this: QueryClient, args: ShopifyAccountConnectBeginArgs = {} as ShopifyAccountConnectBeginArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyAccountConnectBegin", buildShopifyAccountConnectBegin(args), opts);
+};
+
 /** Begin Connect Shopify for a storefront's store (design 12.4, D1, D10): answer the URL the browser navigates to -- Shopify's approve page for the shop the server resolved -- with a single-use state bound to the caller.
 The app Shopify is asked to approve is the PENDING one a save left, when there is one, otherwise the store's current app and its webhook secret; with neither the reason is shopify_app_not_saved and nothing is written. The state (v1:identity:githubConnectState, purpose shopify_connect) names the shop, the site, the app's client id and which secret verifies the callback, and lives ten minutes. The plaintext state appears only inside authorizeUrl; only its digest is stored. The redirect is this cluster's own identity service, never anything the request said. */
 export interface ShopifyConnectBeginArgs {
@@ -2735,6 +2758,25 @@ declare module "./query.js" {
 
 QueryClient.prototype.shopifyConnectStatus = function (this: QueryClient, args: ShopifyConnectStatusArgs = {} as ShopifyConnectStatusArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("shopifyConnectStatus", buildShopifyConnectStatus(args), opts);
+};
+
+/** Provider readiness contains no client credentials. Registration belongs to the cluster operator; people authorize through Shopify. */
+export interface ShopifyConnectionProviderStatusArgs {
+}
+
+export function buildShopifyConnectionProviderStatus(args: ShopifyConnectionProviderStatusArgs): string {
+  void args;
+  return "builtin shopifyConnectionProviderStatus()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyConnectionProviderStatus(args?: ShopifyConnectionProviderStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyConnectionProviderStatus = function (this: QueryClient, args: ShopifyConnectionProviderStatusArgs = {} as ShopifyConnectionProviderStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyConnectionProviderStatus", buildShopifyConnectionProviderStatus(args), opts);
 };
 
 /** Register every mirrored webhook topic for every ingesting store at the pinned API version, update the ones whose URL, version or includeFields have drifted, and remove ours the allowlist no longer wants. Shopify deletes a subscription after eight consecutive delivery failures, so this is what brings a store back after an outage. Records the outcome on each store's health. */

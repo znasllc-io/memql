@@ -133,7 +133,7 @@ export function useGithubConnect(): GithubConnectActions {
       const begun = await begin(returnPath, credentialId, flowId);
       if (begun === null) return;
       if (begun.authorizeUrl === "") return;
-      rememberConnectAttempt(flowId, viewer, credentialId, new URL(returnPath, window.location.origin).searchParams.get(CONNECT_SECTION_PARAM) ?? "");
+      rememberConnectAttempt(flowId, viewer, credentialId, new URL(returnPath, window.location.origin).searchParams.get(CONNECT_SECTION_PARAM) ?? "", new URL(returnPath, window.location.origin).searchParams.get("connectApp") === "settings" ? "settings" : "deployables");
       window.location.assign(begun.authorizeUrl);
     },
     [begin, viewer],

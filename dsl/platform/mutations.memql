@@ -2824,3 +2824,36 @@ mutation sourceConnection removeSourceConnection {
     status: "removed"
   }
 }
+
+/// Provider callback only: actor.userId stamps ownership, but scoping to that
+/// actor cannot prove authorization at Shopify. Only the integration that
+/// verified OAuth approval may record an active provider connection.
+@serverOnly
+@actor
+mutation externalConnection recordExternalConnection {
+  args {
+    connectionId string!
+    provider string!
+    resourceId string!
+    label string!
+  }
+  insert {
+    accept { provider, resourceId, label }
+    stamp {
+      id: args.connectionId
+      ownerUserId: actor.userId
+      status: "active"
+    }
+  }
+}
+
+/// Removing a personal selection changes no provider grant or deployed site.
+@actor
+@requiresCapability("execute", "app:settings/connections")
+mutation externalConnection disconnectExternalConnection {
+  args { connectionId string! }
+  update {
+    id: args.connectionId
+    status: "removed"
+  }
+}

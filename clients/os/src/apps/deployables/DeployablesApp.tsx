@@ -17,13 +17,13 @@ import { deploymentFromRow, packageFromRow, type DeploymentRow, type PackageRow 
 import { usePendingDeployments } from "./packages/usePendingDeployments";
 import { usePackages } from "./packages/usePackages";
 import { siteFingerprint, siteFromRow, type SiteRow } from "./rows";
-import { SourceConnectionsProvider, useSourceConnections } from "./sources/connections";
-import { GitHubAccountsSettings } from "./sources/GitHubAccountsSettings";
+import { SourceConnectionsProvider, useSourceConnections } from "../../modules/connections/connections";
+import { ConnectionsPanel } from "../../modules/connections/ConnectionsPanel";
 import { accountSetupState, githubAccountsFor } from "./sources/accountSetup";
 import { ConnectReturnNotice } from "./sources/ConnectReturnNotice";
 import type { ConnectReturn } from "./sources/connectReturn";
 import { credentialFromRow, type CredentialRow } from "./sources/rows";
-import { useSourceCredentials } from "./sources/useSourceCredentials";
+import { useSourceCredentials } from "../../modules/connections/useSourceCredentials";
 import {
   LocalDeployablesSettingsStore,
   type DeployablesSettings,
@@ -32,7 +32,7 @@ import {
 import { DeployablesSettingsProvider } from "./settingsContext";
 import { useSiteHealth } from "./useSiteHealth";
 import { siteStateWord } from "./words";
-import { shopifyMessage } from "./store/useShopifyConnect";
+import { shopifyMessage } from "../../modules/connections/shopifyReply";
 import { useSites } from "./useSites";
 
 // Deployables: the things this cluster serves, the map of what serves where,
@@ -241,17 +241,20 @@ function DeployablesAppContent({
   // pixels. Consumed by id, so acting on a stale render can never eat a
   // newer instruction, and an unrecognised payload is consumed and ignored
   // rather than left standing to re-fire on every render.
+  const [connectionProvider, setConnectionProvider] = useState<"github" | "shopify">("github");
+  const [connectionsIntent, setConnectionsIntent] = useState<OsAppProps["intent"]>();
   const [shopifyError, setShopifyError] = useState("");
   const [connectResult, setConnectResult] = useState<ConnectReturn | null>(null);
   useEffect(() => {
     if (!intent) return;
+    if (intent.payload.provider === "shopify") { setConnectionProvider("shopify"); setConnectionsIntent(intent); }
     const shopify = intent.payload["shopify"];
     if (shopify && typeof shopify === "object" && "siteId" in shopify && typeof shopify.siteId === "string" && shopify.siteId) {
       setShopifyError("");
       setOpenRequest(held => ({ siteId: shopify.siteId as string, revision: (held?.revision ?? 0) + 1, detail: "store", result: "reason" in shopify && typeof shopify.reason === "string" ? shopify.reason : "" }));
       reseedAll();
     }
-    if (shopify && typeof shopify === "object" && (!("siteId" in shopify) || !shopify.siteId)) {
+    if (sectionId !== "settings" && shopify && typeof shopify === "object" && (!("siteId" in shopify) || !shopify.siteId)) {
       setShopifyError(shopifyMessage("reason" in shopify && typeof shopify.reason === "string" ? shopify.reason : "connect_state_invalid"));
     }
     const carried = intent.payload["connect"];
@@ -268,8 +271,7 @@ function DeployablesAppContent({
   }, [intent, consumeIntent, sectionId]);
 
   const settingsContent = (
-    <GitHubAccountsSettings accounts={githubAccounts} packages={packageSnapshot.rows}
-      feed={{ state: credentialSnapshot.state, error: credentialSnapshot.error, retry: reseedCredentials }}
+    <ConnectionsPanel appId="deployables" initialProvider={connectionProvider} intent={connectionsIntent} consumeIntent={() => setConnectionsIntent(undefined)}
       connectResult={connectResult?.section === "settings" ? connectResult : null} />
   );
   // The app's slice of the cluster's logs (epic memql#4895). It survived the
