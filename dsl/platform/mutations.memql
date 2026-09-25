@@ -2828,18 +2828,19 @@ mutation sourceConnection removeSourceConnection {
 /// Provider callback only: caller ownership alone cannot prove authorization
 /// at Shopify. The integration records this after verified OAuth approval.
 @serverOnly
+@actor
 mutation externalConnection recordExternalConnection {
   args {
     connectionId string!
-    ownerUserId string!
     provider string!
     resourceId string!
     label string!
   }
   insert {
-    accept { ownerUserId, provider, resourceId, label }
+    accept { provider, resourceId, label }
     stamp {
       id: args.connectionId
+      ownerUserId: actor.userId
       status: "active"
     }
   }

@@ -142,6 +142,9 @@ func TestSharedShopifyConnectionAcrossNodes(t *testing.T) {
 		t.Fatalf("connection did not cross nodes: %v", rows)
 	}
 	connectionID := mapString(rows[0], "id")
+	if _, err := a.Execute(ctx, renderCall("recordExternalConnection", map[string]any{"connectionId": connectionID, "provider": "shopify", "resourceId": "forged", "label": "forged"})); err == nil {
+		t.Fatal("client invoked the provider-only connection writer")
+	}
 	stranger := actorCtx("stranger-"+suffix, auth.RoleDeveloper)
 	if got := memql.MaterializeRows(must(a, stranger, "query externalConnectionsMine()")); len(got) != 0 {
 		t.Fatal("another user's connection leaked")

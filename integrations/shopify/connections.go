@@ -143,8 +143,10 @@ func (c *Connector) savePersonalConnection(ctx context.Context, state *identity.
 			break
 		}
 	}
-	_, err = c.engine.Execute(operatorContext(ctx), renderCall("recordExternalConnection", map[string]any{
-		"connectionId": connectionID, "ownerUserId": state.UserId, "provider": "shopify", "resourceId": storeID, "label": state.ShopDomain,
+	// The verified callback supplies internal origin; ownership remains the
+	// person's authenticated identity and is stamped by the mutation itself.
+	_, err = c.engine.Execute(auth.ContextWithInternalOrigin(person), renderCall("recordExternalConnection", map[string]any{
+		"connectionId": connectionID, "provider": "shopify", "resourceId": storeID, "label": state.ShopDomain,
 	}))
 	return err == nil
 }
