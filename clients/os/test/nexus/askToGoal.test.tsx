@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { AskSurface } from "../../src/ask/AskSurface";
-import { StubAskTransport } from "../../src/ask/askController";
+import { StubAskTransport } from "../ask/stubTransport";
 import type { MakeGoalState } from "../../src/ask/useMakeGoal";
 
 // ASK-TO-GOAL: the handoff from asking to having it done.

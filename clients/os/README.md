@@ -1781,58 +1781,47 @@ missing retention control.
 goal's ceilings are set when the goal is accepted. The Settings section says
 that rather than leaving the gap somebody would go looking in.
 
-## Ask voice (epic memql#4747)
+## Ask conversations and voice
 
-The mic toggle is live: hold it to talk, tap it to keep listening, and the
-transcript lands in the box as you speak. Five things about it are rules the
-next surface that touches audio or the Ask sheet gets wrong by default.
+The sheet and desk widget use `AskSurface`, backed by a shared conversation
+session. History, draft, selected conversation, live voice and Activity stay
+consistent across both surfaces. `SdkAskTransport` calls the server's
+permission-scoped MemQL agent; test transports live under `test/ask`.
 
-- **`format` IS A LABEL THE SERVER DOES NOT READ.** `AiTranscribeStreamStart`
-  carries one, and the obvious browser capture -- `MediaRecorder`, which
-  yields webm/opus -- can declare `format: "webm"` and look correct. The
-  cluster's default STT provider is `openai-realtime`, and
-  `integrations/stt/openai_realtime.go` passes only `SampleRate` through: it
-  never reads `Format`, and resamples whatever arrives as though it were
-  16 kHz PCM16. Hand it opus and the session opens, chunks flow, and the
-  transcript comes back as plausible nonsense. So `ask/pcm16.ts` is a real
-  resampler -- stateful across capture blocks, box-averaged rather than
-  point-sampled -- and the worklet that feeds it is a buffer and a pipe with
-  no arithmetic in it, because a worklet has no test harness and the
-  arithmetic is the part worth proving.
+The microphone dictates into the editable composer. Press-and-hold ends an
+utterance on release; a short tap keeps listening until the next tap. Review
+before sending is the default, with immediate submission and hold-Space
+available in Settings → Ask. The routed ASR result may arrive only after the
+utterance ends; do not promise partial transcripts for every provider.
 
-- **THE EDGE HAD TO STOP FORBIDDING THE MICROPHONE.** `component/edge`
-  answered `Permissions-Policy: microphone=()` on every hosted site, which
-  rejects `getUserMedia` with `NotAllowedError` BEFORE the browser prompts --
-  indistinguishable from the person declining. Voice would have passed every
-  test, worked under `npm run dev` (vite sends no such header), and been dead
-  in every cluster while blaming the user. It is `microphone=(self)` now;
-  camera and geolocation stay closed, and a Go test says why.
+Talk with MemQL is a separate live call. It joins a private LiveKit room and
+replaces the transcript with the MemQL mark and call controls. The controller
+runs in Go on an agent node, using routed ASR, the same Ask tool loop and
+sentence TTS. Local and federated routes can be mixed, with male and female
+voice choices. It currently uses the ASR/chat/TTS pipeline rather than OpenAI's
+native Realtime speech-to-speech protocol.
 
-- **DELTAS REPLACE THE FIELD; THEY NEVER APPEND.**
-  `AiTranscribeStreamDelta` carries the whole accumulated transcript, not an
-  increment -- the opposite of the chat path in the same component.
-  Appending renders "openopen theopen the fleet". The field is `readOnly`
-  while the mic writes it, never `disabled`, so it stays focusable.
+Audio contracts to preserve:
 
-- **THE LEVEL NEVER ENTERS REACT STATE.** It moves at the frame rate; state
-  would re-render the streaming answer log sixty times a second to animate one
-  ring. It is `--os-mic-level`, written from a rAF loop that runs only while
-  the mic is live. The ring itself is a `box-shadow` on the existing 30px
-  button -- the shell's cue language, and the geometry spec C promised would
-  not change when voice landed.
+- Dictation capture is mono PCM16. `pcm16.ts` resamples across capture blocks;
+  declaring an encoding does not convert MediaRecorder's WebM/Opus bytes.
+- Transcript callbacks replace the accumulated field; they do not append it.
+  The composer remains focusable while the microphone writes to it.
+- `Permissions-Policy: microphone=(self)` allows the browser to request access.
+  Camera and geolocation remain closed. A denied microphone is a standing
+  explanation, and text remains usable.
+- Only one surface may own the microphone. Closing or cancelling capture
+  releases the device; leaving a live room cancels the associated model work.
+- Dictation levels update a CSS property from the animation loop, outside React
+  state. Reduced-motion preferences apply to both microphone and call cues.
+- The response estimate follows the selected route and stops near its end with
+  Still working. It never acts as an inference timeout. Provider calls and
+  tool execution belong in Activity, rather than permanent composer chrome.
 
-- **A REFUSAL IS A STANDING FACT, NOT A PHASE.** `denied` outlives the
-  attempt that found it, so the control keeps explaining itself while the
-  person types. It covers a genuine refusal AND a Permissions-Policy block,
-  because browsers report them identically -- which is why the sentence names
-  the browser instead of accusing the reader of a choice they may not have
-  made. Text stays fully usable throughout, and nothing is a dialog.
-
-There is no input-LANGUAGE setting and no microphone PICKER, and both
-absences are deliberate: `ai_transcribe_stream.go` accepts `language_hint` and
-discards it (the language is pinned cluster-wide), and every browser already
-offers a per-site input device in the address bar. A control that changes
-nothing is worse than an absent one.
+There is no microphone picker: the browser owns per-site device selection.
+Provider and model choices follow MemQL's route policies. Deployment, local
+models, limits and telemetry details are documented in
+[Ask conversations and voice](../../docs/public/operate/ask-and-voice.md).
 
 ## Themes, the marketplace (epic memql#4745)
 
