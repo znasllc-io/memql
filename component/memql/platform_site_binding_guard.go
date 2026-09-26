@@ -73,19 +73,15 @@ const bindingStoreIdKey = "storeId"
 // that still carries them is a caller nobody migrated.
 var retiredBindingKeys = []string{"storeDomain", "storefrontTokenRef"}
 
-// validateSiteStoreBinding refuses a `binding` delta that names a store the
-// caller cannot read, or that still carries the retired copied shape.
-//
-// A write that names no `binding` key passes untouched: a publish, a rename
-// and a status flip inherit the stored object through the read-merge, and
-// re-judging an inherited value would refuse every unrelated write to a site
-// bound before the rule. An explicit null, an empty object and an empty
-// storeId are the UNBOUND state and pass reading no store at all -- a
-// storefront is created before its store is attached, and a store can be
-// detached, so clearing must stay expressible (updateSiteSettings' reason).
+// validateSiteStoreBinding validates the final row after read-merge and hooks.
+// Shape is always checked, but store readability is checked only when the store
+// changes. Publishing bytes or renaming a site inherits an already-authorized
+// binding without acquiring authority to attach a different store. An empty
+// binding remains the unbound state, so clearing reads no store.
 func (e *MemQLEngine) validateSiteStoreBinding(
 	ctx context.Context,
 	payload map[string]any,
+	priorStoreId string,
 	actor string,
 	readable storeReadable,
 ) error {
@@ -121,9 +117,9 @@ func (e *MemQLEngine) validateSiteStoreBinding(
 	}
 
 	storeId := strings.TrimSpace(stringFromAny(binding[bindingStoreIdKey]))
-	if storeId == "" {
-		// The unbound state, and it must stay expressible: a storefront can be
-		// created before its store is attached, and a store can be detached.
+	if storeId == "" || storeId == strings.TrimSpace(priorStoreId) {
+		// Neither retaining an authorized binding nor clearing one attaches a
+		// new store. Shape validation above still applies to inherited values.
 		return nil
 	}
 	return requireReadableStore(ctx, storeId, actor, "bind this storefront to", readable)

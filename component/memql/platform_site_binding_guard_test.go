@@ -23,7 +23,7 @@ import (
 func TestABindingNamingAnUnreadableStoreIsRefused(t *testing.T) {
 	e := &MemQLEngine{}
 	payload := map[string]any{"binding": map[string]any{"storeId": "nope"}}
-	err := e.validateSiteStoreBinding(context.Background(), payload, "u1", func(context.Context, string) (bool, error) {
+	err := e.validateSiteStoreBinding(context.Background(), payload, "", "u1", func(context.Context, string) (bool, error) {
 		return false, nil
 	})
 	if err == nil {
@@ -39,7 +39,7 @@ func TestABindingNamingAnUnreadableStoreIsRefused(t *testing.T) {
 func TestABindingNamingAReadableStoreIsAccepted(t *testing.T) {
 	e := &MemQLEngine{}
 	payload := map[string]any{"binding": map[string]any{"storeId": "acme"}}
-	if err := e.validateSiteStoreBinding(context.Background(), payload, "u1", func(context.Context, string) (bool, error) {
+	if err := e.validateSiteStoreBinding(context.Background(), payload, "", "u1", func(context.Context, string) (bool, error) {
 		return true, nil
 	}); err != nil {
 		t.Fatalf("a binding naming a readable store was refused: %v", err)
@@ -58,7 +58,7 @@ func TestAnEmptyBindingReadsNoStore(t *testing.T) {
 		{"binding": nil},
 		{},
 	} {
-		if err := e.validateSiteStoreBinding(context.Background(), payload, "u1", probe); err != nil {
+		if err := e.validateSiteStoreBinding(context.Background(), payload, "", "u1", probe); err != nil {
 			t.Errorf("payload %v was refused: %v", payload, err)
 		}
 	}
@@ -76,7 +76,7 @@ func TestTheLegacyCopiedBindingIsRefused(t *testing.T) {
 		"storeDomain":        "acme.myshopify.com",
 		"storefrontTokenRef": "acme-storefront-token",
 	}}
-	err := e.validateSiteStoreBinding(context.Background(), payload, "u1", func(context.Context, string) (bool, error) {
+	err := e.validateSiteStoreBinding(context.Background(), payload, "", "u1", func(context.Context, string) (bool, error) {
 		return true, nil
 	})
 	if err == nil {
@@ -93,7 +93,7 @@ func TestTheLegacyCopiedBindingIsRefused(t *testing.T) {
 func TestABindingThatIsNotAnObjectIsRefused(t *testing.T) {
 	e := &MemQLEngine{}
 	payload := map[string]any{"binding": "acme.myshopify.com"}
-	err := e.validateSiteStoreBinding(context.Background(), payload, "u1", func(context.Context, string) (bool, error) {
+	err := e.validateSiteStoreBinding(context.Background(), payload, "", "u1", func(context.Context, string) (bool, error) {
 		return true, nil
 	})
 	if err == nil {
@@ -170,6 +170,30 @@ func TestUpdateSiteStoreBindingRendersTheStoreReference(t *testing.T) {
 			}
 			if len(binding) != 1 {
 				t.Errorf("binding carries %d keys (%v); the reference is exactly {storeId}", len(binding), binding)
+			}
+		})
+	}
+}
+
+// Even an unchanged store cannot hide a malformed or retired binding shape.
+func TestUnchangedStoreBindingRetainsShapeValidation(t *testing.T) {
+	e := &MemQLEngine{}
+	for _, tc := range []struct {
+		name      string
+		binding   any
+		wantError bool
+	}{
+		{"authorized binding", map[string]any{"storeId": "acme"}, false},
+		{"retired keys", map[string]any{"storeId": "acme", "storeDomain": "acme.myshopify.com"}, true},
+		{"scalar", "acme", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := e.validateSiteStoreBinding(context.Background(), map[string]any{"binding": tc.binding}, "acme", "u1", func(context.Context, string) (bool, error) {
+				t.Fatal("unchanged/invalid binding must not read the store")
+				return false, nil
+			})
+			if (err != nil) != tc.wantError {
+				t.Fatalf("binding validation error = %v, wantError=%v", err, tc.wantError)
 			}
 		})
 	}

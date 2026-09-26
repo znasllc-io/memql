@@ -34,8 +34,14 @@ func (d *Deps) nextAutoDeployment(ctx context.Context, pkg map[string]any, versi
 			return id, from, nil
 		}
 		if !rowBool(prior, "automatic") || !sameShortId(rowString(prior, "packageId"), rowString(pkg, "id")) ||
-			rowString(prior, "sourceVersion") != version || !retryableAutoInfrastructureFailure(prior) {
+			rowString(prior, "sourceVersion") != version {
 			return "", "", nil
+		}
+		if !retryableAutoInfrastructureFailure(prior) {
+			retryable, err := d.retryableInheritedBindingFailure(ctx, pkg, prior)
+			if err != nil || !retryable {
+				return "", "", err
+			}
 		}
 		// Retrying means the same bytes. A missing snapshot needs a person's
 		// fresh deploy, never an automatic fetch of a possibly moved branch.
@@ -50,7 +56,7 @@ func (d *Deps) nextAutoDeployment(ctx context.Context, pkg map[string]any, versi
 	}
 	// Leave the failure visible and updateAvailable set. A person can use
 	// Retry after repairing the cluster; further polls create no more runs.
-	d.log().Warn("packages: automatic infrastructure retries exhausted; repair the build surface and retry the deployment",
+	d.log().Warn("packages: automatic infrastructure retries exhausted; repair the deployment failure and retry the deployment",
 		"component", "packages.autodeploy", "package", rowString(pkg, "id"), "deployment", id,
 		"attemptLimit", autoDeploymentAttemptLimit)
 	return "", "", nil
