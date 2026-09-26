@@ -86,6 +86,13 @@ const maintenanceUserIdPrefix = "system:maintenance:"
 // maintenanceAutomations maps each automation that runs under the cluster's
 // maintenance principal to WHY it needs one.
 var maintenanceAutomations = map[string]string{
+	"pollPackageUpstreams": "engine-owned repository polling across every owner's active sources. " +
+		"The package composite tier hides user-owned sources from the default reader actor, so the " +
+		"poll otherwise succeeds with checked=0 and never discovers a new revision. Discovery must " +
+		"span owners before credentials and any automatic deployment are resolved as each package owner",
+	// The webhook feed is deliberately absent: stageInboundRequest currently
+	// accepts client-origin writes, so a staged row does not establish trusted
+	// provenance for granting cross-owner authority to an event-triggered run.
 	"checkDeployableHealth": "engine-owned scheduled availability checks across every owner's published sites; without a cluster maintenance principal an unobserved site would remain indistinguishable from a healthy one",
 	"workerInvocationRetentionSweep": "retention sweep over v1:worker:invocation, whose composite owner tier " +
 		"(memql#4406) would otherwise hide every row from it -- silently, because a sweep that retires " +
