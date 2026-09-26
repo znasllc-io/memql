@@ -87,6 +87,23 @@ Keep parent key statistics and autovacuum current too. They benefit other reads
 and the one-time backfill; they no longer determine whether recovery must scan
 100,000 completed IDs on every tick.
 
+## Current Fleet reads
+
+The Fleet readiness and stale-connection sweeps also encountered eight-second
+cancellations. Their current-key subquery was fast, but PostgreSQL could reorder
+an ordinary join into a hash join over historical JSON payloads after inherited
+statistics changed. The production plan estimated 264,635 registration history
+rows although only 13 current machines were needed.
+
+The shared DSL reader and latest-version recheck now use a lateral exact-version
+probe with `LIMIT 1`. This keeps payload access tied to each current key while
+preserving outer authorization, filters, ordering, pagination and as-of selection.
+A production read-only test returned all 13 machines in about 33 ms. A real
+Timescale regression captures and explains the actual Bun SQL with dense machine
+history and many unrelated IDs, verifying indexed payload probes rather than a
+historical heap scan. Parent statistics and vacuum remain scheduled maintenance;
+correctness and bounded payload access do not depend on a planner setting.
+
 ## Safeguards
 
 - No arbitrary-concept TTL. User-owned runs/goals, active work, business rows and
