@@ -47,13 +47,16 @@ import (
 // runner. The first four are the runner's own entry points, by the names the
 // plan gives them (docs/superpowers/plans/2026-09-23-procedure-certification-
 // replay.md, section 1.4); the last two are the reads compile and the verifier
-// make. Every call names the owner, and the adapter decides which actor makes
-// it -- the person, or the cluster's maintenance principal an automation runs
-// as -- because that is a property of the runner's gates, not of the lifecycle.
+// make. Every call names the owner, and every call is made AS the owner: the
+// learned constructs, the runs and the approvals are all on the owner's
+// composite tier, and each automation that makes these calls in production
+// borrows the owner the event names (learnFromSucceededRun included) rather
+// than acting as the cluster -- so an adapter that made them as anybody else
+// would measure a path production does not take.
 type ProcedureLadder interface {
 	// LearnFromRun mines the corpus a succeeded recording belongs to and
-	// lifts what it finds -- what the learnFromSucceededRun automation does
-	// when a recording run succeeds.
+	// lifts what it finds -- what the learnFromSucceededRun automation does,
+	// under the recording owner's actor, when a recording run succeeds.
 	LearnFromRun(ctx context.Context, ownerUserId, recordingRunId string) (LearnReport, error)
 	// ShadowCompare replays every procedure on shadow for the recording's
 	// goal beside the app's own actions, in a sandbox, and moves the ladder

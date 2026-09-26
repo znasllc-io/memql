@@ -17,11 +17,12 @@ type SuiteResult struct {
 	// Results are every arm result, for the row writer and for a failure that
 	// needs to say what happened.
 	Results []ArmResult
-	// ControlFailures are negative controls that came back zero. THEY ARE
-	// FATAL, and they are kept separate from ordinary verifier failures
-	// because they mean something different: not "the platform regressed" but
-	// "the instrument is dead, and every green figure it produced means
-	// nothing".
+	// ControlFailures are negative controls that read the wrong way -- a
+	// lower-is-better control that came back zero, or a higher-is-better one
+	// that did not. THEY ARE FATAL, and they are kept separate from ordinary
+	// verifier failures because they mean something different: not "the
+	// platform regressed" but "the instrument is dead, and every green figure
+	// it produced means nothing".
 	ControlFailures []string
 	// VerifierFailures are scenarios whose platform arm did not satisfy its
 	// own verifier.

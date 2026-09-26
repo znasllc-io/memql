@@ -185,8 +185,9 @@ func (p *ProcedureWorld) fingerprint(workspace string, takenAt time.Time) map[st
 // splitCommand splits a command line into its argument vector the way a POSIX
 // shell does for words: single quotes literal, double quotes with backslash
 // escapes, a backslash escaping the next rune, whitespace separating. It is
-// the inverse of component/procedure.Materialize's argv quoting, which single-
-// quotes an element that needs it and writes an embedded quote as '\''.
+// the inverse of component/procedure.Materialize's argv quoting, which
+// single-quotes an element that needs it and writes a quote inside one by
+// closing the quotes, escaping it with a backslash, and reopening them.
 func splitCommand(s string) []string {
 	var (
 		out     []string
