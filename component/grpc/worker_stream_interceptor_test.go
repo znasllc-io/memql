@@ -150,3 +150,19 @@ func TestWorkerAwareInterceptor_RejectsResolverError(t *testing.T) {
 		t.Fatalf("unknown token: code=%v, want %v (err=%v)", got, want, err)
 	}
 }
+
+func TestWorkerAwareInterceptor_DatabaseFailureIsRetryable(t *testing.T) {
+	resolver := &stubWorkerResolver{err: errors.New("private database address: i/o timeout")}
+	intr := NewWorkerAwareStreamInterceptor(fallthroughInterceptor, resolver, nil)
+	cap := &captureHandler{}
+	err := intr(nil, streamWithAuthHeader("Worker mql_wkr_validtoken"), workerServiceInfo(), cap.handle)
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("database failure: %v", err)
+	}
+	if status.Convert(err).Message() != "worker authentication temporarily unavailable" {
+		t.Fatalf("private details escaped: %v", err)
+	}
+	if cap.called {
+		t.Fatal("lookup failure must not admit the worker")
+	}
+}

@@ -102,3 +102,14 @@ use the shared published build instead of `candidateRef`.
 Site runtime settings are shared between destinations. Store-specific Customer
 Account API settings still require separate work; independent catalog bindings
 do not imply independent account-client settings.
+
+## Store connection state
+
+For storefronts, `runtime-config.json` includes `storefront.connectionState`:
+`unbound` means no store is assigned and the website may offer a clearly marked
+local design-preview catalog/cart with checkout disabled. `unavailable` means a
+store is assigned but its configuration could not be read; display a connection
+error, never substitute demonstration products. `connected` means the domain and
+public Storefront credential are available; Shopify API failures still remain
+errors. This state is independent for Testing and Production. It exposes no
+backend error details or private credentials.

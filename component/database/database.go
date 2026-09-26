@@ -1582,18 +1582,12 @@ const (
 	// Long-lived holders stay busy (cron leader polls every 10s), so they are
 	// never idle long enough to trip it. Set to 0 to disable.
 	defaultIdleSessionTimeoutMs = 300000
-	// 60s: bound ONE statement on every pooled backend. The pool cap is a
-	// client-side promise the server never hears: a Go context that expires
-	// closes the socket, and the Postgres backend keeps running the statement
-	// until it next tries to write to that socket -- for a 178-second read that
-	// is 178 seconds. On a production instance (2026-09-13) pods capped at 4
-	// connections held 30 backends each that way, and 200 slots ran out. A
-	// statement the server itself abandons frees its slot at the deadline, and
-	// the client sees `canceling statement due to statement timeout` (SQLSTATE
-	// 57014) instead of a slot-exhaustion storm an hour later. Migrations are
-	// exempt (migrationConnParams): an index build on a large hypertable is
-	// the one statement that is meant to run long.
-	defaultStatementTimeoutMs = 60000
+	// Cancel serving queries at the server before pgdriver's default 10 s
+	// socket read deadline. With a 60 s server limit, each abandoned request
+	// kept scanning for another 50 s while its caller retried, amplifying disk
+	// contention and starving authentication. Migrations use a separate pool
+	// without this limit. Operators may override it for longer request budgets.
+	defaultStatementTimeoutMs = 8000
 )
 
 // pgSQLOpener builds the default opener over the pgdriver connector. params

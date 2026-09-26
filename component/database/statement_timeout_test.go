@@ -12,8 +12,8 @@ import (
 func TestEveryPooledBackendCarriesAStatementTimeout(t *testing.T) {
 	t.Setenv(envDBStatementTimeoutMs, "")
 	params := sessionConnParams()
-	if got := params["statement_timeout"]; got != "60000" {
-		t.Fatalf("statement_timeout = %v, want the 60000 default", got)
+	if got := params["statement_timeout"]; got != "8000" {
+		t.Fatalf("statement_timeout = %v, want the 8000 default", got)
 	}
 
 	t.Setenv(envDBStatementTimeoutMs, "15000")
