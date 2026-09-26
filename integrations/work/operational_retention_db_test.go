@@ -95,7 +95,7 @@ func TestOperationalRetentionDBProtectsActiveOwnedRecentAndArchivesSystemHistory
 	}
 	// Recoverable archives contain the historical versions and intrinsic fields.
 	archived := 0
-	for object, blob := range archive.blobs {
+	for object, blob := range archive.objects {
 		if !strings.HasSuffix(object, fmt.Sprintf("/%x.ndjson.gz", sha256.Sum256(blob))) {
 			t.Fatalf("archive filename cannot be independently verified with sha256sum: %s", object)
 		}
