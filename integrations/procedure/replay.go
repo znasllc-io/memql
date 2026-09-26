@@ -70,6 +70,11 @@ import (
 // key, and -- when the first one finished -- answers what it answered without
 // running, counting or handing anything over twice.
 
+// Preconditions is component/procedure's learned initiation set -- what a
+// Prober is handed and answers -- named here so a node that implements the
+// seam from app/ needs no direct import of the pure module for its one type.
+type Preconditions = proc.Preconditions
+
 // ReplayMode is what a replay is for.
 type ReplayMode string
 
@@ -379,6 +384,14 @@ func (r *replay) gateRung(ctx context.Context) bool {
 		if rung != work.RungShadow {
 			r.out.Code = codeNotServable
 			r.out.Diagnosis = fmt.Sprintf("Only a procedure in shadow is compared beside the app, and this one is %s.", rungPhrase(rung))
+			if r.resuming {
+				// A comparison that started before the procedure left shadow
+				// is closed saying why, rather than left `running` for the
+				// abandoned sweep to find.
+				r.outcome = r.baseOutcome()
+				r.outcome["diagnosis"] = r.out.Diagnosis
+				r.closeRun(ctx, "failed", codeNotServable, r.out.Diagnosis)
+			}
 			return false
 		}
 		r.mode = ReplayShadow
@@ -740,7 +753,7 @@ func (r *replay) checkPreconditions(ctx context.Context) bool {
 	)
 	if needsProbe := !proc.CheckPreconditions(r.c.learned, proc.Preconditions{}, target).Held; needsProbe {
 		if p := r.i.prober(); p != nil {
-			observed, probeErr = p.Probe(ctx, r.target, r.req.OwnerUserId, r.runId, r.c.learned)
+			observed, probeErr = p.Probe(ownerActor(ctx, r.req.OwnerUserId), r.target, r.req.OwnerUserId, r.runId, r.c.learned)
 		} else {
 			probeErr = errors.New("no prober is installed on this node")
 		}
@@ -1419,7 +1432,9 @@ func (r *replay) fallBack(ctx context.Context, g Guidance, started bool) {
 	goalId, statement := r.goalContext(ctx)
 	g.Procedure = r.c.name
 	g.Prompt = renderGuidance(statement, g, started, r.out.DivergedStep)
-	fo, err := f.Handover(ctx, FallbackRequest{
+	// Every seam sees the OWNER's actor, as the dispatcher does: the goal is
+	// theirs, and so is whatever the app does with it.
+	fo, err := f.Handover(ownerActor(ctx, r.req.OwnerUserId), FallbackRequest{
 		OwnerUserId: r.req.OwnerUserId,
 		GoalId:      goalId,
 		RunId:       r.req.GoalRunId,
