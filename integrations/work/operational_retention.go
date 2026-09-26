@@ -272,7 +272,11 @@ func (i *Integration) retireVerified(ctx context.Context, concept string, candid
 			return 0, 0, "", e
 		}
 		var row map[string]any
-		if e = json.Unmarshal(raw, &row); e != nil {
+		// Archive numbers verbatim; float64 would round large integer evidence
+		// even though the database and the original RawMessage preserve it.
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.UseNumber()
+		if e = decoder.Decode(&row); e != nil {
 			return 0, 0, "", e
 		}
 		encoded = append(encoded, row)

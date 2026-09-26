@@ -68,7 +68,7 @@ func TestOperationalRetentionDBProtectsActiveOwnedRecentAndArchivesSystemHistory
 		insertSweepRow(t, db, "v1:work:step:"+tc.id, "v1:work:step", now.AddDate(0, 0, -tc.days), map[string]any{"ownerUserId": tc.owner, "runId": id, "status": "done"})
 	}
 	insertSweepRow(t, db, "v1:work:modelCall:recent", modelCallConcept, now.AddDate(0, 0, -1), map[string]any{"ownerUserId": "", "runId": runConcept + ":recent-detail"})
-	insertSweepRow(t, db, "v1:identity:auditEvent:old", "v1:identity:auditEvent", now.AddDate(0, 0, -366), map[string]any{"action": "test"})
+	insertSweepRow(t, db, "v1:identity:auditEvent:old", "v1:identity:auditEvent", now.AddDate(0, 0, -366), map[string]any{"action": "test", "sequence": int64(9007199254740993)})
 	insertSweepRow(t, db, "v1:identity:auditEvent:recent", "v1:identity:auditEvent", now.AddDate(0, 0, -30), map[string]any{"action": "test"})
 	insertSweepRow(t, db, "v1:business:product:keep", "v1:business:product", now.AddDate(0, 0, -900), map[string]any{"name": "business record"})
 	// Operational safety evidence belonging to live work remains even past its age window.
@@ -104,6 +104,7 @@ func TestOperationalRetentionDBProtectsActiveOwnedRecentAndArchivesSystemHistory
 			t.Fatal(err)
 		}
 		dec := json.NewDecoder(r)
+		dec.UseNumber()
 		for {
 			var row map[string]any
 			err = dec.Decode(&row)
@@ -117,6 +118,9 @@ func TestOperationalRetentionDBProtectsActiveOwnedRecentAndArchivesSystemHistory
 				if _, ok := row[key]; !ok {
 					t.Fatalf("archive missing %s", key)
 				}
+			}
+			if row["id"] == "v1:identity:auditEvent:old" && fmt.Sprint(row["payload"].(map[string]any)["sequence"]) != "9007199254740993" {
+				t.Fatal("archive rounded integer evidence before deleting the original")
 			}
 			archived++
 		}
