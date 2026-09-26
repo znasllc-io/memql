@@ -100,30 +100,55 @@ func (r *Runner) Run(ctx context.Context, corpus scenario.Corpus) (SuiteResult, 
 // re-executed, provider calls on a replay -- is therefore paired with a
 // scenario that MUST produce a non-zero, and this is where "must" is enforced.
 //
-// The control is normally the BASELINE ARM of the same scenario: a bare loop
-// with no journal restarts from the beginning, so it re-executes and it
-// re-delivers.
+// THE RULE HAS TWO DIRECTIONS, because a counter can be dead in two ways
+// (figure.Spec.Control). One whose good answer is a POSITIVE count -- goals a
+// trusted procedure served with no model -- is dead when it reads its claim on
+// every path: "no model was reached" is also true of a goal nothing served at
+// all. Its control is a scenario in which the counted event does not happen,
+// and it MUST read ZERO.
 //
-// TWO METRICS ARE MEASURED ON THE PLATFORM ARM INSTEAD, and the reason is the
-// same both times: the mechanism the metric counts does not exist in a bare
-// loop at all, so its baseline arm is structurally zero and would report a dead
-// instrument on a working one. `compileCallsOnCatalogHit` -- a bare loop does
-// not compile. `recovery.modelCalls` -- a bare loop has no failure path, so it
-// never reaches the symptom classifier; the count the metric is about is the
-// PLATFORM deciding whether a failure needs a model, and a control on the
-// baseline would be asking a question the arm cannot answer.
+// A lower-is-better control is normally the BASELINE ARM of the same
+// scenario: a bare loop with no journal restarts from the beginning, so it
+// re-executes and it re-delivers.
+//
+// TWO LOWER-IS-BETTER METRICS ARE MEASURED ON THE PLATFORM ARM INSTEAD, and
+// the reason is the same both times: the mechanism the metric counts does not
+// exist in a bare loop at all, so its baseline arm is structurally zero and
+// would report a dead instrument on a working one. `compileCallsOnCatalogHit`
+// -- a bare loop does not compile. `recovery.modelCalls` -- a bare loop has no
+// failure path, so it never reaches the symptom classifier; the count the
+// metric is about is the PLATFORM deciding whether a failure needs a model,
+// and a control on the baseline would be asking a question the arm cannot
+// answer.
 //
 // That is a narrower exemption than it looks. On the platform arm the control
 // still has to produce a non-zero, which is the whole property: it fails if the
 // classifier is never reached, which is exactly the state the suite was in
 // before it was wired.
-// platformArmControls are the metrics whose negative control is measured on the
-// platform arm rather than the baseline. See checkNegativeControl's header for
-// why each is here; an entry added without that reasoning turns a control into
-// a formality.
+//
+// EVERY HIGHER-IS-BETTER CONTROL IS ON THE PLATFORM ARM, for the mirror
+// reason: the baseline's reading is structurally zero -- a bare loop has no
+// ladder, so it serves no goal from a procedure -- and a zero there proves
+// nothing about the counter. The lie a positive counter tells is the
+// PLATFORM claiming an event that did not happen, so that is where its control
+// must read zero.
+//
+// platformArmControls are the lower-is-better metrics whose negative control is
+// measured on the platform arm rather than the baseline. See the header above
+// for why each is here; an entry added without that reasoning turns a control
+// into a formality.
 var platformArmControls = map[figure.Metric]bool{
 	figure.MetricCompileCallsExact: true,
 	figure.MetricRecoveryCalls:     true,
+}
+
+// controlArm is the arm a metric's negative control is read on.
+func controlArm(m figure.Metric) figure.Arm {
+	spec, _ := figure.MetricSpec(m)
+	if platformArmControls[m] || spec.Control() == figure.ControlZero {
+		return figure.ArmPlatform
+	}
+	return figure.ArmBaseline
 }
 
 func checkNegativeControl(s scenario.Scenario, entries []scorecard.Entry) string {
@@ -131,10 +156,11 @@ func checkNegativeControl(s scenario.Scenario, entries []scorecard.Entry) string
 	if m == "" {
 		return ""
 	}
-	arm := figure.ArmBaseline
-	if platformArmControls[m] {
-		arm = figure.ArmPlatform
+	spec, ok := figure.MetricSpec(m)
+	if !ok {
+		return fmt.Sprintf("%s is the negative control for %s, which is not a registered metric", s.Id, m)
 	}
+	arm := controlArm(m)
 	for _, e := range entries {
 		if e.Figure.Metric != m || e.Arm != arm {
 			continue
@@ -143,12 +169,25 @@ func checkNegativeControl(s scenario.Scenario, entries []scorecard.Entry) string
 			return fmt.Sprintf("%s is the negative control for %s and its %s figure is unmeasured (%s), so nothing checks the instrument",
 				s.Id, m, arm, e.Figure.Absent)
 		}
-		if e.Figure.Stat.Median == 0 {
-			return fmt.Sprintf(
-				"%s is the negative control for %s and its %s arm measured ZERO. "+
-					"That means the counter behind %s never goes up on any path, so every green figure it produced means nothing. "+
-					"Fix the instrument before believing the suite",
-				s.Id, m, arm, m)
+		switch spec.Control() {
+		case figure.ControlNonZero:
+			if e.Figure.Stat.Median == 0 {
+				return fmt.Sprintf(
+					"%s is the negative control for %s and its %s arm measured ZERO. "+
+						"That means the counter behind %s never goes up on any path, so every green figure it produced means nothing. "+
+						"Fix the instrument before believing the suite",
+					s.Id, m, arm, m)
+			}
+		case figure.ControlZero:
+			if e.Figure.Stat.Median != 0 {
+				return fmt.Sprintf(
+					"%s is the negative control for %s and its %s arm measured %s where the event it counts does not happen. "+
+						"That means the counter behind %s reads its claim whether or not the event occurred, so every green figure it produced means nothing. "+
+						"Fix the instrument before believing the suite",
+					s.Id, m, arm, e.Figure.Render(), m)
+			}
+		default:
+			return fmt.Sprintf("%s is the negative control for %s, which declares no better direction, so no reading of it means anything", s.Id, m)
 		}
 		return ""
 	}

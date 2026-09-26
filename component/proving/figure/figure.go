@@ -129,6 +129,18 @@ func (u Unit) Valid() bool {
 	return false
 }
 
+// Counts reports whether a figure in u is a COUNT OF OCCURRENCES -- calls
+// made, steps run, tokens spent, things counted -- rather than a fraction,
+// a duration or money. It is what makes a metric a counter in the negative-
+// control rule's sense (Spec.NeedsControl).
+func (u Unit) Counts() bool {
+	switch u {
+	case UnitCalls, UnitSteps, UnitTokens, UnitCount:
+		return true
+	}
+	return false
+}
+
 // Direction says which way is better for a metric. Declared once, in the
 // metric table, because "lower is better" is true of cost and false of pass
 // rate and a comparison that guessed would report every improvement backwards
@@ -163,6 +175,12 @@ const (
 	MetricTokensPerGoal     Metric = "amortizedCost.tokensPerGoal"
 	MetricUSDPerGoal        Metric = "amortizedCost.usdPerGoal"
 	MetricCompileCallsExact Metric = "amortizedCost.compileCallsOnCatalogHit"
+	// MetricReplaysWithoutModel is the learned-procedure headline (epic
+	// memql#5408): a goal a TRUSTED procedure answered by replaying its steps,
+	// reaching neither a model nor the app it was learned from. It is the one
+	// blocking metric whose good answer is a positive count, which is why the
+	// negative-control rule has a second direction (Spec.Control).
+	MetricReplaysWithoutModel Metric = "amortizedCost.replaysServedWithoutModel"
 
 	// Reliability.
 	MetricPassRate     Metric = "reliability.passRate"
@@ -179,6 +197,12 @@ const (
 	MetricDuplicatedEffects Metric = "durability.duplicatedSideEffects"
 	MetricResumedElsewhere  Metric = "durability.resumedOnAnotherNode"
 	MetricResumeReExecuted  Metric = "durability.resumedStepsReExecuted"
+	// MetricDuplicatedAcrossDivergence is D16's failure mode made a figure: a
+	// replay that stops part-way has already delivered its first steps, and
+	// the app that takes over must not deliver them again. The platform's
+	// guidance -- the steps that ran, with their idempotency keys -- is what
+	// prevents it; nothing in the fake world does.
+	MetricDuplicatedAcrossDivergence Metric = "durability.duplicatedSideEffectsAcrossDivergence"
 
 	// Learning curve.
 	MetricCatalogServedFraction Metric = "learningCurve.catalogServedFraction"
@@ -224,6 +248,12 @@ var metrics = map[Metric]Spec{
 	MetricTokensPerGoal:     {MetricTokensPerGoal, FamilyAmortizedCost, UnitTokens, LowerIsBetter, "Tokens spent per goal, amortized over N runs with different variables.", false},
 	MetricUSDPerGoal:        {MetricUSDPerGoal, FamilyAmortizedCost, UnitUSD, LowerIsBetter, "Dollars per goal, amortized over N runs with different variables.", false},
 	MetricCompileCallsExact: {MetricCompileCallsExact, FamilyAmortizedCost, UnitCalls, LowerIsBetter, "Model calls made while compiling a goal that exactly matches the catalog.", true},
+	// UnitCount rather than a "replays" unit of its own: the unit set is
+	// closed in THREE places -- here, the bench sample concept's `unit` enum
+	// (dsl/bench/concepts.memql) and MemQL OS's formatter -- and a unit this
+	// file alone knew would have its every published row refused by the
+	// schema. The sentence says what is counted.
+	MetricReplaysWithoutModel: {MetricReplaysWithoutModel, FamilyAmortizedCost, UnitCount, HigherIsBetter, "Goals a trusted learned procedure answered with no model and no app call.", true},
 
 	MetricPassRate:     {MetricPassRate, FamilyReliability, UnitRatio, HigherIsBetter, "Runs whose verifier passed, over runs attempted.", true},
 	MetricPassVariance: {MetricPassVariance, FamilyReliability, UnitRatio, LowerIsBetter, "Spread of the pass rate across K runs of one goal.", false},
@@ -237,6 +267,8 @@ var metrics = map[Metric]Spec{
 	MetricDuplicatedEffects: {MetricDuplicatedEffects, FamilyDurability, UnitCount, LowerIsBetter, "Side effects delivered twice across a mid-run kill and a resume. Must be zero.", true},
 	MetricResumedElsewhere:  {MetricResumedElsewhere, FamilyDurability, UnitRatio, HigherIsBetter, "Killed runs that resumed on a different node from the journal alone.", true},
 	MetricResumeReExecuted:  {MetricResumeReExecuted, FamilyDurability, UnitSteps, LowerIsBetter, "Completed steps a resumed run executed again. Must be zero.", true},
+
+	MetricDuplicatedAcrossDivergence: {MetricDuplicatedAcrossDivergence, FamilyDurability, UnitCount, LowerIsBetter, "Side effects delivered twice when a replay diverged and the app took over. Must be zero.", true},
 
 	MetricCatalogServedFraction: {MetricCatalogServedFraction, FamilyLearningCurve, UnitRatio, HigherIsBetter, "Steps served by the catalog, across a sequence of related goals.", false},
 	MetricUSDPerGoalInSequence:  {MetricUSDPerGoalInSequence, FamilyLearningCurve, UnitUSD, LowerIsBetter, "Dollars per goal as the catalog fills across a related sequence.", false},
@@ -268,6 +300,73 @@ func RegisteredMetrics() []Metric {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out
+}
+
+// ControlReading is what a metric's NEGATIVE CONTROL must read: the reading
+// that proves the instrument behind the metric can move in the direction in
+// which its claim could be false.
+//
+// It is DIRECTION-AWARE because the claim is. A lower-is-better headline is a
+// zero, and the way a zero lies is a counter that never rises on any path. A
+// higher-is-better headline is a positive count, and the way IT lies is a
+// counter that reads its claim on every path -- "the replay reached no model"
+// is also true of a goal nothing served at all, so an instrument that counted
+// the absence of a model call rather than a served replay would report the
+// headline forever. The two failures are mirror images, and so are the
+// controls that catch them.
+type ControlReading string
+
+const (
+	// ControlNone: the metric declares no better direction, so no reading of
+	// a control could mean anything. A scenario naming one as the metric it
+	// controls is refused at load.
+	ControlNone ControlReading = ""
+	// ControlNonZero: lower is better. The control is a scenario on which the
+	// counter MUST rise -- the corpus's original rule.
+	ControlNonZero ControlReading = "nonZero"
+	// ControlZero: higher is better. The control is a scenario built so the
+	// event the metric counts does NOT happen, on which the counter MUST stay
+	// at zero.
+	ControlZero ControlReading = "zero"
+)
+
+// Control reports what a negative control for this metric must read.
+func (s Spec) Control() ControlReading {
+	switch s.Direction {
+	case LowerIsBetter:
+		return ControlNonZero
+	case HigherIsBetter:
+		return ControlZero
+	}
+	return ControlNone
+}
+
+// NeedsControl reports whether the corpus MUST pair this metric with a
+// negative control (scenario.Corpus.CorpusControls asks it).
+//
+// Every blocking lower-is-better metric does, whatever its unit -- the rule as
+// it was first written, kept whole. A blocking higher-is-better metric does
+// when it is a COUNTER (Unit.Counts), and that boundary is the substance of
+// the rule rather than a convenience. A counter's dead state is an absence
+// that reads like the event, which is exactly what a zero-reading control
+// catches. The blocking higher-is-better RATIOS the corpus claims are verdicts
+// over attempts -- the platform verifier's pass, a governance property, a
+// resume -- and a control for a verdict would be a scenario built to fail it;
+// for the verifier and governance ratios that failure is already a blocking
+// failure of the whole suite on the platform arm. None of those ratios has a
+// zero-reading control today, and the rule says so by stopping at counters
+// rather than by exempting them one at a time.
+func (s Spec) NeedsControl() bool {
+	if !s.Blocking {
+		return false
+	}
+	switch s.Direction {
+	case LowerIsBetter:
+		return true
+	case HigherIsBetter:
+		return s.Unit.Counts()
+	}
+	return false
 }
 
 // AbsentReason says why a figure has no number. CLOSED on purpose: a

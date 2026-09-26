@@ -38,6 +38,7 @@ CI and stay that way until the live tier fills them.
 |---|---|---|---|
 | amortizedCost | `amortizedCost.compileCallsOnCatalogHit` | **yes** | Model calls made while compiling a goal that exactly matches the catalog. |
 | amortizedCost | `amortizedCost.providerCalls` | **yes** | Provider calls one run made. A run served entirely from the journal makes none. |
+| amortizedCost | `amortizedCost.replaysServedWithoutModel` | **yes** | Goals a trusted learned procedure answered with no model and no app call. |
 | amortizedCost | `amortizedCost.stepsServedFromJournal` | no | Steps answered from the journal rather than re-executed. |
 | amortizedCost | `amortizedCost.tokensPerGoal` | no | Tokens spent per goal, amortized over N runs with different variables. |
 | amortizedCost | `amortizedCost.usdPerGoal` | no | Dollars per goal, amortized over N runs with different variables. |
@@ -49,6 +50,7 @@ CI and stay that way until the live tier fills them.
 | recovery | `recovery.stepsReExecuted` | **yes** | Already-completed steps re-executed while recovering. Repair from the failed step re-executes none. |
 | recovery | `recovery.wallClockMs` | no | Wall-clock from the injected failure to a passing verifier. |
 | durability | `durability.duplicatedSideEffects` | **yes** | Side effects delivered twice across a mid-run kill and a resume. Must be zero. |
+| durability | `durability.duplicatedSideEffectsAcrossDivergence` | **yes** | Side effects delivered twice when a replay diverged and the app took over. Must be zero. |
 | durability | `durability.resumedOnAnotherNode` | **yes** | Killed runs that resumed on a different node from the journal alone. |
 | durability | `durability.resumedStepsReExecuted` | **yes** | Completed steps a resumed run executed again. Must be zero. |
 | learningCurve | `learningCurve.catalogServedFraction` | no | Steps served by the catalog, across a sequence of related goals. |

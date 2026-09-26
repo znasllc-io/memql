@@ -482,3 +482,93 @@ func TestPercentileInterpolatesRatherThanRounding(t *testing.T) {
 		t.Errorf("percentile(0.1) = %v, want 1", got)
 	}
 }
+
+// --- Negative controls, in both directions ----------------------------------
+
+func TestTheControlReadingFollowsTheMetricsDirection(t *testing.T) {
+	// A lower-is-better headline is a zero, and its control must be seen to
+	// RISE; a higher-is-better headline is a positive count, and its control
+	// must be seen to STAY at zero. A metric with no better direction has no
+	// reading a control could be held to.
+	for _, tc := range []struct {
+		dir  Direction
+		want ControlReading
+	}{
+		{LowerIsBetter, ControlNonZero},
+		{HigherIsBetter, ControlZero},
+		{NeitherIsBetter, ControlNone},
+	} {
+		if got := (Spec{Direction: tc.dir}).Control(); got != tc.want {
+			t.Errorf("a %s-is-better metric's control reads %q, want %q", tc.dir, got, tc.want)
+		}
+	}
+}
+
+func TestEveryBlockingCounterNeedsAControlAndARatioDoesNot(t *testing.T) {
+	// The rule branches on three properties -- blocking, direction and whether
+	// the unit counts occurrences -- so the registry is checked to hold every
+	// branch first. A registry uniform on any of them would let this test pass
+	// while asserting nothing about the branch it lacks.
+	var lowerBlocking, higherCounter, higherRatio, nonBlocking int
+	for _, m := range RegisteredMetrics() {
+		spec, _ := MetricSpec(m)
+		switch {
+		case !spec.Blocking:
+			nonBlocking++
+		case spec.Direction == LowerIsBetter:
+			lowerBlocking++
+		case spec.Direction == HigherIsBetter && spec.Unit.Counts():
+			higherCounter++
+		case spec.Direction == HigherIsBetter:
+			higherRatio++
+		}
+	}
+	if lowerBlocking == 0 || higherCounter == 0 || higherRatio == 0 || nonBlocking == 0 {
+		t.Fatalf("the registry no longer holds every branch of the rule (lower+blocking %d, higher counter %d, higher ratio %d, non-blocking %d); this test would check one side only",
+			lowerBlocking, higherCounter, higherRatio, nonBlocking)
+	}
+
+	for _, m := range RegisteredMetrics() {
+		spec, _ := MetricSpec(m)
+		want := spec.Blocking && (spec.Direction == LowerIsBetter || (spec.Direction == HigherIsBetter && spec.Unit.Counts()))
+		if got := spec.NeedsControl(); got != want {
+			t.Errorf("%s (blocking=%v, %s, unit %s): NeedsControl() = %v, want %v", m, spec.Blocking, spec.Direction, spec.Unit, got, want)
+		}
+	}
+}
+
+func TestCountsIsTrueOnlyForAUnitThatCountsOccurrences(t *testing.T) {
+	counts := map[Unit]bool{UnitCalls: true, UnitSteps: true, UnitTokens: true, UnitCount: true}
+	for _, u := range []Unit{UnitCalls, UnitSteps, UnitTokens, UnitUSD, UnitMillis, UnitRatio, UnitPercent, UnitCount} {
+		if got := u.Counts(); got != counts[u] {
+			t.Errorf("%s.Counts() = %v, want %v", u, got, counts[u])
+		}
+	}
+}
+
+func TestTheLearnedProcedureFiguresAreRegisteredAsTheRecordSaysTheyAre(t *testing.T) {
+	// Epic memql#5408's two figures. The direction is the load-bearing field:
+	// replaysServedWithoutModel is the first BLOCKING metric whose good answer
+	// is a positive count, and a lower-is-better registration would report the
+	// platform's headline as a regression and its control as a pass.
+	for _, tc := range []struct {
+		m      Metric
+		family Family
+		dir    Direction
+		means  string
+	}{
+		{MetricReplaysWithoutModel, FamilyAmortizedCost, HigherIsBetter, "Goals a trusted learned procedure answered with no model and no app call."},
+		{MetricDuplicatedAcrossDivergence, FamilyDurability, LowerIsBetter, "Side effects delivered twice when a replay diverged and the app took over. Must be zero."},
+	} {
+		spec, ok := MetricSpec(tc.m)
+		if !ok {
+			t.Fatalf("%s is not registered", tc.m)
+		}
+		if spec.Family != tc.family || spec.Direction != tc.dir || spec.Unit != UnitCount || !spec.Blocking || spec.Means != tc.means {
+			t.Errorf("%s = %+v, want family %s, direction %s, unit count, blocking, and Means %q", tc.m, spec, tc.family, tc.dir, tc.means)
+		}
+		if !spec.NeedsControl() {
+			t.Errorf("%s is a blocking counter and the corpus does not have to control it", tc.m)
+		}
+	}
+}

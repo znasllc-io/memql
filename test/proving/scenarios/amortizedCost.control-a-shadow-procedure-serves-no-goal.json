@@ -1,0 +1,105 @@
+{
+  "id": "amortizedCost.control-a-shadow-procedure-serves-no-goal",
+  "family": "amortizedCost",
+  "title": "The control: a procedure nobody promoted serves no goal, however often it matched",
+  "description": "The app is the proving suite's FIXTURE APP: a fake harness that performs the goal's actions on the fake machine and reports each one as the cockpit does, through the same session writer a delegated app session is recorded through. It is not a provider and plays no cassette; every session it runs counts as one model reach, because an app session is the intelligence a learned procedure exists to stop paying for. The same fixture and the same evidence as the trusted scenario -- two recordings, two matches beside the app across two bindings, and the promotion proposed -- but no person decides it. The measured goal must therefore be served by the app, and the replays-without-a-model counter must read ZERO on the platform arm: a counter that read one here would be counting the absence of a model call rather than a served replay.",
+  "goal": "Reconcile the weekly ledger for {{account}} and notify the operators",
+  "variables": [],
+  "steps": [
+    {
+      "key": "reconcile",
+      "type": "exec",
+      "target": "reconcile.sh --account {{account}} --period weekly",
+      "effect": "machine"
+    },
+    {
+      "key": "notify",
+      "type": "exec",
+      "target": "notify.sh --to ops --account {{account}}",
+      "effect": "machine"
+    },
+    {
+      "key": "archive",
+      "type": "exec",
+      "target": "archive.sh --account {{account}}",
+      "effect": "machine"
+    }
+  ],
+  "procedure": {
+    "policy": {
+      "shadowMatches": 2,
+      "distinctBindings": 2,
+      "canaryMatches": 1
+    },
+    "goals": [
+      {
+        "variables": {
+          "account": "acme"
+        }
+      },
+      {
+        "variables": {
+          "account": "globex"
+        }
+      },
+      {
+        "variables": {
+          "account": "initech"
+        }
+      },
+      {
+        "variables": {
+          "account": "umbrella"
+        }
+      },
+      {
+        "variables": {
+          "account": "stark"
+        },
+        "measure": true
+      }
+    ]
+  },
+  "world": {
+    "machine": {
+      "labels": {
+        "os": "linux"
+      },
+      "scripts": {
+        "reconcile.sh": "{\"lines\": 42, \"balanced\": true}\n",
+        "notify.sh": "notice queued\n",
+        "archive.sh": "archived\n"
+      }
+    }
+  },
+  "inject": [],
+  "verify": [
+    {
+      "rows": "v1:authoring:construct",
+      "where": {
+        "ladder": "shadow"
+      },
+      "count": 1
+    },
+    {
+      "rows": "v1:work:approval",
+      "where": {
+        "kind": "procedurePromotion",
+        "decision": "pending"
+      },
+      "count": 1
+    },
+    {
+      "effects": "machine.run",
+      "count": 15
+    },
+    {
+      "effects": "machine.duplicates",
+      "count": 0
+    }
+  ],
+  "claims": [
+    "amortizedCost.replaysServedWithoutModel"
+  ],
+  "negativeControlFor": "amortizedCost.replaysServedWithoutModel"
+}
