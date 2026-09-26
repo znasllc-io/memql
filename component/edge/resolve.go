@@ -65,9 +65,9 @@ type Site struct {
 	// row already held, edited in two places at two authorization tiers -- and
 	// that duplication is what the binding stopped being.
 	//
-	// NOTHING DOWNSTREAM READS THIS FIELD. It is the id's arrival, and Store
-	// below is its resolution; the policy and the runtime-config document both
-	// read Store. Keeping the raw object is what lets the resolver see whether
+	// It is the id's arrival, and Store below is its resolution. Runtime
+	// config uses its presence to distinguish unbound from unavailable;
+	// the policy and connection credentials read Store. Keeping the raw object is what lets the resolver see whether
 	// there is a store to look up at all without a second projection.
 	Binding map[string]any
 
@@ -417,9 +417,8 @@ func (r *resolver) Resolve(ctx context.Context, hostname string) (*Site, error) 
 			//
 			// A FAILED READ LEAVES THE SITE SERVABLE, exactly as the serving
 			// store's does, and the consequence is narrower: a preview whose
-			// store could not be read gets no storefront block and no store in
-			// its policy, which is what a storefront nobody has bound already
-			// gets. The public path is untouched either way.
+			// store could not be read gets an unavailable connection state and
+			// no store origin in its policy. The public path is untouched.
 			if storeId := strings.TrimSpace(bindingStoreId(site.PreviewBinding)); storeId != "" {
 				store, serr := r.exec.StoreByID(ctx, storeId)
 				if serr != nil {

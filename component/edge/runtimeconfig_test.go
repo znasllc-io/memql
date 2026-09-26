@@ -722,7 +722,7 @@ func TestRuntimeConfigUnboundStorefrontKeepsKindWithoutResolvingSecrets(t *testi
 	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
 		t.Fatal(err)
 	}
-	if doc.Storefront == nil || *doc.Storefront != (StorefrontConfig{Kind: storefrontKind}) {
+	if doc.Storefront == nil || *doc.Storefront != (StorefrontConfig{Kind: storefrontKind, ConnectionState: "unbound"}) {
 		t.Fatalf("unbound storefront config = %+v, want kind without commerce credentials", doc.Storefront)
 	}
 }

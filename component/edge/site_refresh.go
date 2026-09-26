@@ -28,7 +28,7 @@ func deploymentVersion(site *Site) string {
 	if site.Store != nil {
 		store = site.Store.ID + "|" + site.Store.Domain + "|" + site.Store.StorefrontTokenRef + "|" + site.Store.APIVersion
 	}
-	return strings.Trim(strongETag("site-refresh-v1", site.BundleRef, buildinfo.Version(), buildinfo.Commit(), store, string(settings)), `"`)
+	return strings.Trim(strongETag("site-refresh-v1", site.BundleRef, buildinfo.Version(), buildinfo.Commit(), bindingStoreId(site.Binding), store, string(settings)), `"`)
 }
 
 func serveSiteRefresh(w http.ResponseWriter, r *http.Request) {
