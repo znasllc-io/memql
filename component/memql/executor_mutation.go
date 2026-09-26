@@ -1408,7 +1408,7 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		// ask it. Without it a site owner could bind their own deployable to any
 		// store in the cluster and the edge would serve that store's Storefront
 		// token under their hostname. See platform_site_binding_guard.go.
-		if err := e.validateSiteStoreBinding(ctx, payload, actor, e.canReadStore); err != nil {
+		if err := e.validateSiteStoreBinding(ctx, payload, meta.priorBindingStoreId, actor, e.canReadStore); err != nil {
 			return nil, meta, err
 		}
 		// The organization boundary checks the capability on the final row.

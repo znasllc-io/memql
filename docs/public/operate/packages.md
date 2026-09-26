@@ -798,11 +798,15 @@ The deployment rules are:
 - **Infrastructure retries are limited.** A missing workbench or a build process
   that could not start can retry automatically twice after the original attempt,
   at least ten minutes apart. Each retry opens a new row and uses the original
-  source snapshot; it still passes the plan confirmation gate. Canceled runs,
-  missing snapshots, source or credential failures, build errors and timeouts
-  require attention. After three failed attempts for one revision and policy
+  source snapshot; it still passes the plan confirmation gate. The same budget
+  also recovers a pre-0.23.4 bundle publication incorrectly refused for its
+  unchanged Shopify binding, only while the site, source, owner, and store still
+  match the recorded failure. New or changed bindings still require store access.
+  Canceled runs, missing snapshots, source or credential failures, build errors,
+  and timeouts require attention. After three failed attempts for one revision and policy
   setting, automatic attempts stop. The failure and update remain visible; repair
-  the build surface and use **Retry**. A later source revision has its own limit.
+  the deployment failure and use **Retry**. A later source revision has its own
+  limit.
 
 Workbench builds are the Build epic of
 [the Deployables program](../../superpowers/specs/2026-09-02-deployables-program-design.md).
