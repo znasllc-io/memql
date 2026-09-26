@@ -65,10 +65,35 @@ type fakeEngine struct {
 	// only to calls made as that actor, and nothing to anybody else -- the
 	// composite tier's answer, zero rows and no error.
 	ownedBy map[string]string
+	// dynamic answers a read from live state, taking precedence over every
+	// static reply, and may answer the next page's cursor: a fake that
+	// cannot page cannot test a walk that must.
+	dynamic map[string]func(call recordedCall, cursor string) ([]map[string]any, string)
+	// hooks see every write to a construct after it is recorded -- how a
+	// test keeps the row a later read answers in step with what was written.
+	hooks map[string]func(call recordedCall)
 }
 
 func newFakeEngine() *fakeEngine {
-	return &fakeEngine{replies: map[string][]map[string]any{}, fail: map[string]error{}, ownedBy: map[string]string{}}
+	return &fakeEngine{
+		replies: map[string][]map[string]any{}, fail: map[string]error{}, ownedBy: map[string]string{},
+		dynamic: map[string]func(recordedCall, string) ([]map[string]any, string){},
+		hooks:   map[string]func(recordedCall){},
+	}
+}
+
+// answer installs a live read.
+func (e *fakeEngine) answer(name string, fn func(call recordedCall, cursor string) ([]map[string]any, string)) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.dynamic[name] = fn
+}
+
+// onWrite installs a write hook.
+func (e *fakeEngine) onWrite(name string, fn func(call recordedCall)) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.hooks[name] = fn
 }
 
 // ownedRead makes a construct answer only its owner.
@@ -93,20 +118,33 @@ func (e *fakeEngine) Execute(ctx context.Context, query string) (*memql.ExecuteR
 			break
 		}
 	}
+	dyn, hook := e.dynamic[name], e.hooks[name]
 	if owner, owned := e.ownedBy[name]; owned && c.Actor != owner {
-		rows = nil
+		rows, dyn = nil, nil
 	}
 	err := e.fail[name]
 	e.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
+	next := ""
+	if dyn != nil {
+		rows, next = dyn(c, memql.CursorFromContext(ctx))
+	}
+	if hook != nil {
+		hook(c)
+	}
 	// A shaped read answers `output` rows, the shape every read here has.
 	payload := make([]any, 0, len(rows))
 	for _, r := range rows {
 		payload = append(payload, r)
 	}
-	return memql.NewResultWithOutput(payload), nil
+	res := memql.NewResultWithOutput(payload)
+	if next != "" {
+		res.SetCursor(next)
+		res.SetHasMore(true)
+	}
+	return res, nil
 }
 
 func (e *fakeEngine) reply(name string, rows ...map[string]any) {

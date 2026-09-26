@@ -313,6 +313,10 @@ type replay struct {
 	target work.ReplayTarget
 	d      Dispatcher
 
+	// resuming: a replay of this very statement had started and not
+	// finished, and this one continues it from its receipts.
+	resuming bool
+
 	free     map[string]string
 	outputs  map[int]any
 	receipts map[string]stepReceipt
@@ -325,12 +329,24 @@ type replay struct {
 	ranAndDiffered bool
 }
 
-// run is stages 2 to 8.
+// run is stages 2 to 8, after the one question that comes before all of them:
+// has this very replay already run?
+//
+// RE-ENTRY IS DECIDED BEFORE THE RUNG IS RE-READ. A replay that diverged has
+// usually demoted its procedure, so a statement executed again after it would
+// find the procedure no longer serving -- and, deciding the rung first, hand
+// the goal to the app a SECOND time, a second session doing work the first
+// one already did. Its own replay run is the answer to what happened, whatever
+// the ladder says now.
 func (r *replay) run(ctx context.Context) {
+	r.mode = r.req.Mode
+	if finished := r.reenter(ctx); finished {
+		return
+	}
 	if !r.gateRung(ctx) {
 		return
 	}
-	if finished := r.open(ctx); finished {
+	if !r.resuming && !r.open(ctx) {
 		return
 	}
 	if r.mode == ReplayShadow && strings.TrimSpace(r.req.Unfit) != "" {
@@ -374,12 +390,20 @@ func (r *replay) gateRung(ctx context.Context) bool {
 		if reason == "" {
 			reason = fmt.Sprintf("the procedure is %s, which does not serve a goal", rungPhrase(rung))
 		}
-		r.out.StartRefused = true
 		r.out.Code = codeNotServable
 		r.out.Diagnosis = "It was chosen for this goal and no longer serves it: " + reason + "."
+		if r.resuming {
+			// A replay of this statement had STARTED -- its node died
+			// mid-way -- and the procedure stopped serving since. The steps
+			// its receipts record ran, so the app is told them, and the run
+			// that started them is closed saying why it went no further.
+			r.handBackResumed(ctx)
+			return false
+		}
 		// Nothing about the procedure was attempted: no replay run is opened
 		// and the ladder does not move -- the rung it already moved to is the
 		// whole of the story.
+		r.out.StartRefused = true
 		r.fallBack(ctx, Guidance{Diagnosis: r.out.Diagnosis}, false)
 		return false
 	}
@@ -392,28 +416,59 @@ func (r *replay) gateRung(ctx context.Context) bool {
 
 // --- stage 3: the replay run --------------------------------------------------
 
-// open opens the replay run, or finds the one this replay already opened. It
-// reports finished when that one had already FINISHED: its answer is rebuilt
-// from the row, and nothing runs, counts or is handed over a second time.
-func (r *replay) open(ctx context.Context) (finished bool) {
-	var derived bool
-	r.runId, derived = r.replayRunId()
-	r.out.ReplayRunId = r.runId
+// reenter finds the replay run this replay already opened, when its id is
+// derived. It reports finished when that run had FINISHED: its answer is
+// rebuilt from the row, and nothing runs, counts or is handed over a second
+// time. A run that started and did not finish is RESUMED from its receipts.
+func (r *replay) reenter(ctx context.Context) (finished bool) {
+	runId, derived := r.replayRunId()
+	if !derived {
+		return false
+	}
 	actorCtx := ownerActor(ctx, r.req.OwnerUserId)
-	if derived {
-		existing, err := r.i.runForOwner(actorCtx, r.runId)
-		if err != nil {
-			r.i.log().Warn("procedure: could not read a replay run back; opening it again", "run", r.runId, "error", err)
-		}
-		if existing != nil {
-			if terminalRunStatus(str(existing, "status")) {
-				r.reenterFinished(ctx, existing)
-				return true
-			}
-			r.loadReceipts(actorCtx)
-			return false
+	existing, err := r.i.runForOwner(actorCtx, runId)
+	if err != nil {
+		r.i.log().Warn("procedure: could not read a replay run back; replaying afresh", "run", runId, "error", err)
+		return false
+	}
+	if existing == nil {
+		return false
+	}
+	r.runId, r.out.ReplayRunId = runId, runId
+	if terminalRunStatus(str(existing, "status")) {
+		r.reenterFinished(ctx, existing)
+		return true
+	}
+	r.resuming = true
+	r.loadReceipts(actorCtx)
+	return false
+}
+
+// handBackResumed closes a resumed replay the procedure can no longer finish
+// and hands the goal to the app with every step the receipts say ran.
+func (r *replay) handBackResumed(ctx context.Context) {
+	for idx := range r.c.template.Steps {
+		if rec, ok := r.receipts[replayStepKey(idx)]; ok {
+			r.out.Completed = append(r.out.Completed, rec.completed)
 		}
 	}
+	started := len(r.out.Completed) > 0
+	r.out.StartRefused = !started
+	r.out.DivergedStep = len(r.out.Completed)
+	r.outcome = r.baseOutcome()
+	r.outcome["diagnosis"] = r.out.Diagnosis
+	r.outcome["code"] = r.out.Code
+	r.outcome["completed"] = completedList(r.out.Completed)
+	r.closeRun(ctx, "failed", r.out.Code, r.out.Diagnosis)
+	r.fallBack(ctx, Guidance{Diagnosis: r.out.Diagnosis, Completed: r.out.Completed}, started)
+	r.recordHandover(ctx)
+}
+
+// open opens a new replay run and reports whether it did.
+func (r *replay) open(ctx context.Context) bool {
+	r.runId, _ = r.replayRunId()
+	r.out.ReplayRunId = r.runId
+	actorCtx := ownerActor(ctx, r.req.OwnerUserId)
 	args := map[string]any{
 		"runId":               r.runId,
 		"automationName":      r.c.name,
@@ -452,9 +507,9 @@ func (r *replay) open(ctx context.Context) (finished bool) {
 		if r.mode != ReplayShadow {
 			r.fallBack(ctx, Guidance{Diagnosis: r.out.Diagnosis}, false)
 		}
-		return true
+		return false
 	}
-	return false
+	return true
 }
 
 // replayRunId is the replay run's id: DERIVED from what the replay is for when
