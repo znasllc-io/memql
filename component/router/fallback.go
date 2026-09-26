@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/znasllc-io/memql/component/memql"
@@ -160,6 +161,11 @@ type fallbackWithTools struct {
 	chain    []string
 	req      ResolveRequest
 	resolved Resolved
+
+	// served is the client that answered the most recent successful call,
+	// kept for LastSession.
+	servedMu sync.Mutex
+	served   common.ToolCallingChatAIProvider
 }
 
 func (f *fallbackWithTools) CallChatWithTools(
@@ -190,6 +196,9 @@ func (f *fallbackWithTools) CallChatWithTools(
 		}
 		result, err := observed.CallChatWithTools(ctx, messages, tools)
 		if err == nil {
+			f.servedMu.Lock()
+			f.served = inner
+			f.servedMu.Unlock()
 			return result, nil
 		}
 		lastErr = err
@@ -200,6 +209,38 @@ func (f *fallbackWithTools) CallChatWithTools(
 		return nil, lastErr
 	}
 	return nil, errNoChainEntryAvailable
+}
+
+// sessionReporter is what a SESSION client says about the app session its
+// most recent call ran as (component/memql's sessionProvider). Structural, for
+// the reason surfaceReporter is: a client that took no step simply does not
+// satisfy it.
+type sessionReporter interface {
+	LastSession() (memql.AppSessionOutcome, bool)
+}
+
+// LastSession reports the app session the most recent successful call was
+// handed to, when the winner was a `session` door (epic memql#5391, design
+// D7), and ok=false otherwise.
+//
+// IT IS HERE BECAUSE THE WRAPPER HIDES IT. The chain is re-resolved by name on
+// every call, so the session client that actually ran is built inside
+// CallChatWithTools and is not the one ResolveFor handed out -- and a caller
+// that hands a whole step to an app needs to know which subrun the step now
+// points at (epic memql#5408: a replay's fallback records the app's repair as
+// that run). Without this the only way to recover it would be to re-read the
+// step row the delegate stamped, which is a second account of one fact.
+func (f *fallbackWithTools) LastSession() (memql.AppSessionOutcome, bool) {
+	if f == nil {
+		return memql.AppSessionOutcome{}, false
+	}
+	f.servedMu.Lock()
+	served := f.served
+	f.servedMu.Unlock()
+	if r, ok := served.(sessionReporter); ok {
+		return r.LastSession()
+	}
+	return memql.AppSessionOutcome{}, false
 }
 
 // fallbackChat mirrors fallbackStreamWithTools for the non-streaming
