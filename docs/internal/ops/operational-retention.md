@@ -28,9 +28,13 @@ strings where object options were required, then ignored the write error and
 parked the run on a nonexistent approval. Failed periodic maintenance now ends
 as failed, retries on its next schedule, and only proven unowned scheduled waits
 with missing approvals are closed by recovery. User goals and real approvals
-keep their existing lifecycle. The recovery query uses a partial index plus
-latest-version rejection before fetching bounded payloads; it no longer reads
-all completed histories every two minutes.
+keep their existing lifecycle. The recovery query materializes current version
+keys, probes the partial nonterminal index, and only then fetches bounded
+payloads. Production Timescale verification found that a correlated concept
+reference in the earlier anti-join forced historical heap reads despite the
+index. The current-key plan completed in 1.3 seconds with 104,018 logical runs
+and 5,922 unfinished runs, while the earlier plan exceeded the eight-second
+statement limit. It no longer reads completed payload histories every two minutes.
 
 ## Safeguards
 
