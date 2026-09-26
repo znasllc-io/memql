@@ -114,6 +114,12 @@ func rowsFromLoose(v any) []map[string]any {
 	case []any:
 		return castRows(x)
 	case map[string]any:
+		// A persisted builtin result has crossed JSON and lost its Go map type.
+		// Recognize the same node set by its intrinsic id and payload, rather
+		// than returning the enclosing id-to-node map as a single empty row.
+		if rows := looseNodeSetRows(x); rows != nil {
+			return rows
+		}
 		// Projection keys first -- the shape-projected output lands
 		// under one of these depending on which engine builder ran.
 		// Under the canonical envelope (memql#1710) a shaped query is
@@ -145,6 +151,27 @@ func rowsFromLoose(v any) []map[string]any {
 		}
 	}
 	return nil
+}
+
+func looseNodeSetRows(nodes map[string]any) []map[string]any {
+	if len(nodes) == 0 {
+		return nil
+	}
+	rows := make([]map[string]any, 0, len(nodes))
+	for _, id := range slices.Sorted(maps.Keys(nodes)) {
+		node, ok := nodes[id].(map[string]any)
+		if !ok || node["id"] != id {
+			return nil
+		}
+		payload, ok := node["payload"].(map[string]any)
+		if !ok {
+			return nil
+		}
+		row := maps.Clone(node)
+		maps.Copy(row, payload)
+		rows = append(rows, row)
+	}
+	return rows
 }
 
 // nodeSetRows reads a top-level builtin's answer. Without it the node map

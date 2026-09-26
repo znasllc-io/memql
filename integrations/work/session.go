@@ -50,6 +50,7 @@ import (
 	"strings"
 	"time"
 
+	workstate "github.com/znasllc-io/memql/component/work"
 	workerservice "github.com/znasllc-io/memql/component/worker"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -135,6 +136,7 @@ func (w *SessionWriter) OpenRecording(ctx context.Context, r workerservice.Recor
 	}
 	if err := w.store.writeInternal(ownerActor(ctx, owner), "mutation "+call("createWorkRun", map[string]any{
 		"runId":               runId,
+		"goalSignature":       workstate.GoalSignature(statement, nil),
 		"goalId":              goalId,
 		"automationName":      appSessionTemplate,
 		"templateFingerprint": appSessionTemplate,

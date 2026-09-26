@@ -253,7 +253,7 @@ var rules = []rule{
 		id: "transient.timeout", tier: "retryable", symptom: SymptomTransient,
 		reason: "the call did not answer in time",
 		match: func(s Signal) bool {
-			return s.ErrorCode == "timeout" || anyOf(lower(s.ErrorMessage), "deadline exceeded", "timeout", "timed out", "i/o timeout")
+			return s.ErrorCode == "timeout" || anyOf(lower(s.ErrorMessage), "deadline exceeded", "timeout", "timed out", "i/o timeout", "stopped producing output past the idle ceiling")
 		},
 	},
 	{
@@ -267,7 +267,7 @@ var rules = []rule{
 		id: "transient.network", tier: "retryable", symptom: SymptomTransient,
 		reason: "the connection failed below the application",
 		match: func(s Signal) bool {
-			return anyOf(lower(s.ErrorMessage), "connection refused", "connection reset", "no such host", "broken pipe", "eof", "network is unreachable")
+			return anyOf(lower(s.ErrorMessage), "connection refused", "connection reset", "no such host", "broken pipe", "eof", "network is unreachable", "stream ended without a completion frame")
 		},
 	},
 	{

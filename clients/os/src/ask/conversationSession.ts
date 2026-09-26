@@ -2,7 +2,7 @@ import type { AskHandle, AskTransport } from "./askController";
 
 export interface AskActivity {
   id: string;
-  kind: "model" | "action" | "run";
+  kind: "model" | "action" | "run" | "artifact";
   phase: "running" | "completed" | "failed" | "fallback";
   at: string;
   provider?: string;

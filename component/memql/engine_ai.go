@@ -198,6 +198,7 @@ func (e *MemQLEngine) InvokeAIStructured(
 
 	messages := []common.ChatMessage{
 		{Role: "system", Content: rendered},
+		{Role: "user", Content: "Return the structured result requested above."},
 	}
 
 	spec := common.StructuredSchema{

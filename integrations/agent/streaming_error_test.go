@@ -29,7 +29,7 @@ func streamErrorChunks(chunks ...common.StreamToolChunk) <-chan common.StreamToo
 }
 
 func TestStreamingFailurePreservesPartialResultAndError(t *testing.T) {
-	cause := errors.New("ollama: stream ended without a completion frame")
+	cause := errors.New("provider rejected invalid request")
 	for _, continuation := range []bool{false, true} {
 		t.Run(map[bool]string{false: "first stream", true: "continuation start"}[continuation], func(t *testing.T) {
 			r := testReplier()
@@ -79,11 +79,39 @@ func TestStreamingRetryExhaustionReturnsTheUpstreamError(t *testing.T) {
 			if !errors.Is(err, cause) || result == nil {
 				t.Fatalf("retry exhaustion became successful completion: result=%+v error=%v", result, err)
 			}
-			if provider.calls != streamTransientMaxRetries+1 {
+			wantCalls := streamTransientMaxRetries + 1
+			if !startFailure {
+				wantCalls = 1
+			} // never duplicate text already delivered
+			if provider.calls != wantCalls {
 				t.Fatalf("provider calls=%d", provider.calls)
 			}
 			if !startFailure && result.FinalText != "Partial answer" {
 				t.Fatalf("lost partial result: %+v", result)
+			}
+		})
+	}
+}
+
+func TestStreamingRecoversAnIncompleteIterationWithoutRepeatingTools(t *testing.T) {
+	for _, cause := range []string{"ollama: stream ended without a completion frame", "ollama: tool call parsing failed"} {
+		t.Run(cause, func(t *testing.T) {
+			r := testReplier()
+			r.stamper = newToolRecorder(successExecutor{}, r.logger)
+			provider := &errorSequenceStreamProvider{next: func(call int) (<-chan common.StreamToolChunk, error) {
+				switch call {
+				case 1:
+					return streamErrorChunks(common.StreamToolChunk{ToolCalls: []common.ToolCallDelta{{Index: 0, ID: "tool", Name: "noop", Arguments: "{}"}}, Done: true}), nil
+				case 2:
+					return streamErrorChunks(common.StreamToolChunk{Error: errors.New(cause)}), nil
+				default:
+					return streamErrorChunks(common.StreamToolChunk{Content: "Recovered answer", Done: true}), nil
+				}
+			}}
+			sink := &captureSink{}
+			result, err := r.runStreamingToolLoop(context.Background(), provider, nil, nil, sink, time.Now(), "runtime-repair", turnContext{})
+			if err != nil || result.FinalText != "Recovered answer" || provider.calls != 3 || sink.toolResults != 1 || len(result.ToolCalls) != 1 {
+				t.Fatalf("recovery lost progress or repeated effects: result=%+v calls=%d tools=%d err=%v", result, provider.calls, sink.toolResults, err)
 			}
 		})
 	}

@@ -60,3 +60,34 @@ func TestAskHistoryKeepsRealMessagesBeyondOldCutoff(t *testing.T) {
 	require.NotContains(t, messages[2]["content"], "Voice message")
 	require.Len(t, messages, 82)
 }
+
+func TestWorkObserverDeliversPersistedBuiltinFileReceipt(t *testing.T) {
+	// The journal crossed a replica boundary, so this is decoded JSON, not a
+	// map[string]MemoryNode. "done" is the step concept's terminal spelling.
+	steps := []map[string]any{{"status": "done", "result": map[string]any{"value": map[string]any{
+		"receipt": map[string]any{"id": "receipt", "concept": "v1:compose:result", "payload": map[string]any{
+			"outputFileId": "v1:library:file:birds", "name": "birds.md", "sha256": "verified-hash",
+		}},
+	}}}}
+	read := func(_ context.Context, name, _ string) ([]map[string]any, error) {
+		switch name {
+		case "workRunForOwner":
+			return []map[string]any{{"status": "succeeded"}}, nil
+		case "workStepsForOwnerRun":
+			return steps, nil
+		}
+		return nil, nil
+	}
+	var events []WorkEvent
+	answer, err := followWorkRun(context.Background(), "run", read, nil, func(event WorkEvent) error {
+		events = append(events, event)
+		return nil
+	}, time.Millisecond)
+	require.NoError(t, err)
+	require.Equal(t, "Created in Files: birds.md.", answer)
+	require.Len(t, events, 1)
+	require.Equal(t, "artifact", events[0].Kind)
+	require.Equal(t, "birds", events[0].Arguments["fileId"])
+	steps[0]["status"] = "failed"
+	require.Empty(t, workResultFiles(steps), "a failed step is not a delivery receipt")
+}
