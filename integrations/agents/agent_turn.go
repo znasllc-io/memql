@@ -130,6 +130,15 @@ func (i *Integration) handleRunAgentTurn(ctx context.Context, args map[string]an
 			{Role: "user", Content: prompt},
 		},
 	}
+	if i.engine != nil {
+		history, err := workTurnHistory(ctx, i.engine, prompt)
+		if err != nil {
+			return nil, err
+		}
+		if len(history) > 0 {
+			msg.History = history
+		}
+	}
 	reply, err := runner.RunTurn(ctx, msg)
 	if err != nil {
 		return nil, fmt.Errorf("runAgentTurn: %w", err)

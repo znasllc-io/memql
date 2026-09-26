@@ -2,8 +2,9 @@ package memql
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"github.com/znasllc-io/memql/core/airoute"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/core/common"
 	"testing"
 	"time"
@@ -49,12 +50,12 @@ func TestAskConversationOwnershipAndServerTranscript(t *testing.T) {
 	require.NoError(t, err)
 	release()
 	// The real declarations must reach their registries, not merely parse.
-	_, err = e.functions.Get("os.askCapabilities")
+	_, err = e.functions.Get("work.workCapabilities")
 	require.NoError(t, err)
-	_, err = e.tools.Get("os.askDiscover")
+	_, err = e.tools.Get("work.discoverCapabilities")
 	require.NoError(t, err)
 	_, present := e.prompts.Get("askMemql")
-	require.True(t, present)
+	require.False(t, present, "Ask must not retain a separate model prompt")
 }
 
 func TestAskConversationCreationSeparatesHistoriesAndPreservesRetries(t *testing.T) {
@@ -94,7 +95,7 @@ func TestAskConversationCreationSeparatesHistoriesAndPreservesRetries(t *testing
 }
 
 func TestAskEstimateUsesOnlyMatchingSuccessfulRoute(t *testing.T) {
-	turns := []AskTurn{{Activity: []AskEvent{{Kind: "model", Phase: "completed", Provider: "fleet:local", Model: "local", ElapsedMS: 8000}, {Kind: "model", Phase: "failed", Provider: "fleet:local", Model: "local", ElapsedMS: 50000}, {Kind: "model", Phase: "completed", Provider: "remote", Model: "other", ElapsedMS: 500}}}}
+	turns := []AskTurn{{Activity: []WorkEvent{{Kind: "model", Phase: "completed", Provider: "fleet:local", Model: "local", ElapsedMS: 8000}, {Kind: "model", Phase: "failed", Provider: "fleet:local", Model: "local", ElapsedMS: 50000}, {Kind: "model", Phase: "completed", Provider: "remote", Model: "other", ElapsedMS: 500}}}}
 	ms, source := askExpected(turns, "fleet:local", "local")
 	require.EqualValues(t, 8000, ms)
 	require.Equal(t, "recent calls", source)
@@ -103,70 +104,58 @@ func TestAskEstimateUsesOnlyMatchingSuccessfulRoute(t *testing.T) {
 	require.Equal(t, "initial estimate", source)
 }
 
-type askScriptedModel struct {
-	calls    int
-	messages []common.ChatMessage
-}
-
-func (p *askScriptedModel) CallChatStreamWithTools(ctx context.Context, messages []common.ChatMessage, tools []common.ToolDefinition) (<-chan common.StreamToolChunk, error) {
-	p.calls++
-	p.messages = messages
-	out := make(chan common.StreamToolChunk, 2)
-	if p.calls == 1 {
-		out <- common.StreamToolChunk{ToolCalls: []common.ToolCallDelta{{Index: 0, ID: "call-1", Name: "askDiscover", Arguments: `{"search":"todos"}`}}}
-	} else {
-		out <- common.StreamToolChunk{Content: "Here is your workspace."}
-	}
-	out <- common.StreamToolChunk{Done: true}
-	close(out)
-	return out, nil
-}
-func TestAskRunsTheRealDSLToolLoopAndPersistsHistory(t *testing.T) {
+func TestAskUsesWorkIntakeAndPreservesTurnIdentity(t *testing.T) {
 	e, _, _ := readMergeTestEngine(t)
 	previousCatalog := auth.InstalledCapabilityCatalog()
 	auth.SetCapabilityCatalog(nil)
 	t.Cleanup(func() { auth.SetCapabilityCatalog(previousCatalog) })
 	user := "v1:identity:user:" + id.NewShortId()
 	ctx := auth.ContextWithAccess(auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: user}), &auth.AccessContext{UserId: user, Role: auth.RoleWriter})
-	model := &askScriptedModel{}
-	e.SetAIResolver(testAIResolver{fn: func(ctx context.Context, req airoute.ResolveRequest) (ResolvedProvider, error) {
-		return ResolvedProvider{Client: model, Resolution: airoute.Resolution{ProviderName: "fleet:test", Model: "test-model"}}, nil
-	}})
-	result, err := e.Execute(ctx, `mutation createAskConversation(requestId: "tool-loop", title: "New conversation")`)
+	calls := 0
+	e.builtinExecutorHandlers["integration.work.createGoal"] = func(callCtx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+		calls++
+		require.Equal(t, "ask", args["requestedVia"])
+		input := args["input"].(map[string]any)
+		require.Contains(t, fmt.Sprint(input), "app:todos")
+		runID := "v1:work:run:" + id.NewShortId()
+		runCtx := common.ContextWithRun(callCtx, common.RunContext{RunId: runID, GoalId: "goal", OwnerUserId: user, StepKey: "reason"})
+		// A separate engine execution writes the durable result, with no Ask
+		// callback or original stream state on its context.
+		require.NoError(t, e.RecordWorkProgress(runCtx, WorkEvent{ID: "reply", Kind: "response", Phase: "completed", Text: "Your workspace."}))
+		call, err := parser.RenderCall("createWorkRun", map[string]any{"runId": runID, "goalId": "goal", "automationName": "shared", "templateFingerprint": "test", "triggeredBy": "manual", "status": "succeeded", "mode": "live", "startedAt": time.Now().UTC().Format(time.RFC3339)})
+		require.NoError(t, err)
+		_, err = e.Execute(auth.ContextWithInternalOrigin(callCtx), "mutation "+call)
+		require.NoError(t, err)
+		raw, _ := json.Marshal(map[string]any{"goalId": "goal", "runId": runID})
+		return []memorynodes.MemoryNode{{ID: "intake", Payload: raw}}, nil
+	}
+	result, err := e.Execute(ctx, `mutation createAskConversation(requestId: "shared", title: "New conversation")`)
 	require.NoError(t, err)
-	rows := MaterializeRows(result)
-	require.Len(t, rows, 1)
-	conversationID := fmt.Sprint(rows[0]["id"])
+	conversationID := fmt.Sprint(MaterializeRows(result)[0]["id"])
 	var text string
-	var events []AskEvent
-	_, err = e.RunAsk(ctx, conversationID, "one", "What can you do with my todos?", "app:todos", func(delta string) { text += delta }, func(event AskEvent) { events = append(events, event) })
+	answer, err := e.RunAsk(ctx, conversationID, "turn", "What can you do?", "app:todos", func(delta string) { text += delta }, nil)
 	require.NoError(t, err)
-	require.Equal(t, "Here is your workspace.", text)
-	require.Equal(t, 2, model.calls)
-	require.Empty(t, events, "a test provider without the router must not invent call metadata")
+	require.Equal(t, "Your workspace.", answer)
+	require.Equal(t, answer, text)
+	_, err = e.RunAsk(ctx, conversationID, "turn", "Do it again", "", nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, calls, "a retried turn must never submit a second goal")
 	row, err := e.askRead(ctx, conversationID)
 	require.NoError(t, err)
-	require.Contains(t, fmt.Sprint(row), "Here is your workspace.")
-	_, err = e.RunAsk(ctx, conversationID, "two", "What did I ask?", "", nil, nil)
-	require.NoError(t, err)
-	require.Contains(t, fmt.Sprint(model.messages), "What can you do with my todos?")
-	calls := model.calls
-	_, err = e.RunAsk(ctx, conversationID, "two", "Repeat the action", "", nil, nil)
-	require.NoError(t, err)
-	require.Equal(t, calls, model.calls, "replayed turn IDs must not run a second time")
+	require.Contains(t, fmt.Sprint(row), "runId")
 }
 
 func TestAskCannotExecuteCapabilityOutsideCallerAuthority(t *testing.T) {
 	installDeployPartFake(t)
 	e, reached := installBuiltinGateProbe(t)
-	_, err := e.askExecuteBuiltin(asCaller("writer"), map[string]any{"name": gatedProbeBuiltin, "arguments": map[string]any{}}, 0)
+	_, err := e.workExecuteBuiltin(asCaller("writer"), map[string]any{"name": gatedProbeBuiltin, "arguments": map[string]any{}}, 0)
 	require.Error(t, err)
 	require.Zero(t, *reached, "Ask may not elevate the caller through a named builtin")
 	fn, _ := e.functions.Get(gatedProbeBuiltin)
-	require.False(t, e.askAllowed(asCaller("writer"), fn))
-	require.True(t, e.askAllowed(asCaller("developer"), fn))
+	require.False(t, e.workCapabilityAllowed(asCaller("writer"), fn))
+	require.True(t, e.workCapabilityAllowed(asCaller("developer"), fn))
 	fn.ServerOnly = true
-	require.False(t, e.askAllowed(asCaller("owner"), fn), "internal-only is not owner authority")
+	require.False(t, e.workCapabilityAllowed(asCaller("owner"), fn), "internal-only is not owner authority")
 }
 
 func TestAskExecutesQualifiedCapabilitiesWithCallerRowScope(t *testing.T) {
@@ -177,18 +166,21 @@ func TestAskExecutesQualifiedCapabilitiesWithCallerRowScope(t *testing.T) {
 	}
 	mine, theirs := actor(), actor()
 	todoID := id.NewShortId()
-	var events []AskEvent
-	mine = context.WithValue(mine, askEventKey{}, askEmitter(func(e AskEvent) error { events = append(events, e); return nil }))
-	_, err := e.askExecuteBuiltin(mine, map[string]any{"name": "todos.createTodo", "arguments": map[string]any{"todoId": todoID, "title": "Ask capability regression"}}, 0)
+	runID := "v1:work:run:" + id.NewShortId()
+	ac, _ := auth.AccessFromContext(mine)
+	mine = common.ContextWithRun(mine, common.RunContext{RunId: runID, OwnerUserId: ac.UserId, StepKey: "capability"})
+	_, err := e.workExecuteBuiltin(mine, map[string]any{"name": "todos.createTodo", "arguments": map[string]any{"todoId": todoID, "title": "Ask capability regression"}}, 0)
 	require.NoError(t, err)
 	read := map[string]any{"name": "todos.todoById", "arguments": map[string]any{"todoId": "v1:todos:todo:" + todoID}}
-	rows, err := e.askExecuteBuiltin(mine, read, 0)
+	rows, err := e.workExecuteBuiltin(mine, read, 0)
 	require.NoError(t, err)
 	require.Contains(t, string(rows[0].Payload), "Ask capability regression")
-	rows, err = e.askExecuteBuiltin(theirs, read, 0)
+	rows, err = e.workExecuteBuiltin(theirs, read, 0)
 	require.NoError(t, err)
 	require.NotContains(t, string(rows[0].Payload), "Ask capability regression")
-	require.Len(t, events, 4)
-	require.Equal(t, "completed", events[3].Phase)
-	require.Equal(t, todoID, events[3].Arguments["todoId"], "navigation must carry the bare identifier used by the UI")
+	events, err := e.workRows(mine, "workObservationsForOwnerRun", runID)
+	require.NoError(t, err)
+	require.Len(t, events, 2)
+	require.Contains(t, fmt.Sprint(events), todoID)
+
 }

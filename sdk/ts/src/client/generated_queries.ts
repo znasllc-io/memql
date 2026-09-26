@@ -11389,6 +11389,28 @@ QueryClient.prototype.workApprovalsForOwner = function (this: QueryClient, args:
   return this.executeNamed("workApprovalsForOwner", buildWorkApprovalsForOwner(args), opts);
 };
 
+/** Reuse a checkpoint only for these exact source bytes and this owner. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workCheckpointForOwner"] in generated_concepts.ts).
+export interface WorkCheckpointForOwnerArgs {
+  fingerprint: string;
+}
+
+export function buildWorkCheckpointForOwner(args: WorkCheckpointForOwnerArgs): string {
+  const parts: string[] = [];
+  parts.push("fingerprint: " + renderMemQLValue(args.fingerprint));
+  return "query workCheckpointForOwner(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workCheckpointForOwner(args: WorkCheckpointForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workCheckpointForOwner = function (this: QueryClient, args: WorkCheckpointForOwnerArgs = {} as WorkCheckpointForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workCheckpointForOwner", buildWorkCheckpointForOwner(args), opts);
+};
+
 /** One of the caller's goals by id. */
 // Bound concept: v1:work:goal (machine-readable: BoundConcepts["workGoalForOwner"] in generated_concepts.ts).
 export interface WorkGoalForOwnerArgs {

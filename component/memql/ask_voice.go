@@ -21,12 +21,12 @@ func (e *MemQLEngine) SetVoiceTransport(transport audio.RoomTransport) { e.voice
 
 type AskVoiceOptions struct{ ConversationID, PageContext, Voice, ChatProvider, TranscriptionProvider, SpeechProvider string }
 type AskVoiceEvent struct {
-	Type     string    `json:"type"`
-	State    string    `json:"state,omitempty"`
-	TurnID   string    `json:"turnId,omitempty"`
-	Text     string    `json:"text,omitempty"`
-	Error    string    `json:"error,omitempty"`
-	Activity *AskEvent `json:"activity,omitempty"`
+	Type     string     `json:"type"`
+	State    string     `json:"state,omitempty"`
+	TurnID   string     `json:"turnId,omitempty"`
+	Text     string     `json:"text,omitempty"`
+	Error    string     `json:"error,omitempty"`
+	Activity *WorkEvent `json:"activity,omitempty"`
 }
 
 func (e *MemQLEngine) StartAskVoice(ctx context.Context, opts AskVoiceOptions) (audio.RoomCredentials, error) {
@@ -147,10 +147,10 @@ func (e *MemQLEngine) askVoiceTurn(ctx context.Context, room audio.Room, opts As
 		}
 	}
 	var mu sync.Mutex
-	events := []AskEvent{}
+	events := []WorkEvent{}
 	timingHistory := e.askTimingHistory(ctx)
 	observe := func(call airoute.CallObservation) {
-		event := AskEvent{ID: call.ID, Kind: "model", Phase: call.Phase, At: time.Now().UTC(), Provider: call.Provider, Model: call.Model, ElapsedMS: int64(call.ElapsedMS), Error: call.Error, Call: &call}
+		event := WorkEvent{ID: call.ID, Kind: "model", Phase: call.Phase, At: time.Now().UTC(), Provider: call.Provider, Model: call.Model, ElapsedMS: int64(call.ElapsedMS), Error: call.Error, Call: &call}
 		if call.Phase == "running" {
 			event.ExpectedMS, event.EstimateSource = askExpectedFor(timingHistory, call)
 		}
@@ -162,13 +162,17 @@ func (e *MemQLEngine) askVoiceTurn(ctx context.Context, room audio.Room, opts As
 	audioCtx := airoute.WithObserver(ctx, observe)
 	state("transcribing")
 	transcript, err := e.TranscribeAudio(audioCtx, FleetAudio{Data: audio.CreateWAVChunk(pcm, 24000, 1, 16), MediaType: "audio/wav", SampleRateHz: 24000}, opts.TranscriptionProvider)
+	if ctx.Err() != nil {
+		_ = room.Event(AskVoiceEvent{Type: "done", TurnID: turnID})
+		return
+	}
 	if err != nil || strings.TrimSpace(transcript.Text) == "" {
 		if err == nil {
 			err = fmt.Errorf("No speech was recognized. Try speaking again.")
 		}
 		saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		mu.Lock()
-		captured := append([]AskEvent(nil), events...)
+		captured := append([]WorkEvent(nil), events...)
 		mu.Unlock()
 		saveErr := e.saveAskVoiceFailure(saveCtx, opts.ConversationID, turnID, captured, err)
 		cancel()
@@ -227,7 +231,7 @@ func (e *MemQLEngine) askVoiceTurn(ctx context.Context, room audio.Room, opts As
 			pending = rest
 			queue(sentence)
 		}
-	}, func(event AskEvent) {
+	}, func(event WorkEvent) {
 		_ = room.Event(AskVoiceEvent{Type: "activity", TurnID: turnID, Activity: &event})
 	})
 	if err == nil && strings.TrimSpace(pending) != "" {
@@ -241,9 +245,9 @@ func (e *MemQLEngine) askVoiceTurn(ctx context.Context, room audio.Room, opts As
 	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	mu.Lock()
-	captured := append([]AskEvent(nil), events...)
+	captured := append([]WorkEvent(nil), events...)
 	mu.Unlock()
-	if saveErr := e.appendAskActivity(saveCtx, opts.ConversationID, turnID, captured); saveErr != nil && err == nil {
+	if saveErr := e.appendAskActivity(saveCtx, opts.ConversationID, turnID, captured, ctx.Err() != nil); saveErr != nil && err == nil {
 		err = saveErr
 	}
 	if err != nil && ctx.Err() == nil {
@@ -254,7 +258,7 @@ func (e *MemQLEngine) askVoiceTurn(ctx context.Context, room audio.Room, opts As
 		state("listening")
 	}
 }
-func (e *MemQLEngine) appendAskActivity(ctx context.Context, conversationID, turnID string, events []AskEvent) error {
+func (e *MemQLEngine) appendAskActivity(ctx context.Context, conversationID, turnID string, events []WorkEvent, interrupted bool) error {
 	release, err := e.lockAskConversation(ctx, conversationID)
 	if err != nil {
 		return err
@@ -272,6 +276,7 @@ func (e *MemQLEngine) appendAskActivity(ctx context.Context, conversationID, tur
 	for i := range transcript.Turns {
 		if transcript.Turns[i].ID == turnID {
 			transcript.Turns[i].Activity = append(transcript.Turns[i].Activity, events...)
+			transcript.Turns[i].VoiceInterrupted = interrupted
 			return e.askSave(ctx, conversationID, fmt.Sprint(row["title"]), transcript)
 		}
 	}
@@ -289,7 +294,7 @@ func nextSpeechSegment(text string, final bool) (string, string) {
 	}
 	return "", text
 }
-func (e *MemQLEngine) saveAskVoiceFailure(ctx context.Context, conversationID, turnID string, events []AskEvent, cause error) error {
+func (e *MemQLEngine) saveAskVoiceFailure(ctx context.Context, conversationID, turnID string, events []WorkEvent, cause error) error {
 	release, err := e.lockAskConversation(ctx, conversationID)
 	if err != nil {
 		return err
@@ -305,7 +310,7 @@ func (e *MemQLEngine) saveAskVoiceFailure(ctx context.Context, conversationID, t
 		return err
 	}
 	now := time.Now().UTC()
-	transcript.Turns = append(transcript.Turns, AskTurn{ID: turnID, Prompt: "Voice message", State: "error", StartedAt: now, EndedAt: &now, Activity: events, Error: cause.Error()})
+	transcript.Turns = append(transcript.Turns, AskTurn{ID: turnID, Prompt: "", State: "error", StartedAt: now, EndedAt: &now, Activity: events, Error: cause.Error()})
 	return e.askSave(ctx, conversationID, fmt.Sprint(row["title"]), transcript)
 }
 

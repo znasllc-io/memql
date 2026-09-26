@@ -43,6 +43,7 @@ package agent
 // instead of a retry nobody benefits from.
 
 import (
+	"context"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/memql"
@@ -95,7 +96,7 @@ const (
 //
 // used is a pointer because the cap is per TURN, not per iteration: a turn
 // that compresses at every iteration is not recovering, it is looping.
-func (r *Replier) handOffContext(err error, messages []common.ChatMessage, used *int, iter int, requestId string) ([]common.ChatMessage, bool) {
+func (r *Replier) handOffContext(ctx context.Context, err error, messages []common.ChatMessage, used *int, iter int, requestId string) ([]common.ChatMessage, bool) {
 	if !memql.IsContextOverflow(err) {
 		return nil, false
 	}
@@ -103,6 +104,15 @@ func (r *Replier) handOffContext(err error, messages []common.ChatMessage, used 
 		r.logger.Warn("agent: context window exhausted -- compressing freed nothing further, so the failure stands",
 			"iter", iter, "handoffs", *used, "requestId", requestId, "error", err)
 		return nil, false
+	}
+	if isOwnedWorkExecution(ctx) {
+		target := memql.WorkContextSize(messages, nil) * 2 / 3
+		next, compactErr := r.compactWorkContext(ctx, messages, nil, target)
+		if compactErr != nil || len(next) >= len(messages) {
+			return nil, false
+		}
+		*used++
+		return next, true
 	}
 	next, note, ok := handOffToNextContextWindow(messages)
 	if !ok {

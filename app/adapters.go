@@ -359,3 +359,8 @@ func (a *EdgeEngineAdapter) Execute(ctx context.Context, query string) (any, err
 	}
 	return result, nil
 }
+
+// Shared context management for agent turns regardless of their UI surface.
+func (a *CognitionEngineAdapter) CompactWorkContext(ctx context.Context, messages []common.ChatMessage, tools []common.ToolDefinition, target int) ([]common.ChatMessage, error) {
+	return a.Engine.CompactWorkContext(ctx, messages, tools, target)
+}

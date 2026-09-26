@@ -428,6 +428,12 @@ StreamLoop:
 			textChunks++
 		}
 
+		compacted, compactErr := r.compactWorkContext(ctx, messages, tools, 20000)
+		if compactErr != nil {
+			return nil, compactErr
+		}
+		messages = compacted
+
 		// Inner retry loop: on transient upstream errors (529
 		// overloaded, 429 rate-limited, 5xx, connection resets,
 		// timeouts) we retry the SAME iteration with exponential
@@ -446,7 +452,7 @@ StreamLoop:
 		for {
 			chunks, err = provider.CallChatStreamWithTools(ctx, messages, tools)
 			if err != nil {
-				if next, ok := r.handOffContext(err, messages, &contextHandoffs, iter, requestId); ok {
+				if next, ok := r.handOffContext(ctx, err, messages, &contextHandoffs, iter, requestId); ok {
 					messages = next
 					continue
 				}
@@ -475,7 +481,7 @@ StreamLoop:
 
 			turnText, turnCalls, streamErr = r.consumeStreamingTurn(ctx, chunks, sink, &textChunks, &fullText, turnStart, iter, requestId, &ttftLogged)
 			if streamErr != nil {
-				if next, ok := r.handOffContext(streamErr, messages, &contextHandoffs, iter, requestId); ok {
+				if next, ok := r.handOffContext(ctx, streamErr, messages, &contextHandoffs, iter, requestId); ok {
 					messages = next
 					continue
 				}

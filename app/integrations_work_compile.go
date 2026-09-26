@@ -11,6 +11,7 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/integrations/planner"
+	workintegration "github.com/znasllc-io/memql/integrations/work"
 )
 
 // The planner owns compilation. Intake can happen on any node: persisted
@@ -47,7 +48,7 @@ func (a *App) wireWorkCompiler() {
 		a.Logger.Warn("work compile not wired: the planner integration has no agent loop", "component", "work")
 		return
 	}
-	work.SetCompiler(compiler)
+	work.SetCompiler(&observedWorkCompiler{engine: a.engine, compiler: compiler})
 	for _, topic := range []string{
 		"graph.node.created.v1:work:run",
 		"graph.node.updated.v1:work:run",
@@ -145,3 +146,15 @@ func (a *App) wireWorkFailurePath() {
 // week: the proposal is a patch to a template, and the person who can judge it
 // is not necessarily the person who was watching when it failed.
 const workHealApprovalTTL = 7 * 24 * time.Hour
+
+// The same durable model progress is visible to Ask and Nexus during compile.
+type observedWorkCompiler struct {
+	engine   *memql.MemQLEngine
+	compiler workintegration.Compiler
+}
+
+func (c *observedWorkCompiler) Compile(ctx context.Context, req workintegration.CompileRequest) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	c.compiler.Compile(c.engine.ObserveWorkCalls(ctx, cancel), req)
+}

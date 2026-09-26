@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -152,7 +153,7 @@ func TestTheHandoffIsCappedPerTurn(t *testing.T) {
 
 	used := 0
 	for attempt := 1; attempt <= maxContextHandoffs; attempt++ {
-		next, ok := r.handOffContext(overflow, messages, &used, 0, "req")
+		next, ok := r.handOffContext(context.Background(), overflow, messages, &used, 0, "req")
 		if !ok {
 			t.Fatalf("handoff %d refused while the history was still compressible", attempt)
 		}
@@ -161,7 +162,7 @@ func TestTheHandoffIsCappedPerTurn(t *testing.T) {
 	if used != maxContextHandoffs {
 		t.Fatalf("handoffs used = %d, want %d", used, maxContextHandoffs)
 	}
-	if _, ok := r.handOffContext(overflow, messages, &used, 0, "req"); ok {
+	if _, ok := r.handOffContext(context.Background(), overflow, messages, &used, 0, "req"); ok {
 		t.Fatal("the handoff ran past its cap; an unbounded compression loop is the runaway the cap exists to stop")
 	}
 
@@ -175,7 +176,7 @@ func TestTheHandoffIsCappedPerTurn(t *testing.T) {
 		errors.New("permission denied"),
 	} {
 		fresh := 0
-		if _, ok := r.handOffContext(err, messages, &fresh, 0, "req"); ok {
+		if _, ok := r.handOffContext(context.Background(), err, messages, &fresh, 0, "req"); ok {
 			t.Fatalf("%q was treated as a context overflow", err)
 		}
 	}

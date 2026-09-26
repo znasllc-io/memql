@@ -2,7 +2,7 @@ import type { AskHandle, AskTransport } from "./askController";
 
 export interface AskActivity {
   id: string;
-  kind: "model" | "action";
+  kind: "model" | "action" | "run";
   phase: "running" | "completed" | "failed" | "fallback";
   at: string;
   provider?: string;
@@ -18,6 +18,8 @@ export interface AskActivity {
   error?: string;
 }
 export interface AskTurn {
+  goalId?: string;
+  runId?: string;
   id: string;
   prompt: string;
   answer: string;
@@ -95,7 +97,7 @@ export class ConversationSession {
       if (selection === this.selection) this.patch({ selectedId: id, turns, dictationActivity: [], draft: "", loading: false });
     } catch (error) { if (selection === this.selection) this.patch({ loading: false, error: message(error) }); }
   };
-  stop = (reason = "Stopped. Completed actions remain in Activity.") => {
+  stop = (reason = "Stopped watching. The work continues in Nexus.") => {
     this.epoch++;
     this.active?.cancel(); this.active = null;
     this.patch({ busy: false, activity: null, turns: this.state.turns.map(turn => turn.state === "streaming" ? { ...turn, state: "interrupted", error: reason } : turn) });
@@ -139,7 +141,7 @@ export class ConversationSession {
     } else if (event.type === "activity" && event.activity) {
       const activity = event.activity;
       if (!existing) this.pendingVoiceActivity.set(id, [...(this.pendingVoiceActivity.get(id) ?? []), activity]);
-      this.patch({ turns: this.state.turns.map(turn => turn.id === id ? { ...turn, activity: [...turn.activity, activity] } : turn), ...(activity.kind === "action" ? { activity } : {}) });
+      this.patch({ turns: this.state.turns.map(turn => turn.id === id ? { ...turn, activity: [...turn.activity, activity], ...runIdentity(activity) } : turn), ...(activity.kind === "action" ? { activity } : {}) });
     } else if (event.type === "done") {
       this.patch({ busy: this.voiceTurnId === id ? false : this.state.busy, turns: this.state.turns.map(turn => turn.id === id ? { ...turn, state: turn.error ? "error" : "done", endedAt: new Date().toISOString() } : turn) });
       void this.reload();
@@ -179,7 +181,7 @@ export class ConversationSession {
           delta: text => patchTurn({ answer: turn.answer + text }),
           activity: event => {
             if (epoch !== this.epoch) return;
-            patchTurn({ activity: [...turn.activity, event] });
+            patchTurn({ activity: [...turn.activity, event], ...runIdentity(event) });
             if (event.kind === "action") this.patch({ activity: event });
           },
           done: () => finish(turn.answer.trim() ? undefined : "MemQL finished without an answer."),
@@ -193,3 +195,8 @@ export class ConversationSession {
 }
 
 function message(error: unknown) { return error instanceof Error ? error.message : String(error); }
+
+function runIdentity(event: AskActivity): Partial<AskTurn> {
+  if (event.kind !== "run") return {};
+  return { goalId: typeof event.arguments?.goalId === "string" ? event.arguments.goalId : undefined, runId: typeof event.arguments?.runId === "string" ? event.arguments.runId : undefined };
+}
