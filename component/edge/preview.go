@@ -249,6 +249,7 @@ func previewSite(site *Site, grant *PreviewGrant) *Site {
 		copied.BundleRef = strings.TrimSpace(site.CandidateRef)
 	}
 	copied.Store = site.PreviewStore
+	copied.Binding = site.PreviewBinding
 	return &copied
 }
 

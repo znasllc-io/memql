@@ -1925,16 +1925,18 @@ func (e *MemQLEngine) loadLatestNodes(ctx context.Context, ids []string, timesta
 		ctx = context.Background()
 	}
 
-	var latest []memorynodes.MemoryNode
-	query := db.NewSelect().
-		Model(&latest).
-		DistinctOn("id").
-		OrderExpr(`id ASC, "createdAt" DESC`).
-		Where("id IN (?)", bun.In(unique))
-
+	// Collapse covering-index keys first. Selecting every historical payload
+	// here would undo the read-path optimization as soon as candidates are
+	// rechecked against their true latest version.
+	keys := db.NewSelect().Model((*memorynodes.MemoryNode)(nil)).
+		Column("id", "createdAt").DistinctOn("id").
+		OrderExpr(`id ASC, "createdAt" DESC`).Where("id IN (?)", bun.In(unique))
 	if timestamp != nil {
-		query = query.Where(`"createdAt" <= ?`, timestamp.UTC())
+		keys = keys.Where(`"createdAt" <= ?`, timestamp.UTC())
 	}
+	var latest []memorynodes.MemoryNode
+	query := db.NewSelect().Model(&latest).
+		Join(`JOIN (?) AS latest_keys ON latest_keys.id = mn.id AND latest_keys."createdAt" = mn."createdAt"`, keys)
 
 	if err := query.Scan(ctx); err != nil {
 		return nil, err

@@ -179,6 +179,10 @@ type StorefrontConfig struct {
 	// (design D4 specifies {kind, storeDomain, storefrontToken}). Always
 	// "shopify_storefront" -- nothing else produces this object.
 	Kind string `json:"kind"`
+	// ConnectionState distinguishes an intentionally unbound design preview
+	// from a bound store whose row or credential could not be resolved.
+	// No secret names, store IDs, or backend errors are published.
+	ConnectionState string `json:"connectionState"`
 	// StoreDomain is the myshopify.com domain the Storefront API calls are
 	// addressed to, read from the BOUND STORE row rather than from the site.
 	StoreDomain string `json:"storeDomain"`
@@ -300,15 +304,17 @@ const storefrontKind = "shopify_storefront"
 // nothing and publishes nothing. The token is only ever fetched for a site
 // that is declared to be a storefront.
 //
-// An unbound or unreadable store keeps the kind, with empty connection fields.
-// That lets the bundle render its design preview without publishing a store
-// name or resolving any credential. Clients must require a domain and token
-// before making commerce requests.
+// Both unbound and unreadable stores keep empty connection fields, but only
+// an explicitly unbound store may enter design preview. A failed connection
+// must never silently replace a real catalog/cart with demonstration data.
 func storefrontForSite(ctx context.Context, site *Site, resolveSecret SecretResolver) *StorefrontConfig {
 	if site == nil || site.Kind != storefrontKind {
 		return nil
 	}
-	out := &StorefrontConfig{Kind: storefrontKind}
+	out := &StorefrontConfig{Kind: storefrontKind, ConnectionState: "unbound"}
+	if site.Store != nil || strings.TrimSpace(bindingStoreId(site.Binding)) != "" {
+		out.ConnectionState = "unavailable"
+	}
 	if site.Store == nil {
 		return out
 	}
@@ -326,6 +332,9 @@ func storefrontForSite(ctx context.Context, site *Site, resolveSecret SecretReso
 		return out
 	}
 	out.StorefrontToken = strings.TrimSpace(token)
+	if out.StoreDomain != "" && out.StorefrontToken != "" {
+		out.ConnectionState = "connected"
+	}
 	return out
 }
 

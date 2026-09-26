@@ -125,7 +125,7 @@ func TestAnUnresolvableStoreLeavesTheSiteServable(t *testing.T) {
 	if got := policyForSite(httptest.NewRequest("GET", "/", nil), site, noEnv, ""); strings.Contains(got, "myshopify") {
 		t.Errorf("the policy named a store the edge could not read: %q", got)
 	}
-	if doc := runtimeConfigForSite(context.Background(), site, noEnv, true, nil); doc.Storefront == nil || *doc.Storefront != (StorefrontConfig{Kind: storefrontKind}) {
+	if doc := runtimeConfigForSite(context.Background(), site, noEnv, true, nil); doc.Storefront == nil || *doc.Storefront != (StorefrontConfig{Kind: storefrontKind, ConnectionState: "unavailable"}) {
 		t.Errorf("an unresolvable store must expose only its kind: %+v", doc.Storefront)
 	}
 }

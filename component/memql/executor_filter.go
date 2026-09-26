@@ -522,6 +522,18 @@ func (e *MemQLEngine) executeCombinedFilterQuery(ctx context.Context, expr Expre
 		}
 
 		q := db.NewSelect().Model(rows).ModelTableExpr("(?) AS mn", latest)
+		if keys := e.latestScanKeys(expr, timestamp); keys != nil {
+			// Collapse covering-index keys before reading payloads. Heartbeats
+			// may give a few machines hundreds of thousands of versions; the
+			// old predicate scanned every historical JSON payload on every poll.
+			// Only the latest payload can survive latestMatchingNodes anyway.
+			current := db.NewSelect().Model((*memorynodes.MemoryNode)(nil)).
+				Join(`JOIN (?) AS latest_keys ON latest_keys.id = mn.id AND latest_keys."createdAt" = mn."createdAt"`, keys)
+			q = db.NewSelect().Model(rows).ModelTableExpr("(?) AS mn", current)
+			if filter.sql != "" {
+				q = q.Where(filter.sql, filter.args...)
+			}
+		}
 
 		// Keyset cursor (5.12): when a continuation cursor is present, push the
 		// keyset predicate `(createdAt, id) <keyset> (?, ?)` into SQL so deep
