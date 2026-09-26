@@ -32,6 +32,7 @@
 @actor
 mutation run createWorkRun {
   args {
+    executionAuthority object
     runId                  string!
     goalId                 string
     goalSignature          string
@@ -55,7 +56,7 @@ mutation run createWorkRun {
     startedAt              string!
   }
   insert {
-    accept { goalId, goalSignature, automationName, templateFingerprint, templateConstructId, templateVersion, input, inputFingerprint, triggeredBy, triggerEvent, variables, forkedFromRunId, forkAtStepKey, status, nodeId, initialChainHead, startedAt }
+    accept { executionAuthority, goalId, goalSignature, automationName, templateFingerprint, templateConstructId, templateVersion, input, inputFingerprint, triggeredBy, triggerEvent, variables, forkedFromRunId, forkAtStepKey, status, nodeId, initialChainHead, startedAt }
     stamp {
       id: args.runId
       ownerUserId: actor.userId

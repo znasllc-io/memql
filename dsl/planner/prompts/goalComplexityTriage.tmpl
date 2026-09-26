@@ -23,6 +23,20 @@ Output ONLY a JSON object -- no markdown fences, no prose:
 
 When `requiresFile` is true, `fileName` and `fileFormat` are REQUIRED. Preserve the requested filename and format when specified; otherwise choose a concise descriptive name and the appropriate supported format for the requested deliverable. The only supported formats are markdown, html, txt, csv, json, docx, and pdf. Do not silently substitute a supported format when the user explicitly requests an unsupported one: return that requested format so compilation can refuse it. Omit both fields when `requiresFile` is false. File delivery calls the native Materializer directly with these validated choices; it does not need an agent turn to select a file tool.
 
+For a request whose ENTIRE outcome is opening or focusing an existing MemQL OS
+app, tab or record, return complexity "trivial", requiresFile false, and
+"navigation": {"app": "<app id>", "section": "<requested tab or empty>", "record": "<requested existing record name/id or empty>"}.
+Use this only when the app is explicit in the goal. A follow-up with an unresolved
+"it" needs the normal agent and conversation history. Never use this shortcut
+for creating, editing, deleting, deploying, searching external information, or
+for a navigation request that ALSO asks for other work. Do not invent a missing
+record or replace its name with a guessed id. The runtime resolves the exact
+current UI destination and visible record; a typo or ambiguity returns a choice.
+For example, "open the deployable called VS Code and Cursor" has navigation
+{"app":"deployables","section":"deployables","record":"VS Code and Cursor"}.
+Omit navigation for every other goal. This uses the same journal and compiler,
+with one deterministic navigation step instead of a second model turn.
+
 ## GOAL
 "{{.goal}}"
 {{if .now}}

@@ -127,12 +127,13 @@ type Compiler interface {
 // the planner. No caller-local run, actor, or budget context is assumed to
 // survive the graph event that crosses the node boundary.
 type CompileRequest struct {
-	GoalId      string
-	RunId       string
-	OwnerUserId string
-	Statement   string
-	Input       map[string]any
-	Ceilings    map[string]any
+	ExecutionAuthority map[string]any
+	GoalId             string
+	RunId              string
+	OwnerUserId        string
+	Statement          string
+	Input              map[string]any
+	Ceilings           map[string]any
 }
 
 // New constructs the integration. Tests call this with a stub engine.

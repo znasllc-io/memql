@@ -1936,6 +1936,7 @@ func (s *streamSession) handleExecuteQuery(envelope *memqlv1.MemqlClientMessage,
 	// AccessContext, actor.userId resolves to "", and every self-scoped
 	// query/mutation silently no-ops (zero rows). See memql#216.
 	ctx = auth.ContextWithAccess(ctx, s.ensureAccess(ctx))
+	ctx = s.bindWorkIntakeAuthority(ctx)
 
 	// The client-origin stamp that used to live here (#2800) moved to the
 	// stream interceptor -- see withClientOrigin. It was never a property of

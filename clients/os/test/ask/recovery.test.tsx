@@ -8,7 +8,7 @@ function wire() {
   let callbacks: AskCallbacks | null = null;
   const cancel = vi.fn();
   const ask = vi.fn((_p: string, _c: string | null, on: AskCallbacks) => { callbacks = on; return { cancel }; });
-  return { transport: { ask }, ask, cancel, callbacks: () => callbacks! };
+  return { transport: { ask, cancelGoal: vi.fn(async () => {}) }, ask, cancel, callbacks: () => callbacks! };
 }
 function typePrompt(text = "Can my machine answer?") { fireEvent.change(screen.getByRole("textbox", { name: "Ask" }), { target: { value: text } }); }
 function send() { fireEvent.click(screen.getByRole("button", { name: "Send" })); }
@@ -31,12 +31,13 @@ it("blocks loading before readiness is known", () => {
   typePrompt(); send(); expect(w.ask).not.toHaveBeenCalled();
   expect(screen.queryByText(/Checking whether chat/)).toBeNull();
 });
-it("shows waiting and Stop, preserves partial text, and retries a stopped reply", () => {
+it("shows waiting and Stop, preserves partial text, and retries a stopped reply", async () => {
   const w = wire(); render(<AskSurface {...{ transport: w.transport, variant: "sheet" as const, availability: ready }} />);
   typePrompt(); send(); expect(screen.getByText(/Thinking/)).toBeTruthy();
   act(() => w.callbacks().delta("First part"));
-  fireEvent.click(screen.getByRole("button", { name: "Stop watching reply" }));
-  expect(w.cancel).toHaveBeenCalledOnce(); expect(screen.getByRole("alert").textContent).toMatch(/Stopped/);
+  act(() => w.callbacks().activity?.({id:"run",kind:"run",phase:"running",at:new Date().toISOString(),arguments:{goalId:"goal",runId:"run"}}));
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Stop reply" })); });
+  expect(w.cancel).toHaveBeenCalledOnce(); expect(screen.getByRole("alert").textContent).toMatch(/Stop requested/);
   expect(screen.getByText("First part")).toBeTruthy();
   act(() => { w.callbacks().delta("late text"); w.callbacks().done(); });
   expect(screen.queryByText(/late text/)).toBeNull();
@@ -47,7 +48,7 @@ it("ends waiting visibly on disconnect and preserves a new draft", () => {
   const view = render(<AskSurface {...props} />); typePrompt(); send(); typePrompt("next question");
   view.rerender(<AskSurface {...props} availability={{ ...ready, state: "disconnected", message: "Connection to the cluster was lost." }} />);
   expect(screen.getByRole("alert").textContent).toMatch(/connection|Connection/);
-  expect(screen.queryByRole("button", { name: "Stop watching reply" })).toBeNull(); expect(w.cancel).toHaveBeenCalledOnce();
+  expect(screen.queryByRole("button", { name: "Stop reply" })).toBeNull(); expect(w.cancel).toHaveBeenCalledOnce();
   expect((screen.getByRole("textbox", { name: "Ask" }) as HTMLInputElement).value).toBe("next question");
 });
 it("catches synchronous transport failure", () => {

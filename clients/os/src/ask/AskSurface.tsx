@@ -80,7 +80,6 @@ export function AskSurface({
   transport,
   conversation: providedConversation,
   liveVoice,
-  onOpenRun,
   onOpenFile,
   onOpenFleet,
   onClose,
@@ -109,7 +108,6 @@ export function AskSurface({
   contextLabel?: string;
   variant: "sheet" | "widget";
   autoFocus?: boolean;
-  onOpenRun?: (goalId: string) => void;
   onOpenFile?: (fileId: string) => void;
 }) {
   const localConversation = useRef<ConversationSession | null>(null);
@@ -153,7 +151,7 @@ export function AskSurface({
 
   useEffect(() => {
     if (availability.state === "disconnected") {
-      conversation.stop("Connection to the cluster was lost. Completed actions remain in Activity.");
+      conversation.detach("Connection to the cluster was lost. Completed actions remain in Activity.");
     }
   }, [availability.state]);
 
@@ -276,7 +274,6 @@ export function AskSurface({
             <div className="os-ask-message"><span className="os-ask-avatar os-ask-avatar-memql" aria-hidden><Mark size={22} /></span><div><div className="os-ask-byline"><strong>MemQL</strong><time dateTime={turn.startedAt}>{messageTime(turn.startedAt)}</time></div>
               {turn.answer ? <AskMessage text={turn.answer} /> : null}
               {onOpenFile ? turn.activity.filter(event => event.kind === "artifact" && event.phase === "completed" && typeof event.arguments?.fileId === "string").map(event => <button key={event.id} type="button" className="os-ask-retry" onClick={() => onOpenFile(event.arguments!.fileId as string)}>Open {event.name || "file"}</button>) : null}
-              {onOpenRun && turn.goalId ? <details className="os-ask-message-actions"><summary aria-label="Message actions">•••</summary><button type="button" onClick={() => onOpenRun(turn.goalId!)}>View work</button></details> : null}
               {turn.state === "streaming" ? <AskWait activity={turn.activity} startedAt={turn.startedAt} hasText={Boolean(turn.answer)} /> : null}
               {turn.error ? <div className="os-ask-error"><p role="alert">{askErrorSummary(turn.error)}</p>{askErrorSummary(turn.error) !== turn.error ? <details><summary>Details</summary><p>{turn.error}</p></details> : null}{!busy ? <button type="button" className="os-ask-retry" onClick={() => { setDraft(turn.prompt); inputRef.current?.focus(); }}>Edit and try again</button> : null}{onOpenFleet ? <button type="button" className="os-ask-retry" onClick={onOpenFleet}>Open Fleet</button> : null}</div> : null}
             </div></div>
@@ -359,7 +356,7 @@ export function AskSurface({
           readOnly={live}
           onChange={(event) => setDraft(event.target.value)}
         />
-        {busy ? <button type="button" className="os-ask-send" aria-label="Stop watching reply" title="Stop watching; work continues in Nexus" onClick={() => conversation.stop()}><Square size={13} /></button> : <button
+        {busy ? <button type="button" className="os-ask-send" aria-label="Stop reply" title="Stop this work" onClick={() => conversation.stop()}><Square size={13} /></button> : <button
           type="submit"
           className="os-ask-send"
           aria-label={live ? "Finish" : "Send"}

@@ -9,6 +9,7 @@ export interface LiveVoiceState {
  error: string;
  activity: AskActivity[];
  startedAt: string;
+ echoCancellation?: boolean;
 }
 /** The sheet and widget observe one microphone, room and playback owner. */
 export class LiveVoiceSession {
@@ -27,7 +28,7 @@ export class LiveVoiceSession {
   if (!this.transport.startVoice) { this.patch({ error: "Live voice is unavailable in this window." }); return; }
   const generation = ++this.generation;
   const abort = new AbortController(); this.abort = abort;
-  this.patch({ phase: "connecting", error: "", activity: [], startedAt: new Date().toISOString() });
+  this.patch({ phase: "connecting", error: "", activity: [], echoCancellation: undefined, startedAt: new Date().toISOString() });
   try {
    const conversationId = await this.conversation.beginVoice();
    if (generation !== this.generation) return;
@@ -50,7 +51,7 @@ export class LiveVoiceSession {
      const event = JSON.parse(new TextDecoder().decode(data));
      if (event.type === "state" && ["listening", "transcribing", "thinking", "speaking"].includes(event.state)) this.patch({ phase: event.state });
      if (event.type === "activity" && event.activity) this.patch({ activity: [...this.state.activity.slice(-99), event.activity] });
-     if (event.type === "error") this.patch({ error: event.error ?? "Voice turn failed", phase: "listening" });
+     if (event.type === "error") this.patch({ error: event.error ?? "Voice turn failed", ...(event.turnId ? { phase: "listening" as const } : {}) });
      this.conversation.voiceEvent(event);
     } catch { /* Non-Ask room data carries no instruction. */ }
    });
@@ -60,7 +61,10 @@ export class LiveVoiceSession {
    await room.connect(credentials.url, credentials.token);
    connected = true;
    if (generation !== this.generation) { await room.disconnect(); return; }
-   await room.localParticipant.setMicrophoneEnabled(true);
+   const microphone = await room.localParticipant.setMicrophoneEnabled(true);
+   const echoCancellation = microphone?.track?.mediaStreamTrack.getSettings().echoCancellation;
+   if (echoCancellation === false) throw new Error("This microphone did not enable echo cancellation. Choose another microphone before using speakers.");
+   this.patch({ echoCancellation });
    if (generation !== this.generation) { await room.disconnect(); return; }
    await room.startAudio().catch(() => this.patch({ needsPlayback: true }));
    this.patch({ phase: "listening", muted: false });

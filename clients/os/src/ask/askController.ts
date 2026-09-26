@@ -16,6 +16,7 @@ export interface AskHandle {
 }
 
 export interface AskTransport {
+ cancelGoal?: (goalId: string) => Promise<void>;
   conversations?: AskConversationStore;
   startVoice?: (options: import("@znasllc-io/memql-sdk-core/voice").AskVoiceOptions, signal: AbortSignal) => Promise<import("@znasllc-io/memql-sdk-core/voice").AskVoiceCredentials>;
   /**

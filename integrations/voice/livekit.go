@@ -191,6 +191,9 @@ func (r *room) Publish(ctx context.Context, pcm []byte, sampleRate int) error {
 	tick := time.NewTicker(20 * time.Millisecond)
 	defer tick.Stop()
 	for len(pcm) > 0 {
+		if err := audio.WaitForPlayback(ctx); err != nil {
+			return err
+		}
 		frame := pcm[:min(frameBytes, len(pcm))]
 		pcm = pcm[len(frame):]
 		if len(frame) < frameBytes {

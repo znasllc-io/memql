@@ -33,8 +33,19 @@ tool executeCapability {
 @executor("workNavigate")
 @args(profile="object")
 builtin workNavigate {
- app enum("users", "fleet", "nexus", "cluster", "files", "accounts", "campaigns", "deployables", "training", "settings", "identity", "concepts", "materializer")!
- section string @description("Optional existing app section identifier.")
+ app string @description("App id or label. Omit to list the current authorized app/section catalog.")
+ section string @description("Existing section id or label; never invent a section.")
+ record string @description("Optional name or id of an existing record to open, such as VS Code and Cursor. Resolves under the caller permissions and asks for a choice on ambiguity.")
+}
+
+/// Navigate directly to a real OS destination. Use this for opening apps,
+/// sections and records; do not discover arbitrary data operations first.
+@handler(type="query", query="query workNavigate(app: args.app, section: args.section, record: args.record)")
+@allowedRoles("assistant", "system-planner")
+tool navigateOS {
+ app string @description("App id/name; omit to list destinations.")
+ section string @description("Section id/name when requested.")
+ record string @description("Existing record name or id when requested.")
 }
 
 /// Search original conversation messages and checkpoint sources in this work

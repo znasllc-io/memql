@@ -184,7 +184,7 @@ func TestMaterializeDB_AcceptThenAdoptOnAnotherEngine(t *testing.T) {
 			}
 			// Dispatch rebuilds context from the persisted journal. Its RunId is
 			// bare while goal and owner references retain canonical identities.
-			ctx, err = auth.ContextWithPersistedOwner(context.Background(), journal.OwnerUserId)
+			ctx, err = auth.ContextWithPersistedOwner(context.Background(), journal.OwnerUserId, nil, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

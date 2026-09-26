@@ -27,9 +27,12 @@ original authority. Role, app capability, account scope and row authorization
 remain in force. Assistant identity never grants owner permissions. Internal
 capabilities and credential inputs are excluded from discovery. Every turn opens the same durable work run used by Nexus and the API. The
 compiler checks reusable procedures before asking a model; the agent executes
-with the same budgets, receipts, and recovery. **View work** opens that existing
-goal. Reconnecting observes the run rather than submitting it again. Stopping
-the reply stops watching; use Nexus to cancel the work. Fresh-data questions
+with the same budgets, receipts, and recovery. Runs remain available in Nexus.
+Reconnecting observes the run rather than submitting it again. Stop requests
+cancellation of the underlying goal and waits for the cluster receipt before
+detaching. Model calls observe cancellation through the shared journal; writes
+finish at a safe boundary and keep their receipts. A lost connection only
+detaches the viewer. Fresh-data questions
 still read fresh sources even when the procedure is reused.
 
 Replies default to English without emojis unless explicitly requested.
@@ -40,7 +43,14 @@ the owner-scoped journal; exact source prefixes reuse the same summary, and the
 agent can search original messages with `recallWorkHistory`. A failed checkpoint
 never silently discards history. This path applies to both Ask and Nexus.
 
-Execution can open the associated app and highlight the active window. An
+For a request whose entire outcome is navigation, the shared planner can use
+one fast triage call followed by a deterministic destination lookup. App and
+section names come from the OS registry; registered record destinations use
+the same authorized reads as their lists. Ambiguous records require a choice;
+a missing match never becomes an instruction to create data. Other work retains
+the shared agent reasoning path.
+
+Execution can open the associated app and highlight the active window and tab. An
 implemented control binding, such as adding a group member, receives the same
 quiet cue. Cues represent server execution; they never simulate a cursor or
 issue a second write from the browser. An app without an exact control binding
@@ -55,8 +65,17 @@ floating window. Only one surface can hold the microphone at a time.
 Talk with MemQL joins a private LiveKit room and replaces the conversation view
 with the MemQL mark, microphone and end-call controls. Male and female voice
 choices live in Settings → Ask. The shared conversation remains available when
-the call ends. The browser performs echo cancellation and noise suppression.
-Sustained speech interrupts audio delivery. Room departure stops the voice
+the call ends. The browser requests echo cancellation and noise suppression,
+and Ask checks the active microphone settings. An explicit refusal to enable
+echo cancellation closes the microphone with an actionable error.
+
+Microphone activity pauses playback while the cluster transcribes a candidate.
+Empty or failed transcription, and multi-word text matching recent playback,
+resume the same buffered audio. Confirmed new speech interrupts the reply.
+The echo check uses capture time so slow local transcription does not turn
+old playback into a new question. Acoustic cancellation remains the primary
+protection; test real interruptions and playback with the intended microphone,
+speakers and room. Room departure stops the voice
 session; accepted work remains in its durable run. Canceled transcription does
 not create a fictional user message.
 

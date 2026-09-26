@@ -148,6 +148,19 @@ func workResultText(run map[string]any, steps []map[string]any) string {
 			return string(raw)
 		}
 	}
+	// Typed deterministic capabilities can return their own concise reply.
+	// A model call merely to paraphrase a navigation receipt adds latency.
+	for i := len(steps) - 1; i >= 0; i-- {
+		if steps[i]["status"] != "done" {
+			continue
+		}
+		result, _ := steps[i]["result"].(map[string]any)
+		for _, row := range MaterializeRows(result["value"]) {
+			if reply, ok := row["reply"].(string); ok && strings.TrimSpace(reply) != "" {
+				return reply
+			}
+		}
+	}
 	// Every completed template has receipts, even a deterministic one that
 	// never invoked an agent. Return those results without spending another call
 	// merely to rephrase them or pretending an absent result is an answer.

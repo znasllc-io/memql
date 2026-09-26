@@ -2548,3 +2548,24 @@ candidate selection, preview grants, store checks or promotion action; a design
 update reaches both URLs. Candidate previews remain available for other kinds.
 
 Ask text, dictation, live voice and cluster setup: [Ask conversations and voice](../../docs/public/operate/ask-and-voice.md).
+
+
+### Ask navigation destinations
+
+The app manifest owns agent navigation as well as window chrome. App and section
+IDs must be stable. Declare record destinations in `records` with the owning
+section, an intent ID field, the authorized named list query, and display-label
+fields. Implement that intent in the app through the same selection state a
+person uses. Do not automate DOM selectors, manufacture clicks, or repeat a
+server mutation from a browser execution event. Unsupported record destinations
+must be reported honestly instead of opening an unrelated page.
+
+The engine catalog is generated from `OS_REGISTRY`. After changing destinations,
+run `MEMQL_UPDATE_NAVIGATION=1 npm test -- test/ask/navigationContract.test.ts`
+from `clients/os`; normal tests refuse a stale catalog. Server and browser both
+check current access. Include an app test that proves its intent reaches the
+actual detail page, including arrival while a different tab is selected.
+
+A navigation event holds a quiet window/tab glow long enough to be seen. Only
+an explicitly bound action control receives a control cue; reads and unrelated
+tool completions must not move focus or erase a navigation cue. No fake cursor.

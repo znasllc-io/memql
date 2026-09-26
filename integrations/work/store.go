@@ -267,6 +267,7 @@ func (s *store) createGoalRow(ctx context.Context, g goalSeed) error {
 func (s *store) createRunRow(ctx context.Context, r runSeed) error {
 	return s.writeInternal(ctx, "mutation "+call("createWorkRun", map[string]any{
 		"runId":               r.RunId,
+		"executionAuthority":  optMap(r.ExecutionAuthority),
 		"goalId":              r.GoalId,
 		"automationName":      r.AutomationName,
 		"templateFingerprint": r.TemplateFingerprint,
@@ -352,6 +353,7 @@ type goalSeed struct {
 }
 
 type runSeed struct {
+	ExecutionAuthority  map[string]any
 	RunId               string
 	GoalId              string
 	AutomationName      string
