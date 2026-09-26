@@ -280,6 +280,9 @@ type recFixture struct {
 	// writeArgs overrides the fs_write step's arguments -- another app's
 	// spelling of a write, or one no dispatcher applies.
 	writeArgs map[string]any
+	// execCommand overrides the exec step's command: the app doing the goal
+	// some other way.
+	execCommand string
 }
 
 type stepFeedback struct {
@@ -297,6 +300,14 @@ func recording1(file string, created time.Time) recFixture {
 		model:     "claude-sonnet-4-6",
 		effort:    "high",
 	}
+}
+
+// command is the exec step's command line.
+func (r recFixture) command() string {
+	if r.execCommand != "" {
+		return r.execCommand
+	}
+	return "mkdir -p out && echo hello > " + r.file
 }
 
 func (r recFixture) execKey() string {
@@ -400,7 +411,7 @@ func (r recFixture) observationRows(t *testing.T) []map[string]any {
 			"tool": "exec", "appActionId": "toolu_exec_" + strings.TrimSuffix(r.file, ".txt"),
 			"sessionId": r.sessionId, "seq": float64(1), "isError": r.execExit != 0,
 			"exitCode": float64(r.execExit), "resultType": "string", "cwd": testWorkspace,
-			"args": argsJSON(t, map[string]any{"command": "mkdir -p out && echo hello > " + r.file}),
+			"args": argsJSON(t, map[string]any{"command": r.command()}),
 		}
 		if r.argsTruncated {
 			data["argsTruncated"] = true
