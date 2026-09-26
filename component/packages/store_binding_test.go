@@ -37,7 +37,7 @@ func storefrontOnlyReport(storeDomain string) *Report {
 // for everything else, which is exactly the shape the production resolver
 // answers with when a read comes back empty.
 func storeIdFor(table map[string]string) StoreResolver {
-	return func(_ context.Context, domain string) (string, error) {
+	return func(_ context.Context, domain, _, _ string) (string, error) {
 		return table[strings.TrimSpace(domain)], nil
 	}
 }
@@ -80,10 +80,18 @@ func TestAStorefrontManifestNamesItsStoreRatherThanCopyingIt(t *testing.T) {
 	}
 }
 
-// TestAManifestNamingAnUnknownStoreIsRefused is the RESOLUTION half, and it
-// is deliberately a publish test: Analyze stays offline and resolves nothing,
-// so the only place this can be measured is the stage that reads the cluster.
-func TestAManifestNamingAnUnknownStoreIsRefused(t *testing.T) {
+// TestAManifestNamingAnUnknownStoreDeploysAnUnattachedDraft is the RESOLUTION
+// half, and it is deliberately a publish test: Analyze stays offline and
+// resolves nothing, so the only place this can be measured is the stage that
+// reads the cluster.
+//
+// A STORE THIS CALLER CANNOT ATTACH IS A DRAFT, NOT A REFUSAL (Connect Shopify,
+// D5). It used to refuse the whole run, which is what stopped a developer's
+// first deploy of a storefront whose store they were not allowed to see. Now
+// the site is created as a draft with no binding and the run records a
+// non-fatal note; the go-live rule is what keeps that draft away from
+// shoppers until a store is connected.
+func TestAManifestNamingAnUnknownStoreDeploysAnUnattachedDraft(t *testing.T) {
 	pub := &fakePublisher{}
 	engine := &recordingEngine{rows: map[string][]map[string]any{"query sitesForPackage": nil}}
 	d := &Deps{
@@ -100,33 +108,60 @@ func TestAManifestNamingAnUnknownStoreIsRefused(t *testing.T) {
 	}
 	bundles := map[string]edge.Bundle{"storefront": {}}
 
-	_, err := d.publish(callerCtx("v1:identity:user:someone"), req,
+	outcomes, err := d.publish(callerCtx("v1:identity:user:someone"), req,
 		map[string]any{}, storefrontOnlyReport("acme.myshopify.com"), bundles)
-	if got := RefusalCode(err); got != CodeDeployableStoreUnknown {
-		t.Fatalf("want %s, got %q (%v)", CodeDeployableStoreUnknown, got, err)
+	if err != nil {
+		t.Fatalf("a storefront whose store cannot be attached refused the run: %v", err)
 	}
-	if !strings.Contains(err.Error(), "acme.myshopify.com") {
-		t.Fatalf("the refusal must name the store it could not find: %v", err)
+	if len(pub.createdStores) != 1 || pub.createdStores[0] != "" {
+		t.Fatalf("the site must be created with no binding, got stores %q", pub.createdStores)
 	}
-	if !strings.Contains(err.Error(), "Store") {
-		t.Fatalf("the refusal must name where a store is attached: %v", err)
+	if len(pub.published) != 1 {
+		t.Fatalf("the draft's files must still be put in place: %v", pub.published)
 	}
-	if len(pub.published) != 0 {
-		t.Fatalf("a storefront whose store cannot be resolved must publish nothing: %v", pub.published)
+	if len(pub.bound) != 0 {
+		t.Fatalf("nothing resolved, so nothing may be bound: %v", pub.bound)
 	}
+	assertUnattachedNote(t, outcomes, "acme.myshopify.com")
 
 	// THE REACHABLE POSITIVE: the same run, the same manifest, against a
-	// cluster that HAS the store, publishes. Without it this test would pass
-	// against a publish stage that refused every storefront.
+	// cluster that HAS the store, binds it at create. Without it this test
+	// would pass against a publish stage that had stopped resolving stores.
 	ok := &fakePublisher{}
 	d.Publisher = ok
 	d.Stores = storeIdFor(map[string]string{"acme.myshopify.com": "v1:shopify:store:acme"})
-	if _, perr := d.publish(callerCtx("v1:identity:user:someone"), req,
-		map[string]any{}, storefrontOnlyReport("acme.myshopify.com"), bundles); perr != nil {
+	outcomes, perr := d.publish(callerCtx("v1:identity:user:someone"), req,
+		map[string]any{}, storefrontOnlyReport("acme.myshopify.com"), bundles)
+	if perr != nil {
 		t.Fatalf("control failed: the same run against a cluster holding the store must publish: %v", perr)
 	}
-	if len(ok.published) != 1 {
-		t.Fatalf("control failed: want one publish, got %v", ok.published)
+	if len(ok.createdStores) != 1 || ok.createdStores[0] != "v1:shopify:store:acme" {
+		t.Fatalf("control failed: the site must be created bound to the store, got %q", ok.createdStores)
+	}
+	if len(outcomes) != 1 || outcomes[0].Refusal != nil {
+		t.Fatalf("control failed: a bound storefront carries no note: %+v", outcomes)
+	}
+}
+
+// assertUnattachedNote is the note an unattached storefront's run carries:
+// non-fatal, deployable_store_unknown, naming the store and saying the
+// storefront cannot go live until one is connected.
+func assertUnattachedNote(t *testing.T, outcomes []DeployableOutcome, named string) {
+	t.Helper()
+	if len(outcomes) != 1 || outcomes[0].Refusal == nil {
+		t.Fatalf("the outcome carries no note about the unattached store: %+v", outcomes)
+	}
+	note := outcomes[0].Refusal
+	if note.Fatal {
+		t.Errorf("the note is fatal, which would refuse the run it is attached to: %+v", note)
+	}
+	if note.Code != CodeDeployableStoreUnknown {
+		t.Errorf("note code = %q, want %q", note.Code, CodeDeployableStoreUnknown)
+	}
+	for _, want := range []string{named, "not attached to a store", "can go live for design review"} {
+		if !strings.Contains(note.Message, want) {
+			t.Errorf("the note does not say %q: %s", want, note.Message)
+		}
 	}
 }
 
@@ -231,9 +266,9 @@ func TestARedeployRePointsABindingTheManifestChanged(t *testing.T) {
 // AN UNRESOLVABLE STORE IS FATAL ONLY WHEN NOTHING IS BOUND YET.
 //
 // This is the case the auto-deploy feed is in on EVERY automatic run. It
-// borrows the package owner as a rankless writer (Deps.Roles), so
-// `actor.isClusterOwner == true` is false and the cluster-owner-tier
-// storeByDomain read answers zero rows. Fatal here would mean an armed source
+// borrows the package owner as a rankless writer (Deps.Roles), which is
+// neither a cluster owner nor at v1:shopify:store's developer read floor, so
+// storeByDomain answers zero rows. Fatal here would mean an armed source
 // can never republish a storefront again -- something it could do before this
 // epic, when a redeploy never read a store at all.
 //
@@ -293,12 +328,20 @@ func TestARedeployWhoseStoreCannotBeResolvedKeepsItsBindingAndPublishes(t *testi
 	}
 }
 
-// THE REACHABLE POSITIVE for the case above: with NOTHING bound, the same
-// unresolvable store refuses. Without this, the test above would pass against
-// a `publish` that had simply stopped resolving stores at all.
-func TestAnUnboundStorefrontWhoseStoreCannotBeResolvedIsStillRefused(t *testing.T) {
+// THE OTHER HALF of the case above: with NOTHING bound, the same unresolvable
+// store is not "unchanged" -- there is nothing to keep -- so the storefront
+// stays an unattached draft and the note says so. It holds on a REDEPLOY of an
+// unattached site as well as on a first deploy (Connect Shopify, D5): the
+// site is found, published, and still bound to nothing.
+func TestAnUnboundStorefrontWhoseStoreCannotBeResolvedStaysAnUnattachedDraft(t *testing.T) {
 	pub := &fakePublisher{}
-	engine := &recordingEngine{rows: map[string][]map[string]any{"query sitesForPackage": nil}}
+	engine := &recordingEngine{rows: map[string][]map[string]any{
+		"query sitesForPackage": {{
+			"id":                    "v1:platform:site:storefront",
+			"hostname":              "shop.example.com",
+			"packageDeployableName": "storefront",
+		}},
+	}}
 	d := &Deps{
 		Store:     &store{engine: engine},
 		Publisher: pub,
@@ -309,14 +352,103 @@ func TestAnUnboundStorefrontWhoseStoreCannotBeResolvedIsStillRefused(t *testing.
 		PackageId:  "v1:platform:package:abc",
 		Placements: map[string]Placement{"storefront": {Hostname: "shop.example.com"}},
 	}
-	_, err := d.publish(
+	outcomes, err := d.publish(
 		context.Background(), req, map[string]any{},
 		storefrontOnlyReport("acme.myshopify.com"), map[string]edge.Bundle{"storefront": {}},
 	)
-	if RefusalCode(err) != CodeDeployableStoreUnknown {
-		t.Fatalf("a storefront with no store and none resolvable must refuse; got %v", err)
+	if err != nil {
+		t.Fatalf("a redeploy of an unattached storefront was refused: %v", err)
 	}
-	if len(pub.published) != 0 {
-		t.Errorf("nothing may publish after that refusal: %v", pub.published)
+	if len(pub.created) != 0 || len(pub.bound) != 0 {
+		t.Fatalf("the existing site must be found and left unbound: created %v, bound %v", pub.created, pub.bound)
+	}
+	if len(pub.published) != 1 {
+		t.Errorf("the redeploy must publish: %v", pub.published)
+	}
+	assertUnattachedNote(t, outcomes, "acme.myshopify.com")
+	if strings.Contains(outcomes[0].Refusal.Message, "unchanged") {
+		t.Errorf("an unattached storefront's note claims a store was kept: %s", outcomes[0].Refusal.Message)
+	}
+}
+
+// AN UNATTACHED DRAFT IS ATTACHED BY THE FIRST REDEPLOY THAT CAN ATTACH IT.
+// The draft a first deploy left (the case above) is not stuck: once the
+// manifest's store resolves for the caller -- the store was mirrored, or the
+// caller now holds the store part -- the redeploy re-points the existing site
+// to it, exactly once, and the note is gone because nothing is unattached.
+func TestARedeployAttachesAnUnattachedDraftOnceItsStoreResolves(t *testing.T) {
+	pub := &fakePublisher{}
+	engine := &recordingEngine{rows: map[string][]map[string]any{
+		"query sitesForPackage": {{
+			"id":                    "v1:platform:site:storefront",
+			"hostname":              "shop.example.com",
+			"packageDeployableName": "storefront",
+		}},
+	}}
+	d := &Deps{
+		Store:     &store{engine: engine},
+		Publisher: pub,
+		Logger:    discardLogger(),
+		Stores:    storeIdFor(map[string]string{"acme.myshopify.com": "v1:shopify:store:acme"}),
+	}
+	req := DeployRequest{
+		PackageId:  "v1:platform:package:abc",
+		Placements: map[string]Placement{"storefront": {Hostname: "shop.example.com"}},
+	}
+	outcomes, err := d.publish(
+		context.Background(), req, map[string]any{},
+		storefrontOnlyReport("acme.myshopify.com"), map[string]edge.Bundle{"storefront": {}},
+	)
+	if err != nil {
+		t.Fatalf("a redeploy of an unattached storefront whose store now resolves was refused: %v", err)
+	}
+	if len(pub.created) != 0 {
+		t.Fatalf("the existing draft must be found, not a second site created: %v", pub.created)
+	}
+	if len(pub.bound) != 1 || pub.bound[0] != "v1:platform:site:storefront -> v1:shopify:store:acme" {
+		t.Fatalf("want exactly one binding of the draft to acme, got %v", pub.bound)
+	}
+	if len(outcomes) != 1 || outcomes[0].Refusal != nil {
+		t.Fatalf("an attached storefront carries a note: %+v", outcomes)
+	}
+}
+
+// TestTheStoreIsAskedForAtTheSitesOrganization: the resolver is told which
+// organization the site belongs to, because attaching a store takes the store
+// part THERE as well as of the caller (memql#5598). A first deploy names the
+// placement's organization; a redeploy names the one its site row carries.
+func TestTheStoreIsAskedForAtTheSitesOrganization(t *testing.T) {
+	var asked []string
+	engine := &recordingEngine{rows: map[string][]map[string]any{"query sitesForPackage": nil}}
+	d := &Deps{
+		Store:     &store{engine: engine},
+		Publisher: &fakePublisher{},
+		Logger:    discardLogger(),
+		Stores: func(_ context.Context, _, _, account string) (string, error) {
+			asked = append(asked, account)
+			return "v1:shopify:store:acme", nil
+		},
+	}
+	req := DeployRequest{
+		PackageId:  "v1:platform:package:abc",
+		Placements: map[string]Placement{"storefront": {Hostname: "shop.example.com", AccountId: "acme"}},
+	}
+	bundles := map[string]edge.Bundle{"storefront": {}}
+	ctx := callerCtx("v1:identity:user:someone")
+
+	if _, err := d.publish(ctx, req, map[string]any{}, storefrontOnlyReport("acme.myshopify.com"), bundles); err != nil {
+		t.Fatalf("first deploy: %v", err)
+	}
+	engine.rows["query sitesForPackage"] = []map[string]any{{
+		"id":                    "v1:platform:site:storefront",
+		"hostname":              "shop.example.com",
+		"packageDeployableName": "storefront",
+		"accountId":             "beta",
+	}}
+	if _, err := d.publish(ctx, req, map[string]any{}, storefrontOnlyReport("acme.myshopify.com"), bundles); err != nil {
+		t.Fatalf("redeploy: %v", err)
+	}
+	if strings.Join(asked, ",") != "acme,beta" {
+		t.Fatalf("the resolver was asked at %q, want the placement's organization and then the site's own", asked)
 	}
 }

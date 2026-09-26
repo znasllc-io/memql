@@ -1,3 +1,4 @@
+import { RecordList } from "../../kit/RecordRow";
 import { useMemo, useState } from "react";
 import { UserRound } from "lucide-react";
 
@@ -7,7 +8,7 @@ import {
   Head,
   Panel,
   RankMark,
-  Row as ListRow,
+  RecordRow,
   Subhead,
 } from "../../kit";
 import { ActionBar, type Act } from "../../kit/ActionBar";
@@ -25,6 +26,7 @@ export function RolePage({
   role,
   catalog,
   people,
+  peopleAvailable = false,
   accounts,
   actions,
   viewerRole,
@@ -34,6 +36,7 @@ export function RolePage({
   role: RoleRow;
   catalog: RoleCatalog;
   people: readonly PersonRow[];
+  peopleAvailable?: boolean;
   accounts: readonly AccountRow[];
   actions: UsersActions;
   viewerRole: string;
@@ -141,23 +144,20 @@ export function RolePage({
         </Panel>
 
         <Panel label={`Who holds ${role.name}`}>
-          <Subhead>Holders</Subhead>
+          <Subhead meta={peopleAvailable ? holders.length : undefined}>Holders</Subhead>
           {holders.length === 0 ? (
             <p className="os-caption">Nobody holds this role.</p>
           ) : (
-            <ul className="os-holder-list" aria-label={`People who hold ${role.name}`}>
+            <RecordList as="ul" label={`People who hold ${role.name}`}>
               {holders.map((person) => (
-                <li key={person.id}>
-                  <ListRow
-                    icon={<UserRound size={16} aria-hidden />}
-                    name={personName(person)}
-                    onOpen={() => onOpenPerson(person.id)}
-                  >
-                    <span className="os-caption os-mono">{person.primaryEmail}</span>
-                  </ListRow>
-                </li>
+                <RecordRow key={person.id}
+                  icon={<UserRound size={16} aria-hidden />}
+                  name={personName(person)}
+                  secondary={person.primaryEmail}
+                  onOpen={() => onOpenPerson(person.id)}
+                />
               ))}
-            </ul>
+            </RecordList>
           )}
           {holders.length === 0 || role.predefined ? null : (
             <p className="os-caption">

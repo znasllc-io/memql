@@ -1,87 +1,15 @@
-// The client registry (epic memql#4800, design
-// docs/superpowers/specs/2026-09-01-accounts-app-design.md).
-//
-// An ACCOUNT IS A RECORD, NEVER AN AUTHORIZATION BOUNDARY (D1). This is the
-// one sentence the whole domain is built on, and every other file here
-// depends on it staying true. An account says who work is FOR -- the company
-// whose storefront this cluster hosts, whose files it stores, whose people it
-// invited as guests. It is not a login wall, not a visibility scope, and not
-// a partition. Row authorization is untouched everywhere the four tie fields
-// land, and no query in this tree or any other narrows a read on an account
-// field.
-//
-// The pressure to make it one will arrive, because a registry of clients
-// LOOKS like a tenancy model. When client ACCESS is eventually wanted it
-// rides the guest-invitation machinery already in dsl/identity -- pointed at
-// an account, which is exactly what `v1:identity:invitation.accountId` is
-// for. That is an invitation gaining a label, not an account gaining a wall.
-
-// ===========================================================================
-// TWO THINGS IN THIS ENGINE ARE CALLED AN ACCOUNT, AND THEY ARE UNRELATED
-// ===========================================================================
-// `v1:identity:account` already exists and is the PAYING account of the
-// account-isolation model (docs/internal/design/account-isolation-model.md) --
-// a billing and attribution subject that nothing authenticates as.
-// `v1:accounts:account`, declared here, is a CLIENT: a company this instance's
-// owner does work for. They share a word and nothing else -- no field, no
-// reference, no lifecycle. Neither is the other's namespace, and a reader
-// tracing `accountId` should check which concept the field's own description
-// names before assuming.
-//
-// The name is kept rather than made unique because it is the owner's own word
-// for the thing, and the domain qualifies it: everything in `v1:accounts:` is
-// about clients, and nothing else is.
+// Organizations serviced by this installation. `self` is the cluster operator's
+// own organization; the identity namespace's paying account is a different model.
+// Account membership and operator-granted scoped roles authorize organization
+// work. An account record alone grants nothing: a user must belong to an active
+// group for it, and hold the applicable app/action permission.
 
 use identity.concepts.{ user }
 
-/// A client -- a company this instance's owner does work for.
-///
-/// THE COMPOSITE TIER, for the reason v1:platform:site carries one. A plain
-/// `owner="ownerUserId"` tier has no cluster-owner escape on the READ path --
-/// enforceRowAuthzOnPlan ANDs the owned predicate unconditionally -- so "list
-/// every account in this cluster" would not merely be unimplemented, it would
-/// not be EXPRESSIBLE, and the app's primary screen would silently render a
-/// subset. Going the other way (a bare clusterOwner tier) would make every
-/// account a non-operator created invisible to the person who created it. The
-/// composite keeps both statements true: a user reads exactly their own
-/// accounts, an operator reads every row.
-///
-/// `ownerUserId` EMPTY means cluster-owned, and the `self` singleton is the
-/// case: it is the DEPLOYMENT's row, not whichever principal happened to boot
-/// the cluster. sameRowAuthzOwner refuses an empty owner outright, so a
-/// cluster-owned row is reachable through the admin branch alone.
-///
-/// THAT LAST SENTENCE WAS ALSO A CLAIM NOTHING IMPLEMENTED (memql#4817). The
-/// seeded row landed owned by `system:maintenance:seedSelfAccount` -- not
-/// empty, just meaningless -- and the tier happened to behave as designed
-/// because a bogus owner matches no real user either. It is genuinely empty
-/// now: a non-principal actor cannot own a row
-/// (component/memql/rowauthz_nonprincipal_owner.go).
-///
-/// THE RANK MODIFIERS (epic memql#4832). `rankVisible` adds "rows owned by
-/// anyone at or below my rank" (D2), and `unowned="admin"` is what finally
-/// makes the self row readable by somebody other than a cluster owner.
-///
-/// Before it, an admin or a developer opening the registry got ZERO ROWS and
-/// could not distinguish an unconfigured cluster from an empty one -- which is
-/// why the "not set up yet" state had no signal to read.
-///
-/// THE FLOOR READS `admin` AND THE ISSUE SAYS "developer-and-above", AND BOTH
-/// NAME THE SAME SET. memql#4837 spells the set out -- "admits developer,
-/// admin and owner, and excludes writer and reader" -- and under the ladder
-/// this epic makes authoritative that set is rank >= 200, whose slug is
-/// `admin`. "Developer-and-above" was the OS ladder's way of saying it, where
-/// developer sat BELOW admin. Writing `unowned="developer"` here would read
-/// like the issue and lock out every admin, which is the exact class of
-/// mistake memql#4833 warns about: every requirement written under the old
-/// ordering changes meaning the moment it flips, and has to be re-read against
-/// what it was TRYING to say rather than transcribed.
-///
-/// NOT rankStrict. Rank-visible reads are wanted here; rank-strict writes are
-/// not, because an account is a RECORD -- who work is for -- and letting a
-/// developer edit an admin's client list is authority this concept never
-/// claimed. The owned tier keeps the write rule it always had: your own rows,
-/// plus the cluster-owner escape.
+/// An organization: the cluster operator's own company or one of its clients.
+/// The engine admits authorized organization members and cluster operators.
+/// Creating/archive operations remain cluster-operator decisions; scoped client
+/// administration never becomes cluster administration.
 @rowAuthz(owner="ownerUserId", rankVisible, unowned="admin", clusterOwner)
 @displayCard(primary="name", secondary="domain", tertiary="primaryContactEmail", status="status")
 // The Materializer's mark (epic memql#4977). A client is what most of the
@@ -92,7 +20,7 @@ use identity.concepts.{ user }
 // will not write.
 @composable(as="client", fields="name,domain,primaryContactEmail,status", list="clientAccountsAll")
 concept account {
-  ownerUserId  string   @description("v1:identity:user.id that created this account, or EMPTY for a cluster-owned one. Stamped from the actor by createAccount, which is what makes the tier above true rather than aspirational; a write made by a SYNTHETIC actor -- the seed materializer, a maintenance actor, an automation's system actor -- has that stamp undone and produces a cluster-owned row instead, which is how the seeded `self` row gets its empty owner (memql#4817). NARROWER THAN THE SENTENCE THIS REPLACED, which said `a cluster owner, a system actor, or trusted server-side Go` and was wrong on two of the three: a real cluster owner keeps their stamp, and so does an internal-origin write. Only an actor carrying AccessContext.Synthetic is undone -- and borrowed authority (ContextWithUserActor) is deliberately NOT one, because it acts as a real person and the rows it creates are theirs. NOT `string!`: an empty value is the meaningful cluster-owned state, and `string!` would refuse the seed.")
+  ownerUserId  string   @description("The real principal owning this organization, stamped from the creator. The synthetic self seed starts unowned; successful ownership setup persists the verified claiming user. Group membership grants authorized organization access separately from this attribution.")
   name         string!  @description("The client's name, as a person would say it. REQUIRED, and it is the one thing the first-run card insists on (D7) -- an account whose name is a placeholder is a row nobody can pick out of a list. The seeded `self` row gets a starter value rather than a real one precisely so the card has something to ask for; see dsl/accounts/seeds.memql for why that starter is not a lie the app has to detect.")
   domain       string   @description("The client's OWN domain (acme.com), not a hostname this cluster serves. Free text, unvalidated, and deliberately so: it is a fact about the client, recorded because somebody knows it, and refusing a typo would cost more than it saves. Epic C (custom domains) consumes exactly this field plus v1:platform:site.accountId as its SUGGESTION source when an operator adds a custom domain to a site (D9) -- a suggestion, never a claim: nothing here verifies ownership of anything, and Epic C's DNS check is what does.")
   primaryContactName   string  @description("Who to talk to at the client. A FIELD ON THE ROW rather than a contact concept (D4): a contact concept is future work that nothing in this epic needs, and a v1 that ships two fields is one a later concept can migrate from, while a v1 that ships a half-designed concept is one it has to live with.")
@@ -109,7 +37,7 @@ concept account {
   memqlDomain  string   @description("The name this account is RESERVED under on this cluster (D10) -- `memql.<domain>` by default, filled by updateClientAccount when empty and the domain is set, and editable. Recorded now and SERVED by nothing yet: the per-account front door is a later sub-project. Refused under this cluster's own domain or equal to a front-door host, the custom-domain guardrails, because either would be a certificate request for a host the platform already answers on.")
   memqlReservedAt      datetime  @description("When the reservation was recorded -- stamped by the reconciler at the moment domainStatus becomes verified AND memqlDomain passes the guardrails. Absent means the name is not held: either ownership is unproven or the name was refused.")
   memqlReservationReason string  @description("WHY the name is not held, when it is not -- or empty when it is held, or when nothing has looked yet (epic memql#5168). Written by the front-door sweep, never by a caller. It exists because an absent memqlReservedAt meant two different things and the Accounts rail inferred which by reading the ownership stop beside it: `ownership_unproven` is a domain that has not passed the TXT walk, while `domain_under_cluster_domain`, `domain_is_front_door_host`, `name_collides_with_site` and `name_collides_with_custom_domain` are names this cluster refuses to serve. The first two of those four are record A's own codes, reused verbatim rather than re-spelled. NOT AN ENUM, for customDomain.failureReason's reason: a refusal the engine has never seen must still reach the row rather than being refused by its own schema. NOTE that `domain_is_front_door_host` is written by nothing on a cluster whose labels are today's -- every front-door host is a single label under the cluster's own domain, so the under-domain test fires first and that branch is unreachable for any name a person would type. The value exists because the code that would set it exists; record A asserts the overlap honestly rather than reordering the branches to make it reachable.")
-  configuredAt datetime @description("When a human last stated this row's facts -- stamped by updateClientAccount, and by NOTHING else (D7). Its absence on the seeded `self` row is what renders the OS first-run card, and the card's Save is an updateAccount, so answering the question is what retires it; createClientAccount deliberately does not stamp, or the card would be retired before it was ever shown. On an ordinary account -- one somebody typed into the create form -- absence means created and never since edited, which is a smaller claim than the one the card acts on. Read the field as 'a person last confirmed these facts at', and read the card's gate as what it is: a question about ONE row, asked because a boot filled that row in and a boot cannot know what a company is called.")
+  configuredAt datetime @description("When a person stated this organizations facts. Written by updateClientAccount or successful ownership setup. Its absence on the synthetic self seed drives the first-run organization card; boot reconciliation never invents a human confirmation.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }

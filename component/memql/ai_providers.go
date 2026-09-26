@@ -1365,6 +1365,8 @@ func newAIProvider(cfg ProviderConfig) (AIProvider, error) {
 		return newOpenAIProvider(cfg)
 	case "openaitts":
 		return newOpenAITTSProvider(cfg)
+	case "openaistt":
+		return newOpenAISTTProvider(cfg)
 	case "openaiembedding":
 		return newOpenAIEmbeddingProvider(cfg)
 	case "anthropic", "anthropicchat":

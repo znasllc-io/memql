@@ -116,7 +116,9 @@ func (i *IdentityIntegration) Capabilities() []memql.IntegrationCapability {
 				"offer the pasted-token path instead of rendering a failure.",
 			Handler: i.handleGithubConnectBegin,
 			ArgsSchema: map[string]string{
-				"returnPath": "string?",
+				"credentialId": "string?",
+				"flowId":       "string?",
+				"returnPath":   "string?",
 			},
 		},
 		{

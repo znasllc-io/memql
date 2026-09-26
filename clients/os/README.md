@@ -9,6 +9,47 @@ Sign-in requires a secure browser context with the Web Locks API. The OS
 serializes refresh-cookie responses across its tabs, including the initial
 session probe. Browsers without that capability refuse sign-in rather than
 race cookie rotation; credentials stay in memory and HttpOnly cookies.
+Signed-out users enter the OAuth/PKCE login flow automatically, without a
+separate landing-page button. The production login form shows both email-link
+and passkey actions; the local installation remains passkey-only. Unavailable
+identity services retain a retry view instead of an automatic redirect loop.
+
+Identity and ownership setup live in OS. Before probing a session, OS reads
+identity's `/auth/setup/state`: only an explicit `unclaimed` answer opens the
+ownership wizard. Either unreadable bootstrap/owner signal shows an unavailable
+view. The server reads the operator's `MEMQL_DEPLOY_PROVIDER`: only an exact
+`docker-local` enables local setup without email. Local setup requires a passkey
+and all subsequent local interactive sign-in uses passkeys; its contact email is
+not verified. `azure`, absent and unknown values retain hosted verification:
+email first, then mandatory passkey registration. Neither email verification nor
+an enrollment grant is an owner session. After both required steps, the existing
+`CoreGate` still controls inference onboarding and retains its owner/developer
+admission rules. Organization name is required; setup configures the existing
+`self` account, stamps its owner, and ensures its account group and owner
+membership before sealing the claim or issuing a session. Every step is
+idempotent under the same claim lock. The optional “Title in organization” is
+profile text (`primaryRole`), never an authorization role.
+
+The Identity app contains your profile, passkeys, sessions, personal access
+tokens, and sign-in policy. Email verification, invitations, recovery, and
+external OAuth consent also render in OS. Old identity page URLs hand off to
+`/identity/...`, carrying their parameters in the fragment rather than OS access
+logs. Identity remains the authority: its structured representation requires the
+exact configured OS origin (or a verified account front door), credentialed
+requests, and CSRF on mutations. Cookies retain their identity-host paths;
+OAuth/PKCE and device-bound email verification keep their existing protocol.
+
+Passkeys keep their existing RP IDs. The identity host publishes
+`/.well-known/webauthn` for WebAuthn Related Origin Requests from OS. Passkey
+operations require a current browser with related-origin and WebAuthn JSON
+support. Hosted email sign-in remains subject to account policy. Shared challenge
+storage, a durable enrollment record and a fail-closed PostgreSQL ownership lock
+coordinate replicas. Failed ceremonies can be retried; an attestation saved before
+a transient graph-write failure resumes with the same credential and user IDs.
+A lost enrollment cookie resumes through the registered passkey, or through a
+new verification of the original hosted email. No competing claim can replace a
+reserved owner. The setup table is private authentication state, never graph data
+or client-visible session authority.
 
 - **Desks** hold at most two auto-placed windows (solo centered, two-up
   split, swap/throw by drag); a third app spills onto a new desk. Windows
@@ -26,7 +67,11 @@ race cookie rotation; credentials stay in memory and HttpOnly cookies.
   desk-resident cards; Ask ships first.
 - **Ask** is chrome, not a module: the dock orb, the desk widget and every
   title bar open the same streaming surface. It takes dictation (#4747):
-  hold the mic to talk, tap it to keep listening.
+  hold the mic to talk, tap it to keep listening. Each turn uses the same durable
+  work engine as Nexus. Its goals remain visible in Nexus; Ask has no
+  per-message work menu. Explicit Stop cancels the durable goal; closing a viewer
+  only detaches and never resubmits work. Conversation checkpoints and execution progress belong
+  to the shared engine.
 - **Roles**: one predicate (`system/roles.ts`) gates apps and app sections
   from `MyAccess.role` — the SLUG the person's user row carries, resolved
   against the ladder read from `activeRoles`, so a role this cluster authored
@@ -39,12 +84,12 @@ race cookie rotation; credentials stay in memory and HttpOnly cookies.
   when a requirement is genuinely non-monotonic, and say why where you
   declare it.
 - **Theming**: `--os-*` token packs on the root (`data-os-theme`); mode
-  (light/dark/system) is orthogonal. The wallpaper (the memory field) paints
-  from tokens and from the pack's own field parameters. A pack is DATA, and
-  Themes in the Launcher is the drawer that sells them (#4745). Windows,
-  widgets and sheets re-inherit the tokens but do NOT carry the attribute --
-  the foundation spec says they do and it is wrong; a per-window mix is three
-  one-line edits away and deliberately not built.
+  (light/dark/system) is orthogonal. The Fold wallpaper is two static tonal
+  planes derived from the active theme's ground and ink. All themes use the
+  same approved geometry; no graph, animation or canvas runs behind windows.
+  The desk numeral keeps its own theme token and placement. A pack is DATA,
+  and Themes in the Launcher is the drawer that sells them (#4745). Windows,
+  widgets and sheets re-inherit the tokens but do NOT carry the attribute.
 - **Persistence**: `system/store.ts` (`DesktopStore`) — versioned
   localStorage; desks, items, pins, theme. Never windows.
 - **The interface language**: [DESIGN.md](DESIGN.md) — the ten owner-set
@@ -52,6 +97,14 @@ race cookie rotation; credentials stay in memory and HttpOnly cookies.
   filters behind one Refine affordance, quiet sort, the control line,
   one container grammar. When a rule and a surface disagree, the surface
   is wrong.
+- **Loading and nested navigation**: every app uses content-shaped, text-free
+  skeletons for missing content, keeping accessible status labels off screen.
+  Use `RecordListSkeleton`, `ContentSkeleton`, or `InlineSkeleton`; preserve
+  loaded content during refresh and show failures separately. Sibling views
+  inside a page use `LocalTabs`, like Fleet's Model Library and machine detail.
+  Filters and saved preferences are not tabs. See [the rules](DESIGN.md#loading-is-the-shape-of-the-content-never-a-message)
+  and [coverage](qa/loading-and-navigation.md).
+
 - Phone keeps its own chrome (tab bar, one app at a time, Ask sheet);
   layout is keyed off pointer/hover, never width alone.
 
@@ -63,16 +116,34 @@ Deployables, Training, Files (#4721), Accounts (#4800), Campaigns
 was the only home for -- Concepts and Cluster (epic memql#5009) -- the
 last stub went with Files, and `StubApp` with it.
 
-**Stores was a third, and it is gone** (epic memql#5530). Everything about
-a storefront is configured on its deployable, and the store it fronts was
-the one thing that was not: the site's `binding` carried a COPY of the
-store's domain and its Storefront token reference, edited at a different
-authorization tier from the `v1:shopify:store` row that also held them. The
-binding names the store now, and the store is read and changed on the
-storefront's own Store pane in Deployables, behind `execute
-app:deployables/store`. The per-domain acts -- backfill, pause, retry,
-discard -- never lived in Stores either; they belong to every connector and
-are still in Cluster > Data origins.
+**Connections are shared platform settings.** `modules/connections` owns the
+GitHub account/organization interface, Shopify store connection wizard and the
+provider tabs reused by global Settings and Deployables Settings. The shell
+retains one collection per connection concept. Provider callbacks return to the
+app and Settings surface that began authorization. An app selects a connected
+resource for its own work; it does not create a private copy of the account.
+GitHub retains its existing personal credential and installation records.
+Shopify uses personal `v1:platform:externalConnection` selections pointing at the
+integration's store record; removing a selection changes no store or deployed
+site. New selections require verified provider authorization on the server.
+
+Ordinary connection screens never ask for client secrets or API tokens. Shopify
+registration is operator configuration; an unconfigured installation shows the
+setup requirement. Shopify store selection starts on Shopify, never in a manually entered domain
+form. The OS preserves the signed App URL launch through sign-in; the server
+verifies it before beginning session-bound authorization. Storefronts identify
+Shopify development stores as Sandbox and require review before replacing the
+active store. The sandbox and production stores may have different Shopify owners.
+Storefronts choose an authorized store using the shared wizard
+and keep serving design previews until connected. The Store icon stays beside
+Traffic. See [Connect Shopify](../../docs/public/operate/shopify-connect.md).
+
+A storefront's Visit action offers **Testing** and **Production**, with each
+URL and its connected store. Both use the same published build. Testing has a
+stable `test--<hostname>` address; Visit opens it with private access handled
+automatically. Production always uses its own binding, even when the browser
+holds a Testing session. Either destination may use a sandbox, both may use the
+same store, and an unconnected destination shows design preview.
 
 ## Right-click belongs to the shell
 
@@ -364,17 +435,17 @@ of the Packages half this passage replaces and survived it unchanged.
   in its `compact` form: the same five marks, no labels, each carrying its
   label as its accessible name. A row is read as the shape it opens into.
 
-- **THE PARKED-RUNS FEED IS A FOURTH FEED AT THE APP ROOT, AND IT IS THE ONE
-  RECORDED EXCEPTION** to the rule this app's own Packages half wrote down: a
-  deployment TIMELINE is retained by the page and never by the root. That rule
-  guards against subscribing a window to every deploy in the cluster to render
-  one row, and it still does. `packageDeploymentsAwaitingConfirm` is parked
-  runs ALONE -- a handful of rows, and rows a person needs to see BEFORE they
-  open anything, because the whole point of a gate that lives on the row is
-  that somebody who closed the window finds their deploy where they left it.
-  The list marks that row "a deploy is waiting for you". **Any other timeline
-  feed at the root is the thing the rule forbids**, and the exception's code
-  comment cites this passage rather than restating it.
+- **THE PENDING-RUNS FEED IS THE FOURTH FEED AT THE APP ROOT.**
+  `packageDeploymentsPending` retains active work and review gates, never full
+  deployment histories. Leave preserves analysis and the list shows Analyzing;
+  opening its row resumes Configuration or Review from persisted run state.
+  Cancel targets the exact run, using the same durable cancellation flag on
+  every replica. `packageDeploy(background:true, confirm:false)` persists the
+  run and returns its ID before fetching; request teardown does not stop it.
+  Terminal runs leave the pending feed. Registered sources with no report keep
+  a setup row, so a failure after leaving is still reachable in its timeline.
+  An unplaced, stopped setup offers Discard with name confirmation; a scoped
+  app offers Deactivate instead, leaving sibling apps alone. Leave only navigates.
 
 - **A CREDENTIAL IS A CARD, AND THERE IS NO TYPE THAT COULD HOLD THE VALUE**
   (`sources/rows.ts`, `sources/useSourceCredentials.ts`). `CredentialRow`
@@ -400,16 +471,15 @@ of the Packages half this passage replaces and survived it unchanged.
   browser unnamed. No toasts, no dialogs, no `window.confirm` -- a refusal
   inside a modal that then closes is a refusal nobody can re-read.
 
-- **THE SOURCES GROUP LIVES IN THIS APP'S SETTINGS, NOT IN THE SHELL'S**
-  (`settings/SourcesGroup.tsx`). A source credential is this app's own record
-  -- the person's token for the repositories THEY deploy -- rather than a
-  cluster credential an operator rotates from a shell, which is the same line
-  Campaigns draws between its sending identities and Settings -> Integrations.
-  Revoking says what it will cost before it is done: sources fetching under it
-  will refuse at their next fetch until you switch them. Rotation is adding a
-  credential and repointing the source on its Source stop; there is no
-  in-place replace, because a replace would change what a source fetches under
-  without a row saying so.
+- **SOURCES HAS ONE CATALOG; SETTINGS DOES NOT REPEAT IT.** A configured
+  repository is the record, with its GitHub identity, organization or personal
+  target, repository and branch shown together. Credentials and installation
+  bindings supply verified access metadata; they are not separate Sources
+  rows or sibling Accounts/Repositories lists. Open a source to manage its
+  access and repository settings. Settings links to that same catalog rather
+  than rendering a second credential roster. Creating or restoring a source
+  belongs to Add deployable. Removing its catalog entry is separate from
+  archiving its deployment lifecycle or disconnecting its shared GitHub grant.
 
 - **A CUE AND A STANDING MARK ARE DIFFERENT STATEMENTS, and the update needs
   both.** The arrival ring says "this just changed" and decays on the clock;
@@ -984,8 +1054,7 @@ rules rather than repetitions of the five before it.
   fill it -- `groupsForAccount`, then `membersOfGroup` per group -- and it
   counts DISTINCT people, because somebody in two of a client's groups is one
   person and summing memberships would report a number nobody could reconcile.
-  It does NOT count the standing staff: developer rank and above reach every
-  client's work by rule with no rows anywhere, so including them would mean
+  It does NOT synthesize memberships for standing cluster operators, so including them would mean
   this band deciding who the cluster's staff are, on a screen about a client.
   Opening it hands off to Users on the group by intent rather than listing
   members here -- membership is managed on the group's own page, and a members
@@ -1007,15 +1076,16 @@ rules rather than repetitions of the five before it.
   are in it, because a domain that became proven is what a person would call a
   change.
 
-- **THE TIE PICKER FALLS BACK TO MyAccess, AND ONLY WHEN THE READ IS EMPTY.**
-  A client-rank person cannot read `v1:accounts:account` at all, so
-  `useAccountOptions` answers nothing for them -- and a picker with no options
-  would let a Member of Acme tie their campaign to nobody, landing their work
-  where their colleagues cannot see it. What they CAN be told is which groups
-  they are in, because MyAccess tells them as part of who they are, and each
-  group carries the client's id and NAME so the option is nameable without a
-  second read that would be refused for the same reason the first one was. It
-  is a fallback, never a merge: a caller who can read accounts gets the rows.
+- **ORGANIZATION OWNERSHIP IS ENFORCED BY THE ENGINE.** Campaigns and
+  deployables require one organization. The UI defaults from authoritative
+  `MyAccess.everyAccount/accountIds`: operators use `self`, a client with one
+  authorized organization uses that organization, and multiple memberships
+  require an explicit choice. The engine independently resolves the default,
+  checks current membership and app grants, verifies references belong to the
+  same organization, and stamps the persisted `accountId`. Creating or owning
+  a row does not bypass another organization's boundary. Group grants do not
+  grant cluster administration. See [Organization ownership](../../docs/public/operate/auth/organization-ownership.md)
+  for the full resource audit and existing-data policy.
 
 - **THE LEDGER IS AN ON-DEMAND READ, AND ALL FOUR BANDS ARE, DELIBERATELY.**
   Three of the four rolled-up concepts DO broadcast (`v1:platform:site`,
@@ -1039,7 +1109,7 @@ rules rather than repetitions of the five before it.
 - **THE FIRST-RUN CARD IS GATED ON A ROW, NOT ON A FLAG.** It renders when
   `v1:accounts:account:self` carries no `configuredAt`, read off the feed the
   list already holds rather than through a second by-id read -- one source of
-  truth for the row that decides whether a form or a list renders. Saving is
+  truth for the row that decides whether a form or a list renders. First-owner setup configures this same row; older installations can save
   an ordinary `updateClientAccount`, which stamps the field, so the answer
   lives in the cluster and the card is gone for everybody at once. Nothing is
   remembered in this browser, and no other OS surface gains a prompt: a
@@ -1722,58 +1792,47 @@ missing retention control.
 goal's ceilings are set when the goal is accepted. The Settings section says
 that rather than leaving the gap somebody would go looking in.
 
-## Ask voice (epic memql#4747)
+## Ask conversations and voice
 
-The mic toggle is live: hold it to talk, tap it to keep listening, and the
-transcript lands in the box as you speak. Five things about it are rules the
-next surface that touches audio or the Ask sheet gets wrong by default.
+The sheet and desk widget use `AskSurface`, backed by a shared conversation
+session. History, draft, selected conversation, live voice and Activity stay
+consistent across both surfaces. `SdkAskTransport` calls the server's
+permission-scoped MemQL agent; test transports live under `test/ask`.
 
-- **`format` IS A LABEL THE SERVER DOES NOT READ.** `AiTranscribeStreamStart`
-  carries one, and the obvious browser capture -- `MediaRecorder`, which
-  yields webm/opus -- can declare `format: "webm"` and look correct. The
-  cluster's default STT provider is `openai-realtime`, and
-  `integrations/stt/openai_realtime.go` passes only `SampleRate` through: it
-  never reads `Format`, and resamples whatever arrives as though it were
-  16 kHz PCM16. Hand it opus and the session opens, chunks flow, and the
-  transcript comes back as plausible nonsense. So `ask/pcm16.ts` is a real
-  resampler -- stateful across capture blocks, box-averaged rather than
-  point-sampled -- and the worklet that feeds it is a buffer and a pipe with
-  no arithmetic in it, because a worklet has no test harness and the
-  arithmetic is the part worth proving.
+The microphone dictates into the editable composer. Press-and-hold ends an
+utterance on release; a short tap keeps listening until the next tap. Review
+before sending is the default, with immediate submission and hold-Space
+available in Settings → Ask. The routed ASR result may arrive only after the
+utterance ends; do not promise partial transcripts for every provider.
 
-- **THE EDGE HAD TO STOP FORBIDDING THE MICROPHONE.** `component/edge`
-  answered `Permissions-Policy: microphone=()` on every hosted site, which
-  rejects `getUserMedia` with `NotAllowedError` BEFORE the browser prompts --
-  indistinguishable from the person declining. Voice would have passed every
-  test, worked under `npm run dev` (vite sends no such header), and been dead
-  in every cluster while blaming the user. It is `microphone=(self)` now;
-  camera and geolocation stay closed, and a Go test says why.
+Talk with MemQL is a separate live call. It joins a private LiveKit room and
+replaces the transcript with the MemQL mark and call controls. The controller
+runs in Go on an agent node, using routed ASR, the same Ask tool loop and
+sentence TTS. Local and federated routes can be mixed, with male and female
+voice choices. It currently uses the ASR/chat/TTS pipeline rather than OpenAI's
+native Realtime speech-to-speech protocol.
 
-- **DELTAS REPLACE THE FIELD; THEY NEVER APPEND.**
-  `AiTranscribeStreamDelta` carries the whole accumulated transcript, not an
-  increment -- the opposite of the chat path in the same component.
-  Appending renders "openopen theopen the fleet". The field is `readOnly`
-  while the mic writes it, never `disabled`, so it stays focusable.
+Audio contracts to preserve:
 
-- **THE LEVEL NEVER ENTERS REACT STATE.** It moves at the frame rate; state
-  would re-render the streaming answer log sixty times a second to animate one
-  ring. It is `--os-mic-level`, written from a rAF loop that runs only while
-  the mic is live. The ring itself is a `box-shadow` on the existing 30px
-  button -- the shell's cue language, and the geometry spec C promised would
-  not change when voice landed.
+- Dictation capture is mono PCM16. `pcm16.ts` resamples across capture blocks;
+  declaring an encoding does not convert MediaRecorder's WebM/Opus bytes.
+- Transcript callbacks replace the accumulated field; they do not append it.
+  The composer remains focusable while the microphone writes to it.
+- `Permissions-Policy: microphone=(self)` allows the browser to request access.
+  Camera and geolocation remain closed. A denied microphone is a standing
+  explanation, and text remains usable.
+- Only one surface may own the microphone. Closing or cancelling capture
+  releases the device; leaving a live room cancels the associated model work.
+- Dictation levels update a CSS property from the animation loop, outside React
+  state. Reduced-motion preferences apply to both microphone and call cues.
+- The response estimate follows the selected route and stops near its end with
+  Still working. It never acts as an inference timeout. Provider calls and
+  tool execution belong in Activity, rather than permanent composer chrome.
 
-- **A REFUSAL IS A STANDING FACT, NOT A PHASE.** `denied` outlives the
-  attempt that found it, so the control keeps explaining itself while the
-  person types. It covers a genuine refusal AND a Permissions-Policy block,
-  because browsers report them identically -- which is why the sentence names
-  the browser instead of accusing the reader of a choice they may not have
-  made. Text stays fully usable throughout, and nothing is a dialog.
-
-There is no input-LANGUAGE setting and no microphone PICKER, and both
-absences are deliberate: `ai_transcribe_stream.go` accepts `language_hint` and
-discards it (the language is pinned cluster-wide), and every browser already
-offers a per-site input device in the address bar. A control that changes
-nothing is worse than an absent one.
+There is no microphone picker: the browser owns per-site device selection.
+Provider and model choices follow MemQL's route policies. Deployment, local
+models, limits and telemetry details are documented in
+[Ask conversations and voice](../../docs/public/operate/ask-and-voice.md).
 
 ## Themes, the marketplace (epic memql#4745)
 
@@ -1790,8 +1849,8 @@ rules rather than repetitions.
   `component/edge`'s `validHost` takes, and for the same reason.
 
 - **A THEME CHANGES HOW THE OS LOOKS, NEVER HOW IT BEHAVES.** The format
-  carries 21 colour/depth tokens twice (dark and light) plus bounded wallpaper
-  parameters. The type scale, the radii, the grid cell and the motion
+  carries 20 colour/depth tokens twice (dark and light). The Fold wallpaper
+  derives its two planes from ground and ink; packs contain no graph parameters. The type scale, the radii, the grid cell and the motion
   durations are not in it at all. A marketplace must not be able to sell a
   desktop that will not scroll.
 
@@ -2310,6 +2369,10 @@ short-lived arrival animation, green Live health, amber setup warnings, red
 errors and Ask activity. It is not a notification feed. Users configure none
 of these markers.
 
+Icon buttons use `data-os-setup` for setup dots: the dot overlaps the upper-right
+corner without moving the icon. If an unseen-change marker is also present, it
+uses the upper-left corner; setup remains on the right.
+
 All registered apps participate through the shared desktop and phone shell:
 launcher entries, dock apps, window icons and section navigation aggregate
 unseen descendants. Section `parent` relationships aggregate automatically;
@@ -2382,6 +2445,70 @@ clears marks only after a successful write, preserves them on failure, and
 offers an in-surface retry. An old revision cannot acknowledge a newer one,
 and one person's receipts cannot dismiss another's changes.
 
+### GitHub Sources
+
+A repository source identifies a verified GitHub account, its organization or
+personal account, and a repository. Saved access bindings allow multiple GitHub
+identities and installations to coexist and be reused across repositories.
+Selection never infers the first or latest credential.
+
+Add a deployable offers saved repository paths or Add source. New source setup
+asks one question per screen: GitHub account, organization (or personal account),
+then repository, each confirmed by Continue. Together those choices describe the
+source. Settings owns adding accounts and organization access. The wizard selects only saved
+accounts and organizations; an accent text action takes people to Settings to add
+or manage them. With no configured account and organization, the repository method
+shows an amber marker and opens Settings. ZIP and CI remain usable. Back preserves
+drafts; changing an identity clears organization and repository choices, and changing
+an organization clears the repository. Configuration follows with branch, name,
+deployment mode and the separate MemQL owning account.
+
+Analyze registers the repository
+and starts its analysis. A saved repository is silently reused only with the same
+GitHub binding and MemQL ownership; its history never impersonates a different
+selected identity. Progress marks the visible step, not merely prefilled values.
+
+**Sources is the single configured repository catalog.** Each row projects the
+GitHub identity, organization or personal target, repository and tracked branch
+from the saved package and its verified access records. The MemQL owning account
+is separate attribution. There are no sibling Repositories or Accounts sections,
+and Settings links here without duplicating the credential roster. Opening a
+source exposes its access, repository settings, deployables and history. Missing
+personal metadata is labelled unknown; the repository URL cannot establish the
+GitHub identity that authorized it.
+
+Sources is management-only: new source setup remains in Add deployable. Remove
+source hides that configured package from the catalog and saved choices; it
+preserves the package ID, automatic updates, deployment history, running sites,
+shared credential and installation binding. Adding the same active configuration
+again restores or reuses that record atomically. Identity, installation binding,
+MemQL owner/account, repository and ref participate in reuse, so another identity
+or account never silently inherits its history. Archive and restore remain
+separate lifecycle actions. An installation binding without a configured
+repository never creates a Sources row.
+
+Existing repositories retain their original installation relationship and
+revalidate live access on fetch. Disconnect GitHub is a separate identity-wide
+operation: it revokes that identity's authorization and affects future fetches
+for every repository using it. Removing a source does not disconnect GitHub;
+neither operation uninstalls the shared GitHub App.
+
+Connect adds another identity. Reconnect explicitly names a stored credential
+and refuses a different numeric GitHub identity. OAuth uses PKCE and single-use
+shared state bound to the initiating live MemQL session. The installation setup
+return is neutral; protected Connect establishes the personal authorization.
+Per-identity database locks serialize callback upsert, refresh and disconnect
+across replicas, with uncached credential reads inside that boundary.
+
+The backend verifies owner, credential, installation and repository access on
+list, probe and create. Browser-provided provider claims cannot mint bindings.
+Source and credential changes, viewer changes and unmount invalidate pending
+reads and draft selections. Source creation and repository registration prevent
+duplicate submission; late responses cannot deploy a replacement flow. GitHub
+setup, refused access and pending organization approval stay visible in Add
+source. New connections do not offer pasted tokens; existing stored credentials
+remain manageable.
+
 ### Branch deployment policy
 
 Repository sources use the existing backend `autoDeploy` policy. Creation
@@ -2411,3 +2538,35 @@ Markers lead through Overview/map, source group and deployable row to
 source or deployable does not acknowledge it. Expanding Available version
 does, without deploying or removing the available update. Successful
 automatic updates do not create this manual-update attention item.
+
+### Storefront connections and testing
+
+The composition map's Store entry owns Testing (`previewBinding`) and
+Production (`binding`). Both selectors use the user's shared Shopify
+connections and may name any authorized store, including the same sandbox.
+Changing one binding never clears or changes the other. Storefronts show no
+candidate selection, preview grants, store checks or promotion action; a design
+update reaches both URLs. Candidate previews remain available for other kinds.
+
+Ask text, dictation, live voice and cluster setup: [Ask conversations and voice](../../docs/public/operate/ask-and-voice.md).
+
+
+### Ask navigation destinations
+
+The app manifest owns agent navigation as well as window chrome. App and section
+IDs must be stable. Declare record destinations in `records` with the owning
+section, an intent ID field, the authorized named list query, and display-label
+fields. Implement that intent in the app through the same selection state a
+person uses. Do not automate DOM selectors, manufacture clicks, or repeat a
+server mutation from a browser execution event. Unsupported record destinations
+must be reported honestly instead of opening an unrelated page.
+
+The engine catalog is generated from `OS_REGISTRY`. After changing destinations,
+run `MEMQL_UPDATE_NAVIGATION=1 npm test -- test/ask/navigationContract.test.ts`
+from `clients/os`; normal tests refuse a stale catalog. Server and browser both
+check current access. Include an app test that proves its intent reaches the
+actual detail page, including arrival while a different tab is selected.
+
+A navigation event holds a quiet window/tab glow long enough to be seen. Only
+an explicitly bound action control receives a control cue; reads and unrelated
+tool completions must not move focus or erase a navigation cue. No fake cursor.

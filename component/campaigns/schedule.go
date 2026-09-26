@@ -226,6 +226,9 @@ func (w *Worker) fireTimePreflight(ownerCtx context.Context, campaign Campaign) 
 	if !found {
 		return fmt.Sprintf("template %q is no longer readable", campaign.TemplateID), true
 	}
+	if err := w.validateCampaignOrganization(ownerCtx, campaign, tmpl); err != nil {
+		return err.Error(), true
+	}
 	if tmpl.Status != "ready" {
 		return fmt.Sprintf("template %q is %q rather than \"ready\"; it was un-readied after the campaign was scheduled", tmpl.ID, tmpl.Status), true
 	}

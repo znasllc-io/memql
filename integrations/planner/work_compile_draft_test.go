@@ -150,3 +150,33 @@ func TestReasoningAgentRefusesUnavailableOrForeignSeed(t *testing.T) {
 
 // Keep the compiler hook real; the stub only supplies the triage's model response.
 var _ authoringSandbox = realSandbox{}
+
+func TestNavigationDraftUsesOneTriageAndNoGeneralAgent(t *testing.T) {
+	eng := &countingCompileEngine{triage: map[string]any{"complexity": "trivial", "requiresFile": false, "navigation": map[string]any{"app": "deployables", "section": "deployables", "record": "VS Code and Cursor"}}}
+	out, err := (&PlannerAgentLoop{engine: eng}).CompileGoalForRun(context.Background(), compileReq(), nil, realSandbox{})
+	if err != nil || out.ModelCalls != 1 {
+		t.Fatalf("navigation draft: %+v %v", out, err)
+	}
+	for _, q := range eng.queries {
+		if strings.Contains(q, "assistantAgentForUser") || strings.Contains(q, "agentById") {
+			t.Fatalf("navigation resolved a general agent: %s", q)
+		}
+	}
+	decision := parseSectionableDecision(eng.triage)
+	bundle, err := synthesizeWorkReasoningBundle(compileReq(), "", decision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := bundle.Constructs[0].Source
+	if !strings.Contains(source, `builtin workNavigate(app: "deployables", section: "deployables", record: "VS Code and Cursor")`) || strings.Contains(source, "runAgentTurn") {
+		t.Fatalf("wrong navigation step: %s", source)
+	}
+	yes := true
+	decision.RequiresFile = &yes
+	decision.FileName = "report"
+	decision.FileFormat = "markdown"
+	bundle, err = synthesizeWorkReasoningBundle(compileReq(), "agent", decision)
+	if err != nil || strings.Contains(bundle.Constructs[0].Source, "workNavigate") {
+		t.Fatalf("file goal reduced to navigation: %+v %v", bundle, err)
+	}
+}

@@ -61,7 +61,7 @@ const RAN_CLEAN_HEALTH = syncStateRow({
  *  lookup here would race the inventory and read as a missing row. */
 async function rowFor(conceptId: string): Promise<HTMLElement> {
   const el = await screen.findByText(conceptId);
-  return el.closest(".os-cluster-tr") as HTMLElement;
+  return el.closest("li") as HTMLElement;
 }
 
 beforeEach(() => {
@@ -69,6 +69,22 @@ beforeEach(() => {
 });
 
 describe("the data-origins table", () => {
+  it("uses silent skeletons during a delayed read and exposes a failed read", async () => {
+    const connection = fakeConnection();
+    let reject!: (reason: Error) => void;
+    connection.query.dataOrigins.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+    const view = mount(connection);
+    const label = screen.getByText("Loading the declared inventory");
+    expect(label.className).toBe("os-sr-only");
+    expect(label.closest('[aria-busy="true"]')).not.toBeNull();
+    expect(view.container.querySelector(".os-skeleton-block")).not.toBeNull();
+    expect(screen.queryByText(/Reading the (trail|declared inventory)/)).toBeNull();
+    await act(async () => reject(new Error("temporarily unavailable")));
+    expect(view.container.querySelector(".os-record-skeleton")).toBeNull();
+    expect(screen.getByText("temporarily unavailable")).toBeTruthy();
+  });
+
+
   it("renders absent health as an em dash and NOT as a zero", async () => {
     // THE REGRESSION THAT MATTERS. A connector that has never run has no lag,
     // no drift, no outbox depth and no dead letters. Rendering any of those
@@ -278,9 +294,9 @@ describe("connector coverage", () => {
     // The silent one's ratio carries the attention ink; the reporting one's
     // does not. Asserted through the tone attribute rather than a computed
     // colour, which jsdom cannot see.
-    const silent = screen.getByText("0 of 1 reported").closest(".os-cluster-coverage-line");
-    const reporting = screen.getByText("1 of 1 reported").closest(".os-cluster-coverage-line");
-    expect(silent?.getAttribute("data-tone")).toBe("silent");
-    expect(reporting?.getAttribute("data-tone")).toBe("reporting");
+    const silent = screen.getByText("0 of 1 reported").closest(".os-record-row");
+    const reporting = screen.getByText("1 of 1 reported").closest(".os-record-row");
+    expect(silent?.querySelector(".os-record-status")?.getAttribute("data-tone")).toBe("warn");
+    expect(reporting?.querySelector(".os-record-status")?.getAttribute("data-tone")).toBe("muted");
   });
 });

@@ -127,6 +127,17 @@ describe("refusal copy coverage", () => {
     expect(copyFor("deployable_target_not_offered")?.next).toBe("");
   });
 
+  it("says what an unattached storefront is, and names the refusal that keeps it from going live", () => {
+    // deployable_store_unknown is a NOTE now (Connect Shopify, D5): the run
+    // succeeded and placed an unattached draft, or kept the store it had. A
+    // headline saying the store does not exist would be false for a store the
+    // person may read and not attach, and for every bound redeploy.
+    const unknown = copyFor("deployable_store_unknown");
+    expect(unknown?.title).toBe("This storefront's store was not attached");
+    expect(unknown?.next).toContain("Store panel");
+    expect(unknown?.next).toContain("design review");
+  });
+
   it("says the DEPLOY SUCCEEDED for the two placement halves", () => {
     // The pipeline applies the account and the domain AFTER the publish and
     // records a refusal on the outcome without failing the run
@@ -283,5 +294,35 @@ describe("refusal copy coverage", () => {
     ]) {
       expect(toneFor(code), code).toBe("warn");
     }
+  });
+
+  it("has copy for every way Connect Shopify's callback can end badly", () => {
+    // component/identity/http/shopify_callback.go. The signature and the
+    // scopes are fixed in Shopify, a lost permission by whoever grants it:
+    // next steps. A failed exchange or mint is a fault.
+    expect(copyFor("signature_invalid")?.next).toContain("client secret");
+    expect(copyFor("scopes_missing")?.next).toContain("scopes");
+    expect(copyFor("storefront_token_failed")?.next).toContain("Connect Shopify again");
+    for (const code of ["signature_invalid", "permission_lost", "scopes_missing"]) {
+      expect(toneFor(code), code).toBe("warn");
+    }
+    for (const code of ["exchange_failed", "storefront_token_failed"]) {
+      expect(copyFor(code), code).not.toBeNull();
+      expect(toneFor(code), code).toBe("error");
+    }
+  });
+
+  it("has copy for every reason Connect Shopify's builtins answer", () => {
+    // integrations/shopify/connect.go. Each is a step to take except the
+    // duplicated credential rows, which are the cluster's fault.
+    for (const code of [
+      "site_not_writable", "not_a_storefront", "store_not_named", "store_redacted", "app_credentials_invalid",
+      "store_not_connected", "store_in_use", "storefront_token_required", "storefront_token_invalid", "shopify_app_not_saved",
+    ]) {
+      expect(copyFor(code), code).not.toBeNull();
+      expect(toneFor(code), code).toBe("warn");
+    }
+    expect(copyFor("secret_name_ambiguous")).not.toBeNull();
+    expect(toneFor("secret_name_ambiguous")).toBe("error");
   });
 });

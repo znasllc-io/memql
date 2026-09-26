@@ -2,6 +2,7 @@ package automations
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -859,7 +860,24 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 	// function's comment.
 	trusted := stepCtx != nil && stepCtx.Execution != nil && stepCtx.Execution.SourceTrusted
 	stepExecCtx := e.withRunContext(originForSource(ctx, trusted), stepCtx, step)
+	// Every owned goal step uses the same call journal, including structured
+	// composition and deterministic templates that invoke a model indirectly.
+	// The observer is installed on the executing replica with this step's id.
+	var callContext context.Context
+	if run, ok := common.RunFromContext(stepExecCtx); ok && run.OwnerUserId != "" && run.GoalId != "" && e.engine != nil {
+		var cancel context.CancelCauseFunc
+		callContext, cancel = context.WithCancelCause(stepExecCtx)
+		defer cancel(nil)
+		stepExecCtx = e.engine.ObserveWorkCalls(callContext, cancel)
+	}
 	result, err := e.stepRegistry.Execute(stepExecCtx, step, stepCtx)
+	if callContext != nil && context.Cause(callContext) != nil {
+		var stopped *memql.WorkCancelledError
+		if errors.As(context.Cause(callContext), &stopped) {
+			return result, &runCancelled{by: stopped.By}
+		}
+		return result, context.Cause(callContext)
+	}
 
 	// A cancelled executor may return no result. Lifecycle reporting must not
 	// turn cooperative cancellation into a nil-pointer panic.

@@ -1,29 +1,7 @@
 import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
-// What a storefront preview looks like from the shell (epic memql#5531).
-//
-// ===========================================================================
-// THE VOCABULARY IS FIXED AND IS NOT THIS FILE'S TO VARY
-// ===========================================================================
-// A deployable has a SERVING VERSION and may have a CANDIDATE VERSION; it has
-// a BINDING (the store shoppers reach) and may have a PREVIEW BINDING (the
-// development store); a PREVIEW is an authorized operator's view of the
-// candidate. Those six words are the design record's (D7, confirmed by the
-// owner on 2026-09-20) and they are used unchanged from the engine's guard to
-// the label on the screen -- because "which version, against which store" is
-// the only question this surface exists to answer, and a synonym introduced
-// anywhere in that chain is a place two readers can disagree.
-//
-// PREVIEW IS NOT AN ENVIRONMENT, and the shell must not imply otherwise. One
-// cluster, one deployable, one hostname. Nothing here is a second anything.
-//
-// ===========================================================================
-// AN UNMEASURED OBSERVATION IS NOT A FAILED ONE
-// ===========================================================================
-// Three states, drawn three ways, and collapsing any two of them is the one
-// dishonesty this surface can commit. A step that ANSWERED, a step that was
-// ASKED AND DID NOT ANSWER, and a step NOBODY HAS ASKED are different facts
-// about a storefront somebody is about to point at real money.
+// Storefront Testing shares the production bundle and has its own hostname
+// and store. Candidate previews remain available for other deployable kinds.
 
 /** One preview an operator opened. */
 export interface PreviewGrantRow {
@@ -172,6 +150,7 @@ export interface PreviewReadiness {
   storeIsDevelopment: boolean;
   previewStoreId: string;
   previewStoreDomain: string;
+  testingUrl: string;
   canPreview: boolean;
   canPromote: boolean;
   canGoLive: boolean;
@@ -195,6 +174,7 @@ export function readinessFromRow(row: Row): PreviewReadiness {
     storeIsDevelopment: bool("storeIsDevelopment"),
     previewStoreId: rowString(row, "previewStoreId"),
     previewStoreDomain: rowString(row, "previewStoreDomain"),
+    testingUrl: rowString(row, "testingUrl"),
     canPreview: bool("canPreview"),
     canPromote: bool("canPromote"),
     canGoLive: bool("canGoLive"),

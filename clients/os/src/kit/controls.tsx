@@ -110,9 +110,13 @@ export function Input({
   disabled = false,
   onEnter,
   code = false,
+  type = "text",
 }: {
+  type?: "text" | "password";
   value: string;
   onChange: (next: string) => void;
+  /** Explicit confirmation, including choosing the current value. Dismissal does not commit. */
+  onCommit?: () => void;
   id: string;
   /** Always required, visually hidden by default. A control with no name is
    *  unreachable by anyone not using their eyes. */
@@ -134,6 +138,7 @@ export function Input({
       </label>
       <input
         id={id}
+        type={type}
         className={code ? "os-input os-mono" : "os-input"}
         value={value}
         disabled={disabled}
@@ -365,12 +370,15 @@ export function listScrollTop(
 export function Select({
   value,
   onChange,
+  onCommit,
   id,
   label,
   children,
 }: {
   value: string;
   onChange: (next: string) => void;
+  /** Explicit confirmation, including choosing the current value. Dismissal does not commit. */
+  onCommit?: () => void;
   id: string;
   /** Always required, visually hidden. Names the control AND the open list. */
   label: string;
@@ -455,6 +463,7 @@ export function Select({
     // writes a recipient's subscription status and re-reads the roster.
     // Re-picking what is already chosen must not post either of those.
     if (option.value !== value) onChange(option.value);
+    onCommit?.();
   }
 
   /** Where a letter lands. Returns -1 when nothing starts with the buffer. */
@@ -883,6 +892,7 @@ export interface ChoiceOption {
   /** The value's own name. Rendered in the data voice -- these are enum
    *  members, and dressing them up as prose hides what to type elsewhere. */
   label: string;
+  indicator?: ReactNode;
   /** What it MEANS, in the reader's terms. "leastLoaded" does not say what it
    *  is least-loaded against. */
   description?: string;
@@ -940,7 +950,7 @@ export function ChoiceStack({
           onClick={() => onChange(option.value)}
         >
           <span className={voice === "prose" ? "os-choice-card-name" : "os-choice-card-name os-mono"}>
-            {option.label}
+            {option.label}{option.indicator ? <> {option.indicator}</> : null}
           </span>
           {option.description ? (
             <span className="os-choice-card-note">{option.description}</span>
@@ -1008,8 +1018,8 @@ export function Head({ title, meta, children, breadcrumbs, back, navigation = tr
   </>;
 }
 
-export function Subhead({ children }: { children: ReactNode }) {
-  return <h4 className="os-subhead">{children}</h4>;
+export function Subhead({ children, meta }: { children: ReactNode; meta?: ReactNode }) {
+  return <h4 className="os-subhead">{children}{meta !== undefined && meta !== null ? <> <span className="os-head-meta os-subhead-meta">{meta}</span></> : null}</h4>;
 }
 
 export function FormRow({ children }: { children: ReactNode }) {
@@ -1094,26 +1104,9 @@ export function Notice({
 // Rows
 // ---------------------------------------------------------------------------
 
-/**
- * One line in a live list.
- *
- * An icon, a name, whatever the surface wants to say quietly in between, and a
- * state cluster on the trailing edge. Fleet wrote this as `.os-machine`; the
- * note in the stylesheet's app-local section says the day a second app wants
- * one is the day it moves up here rather than being copied sideways, and the
- * Users app is that second app.
- *
- * `current` is the row's own liveness -- online for a machine, active for a
- * person -- and it is what takes the row from muted to full ink, so a list
- * reads its own state before anybody has read a word of it. `dim` is the
- * other axis: still true, no longer live (revoked, deactivated). They are
- * independent, because a deactivated account can still have a live session.
- *
- * `onOpen` is what makes it a button. A row with no `onOpen` renders as a
- * plain line -- not a button with nothing behind it, which is a control that
- * announces itself to a screen reader and then does nothing.
- */
-export function Row({
+/** Compact column picker. App record collections use RecordRow instead.
+ * Kept for the repository chooser's aligned visibility/branch/date cells. */
+export function PickerRow({
   icon,
   name,
   children,

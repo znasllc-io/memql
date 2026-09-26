@@ -173,6 +173,8 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 			"attribute name changed, which would silently exempt nothing and gate nothing.")
 	}
 	want := map[serverOnlyKey]bool{
+		// Ownership alone cannot prevent forged assistant replies/action evidence.
+		{"os/ask.memql", "saveAskConversation"}: true,
 		// epic memql#4800. The accounts seed's existence probe. It runs from
 		// the seedSelfAccount automation at system.startup, under the engine's
 		// own system actor, before any person has signed in -- so actor.userId
@@ -248,6 +250,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// rows keep their composite owner tier, which is what decides who can
 		// READ what this writes.
 		{Path: "accounts/mutations.memql", Name: "recordAccountDomainCheck"}: true,
+		// The successful first-claim coordinator writes the reserved self row
+		// before a completed owner session exists. Only it may associate the
+		// verified claim user after mandatory passkey completion, under the
+		// database claim lock; ordinary forms cannot choose the owner.
+		{Path: "accounts/mutations.memql", Name: "configureClusterAccount"}: true,
 
 		// epic memql#5165, D2. Both group writers, and the argument is the
 		// concept's shape rather than the caller's: v1:identity:group and
@@ -408,6 +415,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "identity/queries.memql", Name: "githubConnectStateByHash"}:    true,
 		{Path: "identity/mutations.memql", Name: "createGithubConnectState"}:  true,
 		{Path: "identity/mutations.memql", Name: "consumeGithubConnectState"}: true,
+		// actor.userId stamps the personal selection's owner, but ownership is
+		// not proof of provider authorization. Only the verified OAuth callback
+		// may assert this active connection; a self-scoped public writer would
+		// let a user forge a connection without completing Shopify approval.
+		{Path: "platform/mutations.memql", Name: "recordExternalConnection"}: true,
 		// epic memql#4378, the SYNC RUNTIME's own bookkeeping. Eight
 		// writers over two engine-owned concepts -- an outbox queue and a
 		// health timeline -- and the argument is one argument, not eight.
@@ -657,6 +669,13 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// person does needs them: a grant is unsealed only inside a fetch, a
 		// poll, a probe or the connect callback, into a local that dies with
 		// the call.
+		// Personal installation bindings are verified facts, not arbitrary owned
+		// data. actor.userId cannot prove live grant/install membership or derive
+		// provider identity; record is reached only after GitHub verification.
+		// Removal likewise requires the separate execute Sources capability;
+		// owning a row plus generic data update is insufficient for that action.
+		{Path: "platform/mutations.memql", Name: "recordSourceConnection"}:       true,
+		{Path: "platform/mutations.memql", Name: "removeSourceConnection"}:       true,
 		{Path: "platform/mutations.memql", Name: "createGithubAppGrant"}:         true,
 		{Path: "platform/mutations.memql", Name: "updateGithubAppGrant"}:         true,
 		{Path: "platform/mutations.memql", Name: "refreshGithubAppGrantToken"}:   true,

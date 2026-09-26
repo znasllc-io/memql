@@ -289,3 +289,20 @@ describe("when the domain read fails", () => {
     expect(screen.getByText("domains unavailable")).toBeTruthy();
   });
 });
+
+
+describe("review count availability", () => {
+  it("does not claim an empty queue when its domain discovery is denied", async () => {
+    const view = mount(fakeConnection({ domainsError: "review domains denied" }));
+    expect(view.container.querySelector(".os-head-meta")).toBeNull();
+    await settle(6);
+    expect(view.container.querySelector(".os-head-meta")).toBeNull();
+  });
+
+  it("labels the measured queue as loaded rather than a total", async () => {
+    const view = mount(fakeConnection({ domainRows: [domainLiteRow("sales", "unvalidated")], chunkPages: { sales: [pageOf(0, 30), pageOf(30, 10)] } }));
+    await settle(6);
+    expect(view.container.querySelector(".os-head-meta")?.textContent).toBe("30 loaded");
+    expect(screen.getByRole("button", { name: "Load more" })).toBeTruthy();
+  });
+});

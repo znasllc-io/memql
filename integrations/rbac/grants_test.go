@@ -8,6 +8,7 @@ import (
 
 	componentAuth "github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // EACH GOVERNANCE RULE REFUSES BY ITS CODE (app access grants record, section
@@ -397,4 +398,47 @@ func (s *fakeGrantSource) ActiveGrantsForGroups(_ context.Context, groupIds []st
 		out = append(out, s.group[g]...)
 	}
 	return out, nil
+}
+
+// Discovery remains alongside the original global decision; a scoped answer
+// must never turn a deny into an unscoped permission.
+type organizationDiscoveryEngine struct {
+	roleEngine
+	calledUser string
+}
+
+func (e *organizationDiscoveryEngine) ResolveOrganizationCapabilities(ctx context.Context, _ []componentAuth.Decision) []memql.OrganizationCapability {
+	ac, _ := componentAuth.AccessFromContext(ctx)
+	e.calledUser = ac.UserId
+	return []memql.OrganizationCapability{
+		{AccountID: "acme", Verb: "read", Resource: "app:deployables", Effect: "allow"},
+		{AccountID: "beta", Verb: "read", Resource: "app:deployables", Effect: "deny"},
+	}
+}
+func TestEffectiveCapabilitiesKeepsOrganizationDiscoverySeparate(t *testing.T) {
+	i, _ := grantsEngine(t)
+	e := &organizationDiscoveryEngine{roleEngine: i.engine}
+	i.engine = e
+	src := &fakeGrantSource{user: map[string][]componentAuth.Grant{"caller": {{Verb: "read", Resource: "app:deployables", Effect: componentAuth.GrantDeny}}}}
+	componentAuth.SetGrantSource(src)
+	t.Cleanup(func() { componentAuth.SetGrantSource(nil) })
+	nodes, err := i.handleEffectiveCapabilities(asRole("admin"), map[string]any{"subjectId": "forged"}, 0)
+	if err != nil || len(nodes) != 1 {
+		t.Fatalf("nodes=%d err=%v", len(nodes), err)
+	}
+	var payload struct {
+		Entries             []struct{ Verb, Resource, Effect string }
+		OrganizationEntries []memql.OrganizationCapability `json:"organizationEntries"`
+	}
+	if err := json.Unmarshal(nodes[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if memql.BareShortId(e.calledUser) != "caller" || len(payload.OrganizationEntries) != 2 {
+		t.Fatalf("wrong discovery identity or decisions: %+v", payload)
+	}
+	for _, entry := range payload.Entries {
+		if entry.Verb == "read" && entry.Resource == "app:deployables" && entry.Effect != "deny" {
+			t.Fatal("organization permission replaced the global denial")
+		}
+	}
 }

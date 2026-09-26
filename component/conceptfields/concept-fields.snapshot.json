@@ -813,7 +813,6 @@
         "status"
       ],
       "required": [
-        "campaignId",
         "email",
         "ownerUserId",
         "recipientId",
@@ -2377,14 +2376,24 @@
       "concept": "v1:identity:githubConnectState",
       "file": "identity/concepts.memql",
       "fields": [
+        "clientId",
         "consumedAt",
         "consumedFromIP",
+        "credentialId",
+        "credentialSource",
+        "expectedExternalId",
         "expiresAt",
+        "flowId",
         "organization",
+        "pkceVerifier",
         "purpose",
         "returnPath",
+        "sessionId",
+        "shopDomain",
+        "siteId",
         "sourceIP",
         "stateHash",
+        "targetRevokedAt",
         "userId"
       ],
       "required": [
@@ -2425,6 +2434,7 @@
       "concept": "v1:identity:groupMembership",
       "file": "identity/concepts.memql",
       "fields": [
+        "accountId",
         "addedBy",
         "groupId",
         "origin",
@@ -3437,6 +3447,20 @@
       }
     },
     {
+      "concept": "v1:os:askConversation",
+      "file": "os/ask.memql",
+      "fields": [
+        "ownerUserId",
+        "title",
+        "transcript"
+      ],
+      "required": [
+        "ownerUserId",
+        "title",
+        "transcript"
+      ]
+    },
+    {
       "concept": "v1:os:attentionReceipt",
       "file": "os/concepts.memql",
       "fields": [
@@ -3666,6 +3690,24 @@
       "required": [
         "dimensions",
         "providerRef"
+      ]
+    },
+    {
+      "concept": "v1:platform:externalConnection",
+      "file": "platform/concepts.memql",
+      "fields": [
+        "label",
+        "ownerUserId",
+        "provider",
+        "resourceId",
+        "status"
+      ],
+      "required": [
+        "label",
+        "ownerUserId",
+        "provider",
+        "resourceId",
+        "status"
       ]
     },
     {
@@ -4063,7 +4105,9 @@
         "ownerUserId",
         "repoRef",
         "repoUrl",
+        "sourceConnectionId",
         "sourceKind",
+        "sourceRemoved",
         "status",
         "updateAvailable"
       ],
@@ -4398,6 +4442,34 @@
           "catalog_read",
           "checkout_url",
           "order_mirrored"
+        ]
+      }
+    },
+    {
+      "concept": "v1:platform:sourceConnection",
+      "file": "platform/concepts.memql",
+      "fields": [
+        "accountLogin",
+        "accountType",
+        "credentialId",
+        "installationId",
+        "ownerUserId",
+        "providerAccountId",
+        "status"
+      ],
+      "required": [
+        "accountLogin",
+        "accountType",
+        "credentialId",
+        "installationId",
+        "ownerUserId",
+        "providerAccountId",
+        "status"
+      ],
+      "enums": {
+        "status": [
+          "active",
+          "removed"
         ]
       }
     },
@@ -7966,6 +8038,7 @@
         "chainHead",
         "errorCode",
         "errorMessage",
+        "executionAuthority",
         "expectedFootprint",
         "finishedAt",
         "forkAtStepKey",

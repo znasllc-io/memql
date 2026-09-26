@@ -14,6 +14,7 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	componentIdentity "github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/githubconnect"
+	"github.com/znasllc-io/memql/component/secret"
 )
 
 // GITHUB CONNECT STARTS HERE, OVER THE STREAM (epic memql#4912, decision C4).
@@ -114,14 +115,41 @@ func (i *IdentityIntegration) handleGithubConnectBegin(ctx context.Context, args
 		return nil, fmt.Errorf("identity.githubConnectBegin: this node has no engine, so the connect state cannot be stored")
 	}
 
+	claims, _ := componentAuth.ClaimsFromContext(ctx)
+	sessionID, _ := claims["sid"].(string)
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, fmt.Errorf("identity.githubConnectBegin: a browser session is required")
+	}
+	flowID := strings.TrimSpace(stringArg(args, "flowId"))
+	if len(flowID) > 128 {
+		return nil, fmt.Errorf("identity.githubConnectBegin: flowId is too long")
+	}
+	verifier, err := githubconnect.NewVerifier()
+	if err != nil {
+		return nil, err
+	}
+	sealedVerifier, _, err := secret.Encrypt(verifier)
+	if err != nil {
+		return nil, fmt.Errorf("identity.githubConnectBegin: seal PKCE verifier: %w", err)
+	}
+	store := &componentIdentity.Store{Engine: i.engine, Logger: i.logger}
+	credentialID, expectedID, revokedAt := "", "", ""
+	if requested := strings.TrimSpace(stringArg(args, "credentialId")); requested != "" {
+		target, err := store.GithubReconnectTarget(ctx, requested)
+		if err != nil {
+			return nil, err
+		}
+		credentialID, expectedID, revokedAt = target.ID, target.ExternalId, target.RevokedAt
+	}
 	state, err := randomState()
 	if err != nil {
 		return nil, fmt.Errorf("identity.githubConnectBegin: mint connect state: %w", err)
 	}
 
-	store := &componentIdentity.Store{Engine: i.engine, Logger: i.logger}
 	if _, err := store.CreateGithubConnectState(ctx, componentIdentity.GithubConnectStateSeed{
-		UserId: userId,
+		UserId:    userId,
+		SessionId: sessionID, PKCEVerifier: sealedVerifier,
+		CredentialId: credentialID, ExpectedExternalId: expectedID, TargetRevokedAt: revokedAt, FlowId: flowID,
 		// ONLY THE DIGEST IS STORED. A row read is not a credential: anyone
 		// who could read this row would otherwise be able to complete
 		// somebody else's connect and land a grant on their account.
@@ -158,7 +186,7 @@ func (i *IdentityIntegration) handleGithubConnectBegin(ctx context.Context, args
 	// MEMQL_DOMAIN at boot in main.go -- which is what lets this capability
 	// answer the same URL wherever the stream happens to land.
 	redirectURI := githubconnect.RedirectURI(identityBaseURLFromEnv())
-	return connectResult(cfg.AuthorizeURL(redirectURI, state), connectReasonOK, cfg.InstallURL()), nil
+	return connectResult(cfg.AuthorizeURL(redirectURI, state, verifier), connectReasonOK, cfg.InstallURL()), nil
 }
 
 // identityBaseURLFromEnv is the ONE read of MEMQL_IDENTITY_BASE_URL in this

@@ -19,6 +19,7 @@ import {
   sectionsFor,
 } from "../system/registry";
 import { useSession } from "./access";
+import { useAppSetupMark } from "./useAppSetupMark";
 import { Mark } from "./Mark";
 import { useOs } from "./state";
 import { WindowErrorBoundary } from "./WindowErrorBoundary";
@@ -48,7 +49,7 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
   const gate = gateFor(readiness, sectionReqs.requires, sectionReqs.wants);
   const appReqs = current ? allRequirementsFor(current) : { requires: [], wants: [] };
   const appGate = gateFor(readiness, appReqs.requires, appReqs.wants);
-  const settingsTone = current ? markToneFor(appGate) : null;
+  const { settingsTone, reportSetupState } = useAppSetupMark(current?.id ?? "", current ? markToneFor(appGate) : null);
   // The dot inside a button is DECORATIVE and the button says the state
   // itself: a labelled role="img" nested in a button appends to the button's
   // accessible name, so "Settings" would announce as "Settings Campaigns is
@@ -122,6 +123,7 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
             <WindowErrorBoundary key={current.id} app={current.id} section={activeSection?.id ?? ""}>
               <AttentionDestination appId={current.id} sectionId={activeSection?.id ?? ""}><current.component
                 sectionId={activeSection?.id ?? ""}
+                reportSetupState={reportSetupState}
                 navigate={setSectionId}
                 askContext={(tag) => openAsk(tag)}
               /></AttentionDestination>

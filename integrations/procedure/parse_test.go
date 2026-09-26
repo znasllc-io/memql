@@ -110,18 +110,19 @@ func everyRenderedStatement(t *testing.T) []recordedCall {
 		out = append(out, eng.recorded()...)
 	}
 
-	// A first lift, with the maintenance principal's by-id read in front of
-	// it -- the path the automation takes.
+	// A first lift through the completion trigger -- the path the automation
+	// takes: it borrows the run's owner and reads the run through the owned
+	// read.
 	eng := newFakeEngine()
 	seedCorpus(t, eng, twoRecordings()...)
-	eng.reply("workRunById", twoRecordings()[1].runRow())
+	eng.reply("workRunForOwner", twoRecordings()[1].runRow())
 	i := newTestIntegration(eng)
 	i.SetCompiler(&passingGate{})
-	maintenance := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("learnFromSucceededRun"))
-	if _, err := i.learnFromRun(maintenance, twoRecordings()[1].runId, LevelAction); err != nil {
+	if _, err := i.handleLearnFromRun(triggerCtx(), map[string]any{"runId": twoRecordings()[1].runId, "ownerUserId": testOwner}, 0); err != nil {
 		t.Fatalf("learnFromRun: %v", err)
 	}
 	collect(eng)
+	maintenance := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("mineProcedureCorpusAcrossAutomations"))
 
 	// A re-lift of a changed procedure, a candidate re-entering, and the
 	// person's own read path.
@@ -165,7 +166,7 @@ func everyRenderedStatement(t *testing.T) []recordedCall {
 func TestEveryStatementTheLiftRendersParses(t *testing.T) {
 	calls := everyRenderedStatement(t)
 	want := []string{
-		"workRunById", "workRunForOwner", "workRunsForOwnerGoalSignature", "workStepsForOwnerRun",
+		"workRunForOwner", "workRunsForOwnerGoalSignature", "workStepsForOwnerRun",
 		"workObservationsForOwnerRun", "libraryFileById", "workGoalForOwner", "procedureConstructByName",
 		"createAuthoringBundle", "createAuthoringConstruct", "recordProcedure", "recordBundleValidation",
 		"recordConstructLadder", "recordConstructGoalSignature", "usersForSeedSweep", "workRunsForOwner",

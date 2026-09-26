@@ -50,9 +50,9 @@ import (
 // it would refuse the case the feature is most wanted in, for a reason that
 // does not hold here.
 //
-// The gate is instead the one every campaign-scoped builtin uses: the
-// composite-tier read of the campaign. A caller who cannot read it cannot
-// test-send it.
+// The campaign must be readable, and the caller must currently hold write
+// permission in its organization. Reading a campaign alone cannot authorize
+// sending mail.
 //
 // # `to` is REQUIRED and never defaults to the caller
 //
@@ -93,6 +93,9 @@ func (w *Worker) handleTestSend(ctx context.Context, args map[string]any, _ int)
 	if !found {
 		return nil, fmt.Errorf("campaigns.testSend: campaign %q not found", campaignID)
 	}
+	if err := w.requireSendAuthority(ctx, campaign.AccountID); err != nil {
+		return nil, err
+	}
 	if reason := w.cfg.RequireUnsubscribe(); reason != "" {
 		// The same precondition a real send has. A test message is a real
 		// message to a real mailbox, and one without a working opt-out is the
@@ -109,6 +112,9 @@ func (w *Worker) handleTestSend(ctx context.Context, args map[string]any, _ int)
 	}
 	if !found {
 		return nil, fmt.Errorf("campaigns.testSend: template %q is not readable", campaign.TemplateID)
+	}
+	if !sameOrganization(campaign.AccountID, tmpl.AccountID) {
+		return nil, errors.New("campaigns.testSend: campaign and template must belong to the same organization")
 	}
 	// NO template-status check, unlike the send preflight. Refusing a draft
 	// is what stops half-written copy reaching an audience; a test send to

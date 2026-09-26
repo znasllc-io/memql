@@ -59,7 +59,7 @@ func TestOwnedWorkLanesPreserveFleetSelectionContext(t *testing.T) {
 	for _, background := range []bool{false, true} {
 		t.Run(fmt.Sprintf("background=%v", background), func(t *testing.T) {
 			owner := "v1:identity:user:fleet-work-owner"
-			ctx, err := auth.ContextWithPersistedOwner(context.Background(), owner)
+			ctx, err := auth.ContextWithPersistedOwner(context.Background(), owner, nil, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

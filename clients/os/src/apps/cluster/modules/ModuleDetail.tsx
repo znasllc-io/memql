@@ -1,8 +1,9 @@
+import { ContentSkeleton } from "../../../kit/ContentSkeleton";
 import { useCallback, useMemo, useState } from "react";
 import type { Module, ModuleDetail as ModuleDetailWire, ModulesClient } from "@znasllc-io/memql-sdk-core/client";
 
 import { ActionBar, type Act, type ActionBarTone } from "../../../kit/ActionBar";
-import { Button, Caption, Chip, Fact, Facts, Head, Notice, Panel, Subhead, roleAdmits, stateWords } from "../../../kit";
+import { Button, Caption, Chip, Fact, Facts, Head, Notice, Panel, Subhead, RecordList, RecordRow, stateWords } from "../../../kit";
 import { useSession } from "../../../chrome/access";
 import { useReading } from "../../../cluster/reading";
 import type { Verdict } from "../../../system/readinessFold";
@@ -56,12 +57,14 @@ export function ModuleDetail({
   onFlipped: () => void;
 }) {
   const session = useSession();
-  // OWNER-ONLY, AND ABSENT RATHER THAN DISABLED (DESIGN.md rule 12). The
-  // engine's write gate on the registry is cluster-owner; an admin who can
-  // READ this page cannot flip a pack. A greyed-out switch would be a control
-  // they have to read past to learn it is not for them, and an enabled one
-  // would be a refusal they find out about by being told no.
-  const isOwner = roleAdmits(session.access?.role ?? "", { min: "owner" });
+  // THE ENGINE'S ANSWER, AND ABSENT RATHER THAN DISABLED (DESIGN.md rule 12).
+  // `mayFlip` is computed per caller by the same function the write asks: an
+  // owner may flip any pack, a developer a storefront pack (Connect Shopify
+  // design, D4), an admin who can READ this page none. No role is read here --
+  // a second copy of that rule would be one that drifts. A greyed-out switch
+  // would be a control they have to read past to learn it is not for them,
+  // and an enabled one would be a refusal they find out about by being told no.
+  const mayFlip = module.mayFlip;
   // The cluster-wide reading of this module, when the registry's name is also
   // a readiness module -- the one feed the shell retains, never a second read.
   const verdict = readinessForModule(module, session.readiness);
@@ -103,7 +106,7 @@ export function ModuleDetail({
 
   // The acts legal from this state, computed rather than rendered-then-hidden.
   const acts: Act[] = useMemo(() => {
-    if (!flippable || !isOwner) return [];
+    if (!flippable || !mayFlip) return [];
     return [
       {
         label: enabled ? "Disable this pack" : "Enable this pack",
@@ -111,7 +114,7 @@ export function ModuleDetail({
         onAct: () => setConfirming(true),
       },
     ];
-  }, [flippable, isOwner, enabled]);
+  }, [flippable, mayFlip, enabled]);
 
   const envVars = detail.value?.envVars ?? [];
 
@@ -145,16 +148,16 @@ export function ModuleDetail({
             <Caption>{noSwitchSentence(module.kind)}</Caption>
           )}
 
-          {flippable && !isOwner ? (
+          {flippable && !mayFlip ? (
             <Caption>
-              Only a cluster owner can change what a pack does. Nothing on this page will change it
-              for you.
+              You cannot change what this pack does. An owner can change any pack, and a developer
+              a storefront pack. Nothing on this page will change it for you.
             </Caption>
           ) : null}
 
           {verdict ? <ReadinessAcross verdict={verdict} /> : null}
 
-          <Subhead>Environment</Subhead>
+          <Subhead meta={detail.state === "read" && !detail.error ? envVars.length : undefined}>Environment</Subhead>
           {detail.state === "failed" ? (
             <Notice
               tone="error"
@@ -163,7 +166,7 @@ export function ModuleDetail({
             />
           ) : null}
           {detail.state === "reading" && detail.value === null ? (
-            <Caption>Reading this module's environment.</Caption>
+            <ContentSkeleton kind="detail" label="Loading this module's environment" />
           ) : null}
           {detail.state === "read" && envVars.length === 0 ? (
             <Caption>This module declares no environment variables.</Caption>
@@ -318,30 +321,13 @@ function ReadinessAcross({ verdict }: { verdict: Verdict }) {
   const lines = readinessNodeLines(verdict, new Date());
   return (
     <>
-      <Subhead>Across the cluster</Subhead>
+      <Subhead meta={lines.length}>Across the cluster</Subhead>
       <p className="os-cluster-fact">{acrossSentence(verdict)}</p>
       {lines.length === 0 ? null : (
-        <div className="os-cluster-readiness" role="list" aria-label={`${verdict.module} on each live node`}>
-          {lines.map((line) => (
-            <div
-              key={line.nodeId}
-              className="os-cluster-readiness-row"
-              role="listitem"
-              data-aside={line.counted ? undefined : true}
-              // The exact moment this node read the cluster, beside the
-              // relative words a person reads. Two nodes that both say "2m
-              // ago" are ordered by nothing visible, and that order is what
-              // the fold's staleness rule turns on.
-              title={line.at || undefined}
-            >
-              <span className="os-cluster-readiness-node os-mono">{line.nodeId}</span>
-              <span className="os-cluster-readiness-words">{line.words}</span>
-              <span className="os-cluster-readiness-note">
-                {line.nodeType} &middot; {line.note}
-              </span>
-            </div>
-          ))}
-        </div>
+        <RecordList as="ul" label={`${verdict.module} on each live node`}>
+          {lines.map(line => <RecordRow key={line.nodeId} name={line.nodeId} secondary={line.nodeType}
+            state={line.words} stateTitle={line.at || undefined} dim={!line.counted}>{line.note}</RecordRow>)}
+        </RecordList>
       )}
       <Caption>
         Every live node checks this module for itself. A node that has not re-checked since the

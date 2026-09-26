@@ -7,10 +7,12 @@ vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connectio
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import type { OsAppProps } from "../../src/system/registry";
-import { SHOP, DOCS, click, fakeConnection, withSession } from "./harness";
+import { SHOP, DOCS, click, fakeConnection, githubGrantRow, repositoriesReply, repositoryFixture, withSession } from "./harness";
 
-function mount(sectionId = "deployables") {
-  h.connection = fakeConnection({ sites: [SHOP, DOCS] });
+function mount(sectionId = "deployables", initialIntent?: OsAppProps["intent"]) {
+  let intent: OsAppProps["intent"];
+  const consumeIntent = vi.fn(() => { intent = undefined; });
+  h.connection = fakeConnection({ sites: [SHOP, DOCS], credentials: [githubGrantRow({ id: "cred-acme", login: "octocat" })], repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "acme/storefront" })] }) });
   const saved = new Map<string, string>();
   const store = new LocalDeployablesSettingsStore({
     getItem: key => saved.get(key) ?? null,
@@ -24,10 +26,11 @@ function mount(sectionId = "deployables") {
     go(section, options?.fromContent ? "content" : "peer");
   });
   const app = (section: string, origin: NonNullable<OsAppProps["navigation"]>["origin"]) => withSession(
-    <DeployablesApp sectionId={section} navigation={{ origin, revision }} windowVisible={visible} navigate={navigate} askContext={vi.fn()} store={store} />,
+    <DeployablesApp intent={intent} consumeIntent={consumeIntent} sectionId={section} navigation={{ origin, revision }} windowVisible={visible} navigate={navigate} askContext={vi.fn()} store={store} />,
     { role: "owner", userId: "u-me" },
   );
   const result = render(app(sectionId, "peer"));
+  if (initialIntent) { intent = initialIntent; result.rerender(app(sectionId, "peer")); }
   function go(section: string, origin: NonNullable<OsAppProps["navigation"]>["origin"] = "peer") {
     revision += 1;
     currentSection = section;
@@ -38,7 +41,7 @@ function mount(sectionId = "deployables") {
     visible = next;
     result.rerender(app(currentSection, currentOrigin));
   }
-  return { go, navigate, setVisible };
+  return { go, navigate, setVisible, consumeIntent };
 }
 
 describe("shared shell navigation", () => {
@@ -78,16 +81,18 @@ describe("shared shell navigation", () => {
     await click(await screen.findByRole("button", { name: /Add a deployable/ }));
     const draft = screen.getByRole("region", { name: "Add a deployable" });
     await click(within(draft).getByRole("radio", { name: /A repository/ }));
-    await click(within(draft).getByRole("radio", { name: "A token" }));
-    const input = within(draft).getByRole("textbox", { name: "The repository this deployable is built from" });
-    fireEvent.change(input, { target: { value: "https://github.com/acme/unfinished" } });
+    await click(await within(draft).findByRole("button", { name: /^@octocat Connected/ }));
+    await click(await within(draft).findByRole("button", { name: /^acme Organization/ }));
+    await click(await within(draft).findByRole("button", { name: /storefront/ }));
+    const input = within(draft).getByRole("textbox", { name: "What this deployable is called" });
+    fireEvent.change(input, { target: { value: "Unfinished storefront" } });
     go("settings");
     expect(screen.queryByRole("region", { name: "Add a deployable" })).toBeNull();
     go("deployables");
     expect(screen.queryByRole("button", { name: "Back to Deployables" })).toBeNull();
     await click(screen.getByRole("button", { name: /Add a deployable/ }));
-    expect(screen.getByRole("textbox", { name: "The repository this deployable is built from" })).toBe(input);
-    expect((input as HTMLInputElement).value).toBe("https://github.com/acme/unfinished");
+    expect(screen.getByRole("textbox", { name: "What this deployable is called" })).toBe(input);
+    expect((input as HTMLInputElement).value).toBe("Unfinished storefront");
   });
 
   it("restores the nested origin on contextual Back", async () => {
@@ -114,4 +119,13 @@ describe("shared shell navigation", () => {
     await click(screen.getByRole("button", { name: /^Deployable docs.memql.example.com/ }));
     expect(await screen.findByRole("region", { name: "Deployable docs.memql.example.com" })).toBeTruthy();
   });
+});
+
+
+it("opens the exact deployable from an Ask intent even when a different tab was open", async () => {
+ const { consumeIntent, navigate } = mount("map", { id: "ask-navigation", payload: { siteId: DOCS.id } });
+ expect(await screen.findByRole("region", { name: "Deployable docs.memql.example.com" })).toBeTruthy();
+ expect(navigate).toHaveBeenCalledWith("deployables");
+ expect(consumeIntent).toHaveBeenCalledWith("ask-navigation");
+ expect(screen.queryByRole("region", { name: "Add a deployable" })).toBeNull();
 });

@@ -63,6 +63,21 @@ function mount(connection: Conn, role = "owner") {
 }
 
 describe("the groups list", () => {
+  it("opens delegated organization membership without reading the global directory", async () => {
+    const connection = seed({
+      groupsAll: [groupRow({ id: "g-acme", name: "Acme", kind: "account", accountId: "acct-acme" })],
+      groupPeople: [userRow({ id: "u-client", displayName: "Client colleague" })],
+      membersOfGroup: { "g-acme": [membershipRow({ id: "membership-client", groupId: "g-acme", userId: "u-client" })] },
+    });
+    const view = mount(connection, "acme-admin");
+    await click(await screen.findByRole("button", { name: /Acme/ }));
+    expect(await screen.findByText("Client colleague")).toBeTruthy();
+    expect(connection.query.groupPeople.mock.calls[0]?.[0]).toEqual({ groupId: "g-acme" });
+    expect(connection.query.searchUsers).not.toHaveBeenCalled();
+    expect(connection.query.pendingUserInvitations).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
   it("takes a new group from the broadcast rather than inserting it locally", async () => {
     // NOTHING IS INSERTED LOCALLY. The row arrives on its own broadcast with
     // the arrival cue, which is what makes the new group appear the same way

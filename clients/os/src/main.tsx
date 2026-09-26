@@ -1,9 +1,11 @@
+import { captureShopifyInstallation } from "./modules/connections/shopifyInstallation";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { App } from "./app/App";
 import { applyStoredTheme } from "./app/theme";
 import { captureConceptOpen } from "./apps/concepts/openConcept";
+import { captureShopifyReturn } from "./apps/deployables/store/connectReturn";
 import { captureConnectReturn } from "./apps/deployables/sources/connectReturn";
 import "./styles/index.css";
 
@@ -16,7 +18,9 @@ applyStoredTheme();
 // path, the hash and everything else alone. The value waits in that module
 // until the Shell exists to receive it; a browser that arrived here with no
 // marker parks nothing and this is a no-op.
+captureShopifyInstallation(window);
 captureConnectReturn(window);
+captureShopifyReturn(window);
 
 // A concept named in the address, read and scrubbed at the same moment and
 // for the same reasons (epic memql#5009). This is how the VS Code

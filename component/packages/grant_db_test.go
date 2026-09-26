@@ -2,6 +2,7 @@ package packages
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"net/http"
 	"os"
@@ -140,8 +141,10 @@ func TestGithubAppGrantResolutionIsOwnerScopedOverRealRows(t *testing.T) {
 	// owner term is the whole of its authorization. This is the pair the fake
 	// engine cannot tell apart.
 	hub := &grantFakeHub{grantHub: newGrantHub(), repoPath: repoPath}
+	hub.body("/user/installations", http.StatusOK, installationsBody)
+	hub.body("/repos/"+repoPath, http.StatusOK, `{"full_name":`+jsonQuote(repoPath)+`}`)
 	client := githubapp.New(grantAppConfig(t), githubapp.WithHTTPClient(&http.Client{Transport: hub}))
-	s := &store{engine: eng, logger: discardLogger(), github: client}
+	s := &store{engine: eng, logger: discardLogger(), github: client, directDB: func() *sql.DB { return db.DB }}
 
 	mine, err := s.githubAppGrantForCaller(ctxA)
 	if err != nil {
@@ -186,9 +189,11 @@ func TestGithubAppGrantResolutionIsOwnerScopedOverRealRows(t *testing.T) {
 	i := NewIntegration(eng, discardLogger())
 	i.depsOnce.Do(func() { i.deps = deps })
 
+	accountId := "grant-account-" + suffix
+	mustExecute(t, eng, tieSeederCtx(), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Grant test account")`, langparser.QuoteString(accountId)))
 	mustExecute(t, eng, ctxA, fmt.Sprintf(
-		`mutation createPackage(packageId: %s, name: "acme", sourceKind: "repo", repoUrl: %s, credentialId: %s)`,
-		langparser.QuoteString(packageId), langparser.QuoteString(repoUrl), langparser.QuoteString(credentialId)))
+		`mutation createPackage(packageId: %s, name: "acme", sourceKind: "repo", repoUrl: %s, credentialId: %s, accountId: %s)`,
+		langparser.QuoteString(packageId), langparser.QuoteString(repoUrl), langparser.QuoteString(credentialId), langparser.QuoteString(accountId)))
 	pkgRow := mustPackage(t, s, ctxA, packageId)
 
 	hub.reset()

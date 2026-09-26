@@ -114,14 +114,16 @@ func (d *Deps) build(ctx context.Context, req DeployRequest, pkg map[string]any,
 		}
 		if dep.Prebuilt {
 			// Read the built tree straight out of the snapshot. No build, no
-			// workbench, no restart -- and no network, which is what makes a
-			// prebuilt package deployable on a cluster with no build surface
-			// configured at all.
+			// workbench or restart. Separately declared assets still need their
+			// verified import below; a build surface is never needed.
 			bundle, err := bundleFromTree(snapshot.Tree, path.Join(dep.Path, dep.Output), d.Limits)
 			if err != nil {
 				return nil, err
 			}
 			bundles[dep.Name] = bundle
+			if err := d.importAssets(ctx, req, pkg, dep, bundle); err != nil {
+				return nil, err
+			}
 			out.recordBuiltOn(BuiltOn{Surface: SurfacePrebuilt})
 			continue
 		}
@@ -151,6 +153,9 @@ func (d *Deps) build(ctx context.Context, req DeployRequest, pkg map[string]any,
 			return nil, refuseScoped(buildRefusalCode(err), dep.Name, "%s", buildFailureMessage(dep, res, err))
 		}
 		bundles[dep.Name] = res.Bundle
+		if err := d.importAssets(ctx, req, pkg, dep, res.Bundle); err != nil {
+			return nil, err
+		}
 	}
 	return bundles, nil
 }
@@ -425,6 +430,7 @@ type SitePublisher interface {
 	// BindSiteToStore re-points an EXISTING site at the store its manifest
 	// names. Called only when the two differ.
 	BindSiteToStore(ctx context.Context, siteId, storeId string) error
+	BindSiteTestingStore(ctx context.Context, siteId, storeId string) error
 	// RepointSite points a site back at a bundle version that already exists.
 	// THE rollback operation, and it is the same write updateSiteBundle makes
 	// forward -- which is the whole reason bundles live under versioned
@@ -450,6 +456,7 @@ type EnsureSiteRequest struct {
 	DeployableName string
 	Kind           string
 	Hostname       string
+	AccountId      string
 	// StoreId is the v1:shopify:store row the manifest's `store` domain
 	// RESOLVED to on this cluster, never the domain itself: the site's
 	// binding is a reference, so the resolution happens once, in publish,
@@ -534,10 +541,17 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 			continue
 		}
 
+		placement := manifestPlacement(dep.Deployment, req.Placements[dep.Name])
 		siteId := rowString(byName[dep.Name], "id")
 		hostname := rowString(byName[dep.Name], "hostname")
 		created := false
 		outcome := DeployableOutcome{Name: dep.Name}
+		// The organization the site belongs to, or will on create: EnsureSite
+		// names it, and the store part is asked there too.
+		accountID := rowString(byName[dep.Name], "accountId")
+		if siteId == "" {
+			accountID = firstNonEmpty(strings.TrimSpace(req.Placements[dep.Name].AccountId), rowString(pkg, "accountId"))
+		}
 
 		// THE STORE IS RESOLVED HERE, before the first-deploy branch, so a
 		// redeploy re-points rather than quietly keeping a store the manifest
@@ -547,37 +561,39 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 		// and fatally; this is the half that needs a cluster.
 		//
 		// =====================================================================
-		// AN UNRESOLVABLE STORE IS FATAL ONLY WHEN NOTHING IS BOUND YET
+		// AN UNRESOLVABLE STORE IS NEVER FATAL (Connect Shopify, D5)
 		// =====================================================================
 		// The read runs under the CALLER's actor, deliberately: a caller who
-		// may not read a store may not bind a storefront to one. But leaving a
-		// binding ALONE is not a privileged act -- the binding already exists,
-		// somebody who could read that store made it, and this run is
-		// publishing bytes rather than changing it. Refusing the whole deploy
-		// because the deployer cannot read a row the deploy does not touch
-		// punishes a bundle update for an authorization fact about something
-		// else.
+		// may not read a store may not bind a storefront to one -- and since
+		// developers read every store (D3), a caller who may read one but not
+		// ATTACH it (the store part) gets the same "" from the resolver. Either
+		// way the run goes on, and what it records depends on what is bound.
 		//
-		// IT IS ALSO A REGRESSION IF IT IS FATAL, and a measured one. The
-		// auto-deploy feed borrows the package owner as a RANKLESS WRITER (see
-		// Deps.Roles), so `actor.isClusterOwner == true` is false and
-		// storeByDomain answers zero rows for every automatic run. Fatal here
-		// means an armed source can never republish a storefront again, which
-		// it could before this epic -- and the manifest's store cannot have
-		// changed on that path anyway, because `bindingWord` puts it in the
-		// plan fingerprint and a changed one parks the run at the confirm gate
-		// (autodeploy.go).
+		// With no binding, place the design as a draft. It can go live for
+		// design review while its Store panel still reports setup needed.
+		// Commerce remains unavailable until the storefront is connected.
+
+		// SOMETHING BOUND: leaving a binding ALONE is not a privileged act --
+		// the binding already exists, somebody who could attach that store made
+		// it, and this run is publishing bytes rather than changing it. Refusing
+		// the whole deploy because the deployer cannot read a row the deploy
+		// does not touch punishes a bundle update for an authorization fact
+		// about something else. It is also the auto-deploy feed's case on EVERY
+		// automatic run: it borrows the package owner as a RANKLESS WRITER (see
+		// Deps.Roles), below the store tier's developer read floor, so
+		// storeByDomain answers zero rows -- and the manifest's store cannot
+		// have changed on that path anyway, because `bindingWord` puts it in
+		// the plan fingerprint and a changed one parks the run at the confirm
+		// gate (autodeploy.go).
 		//
-		// So: refuse when the site is unbound and we cannot resolve -- a
-		// storefront serving nothing and reporting success is the failure this
-		// guards. Otherwise keep the binding, RECORD IT NON-FATALLY on the
-		// outcome, and publish. The note is what stops it being silent.
+		// Both notes are NON-FATAL and recorded on the outcome. The note is
+		// what stops either being silent.
 		storeId := ""
 		var storeNote *Problem
 		if dep.Kind == KindStorefront && hasBinding(dep.Binding) {
 			named := strings.TrimSpace(dep.Binding.Store)
 			bound := boundStoreId(byName[dep.Name])
-			resolved, serr := resolveNamedStore(ctx, d.Stores, named)
+			resolved, serr := resolveNamedStore(ctx, d.Stores, named, bound, accountID)
 			if serr != nil {
 				return outcomes, serr
 			}
@@ -585,26 +601,27 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 			case resolved != "":
 				storeId = resolved
 			case bound == "":
-				// Nothing to fall back on. Publishing here would put a
-				// storefront on a hostname with nothing behind it and report
-				// success.
-				return outcomes, refuseScoped(CodeDeployableStoreUnknown, dep.Name,
-					"deployable %q names store %q, and this cluster has no store by that name you may read: either nothing here mirrors it, or it belongs to a tier you are not in. Attach the store on the deployable's Store panel, as somebody who may, and deploy again.",
-					dep.Name, named)
+				storeNote = &Problem{
+					Code:  CodeDeployableStoreUnknown,
+					Scope: dep.Name,
+					Fatal: false,
+					Message: fmt.Sprintf(
+						"deployable %q names store %q, and this cluster has no store by that name that you may read and attach, so the storefront is not attached to a store. It can go live for design review; connect a store on its Store panel to enable shopping.",
+						dep.Name, named),
+				}
 			default:
 				storeNote = &Problem{
 					Code:  CodeDeployableStoreUnknown,
 					Scope: dep.Name,
 					Fatal: false,
 					Message: fmt.Sprintf(
-						"deployable %q names store %q, which this run could not resolve, so its store is unchanged -- it still fronts the one it was bound to. Either nothing here mirrors that name, or it belongs to a tier this caller is not in.",
+						"deployable %q names store %q, which this run could not resolve, so its store is unchanged -- it still fronts the one it was bound to. Either nothing here mirrors that name, or this caller may not read or attach it.",
 						dep.Name, named),
 				}
 			}
 		}
 
 		if siteId == "" {
-			placement := req.Placements[dep.Name]
 			requested := strings.TrimSpace(placement.Hostname)
 			if requested == "" {
 				return outcomes, refuseScoped(CodeDeployableHostnameUnchosen, dep.Name,
@@ -616,6 +633,7 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 				DeployableName: dep.Name,
 				Kind:           dep.Kind,
 				Hostname:       requested,
+				AccountId:      accountID,
 				StoreId:        storeId,
 				ResolutionTail: dep.ResolutionTail,
 				OwnerUserId:    rowString(pkg, "ownerUserId"),
@@ -623,10 +641,10 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 			if err != nil {
 				return outcomes, err
 			}
+			outcome.AccountId = accountID
 			if berr := d.Store.bindSiteToPackage(ctx, siteId, req.PackageId, dep.Name); berr != nil {
 				return outcomes, berr
 			}
-			d.place(ctx, siteId, dep.Name, placement, &outcome)
 		} else if storeId != "" && storeId != boundStoreId(byName[dep.Name]) {
 			// A REDEPLOY RE-POINTS, and this is deliberately not "set on
 			// create only" like Kind and ResolutionTail.
@@ -645,6 +663,29 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 				return outcomes, berr
 			}
 		}
+
+		if dep.Testing != nil && hasBinding(dep.Testing.Binding) {
+			named := strings.TrimSpace(dep.Testing.Binding.Store)
+			bound := boundStoreId(map[string]any{"binding": byName[dep.Name]["previewBinding"]})
+			resolved, err := resolveNamedStore(ctx, d.Stores, named, bound, accountID)
+			if err != nil {
+				return outcomes, err
+			}
+			if resolved != "" && resolved != bound {
+				if err := d.Publisher.BindSiteTestingStore(ctx, siteId, resolved); err != nil {
+					return outcomes, err
+				}
+			} else if resolved == "" {
+				note := fmt.Sprintf("Testing store %q could not be read and attached; the existing testing connection is unchanged.", named)
+				if storeNote == nil {
+					storeNote = &Problem{Code: CodeDeployableStoreUnknown, Scope: dep.Name, Fatal: false, Message: note}
+				} else {
+					storeNote.Message += " " + note
+				}
+			}
+		}
+
+		d.place(ctx, siteId, dep.Name, placement, &outcome)
 
 		if storeNote != nil {
 			outcome.Refusal = storeNote
@@ -667,36 +708,20 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 	return outcomes, nil
 }
 
-// place applies the two optional halves of a first-deploy placement (D8) --
-// the client the site is FOR and the client's own domain -- and records on
-// the outcome what was applied and what was refused.
-//
-// BOTH RUN UNDER THE CALLER'S ACTOR, UNSTAMPED, and that is the whole
-// authorization shape of the feature: they are the SAME two calls the page
-// issues (updateSiteAccount, customDomainAdd), so the account write's guard
-// and the three custom-domain guards (platform_custom_domain_policy.go)
-// decide exactly as they do from the page. The pipeline gains no bypass of
-// either; it only saves the person a second click.
-//
-// A REFUSAL DOES NOT FAIL THE PUBLISH. The site is live at its cluster
-// address either way, and a hostname collision or a per-site cap is a fact
-// about the domain, not about the deploy -- so it lands on the outcome with
-// the server's own sentence, for the Where-it-lives stop to render, and the
-// deploy goes on to publish. Recorded rather than logged, because a row is
-// what the person reads and a pod log is not.
+// place optionally binds the client's own domain after the site exists.
+// Organization ownership has already been authorized and persisted atomically
+// by EnsureSite; a refusal there fails creation. DNS failure remains a recorded
+// non-fatal outcome because the site can still serve its cluster hostname.
 func (d *Deps) place(ctx context.Context, siteId, name string, p Placement, out *DeployableOutcome) {
-	if accountId := strings.TrimSpace(p.AccountId); accountId != "" {
-		if err := d.Store.setSiteAccount(ctx, siteId, accountId); err != nil {
-			out.AccountRefusal = &Problem{Code: CodeDeployableAccountRefused, Message: err.Error(), Scope: name}
-		} else {
-			out.AccountId = accountId
-		}
-	}
-	if own := strings.TrimSpace(p.OwnDomain); own != "" {
+	for _, own := range placementDomainNames(p) {
 		if err := d.Store.addCustomDomain(ctx, siteId, own); err != nil {
-			out.DomainRefusal = &Problem{Code: CodeDeployableDomainRefused, Message: err.Error(), Scope: name}
+			if out.DomainRefusal == nil {
+				out.DomainRefusal = &Problem{Code: CodeDeployableDomainRefused, Message: err.Error(), Scope: name}
+			} else {
+				out.DomainRefusal.Message += "; " + err.Error()
+			}
 		} else {
-			out.OwnDomain = own
+			out.OwnDomain = strings.TrimPrefix(out.OwnDomain+", "+own, ", ")
 		}
 	}
 }
@@ -727,14 +752,15 @@ func marshalActiveSet(set map[string]string) ([]byte, error) {
 // helper exists to make honest. `Deps.Credentials`' rule is that nil is an
 // answer rather than a gap, and the answer here is "this run cannot resolve
 // stores" -- which is exactly the same fact as "this caller cannot read that
-// store", and gets the same treatment from the caller: fatal when nothing is
-// bound yet, a recorded note when something is.
-func resolveNamedStore(ctx context.Context, resolve StoreResolver, named string) (string, error) {
+// store", and gets the same treatment from the caller: an unattached draft when
+// nothing is bound yet, the binding kept when something is, and a recorded
+// note either way.
+func resolveNamedStore(ctx context.Context, resolve StoreResolver, named, bound, account string) (string, error) {
 	named = strings.TrimSpace(named)
 	if named == "" || resolve == nil {
 		return "", nil
 	}
-	resolved, err := resolve(ctx, named)
+	resolved, err := resolve(ctx, named, bound, account)
 	if err != nil {
 		return "", err
 	}

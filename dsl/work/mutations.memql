@@ -35,8 +35,10 @@
 @actor
 mutation run createWorkRun {
   args {
+    executionAuthority object
     runId                  string!
     goalId                 string
+    goalSignature          string
     automationName         string!
     templateFingerprint    string!
     templateConstructId    string
@@ -55,11 +57,10 @@ mutation run createWorkRun {
     nodeId                 string
     initialChainHead       string
     startedAt              string!
-    goalSignature          string
     parentRunId            string
   }
   insert {
-    accept { goalId, automationName, templateFingerprint, templateConstructId, templateVersion, input, inputFingerprint, triggeredBy, triggerEvent, variables, forkedFromRunId, forkAtStepKey, status, nodeId, initialChainHead, startedAt, goalSignature, parentRunId }
+    accept { executionAuthority, goalId, goalSignature, automationName, templateFingerprint, templateConstructId, templateVersion, input, inputFingerprint, triggeredBy, triggerEvent, variables, forkedFromRunId, forkAtStepKey, status, nodeId, initialChainHead, startedAt, parentRunId }
     stamp {
       id: args.runId
       ownerUserId: actor.userId
@@ -81,6 +82,7 @@ mutation run createWorkRun {
 mutation run updateWorkRun {
   args {
     runId            string!
+    goalSignature    string
     status           string
     automationName   string
     templateConstructId  string
@@ -102,11 +104,10 @@ mutation run updateWorkRun {
     cancelledBy      string
     actualFootprint  object
     summary          object
-    goalSignature    string
     parentRunId      string
   }
   update {
-    accept { status, automationName, templateConstructId, templateVersion, templateFingerprint, variables, nodeId, callerSuppliedPayload, heartbeatAt, chainHead, stepOrder, waitingOn, spent, outcome, errorCode, errorMessage, finishedAt, cancelRequested, cancelledBy, actualFootprint, summary, goalSignature, parentRunId }
+    accept { status, goalSignature, automationName, templateConstructId, templateVersion, templateFingerprint, variables, nodeId, callerSuppliedPayload, heartbeatAt, chainHead, stepOrder, waitingOn, spent, outcome, errorCode, errorMessage, finishedAt, cancelRequested, cancelledBy, actualFootprint, summary, parentRunId }
     stamp {
       id: args.runId
     }

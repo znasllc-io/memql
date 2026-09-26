@@ -104,8 +104,9 @@ func githubConnectNodeFromFake(r map[string]string) *memqlv1.MemoryNode {
 		fields[k] = structpb.NewStringValue(v)
 	}
 	return &memqlv1.MemoryNode{
-		Id:      r["id"],
-		Payload: &structpb.Struct{Fields: fields},
+		Id:        r["id"],
+		CreatedAt: fixtureCreatedAt(r["createdAt"]),
+		Payload:   &structpb.Struct{Fields: fields},
 	}
 }
 
@@ -129,6 +130,8 @@ func liveConnectStateRow() map[string]string {
 		"id":        "v1:identity:githubConnectState:cas",
 		"userId":    "v1:identity:user:asked",
 		"stateHash": HashConnectState("the-plaintext-state"),
+		// A server writer sets expiresAt ten minutes after createdAt; consume refuses any other lifetime.
+		"createdAt": time.Now().UTC().Add(-5 * time.Minute).Format(time.RFC3339),
 		"expiresAt": time.Now().UTC().Add(5 * time.Minute).Format(time.RFC3339),
 	}
 }
@@ -227,7 +230,7 @@ func TestConcurrentConnectConsumesWithoutTheGateRace(t *testing.T) {
 		row:          liveConnectStateRow(),
 		readWriteGap: 250 * time.Millisecond,
 	}
-	store := &Store{Engine: eng} // no DirectDB: no lock
+	store := &Store{Engine: eng, GithubGate: githubUnitGate} // explicit negative control: no lock
 	hash := HashConnectState("the-plaintext-state")
 
 	var wg sync.WaitGroup
@@ -261,7 +264,7 @@ func TestAnExpiredConnectStateIsRefusedWithoutAWrite(t *testing.T) {
 	row := liveConnectStateRow()
 	row["expiresAt"] = time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)
 	eng := &githubConnectFakeEngine{row: row}
-	store := &Store{Engine: eng}
+	store := &Store{Engine: eng, GithubGate: githubUnitGate}
 
 	got, err := store.ConsumeGithubConnectState(context.Background(),
 		HashConnectState("the-plaintext-state"), "203.0.113.9")

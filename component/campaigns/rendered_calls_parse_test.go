@@ -312,3 +312,8 @@ func TestQuoteStringIsUsedForEveryInterpolatedValue(t *testing.T) {
 		t.Error("the rendered call carries a \\x00 escape, which is the Go-quoting spelling the lexer refuses")
 	}
 }
+
+// This store/query fixture never authorizes sending.
+func (e *parsingEngine) OrganizationCapable(context.Context, string, string, string) bool {
+	return false
+}

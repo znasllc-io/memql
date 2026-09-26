@@ -13,7 +13,7 @@ import (
 // Execution starts on a different replica from intake and compilation. The
 // persisted journal supplies identity and lineage; no context value can be
 // assumed to have followed the graph event here.
-func workExecutionContext(ctx context.Context, j, source *automations.RunJournal) (context.Context, error) {
+func workExecutionContext(ctx context.Context, j, source *automations.RunJournal, resolver *auth.IdentityResolver) (context.Context, error) {
 	run := common.RunContext{RunId: j.RunId, GoalId: j.GoalId, OwnerUserId: j.OwnerUserId, Mode: j.Mode, ReplayPolicy: j.ReplayPolicy, ForkAtStepKey: j.ForkAtStepKey}
 	if run.Mode == "" {
 		run.Mode = common.RunModeLive
@@ -30,7 +30,7 @@ func workExecutionContext(ctx context.Context, j, source *automations.RunJournal
 	// run must name its persisted owner before any owned work can execute.
 	if j.OwnerUserId != "" || j.GoalId != "" {
 		var err error
-		ctx, err = auth.ContextWithPersistedOwner(ctx, j.OwnerUserId)
+		ctx, err = auth.ContextWithPersistedOwner(ctx, j.OwnerUserId, j.ExecutionAuthority, resolver)
 		if err != nil {
 			return nil, err
 		}

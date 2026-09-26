@@ -279,11 +279,11 @@ func (j *workJournal) call(ctx context.Context, name string, args map[string]any
 }
 
 // write renders and executes one journal call.
-func (j *workJournal) write(ctx context.Context, name string, args map[string]any) {
+func (j *workJournal) write(ctx context.Context, name string, args map[string]any) error {
 	query, err := journalArgs(name, args)
 	if err != nil {
 		j.warn(name, err)
-		return
+		return err
 	}
 	writeCtx := journalContext(ctx)
 	if run, ok := common.RunFromContext(ctx); ok && strings.TrimSpace(run.OwnerUserId) != "" {
@@ -295,7 +295,26 @@ func (j *workJournal) write(ctx context.Context, name string, args map[string]an
 	}
 	if _, err := j.exec.Execute(writeCtx, query); err != nil {
 		j.warn(name, err)
+		return err
 	}
+	return nil
+}
+
+// A wait must name a persisted approval. Ordinary telemetry writes can fail
+// without stopping work, but a failed approval write must never manufacture a
+// wait that nobody can answer. Keep the original failure and a terminal row.
+func (j *workJournal) persistApproval(ctx context.Context, exec *AutomationExecution, chainHead string, args map[string]any) bool {
+	if err := j.write(ctx, "createWorkApproval", args); err != nil {
+		j.closeRunRecord(ctx, exec, chainHead)
+		j.call(ctx, "updateWorkRun", map[string]any{
+			"runId":        exec.ID,
+			"errorCode":    "approval_persist_failed",
+			"errorMessage": fmt.Sprintf("%s; the approval could not be saved: %v", exec.Error, err),
+			"waitingOn":    map[string]any{},
+		})
+		return false
+	}
+	return true
 }
 
 // heldWrites keeps a journal's writes until the run they belong to opens: a
@@ -569,6 +588,18 @@ func (j *workJournal) closeRun(ctx context.Context, exec *AutomationExecution, c
 	// nothing to do with the run. Failing it would throw away a compiled
 	// template and a journal because somebody closed a laptop.
 	if status == "failed" {
+		// A periodic cluster-maintenance attempt ends at this failure. The
+		// schedule retries current state on its next tick; parking each old
+		// attempt manufactures an ever-growing queue with no human owner.
+		// User-owned goals and ordinary automations retain their approval and
+		// retry lifecycle, even when they share a maintenance automation name.
+		if actor, ok := auth.AccessFromContext(ctx); ok && actor != nil && actor.Synthetic &&
+			exec.TriggeredBy == "schedule" && auth.MaintenanceActor(exec.AutomationName) != nil {
+			if run, adopted := common.RunFromContext(ctx); !adopted || (run.OwnerUserId == "" && run.GoalId == "") {
+				j.closeRunRecord(ctx, exec, chainHead)
+				return
+			}
+		}
 		// A RUN THAT REACHED ITS OWN CEILING PARKS, AND IT IS ASKED FIRST
 		// (memql#5580). It is the same argument the door park makes -- a
 		// number a person set is not a defect in the work -- but a DIFFERENT
@@ -671,7 +702,7 @@ func (j *workJournal) parkOnInference(ctx context.Context, exec *AutomationExecu
 	}
 	req := work.InferenceUnavailableApproval(exec.ID, stepKey, code, doors, now, workApprovalTTL)
 
-	j.call(ctx, "createWorkApproval", map[string]any{
+	if !j.persistApproval(ctx, exec, chainHead, map[string]any{
 		"approvalId":   approvalId,
 		"runId":        req.RunId,
 		"stepKey":      req.StepKey,
@@ -688,7 +719,9 @@ func (j *workJournal) parkOnInference(ctx context.Context, exec *AutomationExecu
 		},
 		"requestedAt": rfc3339(req.RequestedAt),
 		"expiresAt":   rfc3339(req.ExpiresAt),
-	})
+	}) {
+		return
+	}
 
 	// `resumeAt` rides the wait so the sweep re-checks it. It is a POLL
 	// because the event that would replace it -- a module-readiness feed --
@@ -772,7 +805,7 @@ func (j *workJournal) parkOnRunCeiling(ctx context.Context, exec *AutomationExec
 	}
 	req := work.BudgetApproval(exec.ID, stepKey, breach, now, workApprovalTTL)
 
-	j.call(ctx, "createWorkApproval", map[string]any{
+	if !j.persistApproval(ctx, exec, chainHead, map[string]any{
 		"approvalId":   approvalId,
 		"runId":        req.RunId,
 		"stepKey":      req.StepKey,
@@ -792,7 +825,9 @@ func (j *workJournal) parkOnRunCeiling(ctx context.Context, exec *AutomationExec
 		},
 		"requestedAt": rfc3339(req.RequestedAt),
 		"expiresAt":   rfc3339(req.ExpiresAt),
-	})
+	}) {
+		return
+	}
 
 	j.call(ctx, "updateWorkRun", map[string]any{
 		"runId":     exec.ID,

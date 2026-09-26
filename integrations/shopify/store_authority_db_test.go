@@ -80,6 +80,11 @@ func authorityEngine(t *testing.T) (*memql.MemQLEngine, *sql.DB) {
 	if err := eng.Init(memorynodes.DefaultRegistry()); err != nil {
 		t.Fatalf("engine Init: %v", err)
 	}
+	// Standalone package tests start without the cluster's bootstrap. Source
+	// and site fixtures explicitly rely on its self organization.
+	if _, err := eng.Execute(seedCtx(), `insert("v1:accounts:account", id="self", payload={"name":"Test cluster","status":"active","domainStatus":"unverified"})`); err != nil {
+		t.Fatalf("seed the test cluster organization: %v", err)
+	}
 	return eng, raw
 }
 

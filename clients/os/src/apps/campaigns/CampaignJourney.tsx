@@ -1,3 +1,6 @@
+import { AccountPicker } from "../accounts/AccountPicker";
+import { useAccountOptions } from "../accounts/tie";
+import { organizationChosen, useDefaultOrganization } from "../accounts/organization";
 import { campaignSendingConfigured } from "./readiness";
 import { useCallback, useState } from "react";
 import { Mail, Users, FileText } from "lucide-react";
@@ -51,6 +54,10 @@ export function CampaignJourney({
   onDone: (id: string) => void;
 }) {
   const { readiness } = useSession();
+  const accounts = useAccountOptions();
+  const defaultAccountId = useDefaultOrganization(accounts);
+  const [pickedAccountId, setAccountId] = useState("");
+  const accountId = pickedAccountId || defaultAccountId;
   const [step, setStep] = useState(0);
   const [senderId, setSenderId] = useState("");
   const [audienceId, setAudienceId] = useState("");
@@ -68,13 +75,13 @@ export function CampaignJourney({
     setEditors((previous) => ({ ...previous, [step]: value }));
   }
   const audiences = audienceProjection(feeds.audiences.snapshot.rows).filter(
-    (a) => a.status !== "archived",
+    (a) => a.accountId === accountId && a.status !== "archived",
   );
   const senders = senderProjection(feeds.senders.snapshot.rows).filter(
-    (s) => s.status !== "disabled",
+    (s) => s.accountId === accountId && s.status !== "disabled",
   );
   const templates = templateProjection(feeds.templates.snapshot.rows).filter(
-    (t) => t.status !== "archived",
+    (t) => t.accountId === accountId && t.status !== "archived",
   );
   const audience = audiences.find((a) => a.id === audienceId);
   const template = templates.find((t) => t.id === templateId);
@@ -84,14 +91,14 @@ export function CampaignJourney({
     !email.value.needsConfiguration;
   const complete = [
     !!configured,
-    senderId === "" || senders.some((s) => s.id === senderId),
+    (accountId === "self" && senderId === "") || senders.some((s) => s.id === senderId),
     !!audience && roster.id === audience.id && roster.count !== null && roster.count > 0,
     template?.status === "ready" && !contentDirty,
     false,
   ];
   // A missing provider must not trap a person who wants to prepare a draft.
   // It is never painted complete, and remains visible on the final review.
-  const canContinue = step < 2 || (step === 2 ? !!audience : !!template);
+  const canContinue = organizationChosen(accounts, accountId) && (step < 2 || (step === 2 ? !!audience : !!template));
   function select(next: number) {
     if (next === 4) setReviewed(true);
     setStep(next);
@@ -116,6 +123,11 @@ export function CampaignJourney({
             </p>
           </InfoDetail>
         </Head>
+        <Field label="Organization">
+          <AccountPicker id="campaign-organization" label="Campaign organization" required value={accountId} accounts={accounts} onChange={(next) => {
+            setAccountId(next); setSenderId(""); setAudienceId(""); setTemplateId(""); setStep(0); setReviewed(false); setEditors({});
+          }} />
+        </Field>
         <JourneyTrail
           label="Campaign setup"
           steps={STEPS.map((label, i) => ({
@@ -224,6 +236,7 @@ export function CampaignJourney({
             ) : null}
             {editors[1] ? (
               <SenderForm
+                initialAccountId={accountId}
                 writes={writes}
                 onDone={(id) => {
                   if (id) {
@@ -264,6 +277,7 @@ export function CampaignJourney({
               ) : null}
               {editors[2] ? (
                 <AudienceForm
+                  initialAccountId={accountId}
                   writes={writes}
                   onDone={(id) => {
                     if (id) {
@@ -314,6 +328,7 @@ export function CampaignJourney({
             ) : null}
             {editors[3] ? (
               <TemplateEditor
+                initialAccountId={accountId}
                 audiences={audiences}
                 campaigns={[]}
                 writes={writes}
@@ -330,6 +345,7 @@ export function CampaignJourney({
             )}
             {template && !editors[3] ? (
               <TemplateEditor
+                initialAccountId={accountId}
                 key={template.id}
                 template={template}
                 onDirtyChange={setContentDirty}
@@ -385,7 +401,7 @@ export function CampaignJourney({
               audiences={audiences}
               templates={templates}
               senders={senders}
-              initial={{ audienceId, templateId, senderIdentityId: senderId }}
+              initial={{ audienceId, templateId, senderIdentityId: senderId, accountId }}
               writes={writes}
               trackByDefault={trackByDefault}
               onDone={onDone}

@@ -73,7 +73,7 @@ func captureStore(t *testing.T) []string {
 		"query libraryArtifactById": {{"id": "v1:library:artifact:mno", "kind": "file", "sourceConceptRef": "v1:library:file:mno"}},
 		"query libraryFileById":     {{"id": "v1:library:file:mno", "mimeType": "application/zip", "blobUrl": "library/u/mno/tree.zip"}},
 	}}
-	s := &store{engine: rec}
+	s := &store{engine: rec, deploymentGate: offlineDeploymentGate}
 	ctx := context.Background()
 	at := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 
@@ -176,7 +176,6 @@ func captureStore(t *testing.T) []string {
 	// publish stage makes after the site exists. The hostname is remote text
 	// -- a person types it -- so it carries the four control bytes; the
 	// guard behind the call refuses it, which is the point of the call.
-	_ = s.setSiteAccount(ctx, "v1:platform:site:ghi", "v1:accounts:account:acme")
 	_ = s.addCustomDomain(ctx, "v1:platform:site:ghi", awkwardText)
 
 	// The off-list (2026-09-05): a LIST literal of manifest names, the shape

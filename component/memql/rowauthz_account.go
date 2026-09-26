@@ -31,8 +31,8 @@ package memql
 //
 // # Staff are a RULE, not rows (design D6)
 //
-// Everyone at developer rank and above is a standing member of every
-// account-kind group. Rows drift -- a developer hired next month is in no group
+// Every global cluster operator (admin rank and above) is a standing member of every
+// account-kind group. Account-scoped roles never inherit this. Rows drift -- an operator hired next month is in no group
 // until something adds them -- and a rule does not. Their scope resolves to
 // `everyAccount`, which lowers to "the account field is present and non-empty"
 // rather than to a list, so it costs no membership read and never goes stale.
@@ -61,14 +61,6 @@ const (
 	conceptIdentityGroupMembership = "v1:identity:groupMembership"
 )
 
-// accountStaffFloorSlug is the rung from which an actor is STAFF (design D6).
-//
-// A SLUG rather than a number, resolved through the same ladder every other
-// rank decision reads, so a cluster that re-ranks its roles re-ranks this too.
-// A custom role ranked at or above developer is staff as well -- that is what
-// the ladder means, and the role editor says so on the rank stop.
-const accountStaffFloorSlug = "developer"
-
 // AccountScopeExpression is the symbolic account-grant node.
 //
 // It carries the FIELD and nothing else. Whether that field holds one account
@@ -80,7 +72,11 @@ const accountStaffFloorSlug = "developer"
 type AccountScopeExpression struct {
 	// Field is the payload property naming the row's account, as declared
 	// in `@rowAuthz(..., account="<field>")`.
-	Field string
+	Field        string
+	Organization bool
+	RowID        bool
+	AllowUntied  bool
+	Resource     string
 }
 
 func (*AccountScopeExpression) isExpressionNode() {}
@@ -97,6 +93,8 @@ type accountScopeMatch struct {
 	field        string
 	accounts     []string
 	everyAccount bool
+	rowID        bool
+	allowUntied  bool
 }
 
 func (*accountScopeMatch) isExpressionNode() {}
@@ -192,8 +190,9 @@ type accountScopeMemo struct {
 // to. Both come from the same two reads, which is the point of resolving them
 // together.
 type memberships struct {
-	groupIds   []string
-	accountIds []string
+	groupIds      []string
+	accountIds    []string
+	groupAccounts map[string]string
 }
 
 type membershipsEntry struct {
@@ -245,8 +244,8 @@ func (e *MemQLEngine) resolveMemberships(ctx context.Context, userId string) mem
 	if len(memberOf) == 0 {
 		return memberships{}
 	}
-	groupIds, accountIds := activeGroupsAndAccounts(ctx, db, memberOf)
-	return memberships{groupIds: groupIds, accountIds: accountIds}
+	groupIds, accountIds, groupAccounts := activeGroupsAndAccounts(ctx, db, memberOf)
+	return memberships{groupIds: groupIds, accountIds: accountIds, groupAccounts: groupAccounts}
 }
 
 type accountScopeMemoKey struct{}
@@ -309,8 +308,16 @@ func (e *MemQLEngine) resolveAccountScope(ctx context.Context) *accountScope {
 		return scope
 	}
 
-	ladder := e.rankLadder(ctx)
-	if floor := ladder.rankOf(accountStaffFloorSlug); floor > 0 && ladder.rankOf(string(ac.Role)) >= floor {
+	role := ac.Role
+	if ac.Unranked && !ac.Synthetic {
+		var found bool
+		role, found = e.organizationUserRole(ctx, ac.UserId)
+		if !found {
+			scope.fingerprint = "unresolved-borrowed"
+			return scope
+		}
+	}
+	if auth.IsClusterOperator(role) {
 		// STAFF (D6). Note the `floor > 0` guard, which is rankFloorAdmits'
 		// lesson in one line: rankOf answers 0 for a slug it does not know,
 		// and every rank clears 0, so the natural spelling would make every
@@ -321,6 +328,9 @@ func (e *MemQLEngine) resolveAccountScope(ctx context.Context) *accountScope {
 	}
 
 	for _, accountId := range e.membershipsFor(ctx, ac.UserId).accountIds {
+		if roleScope := auth.RoleAccountScope(role); roleScope != "" && BareShortId(roleScope) != BareShortId(accountId) {
+			continue
+		}
 		addAccountSpellings(scope.accounts, accountId)
 	}
 	scope.fingerprint = fingerprintAccountSet(ac.UserId, scope.accounts)
@@ -399,7 +409,7 @@ func activeGroupIdsForUser(ctx context.Context, db *bun.DB, userId string) []str
 // a grant subject, D13, "it grants apps and still grants no rows"). Reading
 // the groups once and answering both is what keeps a request at one
 // membership read whichever gates it passes.
-func activeGroupsAndAccounts(ctx context.Context, db *bun.DB, groupIds []string) (activeGroupIds, accountIds []string) {
+func activeGroupsAndAccounts(ctx context.Context, db *bun.DB, groupIds []string) (activeGroupIds, accountIds []string, groupAccounts map[string]string) {
 	wanted := make(map[string]struct{}, len(groupIds)*2)
 	for _, g := range groupIds {
 		wanted[g] = struct{}{}
@@ -414,9 +424,10 @@ func activeGroupsAndAccounts(ctx context.Context, db *bun.DB, groupIds []string)
 		Where("concept = ?", conceptIdentityGroup).
 		OrderExpr(`id ASC, "createdAt" DESC`).
 		Scan(ctx); err != nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	seenAccount := map[string]struct{}{}
+	groupAccounts = map[string]string{}
 	activeGroupIds = make([]string, 0, len(groupIds))
 	accountIds = make([]string, 0, len(groupIds))
 	for i := range nodes {
@@ -438,6 +449,7 @@ func activeGroupsAndAccounts(ctx context.Context, db *bun.DB, groupIds []string)
 		}
 		activeGroupIds = append(activeGroupIds, id)
 		accountId := strings.TrimSpace(stringFromAny(payload["accountId"]))
+		groupAccounts[BareShortId(id)] = BareShortId(accountId)
 		if accountId == "" {
 			// A group with no account grants nothing and exists to
 			// organize (design D8). Not an error, and not a warning.
@@ -449,7 +461,7 @@ func activeGroupsAndAccounts(ctx context.Context, db *bun.DB, groupIds []string)
 		seenAccount[accountId] = struct{}{}
 		accountIds = append(accountIds, accountId)
 	}
-	return activeGroupIds, accountIds
+	return activeGroupIds, accountIds, groupAccounts
 }
 
 // accountRowPayload unmarshals a row's payload, answering nil on failure.
@@ -594,6 +606,9 @@ func treeHasAccountScope(expr ExpressionNode) bool {
 //	every account      -> the field is present and non-empty
 func (e *MemQLEngine) accountScopeComparison(ctx context.Context, n *AccountScopeExpression) ExpressionNode {
 	field := strings.TrimSpace(n.Field)
+	if n.Organization && organizationOperator(ctx) {
+		return &constantBoolExpression{value: e.GlobalDataCapable(ctx, auth.VerbRead)}
+	}
 	if field == "" {
 		return &constantBoolExpression{value: false}
 	}
@@ -602,13 +617,20 @@ func (e *MemQLEngine) accountScopeComparison(ctx context.Context, n *AccountScop
 		return &constantBoolExpression{value: false}
 	}
 	if scope.everyAccount {
+		if n.Organization && !e.GlobalDataCapable(ctx, auth.VerbRead) {
+			return &constantBoolExpression{value: false}
+		}
 		return &accountScopeMatch{field: field, everyAccount: true}
 	}
+	allowUntied := n.AllowUntied && (!n.Organization || e.GlobalDataCapable(ctx, auth.VerbRead))
 	values := make([]string, 0, len(scope.accounts))
 	for account := range scope.accounts {
+		if n.Organization && !e.organizationReadAllows(ctx, account, n.Resource) {
+			continue
+		}
 		values = append(values, account)
 	}
-	if len(values) == 0 {
+	if len(values) == 0 && !allowUntied {
 		// A member of nothing. Folding to a false constant rather than
 		// emitting an empty containment list keeps the SQL compiler off a
 		// degenerate array whose semantics vary by backend, and says the
@@ -619,7 +641,7 @@ func (e *MemQLEngine) accountScopeComparison(ctx context.Context, n *AccountScop
 	// signature and every test assertion over it -- is stable rather than
 	// following Go's map iteration order.
 	sort.Strings(values)
-	return &accountScopeMatch{field: field, accounts: values}
+	return &accountScopeMatch{field: field, accounts: values, rowID: n.RowID, allowUntied: allowUntied}
 }
 
 // accountScopeMatchesNode is the post-filter evaluation of a lowered account
@@ -636,11 +658,22 @@ func accountScopeMatchesNode(node memorynodes.MemoryNode, n *accountScopeMatch, 
 	if n == nil || strings.TrimSpace(n.field) == "" {
 		return false
 	}
+	if n.rowID {
+		for _, account := range n.accounts {
+			if BareShortId(node.ID) == BareShortId(account) {
+				return true
+			}
+		}
+		return false
+	}
 	payload, err := cachedPayloadMap(node, cache)
 	if err != nil || payload == nil {
 		return false
 	}
 	value, present := payload[strings.TrimSpace(n.field)]
+	if n.allowUntied && (!present || value == nil || value == "") {
+		return true
+	}
 	if !present {
 		return false
 	}

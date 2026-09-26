@@ -11,8 +11,13 @@
 /// record of how to reach a store, and Shopify has no corresponding object.
 /// One connector, many stores -- every mirrored row carries the storeId of
 /// the row it came from, and every read is scoped by it.
+///
+/// Readable by developers and cluster owners, writable by cluster owners
+/// (Connect Shopify, decision D3). `rankFloor` widens the READ only: a
+/// developer sees every store, and changing one that exists stays owner-only.
+/// Below developer, a read answers zero rows rather than an error.
 @origin("memql")
-@rowAuthz(clusterOwner)
+@rowAuthz(clusterOwner, rankFloor="developer")
 @displayCard(primary="domain", secondary="name", tertiary="apiVersion", status="status")
 concept store {
   /// The myshopify.com domain, e.g. "acme-widgets.myshopify.com". The one

@@ -68,7 +68,7 @@ export function ManifestPreview({ manifest }: { manifest: ManifestSummary }) {
           {manifest.deployables.map((app) => (
             <li key={app.name} className="os-report-item">
               <div className="os-report-item-head">
-                <span className="os-report-name">{app.name}</span>
+                <span className="os-report-name">{app.displayName || app.name}</span>
                 {app.kind === "" ? null : <Chip>{app.kind}</Chip>}
               </div>
               {app.path === "" ? null : <p className="os-report-path">{app.path}</p>}

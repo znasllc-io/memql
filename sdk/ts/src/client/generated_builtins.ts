@@ -117,7 +117,7 @@ QueryClient.prototype.campaignImportRecipients = function (this: QueryClient, ar
 
 /** Pause a running campaign send. The delivery ledger is untouched, so resuming continues exactly where it stopped -- 'where it stopped' is the set of recipients with no delivery row, not a cursor that could go stale. */
 export interface CampaignPauseSendArgs {
-  /** The campaign to pause. The caller must own it. */
+  /** The campaign to pause. The caller needs update permission in its organization. */
   campaignId: string;
 }
 
@@ -139,7 +139,7 @@ QueryClient.prototype.campaignPauseSend = function (this: QueryClient, args: Cam
 
 /** Resume a paused campaign send. Does not re-stamp startedAt: the gap between startedAt and completedAt is how long the run took, and resetting it on resume would erase the pause it exists to reveal. */
 export interface CampaignResumeSendArgs {
-  /** The campaign to resume. The caller must own it. */
+  /** The campaign to resume. The caller needs update permission in its organization. */
   campaignId: string;
 }
 
@@ -181,9 +181,9 @@ QueryClient.prototype.campaignRetireEmailRule = function (this: QueryClient, arg
   return this.executeNamed("campaignRetireEmailRule", buildCampaignRetireEmailRule(args), opts);
 };
 
-/** Commit a campaign to a time and enqueue the send job that will fire at it (memql#3459). Runs the SAME preflight as campaignStartSend -- sender registered, one-click unsubscribe configured, template marked ready, audience non-empty and inside the ceiling -- because the whole value of scheduling is finding out now rather than at 3am. The job it writes is inert: it sits in the 'scheduled' status until the drain worker sees that the campaign's scheduledAt has passed, and the campaign row is the authority on that time, so moving the date with updateCampaign moves the send. A time in the past is refused; use campaignStartSend to send now. Authorization is the owned-tier read of the campaign, exactly as for starting one by hand. */
+/** Commit a campaign to a time and enqueue the send job that will fire at it (memql#3459). Runs the SAME preflight as campaignStartSend -- sender registered, one-click unsubscribe configured, template marked ready, audience non-empty and inside the ceiling -- because the whole value of scheduling is finding out now rather than at 3am. The job it writes is inert: it sits in the 'scheduled' status until the drain worker sees that the campaign's scheduledAt has passed, and the campaign row is the authority on that time, so moving the date with updateCampaign moves the send. A time in the past is refused; use campaignStartSend to send now. Requires the same organization update permission as starting one by hand. */
 export interface CampaignScheduleSendArgs {
-  /** The campaign to schedule. The caller must own it. */
+  /** The campaign to schedule. The caller needs update permission in its organization. */
   campaignId: string;
   /** When the send should begin, RFC 3339 (e.g. 2026-08-14T09:00:00Z). Interpreted as an instant, not a local wall clock -- a value with no offset is read as UTC. */
   scheduledAt: string;
@@ -206,9 +206,9 @@ QueryClient.prototype.campaignScheduleSend = function (this: QueryClient, args: 
   return this.executeNamed("campaignScheduleSend", buildCampaignScheduleSend(args), opts);
 };
 
-/** Preflight and start a campaign send. Refuses -- rather than partially sending -- when no email sender is registered on the node, when one-click unsubscribe is not configured (MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET / _BASE_URL), when the template is not marked ready, or when the audience is empty or at the MEMQL_CAMPAIGNS_MAX_AUDIENCE ceiling. Authorization is the owned-tier read of the campaign: a caller who cannot read it cannot start it. Returns the recipient count the send will work through. */
+/** Preflight and start a campaign send. Refuses -- rather than partially sending -- when no email sender is registered on the node, when one-click unsubscribe is not configured (MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET / _BASE_URL), when the template is not marked ready, or when the audience is empty or at the MEMQL_CAMPAIGNS_MAX_AUDIENCE ceiling. Requires a readable campaign and update permission on data in its organization. Returns the recipient count the send will work through. */
 export interface CampaignStartSendArgs {
-  /** The campaign to send. The caller must own it. */
+  /** The campaign to send. The caller needs update permission in its organization. */
   campaignId: string;
 }
 
@@ -831,7 +831,7 @@ QueryClient.prototype.editDocument = function (this: QueryClient, args: EditDocu
   return this.executeNamed("editDocument", buildEditDocument(args), opts);
 };
 
-/** The CALLER's resolved capability set, with provenance: one entry per (verb, resource) the cluster knows -- every pair any role holds, plus every pair a grant naming the caller adds -- each `allow` or `deny` and `source` naming the level that answered: `role` (inherited), `group` (a group the caller is in) or `user` (a grant on the caller). Takes no subject, so nobody can name anybody else; every signed-in person reads their own, which is why it carries no admin floor. This is the one read MemQL OS decides its desktop from. Returns {ok, role, userId, entries: [{verb, resource, effect, source}]}. */
+/** The CALLER's resolved capability set, with provenance: one entry per (verb, resource) the cluster knows -- every pair any role holds, plus every pair a grant naming the caller adds -- each `allow` or `deny` and `source` naming the level that answered: `role` (inherited), `group` (a group the caller is in) or `user` (a grant on the caller). Takes no subject, so nobody can name anybody else; every signed-in person reads their own, which is why it carries no admin floor. This is the one read MemQL OS decides its desktop from. Returns {ok, role, userId, entries: [{verb, resource, effect, source}], organizationEntries: [{accountId, verb, resource, effect}]}. Global entries retain their existing meaning. Organization entries report target-specific app and data permissions for authorized finite memberships; app discovery may admit a root app available in any organization, while actions must authorize their selected organization. Global operators keep global entries and an empty organizationEntries list. */
 export interface EffectiveCapabilitiesForActorArgs {
 }
 
@@ -988,18 +988,24 @@ QueryClient.prototype.fleetRevokeMachine = function (this: QueryClient, args: Fl
   return this.executeNamed("fleetRevokeMachine", buildFleetRevokeMachine(args), opts);
 };
 
-/** Set the OWNER's half of a machine's sharing consent: `owner` keeps it to yourself, `cluster` offers it to everybody on this cluster. The machine's own half comes from its policy.yaml and is not settable from here -- deliberately, because it is a decision about where the machine IS and only the machine can make it; both halves must say cluster before anybody else's work runs on it. It resolves the machine through YOUR OWN machines, which is the whole reason this is a builtin: the row's tier grants a cluster owner the write, and lending somebody else's hardware to the cluster is not a decision a cluster owner gets to make for them. */
+/** Set the OWNER's half of a machine's sharing consent: `owner` keeps it to yourself, `people` lends it to the users and groups you name, `cluster` offers it to everybody on this cluster and to the cluster's own work. The machine's own half comes from its policy.yaml and is not settable from here -- deliberately, because it is a decision about where the machine IS and only the machine can make it; it must say cluster before anybody else's work runs on it. It resolves the machine through YOUR OWN machines, which is the whole reason this is a builtin: the row's tier grants a cluster owner the write, and lending somebody else's hardware is not a decision a cluster owner gets to make for them. Under `people`, a user or group not already on the machine's list must be one fleetShareDirectory offers you, and one sentence refuses both an id that does not exist and one you may not pick, so this is never a way to learn who is on the cluster. */
 export interface FleetSetSharingArgs {
   /** v1:worker:registration.id of the machine to set sharing on. It must be one of the caller's own. */
   registrationId: string;
-  /** owner or cluster. Anything else is refused rather than read as owner -- a misspelling that silently meant `keep it private` would be safe, and one that silently meant anything else would not. */
+  /** owner, people or cluster. Anything else is refused rather than read as owner -- a misspelling that silently meant `keep it private` would be safe, and one that silently meant anything else would not. */
   mode: string;
+  /** Under people: the v1:identity:user ids to lend the machine to. At most 50 subjects across both lists, and at least one. Your own id is dropped rather than refused -- your own machine is yours already. Ignored under owner and cluster. */
+  userIds?: string[];
+  /** Under people: the v1:identity:group ids whose active members may use the machine. Ignored under owner and cluster. */
+  groupIds?: string[];
 }
 
 export function buildFleetSetSharing(args: FleetSetSharingArgs): string {
   const parts: string[] = [];
   parts.push("registrationId: " + renderMemQLValue(args.registrationId));
   parts.push("mode: " + renderMemQLValue(args.mode));
+  if (args.userIds !== undefined) parts.push("userIds: " + renderMemQLValue(args.userIds));
+  if (args.groupIds !== undefined) parts.push("groupIds: " + renderMemQLValue(args.groupIds));
   return "builtin fleetSetSharing(" + parts.join(", ") + ")";
 }
 
@@ -1011,6 +1017,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.fleetSetSharing = function (this: QueryClient, args: FleetSetSharingArgs = {} as FleetSetSharingArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("fleetSetSharing", buildFleetSetSharing(args), opts);
+};
+
+/** Who you can lend one of YOUR OWN machines to: the people and groups you may pick, and the ones already on this machine's list. When you may already read every person on the cluster (`read` on `principal`: owner, developer and admin by default, and whoever a grant gives it to) that is every active person, with their email, and every active group; otherwise it is the active groups you are in and the active people in them, by display name only. Also names every subject already on the machine's list, marked when it is no longer one you could pick -- somebody who left your group stays on the list until you remove them. The machine is resolved through your own machines, so another user's id answers exactly as a made-up one does, and a person with no machine cannot list anybody through it. */
+export interface FleetShareDirectoryArgs {
+  /** v1:worker:registration.id of the machine being shared. It must be one of the caller's own. */
+  registrationId: string;
+}
+
+export function buildFleetShareDirectory(args: FleetShareDirectoryArgs): string {
+  const parts: string[] = [];
+  parts.push("registrationId: " + renderMemQLValue(args.registrationId));
+  return "builtin fleetShareDirectory(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    fleetShareDirectory(args: FleetShareDirectoryArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.fleetShareDirectory = function (this: QueryClient, args: FleetShareDirectoryArgs = {} as FleetShareDirectoryArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("fleetShareDirectory", buildFleetShareDirectory(args), opts);
 };
 
 /** What one of YOUR OWN machines has done this week: how many calls ran on it, for how many people, and how those calls split across the four levels. COUNTS AND LEVELS, and nothing else -- somebody who lends their machine to the team is entitled to know it is being used and NOT entitled to read what it was used for, so the narrowing happens in the engine before anything leaves it rather than in a renderer that could later be rewritten. People are counted and never named. A read that FAILS answers `readable: false` rather than zero: telling somebody who lent their machine that nobody used it is a specific claim, and a failed read is not evidence for it. */
@@ -1142,12 +1170,18 @@ It answers `{authorizeUrl, reason, installUrl}` and never an error a client has 
   ok                        -- authorizeUrl is set; navigate to it.   github_app_not_configured -- this cluster has no GitHub App (the six MEMQL_GITHUB_APP_*                                values are absent). authorizeUrl and installUrl are empty and                                the Source stop offers the pasted-token path alone. An                                operator's condition, not a person's.   connect_state_invalid     -- the state row could not be written. The person retries; there                                is nothing for them to fix.
 A call carrying no actor is REFUSED rather than answered, because the state row names the account the callback may land a grant on and a row naming nobody is a grant nobody owns. */
 export interface GithubConnectBeginArgs {
+  /** Existing own grant to reconnect; omitted means add another GitHub identity. */
+  credentialId?: string;
+  /** Browser flow correlation, echoed on callback; never authorization. */
+  flowId?: string;
   /** Where in MemQL OS to land when the callback finishes -- a same-origin path such as "/packages/new". Validated as a relative path on the way in and again on the way out; anything absolute, protocol-relative or carrying a control character is dropped for the OS root. */
   returnPath?: string;
 }
 
 export function buildGithubConnectBegin(args: GithubConnectBeginArgs): string {
   const parts: string[] = [];
+  if (args.credentialId !== undefined) parts.push("credentialId: " + renderMemQLValue(args.credentialId));
+  if (args.flowId !== undefined) parts.push("flowId: " + renderMemQLValue(args.flowId));
   if (args.returnPath !== undefined) parts.push("returnPath: " + renderMemQLValue(args.returnPath));
   return "builtin githubConnectBegin(" + parts.join(", ") + ")";
 }
@@ -1311,6 +1345,27 @@ declare module "./query.js" {
 
 QueryClient.prototype.groupMemberRemove = function (this: QueryClient, args: GroupMemberRemoveArgs = {} as GroupMemberRemoveArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("groupMemberRemove", buildGroupMemberRemove(args), opts);
+};
+
+/** List up to 100 active people already in this group's organization. Requires group management permission and membership of that organization; never enumerates unrelated users. */
+export interface GroupPeopleArgs {
+  groupId: string;
+}
+
+export function buildGroupPeople(args: GroupPeopleArgs): string {
+  const parts: string[] = [];
+  parts.push("groupId: " + renderMemQLValue(args.groupId));
+  return "builtin groupPeople(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    groupPeople(args: GroupPeopleArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.groupPeople = function (this: QueryClient, args: GroupPeopleArgs = {} as GroupPeopleArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("groupPeople", buildGroupPeople(args), opts);
 };
 
 /** Rename a group or change its description. Requires `update` on `group`. Refuses `group_not_active` on an archived group -- an archived group grants nothing, and editing one reads as reviving it. Returns {groupId, name, description}. */
@@ -1904,6 +1959,8 @@ QueryClient.prototype.packageDeactivateDeployable = function (this: QueryClient,
 
 /** Run one deployment attempt for a package (epic memql#4794). WITHOUT confirm the run parks at awaiting_confirm with the analysis report on a new deployment row and nothing else happens -- that gate is always present (D12), and a redeploy passes it in one click. WITH confirm the run builds, stages, rolls and publishes in the D6 order: a failure anywhere before publish leaves every site serving exactly what it was serving, and a package with no DSL (or unchanged DSL) skips stage and roll entirely so nothing restarts. A package carrying DSL requires an actor who may author constructs -- an owner or a developer, and deliberately not an admin -- and is refused with dsl_requires_authoring at the START, before any build. placements is read only for a deployable's FIRST deploy (epic memql#4885, D8); later deploys find the site through (packageId, packageDeployableName) and never re-ask. Returns {deploymentId, status, awaitingConfirm, deployables, report}; each deployables entry carries {name, siteId, hostname, bundleRef, version, created} on success, {name, refusal} for a half that was refused or skipped, plus accountId / ownDomain for the placement halves that landed and accountRefusal / domainRefusal for the ones the guards refused. */
 export interface PackageDeployArgs {
+  /** Start analysis in the background and immediately return its durable run ID. Requires confirm:false and no deploymentId. Read the deployment row for progress and the final report; leaving the browser does not cancel the run. */
+  background?: boolean;
   /** The v1:platform:package row to deploy. */
   packageId: string;
   /** Pass true to proceed past the confirm gate. Absent or false parks the run with its report and returns. */
@@ -1918,6 +1975,7 @@ export interface PackageDeployArgs {
 
 export function buildPackageDeploy(args: PackageDeployArgs): string {
   const parts: string[] = [];
+  if (args.background !== undefined) parts.push("background: " + renderMemQLValue(args.background));
   parts.push("packageId: " + renderMemQLValue(args.packageId));
   if (args.confirm !== undefined) parts.push("confirm: " + renderMemQLValue(args.confirm));
   if (args.placements !== undefined) parts.push("placements: " + renderMemQLValue(args.placements));
@@ -2006,6 +2064,39 @@ declare module "./query.js" {
 
 QueryClient.prototype.packageSetAutoDeploy = function (this: QueryClient, args: PackageSetAutoDeployArgs = {} as PackageSetAutoDeployArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("packageSetAutoDeploy", buildPackageSetAutoDeploy(args), opts);
+};
+
+/** Atomically register or restore one verified repository path, preserving an existing package ID. */
+export interface PackageSourceRegisterArgs {
+  name: string;
+  repoUrl: string;
+  repoRef?: string;
+  credentialId: string;
+  sourceConnectionId: string;
+  accountId: string;
+  autoDeploy?: boolean;
+}
+
+export function buildPackageSourceRegister(args: PackageSourceRegisterArgs): string {
+  const parts: string[] = [];
+  parts.push("name: " + renderMemQLValue(args.name));
+  parts.push("repoUrl: " + renderMemQLValue(args.repoUrl));
+  if (args.repoRef !== undefined) parts.push("repoRef: " + renderMemQLValue(args.repoRef));
+  parts.push("credentialId: " + renderMemQLValue(args.credentialId));
+  parts.push("sourceConnectionId: " + renderMemQLValue(args.sourceConnectionId));
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.autoDeploy !== undefined) parts.push("autoDeploy: " + renderMemQLValue(args.autoDeploy));
+  return "builtin packageSourceRegister(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    packageSourceRegister(args: PackageSourceRegisterArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.packageSourceRegister = function (this: QueryClient, args: PackageSourceRegisterArgs = {} as PackageSourceRegisterArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("packageSourceRegister", buildPackageSourceRegister(args), opts);
 };
 
 /** List every AI provider this NODE has registered: its vendor and model, whether this node can call it, which tier of the resolution chain supplied its credential (federation | globalSecret | globalVariable | env | unresolved), and -- when it cannot be called -- why not. Produced from the live provider registry, never persisted, and carrying no credential or fingerprint of one. Per-node on purpose: two replicas genuinely can disagree, and that disagreement is the most useful thing this read surfaces. Owner-only. */
@@ -2597,6 +2688,97 @@ QueryClient.prototype.routingRules = function (this: QueryClient, args: RoutingR
   return this.executeNamed("routingRules", buildRoutingRules(args), opts);
 };
 
+/** Begin a reusable personal store connection without changing any deployable. The shop is derived from a recent signed Shopify App URL launch, then authorized through the session-bound callback. No caller-supplied store address is accepted. */
+export interface ShopifyAccountConnectBeginArgs {
+  signedQuery: string;
+  returnPath?: string;
+}
+
+export function buildShopifyAccountConnectBegin(args: ShopifyAccountConnectBeginArgs): string {
+  const parts: string[] = [];
+  parts.push("signedQuery: " + renderMemQLValue(args.signedQuery));
+  if (args.returnPath !== undefined) parts.push("returnPath: " + renderMemQLValue(args.returnPath));
+  return "builtin shopifyAccountConnectBegin(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyAccountConnectBegin(args: ShopifyAccountConnectBeginArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyAccountConnectBegin = function (this: QueryClient, args: ShopifyAccountConnectBeginArgs = {} as ShopifyAccountConnectBeginArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyAccountConnectBegin", buildShopifyAccountConnectBegin(args), opts);
+};
+
+/** Begin Connect Shopify for a storefront's store (design 12.4, D1, D10): answer the URL the browser navigates to -- Shopify's approve page for the shop the server resolved -- with a single-use state bound to the caller.
+The app Shopify is asked to approve is the PENDING one a save left, when there is one, otherwise the store's current app and its webhook secret; with neither the reason is shopify_app_not_saved and nothing is written. The state (v1:identity:githubConnectState, purpose shopify_connect) names the shop, the site, the app's client id and which secret verifies the callback, and lives ten minutes. The plaintext state appears only inside authorizeUrl; only its digest is stored. The redirect is this cluster's own identity service, never anything the request said. */
+export interface ShopifyConnectBeginArgs {
+  /** The storefront deployable. The shop is resolved on the server from the package run that last published it. */
+  siteId: string;
+  /** Where in MemQL OS to land when Connect finishes -- a same-origin path. Anything absolute, protocol-relative or carrying a control character is dropped for the OS root. */
+  returnPath?: string;
+}
+
+export function buildShopifyConnectBegin(args: ShopifyConnectBeginArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  if (args.returnPath !== undefined) parts.push("returnPath: " + renderMemQLValue(args.returnPath));
+  return "builtin shopifyConnectBegin(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyConnectBegin(args: ShopifyConnectBeginArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyConnectBegin = function (this: QueryClient, args: ShopifyConnectBeginArgs = {} as ShopifyConnectBeginArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyConnectBegin", buildShopifyConnectBegin(args), opts);
+};
+
+/** Where one storefront stands with Connect Shopify (design 12.2) -- what the Store panel draws, and the only thing it draws from: a binding says nothing about whether a store is connected.
+`reason` is 'ok' when the storefront resolved, and otherwise one of site_not_writable, not_a_storefront, store_not_named or store_redacted, with every other key present and empty. `appSaved` is true when the store has a live appClientId or a pending app was saved; `pendingApp` when a pending app is waiting for an approval; `connected` when the store has an Admin token; `storefrontTokenSet` when it names a Storefront token. `requiredScopes` is the one scope list the Shopify app must request, Storefront scopes first; `grantedScopes` is what the store was granted. Never returns a credential. */
+export interface ShopifyConnectStatusArgs {
+  /** The storefront deployable. The shop is resolved on the server from the package run that last published it. */
+  siteId: string;
+}
+
+export function buildShopifyConnectStatus(args: ShopifyConnectStatusArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  return "builtin shopifyConnectStatus(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyConnectStatus(args: ShopifyConnectStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyConnectStatus = function (this: QueryClient, args: ShopifyConnectStatusArgs = {} as ShopifyConnectStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyConnectStatus", buildShopifyConnectStatus(args), opts);
+};
+
+/** Provider readiness contains no client credentials. Registration belongs to the cluster operator; people authorize through Shopify. */
+export interface ShopifyConnectionProviderStatusArgs {
+}
+
+export function buildShopifyConnectionProviderStatus(args: ShopifyConnectionProviderStatusArgs): string {
+  void args;
+  return "builtin shopifyConnectionProviderStatus()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyConnectionProviderStatus(args?: ShopifyConnectionProviderStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyConnectionProviderStatus = function (this: QueryClient, args: ShopifyConnectionProviderStatusArgs = {} as ShopifyConnectionProviderStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyConnectionProviderStatus", buildShopifyConnectionProviderStatus(args), opts);
+};
+
 /** Register every mirrored webhook topic for every ingesting store at the pinned API version, update the ones whose URL, version or includeFields have drifted, and remove ours the allowlist no longer wants. Shopify deletes a subscription after eight consecutive delivery failures, so this is what brings a store back after an outage. Records the outcome on each store's health. */
 export interface ShopifyEnsureSubscriptionsArgs {
 }
@@ -2728,6 +2910,35 @@ QueryClient.prototype.shopifyRunComplianceJobs = function (this: QueryClient, ar
   return this.executeNamed("shopifyRunComplianceJobs", buildShopifyRunComplianceJobs(args), opts);
 };
 
+/** Save the Shopify app's client ID and secret from a storefront's Store panel (design 12.3, D7).
+PENDING ONLY (D12). The client ID lands as the globalVariable SHOPIFY_<ID>_PENDING_CLIENT_ID and the secret, sealed on the server, as the globalSecret SHOPIFY_<ID>_PENDING_CLIENT_SECRET. The store row, its live appClientId and the secret that verifies its webhooks are never touched: saving proves nothing about the shop, so it can move nothing a webhook is checked with. They change only after the shop's own staff approve Connect Shopify. */
+export interface ShopifyStoreAppSaveArgs {
+  /** The storefront deployable whose store the app belongs to. */
+  siteId: string;
+  /** The Shopify app's client ID, from the Dev Dashboard. */
+  clientId: string;
+  /** The Shopify app's client secret. Read once, sealed, and discarded; never stored or echoed in the clear. */
+  clientSecret: string;
+}
+
+export function buildShopifyStoreAppSave(args: ShopifyStoreAppSaveArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  parts.push("clientId: " + renderMemQLValue(args.clientId));
+  parts.push("clientSecret: " + renderMemQLValue(args.clientSecret));
+  return "builtin shopifyStoreAppSave(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyStoreAppSave(args: ShopifyStoreAppSaveArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyStoreAppSave = function (this: QueryClient, args: ShopifyStoreAppSaveArgs = {} as ShopifyStoreAppSaveArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyStoreAppSave", buildShopifyStoreAppSave(args), opts);
+};
+
 /** Report every configured store's status, granted-versus-needed scopes, subscription reconcile time, cost-bucket state and per-domain sync state with drift counters. The read behind the portal's Stores page. */
 export interface ShopifyStoreHealthArgs {
   storeId?: string;
@@ -2747,6 +2958,32 @@ declare module "./query.js" {
 
 QueryClient.prototype.shopifyStoreHealth = function (this: QueryClient, args: ShopifyStoreHealthArgs = {} as ShopifyStoreHealthArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("shopifyStoreHealth", buildShopifyStoreHealth(args), opts);
+};
+
+/** Use a pasted Storefront API token for a storefront's store, or clear the one it has (design 12.5, D8).
+Refused `store_in_use` unless the caller is a cluster owner or can write EVERY site bound to the store, serving or preview: a store's token is served under each of their hostnames. A token is checked with one Storefront request before it is sealed; an empty token clears the reference so the next Connect mints one, and is refused while a live storefront is bound to the store. */
+export interface ShopifyStorefrontTokenSetArgs {
+  /** The storefront deployable whose store the token is for. */
+  siteId: string;
+  /** The Storefront API token. Empty clears the store's token. Read once, sealed, and discarded. */
+  token?: string;
+}
+
+export function buildShopifyStorefrontTokenSet(args: ShopifyStorefrontTokenSetArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  if (args.token !== undefined) parts.push("token: " + renderMemQLValue(args.token));
+  return "builtin shopifyStorefrontTokenSet(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    shopifyStorefrontTokenSet(args: ShopifyStorefrontTokenSetArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.shopifyStorefrontTokenSet = function (this: QueryClient, args: ShopifyStorefrontTokenSetArgs = {} as ShopifyStorefrontTokenSetArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("shopifyStorefrontTokenSet", buildShopifyStorefrontTokenSet(args), opts);
 };
 
 /** The plan-independent grant: add one tag to the buyer's customer record. Writes the tag and NOTHING else -- what the tag does is the merchant's own automatic discount, which this connector deliberately does not create on their behalf. Refuses when no customer on the store has that email, because a tag on an account that does not exist entitles nobody. */
@@ -3131,6 +3368,50 @@ QueryClient.prototype.siteTrafficInWindow = function (this: QueryClient, args: S
   return this.executeNamed("siteTrafficInWindow", buildSiteTrafficInWindow(args), opts);
 };
 
+/** Save a caller-owned GitHub installation grouping. Re-adding the same binding reactivates its stable ID after live verification; it never creates a token. */
+export interface SourceConnectionCreateArgs {
+  credentialId: string;
+  installationId: string;
+}
+
+export function buildSourceConnectionCreate(args: SourceConnectionCreateArgs): string {
+  const parts: string[] = [];
+  parts.push("credentialId: " + renderMemQLValue(args.credentialId));
+  parts.push("installationId: " + renderMemQLValue(args.installationId));
+  return "builtin sourceConnectionCreate(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    sourceConnectionCreate(args: SourceConnectionCreateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.sourceConnectionCreate = function (this: QueryClient, args: SourceConnectionCreateArgs = {} as SourceConnectionCreateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("sourceConnectionCreate", buildSourceConnectionCreate(args), opts);
+};
+
+/** Remove only this personal saved binding. Existing packages and sites remain; other sources sharing the same GitHub grant remain connected. */
+export interface SourceConnectionRemoveArgs {
+  connectionId: string;
+}
+
+export function buildSourceConnectionRemove(args: SourceConnectionRemoveArgs): string {
+  const parts: string[] = [];
+  parts.push("connectionId: " + renderMemQLValue(args.connectionId));
+  return "builtin sourceConnectionRemove(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    sourceConnectionRemove(args: SourceConnectionRemoveArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.sourceConnectionRemove = function (this: QueryClient, args: SourceConnectionRemoveArgs = {} as SourceConnectionRemoveArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("sourceConnectionRemove", buildSourceConnectionRemove(args), opts);
+};
+
 /** Store a personal source credential (epic memql#4885, D10). The token crosses the wire ONCE, inside this call, is sealed server-side under MEMQL_MASTER_KEY, and lands on a v1:platform:sourceCredential row owned by the caller; it appears in no row, no log line and no reply. Only github.com is admitted as a host today -- any other host is refused with source_host_unsupported, and the answer is to upload the tree as a zip instead. Returns {credentialId, fingerprint}, the fingerprint being the token's last four characters prefixed with '...', for telling two credentials apart. Name the credential on a package through createPackage or updatePackageSource; the fetcher resolves it under that package's OWNER, so a package naming somebody else's credential is refused by name. */
 export interface SourceCredentialCreateArgs {
   /** The host the token authenticates against. github.com is the only value admitted today. */
@@ -3181,8 +3462,31 @@ QueryClient.prototype.sourceCredentialRevoke = function (this: QueryClient, args
   return this.executeNamed("sourceCredentialRevoke", buildSourceCredentialRevoke(args), opts);
 };
 
+/** List installations for one personal GitHub identity, without reading its repositories. */
+export interface SourceInstallationsArgs {
+  credentialId: string;
+}
+
+export function buildSourceInstallations(args: SourceInstallationsArgs): string {
+  const parts: string[] = [];
+  parts.push("credentialId: " + renderMemQLValue(args.credentialId));
+  return "builtin sourceInstallations(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    sourceInstallations(args: SourceInstallationsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.sourceInstallations = function (this: QueryClient, args: SourceInstallationsArgs = {} as SourceInstallationsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("sourceInstallations", buildSourceInstallations(args), opts);
+};
+
 /** Ask whether this cluster can read a repository (epic memql#4885, D11). Parses the URL, resolves credentialId under the caller's own actor the way a fetch does, asks GitHub for the repository, and answers {host, reachable, private, defaultBranch, reason}. reason is exactly one of: ok (reachable; private and defaultBranch are GitHub's answer), not_found_or_private (404 with no credential -- GitHub answers the two alike, and the stop offers a credential), credential_cannot_see_it (refused under the credential: choose another, or fix its grant), credential_not_found (the caller cannot read the named credential), credential_revoked, source_host_unsupported (only github.com today, or upload a zip), rate_limited (ask again later), reconnect_required (GitHub refused the grant itself -- never read as 'private, or not there', because the repair is reconnecting and not choosing another credential), repository_not_installed (the grant is good and the app is not installed on this repository, which is a link away). Under a grant the probe also answers `branches` and a `manifest` summary read from memql-package.yaml through the contents API -- {name, deployables:[{name, kind, path}], dslDomains} -- so the ref picker and the What-it-is preview are filled before Analyze runs; both are empty when there is no grant, no manifest, or the manifest does not parse, and a manifest that does not parse is NOT a refusal here, because the analysis is the authority. A typed reason, never the API's own body. A GitHub this cluster cannot reach is an ERROR rather than a reason, so the stop says so and stays editable; the fetch is the authority and the probe is a courtesy. Writes nothing and stamps nothing. */
 export interface SourceProbeArgs {
+  /** A caller-owned active saved source. When supplied, its grant and installation bound this probe. */
+  connectionId?: string;
   /** The repository URL as typed, e.g. https://github.com/acme/widget. */
   repoUrl: string;
   /** One of the caller's v1:platform:sourceCredential rows to probe under -- a pasted token or a GitHub App grant. Empty resolves the caller's active grant when they hold one and probes anonymously otherwise, which is what a public repository needs and what makes a connected person's picker prefill without naming anything. */
@@ -3191,6 +3495,7 @@ export interface SourceProbeArgs {
 
 export function buildSourceProbe(args: SourceProbeArgs): string {
   const parts: string[] = [];
+  if (args.connectionId !== undefined) parts.push("connectionId: " + renderMemQLValue(args.connectionId));
   parts.push("repoUrl: " + renderMemQLValue(args.repoUrl));
   if (args.credentialId !== undefined) parts.push("credentialId: " + renderMemQLValue(args.credentialId));
   return "builtin sourceProbe(" + parts.join(", ") + ")";
@@ -3208,6 +3513,8 @@ QueryClient.prototype.sourceProbe = function (this: QueryClient, args: SourcePro
 
 /** List the repositories a GitHub App grant can reach (epic memql#4912, C7). Resolves the caller's active grant -- or the one named by credentialId -- reads its installations live from GitHub and walks each one's repositories, and answers {repositories, installations, pending, nextPage, reason}. Each repository carries {fullName, owner, name, url, private, visibility, defaultBranch, pushedAt, installationId}, so the picker can group by owner and prefill a ref without a second call. `installations` names every installation the grant reaches, and `pending` names those still awaiting an organization owner's approval BY NAME -- a pending installation is not a reachable one, and saying so is what stops a person hunting for a repository that will appear when somebody else clicks. reason is one of: ok, github_app_not_configured (this cluster has no GitHub App, so only the token path is offered), reconnect_required (GitHub refused the grant -- the person reconnects), credential_not_found (no grant, or not the caller's), credential_revoked, rate_limited. Writes nothing except the grant's own installation ids, which it refreshes from what it just read. */
 export interface SourceRepositoriesArgs {
+  /** A caller-owned active saved source. When supplied, only its live installation is listed. */
+  connectionId?: string;
   /** A github_app grant of the caller's to list under. Empty resolves the caller's active grant, which is what a person with one connection has. */
   credentialId?: string;
   /** 1-based page through the repositories of every installation, 100 per page. Empty or 0 means the first page; nextPage in the reply is 0 when there are no more. */
@@ -3216,6 +3523,7 @@ export interface SourceRepositoriesArgs {
 
 export function buildSourceRepositories(args: SourceRepositoriesArgs): string {
   const parts: string[] = [];
+  if (args.connectionId !== undefined) parts.push("connectionId: " + renderMemQLValue(args.connectionId));
   if (args.credentialId !== undefined) parts.push("credentialId: " + renderMemQLValue(args.credentialId));
   if (args.page !== undefined) parts.push("page: " + renderMemQLValue(args.page));
   return "builtin sourceRepositories(" + parts.join(", ") + ")";

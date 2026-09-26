@@ -64,9 +64,8 @@ type Server struct {
 	// section G) -- what places an arriving person into the group of the
 	// account whose verified domain matches their address.
 	//
-	// Reached only from provisionOidcUser, which returns early unless the
-	// provider VERIFIED the address, so the true it passes is proven rather
-	// than assumed. Nil on a node with no groups plug-in wired, and it
+	// OIDC and hosted bootstrap pass true only after email verification.
+	// Local passkey bootstrap passes false: its contact email is unverified. Nil on a node with no groups plug-in wired, and it
 	// returns nothing: it must never fail a sign-in that has succeeded.
 	OnUserProvisioned func(ctx context.Context, userId, email string, emailVerified bool)
 
@@ -220,6 +219,14 @@ type Server struct {
 	// Nil falls back to Cfg.GitHubApp -- the environment alone, which is what
 	// every test that builds a Server by hand means by it.
 	GitHubApp *githubconnect.Resolver
+
+	// ShopifyConnect is Connect Shopify's half of GET /auth/shopify/callback
+	// (design record 2026-09-23-connect-shopify, 12.7): the checks and writes
+	// that need the store, its sealed secrets and Shopify. Implemented in
+	// integrations/shopify, which this module cannot import, and wired in
+	// app/integrations_identity.go. Nil answers the route 404 past the
+	// install landing.
+	ShopifyConnect identity.ShopifyConnect
 }
 
 // gitHubApp is the one place a handler asks which GitHub App this cluster has.
@@ -298,6 +305,7 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	wrapHandler := func(h http.Handler) http.Handler {
 		return identity.SystemActorMiddleware(abuse.SecurityHeadersMiddleware(h))
 	}
+	mux.HandleFunc("GET /.well-known/webauthn", wrap(s.handleWebAuthnOrigins))
 
 	magicLink := http.HandlerFunc(s.cors(s.handleMagicLink))
 	var magicLinkHandler http.Handler = magicLink
@@ -323,8 +331,9 @@ func (s *Server) Mount(mux *http.ServeMux) {
 
 	// GITHUB CONNECT (epic memql#4912, decision C3). The same exception class
 	// as the two above -- GitHub redirects a BROWSER here, and there is no gRPC
-	// form of "the person came back from GitHub" -- and the only HTTP surface
-	// this feature has: the flow is STARTED over the stream by
+	// form of "the person came back from GitHub". The callback relays to the
+	// OS completion route so validation sees its host-only session cookie;
+	// the flow is STARTED over the stream by
 	// githubConnectBegin. No s.cors: it is a top-level navigation, not a fetch.
 	// Registered unconditionally and 404s when no App is configured, so the
 	// route table does not vary with configuration. It needs no front-door
@@ -332,7 +341,8 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	// Service, so every path here is already reachable -- see the header of
 	// github_callback.go for why declaring it in component/server would be
 	// wrong rather than merely unnecessary.
-	mux.HandleFunc("GET "+githubconnect.CallbackPath, wrap(s.handleGitHubCallback))
+	mux.HandleFunc("GET "+githubconnect.CallbackPath, wrap(s.handleGitHubReturn))
+	mux.HandleFunc("GET "+githubconnect.CompletePath, wrap(s.handleGitHubCallback))
 	// THE GITHUB APP SETUP CALLBACK (design record 2026-09-20-github-app-setup,
 	// D4; owner-approved HTTP exception, CLAUDE.md). The same class as the
 	// route above and registered beside it for the same two reasons: GitHub
@@ -343,6 +353,13 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	// page that STARTS the flow is component/identity/web's, because it is a
 	// page.
 	mux.HandleFunc("GET "+githubconnect.AppSetupCallbackPath, wrap(s.handleGitHubAppSetupCallback))
+	// CONNECT SHOPIFY (design record 2026-09-23-connect-shopify, D2, D10). The
+	// class and the placement of the two routes above, for their reasons:
+	// Shopify redirects a BROWSER here, the flow started over the stream
+	// (shopifyConnectBegin), and declaring it in component/server would publish
+	// it on api.<domain>. No s.cors -- a top-level navigation.
+	mux.HandleFunc("GET "+githubconnect.ShopifyCallbackPath, wrap(s.handleShopifyReturn))
+	mux.HandleFunc("GET /auth/shopify/complete", wrap(s.handleShopifyCallback))
 	mux.HandleFunc("POST /oauth/token", wrap(s.cors(s.handleToken)))
 	mux.HandleFunc("OPTIONS /oauth/token", wrap(s.cors(s.handleOptions)))
 

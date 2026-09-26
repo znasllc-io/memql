@@ -891,3 +891,21 @@ func TestSitePublishRegistrationNameIsTheLiteralTheGateScansFor(t *testing.T) {
 			got, sitePublishIntegrationName)
 	}
 }
+
+// A TOP-LEVEL BUILTIN'S ANSWER is a node set -- no bundle, and an output that
+// is a map[string]MemoryNode keyed by id (engine.go, nodesToMap). No read in
+// this package calls a builtin today, so this is the reader held to the shape
+// directly: the copy it was made from (integrations/library) answered nothing
+// for it, which is how every similar-files search came back empty.
+func TestExtractRowsReadsATopLevelBuiltinsAnswer(t *testing.T) {
+	res := memql.NewResultWithOutput(map[string]concepts.MemoryNode{
+		"integration:library:result:x": {
+			ID: "integration:library:result:x", Concept: resultConcept,
+			Payload: []byte(`{"published":true}`),
+		},
+	})
+	rows := extractRows(res)
+	if len(rows) != 1 || rows[0]["published"] != true {
+		t.Fatalf("extractRows read %#v from a builtin that answered one row", rows)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/identity/githubconnect"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/secret"
 )
 
 // githubconnect_test.go -- what githubConnectBegin answers, and what it
@@ -63,7 +65,7 @@ func (f *beginFakeEngine) statement(t *testing.T, prefix string) string {
 
 // callerContext builds the access envelope a signed-in stream call carries.
 func callerContext(userId string) context.Context {
-	return componentAuth.ContextWithUserActor(context.Background(), userId)
+	return componentAuth.ContextWithClaims(componentAuth.ContextWithUserActor(context.Background(), userId), map[string]any{"sid": "browser-session"})
 }
 
 // beginReply decodes the capability's single result node.
@@ -83,6 +85,7 @@ func beginReply(t *testing.T, nodes []memorynodes.MemoryNode, err error) map[str
 }
 
 func configureApp(t *testing.T) {
+	t.Setenv("MEMQL_MASTER_KEY", strings.Repeat("ab", 32))
 	t.Helper()
 	t.Setenv(githubconnect.EnvAppID, "123456")
 	t.Setenv(githubconnect.EnvAppSlug, "memql-example")
@@ -125,6 +128,10 @@ func TestGithubConnectBeginAnswersAnAuthorizeURL(t *testing.T) {
 	authorizeURL, _ := reply["authorizeUrl"].(string)
 	if !strings.HasPrefix(authorizeURL, "https://github.com/login/oauth/authorize?") {
 		t.Fatalf("authorizeUrl = %q", authorizeURL)
+	}
+	parsed, parseErr := url.Parse(authorizeURL)
+	if parseErr != nil || parsed.Query().Get("prompt") != "select_account" {
+		t.Fatalf("connect must offer account selection, got %q (%v)", authorizeURL, parseErr)
 	}
 	if !strings.Contains(authorizeURL, "redirect_uri=https%3A%2F%2Fidentity.example.test%2Fauth%2Fgithub%2Fcallback") {
 		t.Errorf("the redirect URI is not derived from this cluster's own identity base URL:\n  %s", authorizeURL)
@@ -219,6 +226,9 @@ func storedAppRows() githubconnect.RowReader {
 // setting six values in a deployment -- and Connect has to work all the same.
 func TestGithubConnectBeginSeesAnAppRegisteredFromTheProduct(t *testing.T) {
 	unconfigureApp(t)
+	// The app comes from rows, but PKCE still uses the cluster encryption key.
+	// Supply a fixture key rather than inheriting a developer's environment.
+	t.Setenv("MEMQL_MASTER_KEY", strings.Repeat("ab", 32))
 	eng := &beginFakeEngine{}
 	i := NewIdentityIntegrationWithEngine(eng, nil, nil)
 	i.SetGitHubAppRows(storedAppRows())
@@ -338,3 +348,55 @@ var errWriteRefused = &writeRefusedError{}
 type writeRefusedError struct{}
 
 func (*writeRefusedError) Error() string { return "the engine refused the write" }
+
+func TestGithubConnectPersistsSealedPKCEAndBrowserSession(t *testing.T) {
+	configureApp(t)
+	eng := &beginFakeEngine{}
+	i := NewIdentityIntegrationWithEngine(eng, nil, nil)
+	nodes, err := i.handleGithubConnectBegin(callerContext("owner"), map[string]any{"flowId": "attempt-1"}, 0)
+	reply := beginReply(t, nodes, err)
+	target, _ := url.Parse(reply["authorizeUrl"].(string))
+	write := eng.statement(t, "mutation createGithubConnectState(")
+	match := regexp.MustCompile(`pkceVerifier: "([^"]+)"`).FindStringSubmatch(write)
+	if len(match) != 2 {
+		t.Fatal("no sealed PKCE verifier persisted")
+	}
+	verifier, err := secret.Decrypt(match[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(verifier) != 43 || target.Query().Get("code_challenge") != githubconnect.Challenge(verifier) || target.Query().Get("code_challenge_method") != "S256" {
+		t.Fatal("authorize challenge does not match persisted verifier")
+	}
+	if strings.Contains(write, verifier) || strings.Contains(reply["authorizeUrl"].(string), verifier) {
+		t.Fatal("plaintext verifier leaked")
+	}
+	if !strings.Contains(write, `sessionId: "browser-session"`) || !strings.Contains(write, `flowId: "attempt-1"`) {
+		t.Fatal("browser binding or UI correlation missing")
+	}
+}
+
+func TestGithubConnectRequiresBrowserSessionAndOwnReconnectTarget(t *testing.T) {
+	configureApp(t)
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		args map[string]any
+	}{
+		{"missing session", componentAuth.ContextWithUserActor(context.Background(), "owner"), nil},
+		{"unreadable target", callerContext("owner"), map[string]any{"credentialId": "foreign"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eng := &beginFakeEngine{}
+			i := NewIdentityIntegrationWithEngine(eng, nil, nil)
+			if _, err := i.handleGithubConnectBegin(tc.ctx, tc.args, 0); err == nil {
+				t.Fatal("unauthorized begin succeeded")
+			}
+			for _, q := range eng.statements {
+				if strings.HasPrefix(q, "mutation createGithubConnectState(") {
+					t.Fatal("refused begin wrote state")
+				}
+			}
+		})
+	}
+}

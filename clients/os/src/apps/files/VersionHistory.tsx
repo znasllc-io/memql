@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { Download, RotateCw } from "lucide-react";
 
 import { Button, Chip, Notice, ProvenanceDot, Subhead, formatBytes, formatFreshness, formatMoment, useNow } from "../../kit";
@@ -60,13 +61,13 @@ export function VersionHistory({
   return (
     <section className="os-files-versions" aria-label="Version history">
       <div className="os-files-versions-head">
-        <Subhead>Versions</Subhead>
+        <Subhead meta={!loading && !error && readAt !== null ? history.total : undefined}>Versions</Subhead>
         <span className="os-caption">
           {/* WHEN THIS WAS READ, said plainly. These rows carry no broadcast
               routing rule, so this panel is a read rather than a feed -- and a
               surface that looked live while sitting still would be the lie
               worth avoiding here. */}
-          {loading ? "Reading" : readAt === null ? "Not read yet" : `Read ${formatFreshness(readAt.toISOString(), now)}`}
+          {readAt === null ? null : `Read ${formatFreshness(readAt.toISOString(), now)}`}
         </span>
         <Button onClick={onRefresh} ariaLabel="Read the version history again">
           <RotateCw size={12} aria-hidden />
@@ -82,6 +83,7 @@ export function VersionHistory({
         />
       ) : null}
 
+      {history.entries.length === 0 && loading && !error ? <RecordListSkeleton label="Loading file versions" /> : null}
       {history.entries.length === 0 && !loading && error === "" ? (
         <p className="os-caption">No versions to show for this file.</p>
       ) : null}

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, type AccessSummary } from "@znasllc-io/memql-sdk-core/client";
 
@@ -155,6 +155,32 @@ afterEach(() => {
 });
 
 describe("the launcher recovers when the effective set lands after the identity", () => {
+  it("discovers an organization-authorized app and removes it when that permission is revoked", async () => {
+    const denied = [{ verb: "read", resource: "app:campaigns", effect: "deny" as const, source: "group" as const }];
+    const fake = fakeConnection([
+      () => ({ ...effectiveRow("viewer"), entries: denied, organizationEntries: [
+        { accountId: "acme", verb: "read", resource: "app:campaigns", effect: "allow" },
+        { accountId: "acme", verb: "read", resource: "data", effect: "allow" },
+        { accountId: "beta", verb: "read", resource: "app:campaigns", effect: "deny" },
+      ] }),
+      () => ({ ...effectiveRow("viewer"), entries: denied, organizationEntries: [
+        { accountId: "beta", verb: "read", resource: "app:campaigns", effect: "deny" },
+      ] }),
+    ]);
+    h.connection = fake.connection;
+    mountShell();
+    await screen.findByRole("button", { name: "Launcher" });
+    expect(await launcherApps()).not.toContain("Campaigns");
+    await act(async () => fake.open());
+    await waitFor(() => expect(fake.effectiveCalls()).toBe(1));
+    expect(await launcherApps()).toContain("Campaigns");
+    fake.rearm();
+    fireEvent.focus(window);
+    await act(async () => fake.open());
+    await waitFor(() => expect(fake.effectiveCalls()).toBe(2));
+    expect(await launcherApps()).not.toContain("Campaigns");
+  });
+
   it("shows the gated app once the set loads, with no query typed", async () => {
     const fake = fakeConnection([() => effectiveRow("owner")]);
     h.connection = fake.connection;

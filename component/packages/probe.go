@@ -120,9 +120,10 @@ type ManifestSummary struct {
 // preview shows. Deliberately not the build plan or the binding: those are
 // Analyze's to report against a tree it has actually read.
 type ManifestSummaryDeployable struct {
-	Name string `json:"name"`
-	Kind string `json:"kind"`
-	Path string `json:"path"`
+	DisplayName string `json:"displayName,omitempty"`
+	Name        string `json:"name"`
+	Kind        string `json:"kind"`
+	Path        string `json:"path"`
 }
 
 // emptyManifestSummary is what a probe answers when there is nothing to
@@ -421,7 +422,7 @@ func probeManifest(ctx context.Context, d *Deps, bearer, owner, repo string) Man
 	out.Name = manifest.Name
 	for _, dep := range manifest.Deployables {
 		out.Deployables = append(out.Deployables, ManifestSummaryDeployable{
-			Name: dep.Name, Kind: dep.Kind, Path: dep.Path,
+			Name: dep.Name, Kind: dep.Kind, Path: dep.Path, DisplayName: dep.DisplayName,
 		})
 	}
 	// The DSL domains are the DIRECTORY NAMES under dsl/, because that is
@@ -516,7 +517,18 @@ func (i *Integration) handleSourceProbe(ctx context.Context, args map[string]any
 	if repoUrl == "" {
 		return nil, refuse(CodeSourceUnreadable, "repoUrl is required")
 	}
-	res, perr := ProbeSource(ctx, deps, repoUrl, stringArg(args, "credentialId"))
+	credentialId := stringArg(args, "credentialId")
+	if connectionId := stringArg(args, "connectionId"); connectionId != "" {
+		if err := deps.ValidateSourceConnectionRepository(ctx, connectionId, credentialId, repoUrl); err != nil {
+			return nil, err
+		}
+		grant, _, err := resolveSourceConnection(ctx, deps, connectionId, credentialId)
+		if err != nil {
+			return nil, err
+		}
+		credentialId = grant.Id
+	}
+	res, perr := ProbeSource(ctx, deps, repoUrl, credentialId)
 	if perr != nil {
 		return nil, perr
 	}

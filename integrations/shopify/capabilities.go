@@ -125,6 +125,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 	}
+	base = append(base, i.connectCapabilities()...)
 	// THE WHOLESALE WRITES ARE APPENDED RATHER THAN LISTED HERE (epic
 	// memql#5533). They are the only capabilities in this connector that
 	// create B2B objects in a merchant's live store and change what

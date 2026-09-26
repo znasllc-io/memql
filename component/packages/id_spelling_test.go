@@ -37,7 +37,7 @@ func TestARetryWithABareRequestIdReadsThePriorRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first deploy: %v", err)
 	}
-	h.engine.rows["query packageDeploymentById"] = []map[string]any{{
+	h.engine.rows[`query packageDeploymentById(deploymentId: "`+first.DeploymentId+`")`] = []map[string]any{{
 		"id":                 first.DeploymentId,
 		"packageId":          "v1:platform:package:abc",
 		"status":             StatusAbandoned,

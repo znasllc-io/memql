@@ -37,9 +37,9 @@ use shopify.overlay.concepts.{ store }
 // declares a projection that cannot carry one -- the omission is the
 // safety property rather than an economy.
 //
-// The store row is @rowAuthz(clusterOwner) and D10 left that tier
-// UNCHANGED, so this read ANSWERING NOTHING is the ordinary case for a
-// merchant rather than a fault. entitlement.go's storePlan treats it as
+// The store row is readable by a cluster owner or a developer only
+// (@rowAuthz(clusterOwner, rankFloor="developer")), so this read ANSWERING
+// NOTHING is the ordinary case for a merchant rather than a fault. entitlement.go's storePlan treats it as
 // such, and each adapter says for itself what an unknown plan means for it.
 @description("What this pack needs to know about a bound store: which plan it is on and whether it is a development store. NOT its credentials -- storeFull projects three token references and this projection exists so the wholesale pack can never hold one.")
 @row

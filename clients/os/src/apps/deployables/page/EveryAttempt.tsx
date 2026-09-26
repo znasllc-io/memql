@@ -53,7 +53,7 @@ export function EveryAttempt({
     <section className="os-report-part deployable-history">
       {pkg === null ? (
         <Caption>
-          Open Version history on the app to see its published files.
+          Open the app to see its versions.
         </Caption>
       ) : (
         <>

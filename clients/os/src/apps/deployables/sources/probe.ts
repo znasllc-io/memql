@@ -70,6 +70,7 @@ export interface ManifestSummary {
 
 /** One declared deployable, in the three facts the preview shows. */
 export interface ManifestDeployable {
+  displayName?: string;
   name: string;
   kind: string;
   path: string;
@@ -155,7 +156,7 @@ export function manifestFrom(value: unknown): ManifestSummary {
   for (const member of membersOf(row["deployables"])) {
     const name = textOf(member, "name").trim();
     if (name === "") continue;
-    deployables.push({ name, kind: textOf(member, "kind"), path: textOf(member, "path") });
+    deployables.push({ name, ...(textOf(member, "displayName") ? {displayName: textOf(member, "displayName")} : {}), kind: textOf(member, "kind"), path: textOf(member, "path") });
   }
   return {
     name: typeof row["name"] === "string" ? row["name"] : "",
@@ -234,6 +235,9 @@ export function probeNote(reply: SourceProbeReply): string {
     // refusal is two things to keep in step.
     case "reconnect_required":
     case "repository_not_installed":
+    case "source_connection_unavailable":
+    case "source_repository_mismatch":
+    case "repository_not_accessible":
       return copyFor(reply.reason)?.title ?? "";
     default:
       // A reason this build has no name for is not paraphrased. The stop
@@ -259,7 +263,10 @@ export function probeParks(reason: string): boolean {
     // here: it is an operator's condition, the token path still works, and
     // parking on it would block a deploy this cluster can perform.
     reason === "reconnect_required" ||
-    reason === "repository_not_installed"
+    reason === "repository_not_installed" ||
+    reason === "source_connection_unavailable" ||
+    reason === "source_repository_mismatch" ||
+    reason === "repository_not_accessible"
   );
 }
 

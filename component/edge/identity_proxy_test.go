@@ -43,7 +43,7 @@ func TestIdentityXHRIsProxiedNotSPAFallback(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("POST /oauth/token = %d, want 200 from identity", rec.Code)
 	}
-	if body := rec.Body.String(); !strings.Contains(body, `"access_token":"AT"`) {
+	if body := sourceHTML(rec.Body.String()); !strings.Contains(body, `"access_token":"AT"`) {
 		t.Fatalf("body %q is the SPA fallback or not identity's token JSON", body)
 	}
 	if sawMethod != http.MethodPost || sawPath != "/oauth/token" {
@@ -73,8 +73,8 @@ func TestIdentityXHRDoesNotCaptureAuthCallback(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /auth/callback = %d, want 200 SPA fallback", rec.Code)
 	}
-	if rec.Body.String() != "ROOT-SPA" {
-		t.Errorf("GET /auth/callback body = %q, want the SPA", rec.Body.String())
+	if sourceHTML(rec.Body.String()) != "ROOT-SPA" {
+		t.Errorf("GET /auth/callback body = %q, want the SPA", sourceHTML(rec.Body.String()))
 	}
 }
 
@@ -91,13 +91,13 @@ func TestIdentityXHRWithoutTargetIsBadGatewayNotHTML(t *testing.T) {
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("POST /oauth/token with no identity target = %d, want 502 (not SPA 200)", rec.Code)
 	}
-	if strings.Contains(rec.Body.String(), "ROOT-SPA") {
+	if strings.Contains(sourceHTML(rec.Body.String()), "ROOT-SPA") {
 		t.Error("served the SPA fallback as a token response")
 	}
 }
 
 func TestIsIdentityXHRPathExact(t *testing.T) {
-	for _, p := range []string{"/oauth/token", "/auth/refresh", "/auth/logout", "/.well-known/jwks.json"} {
+	for _, p := range []string{"/oauth/token", "/auth/refresh", "/auth/logout", "/.well-known/jwks.json", "/auth/github/complete"} {
 		if !isIdentityXHRPath(p) {
 			t.Errorf("%s should be an identity XHR path", p)
 		}
@@ -106,6 +106,29 @@ func TestIsIdentityXHRPathExact(t *testing.T) {
 		if isIdentityXHRPath(p) {
 			t.Errorf("%s must not be forwarded to identity", p)
 		}
+	}
+}
+
+func TestGitHubCompletionForwardsTheOSCookieAndCallbackToIdentity(t *testing.T) {
+	called := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		cookie, err := r.Cookie("memql_refresh")
+		if err != nil || cookie.Value != "os-host-session" || r.URL.Path != "/auth/github/complete" || r.URL.Query().Get("code") != "provider-code" || r.URL.Query().Get("state") != "single-use-state" || r.Header.Get("X-Forwarded-Proto") != "https" {
+			t.Error("completion lost the OS browser session or callback data at the proxy hop")
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		http.Redirect(w, r, "https://os.example.com/?connect=settings&github=connected", http.StatusSeeOther)
+	}))
+	defer upstream.Close()
+	h := NewHandler(Options{Resolver: staticResolver{site: spaSite()}, Opener: mapOpener(map[string]string{"index.html": "ROOT-SPA"}), IdentityTarget: upstream.URL})
+	req := httptest.NewRequest(http.MethodGet, "https://shop.example.com/auth/github/complete?code=provider-code&state=single-use-state", nil)
+	req.AddCookie(&http.Cookie{Name: "memql_refresh", Value: "os-host-session"})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if !called || rec.Code != http.StatusSeeOther || !strings.Contains(rec.Header().Get("Location"), "connect=settings") || rec.Header().Get("Referrer-Policy") != "no-referrer" {
+		t.Fatal("GitHub completion must proxy to Identity and return its redirect, never the SPA fallback")
 	}
 }
 
@@ -194,5 +217,27 @@ func TestIdentityXHRForwardsRefreshCookieToIdentity(t *testing.T) {
 	}
 	if !strings.Contains(sawCookie, "memql_session=1") {
 		t.Errorf("identity did not see memql_session; Cookie=%q", sawCookie)
+	}
+}
+
+func TestShopifyCompletionProxiesSessionAndSignedQuery(t *testing.T) {
+	raw := "state=s&hmac=h&extra=a%2Bb&extra=x%20y"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cookie, err := r.Cookie("memql_refresh")
+		if err != nil || cookie.Value != "session" || r.URL.RawQuery != raw || r.URL.Path != "/auth/shopify/complete" {
+			t.Error("Shopify completion lost its session or signed parameters")
+		}
+		w.Header().Set("Location", "https://os.example.test/?shopify=connected&site=s1")
+		w.WriteHeader(http.StatusSeeOther)
+	}))
+	defer upstream.Close()
+	h := NewHandler(Options{Resolver: staticResolver{site: spaSite()}, Opener: mapOpener(map[string]string{"index.html": "SPA"}), IdentityTarget: upstream.URL})
+	req := httptest.NewRequest("GET", "/auth/shopify/complete?"+raw, nil)
+	req.Host = "shop.example.com"
+	req.AddCookie(&http.Cookie{Name: "memql_refresh", Value: "session"})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("completion returned %d, want identity redirect", rec.Code)
 	}
 }

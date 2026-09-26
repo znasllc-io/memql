@@ -70,14 +70,11 @@ export function WhereItLivesStop({
         addressFacts={<AccountChip name={accountNameFrom(accounts, site.accountId)} />}
       />
 
-      {/* The client picker. Presentation over engine truth: an account is a
-          record with no read effect, so setting one changes who the work is
-          FOR and nothing about who may read or write this deployable. It is
-          NOT behind `canWrite` for that reason -- labelling a site with the
-          client it belongs to is not a privileged act, and the engine's own
-          write guard is what decides whether the write lands. */}
-      <Field label="Client">
+      {/* Organization ownership is enforced by the engine on both the
+          existing and requested organization. It cannot be cleared. */}
+      <Field label="Organization">
         <AccountPicker
+              required
           id={`os-deploy-account-${site.id}`}
           label="The client this deployable is for"
           value={site.accountId}

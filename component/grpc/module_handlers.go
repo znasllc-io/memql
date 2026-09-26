@@ -9,9 +9,7 @@ import (
 	"github.com/znasllc-io/memql/component/envregistry"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/identity"
-	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
-	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 // module_handlers.go is the stream landing for the module registry (epic
@@ -19,10 +17,11 @@ import (
 // design.md sections 5-6).
 //
 // The handlers are thin the way identity_admin_handlers.go is thin, and
-// for the same reason: the policy -- owner/admin for reads, owner-only for
-// the pack flip -- lives in ONE place (component/memql's
-// AuthorizeModuleRead / AuthorizeSetPackEnabled, next to the assembly), so
-// a future second transport cannot disagree with this one. What lives here
+// for the same reason: the policy -- read app:cluster/modules for reads; the
+// owner, or a developer on a storefront pack, for the flip -- lives in ONE
+// place (component/memql's AuthorizeModuleRead / AuthorizeSetPackEnabled, and
+// SetPackEnabled for the write itself), so a future second transport cannot
+// disagree with this one. What lives here
 // is the plumbing that stamps the session's resolved AccessContext onto
 // the context those gates read, the proto mapping, and -- for the one
 // write -- the audit emission, because this package is the one with the
@@ -73,6 +72,7 @@ func moduleInfoToProto(row memqlengine.ModuleRow) *memqlv1.ModuleInfo {
 		EnvComponents: row.EnvComponents,
 		FqnPrefixes:   row.FqnPrefixes,
 		CodeReference: row.CodeReference,
+		MayFlip:       row.MayFlip,
 	}
 }
 
@@ -137,9 +137,13 @@ func (s *streamSession) handleModuleDetail(envelope *memqlv1.MemqlClientMessage,
 	return s.replyModuleDetail(envelope, out)
 }
 
-// handleSetPackEnabled performs the one module-registry write. Owner-only;
-// the audit event is emitted for EVERY outcome -- refusal, validation
-// failure, mutation failure, success -- before the reply goes out.
+// handleSetPackEnabled performs the one module-registry write. The policy
+// AND the write are component/memql's SetPackEnabled -- an owner flips any
+// pack, a developer holding execute app:cluster/modules flips a storefront
+// pack -- because the write runs under internal origin and this package may
+// not stamp it. What stays here is the audit event, emitted for EVERY outcome
+// -- refusal, validation failure, mutation failure, success -- before the
+// reply goes out.
 func (s *streamSession) handleSetPackEnabled(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.SetPackEnabledMsg) error {
 	out := &memqlv1.SetPackEnabledResult{
 		RequestId:       msg.GetRequestId(),
@@ -158,7 +162,7 @@ func (s *streamSession) handleSetPackEnabled(envelope *memqlv1.MemqlClientMessag
 	}
 
 	ctx := s.moduleCtx()
-	actor, refusal := memqlengine.AuthorizeSetPackEnabled(ctx)
+	actor, prior, refusal, err := s.service.engine.SetPackEnabled(ctx, out.PackDomain, msg.GetEnabled(), msg.GetReason())
 
 	emit := func(outcome identity.AuditOutcome, failureReason string) {
 		audit.Log(ctx, identity.AuditEvent{
@@ -175,60 +179,20 @@ func (s *streamSession) handleSetPackEnabled(envelope *memqlv1.MemqlClientMessag
 		})
 	}
 
-	if refusal != nil {
+	switch {
+	case refusal != nil:
 		emit(identity.AuditOutcomeBlocked, refusal.Message)
 		out.ErrorCode = int32(refusal.Code)
 		out.ErrorMessage = refusal.Message
-		return s.replySetPackEnabled(envelope, out)
-	}
-
-	// The flip targets a REGISTERED pack domain. Refusing an unknown name
-	// catches the typo'd flip that would otherwise persist a row the
-	// inventory forever reports as "names no registered pack". Packs are
-	// compiled uniformly into every node type (tag gating stops at app/),
-	// so what this binary has registered is what the mesh has registered.
-	registered := false
-	for _, d := range memqldsl.ListPackDomains() {
-		if d.Origin != "embedded" && d.Name == out.PackDomain {
-			registered = true
-			break
-		}
-	}
-	if out.PackDomain == "" || !registered {
-		reasonMsg := fmt.Sprintf("set pack enabled: %q is not a registered pack domain", out.PackDomain)
-		emit(identity.AuditOutcomeBlocked, reasonMsg)
-		out.ErrorCode = 3 // INVALID_ARGUMENT
-		out.ErrorMessage = reasonMsg
-		return s.replySetPackEnabled(envelope, out)
-	}
-
-	// Prior state from the graph, for the reply's before/after honesty.
-	priorEnabled := true
-	if states, err := s.service.engine.PackStateSnapshot(ctx); err == nil {
-		if st, ok := states[out.PackDomain]; ok {
-			priorEnabled = st.Enabled
-		}
-	}
-	out.PriorEnabled = priorEnabled
-
-	// The write goes through the setPackEnabled DSL mutation under the
-	// caller's actor, so the concept's clusterOwner tier runs as the
-	// independent second layer and the row carries real provenance.
-	q := fmt.Sprintf(
-		`mutation setPackEnabled(id:%s, packDomain:%s, enabled:%t, reason:%s)`,
-		langparser.QuoteString(out.PackDomain),
-		langparser.QuoteString(out.PackDomain),
-		msg.GetEnabled(),
-		langparser.QuoteString(msg.GetReason()),
-	)
-	if _, err := s.service.engine.Execute(ctx, q); err != nil {
+	case err != nil:
 		emit(identity.AuditOutcomeFailure, err.Error())
+		out.PriorEnabled = prior
 		out.ErrorCode = 13 // INTERNAL
 		out.ErrorMessage = fmt.Sprintf("set pack enabled: %v", err)
-		return s.replySetPackEnabled(envelope, out)
+	default:
+		emit(identity.AuditOutcomeSuccess, "")
+		out.PriorEnabled = prior
 	}
-
-	emit(identity.AuditOutcomeSuccess, "")
 	return s.replySetPackEnabled(envelope, out)
 }
 

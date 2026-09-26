@@ -59,13 +59,9 @@ export interface ProfileAccess {
    * The groups this person is in, as MyAccess reports them (epic memql#5165,
    * section H).
    *
-   * IT IS HERE RATHER THAN READ, and that is the whole reason it exists: a
-   * client-rank person cannot read `v1:identity:group` at all -- the query
-   * carries `@requiresRank("admin")` -- so the only way they can know which
-   * client they belong to is for the cluster to tell them alongside who they
-   * are. The Deployables tie picker is the surface that needs it: without it,
-   * a Member of Acme is offered no client to tie their work to, and their
-   * colleagues never see what they make.
+   * This membership summary accompanies identity so pickers can resolve the
+   * caller's organization scope before an app opens. Organization group reads
+   * are membership-bounded; global identity directory access remains separate.
    *
    * ABSENT OR EMPTY MEANS "NOT REPORTED" as well as "none", because a cluster
    * whose engine predates the field sends nothing. Every reader treats it as a
@@ -74,6 +70,9 @@ export interface ProfileAccess {
    * is not making a claim about anybody's groups.
    */
   groups?: AccessGroup[];
+  /** Resolved organization scope reported by the server; absence grants nothing. */
+  accountIds?: string[];
+  everyAccount?: boolean;
 }
 
 /** One group, and the client it grants -- named, so a member can read it. */

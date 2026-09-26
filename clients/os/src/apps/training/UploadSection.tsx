@@ -2,13 +2,13 @@ import { useCallback, useMemo, useRef, useState, type DragEvent } from "react";
 import type { LiveSnapshot } from "@znasllc-io/memql-sdk-core/client";
 import { FileUp, ScrollText, Upload } from "lucide-react";
 
-import { Button, Caption, Chip, Head, Notice, ProvenanceDot, Row as ListRow, Select } from "../../kit";
+import { Button, Caption, Chip, Head, Notice, RecordRow, listCount, Select } from "../../kit";
 import { formatBytes, formatFreshness } from "../../kit/format";
 import { useNow } from "../../kit/useNow";
 import { LiveList } from "../../live/LiveList";
 import type { LiveView } from "../../live/liveView";
 import { MAX_UPLOAD_BYTES, UPLOAD_ACCEPT_ATTRIBUTE, type FileStage } from "./concepts";
-import { fileDotTone, stageOf, type AnalysisRun, type TrainingFile } from "./rows";
+import { stageOf, type AnalysisRun, type TrainingFile } from "./rows";
 import type { DomainsFeed } from "./useDomains";
 import type { TrainAct } from "./useTrain";
 import type { UploadsState } from "./useUploads";
@@ -106,7 +106,7 @@ export function UploadSection({
     <div className="os-app-stack">
       <Head
         title="Teach from a file"
-        meta={snapshot.rows.length > 0 ? `${snapshot.rows.length} recent` : undefined}
+        meta={listCount(snapshot)}
       >
         <Button
           tone="primary"
@@ -330,100 +330,70 @@ function FileLine({
   }
 
   return (
-    <ListRow
-      icon={<ScrollText size={16} aria-hidden />}
-      name={file.name || file.id}
-      current={stage === "reading"}
-      dim={stage === "unreadable"}
-      state={
-        <>
-          {/* The dot and the word say one thing, so only one of them says it
-              to a screen reader: the dot is aria-hidden and the word is right
-              there. */}
-          <span className="os-deploy-status" data-tone={toneFor(stage)}>
-            <ProvenanceDot tone={fileDotTone(stage)} />
-            {stageWord(stage)}
+    <>
+      <RecordRow
+        icon={<ScrollText size={16} aria-hidden />}
+        name={file.name || file.id}
+        current={stage === "reading"}
+        dim={stage === "unreadable"}
+        state={stageWord(stage)}
+        tone={stage === "failed" ? "warn" : stage === "reading" || stage === "trained" ? "accent" : "muted"}
+        secondary={stage === "failed"
+          ? `${file.failureReason || run?.errorMessage || "The cluster did not say why."} Drop it again to retry.`
+          : stage === "unreadable" ? "Stored and downloadable; there is no text in it to read."
+          : stage === "trained" && taught !== "" ? `Teaching ${taught}` : undefined}
+        stateExtra={tick === "added" ? <span className="os-livelist-tick">new</span> : null}
+        actions={(stage === "untrained" || stage === "trained") && !picking ? (
+          <Button onClick={() => setPicking(true)}>{stage === "trained" ? "Teach another" : "Teach a domain"}</Button>
+        ) : null}
+      >
+        <span className="os-caption">{formatBytes(file.size)}{passageLine(run)} · {formatFreshness(file.createdAt, now)}</span>
+      </RecordRow>
+      {/* The teach form and refusals remain visible at narrow widths. */}
+      {picking || refusal !== "" ? <div className="os-app-stack">
+        {/* AN EMPTY PICKER IS A DEAD END, so it says what to do instead rather
+            than offering a control with nothing in it. This is the honest state
+            on a cluster whose knowledge domains have never been seeded, and the
+            Domains section is where somebody would go to look. */}
+        {picking && options.length === 0 ? (
+          <span className="os-caption">
+            This cluster has no knowledge domains yet, so there is nothing to teach into. The Domains
+            section lists what it has.
           </span>
-          {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
-          {/* THE ACT, and only when it is legal. */}
-          {(stage === "untrained" || stage === "trained") && !picking ? (
-            <Button onClick={() => setPicking(true)}>
-              {stage === "trained" ? "Teach another" : "Teach a domain"}
+        ) : null}
+
+        {picking && options.length > 0 ? (
+          <span className="os-train-teach">
+            <Select
+              id={`teach-${file.id}`}
+              label={`Knowledge domain to teach from ${file.name || "this file"}`}
+              value={domainId}
+              onChange={setDomainId}
+            >
+              <option value="">Choose a domain</option>
+              {options.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.name}
+                </option>
+              ))}
+            </Select>
+            <Button tone="primary" disabled={busy || domainId === ""} onClick={() => void teach()}>
+              {busy ? "Teaching..." : "Teach"}
             </Button>
-          ) : null}
-        </>
-      }
-    >
-      {/* A SPAN carrying the caption class, not <Caption>: these sit inside
-          the row, and a <p> here is invalid markup React warns about. */}
-      <span className="os-caption">
-        {formatBytes(file.size)}
-        {passageLine(run)}
-        {" · "}
-        {formatFreshness(file.createdAt, now)}
-      </span>
-
-      {stage === "trained" && taught !== "" ? (
-        <span className="os-caption">Teaching {taught}</span>
-      ) : null}
-
-      {stage === "unreadable" ? (
-        <span className="os-caption">Stored and downloadable; there is no text in it to read.</span>
-      ) : null}
-
-      {stage === "failed" ? (
-        <>
-          <span className="os-train-plan-error">
-            {file.failureReason || run?.errorMessage || "The cluster did not say why."}
+            <Button onClick={() => setPicking(false)}>Cancel</Button>
           </span>
-          <span className="os-caption" data-line>
-            Drop it again to retry.
+        ) : null}
+
+        {/* The refusal belongs on the row that produced it. */}
+        {refusal !== "" ? <span className="os-train-plan-error">{refusal}</span> : null}
+
+        {domains.error !== "" && picking ? (
+          <span className="os-caption">
+            The domain list could not be read, so this picker may be incomplete.
           </span>
-        </>
-      ) : null}
-
-      {/* AN EMPTY PICKER IS A DEAD END, so it says what to do instead rather
-          than offering a control with nothing in it. This is the honest state
-          on a cluster whose knowledge domains have never been seeded, and the
-          Domains section is where somebody would go to look. */}
-      {picking && options.length === 0 ? (
-        <span className="os-caption">
-          This cluster has no knowledge domains yet, so there is nothing to teach into. The Domains
-          section lists what it has.
-        </span>
-      ) : null}
-
-      {picking && options.length > 0 ? (
-        <span className="os-train-teach">
-          <Select
-            id={`teach-${file.id}`}
-            label={`Knowledge domain to teach from ${file.name || "this file"}`}
-            value={domainId}
-            onChange={setDomainId}
-          >
-            <option value="">Choose a domain</option>
-            {options.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.name}
-              </option>
-            ))}
-          </Select>
-          <Button tone="primary" disabled={busy || domainId === ""} onClick={() => void teach()}>
-            {busy ? "Teaching..." : "Teach"}
-          </Button>
-          <Button onClick={() => setPicking(false)}>Cancel</Button>
-        </span>
-      ) : null}
-
-      {/* The refusal belongs on the row that produced it. */}
-      {refusal !== "" ? <span className="os-train-plan-error">{refusal}</span> : null}
-
-      {domains.error !== "" && picking ? (
-        <span className="os-caption">
-          The domain list could not be read, so this picker may be incomplete.
-        </span>
-      ) : null}
-    </ListRow>
+        ) : null}
+      </div> : null}
+    </>
   );
 }
 
@@ -451,11 +421,7 @@ function stageWord(stage: FileStage): string {
   }
 }
 
-function toneFor(stage: FileStage): "ok" | "warn" | "muted" {
-  if (stage === "failed") return "warn";
-  if (stage === "reading") return "ok";
-  return "muted";
-}
+
 
 /**
  * The passage count, which is the run's to say and nobody else's.

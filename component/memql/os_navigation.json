@@ -1,0 +1,549 @@
+[
+  {
+    "id": "identity",
+    "name": "Identity",
+    "requires": "app:identity",
+    "sections": [
+      {
+        "id": "profile",
+        "name": "Profile"
+      },
+      {
+        "id": "devices",
+        "name": "Passkeys and sessions"
+      },
+      {
+        "id": "tokens",
+        "name": "Access tokens"
+      },
+      {
+        "id": "logs",
+        "name": "Logs",
+        "requires": "app:identity/logs"
+      },
+      {
+        "id": "settings",
+        "name": "Settings"
+      }
+    ],
+    "records": []
+  },
+  {
+    "id": "accounts",
+    "name": "Accounts",
+    "requires": "app:accounts",
+    "sections": [
+      {
+        "id": "accounts",
+        "name": "Accounts"
+      },
+      {
+        "id": "credentials",
+        "name": "Credentials"
+      },
+      {
+        "id": "logs",
+        "name": "Logs",
+        "requires": "app:accounts/logs"
+      },
+      {
+        "id": "settings",
+        "name": "Settings"
+      }
+    ],
+    "records": []
+  },
+  {
+    "id": "campaigns",
+    "name": "Campaigns",
+    "requires": "app:campaigns",
+    "sections": [
+      {
+        "id": "overview",
+        "name": "Overview"
+      },
+      {
+        "id": "campaigns",
+        "name": "Campaigns"
+      },
+      {
+        "id": "audiences",
+        "name": "Audiences"
+      },
+      {
+        "id": "templates",
+        "name": "Templates"
+      },
+      {
+        "id": "senders",
+        "name": "Senders"
+      },
+      {
+        "id": "rules",
+        "name": "Rules"
+      },
+      {
+        "id": "logs",
+        "name": "Logs",
+        "requires": "app:campaigns/logs"
+      },
+      {
+        "id": "settings",
+        "name": "Settings"
+      }
+    ],
+    "records": []
+  },
+  {
+    "id": "cluster",
+    "name": "Cluster",
+    "requires": "app:cluster",
+    "sections": [
+      {
+        "id": "readiness",
+        "name": "Readiness"
+      },
+      {
+        "id": "modules",
+        "name": "Modules",
+        "requires": "app:cluster/modules"
+      },
+      {
+        "id": "mesh",
+        "name": "Mesh"
+      },
+      {
+        "id": "origins",
+        "name": "Data origins",
+        "requires": "app:cluster/origins"
+      },
+      {
+        "id": "automations",
+        "name": "Automations",
+        "requires": "app:cluster/automations"
+      },
+      {
+        "id": "agents",
+        "name": "Agents"
+      },
+      {
+        "id": "audit",
+        "name": "Audit trail",
+        "requires": "app:cluster/audit"
+      },
+      {
+        "id": "logs",
+        "name": "Logs",
+        "requires": "app:cluster/logs"
+      },
+      {
+        "id": "settings",
+        "name": "Settings"
+      }
+    ],
+    "records": []
+  },
+  {
+    "id": "concepts",
+    "name": "Concepts",
+    "requires": "app:concepts",
+    "sections": [
+      {
+        "id": "registry",
+        "name": "Registry"
+      },
+      {
+        "id": "logs",
+        "name": "Logs",
+        "requires": "app:concepts/logs"
+      },
+      {
+        "id": "settings",
+        "name": "Settings"
+      }
+    ],
+    "records": []
+  },
+  {
+    "id": "files",
+    "name": "Files",
+    "requires": "app:files",
+    "sections": [
+      {
+        "id": "browse",
+        "name": "Browse"
+      },
+      {
+        "id": "backups",
+        "name": "Backups"
+      },
+      {
+        "id": "logs",
+        "name": "Logs",
+        "requires": "app:files/logs"
+      },
+      {
+        "id": "settings",
+        "name": "Settings"
+      }
+    ],
+    "records": []
+  },
+  {
+    "id": "deployables",
+    "name": "Deployables",
+    "requires": "app:deployables",
+    "sections": [
+      {
+        "id": "map",
+        "name": "Overview"
+      },
+      {
+        "id": "deployables",
+        "name": "Deployables"
+      },
+      {
+        "id": "sources",
+        "name": "Sources"
+      },
+      {
+        "id": "logs",
+        "name": "Logs",
+        "requires": "app:deployables/logs"
+      },
+      {
+        "id": "settings",
+        "name": "Settings"
+      }
+    ],
+    "records": [
+      {
+        "section": "deployables",
+        "idField": "siteId",
+        "query": "platform.sitesAll",
+        "labels": [
+          "title",
+          "hostname"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "fleet",
+    "name": "Fleet",
+    "requires": "app:fleet",
+    "sections": [
+      {
+        "id": "overview",
+        "name": "Overview"
+      },
+      {
+        "id": "machines",
+        "name": "Machines"
+      },
+      {
+        "id": "policies",
+        "name": "Policies"
+      },
+      {
+        "id": "models",
+        "name": "Model library"
+      },
+      {
+        "id": "routing",
+        "name": "Machine routing"
+      },
+      {
+        "id": "apps",
+        "name": "Activity"
+      },
+      {
+        "id": "workbenches",
+        "name": "Workspaces"
+      },
+      {
+        "id": "logs",
+        "name": "Logs",
+        "requires": "app:fleet/logs"
+      },
+      {
+        "id": "settings",
+        "name": "Settings"
+      }
+    ],
+    "records": []
+  },
+  {
+    "id": "logs",
+    "name": "Logs",
+    "requires": "app:logs",
+    "sections": [
+      {
+        "id": "stream",
+        "name": "Stream",
+        "requires": "app:logs/stream"
+      },
+      {
+        "id": "search",
+        "name": "Search"
+      },
+      {
+        "id": "settings",
+        "name": "Settings"
+      }
+    ],
+    "records": []
+  },
+  {
+    "id": "materializer",
+    "name": "Materializer",
+    "requires": "app:materializer",
+    "sections": [
+      {
+        "id": "composer",
+        "name": "Compose"
+      },
+      {
+        "id": "materialized",
+        "name": "Materialized"
+      },
+      {
+        "id": "templates",
+        "name": "Templates"
+      },
+      {
+        "id": "logs",
+        "name": "Logs",
+        "requires": "app:materializer/logs"
+      },
+      {
+        "id": "settings",
+        "name": "Settings"
+      }
+    ],
+    "records": []
+  },
+  {
+    "id": "users",
+    "name": "Users",
+    "requires": "app:users",
+    "sections": [
+      {
+        "id": "people",
+        "name": "People"
+      },
+      {
+        "id": "groups",
+        "name": "Groups"
+      },
+      {
+        "id": "roles",
+        "name": "Roles"
+      },
+      {
+        "id": "logs",
+        "name": "Logs",
+        "requires": "app:users/logs"
+      },
+      {
+        "id": "settings",
+        "name": "Settings"
+      }
+    ],
+    "records": [
+      {
+        "section": "people",
+        "idField": "userId",
+        "query": "identity.searchUsers",
+        "labels": [
+          "displayName",
+          "primaryEmail"
+        ]
+      },
+      {
+        "section": "groups",
+        "idField": "groupId",
+        "query": "identity.groupsAll",
+        "labels": [
+          "name"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "training",
+    "name": "Training",
+    "requires": "app:training",
+    "sections": [
+      {
+        "id": "upload",
+        "name": "Teach"
+      },
+      {
+        "id": "review",
+        "name": "Review"
+      },
+      {
+        "id": "domains",
+        "name": "Domains"
+      },
+      {
+        "id": "logs",
+        "name": "Logs",
+        "requires": "app:training/logs"
+      },
+      {
+        "id": "settings",
+        "name": "Settings"
+      }
+    ],
+    "records": []
+  },
+  {
+    "id": "nexus",
+    "name": "Nexus",
+    "requires": "app:nexus",
+    "sections": [
+      {
+        "id": "goals",
+        "name": "Goals"
+      },
+      {
+        "id": "runs",
+        "name": "Runs"
+      },
+      {
+        "id": "automations",
+        "name": "Automations"
+      },
+      {
+        "id": "approvals",
+        "name": "Approvals"
+      },
+      {
+        "id": "logs",
+        "name": "Logs",
+        "requires": "app:nexus/logs"
+      },
+      {
+        "id": "settings",
+        "name": "Settings"
+      }
+    ],
+    "records": []
+  },
+  {
+    "id": "settings",
+    "name": "Settings",
+    "requires": "app:settings",
+    "sections": [
+      {
+        "id": "about",
+        "name": "About"
+      },
+      {
+        "id": "appearance",
+        "name": "Appearance"
+      },
+      {
+        "id": "ask",
+        "name": "Ask"
+      },
+      {
+        "id": "apps",
+        "name": "Apps"
+      },
+      {
+        "id": "access",
+        "name": "Access",
+        "requires": "app:settings/access"
+      },
+      {
+        "id": "cluster",
+        "name": "Cluster",
+        "requires": "app:settings/cluster"
+      },
+      {
+        "id": "language",
+        "name": "Language",
+        "requires": "app:settings/language"
+      },
+      {
+        "id": "diagnostics",
+        "name": "Diagnostics"
+      },
+      {
+        "id": "benchmarks",
+        "name": "Benchmarks",
+        "requires": "app:settings/benchmarks"
+      },
+      {
+        "id": "connections",
+        "name": "Connections",
+        "requires": "app:settings/connections"
+      },
+      {
+        "id": "integrations",
+        "name": "Integrations",
+        "requires": "app:settings/integrations"
+      },
+      {
+        "id": "providers",
+        "name": "Doors",
+        "requires": "app:settings/providers"
+      },
+      {
+        "id": "levels",
+        "name": "Levels",
+        "requires": "app:settings/levels"
+      },
+      {
+        "id": "rules",
+        "name": "Rules",
+        "requires": "app:settings/rules"
+      },
+      {
+        "id": "decisions",
+        "name": "Decisions",
+        "requires": "app:settings/decisions"
+      },
+      {
+        "id": "tokens",
+        "name": "Tokens",
+        "requires": "app:settings/tokens"
+      },
+      {
+        "id": "keys",
+        "name": "Keys",
+        "requires": "app:settings/keys"
+      },
+      {
+        "id": "logs",
+        "name": "Logs",
+        "requires": "app:settings/logs"
+      }
+    ],
+    "records": []
+  },
+  {
+    "id": "bin",
+    "name": "Bin",
+    "requires": "app:bin",
+    "sections": [
+      {
+        "id": "items",
+        "name": "Bin"
+      },
+      {
+        "id": "logs",
+        "name": "Logs",
+        "requires": "app:bin/logs"
+      },
+      {
+        "id": "settings",
+        "name": "Settings"
+      }
+    ],
+    "records": []
+  }
+]

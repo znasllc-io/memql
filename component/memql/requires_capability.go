@@ -87,7 +87,7 @@ func (r CapabilityRequirement) String() string {
 // which would be a gate that admits the whole cluster. The load-time check
 // below is what makes the second case unreachable in a booted engine -- this is
 // its runtime backstop, not a duplicate of it.
-func (e *MemQLEngine) refuseBelowRequiredCapability(ctx context.Context, fn *Function, name string) error {
+func (e *MemQLEngine) refuseBelowRequiredCapability(ctx context.Context, fn *Function, name string, arguments ...map[string]any) error {
 	if fn == nil {
 		return nil
 	}
@@ -109,6 +109,23 @@ func (e *MemQLEngine) refuseBelowRequiredCapability(ctx context.Context, fn *Fun
 				"Refusing the call rather than treating an incomplete grant as no grant, "+
 				"which would admit every caller (epic memql#5166)",
 			name, required.Verb, required.Resource)
+	}
+	if e != nil && e.functions != nil {
+		actual, _ := e.functions.Get(name)
+		if personalSourceBuiltin(actual) || personalSourceQuery(actual) {
+			verb, resource := personalSourceRequirement(actual.Name)
+			if required.Verb == verb && required.Resource == resource {
+				if e.personalSourceCapable(ctx, verb, resource) {
+					return nil
+				}
+				return fmt.Errorf("%s: %q is not available for the caller's personal sources", CodeCapabilityNotHeld, name)
+			}
+		}
+	}
+	if len(arguments) != 0 {
+		if handled, err := e.refuseOrganizationActionCapability(ctx, fn, arguments[0]); handled {
+			return err
+		}
 	}
 	// THE ACTOR-SHAPED QUESTION (epic memql#5296): the subject is the verified
 	// caller plus their memoised memberships, and CapableFor overlays the
@@ -153,6 +170,16 @@ func (e *MemQLEngine) refusePlanBelowRequiredCapability(ctx context.Context, pla
 	sort.Strings(names)
 	for _, name := range names {
 		fn := &Function{RequiresCapability: plan.RequiredCapabilities[name]}
+		// A target-bound builtin enforces this declaration again at execution,
+		// where its evaluated arguments identify the authoritative target.
+		if e != nil && e.functions != nil {
+			actual, _ := e.functions.Get(name)
+			if actual != nil && actual.FunctionKind == "builtin" {
+				if concept, _ := organizationCapabilityTarget(actual); concept != "" {
+					continue
+				}
+			}
+		}
 		if err := e.refuseBelowRequiredCapability(ctx, fn, name); err != nil {
 			return err
 		}
@@ -170,7 +197,7 @@ func (e *MemQLEngine) refusePlanBelowRequiredCapability(ctx context.Context, pla
 // construction; refusing them would take the engine's own introspection
 // dark. A name that resolves to a function with no declaration returns nil
 // from the gate below, exactly as it does for every other construct.
-func (e *MemQLEngine) refuseBuiltinBelowRequiredCapability(ctx context.Context, name string) error {
+func (e *MemQLEngine) refuseBuiltinBelowRequiredCapability(ctx context.Context, name string, arguments ...map[string]any) error {
 	if e == nil || e.functions == nil || strings.TrimSpace(name) == "" {
 		return nil
 	}
@@ -178,7 +205,7 @@ func (e *MemQLEngine) refuseBuiltinBelowRequiredCapability(ctx context.Context, 
 	if err != nil || fn == nil {
 		return nil
 	}
-	return e.refuseBelowRequiredCapability(ctx, fn, name)
+	return e.refuseBelowRequiredCapability(ctx, fn, name, arguments...)
 }
 
 // validateRequiresCapabilitySlugs is the LOAD-time half: every declared

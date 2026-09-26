@@ -190,12 +190,10 @@ func TestSiteOwnerRestampRepairsTheErasedDeveloperSite(t *testing.T) {
 		t.Fatalf("the erased version still carries ownerUserId=%q", owner)
 	}
 
-	// ---- the negative control: the developer is locked out ----
-	if restampIds(mustExecute(t, eng, devCtx, "query sitesAll()"))[siteId] {
-		t.Fatalf("the developer can read %s through sitesAll while its owner is blank -- the blanked shape did not reproduce the lockout", siteId)
-	}
-	if _, err := eng.Execute(devCtx, fmt.Sprintf(`mutation updateSiteStatus(siteId: %s, status: "live")`, langparser.QuoteString(siteId))); err == nil {
-		t.Fatalf("updateSiteStatus(live) by the developer succeeded on the blanked row; the lockout did not reproduce")
+	// Organization membership now preserves access even when a historical bug
+	// erased the person. The repair is still required for correct attribution.
+	if !restampIds(mustExecute(t, eng, devCtx, "query sitesAll()"))[siteId] {
+		t.Fatalf("organization-owned site disappeared solely because its person attribution was erased: %s", siteId)
 	}
 
 	// ---- the repair ----

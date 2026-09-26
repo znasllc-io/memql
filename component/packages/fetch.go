@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -161,7 +162,52 @@ func parseGitHubRepo(repoUrl string) (owner, repo string, err error) {
 	return parts[0], strings.TrimSuffix(parts[1], ".git"), nil
 }
 
+// Source reads have two distinct bounds: a stalled network read must stop
+// promptly, while a large archive that keeps making progress may use the same
+// fifteen-minute budget as background analysis. A five-minute Client.Timeout
+// previously killed healthy downloads of repositories containing media assets.
+const sourceDownloadTimeout = 15 * time.Minute
+const sourceReadIdleTimeout = 30 * time.Second
+
+var errSourceReadIdle = errors.New("source download received no data for 30 seconds; retry when the connection to GitHub is responding")
+
+// sourceBody bounds each blocking network read, rather than the total amount
+// of time spent reading a valid archive. Cancelling the request interrupts a
+// blocked net/http body read and also observes cancellation from another node.
+type sourceBody struct {
+	io.ReadCloser
+	cancel context.CancelCauseFunc
+	idle   time.Duration
+}
+
+func (b *sourceBody) Read(p []byte) (int, error) {
+	timer := time.AfterFunc(b.idle, func() { b.cancel(errSourceReadIdle) })
+	n, err := b.ReadCloser.Read(p)
+	timer.Stop()
+	return n, err
+}
+
+func sourceDownloadError(ctx context.Context, err error) error {
+	if errors.Is(context.Cause(ctx), errSourceReadIdle) {
+		return refuse(CodeSourceUnreadable, "%s", errSourceReadIdle)
+	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return refuse(CodeSourceUnreadable, "the GitHub source download did not finish within the available time; retry or upload a ZIP of the deployable source")
+	}
+	return err
+}
+
+func sourceHTTPClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = sourceReadIdleTimeout
+	return &http.Client{Transport: transport}
+}
+
 func (f *githubFetcher) FetchRepo(ctx context.Context, src RepoSource, limits Limits) (*SourceSnapshot, error) {
+	ctx, finish := context.WithTimeout(ctx, sourceDownloadTimeout)
+	defer finish()
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
 	target, err := tarballURL(src.RepoUrl, src.Ref)
 	if err != nil {
 		return nil, err
@@ -212,11 +258,11 @@ func (f *githubFetcher) FetchRepo(ctx context.Context, src RepoSource, limits Li
 
 	client := f.http
 	if client == nil {
-		client = &http.Client{Timeout: 5 * time.Minute}
+		client = sourceHTTPClient()
 	}
 	resp, derr := client.Do(req)
 	if derr != nil {
-		return nil, refuse(CodeSourceUnreadable, "this cluster could not reach %s: %v", target, derr)
+		return nil, sourceDownloadError(ctx, refuse(CodeSourceUnreadable, "this cluster could not reach %s: %v", target, derr))
 	}
 	defer resp.Body.Close()
 
@@ -273,11 +319,11 @@ func (f *githubFetcher) FetchRepo(ctx context.Context, src RepoSource, limits Li
 	// compressed archive AND the expanded tree before the caps had a chance
 	// to refuse either.
 	var raw bytes.Buffer
-	body := io.TeeReader(io.LimitReader(resp.Body, limits.normalized().MaxSourceBytes+1), &raw)
+	body := io.TeeReader(io.LimitReader(&sourceBody{ReadCloser: resp.Body, cancel: cancel, idle: sourceReadIdleTimeout}, limits.normalized().MaxSourceBytes+1), &raw)
 	root, xerr := ExtractTarGz(body, dir, limits)
 	if xerr != nil {
 		cleanup()
-		return nil, xerr
+		return nil, sourceDownloadError(ctx, xerr)
 	}
 
 	return &SourceSnapshot{

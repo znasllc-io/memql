@@ -10,12 +10,6 @@ package router
 // onto the Resolve* entry point that serves it, and hands back the client with
 // the decision that chose it.
 //
-// SPEECH AND TRANSCRIPTION ARE ABSENT ON PURPOSE, not by oversight. TTSProvider
-// and openAITTSProvider.Synthesize have zero callers anywhere in the tree and
-// there is no AiSpeechMsg handler at all -- speech is a wiring gap, not a call
-// site. Transcription goes through integrations/stt.StreamingProvider, which
-// never touches the provider registry, so there is nothing here for it to
-// resolve. Adding either arm now would be a door with no room behind it.
 
 import (
 	"context"
@@ -70,6 +64,10 @@ func (r *Router) ResolveFor(ctx context.Context, req ResolveRequest) (memql.Reso
 		client, resolved, err = r.resolveDirect(ctx, req, modalityVision)
 	case airoute.ModalityEmbedding:
 		client, resolved, err = r.resolveDirect(ctx, req, modalityEmbedding)
+	case airoute.ModalitySpeech:
+		client, resolved, err = r.resolveAudio(ctx, req, modalitySpeech)
+	case airoute.ModalityTranscribe:
+		client, resolved, err = r.resolveAudio(ctx, req, modalityTranscribe)
 	default:
 		// A modality the seam does not serve is a CALL-SITE fault, and the
 		// message says which: reporting it as an unavailable provider would
@@ -77,7 +75,7 @@ func (r *Router) ResolveFor(ctx context.Context, req ResolveRequest) (memql.Reso
 		// door.
 		return memql.ResolvedProvider{}, fmt.Errorf(
 			"the router does not serve modality %q: chat, streamingChat, tools, streamingTools, "+
-				"structured, vision and embedding are the seven it resolves", req.Modality)
+				"structured, vision, embedding, speech and transcribe are supported", req.Modality)
 	}
 	if err != nil {
 		return memql.ResolvedProvider{}, err

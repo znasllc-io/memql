@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { buildLogsSearch, type LogsSearchArgs } from "@znasllc-io/memql-sdk-core/client";
 
@@ -10,12 +11,10 @@ import {
   WINDOW_PRESETS,
   constraintsOf,
   isNarrowed,
-  lineCount,
   subjectIntentOf,
   logViewIntentOf,
   toTailArgs,
   windowBounds,
-  windowLabel,
   windowPhrase,
   type LogFilters,
   type LogScope,
@@ -119,7 +118,7 @@ export function SearchSection({
   return (
     <div className="os-app-stack os-logs" data-density={settings.density}>
       {scope.apps?.length || scope.subjectConcepts?.length ? <div className="os-head-actions"><span className="os-caption">App scope: {scope.apps?.join(", ")} and its related subjects</span><Button onClick={() => setScope(WHOLE_STORE)}>Clear app scope</Button></div> : null}
-      <Head title="Search" meta={`${windowLabel(filters.window)} · ${lineCount(search.rows.length)}`}>
+      <Head title="Search" meta={search.state === "ready" && !search.error ? search.rows.length : undefined}>
         <Refine
           search={filters.text}
           onSearch={(next) => patch({ text: next })}
@@ -180,7 +179,7 @@ export function SearchSection({
                 ? " · not read yet"
                 : ` · read ${formatFreshness(search.readAt.toISOString(), now)}`}
             </span>
-            <Button onClick={() => setGeneration((g) => g + 1)} busy={search.state === "reading"} busyLabel="Reading">
+            <Button onClick={() => setGeneration((g) => g + 1)} busy={search.state === "reading"}>
               Read again
             </Button>
           </div>
@@ -194,7 +193,7 @@ export function SearchSection({
 
           {search.rows.length === 0 ? (
             search.state === "reading" ? (
-              <Caption>Reading from the cluster.</Caption>
+              <RecordListSkeleton label="Loading from the cluster" />
             ) : search.state === "ready" ? (
               <div className="os-logs-empty">
                 <p className="os-logs-empty-line">
@@ -225,7 +224,7 @@ export function SearchSection({
                 {search.exhausted ? (
                   <Caption>That is every line in the window.</Caption>
                 ) : (
-                  <Button onClick={search.loadOlder} busy={search.loadingOlder} busyLabel="Reading">
+                  <Button onClick={search.loadOlder} busy={search.loadingOlder}>
                     Older lines
                   </Button>
                 )}

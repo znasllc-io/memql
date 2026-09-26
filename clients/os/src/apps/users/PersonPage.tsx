@@ -1,3 +1,4 @@
+import { RecordList, RecordRow, listCount } from "../../kit/RecordRow";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -256,7 +257,7 @@ export function PersonPage({
 
         {/* ---- groups ---- */}
         <Panel label={`Groups for ${name}`}>
-          <Subhead>Groups</Subhead>
+          <Subhead meta={listCount(membershipRows?.snapshot)}>Groups</Subhead>
           {isStaff(person, catalog) ? (
             // THE STANDING STAFF RULE IS A RULE, NOT ROWS (epic memql#5165, D6).
             // Developer rank and above are members of every account's group by
@@ -321,7 +322,7 @@ export function PersonPage({
 
         {/* ---- sign-in ---- */}
         <Panel label={`Sign-in for ${name}`}>
-          <Subhead>Sign-in</Subhead>
+          <Subhead meta={sessions.unknown ? undefined : `${sessions.live.length} recent sessions`}>Sign-in</Subhead>
           <Facts>
             <Fact label="Signs in with" value={person.signInPolicy === "passkey_only" ? "A passkey only" : "A link or a passkey"} />
             <Fact label="Last seen" value={formatFreshness(person.lastSeenAt, now)} title={person.lastSeenAt || undefined} />
@@ -337,12 +338,12 @@ export function PersonPage({
           ) : sessions.live.length === 0 ? (
             <p className="os-caption">No sessions open.</p>
           ) : (
-            <ul className="os-session-list" aria-label={`Sessions open for ${name}`}>
+            <RecordList as="ul" label={`Sessions open for ${name}`}>
               {sessions.live.map((session) => (
-                <li key={session.id} className="os-session-row">
-                  <span className="os-session-where">{session.clientLabel || session.source || "A session"}</span>
-                  <span className="os-caption">{formatFreshness(session.lastActivityAt, now)}</span>
-                  {governable ? (
+                <RecordRow key={session.id}
+                  name={session.clientLabel || session.source || "A session"}
+                  secondary={formatFreshness(session.lastActivityAt, now)}
+                  actions={governable ? (
                     <Button
                       onClick={() =>
                         void actions.endSession(session.id).then((ok) => {
@@ -356,9 +357,9 @@ export function PersonPage({
                       End
                     </Button>
                   ) : null}
-                </li>
+                />
               ))}
-            </ul>
+            </RecordList>
           )}
         </Panel>
 
@@ -422,27 +423,20 @@ function MembershipLine({
   // "Acme Acme".
   const clientName = account === null ? "" : accountName(account);
   return (
-    <div className="os-membership-row">
-      <span className="os-membership-name">{group?.name ?? membership.groupId}</span>
-      {clientName === "" || clientName === group?.name ? null : (
-        <Chip tone="accent">{clientName}</Chip>
-      )}
-      <span className="os-caption">
-        {originSentence(membership, {
-          addedByName: addedBy ? personName(addedBy) : undefined,
-          domain: account?.domain,
-        })}
-      </span>
-      {/* The act sits at the row's trailing edge, where every other row in
-          this shell puts one, rather than beside the sentence it is not
-          about. */}
-      <span className="os-membership-gap" />
-      {removable ? (
+    <RecordRow
+      name={group?.name ?? membership.groupId}
+      secondary={originSentence(membership, {
+        addedByName: addedBy ? personName(addedBy) : undefined,
+        domain: account?.domain,
+      })}
+      actions={removable ? (
         <Button onClick={onRemove} busy={busy} busyLabel="Removing..." ariaLabel={`Remove from ${group?.name ?? "this group"}`}>
           Remove
         </Button>
       ) : null}
-    </div>
+    >
+      {clientName === "" || clientName === group?.name ? null : <Chip tone="accent">{clientName}</Chip>}
+    </RecordRow>
   );
 }
 

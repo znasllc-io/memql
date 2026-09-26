@@ -315,6 +315,10 @@ func (a *CampaignsEngineAdapter) Execute(ctx context.Context, query string) (any
 	return result, nil
 }
 
+func (a *CampaignsEngineAdapter) OrganizationCapable(ctx context.Context, account, verb, resource string) bool {
+	return a.Engine.OrganizationCapable(ctx, account, verb, resource)
+}
+
 // campaignEmailSender resolves the email sender off the integration
 // registry at SEND time (memql#3348), mirroring outbound.EmailTransport:
 // on a booting node the plug-in registry may not be populated yet, so a
@@ -354,4 +358,9 @@ func (a *EdgeEngineAdapter) Execute(ctx context.Context, query string) (any, err
 		return nil, err
 	}
 	return result, nil
+}
+
+// Shared context management for agent turns regardless of their UI surface.
+func (a *CognitionEngineAdapter) CompactWorkContext(ctx context.Context, messages []common.ChatMessage, tools []common.ToolDefinition, target int) ([]common.ChatMessage, error) {
+	return a.Engine.CompactWorkContext(ctx, messages, tools, target)
 }

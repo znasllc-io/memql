@@ -46,8 +46,9 @@ import (
 
 // ShadowCompare compares a succeeded recording against every learned
 // procedure in shadow for its goal, and answers one outcome per procedure
-// compared. The caller is gated as LearnFromRun's is: the run's owner, or the
-// cluster's maintenance principal.
+// compared. The caller is gated as LearnFromRun's is: the run's OWNER, whose
+// owned read is the only way the recording is read -- there is no cluster-wide
+// variant, and the completion trigger borrows the owner before it compares.
 func (i *Integration) ShadowCompare(ctx context.Context, recordingRunId string) ([]ReplayOutcome, error) {
 	runId := strings.TrimSpace(recordingRunId)
 	if runId == "" {
@@ -61,7 +62,10 @@ func (i *Integration) ShadowCompare(ctx context.Context, recordingRunId string) 
 		return nil, fmt.Errorf("procedure.shadowCompare: run %s is not readable as the caller", runId)
 	}
 	owner := strings.TrimSpace(str(run, "ownerUserId"))
-	if ac, ok := auth.AccessFromContext(ctx); ok && ac != nil && !ac.Synthetic && !sameUser(ac.UserId, owner) {
+	if ac, ok := auth.AccessFromContext(ctx); !ok || ac == nil || strings.TrimSpace(ac.UserId) == "" || !sameUser(ac.UserId, owner) {
+		// Belt and braces over the owned read: a cluster owner CAN read
+		// another person's run, and comparing it would move that person's
+		// ladder on somebody else's say-so.
 		return nil, fmt.Errorf("procedure.shadowCompare: run %s belongs to another person; "+
 			"a recording is compared with its owner's own procedures", runId)
 	}

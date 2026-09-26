@@ -154,7 +154,6 @@ export function LauncherOverlay({
             <button type="button" data-tile className="os-tile" onClick={onOpenThemes}>
               <Palette size={26} aria-hidden />
               <span>Themes</span>
-              <span className="os-caption">Try one on</span>
             </button>
             {apps.length === 0 ? (
               <p className="os-caption os-launcher-empty">No app matches "{query}".</p>

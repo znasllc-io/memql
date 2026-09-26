@@ -57,6 +57,32 @@ describe("the registry list", () => {
     expect(screen.getByText("Borden Ltd")).toBeTruthy();
   });
 
+  it("places the authorized filtered count beside Accounts and updates it on arrival", async () => {
+    const conn = fakeConnection({ clientAccountsAll: [
+      accountRow({ id: "client-a", name: "Visible client" }),
+      accountRow({ id: "client-b", name: "Archived client", status: "archived" }),
+    ] });
+    mount(conn);
+    await screen.findByText("Visible client");
+    const heading = screen.getByRole("heading", { name: "Accounts" });
+    expect(heading.parentElement?.querySelector(".os-head-meta")?.textContent).toBe("1");
+    expect(screen.getByRole("button", { name: /Visible client/ }).classList.contains("os-record-row")).toBe(true);
+    await act(async () => conn.subscriptions.emit(ACCOUNT_CONCEPT, accountRow({ id: "client-c", name: "New client" }), "NODE_CREATED"));
+    await screen.findByText("New client");
+    expect(heading.parentElement?.querySelector(".os-head-meta")?.textContent).toBe("2");
+  });
+
+  it("does not invent a zero while the account read is pending or refused", async () => {
+    const conn = fakeConnection({});
+    let refuse!: (reason: Error) => void;
+    conn.query.clientAccountsAll.mockImplementation(() => new Promise((_resolve, reject) => { refuse = reject; }));
+    const { view } = mount(conn);
+    expect(view.container.querySelector(".os-head-meta")).toBeNull();
+    await act(async () => refuse(new Error("permission denied")));
+    await screen.findByText("This cluster did not return its clients.");
+    expect(view.container.querySelector(".os-head-meta")).toBeNull();
+  });
+
   it("SEEDS UNFILTERED and folds the archive filter client-side", async () => {
     // Seeding filtered would make the toggle re-run the read and re-baseline
     // every arrival cue, so revealing rows the browser already had would

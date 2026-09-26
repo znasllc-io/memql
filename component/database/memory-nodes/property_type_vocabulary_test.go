@@ -113,7 +113,7 @@ func TestPropertyTypeSuggestions_SizeIsPinned(t *testing.T) {
 			"spelling, update BOTH restatements in the same change:\n"+
 			"  - the correction table in docs/public/language/memql.md\n"+
 			"  - the rejected map in TestConceptPropertyTypes_AcceptedAndRejectedSets "+
-			"(component/memql/lint_parity_concept_build_test.go)\n"+
+			"(component/memql/offline/lint_parity_concept_build_test.go)\n"+
 			"then update `want` here.", got, want)
 	}
 }

@@ -1,8 +1,9 @@
+import { ContentSkeleton } from "../../kit/ContentSkeleton";
 import { useEffect, useRef, useState } from "react";
 import { Code2 } from "lucide-react";
 import type { Concept } from "@znasllc-io/memql-sdk-core/client";
 
-import { Button, Caption, Chip, Head, Notice } from "../../kit";
+import { Button, Chip, Head, Notice } from "../../kit";
 import { useSession } from "../../chrome/access";
 import { conceptHandoffUrl, openHandoff, VSCODE_NO_ANSWER_MESSAGE } from "../../items/vscode";
 import { originBadgeFor, originBadgeLabel } from "./registry";
@@ -63,7 +64,7 @@ export function ConceptPage({
       <div className="os-app-stack os-concept-page">
         <Head title={conceptId} back={{ label: "Concepts", onSelect: onBack }} />
         {registryState === "seeding" ? (
-          <Caption>Reading the registry from the cluster.</Caption>
+          <ContentSkeleton kind="detail" label="Loading the registry from the cluster" />
         ) : (
           <Notice
             tone="warn"

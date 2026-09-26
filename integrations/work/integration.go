@@ -35,6 +35,7 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/num"
+	"github.com/znasllc-io/memql/integrations/azureblob"
 )
 
 // integrationName is the plug-in name and the middle segment of every
@@ -127,12 +128,13 @@ type Compiler interface {
 // the planner. No caller-local run, actor, or budget context is assumed to
 // survive the graph event that crosses the node boundary.
 type CompileRequest struct {
-	GoalId      string
-	RunId       string
-	OwnerUserId string
-	Statement   string
-	Input       map[string]any
-	Ceilings    map[string]any
+	ExecutionAuthority map[string]any
+	GoalId             string
+	RunId              string
+	OwnerUserId        string
+	Statement          string
+	Input              map[string]any
+	Ceilings           map[string]any
 }
 
 // New constructs the integration. Tests call this with a stub engine.
@@ -158,6 +160,14 @@ func init() {
 		i := New(pctx.Engine, pctx.Logger)
 		i.bunDB = pctx.BunDB
 		i.admitRow = pctx.AdmitSourceRow
+		if archiveContainer() != "" {
+			uploader, err := azureblob.New(context.Background())
+			if err != nil {
+				i.log().Warn("work: archive container configured but storage unavailable; retention will preserve records", "component", "work.retention", "error", err)
+			} else {
+				i.SetArchiver(uploader)
+			}
+		}
 		return i, nil
 	})
 }
@@ -307,7 +317,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "retentionSweep",
-			Description: "Fold each affected run's summary, archive expired journal rows to blob storage, then delete them. No archive means no delete. Returns {boundaryModelCall, boundaryObservation, runsSummarized, rowsArchived, rowsDeleted, objects, refused}.",
+			Description: "Archive and verify expired operational history before deletion. Preserves active work and user goals; returns per-concept policies and archive/delete counts alongside journal summaries.",
 			Handler:     i.handleRetentionSweep,
 			ArgsSchema: map[string]string{
 				"dryRun": "boolean -- report what would be archived and deleted without doing either",

@@ -314,7 +314,7 @@ describe("SetupGroup", () => {
         "owner",
       ),
     );
-    expect(screen.getByText("Reading this cluster's setup.")).toBeTruthy();
+    expect(screen.getByText("Loading cluster setup")).toBeTruthy();
     expect(screen.queryByText("Not set up")).toBeNull();
   });
 

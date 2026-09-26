@@ -125,6 +125,7 @@ func (c *WorkCompiler) Compile(ctx context.Context, req workintegration.CompileR
 	// without this write the choice exists only in a log line.
 	args := map[string]any{
 		"runId":          req.RunId,
+		"goalSignature":  out.Signature,
 		"status":         "running",
 		"automationName": out.AutomationName,
 	}

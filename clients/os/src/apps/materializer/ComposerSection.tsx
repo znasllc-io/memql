@@ -1,6 +1,7 @@
+import { ContentSkeleton } from "../../kit/ContentSkeleton";
 import { useMemo, useState } from "react";
 
-import { Button, Chip, Fact, Facts, Field, FormRow, Head, Input, Notice, Select, Subhead } from "../../kit";
+import { Button, Chip, Fact, Facts, Field, FormRow, Head, Input, Notice, RecordList, RecordRow, Select, Subhead } from "../../kit";
 import { ActionBar } from "../../kit/ActionBar";
 import { actsFor, stateLine, type ActId } from "./acts";
 import { ProvenanceChain } from "./Provenance";
@@ -51,6 +52,7 @@ export interface ComposerSectionProps {
   /** The composition the composer is looking at, once one exists. */
   composition: CompositionRow | null;
   compositionSources: SourceRow[];
+  compositionAvailable?: boolean;
   compositionModels: ModelRow[];
   showUnmarkedConcepts: boolean;
   defaultFormat: string;
@@ -80,6 +82,7 @@ export function ComposerSection({
   templates,
   composition,
   compositionSources,
+  compositionAvailable = false,
   compositionModels,
   showUnmarkedConcepts,
   defaultFormat,
@@ -162,6 +165,7 @@ export function ComposerSection({
           resolved={resolved.sources}
           resolveError={resolved.error}
           settled={open !== null}
+          recordsAvailable={compositionAvailable}
           onAdd={addSource}
           onRemove={removeSource}
         />
@@ -243,6 +247,7 @@ function SourcesColumn({
   resolved,
   resolveError,
   settled,
+  recordsAvailable,
   onAdd,
   onRemove,
 }: {
@@ -255,6 +260,7 @@ function SourcesColumn({
   resolveError: string;
   /** True once a composition exists: the sources are a RECORD, not a choice. */
   settled: boolean;
+  recordsAvailable: boolean;
   onAdd: (s: PickedSource) => void;
   onRemove: (ref: string) => void;
 }) {
@@ -272,17 +278,15 @@ function SourcesColumn({
   if (settled) {
     return (
       <section className="os-mz-col os-mz-col-sources" aria-label="Sources">
-        <Subhead>Made from</Subhead>
+        <Subhead meta={recordsAvailable ? picked.length : undefined}>Made from</Subhead>
         {picked.length === 0 ? (
           <p className="os-caption">The record holds what this was composed from.</p>
         ) : (
-          <ul className="os-mz-picked" aria-label="Sources this was made from">
+          <RecordList as="ul" label="Sources this was made from">
             {picked.map((p) => (
-              <li key={p.ref} className="os-mz-picked-row">
-                <span className="os-mz-picked-name">{p.label || p.ref}</span>
-              </li>
+              <RecordRow key={p.ref} name={p.label || p.ref} />
             ))}
-          </ul>
+          </RecordList>
         )}
       </section>
     );
@@ -305,7 +309,7 @@ function SourcesColumn({
           next="A query source still works, and the Logs section holds the lines for this app."
         />
       ) : loading && composables.length === 0 ? (
-        <p className="os-caption">Reading what this cluster offers</p>
+        <ContentSkeleton kind="form" label="Loading what this cluster offers" />
       ) : composables.length === 0 ? (
         <p className="os-caption">
           No concept in this cluster is marked as worth composing from. A query source still works.

@@ -63,12 +63,18 @@ func NewWorkerAwareStreamInterceptor(
 		ident, err := resolveWorkerToken(ss.Context(), resolver, token)
 		if err != nil {
 			if logger != nil {
-				logger.Warn("worker token rejected",
+				logger.Warn("worker authentication failed",
 					"method", info.FullMethod,
 					"error", err,
 				)
 			}
-			return status.Error(codes.Unauthenticated, "invalid worker token")
+			if errors.Is(err, ErrWorkerTokenNotFound) {
+				return status.Error(codes.Unauthenticated, "invalid worker token")
+			}
+			// A failed database lookup says nothing about the credential. Keep
+			// transient infrastructure failures retryable and do not expose DB
+			// details (or ask the user to rotate a perfectly valid token).
+			return status.Error(codes.Unavailable, "worker authentication temporarily unavailable")
 		}
 
 		ctx := worker.ContextWithWorkerIdentity(ss.Context(), ident)
@@ -114,11 +120,11 @@ func (r *EngineWorkerTokenResolver) ResolveWorkerToken(ctx context.Context, plai
 		return nil, fmt.Errorf("worker: resolver engine not configured")
 	}
 	if strings.TrimSpace(plainToken) == "" {
-		return nil, fmt.Errorf("worker: empty token")
+		return nil, fmt.Errorf("%w: empty token", ErrWorkerTokenNotFound)
 	}
 	hash := workertoken.Hash(plainToken)
 	if hash == "" {
-		return nil, fmt.Errorf("worker: hash failed")
+		return nil, fmt.Errorf("%w: hash failed", ErrWorkerTokenNotFound)
 	}
 	store := &workertoken.Store{Engine: r.Engine, Logger: r.Logger}
 	row, err := store.LookupByKeyHash(ctx, hash)
@@ -147,7 +153,7 @@ func (r *EngineWorkerTokenResolver) ResolveWorkerToken(ctx context.Context, plai
 			// answered a question it was not asked.
 			return nil, ErrWorkerTokenNotFound
 		case row.PreviousKeyExpiresAt.IsZero(), !time.Now().Before(row.PreviousKeyExpiresAt):
-			return nil, fmt.Errorf("worker: the rotated token's grace window has closed")
+			return nil, fmt.Errorf("%w: the rotated token's grace window has closed", ErrWorkerTokenNotFound)
 		default:
 			if r.Logger != nil {
 				r.Logger.Info("worker token admitted on the rotation grace hash",
@@ -170,28 +176,28 @@ func resolveWorkerToken(ctx context.Context, resolver WorkerTokenResolver, plain
 		return nil, errors.New("worker: resolver not configured")
 	}
 	if strings.TrimSpace(plainToken) == "" {
-		return nil, errors.New("worker: empty token")
+		return nil, fmt.Errorf("%w: empty token", ErrWorkerTokenNotFound)
 	}
 	if !worker.HasTokenPrefix(plainToken) {
-		return nil, errors.New("worker: token does not carry mql_wkr_ prefix")
+		return nil, fmt.Errorf("%w: token does not carry mql_wkr_ prefix", ErrWorkerTokenNotFound)
 	}
 	ident, err := resolver.ResolveWorkerToken(ctx, plainToken)
 	if err != nil {
 		return nil, err
 	}
 	if ident == nil || ident.IdentityId == "" || ident.OwnerUserId == "" {
-		return nil, errors.New("worker: identity not found for token")
+		return nil, fmt.Errorf("%w: identity not found for token", ErrWorkerTokenNotFound)
 	}
 	// Active==false is how worker tokens are revoked (see
 	// workertoken.Store.Revoke). Reject revoked tokens.
 	if !ident.Active {
-		return nil, errors.New("worker: identity inactive")
+		return nil, fmt.Errorf("%w: identity inactive", ErrWorkerTokenNotFound)
 	}
 	// Expiry is optional (ExpiresAt zero = non-expiring). When set,
 	// the bound is inclusive of `now` for backwards-compatibility
 	// with downstream callers that look at expiresAt for display.
 	if !ident.ExpiresAt.IsZero() && !time.Now().Before(ident.ExpiresAt) {
-		return nil, errors.New("worker: identity expired")
+		return nil, fmt.Errorf("%w: identity expired", ErrWorkerTokenNotFound)
 	}
 	return ident, nil
 }

@@ -697,7 +697,7 @@ func (m FleetModel) EffectiveParams() int64 {
 }
 
 func (m FleetModel) eligibleForSelector(selector string, needs FleetNeeds) (bool, string) {
-	if selector == FleetSelectorFastest && m.EffectiveParams() < FleetFastMinParams {
+	if selector == FleetSelectorFastest && !needs.AudioIn && !needs.AudioOut && m.EffectiveParams() < FleetFastMinParams {
 		return false, fmt.Sprintf("effective parameters %d are under the fast quality floor %d; pin fleet:%s to override", m.EffectiveParams(), FleetFastMinParams, m.ModelId)
 	}
 	return m.eligibleFor(needs)
@@ -719,6 +719,18 @@ func (m FleetModel) eligibleFor(n FleetNeeds) (bool, string) {
 	}
 	if n.Tools && !m.Tools {
 		return false, "does not advertise tool calling"
+	}
+	if n.Vision && !m.Vision {
+		return false, "does not advertise vision"
+	}
+	if n.AudioIn && !m.AudioIn {
+		return false, "does not advertise audio input"
+	}
+	if n.AudioOut && !m.AudioOut {
+		return false, "does not advertise audio output"
+	}
+	if n.ImageGen && !m.ImageGen {
+		return false, "does not advertise image generation"
 	}
 	if n.MinContextWindow > 0 && m.ContextWindow < n.MinContextWindow {
 		return false, fmt.Sprintf("context window %d is under the floor %d", m.ContextWindow, n.MinContextWindow)

@@ -87,3 +87,29 @@ it('gives empty equipment and recent work their own empty states',async()=>{
  expect(await screen.findByRole('region',{name:'No recent work'})).toBeTruthy();
  expect(screen.queryByRole('region',{name:'Selected equipment'})).toBeNull();
 });
+
+
+it('counts only the authorized filtered machine rows after the feed settles', async () => {
+ let finish!: (value: ReturnType<typeof rowsResult>) => void;
+ h.connection = fakeConnection();
+ h.connection.query.myWorkersWithStatus.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+ fleet();
+ const count = () => screen.getByRole('heading', { name: 'Machines' }).closest('.os-head')?.querySelector('.os-head-meta')?.textContent;
+ expect(count()).toBeUndefined();
+ await act(async () => finish(rowsResult([machineRow({id:'a',displayName:'Alpha'}), machineRow({id:'b',displayName:'Beta'})])));
+ expect(count()).toBe('2');
+ fireEvent.click(screen.getByRole('button', { name: 'Find machines' }));
+ fireEvent.change(screen.getByPlaceholderText('Search machines'), { target: { value: 'Alpha' } });
+ expect(count()).toBe('1');
+ expect(screen.queryByRole('button', { name: /^Open Beta/ })).toBeNull();
+ await act(async () => h.connection.subscriptions.emit(WORKER_REGISTRATION_CONCEPT, {id:'a'}, 'NODE_DELETED'));
+ expect(count()).toBe('0');
+});
+
+it('never presents a refused machine inventory as a zero count', async () => {
+ h.connection = fakeConnection();
+ h.connection.query.myWorkersWithStatus.mockRejectedValue(new Error('Inventory denied'));
+ fleet();
+ await screen.findByRole('region', { name: 'Machines unavailable' });
+ expect(screen.getByRole('heading', { name: 'Machines' }).closest('.os-head')?.querySelector('.os-head-meta')).toBeNull();
+});

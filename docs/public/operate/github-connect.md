@@ -161,9 +161,19 @@ capability that needs more -- an agent opening a pull request -- requests it as
 its own permission change, which GitHub then surfaces to every installation for
 re-approval.
 
-There is one route on purpose. With authorization requested during installation
-GitHub sends the post-install landing to the callback URL as well, and the route
-tells the two apart by the query GitHub sends.
+GitHub uses this same registered callback for authorization and post-install
+landings. Identity relays the callback to
+`https://os.<domain>/auth/github/complete`, which the edge proxies back to
+Identity with the OS host's session cookie. Only then does Identity validate
+the initiating session, consume the single-use state and exchange the code.
+The Identity hostname does not share that host-only cookie. Both callback
+responses disable caching and referrer propagation. The registered GitHub
+callback URL does not change.
+
+Adding an account from Settings returns to the GitHub account list; adding it
+from Add deployable resumes the wizard with the verified account. A refused
+connection also returns to its originating surface, without selecting an
+unverified account.
 
 Then, on the app's page:
 

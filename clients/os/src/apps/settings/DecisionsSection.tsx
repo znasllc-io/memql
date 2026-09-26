@@ -1,6 +1,7 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useState } from "react";
 
-import { Button, Caption, Chip, Head, Measure, Notice, Refine, Select } from "../../kit";
+import { Button, Caption, Chip, RecordList, RecordRow, Head, Measure, Notice, Refine, Select } from "../../kit";
 import { formatDuration, formatMoment } from "../../kit/format";
 import { useSession } from "../../chrome/access";
 import { LEVELS } from "./routingFacts";
@@ -18,18 +19,8 @@ import {
 
 // Settings -> Decisions (epic memql#5153, D2).
 //
-// ===========================================================================
-// THE ONE SECTION THAT IS GENUINELY A TABLE
-// ===========================================================================
-// Doors is a list of places, Levels is four sentences, Rules is an ordered
-// argument. This is a LOG: many rows, read down a column, scanned for the one
-// that is different. That is the shape a table is for, and it is the reason
-// these four screens do not look alike -- the shape of each one is a claim
-// about the question it answers.
-//
-// It is deliberately not a dashboard. A chart of doors-by-hour answers a
-// question nobody has; "why did THIS go to a vendor" is answered by finding
-// the row and opening it.
+// Shared records lead with the call; opening one explains why this call used
+// a particular model. Cost and timing remain quiet facts beside its identity.
 //
 // ===========================================================================
 // A ROW EXPANDS TO THE WALK, IN PLACE
@@ -73,9 +64,9 @@ export function DecisionsSection() {
     <div className="os-settings os-settings-wide">
       <Head
         title="Decisions"
-        meta={decisions.rows.length === 0 ? undefined : `${decisions.rows.length} most recent`}
+        meta={!decisions.loading && !decisions.error && decisions.supported && decisions.fetchedAt !== null ? decisions.rows.length : undefined}
       >
-        <Button onClick={decisions.reload} busy={decisions.loading} busyLabel="Reading">
+        <Button onClick={decisions.reload} busy={decisions.loading}>
           Read again
         </Button>
       </Head>
@@ -131,7 +122,7 @@ export function DecisionsSection() {
           </div>
 
           {decisions.loading && decisions.rows.length === 0 ? (
-            <Caption>Reading the decisions.</Caption>
+            <RecordListSkeleton label="Loading the decisions" />
           ) : decisions.rows.length === 0 ? (
             <Caption>
               {chips.length > 0
@@ -139,7 +130,7 @@ export function DecisionsSection() {
                 : "No calls have been routed yet. The first one appears here."}
             </Caption>
           ) : (
-            <ul className="os-decisions" aria-label="Recent routing decisions">
+            <RecordList as="ul" label="Recent routing decisions">
               {decisions.rows.map((row) => (
                 <DecisionLine
                   key={row.id || row.requestId}
@@ -150,7 +141,7 @@ export function DecisionsSection() {
                   }
                 />
               ))}
-            </ul>
+            </RecordList>
           )}
         </>
       )}
@@ -204,44 +195,13 @@ function DecisionLine({
     .join(", ");
 
   return (
-    <li className="os-decision-item">
-      <button
-        type="button"
-        className="os-decision"
-        data-os-door={row.door}
-        data-os-outcome={row.outcome}
-        data-open={open || undefined}
-        aria-expanded={open}
-        aria-label={spoken}
-        onClick={onOpen}
-      >
-        {/* THE TIME, not the date. A log is scanned for "the one a minute
-            ago"; the full moment is one hover away and takes no column. */}
-        <span className="os-decision-when os-mono" title={formatMoment(row.createdAt)}>
-          {clockOf(row.createdAt)}
-        </span>
-        <span className="os-decision-prompt">{row.promptName || "a call"}</span>
-        <span className="os-decision-level">
-          {level}
-          {row.degraded ? <Chip tone="muted">degraded</Chip> : null}
-        </span>
-        <span className="os-decision-door">{doorWord}</span>
-        <span className="os-decision-model os-mono">{row.model}</span>
-        <span className="os-decision-cost os-mono">
-          {costIsMoney(row) ? (
-            <Measure figure={costFigure(row)} format={(v) => `$${v.toFixed(4)}`} />
-          ) : (
-            <span className="os-decision-free" title={billingWords(row)}>
-              {billingShort(row)}
-            </span>
-          )}
-        </span>
-        <span className="os-decision-took os-mono">
-          {row.totalDurationMs.kind === "measured"
-            ? formatDuration(row.totalDurationMs.value)
-            : ""}
-        </span>
-      </button>
+    <div className="os-decision-item" data-os-door={row.door} data-os-outcome={row.outcome}>
+      <RecordRow name={row.promptName || "a call"} label={spoken} onOpen={onOpen} open={open}
+        secondary={<>{clockOf(row.createdAt)} · {doorWord} · <span className="os-mono">{row.model}</span></>} state={row.outcome === "ok" ? "served" : row.outcome}
+        stateExtra={row.degraded ? <Chip tone="muted">degraded</Chip> : undefined}>
+        <span>{level}</span><span data-cost>{costIsMoney(row) ? <Measure figure={costFigure(row)} format={v => `$${v.toFixed(4)}`} /> : <span title={billingWords(row)}>{billingShort(row)}</span>}</span>
+        <span>{row.totalDurationMs.kind === "measured" ? formatDuration(row.totalDurationMs.value) : ""}</span>
+      </RecordRow>
 
       {open ? (
         <div className="os-decision-detail">
@@ -272,6 +232,6 @@ function DecisionLine({
           )}
         </div>
       ) : null}
-    </li>
+    </div>
   );
 }

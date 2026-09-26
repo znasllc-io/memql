@@ -191,8 +191,9 @@ func (i *Integration) deriveRun(ctx context.Context, source map[string]any, d de
 		return "", errNoCompileSurface
 	}
 	seed := runSeed{
-		RunId:  runId,
-		GoalId: goalId,
+		ExecutionAuthority: rowMap(source, "executionAuthority"),
+		RunId:              runId,
+		GoalId:             goalId,
 		// The template identity is inherited verbatim. A derived run that
 		// compiled itself afresh would not be a replay of anything.
 		AutomationName:      rowString(source, "automationName"),

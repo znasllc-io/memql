@@ -262,6 +262,36 @@ func credentialKind(row map[string]any) string {
 // such a token really is dead, GitHub answers 401 and the caller reads that as
 // reconnect_required, which is the same repair by a slower route.
 func (s *store) refreshGrantIfExpired(ctx context.Context, row map[string]any, current string) (string, error) {
+	expiry, err := time.Parse(time.RFC3339, rowString(row, "expiresAt"))
+	if err != nil || time.Now().UTC().Add(refreshMargin).Before(expiry) || s.github == nil || !s.github.Configured() {
+		return s.refreshGrantLocked(ctx, row, current)
+	}
+	var token string
+	err = s.withGrantGate(ctx, row, func(ctx context.Context) error {
+		latest, err := s.sourceCredentialSealedById(ctx, rowString(row, "id"))
+		if err != nil {
+			return err
+		}
+		if latest == nil {
+			return refuse(CodeCredentialNotFound, "the GitHub credential is no longer available")
+		}
+		if rowString(latest, "status") == credentialStatusRevoked {
+			return refuse(CodeCredentialRevoked, "the GitHub credential was disconnected")
+		}
+		if rowString(latest, "externalId") != rowString(row, "externalId") || rowString(latest, "ownerUserId") != rowString(row, "ownerUserId") {
+			return refuse(CodeCredentialNotFound, "the GitHub credential identity changed")
+		}
+		current, err := secret.Decrypt(rowString(latest, "encryptedValue"))
+		if err != nil {
+			return err
+		}
+		token, err = s.refreshGrantLocked(ctx, latest, current)
+		return err
+	})
+	return token, err
+}
+
+func (s *store) refreshGrantLocked(ctx context.Context, row map[string]any, current string) (string, error) {
 	expiresAt := strings.TrimSpace(rowString(row, "expiresAt"))
 	if expiresAt == "" {
 		return current, nil
@@ -448,8 +478,8 @@ func normalizeCredentialHost(raw string) (string, error) {
 // decides that the caller owns the row (or is a cluster owner).
 //
 // FOR A GRANT IT ALSO DISCONNECTS AT GITHUB (epic memql#4912, A.6), and the
-// ORDER is the point: GitHub first, the row second, and a GitHub-side failure
-// does not stop the row. The person asked to disconnect, and the local row is
+// ORDER is the point: authorize and revoke locally before contacting GitHub.
+// A GitHub-side failure does not stop the row. The person asked to disconnect, and the local row is
 // what actually stops every fetch, poll and probe on this cluster -- so
 // refusing the disconnect because GitHub was unreachable would leave the
 // cluster still fetching under an authorization the person believes they
@@ -464,10 +494,30 @@ func (i *Integration) handleSourceCredentialRevoke(ctx context.Context, args map
 		return nil, fmt.Errorf("packages: credentialId is required")
 	}
 
-	remote := deps.revokeAtGitHub(ctx, credentialId)
-	if err := deps.Store.revokeSourceCredential(ctx, credentialId); err != nil {
+	// A disconnect and a callback/refresh of the same provider identity must
+	// not overlap: remote revoke must not erase a newly reconnected token.
+	remote := false
+	revoke := func(ctx context.Context) error {
+		bearer := deps.disconnectBearer(ctx, credentialId)
+		if err := deps.Store.revokeSourceCredential(ctx, credentialId); err != nil {
+			return err
+		}
+		remote = deps.revokeAtGitHub(ctx, credentialId, bearer)
+		return nil
+	}
+	row, readErr := deps.Store.sourceCredentialSealedById(ctx, credentialId)
+	if readErr != nil {
+		return nil, readErr
+	}
+	if row != nil && credentialKind(row) == credentialKindGithubApp {
+		err = deps.Store.withGrantGate(ctx, row, revoke)
+	} else {
+		err = revoke(ctx)
+	}
+	if err != nil {
 		return nil, err
 	}
+
 	return resultNode(map[string]any{
 		"credentialId": credentialId,
 		"status":       credentialStatusRevoked,
@@ -479,24 +529,42 @@ func (i *Integration) handleSourceCredentialRevoke(ctx context.Context, args map
 	}), nil
 }
 
-// revokeAtGitHub ends the authorization at GitHub for a grant, and answers
-// whether it did.
-//
-// EVERY FAILURE IS A WARNING AND A FALSE, never an error. It reads the sealed
-// row under the CALLER's actor, which means a cluster owner revoking somebody
-// else's credential reads zero rows and skips the remote half entirely -- the
-// honest outcome, since the token they would revoke is not theirs to hold and
-// the local revoke is the part that matters. A token credential returns false
-// with nothing attempted.
-func (d *Deps) revokeAtGitHub(ctx context.Context, credentialId string) bool {
-	if d.PeekCredentials == nil || d.GitHubApp == nil || !d.GitHubApp.Configured() {
+// disconnectBearer captures only the caller's grant, without refreshing an
+// expired token. Refresh would contact GitHub before the write gate has admitted
+// the revoke. A missing/unreadable token does not prevent local disconnection;
+// a cluster owner revoking another person's row deliberately gets no bearer.
+func (d *Deps) disconnectBearer(ctx context.Context, credentialId string) string {
+	if d.Store == nil || d.GitHubApp == nil || !d.GitHubApp.Configured() {
+		return ""
+	}
+	row, err := d.Store.sourceCredentialSealedById(ctx, credentialId)
+	if err != nil || row == nil || credentialKind(row) != credentialKindGithubApp {
+		return ""
+	}
+	// GitHub requires a valid access token to revoke an authorization. An
+	// expired token can produce 404 without proving the grant was removed.
+	// Do not refresh for disconnect, or report remote success from that reply.
+	if raw := strings.TrimSpace(rowString(row, "expiresAt")); raw != "" {
+		expiry, err := time.Parse(time.RFC3339, raw)
+		if err != nil || !time.Now().UTC().Add(refreshMargin).Before(expiry) {
+			return ""
+		}
+	}
+	bearer, err := secret.Decrypt(rowString(row, "encryptedValue"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(bearer)
+}
+
+// revokeAtGitHub uses the captured token only after the local write succeeded.
+// Every remote failure is a warning and false, never an error: local revocation
+// has already stopped this cluster from using the credential.
+func (d *Deps) revokeAtGitHub(ctx context.Context, credentialId, bearer string) bool {
+	if bearer == "" || d.GitHubApp == nil || !d.GitHubApp.Configured() {
 		return false
 	}
-	grant, err := d.PeekCredentials(ctx, credentialId, actorFromContext(ctx).UserId)
-	if err != nil || !grant.IsGrant() {
-		return false
-	}
-	if rerr := d.GitHubApp.RevokeGrant(ctx, grant.Bearer); rerr != nil {
+	if rerr := d.GitHubApp.RevokeGrant(ctx, bearer); rerr != nil {
 		d.log().Warn("packages: could not end a GitHub App authorization at GitHub; the local credential is revoked regardless",
 			"component", "packages.credentials", "credential", credentialId, "err", rerr)
 		return false

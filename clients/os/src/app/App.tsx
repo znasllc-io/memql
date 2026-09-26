@@ -1,9 +1,12 @@
+import { ContentSkeleton } from "../kit/ContentSkeleton";
 import { useEffect, useState } from "react";
 
 import { AuthProvider, useAuth } from "../auth/AuthProvider";
 import { SignIn } from "../chrome/SignIn";
 import { Shell } from "../chrome/Shell";
 import { layoutFromWindow, type ChromeLayout } from "./layout";
+import { IdentityScreen } from "../auth/IdentityScreen";
+import { identityEntry } from "../auth/nativeIdentity";
 
 export function App() {
   return (
@@ -39,10 +42,13 @@ function OsBoot() {
   if (status === "loading") {
     return (
       <div className="os-boot" data-os-boot="loading">
-        Loading
+        <ContentSkeleton kind="detail" label="Opening MemQL OS" />
       </div>
     );
   }
+  const entry = identityEntry();
+  if (status !== "unavailable" && entry && !(status === "signed-in" && entry.startsWith("/me"))) return <IdentityScreen initialPath={entry} />;
+  if (status === "unclaimed") return <IdentityScreen initialPath="/setup" />;
   if (status === "signed-out" || status === "unavailable") {
     return <SignIn status={status} onSignIn={signIn} />;
   }

@@ -82,8 +82,10 @@ func SystemActorContext(ctx context.Context) context.Context {
 	ctx = auth.ContextWithClaims(ctx, claims)
 	ctx = auth.ContextWithToken(ctx, auth.BuildTokenInfo(claims))
 	ctx = auth.ContextWithAccess(ctx, &auth.AccessContext{
-		UserId: systemGroupsActor,
-		Role:   auth.RoleOwner,
+		UserId:    systemGroupsActor,
+		Role:      auth.RoleOwner,
+		Synthetic: true,
+		Unranked:  true,
 	})
 	return auth.ContextWithInternalOrigin(ctx)
 }
@@ -208,6 +210,23 @@ func (s *Store) UserRole(ctx context.Context, userID string) (string, error) {
 	return rowString(rows[0], "role"), nil
 }
 
+// PersonForOrganizationManagement is called only after the group-management
+// capability and organization membership guards admit the requesting caller.
+// Its caller projects public roster fields, never the complete returned row.
+func (s *Store) PersonForOrganizationManagement(ctx context.Context, userID string) (map[string]any, error) {
+	rows, err := s.rows(ctx, fmt.Sprintf("query userByIdSystem(userId: %s)", langparser.QuoteString(userID)))
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	return rows[0], nil
+}
+
+// ConfigureClusterAccount is reached only by the internally gated successful
+// claim coordinator, which has validated the owner and holds the shared lock.
+func (s *Store) ConfigureClusterAccount(ctx context.Context, name, ownerUserID string) error {
+	return s.exec(ctx, fmt.Sprintf("mutation configureClusterAccount(name: %s, ownerUserId: %s)", langparser.QuoteString(name), langparser.QuoteString(ownerUserID)))
+}
+
 // WriteGroup upserts one group row.
 func (s *Store) WriteGroup(ctx context.Context, g Group) error {
 	var q strings.Builder
@@ -233,11 +252,19 @@ func (s *Store) WriteGroup(ctx context.Context, g Group) error {
 
 // WriteMembership upserts one membership row.
 func (s *Store) WriteMembership(ctx context.Context, m Membership, addedBy, removedBy string) error {
+	group, err := s.GroupByID(ctx, m.GroupID)
+	if err != nil {
+		return err
+	}
 	var q strings.Builder
 	q.WriteString("mutation writeGroupMembership(membershipId: ")
 	q.WriteString(langparser.QuoteString(m.ID))
 	q.WriteString(", groupId: ")
 	q.WriteString(langparser.QuoteString(m.GroupID))
+	if group != nil {
+		q.WriteString(", accountId: ")
+		q.WriteString(langparser.QuoteString(group.AccountID))
+	}
 	q.WriteString(", userId: ")
 	q.WriteString(langparser.QuoteString(m.UserID))
 	q.WriteString(", origin: ")

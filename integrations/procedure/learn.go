@@ -283,9 +283,10 @@ func actionsOf(insts []instance) [][]proc.Action {
 
 // LearnFromRun mines the corpus a finished run belongs to and lifts what it
 // finds, at the action level -- the exported form of the learnFromRun
-// builtin, for the proving driver and for Go callers. The caller is gated
-// exactly as the builtin is: the run's owner, or the cluster's maintenance
-// principal.
+// builtin, for the proving driver and for Go callers. The caller must be the
+// run's OWNER (a person, or server-side Go that borrowed them): the run is
+// read through the owned read, and a procedure is filed in its owner's
+// catalog.
 //
 // It does NOT run the shadow comparison the builtin runs after an unchanged
 // lift: a Go caller compares with ShadowCompare, and a lift that compared as
@@ -298,6 +299,21 @@ func (i *Integration) handleLearnFromRun(ctx context.Context, args map[string]an
 	runId := strings.TrimSpace(argString(args, "runId"))
 	if runId == "" {
 		return nil, fmt.Errorf("procedure.learnFromRun: runId is required")
+	}
+	ac, present := auth.AccessFromContext(ctx)
+	if !present || ac == nil || ac.UserId == "" {
+		return nil, fmt.Errorf("procedure.learnFromRun: an authenticated owner is required")
+	}
+	if ac.Synthetic {
+		// Only the engine-owned completion trigger may borrow the event's one
+		// named owner. The owner-filtered read in learnFromRun verifies that
+		// hint; neither a caller-supplied automation nor an arbitrary system
+		// actor gains a cross-owner lookup through this builtin.
+		owner := strings.TrimSpace(argString(args, "ownerUserId"))
+		if !auth.OriginFromContext(ctx).IsInternal() || ac.UserId != "system:automation:learnFromSucceededRun" || owner == "" {
+			return nil, fmt.Errorf("procedure.learnFromRun: only the trusted completion trigger may supply an owner")
+		}
+		ctx = ownerActor(ctx, owner)
 	}
 	res, run, err := i.learnFromRunRow(ctx, runId, levelArg(args))
 	if err != nil {
@@ -329,23 +345,12 @@ func (i *Integration) handleLearnFromRun(ctx context.Context, args map[string]an
 
 // learnFromRun is the handler body.
 //
-// THE GATE (gap G10). @serverOnly is refused on a builtin at parse, so the
-// check lives here (dsl/procedure/builtins.memql records why), and it has two
-// callers with two different reads:
-//
-//   - A PERSON reads the run through workRunForOwner, under their own actor:
-//     the owned read answers zero rows for anybody else's run, and the refusal
-//     below turns that silence into an answer.
-//   - The learnFromSucceededRun automation runs under the cluster's
-//     MAINTENANCE PRINCIPAL (component/auth/maintenance_actor.go), because the
-//     event names a run before anybody knows whose it is. It reads through
-//     workRunById -- @serverOnly, so the stamp, and filtered to a cluster
-//     owner, which only that principal and trusted server-side Go are. Every
-//     read after it runs under the run owner's own actor.
-//
-// A synthetic caller is not "another person": it is the cluster acting, and it
-// can never own a row, so comparing it with the run's owner would refuse every
-// automation-driven lift -- which is how the feature stayed inert.
+// THE GATE. @serverOnly is refused on a builtin at parse, so the check lives
+// here (dsl/procedure/builtins.memql records why). The run is read through
+// workRunForOwner under the CALLER's own actor -- a person, or the run's owner
+// the completion trigger borrowed in handleLearnFromRun -- so a caller who
+// does not own it reads zero rows, and the refusal below turns that silence
+// into an answer. Every later read runs under the same owner.
 func (i *Integration) learnFromRun(ctx context.Context, runId string, level Level) (LearnResult, error) {
 	res, _, err := i.learnFromRunRow(ctx, runId, level)
 	return res, err
@@ -353,8 +358,8 @@ func (i *Integration) learnFromRun(ctx context.Context, runId string, level Leve
 
 // learnFromRunRow is learnFromRun, answering the run row it read beside the
 // result -- the row the learn handler's shadow comparison is made over. The
-// row is nil for an answer that learned nothing from it (a replay run, a run
-// with no goal signature).
+// row is nil for an answer that learned nothing from it (a run that has not
+// succeeded, a replay run, a run with no goal signature).
 func (i *Integration) learnFromRunRow(ctx context.Context, runId string, level Level) (LearnResult, map[string]any, error) {
 	res := LearnResult{RunId: runId, Level: level}
 	if runId == "" {
@@ -372,14 +377,18 @@ func (i *Integration) learnFromRunRow(ctx context.Context, runId string, level L
 	if owner == "" {
 		return res, nil, fmt.Errorf("procedure.learnFromRun: run %s has no owner, so there is nobody whose catalog a procedure could be filed in", runId)
 	}
-	if ac, ok := auth.AccessFromContext(ctx); ok && ac != nil && !ac.Synthetic && !sameUser(ac.UserId, owner) {
-		// Belt and braces over the owned read: a procedure learned from
-		// somebody else's run would be written into their catalog under
-		// their name.
+	if ac, ok := auth.AccessFromContext(ctx); !ok || ac == nil || strings.TrimSpace(ac.UserId) == "" || !sameUser(ac.UserId, owner) {
+		// Belt and braces over the owned read: a cluster owner CAN read
+		// another person's run, and a procedure learned from it would be
+		// written into their catalog under their name.
 		return res, nil, fmt.Errorf("procedure.learnFromRun: run %s belongs to another person; "+
 			"a procedure is learned from its owner's corpus and filed in their catalog", runId)
 	}
 	res.OwnerUserId = owner
+	if str(run, "status") != "succeeded" {
+		res.Reason = "the run has not succeeded"
+		return res, nil, nil
+	}
 	if isReplayRun(run) {
 		// A procedure's own replay is never a recording (see corpus.go).
 		// Answered rather than refused: the automation fires on every run
@@ -398,20 +407,10 @@ func (i *Integration) learnFromRunRow(ctx context.Context, runId string, level L
 	return learned, run, err
 }
 
-// readRunForCaller reads one run the way the caller is entitled to: a person
-// through the owned read, the cluster through the stamped by-id read.
+// readRunForCaller reads one run through the OWNED read, under whatever
+// actor the caller carries. There is deliberately no cluster-wide variant:
+// the completion trigger borrows the run's owner before it gets here.
 func (i *Integration) readRunForCaller(ctx context.Context, runId string) (map[string]any, error) {
-	ac, ok := auth.AccessFromContext(ctx)
-	if !ok || ac == nil {
-		return nil, fmt.Errorf("procedure.learnFromRun: no authenticated caller")
-	}
-	if ac.Synthetic {
-		// The by-id read is @serverOnly, so it takes the stamp; its filter is
-		// actor.isClusterOwner, so the stamp opens the construct and the
-		// actor still decides the rows -- a synthetic READER (an automation
-		// that is not on the maintenance list) reads nothing.
-		return i.store.runByIdAsCluster(ctx, runId)
-	}
 	rows, err := i.store.query(ctx, "query "+call("workRunForOwner", map[string]any{"runId": runId}))
 	if err != nil || len(rows) == 0 {
 		return nil, err

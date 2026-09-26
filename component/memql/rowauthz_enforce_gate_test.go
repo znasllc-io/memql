@@ -163,7 +163,7 @@ var tierDecidesTheRead = map[string]string{
 	//
 	// THIS IS THE THIRD ENTRY the note above calls a design decision, and the
 	// test it asks for is the one that would fail if the reasoning were wrong:
-	// TestGroupQueriesAnswerForTheSystemActorAndRefuseBelowTheFloor drives all
+	// TestGroupQueriesAnswerForSystemActorAndOrganizationMembers drives all
 	// five against a real database and asserts BOTH halves -- rows for the
 	// caller set the annotation admits, and none for a writer.
 	"groupsAll":        "epic memql#5165. ownerUserId is always empty on this concept, so the tier's owner arm matches nobody and unowned=\"admin\" admits exactly the caller set @requiresRank(\"admin\") already bounds. A conjunct would be false for every admin the read serves.",
@@ -269,23 +269,85 @@ var tierDecidesTheRead = map[string]string{
 	// refusal -- plus TestAccountGrantReachesTheAccountView for the account
 	// view.
 	//
-	// DELIBERATELY NOT HERE: siteByHostname (the edge's read under its own
-	// synthetic cluster-owner actor), packagesByRepoUrl and
-	// packagesTrackingRepos (the update feeds, under the engine's operator
-	// identity), and every sourceCredential read (a personal token, and the
-	// concept declares no account argument). Each keeps the written-out term.
+	// Source credentials remain personal tokens and keep their authored owner
+	// predicate. Organization-owned site/package update feeds are adjudicated
+	// below alongside the client-facing reads.
 	"sitesAll":                          "memql#5303, D4 / D12. The tier's account arm has no author spelling, so the written-out `own || clusterOwner` conjunct was the tier minus one arm and an AND with it filtered out every account-admitted row. The tier decides.",
 	"siteById":                          "memql#5303, as sitesAll -- and the by-id read every site builtin gates a write on.",
 	"sitesForPackage":                   "memql#5303, as sitesAll.",
+	"sitesBoundToStore":                 "Connect Shopify 12.5, as sitesAll. Connect reads it as the deployment, which the clusterOwner arm admits to every row -- a site it missed would have its Storefront token changed under somebody who never asked. TestConnectResolvesAndSavesAgainstARealEngine (integrations/shopify).",
 	"sitesArchived":                     "memql#5303, as sitesAll.",
 	"sitesForAccount":                   "memql#5303, as sitesAll -- the account VIEW, whose whole purpose is the tie the conjunct filtered out. TestAccountGrantReachesTheAccountView.",
 	"packagesAll":                       "memql#5303, D4 / D12, as sitesAll over v1:platform:package.",
 	"packagesArchived":                  "memql#5303, as packagesAll.",
 	"packageById":                       "memql#5303, as packagesAll -- and the by-id read every packages builtin (packageDeploy among them) resolves its target through under the caller's actor.",
 	"packageDeployments":                "memql#5303, D4 / D12, as sitesAll over v1:platform:packageDeployment, whose account is copied from its package at open.",
+	"packageDeploymentsPending":         "memql#5598: the mandatory organization and app boundary scopes pending runs, including shared organization work; creator-only filtering would hide resumable runs from authorized peers.",
 	"packageDeploymentsAwaitingConfirm": "memql#5303, as packageDeployments.",
 	"packageDeploymentById":             "memql#5303, as packageDeployments -- the confirm gate's read.",
 	"packageDeploymentsInFlight":        "memql#5303, as packageDeployments -- the abandoned sweep's read, under the maintenance actor the clusterOwner arm admits.",
+	// Organization-owned reads deliberately admit authorized peer members.
+	// PR #5598; TestOrganizationPersistedAttributionAndCrossReplicaMembership
+	// exercises actual SQL, named reads, grants, and a separate receiver.
+	"audienceById":                  "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"audienceRosterForSend":         "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"audienceRosterSize":            "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"audiences":                     "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"campaignById":                  "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"campaignConsentCountByKind":    "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"campaignDeliveryCountByStatus": "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"campaignEngagementCountByKind": "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"campaignEngagementRefs":        "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"campaignSkipCountByReason":     "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"campaigns":                     "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"campaignsForAccount":           "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"consentEventsBySubscriber":     "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"consentStatus":                 "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"deliveriesForCampaign":         "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"deliveriesForRecipients":       "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"deliveryLedgerForCampaign":     "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"emailRuleById":                 "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"emailRules":                    "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"packagesByRepoUrl":             "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"packagesTrackingRepos":         "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"recipientById":                 "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"recipientsForAudience":         "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"sendableRecipientsForAudience": "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"senderIdentities":              "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"senderIdentitiesForAccount":    "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"senderIdentityById":            "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"siteByHostname":                "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"templateById":                  "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"templates":                     "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+
+	// The four store reads (Connect Shopify, decision D3, design record
+	// docs/superpowers/specs/2026-09-23-connect-shopify-design.md section 7),
+	// the bench argument without the surface floor.
+	//
+	// v1:shopify:store has no per-caller slice: every store is the
+	// deployment's. Its tier is `clusterOwner, rankFloor="developer"`, so the
+	// arms are "is a cluster owner" and "ranks developer or above", and the
+	// tier decides the row set for EVERY caller: all of it at the floor, none
+	// of it below. No filter can spell a stricter correct answer.
+	//
+	// WHY NO @requiresRank TO MATCH, unlike bench. Below the floor these reads
+	// must answer ZERO ROWS, not an error: canReadStore
+	// (platform_site_binding_guard.go), resolveStore (component/packages) and
+	// the auto-deploy feed's rankless writer all read "not readable" off an
+	// empty result, and an error would fail every deploy they sit on.
+	//
+	// WHAT A CONJUNCT WOULD COST. These four used to carry
+	// `actor.isClusterOwner == true`, which is the tier minus its floor arm,
+	// and an AND with it hides every store from the developers D3 admits.
+	//
+	// The test that fails if this reasoning is wrong is
+	// TestStoreReadsAnswerForDeveloperAndAnswerNothingBelowTheFloor
+	// (store_read_floor_db_test.go): developer and owner read, admin and writer
+	// get zero rows and no error, and a developer's writes stay refused.
+	"storeById":            "Connect Shopify D3. An ownerless clusterOwner-tier concept with rankFloor=\"developer\": the tier decides every row for every caller, and below the floor the answer must be zero rows, not an error, for canReadStore's sake.",
+	"storeByDomain":        "Connect Shopify D3, as storeById -- the read resolveStore and the auto-deploy feed resolve a manifest's store through.",
+	"stores":               "Connect Shopify D3, as storeById.",
+	"developmentStoresFor": "Connect Shopify D3, as storeById.",
 }
 
 func TestRowAuthzEnforcementLandGate(t *testing.T) {
@@ -318,7 +380,10 @@ func TestRowAuthzEnforcementLandGate(t *testing.T) {
 		if r.verdict == ShadowAlreadyImplied {
 			continue
 		}
-		if _, ok := tierDecidesTheRead[r.construct]; ok {
+		if reason, ok := tierDecidesTheRead[r.construct]; ok {
+			if strings.HasPrefix(reason, "memql#5598:") && !HasOrganizationBoundary(r.concept) {
+				t.Errorf("%s lost its mandatory organization boundary", r.construct)
+			}
 			adjudicated[r.construct] = true
 			continue
 		}

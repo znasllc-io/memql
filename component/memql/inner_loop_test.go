@@ -212,6 +212,7 @@ func TestIsContextOverflow(t *testing.T) {
 		"prompt is too long: 216000 tokens > 200000 maximum",
 		"Please reduce the length of the messages",
 		"input exceeds the context window for this model",
+		"ollama: the input length exceeds the context length",
 	} {
 		if !IsContextOverflow(errors.New(msg)) {
 			t.Errorf("%q was not recognised as a context overflow, so the turn ends on a limit it could have compressed past", msg)

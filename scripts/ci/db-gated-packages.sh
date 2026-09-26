@@ -172,11 +172,18 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # FIRST `)` after the declaration, so a parenthesised aside between the entries
 # truncates the list silently -- everything below it stops being read, and the
 # comparison then reports a drift nobody introduced.
+#
+# Connect Shopify (PR 5) added `integrations/sitepreview`. Its readiness answer
+# and the go-live write guard must refuse the same row for the same reason --
+# the Deployables page draws Go live from one and the engine enforces the
+# other -- and that parity is a claim about real rows read as the deployment
+# and as the caller, which a fake engine answers either way.
 readonly DB_GATED_TREES=(
 	"app"
 	"component/memql"
 	"component/automations"
 	"component/backup"
+	"component/campaigns"
 	"component/database"
 	"component/grpc"
 	"component/identity"
@@ -188,8 +195,10 @@ readonly DB_GATED_TREES=(
 	"component/worker/fleetcatalog"
 	"integrations/compose"
 	"integrations/embedding"
+	"integrations/groups"
 	"integrations/planner"
 	"integrations/shopify"
+	"integrations/sitepreview"
 	"integrations/work"
 	"examples/referencepack"
 	"packs"

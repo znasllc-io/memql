@@ -7,6 +7,7 @@ import { useDraggable } from "@dnd-kit/core";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { X, Search, ListFilter, Maximize2, Minimize2, Minus, Settings2 } from "lucide-react";
 
+import { useDrivingCue } from "../ask/useDrivingCue";
 import { useAsk } from "../ask/AskProvider";
 import { ProvenanceDot } from "../kit";
 import { SurfaceRefused } from "../kit/RankStates";
@@ -28,6 +29,7 @@ import {
 } from "../system/registry";
 import type { OsWindow } from "../system/windows";
 import { useSession } from "./access";
+import { useAppSetupMark } from "./useAppSetupMark";
 import { Mark } from "./Mark";
 import { useOs } from "./state";
 import { WindowErrorBoundary } from "./WindowErrorBoundary";
@@ -92,6 +94,8 @@ export function WindowFrame({
     return () => { if (node) scroll.current.set(win.sectionId, node.scrollTop); };
   }, [win.sectionId]);
   const { openAsk } = useAsk();
+  const askActivity = useDrivingCue(manifest.id);
+  const driving = askActivity ? askActivity.phase === "completed" ? "completed" : "running" : undefined;
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `window:${win.id}`,
   });
@@ -114,7 +118,7 @@ export function WindowFrame({
   const gate = gateFor(readiness, sectionReqs.requires, sectionReqs.wants);
   const appReqs = allRequirementsFor(manifest);
   const appGate = gateFor(readiness, appReqs.requires, appReqs.wants);
-  const settingsTone = markToneFor(appGate);
+  const { settingsTone, reportSetupState } = useAppSetupMark(manifest.id, markToneFor(appGate));
   // The dot inside a button is DECORATIVE and the button says the state
   // itself: a labelled role="img" nested in a button appends to the button's
   // accessible name, so "Settings" would announce as "Settings Campaigns is
@@ -141,6 +145,7 @@ export function WindowFrame({
       ref={setNodeRef}
       className="os-window"
       data-os-window={manifest.id}
+      data-ask-driving={driving}
       data-os-window-desk={deskId}
       hidden={hidden}
       data-focused={focused || undefined}
@@ -252,6 +257,7 @@ export function WindowFrame({
                 key={section.id}
                 type="button"
                 className={`os-window-nav-item${index > 1 ? " os-window-secondary-nav" : ""}`}
+                data-ask-control={askActivity && section.id === (current?.parent ?? current?.id) ? "running" : undefined}
                 data-os-setup={
                   settingsTone && section.id === manifest.settingsSection ? "" : undefined
                 }
@@ -316,6 +322,7 @@ export function WindowFrame({
             <WindowErrorBoundary key={win.id} app={manifest.id} section={current?.id ?? ""}>
               <WindowSearchContext.Provider value={searchHost}><AttentionDestination appId={manifest.id} sectionId={current?.id ?? ""} visible={!hidden}><Body
                 sectionId={current?.id ?? ""}
+                reportSetupState={reportSetupState}
                 navigation={win.sectionNavigation}
                 windowVisible={!hidden}
                 navigate={(sectionId, options) => actions.navigateSection(win.id, sectionId, options?.fromContent ? "content" : "peer")}

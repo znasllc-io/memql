@@ -116,3 +116,32 @@ func TestFleetUnavailableRegistryMissDoesNotSayRetryConnectedNodeId(t *testing.T
 		t.Fatalf("want registry-miss wording, got %s", msg)
 	}
 }
+
+// A machine LENT TO THE CALLER whose own consent is missing is somebody else's
+// machine -- counted, never named (D12) -- but it is not "not shared with you",
+// and telling a person that about a machine their colleague just lent them
+// sends them to the owner for a repair that belongs to the machine (review
+// finding on epic memql#5344). It gets its own line.
+func TestAMachineLentToYouButNotAgreedHasItsOwnLine(t *testing.T) {
+	err := &FleetUnavailable{
+		ModelId: "llama3.1:8b",
+		Total:   2,
+		Considered: map[string]string{
+			"v1:worker:registration:lent":  "Its owner has shared it with you, but its cockpit is not willing to serve anyone but its owner. Set inference.serve to cluster in that machine's policy.yaml -- it is a decision about where the machine is, and only the machine can make it.",
+			"v1:worker:registration:other": "Its owner has shared it with specific people, and not with you.",
+		},
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "registration:lent") || strings.Contains(msg, "registration:other") {
+		t.Fatalf("no foreign machine may be named, got %q", msg)
+	}
+	if !strings.Contains(msg, "1 machine lent to you is waiting on its own consent") {
+		t.Fatalf("the machine lent to the caller needs its own line, got %q", msg)
+	}
+	if !strings.Contains(msg, "1 machine on this cluster is not shared with you") {
+		t.Fatalf("the machine lent to somebody else keeps the foreign line, got %q", msg)
+	}
+	if !IsForeignShareRefusal("Its owner has shared it with you, but its cockpit is not willing to serve anyone but its owner.") {
+		t.Fatal("it is still somebody else's machine, so the classifier must still count it")
+	}
+}

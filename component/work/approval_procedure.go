@@ -21,6 +21,8 @@ package work
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -85,11 +87,7 @@ func ProcedurePromotionApproval(p PromotionProposal, requestedAt time.Time) Appr
 		Source: EvidenceSourceRules,
 	}, requestedAt, 0)
 	a.ArtifactHash = p.ProcedureHash
-	name := p.ConstructName
-	if name == "" {
-		name = "this learned procedure"
-	}
-	a.Question = fmt.Sprintf("Promote %s to canary? It matched the app %d times beside it, and would now run for real with the app standing by.", name, p.ShadowMatches)
+	a.Question = fmt.Sprintf("Promote %s to canary? It matched the app %d times beside it, and would now run for real with the app standing by.", promotionSubjectName(p), p.ShadowMatches)
 	// TWO OPTIONS AND NO THIRD, as for the routing review: "not now" would
 	// decide nothing and leave the same evidence proposing again. A decline
 	// is recorded and spends the streak, which is what makes it final.
@@ -98,6 +96,22 @@ func ProcedurePromotionApproval(p PromotionProposal, requestedAt time.Time) Appr
 		{"label": "Keep it in shadow", "value": "rejected"},
 	}
 	return a
+}
+
+// promotionSubjectName is what the question calls the procedure. The GOAL
+// it serves, when the lift recorded one, because that is the only name a
+// person recognises: the construct name is derived from the goal signature
+// (learnedProcedure_<digest>_l1) and reads as noise in an inbox. The
+// construct name is the fallback, and a generic phrase the last resort --
+// never an empty quote.
+func promotionSubjectName(p PromotionProposal) string {
+	if t := strings.TrimSpace(p.Title); t != "" {
+		return strconv.Quote(t)
+	}
+	if n := strings.TrimSpace(p.ConstructName); n != "" {
+		return n
+	}
+	return "this learned procedure"
 }
 
 // promotionReason states the evidence in a sentence: the matches, and the

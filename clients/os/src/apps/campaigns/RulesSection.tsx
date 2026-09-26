@@ -1,3 +1,4 @@
+import { listCount } from "../../kit/RecordRow";
 import { AddButton } from "../../kit/AddButton";
 import { Fragment, useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -6,11 +7,11 @@ import { Zap } from "lucide-react";
 import { AccountChip, AccountPicker } from "../accounts/AccountPicker";
 import { accountNameFrom } from "../accounts/rows";
 import { useAccountOptions } from "../accounts/tie";
+import { organizationChosen, useDefaultOrganization } from "../accounts/organization";
 import {
   Button,
   EmptyState,
   Caption,
-  Chip,
   ChoiceStack,
   Fact,
   Facts,
@@ -20,7 +21,7 @@ import {
   LiveList,
   Notice,
   Panel,
-  Row as ListRow,
+  RecordRow,
   Select,
   Subhead,
   formatMoment,
@@ -150,7 +151,7 @@ export function RulesSection({
 
   return (
     <div className="os-app-stack">
-      <Head title="Rules">
+      <Head title="Rules" meta={listCount(source?.snapshot)}>
         <AddButton onClick={() => setAdding((v) => !v)} label="New rule" />
       </Head>
 
@@ -253,11 +254,7 @@ function AuthoredAutomationsBanner({
 
 /** Only two statuses carry colour: one that is running and one that broke.
  *  Four coloured chips is a list with no emphasis at all. */
-function ruleTone(status: string): "neutral" | "accent" | "muted" {
-  if (status === "active") return "accent";
-  if (status === "draft" || status === "paused") return "muted";
-  return "neutral";
-}
+
 
 function RuleLine({
   rule,
@@ -279,30 +276,25 @@ function RuleLine({
     audience: nameOfAudience(audiences, rule.audienceId),
   };
   return (
-    <ListRow
+    <RecordRow
       icon={<Zap size={16} aria-hidden />}
       name={ruleName(rule)}
       current={rule.status === "active"}
       dim={rule.status === "paused"}
       open={open}
       onOpen={onToggle}
-      state={
-        <>
-          <Chip tone={ruleTone(rule.status)}>{rule.status || "draft"}</Chip>
-          {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
-        </>
-      }
+      secondary={<span title={ruleSentence(rule, names)}><SentenceText parts={ruleSentenceParts(rule, names)} /></span>}
+      state={rule.status || "draft"}
+      tone={rule.status === "active" ? "accent" : "muted"}
+      stateExtra={tick === "added" ? <span className="os-livelist-tick">new</span> : null}
     >
       {/* THE LIST READS THE WAY THE BUILDER DOES. Somebody who built a rule by
           filling in a sentence should recognise it here without translating. */}
-      <span className="os-caption os-campaign-rule-sentence" title={ruleSentence(rule, names)}>
-        <SentenceText parts={ruleSentenceParts(rule, names)} />
-      </span>
       {/* LIVENESS IS DISPLAYED, NEVER RUNG. */}
       {rule.firedCount === 0 ? null : (
         <span className="os-caption os-mono">{rule.firedCount}x</span>
       )}
-    </ListRow>
+    </RecordRow>
   );
 }
 
@@ -645,6 +637,7 @@ function RuleBuilder({
   onDone: (createdId: string) => void;
 }) {
   const accounts = useAccountOptions();
+  const defaultAccountId = useDefaultOrganization(accounts);
   const editing = rule !== undefined;
   const write = editing ? writes.updateRule : writes.createRule;
   const [draft, setDraft] = useState<RuleFacts>(() => ({
@@ -667,25 +660,39 @@ function RuleBuilder({
     [concepts.value],
   );
 
-  const ready =
+  const accountId = draft.accountId || (rule === undefined ? defaultAccountId : "");
+
+  const ready = organizationChosen(accounts, accountId) &&
     draft.name.trim() !== "" &&
     draft.triggerConcept !== "" &&
-    draft.templateId !== "" &&
-    (draft.recipientMode !== "audience" || draft.audienceId !== "") &&
+    templates.some((t) => t.id === draft.templateId && t.accountId === accountId) &&
+    ((accountId === "self" && draft.senderIdentityId === "") || senders.some((s) => s.id === draft.senderIdentityId && s.accountId === accountId)) &&
+    (draft.recipientMode !== "audience" || audiences.some((a) => a.id === draft.audienceId && a.accountId === accountId)) &&
     (draft.recipientMode !== "row_address" || draft.recipientField.trim() !== "");
 
   async function submit() {
+    if (!ready) return;
     if (editing && rule) {
-      const ok = await writes.updateRule.update(rule.id, draft);
+      const ok = await writes.updateRule.update(rule.id, { ...draft, accountId });
       if (ok) onDone(rule.id);
       return;
     }
-    const id = await writes.createRule.create(draft);
+    const id = await writes.createRule.create({ ...draft, accountId });
     if (id !== "") onDone(id);
   }
 
   return (
     <Panel label={editing ? "Edit rule" : "New rule"}>
+      <Field label="Organization">
+            <AccountPicker
+              id="os-rule-account"
+              label="Organization this rule is for"
+              required
+            value={accountId}
+              onChange={(v) => setDraft({ ...draft, accountId: v, audienceId: "", templateId: "", senderIdentityId: "" })}
+              accounts={accounts}
+            />
+          </Field>
       <Field label="Call this rule">
         <Input
           id="os-rule-name"
@@ -734,7 +741,7 @@ function RuleBuilder({
         >
           <option value="">choose a template</option>
           {templates
-            .filter((t) => t.status !== "archived" || t.id === draft.templateId)
+            .filter((t) => t.accountId === accountId && (t.status !== "archived" || t.id === draft.templateId))
             .map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name || t.id}
@@ -787,7 +794,7 @@ function RuleBuilder({
             >
               <option value="">Choose an audience</option>
               {audiences
-                .filter((a) => a.status !== "archived" || a.id === draft.audienceId)
+                .filter((a) => a.accountId === accountId && (a.status !== "archived" || a.id === draft.audienceId))
                 .map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.name || a.id}
@@ -857,9 +864,9 @@ function RuleBuilder({
               value={draft.senderIdentityId}
               onChange={(v) => setDraft({ ...draft, senderIdentityId: v })}
             >
-              <option value="">This cluster's default mailbox</option>
+              <option value="" disabled={accountId !== "self"}>{accountId === "self" ? "This cluster's default mailbox" : "Choose an organization mailbox"}</option>
               {senders
-                .filter((s) => s.status !== "disabled" || s.id === draft.senderIdentityId)
+                .filter((s) => s.accountId === accountId && (s.status !== "disabled" || s.id === draft.senderIdentityId))
                 .map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.address}
@@ -867,15 +874,7 @@ function RuleBuilder({
                 ))}
             </Select>
           </Field>
-          <Field label="Client">
-            <AccountPicker
-              id="os-rule-account"
-              label="Client this rule is for"
-              value={draft.accountId}
-              onChange={(v) => setDraft({ ...draft, accountId: v })}
-              accounts={accounts}
-            />
-          </Field>
+
           <Field label="What it is for">
             <Input
               id="os-rule-description"

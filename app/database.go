@@ -23,6 +23,13 @@ func (a *App) databaseAndConcepts() {
 	}
 	a.db = mnd
 
+	// Product concepts can import a storefront pack's concepts. Register the
+	// pack trees before this FIRST concept pass, not in the later engine
+	// phase: otherwise a valid product import resolves during Analyze but is
+	// still bare when the database registry is built at boot. Registration
+	// declares disabled defaults; behavior remains gated by loadPackEnablement.
+	a.anchorStorefrontPacks()
+
 	// Mount any product DSL delivered at runtime via MEMQL_DSL_PATH (a bundle
 	// image's init-container populates that volume) BEFORE the first Tree()
 	// walk below. This is what lets a product-agnostic engine image run a

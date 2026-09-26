@@ -235,7 +235,7 @@ describe("Fleet overview", () => {
     const connection = fakeConnection();
     connection.query.myWorkersWithStatus.mockReturnValue(new Promise(() => {}));
     mount(connection, "overview", memoryStore(DEFAULT_FLEET_SETTINGS));
-    expect(screen.getByRole("heading", { name: "Reading your fleet" })).toBeTruthy();
+    expect(screen.getByText("Loading fleet connections")).toBeTruthy();
     expect(document.querySelector('[data-overview-metric="Machines"] dd')?.textContent).toBe("—");
     expect(document.querySelector('[data-overview-metric="Active calls"] dd')?.textContent).toBe("—");
   });

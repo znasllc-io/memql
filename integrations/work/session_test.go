@@ -441,8 +441,12 @@ func TestArgumentsAboveTheCeilingKeepAReference(t *testing.T) {
 // mapped onto a parameter. The parent is read under the OWNER's actor, since
 // the composite tier answers zero rows and no error to anybody else.
 //
-// The control is the same open with no parent: nothing is read and none of
-// the three is written.
+// The control is the same open with no parent: nothing is read, and the run
+// carries neither a parent nor variables -- but it still carries a goal
+// signature, derived from the session's own statement (main's delegated-task
+// rule), so a parentless session is still learnable. The PARENT's signature
+// wins whenever there is a parent, because it covers the goal's input names
+// and the statement-derived one cannot.
 func TestAnOpenedRecordingRunCarriesItsParentsGoalSignature(t *testing.T) {
 	w, eng := newSessionWriter(t)
 	eng.reply("workRunForOwner", map[string]any{
@@ -481,10 +485,13 @@ func TestAnOpenedRecordingRunCarriesItsParentsGoalSignature(t *testing.T) {
 		t.Error("a recording with no parent read a parent anyway")
 	}
 	control := eng2.callTo(t, "createWorkRun").Args(t)
-	for _, absent := range []string{"goalSignature", "parentRunId", "variables"} {
+	for _, absent := range []string{"parentRunId", "variables"} {
 		if _, present := control[absent]; present {
 			t.Errorf("a recording with no parent wrote %s = %v", absent, control[absent])
 		}
+	}
+	if sig, _ := control["goalSignature"].(string); sig == "" || sig == "sig-parent" {
+		t.Errorf("a recording with no parent must carry its statement's own signature, got %v", control["goalSignature"])
 	}
 }
 

@@ -27,11 +27,13 @@ function streamOf(deltas: string[]): AskStreamFn {
 }
 
 describe("SdkAskTransport", () => {
-  it("streams deltas through the surface callbacks and prepends the context line", async () => {
+  it("streams deltas and sends page context separately from the user message", async () => {
     const seen: string[] = [];
     let sentMessages: Array<{ role: string; content: string }> = [];
-    const stream: AskStreamFn = (_d, messages) => {
+    let pageContext: string | undefined;
+    const stream: AskStreamFn = (_d, messages, options) => {
       sentMessages = messages;
+      pageContext = options.pageContext;
       return streamOf(["hel", "lo"])(_d, messages, {});
     };
     const transport = new SdkAskTransport(() => ({}) as Dispatcher, stream);
@@ -40,11 +42,11 @@ describe("SdkAskTransport", () => {
         delta: (t) => seen.push(t),
         done: resolve,
         error: (m) => reject(new Error(m)),
-      });
+      }, { conversationId: "conversation", turnId: "turn" });
     });
     expect(seen.join("")).toBe("hello");
-    expect(sentMessages[0]).toEqual({ role: "system", content: "Context: app:artifacts section:browse" });
-    expect(sentMessages[1]).toEqual({ role: "user", content: "hi" });
+    expect(pageContext).toBe("app:artifacts section:browse");
+    expect(sentMessages).toEqual([{ role: "user", content: "hi" }]);
   });
 
   it("reports an honest in-surface error with no connection", async () => {
@@ -72,7 +74,7 @@ describe("SdkAskTransport", () => {
       delta: (t) => seen.push(t),
       done: () => seen.push("<done>"),
       error: (m) => seen.push(`<err:${m}>`),
-    });
+    }, { conversationId: "conversation", turnId: "turn" });
     await Promise.resolve();
     await Promise.resolve();
     handle.cancel();

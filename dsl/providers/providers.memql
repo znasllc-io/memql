@@ -427,3 +427,20 @@ provider fleet { }
 @base
 @vendor("SubscriptionApp")
 provider app { }
+
+/// Speech input through the same federated credential as chat. Local audio
+/// models remain first in the default policy and need no vendor connection.
+@extends("openai")
+@vendor("OpenAISTT")
+@model("gpt-4o-mini-transcribe")
+provider askTranscription {
+  params { contextWindow 128000 }
+}
+
+/// Spoken replies. Voice selection is a per-session preference.
+@extends("openai")
+@vendor("OpenAITTS")
+@model("gpt-4o-mini-tts")
+provider askSpeech {
+  params { contextWindow 128000 }
+}

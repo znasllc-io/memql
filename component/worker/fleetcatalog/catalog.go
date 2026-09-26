@@ -14,6 +14,10 @@ import (
 type Reader struct {
 	Store StoreReader
 	Now   func() time.Time
+	// Groups resolves a person's ACTIVE groups for a machine lent to a group
+	// (epic memql#5344). Nil is workerservice.InstalledGroups: the membership
+	// source every node installs at engine start.
+	Groups workerservice.GroupResolver
 }
 type StoreReader interface {
 	WorkersForOwner(context.Context, string) ([]Candidate, error)
@@ -49,12 +53,55 @@ func (r *Reader) Catalog(ctx context.Context, owner string) ([]memqlengine.Fleet
 		if err != nil {
 			return nil, err
 		}
+		// THE MACHINES LENT TO THIS PERSON (epic memql#5344, design G8).
+		// Without them availability and the fleet:strongest / fleet:fastest
+		// expansion -- both of which read this catalog -- answered "no machine
+		// offers it" for a person whose only route was a colleague's machine,
+		// and the shared plan behind them never ran.
+		//
+		// A FAILED CROSS-OWNER READ KEEPS THE OWN HALF, the rule
+		// PlanUserModelWithShared already follows: the own machines are a
+		// complete answer to a narrower question, and a person whose laptop
+		// can serve must not lose it to a read about somebody else's.
+		if shared, ok := r.Store.(SharedStoreReader); ok {
+			if all, sharedErr := shared.SharedInferenceWorkers(ctx); sharedErr == nil {
+				machines = append(machines, lentToPerson(ctx, owner, machines, all, r.Groups)...)
+			}
+		}
 	}
 	now := time.Now()
 	if r.Now != nil {
 		now = r.Now()
 	}
 	return Project(machines, now), nil
+}
+
+// lentToPerson picks, from every machine in the cluster, the ones this person
+// may use beyond what the owner-scoped read returned: machines lent to them
+// under BOTH consents, and their OWN machines that read missed.
+//
+// THE SECOND KIND IS PlanUserModelWithShared's RECOVERY, mirrored. A row whose
+// owner is this person in another spelling of their id is their hardware, and
+// the plan serves it with no sharing consent at all; the catalog decides
+// availability, so leaving it out would call a model unavailable that the plan
+// could serve. Their groups are resolved at most once, and only if a machine
+// lent to a group asks.
+func lentToPerson(ctx context.Context, person string, own, all []Candidate, groups workerservice.GroupResolver) []Candidate {
+	seen := make(map[string]struct{}, len(own))
+	for _, m := range own {
+		seen[m.RegistrationId] = struct{}{}
+	}
+	who := workerservice.NewPerson(ctx, person, groups)
+	out := make([]Candidate, 0)
+	for _, m := range all {
+		if _, dup := seen[m.RegistrationId]; dup {
+			continue
+		}
+		if workerservice.SameSubjectId(m.OwnerUserId, person) || m.ServesPerson(who) {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // projectCatalog turns registrations into one entry per model.

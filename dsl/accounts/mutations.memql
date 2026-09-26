@@ -6,6 +6,27 @@
 // rowAuthzWriteEscape. A user edits their own accounts, an operator edits
 // any, and a cross-user write is refused before the merge.
 
+/// The claim coordinator names the existing cluster organization and records
+/// the real claiming principal. Only trusted ownership completion may choose
+/// this owner; an ordinary account form never accepts an ownership override.
+/// actor.userId scoping is insufficient: this runs before a completed owner
+/// session exists, after the server validates the passkey and coordinates the
+/// claim across replicas. The internal coordinator supplies the verified user.
+@serverOnly
+mutation account configureClusterAccount {
+  args {
+    name         string! @maxLength(200)
+    ownerUserId  string!
+  }
+  update {
+    accept { name, ownerUserId }
+    stamp {
+      id:           "v1:accounts:account:self"
+      configuredAt: now
+    }
+  }
+}
+
 /// Add a client to the registry -- and, once per cluster lifetime, materialize
 /// the owner's own company as `v1:accounts:account:self`.
 ///

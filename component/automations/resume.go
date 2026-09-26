@@ -64,6 +64,7 @@ var (
 // RunJournal is what resume needs from the rows: the run's envelope and
 // the completed steps' trimmed results.
 type RunJournal struct {
+	ExecutionAuthority    map[string]any
 	HeartbeatAt           time.Time
 	HasRunningStep        bool
 	GoalId                string
@@ -171,11 +172,13 @@ func runJournalFromRows(run map[string]any, steps []map[string]any) (*RunJournal
 	if run == nil {
 		return nil, ErrRunNotFound
 	}
+	authority, _ := run["executionAuthority"].(map[string]any)
 	j := &RunJournal{
 		RunId:                 shortWorkId(stringField(run, "id")),
 		GoalId:                stringField(run, "goalId"),
 		Status:                stringField(run, "status"),
 		OwnerUserId:           stringField(run, "ownerUserId"),
+		ExecutionAuthority:    authority,
 		Mode:                  stringField(run, "mode"),
 		ReplayPolicy:          stringField(run, "replayPolicy"),
 		ForkedFromRunId:       stringField(run, "forkedFromRunId"),

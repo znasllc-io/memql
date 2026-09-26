@@ -14,19 +14,20 @@ afterEach(cleanup);
 function OpenOnMount() { const { openAsk } = useAsk(); useEffect(() => openAsk(), [openAsk]); return null; }
 const Widget = OS_REGISTRY.widgets.find((w) => w.id === "ask")!.component;
 
-it("Ask widget matches Set up desk footprint", () => {
+it("Ask widget reserves more space for conversations", () => {
   const ask = OS_REGISTRY.widgets.find((w) => w.id === "ask")!;
   const setup = OS_REGISTRY.widgets.find((w) => w.id === "setup")!;
-  expect(ask.size).toEqual(SETUP_WIDGET_SIZE);
+  expect(ask.size).toEqual({ w: 6, h: 5 });
   expect(setup.size).toEqual(SETUP_WIDGET_SIZE);
-  expect(ask.size).toEqual(setup.size);
+  expect(ask.size.w * ask.size.h).toBeGreaterThan(setup.size.w * setup.size.h);
 });
 
 it.each(["sheet", "widget"])("keeps %s input visible but blocks Send until the same authoritative reading permits it", (entry) => {
   const ask = vi.fn(() => ({ cancel: vi.fn() }));
+  const transport = { ask };
   function tree(availability?: AskAvailability) {
     return withSession(withOs(
-      <AskProvider transport={{ ask }} availability={availability}>
+      <AskProvider transport={transport} availability={availability}>
         {entry === "sheet" ? <><OpenOnMount /><AskSheet /></> : <Widget />}
       </AskProvider>, "owner"), { readiness: coreAt("unconfigured", "configured", "configured") });
   }

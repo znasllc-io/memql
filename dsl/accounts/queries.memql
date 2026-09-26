@@ -1,28 +1,8 @@
-// The registry's own reads, and the four rollups the app's detail view folds
-// into one answer (D6).
-//
-// ===========================================================================
-// FOUR OF THESE SIX QUERIES READ A CONCEPT THIS DOMAIN DOES NOT OWN
-// ===========================================================================
-// `dsl/worker/queries.memql` is the precedent -- it declares
-// `query plan runningPlansForUser` over `planner.concepts.plan` under a `use`
-// -- and the reasoning is the same here. What makes a rollup a rollup is the
-// ACCOUNT it is asked about; the four populations belong to four different
-// domains, and putting each rollup beside its own concept would scatter one
-// feature across four files whose only shared fact is a field name.
-//
-// EVERY ONE OF THEM READS THROUGH THE NORMAL AUTHORIZED PATH, and that is
-// D1 restated as code: each filter is the tie-field equality ANDed with the
-// concept's OWN tier predicate, exactly as the concept's own queries write
-// it. Not one of them narrows a read BECAUSE of an account -- a caller sees
-// precisely the sites, files, domains and invitations they could already see,
-// arranged by who the work was for. An account is a record, so a rollup can
-// only ever be a presentation of rows the engine had already decided to hand
-// over.
-//
-// The consequence is worth stating plainly because a reader will wonder: two
-// people can open the same account and see different rollups. That is
-// correct. The account is shared; the rows are not.
+// Organization registry reads and account-specific views of related work.
+// True organization-owned concepts are filtered by the engine's current
+// membership and scoped-permission boundary. Multi-account artifacts and
+// knowledge records keep their separate sharing/label semantics; grouping
+// them here does not turn a label into singular ownership.
 
 use campaigns.concepts.{ campaign }
 use campaigns.shapes.{ campaignFull }
@@ -36,56 +16,11 @@ use library.shapes.{ artifactFull }
 use platform.concepts.{ site }
 use platform.shapes.{ siteFull }
 
-/// Every account this caller may see -- their own, or every account in the
-/// cluster when the caller is a cluster owner. The Accounts app's primary
-/// screen, and the source every account picker in the OS reads.
-///
-/// ARCHIVED ROWS ARE EXCLUDED BY DEFAULT and returned under the filter (D8).
-/// The archive term compares the argument with true rather than testing its
-/// presence (`args.includeArchived != nil`, the optional-argument guard), and the
-/// difference is not stylistic: a presence test answers whether the argument was
-/// PASSED, not whether it is true, so a caller passing `includeArchived: false`
-/// -- which is exactly what a checkbox bound to a boolean sends -- would have
-/// widened the read to every archived row. Written as
-/// `isNotArchived(row) || args.includeArchived == true` the three cases are the
-/// three answers: unset fails the comparison (active only), false fails it
-/// (active only), true admits everything.
-///
-/// "Everything", note, and not "the archived ones": a person looking for a
-/// client they filed away wants it in its place in the list, marked, not in a
-/// separate list of the forgotten.
-///
-/// The caller term is the composite tier's own predicate written out, which is
-/// what TestRowAuthzEnforcementLandGate requires of an authored query over a
-/// tier-declaring concept.
-///
-/// IT CARRIES A THIRD DISJUNCT NOW, and the reason is worth stating because
-/// the term looks wider than it is. The concept declares `rankVisible` plus an
-/// `unowned="admin"` floor (epic memql#4832), so the tier admits more than
-/// owner-or-cluster-owner -- and an authored conjunct narrower than the tier
-/// would silently re-close what the declaration opened, leaving an admin the
-/// zero rows memql#4837 exists to end.
-///
-/// The WIDTH is not where the narrowing was lost: the engine ANDs the tier's
-/// own predicate at the root, and that term carries the rank membership as a
-/// pushed-down `in` list. So for an admin this conjunct folds to a constant
-/// and the injected term does the real work IN SQL -- which is what keeps a
-/// page of peer-owned rows from reading as exhaustion to the cursor.
-///
-/// THE OWNER-CHECK CONJUNCT IS GONE (epic memql#5166), and what replaced it is
-/// nothing -- the concept's tier decides. That disjunction read
-/// `ownerUserId==actor.userId || actor.isClusterOwner==true ||
-/// requiresDeveloperOrAbove`, and its third arm admitted a set the tier already
-/// admitted: `unowned="admin"` plus `rankVisible` is enforced BESIDE this
-/// filter, so the branch narrowed nothing the tier would have widened. Accounts
-/// are created at admin rank, so there is no Member-owned row for the owner arm
-/// to have narrowed either.
-///
-/// The `@requiresRank("admin")` floor above is what gates the CALL, and it is
-/// unchanged. Deleting the conjunct removes a caller-scoping term that was
-/// doing no work, not a gate.
+/// Accounts authorized for this caller, including clients a cluster operator
+/// may manage. Organization members use the same query for their pickers.
+/// Archived rows are excluded unless includeArchived is explicitly true;
+/// omitted and false both return only current organizations.
 @actor
-@requiresRank("admin")
 query account clientAccountsAll {
   args {
     includeArchived  boolean
@@ -99,7 +34,6 @@ query account clientAccountsAll {
 /// the read every tie surface uses to put a name on an id it holds.
 @unbounded("account by id -- bounded to a single row (id is the row's own primary key)")
 @actor
-@requiresRank("admin")
 query account clientAccountById {
   args {
     accountId  string!
@@ -288,7 +222,6 @@ query campaign campaignsForAccount {
     accountId  string!
   }
   filter  row => row.accountId == args.accountId
-              && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   campaignFull
   sort    "row.createdAt", "desc"
 }

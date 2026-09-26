@@ -67,7 +67,7 @@ describe("the inbox", () => {
         /A run that needs a decision puts it here and stops until you make it\./,
       ),
     ).toBeTruthy();
-    expect(screen.getByText("nothing waiting")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Approvals" }).parentElement?.querySelector(".os-head-meta")?.textContent).toBe("0");
   });
 
   it("leads a row with WHAT is being asked, not with the kind", async () => {

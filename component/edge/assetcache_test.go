@@ -218,7 +218,7 @@ func TestRepublishFetchesFresh(t *testing.T) {
 			}},
 			Opener: opener,
 		})
-		return get(t, h, "/", nil).Body.String()
+		return sourceHTML(get(t, h, "/", nil).Body.String())
 	}
 
 	if got := serve("blob://" + testBundlePrefix); got != "<!doctype html>v1" {

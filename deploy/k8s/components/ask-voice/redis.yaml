@@ -1,0 +1,44 @@
+# Room placement is shared across SFU replicas. This cache holds no transcripts.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: voice-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: voice-redis}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: voice-redis}
+    spec:
+      containers:
+        - name: redis
+          image: redis:7.4-alpine
+          args: ["--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction"]
+          ports: [{name: redis, containerPort: 6379}]
+          readinessProbe:
+            exec: {command: ["redis-cli", "ping"]}
+          resources:
+            requests: {cpu: 20m, memory: 32Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: voice-redis
+spec:
+  selector: {app.kubernetes.io/name: voice-redis}
+  ports: [{port: 6379, targetPort: redis}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: voice-redis
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: voice-redis}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: livekit}
+      ports: [{protocol: TCP, port: 6379}]

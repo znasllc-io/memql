@@ -282,3 +282,126 @@ func TestForeignShareRefusalSurfacesWhenNoOwnCandidate(t *testing.T) {
 		t.Fatalf("sole foreign private refusal must stay visible, got %q", why)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Lent to NAMED people (epic memql#5344, design G3 and G7)
+// ---------------------------------------------------------------------------
+
+func peopleMachine(id, owner string, userIds, groupIds []string) Candidate {
+	c := sharedMachine(id, owner)
+	c.SharingMode = workerservice.SharingModePeople
+	c.SharedUserIds = userIds
+	c.SharedGroupIds = groupIds
+	return c
+}
+
+// equalIds treats nil and empty as the same answer: "no candidates".
+func equalIds(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func TestAPeopleShareServesExactlyItsPeople(t *testing.T) {
+	// G7 on the plan: the listed person, a member of the listed group, and
+	// nobody else -- in whichever spelling the list and the caller use.
+	forAna := peopleMachine("for-ana", "bob", []string{"v1:identity:user:ana"}, nil)
+	forDesign := peopleMachine("for-design", "bob", nil, []string{"design"})
+	store := &sharedFleet{fakeFleet: &fakeFleet{owner: "ana"}, all: []Candidate{forAna, forDesign}}
+	router := modelRouter(t, store)
+	router.SetGroupResolver(func(_ context.Context, userId string) []string {
+		if userId == "cy" {
+			return []string{"v1:identity:group:design"}
+		}
+		return nil
+	})
+	cases := map[string][]string{"ana": {"for-ana"}, "cy": {"for-design"}, "dee": nil}
+	for user, want := range cases {
+		plan, err := router.PlanUserModelWithShared(context.Background(), user, smallModel, ModelNeeds{})
+		if err != nil {
+			t.Fatalf("%s: %v", user, err)
+		}
+		if got := ids(plan.Candidates); !equalIds(got, want) {
+			t.Fatalf("%s: candidates = %v, want %v", user, got, want)
+		}
+	}
+}
+
+func TestAPeopleShareRefusalIsForeignNoiseForEverybodyElse(t *testing.T) {
+	// dee is on no list. With no machine of her own, the refusal for bob's
+	// machine is the only signal she has -- and it is the COUNTED kind (D12),
+	// never a line naming bob's machine.
+	forAna := peopleMachine("for-ana", "bob", []string{"ana"}, nil)
+	store := &sharedFleet{fakeFleet: &fakeFleet{owner: "dee"}, all: []Candidate{forAna}}
+	plan, err := modelRouter(t, store).PlanUserModelWithShared(context.Background(), "dee", smallModel, ModelNeeds{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	why, ok := plan.Rejected["for-ana"]
+	if !ok || !strings.Contains(why, "specific people") {
+		t.Fatalf("rejected = %v; the refusal must say the machine is lent to specific people", plan.Rejected)
+	}
+}
+
+func TestSystemWorkNeverReachesAPeopleShare(t *testing.T) {
+	// G3. A list of names is consent for those people; the cluster's own work
+	// is nobody on the list, so it reaches only a machine lent to everyone.
+	forAna := peopleMachine("for-ana", "bob", []string{"ana"}, nil)
+	everyone := sharedMachine("everyone", "bob")
+	store := &sharedFleet{fakeFleet: &fakeFleet{}, all: []Candidate{forAna, everyone}}
+	plan, err := modelRouter(t, store).PlanSharedModel(context.Background(), smallModel, ModelNeeds{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(plan.Candidates); len(got) != 1 || got[0] != "everyone" {
+		t.Fatalf("system candidates = %v, want only the machine lent to everyone", got)
+	}
+	if why := plan.Rejected["for-ana"]; !strings.Contains(why, "cluster's own work") {
+		t.Fatalf("the refusal must say why: %q", why)
+	}
+	// And through the user entry point with no acting user, which is how an
+	// automation arrives there.
+	viaUser, err := modelRouter(t, store).PlanUserModelWithShared(context.Background(), "", smallModel, ModelNeeds{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(viaUser.Candidates); len(got) != 1 || got[0] != "everyone" {
+		t.Fatalf("no-actor candidates = %v, want only the machine lent to everyone", got)
+	}
+}
+
+func TestOwnMachinesStillComeFirstBeforeAPeopleShare(t *testing.T) {
+	// preferOwnMachines is unchanged by who the other machine is lent to.
+	mine := privateMachine("mine", "ana")
+	forAna := peopleMachine("for-ana", "bob", []string{"ana"}, nil)
+	store := &sharedFleet{fakeFleet: &fakeFleet{machines: []Candidate{mine}, owner: "ana"}, all: []Candidate{mine, forAna}}
+	plan, err := modelRouter(t, store).PlanUserModelWithShared(context.Background(), "ana", smallModel, ModelNeeds{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(plan.Candidates); len(got) != 2 || got[0] != "mine" || got[1] != "for-ana" {
+		t.Fatalf("preferOwnMachines: %v", got)
+	}
+}
+
+func TestAGroupShareAdmitsNobodyWhenMembershipsCannotBeRead(t *testing.T) {
+	// The narrowing direction: an unreadable membership costs the group arm,
+	// never widens it.
+	forDesign := peopleMachine("for-design", "bob", nil, []string{"design"})
+	store := &sharedFleet{fakeFleet: &fakeFleet{owner: "cy"}, all: []Candidate{forDesign}}
+	router := modelRouter(t, store)
+	router.SetGroupResolver(func(context.Context, string) []string { return nil })
+	plan, err := router.PlanUserModelWithShared(context.Background(), "cy", smallModel, ModelNeeds{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(plan.Candidates); len(got) != 0 {
+		t.Fatalf("candidates = %v; nobody is admitted through a group nobody could read", got)
+	}
+}

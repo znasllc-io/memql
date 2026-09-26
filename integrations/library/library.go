@@ -1180,6 +1180,12 @@ func intArg(v any) (int, bool) {
 // extractRows normalizes the engine's Execute return into a uniform
 // []map[string]any with payload fields at the top level. Mirrors
 // integrations/dailyspace/dailyspace.go's extractRows.
+//
+// Not memql.MaterializeRows, because that one keeps a bundle row's payload
+// nested and every reader here reads it flat. It does borrow that function
+// for a top-level BUILTIN's answer, a map[string]MemoryNode no branch below
+// used to recognise -- so the similarTo call in similarChunks returned
+// nothing, and every similar-files search with it.
 func extractRows(raw any) []map[string]any {
 	if raw == nil {
 		return nil
@@ -1210,6 +1216,8 @@ func extractRows(raw any) []map[string]any {
 		return out
 	}
 	switch v := raw.(type) {
+	case map[string]memorynodes.MemoryNode:
+		return memql.MaterializeRows(v)
 	case []map[string]any:
 		return v
 	case []any:

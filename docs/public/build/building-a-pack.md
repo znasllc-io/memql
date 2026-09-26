@@ -231,6 +231,7 @@ release.
 func Register(domain string) {
     memqldsl.RegisterTree(domain, Tree())
     memqldsl.RegisterPackDefault(domain, DefaultEnabled) // false, for a storefront pack
+    memqldsl.RegisterStorefrontPack(domain)              // a developer may flip it
     registerShopperSurface()                             // see below
     memql.BindPluginToPack(domain, domain)
     memql.RegisterPluginForContract(domain, ContractVersion, NewProvider)
@@ -252,6 +253,12 @@ behavioural construct is skipped. A flip takes effect as each node restarts.
 Operators see all of this at **Cluster > Modules**, which names why a pack is
 off -- ships-disabled, or switched off by somebody -- and what enabling it
 would publish.
+
+**`RegisterStorefrontPack` is what lets a developer flip it**, not only the
+cluster owner ([who may flip a pack](../concepts/modules.md#who-may-flip-a-pack)).
+It is a declaration of its own, never inferred from the default above, and a
+test in `packs/anchor` fails the build when the declared set and the anchored
+set disagree -- so a new storefront pack is added to both or to neither.
 
 **Register the default before the rows are read.** `app/engine.go` anchors the
 storefront packs immediately above `loadPackEnablement()` for exactly this

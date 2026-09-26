@@ -561,6 +561,11 @@ const (
 	// because the concept's cluster-owner escape let an operator lend hardware
 	// they do not own.
 	BuiltinExecutorFleetSetSharing = "fleetSetSharing"
+	// BuiltinExecutorFleetShareDirectory answers who the caller may lend one
+	// of their own machines to (epic memql#5344, design G2): the people they
+	// share an active group with and those groups, or everyone from admin
+	// rank. See fleet_share_directory.go.
+	BuiltinExecutorFleetShareDirectory = "fleetShareDirectory"
 	// BuiltinExecutorModuleReadiness folds every node's readiness rows into
 	// one verdict per module (design record 2026-09-06-configuration-readiness,
 	// section 4.5). See readiness_read.go.

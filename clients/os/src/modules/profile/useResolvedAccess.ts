@@ -77,6 +77,8 @@ export function accessFromSummary(summary: AccessSummary | null): ProfileAccess 
     // already answers an empty list for a cluster that does not report them,
     // and this layer must not turn that into a claim of its own.
     groups: summary.groups ?? [],
+    accountIds: summary.accountIds ?? [],
+    everyAccount: summary.everyAccount === true,
   };
 }
 

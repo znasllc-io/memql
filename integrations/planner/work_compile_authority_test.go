@@ -8,7 +8,7 @@ import (
 )
 
 func TestCompileActorsPreservePersistedOwnerAssertion(t *testing.T) {
-	ctx, err := auth.ContextWithPersistedOwner(context.Background(), "v1:identity:user:compile-owner")
+	ctx, err := auth.ContextWithPersistedOwner(context.Background(), "v1:identity:user:compile-owner", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

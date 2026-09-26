@@ -5,3 +5,5 @@ export {
   type PartialTranscript,
   type PushToTalkOptions,
 } from "./pushToTalk.js";
+
+export { startAskVoice, type AskVoiceOptions, type AskVoiceCredentials } from "./askVoice.js";

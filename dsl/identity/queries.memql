@@ -2821,7 +2821,6 @@ query githubConnectState githubConnectStateByHash {
 // not exist, and a list a person could not act on reads as one they could.
 
 /// Every group in the cluster, for the Users app's Groups section.
-@requiresRank("admin")
 query group groupsAll {
   args {
     includeArchived  boolean
@@ -2832,7 +2831,6 @@ query group groupsAll {
 }
 
 /// One group by id, for its page.
-@requiresRank("admin")
 query group groupById {
   args {
     groupId  string!
@@ -2842,7 +2840,6 @@ query group groupById {
 }
 
 /// The groups tied to one account -- the Accounts ledger's People band.
-@requiresRank("admin")
 query group groupsForAccount {
   args {
     accountId  string!
@@ -2854,7 +2851,6 @@ query group groupsForAccount {
 
 /// The membership rows of one group. Removed members are history and are excluded unless asked for
 /// -- the row stays, because who left and when is the question the versions exist to answer.
-@requiresRank("admin")
 query groupMembership membersOfGroup {
   args {
     groupId         string!

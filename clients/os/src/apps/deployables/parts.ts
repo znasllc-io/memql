@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 
 import { useSessionIfPresent } from "../../chrome/access";
-import { holds } from "../../system/roles";
+import { availableInAnyOrganization, hasOrganizationDecisions, holds, holdsForOrganization } from "../../system/roles";
 
 // THE PARTS OF DEPLOYABLES (epic memql#5289, task memql#5305; app access
 // grants design, section 2's table and section 4 "A missing part").
@@ -21,11 +21,25 @@ import { holds } from "../../system/roles";
 //   preview   publish a candidate version, exercise it against a development
 //             store, open and end a preview
 //
-// SIX OF THEM ARE SEEDED ON OWNER AND DEVELOPER; `store` IS OWNER ALONE
-// (memql#5541). It took over from the retired `app:stores` capabilities, and
-// those were owner-only because v1:shopify:store is @rowAuthz(clusterOwner):
-// a developer holding the part would be drawn the control and then served no
-// rows, which is a refusal rendered as an empty panel (memql#5216).
+// ALL SEVEN ARE SEEDED ON OWNER AND DEVELOPER. `store` was owner alone
+// (memql#5541) while v1:shopify:store was plain @rowAuthz(clusterOwner): a
+// developer holding the part would have been drawn the control and served no
+// rows, a refusal rendered as an empty panel (memql#5216). The store concept
+// reads at developer and above now (Connect Shopify, D3), so the part came to
+// developer with it. It ATTACHES a store. Registering one, pausing it and
+// resuming it are a cluster owner's, which the engine refuses below one;
+// reconciling subscriptions walks every store on the cluster rather than the
+// one a storefront fronts. The Store panel draws all four only for a cluster
+// owner.
+//
+// THE CONSEQUENCE, STATED (D3): a developer holding `store` may bind ANY
+// storefront they can write to any store on the cluster -- not only their
+// own. v1:platform:site's account grant admits staff (developer and above) to
+// write every account-tied site, so every client storefront, live ones
+// included, is in reach: the same reach that already lets a developer pause,
+// archive or delete those sites. Every store row is made by a cluster owner or
+// server code (D15), so the token a binding exposes is one an owner or Connect
+// Shopify chose.
 //
 // THE OS HIDES; THE ENGINE REFUSES. Every act on this app names the part it
 // needs beside itself (`requires` on an ActSpec, on a HeadAction, on the
@@ -108,4 +122,25 @@ export function useDeployableParts(): PartsHeld {
   // `epoch` is the reactivity signal, not an input: the parts are read out of
   // band and this memo has to recompute when the set lands (memql#4857).
   return useMemo(() => heldParts(), [epoch]);
+}
+
+/** Resolve controls for the row or selected organization, never by unioning
+ * permissions on unrelated clients. Supplied global parts remain the operator
+ * and isolated-component contract when no organization decisions are present. */
+export function partsForOrganization(accountId: string, fallback: PartsHeld, dataVerb: "create" | "update" = "update"): PartsHeld {
+  if (!hasOrganizationDecisions()) return fallback;
+  const allowed = holdsForOrganization(accountId, "read", "data") && holdsForOrganization(accountId, "read", "app:deployables") && holdsForOrganization(accountId, dataVerb, "data");
+  return Object.fromEntries(DEPLOYABLE_PARTS.map(part => [part, allowed && holdsForOrganization(accountId, "execute", partResource(part))])) as Record<DeployablePart, boolean>;
+}
+
+/** Personal GitHub grants and installation bindings have no owning MemQL
+ * account. The server admits their management when one authorized account
+ * permits all three capabilities; this never authorizes a package write. */
+export function canManagePersonalSources(): boolean {
+  return (holds("read", "data") && holds("read", "app:deployables") && holds("execute", partResource("sources"))) ||
+    availableInAnyOrganization("execute", partResource("sources"));
+}
+export function useCanManagePersonalSources(): boolean {
+  const epoch = useSessionIfPresent()?.accessEpoch ?? 0;
+  return useMemo(canManagePersonalSources, [epoch]);
 }

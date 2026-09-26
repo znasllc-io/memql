@@ -86,28 +86,30 @@ func TestMaintenanceAutomationsAreArgued(t *testing.T) {
 	// before its detail ages out, so a read that sees nothing does not merely
 	// skip a delete, it destroys the evidence it was there to preserve.
 	//
-	// Procedure learning and the certification ladder added five in epic
+	// Procedure learning and the certification ladder added four in epic
 	// memql#5408 (closing epic memql#5402's gap G10), and they share ONE
-	// argument rather than five: each must read a row BEFORE it can know whose
-	// it is. learnFromSucceededRun and onProcedurePromotionDecided are fired by
-	// an event that names a run or an approval, and both rows declare the
-	// composite owner tier behind a cluster-owner-scoped by-id read, so the
-	// default reader actor sees the named row as ABSENT -- the run is learned
-	// from by nothing, and an approval a person gave is applied to nothing.
-	// mineProcedureCorpusAcrossAutomations, demoteProcedures and
-	// retireProcedures are fired by a schedule, which carries no owner at all,
-	// so they list owners and walk each one. What none of them does is read one
-	// person's rows as anybody else: every read after the first borrows the
-	// owner's own actor, because a procedure mined across two people's
-	// recordings is correct about neither.
+	// argument rather than four: each must read a row BEFORE it can know whose
+	// it is. onProcedurePromotionDecided is fired by an event that names an
+	// approval, a composite-owner row behind a cluster-owner-scoped by-id read,
+	// so the default reader actor sees it as ABSENT and an approval a person
+	// gave is applied to nothing. mineProcedureCorpusAcrossAutomations,
+	// demoteProcedures and retireProcedures are fired by a schedule, which
+	// carries no owner at all, so they list owners and walk each one. What none
+	// of them does is read one person's rows as anybody else: every read after
+	// the first borrows the owner's own actor, because a procedure mined across
+	// two people's recordings is correct about neither. learnFromSucceededRun
+	// is absent on purpose: its event carries the owner, which it borrows.
 	want := []string{
 		"auditEventRetentionSweep",
 		"checkDeployableHealth",
 		"demoteProcedures",
-		"learnFromSucceededRun",
 		"logsRetentionSweep",
 		"mineProcedureCorpusAcrossAutomations",
 		"onProcedurePromotionDecided",
+		// The engine-owned repository poll discovers sources across owners
+		// before borrowing each source owner's credential/deploy authority.
+		// A reader actor silently sees no packages and reports checked=0.
+		"pollPackageUpstreams",
 		"retireProcedures",
 		// routingEvidenceFold (epic memql#5146) is the one entry here whose
 		// read spans owners because the QUESTION does. It asks how a model
@@ -223,6 +225,21 @@ func TestMaintenanceAutomationsAreArgued(t *testing.T) {
 	if ac.Role != auth.RoleReader {
 		t.Errorf("the ordinary system actor carries role %q, want %q -- memql#2801's guarantee for a "+
 			"caller with no identity of its own", ac.Role, auth.RoleReader)
+	}
+}
+
+func TestRepositoryFeedNamesDoNotElevateInheritedCallers(t *testing.T) {
+	for _, name := range []string{"pollPackageUpstreams", "notePackageUpstreamFromWebhook"} {
+		for _, role := range []auth.Role{auth.RoleReader, auth.RoleDeveloper} {
+			t.Run(name+"/"+string(role), func(t *testing.T) {
+				caller := &auth.AccessContext{UserId: "feed-caller", Role: role}
+				ctx := auth.ContextWithAccess(context.Background(), caller)
+				got, ok := auth.AccessFromContext(contextWithSystemActor(ctx, name))
+				if !ok || got != caller || got.IsClusterOwner() {
+					t.Fatalf("an inherited caller was replaced or elevated: %+v", got)
+				}
+			})
+		}
 	}
 }
 

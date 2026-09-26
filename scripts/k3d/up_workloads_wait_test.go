@@ -47,6 +47,7 @@ case "$*" in
     printf '{"items":[{"metadata":{"name":"identity-abc"},"status":{"phase":"Pending","conditions":[{"type":"Ready","status":"False"}],"containerStatuses":[{"state":{"waiting":{"reason":"ContainerCreating","message":"pulling image memql-identity"}}}]}}]}\n'
     exit 0 ;;
   *wait*)
+    if [[ -n "${FAKE_WAIT_DELAY:-}" ]]; then sleep "$FAKE_WAIT_DELAY"; fi
     for unready in $FAKE_UNREADY; do
       case "$*" in
         *"/$unready"*)

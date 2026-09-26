@@ -1,28 +1,30 @@
+import { InlineSkeleton } from "../../../kit/ContentSkeleton";
+import { Versions } from "./Versions";
+import type { SiteLifecycleActions } from "../packages/actions";
 import { AvailableVersion } from "./AvailableVersion";
 import { AutoDeploySwitch } from "./stops/Source";
 import { useState } from "react";
-import { healthExplanation } from "../health";
 import { IconButton } from "../../../kit/IconButton";
 import type { ReactNode } from "react";
-import { AppWindow, Building2, ChevronRight, FileArchive, GitBranch, Globe, Hammer, History, Info, Link, Radio, Shapes, ShoppingBag, SlidersHorizontal, Activity } from "lucide-react";
+import { AppWindow, Building2, ChevronRight, FileArchive, GitBranch, Globe, Hammer, Info, Link, Shapes, ShoppingBag, SlidersHorizontal } from "lucide-react";
 import { Button, Caption, Notice, useLiveView } from "../../../kit";
 import { ActivityTarget } from "../../../kit/SemanticActivity";
 import { accountNameFrom, type AccountRow } from "../../accounts/rows";
 import { domainFromRow, isListedDomain } from "../domains";
 import { shortVersion, sourceLabel, type DeploymentRow, type PackageRow } from "../packages/rows";
-import { boundStoreId, bundleForm, type SiteRow } from "../rows";
+import { boundStoreId, previewStoreId, bundleForm, type SiteRow } from "../rows";
 import { kindLabel } from "../targets";
 import { useCustomDomains } from "../useCustomDomains";
-import { siteIsBuilt, siteStateWord } from "../words";
 import { railFor, type RailInput } from "./rail";
 import { storeLabel } from "../store/rows";
 import { PreviewSection } from "../preview/PreviewSection";
 import { NO_PARTS, type PartsHeld } from "../parts";
+import { AttentionMarker } from "../../../attention/Attention";
 import { useStore } from "../store/useStore";
 
-export type WorkspaceDetail = "source" | "whatItIs" | "whereItLives" | "build" | "live" | "runtime" | "traffic" | "store";
+export type WorkspaceDetail = "source" | "whatItIs" | "whereItLives" | "build" | "runtime" | "traffic" | "store";
 
-export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDomains, canStore, timelineState, timelineError, onRetryRead, onInspect, onOpenSource, onHistory, canSources = false, onUpdate }: {
+export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDomains, canStore, timelineState, timelineError, onRetryRead, onInspect, onOpenSource, lifecycle, canSources = false, onUpdate }: {
   canSources?: boolean; onUpdate?: () => void;
   site: SiteRow; pkg: PackageRow | null; run: DeploymentRow | null; accounts: AccountRow[];
   /** This source's whole timeline, for the versions this deployable has published. */
@@ -30,11 +32,9 @@ export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDo
   /** The parts this session holds, for the Preview section's own acts. */
   can?: PartsHeld;
   canDomains: boolean; canStore: boolean; timelineState: string; timelineError: string; onRetryRead: () => void;
-  onInspect: (detail: WorkspaceDetail) => void; onOpenSource: () => void; onHistory: () => void;
+  onInspect: (detail: WorkspaceDetail) => void; onOpenSource: () => void; lifecycle: SiteLifecycleActions;
 }) {
   const [modeOpen, setModeOpen] = useState(false);
-  const built = siteIsBuilt(site);
-  const state = site.status === "" ? "Unknown" : siteStateWord(site);
   const storefront = site.kind === "shopify_storefront";
   const storeId = storefront ? boundStoreId(site) : "";
   const input: RailInput = { mode: "standing", site, pkg, run, app: site.packageDeployableName };
@@ -70,11 +70,11 @@ export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDo
             Shopify store is the most consequential answer a storefront has.
 
             ABSENT, NOT DISABLED, when the grants do not reach it
-            (DESIGN.md rule 12). The store row is cluster-owner tier, so
-            somebody without `execute app:deployables/store` would be shown a
-            slot the engine then serves nothing into -- a refusal rendered as
-            an empty panel. */}
-        {storefront && canStore ? <StorePiece storeId={storeId} onClick={() => onInspect("store")} siteId={site.id} /> : null}
+            (DESIGN.md rule 12). The store row reads at developer and
+            above, so somebody without `execute app:deployables/store` would
+            be shown a slot the engine then serves nothing into -- a refusal
+            rendered as an empty panel. */}
+        {storefront && canStore ? <StorePiece storeId={storeId} testingId={previewStoreId(site)} onClick={() => onInspect("store")} siteId={site.id} /> : null}
         <ActivityTarget target={`deployables:${site.id}:address`}><Piece icon={<Globe size={18} aria-hidden />} label="Cluster address" detail={site.hostname || "No address recorded"} onClick={() => onInspect("whereItLives")} /></ActivityTarget>
         {canDomains ? <DomainPiece site={site} onClick={() => onInspect("whereItLives")} /> : null}
         <ActivityTarget target={`deployables:${site.id}:client`}><Piece icon={<Building2 size={18} aria-hidden />} label="Client" detail={accountNameFrom(accounts, site.accountId) || (site.accountId ? "Client name unavailable" : "The cluster")} onClick={() => onInspect("whereItLives")} /></ActivityTarget>
@@ -82,29 +82,20 @@ export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDo
     </section>
     {modeOpen && pkg?.sourceKind === "repo" ? canSources ? <AutoDeploySwitch pkg={pkg} /> : <Caption>{pkg.autoDeploy ? "Automatic" : "Manual"} deployment. Only someone with source access can change this mode.</Caption> : null}
     <section className="deployable-versions" aria-label="Serving version and latest attempt">
-      <header><h3>Versions</h3><IconButton label={pkg ? "Deployment history" : "Version history"} onClick={onHistory}><History size={16} aria-hidden /></IconButton></header>
+      <header><h3>Versions</h3></header>
       {pkg ? <AvailableVersion key={pkg.id} pkg={pkg} onUpdate={onUpdate} /> : null}
-      <div className="deployable-version-row"><span><Radio size={14} aria-hidden />{site.status === "live" ? state : "Stored version"}</span><div><strong className="os-mono">{built ? versionOf(site.bundleRef) : "No bundle yet"}</strong><small>{site.status === "live" ? healthExplanation(site) : built ? "Not published" : "Waiting for built files"}</small></div><IconButton label="Stored version details" onClick={() => onInspect("live")}><Info size={16} aria-hidden /></IconButton></div>
-      {pkg ? <div className="deployable-version-row"><span><Hammer size={14} aria-hidden />Latest attempt</span><div><strong>{run ? attemptWord(run.status) : knownTimeline ? "No attempt yet" : "History unavailable"}</strong><small>{run ? [shortVersion(run.sourceVersion), build?.reason].filter(Boolean).join(" · ") : timelineState === "loading" || timelineState === "seeding" ? "Reading deployment history…" : "Deploy an update to start a new attempt"}</small></div>{run ? <IconButton label="Latest attempt details" onClick={() => onInspect(run.status === "awaiting_confirm" ? "whatItIs" : "build")}><Info size={16} aria-hidden /></IconButton> : null}</div> : null}
+      <Versions site={site} runs={runs ?? []} canPublish={can?.publish ?? false} lifecycle={lifecycle} />
+      {pkg ? <div className="deployable-version-row"><span><Hammer size={14} aria-hidden />Latest attempt</span><div><strong>{run ? attemptWord(run.status) : knownTimeline ? "No attempt yet" : "History unavailable"}</strong><small>{run ? [shortVersion(run.sourceVersion), build?.reason].filter(Boolean).join(" · ") : timelineState === "loading" || timelineState === "seeding" ? <InlineSkeleton label="Loading deployment history" /> : "Deploy an update to start a new attempt"}</small></div>{run ? <IconButton label="Latest attempt details" onClick={() => onInspect(run.status === "awaiting_confirm" ? "whatItIs" : "build")}><Info size={16} aria-hidden /></IconButton> : null}</div> : null}
       {failed && site.status === "live" ? <Caption>The latest attempt did not replace the published version.</Caption> : null}
       {pkg && timelineError ? <Notice tone="error" sentence="Deployment history could not be read." detail={timelineError}><Button onClick={onRetryRead}>Try again</Button></Notice> : null}
     </section>
-    {/* PREVIEW SITS UNDER VERSIONS, because it is a reading of the same thing:
-        Versions says what is serving, Preview says what is being exercised
-        beside it. Two sections rather than one, because the second answers a
-        question the first cannot -- which store each version talks to -- and
-        folding them together would bury it.
-
-        ABSENT FOR THE PLATFORM'S OWN SITE. MemQL OS is systemOwned and exempt
-        from the preview axis as it is from the status and settings axes; the
-        engine refuses those writes, and drawing the section on the console
-        somebody is reading this in would be a panel of controls that only fail. */}
-    {!site.systemOwned ? <PreviewSection site={site} runs={runs ?? []} can={can ?? NO_PARTS} onOpenStore={() => onInspect("store")} /> : null}
-    <div className="deployable-reading-tools"><IconButton label="Traffic" onClick={() => onInspect("traffic")}><Activity size={16} aria-hidden /></IconButton></div>
+    {/* Storefront testing lives with its two store connections. Other app
+        kinds keep their version preview on this page. */}
+    {!site.systemOwned && !storefront ? <PreviewSection site={site} runs={runs ?? []} can={can ?? NO_PARTS} onOpenStore={() => onInspect("store")} /> : null}
   </>;
 }
 
-function Piece({ icon, label, detail, onClick }: { icon: ReactNode; label: string; detail: string; onClick: () => void }) {
+function Piece({ icon, label, detail, onClick }: { icon: ReactNode; label: string; detail: ReactNode; onClick: () => void }) {
   return <button type="button" className="deployable-slot" onClick={onClick}>{icon}<span><strong>{label}</strong><small>{detail}</small></span><ChevronRight size={13} aria-hidden /></button>;
 }
 
@@ -113,7 +104,7 @@ function DomainPiece({ site, onClick }: { site: SiteRow; onClick: () => void }) 
   const view = useLiveView(source, `workspace-domains:${site.id}`, rows => rows.map(domainFromRow).filter(d => d.siteId === site.id && isListedDomain(d)));
   const rows = view?.snapshot.rows ?? [];
   const ready = view?.snapshot.state === "live";
-  const detail = view?.snapshot.error ? "Could not read domains" : rows.length ? rows.map(d => `${d.hostname}${d.status === "live" ? "" : ` · ${d.status.replace(/_/g, " ")}`}`).join(", ") : ready ? "Add a domain" : "Reading domains…";
+  const detail = view?.snapshot.error ? "Could not read domains" : rows.length ? rows.map(d => `${d.hostname}${d.status === "live" ? "" : ` · ${d.status.replace(/_/g, " ")}`}`).join(", ") : ready ? "Add a domain" : <InlineSkeleton label="Loading domains" />;
   return <ActivityTarget target={`deployables:${site.id}:domains`}><Piece icon={<Link size={18} aria-hidden />} label="Custom domains" detail={detail} onClick={onClick} /></ActivityTarget>;
 }
 
@@ -126,27 +117,30 @@ function DomainPiece({ site, onClick }: { site: SiteRow; onClick: () => void }) 
  * labelled "Store" tells them only that a binding exists, which they can see
  * from the slot being drawn at all.
  *
- * FOUR STATES AND THEY ARE DIFFERENT ANSWERS. Nothing bound is an invitation.
+ * FOUR STATES AND THEY ARE DIFFERENT ANSWERS. Nothing bound reads Not
+ * connected. Publication and Shopify connection are independent.
  * A read in flight says so. A store that reads back gets its domain and its
  * state. A store that does not read back is NOT drawn as unbound -- that
  * would hide a real misconfiguration behind a state that looks deliberate.
  */
-function StorePiece({ storeId, siteId, onClick }: { storeId: string; siteId: string; onClick: () => void }) {
+function StorePiece({ storeId, testingId, siteId, onClick }: { storeId: string; testingId: string; siteId: string; onClick: () => void }) {
   const bound = useStore(storeId);
+  const testing = useStore(testingId);
+  const connection = storeId ? bound : testing;
+  const connected = Boolean(connection.store?.adminTokenRef && connection.store?.storefrontTokenRef);
   const detail =
-    storeId === ""
-      ? "Attach a store"
-      : bound.state === "failed"
+    !storeId && !testingId
+      ? "Not connected"
+      : connection.state === "failed"
         ? "The store could not be read"
-        : bound.store !== null
-          ? [storeLabel(bound.store), bound.store.status].filter((part) => part !== "").join(" \u00b7 ")
-          : bound.state === "read"
+        : connection.store !== null
+          ? [storeLabel(connection.store), storeId ? "" : "Testing", connection.store.isDevelopment ? "Sandbox" : "", connected ? "Connected" : "Setup needed"].filter((part) => part !== "").join(" \u00b7 ")
+          : connection.state === "read"
             ? "Names a store that is not on this cluster"
-            : "Reading the store";
-  return <ActivityTarget target={`deployables:${siteId}:store`}><Piece icon={<ShoppingBag size={18} aria-hidden />} label="Store" detail={detail} onClick={onClick} /></ActivityTarget>;
+            : <InlineSkeleton label="Loading store" />;
+  return <ActivityTarget target={`deployables:${siteId}:store`}><button type="button" className="deployable-slot" onClick={onClick} data-os-setup={(!storeId && !testingId) || connection.state === "failed" || (connection.state === "read" && !connected) ? "" : undefined}><ShoppingBag size={18} aria-hidden /><span><strong>Store</strong><small>{detail}</small></span><AttentionMarker appId="deployables" sectionId="deployables" target="shopify-store" /><ChevronRight size={13} aria-hidden /></button></ActivityTarget>;
 }
 
-export function versionOf(ref: string): string { return ref.replace(/\/$/, "").split("/").pop() || ref; }
 export function attemptWord(status: string): string {
   const words: Record<string, string> = { succeeded: "Finished", abandoned: "Lost", refused: "Refused", failed: "Failed", cancelled: "Cancelled", analyzing: "Analyzing", awaiting_confirm: "Waiting for review", building: "Building", staging_dsl: "Staging definitions", rolling: "Restarting cluster", publishing: "Putting files in place" };
   return words[status] ?? (status ? `Unknown state: ${status}` : "State unavailable");

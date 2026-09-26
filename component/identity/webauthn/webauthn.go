@@ -81,6 +81,9 @@ type Config struct {
 	// MEMQL_IDENTITY_BASE_URL. The RP ID and the expected ceremony origin
 	// are both derived from it.
 	BaseURL string
+	// UIOrigins are trusted first-party origins, supplied by installation
+	// wiring. They never come from request headers or registered OAuth clients.
+	UIOrigins []string
 
 	// DisplayName is the relying-party name the browser shows. Defaults
 	// to DefaultRPDisplayName.
@@ -167,7 +170,7 @@ func newCeremony(rpID, origin string, cfg Config) (*Ceremony, error) {
 	rp, err := gowebauthn.New(&gowebauthn.Config{
 		RPID:          rpID,
 		RPDisplayName: displayName,
-		RPOrigins:     []string{origin},
+		RPOrigins:     append([]string{origin}, cfg.UIOrigins...),
 		AuthenticatorSelection: protocol.AuthenticatorSelection{
 			ResidentKey:        protocol.ResidentKeyRequirementRequired,
 			RequireResidentKey: protocol.ResidentKeyRequired(),
@@ -384,5 +387,6 @@ func NewForDoor(reservedName string, cfg Config) (*Ceremony, error) {
 	if err != nil {
 		return nil, err
 	}
+	cfg.UIOrigins = append(cfg.UIOrigins, "https://"+frontdoor.AccountRoleHost(frontdoor.AccountRoleApp, reservedName))
 	return newCeremony(rpID, origin, cfg)
 }

@@ -7,8 +7,10 @@
 // client.Dispatcher, typed methods over SDK-owned values, and errors that
 // bubble up. No memqlv1.* import leaks out of the exported surface.
 //
-// Authorization is server-side: reads answer only to owner/admin callers,
-// SetPackEnabled to owners, and a refusal comes back as a *RefusedError
+// Authorization is server-side: reads answer to callers holding read on
+// app:cluster/modules (owner, developer, admin), SetPackEnabled to an owner
+// for any pack and to a developer for a storefront pack (Module.MayFlip says
+// which), and a refusal comes back as a *RefusedError
 // carrying the server's status code and message. Secret env vars NEVER
 // carry a value -- Set is the whole answer for them; that is an engine
 // guarantee, not a client courtesy.
@@ -60,6 +62,10 @@ type Module struct {
 	EnvComponents []string
 	FqnPrefixes   []string
 	CodeReference string
+	// MayFlip is whether THIS caller may flip this pack: an owner any pack, a
+	// developer holding execute on app:cluster/modules a storefront pack.
+	// False on every non-pack row.
+	MayFlip bool
 }
 
 // EnvVar is one manifest-declared environment variable on a module's
@@ -112,11 +118,12 @@ func moduleFromProto(m *memqlv1.ModuleInfo) Module {
 		EnvComponents: m.GetEnvComponents(),
 		FqnPrefixes:   m.GetFqnPrefixes(),
 		CodeReference: m.GetCodeReference(),
+		MayFlip:       m.GetMayFlip(),
 	}
 }
 
 // List returns the full module inventory as the answering node assembles
-// it. Owner/admin only.
+// it. Requires read on app:cluster/modules.
 func (c *Client) List(ctx context.Context) (*Inventory, error) {
 	msg := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_ModulesList{
@@ -145,7 +152,7 @@ func (c *Client) List(ctx context.Context) (*Inventory, error) {
 }
 
 // Get returns one module's detail (row + env surface) by (kind, name).
-// Owner/admin only; an unknown pair is a *RefusedError with code 5
+// Requires read on app:cluster/modules; an unknown pair is a *RefusedError with code 5
 // (NOT_FOUND).
 func (c *Client) Get(ctx context.Context, kind, name string) (*Detail, error) {
 	msg := &memqlv1.MemqlClientMessage{
@@ -184,7 +191,8 @@ func (c *Client) Get(ctx context.Context, kind, name string) (*Detail, error) {
 	return d, nil
 }
 
-// SetPackEnabled flips a pack's per-instance enablement. Owner only;
+// SetPackEnabled flips a pack's per-instance enablement. The owner's, or a
+// developer's on a storefront pack;
 // audited server-side including refusals. The returned PackFlip's
 // RestartRequired says when the flip takes effect (each node's next
 // boot, in v1 -- always true).

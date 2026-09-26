@@ -65,8 +65,9 @@ func TestSiteOwnerStampSurvivesThePipelinesOwnStampedUpdate(t *testing.T) {
 // that created them -- the state memql#4344 says a cluster owner cannot be in.
 func TestSiteOwnerStampStillUndoesACreateByADeploymentWriter(t *testing.T) {
 	ctx := auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), &auth.AccessContext{
-		UserId: "system:seedMaterializer",
-		Role:   auth.RoleOwner,
+		UserId:    "system:seedMaterializer",
+		Role:      auth.RoleOwner,
+		Synthetic: true,
 	}))
 	payload := map[string]any{"hostname": "os.memql.localhost", "ownerUserId": "system:seedMaterializer"}
 	if err := applySiteOwnerStamp(ctx, payload, false /* a CREATE */, "system:seedMaterializer", true); err != nil {
@@ -77,18 +78,14 @@ func TestSiteOwnerStampStillUndoesACreateByADeploymentWriter(t *testing.T) {
 	}
 }
 
-// TestSiteOwnerStampStillLetsAnOperatorTakeASiteBack keeps the documented
-// hand-over: a cluster owner re-running createSite on an existing id arrives
-// as an UPDATE whose delta DOES restate `ownerUserId: actor.userId`. That is a
-// fresh stamp of the caller's own id, and it must still be undone so the row
-// becomes the deployment's rather than the operator's.
-func TestSiteOwnerStampStillLetsAnOperatorTakeASiteBack(t *testing.T) {
+// A real operator remains the recorded owner even on an explicit re-create.
+func TestSiteOwnerStampRecordsAnOperatorsExplicitOwnership(t *testing.T) {
 	ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "root", Role: auth.RoleOwner})
 	payload := map[string]any{"hostname": "shop.memql.localhost", "ownerUserId": "root"}
 	if err := applySiteOwnerStamp(ctx, payload, true /* existing row */, "root", true /* createSite restated the owner */); err != nil {
 		t.Fatalf("applySiteOwnerStamp: %v", err)
 	}
-	if _, present := payload["ownerUserId"]; present {
-		t.Fatal("an operator's createSite re-run kept ownerUserId = root; the take-back path stopped producing a cluster-owned row")
+	if payload["ownerUserId"] != "root" {
+		t.Fatal("a real operator lost persisted owner attribution")
 	}
 }

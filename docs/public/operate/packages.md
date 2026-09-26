@@ -51,7 +51,11 @@ Deployables app.
 formatVersion: 1
 name: acme-storefront
 deployables:
-  - name: storefront             # unique within the package
+  - name: storefront             # stable identity within the package
+    displayName: Acme Storefront  # optional UI label
+    deployment:                  # optional defaults, reviewed before deploy
+      slug: quiet-cedar           # <slug>.<receiving-cluster-domain>
+      domains: [shop.acme.com, www.acme.com]
     path: clients/web
     kind: shopify_storefront     # spa | static | shopify_storefront
     build:                       # optional; these ARE the defaults
@@ -73,8 +77,14 @@ cluster's database, while the myshopify.com domain is the same identifier
 everywhere and one an operator can check by eye.
 
 A store is attached on the deployable's Store panel. A manifest naming a store
-this cluster does not have (or one you may not read) is refused at deploy with
-`deployable_store_unknown`, before anything is published.
+the deployer may not attach -- one this cluster does not have, one they may not
+read, or one they may read without holding the store part -- does not refuse
+the deploy. A first deploy places the storefront as a **draft with no store**,
+and the run records a non-fatal `deployable_store_unknown` note saying so; a
+redeploy of a storefront that is already bound keeps the store it has. An
+unattached storefront can go live for design review. Shopping requires a store
+connected on its Store panel. Once a later deploy can attach the manifest's
+store, it re-points the storefront to it.
 
 Two halves, and the asymmetry is deliberate:
 
@@ -84,16 +94,106 @@ Two halves, and the asymmetry is deliberate:
 - **DSL domains are DISCOVERED** from `dsl/<domain>/`, exactly as the engine's
   own `MEMQL_DSL_PATH` mount discovers them.
 
-**There is no hostname here.** The manifest describes the software; the deploy
-describes the placement. A hostname is chosen once, at a deployable's first
-deploy, and remembered on its site row -- so the same manifest deploys to two
-clusters without an edit, and renaming a site needs no pull request against the
-package. The placement itself is `placements` on `packageDeploy`
-([deployables.md](deployables.md)).
+**Deployment configuration is optional.** `displayName` changes the displayed
+label without changing `name`, which identifies the same app on redeploy.
+For a Shopify storefront, the existing `deployment` address and `binding`
+configure **Production**. A second stable **Testing** URL is assigned automatically:
+`test--<production-hostname>` (for example, `test--graceful-fjord.cluster.example.com`).
+Both destinations use one deployable and the same build. Testing access opens
+through MemQL OS's **Visit → Testing** action.
+
+Set the independent testing store with the optional manifest block:
+
+```yaml
+    testing:
+      binding:
+        store: sandbox.myshopify.com
+```
+
+Both bindings may name the same store, including a sandbox. An unconnected
+destination serves design preview. Omitting `testing` preserves the testing
+store chosen in MemQL OS; declaring a different testing store rebinds only
+Testing on deployment. An unavailable store leaves its prior binding intact
+and records a deployment note. A change to the declared testing store requires
+review before an automatic deployment.
+
+`deployment.slug` is a lowercase DNS label of 3–40 characters under the receiving
+cluster's domain. Omit it to let the wizard generate an editable name. Existing
+site addresses are preserved on redeploy. `deployment.domains` lists custom
+hostnames without schemes, paths or wildcards. The wizard prefills these values,
+checks availability and shows the store binding before confirmation. Domain
+ownership verification and DNS setup still apply.
+
+Explicit wizard placements override manifest defaults. An explicit empty
+`domains: []` in a placement opts out for that run; an omitted placement inherits
+the declaration. New domain declarations are additive on redeploy. Omitting a
+setting never disconnects a store, removes a domain or relocates an existing
+site. An existing domain on the same site is reused. Changed declarations park
+automatic deployments for review. Secrets and connection credentials stay in
+MemQL, not in this file.
+
+The Address step's **Export manifest** downloads the complete analyzed manifest
+with the chosen address and domain defaults. This includes generated names and
+preserves build, asset and store declarations. Commit that file in the source
+repository to carry the choices into subsequent imports; export never writes to
+GitHub automatically.
 
 A `bff/` with a `go.mod` is **detected, reported and deferred**: it appears in
 the report saying where Go delivery happens today (engine images built by CI),
 and every other half of the package deploys around it.
+
+### Large files supplied separately
+
+A GitHub repository package can keep videos and other large static files in
+release assets instead of including them in every source archive. Declare the
+files on their deployable:
+
+```yaml
+formatVersion: 1
+name: example
+deployables:
+  - name: website
+    path: clients/website
+    kind: static
+    build: {output: out}
+    assets:
+      - path: media/walkthrough.mp4
+        source: https://github.com/example/project/releases/download/media-v1/walkthrough.mp4
+        sha256: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+        size: 13831438
+```
+
+Use the file's actual SHA-256 and byte count. `path` is relative to the final
+published site, **not** the repository or build workspace. The build must not
+emit a file or directory that conflicts with that path. Files that the build
+command needs as inputs still belong in its source or its own input workflow.
+
+Configuration validates these declarations without downloading the assets.
+Review includes their import in the build plan. After confirmation, Build
+builds the small site, downloads missing assets, verifies their sizes and
+digests, and stores them in the instance's private blob storage. Cached files
+are scoped to the package and shared across replicas. Subsequent builds reuse
+verified bytes, while rechecking the package's source credential. A changed
+asset declaration changes the automatic deployment approval fingerprint.
+
+Asset URLs must name a release in the **same GitHub repository** as the package.
+The existing package source connection also authorizes private release reads;
+never put a token or signed URL in the manifest. GitHub supplies the original
+distribution copy. MemQL serves the imported copy through the existing site
+publisher, at the declared path, with the site's normal access and HTTP range
+behavior. A release tag moving or an asset being replaced cannot silently
+change a declared file: its digest must still match.
+
+The existing per-file, complete-output, and file-count limits also apply to
+assets. An unavailable, oversized, or mismatched file stops the deployment
+before publishing. Keep generated payloads and authoring originals outside the
+current source tree once their durable copies have been verified; merely adding
+this block while retaining large files in Git does not shrink a source archive.
+
+Local development uses Azurite. Both the BFF and workbench need the shared blob
+connection and `MEMQL_AZURE_BLOB_CONTAINER`; the local overlay also enables
+container creation for the emulator. Cloud instances supply their own storage
+configuration.
 
 ## Upgrading to an engine that reads the language line
 
@@ -164,7 +264,6 @@ somebody's mistake.
 | `deployable_path_missing` | A declared `path` is not a directory in the tree |
 | `deployable_kind_unknown` | `kind` is a value nobody has heard of -- not one of the three live values, and not one of the known-but-unoffered ones below |
 | `deployable_binding_missing` | A storefront whose `binding` names no store. A manifest fact, decided offline |
-| `deployable_store_unknown` | A storefront naming a store this cluster has no row for, or one the caller may not read. Decided at publish, because it is a cluster read the offline analysis does not make. One code for both cases deliberately: separating them would answer "is this store on this cluster" for somebody outside the tier that decides who may look |
 | `deployable_hostname_unchosen` | A never-deployed app whose placement names no hostname. Split out of `deployable_binding_missing`, because its repair is choosing an address rather than editing the tree |
 | `dsl_domain_reserved` | A `dsl/<domain>/` whose name the engine already owns |
 | `dsl_refuses_boot` | The package's DSL does not survive the Init-grade gates; carries the construct-level errors |
@@ -200,6 +299,7 @@ somebody's mistake.
 | `deploy_failed` | Not a refusal -- a store or a storage call that broke mid-run. Nothing about the source was changed, and a new attempt is the way forward, because the timeline is append-only |
 | `deployable_account_refused` | The `accountId` half of a placement was refused by the account write's own guard. Recorded on that app's OUTCOME, **not fatal**: the site is live at its cluster address either way |
 | `deployable_domain_refused` | The `ownDomain` half was refused -- a hostname under the cluster's own domain, a collision, or the per-site cap. Recorded the same way, **not fatal** |
+| `deployable_store_unknown` | A storefront naming a store the caller may not attach: no row for it, a row they may not read, or one they may read without holding the store part. Recorded on that app's OUTCOME, **not fatal**: an unbound storefront is placed as a draft with no store, which may go live for design review before a store is connected, and a bound one keeps its store. Decided at publish, because it is a cluster read the offline analysis does not make. One code for every case deliberately: separating them would answer "is this store on this cluster" for somebody outside the tier that decides who may look |
 
 An **unknown `formatVersion` refuses** rather than parsing the subset it
 recognises, and so does an **unknown KEY**: `deployabels:` parses fine and
@@ -680,12 +780,33 @@ The gate is not skipped. It is answered, and only by a plan somebody already
 said yes to. A changed build command is the case that matters most -- it is
 somebody else's shell command arriving on your cluster -- and it always parks.
 
-Two other rules:
+Scheduled repository polling runs on one elected workbench replica, independently
+of general maintenance leadership. If no workbench is available, polling waits;
+another node never attempts the build locally. Other scheduled automations keep
+their existing leadership.
+The supported local k3d stack includes its own workbench with this same role and
+lease. A standalone BFF, including a process with `MEMQL_NODE_TYPE` unset, does
+not poll repositories or serve as a fallback build node.
 
-- **Never more than one auto-run live per source.** Two pushes seconds apart
-  compose the same deployment id, so the second lands on a row that already
-  exists and the append-only rule refuses to reopen it.
+The deployment rules are:
+
+- **One live run per source.** A shared database gate serializes the short
+  read-and-open step across replicas. An existing attempt cannot be opened again,
+  and another live attempt must finish or be canceled before a new one starts.
+  Confirming a parked attempt continues that same run.
 - **A cluster-owned source cannot auto-deploy.** There is nobody to run as.
+- **Infrastructure retries are limited.** A missing workbench or a build process
+  that could not start can retry automatically twice after the original attempt,
+  at least ten minutes apart. Each retry opens a new row and uses the original
+  source snapshot; it still passes the plan confirmation gate. The same budget
+  also recovers a pre-0.23.4 bundle publication incorrectly refused for its
+  unchanged Shopify binding, only while the site, source, owner, and store still
+  match the recorded failure. New or changed bindings still require store access.
+  Canceled runs, missing snapshots, source or credential failures, build errors,
+  and timeouts require attention. After three failed attempts for one revision and policy
+  setting, automatic attempts stop. The failure and update remain visible; repair
+  the deployment failure and use **Retry**. A later source revision has its own
+  limit.
 
 Workbench builds are the Build epic of
 [the Deployables program](../../superpowers/specs/2026-09-02-deployables-program-design.md).

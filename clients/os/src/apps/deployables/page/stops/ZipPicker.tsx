@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 import { FileArchive } from "lucide-react";
 
-import { Button, Caption, LiveList, Notice, Row as ListRow, Subhead } from "../../../../kit";
+import { Button, Caption, LiveList, Notice, RecordRow as ListRow, listCount, Subhead } from "../../../../kit";
 import { useLiveView } from "../../../../live/liveView";
 import { usePublish } from "../../actions";
 import { PICKER_PAGE_SIZE, useZipArtifacts } from "../../sources/useZipArtifacts";
@@ -92,7 +92,7 @@ export function ZipPicker({
 
   return (
     <div className="os-deploy-publish">
-      <Subhead>{verb} from a zip</Subhead>
+      <Subhead meta={listCount(zips?.snapshot)}>{verb} from a zip</Subhead>
 
       <LiveList<ZipRow>
         source={zips}
@@ -112,7 +112,7 @@ export function ZipPicker({
             current={chosen === zip.id}
             open={chosen === zip.id}
             onOpen={() => choose(zip.id)}
-            state={chosen === zip.id ? <span className="os-livelist-tick">chosen</span> : null}
+            stateExtra={chosen === zip.id ? <span className="os-livelist-tick">chosen</span> : null}
           >
             <span className="os-caption os-mono">{zip.mimeType}</span>
           </ListRow>

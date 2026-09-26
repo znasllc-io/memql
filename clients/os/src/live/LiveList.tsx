@@ -2,6 +2,7 @@ import { useMemo, useSyncExternalStore } from "react";
 import type { LiveSnapshot } from "@znasllc-io/memql-sdk-core/client";
 
 import { Caption } from "../kit/Caption";
+import { RecordListSkeleton } from "../kit/RecordListSkeleton";
 import type { ArrivalKind } from "./arrival";
 import { useArrivals } from "./useArrivals";
 
@@ -60,7 +61,7 @@ export function LiveList<T>({
 
   const stateLine =
     snapshot.state === "seeding"
-      ? "Loading from the cluster"
+      ? null
       : snapshot.state === "degraded"
         ? "Live updates degraded -- showing the last known rows"
         : snapshot.state === "disconnected"
@@ -68,7 +69,7 @@ export function LiveList<T>({
           : null;
 
   return (
-    <div className="os-livelist" data-os-livelist data-state={snapshot.state}>
+    <div className="os-livelist os-record-list" aria-busy={snapshot.state === "seeding" || undefined} data-os-livelist data-state={snapshot.state}>
       <ul className="os-livelist-rows" aria-label={label}>
         {snapshot.rows.map((row) => {
           const id = rowId(row);
@@ -83,7 +84,9 @@ export function LiveList<T>({
       {snapshot.rows.length === 0 && snapshot.state === "live" ? (
         emptyContent ?? <Caption>{emptyText}</Caption>
       ) : null}
-      {stateLine ? <Caption>{stateLine}</Caption> : null}
+      {snapshot.state === "seeding" && snapshot.rows.length === 0
+        ? <RecordListSkeleton label="Loading from the cluster" />
+        : stateLine ? <Caption>{stateLine}</Caption> : null}
       {snapshot.error ? <p className="os-ask-error">{snapshot.error}</p> : null}
     </div>
   );

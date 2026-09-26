@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Check, Trash2, X } from "lucide-react";
+
+import { FoldWallpaper } from "../wallpaper/FoldWallpaper";
 
 import { useOs } from "../chrome/state";
 import { Button, Notice } from "../kit";
@@ -254,7 +256,7 @@ function ThemeMiniature({ tokens, label }: { tokens: OsThemeTokens; label: strin
       aria-label={`${label} mode`}
       style={{ background: tokens.ground, borderColor: tokens.line }}
     >
-      <span className="os-theme-mini-field" style={{ background: tokens["field-dot"] }} />
+      <FoldWallpaper style={{ "--os-ground": tokens.ground, "--os-ink": tokens.ink } as CSSProperties} />
       <span
         className="os-theme-mini-window"
         style={{ background: tokens.plate, borderColor: tokens.line }}

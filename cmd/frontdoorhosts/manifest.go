@@ -12,8 +12,7 @@ const tlsSecret = "memql-front-door-tls"
 
 // clusterIssuer is the cert-manager ClusterIssuer that signs it. Managed
 // outside this repository (deploy/argocd/apps/project.yaml permits the
-// public-entry overlay to own it) and referenced by name, exactly as
-// deploy/k8s/base/livekit.yaml already references it.
+// public-entry overlay to own it) and referenced by name by the generated front door.
 //
 // IT SOLVES HTTP-01, AND THE CERTIFICATE IS SHAPED FOR THAT (memql#4224). An
 // earlier version of this comment demanded a DNS-01 solver because the
@@ -29,9 +28,7 @@ const clusterIssuer = "letsencrypt-prod"
 
 // ingressClass is the cloud front door's L7 proxy.
 //
-// nginx and not traefik, matching the only other cloud Ingress in this
-// repository (deploy/k8s/base/livekit.yaml, which the local overlay deletes for
-// exactly this reason). The choice is a VALUE under CLAUDE.md's parity standard
+// nginx and not traefik, matching the cloud ingress controller. The choice is a VALUE under CLAUDE.md's parity standard
 // -- "ingress controller (traefik vs nginx annotations)" is on its ALLOWED list
 // -- and it is the one thing in this file that a cluster could disagree with
 // this repository about. If the cloud cluster is ever traefik, this constant and

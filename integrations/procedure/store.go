@@ -44,13 +44,15 @@ import (
 // that came out would be correct about nobody.
 //
 // TWO READS ARE THE EXCEPTION, and both are made by the cluster's maintenance
-// principal BEFORE any owner is known (gap G10): workRunById, to learn whose
-// run an event named, and usersForSeedSweep, to list the owners a sweep walks.
-// Both are @serverOnly, so they go through executeInternal, and neither is
-// reachable by anybody else: workRunById filters to a cluster owner, which a
-// person and an ordinary automation's reader are not, and the handler admits
-// only the cluster's principal before it ever lists owners. Every read after
-// them borrows the owner.
+// principal BEFORE any owner is known (gap G10): usersForSeedSweep, to list the
+// owners a sweep walks, and workApprovalById, to learn whose construct a
+// decided promotion names. Both are @serverOnly, so they go through
+// executeInternal, and neither is reachable by anybody else: workApprovalById
+// filters to a cluster owner, which a person and an ordinary automation's
+// reader are not, and each handler admits only the cluster's principal before
+// it reads either. Every read after them borrows the owner. (The completion
+// trigger that fires the lift needs no such read: its event names the run's
+// owner, which the learn handler borrows and re-verifies.)
 
 // Engine is the executor seam.
 type Engine interface {
@@ -105,23 +107,10 @@ func (s *store) query(ctx context.Context, q string) ([]map[string]any, error) {
 	return memqlRows(res), nil
 }
 
-// The @serverOnly READS. They live HERE, beside the one stamp, rather than at
-// their callers: a @serverOnly call belongs next to the internal origin it
-// needs, where the next reader -- and the conformance gate that holds every
-// such call to a file that stamps -- finds the two together. The header names
-// the two the lift makes; the third is the promotion decision's
-// (approvalByIdAsCluster), made for the same reason by the same principal.
-
-// runByIdAsCluster reads one run through the by-id read, which only a cluster
-// owner's actor answers: the maintenance principal learning whose run an event
-// named. nil when nothing answered.
-func (s *store) runByIdAsCluster(ctx context.Context, runId string) (map[string]any, error) {
-	rows, err := s.executeInternal(ctx, "query "+call("workRunById", map[string]any{"runId": runId}))
-	if err != nil || len(rows) == 0 {
-		return nil, err
-	}
-	return rows[0], nil
-}
+// The @serverOnly READS the header names live HERE, beside the one stamp,
+// rather than at their callers: a @serverOnly call belongs next to the
+// internal origin it needs, where the next reader -- and the conformance gate
+// that holds every such call to a file that stamps -- finds the two together.
 
 // activeUserIds lists every active person, through the query the seed sweep
 // uses -- unscoped by nature, because a sweep over owners cannot know whose
@@ -131,8 +120,8 @@ func (s *store) activeUserIds(ctx context.Context) ([]map[string]any, error) {
 	return s.executeInternal(ctx, "query usersForSeedSweep()")
 }
 
-// approvalByIdAsCluster reads one approval through the by-id read, which --
-// like workRunById -- only a cluster owner's actor answers: the promotion
+// approvalByIdAsCluster reads one approval through the by-id read, which only a
+// cluster owner's actor answers: the promotion
 // decision's automation learning whose construct a DECIDED approval names. A
 // person has no by-id read of a decided approval (their list is the pending
 // one), and the caller admits only the cluster's principal first. nil when

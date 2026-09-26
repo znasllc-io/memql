@@ -219,6 +219,55 @@ func TestMaterializeRetryOnAnotherReplicaReturnsCompletedFile(t *testing.T) {
 	}
 }
 
+func TestMaterializeTransientFailureResumesOnAnotherReplica(t *testing.T) {
+	for _, message := range []string{"context deadline exceeded", "the local runtime stopped producing output past the idle ceiling", "connection reset by peer"} {
+		t.Run(message, func(t *testing.T) {
+			i, e, u := materializeFixture(t)
+			i.SetComposer(materializeComposerFunc(func(context.Context, ComposeRequest) (ComposeReply, error) {
+				return ComposeReply{}, fmt.Errorf("%s", message)
+			}))
+			_, err := i.materialize(nestedMaterializeContext(), "u-alice", "", materializeDraft())
+			if err == nil || strings.Contains(err.Error(), terminalFailureCode) {
+				t.Fatalf("transient error was swallowed or made terminal: %v", err)
+			}
+			for _, row := range e.compositions {
+				if row["status"] != "draft" {
+					t.Fatalf("resumable composition was closed: %v", row)
+				}
+			}
+			worker := New(e, nil)
+			worker.SetUploader(u, "files")
+			worker.SetComposer(materializeComposerFunc(func(context.Context, ComposeRequest) (ComposeReply, error) {
+				return ComposeReply{Draft: pure.Draft{Body: "Recovered report"}}, nil
+			}))
+			out, err := worker.materialize(nestedMaterializeContext(), "u-alice", "", materializeDraft())
+			if err != nil || len(e.compositions) != 1 || len(e.files) != 1 || u.calls != 1 {
+				t.Fatalf("recovery lost its identity or duplicated an effect: out=%v err=%v uploads=%d", out, err, u.calls)
+			}
+			if row := e.compositions[stringOf(out["compositionId"])]; row["status"] != "ready" {
+				t.Fatalf("recovered file did not finish: %v", row)
+			}
+		})
+	}
+}
+
+func TestMaterializeTerminalFailureDoesNotCallModelAgain(t *testing.T) {
+	i, e, u := materializeFixture(t)
+	i.SetComposer(materializeComposerFunc(func(context.Context, ComposeRequest) (ComposeReply, error) {
+		return ComposeReply{}, fmt.Errorf("invalid document draft")
+	}))
+	_, _ = i.materialize(nestedMaterializeContext(), "u-alice", "", materializeDraft())
+	worker := New(e, nil)
+	worker.SetUploader(u, "files")
+	worker.SetComposer(materializeComposerFunc(func(context.Context, ComposeRequest) (ComposeReply, error) {
+		t.Fatal("terminal composition was retried")
+		return ComposeReply{}, nil
+	}))
+	if _, err := worker.materialize(nestedMaterializeContext(), "u-alice", "", materializeDraft()); err == nil || !strings.Contains(err.Error(), terminalFailureCode) {
+		t.Fatalf("terminal state was ignored: %v", err)
+	}
+}
+
 type directMaterializeGoal struct {
 	goal  work.DirectGoal
 	calls int
@@ -370,15 +419,14 @@ func TestMaterializeProviderFailureRecordsFailedComposition(t *testing.T) {
 func TestAFailedCompositionSaysSoInAWordTheWorkSpineMatches(t *testing.T) {
 	i, e, u := materializeFixture(t)
 	i.SetComposer(materializeComposerFunc(func(context.Context, ComposeRequest) (ComposeReply, error) {
-		return ComposeReply{}, fmt.Errorf("context deadline exceeded")
+		return ComposeReply{}, fmt.Errorf("invalid document draft")
 	}))
 	_, err := i.materialize(nestedMaterializeContext(), "u-alice", "", materializeDraft())
 	if err == nil {
 		t.Fatal("the failure was swallowed")
 	}
 	if !strings.Contains(err.Error(), "composition_failed") {
-		t.Fatalf("error = %q, want it to lead with composition_failed: without the code the work spine "+
-			"reads the words \"deadline exceeded\" and parks the run on a retry against a failed row", err)
+		t.Fatalf("error = %q, want composition_failed for an invalid document", err)
 	}
 	// THE ROW AND THE ERROR MUST AGREE. The code is only honest because the
 	// terminal record is written before it is returned.

@@ -463,16 +463,16 @@ passes the gates an HTTP provider call passes, sharing the same state. See
 Selection is the existing Fleet router asked for a `model:<id>` label, under
 the strategies it already has. Two properties are security-load-bearing:
 
-- **A model call carries your prompts, so it routes only to YOUR machines.**
-  There is no cross-user routing path. The read that finds candidates is
-  caller-scoped, so another user's machine is never in the result to begin
-  with.
+- **A model call carries your prompts, so it routes only to YOUR machines
+  and to machines LENT TO YOU.** Another person's machine reaches your call
+  only when its owner shared it with everyone, with you, or with a group you
+  are in, AND the machine itself agreed (`inference.serve: cluster` in its
+  `policy.yaml`). A machine nobody lent you is never a candidate.
 - **System work** — automations and cluster maintenance, with no acting user
-  — reaches only machines that are **shared with the cluster**, which takes
-  **two** consents: the owner's, on the machine's page in Fleet, and the
-  machine's own, as `inference.serve: cluster` in its `policy.yaml`. Neither
-  is sufficient. [Sharing a machine with the cluster](shared-machines.md) is
-  the whole story, including what the lender is told afterwards.
+  — reaches only machines **lent to everyone**, with both consents. A machine
+  shared with specific people never serves it. [Sharing a
+  machine](shared-machines.md) is the whole story, including who you can lend
+  a machine to and what the lender is told afterwards.
 
   > This replaced the `sharedInference=true` **operator label**, pre-release
   > and with no shim. A machine that reports `sharedInference` in its own
@@ -525,8 +525,8 @@ function that throws.
 ## Related
 
 - [Workers runbook](workers-runbook.md) — pairing a machine, tokens, scope
-- [Sharing a machine with the cluster](shared-machines.md) — the two consents,
-  and what the lender is told afterwards
+- [Sharing a machine](shared-machines.md) — with people, groups or everyone;
+  the two consents, and what the lender is told afterwards
 - [Local apps as execution surfaces](local-apps.md) — the sibling delegation surface
 - [LLM cost control](../ai/llm-cost-control.md) — the guard layers
 - [Anthropic federation](auth/anthropic-federation.md) — door 2

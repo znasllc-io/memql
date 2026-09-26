@@ -471,7 +471,7 @@ caller's view. An admin browsing v1:identity:user would populate the
 entry and a reader would then be served every user row from cache,
 bypassing the gate entirely.`, admin)
 	}
-	if !strings.HasPrefix(admin, "actor:") {
+	if !strings.Contains(admin, "actor:operator|") {
 		t.Fatalf("unbound plan signature is not actor-keyed: %q", admin)
 	}
 }

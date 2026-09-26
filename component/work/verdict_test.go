@@ -161,3 +161,14 @@ func TestParseVerdictAcceptsThePastTenseEpicCWrote(t *testing.T) {
 		}
 	}
 }
+
+// TestTheUsesReasonReadsAsASentence: the gate's reason is shown verbatim in
+// Nexus under "why it last moved", so its counts must read as English.
+func TestTheUsesReasonReadsAsASentence(t *testing.T) {
+	for uses, want := range map[int]string{0: "never used", 1: "used once", 3: "used 3 times"} {
+		_, reason := CandidateGate(CandidateEvidence{Uses: uses})
+		if !strings.HasPrefix(reason, want+" ") && !strings.HasPrefix(reason, want+",") {
+			t.Errorf("uses %d: reason %q, want it to open %q", uses, reason, want)
+		}
+	}
+}

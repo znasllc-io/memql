@@ -1,7 +1,8 @@
+import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { useCallback, useMemo, useState } from "react";
 import { ModulesClient, type ModulesInventory } from "@znasllc-io/memql-sdk-core/client";
 
-import { Button, Caption, Chip, Head, Notice, Panel, Row, Subhead, setAsideLabel, stateWords, verdictDetail } from "../../../kit";
+import { Button, Caption, Chip, Head, Notice, Panel, RecordList, RecordRow, Subhead, setAsideLabel, stateWords, verdictDetail } from "../../../kit";
 import { useSession } from "../../../chrome/access";
 import { useOsConnection } from "../../../live/connection";
 import { useReading } from "../../../cluster/reading";
@@ -10,7 +11,6 @@ import {
   groupModules,
   moduleStateNeedsAttention,
   moduleStateSentence,
-  moduleStateTone,
   readinessForModule,
 } from "./rows";
 
@@ -56,7 +56,8 @@ export function ModulesSection() {
 
   // The client is constructed from the dispatcher, not from `query`: the
   // module registry is its own surface with its own authorization tier
-  // (reads owner/admin, the write owner-only), which is why the SDK keeps it
+  // (reads need read on app:cluster/modules; the write is the owner's, or a
+  // developer's on a storefront pack), which is why the SDK keeps it
   // out of the generated query vocabulary.
   const modules = useMemo(
     () => (connection === null ? null : new ModulesClient(connection.dispatcher)),
@@ -114,11 +115,11 @@ export function ModulesSection() {
           this reading is not live, so "look again" is the honest companion to
           printing when we last looked. It also re-asks after a reconnect,
           which the reading's key deliberately does not do on its own. */}
-      <Head title="Modules" meta={answeredBy}>
+      <Head title="Modules" meta={inventory.state === "read" && !inventory.error ? inventory.value?.modules.length : undefined}>
         <Button
           tone="quiet"
           busy={inventory.state === "reading"}
-          busyLabel="Reading"
+
           onClick={() => inventory.reread()}
         >
           Read again
@@ -137,25 +138,28 @@ export function ModulesSection() {
       ) : null}
 
       {inventory.state === "reading" && inventory.value === null ? (
-        <Caption>Reading the inventory from the cluster.</Caption>
+        <RecordListSkeleton label="Loading the inventory from the cluster" />
       ) : null}
 
+      {answeredBy ? <Caption>{answeredBy}</Caption> : null}
       {groups.map((group) => (
         <Panel key={group.kind} label={group.name}>
-          <Subhead>{group.name}</Subhead>
+          <Subhead meta={inventory.state === "read" && !inventory.error ? group.modules.length : undefined}>{group.name}</Subhead>
+          <RecordList as="ul" label={group.name}>
           {group.modules.map((module) => {
             const sentence = moduleStateSentence(module.state);
             const verdict = readinessForModule(module, readiness);
             return (
-              <Row
+              <RecordRow
                 key={`${module.kind}/${module.name}`}
                 name={module.name}
                 onOpen={() => setOpenKey(`${module.kind}/${module.name}`)}
-                state={
+                secondary={module.stateDetail || module.description}
+                state={module.state || "unstated"}
+                tone={moduleStateNeedsAttention(module.state) ? "warn" : "muted"}
+                stateTitle={sentence || undefined}
+                stateExtra={
                   <>
-                    <Chip tone={moduleStateTone(module.state)} title={sentence || undefined}>
-                      {module.state || "unstated"}
-                    </Chip>
                     <Chip tone="muted" title={scopeTitle(module.scope)}>
                       {module.scope || "unscoped"}
                     </Chip>
@@ -185,15 +189,13 @@ export function ModulesSection() {
                   </>
                 }
               >
-                <span className="os-cluster-row-note">
-                  {module.stateDetail || module.description}
-                </span>
                 {moduleStateNeedsAttention(module.state) ? (
                   <span className="os-cluster-row-attention">{sentence}</span>
                 ) : null}
-              </Row>
+              </RecordRow>
             );
           })}
+          </RecordList>
         </Panel>
       ))}
 

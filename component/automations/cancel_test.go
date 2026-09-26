@@ -219,3 +219,22 @@ func TestExecutor_AnUnjournaledRunAsksNothingAboutCancellation(t *testing.T) {
 		t.Fatalf("a preview must run normally: ran %v, status %q", steps.ran, exec.Status)
 	}
 }
+
+type cancelledInFlightRegistry struct{ calls int }
+
+func (r *cancelledInFlightRegistry) Execute(context.Context, *Step, *StepContext) (*StepResult, error) {
+	r.calls++
+	return nil, &runCancelled{by: "u-alice"}
+}
+func TestInFlightStopCannotBeRetriedOrSwallowedByContinue(t *testing.T) {
+	steps := &cancelledInFlightRegistry{}
+	e := NewExecutor(ExecutorOptions{StepRegistry: steps})
+	e.journal = newWorkJournal(&cancelAnsweringExecutor{}, nil)
+	automation := threeStepAutomation()
+	automation.Steps[0].RetryCount = 3
+	automation.Steps[0].OnError = ErrorStrategyContinue
+	execution, err := e.Execute(context.Background(), automation, "test")
+	if err != nil || execution.Status != "cancelled" || steps.calls != 1 {
+		t.Fatalf("Stop retried or swallowed: calls=%d status=%s error=%v", steps.calls, execution.Status, err)
+	}
+}

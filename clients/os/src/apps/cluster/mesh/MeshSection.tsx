@@ -119,7 +119,6 @@ export function MeshSection({
       <MeshNodePage
         node={open}
         byId={byId}
-        now={now}
         onBack={() => setOpenId("")}
         onOpen={(id) => setOpenId(id)}
       />

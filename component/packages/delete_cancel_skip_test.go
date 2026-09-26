@@ -27,7 +27,7 @@ import (
 
 func deleteHarness(t *testing.T, site map[string]any, siblings ...map[string]any) (*Integration, *recordingEngine) {
 	t.Helper()
-	engine := &recordingEngine{rows: map[string][]map[string]any{
+	engine := &recordingEngine{allowOrganizationActions: true, rows: map[string][]map[string]any{
 		"query siteById":        {site},
 		"query sitesForPackage": append([]map[string]any{site}, siblings...),
 		"builtin customDomainReleaseForSite": {{
@@ -68,6 +68,11 @@ func TestDeleteReleasesTheNameAndTakesTheDomainsDownFirst(t *testing.T) {
 	reply := replyPayload(t, nodes)
 	if reply["hostname"] != "shop.example.com" {
 		t.Fatalf("reply %v", reply)
+	}
+	// The count is the BUILTIN's answer, read back through the shape a
+	// top-level builtin really returns (a node set, not a bundle).
+	if reply["domainsReleased"] != float64(2) {
+		t.Fatalf("customDomainReleaseForSite answered requested=2, the reply says domainsReleased=%v", reply["domainsReleased"])
 	}
 
 	stmts := engine.statements()

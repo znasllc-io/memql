@@ -370,7 +370,7 @@ QueryClient.prototype.archiveArtifact = function (this: QueryClient, args: Archi
   return this.executeNamed("archiveArtifact", buildArchiveArtifact(args), opts);
 };
 
-/** Archive an audience: keep it (and every delivery record naming it) readable, but drop it out of the campaign editor's picker. Owned -- ownerUserId is re-stamped from actor.userId, and the engine's row-authz write guard refuses the update outright when the target row's owner is somebody else. */
+/** Archive an audience: keep it (and every delivery record naming it) readable, but drop it out of the campaign editor's picker. Authorized organization peers may archive it; the engine preserves its original owner and records the current writer on the new version. */
 // Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["archiveAudience"] in generated_concepts.ts).
 export interface ArchiveAudienceArgs {
   audienceId: string;
@@ -1348,6 +1348,30 @@ declare module "./query.js" {
 
 QueryClient.prototype.createArtifact = function (this: QueryClient, args: CreateArtifactArgs = {} as CreateArtifactArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("createArtifact", buildCreateArtifact(args), opts);
+};
+
+/** Start an empty conversation for a unique client request. Retrying the same request preserves its transcript; a new request always gets its own record. Clients cannot supply an owner, record id or transcript. */
+// Bound concept: v1:os:askConversation (machine-readable: BoundConcepts["createAskConversation"] in generated_concepts.ts).
+export interface CreateAskConversationArgs {
+  requestId: string;
+  title: string;
+}
+
+export function buildCreateAskConversation(args: CreateAskConversationArgs): string {
+  const parts: string[] = [];
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  parts.push("title: " + renderMemQLValue(args.title));
+  return "mutation createAskConversation(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    createAskConversation(args: CreateAskConversationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.createAskConversation = function (this: QueryClient, args: CreateAskConversationArgs = {} as CreateAskConversationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("createAskConversation", buildCreateAskConversation(args), opts);
 };
 
 /** Create an audience owned by the caller. Owned: ownerUserId is stamped from actor.userId, so a caller can only ever create their own audiences. */
@@ -2815,6 +2839,7 @@ QueryClient.prototype.createPATIdentity = function (this: QueryClient, args: Cre
 `accountId` is the tie the package's tier reads (memql#5303, D12). The compose flow sends the cluster's own account unless a client was picked; absent, the package is untied and its owner's. */
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["createPackage"] in generated_concepts.ts).
 export interface CreatePackageArgs {
+  sourceConnectionId?: string;
   packageId: string;
   name: string;
   // Enum: repo | artifact
@@ -2824,12 +2849,13 @@ export interface CreatePackageArgs {
   credentialId?: string;
   artifactId?: string;
   autoDeploy?: boolean;
-  /** The v1:accounts:account this package is for. Absent means untied. */
+  /** Owning organization. If omitted, the engine resolves an authorized default; it refuses an ambiguous choice. */
   accountId?: string;
 }
 
 export function buildCreatePackage(args: CreatePackageArgs): string {
   const parts: string[] = [];
+  if (args.sourceConnectionId !== undefined) parts.push("sourceConnectionId: " + renderMemQLValue(args.sourceConnectionId));
   parts.push("packageId: " + renderMemQLValue(args.packageId));
   parts.push("name: " + renderMemQLValue(args.name));
   parts.push("sourceKind: " + renderMemQLValue(args.sourceKind));
@@ -3210,12 +3236,12 @@ QueryClient.prototype.createSenderIdentity = function (this: QueryClient, args: 
 status and systemOwned are caller-settable (default "draft" / false, the ordinary operator-created site) so the SeedMaterializer can pass "live" / true for the portal seed (dsl/platform/seeds.memql, memql#3711) -- the platform's own console has to resolve the moment the cluster boots, and it must not be deletable by an operator who does not realize it is how sites get managed at all.
 `createdAt` / `createdBy` are NEVER authored here -- both are reserved payload fields (component/database/memory-nodes/constants.go) the engine stamps intrinsically from `now` / the caller's actor (component/database/memory-nodes/concept.go). An earlier version of this mutation stamped them explicitly in `stamp{}`, which every write refused at the reserved-field guard in executor_mutation.go with "mutation payload ... declares reserved field" -- silently, because nothing exercised this mutation against a live boot until memql#3714's edge verification found the portal's own seed failing with exactly that error on every fresh cluster (memql#3714b).
 OWNERSHIP (memql#4344). `ownerUserId` is STAMPED from actor.userId and is deliberately NOT an arg. A concept declaring an owner tier over a caller-supplied field records a guarantee nothing provides -- and reads as safe, so an auditor seeing the tier stops looking; that is what TestDeclaredOwnerFieldsAreServerStamped refuses, and an exemption here would be false, because the field genuinely is not forgeable.
-The one thing the body cannot say is that a write made AS THE DEPLOYMENT produces the deployment's row rather than a person's -- the seeded portal is site #1 and must land CLUSTER-OWNED (an empty ownerUserId), and `ownerUserId: actor.userId` would otherwise stamp "system:seedMaterializer" onto it, twice over, since the materializer re-writes the row on every boot. So executeWrite UNDOES this stamp -- and only this stamp, matched against the caller's own id -- when the writer is privileged (cluster owner, internal origin, or a system actor). See component/memql/platform_site_hostname_policy.go.
-That is a NARROWING and never a widening, which is why it does not reopen what the gate above protects: the Go step can only turn the caller's own id into EMPTY, which matches nobody (sameRowAuthzOwner refuses an empty owner outright), and it can never name a third party. A cluster owner hands a site over, or takes one back, by re-running this mutation on the id -- the read-merge makes that an update and the cluster-owner write escape admits it.
+Synthetic deployment actors leave system sites unowned. Real people keep ownerUserId, including cluster owners and callers forwarded through the package pipeline. Internal origin admits server-only operations; it never erases the authenticated person's attribution.
 HOSTNAME. The args field carries the SHAPE half (@maxLength + a lowercase-DNS @pattern), which is all a mutation body can express. The half that decides -- <slug>.<domain> against the domain THIS cluster serves, the [a-z0-9-]{3,40} slug, the reserved labels, cluster-wide uniqueness, and the cluster-owner exemption for a custom hostname -- is the same Go guard, for the same reason the systemOwned-delete refusal is: none of it is expressible here, and a UI-only check is not a check. */
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["createSite"] in generated_concepts.ts).
 export interface CreateSiteArgs {
   siteId: string;
+  accountId?: string;
   hostname: string;
   // Enum: spa | static | shopify_storefront
   kind?: string;
@@ -3235,6 +3261,7 @@ export interface CreateSiteArgs {
 export function buildCreateSite(args: CreateSiteArgs): string {
   const parts: string[] = [];
   parts.push("siteId: " + renderMemQLValue(args.siteId));
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
   parts.push("hostname: " + renderMemQLValue(args.hostname));
   if (args.kind !== undefined) parts.push("kind: " + renderMemQLValue(args.kind));
   if (args.resolutionTail !== undefined) parts.push("resolutionTail: " + renderMemQLValue(args.resolutionTail));
@@ -3386,7 +3413,8 @@ QueryClient.prototype.createSpawnEvent = function (this: QueryClient, args: Crea
   return this.executeNamed("createSpawnEvent", buildCreateSpawnEvent(args), opts);
 };
 
-/** Register a Shopify store. Cluster-owner tier, and the three token arguments are REFERENCES to globalSecret rows rather than the tokens themselves -- a mutation that took a token would put it in the call string, which is rendered into logs on a parse error. */
+/** Register a Shopify store. Cluster-owner tier, and the three token arguments are REFERENCES to globalSecret rows rather than the tokens themselves -- a mutation that took a token would put it in the call string, which is rendered into logs on a parse error.
+A CREATE needs a cluster owner or server code, enforced in executeWrite (component/memql/create_rank_floor.go), not here: the tier does not judge a create, and a floor on this mutation would never see a raw insert() of the same concept (Connect Shopify design, D13). Internal origin passes -- the first-boot seed, the connector and Connect Shopify write that way. Changing a store that EXISTS is owner-only too: the write guard judges the stored row for `updateStore` and `setStoreStatus`. */
 // Bound concept: v1:shopify:store (machine-readable: BoundConcepts["createStore"] in generated_concepts.ts).
 export interface CreateStoreArgs {
   storeId: string;
@@ -3400,6 +3428,7 @@ export interface CreateStoreArgs {
   protectedDataLevel?: string;
   plan?: string;
   ownerUserId?: string;
+  scopesGranted?: string[];
   isDevelopment?: boolean;
   developmentOfStoreId?: string;
 }
@@ -3417,6 +3446,7 @@ export function buildCreateStore(args: CreateStoreArgs): string {
   if (args.protectedDataLevel !== undefined) parts.push("protectedDataLevel: " + renderMemQLValue(args.protectedDataLevel));
   if (args.plan !== undefined) parts.push("plan: " + renderMemQLValue(args.plan));
   if (args.ownerUserId !== undefined) parts.push("ownerUserId: " + renderMemQLValue(args.ownerUserId));
+  if (args.scopesGranted !== undefined) parts.push("scopesGranted: " + renderMemQLValue(args.scopesGranted));
   if (args.isDevelopment !== undefined) parts.push("isDevelopment: " + renderMemQLValue(args.isDevelopment));
   if (args.developmentOfStoreId !== undefined) parts.push("developmentOfStoreId: " + renderMemQLValue(args.developmentOfStoreId));
   return "mutation createStore(" + parts.join(", ") + ")";
@@ -3995,6 +4025,28 @@ QueryClient.prototype.disablePackageDeployables = function (this: QueryClient, a
   return this.executeNamed("disablePackageDeployables", buildDisablePackageDeployables(args), opts);
 };
 
+/** Removing a personal selection changes no provider grant or deployed site. */
+// Bound concept: v1:platform:externalConnection (machine-readable: BoundConcepts["disconnectExternalConnection"] in generated_concepts.ts).
+export interface DisconnectExternalConnectionArgs {
+  connectionId: string;
+}
+
+export function buildDisconnectExternalConnection(args: DisconnectExternalConnectionArgs): string {
+  const parts: string[] = [];
+  parts.push("connectionId: " + renderMemQLValue(args.connectionId));
+  return "mutation disconnectExternalConnection(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    disconnectExternalConnection(args: DisconnectExternalConnectionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.disconnectExternalConnection = function (this: QueryClient, args: DisconnectExternalConnectionArgs = {} as DisconnectExternalConnectionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("disconnectExternalConnection", buildDisconnectExternalConnection(args), opts);
+};
+
 /** Turn one or more of a source's deployables back ON.
 The exact inverse of disablePackageDeployables above, and the reason that one is a membership change rather than a whole-list write: removing a member had no form at all. Removing a name that is not there is a no-op rather than an error, so two people enabling the same app both succeed and a retry is safe. */
 // Bound concept: v1:platform:package (machine-readable: BoundConcepts["enablePackageDeployables"] in generated_concepts.ts).
@@ -4021,7 +4073,7 @@ QueryClient.prototype.enablePackageDeployables = function (this: QueryClient, ar
 };
 
 /** ENGINE: enqueue a send run. One row per campaign, id = the campaign's bare short id, so a restart lands on the same timeline rather than accumulating runs.
-campaignOwnerUserId is the field that decides whose authority the worker borrows, so it is worth being explicit about where it comes from: the `campaignStartSend` builtin reads the campaign row UNDER THE CALLER'S OWN ACTOR and copies the owner off that row. A caller can therefore only ever enqueue a job naming a user they could already act as -- the owned-tier read IS the authorization. Nothing in this mutation's arguments is trusted to say who owns anything.
+campaignOwnerUserId is the field that decides whose authority the worker borrows, so it is worth being explicit about where it comes from: the `campaignStartSend` builtin reads the campaign row UNDER THE CALLER'S OWN ACTOR and copies the owner off that row. A caller can therefore only ever enqueue a job only after a readable campaign and organization update permission have been verified. Nothing in this mutation's arguments is trusted to say who owns anything.
 `status` exists so ONE mutation covers both ways a job is created (memql#3459): 'queued' for a send starting now, 'scheduled' for one committed to a time. It defaults to 'queued' via ?? rather than being required, so every existing caller is unchanged and the shortest spelling is still the one that sends now. A 'scheduled' job is inert until the worker promotes it.
 clusterOwner tier, so no actor and no owner stamp: these rows have no owner, and reaching them at all requires the engine's own operator identity. */
 // Bound concept: v1:campaigns:sendJob (machine-readable: BoundConcepts["enqueueCampaignSend"] in generated_concepts.ts).
@@ -6921,7 +6973,8 @@ QueryClient.prototype.setLibraryWatchedFolderStatus = function (this: QueryClien
   return this.executeNamed("setLibraryWatchedFolderStatus", buildSetLibraryWatchedFolderStatus(args), opts);
 };
 
-/** Flip a pack's per-instance enablement in v1:platform:packState. clusterOwner tier via the concept's @rowAuthz -- these rows are the deployment's, not any operator's, and the tier injects the actor gate. The caller (component/grpc's SetPackEnabledMsg handler) verifies the owner role and writes the audit event BEFORE invoking this; the tier here is the independent second layer. The id is the bare pack domain -- the engine canonicalizes it to v1:platform:packState:<packDomain>, so one row per pack with the version history as the flip audit trail. RESTART-REQUIRED lifecycle: the write changes what each node reads at its next boot, never what a running node has loaded. */
+/** Flip a pack's per-instance enablement in v1:platform:packState. clusterOwner tier via the concept's @rowAuthz -- these rows are the deployment's, not any operator's, and the tier injects the actor gate. The Modules flip reaches this through MemQLEngine.SetPackEnabled (component/memql), which admits the owner for any pack and a developer holding execute on app:cluster/modules for a STOREFRONT pack only, then runs this under internal origin with the caller's actor kept, so the row's provenance is the person; component/grpc's SetPackEnabledMsg handler writes one audit event per attempt. The id is the bare pack domain -- the engine canonicalizes it to v1:platform:packState:<packDomain>, so one row per pack with the version history as the flip audit trail. RESTART-REQUIRED lifecycle: the write changes what each node reads at its next boot, never what a running node has loaded.
+The FIRST flip of a pack is a create, and a create needs a cluster owner or server code, enforced in executeWrite (component/memql/create_rank_floor.go): the tier does not judge a create, and a floor on this mutation would never see a raw insert() of the same concept (Connect Shopify design, D13). Internal origin passes. Once a pack has a row, the tier's write guard refuses every non-owner flip of it, so a direct call below owner is refused either way: a developer flips a storefront pack through the Modules path above, never by calling this. */
 // Bound concept: v1:platform:packState (machine-readable: BoundConcepts["setPackEnabled"] in generated_concepts.ts).
 export interface SetPackEnabledArgs {
   id: string;
@@ -6972,6 +7025,30 @@ declare module "./query.js" {
 
 QueryClient.prototype.setPackageAutoDeploy = function (this: QueryClient, args: SetPackageAutoDeployArgs = {} as SetPackageAutoDeployArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("setPackageAutoDeploy", buildSetPackageAutoDeploy(args), opts);
+};
+
+/** Remove or restore only the configured source entry. Package lifecycle, deployables, grants and installation bindings are unchanged. The engine restricts this to its owner. */
+// Bound concept: v1:platform:package (machine-readable: BoundConcepts["setPackageSourceRemoved"] in generated_concepts.ts).
+export interface SetPackageSourceRemovedArgs {
+  packageId: string;
+  removed: boolean;
+}
+
+export function buildSetPackageSourceRemoved(args: SetPackageSourceRemovedArgs): string {
+  const parts: string[] = [];
+  parts.push("packageId: " + renderMemQLValue(args.packageId));
+  parts.push("removed: " + renderMemQLValue(args.removed));
+  return "mutation setPackageSourceRemoved(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    setPackageSourceRemoved(args: SetPackageSourceRemovedArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.setPackageSourceRemoved = function (this: QueryClient, args: SetPackageSourceRemovedArgs = {} as SetPackageSourceRemovedArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("setPackageSourceRemoved", buildSetPackageSourceRemoved(args), opts);
 };
 
 /** Persist a partition-scoped encrypted secret row in v1:platform:partitionSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them. */
@@ -8371,6 +8448,7 @@ export interface UpdatePackageSourceArgs {
   packageId: string;
   repoRef?: string;
   credentialId?: string;
+  sourceConnectionId?: string;
 }
 
 export function buildUpdatePackageSource(args: UpdatePackageSourceArgs): string {
@@ -8378,6 +8456,7 @@ export function buildUpdatePackageSource(args: UpdatePackageSourceArgs): string 
   parts.push("packageId: " + renderMemQLValue(args.packageId));
   if (args.repoRef !== undefined) parts.push("repoRef: " + renderMemQLValue(args.repoRef));
   if (args.credentialId !== undefined) parts.push("credentialId: " + renderMemQLValue(args.credentialId));
+  if (args.sourceConnectionId !== undefined) parts.push("sourceConnectionId: " + renderMemQLValue(args.sourceConnectionId));
   return "mutation updatePackageSource(" + parts.join(", ") + ")";
 }
 
@@ -8640,7 +8719,7 @@ QueryClient.prototype.updateSiteAccount = function (this: QueryClient, args: Upd
 
 /** Point a site at a different bundle version. THE deploy operation, and THE rollback operation -- they are the same write in opposite directions, which is the whole reason bundles are stored under versioned prefixes rather than overwritten.
 `artifactId` is optional provenance: sitePublishFromArtifact passes the v1:library:artifact the bundle came out of, and CI publishing through POST /sites/{id}/bundles passes nothing. It sits in accept{} rather than stamp{} precisely so an omitted arg is OMITTED FROM THE PAYLOAD (missing args are dropped, mutation_templates.go) and the read-merge inherits the stored value -- `args.artifactId ?? ""` would put an explicit empty string in the delta and blank the provenance on every rollback.
-AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite, not anything in this body: the write guard resolves the target row and admits its OWNER only, and the cluster-owner path is the separate, explicit escape in rowAuthzWriteEscape. So a user publishes to their own site, an operator publishes to any, and a cross-user write is refused before the merge -- which is why the guard reads the PRIOR row rather than the merged payload. */
+AUTHORIZATION resolves the prior site and checks current rights in its organization. Shared edits preserve the original owner and record the current writer on the new version. Package publication also checks the target site's deploy/publish permission before external effects; a grant on its source package's organization does not grant rights in another organization. */
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteBundle"] in generated_concepts.ts).
 export interface UpdateSiteBundleArgs {
   siteId: string;
@@ -8669,7 +8748,7 @@ QueryClient.prototype.updateSiteBundle = function (this: QueryClient, args: Upda
 /** Point a storefront's CANDIDATE at the development store it is exercised against, or clear it (epic memql#5531, design D8).
 The preview binding's twin is `binding`, and the two are separate fields for the reason the whole epic exists: `binding` is the store shoppers reach, and a version being exercised must never be able to reach it. Written whole as {storeId} rather than merged, for updateSiteStoreBinding's reason -- a read-merge would let a retired shape survive beside the reference. An empty storeId writes an empty object, the unbound state, so detaching a development store stays expressible.
 THE STORE MUST BE A DEVELOPMENT STORE. v1:shopify:store.isDevelopment is a fact about somebody else's system, recorded on the store row when it is attached, and a preview binding naming a store without it is REFUSED -- that is the second direction of the go-live guard, and the reason it matters is that the failure it prevents is silent: a preview against the live store looks exactly like a preview, right up to the test payment landing in the merchant's real orders.
-AUTHORIZATION is `app:deployables/store`, the same gate updateSiteStoreBinding carries and for the same reason -- this names a v1:shopify:store row, which is cluster-owner tier, and the Go guard beside it refuses a store the CALLER CANNOT READ whatever capability they hold. `preview` is deliberately not enough: preparing a version is one thing, choosing which of the cluster's stores it talks to is another. */
+AUTHORIZATION is `app:deployables/store` (owner and developer), the same gate updateSiteStoreBinding carries and for the same reason -- this names a v1:shopify:store row, which reads at developer and above, and the Go guard beside it refuses a store the CALLER CANNOT READ whatever capability they hold. `preview` is deliberately not enough: preparing a version is one thing, choosing which of the cluster's stores it talks to is another. The reach is the serving binding's: any storefront the caller can write, client storefronts included. */
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSitePreviewBinding"] in generated_concepts.ts).
 export interface UpdateSitePreviewBindingArgs {
   siteId: string;
@@ -8804,7 +8883,8 @@ QueryClient.prototype.updateSiteStatus = function (this: QueryClient, args: Upda
 
 /** Point a storefront deployable at the v1:shopify:store row it fronts, or clear the binding (epic memql#5530, issue memql#5538).
 ONE VALUE, AND IT IS A REFERENCE. The binding is written whole as {storeId} rather than merged, so the legacy {storeDomain, storefrontTokenRef} shape cannot survive a write: a read-merge would have kept the copy beside the reference and left two records of one store, which is the thing this epic exists to end. An empty storeId writes an empty object, which is the unbound state -- clearing must be expressible, for updateSiteSettings' reason.
-AUTHORIZATION IS TWO GATES, AND THE SECOND IS THE SUBSTANTIVE ONE. @requiresCapability names the surface: `app:deployables/store` is seeded on owner alone, which is exactly the population the retired Stores app admitted. Beside it, a Go guard refuses a binding naming a store row the CALLER CANNOT READ -- so the answer to "who may bind a storefront they own to a store they may not read" is nobody. That check needs a cross-row read no mutation body can make, which is why it sits with the hostname policy rather than here (component/memql/platform_site_binding_guard.go). */
+AUTHORIZATION IS TWO GATES, AND THE SECOND IS THE SUBSTANTIVE ONE. @requiresCapability names the surface: `app:deployables/store` is seeded on owner and developer (Connect Shopify, D3). Beside it, a Go guard refuses a binding naming a store row the CALLER CANNOT READ -- so the answer to "who may bind a storefront to a store they may not read" is nobody. That check needs a cross-row read no mutation body can make, which is why it sits with the hostname policy rather than here (component/memql/platform_site_binding_guard.go).
+A developer reads every store, so a developer may bind ANY storefront they can write to ANY store on the cluster, and D3 accepts it. That is not only their own: the site tier's account grant admits staff (developer and above) to write every account-tied site, so it is every client storefront, live ones included -- the same reach that lets a developer pause, archive or delete those sites. Every store row is registered by a cluster owner or server code (D15), so the Storefront token a binding exposes is always one an owner or Connect chose. */
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteStoreBinding"] in generated_concepts.ts).
 export interface UpdateSiteStoreBindingArgs {
   siteId: string;

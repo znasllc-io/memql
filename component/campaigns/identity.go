@@ -120,6 +120,9 @@ func (w *Worker) resolveSendIdentity(ownerCtx context.Context, campaign Campaign
 	// for. Before this the field was authored, stored, documented -- and
 	// never reached a header.
 	if strings.TrimSpace(campaign.SenderIdentityID) == "" {
+		if account := bare(campaign.AccountID); account != "" && account != "self" {
+			return resolvedIdentity{}, identityRefusal{Reason: "choose a sending identity belonging to this organization", Terminal: true}
+		}
 		return resolvedIdentity{
 			SendAs: email.SendAs{FromName: strings.TrimSpace(campaign.FromName)},
 			Label:  w.cfg.SendingIdentityFor(""),
@@ -145,6 +148,9 @@ func (w *Worker) resolveSendIdentity(ownerCtx context.Context, campaign Campaign
 				campaign.SenderIdentityID),
 			Terminal: true,
 		}
+	}
+	if !sameOrganization(campaign.AccountID, identity.AccountID) {
+		return resolvedIdentity{}, identityRefusal{Reason: "campaign and sending identity must belong to the same organization", Terminal: true}
 	}
 	if identity.Disabled() {
 		return resolvedIdentity{}, identityRefusal{

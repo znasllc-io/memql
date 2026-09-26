@@ -71,7 +71,7 @@ func TestProduceArtifactDBRequiresAnActualFileReceipt(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx, err = auth.ContextWithPersistedOwner(context.Background(), journal.OwnerUserId)
+			ctx, err = auth.ContextWithPersistedOwner(context.Background(), journal.OwnerUserId, nil, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

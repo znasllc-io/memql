@@ -424,6 +424,7 @@ var contextOverflowMarkers = []string{
 	"context length exceeded",
 	"maximum context length",
 	"exceeds the context window",
+	"input length exceeds the context length",
 	"prompt is too long",
 	"reduce the length of the messages",
 }
@@ -723,6 +724,16 @@ type ToolLoopObservationSink interface {
 // All fields are optional; the zero value yields the loop's built-in
 // defaults so existing callers are unaffected.
 type ToolLoopOptions struct {
+	// OnText streams interactive responses without changing the tool authority.
+	OnText func(string)
+	// AllowTextOnly admits a chat-only route when no tool-capable route exists.
+	AllowTextOnly bool
+	// OnModel reports each model invocation, including tools-only iterations.
+	OnModel func(phase string, provider, model string, elapsed time.Duration, err error)
+	// Sequential preserves application action order. Interactive operations must
+	// not race reads against preceding writes in the same assistant turn.
+	Sequential bool
+
 	// ScopedTools, when non-empty, restricts the tool set for this call to
 	// the named tools (the #588 hook). Out-of-scope tools are ignored.
 	ScopedTools []string

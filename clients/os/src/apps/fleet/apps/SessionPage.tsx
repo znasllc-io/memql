@@ -1,3 +1,5 @@
+import { ContentSkeleton } from "../../../kit/ContentSkeleton";
+import { RecordList, RecordRow } from "../../../kit/RecordRow";
 import { RefreshButton } from "../FleetControls";
 
 import { EmptyState, Chip, Fact, Facts, Head, Notice, Panel, Subhead, formatMoment } from "../../../kit";
@@ -72,14 +74,14 @@ export function SessionPage({
         />
       )}
 
-      {loading && session === null ? <p className="os-caption">Reading this run.</p> : null}
+      {loading && session === null ? <ContentSkeleton kind="detail" label="Loading this run" /> : null}
 
       {!loading && session === null && error === "" ? (
         <EmptyState title="Session no longer available">It may have been removed since the list was last updated.</EmptyState>
       ) : null}
 
       {session === null ? null : (
-        <SessionBody session={session} polling={polling} readAt={readAt} />
+        <SessionBody session={session} polling={polling} readAt={readAt} settled={!loading && !error} />
       )}
     </div>
   );
@@ -89,10 +91,12 @@ function SessionBody({
   session,
   polling,
   readAt,
+  settled,
 }: {
   session: AppSessionDetailRow;
   polling: boolean;
   readAt: Date | null;
+  settled: boolean;
 }) {
   const live = sessionIsLive(session.status);
 
@@ -221,14 +225,12 @@ function SessionBody({
 
       {session.producedArtifactIds.length === 0 ? null : (
         <>
-          <Subhead>Produced artifacts</Subhead>
-          <ul className="os-fleet-artifacts" aria-label="Produced artifacts">
+          <Subhead meta={settled ? session.producedArtifactIds.length : undefined}>Produced artifacts</Subhead>
+          <RecordList as="ul" label="Produced artifacts">
             {session.producedArtifactIds.map((artifactId) => (
-              <li key={artifactId} className="os-mono">
-                {artifactId}
-              </li>
+              <RecordRow key={artifactId} name={artifactId} />
             ))}
-          </ul>
+          </RecordList>
         </>
       )}
     </>

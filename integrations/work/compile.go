@@ -8,9 +8,9 @@ package work
 import (
 	"context"
 	"fmt"
-	"github.com/znasllc-io/memql/component/auth"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 )
@@ -74,7 +74,13 @@ func (i *Integration) dispatchCompile(ctx context.Context, hint CompileRequest) 
 	if err != nil || !ok {
 		return false
 	}
-	base, err = auth.ContextWithPersistedOwner(base, req.OwnerUserId)
+	base, err = auth.ContextWithPersistedOwner(base, req.OwnerUserId, req.ExecutionAuthority, auth.NewIdentityResolver(auth.QueryRunnerFunc(func(ctx context.Context, q string) (any, error) {
+		result, err := i.engine.Execute(ctx, q)
+		if err != nil || result == nil {
+			return nil, err
+		}
+		return result.OutputPayload(), nil
+	}), i.logger))
 	if err != nil {
 		i.log().Warn("work compile: could not restore the owner's forwarded authority", "run", req.RunId, "error", err)
 		return false
@@ -115,7 +121,8 @@ func (i *Integration) pendingCompile(ctx context.Context, runId string) (Compile
 		return req, rc, false, err
 	}
 	req = CompileRequest{
-		RunId: runId, GoalId: goalId, OwnerUserId: rowString(run, "ownerUserId"),
+		ExecutionAuthority: rowMap(run, "executionAuthority"),
+		RunId:              runId, GoalId: goalId, OwnerUserId: rowString(run, "ownerUserId"),
 		Statement: rowString(goal, "statement"), Input: rowMap(run, "input"), Ceilings: rowMap(goal, "ceilings"),
 	}
 	rc = common.RunContext{
@@ -167,8 +174,15 @@ func (i *Integration) claimCompile(ctx context.Context, runId string) bool {
 type compileHeartbeatKey struct{}
 
 func (i *Integration) compileWithHeartbeat(ctx context.Context, compiler Compiler, req CompileRequest) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	if observer, ok := i.engine.(interface {
+		ObserveWorkCalls(context.Context, context.CancelCauseFunc) context.Context
+	}); ok {
+		// Install on the planner that received the persisted run. An observer
+		// on the originating BFF cannot see compilation's model calls.
+		ctx = observer.ObserveWorkCalls(ctx, cancel)
+	}
 	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
 	done := make(chan struct{})
 	// Cancel an in-flight database pulse before joining it. Closing only a
@@ -193,7 +207,7 @@ func (i *Integration) compileWithHeartbeat(ctx context.Context, compiler Compile
 				}
 				if rowString(run, "status") != runStatusCompiling || argBool(run, "cancelRequested") {
 					cancelPulse()
-					cancel()
+					cancel(context.Canceled)
 					return
 				}
 				err = i.store().updateRun(pulseCtx, req.RunId, map[string]any{"heartbeatAt": rfc(i.clock())})

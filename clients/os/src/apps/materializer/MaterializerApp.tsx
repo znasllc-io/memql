@@ -1,3 +1,4 @@
+import { listCount } from "../../kit/RecordRow";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Caption, Check, Head, Panel, Select, SetupGroup } from "../../kit";
@@ -186,6 +187,8 @@ export function MaterializerApp({
       <TemplatesSection
         templates={templateRows}
         recipes={recipeRows}
+        templatesAvailable={listCount(templates.snapshot) !== undefined}
+        recipesAvailable={listCount(recipes.snapshot) !== undefined}
         busy={templateActs.busy || recipeActs.busy}
         error={templateActs.error || recipeActs.error}
         showArchived={settings.showArchived}
@@ -219,6 +222,7 @@ export function MaterializerApp({
       templates={templateRows}
       composition={open}
       compositionSources={openSources}
+      compositionAvailable={listCount(compositions.snapshot) !== undefined}
       compositionModels={openModels}
       showUnmarkedConcepts={settings.showUnmarkedConcepts}
       defaultFormat={settings.defaultFormat}

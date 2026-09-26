@@ -1,3 +1,5 @@
+import { IdentityApp } from "./identity/IdentityApp";
+import { Fingerprint } from "lucide-react";
 import {
   Boxes,
   Building2,
@@ -18,7 +20,6 @@ import {
 import { AskSurface } from "../ask/AskSurface";
 import { useAsk } from "../ask/AskProvider";
 import { Mark } from "../chrome/Mark";
-import { useMakeGoal } from "../ask/useMakeGoal";
 import type { OsAppManifest, OsRegistry, OsWidgetManifest } from "../system/registry";
 import { AccountsApp } from "./accounts/AccountsApp";
 import { ACCOUNTS_SECTIONS } from "./accounts/settings";
@@ -41,7 +42,7 @@ import { LOGS_SECTIONS, LOGS_REQUIRES, LOGS_WANTS } from "./logs/settings";
 import { MaterializerApp } from "./materializer/MaterializerApp";
 import { MATERIALIZER_SECTIONS, MATERIALIZER_REQUIRES, MATERIALIZER_WANTS } from "./materializer/settings";
 import { SettingsApp } from "./settings/SettingsApp";
-import { SETUP_WIDGET_SIZE, setupWidget } from "./setup/manifest";
+import { setupWidget } from "./setup/manifest";
 import { TrainingApp } from "./training/TrainingApp";
 import { TRAINING_SECTIONS, TRAINING_REQUIRES, TRAINING_WANTS } from "./training/settings";
 import { UsersApp } from "./users/UsersApp";
@@ -103,6 +104,7 @@ const settings: OsAppManifest = {
     // owner's prerogative rather than a rank. `roleAdmits`' `any` form is what
     // says exactly that, and it is presentation over a gate the status
     // capability's own `statusAuthorized` remains the authority on.
+    { id: "connections", name: "Connections", requires: "app:settings/connections" },
     { id: "integrations", name: "Integrations", requires: "app:settings/integrations" },
     // The three that arrived when the portal's admin console was retired
     // (epic memql#4984). Each requirement is the one the ENGINE will
@@ -161,6 +163,8 @@ const settings: OsAppManifest = {
   // changes meaningfully -- a new language line, say -- and never when a form
   // is added to the table it reads: that is data moving, not the surface.
   attentionChanges: [
+    { id: "settings:ask-conversations-and-voice", revision: "1", sectionId: "ask", label: "Conversations, dictation and live voice with MemQL" },
+    { id: "settings:connections", revision: "shared-connections-1", sectionId: "connections", label: "Shared GitHub and Shopify connections" },
     { id: "settings:language", revision: "language-1.0", sectionId: "language", label: "MemQL 1.0 language and deprecations" },
   ],
   component: SettingsApp,
@@ -220,10 +224,17 @@ const deployables: OsAppManifest = {
   icon: Rocket,
   requires: "app:deployables",
   sections: DEPLOYABLES_SECTIONS,
+  records: [{ section: "deployables", idField: "siteId", query: "platform.sitesAll", labels: ["title", "hostname"] }],
   needs: DEPLOYABLES_REQUIRES,
   wants: DEPLOYABLES_WANTS,
   settingsSection: "settings",
   logsSection: "logs",
+  attentionChanges: [
+    { id: "deployables:shopify-store", revision: "connect-1", sectionId: "deployables", target: "shopify-store", label: "Connect Shopify from a storefront’s Store page" },
+    { id: "deployables:organization", revision: "organization-1", sectionId: "deployables", label: "Organization ownership for sources and deployables" },
+    { id: "deployables:github-accounts", revision: "account-settings-2", sectionId: "settings", label: "Manage connected GitHub accounts in Settings" },
+    { id: "deployables:saved-sources", revision: "github-sources-3", sectionId: "sources", label: "Manage each source by GitHub account, organization and repository" },
+  ],
   component: DeployablesApp,
 };
 
@@ -328,6 +339,10 @@ const users: OsAppManifest = {
   icon: Users,
   requires: "app:users",
   sections: USERS_SECTIONS,
+  records: [
+    { section: "people", idField: "userId", query: "identity.searchUsers", labels: ["displayName", "primaryEmail"] },
+    { section: "groups", idField: "groupId", query: "identity.groupsAll", labels: ["name"] },
+  ],
   settingsSection: "settings",
   logsSection: "logs",
   component: UsersApp,
@@ -381,30 +396,9 @@ const training: OsAppManifest = {
 // its five siblings are: the gear and the manifest must offer the same set,
 // and a second copy of the list is one that can disagree.
 //
-// `roles: { min: "admin" }` -- AND IT IS A MIRROR, NOT THE GATE (epic
-// memql#4832 D6, memql#4837).
-//
-// This manifest carried NO role until now, and the reasoning was sound at the
-// time: gating here would have been "presentation pretending to be
-// authorization", because a launcher filter is the only thing this file can
-// do and its own predicate says so.
-//
-// What changed is that there is now something real to mirror. The accounts
-// constructs declare `@requiresRank("admin")`, which the ENGINE enforces, so
-// a person below that rank is refused server-side whether or not this line
-// exists. Both halves are permanent and neither stands in for the other:
-// hiding an app somebody cannot reach beats letting them open it and read a
-// refusal, and that is a different job from refusing it.
-//
-// `admin` is rank >= 200 = {admin, developer, owner}, which is the set
-// memql#4837 spells out. The issue's title says "developer-and-above" and
-// means the same set -- that was the OS ladder's way of saying it, back when
-// developer sat BELOW admin. `min: "developer"` would read like the issue and
-// lock out every admin.
-//
-// `TestAppManifestMirrorsTheEngineFloor` (component/auth) fails the build if
-// this value and the DSL floor ever disagree, which is the whole point of
-// calling it a mirror.
+// App access is explicitly granted. The shared account-options query is also
+// available to organization members creating their work in other apps; the
+// engine filters those rows to their authorized organizations.
 //
 // NOT always-docked. That is the Bin's distinction (#4784); this is an
 // ordinary app that opens from the launcher like every other one.
@@ -416,6 +410,7 @@ const accounts: OsAppManifest = {
   sections: ACCOUNTS_SECTIONS,
   settingsSection: "settings",
   logsSection: "logs",
+  attentionChanges: [{ id: "accounts:organization-membership", revision: "organization-1", sectionId: "accounts", label: "Organizations, membership and scoped app access" }],
   component: AccountsApp,
 };
 
@@ -566,6 +561,7 @@ const campaigns: OsAppManifest = {
   wants: CAMPAIGNS_WANTS,
   settingsSection: "settings",
   logsSection: "logs",
+  attentionChanges: [{ id: "campaigns:organization", revision: "organization-1", sectionId: "campaigns", label: "Choose the organization for every campaign" }],
   component: CampaignsApp,
 };
 
@@ -685,21 +681,22 @@ const materializer: OsAppManifest = {
 //
 
 function AskWidgetBody() {
-  const { transport, voice, settings, availability } = useAsk();
+  const { transport, voice, settings, availability, conversation, liveVoice } = useAsk();
   const { actions } = useOs();
   // The widget hands a prompt off exactly as the sheet does (epic memql#4785).
   // One Ask, three entry points, and an act that exists on one of them is an
   // act somebody learns and then cannot find.
-  const makeGoal = useMakeGoal();
   return (
     <AskSurface
       transport={transport}
+      conversation={conversation}
+          liveVoice={liveVoice}
       availability={availability}
       onOpenFleet={() => { actions.openApp("fleet"); }}
       voicePorts={voice}
       settings={settings}
       variant="widget"
-      makeGoal={makeGoal}
+      onOpenFile={(fileId) => { actions.openApp("files", "browse", { fileId }); }}
     />
   );
 }
@@ -713,13 +710,34 @@ const askWidget: OsWidgetManifest = {
   needs: ["ai"] as const,
   icon: Mark,
   requires: "app:ask",
-  // Same desk footprint as Set up -- a smaller Ask card looked unfinished beside it.
-  size: SETUP_WIDGET_SIZE,
+  // Conversations need room for a readable transcript and composer.
+  size: { w: 6, h: 5 },
   component: AskWidgetBody,
+};
+
+const identity: OsAppManifest = {
+  id: "identity",
+  name: "Identity",
+  icon: Fingerprint,
+  requires: "app:identity",
+  settingsSection: "settings",
+  logsSection: "logs",
+  sections: [
+    { id: "profile", name: "Profile" },
+    { id: "devices", name: "Passkeys and sessions" },
+    { id: "tokens", name: "Access tokens" },
+    { id: "logs", name: "Logs", requires: "app:identity/logs" },
+    { id: "settings", name: "Settings" },
+  ],
+  attentionChanges: [
+    { id: "identity:account-security", revision: "native-os-1", sectionId: "devices", label: "Manage your passkeys and sessions in OS" },
+  ],
+  component: IdentityApp,
 };
 
 export const OS_REGISTRY: OsRegistry = {
   apps: [
+    identity,
     accounts,
     campaigns,
     cluster,

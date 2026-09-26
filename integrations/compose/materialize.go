@@ -11,6 +11,7 @@ import (
 	pure "github.com/znasllc-io/memql/component/compose"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	workstate "github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/core/num"
@@ -257,6 +258,9 @@ func (i *Integration) executeComposition(ctx context.Context, userId, userEmail,
 	if stringOf(row["status"]) == "cancelled" {
 		return nil, errors.New("compose: the composition was cancelled")
 	}
+	if stringOf(row["status"]) == "failed" {
+		return nil, fmt.Errorf("%s: %s", terminalFailureCode, stringOf(row["failureReason"]))
+	}
 	input, err := i.store().compositionInputById(ctx, compositionId)
 	if err != nil {
 		return nil, err
@@ -295,10 +299,9 @@ func compositionResult(compositionId string, row map[string]any) map[string]any 
 // message, asserted at both ends by their own tests. That is the same contract
 // component/router has with work.InferenceRefusalCode.
 //
-// Without it, the failure this integration already recorded as final arrived
-// at the symptom table as prose. "context deadline exceeded" matched
-// transient.timeout, the run parked at `waiting`, and a person watching it
-// waited on a composition the database had already given up on.
+// Recoverable provider interruptions leave a resumable draft and keep their
+// original error for the shared retry policy. Only terminal failures carry
+// this code; the composition and work run must agree about recoverability.
 const terminalFailureCode = "composition_failed"
 
 func (i *Integration) failComposition(ctx context.Context, compositionId string, cause error) (map[string]any, error) {
@@ -310,6 +313,15 @@ func (i *Integration) failComposition(ctx context.Context, compositionId string,
 	status := "failed"
 	if (row != nil && stringOf(row["status"]) == "cancelled") || errors.Is(cause, context.Canceled) {
 		status = "cancelled"
+	} else if row != nil && stringOf(row["runId"]) != "" {
+		// The shared work loop owns retry budgets, backoff and stall detection.
+		// Preserve this step's snapshot and identity when that loop can recover
+		// from a provider/network interruption, including on another replica.
+		_, terminal := workstate.TerminalFailureCode(cause.Error())
+		symptom, _, classified := workstate.ClassifyByRules(workstate.Signal{ErrorMessage: cause.Error()})
+		if !terminal && classified && symptom == workstate.SymptomTransient {
+			status = "draft"
+		}
 	}
 	if readErr != nil {
 		i.log().Warn("compose: could not read terminal composition state", "error", readErr)
@@ -317,10 +329,12 @@ func (i *Integration) failComposition(ctx context.Context, compositionId string,
 	if err := i.store().updateCompositionState(cleanup, map[string]any{"compositionId": compositionId, "status": status, "failureReason": cause.Error()}); err != nil {
 		i.log().Error("compose: could not record composition failure", "compositionId", compositionId, "error", err)
 	}
-	if status == "cancelled" {
+	if status == "cancelled" || status == "draft" {
 		// A CANCELLATION IS NOT THIS CODE. Somebody asked it to stop, which
 		// the work spine already has a state for, and calling it a terminal
 		// failure would report a person's own click back to them as a fault.
+		// A resumable draft likewise retains the original error so the shared
+		// classifier can apply the run's retry and escalation policy.
 		return nil, cause
 	}
 	return nil, fmt.Errorf("%s: %w", terminalFailureCode, cause)
@@ -366,7 +380,10 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 	if existingFile != nil {
 		// The filing row is written only after uploading all bytes. Its identity is
 		// stable even when the final composition update was interrupted.
-		if err := st.updateCompositionState(ctx, map[string]any{"compositionId": compositionId, "status": "ready", "outputFileId": existingFileId, "sha256": existingFile["sha256"]}); err != nil {
+		if err := st.setLibraryFileReady(ctx, existingFileId, stringOf(existingFile["summary"])); err != nil {
+			return fail("the output file could not be marked ready", err)
+		}
+		if err := st.updateCompositionState(ctx, map[string]any{"compositionId": compositionId, "status": "ready", "failureReason": "", "outputFileId": existingFileId, "sha256": existingFile["sha256"]}); err != nil {
 			return nil, err
 		}
 		row, err := st.compositionById(ctx, compositionId)
@@ -397,7 +414,7 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 	}
 
 	if err := st.updateCompositionState(ctx, map[string]any{
-		"compositionId": compositionId, "status": "composing", "runId": runId,
+		"compositionId": compositionId, "status": "composing", "failureReason": "", "runId": runId,
 	}); err != nil {
 		i.log().Warn("compose: could not mark the composition composing", "error", err, "compositionId", compositionId)
 	}

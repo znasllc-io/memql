@@ -116,6 +116,9 @@ func trafficEngine(t *testing.T) (*memql.MemQLEngine, *bun.DB, context.Context) 
 	// The hostname policy reads the domain from the environment on every
 	// write, so it is set per test rather than once at boot.
 	t.Setenv("MEMQL_DOMAIN", trafficTestDomain)
+	previousGrants, previousMembers := auth.InstalledGrantSource(), auth.InstalledMembershipSource()
+	s.eng.InstallGrantResolution()
+	t.Cleanup(func() { auth.SetGrantSource(previousGrants); auth.SetMembershipSource(previousMembers) })
 	return s.eng, s.db, context.Background()
 }
 
@@ -144,9 +147,24 @@ func suffix(t *testing.T) string {
 func seedDeployable(t *testing.T, eng *memql.MemQLEngine, owner, slug string) string {
 	t.Helper()
 	id := "site-traffic-" + slug
+	// Deployables belong to an organization. Give each fixture owner a real
+	// organization and membership so the ordinary writer follows that boundary.
+	account, group := "account-"+id, "group-"+id
+	seed := auth.ContextWithInternalOrigin(operatorCtx("traffic-seeder"))
+	for _, query := range []string{
+		fmt.Sprintf(`insert("v1:accounts:account", id=%s, payload={"name": "Traffic fixture", "status": "active", "domainStatus": "unverified"})`, langparser.QuoteString(account)),
+		fmt.Sprintf(`mutation writeGroup(groupId: %s, name: "Traffic fixture", kind: "account", accountId: %s, status: "active")`, langparser.QuoteString(group), langparser.QuoteString(account)),
+		fmt.Sprintf(`mutation writeGrant(grantId: %s, subjectKind: "user", subjectId: %s, verb: "execute", resourceType: "app:deployables/publish", effect: "allow", grantedBy: "traffic-seeder")`, langparser.QuoteString(auth.GrantRowID(auth.SubjectKindUser, owner, auth.VerbExecute, "app:deployables/publish")), langparser.QuoteString(owner)),
+		fmt.Sprintf(`mutation writeGroupMembership(membershipId: %s, groupId: %s, userId: %s, accountId: %s, origin: "added", status: "active")`, langparser.QuoteString(group+"-"+owner), langparser.QuoteString(group), langparser.QuoteString(owner), langparser.QuoteString(account)),
+	} {
+		if _, err := eng.Execute(seed, query); err != nil {
+			t.Fatalf("seed deployable organization: %v", err)
+		}
+	}
 	q := fmt.Sprintf(
-		`mutation createSite(siteId: %s, hostname: %s, bundleRef: %s, status: "live")`,
+		`mutation createSite(siteId: %s, accountId: %s, hostname: %s, bundleRef: %s, status: "live")`,
 		langparser.QuoteString(id),
+		langparser.QuoteString(account),
 		langparser.QuoteString(shortHost(slug)+"."+trafficTestDomain),
 		langparser.QuoteString("blob://sites/"+id+"/v1/"),
 	)
