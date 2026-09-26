@@ -42,6 +42,11 @@ func TestAVectorJoinsSoTheShellReadsEveryElementBack(t *testing.T) {
 	if got != want {
 		t.Fatalf("joined = %s\nwant     %s", got, want)
 	}
+	// A leading NAME=value is an assignment to a shell, and was the program
+	// to the vector; later ones are ordinary arguments either way.
+	if got := procedureJoinArgv([]string{"FOO=bar", "x=1"}); got != `'FOO=bar' x=1` {
+		t.Fatalf("a leading assignment-shaped word = %s", got)
+	}
 }
 
 func TestACommandInAnySpellingItCannotReadIsRefused(t *testing.T) {

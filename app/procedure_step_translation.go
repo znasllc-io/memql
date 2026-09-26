@@ -202,9 +202,17 @@ func procedureShellQuote(s string) string {
 
 // procedureJoinArgv is an argument vector as the one command line a shell
 // executes identically.
+//
+// The FIRST word is quoted when it holds `=`: a shell reads a leading
+// NAME=value as an assignment and runs the next word, while the vector ran
+// that word as the program.
 func procedureJoinArgv(argv []string) string {
 	words := make([]string, len(argv))
 	for i, a := range argv {
+		if i == 0 && strings.Contains(a, "=") {
+			words[i] = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
+			continue
+		}
 		words[i] = procedureShellQuote(a)
 	}
 	return strings.Join(words, " ")

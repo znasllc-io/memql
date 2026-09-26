@@ -222,7 +222,9 @@ func TestAWorkbenchExecJoinsAVectorThatIsNotAShell(t *testing.T) {
 
 func TestANonZeroExitIsAnErrorCarryingItsCode(t *testing.T) {
 	wb := newFakeWorkbench()
-	wb.exec = func(map[string]any) map[string]any { return map[string]any{"exitCode": 1, "stdout": "", "stderr": "1 failing"} }
+	wb.exec = func(map[string]any) map[string]any {
+		return map[string]any{"exitCode": 1, "stdout": "", "stderr": "1 failing"}
+	}
 	res, err := newTestWorkbenchDispatcher(wb, nil).Dispatch(context.Background(), workbenchStep("exec", map[string]any{"command": "npm test"}))
 	if err != nil {
 		t.Fatal(err)
