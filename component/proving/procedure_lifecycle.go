@@ -517,7 +517,7 @@ func (d *lifecycleDriver) serve(ctx context.Context, i int, g scenario.Procedure
 			return err
 		}
 		gr.ServedBy = servedByApp
-		gr.Narrative = fmt.Sprintf("the app served it (rung %q)", rung)
+		gr.Narrative = fmt.Sprintf("the app served it (rung %s)", wordOr(string(rung), "none"))
 		if sess.Failed {
 			// Not learned from: a failed recording is not a success, and the
 			// learner fires only on one.
@@ -529,7 +529,7 @@ func (d *lifecycleDriver) serve(ctx context.Context, i int, g scenario.Procedure
 				return fmt.Errorf("learning from the recording %s: %w", sess.RunId, err)
 			}
 			gr.Learn = &learn
-			gr.Narrative += fmt.Sprintf(", learned: lift=%q rung=%q", learn.Lift, learn.Rung)
+			gr.Narrative += fmt.Sprintf(", learned: lift %s, rung %s", wordOr(learn.Lift, "none"), wordOr(learn.Rung, "none"))
 			// A comparison beside the app is meaningful only against a
 			// version this recording did NOT change: one it changed was
 			// partly derived from it and has just re-entered the ladder.
@@ -677,6 +677,18 @@ func ladderPolicyOf(p scenario.LadderPolicy) work.LadderPolicy {
 // owner's corpus, and leftovers under a reused owner would be learned from.
 func lifecycleOwner(arm figure.Arm) string {
 	return fmt.Sprintf("proving-%s-%s", arm, strconv.FormatInt(time.Now().UnixNano(), 36))
+}
+
+// wordOr is a narrative's spelling of a value that may be empty. Plain words
+// rather than Go quoting: these lines are prose a person reads in a failure,
+// and a Go-quoted value is the spelling the repository's MemQL-call gate
+// (TestDSLCallStringsDoNotUseGoQuoting) exists to keep out of anything that
+// looks like an argument list.
+func wordOr(v, empty string) string {
+	if strings.TrimSpace(v) == "" {
+		return empty
+	}
+	return v
 }
 
 func describeConstruct(cs ConstructState, found bool) string {
