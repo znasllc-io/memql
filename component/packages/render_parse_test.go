@@ -73,7 +73,7 @@ func captureStore(t *testing.T) []string {
 		"query libraryArtifactById": {{"id": "v1:library:artifact:mno", "kind": "file", "sourceConceptRef": "v1:library:file:mno"}},
 		"query libraryFileById":     {{"id": "v1:library:file:mno", "mimeType": "application/zip", "blobUrl": "library/u/mno/tree.zip"}},
 	}}
-	s := &store{engine: rec}
+	s := &store{engine: rec, deploymentGate: offlineDeploymentGate}
 	ctx := context.Background()
 	at := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 

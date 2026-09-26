@@ -202,6 +202,10 @@ func (d *Deps) startAutoRun(ctx context.Context, pkg map[string]any, version str
 			"component", "packages.autodeploy", "package", packageId, "live", len(live))
 		return false, nil
 	}
+	deploymentId, fromDeploymentId, retryErr := d.nextAutoDeployment(ownerCtx, pkg, version)
+	if retryErr != nil || deploymentId == "" {
+		return false, retryErr
+	}
 	// THE AUTHORITY IS RESOLVED, NOT BORROWED. ownerCtx carries the owner's
 	// IDENTITY (auth.ContextWithUserActor stamps a rankless writer), so the
 	// D9 answer has to be read from the owner's role row instead -- otherwise
@@ -227,12 +231,12 @@ func (d *Deps) startAutoRun(ctx context.Context, pkg map[string]any, version str
 		PackageId: packageId,
 		// The DEPLOYMENT ID IS DERIVED FROM THE VERSION, so two feeds noticing
 		// the same push -- the webhook and the ten-minute poll -- open one run
-		// rather than two. The second call finds a row at that id and the
-		// append-only guard refuses to reopen it, which is a refusal that
-		// means "already handled".
-		DeploymentId: policyDeploymentId(pkg, version),
-		Actor:        Actor{UserId: owner, MayDeployDsl: mayDeployDsl},
-		Automatic:    true,
+		// rather than two. The serialized opening guard refuses both a
+		// duplicate ID and a second live attempt for the same source.
+		DeploymentId:     deploymentId,
+		FromDeploymentId: fromDeploymentId,
+		Actor:            Actor{UserId: owner, MayDeployDsl: mayDeployDsl},
+		Automatic:        true,
 	})
 	if derr != nil {
 		return false, derr
@@ -247,8 +251,8 @@ func (d *Deps) startAutoRun(ctx context.Context, pkg map[string]any, version str
 // autoDeploymentId is the id an auto-run opens at.
 //
 // Derived rather than minted, which is what makes "never more than one
-// auto-run per push" true without a lock: both feeds compose the same id for
-// the same version, and the second attempt lands on a row that already exists.
+// original auto-run per push" true: both feeds compose the same id for the
+// same version, and the serialized opening guard refuses to reopen it.
 func autoDeploymentId(packageId, version string) string {
 	return fmt.Sprintf("v1:platform:packageDeployment:auto-%s-%s", shortId(packageId), safeVersion(version))
 }

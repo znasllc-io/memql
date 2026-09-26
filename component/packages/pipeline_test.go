@@ -244,7 +244,7 @@ func newHarness(t *testing.T, tree fs.FS, pkgRow map[string]any) *harness {
 	}
 	n := 0
 	h.deps = &Deps{
-		Store:     &store{engine: engine},
+		Store:     &store{engine: engine, deploymentGate: offlineDeploymentGate},
 		Fetcher:   h.fetcher,
 		Builder:   h.builder,
 		Stager:    h.stager,
