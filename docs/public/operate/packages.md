@@ -96,6 +96,27 @@ Two halves, and the asymmetry is deliberate:
 
 **Deployment configuration is optional.** `displayName` changes the displayed
 label without changing `name`, which identifies the same app on redeploy.
+For a Shopify storefront, the existing `deployment` address and `binding`
+configure **Production**. A second stable **Testing** URL is assigned automatically:
+`test--<production-hostname>` (for example, `test--graceful-fjord.memql.znas.io`).
+Both destinations use one deployable and the same build. Testing access opens
+through MemQL OS's **Visit → Testing** action.
+
+Set the independent testing store with the optional manifest block:
+
+```yaml
+    testing:
+      binding:
+        store: fylo-sandbox.myshopify.com
+```
+
+Both bindings may name the same store, including a sandbox. An unconnected
+destination serves design preview. Omitting `testing` preserves the testing
+store chosen in MemQL OS; declaring a different testing store rebinds only
+Testing on deployment. An unavailable store leaves its prior binding intact
+and records a deployment note. A change to the declared testing store requires
+review before an automatic deployment.
+
 `deployment.slug` is a lowercase DNS label of 3–40 characters under the receiving
 cluster's domain. Omit it to let the wizard generate an editable name. Existing
 site addresses are preserved on redeploy. `deployment.domains` lists custom

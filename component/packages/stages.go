@@ -430,6 +430,7 @@ type SitePublisher interface {
 	// BindSiteToStore re-points an EXISTING site at the store its manifest
 	// names. Called only when the two differ.
 	BindSiteToStore(ctx context.Context, siteId, storeId string) error
+	BindSiteTestingStore(ctx context.Context, siteId, storeId string) error
 	// RepointSite points a site back at a bundle version that already exists.
 	// THE rollback operation, and it is the same write updateSiteBundle makes
 	// forward -- which is the whole reason bundles live under versioned
@@ -660,6 +661,27 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 			// the row this write is about.
 			if berr := d.Publisher.BindSiteToStore(ctx, siteId, storeId); berr != nil {
 				return outcomes, berr
+			}
+		}
+
+		if dep.Testing != nil && hasBinding(dep.Testing.Binding) {
+			named := strings.TrimSpace(dep.Testing.Binding.Store)
+			bound := boundStoreId(map[string]any{"binding": byName[dep.Name]["previewBinding"]})
+			resolved, err := resolveNamedStore(ctx, d.Stores, named, bound, accountID)
+			if err != nil {
+				return outcomes, err
+			}
+			if resolved != "" && resolved != bound {
+				if err := d.Publisher.BindSiteTestingStore(ctx, siteId, resolved); err != nil {
+					return outcomes, err
+				}
+			} else if resolved == "" {
+				note := fmt.Sprintf("Testing store %q could not be read and attached; the existing testing connection is unchanged.", named)
+				if storeNote == nil {
+					storeNote = &Problem{Code: CodeDeployableStoreUnknown, Scope: dep.Name, Fatal: false, Message: note}
+				} else {
+					storeNote.Message += " " + note
+				}
 			}
 		}
 

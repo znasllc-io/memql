@@ -1206,6 +1206,7 @@ export function previewReadinessRow(over: Partial<Row> & { siteId: string }): Ro
     storeIsDevelopment: false,
     previewStoreId: "",
     previewStoreDomain: "",
+    testingUrl: "https://test--shop.memql.example.com/",
     canPreview: false,
     canPromote: false,
     canGoLive: true,

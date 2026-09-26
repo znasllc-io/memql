@@ -3,7 +3,6 @@ package edge
 
 import (
 	"context"
-	"encoding/json"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -16,39 +15,10 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 )
 
-// THE SERVING HALF OF STOREFRONT PREVIEW, IN PROCESS (epic memql#5531, issue
-// memql#5548).
-//
-// test/clustere2e/storefront_preview_test.go asserts the same properties
-// against a real cluster -- real rows, a real mint, a real edge pod -- and it
-// SKIPS on every machine and every CI lane that has no cluster. A gate skipped
-// by default cannot be what stands between a feature and the bug it prevents
-// (CLAUDE.md, on the worker forward hop; integrations/agent/worker/
-// forward_hop_test.go is the precedent this file follows). So the part that
-// needs no cluster runs here, in the ordinary lane, through the real Handler:
-//
-//   - an unauthenticated request to a DRAFT deployable is still 404;
-//   - an unauthenticated request to a LIVE deployable carrying a candidate is
-//     still served the SERVING version;
-//   - a request carrying a valid grant is served the CANDIDATE, on the site's
-//     own origin, for a draft deployable AND for a live one;
-//   - the SERVED runtime-config document carries the preview binding's store
-//     only under the grant -- grepped out of the bytes, the way
-//     TestRuntimeConfigNeverCarriesTheShopifyAdminToken greps for the Admin
-//     token;
-//   - each of the five checks in previewGrantFor closes its own door.
-//
-// WHAT IT DOES NOT COVER, and the cluster leg does: minting a grant under a
-// real caller, the write guard's refusals against real rows, the promotion and
-// rollback writes, and the publish path behind a candidate version.
-//
-// HOW TO CONFIRM IT IS LOAD-BEARING. Make previewSite return `site` unchanged
-// and TestAGrantIsServedTheCandidate* fail on the served bytes; delete the
-// candidateRef comparison in previewGrantFor and
-// TestAGrantWhoseCandidateMovedGetsThePublicAnswer fails. Every assertion here
-// has a reachable positive in the same test -- the public answer beside the
-// previewed one -- so a handler that simply stopped serving could not pass by
-// answering nothing.
+// Candidate-preview coverage for non-storefront deployables. Storefronts use
+// independent stable destinations, covered in storefront_destinations_test.go.
+// These tests preserve the original same-origin candidate behavior: public
+// visitors get the serving bundle and valid grants get the named candidate.
 
 // --- the harness ------------------------------------------------------------
 
@@ -149,7 +119,7 @@ func previewSiteRow(status string) *Site {
 		ID:           "s-preview",
 		Hostname:     "acme.example.com",
 		Status:       status,
-		Kind:         storefrontKind,
+		Kind:         "spa",
 		BundleRef:    servingRef,
 		CandidateRef: candidateRef,
 		Binding:      map[string]any{"storeId": "acme"},
@@ -339,110 +309,6 @@ func containsFold(values []string, want string) bool {
 	return false
 }
 
-// --- the runtime-config document -------------------------------------------
-
-// THE PREVIEW BINDING REACHES A SERVED DOCUMENT ONLY UNDER A GRANT.
-//
-// Named as component/edge/resolve.go promises it is. GREPPED OUT OF THE SERVED
-// BYTES rather than read off a struct, the way
-// TestRuntimeConfigNeverCarriesTheShopifyAdminToken greps for the Admin token:
-// what matters is that the development store's domain is not in the document a
-// shopper is handed, by any route, and a struct field assertion would miss it
-// arriving through one nobody modelled.
-func TestTheRuntimeConfigNeverCarriesThePreviewBindingWithoutAGrant(t *testing.T) {
-	site := previewSiteRow(siteStatusLiveValue)
-	exec := newStubPreviewExec()
-	h := previewHandler(site, exec)
-
-	public := getWithToken(h, site, runtimeConfigPath, "")
-	if public.Code != http.StatusOK {
-		t.Fatalf("GET %s answered %d", runtimeConfigPath, public.Code)
-	}
-	publicBody := public.Body.String()
-	if strings.Contains(publicBody, devStoreDomain) {
-		t.Errorf("the document served to an unauthenticated request names the DEVELOPMENT store %s:\n%s",
-			devStoreDomain, publicBody)
-	}
-	if strings.Contains(publicBody, "token-for-acme_dev_storefront_token") {
-		t.Errorf("the document served to an unauthenticated request carries the development "+
-			"store's storefront token:\n%s", publicBody)
-	}
-	// The reachable positive: it names the store shoppers reach, so its silence
-	// about the development store is a choice rather than an empty document.
-	if !strings.Contains(publicBody, liveStoreDomain) {
-		t.Fatalf("the public document does not name the bound store at all -- this test would "+
-			"pass against a storefront block that simply stopped being written:\n%s", publicBody)
-	}
-
-	token := exec.issue(t, PreviewGrant{ID: "g-cfg", SiteID: site.ID, CandidateRef: candidateRef})
-	previewed := getWithToken(h, site, runtimeConfigPath, token)
-	if previewed.Code != http.StatusOK {
-		t.Fatalf("GET %s under a grant answered %d", runtimeConfigPath, previewed.Code)
-	}
-	previewedBody := previewed.Body.String()
-	if !strings.Contains(previewedBody, devStoreDomain) {
-		t.Errorf("the document served UNDER A GRANT does not name the development store %s:\n%s",
-			devStoreDomain, previewedBody)
-	}
-	if strings.Contains(previewedBody, liveStoreDomain) {
-		t.Errorf("the document served under a grant still names the store shoppers reach (%s) -- "+
-			"the preview store must REPLACE it, never sit beside it:\n%s", liveStoreDomain, previewedBody)
-	}
-
-	// And the block is well formed either way: a document that stopped parsing
-	// would satisfy both greps above and serve nobody.
-	for name, body := range map[string]string{"public": publicBody, "previewed": previewedBody} {
-		var doc struct {
-			Storefront *StorefrontConfig `json:"storefront"`
-		}
-		if err := json.Unmarshal([]byte(body), &doc); err != nil {
-			t.Fatalf("the %s runtime-config is not JSON: %v", name, err)
-		}
-		if doc.Storefront == nil {
-			t.Fatalf("the %s runtime-config carries no storefront block", name)
-		}
-		if doc.Storefront.StorefrontToken == "" {
-			t.Errorf("the %s runtime-config resolved no storefront token", name)
-		}
-	}
-}
-
-// THE POLICY FOLLOWS THE BINDING TOO, and it has to: the browser's call to the
-// Storefront API is refused by the page's own policy if the store the previewed
-// document names is not in connect-src. This is the property memql#5534 closed
-// for the public path, asserted for the previewed one.
-func TestThePreviewedPolicyNamesThePreviewStoreAndNotTheLiveOne(t *testing.T) {
-	site := previewSiteRow(siteStatusLiveValue)
-	exec := newStubPreviewExec()
-	h := previewHandler(site, exec)
-	token := exec.issue(t, PreviewGrant{ID: "g-csp", SiteID: site.ID, CandidateRef: candidateRef})
-
-	policy := getWithToken(h, site, "/", token).Header().Get("Content-Security-Policy")
-	if policy == "" {
-		t.Fatal("a previewed document was served with no Content-Security-Policy")
-	}
-	if !strings.Contains(policy, "https://"+devStoreDomain) {
-		t.Errorf("the previewed policy does not name the development store: %s", policy)
-	}
-	if strings.Contains(policy, "https://"+liveStoreDomain) {
-		t.Errorf("the previewed policy still names the store shoppers reach: %s", policy)
-	}
-
-	publicPolicy := getWithToken(h, site, "/", "").Header().Get("Content-Security-Policy")
-	if !strings.Contains(publicPolicy, "https://"+liveStoreDomain) {
-		t.Errorf("the PUBLIC policy does not name the bound store: %s", publicPolicy)
-	}
-	if strings.Contains(publicPolicy, "https://"+devStoreDomain) {
-		t.Errorf("the PUBLIC policy names the development store: %s", publicPolicy)
-	}
-}
-
-// --- the five checks, each closing its own door -----------------------------
-
-// EVERY WAY A GRANT CAN FAIL GETS THE PUBLIC ANSWER, never an error and never a
-// redirect. An expired preview of a live deployable is the serving version; of
-// a draft deployable it is the 404 anybody else gets, which is the honest answer
-// -- to the internet that deployable does not exist.
 func TestEachPreviewCheckFallsThroughToThePublicAnswer(t *testing.T) {
 	site := previewSiteRow(siteStatusLiveValue)
 
@@ -680,28 +546,5 @@ func TestHonouringAGrantRecordsItAtMostOncePerThrottleWindow(t *testing.T) {
 			return
 		}
 		time.Sleep(20 * time.Millisecond)
-	}
-}
-
-func TestSameBuildPreviewStillIsolatesTheSandboxFromPublicTraffic(t *testing.T) {
-	site := previewSiteRow(siteStatusLiveValue)
-	site.CandidateRef = site.BundleRef
-	exec := newStubPreviewExec()
-	h := previewHandler(site, exec)
-	token := exec.issue(t, PreviewGrant{ID: "g-same-build", SiteID: site.ID, CandidateRef: site.BundleRef})
-	for _, tc := range []struct{ name, token, want, absent string }{
-		{"public", "", liveStoreDomain, devStoreDomain},
-		{"preview", token, devStoreDomain, liveStoreDomain},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			response := getWithToken(h, site, runtimeConfigPath, tc.token)
-			if response.Code != http.StatusOK {
-				t.Fatalf("runtime config: %d", response.Code)
-			}
-			body := response.Body.String()
-			if !strings.Contains(body, tc.want) || strings.Contains(body, tc.absent) {
-				t.Fatalf("same-build %s request used the wrong store", tc.name)
-			}
-		})
 	}
 }

@@ -134,6 +134,13 @@ Storefronts choose an authorized store using the shared wizard
 and keep serving design previews until connected. The Store icon stays beside
 Traffic. See [Connect Shopify](../../docs/public/operate/shopify-connect.md).
 
+A storefront's Visit action offers **Testing** and **Production**, with each
+URL and its connected store. Both use the same published build. Testing has a
+stable `test--<hostname>` address; Visit opens it with private access handled
+automatically. Production always uses its own binding, even when the browser
+holds a Testing session. Either destination may use a sandbox, both may use the
+same store, and an unconnected destination shows design preview.
+
 ## Right-click belongs to the shell
 
 **The browser's context menu is OFF by default and opted back INTO**, at the
@@ -2541,22 +2548,11 @@ automatic updates do not create this manual-update attention item.
 
 ### Storefront connections and testing
 
-The composition map's Store entry is the storefront's configuration destination;
-there is no duplicate header button. It owns Testing (`previewBinding`),
-Production (`binding`), candidate previews and catalog/cart/checkout/order checks.
-Both selections use the user's shared Shopify connections and may name stores
-from different accounts. Testing offers Shopify-reported development stores;
-Production offers identified non-development stores. An unconnected storefront
-can serve its design without a catalog. Connecting a sandbox never writes it
-into the production binding. Repairing an old sandbox production binding first
-saves it for testing, then clears the production binding after confirmation.
-The engine's publication and preview guards remain authoritative. Show concise
-store setup state in the map and actionable details in Store, rather than a
-standing developer warning on the deployable overview.
-
-Storefront testing may reuse the current built version: the files are identical,
-but preview grants resolve the sandbox binding while public requests resolve
-only the production binding. Non-storefront candidate rules are unchanged.
-A same-build preview does not offer a no-op promotion.
+The composition map's Store entry owns Testing (`previewBinding`) and
+Production (`binding`). Both selectors use the user's shared Shopify
+connections and may name any authorized store, including the same sandbox.
+Changing one binding never clears or changes the other. Storefronts show no
+candidate selection, preview grants, store checks or promotion action; a design
+update reaches both URLs. Candidate previews remain available for other kinds.
 
 Ask text, dictation, live voice and cluster setup: [Ask conversations and voice](../../docs/public/operate/ask-and-voice.md).

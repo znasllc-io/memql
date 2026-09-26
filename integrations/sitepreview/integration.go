@@ -9,6 +9,7 @@ import (
 	"time"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/frontdoor"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -25,8 +26,7 @@ import (
 // rather than drawn and disabled, and DESIGN.md rule 12 says the same thing for
 // every surface in the shell. An absent control needs the refusal to be
 // knowable BEFORE the click, and no amount of client-side reasoning can know it:
-// whether the bound store is a development store is a field on a row the browser
-// cannot read. So the engine answers the question, in the same words the guard
+// whether the bound store is readable is decided under the caller on the server. So the engine answers the question, in the same words the guard
 // would refuse in -- literally the same function, component/sitepreview.
 //
 // # What it deliberately does not do
@@ -67,7 +67,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
 		{
 			Name: "open",
-			Description: "Mint a short-lived preview of a deployable's candidate version, on the deployable's own origin. " +
+			Description: "Open private storefront Testing on its separate hostname, or a non-storefront candidate preview. " +
 				"Returns the URL once; the token is never readable again.",
 			Handler:    i.handleOpen,
 			ArgsSchema: map[string]string{"siteId": "string (required) -- the deployable to preview."},
@@ -91,7 +91,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name: "probe",
-			Description: "Run the three things the engine can observe of a preview against the development store the " +
+			Description: "Run the three things the engine can observe of a preview against the store the " +
 				"preview binding names, and record each on the grant.",
 			Handler:    i.handleProbe,
 			ArgsSchema: map[string]string{"grantId": "string (required) -- the preview to record the observations on."},
@@ -126,13 +126,18 @@ func (i *Integration) handleOpen(ctx context.Context, args map[string]any, _ int
 			"sitePreviewOpen: %q is the surface this cluster is managed through and is exempt from the preview axis, as it is from the status and settings axes",
 			site.Hostname)
 	}
-	if !site.HasCandidate() {
-		return nil, fmt.Errorf(
-			"sitePreviewOpen: %q has no candidate version, so there is nothing to preview. Publish a version and set it as the candidate first",
-			site.Hostname)
+	storefront := site.Kind == storefrontKind
+	version, hostname := site.CandidateRef, site.Hostname
+	if storefront {
+		version, hostname = site.BundleRef, frontdoor.StorefrontTestingHost(site.Hostname)
+	}
+	if strings.TrimSpace(version) == "" || hostname == "" {
+		return nil, fmt.Errorf("sitePreviewOpen: publish a build with a valid website address before opening it")
+	}
+	if site.Status != "live" && site.Status != "draft" {
+		return nil, fmt.Errorf("sitePreviewOpen: this website is %s; restore it before opening Testing", site.Status)
 	}
 
-	storefront := site.Kind == storefrontKind
 	preview, err := i.boundStore(ctx, site.PreviewStoreID)
 	if err != nil {
 		return nil, err
@@ -155,10 +160,10 @@ func (i *Integration) handleOpen(ctx context.Context, args map[string]any, _ int
 		ID:             id.NewShortId(),
 		SiteID:         site.ID,
 		OwnerUserID:    actor,
-		CandidateRef:   site.CandidateRef,
+		CandidateRef:   version,
 		PreviewStoreID: site.PreviewStoreID,
 		IssuedAt:       now,
-		ExpiresAt:      now.Add(i.cfg.GrantTTL),
+		ExpiresAt:      now.Add(memql.ClampPreviewGrantTTL(i.cfg.GrantTTL)),
 	}
 	if err := i.store.CreateGrant(ctx, grant, digest); err != nil {
 		return nil, err
@@ -167,7 +172,7 @@ func (i *Integration) handleOpen(ctx context.Context, args map[string]any, _ int
 	return i.node("open:"+grant.ID, map[string]any{
 		"grantId":        grant.ID,
 		"siteId":         grant.SiteID,
-		"hostname":       site.Hostname,
+		"hostname":       hostname,
 		"candidateRef":   grant.CandidateRef,
 		"previewStoreId": grant.PreviewStoreID,
 		// The domain is named only when the caller could read the store. See
@@ -175,10 +180,10 @@ func (i *Integration) handleOpen(ctx context.Context, args map[string]any, _ int
 		// a cluster-owner-tier row.
 		"previewStoreDomain": preview.Domain,
 		"expiresAt":          grant.ExpiresAt.Format(time.RFC3339),
-		"ttlMinutes":         int(i.cfg.GrantTTL / time.Minute),
+		"ttlMinutes":         int(memql.ClampPreviewGrantTTL(i.cfg.GrantTTL) / time.Minute),
 		// THE ONE TIME THE TOKEN IS READABLE. It is in this reply and in the
 		// operator's browser, and nowhere else ever again.
-		"url": PreviewEnterURL(site.Hostname, token),
+		"url": PreviewEnterURL(hostname, token),
 	})
 }
 
@@ -214,6 +219,14 @@ func (i *Integration) handleReadiness(ctx context.Context, args map[string]any, 
 	preview, err := i.boundStore(ctx, site.PreviewStoreID)
 	if err != nil {
 		return nil, err
+	}
+
+	version, testingURL := site.CandidateRef, ""
+	if storefront {
+		version = site.BundleRef
+		if host := frontdoor.StorefrontTestingHost(site.Hostname); host != "" {
+			testingURL = "https://" + host + "/"
+		}
 	}
 
 	goLive := memql.SiteGoLiveRefusal(storefront, serving)
@@ -254,8 +267,9 @@ func (i *Integration) handleReadiness(ctx context.Context, args map[string]any, 
 		"storeIsDevelopment": serving.Readable && serving.IsDevelopment,
 		"previewStoreId":     site.PreviewStoreID,
 		"previewStoreDomain": preview.Domain,
-		"canPreview":         previewRefusal.Empty() && site.HasCandidate() && !site.SystemOwned,
-		"canPromote":         promote.Empty(),
+		"testingUrl":         testingURL,
+		"canPreview":         previewRefusal.Empty() && strings.TrimSpace(version) != "" && !site.SystemOwned && (site.Status == "live" || site.Status == "draft") && (!storefront || testingURL != ""),
+		"canPromote":         !storefront && promote.Empty(),
 		"canGoLive":          goLive.Empty(),
 		"previewRefusal":     refusalPayload(previewRefusal),
 		"promoteRefusal":     refusalPayload(promote),

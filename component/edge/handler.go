@@ -197,6 +197,13 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, site *Site) stri
 		return h.serveResolved(w, r, site)
 	}
 
+	// A testing origin never falls through to Production when access expires.
+	if site.StorefrontTesting {
+		previewHeaders(w)
+		http.Error(w, "Open this testing website from MemQL OS: Visit → Testing.", http.StatusUnauthorized)
+		return pathClassUnserved
+	}
+
 	// STATUS BEFORE ANY FILE LOOKUP. An unknown host and a draft site are both
 	// 404 -- neither exists as far as the internet is concerned. A DISABLED
 	// site is 503, deliberately: a deliberately paused site and a typo'd

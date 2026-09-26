@@ -38,7 +38,7 @@ describe("shared Shopify connections", () => {
   it("selects an authorized store and confirms its binding in the shared wizard footer", async () => {
     const connection = fixture();
     render(withSession(<ShopifyStorePanel site={siteFromRow({ ...SHOP, binding: {} })} canBind trail={[]} back={{ label: "Deployables", onSelect: vi.fn() }} onWritten={vi.fn()} />));
-    await click(screen.getByRole("button", { name: "Configure production store" }));
+    await click(await screen.findByRole("button", { name: "Configure production store" }));
     await click(await screen.findByRole("button", { name: `Select Shopify store ${saved.label}` }));
     await click(screen.getByRole("button", { name: "Continue" }));
     await click(within(document.querySelector(".os-actbar")!).getByRole("button", { name: "Connect store" }));
@@ -76,41 +76,42 @@ describe("shared Shopify connections", () => {
     render(withSession(<ShopifyStorePanel site={siteFromRow({ ...SHOP, binding: {} })} canBind trail={[]} back={{ label: "Deployables", onSelect: vi.fn() }} onWritten={vi.fn()} />));
     await click(screen.getByRole("button", { name: "Configure testing store" }));
     await click(await screen.findByRole("button", { name: `Select Shopify store ${saved.label}` }));
-    expect(screen.getByText("Sandbox")).toBeTruthy();
+    expect(screen.getByText("Sandbox store")).toBeTruthy();
     await click(screen.getByRole("button", { name: "Continue" }));
-    expect(screen.getByText("Uses the sandbox catalog and test checkout in previews.")).toBeTruthy();
+    expect(screen.getByText("Sandbox store — purchases follow Shopify’s test-store rules.")).toBeTruthy();
     await click(screen.getByRole("button", { name: "Connect store" }));
     expect(connection.callsNamed("updateSitePreviewBinding")[0]).toContain('storeId: "my-store"');
     expect(connection.callsNamed("updateSiteStoreBinding")).toHaveLength(0);
   });
-  it("never offers a sandbox in the production picker", async () => {
-    fixture([saved], true, true);
-    render(withSession(<ShopifyStorePanel site={siteFromRow({ ...SHOP, binding: {} })} canBind trail={[]} back={{ label: "Deployables", onSelect: vi.fn() }} onWritten={vi.fn()} />));
-    await click(screen.getByRole("button", { name: "Configure production store" }));
-    expect(await screen.findByText("No production stores connected.")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: `Select Shopify store ${saved.label}` })).toBeNull();
-  });
-  it("moves an incorrectly serving sandbox to testing without binding a production store", async () => {
+  it("offers a sandbox on Production without changing Testing", async () => {
     const connection = fixture([saved], true, true);
-    render(withSession(<ShopifyStorePanel site={siteFromRow({ ...SHOP, binding: { storeId: "my-store" } })} canBind trail={[]} back={{ label: "Deployables", onSelect: vi.fn() }} onWritten={vi.fn()} />));
-    await click(await screen.findByRole("button", { name: "Move sandbox to testing" }));
+    render(withSession(<ShopifyStorePanel site={siteFromRow({ ...SHOP, previewBinding: { storeId: "my-store" } })} canBind trail={[]} back={{ label: "Deployables", onSelect: vi.fn() }} onWritten={vi.fn()} />));
+    await click(await screen.findByRole("button", { name: "Configure production store" }));
     await click(await screen.findByRole("button", { name: `Select Shopify store ${saved.label}` }));
     await click(screen.getByRole("button", { name: "Continue" }));
     await click(screen.getByRole("button", { name: "Connect store" }));
     await vi.waitFor(() => expect(connection.callsNamed("updateSiteStoreBinding")).toHaveLength(1));
-    expect(connection.callsNamed("updateSitePreviewBinding")[0]).toContain('storeId: "my-store"');
-    expect(connection.callsNamed("updateSiteStoreBinding")[0]).toContain('storeId: ""');
+    expect(connection.callsNamed("updateSitePreviewBinding")).toHaveLength(0);
   });
-  it("can select the first built version for sandbox testing without entering a bundle reference", async () => {
+  it("can use the same sandbox for Testing while retaining Production", async () => {
+    const connection = fixture([saved], true, true);
+    render(withSession(<ShopifyStorePanel site={siteFromRow({ ...SHOP, binding: { storeId: "my-store" } })} canBind trail={[]} back={{ label: "Deployables", onSelect: vi.fn() }} onWritten={vi.fn()} />));
+    await click(await screen.findByRole("button", { name: "Configure testing store" }));
+    await click(await screen.findByRole("button", { name: `Select Shopify store ${saved.label}` }));
+    await click(screen.getByRole("button", { name: "Continue" }));
+    await click(screen.getByRole("button", { name: "Connect store" }));
+    await vi.waitFor(() => expect(connection.callsNamed("updateSitePreviewBinding")).toHaveLength(1));
+    expect(connection.callsNamed("updateSitePreviewBinding")[0]).toContain('storeId: "my-store"');
+    expect(connection.callsNamed("updateSiteStoreBinding")).toHaveLength(0);
+  });
+  it("shows the two store connections without version or grant controls", async () => {
     const connection = fixture();
-    const site = siteFromRow({ ...SHOP, binding: {} });
-    render(withSession(<ShopifyStorePanel site={site} canBind can={ALL_PARTS} trail={[]} back={{ label: "Deployables", onSelect: vi.fn() }} onWritten={vi.fn()} />));
-    const picker = await screen.findByRole("combobox", { name: "A version to exercise" });
-    await click(picker);
-    await click(screen.getByRole("option", { name: "v1" }));
-    await click(screen.getByRole("button", { name: "Exercise this version" }));
-    expect(connection.callsNamed("setSiteCandidate")[0]).toContain(`candidateRef: "${site.bundleRef}"`);
-    expect(screen.queryByRole("textbox", { name: "A bundle reference to exercise" })).toBeNull();
+    render(withSession(<ShopifyStorePanel site={siteFromRow(SHOP)} canBind can={ALL_PARTS} trail={[]} back={{ label: "Deployables", onSelect: vi.fn() }} onWritten={vi.fn()} />));
+    expect(await screen.findByRole("button", { name: "Configure testing store" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Configure production store" })).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "A version to exercise" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Exercise this version" })).toBeNull();
+    expect(connection.callsNamed("setSiteCandidate")).toHaveLength(0);
   });
   it("keeps the serving binding if saving the sandbox for testing fails", async () => {
     const connection = fixture([saved], true, true);
@@ -120,7 +121,7 @@ describe("shared Shopify connections", () => {
       return execute(name, call, options);
     });
     render(withSession(<ShopifyStorePanel site={siteFromRow({ ...SHOP, binding: { storeId: "my-store" } })} canBind trail={[]} back={{ label: "Deployables", onSelect: vi.fn() }} onWritten={vi.fn()} />));
-    await click(await screen.findByRole("button", { name: "Move sandbox to testing" }));
+    await click(await screen.findByRole("button", { name: "Configure testing store" }));
     await click(await screen.findByRole("button", { name: `Select Shopify store ${saved.label}` }));
     await click(screen.getByRole("button", { name: "Continue" }));
     await click(screen.getByRole("button", { name: "Connect store" }));
@@ -131,9 +132,9 @@ describe("shared Shopify connections", () => {
     fixture([saved], true, true);
     const props = { canBind: true, trail: [], back: { label: "Deployables", onSelect: vi.fn() }, onWritten: vi.fn() };
     const view = render(withSession(<ShopifyStorePanel {...props} site={siteFromRow({ ...SHOP, binding: { storeId: "my-store" } })} />));
-    expect(await screen.findByRole("button", { name: "Move sandbox to testing" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Configure testing store" })).toBeTruthy();
     view.rerender(withSession(<ShopifyStorePanel {...props} site={siteFromRow({ ...SHOP, binding: {}, previewBinding: { storeId: "my-store" } })} />));
-    await vi.waitFor(() => expect(screen.queryByRole("button", { name: "Move sandbox to testing" })).toBeNull());
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: "Configure production store" }).textContent).toContain("Design preview"));
     expect((await screen.findByRole("button", { name: "Configure production store" })).textContent).not.toContain(saved.label);
   });
   it.each(["settings", "deployables"])("returns to the %s connections surface and preserves sign-in parameters", appId => {
