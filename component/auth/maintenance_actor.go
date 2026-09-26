@@ -119,7 +119,7 @@ var maintenanceAutomations = map[string]string{
 		"the owned branch matches nothing, the cluster-owner escape does not apply, and the read answers ZERO " +
 		"ROWS AND NO ERROR. A sweep that resumes nothing is indistinguishable from a cluster with nothing " +
 		"parked, and the symptom a person reports is that their goal simply stopped",
-	"workJournalRetentionSweep": "the nightly journal sweep over v1:work:modelCall and " +
+	"workJournalRetentionSweep": "the nightly verified archive-and-delete sweep over completed system runs and steps, worker invocation history, audit and safety evidence, plus v1:work:modelCall and " +
 		"v1:work:observation (epic memql#4966), same tier and same silence as the row above. It is also the " +
 		"one writer that folds a run's summary onto the run row BEFORE deleting its detail, so a read that " +
 		"sees nothing does not merely skip the delete -- it skips the fold, and the detail then ages out of " +

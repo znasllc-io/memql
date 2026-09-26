@@ -41,9 +41,13 @@ func workRecoveryIndexMatches(f indexFacts) bool {
 }
 
 func workRecoveryIndexComplete(st latestRowIndexState) bool {
+	return namedWorkIndexComplete(st, workRecoveryIndexName, workRecoveryIndexMatches)
+}
+
+func namedWorkIndexComplete(st latestRowIndexState, name string, matches func(indexFacts) bool) bool {
 	root := false
 	for _, f := range st.Root {
-		if f.Name == workRecoveryIndexName && workRecoveryIndexMatches(f) && f.usableProblem() == "" {
+		if f.Name == name && matches(f) && f.usableProblem() == "" {
 			root = true
 		}
 	}
@@ -58,7 +62,7 @@ func workRecoveryIndexComplete(st latestRowIndexState) bool {
 		}
 		covered := false
 		for _, f := range c.Indexes {
-			if workRecoveryIndexMatches(f) && f.usableProblem() == "" {
+			if matches(f) && f.usableProblem() == "" {
 				covered = true
 				break
 			}
@@ -75,6 +79,10 @@ func workRecoveryIndexComplete(st latestRowIndexState) bool {
 // table build is atomic. Re-inspect every chunk instead of trusting an index
 // name left by an interrupted build.
 func ensureWorkRecoveryIndex(ctx context.Context, db *bun.DB, logger *slog.Logger, table string) error {
+	return ensureNamedWorkIndex(ctx, db, logger, table, workRecoveryIndexName, `("createdAt", id)`, workRecoveryPredicate, workRecoveryIndexMatches)
+}
+
+func ensureNamedWorkIndex(ctx context.Context, db *bun.DB, logger *slog.Logger, table, name, keys, predicate string, matches func(indexFacts) bool) error {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -90,7 +98,7 @@ func ensureWorkRecoveryIndex(ctx context.Context, db *bun.DB, logger *slog.Logge
 		if err != nil {
 			return err
 		}
-		if workRecoveryIndexComplete(st) {
+		if namedWorkIndexComplete(st, name, matches) {
 			return nil
 		}
 		builds, err := otherIndexBuilds(ctx, s.conn, st)
@@ -107,21 +115,21 @@ func ensureWorkRecoveryIndex(ctx context.Context, db *bun.DB, logger *slog.Logge
 		}
 	}
 	for _, f := range st.Root {
-		if f.Name != workRecoveryIndexName {
+		if f.Name != name {
 			continue
 		}
-		if !workRecoveryIndexMatches(f) {
-			return fmt.Errorf("work recovery index %s has an unexpected definition: %s", f.Name, f.Definition)
+		if !matches(f) {
+			return fmt.Errorf("work index %s has an unexpected definition: %s", f.Name, f.Definition)
 		}
-		if err := s.drop(ctx, st, workRecoveryIndexName); err != nil {
+		if err := s.drop(ctx, st, name); err != nil {
 			return err
 		}
 	}
-	stmt := `CREATE INDEX ` + quoteIdentifier(workRecoveryIndexName) + ` ON ` + st.qualifiedTable() + ` ("createdAt", id)`
+	stmt := `CREATE INDEX ` + quoteIdentifier(name) + ` ON ` + st.qualifiedTable() + ` ` + keys
 	if st.Hypertable {
 		stmt += ` WITH (timescaledb.transaction_per_chunk)`
 	}
-	stmt += ` WHERE ` + workRecoveryPredicate
+	stmt += ` WHERE ` + predicate
 	if err := s.ddl(ctx, stmt); err != nil {
 		return err
 	}
@@ -129,9 +137,9 @@ func ensureWorkRecoveryIndex(ctx context.Context, db *bun.DB, logger *slog.Logge
 	if err != nil {
 		return err
 	}
-	if !workRecoveryIndexComplete(after) {
-		return fmt.Errorf("work recovery index %s is incomplete after its build", workRecoveryIndexName)
+	if !namedWorkIndexComplete(after, name, matches) {
+		return fmt.Errorf("work index %s is incomplete after its build", name)
 	}
-	logger.Info("work recovery index verified", "index", workRecoveryIndexName, "chunks", len(after.Chunks))
+	logger.Info("work index verified", "index", name, "chunks", len(after.Chunks))
 	return nil
 }

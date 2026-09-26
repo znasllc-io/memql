@@ -205,15 +205,16 @@ type latestRowIndexReport struct {
 // indexFacts is one index as the catalog describes it, reduced to what decides
 // whether it answers the latest-row read.
 type indexFacts struct {
-	Name       string
-	Definition string // pg_get_indexdef; filled for root indexes only
-	Method     string // access method
-	Valid      bool
-	Ready      bool
-	Live       bool
-	Partial    bool // carries a WHERE predicate
-	Predicate  string
-	Expression bool // indexes an expression rather than columns
+	Name        string
+	Definition  string // pg_get_indexdef; filled for root indexes only
+	Method      string // access method
+	Valid       bool
+	Ready       bool
+	Live        bool
+	Partial     bool // carries a WHERE predicate
+	Predicate   string
+	Expressions string
+	Expression  bool // indexes an expression rather than columns
 	// The KEY columns in order (INCLUDE columns are not key columns and are
 	// allowed), whether each sorts descending, and whether each uses its
 	// column's default operator class and own collation -- an index built
@@ -871,6 +872,7 @@ SELECT i.indrelid::int8,
        i.indisvalid, i.indisready, i.indislive,
        i.indpred IS NOT NULL,
        COALESCE(pg_get_expr(i.indpred, i.indrelid), ''),
+       COALESCE(pg_get_expr(i.indexprs, i.indrelid), ''),
        i.indexprs IS NOT NULL,
        ARRAY(SELECT COALESCE(a.attname::text, '')
                FROM generate_series(0, i.indnkeyatts - 1) AS k
@@ -899,7 +901,7 @@ SELECT i.indrelid::int8,
 			rel int64
 			f   indexFacts
 		)
-		if err := rows.Scan(&rel, &f.Name, &f.Method, &f.Valid, &f.Ready, &f.Live, &f.Partial, &f.Predicate, &f.Expression,
+		if err := rows.Scan(&rel, &f.Name, &f.Method, &f.Valid, &f.Ready, &f.Live, &f.Partial, &f.Predicate, &f.Expressions, &f.Expression,
 			pgdialect.Array(&f.KeyColumns), pgdialect.Array(&f.KeyDescending), pgdialect.Array(&f.KeyPlain),
 			&f.Definition); err != nil {
 			return st, fmt.Errorf("reading the indexes of %s: %w", st.qualifiedTable(), err)
