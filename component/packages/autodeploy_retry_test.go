@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/integrations/workbench"
 )
 
@@ -44,7 +45,7 @@ func failedAutomaticAttempt(h *harness, id string) map[string]any {
 
 func stubAutomaticAttempt(h *harness, row map[string]any) {
 	// Include the closing quote so the base ID cannot match a retry ID.
-	key := fmt.Sprintf("query packageDeploymentById(deploymentId: %q)", rowString(row, "id"))
+	key := fmt.Sprintf("query packageDeploymentById(deploymentId: %s)", langparser.QuoteString(rowString(row, "id")))
 	h.engine.rows[key] = []map[string]any{row}
 }
 

@@ -22,7 +22,7 @@ func TestRepositoryPollRunsOnlyOnElectedWorkbench(t *testing.T) {
 }
 
 func TestOnlyWorkbenchCreatesRepositoryPollLease(t *testing.T) {
-	for _, nodeType := range []string{"identity", "bff", "agent", "planner", "mcp", "edge", "workbench"} {
+	for _, nodeType := range []string{"identity", "bff", "agent", "planner", "mcp", "edge", "workbench", ""} {
 		t.Run(nodeType, func(t *testing.T) {
 			t.Setenv("MEMQL_NODE_TYPE", nodeType)
 			a := &App{}

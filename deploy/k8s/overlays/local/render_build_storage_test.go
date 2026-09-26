@@ -48,6 +48,11 @@ func TestBuildAndAttachmentNodesShareLocalBlobStorage(t *testing.T) {
 			for _, entry := range container.Env {
 				env[entry.Name] = entry.Value
 			}
+			// Local uses the same elected workbench polling as production.
+			// A missing role would resolve as BFF and never acquire that lease.
+			if resource.Metadata.Name == "workbench" && env["MEMQL_NODE_TYPE"] != "workbench" {
+				t.Error("local repository polling has no eligible workbench node")
+			}
 			if env["MEMQL_AZURE_BLOB_CONTAINER"] != "memql" || env["MEMQL_AZURE_BLOB_AUTOCREATE"] != "true" {
 				t.Errorf("%s cannot use local build blob storage", resource.Metadata.Name)
 			}

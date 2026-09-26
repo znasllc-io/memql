@@ -784,6 +784,9 @@ Scheduled repository polling runs on one elected workbench replica, independentl
 of general maintenance leadership. If no workbench is available, polling waits;
 another node never attempts the build locally. Other scheduled automations keep
 their existing leadership.
+The supported local k3d stack includes its own workbench with this same role and
+lease. A standalone BFF, including a process with `MEMQL_NODE_TYPE` unset, does
+not poll repositories or serve as a fallback build node.
 
 The deployment rules are:
 
