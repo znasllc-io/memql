@@ -34,3 +34,12 @@ test('cooldown survives page loads and blocked browser storage',async()=>{for(co
 test('missing version headers never reload a page',async()=>{const b=await browser();b.latest=null;await b.tick(60000);assert.equal(b.reloads.length,0)});
 
 test('an invalid or future loop marker cannot disable updates',async()=>{for(const stamp of ['Infinity','999999999999999','-1']){const b=await browser({stored:stamp,url:'https://shop.example.test/?__memql_reload='+stamp});b.latest=B;await b.tick(32500);assert.equal(b.reloads.length,1)}});
+
+test('hash and query routers release deferred updates after navigation',async()=>{
+ for(const route of ['/cart?step=two#items','/cart?buyer=one#checkout']){
+  const b=await browser();await b.emit('input',{target:{closest:()=>true}});b.latest=B;
+  await b.tick(32500);assert.equal(b.reloads.length,0);await b.tick(2100);
+  b.history.pushState({},'',route);await b.tick(2500);
+  assert.equal(b.reloads.length,1);assert.equal(new URL(b.reloads[0]).hash,new URL(route,b.location.href).hash);
+ }
+});

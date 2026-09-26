@@ -16,7 +16,6 @@
   var confirmation;
   var lastCheck = 0;
   var lastReload = 0;
-  var pathname = location.pathname;
   var current = new URL(location.href);
   function reloadTime(value) {
     var time = Number(value);
@@ -34,6 +33,13 @@
     // The URL marker retains the loop guard when browser storage is disabled.
     lastReload = stamp;
   }
+
+  function routeKey() {
+    var url = new URL(location.href);
+    url.searchParams.delete(marker);
+    return url.pathname + url.search + url.hash;
+  }
+  var route = routeKey();
 
   function reload() {
     if (dirty || navigating || document.visibilityState === "hidden") return;
@@ -87,8 +93,8 @@
   }
 
   function routeChanged() {
-    if (location.pathname !== pathname) {
-      pathname = location.pathname;
+    if (routeKey() !== route) {
+      route = routeKey();
       dirty = false;
     }
     void check();
@@ -109,6 +115,7 @@
   window.addEventListener("focus", check);
   window.addEventListener("online", check);
   window.addEventListener("popstate", routeChanged);
+  window.addEventListener("hashchange", routeChanged);
   document.addEventListener("click", function (event) {
     if (event.target && event.target.closest && event.target.closest("a[href]")) void check();
   }, true);
