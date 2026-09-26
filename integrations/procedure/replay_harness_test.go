@@ -231,26 +231,39 @@ func installWork(t *testing.T, eng *fakeEngine) *liveWork {
 	eng.onWrite("updateWorkRun", merge(lw.runs, "runId"))
 	eng.onWrite("createWorkStep", merge(lw.steps, "stepId"))
 	eng.onWrite("updateWorkStep", merge(lw.steps, "stepId"))
-	eng.answer("workRunForOwner", func(c recordedCall, _ string) ([]map[string]any, string) {
+	// A run or a step the store holds is answered from it -- to its owner
+	// alone, as the owned tier answers -- and one it does not hold falls
+	// through to the fixture replies: a recording seeded by seedCorpus is
+	// read exactly as the corpus loader reads it.
+	eng.answerSome("workRunForOwner", func(c recordedCall, _ string) ([]map[string]any, string, bool) {
 		id, _ := parseCallArgs(t, c.Query)["runId"].(string)
 		lw.mu.Lock()
 		defer lw.mu.Unlock()
-		if row, ok := lw.runs[id]; ok && sameUser(str(row, "ownerUserId"), c.Actor) {
-			return []map[string]any{copyRow(t, row)}, ""
+		row, ok := lw.runs[id]
+		if !ok {
+			return nil, "", false
 		}
-		return nil, ""
+		if !sameUser(str(row, "ownerUserId"), c.Actor) {
+			return nil, "", true
+		}
+		return []map[string]any{copyRow(t, row)}, "", true
 	})
-	eng.answer("workStepsForOwnerRun", func(c recordedCall, _ string) ([]map[string]any, string) {
+	eng.answerSome("workStepsForOwnerRun", func(c recordedCall, _ string) ([]map[string]any, string, bool) {
 		runId, _ := parseCallArgs(t, c.Query)["runId"].(string)
 		lw.mu.Lock()
 		defer lw.mu.Unlock()
 		var out []map[string]any
+		held := false
 		for _, row := range lw.steps {
-			if str(row, "runId") == runId && sameUser(str(row, "ownerUserId"), c.Actor) {
+			if str(row, "runId") != runId {
+				continue
+			}
+			held = true
+			if sameUser(str(row, "ownerUserId"), c.Actor) {
 				out = append(out, copyRow(t, row))
 			}
 		}
-		return out, ""
+		return out, "", held
 	})
 	return lw
 }

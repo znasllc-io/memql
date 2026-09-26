@@ -66,9 +66,10 @@ type fakeEngine struct {
 	// composite tier's answer, zero rows and no error.
 	ownedBy map[string]string
 	// dynamic answers a read from live state, taking precedence over every
-	// static reply, and may answer the next page's cursor: a fake that
-	// cannot page cannot test a walk that must.
-	dynamic map[string]func(call recordedCall, cursor string) ([]map[string]any, string)
+	// static reply when it HANDLES the call, and may answer the next page's
+	// cursor: a fake that cannot page cannot test a walk that must. A call it
+	// does not handle falls through to the static replies.
+	dynamic map[string]func(call recordedCall, cursor string) ([]map[string]any, string, bool)
 	// hooks see every write to a construct after it is recorded -- how a
 	// test keeps the row a later read answers in step with what was written.
 	hooks map[string]func(call recordedCall)
@@ -77,13 +78,22 @@ type fakeEngine struct {
 func newFakeEngine() *fakeEngine {
 	return &fakeEngine{
 		replies: map[string][]map[string]any{}, fail: map[string]error{}, ownedBy: map[string]string{},
-		dynamic: map[string]func(recordedCall, string) ([]map[string]any, string){},
+		dynamic: map[string]func(recordedCall, string) ([]map[string]any, string, bool){},
 		hooks:   map[string]func(recordedCall){},
 	}
 }
 
-// answer installs a live read.
+// answer installs a live read that handles every call to the construct.
 func (e *fakeEngine) answer(name string, fn func(call recordedCall, cursor string) ([]map[string]any, string)) {
+	e.answerSome(name, func(c recordedCall, cursor string) ([]map[string]any, string, bool) {
+		rows, next := fn(c, cursor)
+		return rows, next, true
+	})
+}
+
+// answerSome installs a live read that handles only the calls it says it
+// does, the rest falling through to the static replies.
+func (e *fakeEngine) answerSome(name string, fn func(call recordedCall, cursor string) ([]map[string]any, string, bool)) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.dynamic[name] = fn
@@ -129,7 +139,9 @@ func (e *fakeEngine) Execute(ctx context.Context, query string) (*memql.ExecuteR
 	}
 	next := ""
 	if dyn != nil {
-		rows, next = dyn(c, memql.CursorFromContext(ctx))
+		if live, cursor, handled := dyn(c, memql.CursorFromContext(ctx)); handled {
+			rows, next = live, cursor
+		}
 	}
 	if hook != nil {
 		hook(c)
