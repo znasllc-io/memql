@@ -50,8 +50,8 @@ import { useWide } from "./useWide";
 // STEPS ARE THE RAIL, AT PAGE SCALE
 // ===========================================================================
 // The same `Rail` every other surface draws, with the same closed state set:
-// `done` is a check, `open` is a held ring (waiting on you), `current` is the
-// pulse (the cluster is working), `ahead` dims. Every step is one line --
+// `done` is a check and `ahead` dims. In a wizard, the displayed step
+// always has the filled accent mark; background work does not select a step. Every step is one line --
 // name, then its answer -- so a person can read back what they have said, in
 // order, without leaving the page; the open one carries its body beneath its
 // line, and the connector runs down the body's left edge, which is what holds
