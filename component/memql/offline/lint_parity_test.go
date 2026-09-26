@@ -1,0 +1,403 @@
+package offline_test
+
+// lint_parity_test.go proves the engine-parity lint pass (#2520) reports the
+// init-time DSL validation classes that dslimports (parse + import-graph) does
+// not model. Each fixture is a synthetic product overlay (generic concept /
+// mutation / logic names) mounted on the embedded core tree; LintUnifiedTree
+// runs the engine's own Init over the merged tree and returns every problem a
+// node would reject or skip at boot.
+//
+// The two lead witness classes the epic names:
+//   - a non-canonical @relationship type ("assignedTo"), rejected by
+//     normalizeRelationshipDefinition (relations.go / engine.go);
+//   - a mutation that declares an arg it never references, rejected by
+//     validateDeclaredUsage (declared_usage_validator.go).
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"testing/fstest"
+
+	memql "github.com/znasllc-io/memql/component/memql"
+)
+
+// diagsContain reports whether any diagnostic's message contains sub.
+func diagsContain(diags []memql.LintDiagnostic, sub string) bool {
+	for _, d := range diags {
+		if strings.Contains(d.Message, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+// lint runs the parity pass over root with every fixture domain declaring the
+// engine's own language line (memql#5357), so each test sees only the problem
+// its fixture is about.
+func lint(t *testing.T, root fstest.MapFS) []memql.LintDiagnostic {
+	t.Helper()
+	diags, _, err := memql.LintUnifiedTree(nil, withLanguageLines(root))
+	if err != nil {
+		t.Fatalf("LintUnifiedTree: %v", err)
+	}
+	return diags
+}
+
+// TestLintParity_CleanPackHasNoDiagnostics is the positive control (epic
+// acceptance: "a pack that lints clean must mount clean"). A well-formed
+// concept + mutation overlay produces zero engine-parity diagnostics.
+func TestLintParity_CleanPackHasNoDiagnostics(t *testing.T) {
+	root := fstest.MapFS{
+		"lintclean/concepts.memql": {Data: []byte(`@version("1.0.0")
+@description("A clean gizmo.")
+concept gizmo {
+  label  string  @required  @description("Gizmo label.")
+}
+`)},
+		"lintclean/mutations.memql": {Data: []byte(`use lintclean.concepts.{ gizmo }
+
+@description("Create a gizmo.")
+mutation gizmo createGizmo {
+  args {
+    gizmoId  string  @required
+    label    string  @required
+  }
+  insert {
+    id: args.gizmoId
+    args.label
+  }
+}
+`)},
+	}
+	diags := lint(t, root)
+	if len(diags) != 0 {
+		t.Fatalf("clean pack must mount clean; got diagnostics: %+v", diags)
+	}
+}
+
+// TestLintParity_NonCanonicalRelationshipType is witness class 1: a
+// @relationship whose type is outside the canonical set ("assignedTo" is
+// explicitly rejected). dslimports parses it fine; the engine rejects it at
+// Init.
+func TestLintParity_NonCanonicalRelationshipType(t *testing.T) {
+	root := fstest.MapFS{
+		"lintrel/concepts.memql": {Data: []byte(`@version("1.0.0")
+@description("A hub other rows point at.")
+concept hub {
+  name  string  @required  @description("Hub name.")
+}
+
+@version("1.0.0")
+@description("A gadget pointing at a hub via a NON-canonical relationship type.")
+concept gadget {
+  hubId  string  @required  @description("FK to the owning hub.")
+
+  @relationship(type="assignedTo", field="hubId", target=hub, direction="outgoing")
+}
+`)},
+	}
+	diags := lint(t, root)
+	if !diagsContain(diags, `relationship type "assignedTo" is invalid`) {
+		t.Fatalf("expected a non-canonical relationship-type diagnostic; got: %+v", diags)
+	}
+}
+
+// TestLintParity_DeclaredButUnusedMutationArg is witness class 2: a mutation
+// that declares an arg it never references as args.<name>. dslimports parses
+// it fine; the engine's declared-usage validator skips the construct at load,
+// which the strict-boot report surfaces.
+func TestLintParity_DeclaredButUnusedMutationArg(t *testing.T) {
+	root := fstest.MapFS{
+		"lintarg/concepts.memql": {Data: []byte(`@version("1.0.0")
+@description("A widget.")
+concept widget {
+  label  string  @required  @description("Widget label.")
+}
+`)},
+		"lintarg/mutations.memql": {Data: []byte(`use lintarg.concepts.{ widget }
+
+@description("Create a widget; declares an arg the body never references.")
+mutation widget createWidget {
+  args {
+    widgetId   string  @required
+    label      string  @required
+    unusedArg  string  @required
+  }
+  insert {
+    id: args.widgetId
+    args.label
+  }
+}
+`)},
+	}
+	diags := lint(t, root)
+	if !diagsContain(diags, "unusedArg") || !diagsContain(diags, "declared but never referenced") {
+		t.Fatalf("expected a declared-but-unused mutation-arg diagnostic naming unusedArg; got: %+v", diags)
+	}
+	// The skip carries per-construct attribution: the origin file is named.
+	namedFile := false
+	for _, d := range diags {
+		if d.File == "lintarg/mutations.memql" {
+			namedFile = true
+		}
+	}
+	if !namedFile {
+		t.Fatalf("expected the declared-usage diagnostic to name its origin file; got: %+v", diags)
+	}
+}
+
+// TestLintParity_LogicReadsEventWithoutDeclaringIt is a third validator class:
+// a logic body that reads the triggering event (args.event.*) without
+// declaring an `event` input. Rejected by validateLogicEventBinding at load.
+func TestLintParity_LogicReadsEventWithoutDeclaringIt(t *testing.T) {
+	root := fstest.MapFS{
+		"lintlogic/concepts.memql": {Data: []byte(`@version("1.0.0")
+@description("A marker concept so the domain carries a concept.")
+concept marker {
+  label  string  @required  @description("Marker label.")
+}
+`)},
+		"lintlogic/logic.memql": {Data: []byte(`
+@description("Reads the triggering event without declaring an event input.")
+logic decideThing {
+  return args.event.payload.partitionId
+}
+`)},
+	}
+	diags := lint(t, root)
+	if !diagsContain(diags, "decideThing") || !diagsContain(diags, "event") {
+		t.Fatalf("expected a logic-event-binding diagnostic naming decideThing + event; got: %+v", diags)
+	}
+}
+
+// TestLintParity_LogicArithmeticOverComparisonReadsByPrecedence pins the end
+// of the #2542 unparenthesized-comparison trap. Before edition 2026 a logic
+// body's `return a - b > 0` parsed as `a - (b > 0)` -- the trailing bare
+// identifier folded the comparison into the subtraction -- and the loader
+// refused it with the parenthesise-the-arithmetic guidance, which memqllint
+// surfaced. Edition 2026 has one precedence table (rule 11c): arithmetic binds
+// tighter than comparison, so the same text means `(a - b) > 0` and mounts
+// clean, as the parenthesized idiom below does.
+func TestLintParity_LogicArithmeticOverComparisonReadsByPrecedence(t *testing.T) {
+	root := fstest.MapFS{
+		"lintarith/concepts.memql": {Data: []byte(`@version("1.0.0")
+@description("A marker concept so the domain carries a concept.")
+concept marker {
+  label  string  @required  @description("Marker label.")
+}
+`)},
+		"lintarith/logic.memql": {Data: []byte(`@description("Returns an unparenthesized arithmetic-then-comparison, which reads by precedence.")
+logic ratioGate {
+  args {
+    a  int  @required
+    b  int  @required
+  }
+  return args.a - args.b > 0
+}
+`)},
+	}
+	diags := lint(t, root)
+	if len(diags) != 0 {
+		t.Fatalf("`args.a - args.b > 0` reads as `(args.a - args.b) > 0` and must mount clean; got: %+v", diags)
+	}
+}
+
+// TestLintParity_LogicParenthesizedComparisonIsClean: the parenthesized idiom
+// `(a - b) > 0` mounts clean, the same expression the unparenthesized form
+// above reads as.
+func TestLintParity_LogicParenthesizedComparisonIsClean(t *testing.T) {
+	root := fstest.MapFS{
+		"lintarithok/concepts.memql": {Data: []byte(`@version("1.0.0")
+@description("A marker concept so the domain carries a concept.")
+concept marker {
+  label  string  @required  @description("Marker label.")
+}
+`)},
+		"lintarithok/logic.memql": {Data: []byte(`
+@description("Returns the parenthesized working idiom.")
+logic ratioGateOK {
+  args {
+    a  int  @required
+    b  int  @required
+  }
+  return (args.a - args.b) > 0
+}
+`)},
+	}
+	diags := lint(t, root)
+	if len(diags) != 0 {
+		t.Fatalf("the parenthesized working idiom must mount clean; got: %+v", diags)
+	}
+}
+
+// TestLintParity_DuplicateConstruct is a fourth validator class, and the one
+// that exercises the report's Duplicates lane (distinct from the Skipped lane
+// the declared-usage witness hits): two mutations with the same name land in
+// the same registry and silently last-wins, which the per-kind uniqueness gate
+// flags.
+func TestLintParity_DuplicateConstruct(t *testing.T) {
+	root := fstest.MapFS{
+		"lintdup/concepts.memql": {Data: []byte(`@version("1.0.0")
+@description("A widget.")
+concept widget {
+  label  string  @required  @description("Widget label.")
+}
+`)},
+		"lintdup/mutations.memql": {Data: []byte(`use lintdup.concepts.{ widget }
+
+@description("Create a widget.")
+mutation widget createWidget {
+  args {
+    widgetId  string  @required
+    label     string  @required
+  }
+  insert {
+    id: args.widgetId
+    args.label
+  }
+}
+`)},
+		// A second file re-declaring the same construct name in the same
+		// registry -- the cross-file duplicate the per-kind uniqueness gate
+		// flags (same-file re-declarations collapse to one origin).
+		"lintdup/mutations_extra.memql": {Data: []byte(`use lintdup.concepts.{ widget }
+
+@description("Create a widget -- a duplicate name in a second file.")
+mutation widget createWidget {
+  args {
+    widgetId  string  @required
+    label     string  @required
+  }
+  insert {
+    id: args.widgetId
+    args.label
+  }
+}
+`)},
+	}
+	diags := lint(t, root)
+	if !diagsContain(diags, "duplicate") || !diagsContain(diags, "createWidget") {
+		t.Fatalf("expected a duplicate-construct diagnostic naming createWidget; got: %+v", diags)
+	}
+}
+
+// TestLintParity_ShapeBarePayloadFieldIsNotTheRemovedPrefixForm covers the
+// unifiedShapeLoader parse-time checks and pins the removed-payload-prefix
+// rule: the check fires only on the removed `payload.<prop>` prefix (WITH the
+// dot), never on a dotless bare name "payload". Lint and the loader share the
+// one convertShapeDecl code path, so they stay in lockstep.
+//
+// The concept here deliberately does NOT declare a top-level property named
+// "payload". It used to, and that made this test pass for the wrong reason:
+// ensureReservedFieldsNotDeclared rejects a reserved top-level "payload", the
+// concept failed to build, and the unified loader dropped it with nothing but
+// a log line -- so `lint` returned zero diagnostics and the shape rule under
+// test was never exercised at all. memql#2909 made that skip a diagnostic,
+// which is what surfaced it.
+//
+// The scenario the old fixture described is unreachable: no concept can
+// declare a top-level "payload", so no shape can project one that exists --
+// which is why this asserts the ABSENCE of the prefix diagnostic rather than
+// the absence of all diagnostics. Since memql#3621 a body path that names no
+// declared field IS reported (it would render null forever), so the fixture
+// draws exactly one diagnostic, from the other rule.
+func TestLintParity_ShapeBarePayloadFieldIsNotTheRemovedPrefixForm(t *testing.T) {
+	root := fstest.MapFS{
+		"lintpayload/concepts.memql": {Data: []byte(`@version("1.0.0")
+@description("A record.")
+concept record {
+  label    string  @required  @description("A field.")
+}
+`)},
+		"lintpayload/shapes.memql": {Data: []byte(`use lintpayload.concepts.{ record }
+
+@description("Projects the field literally named payload by bare name.")
+@row
+shape record recordView {
+  row.id
+  payload
+  label
+}
+`)},
+	}
+	diags := lint(t, root)
+	if diagsContain(diags, "removed `payload.` prefix") {
+		t.Fatalf("a dotless bare `payload` must not be mistaken for the removed prefix form; got: %+v", diags)
+	}
+	// The other rule does fire, and should: `payload` is not a declared field
+	// of the concept, so the projection would render null on every read.
+	if !diagsContain(diags, "does not declare") {
+		t.Fatalf("expected the undeclared-field diagnostic for the bare `payload` projection; got: %+v", diags)
+	}
+}
+
+// TestLintParity_ShapeRemovedPayloadPrefixRejected is the negative control for
+// the fix above: the genuine removed form -- an explicit `payload.<prop>`
+// prefix -- is still rejected by the shape loader, so the fix did not
+// over-relax the rule.
+func TestLintParity_ShapeRemovedPayloadPrefixRejected(t *testing.T) {
+	root := fstest.MapFS{
+		"lintpayloadbad/concepts.memql": {Data: []byte(`@version("1.0.0")
+@description("A record.")
+concept record {
+  label  string  @required  @description("A field.")
+}
+`)},
+		"lintpayloadbad/shapes.memql": {Data: []byte(`use lintpayloadbad.concepts.{ record }
+
+@description("Uses the removed payload. prefix form.")
+@row
+shape record recordBad {
+  row.id
+  payload.label
+}
+`)},
+	}
+	diags := lint(t, root)
+	if !diagsContain(diags, "removed `payload.` prefix") {
+		t.Fatalf("expected the removed payload-prefix form to still be rejected; got: %+v", diags)
+	}
+}
+
+// TestLintParity_EngineOwnTreeIsClean guards the healthy path (epic
+// acceptance item 5): with no overlay mounted, LintUnifiedTree over the
+// embedded core tree returns zero diagnostics -- the same invariant
+// TestStrictBoot_EmbeddedTreeIsClean asserts, exercised through the lint
+// entry point so the lint gate can never false-fail a healthy engine.
+func TestLintParity_EngineOwnTreeIsClean(t *testing.T) {
+	// An empty root mounts nothing, so Init runs over the embedded tree alone.
+	diags := lint(t, fstest.MapFS{})
+	if len(diags) != 0 {
+		t.Fatalf("embedded core tree must lint clean; got: %+v", diags)
+	}
+}
+
+// TestLintParity_RepositoryTreeWithInTreePack is the memql#4190 regression
+// at the LintUnifiedTree altitude: run the full engine-parity lint over the
+// REPOSITORY'S OWN dsl/ directory, in a process where the harness pack's
+// init() has run (importing dsl from this package guarantees it). Before
+// the in-tree-pack skip in MountOverlayDomains, this exact call -- the one
+// `go run ./cmd/memqllint dsl/` makes -- panicked on the duplicate
+// "harness" registration, and only CI's dsl-lint step could see it because
+// no in-process test walked the real tree with the pack init loaded.
+//
+// Assertions: no panic, no error, ZERO diagnostics (the repo's own tree is
+// gated lint-clean in CI, so anything here is a real regression), and
+// harness absent from skippedCore -- it is not core, and its registered
+// tree IS the validated content.
+func TestLintParity_RepositoryTreeWithInTreePack(t *testing.T) {
+	diags, skippedCore, err := memql.LintUnifiedTree(nil, os.DirFS(filepath.Join("..", "..", "..", "dsl")))
+	if err != nil {
+		t.Fatalf("LintUnifiedTree over the repository dsl/ tree: %v", err)
+	}
+	for _, d := range diags {
+		t.Errorf("repository tree must lint clean; got %s: %s", d.File, d.Message)
+	}
+	for _, d := range skippedCore {
+		if d == "harness" {
+			t.Errorf("harness reported through skippedCore; it is an in-tree pack, not a core domain (memql#4190)")
+		}
+	}
+}

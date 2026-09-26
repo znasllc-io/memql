@@ -1,11 +1,7 @@
 package memql
 
 import (
-	"io"
-	"log/slog"
 	"testing"
-
-	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // Story 6 (#2304 / ADR §2.2): the in-memory-vs-SQL guardrail lint warns when a
@@ -155,21 +151,8 @@ func TestInMemoryScanWarnsThroughDirectiveWrapper(t *testing.T) {
 // that trips the warning. Informative: findings are logged, never failed --
 // the lint is a warning and must not break load.
 func TestInMemoryScanOverFullDSL(t *testing.T) {
-	if _, err := LoadUnifiedConcepts(nil); err != nil {
-		t.Fatalf("LoadUnifiedConcepts: %v", err)
-	}
-	registry := concept.DefaultRegistry()
-	if registry == nil || len(registry.List()) == 0 {
-		t.Fatal("concept registry is empty after LoadUnifiedConcepts")
-	}
-	eng, err := New(nil)
-	if err != nil {
-		t.Fatalf("construct engine: %v", err)
-	}
-	eng.Logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
-	if err := eng.Init(registry); err != nil {
-		t.Fatalf("engine.Init over full DSL tree: %v", err)
-	}
+	eng := sharedDblessEngine(t)
+
 	findings := InMemoryCollectionScanFindings(eng.Functions().Snapshot())
 	for _, f := range findings {
 		t.Logf("WARNING: %s", f.Message())
