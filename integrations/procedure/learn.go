@@ -286,6 +286,10 @@ func actionsOf(insts []instance) [][]proc.Action {
 // builtin, for the proving driver and for Go callers. The caller is gated
 // exactly as the builtin is: the run's owner, or the cluster's maintenance
 // principal.
+//
+// It does NOT run the shadow comparison the builtin runs after an unchanged
+// lift: a Go caller compares with ShadowCompare, and a lift that compared as
+// well would count the same recording twice.
 func (i *Integration) LearnFromRun(ctx context.Context, runId string) (LearnResult, error) {
 	return i.learnFromRun(ctx, strings.TrimSpace(runId), LevelAction)
 }
@@ -295,11 +299,32 @@ func (i *Integration) handleLearnFromRun(ctx context.Context, args map[string]an
 	if runId == "" {
 		return nil, fmt.Errorf("procedure.learnFromRun: runId is required")
 	}
-	res, err := i.learnFromRun(ctx, runId, levelArg(args))
+	res, run, err := i.learnFromRunRow(ctx, runId, levelArg(args))
 	if err != nil {
 		return nil, err
 	}
-	return i.reply(learnReply(res)), nil
+	reply := learnReply(res)
+	// THE SHADOW COMPARISON, after the lift and only when it left the version
+	// UNCHANGED (shadow.go): a recording that changed the procedure is part
+	// of the new version's corpus, not evidence about it. A comparison that
+	// fails is reported beside the lift rather than failing it -- the lift
+	// happened, and the automation must not be retried into a second one.
+	if res.Lift == LiftUnchanged && run != nil {
+		outs, serr := i.shadowCompareRun(ctx, run)
+		reply["shadowCompared"] = len(outs)
+		matched := 0
+		for _, o := range outs {
+			if o.Match {
+				matched++
+			}
+		}
+		reply["shadowMatched"] = matched
+		if serr != nil {
+			i.log().Warn("procedure: the shadow comparison after a lift failed", "runId", runId, "error", serr)
+			reply["shadowError"] = serr.Error()
+		}
+	}
+	return i.reply(reply), nil
 }
 
 // learnFromRun is the handler body.
@@ -322,27 +347,36 @@ func (i *Integration) handleLearnFromRun(ctx context.Context, args map[string]an
 // can never own a row, so comparing it with the run's owner would refuse every
 // automation-driven lift -- which is how the feature stayed inert.
 func (i *Integration) learnFromRun(ctx context.Context, runId string, level Level) (LearnResult, error) {
+	res, _, err := i.learnFromRunRow(ctx, runId, level)
+	return res, err
+}
+
+// learnFromRunRow is learnFromRun, answering the run row it read beside the
+// result -- the row the learn handler's shadow comparison is made over. The
+// row is nil for an answer that learned nothing from it (a replay run, a run
+// with no goal signature).
+func (i *Integration) learnFromRunRow(ctx context.Context, runId string, level Level) (LearnResult, map[string]any, error) {
 	res := LearnResult{RunId: runId, Level: level}
 	if runId == "" {
-		return res, fmt.Errorf("procedure.learnFromRun: runId is required")
+		return res, nil, fmt.Errorf("procedure.learnFromRun: runId is required")
 	}
 	run, err := i.readRunForCaller(ctx, runId)
 	if err != nil {
-		return res, err
+		return res, nil, err
 	}
 	if run == nil {
-		return res, fmt.Errorf("procedure.learnFromRun: run %s is not readable as the caller -- "+
+		return res, nil, fmt.Errorf("procedure.learnFromRun: run %s is not readable as the caller -- "+
 			"learning runs on the owner's own corpus", runId)
 	}
 	owner := strings.TrimSpace(str(run, "ownerUserId"))
 	if owner == "" {
-		return res, fmt.Errorf("procedure.learnFromRun: run %s has no owner, so there is nobody whose catalog a procedure could be filed in", runId)
+		return res, nil, fmt.Errorf("procedure.learnFromRun: run %s has no owner, so there is nobody whose catalog a procedure could be filed in", runId)
 	}
 	if ac, ok := auth.AccessFromContext(ctx); ok && ac != nil && !ac.Synthetic && !sameUser(ac.UserId, owner) {
 		// Belt and braces over the owned read: a procedure learned from
 		// somebody else's run would be written into their catalog under
 		// their name.
-		return res, fmt.Errorf("procedure.learnFromRun: run %s belongs to another person; "+
+		return res, nil, fmt.Errorf("procedure.learnFromRun: run %s belongs to another person; "+
 			"a procedure is learned from its owner's corpus and filed in their catalog", runId)
 	}
 	res.OwnerUserId = owner
@@ -352,16 +386,16 @@ func (i *Integration) learnFromRun(ctx context.Context, runId string, level Leve
 		// that succeeds, replays included, and this is the ordinary answer
 		// for one.
 		res.Reason = "a replay run is not a recording"
-		return res, nil
+		return res, nil, nil
 	}
 	sig := strings.TrimSpace(str(run, "goalSignature"))
 	if sig == "" {
 		res.Reason = "the run carries no goalSignature, so there is no corpus to mine it against"
-		return res, nil
+		return res, nil, nil
 	}
 	learned, err := i.learnAndPersist(ctx, corpusKey{OwnerUserId: owner, GoalSignature: sig, Level: level})
 	learned.RunId = runId
-	return learned, err
+	return learned, run, err
 }
 
 // readRunForCaller reads one run the way the caller is entitled to: a person

@@ -108,6 +108,13 @@ type ReplayRequest struct {
 	// runs DRY -- nothing is dispatched on anybody's machine -- and compares
 	// the calls it would have made with these.
 	AppArgs []map[string]any
+	// Unfit is, for shadow, why the recording is NOT an instance of the
+	// procedure -- no run of its actions carries the procedure's steps, or
+	// one does and a value the procedure holds differs. Set, the comparison
+	// is a MISMATCH, recorded like any other, and nothing is replayed.
+	Unfit string
+	// UnfitStep is the first template step the recording lacked, with Unfit.
+	UnfitStep int
 	// StepKey is the goal run's step that asked for the replay (the
 	// replayLearnedProcedure statement). It keys the replay run, so a resumed
 	// goal run finds the replay it already started, and it names the step the
@@ -326,6 +333,16 @@ func (r *replay) run(ctx context.Context) {
 	if finished := r.open(ctx); finished {
 		return
 	}
+	if r.mode == ReplayShadow && strings.TrimSpace(r.req.Unfit) != "" {
+		// A RECORDING THE PROCEDURE DOES NOT FIT IS A MISMATCH: the app did
+		// this goal some other way, and a streak that ignored it would
+		// promote a procedure on the recordings it happens to fit.
+		r.out.Diverged = true
+		r.out.DivergedStep = r.req.UnfitStep
+		r.out.Diagnosis = strings.TrimSpace(r.req.Unfit)
+		r.finish(ctx)
+		return
+	}
 	if !r.checkTarget(ctx) || !r.bindParameters(ctx) || !r.checkPreconditions(ctx) {
 		return
 	}
@@ -469,11 +486,15 @@ func terminalRunStatus(s string) bool {
 	return false
 }
 
-// stepReceipt is a step a resumed replay run already ran.
+// stepReceipt is a step a replay run already ran, as its receipt says. It
+// carries what a resume needs to go on -- the observation to compare and the
+// output a later data-flow hole reads -- and what the app must be told about
+// it if the goal is handed back: the call, its key and whether it reached
+// anything.
 type stepReceipt struct {
 	observation work.StepObservation
 	output      any
-	delivered   bool
+	completed   CompletedStep
 }
 
 // loadReceipts reads the steps a resumed replay run already ran. A step with a
@@ -490,24 +511,29 @@ func (r *replay) loadReceipts(actorCtx context.Context) {
 		if status := str(row, "status"); status != "done" && status != "skipped" {
 			continue
 		}
-		var rec stepReceipt
+		key := str(row, "key")
 		payload := obj(obj(row, "result"), "result")
+		rec := stepReceipt{output: payload["output"]}
 		if o := payload["observation"]; o != nil {
 			_ = decodeInto(o, &rec.observation)
 		}
-		rec.output = payload["output"]
-		rec.delivered, _ = payload["delivered"].(bool)
-		r.receipts[str(row, "key")] = rec
+		side, _ := payload["sideEffect"].(bool)
+		rec.completed = CompletedStep{
+			Index: intOf(row, "seq"), Tool: str(payload, "tool"), IdempotencyKey: str(row, "idempotencyKey"),
+			Summary: str(payload, "summary"), SideEffect: side,
+		}
+		r.receipts[key] = rec
 	}
 }
 
 // reenterFinished answers a replay whose run already finished, from the run
-// row, running and counting nothing. One case still acts: a serving replay
-// that stopped and never handed its goal over -- its node died between the
-// two -- hands it over now, because the goal still has to be served.
+// row, running and counting nothing -- the ladder heard of it when it
+// finished. One case still acts: a serving replay whose goal was never handed
+// back -- its node died between stopping and the hand-over, or the abandoned
+// sweep closed it mid-flight -- hands the goal over now, because the goal
+// still has to be served, and tells the app every step the receipts say ran.
 func (r *replay) reenterFinished(ctx context.Context, run map[string]any) {
 	o := obj(run, "outcome")
-	r.outcome = o
 	r.out.AlreadyDone = true
 	r.out.Served = str(o, "servedBy") == "procedure"
 	r.out.Match, _ = o["match"].(bool)
@@ -524,10 +550,32 @@ func (r *replay) reenterFinished(ctx context.Context, run map[string]any) {
 		r.out.Fallback = FallbackOutcome{ChildRunId: child}
 		return
 	}
-	if r.mode == ReplayShadow || r.out.Served || o == nil {
+	if r.mode == ReplayShadow || r.out.Served {
 		return
 	}
-	r.fallBack(ctx, Guidance{Diagnosis: r.out.Diagnosis, Completed: r.out.Completed}, r.out.Diverged)
+	if o == nil {
+		// Closed with no outcome: the run never reached its own finish. Its
+		// receipts are the only record of what ran.
+		r.loadReceipts(ownerActor(ctx, r.req.OwnerUserId))
+		for idx := range r.c.template.Steps {
+			if rec, ok := r.receipts[replayStepKey(idx)]; ok {
+				r.out.Completed = append(r.out.Completed, rec.completed)
+			}
+		}
+		r.out.Diagnosis = fmt.Sprintf("A replay of this goal was interrupted (its run is %s) after %d step(s), and the app takes it from there.",
+			firstNonEmpty(str(run, "status"), "closed"), len(r.out.Completed))
+		r.out.DivergedStep = len(r.out.Completed)
+		o = r.baseOutcome()
+		o["interrupted"] = true
+		o["diagnosis"] = r.out.Diagnosis
+		o["completed"] = completedList(r.out.Completed)
+	}
+	r.outcome = o
+	started := r.out.Diverged || len(r.out.Completed) > 0
+	if started && !r.out.Diverged {
+		r.out.DivergedStep = len(r.out.Completed)
+	}
+	r.fallBack(ctx, Guidance{Diagnosis: r.out.Diagnosis, Completed: r.out.Completed}, started)
 	r.recordHandover(ctx)
 }
 
@@ -753,17 +801,18 @@ func (r *replay) runStep(ctx context.Context, idx int) bool {
 		return r.diverge(idx, idem, fmt.Sprintf("Step %d (%s: %s) would not have made the call the procedure names: %s.", idx, step.Tool, summary, why), false)
 	}
 
+	done := CompletedStep{Index: idx, Tool: step.Tool, IdempotencyKey: idem, Summary: summary}
 	var (
-		obs       work.StepObservation
-		output    any
-		delivered bool
+		obs    work.StepObservation
+		output any
 	)
 	receipt, ran := r.receipts[key]
 	switch {
 	case ran:
 		// A RECEIPT EXISTS: this step ran before this replay run was resumed.
 		// It is never dispatched again; what it reported then is compared now.
-		obs, output, delivered = receipt.observation, receipt.output, receipt.delivered
+		obs, output = receipt.observation, receipt.output
+		done.SideEffect = receipt.completed.SideEffect
 	case r.dry:
 		r.writeStepIntent(ctx, idx, key, idem)
 	default:
@@ -774,10 +823,14 @@ func (r *replay) runStep(ctx context.Context, idx int) bool {
 			Sandbox: r.mode == ReplayShadow,
 		})
 		if derr != nil {
-			r.writeStepReceipt(ctx, key, "failed", nil, nil, false, derr.Error(), false, "")
+			r.writeStepReceipt(ctx, key, "failed", done, nil, nil, derr.Error(), false, "")
 			return r.diverge(idx, idem, fmt.Sprintf("Step %d (%s: %s) could not be run: %v.", idx, step.Tool, summary, derr), false)
 		}
-		obs, output, delivered = res.Observation, res.Output, res.Delivered
+		obs, output = res.Observation, res.Output
+		// A SIDE EFFECT is anything the step may have touched: what its
+		// footprint says a call of its kind writes, or what the dispatcher
+		// reports reached the world. The app is told not to repeat it.
+		done.SideEffect = res.Delivered || work.ActionFootprint(step.Tool, ".", pathsInArgs(args)).IsSideEffect()
 	}
 
 	match, why := r.compare(idx, step.Tool, args, obs)
@@ -786,7 +839,7 @@ func (r *replay) runStep(ctx context.Context, idx int) bool {
 		if r.dry {
 			status = "skipped"
 		}
-		r.writeStepReceipt(ctx, key, status, &obs, output, delivered, "", match, strings.Join(why, "; "))
+		r.writeStepReceipt(ctx, key, status, done, &obs, output, "", match, strings.Join(why, "; "))
 	}
 	if match {
 		r.trace = append(r.trace, symbol)
@@ -805,10 +858,7 @@ func (r *replay) runStep(ctx context.Context, idx int) bool {
 		return r.diverge(idx, idem, fmt.Sprintf("Step %d (%s: %s) did not match %s: %s.", idx, step.Tool, summary, what, reason), true)
 	}
 	r.outputs[idx] = output
-	r.out.Completed = append(r.out.Completed, CompletedStep{
-		Index: idx, Tool: step.Tool, IdempotencyKey: idem, Summary: summary,
-		SideEffect: !r.dry && (delivered || work.ActionFootprint(step.Tool, ".", pathsInArgs(args)).IsSideEffect()),
-	})
+	r.out.Completed = append(r.out.Completed, done)
 	return true
 }
 
@@ -1227,9 +1277,15 @@ func (r *replay) writeStepIntent(ctx context.Context, idx int, key, idem string)
 }
 
 // writeStepReceipt writes a step's receipt: what it reported, the output a
-// later step or a resume needs, and whether it matched.
-func (r *replay) writeStepReceipt(ctx context.Context, key, status string, obs *work.StepObservation, output any, delivered bool, errMsg string, passed bool, message string) {
-	payload := map[string]any{"delivered": delivered}
+// later step or a resume needs, whether it matched -- and the call it made,
+// its tool and whether it may have touched anything, which is what a hand-back
+// after an interruption tells the app not to repeat.
+func (r *replay) writeStepReceipt(ctx context.Context, key, status string, done CompletedStep, obs *work.StepObservation, output any, errMsg string, passed bool, message string) {
+	payload := map[string]any{
+		"tool":       done.Tool,
+		"summary":    done.Summary,
+		"sideEffect": done.SideEffect,
+	}
 	if obs != nil {
 		if o, err := asObject(obs); err == nil {
 			payload["observation"] = o

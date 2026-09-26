@@ -29,7 +29,6 @@ import (
 	"log/slog"
 	"time"
 
-	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	proc "github.com/znasllc-io/memql/component/procedure"
 	"github.com/znasllc-io/memql/component/work"
@@ -227,8 +226,9 @@ func (i *Integration) log() *slog.Logger {
 
 // Capabilities are the builtins dsl/procedure/builtins.memql declares. A
 // capability the DSL names and the registry lacks is a BOOT failure on every
-// node type -- which is why the four the certification ladder adds are
-// registered here, as stubs, before their executors exist.
+// node type, so every one is registered here -- and every one is a real
+// executor: a capability that merely resolved and refused by name would pass
+// the boot audit with the certification ladder inert.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
 		{
@@ -257,43 +257,47 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"level":         "integer -- 1 actions (default), 2 automation invocations",
 			},
 		},
-		// THE FOUR BELOW ARE STUBS until the replay runner lands (plan Task
-		// 5), and they say so in their error: a capability that resolves
-		// and refuses by name is honest, where one missing from the
-		// registry fails every node's boot the moment dsl/procedure names it.
 		{
-			Name:        "step",
-			Description: "The statement every step of a rendered learned procedure is. Refuses outside a replay.",
-			Handler:     notWiredYet("step"),
+			Name: "step",
+			Description: "The statement every step of a learned procedure's rendered SOURCE is. It always refuses (" +
+				"\"" + stepRefusal + "\"): a learned procedure is served through the certification ladder by its " +
+				"stored template, and its source is the artifact a person reads and approves, never an automation " +
+				"that runs.",
+			Handler: i.handleProcedureStep,
 			ArgsSchema: map[string]string{
 				"step": "integer (required)", "tool": "string (required)", "args": "object",
 			},
 		},
 		{
-			Name:        "replay",
-			Description: "Serve the current work run from a learned procedure on a serving rung.",
-			Handler:     notWiredYet("replay"),
-			ArgsSchema:  map[string]string{"constructId": "string (required)"},
+			Name: "replay",
+			Description: "Serve the current work run from one of its owner's learned procedures -- the one " +
+				"statement of replayLearnedProcedure. Refuses outside a work run and on another person's " +
+				"construct; re-decides the rung now, replays a trusted or canary procedure's template step by " +
+				"step on the target its footprint names, and hands the goal to the app with the partial trace " +
+				"when it cannot start or diverges. Returns {servedBy, constructId, rung, diverged, " +
+				"startRefused, repairRunId, replayRunId, reason}; a goal neither served fails the run.",
+			Handler:    i.handleProcedureReplay,
+			ArgsSchema: map[string]string{"constructId": "string (required) -- the learned procedure to replay"},
 		},
 		{
-			Name:        "ladderSweep",
-			Description: "The certification ladder's demotion or retirement sweep.",
-			Handler:     notWiredYet("ladderSweep"),
-			ArgsSchema:  map[string]string{"sweep": "string (required) -- demotion or retirement"},
+			Name: "ladderSweep",
+			Description: "The certification ladder's demotion or retirement sweep over every owner's learned " +
+				"procedures, each read and written as its owner; only a changed procedure is written. Runs " +
+				"only as the cluster's maintenance principal. Returns {sweep, owners, procedures, examined, " +
+				"demoted, retired, changed, errors}.",
+			Handler:    i.handleLadderSweep,
+			ArgsSchema: map[string]string{"sweep": "string (required) -- demotion or retirement"},
 		},
 		{
-			Name:        "decidePromotion",
-			Description: "Apply a decided procedurePromotion approval to the ladder.",
-			Handler:     notWiredYet("decidePromotion"),
-			ArgsSchema:  map[string]string{"approvalId": "string (required)"},
+			Name: "decidePromotion",
+			Description: "Apply a decided procedurePromotion approval to the ladder: approved moves the " +
+				"procedure from shadow to canary, rejected keeps it in shadow to re-earn the proposal. " +
+				"Idempotent -- a construct no longer waiting on this approval, no longer in shadow, or no " +
+				"longer the approved version is left as it is. Runs only as the cluster's maintenance " +
+				"principal. Returns {approvalId, applied, from, to, reason}.",
+			Handler:    i.handleDecidePromotion,
+			ArgsSchema: map[string]string{"approvalId": "string (required)"},
 		},
-	}
-}
-
-// notWiredYet is a capability that exists and refuses by name.
-func notWiredYet(name string) func(context.Context, map[string]any, int) ([]memorynodes.MemoryNode, error) {
-	return func(context.Context, map[string]any, int) ([]memorynodes.MemoryNode, error) {
-		return nil, fmt.Errorf("procedure: %s is not wired yet", name)
 	}
 }
 

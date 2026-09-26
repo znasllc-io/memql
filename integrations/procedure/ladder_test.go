@@ -25,8 +25,8 @@ func TestReadLadderReadsEveryEvidenceFieldUnderTheOwner(t *testing.T) {
 	eng := newFakeEngine()
 	eng.reply("authoringConstructById", map[string]any{
 		"id": ladderConstruct, "ladder": "canary", "shadowMatches": float64(4), "canaryMatches": float64(2),
-		"distinctBindings":    map[string]any{"s0.command.7": []any{"sha256:aa", "sha256:bb"}},
-		"failures":            float64(1), "insufficient": float64(0),
+		"distinctBindings": map[string]any{"s0.command.7": []any{"sha256:aa", "sha256:bb"}},
+		"failures":         float64(1), "insufficient": float64(0),
 		"promotionApprovalId": "v1:work:approval:p1", "lastReplayAt": "2026-09-22T10:00:00Z",
 	})
 	st, row, err := newTestIntegration(eng).readLadder(context.Background(), testOwner, ladderConstruct)
