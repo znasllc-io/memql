@@ -28,13 +28,81 @@ strings where object options were required, then ignored the write error and
 parked the run on a nonexistent approval. Failed periodic maintenance now ends
 as failed, retries on its next schedule, and only proven unowned scheduled waits
 with missing approvals are closed by recovery. User goals and real approvals
-keep their existing lifecycle. The recovery query materializes current version
-keys, probes the partial nonterminal index, and only then fetches bounded
-payloads. Production Timescale verification found that a correlated concept
-reference in the earlier anti-join forced historical heap reads despite the
-index. The current-key plan completed in 1.3 seconds with 104,018 logical runs
-and 5,922 unfinished runs, while the earlier plan exceeded the eight-second
-statement limit. It no longer reads completed payload histories every two minutes.
+keep their existing lifecycle.
+
+## Bounded current-run recovery
+
+The first covering-index repair improved warm queries but still traversed every
+current run ID. Cold production repeats exceeded the eight-second serving
+statement limit even after ordinary vacuum. Recovery now uses a small derived
+`work_run_heads` table with a partial index containing only unfinished heads.
+It fetches at most 2,000 canonical payloads by exact version keys; terminal
+history is not part of the recurring read. Canonical payloads still pass row
+admission before leaving the integration.
+
+The database migration installs transactional statement triggers on
+`MemoryNodes`. INSERT/UPDATE/DELETE append affected IDs to
+`work_run_head_events`; transition tables coalesce many deleted historical
+versions into one event per ID per statement. This requires TimescaleDB 2.18+
+(the production baseline is 2.29.1). Source writers never acquire projector or
+cross-run locks. A single projector claims the state row with `NOWAIT`, resolves
+current versions using the existing latest-row index, and deletes only the
+exact event sequences it consumed. Sequence allocation is not commit order.
+
+Backfill cursor, heads and consumed events commit together in bounded batches.
+Capture begins before backfill, including changes behind its cursor. The
+recovery reader refreshes and reads within the same repeatable-read transaction;
+a concurrent projector serialization failure retries the whole transaction.
+The reader commits up to four 1,000-event/ID batches per two-minute sweep and
+returns an explicit catching-up error if a visible backlog remains. It never
+reports incomplete heads as a cluster with no waiting work. This provides up to
+2,000 dirty events/minute of catch-up capacity; monitor arrival rate against
+that capacity as the cluster grows.
+
+Bootstrap is deliberately outside the startup migration. Before accepting an
+upgrade with a large history, repeatedly run this bounded transaction on the
+primary until `ready` is true (each iteration must commit independently):
+
+```sql
+BEGIN ISOLATION LEVEL REPEATABLE READ;
+SET LOCAL statement_timeout = '8s';
+SET LOCAL lock_timeout = '1s';
+SELECT refresh_work_run_heads(1000);
+COMMIT;
+```
+
+The result exposes `backfillComplete`, processed ID/event counts,
+`pendingEventsAtLeast` (capped at 10,001), and `oldestPendingAt`. Investigate
+persistent backlog/age growth instead of increasing the serving timeout.
+Interrupted bootstrap resumes from its committed cursor. Normal sweeps also
+advance bootstrap, but a 104,000-ID history takes many ticks without the
+operator catch-up loop. Missing tables/state or disabled capture triggers fail
+visibly. TRUNCATE of source, heads or events invalidates and resets the
+projection. Direct edits to derived tables, disabled triggers, writes directly
+to chunks, and administrative `drop_chunks` are outside normal retention:
+repair capture, then `TRUNCATE work_run_heads` and backfill before recovery.
+Normal exact-version retention DELETEs are captured transactionally.
+
+Keep parent key statistics and autovacuum current too. They benefit other reads
+and the one-time backfill; they no longer determine whether recovery must scan
+100,000 completed IDs on every tick.
+
+## Current Fleet reads
+
+The Fleet readiness and stale-connection sweeps also encountered eight-second
+cancellations. Their current-key subquery was fast, but PostgreSQL could reorder
+an ordinary join into a hash join over historical JSON payloads after inherited
+statistics changed. The production plan estimated 264,635 registration history
+rows although only 13 current machines were needed.
+
+The shared DSL reader and latest-version recheck now use a lateral exact-version
+probe with `LIMIT 1`. This keeps payload access tied to each current key while
+preserving outer authorization, filters, ordering, pagination and as-of selection.
+A production read-only test returned all 13 machines in about 33 ms. A real
+Timescale regression captures and explains the actual Bun SQL with dense machine
+history and many unrelated IDs, verifying indexed payload probes rather than a
+historical heap scan. Parent statistics and vacuum remain scheduled maintenance;
+correctness and bounded payload access do not depend on a planner setting.
 
 ## Safeguards
 

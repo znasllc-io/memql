@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/uptrace/bun"
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/work"
@@ -707,49 +708,25 @@ func (i *Integration) foldSummaries(ctx context.Context, expired map[string][]ma
 
 // runsInFlight is every run at a non-terminal status, whoever owns it.
 //
-// Materialize current keys using the covering latest-row index, then probe the
-// partial recovery index before fetching bounded payloads. Correlating a
-// historical candidate's concept into an anti-join forces heap reads on
-// Timescale chunks because the partial index only stores id and createdAt.
-// Starting from current keys also avoids probing for newer versions once per
-// historical running state. Terminal histories never enter the payload join.
-//
-// staged-data: MUST-NOT-GATE -- a staged run SKIPPED HERE IS NEVER SWEPT. This
-// is the only reader allowed to close a run whose node died and the only one
-// that resumes a due timer, and nothing looks at that run again: it sits at
-// `running` or `waiting` forever while the person who asked for it watches a
-// goal that simply stopped, with no error anywhere. The staged tier withholds
-// a concept's rows from READERS until it is trained; it was never meant to
-// withhold a row from the cluster's own recovery, and the two sweeps are the
-// recovery. Row-level authorization is applied instead, per row as fetched
-// (selectAdmitted below), which is the question that IS answerable here.
-// These statements execute through Bun, whose formatter consumes ? arguments.
-// PostgreSQL $n placeholders would reach the driver without their parameters.
+// staged-data: MUST-NOT-GATE -- recovery must see staged runs too. The actual
+// canonical rows still pass row admission before they leave this integration.
+// Current heads are maintained from the transactional dirty queue, so this
+// read never scans the completed history or every current terminal ID.
 const runsInFlightSQL = `
-WITH latest AS MATERIALIZED (
-    SELECT DISTINCT ON (id) id, "createdAt"
-    FROM "MemoryNodes"
-    WHERE concept = ?
-    ORDER BY id, "createdAt" DESC
-), candidates AS MATERIALIZED (
-    SELECT n.id, n."createdAt"
-    FROM "MemoryNodes" n
-    JOIN latest l ON l.id = n.id AND l."createdAt" = n."createdAt"
-    WHERE n.concept = ?
-      AND COALESCE(n.payload->>'status', '') NOT IN ('succeeded', 'failed', 'cancelled', 'abandoned')
-    ORDER BY n."createdAt" ASC
-    LIMIT ?
+WITH candidates AS MATERIALIZED (
+    SELECT id, "createdAt" FROM work_run_heads
+    WHERE status NOT IN ('succeeded', 'failed', 'cancelled', 'abandoned')
+    ORDER BY "createdAt", id LIMIT ?
 )
-SELECT n.id, n."createdAt", n.payload
-FROM candidates c JOIN "MemoryNodes" n
-    ON n.id = c.id AND n."createdAt" = c."createdAt"
-WHERE n.concept = ?
-ORDER BY n."createdAt" ASC
+SELECT n.id,n."createdAt",n.payload
+FROM candidates c
+JOIN LATERAL (
+    SELECT id,"createdAt",payload FROM "MemoryNodes" n
+    WHERE n.id=c.id AND n."createdAt"=c."createdAt" AND n.concept=?
+    LIMIT 1
+) n ON true
+ORDER BY n."createdAt", n.id
 `
-
-func (i *Integration) runsInFlight(ctx context.Context) ([]map[string]any, error) {
-	return i.selectAdmitted(ctx, runConcept, runsInFlightSQL, runConcept, runConcept, sweepPageSize, runConcept)
-}
 
 // expiredJournalRowsSQL is the retention read. The boundary is applied to the
 // LATEST version's createdAt, so a row rewritten inside the window is kept.
@@ -805,7 +782,15 @@ func (i *Integration) selectAdmitted(ctx context.Context, concept, query string,
 	if i.bunDB == nil || i.bunDB() == nil {
 		return nil, fmt.Errorf("work: the sweeps need a database handle")
 	}
-	rows, err := i.bunDB().QueryContext(ctx, query, params...)
+	return i.selectAdmittedFrom(ctx, i.bunDB(), concept, query, params...)
+}
+
+// selectAdmittedFrom also supports the recovery snapshot transaction.
+func (i *Integration) selectAdmittedFrom(ctx context.Context, db bun.IDB, concept, query string, params ...any) ([]map[string]any, error) {
+	if i.admitRow == nil {
+		return nil, fmt.Errorf("work: no row-admission gate is wired")
+	}
+	rows, err := db.QueryContext(ctx, query, params...)
 	if err != nil {
 		return nil, fmt.Errorf("work: read %s: %w", concept, err)
 	}

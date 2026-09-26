@@ -527,8 +527,11 @@ func (e *MemQLEngine) executeCombinedFilterQuery(ctx context.Context, expr Expre
 			// may give a few machines hundreds of thousands of versions; the
 			// old predicate scanned every historical JSON payload on every poll.
 			// Only the latest payload can survive latestMatchingNodes anyway.
+			// LIMIT 1 fences the payload probe. A normal join can be reordered
+			// into a scan of every historical payload after statistics change.
 			current := db.NewSelect().Model((*memorynodes.MemoryNode)(nil)).
-				Join(`JOIN (?) AS latest_keys ON latest_keys.id = mn.id AND latest_keys."createdAt" = mn."createdAt"`, keys)
+				ModelTableExpr("(?) AS latest_keys", keys).
+				Join(`JOIN LATERAL (SELECT * FROM "MemoryNodes" WHERE id=latest_keys.id AND "createdAt"=latest_keys."createdAt" LIMIT 1) AS mn ON true`)
 			q = db.NewSelect().Model(rows).ModelTableExpr("(?) AS mn", current)
 			if filter.sql != "" {
 				q = q.Where(filter.sql, filter.args...)

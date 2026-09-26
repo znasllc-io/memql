@@ -1,0 +1,10 @@
+DROP TRIGGER IF EXISTS work_run_head_insert ON "MemoryNodes";
+DROP TRIGGER IF EXISTS work_run_head_update ON "MemoryNodes";
+DROP TRIGGER IF EXISTS work_run_head_delete ON "MemoryNodes";
+DROP TRIGGER IF EXISTS work_run_head_reset ON "MemoryNodes";
+DROP TABLE IF EXISTS work_run_head_events;
+DROP TABLE IF EXISTS work_run_heads;
+DROP FUNCTION IF EXISTS refresh_work_run_heads(integer);
+DROP FUNCTION IF EXISTS enqueue_work_run_head();
+DROP FUNCTION IF EXISTS invalidate_work_run_heads();
+DROP TABLE IF EXISTS work_run_head_state;

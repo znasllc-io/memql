@@ -1936,7 +1936,8 @@ func (e *MemQLEngine) loadLatestNodes(ctx context.Context, ids []string, timesta
 	}
 	var latest []memorynodes.MemoryNode
 	query := db.NewSelect().Model(&latest).
-		Join(`JOIN (?) AS latest_keys ON latest_keys.id = mn.id AND latest_keys."createdAt" = mn."createdAt"`, keys)
+		ModelTableExpr("(?) AS latest_keys", keys).
+		Join(`JOIN LATERAL (SELECT * FROM "MemoryNodes" WHERE id=latest_keys.id AND "createdAt"=latest_keys."createdAt" LIMIT 1) AS mn ON true`)
 
 	if err := query.Scan(ctx); err != nil {
 		return nil, err

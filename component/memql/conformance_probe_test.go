@@ -16,11 +16,7 @@ import (
 // on a row that matches and on one that does not, a plan constant over args is
 // folded before the SQL is compiled, and what Lower refuses is refused.
 func TestConformanceProbeLowersAndEvaluatesLikeTheExecutor(t *testing.T) {
-	registry := loadedConceptRegistry(t)
-	eng := newQuietEngine(t)
-	if err := eng.Init(registry); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
+	eng := sharedDblessEngine(t)
 	if eng.LoadReport() == nil {
 		t.Fatal("LoadReport() is nil after Init")
 	}

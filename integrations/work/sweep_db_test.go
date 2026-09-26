@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"testing"
 	"time"
 
@@ -20,9 +21,10 @@ import (
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
-// Use real PostgreSQL and the production Bun/pgdriver stack. Session-local
-// tables isolate sweep/retention tests from other suites and developer data.
-// A single connection keeps every query on the session owning these tables.
+// Use real PostgreSQL and the production Bun/pgdriver stack. A private schema
+// isolates tables and projection functions from other suites/developer data.
+// The primary connection keeps its search_path; concurrency tests open peers
+// explicitly scoped to the same private schema.
 func sweepDB(t *testing.T) (*bun.DB, *Integration) {
 	t.Helper()
 	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()))), pgdialect.New())
@@ -31,14 +33,23 @@ func sweepDB(t *testing.T) (*bun.DB, *Integration) {
 	if err := db.PingContext(context.Background()); err != nil {
 		dbtest.Unreachable(t, "work sweep SQL", dbtest.DSN(), err)
 	}
+	schema := fmt.Sprintf("sweep_%d", time.Now().UnixNano())
+	if _, err := db.ExecContext(context.Background(), `CREATE SCHEMA `+schema); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = db.ExecContext(context.Background(), `DROP SCHEMA `+schema+` CASCADE`) })
+	if _, err := db.ExecContext(context.Background(), `SET search_path TO `+schema+`, public`); err != nil {
+		t.Fatal(err)
+	}
 	for _, q := range []string{
-		`CREATE TEMP TABLE "MemoryNodes" (LIKE public."MemoryNodes" INCLUDING ALL)`,
-		`CREATE TEMP TABLE node_vectors (LIKE public.node_vectors INCLUDING ALL)`,
+		`CREATE TABLE "MemoryNodes" (LIKE public."MemoryNodes" INCLUDING ALL)`,
+		`CREATE TABLE node_vectors (LIKE public.node_vectors INCLUDING ALL)`,
 	} {
 		if _, err := db.ExecContext(context.Background(), q); err != nil {
 			t.Fatal(err)
 		}
 	}
+	installWorkHeadProjection(t, db)
 	i := New(nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	i.bunDB = func() *bun.DB { return db }
 	i.admitRow = func(context.Context, memorynodes.MemoryNode) bool { return true }
@@ -82,7 +93,7 @@ func TestSweepDB_ReadsBindParametersAndCollapseBeforeFiltering(t *testing.T) {
 	if len(rows) != 2 || rows[0]["id"] != "v1:work:run:waiting" || rows[1]["id"] != "v1:work:run:running" {
 		t.Fatalf("in-flight latest/admitted rows: %v", rows)
 	}
-	rows, err = i.selectAdmitted(ctx, runConcept, runsInFlightSQL, runConcept, runConcept, 1, runConcept)
+	rows, err = i.selectAdmitted(ctx, runConcept, runsInFlightSQL, 1, runConcept)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,6 +194,7 @@ FROM generate_series(1,1000) n CROSS JOIN generate_series(1,10) v`)
 		t.Fatal(err)
 	}
 	insertSweepRow(t, db, "v1:work:run:still-waiting", runConcept, time.Now().UTC(), map[string]any{"status": "waiting"})
+	catchUpWorkHeads(t, db)
 	rows, err := i.runsInFlight(ctx)
 	if err != nil || len(rows) != 1 || rows[0]["id"] != "v1:work:run:still-waiting" {
 		t.Fatalf("completed historical versions entered recovery: %v %v", rows, err)
@@ -361,4 +373,35 @@ func TestSweepDB_BuiltinLifecycleWithCanonicalRunID(t *testing.T) {
 	if len(archive.blobs) != 2 {
 		t.Fatal("repeat retention archived already deleted rows")
 	}
+}
+
+func installWorkHeadProjection(t *testing.T, db *bun.DB) {
+	t.Helper()
+	migration, err := os.ReadFile("../../component/database/memory-nodes/migrations/20260926020000_work_run_heads.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(context.Background(), string(migration)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func catchUpWorkHeads(t *testing.T, db *bun.DB) {
+	t.Helper()
+	for n := 0; n < 200; n++ {
+		var raw []byte
+		if err := db.QueryRowContext(context.Background(), `SELECT refresh_work_run_heads(1000)`).Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		var progress struct {
+			Ready bool `json:"ready"`
+		}
+		if err := json.Unmarshal(raw, &progress); err != nil {
+			t.Fatal(err)
+		}
+		if progress.Ready {
+			return
+		}
+	}
+	t.Fatal("projection did not catch up in 200 bounded batches")
 }

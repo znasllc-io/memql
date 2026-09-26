@@ -1975,10 +1975,15 @@ jobs:
       # `::notice::`, so it lands in the run SUMMARY rather than only in a log
       # that gets opened after something is already red. Still no conditional:
       # `if` is one of the control keywords that would disarm this lane's gate.
+      # Public offline language-tooling tests now live in component/memql/offline.
+      # Keep the recursive selector and every assertion. Serialize packages on
+      # this two-core runner so independent engine boots do not consume each
+      # other's per-package wall-clock budget. This changes neither coverage
+      # nor the 600s timeout; no -run partitions or retry-to-green are involved.
       - name: db-gated -- component/memql (own budget, the slow one)
         run: |
           start=$SECONDS
-          go test -count=1 -timeout=600s ./component/memql/...
+          go test -p=1 -count=1 -timeout=600s ./component/memql/...
           echo "::notice::component/memql step wall time (compile + test): $((SECONDS - start))s. The 600s budget bounds the TEST ONLY -- read that off the 'ok github.com/znasllc-io/memql/component/memql <N>s' line in this step's log. After the per-file engine split (memql#4756) CI measured 425.940s, 419.276s and 420.878s -- a 1.6% spread, against 472-539s and 14.2% before it; the 900s bridge was retired on that (memql#4569). If this warns, SPLIT BY CONCERN -- the measured candidates and the working pattern are in the comment above. Never raise it, and never partition by -run."
       # Named for the budget, not the count (memql#3985). It was "the fast
       # five", and then TWO packages joined within a day of each other --

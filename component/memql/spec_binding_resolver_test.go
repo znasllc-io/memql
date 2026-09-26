@@ -1,12 +1,8 @@
 package memql
 
 import (
-	"io"
-	"log/slog"
 	"strings"
 	"testing"
-
-	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // TestSpecBindingsResolveAcrossFullTree is the binding-redesign companion
@@ -21,21 +17,7 @@ import (
 //   - a payload trait classifies as row with the body rewritten to
 //     payload.*.
 func TestSpecBindingsResolveAcrossFullTree(t *testing.T) {
-	if _, err := LoadUnifiedConcepts(nil); err != nil {
-		t.Fatalf("LoadUnifiedConcepts: %v", err)
-	}
-	registry := concept.DefaultRegistry()
-	if registry == nil || len(registry.List()) == 0 {
-		t.Fatal("concept registry empty after LoadUnifiedConcepts")
-	}
-	eng, err := New(nil)
-	if err != nil {
-		t.Fatalf("construct engine: %v", err)
-	}
-	eng.Logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
-	if err := eng.Init(registry); err != nil {
-		t.Fatalf("engine.Init: %v", err)
-	}
+	eng := sharedDblessEngine(t)
 
 	specs := eng.Specs()
 	if specs == nil {
