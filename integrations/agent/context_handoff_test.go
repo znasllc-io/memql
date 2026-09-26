@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
 )
@@ -191,5 +192,27 @@ func TestAnOverflowThatSurvivedCompressionIsAQuestionNotARetry(t *testing.T) {
 	})
 	if !ok || sym != work.SymptomHuman || ev.RuleId != work.RuleIdContextExhausted {
 		t.Fatalf("got %q/%q ok=%v, want human/%s", sym, ev.RuleId, ok, work.RuleIdContextExhausted)
+	}
+}
+
+// Replacing one long message by one checkpoint preserves the count but frees
+// context. Recovery must measure bytes/tokens, not the number of messages.
+type oneMessageCheckpointEngine struct{ registryEngine }
+
+func (*oneMessageCheckpointEngine) CompactWorkContext(_ context.Context, messages []common.ChatMessage, _ []common.ToolDefinition, _ int) ([]common.ChatMessage, error) {
+	next := append([]common.ChatMessage(nil), messages...)
+	next[1].Content = "[Memory checkpoint] CNAS"
+	return next, nil
+}
+func TestOwnedContextHandoffAcceptsSmallerSameCountCheckpoint(t *testing.T) {
+	r := newTestReplier(&oneMessageCheckpointEngine{})
+	owner := "v1:identity:user:checkpoint-owner"
+	ctx := auth.ContextWithUserActor(context.Background(), owner)
+	ctx = common.ContextWithRun(ctx, common.RunContext{RunId: "run", GoalId: "goal", OwnerUserId: owner})
+	messages := []common.ChatMessage{{Role: "system", Content: "Instructions"}, {Role: "user", Content: strings.Repeat("Evidence ", 1000)}}
+	used := 0
+	next, ok := r.handOffContext(ctx, errors.New("context_length_exceeded"), messages, &used, 0, "checkpoint")
+	if !ok || used != 1 || len(next) != len(messages) {
+		t.Fatalf("valid checkpoint rejected: ok=%v used=%d messages=%d", ok, used, len(next))
 	}
 }

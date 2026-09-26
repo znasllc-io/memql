@@ -102,7 +102,7 @@ func (r *Replier) handOffContext(ctx context.Context, err error, messages []comm
 	if isOwnedWorkExecution(ctx) {
 		target := memql.WorkContextSize(messages, nil) * 2 / 3
 		next, compactErr := r.compactWorkContext(ctx, messages, nil, target)
-		if compactErr != nil || len(next) >= len(messages) {
+		if compactErr != nil || memql.WorkContextSize(next, nil) >= memql.WorkContextSize(messages, nil) {
 			return nil, false
 		}
 		*used++
