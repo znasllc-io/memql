@@ -1,6 +1,12 @@
+import { AskNavigator } from "../ask/AskNavigator";
+import { SharedExternalConnectionsProvider } from "../modules/connections/useExternalConnections";
+import { SharedCredentialsProvider } from "../modules/connections/useSourceCredentials";
+import { SharedSourceConnectionsProvider } from "../modules/connections/connections";
 import { AttentionProvider } from "../attention/Attention";
+import { IdentityOpenDispatcher } from "../apps/identity/IdentityOpenDispatcher";
 import { SharedPackagesProvider } from "../apps/deployables/packages/usePackages";
 import { DeployablesAttentionFeed } from "../apps/deployables/attention";
+import { FleetSharingAttentionFeed } from "../apps/fleet/machines/sharingAttention";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type { ChromeLayout } from "../app/layout";
@@ -164,7 +170,8 @@ export function Shell({
       onContextMenu={suppressBrowserMenu}
     >
                     <PhoneShell onSignOut={onSignOut} />
-                    <AskSheet />
+                    <AskNavigator />
+      <AskSheet />
                   </div>
                 ) : (
                   <DesktopChrome
@@ -273,7 +280,13 @@ function ShellRoster({
           memql#4915). Renders nothing, and does nothing at all on a browser
           that did not arrive from a callback -- which is every other one. It
           sits INSIDE OsProvider because opening an app is a shell act. */}
-      <AttentionProvider apps={OS_REGISTRY.apps}><SharedPackagesProvider><DeployablesAttentionFeed />
+      <AttentionProvider apps={OS_REGISTRY.apps}><SharedPackagesProvider><SharedCredentialsProvider><SharedSourceConnectionsProvider><SharedExternalConnectionsProvider><DeployablesAttentionFeed />
+      {/* Sharing a machine with people and groups (epic memql#5344, G15): a
+          runtime change, published only while the viewer owns a machine still
+          in the fleet. At shell lifetime, like the Deployables feed, so a
+          closed Fleet is marked too; it reads the machines feed the
+          MachinesProvider above already retains, and opens nothing new. */}
+      <FleetSharingAttentionFeed />
       <ConnectReturnDispatcher />
       <SetupReturnDispatcher />
       {/* Whether the setup widget is on the active desk at all -- derived from
@@ -287,11 +300,12 @@ function ShellRoster({
           answer to a portal route that no longer exists. Renders nothing,
           and does nothing on a browser that arrived without the marker. */}
       <ConceptOpenDispatcher />
+      <IdentityOpenDispatcher />
       {/* Where a captured line comes from: the focused window's app and
           section, read from this provider's state at capture time. */}
       <CaptureContextInstaller />
       {children}
-      </SharedPackagesProvider></AttentionProvider>
+      </SharedExternalConnectionsProvider></SharedSourceConnectionsProvider></SharedCredentialsProvider></SharedPackagesProvider></AttentionProvider>
     </OsProvider>
   );
 }
@@ -431,6 +445,7 @@ function DesktopChrome({
         }}
       />
       <ThemeStore open={themesOpen} onClose={() => setThemesOpen(false)} />
+      <AskNavigator />
       <AskSheet />
     </div>
   );

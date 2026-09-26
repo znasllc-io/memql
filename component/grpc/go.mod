@@ -34,6 +34,7 @@ require (
 	github.com/znasllc-io/memql/component/worker v0.0.0
 	github.com/znasllc-io/memql/core v0.0.0
 	github.com/znasllc-io/memql/dsl v0.0.0
+	github.com/znasllc-io/memql/integrations v0.0.0
 	github.com/znasllc-io/memql/integrations/stt v0.0.0
 	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.12
@@ -167,3 +168,5 @@ replace github.com/znasllc-io/memql/component/healing => ../healing
 replace github.com/znasllc-io/memql/component/frontdoor => ../frontdoor
 
 replace github.com/znasllc-io/memql/component/work => ../work
+
+replace github.com/znasllc-io/memql/integrations => ../../integrations

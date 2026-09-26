@@ -121,8 +121,8 @@ describe("the machines directory", () => {
     view.unmount();
     mount(fakeConnection({ myWorkersWithStatus: [LIVE, REVOKED] }), true);
     const revoked = await screen.findByText("Old laptop");
-    const row = revoked.closest(".os-machine") as HTMLElement;
-    expect(within(row).getByText("revoked")).toBeTruthy();
+    const row = revoked.closest(".os-record-row") as HTMLElement;
+    expect(within(row).getByText("Revoked")).toBeTruthy();
     // The dot is an img with an accessible name; a revoked machine has none.
     expect(within(row).queryByLabelText("Online")).toBeNull();
   });
@@ -301,6 +301,7 @@ describe("the machines directory", () => {
     await click(await screen.findByText("Apps box"));
 
     expect(screen.getByText("Ready")).toBeTruthy();
+    await click(screen.getByRole("button", { name: /^Codex/ }));
     expect(screen.getByText("Not allowed by Cockpit")).toBeTruthy();
   });
 

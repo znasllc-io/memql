@@ -110,11 +110,13 @@ type RuntimeConfig struct {
 	// Settings is the site row's runtime settings (epic memql#4906, decision
 	// P7): plain string values under identifier keys, written whole by
 	// updateSiteSettings and read by the bundle as `config.settings.<key>`.
+	// A connected storefront inherits its store's API version when the site
+	// has no explicit storefrontApiVersion setting.
 	// This is what lets ONE bundle serve TWO deployables against different
 	// endpoints with no rebuild -- the document differs per site, the bytes
 	// do not.
 	//
-	// ALWAYS PRESENT, as an empty object when the row carries none, unlike
+	// ALWAYS PRESENT, as an empty object when no settings apply, unlike
 	// Storefront above. Storefront is kind-specific, so its absence is
 	// information; settings apply to every kind, and a bundle should be able
 	// to read `config.settings.apiBase` without first asking whether the
@@ -177,6 +179,10 @@ type StorefrontConfig struct {
 	// (design D4 specifies {kind, storeDomain, storefrontToken}). Always
 	// "shopify_storefront" -- nothing else produces this object.
 	Kind string `json:"kind"`
+	// ConnectionState distinguishes an intentionally unbound design preview
+	// from a bound store whose row or credential could not be resolved.
+	// No secret names, store IDs, or backend errors are published.
+	ConnectionState string `json:"connectionState"`
 	// StoreDomain is the myshopify.com domain the Storefront API calls are
 	// addressed to, read from the BOUND STORE row rather than from the site.
 	StoreDomain string `json:"storeDomain"`
@@ -204,9 +210,12 @@ func (h *Handler) serveRuntimeConfig(w http.ResponseWriter, r *http.Request, sit
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	doc := runtimeConfigForSite(r.Context(), site, os.Getenv, config.IdentityAuthEnabled(), h.secretResolver)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
+	if r.Method == http.MethodHead {
+		return // Version checks never read credentials or construct a response body.
+	}
+	doc := runtimeConfigForSite(r.Context(), site, os.Getenv, config.IdentityAuthEnabled(), h.secretResolver)
 	_ = json.NewEncoder(w).Encode(doc)
 }
 
@@ -266,7 +275,8 @@ func runtimeConfigForSite(ctx context.Context, site *Site, env func(string) stri
 // settingsForSite copies the row's settings onto the document. A copy rather
 // than the row's own map: the resolver caches the Site, and a document that
 // aliased the cached map would let one encoder's view drift from another's
-// if anything ever mutated it. Never nil, so the JSON always carries `{}`.
+// if anything ever mutated it. Connected storefronts inherit the store's API
+// version unless the site pins one explicitly. Never nil.
 func settingsForSite(site *Site) map[string]string {
 	out := map[string]string{}
 	if site == nil {
@@ -274,6 +284,11 @@ func settingsForSite(site *Site) map[string]string {
 	}
 	for k, v := range site.Settings {
 		out[k] = v
+	}
+	if site.Kind == storefrontKind && site.Store != nil && strings.TrimSpace(out["storefrontApiVersion"]) == "" {
+		if version := strings.TrimSpace(site.Store.APIVersion); version != "" {
+			out["storefrontApiVersion"] = version
+		}
 	}
 	return out
 }
@@ -289,20 +304,21 @@ const storefrontKind = "shopify_storefront"
 // nothing and publishes nothing. The token is only ever fetched for a site
 // that is declared to be a storefront.
 //
-// NO STORE IS NIL, NOT AN EMPTY BLOCK (epic memql#5530). A storefront whose
-// binding names nothing, or names a store the edge could not read, has
-// nothing for the block to SAY: an empty storeDomain reads as a store at the
-// empty host, which a bundle would then address its Storefront API calls to.
-// The same answer a non-storefront kind gets is the honest one, and it is
-// what a storefront nobody has bound yet already got.
+// Both unbound and unreadable stores keep empty connection fields, but only
+// an explicitly unbound store may enter design preview. A failed connection
+// must never silently replace a real catalog/cart with demonstration data.
 func storefrontForSite(ctx context.Context, site *Site, resolveSecret SecretResolver) *StorefrontConfig {
-	if site == nil || site.Kind != storefrontKind || site.Store == nil {
+	if site == nil || site.Kind != storefrontKind {
 		return nil
 	}
-	out := &StorefrontConfig{
-		Kind:        storefrontKind,
-		StoreDomain: strings.TrimSpace(site.Store.Domain),
+	out := &StorefrontConfig{Kind: storefrontKind, ConnectionState: "unbound"}
+	if site.Store != nil || strings.TrimSpace(bindingStoreId(site.Binding)) != "" {
+		out.ConnectionState = "unavailable"
 	}
+	if site.Store == nil {
+		return out
+	}
+	out.StoreDomain = strings.TrimSpace(site.Store.Domain)
 	ref := strings.TrimSpace(site.Store.StorefrontTokenRef)
 	if ref == "" || resolveSecret == nil {
 		return out
@@ -316,6 +332,9 @@ func storefrontForSite(ctx context.Context, site *Site, resolveSecret SecretReso
 		return out
 	}
 	out.StorefrontToken = strings.TrimSpace(token)
+	if out.StoreDomain != "" && out.StorefrontToken != "" {
+		out.ConnectionState = "connected"
+	}
 	return out
 }
 
@@ -327,7 +346,7 @@ func storefrontForSite(ctx context.Context, site *Site, resolveSecret SecretReso
 // reads them through Site.Store.
 //
 // A binding still carrying the retired {storeDomain, storefrontTokenRef}
-// shape answers "" here, which is the unbound state: no storefront block, no
+// shape answers "" here, which is the unbound state: no store domain, no
 // store named in the policy. That is deliberate and it is why the change
 // ships with a migration rather than a fallback read -- an unconverted row is
 // VISIBLE (the storefront stops resolving a store and the OS says so) where a

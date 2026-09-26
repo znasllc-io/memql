@@ -1,15 +1,16 @@
+import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   Button,
   Caption,
-  Chip,
   Fact,
   Facts,
   Head,
   Notice,
   Refine,
-  Row as KitRow,
+  RecordList,
+  RecordRow,
   Select,
   Subhead,
   formatMoment,
@@ -140,7 +141,7 @@ export function AuditSection() {
 
   return (
     <div className="os-cluster">
-      <Head title="Audit trail" meta={page.at === null ? null : `${page.rows.length} loaded`}>
+      <Head title="Audit trail" meta={page.state === "read" && !page.error ? visible.length : undefined}>
         {/* Rule 2: the question lives behind one affordance on the Head line,
             collapsed until asked, with the active constraint as a removable
             chip beside it. Never a standing chip rail over the list. */}
@@ -176,7 +177,7 @@ export function AuditSection() {
       ) : null}
 
       {page.state === "reading" && page.rows.length === 0 ? (
-        <Caption>Reading the trail.</Caption>
+        <RecordListSkeleton label="Loading the trail" />
       ) : null}
 
       {page.state === "read" && page.rows.length === 0 ? (
@@ -186,32 +187,24 @@ export function AuditSection() {
       {page.rows.length === 0 ? null : (
         <div className="os-cluster-body">
           <div className="os-cluster-list">
-            <ul className="os-cluster-rows" aria-label="Audit events">
+            <RecordList as="ul" label="Audit events">
               {visible.map((row) => (
-                <li key={row.id}>
-                  <KitRow
+                <RecordRow key={row.id}
                     name={row.action || "unstated"}
                     open={openId === row.id}
                     onOpen={() => setOpenId((held) => (held === row.id ? "" : row.id))}
-                    state={
-                      <>
-                        {row.category === "" ? null : <Chip tone="muted">{row.category}</Chip>}
-                        {row.outcome === "" ? null : (
-                          <Chip tone={outcomeTone(row.outcome)}>{row.outcome}</Chip>
-                        )}
-                      </>
-                    }
+                    secondary={row.actorEmail || row.actorUserId || "no actor recorded"}
+                    state={row.outcome} tone={outcomeTone(row.outcome) === "muted" ? "muted" : "warn"}
                   >
+                    <span>{row.category}</span>
                     <span className="os-cluster-row-when">{formatMoment(row.occurredAt)}</span>
                     <span className="os-cluster-row-note">
-                      {row.actorEmail || row.actorUserId || "no actor recorded"}
                       {row.targetType === "" ? "" : ` -> ${row.targetType}`}
                       {row.targetId === "" ? "" : ` ${row.targetId}`}
                     </span>
-                  </KitRow>
-                </li>
+                  </RecordRow>
               ))}
-            </ul>
+            </RecordList>
 
             {visible.length === 0 && page.rows.length > 0 ? (
               <Caption>
@@ -228,7 +221,7 @@ export function AuditSection() {
               <Button
                 tone="quiet"
                 busy={page.state === "reading"}
-                busyLabel="Reading"
+
                 onClick={() => void load(page.cursor)}
               >
                 Load {PAGE_SIZE} more

@@ -375,6 +375,8 @@ func TestSourceCredentialRowsReachABrowserOnAnotherNode(t *testing.T) {
 	for _, topic := range []string{
 		"graph.node.created.v1:platform:sourceCredential",
 		"graph.node.updated.v1:platform:sourceCredential",
+		"graph.node.created.v1:platform:sourceConnection",
+		"graph.node.updated.v1:platform:sourceConnection",
 	} {
 		d := evaluateRouting(rules, topic)
 		if !d.Forward {

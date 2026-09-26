@@ -1,3 +1,6 @@
+import { AccountsApp } from "../src/apps/accounts/AccountsApp";
+import { LocalAccountsSettingsStore } from "../src/apps/accounts/settings";
+import { fakeConnection as accountConnection, accountRow, withSession as accountSession } from "../test/accounts/harness";
 import { createRoot } from "react-dom/client";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
@@ -13,6 +16,8 @@ import {
   STORE,
   fakeConnection,
   githubGrantRow,
+  sourceConnectionRow,
+  probeReply,
   repositoriesReply,
   repositoryFixture,
   siteRow,
@@ -36,11 +41,14 @@ import {
 } from "../test/deployables/harness";
 import { siteFromRow } from "../src/apps/deployables/rows";
 import { MachineDetail } from "../src/apps/fleet/machines/MachineDetail";
+import { ShareDialog } from "../src/apps/fleet/machines/ShareDialog";
+import type { MachineWrites } from "../src/apps/fleet/machines/useMachineWrites";
 import { machineFromRow } from "../src/apps/fleet/rows";
 import { MachinesProvider } from "../src/live/machines";
 import {
   fakeConnection as fleetConnection,
   machineRow as fleetMachineRow,
+  shareDirectoryRow,
   withSession as fleetSession,
 } from "../test/fleet/harness";
 import { OriginsSection } from "../src/apps/cluster/origins/OriginsSection";
@@ -230,6 +238,52 @@ const CONNECTED: FakeSeed = {
   }),
 };
 
+const SOURCE_CHOOSER: FakeSeed = {
+  ...CONNECTED,
+  githubApp: { configured: true, installUrl: "https://github.com/apps/memql/installations/new" },
+  accounts: [{ id: "client", name: "Client account", status: "active" }, { id: "self", name: "Operator organization", status: "active" }],
+  credentials: [githubGrantRow({ id: "cred-grant", login: "octocat" }), githubGrantRow({ id: "cred-work", login: "workcat" })],
+  sourceConnections: [sourceConnectionRow({ credentialId: "cred-grant" }), sourceConnectionRow({ id: "source-personal", credentialId: "cred-grant", installationId: "i-octocat", accountLogin: "octocat", accountType: "User" }), sourceConnectionRow({ id: "source-work", credentialId: "cred-work", installationId: "i-studio", accountLogin: "studio" })],
+  sourceInstallations: {
+    "cred-grant": { reason: "ok", installations: [{ id: "i-acme", account: "acme", accountType: "Organization" }, { id: "i-octocat", account: "octocat", accountType: "User" }], pending: [] },
+    "cred-work": { reason: "ok", installations: [{ id: "i-studio", account: "studio", accountType: "Organization" }], pending: [{ login: "partner" }] },
+  },
+  repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "acme/storefront" }), repositoryFixture({ fullName: "acme/field-notes" }), repositoryFixture({ fullName: "octocat/dotfiles", installationId: "i-octocat" }), repositoryFixture({ fullName: "studio/portal", installationId: "i-studio" })] }),
+  packages: [ACME, WIDGETS, FRESH].map(p => ({ ...p, accountId: "self" })),
+  sourceProbe: { "": probeReply({ branches: ["main", "release"] }) },
+};
+
+// Exercise the production wizard while the source read is in flight; these
+// fixture requests never contact GitHub or create a real deployment.
+function analysisConnection(result: "pending" | "failed" | "review") {
+  const active = { ...PARKED, id: "dep-new", status: "analyzing", report: null,
+    startedAt: new Date(Date.now() - 116000).toISOString() };
+  const seed: FakeSeed = { ...SOURCE_CHOOSER, packages: [{ ...ACME, declares: [] }], sites: [],
+    awaitingConfirm: [active], deployments: { "pkg-acme": [active] } };
+  const connection = fakeConnection(seed);
+  const execute = connection.query.executeNamed.bind(connection.query);
+  let scheduled = false;
+  function finish(cancelled = false) {
+    const next = cancelled ? { ...active, status: "cancelled", error: { code: "deployment_cancelled", message: "You stopped this analysis. Nothing was deployed." } }
+      : result === "failed" ? { ...active, status: "failed", error: { code: "deploy_failed", message: "Source download timed out. Nothing was deployed." } }
+      : { ...PARKED, id: "dep-new" };
+    seed.deployments!["pkg-acme"] = [next];
+    seed.awaitingConfirm = next.status === "awaiting_confirm" ? [next] : [];
+    connection.subscriptions.emit("v1:platform:packageDeployment", next);
+  }
+  connection.query.executeNamed = async (name, call, opts) => {
+    if (name === "packageDeployments" && result !== "pending" && !scheduled) {
+      scheduled = true;
+      setTimeout(() => finish(), 2500);
+    }
+    if (name === "packageCancelDeployment") {
+      setTimeout(() => finish(true), 1200);
+    }
+    return execute(name, call, opts);
+  };
+  return connection;
+}
+
 /** A cluster with NO GitHub App, seen by somebody who may register one. Press
  *  + and choose "A repository": the step asks the one question and the floor
  *  says Set up GitHub. */
@@ -275,9 +329,9 @@ function WindowBody({ fallback, children }: { fallback: string; children: ReactN
   );
 }
 
-function Lists({ section }: { section: "deployables" | "sources" | "settings" }) {
+function Lists({ section }: { section: "deployables" | "sources" | "repositories" | "settings" }) {
   return (
-    <WindowBody fallback={section === "sources" ? "Sources" : section === "settings" ? "Settings" : "Deployables"}>
+    <WindowBody fallback={section === "sources" ? "Sources" : section === "repositories" ? "Repositories" : section === "settings" ? "Settings" : "Deployables"}>
       <DeployablesApp sectionId={section} navigate={() => {}} askContext={() => {}} store={settingsStore()} />
     </WindowBody>
   );
@@ -427,6 +481,8 @@ const PREVIEW_NONE: FakeSeed = {
       storeId: "store-example",
       storeDomain: "example.myshopify.com",
       storeReadable: true,
+      canPreview: true,
+      previewRefusal: {code: "", message: "", remedy: ""},
     } as never),
   },
 };
@@ -465,6 +521,20 @@ const VIEWS: Record<
     render: () => JSX.Element;
   }
 > = {
+  accounts: {
+    connect: () => accountConnection({ clientAccountsAll: [
+      accountRow({ id: "v1:accounts:account:self", name: "Our Studio", domain: "studio.example.com", primaryContactName: "Dana" }),
+      accountRow({ id: "client-acme", name: "Acme Consulting", domain: "acme.example.com", primaryContactName: "Avery" }),
+      accountRow({ id: "client-borden", name: "Borden Ltd", domain: "borden.example.com", primaryContactName: "Morgan" }),
+    ] }),
+    wrap: (el, role) => accountSession(el, { role }),
+    render: () => <AccountsPane />,
+  },
+  "accounts-empty": {
+    connect: () => accountConnection({ clientAccountsAll: [] }),
+    wrap: (el, role) => accountSession(el, { role }),
+    render: () => <AccountsPane />,
+  },
   // The two lists. `framed` views bring their own window body, because the
   // app's wizard needs a floor and its pages publish to the window's trail.
   list: { seed: LISTS, framed: true, render: () => <Lists section="deployables" /> },
@@ -474,6 +544,24 @@ const VIEWS: Record<
   // The same app with a GitHub account connected: press + and choose
   // "A repository" and the Repository step is the picker, not the invitation.
   connected: { seed: CONNECTED, framed: true, render: () => <Lists section="deployables" /> },
+  "guided-account-empty": { seed: { ...SOURCE_CHOOSER, credentials: [], sourceConnections: [] }, framed: true, render: () => <Lists section="deployables" /> },
+  "guided-org-empty": { seed: { ...SOURCE_CHOOSER, sourceInstallations: { "cred-grant": { reason: "ok", installations: [], pending: [] } } }, framed: true, render: () => <Lists section="deployables" /> },
+  "source-chooser": { seed: SOURCE_CHOOSER, framed: true, render: () => <Lists section="deployables" /> },
+  "analysis-pending": { connect: () => analysisConnection("pending"), framed: true, render: () => <Lists section="deployables" /> },
+  "analysis-failed": { connect: () => analysisConnection("failed"), framed: true, render: () => <Lists section="deployables" /> },
+  "analysis-review": { connect: () => analysisConnection("review"), framed: true, render: () => <Lists section="deployables" /> },
+  "source-settings": { seed: SOURCE_CHOOSER, framed: true, render: () => <Lists section="settings" /> },
+  "source-management": { seed: { ...SOURCE_CHOOSER,
+    sourceConnections: [...(SOURCE_CHOOSER.sourceConnections ?? []), sourceConnectionRow({ id: "source-work-acme", credentialId: "cred-work" })],
+    packages: [
+      { ...ACME, accountId: "self", credentialId: "cred-grant", sourceConnectionId: "source-acme" },
+      { ...ACME, id: "pkg-acme-work", name: "acme work", accountId: "self", credentialId: "cred-work", sourceConnectionId: "source-work-acme" },
+      { ...FRESH, accountId: "self", credentialId: "cred-grant", sourceConnectionId: "source-acme" },
+      { ...WIDGETS, accountId: "self" },
+    ],
+  }, framed: true, render: () => <Lists section="sources" /> },
+  "source-empty": { seed: { ...SOURCE_CHOOSER, packages: [], sites: [], awaitingConfirm: [], sourceConnections: [] }, framed: true, render: () => <Lists section="sources" /> },
+  "connected-empty": { seed: { ...CONNECTED, repositories: repositoriesReply({ repositories: [], installations: [], pending: [] }) }, framed: true, render: () => <Lists section="deployables" /> },
   // The cluster's GitHub App, in each reading a surface has of it.
   "github-owner": { seed: NO_APP_OWNER, framed: true, render: () => <Lists section="deployables" /> },
   "github-member": { seed: NO_APP_MEMBER, role: "developer", framed: true, render: () => <Lists section="deployables" /> },
@@ -510,6 +598,62 @@ const VIEWS: Record<
     connect: () => fleetConnection({}),
     wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
     render: () => <MachinePane over={{ credentialExpiresAt: "", rttAt: "", rttMs: 0 }} />,
+  },
+  // Sharing a machine (epic memql#5344). The panel in each reading of who can
+  // use it, then the dialog. `sharing-people` is the one to read first: names,
+  // both consents given, and the week's split ledger line.
+  "sharing-owner": {
+    connect: () => fleetConnection({}),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharingPane over={{ sharing: { mode: "owner" } }} />,
+  },
+  "sharing-people": {
+    connect: () => fleetConnection({ fleetShareDirectory: [SHARE_DIRECTORY], fleetSharingLedger: [SHARE_LEDGER] }),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharingPane over={{ sharing: SHARED_WITH_PEOPLE, capabilityDescriptor: { inferenceServe: "cluster" } }} />,
+  },
+  // Lent by its owner, not yet agreed to by the machine: the one-line state is
+  // muted and the cockpit's line says what to change and where.
+  "sharing-waiting": {
+    connect: () => fleetConnection({ fleetShareDirectory: [SHARE_DIRECTORY] }),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharingPane over={{ sharing: SHARED_WITH_PEOPLE, capabilityDescriptor: { inferenceServe: "owner" } }} />,
+  },
+  "sharing-everyone": {
+    connect: () => fleetConnection({ fleetSharingLedger: [SHARE_LEDGER] }),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharingPane over={{ sharing: { mode: "cluster", sharedAt: "2026-09-20T10:00:00Z" }, capabilityDescriptor: { inferenceServe: "cluster" } }} />,
+  },
+  // Somebody else's machine, as a cluster owner sees it in the fleet: counts,
+  // never names, and no act.
+  "sharing-viewer": {
+    connect: () => fleetConnection({}),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharingPane over={{ ownerUserId: "v1:identity:user:olivia", sharing: SHARED_WITH_PEOPLE, capabilityDescriptor: { inferenceServe: "cluster" } }} />,
+  },
+  // The dialog, opened on a people share with a stale subject on it.
+  "share-dialog": {
+    connect: () => fleetConnection({ fleetShareDirectory: [SHARE_DIRECTORY] }),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharePane over={{ sharing: SHARED_WITH_PEOPLE, capabilityDescriptor: { inferenceServe: "cluster" } }} />,
+  },
+  // An admin's directory: everyone, with the emails they already see in Users.
+  "share-dialog-admin": {
+    connect: () => fleetConnection({ fleetShareDirectory: [{ ...SHARE_DIRECTORY, everyone: true, people: SHARE_PEOPLE_ADMIN, current: { people: [], groups: [] } }] }),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharePane over={{ sharing: { mode: "owner" } }} startPeople />,
+  },
+  // A person in no group, below admin: nobody to pick, and the way out named.
+  "share-dialog-empty": {
+    connect: () => fleetConnection({ fleetShareDirectory: [shareDirectoryRow({ id: "v1:worker:registration:studio", machineId: "v1:worker:registration:studio" })] }),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharePane over={{ sharing: { mode: "owner" } }} startPeople />,
+  },
+  // The engine refused the save: the draft stays, and the engine's words.
+  "share-dialog-refused": {
+    connect: () => fleetConnection({ fleetShareDirectory: [SHARE_DIRECTORY] }),
+    wrap: (el) => fleetSession(<MachinesProvider>{el}</MachinesProvider>),
+    render: () => <SharePane over={{ sharing: SHARED_WITH_PEOPLE, capabilityDescriptor: { inferenceServe: "cluster" } }} refuse />,
   },
   overview: { seed: BOUND, render: () => <Overview site={siteFromRow(SHOP)} /> },
   // The preview section, in the five states worth judging as pixels.
@@ -690,11 +834,153 @@ function MachinePane({ over }: { over: Record<string, unknown> }) {
     rename: async () => true,
     setOperatorLabels: async () => true,
     revoke: async () => null,
-    setSharing: async () => true,
+    setSharing: async () => null,
   };
   return (
     <div className="os-window-content">
       <MachineDetail machine={machine} writes={writes} now={FLEET_NOW} view="details" />
+    </div>
+  );
+}
+
+function AccountsPane() {
+  const [store] = useState(() => new LocalAccountsSettingsStore({ getItem: () => null, setItem: () => {} }));
+  return <WindowBody fallback="Accounts"><AccountsApp sectionId="accounts" navigate={() => {}} askContext={() => {}} store={store} /></WindowBody>;
+}
+
+// --- Sharing a machine (epic memql#5344) -----------------------------------
+//
+// The panel and the dialog, over the suite's own fixture connection. The
+// dialog views render ShareDialog directly -- the harness does not click --
+// and `?modal=0` draws it in the page rather than the top layer, for a capture
+// tool that does not paint the top layer.
+
+const SHARED_WITH_PEOPLE = {
+  mode: "people",
+  userIds: ["ana", "dee"],
+  groupIds: ["design"],
+  sharedAt: "2026-09-21T16:30:00Z",
+  sharedBy: "v1:identity:user:me",
+};
+
+const SHARE_PEOPLE = [
+  { id: "ana", name: "Ana Ruiz", detail: "" },
+  { id: "bo", name: "Bo Chen", detail: "" },
+  { id: "cy", name: "Cy Okafor", detail: "" },
+  { id: "eli", name: "Eli Marsh", detail: "" },
+];
+
+const SHARE_PEOPLE_ADMIN = [
+  { id: "ana", name: "Ana Ruiz", detail: "ana.ruiz@example.com" },
+  { id: "bo", name: "Bo Chen", detail: "bo@example.com" },
+  { id: "cy", name: "Cy Okafor", detail: "cy.okafor@example.com" },
+  { id: "dee", name: "Dee Park", detail: "dee.park@example.com" },
+  { id: "eli", name: "Eli Marsh", detail: "eli@example.com" },
+  { id: "fay", name: "Fay Lindqvist", detail: "fay.lindqvist@example.com" },
+];
+
+const SHARE_DIRECTORY = shareDirectoryRow({
+  id: "v1:worker:registration:studio",
+  machineId: "v1:worker:registration:studio",
+  everyone: false,
+  people: SHARE_PEOPLE,
+  groups: [
+    { id: "design", name: "Design", members: 4 },
+    { id: "ops", name: "Operations", members: 7 },
+  ],
+  current: {
+    people: [
+      { id: "ana", name: "Ana Ruiz", known: true, inDirectory: true },
+      { id: "dee", name: "Dee Park", known: true, inDirectory: false },
+    ],
+    groups: [{ id: "design", name: "Design", known: true, inDirectory: true }],
+  },
+});
+
+const SHARE_LEDGER = {
+  id: "v1:worker:registration:studio",
+  machineId: "v1:worker:registration:studio",
+  week: "2026-W39",
+  calls: 41,
+  people: 3,
+  otherCalls: 12,
+  otherPeople: 2,
+  systemCalls: 0,
+  readable: true,
+  sentence: "Served 41 calls this week, 12 of them for 2 other people.",
+};
+
+function qaWrites(refuse = false): MachineWrites {
+  return {
+    busyId: "",
+    actionError: refuse
+      ? "some of the people or groups chosen are not ones you can lend this machine to; choose from the people and groups offered"
+      : "",
+    rename: async () => true,
+    setOperatorLabels: async () => true,
+    revoke: async () => null,
+    setSharing: async (_id, choice) =>
+      refuse ? null : { mode: choice.mode, people: choice.userIds.length, groups: choice.groupIds.length, sentence: "Lent to 2 people and 1 group." },
+  };
+}
+
+function SharingPane({ over }: { over: Record<string, unknown> }) {
+  const machine = fleetMachine({ ownerUserId: "v1:identity:user:me", ...over });
+  return (
+    <div className="os-window-content">
+      <MachineDetail machine={machine} writes={qaWrites()} now={FLEET_NOW} view="sharing" />
+    </div>
+  );
+}
+
+function SharePane({ over, startPeople = false, refuse = false }: { over: Record<string, unknown>; startPeople?: boolean; refuse?: boolean }) {
+  const machine = fleetMachine({ ownerUserId: "v1:identity:user:me", ...over });
+  const modal = new URLSearchParams(window.location.search).get("modal") !== "0";
+  if (!modal) {
+    // In-page for a capture tool that does not paint the top layer: the SAME
+    // component and stylesheet, opened with show() instead of showModal().
+    HTMLDialogElement.prototype.showModal = HTMLDialogElement.prototype.show;
+  }
+  useEffect(() => {
+    // One-shot captures cannot click: choose "Specific people and groups"
+    // for the views that open on it, and press Save for the refused one.
+    const timer = window.setTimeout(() => {
+      if (startPeople) {
+        const people = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="radio"]')).find((b) =>
+          (b.textContent ?? "").startsWith("Specific people"),
+        );
+        people?.click();
+      }
+      // `?arrow=N` arrows N times through the results from the search, so a
+      // capture shows whether the active option is kept in view (the list is
+      // its options' offsetParent only while it is positioned).
+      const arrows = Number(new URLSearchParams(window.location.search).get("arrow") ?? "0");
+      if (arrows > 0) {
+        window.setTimeout(() => {
+          const box = document.querySelector<HTMLInputElement>(".fleet-share-search");
+          box?.focus();
+          for (let i = 0; i < arrows; i += 1) {
+            window.setTimeout(() => {
+              box?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+            }, 150 * (i + 1));
+          }
+        }, 500);
+      }
+      if (refuse) {
+        const remove = document.querySelector<HTMLButtonElement>(".fleet-share-chip-remove");
+        remove?.click();
+        window.setTimeout(() => {
+          const save = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((b) => b.textContent === "Save");
+          save?.click();
+        }, 300);
+      }
+    }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [startPeople, refuse]);
+  return (
+    <div className="os-window-content">
+      <MachineDetail machine={machine} writes={qaWrites(refuse)} now={FLEET_NOW} view="sharing" />
+      <ShareDialog machine={machine} writes={qaWrites(refuse)} onDiscard={() => undefined} onSaved={() => undefined} />
     </div>
   );
 }

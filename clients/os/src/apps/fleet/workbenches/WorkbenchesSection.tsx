@@ -1,5 +1,6 @@
+import { LocalTabs } from "../../../kit/LocalTabs";
 import { useMemo, useState } from "react";
-import { FleetTabs, RefreshButton, useFleetScroll } from "../FleetControls";
+import { RefreshButton, useFleetScroll } from "../FleetControls";
 import { InfoDetail } from "../../../kit/InfoDetail";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -15,7 +16,7 @@ import {
   type WorkbenchNodeRow,
   type WorkspaceRow,
 } from "../rows";
-import { Button, EmptyState, Switch, Fact, Facts, Head, Notice, Panel } from "../../../kit";
+import { Button, EmptyState, Switch, Fact, Facts, Head, Notice, Panel, Subhead, RecordRow, listCount } from "../../../kit";
 import { useNow } from "../../../kit/useNow";
 import { useWorkbenches } from "./useWorkbenches";
 
@@ -86,7 +87,7 @@ export function WorkbenchesSection() {
   return (
     <div ref={root} className="os-fleet">
       <div className="fleet-section-header">
-      <Head title="Cluster workspaces">
+      <Head title="Cluster workspaces" meta={listCount(tab === "workspaces" ? view?.snapshot : nodeView?.snapshot)}>
         {/* OFFERED ONLY WHEN THE FEED IS BEHIND. Both feeds on this screen
             are live, and a refresh control standing next to a live list
             quietly contradicts it -- it says "this may be stale" about rows
@@ -98,7 +99,7 @@ export function WorkbenchesSection() {
         ) : null}
       </Head>
 
-      <FleetTabs label="Cluster workspace views" value={tab} onChange={setTab} options={[["workspaces", "Workspaces"], ["replicas", "Replicas"]]} />
+      <LocalTabs label="Cluster workspace views" value={tab} onChange={setTab} options={[["workspaces", "Workspaces"], ["replicas", "Replicas"]]} />
       </div>
       <div className="fleet-section-context"><p>Temporary working folders for tasks running in the cluster.</p><InfoDetail title="Cluster workspaces"><p className="os-caption">
         A workspace is a sandboxed working directory for one plan, on one workbench replica's
@@ -173,7 +174,7 @@ function ReplicaPanel({
   return (
     <Panel label="Workbench replicas">
       <div className="os-head">
-        <span className="os-caption">Cluster workbench capacity</span>
+        <Subhead meta={listCount(source?.snapshot)}>Workbench replicas</Subhead>
         <div className="os-head-actions">
           {feedIsBehind(state.nodeState) ? (
             <RefreshButton label="Reconnect replicas" onClick={state.reseedNodes} />
@@ -210,15 +211,22 @@ function ReplicaPanel({
         emptyText="No workbench replicas are running in this cluster."
         emptyContent={<EmptyState title="No workbench replicas">A workbench replica provides space for tasks to run. Ask your cluster administrator to start one before running work that needs a workspace.</EmptyState>}
         renderRow={(node, tick) => (
-          <details className="fleet-record fleet-replica-record">
-            <summary><span className="fleet-record-identity"><strong>{node.id}</strong><small>Workbench replica</small></span><span className="fleet-record-status" data-health={node.health}>{node.health || "Health unknown"}</span><span className="fleet-record-meta">Seen {formatFreshness(node.lastSeen, now)}</span></summary>
-            <div className="fleet-record-detail"><Facts><Fact label="Address" value={node.address || "Not reported"} mono /><Fact label="First seen" value={formatMoment(node.createdAt)} /><Fact label="Last seen" value={formatMoment(node.lastSeen)} /><Fact label="Your workspaces" value={emptyReplicas.some(one => one.id === node.id) ? "None in this view" : "Listed in Workspaces"} /></Facts></div>
-            {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
-          </details>
+          <ReplicaLine node={node} tick={tick} now={now} empty={emptyReplicas.some(one => one.id === node.id)} />
         )}
       />
     </Panel>
   );
+}
+
+function ReplicaLine({ node, tick, now, empty }: { node: WorkbenchNodeRow; tick: "added" | "updated" | null; now: Date; empty: boolean }) {
+  const [open, setOpen] = useState(false);
+  return <div>
+    <RecordRow name={node.id} secondary="Workbench replica" state={node.health || "Health unknown"}
+      open={open} onOpen={() => setOpen(value => !value)} stateExtra={tick === "added" ? <span className="os-livelist-tick">new</span> : null}>
+      <span>Seen {formatFreshness(node.lastSeen, now)}</span>
+    </RecordRow>
+    {open ? <Facts><Fact label="Address" value={node.address || "Not reported"} mono /><Fact label="First seen" value={formatMoment(node.createdAt)} /><Fact label="Last seen" value={formatMoment(node.lastSeen)} /><Fact label="Your workspaces" value={empty ? "None in this view" : "Listed in Workspaces"} /></Facts> : null}
+  </div>;
 }
 
 function WorkspaceLine({
@@ -232,6 +240,7 @@ function WorkspaceLine({
   now: Date;
   groupHead: boolean;
 }) {
+  const [open, setOpen] = useState(false);
   const released = workspace.status === "released";
   const reason = workspace.releasedReason;
   const blurb = RELEASE_REASON_BLURB[reason];
@@ -243,7 +252,12 @@ function WorkspaceLine({
           {workspace.nodeId === "" ? "replica not recorded" : workspace.nodeId}
         </p>
       ) : null}
-      <details className="os-fleet-workspace-body"><summary className="fleet-workspace-summary"><span className="fleet-record-identity"><strong>{workspace.runId || workspace.id}</strong><small>Run workspace</small></span><span>{workspace.status}</span><span className="os-caption">{formatFreshness(workspace.lastUsedAt, now)}</span></summary>
+      <RecordRow name={workspace.runId || workspace.id} secondary={workspace.nodeId || "Replica not recorded"}
+        state={workspace.status} dim={released} open={open} onOpen={() => setOpen(value => !value)}
+        stateExtra={tick === "added" ? <span className="os-livelist-tick">new</span> : null}>
+        <span>{formatFreshness(workspace.lastUsedAt, now)}</span>
+      </RecordRow>
+      {open ? <div className="os-fleet-workspace-body">
         <Facts>
           <Fact label="Run" value={workspace.runId} mono />
           <Fact label="Status" value={workspace.status} mono />
@@ -273,8 +287,7 @@ function WorkspaceLine({
             Release reason: {reason}.
           </p>
         ) : null}
-        {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
-      </details>
+      </div> : null}
     </div>
   );
 }

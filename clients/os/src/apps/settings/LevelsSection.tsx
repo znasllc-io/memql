@@ -1,4 +1,4 @@
-import { Caption, Head, Measure, Notice } from "../../kit";
+import { Caption, RecordList, RecordRow, Head, Measure, Notice } from "../../kit";
 import { useSession } from "../../chrome/access";
 import { doorFor } from "./providerFacts";
 import { useProviderRegistry } from "./providerFacts";
@@ -103,7 +103,7 @@ export function LevelsSection() {
 
   return (
     <div className="os-settings">
-      <Head title="Levels" meta={inference.status.read ? undefined : "not read yet"} />
+      <Head title="Levels" meta={inference.status.read && !inference.status.error ? levels.length : undefined} />
       <p className="os-caption">
         A level is how much intelligence a call needs. Every call names one and
         never names a model, so a model can change without a release. What each
@@ -132,7 +132,7 @@ export function LevelsSection() {
               )}
             </>
           )}
-          <dl className="os-levels" aria-label="Levels">
+          <RecordList as="ul" label="Levels">
             {levels.map((level) => (
               <LevelRow
                 key={level.id}
@@ -142,7 +142,7 @@ export function LevelsSection() {
                 suppressAll={noticeCarriesIt}
               />
             ))}
-          </dl>
+          </RecordList>
         </>
       )}
 
@@ -194,12 +194,9 @@ function LevelRow({
 }) {
   const metered = level.door !== null && level.door.metered;
   return (
-    <div className="os-level" data-os-level={level.id} data-os-metered={metered || undefined}>
-      <dt className="os-level-name">
-        <span className="os-level-word">{level.id}</span>
-        <span className="os-level-meaning">{level.meaning}</span>
-      </dt>
-      <dd className="os-level-body">
+    <div data-os-level={level.id} data-os-metered={metered || undefined}>
+      <RecordRow name={level.id} secondary={level.meaning}>
+        <span>
         {level.sentence === shared || suppressAll ? null : (
           <p className="os-level-said">{level.sentence}</p>
         )}
@@ -214,7 +211,8 @@ function LevelRow({
         {level.advice === "" || level.advice === sharedAdvice || suppressAll ? null : (
           <p className="os-level-advice">{level.advice}</p>
         )}
-      </dd>
+        </span>
+      </RecordRow>
     </div>
   );
 }

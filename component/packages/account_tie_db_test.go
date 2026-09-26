@@ -2,6 +2,7 @@ package packages
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -43,8 +44,10 @@ const conceptIdentityUserForTie = "v1:identity:user"
 func tieSeederCtx() context.Context {
 	ctx := auth.ContextWithInternalOrigin(
 		auth.ContextWithAccess(context.Background(), &auth.AccessContext{
-			UserId: "account-tie-seeder",
-			Role:   auth.RoleOwner,
+			UserId:    "account-tie-seeder",
+			Role:      auth.RoleOwner,
+			Synthetic: true,
+			Unranked:  true,
 		}))
 	return auth.ContextWithToken(ctx, &auth.TokenInfo{Subject: "account-tie-seeder"})
 }
@@ -106,6 +109,20 @@ func seedTieMembership(t *testing.T, eng *memql.MemQLEngine, groupId, userId str
 // account (or not).
 func createTiedPackage(t *testing.T, eng *memql.MemQLEngine, owner context.Context, packageId, name, accountId string) {
 	t.Helper()
+	if accountId == "" {
+		// Historical untied roots predate mandatory organization selection.
+		// New createPackage calls correctly default/require an organization;
+		// load the old shape explicitly rather than pretending it is new work.
+		access, _ := auth.AccessFromContext(owner)
+		payload, _ := json.Marshal(map[string]any{"name": name, "ownerUserId": access.UserId, "sourceKind": "repo", "repoUrl": "https://github.com/acme/" + name, "status": "active", "updateAvailable": false})
+		if _, err := eng.Execute(tieSeederCtx(), fmt.Sprintf(`insert("v1:platform:package", id=%s, payload=%s)`, langparser.QuoteString(packageId), payload)); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if _, err := eng.Execute(tieSeederCtx(), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Package test organization")`, langparser.QuoteString(accountId))); err != nil {
+		t.Fatal(err)
+	}
 	q := fmt.Sprintf(
 		`mutation createPackage(packageId: %s, name: %s, sourceKind: "repo", repoUrl: %s`,
 		langparser.QuoteString(packageId), langparser.QuoteString(name),
@@ -209,7 +226,7 @@ func TestAPackageTiedToTheSelfAccountIsReadableByItsGroupAndByStaff(t *testing.T
 	// Opened the way the pipeline opens it: openDeployment borrows the
 	// package owner's actor and stamps internal origin, and copies the
 	// account off the package row it was handed.
-	s := &store{engine: eng, logger: discardLogger()}
+	s := &store{engine: eng, logger: discardLogger(), directDB: func() *sql.DB { return db.DB }}
 	pkg, err := s.packageById(ownerCtx, tied)
 	if err != nil || pkg == nil {
 		t.Fatalf("read the tied package as its owner: %v (%v)", err, pkg)

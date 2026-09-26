@@ -82,25 +82,40 @@ func filterFires(t *testing.T, a *Automation, ev events.Event) bool {
 func TestLearnFromSucceededRunFiresOnTheTransitionToSucceededOnly(t *testing.T) {
 	a := loadedProcedureAutomation(t, "learnFromSucceededRun")
 	const run = "v1:work:run"
+	const owner, sig = "v1:identity:user:alice", "sha256:goal"
 	for _, tc := range []struct {
 		name      string
 		status    string
 		oldStatus string
+		owner     string
+		signature string
 		fires     bool
 	}{
-		{"running to succeeded", "succeeded", "running", true},
-		{"waiting to succeeded", "succeeded", "waiting", true},
+		{"running to succeeded", "succeeded", "running", owner, sig, true},
+		{"waiting to succeeded", "succeeded", "waiting", owner, sig, true},
 		// The prior version carried no status, so the engine publishes no
 		// oldStatus at all: unset is not `succeeded`, and the run is learned.
-		{"a first write that is already succeeded", "succeeded", "", true},
+		{"a first write that is already succeeded", "succeeded", "", owner, sig, true},
 		// The shape the filter exists to refuse: a later write to a run that
 		// had already succeeded -- the summary fold -- fires nothing.
-		{"succeeded to succeeded", "succeeded", "succeeded", false},
-		{"running to failed", "failed", "running", false},
-		{"a heartbeat while running", "running", "running", false},
+		{"succeeded to succeeded", "succeeded", "succeeded", owner, sig, false},
+		{"running to failed", "failed", "running", owner, sig, false},
+		{"a heartbeat while running", "running", "running", owner, sig, false},
+		// The owner travels with the event and the signature names the
+		// corpus: a run with neither has no corpus to learn into, and the
+		// filter drops it before any handler runs.
+		{"a succeeded run with no owner", "succeeded", "running", "", sig, false},
+		{"a succeeded run with no goal signature", "succeeded", "running", owner, "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ev := graphUpdatedEvent(run, run+":r1", map[string]any{"status": tc.status, "automationName": "x"}, tc.oldStatus)
+			fields := map[string]any{"status": tc.status, "automationName": "x"}
+			if tc.owner != "" {
+				fields["ownerUserId"] = tc.owner
+			}
+			if tc.signature != "" {
+				fields["goalSignature"] = tc.signature
+			}
+			ev := graphUpdatedEvent(run, run+":r1", fields, tc.oldStatus)
 			if got := filterFires(t, a, ev); got != tc.fires {
 				t.Fatalf("learnFromSucceededRun fired=%v for %s, want %v", got, tc.name, tc.fires)
 			}

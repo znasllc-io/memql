@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"golang.org/x/sync/singleflight"
+
+	"github.com/znasllc-io/memql/component/frontdoor"
 )
 
 // Site is the projection of v1:platform:site the edge needs to serve a request.
@@ -50,6 +52,9 @@ type Site struct {
 	ShopperForms bool
 	SystemOwned  bool
 
+	// StorefrontTesting is a private sibling origin serving BundleRef with PreviewStore.
+	StorefrontTesting bool
+
 	// Binding is the site row's typed per-kind configuration, carried through
 	// as the untyped object the row stores (memql#4345). Empty for every kind
 	// that has none (spa, static).
@@ -60,9 +65,9 @@ type Site struct {
 	// row already held, edited in two places at two authorization tiers -- and
 	// that duplication is what the binding stopped being.
 	//
-	// NOTHING DOWNSTREAM READS THIS FIELD. It is the id's arrival, and Store
-	// below is its resolution; the policy and the runtime-config document both
-	// read Store. Keeping the raw object is what lets the resolver see whether
+	// It is the id's arrival, and Store below is its resolution. Runtime
+	// config uses its presence to distinguish unbound from unavailable;
+	// the policy and connection credentials read Store. Keeping the raw object is what lets the resolver see whether
 	// there is a store to look up at all without a second projection.
 	Binding map[string]any
 
@@ -156,7 +161,7 @@ type Site struct {
 }
 
 // BoundStore is the v1:shopify:store row as the SERVING PATH sees it: the
-// three fields it needs and not one more (epic memql#5530, issue memql#5538).
+// serving fields it needs and not one more (epic memql#5530, issue memql#5538).
 //
 // The store row also holds adminTokenRef and webhookSecretRef. Neither is
 // here, and the omission is the safety property rather than an economy: a
@@ -180,6 +185,9 @@ type BoundStore struct {
 	// resolves it at serve time into the runtime-config document, and that is
 	// still the only place it is dereferenced.
 	StorefrontTokenRef string
+	// APIVersion supplies the Storefront API version unless the site explicitly
+	// pins its own. It follows the connected store without rewriting the site.
+	APIVersion string
 }
 
 // SiteAccount is the account behind a reserved front door, as the served page
@@ -307,9 +315,22 @@ func (r *resolver) Resolve(ctx context.Context, hostname string) (*Site, error) 
 	// misses for the same key collapse into one query instead of each
 	// driving their own.
 	anySite, err, _ := r.sf.Do(key, func() (any, error) {
-		site, err := r.exec.SiteByHostname(ctx, key)
+		lookup := key
+		production, testing := frontdoor.StorefrontProductionHost(key)
+		if testing {
+			lookup = production
+		}
+		site, err := r.exec.SiteByHostname(ctx, lookup)
+		if testing && site != nil && (site.Kind != storefrontKind || normalizeHost(site.Hostname) != production || site.SystemOwned) {
+			site = nil
+		}
 		if err != nil {
 			return nil, err
+		}
+
+		if site != nil {
+			copied := *site
+			site = &copied
 		}
 
 		// THE CUSTOM-DOMAIN ALIAS (epic memql#4805, design D8). One extra
@@ -329,7 +350,7 @@ func (r *resolver) Resolve(ctx context.Context, hostname string) (*Site, error) 
 		// a scanner walking random hostnames would drive TWO queries per
 		// request instead of one, which would make the alias step an
 		// amplifier rather than a lookup.
-		if site == nil {
+		if site == nil && !testing {
 			site, err = r.exec.SiteForCustomDomain(ctx, key)
 			if err != nil {
 				return nil, err
@@ -354,7 +375,7 @@ func (r *resolver) Resolve(ctx context.Context, hostname string) (*Site, error) 
 		// The miss is cached by the shared write below, for the reason the
 		// alias step gives: without it, a scanner walking hostnames against the
 		// wildcard would drive THREE queries per request instead of one.
-		if site == nil {
+		if site == nil && !testing {
 			site, err = r.exec.SiteForAccountFrontDoor(ctx, key)
 			if err != nil {
 				return nil, err
@@ -396,9 +417,8 @@ func (r *resolver) Resolve(ctx context.Context, hostname string) (*Site, error) 
 			//
 			// A FAILED READ LEAVES THE SITE SERVABLE, exactly as the serving
 			// store's does, and the consequence is narrower: a preview whose
-			// store could not be read gets no storefront block and no store in
-			// its policy, which is what a storefront nobody has bound already
-			// gets. The public path is untouched either way.
+			// store could not be read gets an unavailable connection state and
+			// no store origin in its policy. The public path is untouched.
 			if storeId := strings.TrimSpace(bindingStoreId(site.PreviewBinding)); storeId != "" {
 				store, serr := r.exec.StoreByID(ctx, storeId)
 				if serr != nil {
@@ -413,6 +433,12 @@ func (r *resolver) Resolve(ctx context.Context, hostname string) (*Site, error) 
 		// A MISS IS CACHED TOO. Without this, a scanner walking random hostnames
 		// drives one database query per request -- an amplifier pointed at the
 		// database, reachable by anyone who can resolve the wildcard.
+		if testing && site != nil {
+			copied := *site
+			copied.Hostname = key
+			copied.StorefrontTesting = true
+			site = &copied
+		}
 		r.mu.Lock()
 		r.cache[key] = entry{site: site, at: time.Now()}
 		r.mu.Unlock()
@@ -433,6 +459,7 @@ func (r *resolver) Invalidate(hostname string) {
 	key := normalizeHost(hostname)
 	r.mu.Lock()
 	delete(r.cache, key)
+	delete(r.cache, frontdoor.StorefrontTestingHost(key))
 	r.mu.Unlock()
 }
 

@@ -1,7 +1,10 @@
-import { useCallback, useMemo, useState } from "react";
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
+import { LocalTabs } from "../../kit/LocalTabs";
+import type { OsAppProps } from "../../system/registry";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check } from "lucide-react";
 
-import { Caption, Chip, Field, Head, Notice, Panel, Select, Subhead } from "../../kit";
+import { Caption, RecordList, RecordRow, Field, Head, Notice, Panel, Select, Subhead } from "../../kit";
 import { useSession } from "../../chrome/access";
 import { useOs } from "../../chrome/state";
 import { holds } from "../../system/roles";
@@ -84,7 +87,7 @@ export const ACCESS_SECTION_RESOURCE = "app:settings/access";
 
 type View = "subject" | "resource";
 
-export function AccessSection() {
+export function AccessSection({ intent, consumeIntent }: Pick<OsAppProps, "intent" | "consumeIntent"> = {}) {
   const { access, accessEpoch } = useSession();
   const { registry } = useOs();
   // BARE, ONCE, AT THE SOURCE: the session's spelling is the token's, and
@@ -100,6 +103,13 @@ export function AccessSection() {
   const [view, setView] = useState<View>("subject");
   const [subjectKey, setSubjectKey] = useState("");
   const [resourceKey, setResourceKey] = useState("");
+  useEffect(() => {
+    const groupId = intent?.payload["groupId"];
+    if (typeof groupId !== "string" || !groupId || !intent) return;
+    setView("subject");
+    setSubjectKey(`group:${groupId}`);
+    consumeIntent?.(intent.id);
+  }, [intent, consumeIntent]);
 
   const subject = useMemo<Subject | null>(() => subjectFromKey(subjectKey, roster.people, roster.groups), [subjectKey, roster.people, roster.groups]);
   const subjectGrants = useSubjectGrants(subject);
@@ -122,30 +132,8 @@ export function AccessSection() {
 
   return (
     <div className="os-settings">
-      <Head title="Access">
-        <div className="os-choice-row" role="radiogroup" aria-label="View">
-          {(
-            [
-              ["subject", "By person or group"],
-              ["resource", "By app"],
-            ] as const
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              role="radio"
-              aria-checked={view === value}
-              className="os-choice"
-              onClick={() => {
-                writes.clear();
-                setView(value);
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </Head>
+      <Head title="Access" />
+      <LocalTabs label="Access views" value={view} onChange={value => { writes.clear(); setView(value); }} options={[["subject", "By person or group"], ["resource", "By app"]]} />
       <Caption>
         Who may open which app, and which parts of one, over and above their role. A role decides first; a
         group the person is in can widen or narrow that; a grant to the person by name decides last.
@@ -188,13 +176,7 @@ export function AccessSection() {
           </Select>
           </Field>
 
-          {subject === null ? (
-            <Caption>
-              {roster.state === "loading"
-                ? "Reading the roster."
-                : "Pick somebody to see what they may open, and where each answer comes from."}
-            </Caption>
-          ) : (
+          {subject === null ? (roster.state === "loading" ? <RecordListSkeleton label="Reading the roster." /> : <Caption>{"Pick somebody to see what they may open, and where each answer comes from."}</Caption>) : (
             <>
               <Caption>{subjectSentence(subject, subjectGrants.groupIds, roster.groups, roster.roles)}</Caption>
               {subjectGrants.state === "error" ? (
@@ -421,7 +403,7 @@ function ResourceHolders({
   const yours = grants.some((g) => namesTheViewer(g, viewerUserId));
   return (
     <div className="os-access-holders">
-      <Subhead>{resource.part === "" ? `Who may open ${resource.label}` : `Who holds ${resource.label}`}</Subhead>
+      <Subhead meta={state === "ready" && !error ? grants.length : undefined}>{resource.part === "" ? `Who may open ${resource.label}` : `Who holds ${resource.label}`}</Subhead>
       <p className="os-access-roles">
         {roles.length === 0 ? "No role holds this; only a grant by name can." : `By role: ${roles.join(", ")}.`}
       </p>
@@ -429,26 +411,16 @@ function ResourceHolders({
       {state === "ready" && grants.length === 0 ? (
         <Caption>Nobody holds it by name. The roles above are the whole answer.</Caption>
       ) : (
-        <ul className="os-access-grant-list" aria-label="Granted by name">
+        <RecordList as="ul" label="Granted by name">
           {grants.map((grant) => {
             const who = holderLabel(grant, nameOf);
             return (
-              <li key={grant.id} className="os-access-grant">
-                <span className="os-access-grant-who">{who}</span>
-                <Chip tone={grant.effect === "allow" ? "accent" : "muted"}>{grant.effect === "allow" ? "allowed" : "denied"}</Chip>
-                <span className="os-access-from">
-                  {grant.subjectKind === "group" ? "a group" : "a person"}
-                  {nameOf(grant.grantedBy) === "" ? "" : `, by ${nameOf(grant.grantedBy)}`}
-                </span>
-                {canWrite && !namesTheViewer(grant, viewerUserId) ? (
-                  <button type="button" className="os-link" disabled={busy} onClick={() => onRevoke(grant)} aria-label={`Revoke ${grant.effect} for ${who}`}>
-                    Revoke
-                  </button>
-                ) : null}
-              </li>
+              <RecordRow key={grant.id} name={who} state={grant.effect === "allow" ? "allowed" : "denied"} tone={grant.effect === "allow" ? "accent" : "muted"}
+                secondary={`${grant.subjectKind === "group" ? "a group" : "a person"}${nameOf(grant.grantedBy) === "" ? "" : `, by ${nameOf(grant.grantedBy)}`}`}
+                actions={canWrite && !namesTheViewer(grant, viewerUserId) ? <button type="button" className="os-link" disabled={busy} onClick={() => onRevoke(grant)} aria-label={`Revoke ${grant.effect} for ${who}`}>Revoke</button> : undefined} />
             );
           })}
-        </ul>
+        </RecordList>
       )}
       {/* THE ABSENT ACT, EXPLAINED ONCE. Rule 12 takes the button away rather
           than disabling it, and a control that vanishes with no sentence

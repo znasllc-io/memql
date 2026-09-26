@@ -187,6 +187,7 @@ type ModelCallMessage struct {
 	// ToolCalls are the calls an assistant turn MADE, replayed into the
 	// conversation so the model can see what it already asked for.
 	ToolCalls []ModelCallToolCall
+	Images    []*memqlv1.ModelCallImage
 }
 
 // ModelCallParams are the generation knobs.
@@ -265,7 +266,11 @@ type ModelCallRequest struct {
 	// Tools are the functions the model may call this turn. EMPTY IS AN
 	// ORDINARY CHAT TURN; a machine whose runtime cannot do tool calling
 	// advertises `tools=0` and is skipped for a turn that carries any.
-	Tools []ModelCallTool
+	Tools  []ModelCallTool
+	Audio  *memqlv1.ModelCallAudio
+	Speech *memqlv1.ModelCallSpeech
+	Image  *memqlv1.ModelCallImageRequest
+	Level  string
 }
 
 // ModelCallDelta is one piece of streamed output handed to the caller.
@@ -311,6 +316,9 @@ type ModelCallOutcome struct {
 	// fragment would otherwise hand the caller arguments that parse and
 	// are wrong, which no later reader can detect.
 	ToolCalls []ModelCallToolCall
+	Audio     *memqlv1.ModelCallAudio
+	Segments  []*memqlv1.ModelCallTranscriptSegment
+	Images    []*memqlv1.ModelCallImage
 }
 
 // ModelCallHandle is the caller's view of a running call.

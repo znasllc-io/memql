@@ -1,3 +1,4 @@
+import { ContentSkeleton } from "../../../../kit/ContentSkeleton";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Caption, Fact, Facts, useNow, RefreshButton, Notice } from "../../../../kit";
@@ -181,7 +182,7 @@ export function TrafficPanel({ site }: { site: SiteRow }) {
           <RefreshButton label="Refresh traffic" onClick={() => void read()} />
         </Notice>
       ) : reading === null ? (
-        <Caption>{state === "loading" ? "Reading the traffic figures." : unmeasuredSentence(window)}</Caption>
+        state === "loading" ? <ContentSkeleton kind="metrics" label="Loading traffic figures" /> : <Caption>{unmeasuredSentence(window)}</Caption>
       ) : (
         <>
           <TrafficStrip reading={reading} window={window} />

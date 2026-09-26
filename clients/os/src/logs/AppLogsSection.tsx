@@ -12,10 +12,8 @@ import {
   TAIL_WINDOWS,
   constraintsOf,
   isNarrowed,
-  lineCount,
   subjectIntentOf,
   toTailArgs,
-  windowLabel,
   windowPhrase,
   withinWindow,
   type LogFilters,
@@ -108,7 +106,7 @@ export function AppLogsSection({ app, subjectConcepts = [], intent, consumeInten
     <div className="os-app-stack os-logs" data-density={DENSITY}>
       {/* The Head names the window and the count of what is SHOWN (rule 7:
           the scope is said once), and the facets sit behind Refine (rule 2). */}
-      <Head title="Logs" meta={`${windowLabel(filters.window)} · ${lineCount(visible.length)}`}>
+      <Head title="Logs" meta={(tail.state === "following" || tail.state === "paused") && !tail.error ? visible.length : undefined}>
         {os && accessAdmits("app:logs") ? <Button onClick={() => os.actions.openApp("logs", "search", { logView: { scope, filters } })}>Open in full Logs</Button> : null}
         <Refine
           search={filters.text}

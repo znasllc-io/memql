@@ -18,7 +18,19 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
 1. **Every section opens with the Head.** Title, at most one primary
    action, nothing else standing. No section renders a control strip before
    its content. Encoded by `kit` `Head` (its `meta` slot carries a quiet
-   count or scope note).
+   count or scope note). Counts come from the authorized filtered collection
+   only after its read settles; unavailable is not zero.
+   Do not add Refresh or Refresh overview buttons unless the owner explicitly
+   requests them; live surfaces update through their subscriptions.
+   Creation actions use the shared icon-only `AddButton` (plus), with an
+   accessible label and tooltip. Do not replace it with a text button such as
+   "Connect GitHub account". A settings page is titled **Settings**; subjects
+   such as **GitHub accounts** are sections beneath that title, with their Add
+   control on the section heading. Settings lists use the available width.
+   Shared record lists draw dividers **only between items**: no top line on
+   the first, no bottom line on the last, and no lines for a single item.
+   Keep this in the shared list styles, including rows with separate actions
+   and live-list wrappers; never add per-app row borders.
 
 2. **Filters are questions, not furniture.** Search and facet controls live
    behind one affordance on the Head line (`kit` `Refine`): collapsed by
@@ -51,13 +63,24 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
 
 7. **Say it once.** A scope is named in one place. The rail highlights it,
    the Head names it, the list does not re-caption it, placeholders stay
-   generic ("Search", not "Search your Library").
+   generic ("Search", not "Search your Library"). Keep every app page minimal:
+   show the record, its state and the actions. Tutorials carry general guidance;
+   standing descriptions must help with a current decision or actionable problem.
+   Do not restate a status badge in prose or add report-age/counting-since
+   paragraphs beneath it. Keep necessary loading, error and destructive-action
+   confirmation messages concise. Detail pages reuse `Panel`, `Subhead`,
+   `Facts` and `Fact`, as the Cluster Mesh node page does, instead of inventing
+   another data layout or button arrangement.
 
 8. **One container language.** `Panel` + `Subhead` + `Field` is the
    grouping grammar. Settings groups keep their `fieldset` and `legend`
    SEMANTICS (a legend names its group to assistive tech), but the legend
    dresses as a Subhead and the legend-breaking-the-border box is gone --
-   one look, not two. A deliberate MOMENT (the Accounts first-run card's
+   one look, not two. Panel actions align to the right edge in the shared
+   `os-panel-actions` row. An action such as Disconnect stays on that same
+   edge when it expands into Cancel and confirmation; do not shift the
+   controls left or fill the panel width. Confirmation copy sits above them.
+   A deliberate MOMENT (the Accounts first-run card's
    eyebrow and headline) may keep its voice; chrome may not.
 
 9. **Real estate belongs to content.** Lists take the window; forms take a
@@ -97,6 +120,9 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
     that changes the thing's state lives anywhere else on the page: Pause at
     y=2412, Archive at 2499 and a cascade that archives a SIBLING at 885 were
     one surface, and the person had to know which was which.
+    Account and organization details use this footer too: state on the left,
+    Back/Disconnect on the right; Cancel/confirmation stay on that same edge.
+    Read-only repository details offer navigation, not deployment actions.
 
 ## Applying them
 
@@ -107,6 +133,48 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
   rules is rendered screenshots, both modes, empty and populated -- not the
   diff. The audit that produced these rules was visual, and the drift it
   found had survived every code review.
+
+## Record lists
+
+App record collections use `RecordList` and `RecordRow`, the Deployables list
+pattern. `LiveList` already provides the list container and arrival semantics.
+Use the row's `actions` slot for independent controls, outside its opening
+button, and `Subhead.meta` for subordinate collection counts. Static collections
+can use `RecordList as="ul"` to retain list/listitem semantics. The repository
+chooser uses this same anatomy, with selection state and grouped counts. See the
+[coverage inventory](qa/list-coverage.md) for specialized grids, trees and
+workflow surfaces that retain their interaction model.
+
+Loading record collections use `RecordListSkeleton`, with the same row geometry
+and an accessible loading status. Reserve the initial list area to avoid panel
+jumps, respect reduced motion, and keep already loaded rows visible during
+refreshes. Loading and failed reads must never look like an empty collection.
+
+### Loading is the shape of the content, never a message
+
+This applies to **every app**, including tabs, entity details, dialogs, widgets,
+and inline values. Cluster's Mesh and Agents lists establish the visual pattern:
+quiet empty shapes in the places the content will occupy. Do not paint
+"Loading", "Reading the trail", "Asking the cluster", or equivalent fetch copy.
+
+- Use `RecordListSkeleton` for collections, `ContentSkeleton` for details,
+  forms, metrics, maps, and conversations, and `InlineSkeleton` for a value in
+  an otherwise complete row. Match the destination's geometry and reserve its
+  space; avoid showing a blank or editable default form before its read resolves.
+- Keep loading descriptions screen-reader-only, with `role="status"` and
+  `aria-busy`. Shapes have no focus targets, use the shared neutral tokens,
+  and stop animating under reduced motion. Never pulse the whole window.
+- Preserve loaded rows and drafts during refresh. A refresh must not replace
+  usable content with skeletons or add a visible fetching caption. Keep the
+  refresh control's name stable while its busy affordance is active.
+- Render a real empty state only after a successful empty read. Render failures
+  and disconnections explicitly, with recovery when available; a skeleton must
+  never conceal an error or imply that a disconnected read is progressing.
+- A running operation is different from fetching a page. Model pulls, builds,
+  approvals, dictation, and Ask inference retain meaningful status and progress.
+  Ask's reverse response estimate measures actual inference, not page loading.
+
+Audit inventory: [loading and navigation coverage](qa/loading-and-navigation.md).
 
 ## App overviews
 
@@ -132,6 +200,15 @@ library; Deployables' are **deployables** and **sources**. A slice of one noun
 -- standalone ones, the ones from a zip, the live ones -- is a question asked of
 a list, and belongs behind `Refine` (rule 2), not on a tab.
 
+Sibling views **inside a page or an entity** use the shared `LocalTabs`, directly
+below that page's heading and above its content. Fleet's Model Library
+(Available models / Catalog / Inference sources) and machine details are the
+reference. Keep the app's top-level section tabs in `AppFrame`; do not add a
+second app-level tab bar or disguise page navigation as radio preferences.
+Local tabs keep one active view, preserve attention destinations, and scroll
+horizontally in a narrow window. Filters stay in `Refine`, saved choices stay
+form controls, and ordered workflows keep their rail.
+
 Deployables used to draw both nouns in one list: a source was a row with its
 apps indented beneath it, then a "Standalone" heading over the rest. A tree
 inside a list, with two row types and an order that followed origin rather than
@@ -142,12 +219,15 @@ combined list". Two lists now, in one row language (`RecordRow`):
   address of its own. Where it came from is a FACT ON THE ROW (the source's
   name, "Zip", "CI", "Built in") and a facet in Refine -- never a heading over
   it and an indent.
-- **Sources** is every repository or zip that produces deployables: what it is
-  called and where it lives, how much it produced, and the one state word a
-  person might have to act on (Review needed, then Update available, then the
-  quiet ones). Its page lists its apps, including the ones it declares and has
-  not deployed, and carries the act its state asks for on its bar.
-- **Every source is on it, and each is summarised by everything it made.** A
+- **Sources** is the single configured repository catalog. Each row shows its
+  GitHub identity, organization or personal target, repository and tracked
+  branch, alongside the separate MemQL owning account. Credentials and saved
+  installation bindings provide access metadata rather than separate list
+  entries. There are no sibling Repositories or Accounts pages. Settings manages
+  personal GitHub accounts; Sources manages the saved repository combinations. A source's detail
+  holds its access, settings, apps and history. ZIP-backed apps remain in
+  Deployables and retain their existing detail and lifecycle controls.
+- **Every listed source is summarised by everything it made.** A
   source whose analysis was refused has made nothing and is still a source:
   this tab is where somebody looks for it to try again. A search is asked of
   the SOURCE (its name, where it lives, what it made) and never trims the
@@ -155,6 +235,21 @@ combined list". Two lists now, in one row language (`RecordRow`):
   apps'. The list has its own fold for this (`foldSources`): read as a filter
   over the deployables list's answer it inherited that list's questions, and
   showed three of five seeded sources.
+- **Remove source changes catalog visibility only.** It hides the configured
+  repository from Sources and saved choices while preserving its grant,
+  installation binding, package ID, automatic updates, deployables and history.
+  Add deployable registers, reuses or restores the same authorized configuration
+  atomically; it does not borrow a different identity's or MemQL account's
+  history. Archive remains the distinct lifecycle operation. Add deployable
+  creates sources and can connect accounts inline; Settings can also add,
+  reconnect and disconnect personal GitHub accounts.
+- **Disconnect GitHub changes repository access only.** Saved sources,
+  deployables, deployed files and serving sites remain intact and online.
+  Successful disconnect returns to Settings and removes the account from
+  both Settings and Add deployable's account choices. There is no disconnected
+  detail page or Reconnect button; the shared plus action adds it again. Fetching
+  future source updates requires an active connection. Disconnect never
+  archives a package, removes a source or uninstalls a hosted app.
 - **What belongs to the source is said on the source, once.** A run parked at a
   source's gate is "Review needed" on that source's row and on its page's bar,
   with Review beside it -- not repeated on every deployable the source made.
@@ -250,9 +345,9 @@ surface in the shell that read as a single thought.
   cards about updates, with a picker and three fields arriving in between --
   the owner's word was "overcrowded". It is two steps now: **Source** is the
   choice and nothing else, and the step after it is NAMED BY THE ANSWER
-  (Repository, Zip, Your CI) and holds what that answer needs. Alternatives
-  that answer one question are ONE choice -- GitHub or a token is a choice
-  row, not a button with a second button beneath it -- and a question that
+  (Repository, Zip, Your CI) and holds what that answer needs. Repository
+  creation uses GitHub alone; it does not ask someone to choose a connection
+  mechanism. A question that
   only makes sense once another is answered (what happens when something newer
   lands) waits until it is.
 - **A step that is one choice is answered by choosing.** There is no Continue
@@ -271,7 +366,7 @@ surface in the shell that read as a single thought.
   first now, with a read that writes nothing, and offers what can be done:
   Connect where there is an app, Set up GitHub where there is none and this
   person may register one, and for anybody else no act at all -- the step says
-  who can, and the other way in is one choice away. "Not known" is not "no":
+  who can set it up. "Not known" is not "no":
   when the question goes unanswered the old offer stands, and the refusal
   still lands in place.
 - **The orb names the subject.** The gate wears the MemQL mark, because what is

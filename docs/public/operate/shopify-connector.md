@@ -133,9 +133,19 @@ rather than a code change.
 
 ## Step 3 -- attach the store to its storefront
 
-MemQL OS → Deployables → the storefront → **Store** → Attach a store.
-Everything about a storefront is configured on its deployable, so attaching the
-store it talks to is done there rather than in an app of its own. It asks for:
+**Connect Shopify does this step.** On the storefront's Store panel, save the
+app from step 2 and press Connect Shopify: the shop's staff approve on Shopify,
+and MemQL seals the credentials, writes the store row, mints the Storefront
+token, attaches the store and registers the webhooks. A developer can do it.
+The whole flow, and every result it can come back with, is
+[Connect Shopify](shopify-connect.md).
+
+The form below is the CLUSTER OWNER's manual route, for a store whose
+credentials are already sealed as `globalSecret` rows -- the environment
+seed's, for instance. MemQL OS → Deployables → the storefront → **Store** →
+Attach a store. Everything about a storefront is configured on its deployable,
+so attaching the store it talks to is done there rather than in an app of its
+own. It asks for:
 
 | Field | What it is |
 |---|---|
@@ -150,8 +160,9 @@ store it talks to is done there rather than in an app of its own. It asks for:
 
 **The three token fields are REFERENCES, not tokens.** The store row is read
 by the console and returned to a browser; a token on it would be a token on a
-screen. Create the secret first (the console's Secrets surface, or
-`memql env`), then name it here.
+screen. No screen seals a token by hand: Connect Shopify seals them on the
+server, and the environment seed below does for a cluster's first store. Name a
+row one of them wrote.
 
 **A store row and a site binding are one record.** The storefront's binding
 NAMES this row -- `binding: {storeId}` on `v1:platform:site` -- and does not
@@ -162,11 +173,47 @@ keep in step. It used to carry its own `{storeDomain, storefrontTokenRef}`,
 which meant one store was recorded twice, edited in two places, at two
 authorization tiers.
 
-**Binding is a cluster owner's act, and the rule is narrow.** Attaching a
-store needs `execute` on `app:deployables/store`, which the owner role holds;
-beside it, the engine refuses a binding that names a store the caller cannot
-read. A store is cluster-owner-tier, so binding a storefront to one you may
-not read would publish that store's Storefront token under your own hostname.
+**Who may read and change a store row.** `v1:shopify:store` is
+`@rowAuthz(clusterOwner, rankFloor="developer")` (design decision D3):
+
+| Act | Who |
+|---|---|
+| read a store row (`storeById`, `storeByDomain`, `stores`, `developmentStoresFor`) | developer, cluster owner |
+| register a store (`createStore`) | cluster owner, or server code (Connect Shopify) |
+| change a store that exists (`updateStore`, `setStoreStatus`) | cluster owner |
+| attach a store to a storefront, or change which one it fronts (`updateSiteStoreBinding`) | developer, cluster owner: the store part, a store they can read, and a storefront they can write |
+
+Below developer a store read answers **zero rows, not an error**: the binding
+guard and the deploy path read "not readable" off an empty result. The read
+floor widens reads only, so a developer who can see a store still cannot
+change it.
+
+**Binding is a developer's or a cluster owner's act, and the rule is narrow.**
+Attaching a store needs `execute` on `app:deployables/store`, which the owner
+and developer roles hold; beside it, the engine refuses a binding that names a
+store the caller cannot read. Binding a storefront to a store you may not read
+would publish that store's Storefront token under that storefront's hostname.
+Reading is not enough on its own: CHANGING which store a site is bound to -- a
+create that binds, a rewrite that re-points, `updateSiteStoreBinding` -- also
+needs the store part, and so does changing the store a preview binding names,
+through `updateSitePreviewBinding` or a rewrite that re-points it. So an admin,
+below the read floor, binds no store even when granted the part, and a
+developer an owner has denied the part by name binds none either, on either
+binding.
+
+**The consequence, stated (D3).** A developer may bind ANY storefront they can
+write to ANY store on the cluster, and that is not only the storefronts they
+own. `v1:platform:site`'s account grant admits staff (developer and above) to
+write every account-tied site, so every client storefront -- live ones
+included -- can be re-pointed at any store by any developer holding the store
+part. That is the same reach that already lets a developer pause, archive or
+delete those sites. Every store row is registered by a cluster owner or by
+server code (D15), so the token references a binding exposes are ones an
+owner or Connect chose. An owner who wants one developer kept out denies them
+`execute app:deployables/store` by name. The Store panel in MemQL OS draws a
+developer the store slot and the attach, and not the register form, pause and
+resume, or the subscription reconcile -- the first three the engine would
+refuse them, and the last walks every store on the cluster.
 
 ### The environment seed
 
@@ -482,9 +529,9 @@ a real one. It is the end-to-end proof, in the order things can break:
 1. **Install.** Create the custom-distribution app on the dev store with the
    scopes above. Note the Admin token, the Storefront token and the webhook
    secret.
-2. **Configure.** Seal the three secrets, attach the store on the storefront
-   deployable, and confirm its Store panel shows `configured` with no missing
-   scopes. Mark it a development store if that is what it is, and name the
+2. **Configure.** Connect the store from the storefront deployable's Store
+   panel ([Connect Shopify](shopify-connect.md)), and confirm the panel shows
+   it connected with no missing scopes. Mark it a development store if that is what it is, and name the
    live store it stands in for.
 3. **Subscriptions.** Run `shopifyEnsureSubscriptions()`. The store's health
    should show `created` equal to the desired count and `failed` empty.

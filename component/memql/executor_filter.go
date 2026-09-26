@@ -228,6 +228,10 @@ func (e *MemQLEngine) tryCompileCombinedFilterIn(ctx context.Context, expr Expre
 		return compiledExpression{sql: "FALSE"}, true
 
 	case *accountScopeMatch:
+		if node.rowID {
+			return compiledExpression{sql: `id = ANY(?::text[])`, args: []any{pq.Array(node.accounts)}}, true
+		}
+
 		// The account grant, lowered for this request (epic memql#5165).
 		//
 		// ONE EXPRESSION FOR BOTH FIELD SHAPES. `jsonb_exists_any` is true
@@ -269,6 +273,9 @@ func (e *MemQLEngine) tryCompileCombinedFilterIn(ctx context.Context, expr Expre
 					jsonbExpr, jsonbExpr, jsonbExpr, jsonbExpr),
 				args: []any{"array", "string"},
 			}, true
+		}
+		if node.allowUntied {
+			return compiledExpression{sql: fmt.Sprintf("(%s IS NULL OR %s = 'null'::jsonb OR %s = '\"\"'::jsonb OR jsonb_exists_any(%s, ?::text[]))", jsonbExpr, jsonbExpr, jsonbExpr, jsonbExpr), args: []any{pq.Array(node.accounts)}}, true
 		}
 		if len(node.accounts) == 0 {
 			return compiledExpression{sql: "FALSE"}, true
@@ -515,6 +522,21 @@ func (e *MemQLEngine) executeCombinedFilterQuery(ctx context.Context, expr Expre
 		}
 
 		q := db.NewSelect().Model(rows).ModelTableExpr("(?) AS mn", latest)
+		if keys := e.latestScanKeys(expr, timestamp); keys != nil {
+			// Collapse covering-index keys before reading payloads. Heartbeats
+			// may give a few machines hundreds of thousands of versions; the
+			// old predicate scanned every historical JSON payload on every poll.
+			// Only the latest payload can survive latestMatchingNodes anyway.
+			// LIMIT 1 fences the payload probe. A normal join can be reordered
+			// into a scan of every historical payload after statistics change.
+			current := db.NewSelect().Model((*memorynodes.MemoryNode)(nil)).
+				ModelTableExpr("(?) AS latest_keys", keys).
+				Join(`JOIN LATERAL (SELECT * FROM "MemoryNodes" WHERE id=latest_keys.id AND "createdAt"=latest_keys."createdAt" LIMIT 1) AS mn ON true`)
+			q = db.NewSelect().Model(rows).ModelTableExpr("(?) AS mn", current)
+			if filter.sql != "" {
+				q = q.Where(filter.sql, filter.args...)
+			}
+		}
 
 		// Keyset cursor (5.12): when a continuation cursor is present, push the
 		// keyset predicate `(createdAt, id) <keyset> (?, ?)` into SQL so deep

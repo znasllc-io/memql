@@ -51,7 +51,7 @@ func (f *fallbackStreamWithTools) CallChatStreamWithTools(
 		// dashboard shows the retry trail with the provider that
 		// failed identified.
 		if lastErr != nil {
-			f.router.recordCall(fallbackRecord(f.req, lastFailedResolved, lastErr))
+			f.router.recordObserved(ctx, fallbackRecord(f.req, lastFailedResolved, lastErr))
 		}
 
 		observed := &observedStreamWithTools{
@@ -115,7 +115,7 @@ func (f *fallbackStreamWithTools) retryUnstartedStream(
 				if ctx.Err() != nil {
 					return
 				}
-				f.router.recordCall(fallbackRecord(f.req, failed, chunk.Error))
+				f.router.recordObserved(ctx, fallbackRecord(f.req, failed, chunk.Error))
 				remaining := *f
 				remaining.chain = f.chain[next:]
 				retry, err := remaining.CallChatStreamWithTools(ctx, messages, tools)
@@ -179,7 +179,7 @@ func (f *fallbackWithTools) CallChatWithTools(
 		inner := client.(common.ToolCallingChatAIProvider)
 
 		if lastErr != nil {
-			f.router.recordCall(fallbackRecord(f.req, lastFailedResolved, lastErr))
+			f.router.recordObserved(ctx, fallbackRecord(f.req, lastFailedResolved, lastErr))
 		}
 
 		observed := &observedWithTools{
@@ -224,7 +224,7 @@ func (f *fallbackChat) CallChat(ctx context.Context, messages []common.ChatMessa
 		inner := client.(common.ChatAIProvider)
 
 		if lastErr != nil {
-			f.router.recordCall(fallbackRecord(f.req, lastFailedResolved, lastErr))
+			f.router.recordObserved(ctx, fallbackRecord(f.req, lastFailedResolved, lastErr))
 		}
 
 		observed := &observedChat{

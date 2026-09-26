@@ -33,6 +33,7 @@ export interface NewPackageInput {
   autoDeploy?: boolean;
   /** A v1:platform:sourceCredential id. This surface never handles a token value. */
   credentialId: string;
+  sourceConnectionId?: string;
   artifactId: string;
   /**
    * The v1:accounts:account the source is FOR (memql#5303, D12). The compose
@@ -54,6 +55,7 @@ export async function createPackage(query: QueryClient, input: NewPackageInput):
   if (input.repoUrl !== "") parts.push(`repoUrl: ${renderMemQLValue(input.repoUrl)}`);
   if (input.repoRef !== "") parts.push(`repoRef: ${renderMemQLValue(input.repoRef)}`);
   if (input.credentialId !== "") parts.push(`credentialId: ${renderMemQLValue(input.credentialId)}`);
+  if (input.sourceConnectionId) parts.push(`sourceConnectionId: ${renderMemQLValue(input.sourceConnectionId)}`);
   if (input.artifactId !== "") parts.push(`artifactId: ${renderMemQLValue(input.artifactId)}`);
   if (input.accountId !== "") parts.push(`accountId: ${renderMemQLValue(input.accountId)}`);
   await query.executeNamed("createPackage", `mutation createPackage(${parts.join(", ")})`);
@@ -70,6 +72,7 @@ export async function createPackage(query: QueryClient, input: NewPackageInput):
  * lands on the outcome without failing the publish.
  */
 export interface Placement {
+  domains?: string[];
   /** The site's own hostname under the cluster domain. Required for a never-deployed app UNLESS it is skipped. */
   hostname: string;
   /** The client it is for. "" ties it to nobody. */
@@ -123,12 +126,13 @@ export function everyOtherAppSkipped(declared: readonly { name: string }[], app:
  */
 export function placementsPayload(
   placements: Record<string, Placement>,
-): Record<string, Record<string, string | boolean>> {
-  const out: Record<string, Record<string, string | boolean>> = {};
+): Record<string, Record<string, string | boolean | string[]>> {
+  const out: Record<string, Record<string, string | boolean | string[]>> = {};
   for (const [app, placement] of Object.entries(placements)) {
-    const entry: Record<string, string | boolean> = {};
+    const entry: Record<string, string | boolean | string[]> = {};
     if (placement.hostname.trim() !== "") entry["hostname"] = placement.hostname.trim();
     if (placement.accountId.trim() !== "") entry["accountId"] = placement.accountId.trim();
+    if (placement.domains !== undefined) entry["domains"] = placement.domains;
     if (placement.ownDomain.trim() !== "") entry["ownDomain"] = placement.ownDomain.trim();
     // THE VALUE TYPE IS WHY THIS WAS DROPPED. The map was `string` only, so
     // `skip` -- declared on Placement above and read by the engine's
@@ -172,6 +176,7 @@ export async function deployPackage(
   const result = await query.packageDeploy({
     packageId,
     confirm: opts.confirm,
+    ...(!opts.confirm ? { background: true } : {}),
     ...(Object.keys(placements).length > 0 ? { placements } : {}),
     // CONFIRMING A PARKED RUN NAMES IT (memql#4954). Without this every call
     // minted a run -- the confirmation included -- so the answered gate stayed
@@ -194,8 +199,8 @@ export async function deployPackage(
 }
 
 /** Switch which of the caller's credentials a tracked source fetches under. */
-export async function setPackageCredential(query: QueryClient, packageId: string, credentialId: string): Promise<void> {
-  await query.updatePackageSource({ packageId, credentialId });
+export async function setPackageCredential(query: QueryClient, packageId: string, credentialId: string, sourceConnectionId?: string): Promise<void> {
+  await query.updatePackageSource({ packageId, credentialId, ...(sourceConnectionId === undefined ? {} : { sourceConnectionId }) });
 }
 
 // ---------------------------------------------------------------------------
@@ -515,4 +520,19 @@ export function justBefore(iso: string): string {
   const ms = Date.parse(iso);
   if (Number.isNaN(ms)) return "";
   return new Date(ms - 1).toISOString();
+}
+
+/** Restore/reuse the exact authorized path; the server returns its stable package ID. */
+export async function registerRepositorySource(query: QueryClient, input: NewPackageInput): Promise<string> {
+  const result = await query.packageSourceRegister({ name: input.name, repoUrl: input.repoUrl, repoRef: input.repoRef,
+    credentialId: input.credentialId, sourceConnectionId: input.sourceConnectionId ?? "", accountId: input.accountId, autoDeploy: input.autoDeploy === true });
+  const row = result.rows()[0];
+  const id = row ? rowString(row, "packageId") : "";
+  if (!id) throw new Error("The repository source was not registered. Try again.");
+  return id;
+}
+
+export async function setPackageSourceRemoved(query: QueryClient, packageId: string, removed: boolean): Promise<boolean> {
+  await query.setPackageSourceRemoved({ packageId, removed });
+  return true;
 }

@@ -586,6 +586,12 @@ shape enrolmentToken enrolmentTokenFull {
 /// prove it found the row it was asked for, not merely a row.
 @row
 shape githubConnectState githubConnectStateFull {
+  sessionId
+  pkceVerifier
+  credentialId
+  expectedExternalId
+  targetRevokedAt
+  flowId
   row.id
   userId
   stateHash
@@ -596,6 +602,10 @@ shape githubConnectState githubConnectStateFull {
   sourceIP
   purpose
   organization
+  shopDomain
+  siteId
+  clientId
+  credentialSource
   row.createdAt
 }
 
@@ -619,6 +629,7 @@ shape group groupFull {
 @row
 shape groupMembership groupMembershipFull {
   row.id
+  accountId
   groupId
   userId
   origin

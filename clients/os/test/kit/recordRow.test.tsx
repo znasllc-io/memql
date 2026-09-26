@@ -1,9 +1,10 @@
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { RecordList, RecordRow } from "../../src/kit/RecordRow";
+import { Subhead } from "../../src/kit/controls";
+import { RecordList, RecordRow, listCount } from "../../src/kit/RecordRow";
 
 afterEach(cleanup);
 
@@ -58,5 +59,40 @@ describe("a record list", () => {
   it("leaves the narrow arrangement alone: there the summary is a second line, not a column", () => {
     const narrow = CSS.slice(CSS.indexOf("@container os-record-list (max-width: 600px)"));
     expect(narrow.slice(0, narrow.indexOf("\n}\n"))).toContain(".os-row.os-record-row { grid-template-columns: 22px minmax(0, 1fr) auto 12px;");
+  });
+});
+
+
+describe("record list behavior", () => {
+  it("keeps semantic list items and a separated accessible heading count", () => {
+    render(<><Subhead meta={2}>Clients</Subhead><RecordList as="ul" label="Clients"><RecordRow name="Acme" /><RecordRow name="Studio" /></RecordList></>);
+    expect(screen.getByRole("heading", { name: "Clients 2" })).toBeTruthy();
+    expect(screen.getByRole("list", { name: "Clients" })).toBeTruthy();
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+  });
+
+  it("keeps independent actions outside the opening button and preserves disclosure state", () => {
+    const open = vi.fn();
+    const archive = vi.fn();
+    render(<RecordList><RecordRow name="Client" open={true} onOpen={open} actions={<button onClick={archive}>Archive</button>} /></RecordList>);
+    const opener = screen.getByRole("button", { name: "Client" });
+    expect(opener.getAttribute("aria-expanded")).toBe("true");
+    expect(opener.contains(screen.getByRole("button", { name: "Archive" }))).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    expect(archive).toHaveBeenCalledOnce();
+    expect(open).not.toHaveBeenCalled();
+    fireEvent.click(opener);
+    expect(open).toHaveBeenCalledOnce();
+  });
+
+  it("never presents loading, stale, or refused populations as a count", () => {
+    for (const state of ["seeding", "degraded", "disconnected"]) {
+      expect(listCount({ state, rows: [] })).toBeUndefined();
+      expect(listCount({ state, rows: [1, 2] })).toBeUndefined();
+    }
+    expect(listCount(null)).toBeUndefined();
+    expect(listCount({ state: "live", error: "permission denied", rows: [1] })).toBeUndefined();
+    expect(listCount({ state: "live", rows: [] })).toBe(0);
+    expect(listCount({ state: "live", rows: [1, 2, 3] }, 1)).toBe(1);
   });
 });

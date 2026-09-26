@@ -1,35 +1,38 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { PENDING_DEPLOYMENT_STATUSES } from "./packages/rows";
+import { useEffect, useMemo, useState } from "react";
 import { Concepts, type LiveSnapshot, type Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { Head, Panel, roleAdmits, SetupGroup } from "../../kit";
+import { Notice, roleAdmits } from "../../kit";
 import { useDeployableParts } from "./parts";
 import { useSession } from "../../chrome/access";
-import { useLiveView, type LiveView } from "../../live/liveView";
+import { useLiveView } from "../../live/liveView";
 import { useArrivals } from "../../live/useArrivals";
 import { AppLogsSection } from "../../logs/AppLogsSection";
-import { accessAdmits, type OsAppProps } from "../../system/registry";
+import type { OsAppProps } from "../../system/registry";
 import { DeployablesSection } from "./DeployablesSection";
 import { ActivePane } from "./paneActivity";
 import { MapSection, NO_SELECTION, type MapSelection } from "./map/MapSection";
 import type { MapNode } from "./map/layout";
 import { deploymentFromRow, packageFromRow, type DeploymentRow, type PackageRow } from "./packages/rows";
-import { useAwaitingConfirm } from "./packages/useAwaitingConfirm";
+import { usePendingDeployments } from "./packages/usePendingDeployments";
 import { usePackages } from "./packages/usePackages";
 import { siteFingerprint, siteFromRow, type SiteRow } from "./rows";
-import { SourcesGroup } from "./settings/SourcesGroup";
+import { SourceConnectionsProvider, useSourceConnections } from "../../modules/connections/connections";
+import { ConnectionsPanel } from "../../modules/connections/ConnectionsPanel";
+import { accountSetupState, githubAccountsFor } from "./sources/accountSetup";
+import { ConnectReturnNotice } from "./sources/ConnectReturnNotice";
 import type { ConnectReturn } from "./sources/connectReturn";
 import { credentialFromRow, type CredentialRow } from "./sources/rows";
-import { useSourceCredentials } from "./sources/useSourceCredentials";
+import { useSourceCredentials } from "../../modules/connections/useSourceCredentials";
 import {
-  DEPLOYABLES_SECTIONS,
-  LIST_DENSITIES,
   LocalDeployablesSettingsStore,
   type DeployablesSettings,
   type DeployablesSettingsStore,
-  type ListDensity, DEPLOYABLES_REQUIRES, DEPLOYABLES_WANTS } from "./settings";
+} from "./settings";
 import { DeployablesSettingsProvider } from "./settingsContext";
 import { useSiteHealth } from "./useSiteHealth";
 import { siteStateWord } from "./words";
+import { shopifyMessage } from "../../modules/connections/shopifyReply";
 import { useSites } from "./useSites";
 
 // Deployables: the things this cluster serves, the map of what serves where,
@@ -70,7 +73,11 @@ const DEPLOYABLES_LOG_CONCEPTS = [
   Concepts.PLATFORM_CUSTOM_DOMAIN,
 ] as const;
 
-export function DeployablesApp({
+export function DeployablesApp(props: Parameters<typeof DeployablesAppContent>[0]) {
+  return <SourceConnectionsProvider><DeployablesAppContent {...props} /></SourceConnectionsProvider>;
+}
+
+function DeployablesAppContent({
   sectionId,
   navigation,
   windowVisible = true,
@@ -78,6 +85,7 @@ export function DeployablesApp({
   askContext,
   intent,
   consumeIntent,
+  reportSetupState,
   store,
 }: OsAppProps & { store?: DeployablesSettingsStore }) {
   // Injectable for tests, which is the whole reason the parameter exists --
@@ -115,20 +123,15 @@ export function DeployablesApp({
   const { source: packageCollection, reseed: reseedPackages } = usePackages();
   // A THIRD FEED, over a third concept (epic memql#4885): the caller's own
   // source credentials, read once here as CARDS and passed down so the
-  // Source stop's chip and, later, the Sources settings group are two
+  // wizard and the Sources list are two
   // readings of one feed rather than two subscriptions free to disagree.
   const { source: credentialCollection, snapshot: credentialSnapshot, reseed: reseedCredentials } = useSourceCredentials();
   // A FOURTH FEED, and the ONE recorded exception to clients/os/README.md's
   // rule that a package's deployment timeline is retained by the page and
-  // never by the root (that rule guards against subscribing a window to
-  // every deploy in the cluster to render one). This holds PARKED RUNS ONLY
-  // -- deployments at `awaiting_confirm`, a handful of rows a person needs to
-  // see before they open anything, because the list's waiting mark ("a
-  // deploy is waiting for you") is how somebody who closed the window
-  // mid-compose finds their run again. It never holds a timeline, and a run
-  // that moves on leaves it on its own event. The whole account is in
-  // `packages/useAwaitingConfirm.ts`.
-  const { source: awaitingCollection, reseed: reseedAwaiting } = useAwaitingConfirm();
+  // never by the root. This exception keeps only pending work and review
+  // gates, so leaving analysis does not hide it. Terminal runs leave this
+  // feed; their full history remains on the package's own page.
+  const { source: awaitingCollection, reseed: reseedAwaiting } = usePendingDeployments();
 
   // PROJECT, then narrow, in one pass. The collection holds RAW wire rows --
   // the fold upserts an event payload as the row type with no projection hook
@@ -165,16 +168,22 @@ export function DeployablesApp({
     rows.map(credentialFromRow).filter((c) => c.id !== ""),
   );
   const credentialRows = credentials?.snapshot.rows ?? [];
+  const connections = useSourceConnections();
+  const githubAccounts = githubAccountsFor(credentialRows, viewerUserId, connections.revokedCredentialIds);
+  const setupState = accountSetupState(githubAccounts, credentialSnapshot);
+  useEffect(() => { reportSetupState?.(setupState); }, [reportSetupState, setupState]);
+  useEffect(() => () => reportSetupState?.("unknown"), [reportSetupState]);
+  useEffect(() => { connections.observeCredentials(credentialRows); }, [connections.observeCredentials, credentialRows]);
 
-  // `awaiting_confirm` is held HERE as well as by the feed's `inScope`: the
+  // Pending status is held HERE as well as by the feed's `inScope`: the
   // seed and the events both narrow to it, and the projection says so once
   // more so a row this view renders can never be a run that has moved on.
   const parked = useLiveView<Row, DeploymentRow>(awaitingCollection, "awaitingConfirm", (rows) =>
-    rows.map(deploymentFromRow).filter((d) => d.id !== "" && d.status === "awaiting_confirm"),
+    rows.map(deploymentFromRow).filter((d) => d.id !== "" && PENDING_DEPLOYMENT_STATUSES.has(d.status)),
   );
   const parkedSnapshot = parked?.snapshot ?? EMPTY_SNAPSHOT<DeploymentRow>();
 
-  const [openRequest, setOpenRequest] = useState<{ siteId: string; revision: number } | undefined>();
+  const [openRequest, setOpenRequest] = useState<{ siteId: string; revision: number; detail?: "store"; result?: string } | undefined>();
   const [selection, setSelection] = useState<MapSelection>(NO_SELECTION);
   const selectedSiteId = selection.siteIds.length === 1 ? (selection.siteIds[0] ?? "") : "";
 
@@ -232,53 +241,44 @@ export function DeployablesApp({
   // pixels. Consumed by id, so acting on a stale render can never eat a
   // newer instruction, and an unrecognised payload is consumed and ignored
   // rather than left standing to re-fire on every render.
+  const [connectionProvider, setConnectionProvider] = useState<"github" | "shopify">("github");
+  const [connectionsIntent, setConnectionsIntent] = useState<OsAppProps["intent"]>();
+  const [shopifyError, setShopifyError] = useState("");
   const [connectResult, setConnectResult] = useState<ConnectReturn | null>(null);
   useEffect(() => {
     if (!intent) return;
+    const requestedSite = intent.payload.siteId;
+    if (typeof requestedSite === "string" && requestedSite) {
+      setOpenRequest(held => ({ siteId: requestedSite, revision: (held?.revision ?? 0) + 1 }));
+      navigate("deployables");
+    }
+    if (intent.payload.provider === "shopify") { setConnectionProvider("shopify"); setConnectionsIntent(intent); }
+    const shopify = intent.payload["shopify"];
+    if (shopify && typeof shopify === "object" && "siteId" in shopify && typeof shopify.siteId === "string" && shopify.siteId) {
+      setShopifyError("");
+      setOpenRequest(held => ({ siteId: shopify.siteId as string, revision: (held?.revision ?? 0) + 1, detail: "store", result: "reason" in shopify && typeof shopify.reason === "string" ? shopify.reason : "" }));
+      reseedAll();
+    }
+    if (sectionId !== "settings" && shopify && typeof shopify === "object" && (!("siteId" in shopify) || !shopify.siteId)) {
+      setShopifyError(shopifyMessage("reason" in shopify && typeof shopify.reason === "string" ? shopify.reason : "connect_state_invalid"));
+    }
     const carried = intent.payload["connect"];
     if (carried !== null && typeof carried === "object") {
       const answer = carried as Partial<ConnectReturn>;
       setConnectResult({
         reason: typeof answer.reason === "string" ? answer.reason : "",
         section: typeof answer.section === "string" ? answer.section : sectionId,
+        ...(typeof answer.credentialId === "string" ? { credentialId: answer.credentialId } : {}),
+        ...(typeof answer.flowId === "string" ? { flowId: answer.flowId } : {}),
       });
     }
     consumeIntent?.(intent.id);
   }, [intent, consumeIntent, sectionId]);
 
-  // THE DEFAULT-SECTION PREFERENCE, APPLIED ONCE PER WINDOW -- Fleet's pattern,
-  // and its reasoning holds unchanged. The shell opens an app on its manifest's
-  // FIRST section, so an app-level "open me here" can only be the app
-  // navigating itself on the first render of this component instance.
-  const applied = useRef(false);
-  useEffect(() => {
-    if (applied.current) return;
-    applied.current = true;
-    // ONLY when the window opened on the SHELL's default. A window opened on a
-    // named section was opened by somebody who said where they wanted to be --
-    // the Settings apps index deep-linking to this app's own settings, say --
-    // and a preference that overrode that would make the deep link silently not
-    // work (memql#4743).
-    const shellDefault = DEPLOYABLES_SECTIONS[0]?.id ?? "";
-    if (sectionId !== shellDefault) return;
-    if (settings.defaultSection && settings.defaultSection !== sectionId) {
-      navigate(settings.defaultSection);
-    }
-    // ONCE PER MOUNT, WHICH IS ONCE PER WINDOW. Re-running on a section change
-    // would drag somebody back to their default the moment they navigated away.
-  }, []);
-
   const settingsContent = (
-      <DeployablesSettingsSection
-        settings={settings}
-        update={update}
-        viewerUserId={viewerUserId}
-        isClusterOwner={isClusterOwner}
-        credentials={credentials}
-        packages={packageSnapshot.rows}
-        connectResult={connectResult}
-      />
-    );
+    <ConnectionsPanel appId="deployables" initialProvider={connectionProvider} intent={connectionsIntent} consumeIntent={() => setConnectionsIntent(undefined)}
+      connectResult={connectResult?.section === "settings" ? connectResult : null} />
+  );
   // The app's slice of the cluster's logs (epic memql#4895). It survived the
   // compose restructure while Sites, Packages and Actions did not, and the
   // difference is whose section it is: those three were this app's own reading
@@ -308,7 +308,6 @@ export function DeployablesApp({
           packages={packages}
           parked={parked}
           feedError={snapshot.error || packageSnapshot.error || parkedSnapshot.error}
-          density={settings.density}
           selectedSiteId={selectedSiteId}
           onSelectSite={selectSite}
           viewerUserId={viewerUserId}
@@ -319,6 +318,7 @@ export function DeployablesApp({
           credentialFeed={{ state: credentialSnapshot.state, error: credentialSnapshot.error, retry: reseedCredentials }}
           onAsk={askContext}
           onReseed={reseedAll}
+          onSettings={() => navigate("settings", { fromContent: true })}
         />
       </DeployablesSettingsProvider>
     );
@@ -328,8 +328,7 @@ export function DeployablesApp({
   // Deployables tab off whatever it was showing. It takes no open request and
   // no connect return: those are addressed to Deployables, which is where the
   // map sends people and where GitHub sends them back.
-  const sourcesContent =
-    snapshot.state === "disconnected" ? null : (
+  const sourcesContent = (
       <DeployablesSettingsProvider value={{ settings, update, toggleSource }}>
         <DeployablesSection
           root="sources"
@@ -340,7 +339,6 @@ export function DeployablesApp({
           packages={packages}
           parked={parked}
           feedError={snapshot.error || packageSnapshot.error || parkedSnapshot.error}
-          density={settings.density}
           selectedSiteId=""
           onSelectSite={() => {}}
           viewerUserId={viewerUserId}
@@ -351,6 +349,7 @@ export function DeployablesApp({
           credentialFeed={{ state: credentialSnapshot.state, error: credentialSnapshot.error, retry: reseedCredentials }}
           onAsk={askContext}
           onReseed={reseedAll}
+          onSettings={() => navigate("settings", { fromContent: true })}
         />
       </DeployablesSettingsProvider>
     );
@@ -370,15 +369,17 @@ export function DeployablesApp({
         setOpenRequest(held => ({ siteId, revision: (held?.revision ?? 0) + 1 }));
         navigate("deployables", { fromContent: true });
       }}
-      onReseed={reseed}
       onBrowse={() => navigate("deployables", { fromContent: true })}
     />
   );
   return <ActivePane active={windowVisible}>
     <RetainedSection active={sectionId === "settings"}>{settingsContent}</RetainedSection>
     <RetainedSection active={sectionId === "logs"}>{logsContent}</RetainedSection>
-    <RetainedSection active={sectionId === "deployables"}>{deployablesContent}</RetainedSection>
-    <RetainedSection active={sectionId === "sources"}>{sourcesContent}</RetainedSection>
+    <RetainedSection active={sectionId === "deployables"}>{shopifyError ? <Notice tone="warn" sentence={shopifyError} /> : null}{deployablesContent}</RetainedSection>
+    <RetainedSection active={sectionId === "sources"}>
+      <ConnectReturnNotice result={connectResult?.section === "sources" ? connectResult : null} />
+      {sourcesContent}
+    </RetainedSection>
     <RetainedSection active={!["settings", "logs", "deployables", "sources"].includes(sectionId)}>{mapContent}</RetainedSection>
   </ActivePane>;
 }
@@ -388,110 +389,4 @@ function RetainedSection({ active, children }: { active: boolean; children: Reac
   const [visited, setVisited] = useState(active);
   useEffect(() => { if (active) setVisited(true); }, [active]);
   return active || visited ? <ActivePane active={active}><div hidden={!active} inert={!active} style={{ display: active ? "contents" : "none" }}>{children}</div></ActivePane> : null;
-}
-
-function DeployablesSettingsSection({
-  settings,
-  update,
-  viewerUserId,
-  isClusterOwner,
-  credentials,
-  packages,
-  connectResult,
-}: {
-  settings: DeployablesSettings;
-  update: (patch: Partial<DeployablesSettings>) => void;
-  /** Whose credentials come first in the Sources group. */
-  viewerUserId: string;
-  /** Whether other people's credentials are listed at all (the concept's clusterOwner branch). */
-  isClusterOwner: boolean;
-  /** The app root's one credentials feed, for the Sources group. */
-  credentials: LiveView<CredentialRow> | null;
-  /** The app root's package rows, joined onto each credential by `credentialId`. */
-  packages: readonly PackageRow[];
-  /** The answer from a GitHub connect, rendered by the group that asked. */
-  connectResult: ConnectReturn | null;
-}) {
-  const { readiness } = useSession();
-  // OFFER ONLY WHAT THIS SESSION CAN OPEN. A preference naming a section the
-  // reader is not admitted to would silently do nothing -- WindowFrame falls
-  // back to the first admitted section -- which reads as a broken setting
-  // rather than as one that does not apply. No section carries a role today,
-  // so this is every one of the three; the filter stays for the day one does.
-  const offered = DEPLOYABLES_SECTIONS.filter((s) => accessAdmits(s.requires));
-
-  return (
-    <div className="os-settings deployable-settings">
-      <Head title="Deployables settings" />
-      {/* THE SET UP GROUP sits above the preferences on purpose: it is the
-          reason a person was sent here from an unconfigured surface, and the
-          first thing they need is what to configure and where. Rule 4 puts
-          micro-preferences in Settings; it never said they come first. */}
-      <SetupGroup
-        app="Deployables"
-        requires={DEPLOYABLES_REQUIRES}
-        wants={DEPLOYABLES_WANTS}
-        readiness={readiness}
-        /* THIS PAGE, so the GitHub App -- configured in the Sources group
-           further down it -- is pointed at in words, not with a button that
-           opens the page somebody is already reading. */
-        here={{ app: "deployables", section: "settings" }}
-      />
-      <Panel label="Deployables settings">
-        <fieldset className="os-field-group">
-          <legend>Open Deployables on</legend>
-          <div className="os-choice-row" role="radiogroup" aria-label="Default section">
-            {offered.map((section) => (
-              <button
-                key={section.id}
-                type="button"
-                role="radio"
-                aria-checked={settings.defaultSection === section.id}
-                className="os-choice"
-                onClick={() => update({ defaultSection: section.id })}
-              >
-                {section.name}
-              </button>
-            ))}
-          </div>
-          <p className="os-caption">
-            Applies the next time you open Deployables.
-          </p>
-        </fieldset>
-
-        <fieldset className="os-field-group">
-          <legend>List density</legend>
-          <div className="os-choice-row" role="radiogroup" aria-label="List density">
-            {LIST_DENSITIES.map((density) => (
-              <button
-                key={density}
-                type="button"
-                role="radio"
-                aria-checked={settings.density === density}
-                className="os-choice"
-                onClick={() => update({ density: density as ListDensity })}
-              >
-                {density}
-              </button>
-            ))}
-          </div>
-          <p className="os-caption">
-            Choose the spacing between app rows.
-          </p>
-        </fieldset>
-
-        {/* THE SOURCES GROUP IS NOT A PREFERENCE, and it is here anyway: the
-            two credential acts a person takes outside a compose flow --
-            add one ahead of time, revoke one that leaked -- have nowhere
-            else to live, and Settings is where an app keeps what is about
-            the app rather than about one row (DESIGN.md rule 4's home, one
-            step out). The two above ARE preferences and stay above it. */}
-        <SourcesGroup
-          viewerUserId={viewerUserId}
-          isClusterOwner={isClusterOwner} credentials={credentials} packages={packages} connectResult={connectResult} />
-
-        <p className="os-caption">Preferences are saved in this browser.</p>
-      </Panel>
-    </div>
-  );
 }

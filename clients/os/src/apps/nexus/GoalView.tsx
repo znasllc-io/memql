@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, GitFork, History, RotateCcw } from "lucide-react";
 import type { LiveState, Row } from "@znasllc-io/memql-sdk-core/client";
@@ -347,17 +348,11 @@ export function GoalView({
                   </li>
                 ))}
               </ol>
-              {railSteps.length === 0 ? (
-                <Caption>
-                  {stepsState === "seeding"
-                    ? "Loading the steps from the cluster"
-                    : stepsState === "disconnected"
+              {railSteps.length === 0 ? (stepsState === "seeding" ? <RecordListSkeleton label="Loading the steps from the cluster" /> : <Caption>{stepsState === "disconnected"
                       ? "Not connected to the cluster"
                       : progress.compiling
                         ? "It is still working out what to do. The steps appear as it decides them."
-                        : "This run recorded no steps."}
-                </Caption>
-              ) : null}
+                        : "This run recorded no steps."}</Caption>) : null}
             </section>
 
             <button type="button" className="os-nexus-link" onClick={() => onOpenRun(run.id)}>

@@ -364,7 +364,7 @@ func formatStamp(t time.Time) string {
 }
 
 func (s *Server) renderDevice(w http.ResponseWriter, r *http.Request, data webtempl.DeviceData) {
-	s.render(w, r, "device", webtempl.Device(data))
+	s.render(w, r, "device", webtempl.Device(data), data)
 }
 
 // requireUserForDevice is /device's auth gate. It mirrors requireUser

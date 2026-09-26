@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { Button, Caption, Head, LiveList, Notice, formatBytes, formatFreshness, useLiveView, useNow, type LiveListSource } from "../../../kit";
+import { Button, Caption, Head, RecordRow, listCount, LiveList, Notice, formatBytes, formatFreshness, useLiveView, useNow, type LiveListSource } from "../../../kit";
 import { flatten } from "../../../kit/rows";
 import { useMachines } from "../../../live/machines";
 import { isWorkerOnline } from "../../fleet/online";
@@ -26,25 +26,8 @@ import { CREATE_BUSY_KEY, useBackupWrites, type BackupWrites } from "./useBackup
 
 // Backups: the folders on this person's machines that keep arriving here.
 //
-// ===========================================================================
-// THE LINK IS THE ROW
-// ===========================================================================
-// A backup is not a record with a status field; it is a RELATIONSHIP between
-// two named ends, and the surface draws it as one. Machine and path on the
-// left, Library folder on the right, and between them a line whose state says
-// what is happening to the bytes: settled, catching up, severed. The direction
-// is drawn because the direction is a rule -- one-way forever, machine to
-// MemQL -- and a picture that could be read either way would be the wrong
-// picture of this feature.
-//
-// The two counts either side are what makes it useful rather than decorative:
-// the origin's own file count (which nothing in the graph can answer -- only
-// the machine can see it) beside the count that has arrived. When a backup is
-// behind, the difference is the story, and it is legible without reading a
-// word.
-//
-// Colour is never the only carrier. Every tone is also a sentence, and the
-// link element takes the same sentence as its accessible name.
+// A backup uses the shared record row. Its two named ends and counts retain
+// the one-way relationship: the machine's source and the Library destination.
 
 export interface BackupsSectionProps {
   /** The Library's folder rows -- the destination names, and the picker. */
@@ -110,7 +93,7 @@ export function BackupsSection({ folders, files, source, writes }: BackupsSectio
     <section className="os-backups" aria-label="Backups">
       <Head
         title="Backups"
-        meta={summarize(source?.snapshot.rows ?? [])}
+        meta={listCount(source?.snapshot)}
       >
         <Button
           tone={adding ? "quiet" : "primary"}
@@ -205,13 +188,7 @@ export function BackupsSection({ folders, files, source, writes }: BackupsSectio
 }
 
 /** The Head's quiet scope note: how many backups, across how many machines. */
-export function summarize(backups: readonly BackupRow[]): string {
-  if (backups.length === 0) return "";
-  const machines = new Set(backups.map((backup) => backup.workerId)).size;
-  const folders = backups.length === 1 ? "1 folder" : `${backups.length} folders`;
-  const across = machines === 1 ? "1 machine" : `${machines} machines`;
-  return `${folders} on ${across}`;
-}
+export
 
 interface BackupLineProps {
   backup: BackupRow;
@@ -249,70 +226,26 @@ function BackupLine({
 
   return (
     <article className="os-backup" data-tone={tone}>
-      {/* The link. One element, one accessible name, and the name is the
-          sentence rather than the colour -- so the state survives being read
-          out loud, printed in greyscale, or looked at by somebody who does not
-          separate red from green. */}
-      <div className="os-backup-top">
-      <div
-        className="os-backup-link"
-        role="img"
-        aria-label={`${name} to ${destination}: ${TONE_LABEL[tone]}. ${TONE_SENTENCE[tone]}`}
-      >
-        <div className="os-backup-end">
-          <span className="os-backup-machine">
-            <span className="os-backup-dot" data-online={online} aria-hidden />
-            {name}
-          </span>
-          <span className="os-backup-path" title={backup.localPath}>
-            {backup.localPath}
-          </span>
-          <span className="os-backup-count">
-            {backup.originState === ""
-              ? "not counted yet"
-              : `${backup.filesSeen.toLocaleString()} ${backup.filesSeen === 1 ? "file" : "files"} · ${formatBytes(backup.bytesSeen)}`}
-          </span>
-        </div>
-
-        <span className="os-backup-wire" data-tone={tone} aria-hidden />
-
-        <div className="os-backup-end os-backup-end-here">
-          <span className="os-backup-folder">{destination}</span>
-          <span className="os-backup-count">
-            {`${mine.length.toLocaleString()} ${mine.length === 1 ? "file" : "files"} here`}
-          </span>
-        </div>
-      </div>
-
-        <span className="os-backup-actions">
-          <Button
-            onClick={() => write.setStatus(backup.id, backup.status === "paused" ? "active" : "paused")}
-            busy={busy}
-            ariaLabel={backup.status === "paused" ? `Resume backing up ${backup.localPath}` : `Pause backing up ${backup.localPath}`}
-          >
+      <RecordRow
+        name={backup.localPath}
+        secondary={`${name} to ${destination}`}
+        state={TONE_LABEL[tone]}
+        tone={tone === "settled" ? "accent" : tone === "paused" ? "muted" : "warn"}
+        current={online}
+        stateExtra={<span className="os-caption">{backup.lastSweepAt === "" ? "no report yet" : `checked ${formatFreshness(backup.lastSweepAt, now)}`}</span>}
+        actions={<>
+          <Button onClick={() => write.setStatus(backup.id, backup.status === "paused" ? "active" : "paused")} busy={busy} ariaLabel={backup.status === "paused" ? `Resume backing up ${backup.localPath}` : `Pause backing up ${backup.localPath}`}>
             {backup.status === "paused" ? "Resume" : "Pause"}
           </Button>
-          <Button onClick={onEdit} ariaExpanded={editing} ariaLabel={`Edit the backup of ${backup.localPath}`}>
-            Edit
-          </Button>
-          <Button onClick={onConfirm} ariaLabel={`Stop backing up ${backup.localPath}`}>
-            Stop
-          </Button>
+          <Button onClick={onEdit} ariaExpanded={editing} ariaLabel={`Edit the backup of ${backup.localPath}`}>Edit</Button>
+          <Button onClick={onConfirm} ariaLabel={`Stop backing up ${backup.localPath}`}>Stop</Button>
+        </>}
+      >
+        <span role="img" aria-label={`${name} to ${destination}: ${TONE_LABEL[tone]}. ${TONE_SENTENCE[tone]}`}>
+          {backup.originState === "" ? "not counted yet" : `${backup.filesSeen.toLocaleString()} ${backup.filesSeen === 1 ? "file" : "files"} · ${formatBytes(backup.bytesSeen)}`}
+          {" → "}<span>{`${mine.length.toLocaleString()} ${mine.length === 1 ? "file" : "files"} here`}</span>
         </span>
-      </div>
-
-      <div className="os-backup-state">
-        <span className="os-backup-tone">{TONE_LABEL[tone]}</span>
-        {/* lastSweepAt renders CONTINUOUSLY and is deliberately absent from the
-            fingerprint: a sweep touches it on a schedule forever, so naming it
-            as news would strobe this list on the sweep's own cycle. It is what
-            makes a stale "Backed up" honest. */}
-        <span className="os-backup-when">
-          {backup.lastSweepAt === ""
-            ? "no report yet"
-            : `checked ${formatFreshness(backup.lastSweepAt, now)}`}
-        </span>
-      </div>
+      </RecordRow>
 
       {/* SAY IT ONCE, and say the SPECIFIC one.
           - A settled backup's label plus "checked N ago" already says

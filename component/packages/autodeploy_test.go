@@ -246,9 +246,9 @@ func TestTwoPushesInQuickSuccessionProduceOneLiveRun(t *testing.T) {
 
 func TestBothFeedsNoticingOnePushComposeTheSameRunId(t *testing.T) {
 	// The one-live-run check is a read, and two feeds can pass it at the same
-	// moment. What makes the outcome one run rather than two is that they
-	// compose the SAME id, so the second lands on a row that already exists
-	// and the append-only guard refuses to reopen it.
+	// moment. They compose the SAME id, and the shared opening gate refuses
+	// the second caller. The real concurrent write is exercised separately
+	// by TestDeploymentOpeningExcludesConcurrentReplicas.
 	first := autoDeploymentId("v1:platform:package:abc", "sha-new")
 	second := autoDeploymentId("v1:platform:package:abc", "sha-new")
 	if first != second {

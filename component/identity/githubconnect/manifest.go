@@ -65,6 +65,10 @@ const (
 	// PurposeConnect is the Connect flow's own purpose. Blank means the same:
 	// every row written before the field existed is a connect state.
 	PurposeConnect = "connect"
+	// PurposeShopifyConnect is Connect Shopify's (design record
+	// 2026-09-23-connect-shopify, 12.4): a person connecting a storefront's
+	// Shopify store rides this row and this lock, and is neither of the above.
+	PurposeShopifyConnect = "shopify_connect"
 )
 
 // Manifest is the document GitHub creates the app from. Field names are

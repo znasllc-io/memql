@@ -191,7 +191,9 @@ func (j *workJournal) classifyAndAct(ctx context.Context, exec *AutomationExecut
 		if kind == "" {
 			return false
 		}
-		j.waitOnApproval(ctx, exec, chainHead, stepKey, kind, symptom, evidence, now)
+		if !j.waitOnApproval(ctx, exec, chainHead, stepKey, kind, symptom, evidence, now) {
+			return true // persistence failure recorded a terminal run, not a wait
+		}
 	default:
 		return false
 	}
@@ -325,13 +327,13 @@ func (j *workJournal) waitFor(ctx context.Context, exec *AutomationExecution, ch
 // LOAD-BEARING, exactly as it is in parkOnInference: a run parked on an
 // approval id that does not exist waits on nothing, which no person can decide
 // and no sweep can resolve.
-func (j *workJournal) waitOnApproval(ctx context.Context, exec *AutomationExecution, chainHead, stepKey, kind string, symptom work.Symptom, evidence work.Evidence, now time.Time) {
+func (j *workJournal) waitOnApproval(ctx context.Context, exec *AutomationExecution, chainHead, stepKey, kind string, symptom work.Symptom, evidence work.Evidence, now time.Time) bool {
 	approvalId := "v1:work:approval:" + id.NewShortId()
 	question := "This run failed and the system does not know how to proceed."
 	if evidence.Reason != "" {
 		question = evidence.Reason
 	}
-	j.call(ctx, "createWorkApproval", map[string]any{
+	if !j.persistApproval(ctx, exec, chainHead, map[string]any{
 		"approvalId": approvalId,
 		"runId":      exec.ID,
 		"stepKey":    stepKey,
@@ -351,7 +353,10 @@ func (j *workJournal) waitOnApproval(ctx context.Context, exec *AutomationExecut
 			"symptom": string(symptom),
 		}),
 		"question": question,
-		"options":  []any{"retry", "abandon"},
+		"options": []map[string]any{
+			{"label": "Retry", "value": "retry"},
+			{"label": "Abandon", "value": "abandon"},
+		},
 		"evidence": map[string]any{
 			"tier":   evidence.Tier,
 			"reason": evidence.Reason,
@@ -360,13 +365,16 @@ func (j *workJournal) waitOnApproval(ctx context.Context, exec *AutomationExecut
 		},
 		"requestedAt": rfc3339(now),
 		"expiresAt":   rfc3339(now.Add(workApprovalTTL)),
-	})
+	}) {
+		return false
+	}
 	j.waitFor(ctx, exec, chainHead, map[string]any{
 		"kind":         WaitKindApproval,
 		"subject":      approvalId,
 		"approvalKind": kind,
 		"since":        rfc3339(now),
 	})
+	return true
 }
 
 // signalFor builds the rules table's input from what the executor actually

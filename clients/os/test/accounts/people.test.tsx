@@ -139,9 +139,9 @@ describe("the People band", () => {
       }),
     );
     const band = peopleBand(ledger);
-    await waitFor(() => expect(within(band).getByRole("button", { name: "Open in Users" })).toBeTruthy());
+    await waitFor(() => expect(within(band).getByRole("button", { name: "Acme" })).toBeTruthy());
     await act(async () => {
-      fireEvent.click(within(band).getByRole("button", { name: "Open in Users" }));
+      fireEvent.click(within(band).getByRole("button", { name: "Acme" }));
     });
     expect(h.opened).toEqual([
       { appId: "users", sectionId: "groups", payload: { groupId: "g1" } },

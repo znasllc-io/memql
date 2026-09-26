@@ -2,11 +2,7 @@ package memql
 
 import (
 	"fmt"
-	"io"
-	"log/slog"
 	"testing"
-
-	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // The connector's reconcile sweep reads through a RAW query string
@@ -27,20 +23,7 @@ import (
 // drift in either shows up as an assertion failure rather than as a
 // sweep that quietly reads nothing.
 func TestConnectorReconcileSweepStringParsesAndBindsItsConcept(t *testing.T) {
-	if _, err := LoadUnifiedConcepts(nil); err != nil {
-		t.Fatalf("LoadUnifiedConcepts: %v", err)
-	}
-	registry := concept.DefaultRegistry()
-	eng, err := New(nil)
-	if err != nil {
-		t.Fatalf("construct engine: %v", err)
-	}
-	// The provider loader logs one WARN per unconfigured provider; not
-	// what this test is about.
-	eng.Logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
-	if err := eng.Init(registry); err != nil {
-		t.Fatalf("engine.Init: %v", err)
-	}
+	eng := sharedDblessEngine(t)
 
 	q := fmt.Sprintf(`sort(paginate(concept==%s && present==true, %d), "createdAt", "desc")`,
 		testMirrorConcept, 50)

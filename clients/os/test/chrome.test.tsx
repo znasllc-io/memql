@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Shell } from "../src/chrome/Shell";
-import { StubAskTransport } from "../src/ask/askController";
+import { StubAskTransport } from "./ask/stubTransport";
 import { resetIdsForTest } from "../src/system/desks";
 import { LocalDesktopStore } from "../src/system/store";
 import type { OsRuntimeConfig } from "../src/cluster/config";
@@ -69,7 +69,7 @@ describe("the desktop lands (spec K bullet 1)", () => {
     renderShell();
     expect(document.querySelector("[data-os-desktop]")).not.toBeNull();
     expect(document.querySelector("[data-os-dock]")).not.toBeNull();
-    expect(document.querySelector("[data-os-field]")).not.toBeNull();
+    expect(document.querySelector("[data-os-wallpaper]")).not.toBeNull();
     expect(document.querySelector("[data-os-desk-numeral]")).not.toBeNull();
     expect(document.querySelector("[data-os-slot]")).toBeNull();
   });
@@ -246,7 +246,7 @@ describe("Ask (spec K bullet 5)", () => {
     renderShell();
     fireEvent.click(screen.getByRole("button", { name: "Ask" }));
     const sheet = screen.getByRole("dialog", { name: "Ask" });
-    const mic = within(sheet).getByRole("button", { name: "Ask by voice" }) as HTMLButtonElement;
+    const mic = within(sheet).getByRole("button", { name: "Dictate a message" }) as HTMLButtonElement;
     expect(mic.disabled).toBe(true);
     expect(within(sheet).getByText(/Voice is not wired up in this window/)).toBeTruthy();
   });

@@ -1,3 +1,6 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
+import { ContentSkeleton, InlineSkeleton } from "../../kit/ContentSkeleton";
+import { RecordList, RecordRow, Subhead } from "../../kit";
 import { Button, Caption } from "../../kit";
 import { useSession } from "../../chrome/access";
 import { useOsConnection } from "../../live/connection";
@@ -107,13 +110,7 @@ export function ClusterSection() {
           <dt>Answered by</dt>
           <dd className="os-mono">{connection?.nodeId || "unknown"}</dd>
         </dl>
-        {deployment.latest === null ? (
-          <Caption>
-            {deployment.loading
-              ? "Loading from the cluster"
-              : "No deployment has been recorded for this cluster."}
-          </Caption>
-        ) : (
+        {deployment.latest === null ? (deployment.loading ? <RecordListSkeleton label="Loading from the cluster" /> : <Caption>{"No deployment has been recorded for this cluster."}</Caption>) : (
           <>
             <dl className="os-facts">
               <dt>Deployment</dt>
@@ -126,16 +123,8 @@ export function ClusterSection() {
             {deployment.specs.length === 0 ? (
               <Caption>No per-node pins recorded for this deployment.</Caption>
             ) : (
-              <ul className="os-hidden-list" aria-label="Node type versions">
-                {deployment.specs.map((spec) => (
-                  <li key={spec.nodeType}>
-                    <span className="os-mono">{spec.nodeType}</span>{" "}
-                    {resolvedVersion(spec, deployment.latest?.version ?? "") || "unknown"}
-                    {ridesTheSpine(spec) ? " (engine version)" : " (pinned)"} &times;{" "}
-                    {spec.replicas}
-                  </li>
-                ))}
-              </ul>
+              <><Subhead meta={!deployment.loading && !deployment.error ? deployment.specs.length : undefined}>Node type versions</Subhead>
+              <RecordList as="ul" label="Node type versions">{deployment.specs.map(spec => <RecordRow key={spec.nodeType} name={spec.nodeType} secondary={resolvedVersion(spec, deployment.latest?.version ?? "") || "unknown"} state={ridesTheSpine(spec) ? "engine version" : "pinned"}><span>{spec.replicas} replicas</span></RecordRow>)}</RecordList></>
             )}
           </>
         )}
@@ -152,7 +141,7 @@ export function ClusterSection() {
         ) : infra.error ? (
           <Refusal role={access?.role ?? ""} message={infra.error} />
         ) : infra.loading ? (
-          <Caption>Loading from the cluster</Caption>
+          <ContentSkeleton kind="form" label="Loading from the cluster" />
         ) : (
           <>
             {infra.database === null ? (
@@ -216,7 +205,7 @@ export function ClusterSection() {
         {mail.error ? (
           <Refusal role={access?.role ?? ""} message={mail.error} />
         ) : mail.value === null ? (
-          <Caption>{mail.loading ? "Loading from the cluster" : "No mail status reported."}</Caption>
+          mail.loading ? <ContentSkeleton kind="detail" label="Loading mail status" /> : <Caption>No mail status reported.</Caption>
         ) : (
           <>
             <p className="os-stub-summary">
@@ -286,7 +275,7 @@ function Refresh({
   const stamp = serverStamp || (facts.fetchedAt === null ? "" : new Date(facts.fetchedAt).toISOString());
   return (
     <div className="os-refresh-row">
-      <Button onClick={facts.reload} busy={facts.loading} busyLabel="Reading">
+      <Button onClick={facts.reload} busy={facts.loading}>
         Refresh
       </Button>
       <Caption>
@@ -297,6 +286,6 @@ function Refresh({
   );
 }
 
-function dash(loading: boolean): string {
-  return loading ? "Loading from the cluster" : "--";
+function dash(loading: boolean) {
+  return loading ? <InlineSkeleton /> : "--";
 }

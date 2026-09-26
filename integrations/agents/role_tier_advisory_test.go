@@ -70,6 +70,8 @@ func TestAgentRoleTierIsPromptAdvisoryOnly(t *testing.T) {
 	// guesses wrong either misfires (and gets deleted) or misses. An entry here
 	// is a claim someone checked; a NEW line is a claim nobody has.
 	known := map[string]string{
+		"rowauthz_may_write.go | (decl.Tier != langparser.RowAuthzPublic && decl.Tier != langparser.RowAuthzClusterOwner) {": "RowAuthzDecl concept visibility tier used to refuse row-dependent authorization without a row; never agentRole.tier",
+
 		// The alignment changed when epic memql#5127 removed the longer
 		// RecommendedPolicySlug field from this literal and gofmt re-aligned
 		// what was left. Same line, same claim.

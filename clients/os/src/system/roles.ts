@@ -262,6 +262,16 @@ export interface EffectiveCapability {
   source: CapabilitySource;
 }
 
+/** A target-specific decision, kept separate from the global permission view. */
+export interface OrganizationCapability {
+  accountId: string;
+  verb: string;
+  resource: string;
+  effect: "allow" | "deny";
+}
+
+let organizationEffective: readonly OrganizationCapability[] = [];
+
 let effective: Map<string, EffectiveCapability> = new Map();
 let effectiveLoaded = false;
 let epoch = 0;
@@ -279,13 +289,14 @@ function keyOf(verb: string, resource: string): string {
  * disappear here, and merging would keep a capability nothing backs -- the
  * ladder's own reason for replacing rather than merging.
  */
-export function setEffectiveCapabilities(entries: readonly EffectiveCapability[]): void {
+export function setEffectiveCapabilities(entries: readonly EffectiveCapability[], organizationEntries: readonly OrganizationCapability[] = []): void {
   const next = new Map<string, EffectiveCapability>();
   for (const entry of entries) {
     if (entry.verb.trim() === "" || entry.resource.trim() === "") continue;
     next.set(keyOf(entry.verb, entry.resource), entry);
   }
   effective = next;
+  organizationEffective = organizationEntries;
   effectiveLoaded = true;
   epoch += 1;
 }
@@ -297,6 +308,7 @@ export function setEffectiveCapabilities(entries: readonly EffectiveCapability[]
  */
 export function clearEffectiveCapabilities(): void {
   effective = new Map();
+  organizationEffective = [];
   effectiveLoaded = false;
   epoch += 1;
 }
@@ -327,6 +339,24 @@ export function effectiveAccessEpoch(): number {
 export function holds(verb: string, resource: string): boolean {
   const entry = effective.get(keyOf(verb, resource));
   return entry !== undefined && entry.effect === "allow";
+}
+
+/** Discovery only: one organization's allow never changes a global action. */
+export function availableInAnyOrganization(verb: string, resource: string): boolean {
+  return organizationEffective.some(entry => entry.verb === verb && entry.resource === resource && entry.effect === "allow" &&
+    holdsForOrganization(entry.accountId, "read", "data") &&
+    holdsForOrganization(entry.accountId, "read", resource.split("/")[0]!));
+}
+
+/** An explicit organization is authoritative when the server reports scoped
+ * decisions. Operators have no scoped entries and retain their global set. */
+export function holdsForOrganization(accountId: string, verb: string, resource: string): boolean {
+  if (organizationEffective.length === 0) return holds(verb, resource);
+  return organizationEffective.some(entry => entry.accountId === accountId && entry.verb === verb && entry.resource === resource && entry.effect === "allow");
+}
+
+export function hasOrganizationDecisions(): boolean {
+  return organizationEffective.length > 0;
 }
 
 /** The whole set, resource then verb, for a surface that RENDERS it (the permissions self-view). */

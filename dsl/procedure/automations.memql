@@ -10,21 +10,28 @@
 // on a rung the ladder decides serves, and it reaches that rung only through
 // shadow evidence and one person's approval.
 //
-// FIVE OF THE SIX RUN UNDER THE MAINTENANCE PRINCIPAL. Each one must read a
-// row -- a run, an approval, the list of owners -- BEFORE it can know whose it
-// is, and every one of those rows declares a composite owner tier, so the
-// default RoleReader system actor would read zero rows and no error: a ladder
-// that never moves looks exactly like one with nothing to move. Each handler
-// then does every other read under the owner's own actor. The entries, with
-// their reasons, are in component/auth/maintenance_actor.go, compiled in so a
-// mounted product bundle cannot grant itself one. replayLearnedProcedure is
-// the sixth and needs none: it runs inside the goal's own run, as its owner.
+// FOUR OF THE SIX RUN UNDER THE MAINTENANCE PRINCIPAL. Each one must read a
+// row -- an approval, the list of owners -- BEFORE it can know whose it is,
+// and every one of those rows declares a composite owner tier, so the default
+// RoleReader system actor would read zero rows and no error: a ladder that
+// never moves looks exactly like one with nothing to move. Each handler then
+// does every other read under the owner's own actor. The entries, with their
+// reasons, are in component/auth/maintenance_actor.go, compiled in so a
+// mounted product bundle cannot grant itself one. The other two need none:
+// learnFromSucceededRun's event carries the run's owner, which the handler
+// borrows (and re-verifies with an owner-filtered read), and
+// replayLearnedProcedure runs inside the goal's own run, as its owner.
 
 /// On a run TRANSITIONING to `succeeded`, mine the corpus it belongs to -- and, once the lift is
 /// done, compare the recording against every learned procedure in shadow for the same goal, which
 /// is the evidence the ladder climbs on. The builtin itself decides whether there is anything to
-/// learn: a run with no goalSignature, or a corpus of fewer than two recordings, answers
-/// `accepted: false` with the reason rather than failing.
+/// learn: a corpus of fewer than two recordings answers `accepted: false` with the reason rather
+/// than failing.
+///
+/// THE OWNER TRAVELS WITH THE EVENT. The handler borrows exactly that one owner's authority -- only
+/// for this trusted completion trigger -- and re-reads the run under it, so an owner hint that does
+/// not own the run reads nothing. A run with no owner or no goal signature has no corpus, and the
+/// filter drops it before any handler runs.
 ///
 /// THE FILTER NAMES THE TRANSITION, not merely the state. node.updated fires on every write to a
 /// run, and a run keeps being written after it succeeds -- the retention sweep folds its summary
@@ -34,15 +41,15 @@
 /// version with no status reads as unset, and unset is not `succeeded`, so a first write still
 /// fires.
 @trigger(event="node.updated", concept="v1:work:run")
-@filter(row => row.status == "succeeded" && args.oldStatus != "succeeded")
+@filter(row => row.status == "succeeded" && args.oldStatus != "succeeded" && row.ownerUserId != "" && row.goalSignature != "")
 automation learnFromSucceededRun {
   args {
-    id         any
-    status     any
-    oldStatus  any
+    id           any
+    oldStatus    any
+    ownerUserId  any
   }
 
-  learned := builtin procedureLearnFromRun(runId: args.id ?? "")
+  learned := builtin procedureLearnFromRun(runId: args.id ?? "", ownerUserId: args.ownerUserId ?? "")
 }
 
 /// Every six hours: mine the second corpus level, where an automation invocation is a symbol like

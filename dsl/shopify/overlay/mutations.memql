@@ -4,6 +4,14 @@ use shopify.overlay.concepts.{ store, complianceJob }
 /// arguments are REFERENCES to globalSecret rows rather than the tokens
 /// themselves -- a mutation that took a token would put it in the call
 /// string, which is rendered into logs on a parse error.
+///
+/// A CREATE needs a cluster owner or server code, enforced in executeWrite
+/// (component/memql/create_rank_floor.go), not here: the tier does not judge a
+/// create, and a floor on this mutation would never see a raw insert() of the
+/// same concept (Connect Shopify design, D13). Internal origin passes -- the
+/// first-boot seed, the connector and Connect Shopify write that way. Changing
+/// a store that EXISTS is owner-only too: the write guard judges the stored
+/// row for `updateStore` and `setStoreStatus`.
 mutation store createStore {
   args {
     storeId             string!
@@ -17,6 +25,7 @@ mutation store createStore {
     protectedDataLevel  string
     plan                string
     ownerUserId         string
+    scopesGranted       []string
     isDevelopment         boolean
     developmentOfStoreId  string
   }
@@ -34,7 +43,7 @@ mutation store createStore {
       plan:               args.plan ?? ""
       ownerUserId:        args.ownerUserId ?? ""
       status:             "configured"
-      scopesGranted:      []
+      scopesGranted:      args.scopesGranted ?? []
       health:             {}
       isDevelopment:        args.isDevelopment ?? false
       developmentOfStoreId: args.developmentOfStoreId ?? ""

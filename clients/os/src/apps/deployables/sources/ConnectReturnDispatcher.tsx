@@ -1,8 +1,13 @@
+import { useOsConnection } from "../../../live/connection";
+import { authorizeShopifyInstallation, takeShopifyDestination, takeShopifyInstallation } from "../../../modules/connections/shopifyInstallation";
+import { takeShopifyReturn } from "../store/connectReturn";
 import { useEffect } from "react";
 
+import { useSession } from "../../../chrome/access";
+import { bare } from "../people";
 import { useOs } from "../../../chrome/state";
 import { canOpen } from "../../../system/registry";
-import { takeParkedConnectReturn } from "./connectReturn";
+import { correlateConnectReturn, takeParkedConnectReturn } from "./connectReturn";
 
 // Hands a parked GitHub-connect return to the surface that asked for it
 // (epic memql#4915).
@@ -27,18 +32,34 @@ import { takeParkedConnectReturn } from "./connectReturn";
 // sign-in rather than being lost to it.
 
 export function ConnectReturnDispatcher() {
+  const { access } = useSession();
+  const connection = useOsConnection();
+  const viewer = bare(access?.userId ?? "");
   const { actions, registry, accessEpoch } = useOs();
   useEffect(() => {
     // The shell mounts before effective capabilities arrive. Keep the return
     // parked until the same gate as openApp admits it; the access epoch
     // retries this effect when the asynchronous permission read completes.
-    if (!canOpen(registry, "deployables")) return;
+    if (!viewer || (!canOpen(registry, "deployables") && !canOpen(registry, "settings"))) return;
     // TAKE, not read: the parked value is consumed here and this effect is
     // free to run again -- a StrictMode remount does, and so does any change
     // in `actions` identity -- and every later run correctly finds nothing.
+    if (connection) {
+      const installation = takeShopifyInstallation();
+      if (installation) {
+        const appId = takeShopifyDestination();
+        void authorizeShopifyInstallation(connection.query, installation, appId).then(url => window.location.assign(url)).catch(() => {
+          actions.openApp(appId, appId === "settings" ? "connections" : "settings", { shopify: { reason: "installation_failed" }, provider: "shopify" });
+        });
+      }
+    }
+    const shopify = takeShopifyReturn();
+    if (shopify) actions.openApp(shopify.appId ?? "deployables", shopify.section ?? "deployables", { shopify, provider: "shopify" });
     const result = takeParkedConnectReturn();
     if (result === null) return;
-    actions.openApp("deployables", result.section, { connect: result });
-  }, [actions, registry, accessEpoch]);
+    const correlated = correlateConnectReturn(result, viewer);
+    const appId = correlated.appId ?? "deployables";
+    if (canOpen(registry, appId)) actions.openApp(appId, appId === "settings" ? "connections" : correlated.section, { connect: correlated });
+  }, [actions, registry, accessEpoch, viewer, connection]);
   return null;
 }

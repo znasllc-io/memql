@@ -79,6 +79,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
 )
 
@@ -448,6 +449,14 @@ func (i *Integration) OpenDirectGoal(ctx context.Context, g DirectGoal) (goalId,
 	goalId = newRowId(goalConcept)
 	runId = newRowId(runConcept)
 	scoped := ownerActor(ctx, owner)
+	var authority map[string]any
+	if access, ok := auth.AccessFromContext(ctx); ok && access != nil && access.UserId == owner && !access.Synthetic && !access.Unranked {
+		var err error
+		authority, err = auth.CaptureExecutionAuthority(ctx)
+		if err != nil {
+			return "", "", err
+		}
+	}
 
 	if err := st.createGoalRow(scoped, goalSeed{
 		GoalId:       goalId,
@@ -478,17 +487,18 @@ func (i *Integration) OpenDirectGoal(ctx context.Context, g DirectGoal) (goalId,
 	}
 
 	if err := st.createRunRow(scoped, runSeed{
-		RunId:          runId,
-		GoalId:         goalId,
-		AutomationName: automation,
-		Input:          g.Input,
-		Variables:      g.Input,
-		TriggeredBy:    g.TriggeredBy,
-		Mode:           modeLive,
-		Status:         runStatusRunning,
-		NodeId:         selfNodeId(),
-		StartedAt:      now,
-		OwnerUserId:    owner,
+		ExecutionAuthority: authority,
+		RunId:              runId,
+		GoalId:             goalId,
+		AutomationName:     automation,
+		Input:              g.Input,
+		Variables:          g.Input,
+		TriggeredBy:        g.TriggeredBy,
+		Mode:               modeLive,
+		Status:             runStatusRunning,
+		NodeId:             selfNodeId(),
+		StartedAt:          now,
+		OwnerUserId:        owner,
 	}); err != nil {
 		return closeUnstarted(err)
 	}

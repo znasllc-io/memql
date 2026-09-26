@@ -87,6 +87,7 @@ describe("the workbenches section", () => {
     await click(screen.getByLabelText("Show released"));
 
     await screen.findAllByText("v1:work:run:3");
+    await click(screen.getByRole("button", { name: /v1:work:run:3/ }));
     // The one thing an operator must not have to go to the source for: the
     // files went with the replica, they were NOT migrated, and the plan got
     // a fresh workspace elsewhere.
@@ -102,6 +103,7 @@ describe("the workbenches section", () => {
       }),
     );
     await click(await screen.findByLabelText("Show released"));
+    await click(await screen.findByRole("button", { name: /v1:work:run:3/ }));
     expect(await screen.findByText(/Release reason: some_future_reason/)).toBeTruthy();
   });
 
@@ -118,7 +120,9 @@ describe("the workbenches section", () => {
       }),
     );
 
-    const idle = await screen.findByText("workbench-7", { selector: "strong" });
+    await click(await screen.findByRole("button", { name: "Replicas" }));
+    const idle = await screen.findByText("workbench-7", { selector: ".os-row-name" });
+    await click(idle);
     expect(within(idle.closest("li") as HTMLElement).getByText("None in this view")).toBeTruthy();
     expect(screen.queryByText("bff-0")).toBeNull();
   });
@@ -143,7 +147,7 @@ describe("the workbenches section", () => {
     await screen.findByText("healthy");
     // Without the collapse a replica renders once per liveness row it has
     // ever written.
-    expect(screen.getAllByText("workbench-0", { selector: "strong" })).toHaveLength(1);
+    expect(screen.getAllByText("workbench-0", { selector: ".os-row-name" })).toHaveLength(1);
     expect(screen.queryByText("starting")).toBeNull();
   });
 

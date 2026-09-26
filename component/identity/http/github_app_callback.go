@@ -3,9 +3,7 @@ package http
 import (
 	"errors"
 	"net/http"
-	"net/url"
 	"strings"
-	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/identity"
@@ -89,12 +87,6 @@ const (
 	// most one app, so the target is the setting rather than a row of it.
 	githubAppAuditTargetId = "githubApp"
 )
-
-// appSetupChainStateTTL bounds the connect state a registration chains into.
-// Ten minutes, githubConnectBegin's own figure and for its reason: installing
-// and authorizing is more work than a sign-in, and a state value left in a
-// browser history should be worthless soon after.
-const appSetupChainStateTTL = 10 * time.Minute
 
 func (s *Server) handleGitHubAppSetupCallback(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSecureRequest(w, r) {
@@ -195,42 +187,13 @@ func (s *Server) handleGitHubAppSetupCallback(w http.ResponseWriter, r *http.Req
 		"webhookSecretGenerated": reg.WebhookSecretGenerated,
 	})
 
-	// AND THEN IT KEEPS GOING: install, authorize, land the owner's grant.
-	if next := s.appInstallURLWithState(r, reg.Config, userId, returnPath); next != "" {
+	// Continue to installation. Its return is neutral; explicit Connect from
+	// Sources establishes the session binding and PKCE authorization afterward.
+	if next := reg.Config.InstallURL(); next != "" {
 		http.Redirect(w, r, next, http.StatusSeeOther)
 		return
 	}
 	s.redirectToOS(w, r, returnPath, resultAppRegistered)
-}
-
-// appInstallURLWithState mints a CONNECT state for the person who just
-// registered the app and answers the installation page carrying it, or "" when
-// the state could not be written.
-//
-// An ordinary connect state, written by the same store call githubConnectBegin
-// uses, so what comes back from GitHub is an ordinary Connect callback: there
-// is one handler that lands a grant and this does not add a second.
-func (s *Server) appInstallURLWithState(r *http.Request, cfg githubconnect.Config, userId, returnPath string) string {
-	install := cfg.InstallURL()
-	state := randToken()
-	if install == "" || state == "" {
-		return ""
-	}
-	if _, err := s.Store.CreateGithubConnectState(r.Context(), identity.GithubConnectStateSeed{
-		UserId:     userId,
-		StateHash:  identity.HashConnectState(state),
-		ReturnPath: returnPath,
-		SourceIP:   clientIP(r),
-		ExpiresAt:  time.Now().UTC().Add(appSetupChainStateTTL),
-		Purpose:    githubconnect.PurposeConnect,
-	}); err != nil {
-		if s.Logger != nil {
-			s.Logger.Warn("identity: the GitHub App is registered, but the connect state that follows it could not be stored; the owner connects from the OS instead",
-				"error", err.Error(), "userId", userId)
-		}
-		return ""
-	}
-	return install + "?state=" + url.QueryEscape(state)
 }
 
 // isActiveClusterOwner reads the person's row. A row that cannot be read is

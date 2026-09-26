@@ -91,11 +91,17 @@ type Downloader interface {
 // fetches the bytes. Returns an error for a URL with no Azure object (the
 // local:// dev placeholder / legacy gs://) so the caller can 404 it.
 func (u *AzureBlobUploader) DownloadURL(ctx context.Context, blobURL string) ([]byte, error) {
+	return u.DownloadURLWithLimit(ctx, blobURL, maxDownloadBytes)
+}
+
+// DownloadURLWithLimit reads a stored URL with the caller's byte budget,
+// including Azurite's account-in-path URLs.
+func (u *AzureBlobUploader) DownloadURLWithLimit(ctx context.Context, blobURL string, maxBytes int64) ([]byte, error) {
 	container, objectName, ok := u.splitStoredURL(blobURL)
 	if !ok {
 		return nil, fmt.Errorf("not an azure blob URL (no downloadable object): %q", blobURL)
 	}
-	return u.Download(ctx, container, objectName)
+	return u.DownloadWithLimit(ctx, container, objectName, maxBytes)
 }
 
 // splitStoredURL turns a stored blob URL back into (container, object). It

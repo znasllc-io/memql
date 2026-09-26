@@ -136,12 +136,24 @@ func TestPackModuleRowsStateAndHonesty(t *testing.T) {
 	}
 }
 
+// testStorefrontPack declares a storefront pack for one test. referencepack is
+// the not-flippable fixture: it is a real pack that never declares itself one.
+func testStorefrontPack(t *testing.T, domain string) {
+	t.Helper()
+	memqldsl.RegisterStorefrontPack(domain)
+	t.Cleanup(func() { memqldsl.UnregisterStorefrontPack(domain) })
+}
+
 func TestAuthorizeModuleRoles(t *testing.T) {
+	const storefront = "modregtest-storefront"
+	const other = "referencepack"
+	testStorefrontPack(t, storefront)
+
 	unauthenticated := context.Background()
 	if r := AuthorizeModuleRead(unauthenticated); r == nil || r.Code != moduleCodeUnauthenticated {
 		t.Fatalf("unauthenticated read: got %+v", r)
 	}
-	if _, r := AuthorizeSetPackEnabled(unauthenticated); r == nil || r.Code != moduleCodeUnauthenticated {
+	if _, r := AuthorizeSetPackEnabled(unauthenticated, storefront); r == nil || r.Code != moduleCodeUnauthenticated {
 		t.Fatalf("unauthenticated write: got %+v", r)
 	}
 
@@ -154,19 +166,83 @@ func TestAuthorizeModuleRoles(t *testing.T) {
 	if r := AuthorizeModuleRead(asRole(auth.RoleReader)); r == nil || r.Code != moduleCodePermissionDenied {
 		t.Errorf("reader must be refused the inventory: %+v", r)
 	}
-	if r := AuthorizeModuleRead(asRole(auth.RoleAdmin)); r != nil {
-		t.Errorf("admin must read the inventory: %+v", r)
-	}
-	if r := AuthorizeModuleRead(asRole(auth.RoleOwner)); r != nil {
-		t.Errorf("owner must read the inventory: %+v", r)
+	for _, role := range []auth.Role{auth.RoleAdmin, auth.RoleOwner, auth.RoleDeveloper} {
+		if r := AuthorizeModuleRead(asRole(role)); r != nil {
+			t.Errorf("%s must read the inventory: %+v", role, r)
+		}
 	}
 
-	if _, r := AuthorizeSetPackEnabled(asRole(auth.RoleAdmin)); r == nil || r.Code != moduleCodePermissionDenied {
-		t.Errorf("admin must be refused the pack flip (owner-only): %+v", r)
+	// An owner flips any pack, storefront or not, as before.
+	for _, pack := range []string{storefront, other} {
+		actor, r := AuthorizeSetPackEnabled(asRole(auth.RoleOwner), pack)
+		if r != nil || actor.ID != "u-test" {
+			t.Errorf("owner must pass the %s flip: actor=%+v refusal=%+v", pack, actor, r)
+		}
 	}
-	actor, r := AuthorizeSetPackEnabled(asRole(auth.RoleOwner))
-	if r != nil || actor.ID != "u-test" {
-		t.Errorf("owner must pass the pack flip: actor=%+v refusal=%+v", actor, r)
+
+	// A developer flips a storefront pack and nothing else.
+	if actor, r := AuthorizeSetPackEnabled(asRole(auth.RoleDeveloper), storefront); r != nil || actor.ID != "u-test" {
+		t.Errorf("developer must pass the storefront flip: actor=%+v refusal=%+v", actor, r)
+	}
+	if _, r := AuthorizeSetPackEnabled(asRole(auth.RoleDeveloper), other); r == nil || r.Code != moduleCodePermissionDenied {
+		t.Errorf("developer must be refused a pack that is not a storefront pack: %+v", r)
+	}
+
+	// Admin holds no flip at all, storefront included: reading the inventory
+	// is not managing it.
+	for _, pack := range []string{storefront, other} {
+		if _, r := AuthorizeSetPackEnabled(asRole(auth.RoleAdmin), pack); r == nil || r.Code != moduleCodePermissionDenied {
+			t.Errorf("admin must be refused the %s flip: %+v", pack, r)
+		}
+	}
+	if _, r := AuthorizeSetPackEnabled(asRole(auth.RoleReader), storefront); r == nil || r.Code != moduleCodePermissionDenied {
+		t.Errorf("reader must be refused the storefront flip: %+v", r)
+	}
+}
+
+// TestListModulesReportsMayFlipPerCaller: the switch the OS draws is the
+// answer AuthorizeSetPackEnabled would give, per pack row, and only a pack row
+// can carry it.
+func TestListModulesReportsMayFlipPerCaller(t *testing.T) {
+	const storefront = "modregtest-flipstore"
+	const plain = "modregtest-flipplain"
+	for _, d := range []string{storefront, plain} {
+		memqldsl.RegisterTree(d, testPackTree(t))
+		d := d
+		t.Cleanup(func() { memqldsl.UnregisterTree(d) })
+	}
+	testStorefrontPack(t, storefront)
+
+	want := map[auth.Role]map[string]bool{
+		auth.RoleOwner:     {storefront: true, plain: true},
+		auth.RoleDeveloper: {storefront: true, plain: false},
+		auth.RoleAdmin:     {storefront: false, plain: false},
+	}
+	e := &MemQLEngine{}
+	for role, packs := range want {
+		ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "u-flip", Role: role})
+		rows, err := e.ListModules(ctx)
+		if err != nil {
+			t.Fatalf("ListModules as %s: %v", role, err)
+		}
+		seen := 0
+		for _, row := range rows {
+			if row.Kind != ModuleKindPack {
+				if row.MayFlip {
+					t.Errorf("%s %q carries mayFlip; only a pack has a switch", row.Kind, row.Name)
+				}
+				continue
+			}
+			if expect, ok := packs[row.Name]; ok {
+				seen++
+				if row.MayFlip != expect {
+					t.Errorf("as %s, pack %q mayFlip = %v, want %v", role, row.Name, row.MayFlip, expect)
+				}
+			}
+		}
+		if seen != len(packs) {
+			t.Fatalf("as %s, saw %d of the %d test packs in the inventory", role, seen, len(packs))
+		}
 	}
 }
 

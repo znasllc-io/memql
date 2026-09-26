@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 
+import { listCount } from "../../kit/RecordRow";
 import { useOsConnection } from "../../live/connection";
 import { useLiveCollection } from "../../live/useLiveCollection";
 import { buildTrends, figureFromRow, runFromRow, type Figure, type Run, type Trend } from "./benchmarks";
@@ -18,6 +19,7 @@ import { buildTrends, figureFromRow, runFromRow, type Figure, type Run, type Tre
 const TREND_RUNS = 12;
 
 export interface Benchmarks {
+  readonly count: number | undefined;
   readonly runs: readonly Run[];
   readonly newest: Run | null;
   readonly trends: readonly Trend[];
@@ -126,6 +128,7 @@ export function useBenchmarks(enabled: boolean): Benchmarks {
     runs,
     newest: runs.length > 0 ? runs[0]! : null,
     trends,
+    count: listCount(runsHandle.snapshot),
     seeding: runsHandle.snapshot.state === "seeding",
     readAt,
     loadingSamples: loading,

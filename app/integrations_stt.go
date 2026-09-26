@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 	openaivoice "github.com/znasllc-io/memql/integrations/openai"
 	"github.com/znasllc-io/memql/integrations/stt"
 )
@@ -17,17 +18,21 @@ import (
 //
 // Provider selection order:
 //  1. If MEMQL_STT_PROVIDER is set explicitly, use that value.
-//  2. Else default to "openai-realtime" (streaming via the Realtime
-//     API -- word-by-word interim results). Falls back to
-//     "openai-whisper" (batch) if the Realtime model isn't usable.
+//  2. Otherwise use the inference router: eligible Fleet audio first, then
+//     the federated providers permitted by the configured policy.
 func (a *App) selectSTTProvider() {
 	explicit := strings.ToLower(strings.TrimSpace(os.Getenv("MEMQL_STT_PROVIDER")))
 	sttProviderName := explicit
 	if sttProviderName == "" {
-		sttProviderName = "openai-realtime"
+		sttProviderName = "router"
 	}
 
 	switch sttProviderName {
+	case "router":
+		a.sttProvider = &stt.RoutedProvider{Transcribe: func(ctx context.Context, wav []byte) (string, error) {
+			result, err := a.engine.TranscribeAudio(ctx, memqlengine.FleetAudio{Data: wav, MediaType: "audio/wav"}, "")
+			return result.Text, err
+		}}
 	case "openai-realtime", "realtime":
 		a.initOpenAIRealtimeProvider(sttProviderName)
 	case "openai-whisper", "whisper":

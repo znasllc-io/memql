@@ -196,23 +196,31 @@ func personCtx(userId string) context.Context {
 	return auth.ContextWithUserActor(context.Background(), userId)
 }
 
-// TestLearnFromRunAcceptsTheMaintenancePrincipal is G10. learnFromSucceededRun
-// runs under the cluster's maintenance principal, because the event names a
-// run before anybody knows whose it is. The handler used to compare that
-// principal's id with the run's owner and refuse it as "another person" -- so
-// no automation-driven lift ever ran. The principal reads the run through the
-// stamped by-id read; EVERY read after it runs as the run's owner.
-func TestLearnFromRunAcceptsTheMaintenancePrincipal(t *testing.T) {
+// triggerCtx is the engine-owned completion trigger as the automation
+// executor presents it: the automation's synthetic actor, with the internal
+// origin a tree-loaded automation runs under.
+func triggerCtx() context.Context {
+	return auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(),
+		&auth.AccessContext{UserId: "system:automation:learnFromSucceededRun", Synthetic: true}))
+}
+
+// TestTheCompletionTriggerLearnsAsTheRunsOwner is G10, closed the narrow way.
+// The event carries the run's owner, and the trusted completion trigger -- and
+// nothing else -- borrows exactly that owner: the run is read through the
+// OWNED read under the borrowed actor, so a hint that does not own the run
+// reads nothing, and every later call runs as that owner. No cluster-wide
+// read is involved at all.
+func TestTheCompletionTriggerLearnsAsTheRunsOwner(t *testing.T) {
 	eng := newFakeEngine()
 	recs := twoRecordings()
 	seedCorpus(t, eng, recs...)
-	eng.reply("workRunById", recs[1].runRow())
+	eng.reply("workRunForOwner", recs[1].runRow())
 	i := newTestIntegration(eng)
 	i.SetCompiler(&passingGate{})
 
-	nodes, err := i.handleLearnFromRun(maintenanceCtx("learnFromSucceededRun"), map[string]any{"runId": recs[1].runId}, 0)
+	nodes, err := i.handleLearnFromRun(triggerCtx(), map[string]any{"runId": recs[1].runId, "ownerUserId": testOwner}, 0)
 	if err != nil {
-		t.Fatalf("the maintenance principal was refused: %v", err)
+		t.Fatalf("the completion trigger was refused: %v", err)
 	}
 	var reply map[string]any
 	if err := json.Unmarshal(nodes[0].Payload, &reply); err != nil {
@@ -221,14 +229,31 @@ func TestLearnFromRunAcceptsTheMaintenancePrincipal(t *testing.T) {
 	if reply["accepted"] != true || reply["lift"] != string(LiftCreated) || reply["rung"] != "shadow" {
 		t.Fatalf("reply = %v, want a lift into shadow", reply)
 	}
-	byId := eng.callTo(t, "workRunById")
-	if !byId.Internal || !byId.Synthetic {
-		t.Fatalf("the by-id read ran internal=%v synthetic=%v; it is @serverOnly and the principal's", byId.Internal, byId.Synthetic)
+	if len(eng.callsTo("workRunById")) != 0 {
+		t.Fatal("the trigger reached the cluster-owner by-id read; it borrows the owner instead")
 	}
-	for _, c := range eng.recorded()[1:] {
+	for _, c := range eng.recorded() {
 		if c.Actor != testOwner {
-			t.Fatalf("%s ran as %q after the first read; every later call is the owner's", c.Name(), c.Actor)
+			t.Fatalf("%s ran as %q; every call is the borrowed owner's", c.Name(), c.Actor)
 		}
+	}
+}
+
+// TestTheMaintenancePrincipalCannotLearnFromARun: least privilege. Only the
+// completion trigger may borrow an owner; a cluster-wide principal -- or any
+// other system actor -- is refused before it reads anything.
+func TestTheMaintenancePrincipalCannotLearnFromARun(t *testing.T) {
+	eng := newFakeEngine()
+	// A LISTED principal: learnFromSucceededRun is no longer on the
+	// maintenance list, so MaintenanceActor would answer nil for it and the
+	// test would be measuring "no actor" instead of "the wrong actor".
+	_, err := newTestIntegration(eng).handleLearnFromRun(maintenanceCtx("demoteProcedures"),
+		map[string]any{"runId": "v1:work:run:r1", "ownerUserId": testOwner}, 0)
+	if err == nil || !strings.Contains(err.Error(), "only the trusted completion trigger") {
+		t.Fatalf("err = %v, want the trusted-trigger refusal", err)
+	}
+	if len(eng.recorded()) != 0 {
+		t.Fatalf("a refused caller reached the engine: %s", eng.summary())
 	}
 }
 
@@ -290,9 +315,9 @@ func TestHandleLearnFromRunAnswersThatAReplayRunIsNotARecording(t *testing.T) {
 	eng := newFakeEngine()
 	replay := twoRecordings()[1]
 	replay.triggeredBy = "procedure:canary"
-	eng.reply("workRunById", replay.runRow())
-	nodes, err := newTestIntegration(eng).handleLearnFromRun(maintenanceCtx("learnFromSucceededRun"),
-		map[string]any{"runId": replay.runId}, 0)
+	eng.reply("workRunForOwner", replay.runRow())
+	nodes, err := newTestIntegration(eng).handleLearnFromRun(triggerCtx(),
+		map[string]any{"runId": replay.runId, "ownerUserId": testOwner}, 0)
 	if err != nil {
 		t.Fatalf("a replay run must be answered, not refused: %v", err)
 	}

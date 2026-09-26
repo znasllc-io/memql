@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useMemo } from "react";
 // `Check` is aliased: the kit exports a control by that name, and two
 // different `Check`s in one file is a rename waiting to go wrong.
@@ -31,6 +32,7 @@ export function ReviewSection({
   decisions,
   onDecide,
   domainsError,
+  domainsAvailable = false,
 }: {
   queue: ReviewQueue;
   decisions: ChunkDecisions;
@@ -39,13 +41,14 @@ export function ReviewSection({
    *  it was never told about, and reporting an empty queue in that case would
    *  be a wrong answer rather than a missing one. */
   domainsError: string;
+  domainsAvailable?: boolean;
 }) {
   const groups = useMemo(() => groupChunksByDocument(queue.chunks), [queue.chunks]);
   const awaiting = queue.chunks.filter((c) => c.validationStatus === "unvalidated").length;
 
   return (
     <div className="os-app-stack">
-      <Head title="Review">
+      <Head title="Review" meta={domainsAvailable && queue.state === "ready" && !queue.error && !domainsError ? `${awaiting} loaded` : undefined}>
         <Button onClick={queue.reload}>Re-read</Button>
       </Head>
 
@@ -74,7 +77,7 @@ export function ReviewSection({
       ) : null}
 
       {queue.state === "loading" && groups.length === 0 ? (
-        <Caption>Reading from the cluster...</Caption>
+        <RecordListSkeleton label="Loading from the cluster" />
       ) : null}
 
       {groups.map((group) => (
@@ -97,7 +100,7 @@ export function ReviewSection({
           {queue.exhausted ? " -- every page has been walked" : ""}.
         </span>
         {queue.exhausted ? null : (
-          <Button onClick={queue.loadMore} busy={queue.state === "loading"} busyLabel="Reading...">
+          <Button onClick={queue.loadMore} busy={queue.state === "loading"}>
             Load more
           </Button>
         )}
@@ -128,6 +131,7 @@ function ReviewGroup({
           output.
         </Caption>
       ) : null}
+      {/* Full-text decisions are review cards, not summary record rows. */}
       <ul className="os-train-cards" aria-label={`Chunks from ${group.label}`}>
         {group.chunks.map((chunk) => (
           <li key={chunk.id}>

@@ -9,11 +9,12 @@ vi.mock("../../src/live/connection", () => ({
   bridgePathFor: () => "/_memql/ws",
 }));
 
+import { canManagePersonalSources } from "../../src/apps/deployables/parts";
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import { OS_REGISTRY } from "../../src/apps/registry";
 import { appsFor } from "../../src/system/registry";
-import { setEffectiveCapabilities } from "../../src/system/roles";
+import { setEffectiveCapabilities, type OrganizationCapability } from "../../src/system/roles";
 import { installSeededAccess, seededAccessWithout } from "../seededAccess";
 import { fakeConnection, siteRow, withSession, type FakeConnection, type FakeSeed } from "./harness";
 
@@ -36,14 +37,14 @@ function memStore() {
   });
 }
 
-function mount(connection: FakeConnection, capabilities: ReturnType<typeof seededAccessWithout>) {
+function mount(connection: FakeConnection, capabilities: ReturnType<typeof seededAccessWithout>, organizationEntries: OrganizationCapability[] = []) {
   h.connection = connection;
-  return render(
-    withSession(
+  const content = withSession(
       <DeployablesApp sectionId="deployables" navigate={vi.fn()} askContext={vi.fn()} store={memStore()} />,
-      { role: "developer", userId: "u-me", capabilities },
-    ),
-  );
+      { role: organizationEntries.length ? "writer" : "developer", userId: "u-me", capabilities },
+    );
+  setEffectiveCapabilities(capabilities, organizationEntries);
+  return render(content);
 }
 
 async function open(hostname: string): Promise<HTMLElement> {
@@ -114,5 +115,47 @@ describe("a missing door hides the app", () => {
     expect(appsFor(OS_REGISTRY).map((a) => a.id)).toContain("files");
     setEffectiveCapabilities(seededAccessWithout("developer"));
     expect(appsFor(OS_REGISTRY).map((a) => a.id)).toContain("deployables");
+  });
+});
+
+
+describe("organization-specific deployable controls", () => {
+  it("shows Acme's publish action despite Beta's deny and never offers it on Beta's site", async () => {
+    const organizationEntries: OrganizationCapability[] = ["acme", "beta"].flatMap(accountId => [
+      ["read", "app:deployables"], ["read", "data"], ["update", "data"], ["execute", "app:deployables/publish"],
+    ].map(([verb, resource]) => ({ accountId, verb: verb!, resource: resource!, effect: accountId === "acme" ? "allow" : "deny" })));
+    const seed: FakeSeed = { sites: [siteRow({ ...BUILT, id: "site-new", accountId: "acme" })] };
+    const globalDenied = seededAccessWithout("developer", "app:deployables/publish");
+    const first = mount(fakeConnection(seed), globalDenied, organizationEntries);
+    await open("new.memql.example.com");
+    await waitFor(() => expect(barActs()).toContain("Go live"));
+    first.unmount();
+    mount(fakeConnection({ sites: [siteRow({ ...BUILT, id: "site-new", accountId: "beta" })] }), globalDenied, organizationEntries);
+    await open("new.memql.example.com");
+    expect(screen.queryByRole("button", { name: "Go live" })).toBeNull();
+  });
+});
+
+describe("personal GitHub source management", () => {
+  const decision = (accountId: string, verb: string, resource: string, effect: "allow" | "deny" = "allow"): OrganizationCapability => ({ accountId, verb, resource, effect });
+  it("admits one complete authorized organization despite another organization's deny", () => {
+    setEffectiveCapabilities([], [
+      decision("acme", "read", "data"), decision("acme", "read", "app:deployables"), decision("acme", "execute", "app:deployables/sources"),
+      decision("beta", "execute", "app:deployables/sources", "deny"),
+    ]);
+    expect(canManagePersonalSources()).toBe(true);
+  });
+  it("does not combine data access in one organization with source permissions in another", () => {
+    setEffectiveCapabilities([], [
+      decision("acme", "read", "data"), decision("acme", "read", "app:deployables"),
+      decision("beta", "execute", "app:deployables/sources"),
+    ]);
+    expect(canManagePersonalSources()).toBe(false);
+  });
+  it("keeps global grants and requires the app and data doors", () => {
+    installSeededAccess("owner");
+    expect(canManagePersonalSources()).toBe(true);
+    setEffectiveCapabilities([{ verb: "execute", resource: "app:deployables/sources", effect: "allow", source: "role" }]);
+    expect(canManagePersonalSources()).toBe(false);
   });
 });

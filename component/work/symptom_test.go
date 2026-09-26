@@ -83,6 +83,19 @@ func TestClassifyByRules_RepeatedActionEscalatesOverTransient(t *testing.T) {
 	}
 }
 
+func TestIdleModelRecoveryStillHonorsStallAndRetryLimits(t *testing.T) {
+	signal := Signal{ErrorMessage: "worker: model call failed: the local runtime stopped producing output past the idle ceiling"}
+	sym, _, ok := ClassifyByRules(signal)
+	if !ok || sym != SymptomTransient || ActFor(sym, 1, 3) != ActRetry || ActFor(sym, 4, 3) != ActAsk {
+		t.Fatalf("idle recovery lost bounded retry policy: %s", sym)
+	}
+	signal.RepeatedAction = true
+	sym, _, ok = ClassifyByRules(signal)
+	if !ok || sym != SymptomHuman || ActFor(sym, 1, 3) != ActAsk {
+		t.Fatal("repeated idle failure did not escalate")
+	}
+}
+
 // AN EXHAUSTED QUOTA ARRIVES AS A 429, which is the reason this rule has to
 // sit above transient.rateLimit rather than anywhere convenient. OpenAI
 // reports a spent balance with the same status it uses for ordinary rate

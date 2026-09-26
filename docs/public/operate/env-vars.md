@@ -492,6 +492,21 @@ All optional. Defaults baked into `component/database/database.go`:
 | `MEMORY_NODES_DATABASE_CONN_MAX_LIFETIME_MS`          | `3600000`   |
 | `MEMORY_NODES_DATABASE_CONN_MAX_IDLE_TIME_MS`         | `120000`    |
 
+A migration runs only after acquiring the shared migration lock. A competing
+replica defers and retries later. If a connection or context deadline expires,
+the server may still be executing the migration: the runner retains the lock
+and reports the failure instead of starting overlapping attempts. An ordinary
+SQL error acknowledged by PostgreSQL releases the lock for retry.
+
+To recover a retained lock, first suspend migration attempts on every writer.
+Inspect `pg_stat_activity` using the identity node's `application_name`; wait
+for or cancel the abandoned migration and verify that it has stopped. Only
+then remove the matching `bun_migrations` row from `bun_migration_locks` and
+resume attempts. Check the failed migration's transaction and idempotency
+before retrying. Never clear a live migration's lock or mark a migration
+applied without completing its work. Increasing the migration context timeout
+alone does not change pgdriver's socket read deadline.
+
 #### Connection pooling: hybrid endpoint split (`DIRECT_DSN`)
 
 Tiger Cloud PgBouncer transaction-mode pooling decouples client
@@ -526,7 +541,7 @@ For the identity binary (`-tags identity`):
 | `MEMQL_IDENTITY_KEY_DIR`                        | `var/identity/keys`      | On-disk Ed25519 keypair directory (file-key mode).                                                                   |
 | `MEMQL_IDENTITY_KEY_ENCRYPTION_KEY`             | none (required in prod)  | Master secret (>=16 bytes) wrapping the private key (file-key mode).                                                 |
 | `MEMQL_IDENTITY_REGISTRATION_MODE`              | `open`                   | `open` / `domain_restricted` / `invite_only` / `waitlist`.                                                           |
-| `MEMQL_IDENTITY_AUTH_ACTIVITY_RETENTION_DAYS`   | `30`                     | Days of `v1:identity:authActivity` history kept before a daily job on the identity node **hard-deletes** the rest (memql#4330). Clamped to `[1, 365]`; an out-of-range value is silently clamped rather than refusing boot. Unlike `MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS`, whose sweep only COUNTS, this one really deletes -- `authActivity` is one row per refresh-token rotation and one per PAT-authenticated request, so it is two orders of magnitude larger than the audit log and its value decays in weeks. **Refresh-token reuse detection looks back exactly this far** (memql#4329): a replayed token is recognised by matching a retired-token hash one of these rows recorded, and once the row is pruned the replay is indistinguishable from a stale cookie. The default is chosen to exceed both `MEMQL_IDENTITY_SESSION_IDLE_DAYS` (14) and the 30-day refresh-token TTL, so a token older than the window is already dead on its own account -- **lowering it below either of those opens a real detection gap, and nothing warns about it.** Watch `memql_auth_activity_pruned_total`: a flat zero over more than a day on a cluster that authenticates anyone means the sweep is not running. |
+| `MEMQL_IDENTITY_AUTH_ACTIVITY_RETENTION_DAYS`   | `30`                     | Days of `v1:identity:authActivity` history kept before a daily job on the identity node **hard-deletes** the rest (memql#4330). Clamped to `[1, 365]`; an out-of-range value is silently clamped rather than refusing boot. Unlike the longer audit archive policy, this auth-activity policy deletes directly -- `authActivity` is one row per refresh-token rotation and one per PAT-authenticated request, so it is two orders of magnitude larger than the audit log and its value decays in weeks. **Refresh-token reuse detection looks back exactly this far** (memql#4329): a replayed token is recognised by matching a retired-token hash one of these rows recorded, and once the row is pruned the replay is indistinguishable from a stale cookie. The default is chosen to exceed both `MEMQL_IDENTITY_SESSION_IDLE_DAYS` (14) and the 30-day refresh-token TTL, so a token older than the window is already dead on its own account -- **lowering it below either of those opens a real detection gap, and nothing warns about it.** Watch `memql_auth_activity_pruned_total`: a flat zero over more than a day on a cluster that authenticates anyone means the sweep is not running. |
 | `MEMQL_DISCOVERY_GRPC_ENDPOINT`                 | the identity host + a scheme-appropriate port | The dial address published as `grpcEndpoint` in `GET /.well-known/memql-config.json`. **A bare `host[:port]`, never a URL** -- a scheme is read for its port and then dropped, and a value that cannot be read as a host falls back to the default. Set it to the FRONT DOOR (`api.<domain>:443`), the only host whose ingress carries gRPC to the bff; the default derives the identity host, which serves HTTP only. Declared in `deploy/k8s/base/identity.yaml` and patched per overlay, so a stale value in an operator's local environment cannot reach the wire (memql#3399). |
 | `MEMQL_DISCOVERY_CLIENT_ID`                     | the first registered client | The OAuth `client_id` published as `clientId` in the same document.                                              |
 | `MEMQL_DISCOVERY_CLUSTER_NAME`                  | the identity host        | The human-readable default name published as `clusterName` in the same document.                                     |
@@ -985,3 +1000,33 @@ actually filled -- per module, per node and cluster-wide -- is
 app's Settings entry mean, why two replicas can disagree mid-rollout, why
 "not reported" is a different answer from "not set up", and the `modules:`
 block that declares it.
+
+### Operational record retention
+
+The cron-leader job `workJournalRetentionSweep` runs nightly at 03:40 UTC. It
+archives complete historical versions, verifies the uploaded bytes, then removes
+only the archived versions in bounded transactions. Failed verification preserves
+the records. Active parent work and user-owned goals/runs remain protected.
+
+| Variable | Default | Records |
+| --- | --- | --- |
+| `MEMQL_WORK_SYSTEM_RUN_RETENTION_DAYS` | `30` | Terminal, unowned scheduled runs, their steps and closed approvals |
+| `MEMQL_WORKER_INVOCATION_RETENTION_DAYS` | `90` | Completed worker invocation history |
+| `MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS` | `90` | Safety classification evidence |
+| `MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS` | `90` | Safety output-screening evidence |
+| `MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS` | `365` | Identity audit evidence |
+| `MEMQL_WORK_MODELCALL_RETENTION_DAYS` | `90` | Model-call detail; the run retains its summary |
+| `MEMQL_WORK_OBSERVATION_RETENTION_DAYS` | `180` | Observation detail; the run retains its summary |
+
+Ages use the latest stored version. System runs with retained model-call or
+observation detail, pending approvals, or recent children stay until those
+constraints clear. An explicit environment setting overrides a stored global
+variable; the first five policies honor existing global settings, including the
+legacy `WORKER_INVOCATION_RETENTION_DAYS` global variable. Invalid/nonpositive
+values use the documented defaults.
+
+`MEMQL_WORK_ARCHIVE_CONTAINER` defaults to `MEMQL_AZURE_BLOB_CONTAINER`.
+Archives use `retention/<UTC-day>/<sha256>.ndjson.gz`, with the original node
+identity, timestamps, schema, metadata, provenance and payload. Archive lifecycle
+is managed separately from database retention. No default age-based deletion
+applies to other concepts, including catalogs, files, goals and customer records.

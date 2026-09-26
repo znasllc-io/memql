@@ -1,4 +1,6 @@
-import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
+import { LiveVoiceSession } from "./liveVoiceSession";
+import { ConversationSession } from "./conversationSession";
+import { createContext, useEffect, useCallback, useContext, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
 import { CHECKING_ASK, type AskAvailability } from "./useAskReadiness";
 import type { AskTransport } from "./askController";
@@ -29,13 +31,13 @@ export interface AskSheetState {
 
 interface AskContextValue {
   transport: AskTransport;
+  conversation: ConversationSession;
+  liveVoice: LiveVoiceSession;
   availability: AskAvailability;
   voice: VoicePorts | null;
   settings: AskSettings;
   updateSettings: (patch: Partial<AskSettings>) => void;
   sheet: AskSheetState;
-  sheetDraft: string;
-  setSheetDraft: (draft: string) => void;
   openAsk: (context?: string | null, contextLabel?: string) => void;
   closeAsk: () => void;
 }
@@ -46,6 +48,14 @@ export function useAsk(): AskContextValue {
   const value = useContext(Ctx);
   if (!value) throw new Error("useAsk outside AskProvider");
   return value;
+}
+
+const noActivity = () => null;
+const noSubscription = () => () => {};
+/** Optional in app harnesses; observes execution without issuing another action. */
+export function useAskActivity() {
+  const session = useContext(Ctx)?.conversation;
+  return useSyncExternalStore(session?.subscribe ?? noSubscription, session ? () => session.getSnapshot().activity : noActivity);
 }
 
 export function AskProvider({
@@ -63,7 +73,11 @@ export function AskProvider({
 }) {
   const storeRef = useRef<AskSettingsStore | null>(null);
   if (!storeRef.current) storeRef.current = settingsStore ?? new LocalAskSettingsStore();
-  const [sheetDraft, setSheetDraft] = useState("");
+  const conversation = useMemo(() => new ConversationSession(transport), [transport]);
+  useEffect(() => { void conversation.refresh(); return () => conversation.dispose(); }, [conversation]);
+  const liveVoice = useMemo(() => new LiveVoiceSession(transport, conversation), [transport, conversation]);
+  useEffect(() => () => liveVoice.dispose(), [liveVoice]);
+  useEffect(() => { if (availability.state === "ready") void conversation.refresh(); }, [availability.state, conversation]);
   const [sheet, setSheet] = useState<AskSheetState>({ open: false, context: null });
   const [settings, setSettings] = useState<AskSettings>(() => storeRef.current!.load());
 
@@ -78,8 +92,8 @@ export function AskProvider({
   }, []);
 
   const value = useMemo(
-    () => ({ transport, availability, voice, settings, updateSettings, sheet, sheetDraft, setSheetDraft, openAsk, closeAsk }),
-    [transport, availability, voice, settings, updateSettings, sheet, sheetDraft, setSheetDraft, openAsk, closeAsk],
+    () => ({ conversation, liveVoice, transport, availability, voice, settings, updateSettings, sheet, openAsk, closeAsk }),
+    [conversation, liveVoice, transport, availability, voice, settings, updateSettings, sheet, openAsk, closeAsk],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

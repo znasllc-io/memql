@@ -7,7 +7,7 @@ import type { ComposeDraft } from "../../compose";
 // The two fields more than one branch of the Source stop asks for.
 //
 // They live beside the stop rather than inside it because the repository
-// answer is its own component (TokenSourceForm.tsx) and both need the name;
+// answer is its own component (RepositorySource.tsx) and both need the name;
 // a shared field imported from the stop that mounts the form would be a
 // module cycle.
 

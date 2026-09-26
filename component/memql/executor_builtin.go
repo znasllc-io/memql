@@ -18,6 +18,10 @@ import (
 
 func (e *MemQLEngine) initBuiltinExecutorHandlers() error {
 	handlers := map[string]builtinExecutorHandler{
+		"recallWorkHistory":     e.recallWorkHistoryBuiltin,
+		"workNavigate":          e.workNavigateBuiltin,
+		"workCapabilities":      e.workCapabilitiesBuiltin,
+		"workExecute":           e.workExecuteBuiltin,
 		"routingPolicyDescribe": e.policyDescribeBuiltin,
 		"routingRuleDescribe":   e.routingRuleDescribeBuiltin,
 		"routingRules":          e.routingRulesBuiltin,
@@ -111,6 +115,9 @@ func (e *MemQLEngine) initBuiltinExecutorHandlers() error {
 		BuiltinExecutorFleetSetSharing: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateFleetSetSharingExpression(ctx, args)
 		},
+		BuiltinExecutorFleetShareDirectory: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			return e.evaluateFleetShareDirectoryExpression(ctx, args)
+		},
 		BuiltinExecutorModuleReadiness: func(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			return e.evaluateModuleReadinessExpression(ctx)
 		},
@@ -188,7 +195,7 @@ func (e *MemQLEngine) evaluateBuiltinFunctionExpression(ctx context.Context, exp
 	// mutation and logic entry points ask. Internal origin passes here for
 	// the reason it passes there: an automation driving packageDeploy on a
 	// person's behalf is trusted Go, not a principal.
-	if err := e.refuseBuiltinBelowRequiredCapability(ctx, expr.Name); err != nil {
+	if err := e.refuseBuiltinBelowRequiredCapability(ctx, expr.Name, expr.Args); err != nil {
 		return nil, err
 	}
 	handler, ok := e.builtinExecutorHandlers[expr.Executor]

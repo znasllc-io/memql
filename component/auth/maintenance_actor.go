@@ -86,6 +86,13 @@ const maintenanceUserIdPrefix = "system:maintenance:"
 // maintenanceAutomations maps each automation that runs under the cluster's
 // maintenance principal to WHY it needs one.
 var maintenanceAutomations = map[string]string{
+	"pollPackageUpstreams": "engine-owned repository polling across every owner's active sources. " +
+		"The package composite tier hides user-owned sources from the default reader actor, so the " +
+		"poll otherwise succeeds with checked=0 and never discovers a new revision. Discovery must " +
+		"span owners before credentials and any automatic deployment are resolved as each package owner",
+	// The webhook feed is deliberately absent: stageInboundRequest currently
+	// accepts client-origin writes, so a staged row does not establish trusted
+	// provenance for granting cross-owner authority to an event-triggered run.
 	"checkDeployableHealth": "engine-owned scheduled availability checks across every owner's published sites; without a cluster maintenance principal an unobserved site would remain indistinguishable from a healthy one",
 	"workerInvocationRetentionSweep": "retention sweep over v1:worker:invocation, whose composite owner tier " +
 		"(memql#4406) would otherwise hide every row from it -- silently, because a sweep that retires " +
@@ -119,7 +126,7 @@ var maintenanceAutomations = map[string]string{
 		"the owned branch matches nothing, the cluster-owner escape does not apply, and the read answers ZERO " +
 		"ROWS AND NO ERROR. A sweep that resumes nothing is indistinguishable from a cluster with nothing " +
 		"parked, and the symptom a person reports is that their goal simply stopped",
-	"workJournalRetentionSweep": "the nightly journal sweep over v1:work:modelCall and " +
+	"workJournalRetentionSweep": "the nightly verified archive-and-delete sweep over completed system runs and steps, worker invocation history, audit and safety evidence, plus v1:work:modelCall and " +
 		"v1:work:observation (epic memql#4966), same tier and same silence as the row above. It is also the " +
 		"one writer that folds a run's summary onto the run row BEFORE deleting its detail, so a read that " +
 		"sees nothing does not merely skip the delete -- it skips the fold, and the detail then ages out of " +
@@ -164,20 +171,18 @@ var maintenanceAutomations = map[string]string{
 		"automation's RoleReader system actor is refused by the very sweep it exists to run, every night, " +
 		"and the store grows past its retention with one refusal line per night as the only sign",
 	// Procedure learning and the certification ladder (epic memql#5408, which
-	// closes epic memql#5402's gap G10). Five entries, one argument: each
-	// automation must read a row -- the run an event names, the approval an
-	// event names, or the list of owners a schedule has to walk -- BEFORE it can
-	// know whose it is, and then does every other read under that owner's own
-	// actor. The principal buys the first read and the handler's floor, never a
-	// cross-owner corpus: a procedure mined from two people's recordings is
-	// correct about neither, so no handler reads a person's rows as anybody else.
-	"learnFromSucceededRun": "the lift and the shadow comparison, fired when a v1:work:run becomes " +
-		"succeeded (epic memql#5402; gap G10, closed in epic memql#5408). The event names a run, and the " +
-		"run's OWNER is what the handler must learn before it can borrow that owner's authority for every " +
-		"later read -- so its first read spans owners by nature: it cannot know whose run it is before it " +
-		"looks. v1:work:run declares the composite owner tier and the by-id read is cluster-owner-scoped, " +
-		"so under the default reader actor the run reads as absent, nothing is learned and no shadow " +
-		"evidence is gathered, from anybody's recordings, with no error anywhere",
+	// closes epic memql#5402's gap G10). Four entries, one argument: each
+	// automation must read a row -- the approval an event names, or the list of
+	// owners a schedule has to walk -- BEFORE it can know whose it is, and then
+	// does every other read under that owner's own actor. The principal buys the
+	// first read and the handler's floor, never a cross-owner corpus: a
+	// procedure mined from two people's recordings is correct about neither, so
+	// no handler reads a person's rows as anybody else.
+	//
+	// learnFromSucceededRun is deliberately NOT here. Its event carries the
+	// run's owner, and the handler borrows exactly that owner (only for the
+	// trusted completion trigger, re-verified by an owner-filtered read), which
+	// is narrower than a cluster-wide principal and needs no first read.
 	"mineProcedureCorpusAcrossAutomations": "the six-hourly sweep over every owner's recorded corpus " +
 		"(epic memql#5402; gap G10, closed in epic memql#5408). A cron firing carries no arguments, so the " +
 		"owner arrives blank, and the handler answers a blank owner from THIS principal -- and only from " +

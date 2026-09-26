@@ -60,6 +60,7 @@ type httpSoftwareAuthenticator struct {
 	// registration (which is what a platform authenticator reports) and
 	// bumped by the login tests to drive the regression check.
 	signCount uint32
+	origin    string
 }
 
 func newHTTPSoftwareAuthenticator(t *testing.T) *httpSoftwareAuthenticator {
@@ -71,6 +72,7 @@ func newHTTPSoftwareAuthenticator(t *testing.T) *httpSoftwareAuthenticator {
 	require.NoError(t, err)
 	return &httpSoftwareAuthenticator{
 		t:            t,
+		origin:       passkeyTestOrigin,
 		key:          key,
 		aaguid:       []byte{0x9c, 0x83, 0x5e, 0x11, 0x40, 0x0a, 0x4a, 0x1b, 0xb2, 0x77, 0x0e, 0x9d, 0x5c, 0x64, 0x37, 0x21},
 		credentialID: credentialID,
@@ -127,7 +129,7 @@ func (a *httpSoftwareAuthenticator) assert(challenge, userHandle string) json.Ra
 	clientData, err := json.Marshal(map[string]any{
 		"type":        "webauthn.get",
 		"challenge":   challenge,
-		"origin":      passkeyTestOrigin,
+		"origin":      a.origin,
 		"crossOrigin": false,
 	})
 	require.NoError(a.t, err)
@@ -181,7 +183,7 @@ func (a *httpSoftwareAuthenticator) create(challenge string) json.RawMessage {
 	clientData, err := json.Marshal(map[string]any{
 		"type":        "webauthn.create",
 		"challenge":   challenge,
-		"origin":      passkeyTestOrigin,
+		"origin":      a.origin,
 		"crossOrigin": false,
 	})
 	require.NoError(a.t, err)

@@ -82,6 +82,8 @@ type VerifyInput struct {
 // VerifyResult is what the HTTP handler needs to construct the final
 // redirect back to the OAuth client.
 type VerifyResult struct {
+	EnrollmentToken string // Scoped bootstrap enrollment authority; never a session.
+
 	UserId      string
 	IdentityId  string
 	Email       string
@@ -224,6 +226,65 @@ func (v *Verifier) Finish(ctx context.Context, fin FinishInput) (*VerifyResult, 
 		return nil, ErrTokenAlreadyUsed
 	}
 
+	// Decode the OAuth ctx.
+	clientId, redirectURI, state, codeChallenge, codeChallengeMethod, bootstrap, adminSession, err := decodeOAuthCtx(row.OAuthCtxJSON)
+	if err != nil {
+		v.auditFailure(ctx, "magic_link_consume", in, "oauth_ctx_corrupt")
+		return nil, ErrOAuthCtxCorrupted
+	}
+
+	if v.Cfg.LocalPasskeyOnly() {
+		return nil, errors.New("this local installation uses passkeys only")
+	}
+	if bootstrap {
+		release, err := v.Store.AcquireBootstrapGate(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer release()
+		current, err := v.Store.LookupMagicLinkById(ctx, row.ID)
+		if err != nil {
+			return nil, err
+		}
+		if current == nil || !current.ConsumedAt.IsZero() {
+			return nil, ErrTokenAlreadyUsed
+		}
+		claimed, err := v.Store.IsClusterBootstrappedE(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if claimed {
+			return nil, ErrTokenAlreadyUsed
+		}
+		owner, err := v.Store.HasOwnerUser(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if owner {
+			return nil, ErrTokenAlreadyUsed
+		}
+		settings, err := v.Store.ReadClusterSettings(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if settings == nil || !strings.EqualFold(settings.BootstrapEmail, row.Email) {
+			return nil, ErrInvalidToken
+		}
+		// Reserve enrollment before consuming. A storage failure leaves the link
+		// usable; a later delivery failure can be resumed by re-verifying email.
+		token, err := v.Store.BeginBootstrapEnrollmentLocked(ctx, v.Cfg, *settings, map[string]string{
+			"client_id": clientId, "redirect_uri": redirectURI, "state": state,
+			"code_challenge": codeChallenge, "code_challenge_method": codeChallengeMethod,
+		}, true)
+		if err != nil {
+			return nil, err
+		}
+		if err := v.Store.ConsumeMagicLinkRequest(ctx, row.ID, fin.SourceIP); err != nil {
+			return nil, err
+		}
+		return &VerifyResult{Bootstrap: true, Email: row.Email, EnrollmentToken: token}, nil
+	}
+
 	// EXACTLY ONCE. The store re-reads the row inside an advisory lock and
 	// writes only if consumedAt is still empty, so the loser of a race
 	// between the poller and a same-device click is TOLD it lost rather than
@@ -235,13 +296,6 @@ func (v *Verifier) Finish(ctx context.Context, fin FinishInput) (*VerifyResult, 
 		}
 		v.auditFailure(ctx, "magic_link_consume", in, "consume_mutation_failed")
 		return nil, fmt.Errorf("magiclink: stamp consumedAt: %w", err)
-	}
-
-	// Decode the OAuth ctx.
-	clientId, redirectURI, state, codeChallenge, codeChallengeMethod, bootstrap, adminSession, err := decodeOAuthCtx(row.OAuthCtxJSON)
-	if err != nil {
-		v.auditFailure(ctx, "magic_link_consume", in, "oauth_ctx_corrupt")
-		return nil, ErrOAuthCtxCorrupted
 	}
 
 	// Validate the registered redirect URI is still kosher (defensive:
@@ -285,25 +339,9 @@ func (v *Verifier) Finish(ctx context.Context, fin FinishInput) (*VerifyResult, 
 		if internal {
 			role = v.Cfg.InternalDefaultRole
 		}
-		// Bootstrap path: this is the wizard-issued owner-mint. Always
-		// promote to owner, mark internal so the user gets the
-		// cluster-wide role + skips the personal-partition path that
-		// external users get. The bootstrap flag is server-stamped on
-		// the magicLinkRequest row; an attacker can't forge it.
-		if bootstrap {
-			role = "owner"
-			internal = true
-		}
 		// Display name defaults to local part of email; admin UI can
 		// override it later.
 		displayName := defaultDisplayName(row.Email)
-		// Bootstrap path: the /setup wizard captured the owner's first
-		// name, last name, phone, role, gender, and birthdate alongside
-		// the email. Pull them off the clusterSettings row and stamp
-		// them onto the freshly minted user so the operator doesn't have
-		// to re-type everything from /admin/users/detail. Failure is
-		// non-fatal -- worst case the operator fills the fields in via
-		// the admin UI.
 		// THE SHARED-MAILBOX HINT, STAMPED AT CREATION (memql#4304). The
 		// heuristic runs exactly once, here, at the moment the account comes
 		// into existence -- so the flag is right from the first sign-in
@@ -311,22 +349,6 @@ func (v *Verifier) Finish(ctx context.Context, fin FinishInput) (*VerifyResult, 
 		// blocks nothing; the user or an admin can clear it in one click.
 		seed := identity.UserProfileSeed{
 			SharedMailbox: registration.LooksLikeSharedMailbox(row.Email),
-		}
-		if bootstrap {
-			if cs, err := v.Store.ReadClusterSettings(ctx); err == nil && cs != nil {
-				seed.FirstName = cs.BootstrapFirstName
-				seed.LastName = cs.BootstrapLastName
-				seed.Phone = cs.BootstrapPhone
-				seed.PrimaryRole = cs.BootstrapPrimaryRole
-				seed.Gender = cs.BootstrapGender
-				seed.Birthdate = cs.BootstrapBirthdate
-				if seed.FirstName != "" || seed.LastName != "" {
-					displayName = strings.TrimSpace(seed.FirstName + " " + seed.LastName)
-				}
-			} else if err != nil && v.Logger != nil {
-				v.Logger.Warn("magiclink: read clusterSettings for bootstrap seed failed",
-					slog.String("error", err.Error()))
-			}
 		}
 		if err := v.Store.CreateUserOnFirstLogin(ctx, userId, displayName, row.Email, role, internal, seed); err != nil {
 			return nil, fmt.Errorf("magiclink: create user: %w", err)
@@ -354,54 +376,6 @@ func (v *Verifier) Finish(ctx context.Context, fin FinishInput) (*VerifyResult, 
 				"role":     role,
 			},
 		})
-	}
-
-	// STAMPED WHETHER OR NOT THE USER WAS NEW (memql#3591). This block used to sit
-	// inside the "first login, create the user" branch, so a bootstrap link
-	// consumed by an owner who ALREADY had a row stamped nothing. That was
-	// unreachable while the only way an owner row appeared was this very branch;
-	// the env bootstrap now names the owner up front, which makes it the ordinary
-	// path -- and an unstamped claim leaves /setup reachable on a claimed cluster
-	// until the next boot's self-heal notices.
-	if bootstrap {
-		// Retry the stamp once before giving up. A swallowed failure
-		// here is the root cause of memql#1864: the owner row lands but
-		// bootstrappedAt stays empty, so the cluster looks "unclaimed"
-		// forever and the auto-bootstrap path re-emails on every deploy.
-		// Keeping it non-fatal (the login must still succeed) but adding
-		// a retry, backed by the boot-time self-heal in attemptAutoBootstrap
-		// (EvaluateAutoBootstrap -> BootstrapActionSelfHeal), makes the
-		// stamp durable: a transient miss reconciles on the next boot
-		// instead of recurring.
-		stampErr := v.Store.StampClusterBootstrapped(ctx)
-		if stampErr != nil {
-			if v.Logger != nil {
-				v.Logger.Warn("magiclink: stamp bootstrapped failed; retrying once",
-					slog.String("error", stampErr.Error()))
-			}
-			stampErr = v.Store.StampClusterBootstrapped(ctx)
-		}
-		if stampErr != nil {
-			if v.Logger != nil {
-				v.Logger.Warn("magiclink: stamp bootstrapped failed after retry; owner row exists, next identity boot self-heals the stamp (memql#1864)",
-					slog.String("error", stampErr.Error()))
-			}
-			// Non-fatal: the user row exists, the link consume
-			// succeeded. The boot-time self-heal in attemptAutoBootstrap
-			// reconciles bootstrappedAt on the next identity start.
-		} else {
-			v.audit(ctx, identity.AuditEvent{
-				Category:    identity.AuditCategoryConfiguration,
-				Action:      "cluster_bootstrapped",
-				TargetType:  "clusterSettings",
-				TargetId:    "cluster",
-				TargetEmail: row.Email,
-				ActorUserId: userId,
-				SourceIP:    in.SourceIP,
-				UserAgent:   in.UserAgent,
-				Outcome:     identity.AuditOutcomeSuccess,
-			})
-		}
 	}
 
 	// Always create a magic_link identity row keyed deterministically

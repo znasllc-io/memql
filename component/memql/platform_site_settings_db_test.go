@@ -231,10 +231,8 @@ func TestSiteSettingsRefusedOnASystemOwnedRow(t *testing.T) {
 	}
 }
 
-// ROW AUTHORIZATION IS UNCHANGED BY ANY OF THIS: a second user cannot write
-// another person's deployable's settings. The guard says what a settings
-// object may contain; guardRowAuthzWrite says whose row it may land on, and
-// this is the assertion that the new mutation did not open a door beside it.
+// An ordinary member cannot write another organization's settings, even
+// while holding the same app grants as that deployable's creator.
 func TestSiteSettingsCannotBeWrittenAcrossUsers(t *testing.T) {
 	eng, _, _ := sharedReadMergeEngine(t)
 	t.Setenv(memqlDomainEnv, siteTestDomain)
@@ -242,12 +240,22 @@ func TestSiteSettingsCannotBeWrittenAcrossUsers(t *testing.T) {
 	suffix := uniqueSuffix("settings-crossuser")
 	owner := "user-set-" + suffix
 	stranger := "user-other-" + suffix
-	id := seedSettingsSite(t, eng, suffix, owner)
+	installSiteOrganizationCapabilities(t)
+	accountID := "settings-account-" + suffix
+	ownerCtx := siteOrganizationMemberCtx(t, eng, owner, accountID)
+	strangerCtx := siteOrganizationMemberCtx(t, eng, stranger, "settings-stranger-account-"+suffix)
+	id := "site-set-" + suffix
+	if _, err := createSiteRaw(t, ownerCtx, eng, map[string]any{
+		"siteId": id, "accountId": accountID, "hostname": "set" + suffix + "." + siteTestDomain,
+		"bundleRef": "blob://sites/" + id + "/v1/", "status": "draft",
+	}); err != nil {
+		t.Fatalf("seed organization deployable: %v", err)
+	}
 
-	if _, err := runSiteMutation(t, userSiteCtx(stranger), eng, "updateSiteSettings", map[string]any{
+	if _, err := runSiteMutation(t, strangerCtx, eng, "updateSiteSettings", map[string]any{
 		"siteId": id, "settings": map[string]any{"apiBase": "https://api.attacker.example"},
 	}); err == nil {
-		t.Fatal("a stranger must not write another person's deployable settings")
+		t.Fatal("a stranger must not write another organization's deployable settings")
 	}
 	if got := settingsOf(t, eng, owner, id); len(got) != 0 {
 		t.Errorf("settings = %v, want nothing written by a refused cross-user call", got)

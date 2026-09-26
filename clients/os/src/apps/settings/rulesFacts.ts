@@ -319,6 +319,7 @@ function builtinOn(
 }
 
 export interface RulesState {
+  read: boolean;
   rules: RuleRow[];
   loading: boolean;
   /** The cluster has the rules read at all. */
@@ -330,6 +331,7 @@ export interface RulesState {
 export function useRules(enabled: boolean): RulesState {
   const connection = useOsConnection();
   const [rules, setRules] = useState<RuleRow[]>([]);
+  const [read, setRead] = useState(false);
   const [loading, setLoading] = useState(false);
   const [supported, setSupported] = useState(true);
   const [error, setError] = useState("");
@@ -337,6 +339,7 @@ export function useRules(enabled: boolean): RulesState {
   const reload = useCallback(() => setEpoch((n) => n + 1), []);
 
   useEffect(() => {
+    setRead(false);
     if (!enabled || connection === null) return;
     const read = builtinOn(connection, "routingRules");
     if (read === null) {
@@ -353,6 +356,7 @@ export function useRules(enabled: boolean): RulesState {
       .then((result) => {
         if (stale) return;
         setRules([...result.rows()].map(ruleFromRow));
+        setRead(true);
       })
       .catch((err: unknown) => {
         if (stale) return;
@@ -368,7 +372,7 @@ export function useRules(enabled: boolean): RulesState {
     };
   }, [connection, enabled, epoch]);
 
-  return { rules, loading, supported, error, reload };
+  return { rules, read, loading, supported, error, reload };
 }
 
 export interface RuleActionState {

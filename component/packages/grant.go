@@ -50,11 +50,40 @@ func installationBearer(ctx context.Context, gh *githubapp.Client, rc ResolvedCr
 	if err != nil {
 		return "", grantRefusal(err, rc, owner, repo, gh.InstallURL())
 	}
+	if err := verifyGrantRepository(ctx, gh, rc, owner, repo, installationId); err != nil {
+		return "", err
+	}
 	token, terr := gh.InstallationToken(ctx, installationId)
 	if terr != nil {
 		return "", grantRefusal(terr, rc, owner, repo, gh.InstallURL())
 	}
 	return token, nil
+}
+
+// Revalidate even when an installation token is cached on this replica. A
+// grant can lose access while the app remains installed for other people.
+func verifyGrantRepository(ctx context.Context, gh *githubapp.Client, rc ResolvedCredential, owner, repo string, installationId int64) error {
+	installations, err := gh.UserInstallations(ctx, rc.Bearer)
+	if err != nil {
+		return grantRefusal(err, rc, owner, repo, gh.InstallURL())
+	}
+	allowed := false
+	for _, installation := range installations {
+		if installation.Id == installationId && strings.TrimSpace(installation.SuspendedAt) == "" {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return refuse("repository_not_accessible", "this GitHub connection cannot access the repository's installation")
+	}
+	if _, err := gh.UserRepository(ctx, rc.Bearer, owner, repo); err != nil {
+		if githubapp.StatusOf(err) == http.StatusForbidden || githubapp.StatusOf(err) == http.StatusNotFound {
+			return refuse("repository_not_accessible", "this GitHub connection cannot access that repository")
+		}
+		return grantRefusal(err, rc, owner, repo, gh.InstallURL())
+	}
+	return nil
 }
 
 // grantRefusal turns a githubapp failure into this package's own typed

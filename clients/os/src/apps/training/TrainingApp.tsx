@@ -287,6 +287,7 @@ export function TrainingApp({
         decisions={decisions}
         onDecide={(chunkId, status) => void decide(chunkId, status)}
         domainsError={domains.error}
+        domainsAvailable={domains.state === "ready" && !domains.error}
       />
     );
   }

@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 
 import { useOsConnection } from "../../../live/connection";
 import type { LabelMap } from "../labels";
+import type { SharingMode } from "../rows";
 
 // The three writes the Machines directory makes, and the one busy/error pair
 // they share.
@@ -53,6 +54,59 @@ export interface RemovalReceipt {
   sentence: string;
 }
 
+/**
+ * What the owner decides about who may use their machine (epic memql#5344).
+ * Under `owner` and `cluster` the lists are sent EMPTY whatever the caller
+ * put in them: a list saved under another mode is residue a later reader
+ * could honour by mistake (design G10).
+ */
+export interface ShareChoice {
+  mode: "owner" | "people" | "cluster";
+  userIds: string[];
+  groupIds: string[];
+}
+
+/**
+ * What a sharing write did, in the engine's words.
+ *
+ * THE SENTENCE IS THE ENGINE'S, and it is the only success this surface
+ * shows: it names the cockpit's half when that is still missing, which is the
+ * difference between "lent" and "lent, and serving".
+ */
+export interface SharingReceipt {
+  mode: SharingMode;
+  /** How many people and groups the stored list now names. */
+  people: number;
+  groups: number;
+  sentence: string;
+}
+
+function countFrom(v: unknown): number {
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0;
+}
+
+/**
+ * Read the engine's sharing receipt off the answer row.
+ *
+ * A row that does not parse still reports what WAS done -- we are past the
+ * throw, so the write landed -- but claims nothing it cannot read: the mode is
+ * the one sent, and the sentence says the cluster did not describe the result.
+ */
+function sharingReceiptFrom(row: unknown, sent: ShareChoice): SharingReceipt {
+  const fields = row !== null && typeof row === "object" ? (row as Record<string, unknown>) : {};
+  const mode = fields["mode"];
+  const sentence = fields["sentence"];
+  return {
+    mode: mode === "owner" || mode === "people" || mode === "cluster" ? mode : sent.mode,
+    people: countFrom(fields["people"]),
+    groups: countFrom(fields["groups"]),
+    sentence:
+      typeof sentence === "string" && sentence.trim() !== ""
+        ? sentence
+        : "Saved. The cluster did not say what changed.",
+  };
+}
+
 export interface MachineWrites {
   /** The id of the machine a write is in flight for, or "". */
   busyId: string;
@@ -65,11 +119,13 @@ export interface MachineWrites {
    *  Resolves to the receipt on success, or null on a refusal with
    *  `actionError` carrying the reason. */
   revoke: (registrationId: string, reason: string) => Promise<RemovalReceipt | null>;
-  /** The OWNER's half of the sharing consent (epic memql#5146, D6). The
-   *  cockpit's half comes from that machine's own policy.yaml and is not
-   *  writable from here -- deliberately: it is a decision about where the
-   *  machine is, and only the machine can make it. */
-  setSharing: (registrationId: string, mode: "owner" | "cluster") => Promise<boolean>;
+  /** The OWNER's half of the sharing consent (epic memql#5146, D6; three
+   *  modes since epic memql#5344). The cockpit's half comes from that
+   *  machine's own policy.yaml and is not writable from here -- deliberately:
+   *  it is a decision about where the machine is, and only the machine can
+   *  make it. Resolves to the engine's receipt, or null on a refusal with
+   *  `actionError` carrying the engine's words. */
+  setSharing: (registrationId: string, choice: ShareChoice) => Promise<SharingReceipt | null>;
 }
 
 function describe(err: unknown): string {
@@ -202,10 +258,36 @@ export function useMachineWrites(): MachineWrites {
   // cluster-owner escape on it -- so an operator could lend hardware they do
   // not own, and un-lend hardware somebody else had lent. fleetSetSharing
   // resolves the machine through the caller's OWN machines first.
+  //
+  // A RECEIPT, NOT A BOOLEAN (epic memql#5344). The panel shows the engine's
+  // own sentence as the only success it claims, and that sentence names the
+  // cockpit's half when it is still missing -- so the answer row is read
+  // rather than discarded. BOTH LISTS ARE ALWAYS SENT, empty outside
+  // `people`: the engine ignores them there, and a write that left them out
+  // would ask the reader to know that.
   const setSharing = useCallback(
-    (registrationId: string, mode: "owner" | "cluster") =>
-      run(registrationId, () => connection!.query.fleetSetSharing({ registrationId, mode })),
-    [connection, run],
+    async (registrationId: string, choice: ShareChoice): Promise<SharingReceipt | null> => {
+      if (connection === null) {
+        setActionError("Not connected to the cluster, so nothing was written.");
+        return null;
+      }
+      const sent: ShareChoice =
+        choice.mode === "people"
+          ? { mode: "people", userIds: [...choice.userIds], groupIds: [...choice.groupIds] }
+          : { mode: choice.mode, userIds: [], groupIds: [] };
+      setBusyId(registrationId);
+      setActionError("");
+      try {
+        const result = await connection.query.fleetSetSharing({ registrationId, ...sent });
+        return sharingReceiptFrom(result.rows()[0] ?? null, sent);
+      } catch (err: unknown) {
+        setActionError(describe(err));
+        return null;
+      } finally {
+        setBusyId("");
+      }
+    },
+    [connection],
   );
 
   return { busyId, actionError, rename, setOperatorLabels, revoke, setSharing };

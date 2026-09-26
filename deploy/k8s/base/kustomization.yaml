@@ -83,9 +83,6 @@ resources:
   # -- along with the product bff/SPA Services it used to sit beside -- is now
   # owned by the downstream product pack's overlay, not this engine base.
   - mcp.yaml
-  # Redis. Its only consumer was the LiveKit server <-> livekit/sip pair, both
-  # removed with the voice node type; retained pending an explicit decision to
-  # drop it (nothing in this tree dials it today).
   # Connection-budget monitor: */5 leak/storm early-warning (memql#1958).
   - conn-monitor-cronjob.yaml
 

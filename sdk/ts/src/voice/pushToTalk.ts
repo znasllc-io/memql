@@ -43,6 +43,7 @@ export interface PushToTalkOptions {
   provider?: string;
   // Called on every delta. Safe to be undefined.
   onPartial?: (p: PartialTranscript) => void;
+  onMetadata?: (json: string) => void;
   // Cancel the session mid-stream.
   signal?: AbortSignal;
 }
@@ -97,9 +98,8 @@ class TranscriptionSession {
     const unregister = this.dispatcher.registerStream(this.requestId, (msg: ServerMessage) => {
       const payload = readServerPayload(msg);
       if (payload?.kind === "aiTranscribeStreamDelta") {
-        if (this.opts.onPartial) {
-          this.opts.onPartial(deltaToPartial(payload.value));
-        }
+        if (payload.value.metadataJson) this.opts.onMetadata?.(payload.value.metadataJson);
+        if (payload.value.text) this.opts.onPartial?.(deltaToPartial(payload.value));
       } else if (payload?.kind === "aiTranscribeStreamComplete") {
         resolveFinal({
           text: payload.value.text ?? "",

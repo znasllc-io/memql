@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 
-import { Chip, Head, LiveList, Notice, Refine, Row, useLiveView, type LiveListSource } from "../../kit";
+import { Head, LiveList, Notice, Refine, RecordRow, listCount, useLiveView, type LiveListSource } from "../../kit";
 import type { Row as SdkRow } from "@znasllc-io/memql-sdk-core/client";
 import { ProvenanceMark } from "./Provenance";
 import {
@@ -10,7 +10,7 @@ import {
   sourcesOf,
   type CompositionRow,
 } from "./rows";
-import { MATERIALIZED_EMPTY, formatWord, statusTone, statusWord } from "./words";
+import { MATERIALIZED_EMPTY, formatWord, statusWord } from "./words";
 
 // MaterializedSection -- everything materialized in this instance, with
 // its authoring and origin metadata (the epic's own words).
@@ -141,7 +141,8 @@ function CountMeta({
   view: ReturnType<typeof useLiveView<SdkRow>>;
   showArchived: boolean;
 }) {
-  const n = view?.snapshot.rows.length ?? 0;
+  const n = listCount(view?.snapshot);
+  if (n === undefined) return null;
   // The scope note says WHAT is being counted, so a number that looks low
   // has its explanation beside it rather than in somebody's head.
   return (
@@ -166,19 +167,14 @@ function CompositionListRow({
   onOpen: () => void;
 }) {
   return (
-    <Row
+    <RecordRow
       name={composition.name || "Untitled"}
       current={current}
       dim={composition.archived}
       onOpen={onOpen}
-      state={
-        <>
-          <Chip tone={statusTone(composition.status)}>{statusWord(composition.status)}</Chip>
-          <Chip tone="neutral">
-            {composition.deployableKind ? "Package" : formatWord(composition.format)}
-          </Chip>
-        </>
-      }
+      secondary={composition.deployableKind ? "Package" : formatWord(composition.format)}
+      state={statusWord(composition.status)}
+      tone={composition.status === "ready" ? "accent" : "muted"}
     >
       {/* THE QUIET MIDDLE IS THE PROVENANCE, for the reason the Bin's is
           where a file came from: it is the fact that decides whether this
@@ -187,6 +183,6 @@ function CompositionListRow({
           replayed from a recipe with no model at all, and the mark says
           which at a glance. */}
       <ProvenanceMark sources={sources} models={models} />
-    </Row>
+    </RecordRow>
   );
 }

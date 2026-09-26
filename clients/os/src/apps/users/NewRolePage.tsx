@@ -60,6 +60,7 @@ export function placementSentence(rank: number, ladder: readonly RoleRow[]): str
 }
 
 export function NewRolePage({
+  initialAccountId = "",
   catalog,
   accounts,
   actions,
@@ -67,6 +68,7 @@ export function NewRolePage({
   onBack,
   onCreated,
 }: {
+  initialAccountId?: string;
   catalog: RoleCatalog;
   accounts: readonly AccountRow[];
   actions: UsersActions;
@@ -83,7 +85,7 @@ export function NewRolePage({
   const [baseSlug, setBaseSlug] = useState("");
   const [rank, setRank] = useState(0);
   const [grants, setGrants] = useState<string[]>([]);
-  const [accountId, setAccountId] = useState("");
+  const [accountId, setAccountId] = useState(initialAccountId);
 
   // A RANK IS PROPOSED BEFORE ANYBODY CHOOSES A BASE. The rail opens with the
   // ladder already read, and a rank of 0 would draw the new rung below every
@@ -195,7 +197,7 @@ export function NewRolePage({
             />
           </Field>
           <p className="os-caption">{placementSentence(rank, ladder)}</p>
-          {rank >= developerRank ? (
+          {accountId === "" && rank >= developerRank ? (
             <p className="os-caption">
               A role at this rank is staff: in every account's group, standing.
             </p>
@@ -237,7 +239,7 @@ export function NewRolePage({
       id: "scope",
       name: "Scope",
       state: "waiting",
-      sentence: "Everywhere, or one client.",
+      sentence: "Cluster-wide, or one organization.",
       answer: accountId === "" ? "Everywhere" : accountId,
       body: (
         <>
@@ -246,10 +248,11 @@ export function NewRolePage({
             onChange={setAccountId}
             accounts={[...accounts]}
             id="role-scope"
-            label="The client this role is confined to"
+            label="The organization this role is confined to"
+            emptyLabel="Cluster-wide"
           />
           <p className="os-caption">
-            A scoped role is holdable only by somebody already in that client's group.
+            An organization role can be assigned only to members of that organization. Its rank does not grant cluster administration or access to other organizations. Choose its allowed apps in Settings → Access after creating it.
           </p>
         </>
       ),

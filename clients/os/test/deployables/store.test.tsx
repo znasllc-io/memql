@@ -9,6 +9,8 @@ vi.mock("../../src/live/connection", () => ({
   useOsConnection: () => h.connection,
 }));
 
+import { siteFromRow } from "../../src/apps/deployables/rows";
+import { StorePanel } from "../../src/apps/deployables/store/StorePanel";
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import {
@@ -18,6 +20,7 @@ import {
   click,
   domainStateRow,
   fakeConnection,
+  previewReadinessRow,
   siteRow,
   storeHealthRow,
   withSession,
@@ -68,11 +71,8 @@ function mount(connection: FakeConnection, opts: { role?: string } = {}) {
  * The Store slot, found by its own label rather than by an accessible-name
  * match.
  *
- * `getByRole("button", {name: /Store/})` ALSO MATCHES "Stored version
- * details", which is a different control on the same page. The slot's label
- * is the `<strong>`, so that is what this asks about -- and it returns null
- * rather than throwing, because "the slot is absent" is an assertion three
- * cases here make.
+ * The slot label is the `<strong>`. Return null rather than throwing,
+ * because absence is asserted for viewers without store access.
  */
 function storeSlot(page: HTMLElement): HTMLElement | null {
   return (
@@ -95,13 +95,9 @@ async function openDeployable(hostname: string): Promise<HTMLElement> {
 /** Opens a storefront and then its Store pane. */
 async function openStore(seed: FakeSeed, opts: { role?: string } = {}) {
   const connection = fakeConnection(seed);
-  mount(connection, opts);
-  const page = await openDeployable("shop.memql.example.com");
-  const slot = storeSlot(page);
-  await click(slot);
-  const pane = (await screen.findByRole("region", {
-    name: "Store for shop.memql.example.com",
-  })) as HTMLElement;
+  h.connection = connection;
+  render(withSession(<section aria-label="Store details"><StorePanel site={siteFromRow((seed.sites ?? [SHOP])[0]!)} canBind trail={[]} back={{ label: "Store", onSelect: vi.fn() }} /></section>, { role: opts.role ?? "owner", userId: "u-me" }));
+  const pane = await screen.findByRole("region", { name: "Store details" });
   return { connection, pane };
 }
 
@@ -112,15 +108,37 @@ const BOUND: FakeSeed = {
 };
 
 describe("the store is a connection on the deployable, not a build setting", () => {
-  it("draws a Store slot in the connections column", async () => {
-    const connection = fakeConnection(BOUND);
+  it.each([
+    { store: STORE, testingOnly: false, needsSetup: false },
+    { store: DEV_STORE, testingOnly: false, needsSetup: false },
+    { store: DEV_STORE, testingOnly: true, needsSetup: false },
+    { store: { ...DEV_STORE, adminTokenRef: "" }, testingOnly: false, needsSetup: true },
+    { store: { ...DEV_STORE, storefrontTokenRef: "" }, testingOnly: true, needsSetup: true },
+  ])("shows the bound store's connection readiness ($testingOnly, $needsSetup)", async ({ store, testingOnly, needsSetup }) => {
+    const connection = fakeConnection({ ...BOUND, stores: [store], sites: [{ ...SHOP, binding: testingOnly ? {} : { storeId: store.id }, previewBinding: testingOnly ? { storeId: store.id } : {} }] });
     mount(connection);
     const page = await openDeployable("shop.memql.example.com");
     const slot = storeSlot(page);
     expect(slot).not.toBeNull();
     // It reads the store, so the slot names the DOMAIN rather than an opaque
     // row id: the domain is what somebody came to check.
-    await waitFor(() => expect(slot?.textContent).toContain("example.myshopify.com"));
+    await waitFor(() => expect(slot?.textContent).toContain(store.domain));
+    expect(slot?.textContent).toContain(needsSetup ? "Setup needed" : "Connected");
+    expect(slot?.hasAttribute("data-os-setup")).toBe(needsSetup);
+    if (store.isDevelopment) expect(slot?.textContent).toContain("Sandbox");
+    if (testingOnly) expect(slot?.textContent).toContain("Testing");
+  });
+
+  it("opens both store connections without candidate or grant controls", async () => {
+    mount(fakeConnection(BOUND));
+    const page = await openDeployable("shop.memql.example.com");
+    expect(within(page).queryByRole("region", { name: "Preview" })).toBeNull();
+    expect(within(page).queryByRole("button", { name: "Store" })).toBeNull();
+    await click(storeSlot(page));
+    expect(await screen.findByRole("button", { name: "Configure testing store" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Configure production store" })).toBeTruthy();
+    expect(screen.queryByText("Store checks")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Exercise this version" })).toBeNull();
   });
 
   it("carries no Shopify chip under App configuration", async () => {
@@ -134,8 +152,8 @@ describe("the store is a connection on the deployable, not a build setting", () 
   });
 
   it("is absent, not disabled, for somebody whose grants do not reach it", async () => {
-    // `execute app:deployables/store` is seeded on OWNER ALONE, which is what
-    // the retired app:stores set granted. DESIGN.md rule 12: a control the
+    // `execute app:deployables/store` is seeded on owner and developer
+    // (Connect Shopify, D3), not on a reader. DESIGN.md rule 12: a control the
     // effective set does not hold is ABSENT -- and here the row tier would
     // serve a reader nothing anyway, so a slot would be a refusal rendered as
     // an empty panel.
@@ -146,57 +164,31 @@ describe("the store is a connection on the deployable, not a build setting", () 
   });
 });
 
+const unbound = siteRow({
+  id: "site-unbound",
+  hostname: "new.memql.example.com",
+  kind: "shopify_storefront",
+  status: "draft",
+  bundleRef: "blob://sites/site-unbound/pending/",
+  binding: {},
+});
+
 describe("a storefront with no store", () => {
-  const unbound = siteRow({
-    id: "site-unbound",
-    hostname: "new.memql.example.com",
-    kind: "shopify_storefront",
-    status: "draft",
-    bundleRef: "blob://sites/site-unbound/pending/",
-    binding: {},
-  });
-
-  it("invites somebody to attach one", async () => {
+  it("reads Not connected", async () => {
     const connection = fakeConnection({ sites: [unbound], stores: [STORE] });
     mount(connection);
     const page = await openDeployable("new.memql.example.com");
-    expect(storeSlot(page)?.textContent).toContain("Attach a store");
+    expect(storeSlot(page)?.textContent).toContain("Not connected");
   });
 
-  it("opens straight into the picker rather than an empty panel", async () => {
-    const connection = fakeConnection({ sites: [unbound], stores: [STORE] });
+  it("offers Go live for design review while Store still needs setup", async () => {
+    const built = { ...unbound, bundleRef: "blob://sites/site-unbound/v1/" };
+    const connection = fakeConnection({ sites: [built], previewReadiness: { "site-unbound": previewReadinessRow({ siteId: "site-unbound", status: "draft", canGoLive: true }) } });
     mount(connection);
-    const page = await openDeployable("new.memql.example.com");
-    await click(storeSlot(page));
-    const pane = await screen.findByRole("region", { name: "Store for new.memql.example.com" });
-    expect(await within(pane).findByText("example.myshopify.com")).toBeTruthy();
-  });
-
-  it("names the store rather than copying it", async () => {
-    const connection = fakeConnection({ sites: [unbound], stores: [STORE] });
-    mount(connection);
-    const page = await openDeployable("new.memql.example.com");
-    await click(storeSlot(page));
-    const pane = await screen.findByRole("region", { name: "Store for new.memql.example.com" });
-    // THE LABEL, THEN THE CHOICE IT NAMES. A choice's accessible name is its
-    // label AND its description -- the domain, then "Example Shop · live ·
-    // Shopify Plus" -- so asking findByRole for a `name` means matching PART
-    // of a longer string, and every spelling of that (an unanchored
-    // /example\.myshopify\.com/, a `.includes`) reads to a scanner as a URL
-    // check with arbitrary hosts free to sit either side of it. Both spellings
-    // were tried and each raised its own alert. The domain is a WHOLE text
-    // node -- ChoiceStack renders the label in its own span inside the button
-    // that carries role="radio" -- so matching it exactly and walking up to
-    // the choice asserts the same thing with nothing partial anywhere in it.
-    const label = await within(pane).findByText("example.myshopify.com");
-    await click(label.closest<HTMLElement>('[role="radio"]'));
-    await click(within(pane).getByRole("button", { name: "Attach" }));
-    const call = connection.callsNamed("updateSiteStoreBinding")[0] ?? "";
-    expect(call).toContain('storeId: "store-example"');
-    // THE ROW ID AND NOTHING ELSE. A domain or a token reference written here
-    // would be the second record of a store this epic exists to end.
-    expect(call).not.toContain("myshopify.com");
-    expect(call).not.toContain("TokenRef");
+    await openDeployable("new.memql.example.com");
+    expect(await screen.findByRole("button", { name: /^Go live/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Store — setup needed" })).toBeNull();
+    expect(storeSlot(document.body)?.getAttribute("data-os-setup")).toBe("");
   });
 });
 
@@ -324,5 +316,56 @@ describe("a binding that does not resolve", () => {
     await waitFor(() =>
       expect(within(pane).getByText(/names a store that is not on this cluster/)).toBeTruthy(),
     );
+  });
+});
+
+describe("who is drawn which store act (Connect Shopify, D3 and D15)", () => {
+  // THE STORE PART IS A DEVELOPER'S TOO, and it is the whole of what a
+  // developer holds here. It attaches a store and changes which one a
+  // storefront fronts. REGISTERING a store creates a v1:shopify:store row,
+  // which the engine refuses below a cluster owner (D15), and PAUSING or
+  // RESUMING one writes a store row that exists, which stays owner-only.
+  // RECONCILING SUBSCRIPTIONS is an owner's too: shopifyEnsureSubscriptions
+  // takes no store and walks every ingesting store on the cluster, so it is
+  // not an act on the storefront a developer attaches. An act that is not
+  // legal is absent, never disabled (DESIGN.md rule 12).
+  async function openPicker(role: string) {
+    const connection = fakeConnection({ sites: [unbound], stores: [STORE] });
+    h.connection = connection;
+    render(withSession(<section aria-label="Store picker"><StorePanel site={siteFromRow(unbound)} canBind trail={[]} back={{ label: "Store", onSelect: vi.fn() }} /></section>, { role, userId: "u-me" }));
+    const pane = await screen.findByRole("region", { name: "Store picker" });
+    const label = await within(pane).findByText("example.myshopify.com");
+    await click(label.closest<HTMLElement>('[role="radio"]'));
+    return pane;
+  }
+
+  it("draws a developer the slot and the attach, and not the register form", async () => {
+    const pane = await openPicker("developer");
+    expect(within(pane).getByRole("button", { name: "Attach" })).toBeTruthy();
+    expect(within(pane).queryByRole("button", { name: "Register a store" })).toBeNull();
+  });
+
+  it("draws a developer no pause or resume, and still the change of store", async () => {
+    const { pane } = await openStore(BOUND, { role: "developer" });
+    await waitFor(() => expect(within(pane).getByText(/scopes the mirror needs are granted/)).toBeTruthy());
+    expect(within(pane).getByRole("button", { name: /Change the store/ })).toBeTruthy();
+    expect(within(pane).queryByRole("button", { name: /Pause ingestion/ })).toBeNull();
+    expect(within(pane).queryByRole("button", { name: /Resume ingestion/ })).toBeNull();
+  });
+
+  it("draws a developer no subscription reconcile, which walks every store on the cluster", async () => {
+    const { pane } = await openStore(BOUND, { role: "developer" });
+    await waitFor(() => expect(within(pane).getByText(/scopes the mirror needs are granted/)).toBeTruthy());
+    expect(within(pane).queryByRole("button", { name: /Reconcile subscriptions/ })).toBeNull();
+  });
+
+  it("draws an owner the attach, the register form, pause and the reconcile", async () => {
+    const pane = await openPicker("owner");
+    expect(within(pane).getByRole("button", { name: "Attach" })).toBeTruthy();
+    expect(within(pane).getByRole("button", { name: "Register a store" })).toBeTruthy();
+
+    const { pane: bound } = await openStore(BOUND, { role: "owner" });
+    expect(await within(bound).findByRole("button", { name: /Pause ingestion/ })).toBeTruthy();
+    expect(within(bound).getByRole("button", { name: /Reconcile subscriptions/ })).toBeTruthy();
   });
 });

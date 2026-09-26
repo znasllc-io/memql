@@ -166,10 +166,12 @@ test("partials stream and Complete resolves the final transcript", { timeout: 50
   const dispatcher = new MockDispatcher();
   const mic = openMicStream();
   const partials: string[] = [];
+  const metadata: string[] = [];
 
   const session = pushToTalk(dispatcher as unknown as Dispatcher, mic.stream, {
     audio: { encoding: "pcm16", sampleRate: 16000, channels: 1 },
     onPartial: (p) => partials.push(p.text),
+    onMetadata: value => metadata.push(value),
   });
   await settle();
 
@@ -178,6 +180,7 @@ test("partials stream and Complete resolves the final transcript", { timeout: 50
 
   const requestId = dispatcher.requestId();
   // Deltas carry the FULL accumulated text, never an increment.
+  dispatcher.frame({ aiTranscribeStreamDelta: { requestId, metadataJson: '{"model":"whisper"}' } });
   dispatcher.frame({ aiTranscribeStreamDelta: { requestId, text: "open" } });
   dispatcher.frame({ aiTranscribeStreamDelta: { requestId, text: "open the fleet" } });
   dispatcher.frame({
@@ -191,6 +194,7 @@ test("partials stream and Complete resolves the final transcript", { timeout: 50
 
   const final = await session;
   assert.deepEqual(partials, ["open", "open the fleet"]);
+  assert.deepEqual(metadata, ['{"model":"whisper"}']);
   assert.equal(final.text, "open the fleet");
   assert.equal(final.durationMs, 1200, "durationMs arrives as a protojson string");
   assert.equal(final.provider, "openai-realtime");

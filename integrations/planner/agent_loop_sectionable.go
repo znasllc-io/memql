@@ -83,7 +83,14 @@ const minSectionsForFanout = 2
 // emits alongside its complexity verdict. It is OPTIONAL on the envelope: a
 // non-sectionable goal omits it (or sets sectionable=false), in which case the
 // generator declines and the plan routes normally.
+type workNavigationDecision struct {
+	App     string `json:"app"`
+	Section string `json:"section"`
+	Record  string `json:"record"`
+}
+
 type sectionableDecision struct {
+	Navigation *workNavigationDecision `json:"navigation"`
 	// RequiresFile is the goal's semantic delivery contract, independent of
 	// sectionability. Nil is a malformed/omitted answer, never false.
 	RequiresFile *bool `json:"requiresFile"`
@@ -215,17 +222,19 @@ func parseSectionableDecision(resp any) sectionableDecision {
 	}
 	raw = extractJSONObject(raw)
 	var env struct {
-		RequiresFile *bool         `json:"requiresFile"`
-		FileName     string        `json:"fileName"`
-		FileFormat   string        `json:"fileFormat"`
-		Sectionable  bool          `json:"sectionable"`
-		Sections     []sectionSpec `json:"sections"`
-		Assembly     string        `json:"assembly"`
+		Navigation   *workNavigationDecision `json:"navigation"`
+		RequiresFile *bool                   `json:"requiresFile"`
+		FileName     string                  `json:"fileName"`
+		FileFormat   string                  `json:"fileFormat"`
+		Sectionable  bool                    `json:"sectionable"`
+		Sections     []sectionSpec           `json:"sections"`
+		Assembly     string                  `json:"assembly"`
 	}
 	if err := json.Unmarshal(raw, &env); err != nil {
 		return sectionableDecision{}
 	}
 	return sectionableDecision{
+		Navigation:   env.Navigation,
 		RequiresFile: env.RequiresFile,
 		FileName:     env.FileName,
 		FileFormat:   env.FileFormat,

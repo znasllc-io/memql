@@ -3,7 +3,7 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { Folder as FolderIcon } from "lucide-react";
 
-import { Caption, Check, Chip, Head, LiveList, Panel, Refine, Row as KitRow, formatFreshness, formatMoment, useNow } from "../../kit";
+import { Caption, Check, Chip, Head, LiveList, Panel, Refine, RecordRow, listCount, formatFreshness, formatMoment, useNow } from "../../kit";
 import { useOsConnection } from "../../live/connection";
 import { useMachines } from "../../live/machines";
 import { AppLogsSection } from "../../logs/AppLogsSection";
@@ -189,7 +189,7 @@ export function BinApp({
 
   return (
     <div className="os-bin">
-      <Head title="Bin">
+      <Head title="Bin" meta={listCount(list?.snapshot)}>
         {/* The search rides the Refine affordance (DESIGN.md rule 2) --
             collapsed until asked, never standing chrome over the list. */}
         <Refine
@@ -291,7 +291,7 @@ function BinRow({
   // panel keeps the dot, where it sits against the sentence that qualifies it.
   const story = artifact === null ? null : fileStory(artifact, artifact.producedByWorkerId ? presence(artifact.producedByWorkerId) : null);
   return (
-    <KitRow
+    <RecordRow
       icon={
         <span className="os-bin-row-glyph">
           {item.kind === "folder" ? <FolderIcon size={16} aria-hidden /> : kindGlyph(item.contentKind, 16)}
@@ -301,7 +301,8 @@ function BinRow({
       onOpen={onOpen}
       open={selected}
       dim={!selected}
-      state={
+      secondary={story?.sentence ?? "Made here"}
+      stateExtra={
         item.changedAt === "" ? null : (
           <span className="os-caption" title={formatMoment(item.changedAt)}>
             {formatFreshness(item.changedAt, now)}
@@ -311,11 +312,10 @@ function BinRow({
     >
       {/* A folder's provenance is that somebody made it here -- parallel to
           "Uploaded here", and the honest answer for a row with no bytes. */}
-      <span className="os-bin-row-from">{story?.sentence ?? "Made here"}</span>
       <Chip tone="muted" title={`Was filed in ${filedIn}`}>
         {filedIn}
       </Chip>
-    </KitRow>
+    </RecordRow>
   );
 }
 

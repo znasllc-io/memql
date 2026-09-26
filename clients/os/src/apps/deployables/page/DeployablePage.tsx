@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Concepts } from "@znasllc-io/memql-sdk-core/client";
-import { ExternalLink } from "lucide-react";
+import { Activity } from "lucide-react";
 
 import { Button, Caption, Chip, Chips, Head, Input, Panel, useLiveView } from "../../../kit";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
@@ -13,7 +13,7 @@ import { deploymentFromRow, type DeploymentRow, type PackageRow } from "../packa
 import type { PartsHeld } from "../parts";
 import { deployedByLabel, deployerOf, type NameOf } from "../people";
 import { usePackageDeployments } from "../packages/usePackages";
-import { liveUrlFor, ownerLabel, siteName, type SiteRow } from "../rows";
+import { ownerLabel, siteName, type SiteRow } from "../rows";
 import type { CredentialRow } from "../sources/rows";
 import { confirmationWordFor } from "../words";
 import { actsFor, runForApp, siblingRunInFlight, type ActName } from "./acts";
@@ -25,13 +25,15 @@ import { TrafficPanel } from "./stops/Traffic";
 import "../composition.css";
 import { railFor, refusalStopFor, type RailStage, type StandingInput } from "./rail";
 import { BuildStop } from "./stops/Build";
-import { LiveStop } from "./stops/Live";
+import { IconButton } from "../../../kit/IconButton";
 import { SourceStop } from "./stops/Source";
 import { WhatItIsStop } from "./stops/WhatItIs";
 import { WhereItLivesStop } from "./stops/WhereItLives";
 import { DomainWizard } from "./stops/Domains";
-import { StorePanel } from "../store/StorePanel";
+import { ShopifyStorePanel } from "../store/ShopifyStorePanel";
+import { RefusalNotice } from "../preview/PreviewSection";
 import { useBundleFlip } from "./useBundleFlip";
+import { VisitSiteButton } from "./VisitSiteButton";
 
 // The deployable page (epic memql#4937, design sections C and D): ONE head,
 // ONE rail, ONE bar.
@@ -80,11 +82,12 @@ export interface DeployablePageProps {
   onAsk?: (tag: string) => void;
   /** The quiet Back to the list. */
   onBack: () => void;
+  initialDetail?: WorkspaceDetail;
+  shopifyResult?: string;
+  openRevision?: number;
   backLabel?: string;
   /** Opens the source's own view. */
   onOpenSource: (packageId: string) => void;
-  /** Opens the source's history view. */
-  onOpenHistory: (packageId: string) => void;
   /** True while this deployable's delete is still tearing its domains down. */
   deleting?: boolean;
   /**
@@ -106,9 +109,9 @@ export function DeployablePage({
   onBack,
   backLabel = "Deployables",
   onOpenSource,
-  onOpenHistory,
   deleting = false,
   onDeleted,
+  initialDetail, shopifyResult, openRevision,
 }: DeployablePageProps) {
   const { source: timeline, reseed } = usePackageDeployments(pkg?.id ?? "");
   const deployments = useLiveView(timeline, `deployments:${pkg?.id ?? ""}`, (rows) =>
@@ -138,7 +141,7 @@ export function DeployablePage({
   // stop is the question; clicking another opens it instead, and clicking the
   // open one closes it. Cleared when the deployable changes, so a stop opened
   // on one is never carried onto another.
-  const [detail, setDetail] = useState<WorkspaceDetail | null>(null);
+  const [detail, setDetail] = useState<WorkspaceDetail | null>(initialDetail ?? null);
   // WHICH PART OF "Addresses and client" IS OPEN. The domains list, one
   // binding's setup, or the add form -- each its OWN view with its own Head, so
   // the trail names the real depth and a list never shares a scroll column
@@ -148,22 +151,21 @@ export function DeployablePage({
   const [confirming, setConfirming] = useState(false);
   const [typed, setTyped] = useState("");
   useEffect(() => {
-    setDetail(null);
+    setDetail(initialDetail ?? null);
     setDomainView({ kind: "list" });
     setConfirming(false);
     setTyped("");
-  }, [site.id]);
+  }, [site.id, initialDetail, openRevision]);
 
   const rail: StandingInput = { mode: "standing", pkg, app, run, site };
   const refusalStop = refusalStopFor(run);
-  const name = site.title || site.packageDeployableName || siteName(site);
-  const url = liveUrlFor(site.hostname);
+  const name = pkg?.declares.find(d => d.name === app)?.displayName?.trim() || site.title || site.packageDeployableName || siteName(site);
 
   // WHAT THE ENGINE SAYS IS LEGAL about this deployable's candidate (epic
   // memql#5531). The bar offers a promotion only when the readiness has landed
   // AND says yes -- absent, never disabled, and the Preview section below
   // draws the reason when the answer is no.
-  const previewRead = usePreviewReadiness(site.id);
+  const previewRead = usePreviewReadiness(site);
   const previewReadiness = previewRead.readiness;
   // The promotion is the one preview write the BAR makes, so the hook lives
   // here rather than in the section: rule 12 puts every act that changes what
@@ -180,7 +182,12 @@ export function DeployablePage({
     preview:
       previewReadiness === null
         ? null
-        : { hasCandidate: previewReadiness.hasCandidate, canPromote: previewReadiness.canPromote },
+        : {
+            hasCandidate: previewReadiness.hasCandidate,
+            canPromote: site.kind !== "shopify_storefront" && previewReadiness.canPromote && site.candidateRef !== site.bundleRef,
+            canGoLive: previewReadiness.canGoLive,
+            goLiveRefusal: previewReadiness.goLiveRefusal,
+          },
   });
   // WHO DEPLOYED IT, off the rows already here: this app's newest run's
   // requester, else the site's owner (the deployer since PR #5284), else the
@@ -324,8 +331,6 @@ export function DeployablePage({
         );
       case "build":
         return <BuildStop run={run} app={site.packageDeployableName} refusal={refusal} />;
-      case "live":
-        return <LiveStop site={site} canPublish={can.publish} lifecycle={lifecycle} refusal={refusal} includeConfiguration={false} />;
       default:
         return null;
     }
@@ -357,16 +362,11 @@ export function DeployablePage({
   // person the engine would then serve nothing to.
   if (detail === "store" && can.store) {
     const toOverview = () => setDetail(null);
-    return <div className="os-deploy-pane deployable-workspace" data-os-page-context={JSON.stringify({ page: "Deployable", siteId: site.id, hostname: site.hostname, name, view: "Store" })}><div className="os-deploy-scroll">
-      <Panel label={`Store for ${siteName(site)}`}>
-        <StorePanel
-          site={site}
-          canBind={can.store}
-          trail={[{ label: backLabel, onSelect: onBack }, { label: name, onSelect: toOverview }, { label: "Store" }]}
-          back={{ label: name, onSelect: toOverview }}
-        />
-      </Panel>
-    </div></div>;
+    return <ShopifyStorePanel
+      site={site} canBind={can.store} result={shopifyResult} revision={openRevision}
+      onWritten={previewRead.reread} runs={timelineRows} can={can}
+      trail={[{ label: backLabel, onSelect: onBack }, { label: name, onSelect: toOverview }, { label: "Store" }]}
+      back={{ label: name, onSelect: toOverview }} />;
   }
 
   if (detail === "whereItLives") {
@@ -386,12 +386,9 @@ export function DeployablePage({
         <Panel label={`Deployable ${siteName(site)}`}>
           {/* Page navigation stays with the title; Ask belongs to the window. */}
           <Head title={name} breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label: name }]} back={{ label: backLabel, onSelect: onBack }}>
-            {url === "" ? null : (
-              <a className="os-icon-button" aria-label={`Open ${name} in a new tab`} title={`Open ${name} in a new tab`} href={url} target="_blank" rel="noreferrer noopener">
-                <ExternalLink size={16} aria-hidden />
-              </a>
-            )}
+            <VisitSiteButton site={site} name={name} can={can} readiness={previewReadiness} readinessError={previewRead.error} onWritten={previewRead.reread} onOpenStore={() => setDetail("store")} />
             <OpenLogsButton iconOnly subject={site.id} subjectConcept={Concepts.PLATFORM_SITE} ariaLabel={`Logs for ${name}`} />
+            <IconButton label="Traffic" onClick={() => setDetail("traffic")}><Activity size={16} aria-hidden /></IconButton>
           </Head>
 
           <Chips label="Deployable facts">
@@ -426,13 +423,21 @@ export function DeployablePage({
             <ProblemNotice problem={{ ...headActions.refusal, fatal: true }} tone="error" />
           ) : null}
 
+          {/* GO LIVE IS ABSENT FROM THE BAR WHEN THE ENGINE WOULD REFUSE IT
+              (Connect Shopify, D5), and the reason is drawn here instead,
+              with the way to the store when that is where it is cleared. The
+              Store panel is absent without the store part, so is the way. */}
+          {reading.withheld && site.kind !== "shopify_storefront" ? (
+            <RefusalNotice refusal={reading.withheld} storefront={can.store} onOpenStore={() => setDetail("store")} />
+          ) : null}
+
           <DeployableWorkspace key={site.id}
             canSources={can.sources} onUpdate={reading.acts.some(a => a.name === "Deploy the update") && !headActions.busy ? () => act("Deploy the update") : undefined}
             site={site} pkg={pkg} run={run} runs={timelineRows} can={can} accounts={accounts} canDomains={can.domains} canStore={can.store}
             timelineState={deployments?.snapshot.state ?? "disconnected"}
             timelineError={deployments?.snapshot.error ?? ""} onRetryRead={reseed}
             onInspect={setDetail} onOpenSource={() => pkg && onOpenSource(pkg.id)}
-            onHistory={() => pkg ? onOpenHistory(pkg.id) : setDetail("live")}
+            lifecycle={lifecycle}
           />
 
           {/* A refusal renders IN SURFACE, beside the rail -- never a toast,
@@ -588,5 +593,5 @@ function newestFirst(rows: DeploymentRow[]): DeploymentRow[] {
 // both take the pane and draw their own Head, and an entry here would be a
 // second title for a surface that already has one.
 function detailTitle(detail: WorkspaceDetail): string {
-  return { source: "Source", whatItIs: "App and deployment plan", whereItLives: "Addresses and client", build: "Build", live: "Versions", runtime: "App values", traffic: "Traffic", store: "Store" }[detail];
+  return { source: "Source", whatItIs: "App and deployment plan", whereItLives: "Addresses and client", build: "Build", runtime: "App values", traffic: "Traffic", store: "Store" }[detail];
 }

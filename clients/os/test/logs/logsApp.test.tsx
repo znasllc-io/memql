@@ -93,7 +93,7 @@ describe("the Stream", () => {
     expect(connection.callsNamed("logsSources")[0]).toMatch(
       /^builtin logsSources\(windowStart: "[^"]+", windowEnd: "[^"]+"\)$/,
     );
-    expect(screen.getByText("Last 15 minutes · 3 lines")).toBeTruthy();
+    expect(document.querySelector(".os-head-meta")?.textContent).toBe("3");
   });
 
   it("offers the cluster's sources with counts, and picking one narrows the call", async () => {
@@ -125,7 +125,7 @@ describe("the Stream", () => {
     h.connection = connection;
     await renderLogsApp({ section: "stream", settings: { levelFloor: "warn", streamWindow: "6h" } });
     expect(connection.callsNamed("logsTail")[0]).toBe('builtin logsTail(levels: ["warn", "error"])');
-    expect(screen.getByText(/^Last 6 hours/)).toBeTruthy();
+    expect(screen.getByRole("grid")).toBeTruthy();
   });
 });
 
@@ -142,7 +142,7 @@ describe("Search", () => {
     expect(connection.callsNamed("logsSearch")[0]).toMatch(
       /^builtin logsSearch\(windowStart: "[^"]+", windowEnd: "[^"]+", limit: 200\)$/,
     );
-    expect(screen.getByText("Last 24 hours · 200 lines")).toBeTruthy();
+    expect(document.querySelector(".os-head-meta")?.textContent).toBe("200");
     expect(screen.getByText(/Newest first/)).toBeTruthy();
 
     await click(screen.getByRole("button", { name: "Older lines" }));
@@ -150,7 +150,7 @@ describe("Search", () => {
     expect(calls[1]).toMatch(
       new RegExp(`limit: 200, beforeAt: "${oldest.occurredAt as string}", beforeId: "${oldest.id as string}"\\)$`),
     );
-    expect(screen.getByText("Last 24 hours · 201 lines")).toBeTruthy();
+    expect(document.querySelector(".os-head-meta")?.textContent).toBe("201");
     // A short page is the end of the window.
     expect(screen.getByText("That is every line in the window.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Older lines" })).toBeNull();
@@ -187,7 +187,7 @@ describe("Search", () => {
     expect(calls[calls.length - 1]).toBe(
       `builtin logsSearch(windowStart: "${new Date("2026-09-01T10:00").toISOString()}", windowEnd: "${new Date("2026-09-02T10:00").toISOString()}", limit: 200)`,
     );
-    expect(screen.getByText(/^Custom window/)).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Custom" }).getAttribute("aria-checked")).toBe("true");
   });
 
   it("the search text settles into the call, and the level floor joins it", async () => {
@@ -263,7 +263,7 @@ describe("Settings", () => {
     await renderLogsApp({ section: "settings", role: "owner" });
     const days = screen.getByRole("list", { name: "Archived days" });
     const entries = within(days).getAllByRole("listitem");
-    expect(entries.map((li) => li.querySelector(".os-logs-day-name")?.textContent)).toEqual(["2026-08-01", "2026-07-31"]);
+    expect(entries.map((li) => li.querySelector(".os-row-name")?.textContent)).toEqual(["2026-08-01", "2026-07-31"]);
     expect(entries[0]?.textContent).toContain("bff, edge");
 
     await click(within(days).getByRole("button", { name: "Bring back 2026-08-01" }));

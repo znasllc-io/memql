@@ -216,6 +216,10 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) (IssueResult, error) 
 		return out, errors.New("magiclink: nil store")
 	}
 
+	if i.Cfg.LocalPasskeyOnly() {
+		return out, errors.New("this local installation uses passkeys only")
+	}
+
 	email := strings.TrimSpace(in.Email)
 	if email == "" {
 		return out, errors.New("magiclink: email required")

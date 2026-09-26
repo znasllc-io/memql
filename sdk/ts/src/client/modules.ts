@@ -5,7 +5,8 @@
 //
 // Kept as its own client rather than folded into QueryClient for the same
 // reason sdk/go/modules stands alone: the registry is an operator surface
-// with its own authorization tier (reads owner/admin, write owner-only),
+// with its own authorization tier (reads: read app:cluster/modules; the
+// write: the owner, or a developer on a storefront pack),
 // not part of the generated query/mutation vocabulary. SDK-owned value
 // types below normalize the optional wire fields once, so consumers never
 // touch `| undefined` soup; no wire type leaks out of the exported
@@ -39,6 +40,10 @@ export interface Module {
   envComponents: string[];
   fqnPrefixes: string[];
   codeReference: string;
+  // Whether THIS caller may flip this pack: an owner any pack, a developer
+  // holding execute on app:cluster/modules a storefront pack. False on every
+  // non-pack row, and false when an older engine did not say.
+  mayFlip: boolean;
 }
 
 // ModuleEnvVar is one manifest-declared environment variable, evaluated on
@@ -95,6 +100,7 @@ function moduleFromWire(w: ModuleInfoWire | null | undefined): Module {
     envComponents: w?.envComponents ?? [],
     fqnPrefixes: w?.fqnPrefixes ?? [],
     codeReference: w?.codeReference ?? "",
+    mayFlip: w?.mayFlip ?? false,
   };
 }
 

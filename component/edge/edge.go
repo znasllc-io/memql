@@ -206,11 +206,11 @@ func (e *engineExecutor) SiteForAccountFrontDoor(ctx context.Context, hostname s
 // StoreByID resolves the v1:shopify:store row a storefront's binding names
 // (epic memql#5530, issue memql#5538), under the same synthetic cluster-owner
 // actor the site reads use -- see the file-level note for why, and note that
-// storeById's own filter carries `actor.isClusterOwner == true` written out on
-// top of the concept's declared @rowAuthz(clusterOwner) tier, so a caller
-// without one is refused twice.
+// v1:shopify:store's @rowAuthz(clusterOwner, rankFloor="developer") tier
+// answers a caller below developer with zero rows, so an unstamped read would
+// find no store at all.
 //
-// THREE FIELDS OF A ROW THAT CARRIES MORE. `adminTokenRef` and
+// Only serving fields from the store are projected. `adminTokenRef` and
 // `webhookSecretRef` are deliberately NOT projected: the Admin API token is
 // the credential that can read orders and customers and mutate the store, and
 // the serving path cannot leak a reference it was never handed. Only
@@ -236,6 +236,7 @@ func (e *engineExecutor) StoreByID(ctx context.Context, storeId string) (*BoundS
 		ID:                 memql.BareShortId(rowString(rows[0], "id")),
 		Domain:             rowString(rows[0], "domain"),
 		StorefrontTokenRef: rowString(rows[0], "storefrontTokenRef"),
+		APIVersion:         rowString(rows[0], "apiVersion"),
 	}, nil
 }
 

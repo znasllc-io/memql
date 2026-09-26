@@ -167,20 +167,20 @@ function wireDecision(over: Record<string, unknown> = {}) {
 
 /** The row whose model column reads `model`. */
 function rowFor(model: string): HTMLElement {
-  const found = [...document.querySelectorAll("li.os-decision-item")].find(
-    (li) => li.querySelector(".os-decision-model")?.textContent === model,
+  const found = [...document.querySelectorAll(".os-decision-item")].find(
+    (li) => li.querySelector(".os-record-secondary .os-mono")?.textContent === model,
   );
   if (!(found instanceof HTMLElement)) throw new Error(`no decision row for ${model}`);
   return found;
 }
 
 function costIn(model: string): string {
-  return rowFor(model).querySelector(".os-decision-cost")?.textContent ?? "";
+  return rowFor(model).querySelector("[data-cost]")?.textContent ?? "";
 }
 
 /** The cost cell's own title -- the long reading, kept for the hover. */
 function titleOfCostIn(model: string): string {
-  return rowFor(model).querySelector(".os-decision-free")?.getAttribute("title") ?? "";
+  return rowFor(model).querySelector("[data-cost] [title]")?.getAttribute("title") ?? "";
 }
 
 /** The arguments the most recent read was made with. */
@@ -496,7 +496,7 @@ describe("what a decision says about its level", () => {
       }),
     ];
     await renderDecisions();
-    const level = rowFor("qwen3-coder").querySelector(".os-decision-level");
+    const level = rowFor("qwen3-coder").querySelector(".os-record-row");
     expect(level?.textContent).toContain("reasoning served as strong");
     expect(level?.textContent).toContain("degraded");
   });

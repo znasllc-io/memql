@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"strings"
 	"time"
 
@@ -45,91 +44,16 @@ import (
 // The gate
 // -----------------------------------------------------------------------------
 
-// githubConnectGateLockClass namespaces the connect-state advisory locks.
-//
-// Postgres two-key advisory locks (pg_advisory_lock(classid, objid)) occupy a
-// DIFFERENT lock space from the single-key bigint form, so this cannot collide
-// with the cron-leader lease, the topology reconciler, the schema lock or the
-// recovery-key mint (all single-key). Within the two-key space the class byte
-// keeps clear of the magic link (0x4D4C4E4B "MLNK"), cognition's dispatch
-// (0x434F474E "COGN"), greeting (0x47524554 "GRET") and feedback-announce
-// (0x464E4452 "FNDR") gates, and the planner's admission lock (0x504C414E
-// "PLAN"). 0x47484342 spells "GHCB". A seventh gate picks the next free
-// four-character constant and repeats this list.
-const githubConnectGateLockClass int32 = 0x47484342
-
-// githubConnectGateTimeout bounds the wait for the lock. A holder that wedges
-// must not hang a browser parked on GitHub's redirect: past this the caller
-// proceeds unlocked, which reduces the flow to a race rather than to a
-// failure. The critical section is two engine round-trips, so a wait this long
-// already means something is wrong elsewhere. Same value the magic-link gate
-// uses, for the same reason.
-const githubConnectGateTimeout = 5 * time.Second
-
-// githubConnectGateKey derives the advisory objid for one state digest.
-// FNV-32a, matching the magic-link and cognition gates. A hash collision costs
-// two unrelated callbacks serialising against each other for the length of one
-// critical section -- invisible, and never a correctness problem, because the
-// re-read inside the section is keyed on the digest itself.
-func githubConnectGateKey(stateHash string) int32 {
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(stateHash))
-	return int32(h.Sum32())
-}
-
-// withGithubConnectGate runs fn while holding the advisory lock for stateHash.
-//
-// A gate-infrastructure failure (no getter, DB not ready, connection error,
-// lock query error, timeout) never fails the call: fn runs anyway, unlocked.
-// That is the pre-gate read-then-write -- no worse than not having the gate,
-// and better than refusing a legitimate connect because a lock query errored.
-// It is not the shipped configuration: app/integrations_identity.go wires
-// DirectDB from the same directDBGetter the magic-link gate uses, and a
-// db-gated test asserts the property against a real Postgres.
-//
-// The lock has to be taken on the DIRECT connection: a transaction-mode
-// PgBouncer recycles the server backend between statements and would silently
-// drop a session-scoped lock (epic memql#1925). Silently is the operative
-// word -- the code reads as correct and the mutual exclusion is simply absent.
-func (s *Store) withGithubConnectGate(ctx context.Context, stateHash string, fn func(context.Context) error) error {
+// withGithubConnectGate delegates to the shared durable lifecycle gate. Tests
+// may supply an explicit gate, while production refuses unavailable storage.
+func (s *Store) withGithubConnectGate(ctx context.Context, key string, fn func(context.Context) error) error {
+	if s != nil && s.GithubGate != nil {
+		return s.GithubGate(ctx, key, fn)
+	}
 	if s == nil || s.DirectDB == nil {
-		return fn(ctx)
+		return fmt.Errorf("identity.store: GitHub lifecycle gate unavailable")
 	}
-	db := s.DirectDB()
-	if db == nil {
-		return fn(ctx)
-	}
-
-	lockCtx, cancel := context.WithTimeout(ctx, githubConnectGateTimeout)
-	defer cancel()
-
-	conn, err := db.Conn(lockCtx)
-	if err != nil {
-		s.warn("identity.store: github-connect gate connection unavailable; proceeding unlocked", "error", err.Error())
-		return fn(ctx)
-	}
-	defer func() { _ = conn.Close() }()
-
-	objid := githubConnectGateKey(stateHash)
-	// BLOCKING, not pg_try_advisory_lock. The loser of this race must not
-	// bail -- it must WAIT, re-read, and discover that it lost, so it can
-	// redirect with connect_state_invalid instead of silently doing nothing
-	// or, worse, landing a second grant.
-	if _, err := conn.ExecContext(lockCtx, "SELECT pg_advisory_lock($1, $2)", githubConnectGateLockClass, objid); err != nil {
-		s.warn("identity.store: github-connect gate not acquired; proceeding unlocked", "error", err.Error())
-		return fn(ctx)
-	}
-	defer func() {
-		// Unlock on a background context so a client disconnect mid-flight
-		// cannot leave the lock held for the life of the pooled connection.
-		uctx, ucancel := context.WithTimeout(context.Background(), githubConnectGateTimeout)
-		defer ucancel()
-		if _, err := conn.ExecContext(uctx, "SELECT pg_advisory_unlock($1, $2)", githubConnectGateLockClass, objid); err != nil {
-			s.warn("identity.store: github-connect gate unlock failed", "error", err.Error())
-		}
-	}()
-
-	return fn(ctx)
+	return githubconnect.WithGate(ctx, s.DirectDB(), key, fn)
 }
 
 // -----------------------------------------------------------------------------
@@ -156,6 +80,13 @@ var (
 // GithubConnectStateRow is the projection of v1:identity:githubConnectState
 // the callback needs.
 type GithubConnectStateRow struct {
+	SessionId          string
+	PKCEVerifier       string
+	CredentialId       string
+	TargetRevokedAt    string
+	ExpectedExternalId string
+	FlowId             string
+
 	ID             string
 	UserId         string
 	StateHash      string
@@ -165,12 +96,51 @@ type GithubConnectStateRow struct {
 	ConsumedFromIP string
 	SourceIP       string
 	// Purpose is which flow minted the state: githubconnect.PurposeConnect
-	// (or blank, which every row written before the field existed is) or
-	// githubconnect.PurposeAppSetup.
+	// (or blank, which every row written before the field existed is),
+	// githubconnect.PurposeAppSetup or githubconnect.PurposeShopifyConnect.
 	Purpose string
 	// Organization is, for an app-setup state, the GitHub organization the
 	// app is to be registered under; blank is the person's own account.
 	Organization string
+	// ShopDomain, SiteID, ClientID and CredentialSource are a Connect Shopify
+	// state's (githubconnect.PurposeShopifyConnect): the normalized shop, the
+	// storefront site, the app's client id and whether its secret is the
+	// pending one or the store's current one. Blank on every other flow.
+	ShopDomain       string
+	SiteID           string
+	ClientID         string
+	CredentialSource string
+	// CreatedAt is the row's own intrinsic, read so consume can tell a state
+	// the server wrote from one it could not have (ServerShaped). It rides the
+	// NODE, not the payload: the read's payload carries no createdAt key.
+	CreatedAt time.Time
+}
+
+// nodeCreatedAt is the node's createdAt intrinsic, or the zero time when the
+// node carries none (AsTime on a nil timestamp would answer 1970 instead).
+func nodeCreatedAt(n *memqlv1.MemoryNode) time.Time {
+	if ts := n.GetCreatedAt(); ts != nil {
+		return ts.AsTime()
+	}
+	return time.Time{}
+}
+
+// maxGithubConnectStateLifetime bounds what a server-written state can claim.
+// Every writer sets expiresAt to createdAt plus ten minutes; the rest is skew.
+const maxGithubConnectStateLifetime = 15 * time.Minute
+
+// ServerShaped reports whether the row's lifetime is one a server writer
+// sets. A row planted through the raw insert literal before the executeWrite
+// guard shipped (memql#5623) carries an expiry its planter chose -- the forgery
+// that proved the hole used the year 2099 -- or none at all, and the guard
+// cannot reach back to rows already in the table. Consume treats such a row as
+// a state it has never seen.
+func (r *GithubConnectStateRow) ServerShaped() bool {
+	if r.CreatedAt.IsZero() || r.ExpiresAt.IsZero() {
+		return false
+	}
+	life := r.ExpiresAt.Sub(r.CreatedAt)
+	return life > 0 && life <= maxGithubConnectStateLifetime
 }
 
 // IsFor reports whether the row belongs to `purpose`. Blank on the row means
@@ -201,6 +171,13 @@ func HashConnectState(plain string) string {
 
 // GithubConnectStateSeed is one begin.
 type GithubConnectStateSeed struct {
+	SessionId          string
+	PKCEVerifier       string
+	CredentialId       string
+	TargetRevokedAt    string
+	ExpectedExternalId string
+	FlowId             string
+
 	UserId     string
 	StateHash  string
 	ReturnPath string
@@ -210,6 +187,11 @@ type GithubConnectStateSeed struct {
 	// connect state, which is what every caller before app setup wrote.
 	Purpose      string
 	Organization string
+	// ShopDomain, SiteID, ClientID, CredentialSource: see GithubConnectStateRow.
+	ShopDomain       string
+	SiteID           string
+	ClientID         string
+	CredentialSource string
 }
 
 // CreateGithubConnectState writes the row a later callback will consume.
@@ -238,7 +220,7 @@ func (s *Store) CreateGithubConnectState(ctx context.Context, seed GithubConnect
 
 	stateId := "v1:identity:githubConnectState:" + id.NewShortId()
 	query := fmt.Sprintf(
-		`mutation createGithubConnectState(stateId: %s, userId: %s, stateHash: %s, expiresAt: %s, returnPath: %s, sourceIP: %s, purpose: %s, organization: %s)`,
+		`mutation createGithubConnectState(stateId: %s, userId: %s, stateHash: %s, expiresAt: %s, returnPath: %s, sourceIP: %s, purpose: %s, organization: %s, sessionId: %s, pkceVerifier: %s, credentialId: %s, expectedExternalId: %s, targetRevokedAt: %s, flowId: %s, shopDomain: %s, siteId: %s, clientId: %s, credentialSource: %s)`,
 		langparser.QuoteString(stateId),
 		langparser.QuoteString(userId),
 		langparser.QuoteString(seed.StateHash),
@@ -247,12 +229,18 @@ func (s *Store) CreateGithubConnectState(ctx context.Context, seed GithubConnect
 		langparser.QuoteString(seed.SourceIP),
 		langparser.QuoteString(strings.TrimSpace(seed.Purpose)),
 		langparser.QuoteString(strings.TrimSpace(seed.Organization)),
+		langparser.QuoteString(seed.SessionId), langparser.QuoteString(seed.PKCEVerifier),
+		langparser.QuoteString(seed.CredentialId), langparser.QuoteString(seed.ExpectedExternalId), langparser.QuoteString(seed.TargetRevokedAt), langparser.QuoteString(seed.FlowId),
+		langparser.QuoteString(strings.TrimSpace(seed.ShopDomain)),
+		langparser.QuoteString(strings.TrimSpace(seed.SiteID)),
+		langparser.QuoteString(strings.TrimSpace(seed.ClientID)),
+		langparser.QuoteString(strings.TrimSpace(seed.CredentialSource)),
 	)
 	// INTERNAL ORIGIN: createGithubConnectState is @serverOnly, and the engine
 	// refuses such a construct unless the context carries it -- so without
 	// this the call cannot succeed on any cluster, ever. Stamped inline as the
 	// argument to the one Execute so the marked context dies at this call.
-	if _, err := s.Engine.Execute(auth.ContextWithInternalOrigin(ctx), query); err != nil {
+	if _, err := s.Engine.Execute(auth.ContextWithInternalOrigin(auth.ContextWithUserActor(ctx, userId)), query); err != nil {
 		return "", fmt.Errorf("identity.store: create github connect state: %w", err)
 	}
 	return stateId, nil
@@ -299,11 +287,11 @@ func (s *Store) ConsumeGithubConnectState(ctx context.Context, stateHash, consum
 // ConsumeGithubConnectStateFor is ConsumeGithubConnectState for a named flow.
 //
 // A ROW OF ANOTHER PURPOSE IS A STATE THIS CALLER HAS NEVER SEEN. The Connect
-// callback and the app-setup callback share this row shape and this lock, and
-// what must never happen is one spending the other's: a connect state finishing
-// a registration would let anybody who can press Connect replace the cluster's
-// app, and a setup state finishing a connect would land a grant from a flow
-// that was never a connect. So the purpose is checked INSIDE the critical
+// callback, the app-setup callback and the Connect Shopify callback share this
+// row shape and this lock, and what must never happen is one spending
+// another's: a connect state finishing a registration would let anybody who
+// can press Connect replace the cluster's app, and a setup state finishing a
+// connect would land a grant from a flow that was never a connect. So the purpose is checked INSIDE the critical
 // section, beside the other three refusals, and a mismatch is answered exactly
 // as an unknown digest is -- and leaves the row UNSPENT, for the callback it
 // does belong to.
@@ -314,7 +302,7 @@ func (s *Store) ConsumeGithubConnectStateFor(ctx context.Context, stateHash, con
 		if err != nil {
 			return fmt.Errorf("identity.store: consume github connect state: re-read: %w", err)
 		}
-		if found == nil || !found.IsFor(purpose) {
+		if found == nil || !found.IsFor(purpose) || !found.ServerShaped() {
 			return ErrGithubConnectStateNotFound
 		}
 		if !found.ConsumedAt.IsZero() {
@@ -331,7 +319,7 @@ func (s *Store) ConsumeGithubConnectStateFor(ctx context.Context, stateHash, con
 		)
 		// INTERNAL ORIGIN: consumeGithubConnectState is @serverOnly. Stamped
 		// inline, in this file, for the reason the header gives.
-		if _, err := s.Engine.Execute(auth.ContextWithInternalOrigin(ctx), query); err != nil {
+		if _, err := s.Engine.Execute(auth.ContextWithInternalOrigin(auth.ContextWithUserActor(ctx, found.UserId)), query); err != nil {
 			return fmt.Errorf("identity.store: consume github connect state: %w", err)
 		}
 		row = found
@@ -349,16 +337,27 @@ func firstGithubConnectStateRow(nodes []*memqlv1.MemoryNode) *GithubConnectState
 	}
 	g := newFieldGetter(nodes[0])
 	return &GithubConnectStateRow{
-		ID:             firstNonEmpty(g.str("id"), nodes[0].GetId()),
-		UserId:         g.str("userId"),
-		StateHash:      g.str("stateHash"),
-		ReturnPath:     g.str("returnPath"),
-		ExpiresAt:      g.time("expiresAt"),
-		ConsumedAt:     g.time("consumedAt"),
-		ConsumedFromIP: g.str("consumedFromIP"),
-		SourceIP:       g.str("sourceIP"),
-		Purpose:        g.str("purpose"),
-		Organization:   g.str("organization"),
+		ID:                 firstNonEmpty(g.str("id"), nodes[0].GetId()),
+		UserId:             g.str("userId"),
+		StateHash:          g.str("stateHash"),
+		ReturnPath:         g.str("returnPath"),
+		ExpiresAt:          g.time("expiresAt"),
+		ConsumedAt:         g.time("consumedAt"),
+		ConsumedFromIP:     g.str("consumedFromIP"),
+		SourceIP:           g.str("sourceIP"),
+		Purpose:            g.str("purpose"),
+		Organization:       g.str("organization"),
+		SessionId:          g.str("sessionId"),
+		PKCEVerifier:       g.str("pkceVerifier"),
+		CredentialId:       g.str("credentialId"),
+		ExpectedExternalId: g.str("expectedExternalId"),
+		TargetRevokedAt:    g.str("targetRevokedAt"),
+		FlowId:             g.str("flowId"),
+		ShopDomain:         g.str("shopDomain"),
+		SiteID:             g.str("siteId"),
+		ClientID:           g.str("clientId"),
+		CredentialSource:   g.str("credentialSource"),
+		CreatedAt:          nodeCreatedAt(nodes[0]),
 	}
 }
 
@@ -371,15 +370,19 @@ func firstGithubConnectStateRow(nodes []*memqlv1.MemoryNode) *GithubConnectState
 // it because the callback lands here, and nothing else about it is identity's.
 const githubAppGrantConcept = "v1:platform:sourceCredential"
 
+var ErrGithubReconnectCancelled = errors.New("identity.store: GitHub reconnect was cancelled by a disconnect")
+
 // GithubAppGrant is one connect's worth of sealed authority.
 //
 // Neither token appears in this struct in the clear: the caller seals both
 // with component/secret.Encrypt before building it, so a value that reaches a
 // log line through this struct is ciphertext.
 type GithubAppGrant struct {
-	OwnerUserId string
-	Host        string
-	Label       string
+	TargetRevokedAt    string
+	TargetCredentialId string
+	OwnerUserId        string
+	Host               string
+	Label              string
 	// EncryptedValue and RefreshToken are already sealed.
 	EncryptedValue  string
 	Fingerprint     string
@@ -408,6 +411,17 @@ type GithubAppGrant struct {
 // just connected, who would see a success and a grant that resolves for no
 // package.
 func (s *Store) UpsertGithubAppGrant(ctx context.Context, grant GithubAppGrant) (string, bool, error) {
+	var credentialID string
+	var created bool
+	err := s.withGithubConnectGate(ctx, githubconnect.GrantKey(grant.OwnerUserId, grant.ExternalId), func(ctx context.Context) error {
+		var err error
+		credentialID, created, err = s.upsertGithubAppGrantLocked(ctx, grant)
+		return err
+	})
+	return credentialID, created, err
+}
+
+func (s *Store) upsertGithubAppGrantLocked(ctx context.Context, grant GithubAppGrant) (string, bool, error) {
 	if s == nil || s.Engine == nil {
 		return "", false, errNoEngine
 	}
@@ -432,6 +446,15 @@ func (s *Store) UpsertGithubAppGrant(ctx context.Context, grant GithubAppGrant) 
 		return "", false, err
 	}
 
+	if grant.TargetCredentialId != "" {
+		target, err := s.GithubReconnectTarget(owned, grant.TargetCredentialId)
+		if err != nil || target.ExternalId != grant.ExternalId || target.RevokedAt != grant.TargetRevokedAt {
+			return "", false, ErrGithubReconnectCancelled
+		}
+	}
+	if grant.TargetCredentialId != "" && strings.TrimPrefix(existing, githubAppGrantConcept+":") != strings.TrimPrefix(grant.TargetCredentialId, githubAppGrantConcept+":") {
+		return "", false, fmt.Errorf("identity.store: GitHub reconnect target changed")
+	}
 	expiresAt := ""
 	if !grant.ExpiresAt.IsZero() {
 		expiresAt = grant.ExpiresAt.UTC().Format(time.RFC3339)
@@ -538,4 +561,26 @@ func memqlStringList(values []string) string {
 	}
 	b.WriteByte(']')
 	return b.String()
+}
+
+// GithubReconnectTarget resolves a named grant using the authenticated caller's
+// owner-scoped sealed query. No ciphertext leaves the store.
+type GithubReconnectTargetRow struct{ ID, ExternalId, RevokedAt string }
+
+func (s *Store) GithubReconnectTarget(ctx context.Context, credentialID string) (GithubReconnectTargetRow, error) {
+	if s == nil || s.Engine == nil {
+		return GithubReconnectTargetRow{}, errNoEngine
+	}
+	nodes, err := s.executeAndExtract(auth.ContextWithInternalOrigin(ctx), "query sourceCredentialSealedById(credentialId: "+langparser.QuoteString(credentialID)+")")
+	if err != nil {
+		return GithubReconnectTargetRow{}, err
+	}
+	if len(nodes) != 1 || nodes[0] == nil {
+		return GithubReconnectTargetRow{}, fmt.Errorf("identity.store: GitHub reconnect target unavailable")
+	}
+	g := newFieldGetter(nodes[0])
+	if g.str("kind") != "github_app" || g.str("externalId") == "" {
+		return GithubReconnectTargetRow{}, fmt.Errorf("identity.store: GitHub reconnect target unavailable")
+	}
+	return GithubReconnectTargetRow{ID: firstNonEmpty(g.str("id"), nodes[0].GetId()), ExternalId: g.str("externalId"), RevokedAt: g.str("revokedAt")}, nil
 }

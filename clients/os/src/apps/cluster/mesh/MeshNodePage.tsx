@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 import { Caption, Fact, Facts, Head, Panel, Subhead } from "../../../kit";
 import { absent, type Figure } from "../../../kit/measure";
-import { formatFreshness, formatMoment } from "../../../kit/format";
+import { formatMoment } from "../../../kit/format";
 import { Measure } from "../../../kit/MeasureView";
 import { formatCount, nodeIcon } from "./present";
 import {
@@ -38,19 +38,16 @@ import {
 // A peer linked both ways is on BOTH sides. Two streams exist, and a page that
 // merged them would hide the duplicate dial that is often the reason.
 //
-// EVERY FIGURE IS DATED. The report is the node's own, as of its last
-// heartbeat, and the page says when that was rather than implying "now".
+// Figures belong to the node's latest report; Last heard is relative to it.
 
 export function MeshNodePage({
   node,
   byId,
-  now,
   onBack,
   onOpen,
 }: {
   node: MeshNode;
   byId: ReadonlyMap<string, MeshNode>;
-  now: Date;
   onBack: () => void;
   onOpen: (id: string) => void;
 }) {
@@ -69,11 +66,10 @@ export function MeshNodePage({
         <span className="os-record-status" data-tone={stateTone(state)}>
           {stateWord(state)}
         </span>
-        <p className={needsAttention(state) ? "os-cluster-row-attention" : "os-cluster-fact"}>
+        {needsAttention(state) ? <p className="os-cluster-row-attention">
           {stateSentence(node, state)}
-        </p>
+        </p> : null}
       </div>
-      <Caption>{asOfSentence(node, now)}</Caption>
 
       <Panel label={panelTitle}>
         <Subhead>{panelTitle}</Subhead>
@@ -240,15 +236,4 @@ function lastHeardValue(node: MeshNode): ReactNode {
   const seconds = Math.max(0, Math.round((reported - heard) / 1000));
   if (seconds < 60) return `${seconds} ${seconds === 1 ? "second" : "seconds"} before the report`;
   return `${spanOf(Math.floor(seconds / 60))} before the report`;
-}
-
-function asOfSentence(node: MeshNode, now: Date): string {
-  // A row with no report was still written -- by the node's registration, or
-  // a peer marking its health -- so the date is the ROW's, and says so.
-  const written = node.report === null ? "Row last written" : "Report written";
-  const reported = node.lastSeen === "" ? "" : `${written} ${formatFreshness(node.lastSeen, now)}.`;
-  const since = node.report?.since ?? "";
-  const counting = since === "" ? "" : ` Counting since ${formatMoment(since)}.`;
-  const address = node.address === "" ? "" : ` Serves the mesh on ${node.address}.`;
-  return `${reported}${counting}${address}`.trim() || "This node has not written a report.";
 }

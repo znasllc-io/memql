@@ -34,6 +34,18 @@ const (
 // component/identity/http/github_callback.go for why they cannot be split.
 const CallbackPath = "/auth/github/callback"
 
+// CompletePath is relayed through the OS edge, where the initiating browser's
+// host-only session cookie lives. GitHub still uses CallbackPath as registered.
+const CompletePath = "/auth/github/complete"
+
+// ShopifyCallbackPath is where Shopify sends the browser back from Connect
+// Shopify (design record 2026-09-23-connect-shopify, 12.4, 12.6). It rides
+// this package's state row and lives on the identity node beside
+// CallbackPath, and is spelled here once because both halves need it: the
+// begin in integrations/shopify composes it into redirect_uri, and the
+// identity server mounts it, and neither can import the other.
+const ShopifyCallbackPath = "/auth/shopify/callback"
+
 // Config is the cluster's GitHub App. The zero value means "no app", which is
 // a supported install: Connect is simply absent and the Source stop offers the
 // pasted-token path alone.
@@ -196,14 +208,20 @@ func RedirectURI(identityBaseURL string) string {
 // `state` is the PLAINTEXT state value; only its digest is stored, so this is
 // the one place the plaintext appears outside the reply to the caller who
 // asked for it.
-func (c Config) AuthorizeURL(redirectURI, state string) string {
-	if !c.Configured() || strings.TrimSpace(redirectURI) == "" || strings.TrimSpace(state) == "" {
+// Every explicit connect offers GitHub's account picker. Without this prompt,
+// an existing authorization can immediately return the same account, making
+// a switch-account action indistinguishable from reconnecting it.
+func (c Config) AuthorizeURL(redirectURI, state, verifier string) string {
+	if !c.Configured() || strings.TrimSpace(redirectURI) == "" || strings.TrimSpace(state) == "" || strings.TrimSpace(verifier) == "" {
 		return ""
 	}
 	q := url.Values{}
 	q.Set("client_id", c.ClientID)
 	q.Set("redirect_uri", redirectURI)
 	q.Set("state", state)
+	q.Set("prompt", "select_account")
+	q.Set("code_challenge", Challenge(verifier))
+	q.Set("code_challenge_method", "S256")
 	return "https://github.com/login/oauth/authorize?" + q.Encode()
 }
 

@@ -22,12 +22,15 @@ export const DEPLOYMENT_CONCEPT = "v1:platform:packageDeployment";
 export interface PackageRow {
   id: string;
   ownerUserId: string;
+  accountId: string;
   name: string;
   sourceKind: string;
   repoUrl: string;
   repoRef: string;
   /** A v1:platform:sourceCredential id, or "" for a public repository. Never a value. */
   credentialId: string;
+  sourceConnectionId?: string;
+  sourceRemoved?: boolean;
   artifactId: string;
   deployedVersion: string;
   latestKnownVersion: string;
@@ -66,6 +69,7 @@ export interface PackageRow {
 /** One manifest deployable, as the package records it. No address: a skipped
  *  app is not asked where it lives until somebody deploys it. */
 export interface DeclaredDeployable {
+  displayName?: string;
   name: string;
   kind: string;
 }
@@ -75,11 +79,14 @@ export function packageFromRow(row: Row): PackageRow {
   return {
     id: rowString(flat, "id"),
     ownerUserId: rowString(flat, "ownerUserId"),
+    accountId: rowString(flat, "accountId"),
     name: rowString(flat, "name"),
     sourceKind: rowString(flat, "sourceKind"),
     repoUrl: rowString(flat, "repoUrl"),
     repoRef: rowString(flat, "repoRef"),
     credentialId: rowString(flat, "credentialId"),
+    sourceConnectionId: rowString(flat, "sourceConnectionId"),
+    sourceRemoved: boolOr(flat, "sourceRemoved", false),
     artifactId: rowString(flat, "artifactId"),
     deployedVersion: rowString(flat, "deployedVersion"),
     latestKnownVersion: rowString(flat, "latestKnownVersion"),
@@ -108,10 +115,13 @@ export function packageFromRow(row: Row): PackageRow {
 export function packageFingerprint(p: PackageRow): string {
   return [
     p.name,
+    p.accountId,
     p.sourceKind,
     p.repoUrl,
     p.repoRef,
     p.credentialId,
+    p.sourceConnectionId,
+    p.sourceRemoved,
     p.deployedVersion,
     p.latestKnownVersion,
     p.updateAvailable ? "update" : "current",
@@ -154,6 +164,7 @@ export interface DeployableOutcome {
 }
 
 export interface DeploymentRow {
+  cancelRequested?: boolean;
   id: string;
   packageId: string;
   sourceVersion: string;
@@ -238,6 +249,7 @@ export interface BuiltOn {
 }
 
 export interface AnalysisReport {
+  manifest?: PackageManifest;
   name?: string;
   formatVersion?: number;
   sourceVersion?: string;
@@ -249,6 +261,9 @@ export interface AnalysisReport {
 }
 
 export interface ReportDeployable {
+  displayName?: string;
+  deployment?: { slug?: string; domains?: string[] };
+  resolutionTail?: string;
   name: string;
   kind: string;
   path: string;
@@ -256,7 +271,9 @@ export interface ReportDeployable {
   command?: string;
   output: string;
   prebuilt: boolean;
+  assets?: Array<{ path: string; source: string; sha256: string; size: number }>;
   binding?: { store?: string };
+  testing?: { binding?: { store?: string } };
   problem?: ReportProblem;
 }
 
@@ -287,9 +304,24 @@ export function deploymentFromRow(row: Row): DeploymentRow {
     packageId: rowString(flat, "packageId"),
     sourceVersion: rowString(flat, "sourceVersion"),
     status: rowString(flat, "status"),
+    cancelRequested: boolOr(flat, "cancelRequested", false),
     report: objectOf<AnalysisReport>(flat, "report"),
     dslVersion: rowString(flat, "dslVersion"),
-    deployables: listOf<DeployableOutcome>(flat, "deployables"),
+    // The engine omits unset outcome fields (for example a sibling skipped
+    // during a scoped redeploy has only a name and refusal). Normalize them
+    // at the read boundary, just like the enclosing deployment row, so a
+    // historical non-publish cannot crash the live site's management page.
+    deployables: listOf<Row>(flat, "deployables")
+      .filter((outcome) => outcome !== null && typeof outcome === "object" && !Array.isArray(outcome))
+      .map((outcome) => ({
+        ...outcome,
+        name: rowString(outcome, "name"),
+        siteId: rowString(outcome, "siteId"),
+        hostname: rowString(outcome, "hostname"),
+        bundleRef: rowString(outcome, "bundleRef"),
+        version: rowString(outcome, "version"),
+        created: boolOr(outcome, "created", false),
+      })),
     snapshotArtifactId: rowString(flat, "snapshotArtifactId"),
     buildLogTail: rowString(flat, "buildLogTail"),
     builtOn: objectOf<BuiltOn>(flat, "builtOn"),
@@ -409,4 +441,18 @@ export function shortVersion(v: string): string {
   if (t === "") return "";
   if (/^[0-9a-f]{16,}$/i.test(t)) return t.slice(0, 7);
   return t;
+}
+
+export const PENDING_DEPLOYMENT_STATUSES = new Set([
+  "analyzing", "awaiting_confirm", "building", "staging_dsl", "rolling", "publishing",
+]);
+
+export interface PackageManifest {
+  formatVersion: number;
+  name: string;
+  deployables: Array<{ name: string; displayName?: string; path: string; kind: string; build?: {command?: string; output?: string}; binding?: {store?: string}; testing?: {binding?: {store?: string}}; deployment?: {slug?: string; domains?: string[]}; resolutionTail?: string; assets?: ReportDeployable["assets"] }>;
+}
+
+export function deployableLabel(d: {name: string; displayName?: string}): string {
+  return d.displayName?.trim() || d.name;
 }

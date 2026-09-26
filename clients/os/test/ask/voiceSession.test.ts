@@ -260,3 +260,12 @@ describe("VoiceSession -- refusals", () => {
     expect(open).toHaveBeenCalledTimes(1);
   });
 });
+
+it("only one surface can own the shared microphone ports", async () => {
+ const captures = [new FakeCapture(), new FakeCapture()]; let count=0;
+ const ports: VoicePorts = { openMicrophone: async () => captures[count++]!, transcriber: new FakeTranscriber() };
+ const callbacks = { onState: vi.fn(), onTranscript: vi.fn(), onUtterance: vi.fn() };
+ const sheet = new VoiceSession(ports, callbacks); const widget = new VoiceSession(ports, callbacks);
+ sheet.press(); await settle(); widget.press(); await settle();
+ expect(sheet.current().phase).toBe("idle"); expect(captures[0]?.stopped).toBe(1); expect(widget.current().phase).toBe("listening"); widget.cancel();
+});

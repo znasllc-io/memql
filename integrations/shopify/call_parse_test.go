@@ -129,6 +129,37 @@ func connectorCallSites() []struct {
 			"body": `{"rows":{}}`, "format": "text", "mimeType": "application/json", "source": "derived",
 		}},
 		{"markStoreRedacted", map[string]any{"storeId": "acme", "redactedAt": "2026-08-23T12:00:00Z"}},
+		// connect.go -- the store resolver and the Store panel's writes.
+		{"siteById", map[string]any{"siteId": "s1"}},
+		{"packageDeployments", map[string]any{"packageId": "v1:platform:package:p1"}},
+		{"sitesBoundToStore", map[string]any{"storeIds": []string{"acme", "v1:shopify:store:acme"}}},
+		{"setGlobalVariable", map[string]any{
+			"id": "var-global-shopify-acme-pending-client-id", "name": "SHOPIFY_ACME_PENDING_CLIENT_ID",
+			"value": "client", "description": "pending", "active": true,
+		}},
+		{"updateStore", map[string]any{"storeId": "acme", "storefrontTokenRef": "SHOPIFY_ACME_STOREFRONT_TOKEN"}},
+		// connect_write.go -- the callback's writes.
+		{"createStore", map[string]any{
+			"storeId": "acme", "domain": "acme.myshopify.com", "ownerUserId": "u1", "appClientId": "client",
+			"adminTokenRef": "SHOPIFY_ACME_ADMIN_TOKEN", "webhookSecretRef": "SHOPIFY_ACME_WEBHOOK_SECRET",
+			"apiVersion": "2026-07", "plan": "Basic",
+		}},
+		{"updateStore", map[string]any{
+			"storeId": "acme", "adminTokenRef": "SHOPIFY_ACME_ADMIN_TOKEN", "apiVersion": "2026-07",
+			"appClientId": "client", "webhookSecretRef": "SHOPIFY_ACME_WEBHOOK_SECRET", "plan": "Basic",
+			"ownerUserId": "u1", "scopesGranted": []string{"read_products", "unauthenticated_read_checkouts"},
+		}},
+		{"updateStore", map[string]any{"storeId": "acme", "scopesGranted": []string{}}},
+		{"setGlobalSecret", map[string]any{
+			"id": "sec-shopify-acme-pending-client-secret", "name": "SHOPIFY_ACME_PENDING_CLIENT_SECRET",
+			"encryptedValue": "", "fingerprint": "", "kind": "vendor_api_key", "description": "cleared",
+			"addedBy": "u1", "active": false,
+		}},
+		{"setGlobalVariable", map[string]any{
+			"id": "var-global-shopify-acme-pending-client-id", "name": "SHOPIFY_ACME_PENDING_CLIENT_ID",
+			"value": "", "description": "cleared", "active": false,
+		}},
+		{"updateSiteStoreBinding", map[string]any{"siteId": "s1", "storeId": "acme"}},
 	}
 	// Every generated READ, for one representative root type and one
 	// materialised child -- the two shapes the emitter produces. There are
@@ -187,6 +218,18 @@ func TestGeneratedCallsResolveAgainstTheRealTree(t *testing.T) {
 	}
 	if want := len(connectorCallSites()); checked != want {
 		t.Fatalf("resolved %d call sites, want %d", checked, want)
+	}
+}
+
+// The one statement connect.go builds that is not a construct call: the
+// resolver's own by-name read, which it spells the same way on purpose.
+func TestTheNamedRowReadParses(t *testing.T) {
+	eng := newRealEngine(t)
+	for _, concept := range []string{conceptGlobalSecret, conceptGlobalVariable} {
+		q := namedRowsQuery(concept, "SHOPIFY_ACME-WIDGETS_PENDING_CLIENT_SECRET")
+		if _, err := eng.Parse(q); err != nil {
+			t.Errorf("the engine refused %s: %v", q, err)
+		}
 	}
 }
 

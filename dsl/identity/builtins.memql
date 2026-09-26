@@ -121,10 +121,15 @@ builtin transferRowOwnership {
 /// A call carrying no actor is REFUSED rather than answered, because the state row names the
 /// account the callback may land a grant on and a row naming nobody is a grant nobody owns.
 @sdk
+@requiresCapability("execute", "app:deployables/sources")
 @executor("integration.identity.githubConnectBegin")
 @args(profile="object")
-@description("Begin GitHub Connect (epic memql#4912, C4). Writes a short-lived state row bound to the caller and answers {authorizeUrl, reason, installUrl}: navigate the browser to authorizeUrl, and GitHub redirects back to this cluster's identity service, which exchanges the code, seals the tokens and lands one v1:platform:sourceCredential grant of kind github_app owned by the caller. reason is 'ok' on success, 'github_app_not_configured' when this cluster has no GitHub App (authorizeUrl empty; offer the pasted-token path instead), or 'connect_state_invalid' when the state could not be stored. installUrl is the app's installation page, for 'Install on another organization'; empty when unconfigured. Never returns a token, and never echoes the state value anywhere but inside authorizeUrl.")
+@description("Begin session-bound GitHub authorization with PKCE. Returns {authorizeUrl, reason, installUrl}. Omit credentialId to add a GitHub identity; supply an own grant to reconnect only that identity. The callback requires the originating live browser session and returns safe credential and flow correlation identifiers. reason is ok, github_app_not_configured, or connect_state_invalid. Never returns a token.")
 builtin githubConnectBegin {
+  /// Existing own grant to reconnect; omitted means add another GitHub identity.
+  credentialId string
+  /// Browser flow correlation, echoed on callback; never authorization.
+  flowId string
   /// Where in MemQL OS to land when the callback finishes -- a same-origin path such as
   /// "/packages/new". Validated as a relative path on the way in and again on the way out; anything
   /// absolute, protocol-relative or carrying a control character is dropped for the OS root.
@@ -310,6 +315,28 @@ builtin groupMemberRemove {
 @description("Ensure the account-kind group for one account exists, at the derived id acct-<accountShortId> (D5). Requires `create` on `group`, the verb groupCreate checks, because this writes a group row -- and the account-KIND one groupCreate itself refuses to mint. Called by the ensureAccountGroup automation on account creation and by the seed materializer's boot backfill for every active account -- so it must be idempotent, and it is: a re-run on an account that already has an active group writes nothing. NOT @sdk: this is the engine placing a row, never a person. Returns {accountId, groupId, created}.")
 builtin groupEnsureForAccount {
   accountId  string!
+}
+
+/// Ownership completion calls this after the required passkey succeeds, while
+/// holding the cross-replica claim lock. Reuses self and its derived group.
+@executor("integration.groups.configureSelfAccount")
+@description("Configure the cluster organization and ensure its claiming owner belongs to its membership group. Internal ownership completion only; retries preserve unrelated account details and grant no new role.")
+builtin configureSelfAccount {
+  name         string!
+  ownerUserId  string!
+}
+
+@executor("integration.groups.groupEnsureOperatorMembership")
+@description("Ensure a global cluster operator belongs to the configured cluster organization. Internal lifecycle only, checked by the handler; scoped client roles never join the cluster organization. Idempotent, grants no role.")
+builtin groupEnsureOperatorMembership {
+  userId  string!
+}
+
+@sdk
+@executor("integration.groups.groupPeople")
+@description("List up to 100 active people already in this group's organization. Requires group management permission and membership of that organization; never enumerates unrelated users.")
+builtin groupPeople {
+  groupId  string!
 }
 
 @requiresCapability("update", "group")

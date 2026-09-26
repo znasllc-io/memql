@@ -180,3 +180,8 @@ func TestOrdinaryWritesAreNotStamped(t *testing.T) {
 		}
 	}
 }
+
+// This store/query fixture never authorizes sending.
+func (e *originEngine) OrganizationCapable(context.Context, string, string, string) bool {
+	return false
+}

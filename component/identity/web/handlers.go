@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/registration"
@@ -110,7 +111,7 @@ func (s *Server) handleLoginGet(w http.ResponseWriter, r *http.Request) {
 		}
 		data.Flash = &webtempl.Flash{Kind: kind, Message: msg}
 	}
-	s.render(w, r, "login", webtempl.Login(data))
+	s.render(w, r, "login", webtempl.Login(data), data)
 }
 
 // preBootstrap returns true when the cluster has not been bootstrapped
@@ -169,7 +170,7 @@ func (s *Server) preBootstrap(r *http.Request) bool {
 // A genuinely fresh cluster -- both signals readable, both negative --
 // is the only state that serves the wizard.
 func (s *Server) setupSealed(r *http.Request) bool {
-	if s == nil {
+	if s == nil || s.CountUsers == nil {
 		return true
 	}
 	if s.CountUsers != nil {
@@ -222,6 +223,10 @@ func (s *Server) logSetupSeal(r *http.Request, reason string, err error) {
 //	form=invite    invitation-token submission. Skips the
 //	               registration-mode gate via invitationId.
 func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
+	if s.Cfg.LocalPasskeyOnly() {
+		s.renderError(w, r, http.StatusForbidden, "This local installation uses passkeys only.")
+		return
+	}
 	if s.preBootstrap(r) {
 		// Belt-and-suspenders: the Issuer also enforces this. The web
 		// pre-check just gives a nicer UX (redirect-to-setup) instead of
@@ -323,7 +328,7 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 			// The hint travels with the re-rendered form (memql#4304), from
 			// the address the visitor typed rather than from any row.
 			next.SharedMailboxHint = registration.LooksLikeSharedMailbox(email)
-			s.render(w, r, "login", webtempl.Login(*next))
+			s.render(w, r, "login", webtempl.Login(*next), *next)
 			return
 		}
 		// routeLoginEmail returned nil → fall through to IssueMagicLink.
@@ -563,7 +568,7 @@ func (s *Server) handleCheckEmail(w http.ResponseWriter, r *http.Request) {
 		// has an account.
 		SharedMailboxHint: registration.LooksLikeSharedMailbox(email),
 	}
-	s.render(w, r, "check_email", webtempl.CheckEmail(data))
+	s.render(w, r, "check_email", webtempl.CheckEmail(data), data)
 }
 
 func (s *Server) handleLogoutComplete(w http.ResponseWriter, r *http.Request) {
@@ -578,7 +583,7 @@ func (s *Server) handleLogoutComplete(w http.ResponseWriter, r *http.Request) {
 		ReturnTo:      returnTo,
 		ReturnToLabel: label,
 	}
-	s.render(w, r, "logout_complete", webtempl.LogoutComplete(data))
+	s.render(w, r, "logout_complete", webtempl.LogoutComplete(data), data)
 }
 
 // humanDuration formats a Duration as a short human string suitable
@@ -616,7 +621,7 @@ func (s *Server) handleError(w http.ResponseWriter, r *http.Request) {
 		Message: msg,
 		ErrorID: strings.TrimSpace(r.URL.Query().Get("errorId")),
 	}
-	s.render(w, r, "error", webtempl.Error(data))
+	s.render(w, r, "error", webtempl.Error(data), data)
 }
 
 // renderError writes a 400/500-class response with the error template.
@@ -628,7 +633,7 @@ func (s *Server) renderError(w http.ResponseWriter, r *http.Request, status int,
 		Heading: "Something went wrong",
 		Message: msg,
 	}
-	s.render(w, r, "error", webtempl.Error(data))
+	s.render(w, r, "error", webtempl.Error(data), data)
 }
 
 // setupPrefillDomain is the /setup domain input (memql#4216).
@@ -660,6 +665,20 @@ func usableSetupDomain(raw string) string {
 // handleSetupGet renders the first-run wizard. 404s unless the cluster
 // is provably unclaimed -- see setupSealed (memql#3415).
 func (s *Server) handleSetupGet(w http.ResponseWriter, r *http.Request) {
+	if nativeRequest(r) && s.bootstrapPage(w, r) {
+		return
+	}
+	if nativeRequest(r) && s.Store != nil {
+		pending, err := s.Store.ReservedBootstrap(r.Context())
+		if err != nil {
+			s.renderError(w, r, http.StatusServiceUnavailable, "Ownership enrollment is temporarily unavailable.")
+			return
+		}
+		if pending != nil && !pending.Complete {
+			writeNative(w, map[string]any{"page": "setup_resume", "csrf": CSRFTokenFromRequest(r), "data": map[string]any{"Local": s.Cfg.LocalPasskeyOnly(), "HasProof": len(pending.Proof) > 0}})
+			return
+		}
+	}
 	if s.setupSealed(r) {
 		http.NotFound(w, r)
 		return
@@ -730,12 +749,24 @@ func (s *Server) handleSetupGet(w http.ResponseWriter, r *http.Request) {
 		CodeChallenge:       strings.TrimSpace(r.URL.Query().Get("code_challenge")),
 		CodeChallengeMethod: strings.TrimSpace(r.URL.Query().Get("code_challenge_method")),
 	}
-	s.render(w, r, "setup_wizard", webtempl.SetupWizard(data))
+	s.render(w, r, "setup_wizard", webtempl.SetupWizard(data), data)
 }
 
 // handleSetupPost validates the wizard submission, persists the
 // settings row, and triggers a magic link to the captured owner email.
 func (s *Server) handleSetupPost(w http.ResponseWriter, r *http.Request) {
+	if allowed, _ := s.enrolLimiter().Allow(clientIP(r)); !allowed {
+		s.renderError(w, r, http.StatusTooManyRequests, "Too many setup attempts. Please try again later.")
+		return
+	}
+	if s.Store != nil {
+		release, err := s.Store.AcquireBootstrapGate(r.Context())
+		if err != nil {
+			s.renderError(w, r, http.StatusServiceUnavailable, "Ownership coordination is unavailable. Please try again.")
+			return
+		}
+		defer release()
+	}
 	if s.setupSealed(r) {
 		http.NotFound(w, r)
 		return
@@ -760,6 +791,10 @@ func (s *Server) handleSetupPost(w http.ResponseWriter, r *http.Request) {
 		InternalDefaultRole:       strings.TrimSpace(r.PostForm.Get("internal_default_role")),
 		AccessRequestNotifyEmails: strings.TrimSpace(r.PostForm.Get("access_request_notify_emails")),
 	}
+	if in.BrandName == "" || utf8.RuneCountInString(in.BrandName) > 200 {
+		s.renderError(w, r, http.StatusBadRequest, "Organization name is required and must be at most 200 characters.")
+		return
+	}
 	if in.Domain == "" {
 		s.renderError(w, r, http.StatusBadRequest, "Cluster domain is required.")
 		return
@@ -770,6 +805,32 @@ func (s *Server) handleSetupPost(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.OwnerFirstName == "" || in.OwnerLastName == "" {
 		s.renderError(w, r, http.StatusBadRequest, "Owner first name and last name are required.")
+		return
+	}
+	if s.Store != nil {
+		pending, err := s.Store.ReservedBootstrap(r.Context())
+		if err != nil || pending != nil {
+			s.renderError(w, r, http.StatusConflict, "Ownership setup is already in progress. Return to setup to resume it.")
+			return
+		}
+	}
+	if s.Cfg.LocalPasskeyOnly() {
+		if s.Store == nil {
+			s.renderError(w, r, http.StatusServiceUnavailable, "Ownership enrollment is unavailable.")
+			return
+		}
+		cid, uri, state, matched := s.pickOAuthCtx(r.Context(), r.Form.Get("client_id"), r.Form.Get("redirect_uri"), r.Form.Get("return_to"), r.Form.Get("state"))
+		oauth := map[string]string{}
+		if matched && r.Form.Get("code_challenge") != "" {
+			oauth = map[string]string{"client_id": cid, "redirect_uri": uri, "state": state, "code_challenge": r.Form.Get("code_challenge"), "code_challenge_method": r.Form.Get("code_challenge_method")}
+		}
+		token, err := s.Store.BeginBootstrapEnrollmentLocked(r.Context(), s.Cfg, bootstrapSettings(in), oauth, false)
+		if err != nil {
+			s.renderError(w, r, http.StatusServiceUnavailable, "Passkey setup is unavailable. Please retry.")
+			return
+		}
+		s.setBootstrapCookie(w, token)
+		http.Redirect(w, r, "/auth/setup/passkey", http.StatusSeeOther)
 		return
 	}
 	// The system-actor middleware stamped "system:identity-svc"
@@ -857,9 +918,12 @@ func (s *Server) handleSetupPost(w http.ResponseWriter, r *http.Request) {
 			issue.State = "setup"
 		}
 		res, err := s.IssueMagicLink(r.Context(), issue)
-		if err != nil && s.Logger != nil {
-			s.Logger.Warn("identity-web: wizard issue magic link failed",
-				"error", err, "email", in.OwnerEmail)
+		if err != nil {
+			if s.Logger != nil {
+				s.Logger.Warn("identity-web: wizard issue magic link failed", "error", err)
+			}
+			s.renderError(w, r, http.StatusServiceUnavailable, "The verification link could not be sent. Please try again.")
+			return
 		}
 		// The wizard's browser gets the same binding as any other requester,
 		// so the claim link completes on the machine that ran /setup. It is
@@ -892,7 +956,7 @@ func (s *Server) renderLegal(w http.ResponseWriter, r *http.Request, title strin
 		Body:     stripFrontMatter(string(body)),
 		Version:  version,
 	}
-	s.render(w, r, "legal_view", webtempl.LegalView(data))
+	s.render(w, r, "legal_view", webtempl.LegalView(data), data)
 }
 
 // stripFrontMatter removes the leading `---\n...\n---\n` block so the
@@ -924,6 +988,28 @@ func meNavLinks() []webtempl.NavLink {
 // hydrates the overview panel by fetching account data through the
 // SPA refresh flow.
 func (s *Server) handleMeDashboard(w http.ResponseWriter, r *http.Request) {
+	if nativeRequest(r) {
+		claims, err := s.requireUser(w, r)
+		if err != nil {
+			return
+		}
+		if s.Store == nil {
+			s.renderError(w, r, http.StatusServiceUnavailable, "Your profile is unavailable.")
+			return
+		}
+		user, err := s.Store.LookupUserById(r.Context(), claims.Subject)
+		if err != nil || user == nil {
+			s.renderError(w, r, http.StatusServiceUnavailable, "Your profile is unavailable.")
+			return
+		}
+		writeNative(w, map[string]any{"page": "me/profile", "csrf": CSRFTokenFromRequest(r), "data": map[string]any{
+			"Layout": map[string]string{"Title": "Your identity"},
+			"Profile": map[string]string{"Name": user.DisplayName, "First name": user.FirstName, "Last name": user.LastName,
+				"Email": user.PrimaryEmail, "Phone": user.Phone, "Role at organization": user.PrimaryRole, "Gender": user.Gender,
+				"Date of birth": user.Birthdate, "Cluster role": user.Role},
+		}})
+		return
+	}
 	extra := []string{s.assetURL("/static/me-dashboard.js")}
 	data := webtempl.MeDashboardData{
 		Layout: s.LayoutData(r, "Dashboard", true, meNavLinks(), extra),
@@ -936,7 +1022,7 @@ func (s *Server) handleMeDashboard(w http.ResponseWriter, r *http.Request) {
 			data.SharedMailboxNotice = user.SharedMailbox && !user.PasskeyOnly()
 		}
 	}
-	s.render(w, r, "me/dashboard", webtempl.MeDashboard(data))
+	s.render(w, r, "me/dashboard", webtempl.MeDashboard(data), data)
 }
 
 func (s *Server) handleMeSettings(w http.ResponseWriter, r *http.Request) {
@@ -953,7 +1039,7 @@ func (s *Server) handleMeSettings(w http.ResponseWriter, r *http.Request) {
 	if claims := s.optionalUser(r); claims != nil {
 		data.SignInSecurity = s.signInSecurityCard(r, claims)
 	}
-	s.render(w, r, "me/settings", webtempl.MeSettings(data))
+	s.render(w, r, "me/settings", webtempl.MeSettings(data), data)
 }
 
 // handleMeDevices renders /me/devices.
@@ -972,7 +1058,7 @@ func (s *Server) handleMeDevices(w http.ResponseWriter, r *http.Request) {
 	data := webtempl.MeDevicesData{
 		Layout: s.LayoutData(r, "Devices", true, meNavLinks(), nil),
 	}
-	s.render(w, r, "me/devices", webtempl.MeDevices(data))
+	s.render(w, r, "me/devices", webtempl.MeDevices(data), data)
 }
 
 func (s *Server) handleMeExport(w http.ResponseWriter, r *http.Request) {
@@ -980,7 +1066,7 @@ func (s *Server) handleMeExport(w http.ResponseWriter, r *http.Request) {
 		Layout:         s.LayoutData(r, "Export your data", true, meNavLinks(), nil),
 		RateLimitHours: int(s.Cfg.DataExportRateLimit / time.Hour),
 	}
-	s.render(w, r, "me/export", webtempl.MeExport(data))
+	s.render(w, r, "me/export", webtempl.MeExport(data), data)
 }
 
 func (s *Server) handleMeDeletionPending(w http.ResponseWriter, r *http.Request) {
@@ -993,7 +1079,7 @@ func (s *Server) handleMeDeletionPending(w http.ResponseWriter, r *http.Request)
 		// existing /me/* hydration flow. Future work can render this
 		// server-side once the handler grows access to the user row.
 	}
-	s.render(w, r, "me/deletion_pending", webtempl.MeDeletionPending(data))
+	s.render(w, r, "me/deletion_pending", webtempl.MeDeletionPending(data), data)
 }
 
 // pickOAuthCtx resolves the relying-party context for a /login

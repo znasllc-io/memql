@@ -2,11 +2,7 @@ package memql
 
 import (
 	"encoding/json"
-	"io"
-	"log/slog"
 	"testing"
-
-	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // TestClusterNodeSpec2094 pins Epic 2.1 (#2094): the dsl/cluster
@@ -23,20 +19,10 @@ import (
 // mutation, a query that no longer loads -- fails here instead of
 // silently breaking the E2.2+ deploy pack that depends on this shape.
 func TestClusterNodeSpec2094(t *testing.T) {
-	if _, err := LoadUnifiedConcepts(nil); err != nil {
-		t.Fatalf("LoadUnifiedConcepts (dsl/ domain-first tree): %v", err)
-	}
-	registry := concept.DefaultRegistry()
+	eng := sharedDblessEngine(t)
+	registry := eng.Concepts()
 	if registry == nil || len(registry.List()) == 0 {
 		t.Fatal("concept registry empty after load")
-	}
-	eng, err := New(nil)
-	if err != nil {
-		t.Fatalf("construct engine: %v", err)
-	}
-	eng.Logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
-	if err := eng.Init(registry); err != nil {
-		t.Fatalf("engine.Init over the full DSL tree: %v", err)
 	}
 
 	// 1) The NodeSpec concept is registered under the cluster namespace.

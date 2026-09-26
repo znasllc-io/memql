@@ -7,7 +7,7 @@ import type { ComponentType, ReactNode } from "react";
 
 import type { ModuleId } from "./modules";
 import { isModuleId } from "./modules";
-import { holds } from "./roles";
+import { availableInAnyOrganization, hasOrganizationDecisions, holds } from "./roles";
 
 // WHAT A MANIFEST ASKS OF THE PERSON (epic memql#5289, design D10): a
 // capability RESOURCE, named. `requires: "app:<id>"` on an app or widget,
@@ -31,6 +31,9 @@ export const OPEN_VERB = "read";
 /** Whether the effective set opens a surface naming `resource`. Absent = every signed-in person. */
 export function accessAdmits(resource?: AccessResource): boolean {
   if (resource === undefined) return true;
+  if ((resource === "app:campaigns" || resource === "app:deployables") && hasOrganizationDecisions()) {
+    return availableInAnyOrganization(OPEN_VERB, resource);
+  }
   return holds(OPEN_VERB, resource);
 }
 
@@ -62,7 +65,12 @@ export interface OsAppSection {
   wants?: readonly ModuleId[];
 }
 
+/** A personal setup reading, separate from cluster module readiness. */
+export type AppSetupState = "unknown" | "partial" | "ready";
+
 export interface OsAppProps {
+  /** Report personal setup to the shell's Settings indicator. Unknown is not empty. */
+  reportSetupState?: (state: AppSetupState) => void;
   /** Current section id ("" when the app declares no sections). */
   sectionId: string;
   windowVisible?: boolean;
@@ -84,7 +92,17 @@ export interface OsAppProps {
   consumeIntent?: (intentId: string) => void;
 }
 
+export interface OsRecordDestination {
+  section: string;
+  /** Intent consumed by this app; a stable API, never a DOM selector. */
+  idField: string;
+  /** Authorized named read; the engine applies caller and row permissions. */
+  query: string;
+  labels: readonly string[];
+}
+
 export interface OsAppManifest {
+  records?: readonly OsRecordDestination[];
   /** Meaningful UI revisions, acknowledged only at their declared destination. */
   attentionChanges?: readonly import("../attention/model").FeatureChange[];
   /** Landing section for record search when a nested page has no search field. */

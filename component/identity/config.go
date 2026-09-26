@@ -335,6 +335,9 @@ func (b BootstrapConfig) HasAllRequired() bool {
 }
 
 type Config struct {
+	// DeployProvider is the operator-configured installation target.
+	DeployProvider string
+
 	// Enabled gates the whole service. When false, the identity
 	// build-tag binary still compiles but the HTTP/gRPC handlers
 	// aren't wired in. Useful in tests and during partial rollout.
@@ -732,6 +735,7 @@ type LiveTokenSettings struct {
 // payload). Missing-but-required values are caught later by Validate.
 func LoadConfigFromEnv() (Config, error) {
 	cfg := Config{
+		DeployProvider:    strings.TrimSpace(os.Getenv("MEMQL_DEPLOY_PROVIDER")),
 		Enabled:           envBool("MEMQL_IDENTITY_ENABLED", false),
 		BaseURL:           strings.TrimRight(os.Getenv("MEMQL_IDENTITY_BASE_URL"), "/"),
 		JWTAudience:       envString("MEMQL_IDENTITY_JWT_AUDIENCE", "memql"),

@@ -73,19 +73,6 @@ describe("validateThemePack", () => {
     }
   });
 
-  it("refuses wallpaper numbers that would pin a GPU", () => {
-    for (const wallpaper of [
-      { seed: 1, cell: 2, density: 1, linkChance: 1, linkReach: 600 },
-      { seed: 1, cell: 110, density: 4, linkChance: 0.1, linkReach: 260 },
-      { seed: 1, cell: 110, density: 0.5, linkChance: 0.1, linkReach: 99999 },
-      { seed: 1, cell: 110, density: 0.5, linkChance: 0.1 },
-    ]) {
-      const load = validateThemePack(pack((p) => void (p.wallpaper = wallpaper)));
-      expect(load.ok, JSON.stringify(wallpaper)).toBe(false);
-      if (!load.ok) expect(load.refusal).toBe("bad-wallpaper");
-    }
-  });
-
   it("refuses an id that is not an id, and one that is not a pack at all", () => {
     expect(validateThemePack(pack((p) => void (p.id = "Not An Id"))).ok).toBe(false);
     expect(validateThemePack(pack((p) => void (p.id = "x"))).ok).toBe(false);

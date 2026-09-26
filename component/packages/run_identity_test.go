@@ -94,10 +94,8 @@ func TestTwoFreshDeploysAreStillTwoRuns(t *testing.T) {
 	}
 }
 
-// A run that is NOT parked is not resumable. Falling through to
-// openDeployment is what keeps the append-only guard refusing a second
-// pipeline on a row already in flight -- which is the dedup two auto-deploy
-// feeds noticing one push rely on.
+// A run that is NOT parked is not resumable. The serialized opening guard
+// refuses the existing ID instead of resetting its in-flight state.
 func TestARunInFlightIsNotResumed(t *testing.T) {
 	h := newHarness(t, spaOnlyPackage(), ownerPackage())
 	const running = "v1:platform:packageDeployment:running"
@@ -112,13 +110,11 @@ func TestARunInFlightIsNotResumed(t *testing.T) {
 		DeploymentId: running,
 		Placements:   firstDeployPlacements(),
 	})
-	if err != nil {
-		t.Fatalf("deploy: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("in-flight run must be refused: %v", err)
 	}
-	if !h.engine.sawStatement("mutation openPackageDeployment") {
-		t.Error("a run at `building` was resumed. Only a parked run is a question " +
-			"waiting for an answer; every other non-terminal row is a pipeline already " +
-			"writing it")
+	if h.engine.sawStatement("mutation openPackageDeployment") || len(h.builder.built) != 0 {
+		t.Error("an in-flight run was reopened or built a second time")
 	}
 }
 

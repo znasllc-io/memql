@@ -13,10 +13,11 @@ package worker
 // with one Mac Studio in the office had no way to make it serve the team.
 //
 // This adds the second half: a user's call may also land on a machine whose
-// owner offered it to the cluster AND whose cockpit is willing to serve it.
-// Nothing about the OWNERSHIP boundary moves. A machine reaches this list only
-// because its owner put it there, and the refusal for every machine that does
-// not names which of the two consents is missing.
+// owner lent it to them -- to everyone, or to them by name, or to a group they
+// are in (epic memql#5344) -- AND whose cockpit is willing to serve people
+// other than its owner. Nothing about the OWNERSHIP boundary moves. A machine
+// reaches this list only because its owner put it there, and the refusal for
+// every machine that does not names which consent is missing.
 //
 // ===========================================================================
 // preferOwnMachines
@@ -111,6 +112,11 @@ func (r *Router) PlanUserModelWithShared(
 		ownSeen[id] = true
 	}
 
+	// WHO IS ASKING, once for the whole plan. Their groups are read at most
+	// once, and only if a machine lent to a group needs the answer -- so a
+	// fleet where nobody shares with groups pays no membership read at all.
+	person := workerservice.NewPerson(ctx, actingUserId, r.groups)
+
 	ownRecovered := make([]Candidate, 0)
 	sharedKept := make([]Candidate, 0, len(all))
 	rejected := map[string]string{}
@@ -151,12 +157,14 @@ func (r *Router) PlanUserModelWithShared(
 			continue
 		}
 		switch {
-		case !c.ServesCluster():
+		case !c.ServesPerson(person):
 			// Record foreign share refusals only when we may need them as the
 			// sole signal. Owner Ask with a live owned worker must not drown in
 			// SharingRefusal lines for other private machines (24ad under a
-			// different identity).
-			pendingShareNoise[c.RegistrationId] = c.SharingRefusal()
+			// different identity). A machine lent to OTHER people lands here
+			// too, with its own sentence, and is counted rather than named
+			// like every other machine that is not this person's (D12).
+			pendingShareNoise[c.RegistrationId] = c.PersonRefusal(person)
 		case !c.RevokedAt.IsZero():
 			rejected[c.RegistrationId] = "revoked"
 		case !workerservice.StreamHeld(c.ConnectedNodeId, c.RevokedAt):

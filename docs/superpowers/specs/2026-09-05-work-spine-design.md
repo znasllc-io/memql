@@ -615,7 +615,9 @@ handler itself stays for cognition until sub-project F.
 In this sub-project: a `createGoal` mutation reachable from the SDK and the
 API (plus `cancelGoal`, `forkRun`, `replayRun`, `decideApproval`); the
 reactive loop for responsibilities; the Library analysis pass. Nexus's New
-goal and Ask-to-goal are sub-project B; the Materializer is C.
+goal is sub-project B; the Materializer is C. As of 2026-09-25, Ask text and
+voice also submit directly through this same intake and link the existing
+goal in Nexus; the original Ask-to-goal handoff has been removed.
 
 No new node type. The planner node keeps compile, the reactive loop and the
 sweeps; the agent node runs steps.

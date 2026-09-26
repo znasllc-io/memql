@@ -1,3 +1,4 @@
+import { ContentSkeleton } from "../../../../kit/ContentSkeleton";
 import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Check, Copy, Globe } from "lucide-react";
 
@@ -508,7 +509,7 @@ export function DomainWizard({ site, name, domainId = "", trail, back, onLeave }
     // detail and its measure stood beside the question and squeezed each other
     // into ellipses; the Fleet's floor already steps aside the same way.
     if (confirming) return { word: finished ? "Remove?" : "Cancel?", tone: "paused" };
-    if (reading) return { word: "Reading this domain", tone: "busy" };
+    if (reading) return { word: "", tone: "none" };
     if (missing) return { word: "Not bound", detail: "there is nothing here to set up" };
     if (bound !== null) {
       if (bound.status === "removed") return { word: "Removed", detail: "it is kept as a record of what this cluster served" };
@@ -584,7 +585,7 @@ function DomainStepBody({ domain: d, site, step }: { domain: DomainRow; site: Si
       next="GoDaddy does not support root CNAME records. Choose A / AAAA for a root domain there. For a subdomain, bind its full name, such as www.example.com." /> : null}
     {method === "ALIAS" ? <Caption>Use this only when your provider offers ALIAS or ANAME. Otherwise choose A / AAAA.</Caption> : null}
     {guidance.error ? <Notice tone="error" sentence="DNS targets could not be loaded." detail={guidance.error}><Button onClick={guidance.retry}>Try again</Button></Notice>
-      : !guidance.value ? <Caption>Reading this cluster’s DNS targets…</Caption>
+      : !guidance.value ? <ContentSkeleton kind="detail" label="Loading this cluster’s DNS targets" />
       : <>
         <Caption>{method === "ADDRESS" ? "Add the address records below at your DNS provider. Replace previous website addresses for this same name; keep your email and ownership records." : "Copy the name and target below into your DNS provider."}</Caption>
         {records.slice(1).map(record => <RecordStrip key={`${record.kind}:${record.value}`} record={record} awaited={isRecordAtFault(record, d.failureReason)} />)}

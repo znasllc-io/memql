@@ -151,7 +151,7 @@ func TestServeRuntimeConfig_IsGenericPerSite(t *testing.T) {
 			h.ServeHTTP(rec, req)
 
 			if rec.Code != http.StatusOK {
-				t.Fatalf("GET %s = %d, want 200; body: %s", runtimeConfigPath, rec.Code, rec.Body.String())
+				t.Fatalf("GET %s = %d, want 200; body: %s", runtimeConfigPath, rec.Code, sourceHTML(rec.Body.String()))
 			}
 			if ct := rec.Header().Get("Content-Type"); ct != "application/json; charset=utf-8" {
 				t.Errorf("Content-Type = %q", ct)
@@ -162,7 +162,7 @@ func TestServeRuntimeConfig_IsGenericPerSite(t *testing.T) {
 
 			var doc RuntimeConfig
 			if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
-				t.Fatalf("decode response: %v; body: %s", err, rec.Body.String())
+				t.Fatalf("decode response: %v; body: %s", err, sourceHTML(rec.Body.String()))
 			}
 			if doc.IdentityURL != tc.wantAuthURL {
 				t.Errorf("identityUrl = %q, want %q", doc.IdentityURL, tc.wantAuthURL)
@@ -386,7 +386,7 @@ func TestRuntimeConfigNeverCarriesTheShopifyAdminToken(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET %s = %d, want 200", runtimeConfigPath, rec.Code)
 	}
-	body := rec.Body.String()
+	body := sourceHTML(rec.Body.String())
 
 	// The instrument can move: the PUBLIC token IS in this same document, so
 	// a document that failed to carry any secret at all would fail here
@@ -544,8 +544,8 @@ func TestServeRuntimeConfig_TwoDeployablesOneBundleReadDifferentSettings(t *test
 		page.Host = host
 		pageRec := httptest.NewRecorder()
 		h.ServeHTTP(pageRec, page)
-		if pageRec.Body.String() != "SAME-BYTES" {
-			t.Fatalf("%s served %q, want the shared bundle", host, pageRec.Body.String())
+		if sourceHTML(pageRec.Body.String()) != "SAME-BYTES" {
+			t.Fatalf("%s served %q, want the shared bundle", host, sourceHTML(pageRec.Body.String()))
 		}
 
 		req := httptest.NewRequest(http.MethodGet, runtimeConfigPath, nil)
@@ -574,6 +574,54 @@ func TestSettingsForSite_CopiesRatherThanAliases(t *testing.T) {
 	doc["a"] = "changed"
 	if site.Settings["a"] != "1" {
 		t.Error("the document's settings alias the cached row's map")
+	}
+}
+
+func TestServeRuntimeConfig_InheritsConnectedStoreAPIVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name, kind, override, storeVersion, want string
+		unbound                                  bool
+	}{
+		{name: "connected", kind: storefrontKind, storeVersion: "2026-07", want: "2026-07"},
+		{name: "blank setting", kind: storefrontKind, override: "  ", storeVersion: " 2026-07 ", want: "2026-07"},
+		{name: "explicit pin", kind: storefrontKind, override: "2026-04", storeVersion: "2026-07", want: "2026-04"},
+		{name: "unbound preview", kind: storefrontKind, unbound: true},
+		{name: "store missing version", kind: storefrontKind},
+		{name: "other kind", kind: "spa", storeVersion: "2026-07"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			site := &Site{
+				ID: "s1", Hostname: "shop.example.com", Status: "live", Kind: tc.kind,
+				Settings: map[string]string{"country": "US"},
+			}
+			if tc.override != "" {
+				site.Settings["storefrontApiVersion"] = tc.override
+			}
+			if !tc.unbound {
+				site.Store = &BoundStore{ID: "store-1", Domain: "acme.myshopify.com", APIVersion: tc.storeVersion}
+			}
+			h := NewHandler(Options{Resolver: staticResolver{site: site}, Opener: mapOpener{"index.html": "ROOT"}})
+			req := httptest.NewRequest(http.MethodGet, runtimeConfigPath, nil)
+			req.Host = site.Hostname
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("GET runtime config = %d", rec.Code)
+			}
+			var doc RuntimeConfig
+			if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+				t.Fatal(err)
+			}
+			if got := doc.Settings["storefrontApiVersion"]; got != tc.want {
+				t.Errorf("served API version = %q, want %q", got, tc.want)
+			}
+			if doc.Settings["country"] != "US" {
+				t.Error("lost the site's other settings")
+			}
+			if site.Settings["storefrontApiVersion"] != tc.override {
+				t.Error("inherited version mutated the cached site settings")
+			}
+		})
 	}
 }
 
@@ -654,5 +702,27 @@ func TestSettingsReachTheServedDocumentAfterOneInvalidation(t *testing.T) {
 	resolver.Invalidate(host)
 	if got := read(); got != "https://api.new.example" {
 		t.Errorf("read = %q after invalidation, want the new value -- a bundle would keep reading the old endpoint", got)
+	}
+}
+
+func TestRuntimeConfigUnboundStorefrontKeepsKindWithoutResolvingSecrets(t *testing.T) {
+	site := &Site{ID: "unbound", Hostname: "shop.example.com", Kind: storefrontKind, Status: "live"}
+	h := NewHandler(Options{Resolver: staticResolver{site: site}, SecretResolver: func(context.Context, string) (string, error) {
+		t.Fatal("an unbound storefront must never resolve a secret")
+		return "", nil
+	}})
+	req := httptest.NewRequest(http.MethodGet, runtimeConfigPath, nil)
+	req.Host = site.Hostname
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("runtime config status = %d", rec.Code)
+	}
+	var doc RuntimeConfig
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Storefront == nil || *doc.Storefront != (StorefrontConfig{Kind: storefrontKind, ConnectionState: "unbound"}) {
+		t.Fatalf("unbound storefront config = %+v, want kind without commerce credentials", doc.Storefront)
 	}
 }

@@ -13,7 +13,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 )
 
-// THE EDGE HOLDS THREE FIELDS OF A STORE AND NO MORE (epic memql#5530, issue
+// THE EDGE HOLDS ONLY THE SERVING FIELDS OF A STORE (epic memql#5530, issue
 // memql#5538).
 //
 // The store row also carries adminTokenRef and webhookSecretRef. Neither is
@@ -23,7 +23,7 @@ import (
 // document; this greps the STRUCT, one rung earlier, so the admin token
 // cannot reach a header or a log line either.
 func TestTheBoundStoreCarriesOnlyWhatTheServingPathNeeds(t *testing.T) {
-	want := []string{"ID", "Domain", "StorefrontTokenRef"}
+	want := []string{"ID", "Domain", "StorefrontTokenRef", "APIVersion"}
 	typ := reflect.TypeOf(BoundStore{})
 	var got []string
 	for i := 0; i < typ.NumField(); i++ {
@@ -51,7 +51,7 @@ func storefrontSiteBoundTo(storeId string) *Site {
 func TestAStoreEditReachesTheSiteWithNoSecondWrite(t *testing.T) {
 	ex := &stubExec{
 		rows:  map[string]*Site{"shop.example.com": storefrontSiteBoundTo("store-1")},
-		store: &BoundStore{ID: "store-1", Domain: "before.myshopify.com", StorefrontTokenRef: "ref"},
+		store: &BoundStore{ID: "store-1", Domain: "before.myshopify.com", StorefrontTokenRef: "ref", APIVersion: "2026-04"},
 	}
 	r := NewResolver(ex, time.Minute)
 
@@ -63,13 +63,20 @@ func TestAStoreEditReachesTheSiteWithNoSecondWrite(t *testing.T) {
 		t.Fatalf("first resolve read %q", first.Store.Domain)
 	}
 
+	if got := settingsForSite(first)["storefrontApiVersion"]; got != "2026-04" {
+		t.Fatalf("first API version = %q", got)
+	}
+
 	// The STORE row changes. The site row does not.
-	ex.store = &BoundStore{ID: "store-1", Domain: "after.myshopify.com", StorefrontTokenRef: "ref"}
+	ex.store = &BoundStore{ID: "store-1", Domain: "after.myshopify.com", StorefrontTokenRef: "ref", APIVersion: "2026-07"}
 	r.InvalidateAll()
 
 	second, err := r.Resolve(context.Background(), "shop.example.com")
 	if err != nil || second == nil || second.Store == nil {
 		t.Fatalf("second resolve did not bind a store: site=%+v err=%v", second, err)
+	}
+	if got := settingsForSite(second)["storefrontApiVersion"]; got != "2026-07" {
+		t.Errorf("API version after store edit = %q", got)
 	}
 	if second.Store.Domain != "after.myshopify.com" {
 		t.Errorf("after a store edit the edge still reads %q; the site was never rewritten and the edit must reach it anyway", second.Store.Domain)
@@ -96,9 +103,8 @@ func TestTheBoundStoreIsCachedWithTheSite(t *testing.T) {
 	}
 }
 
-// A BINDING NAMING A STORE THAT IS GONE SERVES NO STOREFRONT BLOCK AND NAMES
-// NO STORE. Drop, never guess -- the same discipline validHost already applies
-// to a malformed domain.
+// An unreadable store names no store and publishes no token. The kind remains
+// available so the bundle can render its design preview.
 func TestAnUnresolvableStoreLeavesTheSiteServable(t *testing.T) {
 	ex := &stubExec{
 		rows:  map[string]*Site{"shop.example.com": storefrontSiteBoundTo("gone")},
@@ -119,8 +125,8 @@ func TestAnUnresolvableStoreLeavesTheSiteServable(t *testing.T) {
 	if got := policyForSite(httptest.NewRequest("GET", "/", nil), site, noEnv, ""); strings.Contains(got, "myshopify") {
 		t.Errorf("the policy named a store the edge could not read: %q", got)
 	}
-	if doc := runtimeConfigForSite(context.Background(), site, noEnv, true, nil); doc.Storefront != nil {
-		t.Errorf("an unresolvable store still produced a storefront block: %+v", doc.Storefront)
+	if doc := runtimeConfigForSite(context.Background(), site, noEnv, true, nil); doc.Storefront == nil || *doc.Storefront != (StorefrontConfig{Kind: storefrontKind, ConnectionState: "unavailable"}) {
+		t.Errorf("an unresolvable store must expose only its kind: %+v", doc.Storefront)
 	}
 }
 
@@ -184,10 +190,10 @@ func TestOnlyABoundStorefrontReadsAStore(t *testing.T) {
 // THE SAME FALSE SIGNAL TestEngineExecutorRunsUnderASyntheticClusterOwnerActor
 // EXISTS TO CLOSE OFF, one concept over.
 //
-// storeById's filter carries `actor.isClusterOwner == true` written out, and
-// v1:shopify:store declares @rowAuthz(clusterOwner) on top of it. A StoreByID
+// v1:shopify:store declares @rowAuthz(clusterOwner, rankFloor="developer"),
+// which storeById's plan carries. A StoreByID
 // that quietly ran under no actor would read ZERO ROWS AND NO ERROR: every
-// storefront in the cluster would serve no storefront block and name no store
+// storefront in the cluster would serve an empty connection and name no store
 // in its policy, while every stub-driven test above kept passing.
 func TestEngineExecutorStoreByIDRunsUnderASyntheticClusterOwnerActor(t *testing.T) {
 	fe := &fakeEngine{rows: []map[string]any{
@@ -204,11 +210,11 @@ func TestEngineExecutorStoreByIDRunsUnderASyntheticClusterOwnerActor(t *testing.
 		t.Fatalf("engine.Execute ran with no AccessContext on ctx; the engine will refuse the clusterOwner-tier read")
 	}
 	if !ac.IsClusterOwner() {
-		t.Errorf("engine.Execute ran as role %q, want a cluster owner -- storeById's actor.isClusterOwner==true conjunct will refuse this actor", ac.Role)
+		t.Errorf("engine.Execute ran as role %q, want a cluster owner -- v1:shopify:store's tier answers this actor with zero rows", ac.Role)
 	}
 }
 
-// THE PROJECTION IS THREE FIELDS OFF A ROW THAT CARRIES MORE. The row the
+// THE PROJECTION INCLUDES ONLY THE SERVING FIELDS. The row the
 // engine hands back here holds both credential references; neither may reach
 // the Site the edge caches.
 func TestEngineExecutorStoreByIDProjectsOnlyTheServingFields(t *testing.T) {
@@ -219,13 +225,14 @@ func TestEngineExecutorStoreByIDProjectsOnlyTheServingFields(t *testing.T) {
 		"adminTokenRef":      "acme_admin_token",
 		"webhookSecretRef":   "acme_webhook_secret",
 		"isDevelopment":      true,
+		"apiVersion":         "2026-07",
 	}}}
 
 	got, err := NewEngineExecutor(fe).StoreByID(context.Background(), "abc123")
 	if err != nil {
 		t.Fatalf("StoreByID: %v", err)
 	}
-	want := &BoundStore{ID: "abc123", Domain: "acme.myshopify.com", StorefrontTokenRef: "acme_storefront_token"}
+	want := &BoundStore{ID: "abc123", Domain: "acme.myshopify.com", StorefrontTokenRef: "acme_storefront_token", APIVersion: "2026-07"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("StoreByID returned %+v, want %+v", got, want)
 	}

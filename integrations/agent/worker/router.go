@@ -202,6 +202,18 @@ type Router struct {
 	store  FleetStore
 	logger *slog.Logger
 	clock  func() time.Time
+	// groups resolves an acting person's ACTIVE groups, for a machine lent to
+	// a group (epic memql#5344). Nil is workerservice.InstalledGroups.
+	groups workerservice.GroupResolver
+}
+
+// SetGroupResolver replaces how an acting person's groups are read. Tests use
+// it to say who is in which group; nil restores the installed membership
+// source. Not safe to call while the router is planning.
+func (r *Router) SetGroupResolver(fn workerservice.GroupResolver) {
+	if r != nil {
+		r.groups = fn
+	}
 }
 
 // NewRouter constructs a Router. A nil store makes Plan return an empty plan

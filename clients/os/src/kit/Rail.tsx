@@ -69,6 +69,8 @@ export interface Stop {
   answer?: string;
   /** What the stop holds when it is open. */
   body?: ReactNode;
+  /** Independent controls beside the open step's title. */
+  headerActions?: ReactNode;
   /**
    * Whether this stop is a disclosure at all. Defaults to "it is reachable",
    * which is right for a rail over a RECORD: every reached stage of a deploy
@@ -182,13 +184,7 @@ export function Rail({
         const answer = stop.answer ?? "";
         const note = stop.sentence ?? "";
 
-        return (
-          <li key={stop.id} className="os-rail-stage" data-state={stop.state} data-open={open ? "true" : undefined}>
-            <span className="os-rail-mark" aria-hidden>
-              <StopGlyph state={stop.state} size={11} />
-            </span>
-            <span className="os-rail-body">
-              {collapsible && reachable ? (
+        const heading = collapsible && reachable ? (
                 <button
                   type="button"
                   className="os-rail-line"
@@ -221,7 +217,15 @@ export function Rail({
                   <span className="os-rail-label">{stop.name}</span>
                   <span className="os-rail-note">{note}</span>
                 </>
-              )}
+              );
+
+        return (
+          <li key={stop.id} className="os-rail-stage" data-state={stop.state} data-open={open ? "true" : undefined}>
+            <span className="os-rail-mark" aria-hidden>
+              <StopGlyph state={stop.state} size={11} />
+            </span>
+            <span className="os-rail-body">
+              {open && stop.headerActions ? <span className="os-rail-heading">{heading}{stop.headerActions}</span> : heading}
               {/* The note stays visible under an OPEN collapsed stop -- but
                   ONLY when it says something the line above does not. The
                   answer and the note are frequently the SAME string (a

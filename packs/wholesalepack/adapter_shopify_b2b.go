@@ -29,9 +29,9 @@ import (
 //
 // # WHY AN UNREADABLE PLAN IS FATAL *HERE*
 //
-// v1:shopify:store is @rowAuthz(clusterOwner) and epic memql#5530's D10
-// left that tier unchanged, so the pack's plan read answers nothing for an
-// ordinary merchant. This adapter REFUSES in that case, and the refusal is
+// v1:shopify:store is @rowAuthz(clusterOwner, rankFloor="developer"): a
+// cluster owner or a developer reads it (Connect Shopify, D3), and the pack's
+// plan read answers nothing for anyone below that -- an ordinary merchant. This adapter REFUSES in that case, and the refusal is
 // the honest answer rather than a limitation: without the plan it cannot
 // tell a Plus store with forty catalogs from a Basic store with three, and
 // guessing wrong means either refusing a merchant who is entitled to
@@ -66,8 +66,8 @@ func (a *shopifyB2BAdapter) Available(plan string) error {
 		return &AdapterRefusal{
 			Adapter: AdapterShopifyB2B,
 			Reason: "this store's plan is not readable by the caller, so the catalog ceiling " +
-				"cannot be established. v1:shopify:store is cluster-owner tier by design " +
-				"(epic memql#5530, D10). Provision as an operator, or choose the " +
+				"cannot be established. v1:shopify:store is readable by a cluster owner or a " +
+				"developer only. Provision as one of them, or choose the " +
 				AdapterCustomerTag + " adapter, which needs no plan at all",
 		}
 	}

@@ -21,6 +21,7 @@ package app
 import (
 	"context"
 	"errors"
+	"github.com/znasllc-io/memql/component/auth"
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
@@ -149,7 +150,13 @@ func (d *workRunDispatcher) Dispatch(ctx context.Context, req workspine.Dispatch
 			return
 		}
 	}
-	ctx, err = workExecutionContext(ctx, journal, source)
+	ctx, err = workExecutionContext(ctx, journal, source, auth.NewIdentityResolver(auth.QueryRunnerFunc(func(ctx context.Context, query string) (any, error) {
+		result, err := d.app.engine.Execute(ctx, query)
+		if err != nil || result == nil {
+			return nil, err
+		}
+		return result.OutputPayload(), nil
+	}), log))
 	if err != nil {
 		d.failRun(ctx, req, "source_journal_refused", err.Error())
 		return

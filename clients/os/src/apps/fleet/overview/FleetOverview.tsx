@@ -1,3 +1,4 @@
+import { ContentSkeleton } from "../../../kit/ContentSkeleton";
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { Monitor } from "lucide-react";
@@ -33,7 +34,7 @@ export function FleetOverview({ onOpenMachine }: { onOpenMachine: (id: string) =
     { label: "Reported apps", figure: count(machines.reduce((sum, m) => sum + m.apps.length, 0)) },
   ]}>
     {behind || snapshot?.error ? <Notice tone="warn" sentence="Machine updates are interrupted." next="Showing the last reported connections. Refresh to reconnect." /> : null}
-    {!machines.length ? <EmptyState icon={Monitor} title={fresh ? "No machines connected" : snapshot?.error ? "Machines unavailable" : "Reading your fleet"}>{fresh ? "Add a machine from Machines to see its connection here." : "Waiting for this cluster’s machine inventory."}</EmptyState> : <FleetMap machines={machines} now={now} cluster={config.domain || "This cluster"} fresh={fresh} onOpenMachine={onOpenMachine} />}
+    {!machines.length && !fresh && !snapshot?.error ? <ContentSkeleton kind="map" label="Loading fleet connections" /> : !machines.length ? <EmptyState icon={Monitor} title={fresh ? "No machines connected" : "Machines unavailable"}>{fresh ? "Add a machine from Machines to see its connection here." : "Reconnect to read this cluster’s machine inventory."}</EmptyState> : <FleetMap machines={machines} now={now} cluster={config.domain || "This cluster"} fresh={fresh} onOpenMachine={onOpenMachine} />}
     {fresh ? <OverviewBreakdown title="Machine availability" segments={[
       { label: "Online", count: online.length, tone: "good" },
       { label: "Offline", count: machines.length - online.length, tone: "quiet" },

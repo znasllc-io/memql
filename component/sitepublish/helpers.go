@@ -1,6 +1,7 @@
 package sitepublish
 
 import (
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -57,7 +58,10 @@ func boolField(m map[string]any, key string) bool {
 }
 
 // extractRows normalises whatever the engine handed back into plain rows.
-// Copied from integrations/library for the reason in this file's header.
+// Copied from integrations/library for the reason in this file's header. A
+// top-level builtin's node set is read by memql.MaterializeRows rather than a
+// copy of it; the rest stays because MaterializeRows keeps a bundle row's
+// payload nested, and these readers expect it flat.
 func extractRows(raw any) []map[string]any {
 	if raw == nil {
 		return nil
@@ -88,6 +92,8 @@ func extractRows(raw any) []map[string]any {
 		return out
 	}
 	switch v := raw.(type) {
+	case map[string]memorynodes.MemoryNode:
+		return memql.MaterializeRows(v)
 	case []map[string]any:
 		return v
 	case []any:

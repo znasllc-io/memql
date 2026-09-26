@@ -30,7 +30,6 @@ use platform.builtins.{ accountDomainReconcile }
 @trigger(event="system.startup")
 automation seedSelfAccount {
   args {
-    domain any
     node any
   }
 
@@ -45,39 +44,14 @@ automation seedSelfAccount {
   // company is called, so the row says so plainly and the first-run card asks
   // (D7). `configuredAt` is left unwritten and that absence IS the card.
   //
-  // `domain` comes from MEMQL_DOMAIN, forwarded onto the startup payload by
-  // app/cluster.go. Every field binds an explicit key + a `??` fallback, mirroring
-  // bootstrapCluster: a multi-segment path evaluates to nil when absent, and a
-  // nil argument for a required arg trips validation.
+  // The installation hostname is infrastructure, not a claim about the
+  // company's domain. Leave it absent until a person supplies a domain;
+  // the ordinary TXT walk then proves ownership and reserves its front door.
+  // In particular, memql.<installation-domain> is reserved cluster space.
   if decide == true {
     selfAccount := mutation createClientAccount(
       accountId: "v1:accounts:account:self",
-      name:      "My company",
-      domain:    args.domain ?? ""
-    )
-  }
-
-  // THE SELF ACCOUNT'S DOMAIN IS VERIFIED BY THE FACT OF THE DEPLOYMENT
-  // (epic memql#5165, section B). This cluster SERVES that domain -- its
-  // front door answers on it, its certificate names it -- so asking the
-  // owner to publish a TXT record proving they own it would be the cluster
-  // asking itself for evidence it already is.
-  //
-  // A SECOND STATEMENT rather than arguments on createClientAccount, because
-  // that mutation is client-reachable and @requiresRank("admin"): letting a
-  // caller pass domainStatus would let any admin declare any client's domain
-  // verified, which is the one thing the walk exists to decide.
-  //
-  // Gated on the same absence check as the create, so a re-boot writes no
-  // version. Changing the self account's domain afterwards puts it through
-  // the ordinary walk like anybody else's -- the reset in
-  // component/memql/account_domain_validation.go does not exempt it.
-  if decide == true {
-    selfAccountDomain := mutation recordAccountDomainCheck(
-      accountId:        "v1:accounts:account:self",
-      domainStatus:     "verified",
-      domainVerifiedAt: now,
-      memqlReservedAt:  now
+      name:      "My company"
     )
   }
 }
@@ -98,6 +72,15 @@ automation ensureAccountGroup {
     id any
   }
 
+  ensure := builtin groupEnsureForAccount(accountId: args.id)
+}
+
+/// Keep the same derived group when a company is renamed. The builtin writes
+/// nothing when the name already matches, and never adds permissions.
+@trigger(event="node.updated", concept="v1:accounts:account")
+@filter(row => row.status == "active")
+automation refreshAccountGroup {
+  args { id any }
   ensure := builtin groupEnsureForAccount(accountId: args.id)
 }
 

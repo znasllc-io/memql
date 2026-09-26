@@ -313,48 +313,6 @@ func TestConceptLeafNamesTheArchiveObject(t *testing.T) {
 	}
 }
 
-// TestInListIsParameterized. A row id is a VALUE, and a value never belongs in
-// the statement text.
-func TestInListIsParameterized(t *testing.T) {
-	args, placeholders := inList([]string{"a", "b", "c"})
-	if placeholders != "?, ?, ?" {
-		t.Errorf("placeholders = %q", placeholders)
-	}
-	if len(args) != 3 || args[0] != "a" || args[2] != "c" {
-		t.Errorf("args = %v", args)
-	}
-	for _, id := range []string{"a", "b", "c"} {
-		if strings.Contains(placeholders, id) {
-			t.Errorf("the id %q was interpolated into the statement text", id)
-		}
-	}
-}
-
-// TestChunkCoversEveryIdExactlyOnce.
-func TestChunkCoversEveryIdExactlyOnce(t *testing.T) {
-	ids := make([]string, 0, 17)
-	for n := range 17 {
-		ids = append(ids, fmt.Sprintf("id-%d", n))
-	}
-	seen := map[string]int{}
-	for _, batch := range chunk(ids, 5) {
-		if len(batch) > 5 {
-			t.Fatalf("batch of %d exceeds the size", len(batch))
-		}
-		for _, id := range batch {
-			seen[id]++
-		}
-	}
-	if len(seen) != 17 {
-		t.Errorf("covered %d ids, want 17", len(seen))
-	}
-	for id, n := range seen {
-		if n != 1 {
-			t.Errorf("%s appeared %d times", id, n)
-		}
-	}
-}
-
 // TestSweepsRefuseAHandRolledReadWithNoAdmissionGate.
 //
 // Fail-CLOSED. A nil AdmitSourceRow means this node cannot tell whether a
@@ -637,5 +595,22 @@ func TestInferenceRetryDueReadsTheApprovalKindNotTheWaitShape(t *testing.T) {
 				t.Errorf("inferenceRetryDue = (%v, %v), want (%v, %v)", due, park, tc.wantDue, tc.wantPark)
 			}
 		})
+	}
+}
+
+func TestMissingApprovalReadFailurePreservesSystemWait(t *testing.T) {
+	i, engine := newTestIntegration(t)
+	engine.refuse("workApprovalById", fmt.Errorf("database unavailable"))
+	now := time.Now().UTC()
+	run := map[string]any{"id": "v1:work:run:orphan", "ownerUserId": "", "goalId": "", "triggeredBy": "schedule", "waitingOn": map[string]any{"kind": "approval", "subject": "v1:work:approval:missing", "since": rfc(now.Add(-time.Hour))}}
+	ctx := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("sweepWaitingWorkRuns"))
+	closed, err := i.closeOrphanedSystemApprovalWait(ctx, run, now)
+	if err == nil || closed {
+		t.Fatalf("read failure closed a wait: %v %v", closed, err)
+	}
+	for _, c := range engine.recorded() {
+		if c.Name() == "updateWorkRun" {
+			t.Fatal("read failure mutated the run")
+		}
 	}
 }

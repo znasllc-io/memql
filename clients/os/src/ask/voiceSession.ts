@@ -1,3 +1,4 @@
+import type { AskActivity } from "./conversationSession";
 // Ask's voice state machine (epic memql#4747). Pure: no DOM, no React, no
 // audio stack -- the microphone and the transcription wire are both seams, so
 // every transition below is driven from a test with fixtures. `src/system/`
@@ -59,6 +60,7 @@ export interface VoiceTranscriber {
       sampleRate: number;
       /** Each delta is the FULL transcript so far, never an increment. */
       onPartial: (text: string) => void;
+      onActivity?: (activity: AskActivity) => void;
       signal: AbortSignal;
     },
   ): Promise<string>;
@@ -81,6 +83,7 @@ export interface VoiceSessionCallbacks {
   onTranscript(text: string): void;
   /** A finished utterance. Never fires with blank text. */
   onUtterance(text: string): void;
+  onActivity?(activity: AskActivity): void;
 }
 
 /**
@@ -88,6 +91,7 @@ export interface VoiceSessionCallbacks {
  * and unmount.
  */
 export class VoiceSession {
+  private static owners = new WeakMap<VoicePorts, VoiceSession>();
   private state: VoiceState = IDLE;
   private capture: VoiceCapture | null = null;
   private abort: AbortController | null = null;
@@ -178,6 +182,9 @@ export class VoiceSession {
   }
 
   private async begin(): Promise<void> {
+    const previous = VoiceSession.owners.get(this.ports);
+    if (previous !== this) previous?.cancel();
+    VoiceSession.owners.set(this.ports, this);
     const generation = ++this.generation;
     this.transcript = "";
     this.set({ phase: "starting", problem: null, latched: false });
@@ -209,6 +216,7 @@ export class VoiceSession {
           this.transcript = text;
           this.callbacks.onTranscript(text);
         },
+        onActivity: activity => { if (generation === this.generation) this.callbacks.onActivity?.(activity); },
         signal: this.abort.signal,
       })
       .then(

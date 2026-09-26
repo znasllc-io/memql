@@ -1,3 +1,4 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useMemo, useState } from "react";
 import { ArrowLeft, GitFork, RotateCcw } from "lucide-react";
 
@@ -405,17 +406,11 @@ export function RunPage({
               </li>
             ))}
           </ol>
-          {steps.length === 0 ? (
-            <Caption>
-              {stepsState === "seeding"
-                ? "Loading the steps from the cluster"
-                : stepsState === "disconnected"
+          {steps.length === 0 ? (stepsState === "seeding" ? <RecordListSkeleton label="Loading the steps from the cluster" /> : <Caption>{stepsState === "disconnected"
                   ? "Not connected to the cluster"
                   : run.status === "compiling"
                     ? "It is still working out what to do. The steps appear as it decides them."
-                    : "This run recorded no steps."}
-            </Caption>
-          ) : null}
+                    : "This run recorded no steps."}</Caption>) : null}
         </section>
 
         <JournalPanel journal={journal} />

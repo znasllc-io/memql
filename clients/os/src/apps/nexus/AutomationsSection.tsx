@@ -1,15 +1,16 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useMemo, useState } from "react";
 import { RefreshCw } from "lucide-react";
 
 import {
   Button,
   Caption,
-  Chip,
   Head,
   Notice,
   Panel,
   Refine,
-  Row as KitRow,
+  RecordRow as KitRow,
+  RecordList,
   formatFreshness,
   formatMoment,
   useNow,
@@ -126,7 +127,7 @@ export function AutomationsSection({ selectedId, onSelect }: AutomationsSectionP
     <div className="os-nexus-automations">
       <Head
         title="Automations"
-        meta={`${rows.length} ${rows.length === 1 ? "automation" : "automations"}`}
+        meta={catalog.state === "ready" && !catalog.error ? rows.length : undefined}
       >
         <Refine
           search={search}
@@ -151,45 +152,28 @@ export function AutomationsSection({ selectedId, onSelect }: AutomationsSectionP
             />
           ) : null}
 
-          <ul className="os-nexus-catalog" aria-label="Automations this instance can replay">
+          <RecordList as="ul" label="Automations this instance can replay">
             {rows.map((automation) => (
-              <li key={automation.id}>
+              <div key={automation.id}>
                 <KitRow
                   name={automation.name}
                   current={idTail(automation.id) === idTail(selectedId)}
                   onOpen={() => onSelect(automation.id)}
-                  state={
-                    <>
-                      <Chip
-                        tone={automation.status === "active" ? "accent" : "muted"}
-                        title={statusMeaning(automation.status)}
-                      >
-                        {statusWord(automation.status)}
-                      </Chip>
-                      <RungMark automation={automation} />
-                    </>
-                  }
+                  state={statusWord(automation.status)} stateTitle={statusMeaning(automation.status)} tone={automation.status === "active" ? "accent" : "muted"}
+                  secondary={automation.targetNamespace || "—"} stateExtra={<RungMark automation={automation} />}
                 >
-                  <span className="os-nexus-row-sub os-mono">
-                    {automation.targetNamespace === "" ? "—" : automation.targetNamespace}
-                  </span>
-                </KitRow>
-              </li>
-            ))}
-          </ul>
 
-          {rows.length === 0 ? (
-            <Caption>
-              {catalog.state === "loading"
-                ? "Reading the catalog"
-                : search.trim() !== ""
+                </KitRow>
+              </div>
+            ))}
+          </RecordList>
+
+          {rows.length === 0 ? (catalog.state === "loading" ? <RecordListSkeleton label="Reading the catalog" /> : <Caption>{search.trim() !== ""
                   ? "No automation here matches that."
                   : // AN EMPTY SCREEN IS AN INVITATION, and here the invitation
                     // is not a button -- nobody authors an automation by hand in
                     // this app. It says where they come from instead.
-                    "Nothing here yet. An automation appears when a goal is worked out: the system compiles what it decided into a template, and a template that keeps succeeding earns its way up this list."}
-            </Caption>
-          ) : null}
+                    "Nothing here yet. An automation appears when a goal is worked out: the system compiles what it decided into a template, and a template that keeps succeeding earns its way up this list."}</Caption>) : null}
 
           <Caption>
             {catalog.readAt === ""
@@ -257,7 +241,7 @@ export function AutomationsSection({ selectedId, onSelect }: AutomationsSectionP
           selected !== null
             ? statusWord(selected.status)
             : rows.length === 0
-              ? "Nothing yet"
+              ? catalog.state === "loading" ? "" : "Nothing yet"
               : "Nothing selected"
         }
         detail={
@@ -267,7 +251,7 @@ export function AutomationsSection({ selectedId, onSelect }: AutomationsSectionP
               ? // "Select an automation" on an empty list is an instruction for
                 // a list that does not exist. Say what IS true instead.
                 catalog.state === "loading"
-                  ? "reading the catalog"
+                  ? undefined
                   : "nothing to arm yet"
               : "select an automation to arm or retire it"
         }

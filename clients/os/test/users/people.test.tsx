@@ -254,3 +254,29 @@ describe("opening a person", () => {
     expect(screen.getByText("Role")).toBeTruthy();
   });
 });
+
+
+describe("authorized roster counts", () => {
+  it("waits for both reads and counts only the visible people and invitations", async () => {
+    const connection = seed({
+      searchUsers: [
+        userRow({ id: "active", displayName: "Active colleague" }),
+        userRow({ id: "inactive", displayName: "Inactive colleague", active: false }),
+      ],
+      pendingUserInvitations: [invitationRow({ id: "waiting", inviteeEmail: "waiting@example.com" })],
+    });
+    const view = mount(connection);
+    expect(view.container.querySelector(".os-head-meta")).toBeNull();
+    await waitFor(() => expect(view.container.querySelector(".os-head-meta")?.textContent).toBe("2"));
+    expect(view.container.querySelectorAll(".os-record-list .os-record-row")).toHaveLength(2);
+    expect(screen.queryByText("Inactive colleague")).toBeNull();
+  });
+
+  it("does not count a partial roster when the invitations read is denied", async () => {
+    const connection = seed({ searchUsers: [userRow({ id: "active", displayName: "Active colleague" })] });
+    connection.query.pendingUserInvitations.mockRejectedValue(new Error("invitation read denied"));
+    const view = mount(connection);
+    await screen.findByText(/invitation read denied/);
+    expect(view.container.querySelector(".os-head-meta")).toBeNull();
+  });
+});

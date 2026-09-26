@@ -200,9 +200,9 @@ func TestACallerBelowTheConstructFloorIsRefusedNotEmptied(t *testing.T) {
 	writer := "writer-" + suffix
 	seedPrincipal(t, eng, writer, auth.RoleWriter)
 
-	_, err := eng.Execute(rankActorCtx(writer, auth.RoleWriter), `query clientAccountsAll(includeArchived: true)`)
+	_, err := eng.Execute(rankActorCtx(writer, auth.RoleWriter), `query groupsForUser(userId: "other-user", includeRemoved: true)`)
 	if err == nil {
-		t.Fatal("a writer's read of the accounts registry was ALLOWED. @requiresRank(\"admin\") is " +
+		t.Fatal("a writer's lookup of another principal's groups was ALLOWED. @requiresRank(\"admin\") is " +
 			"rank >= 200 and writer is 100; an empty page would be indistinguishable from an " +
 			"empty cluster, which is why this refuses instead")
 	}

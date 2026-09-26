@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { Building2, } from "lucide-react";
 
-import { Button, Caption, Chip, Head, Input, LiveList, Notice, Panel, Row as ListRow } from "../../kit";
+import { Button, Caption, Chip, Head, Input, LiveList, Notice, Panel, RecordRow, listCount } from "../../kit";
 import { useLiveView } from "../../live/liveView";
 import { AccountDetail } from "./AccountDetail";
 import {
@@ -62,7 +62,7 @@ export function AccountsSection({
 
   return (
     <div className="os-app-stack">
-      <Head title="Accounts">
+      <Head title="Accounts" meta={listCount(source?.snapshot)}>
         <AddButton onClick={() => setAdding((v) => !v)} label="Add a client" />
       </Head>
 
@@ -145,7 +145,7 @@ function AccountLine({
 }) {
   const archived = accountIsArchived(account);
   return (
-    <ListRow
+    <RecordRow
       icon={<Building2 size={16} aria-hidden />}
       name={accountName(account)}
       // `current` is the row's own liveness, and for a client that is simply
@@ -155,17 +155,16 @@ function AccountLine({
       dim={archived}
       open={open}
       onOpen={onToggle}
-      state={
+      secondary={account.domain || account.primaryContactName || undefined}
+      state={archived ? "archived" : "active"}
+      tone={archived ? "muted" : "accent"}
+      stateExtra={
         <>
-          {archived ? <Chip tone="muted">archived</Chip> : null}
           {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
         </>
       }
     >
-      {account.domain === "" ? null : (
-        <span className="os-caption os-mono">{account.domain}</span>
-      )}
-      {account.primaryContactName === "" ? null : (
+      {account.primaryContactName === "" || account.domain === "" ? null : (
         <span className="os-caption">{account.primaryContactName}</span>
       )}
       {accountIsSelf(account) ? (
@@ -173,7 +172,7 @@ function AccountLine({
           you
         </Chip>
       ) : null}
-    </ListRow>
+    </RecordRow>
   );
 }
 

@@ -1,8 +1,9 @@
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import type { Concept, Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { Button, Caption, Chip, Notice, Panel, Subhead } from "../../kit";
+import { Button, Caption, Notice, RecordList, RecordRow, Panel, Subhead } from "../../kit";
 import { cardFor, fieldText } from "./displayCard";
 import { rowIdOf, type ConceptRowsWalk } from "./useConceptRows";
 
@@ -33,7 +34,7 @@ export function RowsPanel({ concept, walk }: { concept: Concept; walk: ConceptRo
 
   return (
     <Panel label="Rows">
-      <Subhead>Rows</Subhead>
+      <Subhead meta={walk.status === "more" || walk.status === "exhausted" ? walk.rows.length : undefined}>Rows</Subhead>
 
       {/* THE BAND. New rows are counted, never spliced -- see
           useConceptRows' header for why a keyset walk cannot absorb them. */}
@@ -63,7 +64,7 @@ export function RowsPanel({ concept, walk }: { concept: Concept; walk: ConceptRo
       ) : null}
 
       {walk.rows.length === 0 && walk.status === "loading" ? (
-        <Caption>Reading rows from the cluster.</Caption>
+        <RecordListSkeleton label="Loading rows from the cluster" />
       ) : null}
 
       {walk.rows.length === 0 && walk.status === "exhausted" ? (
@@ -75,29 +76,15 @@ export function RowsPanel({ concept, walk }: { concept: Concept; walk: ConceptRo
       ) : null}
 
       {walk.rows.length === 0 ? null : (
-        <ul className="os-rows-list">
+        <RecordList as="ul" label="Rows">
           {walk.rows.map((row) => {
             const card = cardFor(concept, row);
             return (
-              <li key={card.id} className="os-rows-row">
-                <button
-                  type="button"
-                  className="os-rows-open"
-                  onClick={() => setOpenId(card.id)}
-                >
-                  <span className="os-rows-primary">{card.primary}</span>
-                  {card.secondary === "" ? null : (
-                    <span className="os-rows-secondary">{card.secondary}</span>
-                  )}
-                  {card.tertiary === "" ? null : (
-                    <span className="os-rows-tertiary">{card.tertiary}</span>
-                  )}
-                </button>
-                {card.status === "" ? null : <Chip tone="muted">{card.status}</Chip>}
-              </li>
+              <RecordRow key={card.id} name={card.primary} secondary={card.secondary}
+                state={card.status} onOpen={() => setOpenId(card.id)}>{card.tertiary}</RecordRow>
             );
           })}
-        </ul>
+        </RecordList>
       )}
 
       {/* FOUR STATES, EACH SAYING SOMETHING DIFFERENT. "Loaded N" with no
@@ -106,7 +93,7 @@ export function RowsPanel({ concept, walk }: { concept: Concept; walk: ConceptRo
           whole answer. */}
       <div className="os-rows-foot">
         {walk.status === "loading" && walk.rows.length > 0 ? (
-          <Caption>Reading more rows.</Caption>
+          <RecordListSkeleton label="Loading more rows" />
         ) : null}
         {walk.status === "more" ? (
           <>

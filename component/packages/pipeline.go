@@ -99,7 +99,11 @@ type Actor struct {
 
 // StoreResolver answers which v1:shopify:store row a myshopify.com domain
 // names on THIS cluster, as a bare row id, or "" when there is no such row the
-// caller may read.
+// caller may read and attach. `bound` is the store the site is bound to now
+// ("" for none): answering that same store is leaving the binding alone, which
+// takes no store part, so the resolver asks for the part only on a change.
+// `account` is the organization the site belongs to, or will on create; the
+// part is asked there as well as of the caller (memql#5598).
 //
 // Declared here rather than beside its siblings, and the difference is the
 // reason they are scattered: CredentialResolver lives in credentials.go
@@ -111,7 +115,7 @@ type Actor struct {
 // A MISS IS "", NOT AN ERROR. An error means the read itself failed and the
 // run stops on it; an empty answer means the question was asked and this
 // cluster has no store by that name, which is the refusal a person repairs.
-type StoreResolver func(ctx context.Context, domain string) (string, error)
+type StoreResolver func(ctx context.Context, domain, bound, account string) (string, error)
 
 // Deps is the pipeline's whole outside world. Every field is an interface so
 // the state machine is testable end to end with no cluster, no network and no
@@ -120,6 +124,7 @@ type StoreResolver func(ctx context.Context, domain string) (string, error)
 type Deps struct {
 	Store   *store
 	Fetcher Fetcher
+	Assets  AssetImporter
 	Builder Builder
 	// FleetBuilder builds a deployable whose target needs the person's own
 	// machine (task memql#4904). Nil on every node that holds no worker
@@ -166,13 +171,15 @@ type Deps struct {
 	//
 	// It runs under the CALLER's actor, deliberately, which is the same answer
 	// updateSiteStoreBinding's Go guard gives: a caller who may not read a
-	// store may not bind a storefront to it. A store is cluster-owner-tier, so
+	// store, or may read it but not attach it, may not bind a storefront to
+	// it. A store reads at developer and above (Connect Shopify, D3), so
 	// resolving under the deployment instead would let anyone who can deploy a
-	// package point a storefront at any merchant on the cluster.
+	// package reach the stores the deployment can.
 	//
-	// NIL IS A REFUSAL, NOT A GAP, as it is for Credentials: a storefront
-	// deployed on a node that cannot resolve stores is refused by name rather
-	// than published unbound.
+	// NIL IS AN ANSWER, NOT A GAP, as it is for Credentials: a node that
+	// cannot resolve stores attaches none, so a first deploy places an
+	// unattached draft with a note (Connect Shopify, D5), which the go-live
+	// rule keeps away from shoppers until a store is connected.
 	Stores StoreResolver
 
 	// PeekCredentials is the PROBE's resolver (epic memql#4885, D11): the
@@ -263,6 +270,8 @@ type DeployRequest struct {
 // decide exactly as they do from the page, and there is no client-side
 // follow-up write for a closed window to lose.
 type Placement struct {
+	// Nil inherits manifest domains; an explicit empty list opts out for this run.
+	Domains   []string
 	Hostname  string
 	AccountId string
 	OwnDomain string
@@ -357,22 +366,50 @@ func (o *DeployOutcome) recordBuiltOn(on BuiltOn) {
 // answer, and re-running a TERMINAL row is refused by the append-only guard
 // rather than by anything here.
 func Deploy(ctx context.Context, d *Deps, req DeployRequest) (*DeployOutcome, error) {
-	pkg, err := d.Store.packageById(ctx, req.PackageId)
+	pkg, out, prepared, err := prepareDeployment(ctx, d, req)
 	if err != nil {
 		return nil, err
+	}
+	return executeDeployment(ctx, d, prepared, pkg, out)
+}
+
+// StartAnalysis persists the run before returning its ID. Its lifetime is the
+// cluster's, not the browser request's; Cancel is a durable flag another replica
+// can write. A node lost mid-run is handled by the existing abandoned sweep.
+func StartAnalysis(ctx context.Context, d *Deps, req DeployRequest) (*DeployOutcome, error) {
+	if req.Confirmed || req.Automatic || req.DeploymentId != "" {
+		return nil, fmt.Errorf("background analysis cannot confirm an existing deployment")
+	}
+	pkg, out, prepared, err := prepareDeployment(ctx, d, req)
+	if err != nil {
+		return nil, err
+	}
+	accepted := *out
+	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Minute)
+	go func() {
+		defer cancel()
+		_, _ = executeDeployment(runCtx, d, prepared, pkg, out)
+	}()
+	return &accepted, nil
+}
+
+func prepareDeployment(ctx context.Context, d *Deps, req DeployRequest) (map[string]any, *DeployOutcome, DeployRequest, error) {
+	pkg, err := d.Store.packageById(ctx, req.PackageId)
+	if err != nil {
+		return nil, nil, req, err
 	}
 	if pkg == nil {
 		// The composite tier returns zero rows for a package the caller may
 		// not read, so "not found" and "not yours" are the same answer here
 		// and the message must not claim to know which.
-		return nil, refuse(CodeSourceUnreadable,
+		return nil, nil, req, refuse(CodeSourceUnreadable,
 			"no package %q is readable by this caller", req.PackageId)
 	}
 
 	deploymentId := strings.TrimSpace(req.DeploymentId)
 	resumed, rerr := d.resumeParked(ctx, deploymentId, req.PackageId)
 	if rerr != nil {
-		return nil, rerr
+		return nil, nil, req, rerr
 	}
 	if deploymentId == "" {
 		deploymentId = d.newId(packageDeploymentConcept)
@@ -389,7 +426,7 @@ func Deploy(ctx context.Context, d *Deps, req DeployRequest) (*DeployOutcome, er
 		// would have the run report progress on apps it was told not to build.
 		if len(scope) > 0 {
 			if serr := d.Store.recordScope(ctx, deploymentId, scope); serr != nil {
-				return nil, serr
+				return nil, nil, req, serr
 			}
 		}
 		// AND IT DEPLOYS ITS OWN BYTES. The parked run analysed a snapshot and
@@ -434,10 +471,16 @@ func Deploy(ctx context.Context, d *Deps, req DeployRequest) (*DeployOutcome, er
 		FromDeploymentId: strings.TrimSpace(req.FromDeploymentId),
 		StartedAt:        d.now(),
 	}); err != nil {
-		return nil, err
+		return nil, nil, req, err
 	}
 
 	out := &DeployOutcome{DeploymentId: deploymentId, Status: StatusAnalyzing}
+
+	return pkg, out, req, nil
+}
+
+func executeDeployment(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]any, out *DeployOutcome) (*DeployOutcome, error) {
+	deploymentId := out.DeploymentId
 
 	// THE HEARTBEAT RUNS FOR THE LENGTH OF THE RUN (epic memql#4900, task
 	// memql#4902). Started here rather than inside runDeploy so it covers
@@ -462,6 +505,12 @@ func Deploy(ctx context.Context, d *Deps, req DeployRequest) (*DeployOutcome, er
 	})
 	runErr := runDeploy(runCtx, d, req, pkg, out, &cancelled)
 	stopHeartbeat()
+	if runErr == nil && out.AwaitingConfirm {
+		if asked, err := d.Store.cancelRequestedFor(ctx, deploymentId); err == nil && asked {
+			out.AwaitingConfirm = false
+			runErr = refuse(CodeDeploymentCancelled, "You stopped this analysis. Nothing was built or published.")
+		}
+	}
 
 	if err := runErr; err != nil {
 		var ref *Refusal
@@ -590,6 +639,13 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 	out.Report = rep
 	if rep != nil {
 		rep.UpstreamBaseline = snapshot.UpstreamBaseline
+	}
+	if aerr == nil {
+		repository := ""
+		if rowString(pkg, "sourceKind") == "repo" {
+			repository = rowString(pkg, "repoUrl")
+		}
+		aerr = validateAssetRepositories(rep, repository)
 	}
 
 	snapshotArtifactId := d.storeSnapshot(ctx, req, out.DeploymentId, snapshot)
@@ -939,6 +995,9 @@ func (d *Deps) fetchFor(ctx context.Context, req DeployRequest, pkg map[string]a
 func (d *Deps) fetch(ctx context.Context, pkg map[string]any) (*SourceSnapshot, error) {
 	switch rowString(pkg, "sourceKind") {
 	case "repo":
+		if err := d.validatePackageSourceConnection(ctx, pkg); err != nil {
+			return nil, err
+		}
 		// The owner rides along with the credential NAME, because the name
 		// is resolved under the owner's actor and not the caller's: a
 		// cluster owner deploying a colleague's package fetches under the

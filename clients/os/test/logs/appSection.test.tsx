@@ -36,7 +36,7 @@ describe("the app's slice", () => {
 
     expect(connection.callsNamed("logsTail")).toEqual([`builtin logsTail(${FILES_SCOPE})`]);
     expect(screen.getAllByRole("row")).toHaveLength(3);
-    expect(screen.getByText("Last hour · 3 lines")).toBeTruthy();
+    expect(document.querySelector(".os-head-meta")?.textContent).toBe("3");
     expect(screen.getByRole("button", { name: /^Following/ })).toBeTruthy();
   });
 
@@ -44,6 +44,7 @@ describe("the app's slice", () => {
     await renderAppLogs({ app: "files" });
     expect(screen.getByText("Not connected to the cluster.")).toBeTruthy();
     expect(screen.queryByRole("grid")).toBeNull();
+    expect(document.querySelector(".os-head-meta")).toBeNull();
   });
 });
 
@@ -155,10 +156,10 @@ describe("the two empty answers", () => {
     const old = new Date(Date.now() - 20 * 60_000).toISOString();
     h.connection = fakeConnection({ tail: [logRow({ id: "l-old", occurredAt: old })] });
     await renderAppLogs({ app: "files" });
-    expect(screen.getByText("Last hour · 1 line")).toBeTruthy();
+    expect(document.querySelector(".os-head-meta")?.textContent).toBe("1");
     await openRefine();
     await click(screen.getByRole("radio", { name: "15 min" }));
-    expect(screen.getByText("Last 15 minutes · 0 lines")).toBeTruthy();
+    expect(document.querySelector(".os-head-meta")?.textContent).toBe("0");
     expect(screen.getByText("Nothing recorded for this app in the last 15 minutes.")).toBeTruthy();
   });
 });

@@ -454,9 +454,9 @@ describe("the journal", () => {
     fireEvent.click(screen.getByText("Read the journal"));
     await waitFor(() => expect(conn.query.workModelCallsForOwnerRun).toHaveBeenCalled());
     expect(conn.query.workObservationsForOwnerRun).toHaveBeenCalled();
-    expect(await screen.findByText("1 model call")).toBeTruthy();
+    expect((await screen.findByRole("heading", { name: /^Model calls/ })).querySelector(".os-subhead-meta")?.textContent).toBe("1");
     expect(screen.getByText("served from the journal")).toBeTruthy();
-    expect(screen.getByText("1 observation")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /^Observations/ }).querySelector(".os-subhead-meta")?.textContent).toBe("1");
     expect(screen.getByText(/^Read at /)).toBeTruthy();
     // It says what an on-demand read costs, rather than implying liveness.
     expect(screen.getByText(/A call made since you looked is not here/)).toBeTruthy();

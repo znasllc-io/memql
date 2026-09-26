@@ -46,8 +46,8 @@ export const INVITATION_CONCEPT = "v1:identity:invitation";
  * key the redeem path looks an invitation up BY, and a pending list has never
  * read them.
  */
-export function useInvites(): LiveCollectionHandle<Row> {
-  return useLiveCollection<Row>("users:invites", (connection) => ({
+export function useInvites(enabled = true): LiveCollectionHandle<Row> {
+  return useLiveCollection<Row>(enabled ? "users:invites" : null, (connection) => ({
     concept: INVITATION_CONCEPT,
     actions: ["created", "updated"],
     seed: async (_cursor, signal) => {

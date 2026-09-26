@@ -315,4 +315,17 @@ automation onDelegationCreated {
     timestamp: now
   }
 }
+/// Global operators work for the cluster's own organization. Role changes and
+/// new users reach the same idempotent membership writer as the boot sweep.
+@trigger(event="node.created", concept="v1:identity:user")
+automation ensureNewOperatorOrganization {
+  args { id any }
+  ensure := builtin groupEnsureOperatorMembership(userId: args.id)
+}
+
+@trigger(event="node.updated", concept="v1:identity:user")
+automation ensureUpdatedOperatorOrganization {
+  args { id any }
+  ensure := builtin groupEnsureOperatorMembership(userId: args.id)
+}
 

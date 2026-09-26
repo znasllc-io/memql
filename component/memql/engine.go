@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/core/audio"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -57,6 +58,7 @@ type MemQLEngine struct {
 	seeds                   *SeedRegistry
 	seedMaterializer        *SeedMaterializer
 	providers               *ProviderRegistry
+	voiceTransport          audio.RoomTransport
 	policies                *PolicyRegistry
 	// rules is the routing-rule corpus (epic memql#5127). Unpopulated until
 	// the rule loader lands: every reader is nil-safe, and a nil registry
@@ -1342,6 +1344,9 @@ func (e *MemQLEngine) planCacheSignature(ctx context.Context, plan *QueryPlan) s
 	if treeHasAccountScope(plan.Root) {
 		signature = "account:" + e.accountScopeFor(ctx).fingerprint + "\x1f" + signature
 	}
+	if treeHasAccountScope(plan.Root) || planIsUnbound(plan) {
+		signature = "organization:" + e.organizationAuthorizationFingerprint(ctx) + "\x1f" + signature
+	}
 	return signature
 }
 
@@ -1450,7 +1455,7 @@ func (e *MemQLEngine) executeLogicFunctionCall(ctx context.Context, call *Functi
 	}
 	// The capability grant, repeated at each entry point for the reason the
 	// rank floor is (epic memql#5166, D11).
-	if err := e.refuseBelowRequiredCapability(ctx, fn, call.Name); err != nil {
+	if err := e.refuseBelowRequiredCapability(ctx, fn, call.Name, call.Args); err != nil {
 		return nil, err
 	}
 	if fn.LogicBody == nil {
@@ -1518,7 +1523,7 @@ func (e *MemQLEngine) executeMutationFunctionCall(ctx context.Context, call *Fun
 	}
 	// The capability grant, repeated at each entry point for the reason the
 	// rank floor is (epic memql#5166, D11).
-	if err := e.refuseBelowRequiredCapability(ctx, fn, call.Name); err != nil {
+	if err := e.refuseBelowRequiredCapability(ctx, fn, call.Name, call.Args); err != nil {
 		return nil, err
 	}
 	if fn.MutationTemplate == nil {

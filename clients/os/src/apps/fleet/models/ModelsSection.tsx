@@ -1,5 +1,7 @@
+import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
+import { LocalTabs } from "../../../kit/LocalTabs";
 import { useMemo, useState } from "react";
-import { FleetTabs, RefreshButton, useFleetScroll } from "../FleetControls";
+import { RefreshButton, useFleetScroll } from "../FleetControls";
 import { InfoDetail } from "../../../kit/InfoDetail";
 
 import {
@@ -18,6 +20,8 @@ import {
   Refine,
   Select,
   Subhead,
+  RecordList,
+  RecordRow,
 } from "../../../kit";
 import { figureFrom, type Figure } from "../../../kit/measure";
 import { CatalogSection } from "./CatalogSection";
@@ -156,7 +160,7 @@ export function ModelsSection({ onHome }: { onHome?: () => void } = {}) {
       <div className="fleet-section-header">
       <Head
         title="Model library"
-        meta={models.length === 0 ? undefined : `${models.length} on your fleet`}
+        meta={view === "available" && catalog.state === "read" && !catalog.error ? shown.length : undefined}
       >
         {/* A REFRESH CONTROL BELONGS HERE, unlike on the live sections: both
             readings are on-demand projections that are never broadcast, so
@@ -165,7 +169,7 @@ export function ModelsSection({ onHome }: { onHome?: () => void } = {}) {
         <RefreshButton label="Refresh model library" busy={reading} onClick={() => { catalog.reread(); doors.reread(); profiles.reread(); }} />
       </Head>
 
-      <FleetTabs label="Model library views" value={view} onChange={setView} options={[["available", "Available models"], ["catalog", "Catalog"], ["sources", "Inference sources"]]} />
+      <LocalTabs label="Model library views" value={view} onChange={setView} options={[["available", "Available models"], ["catalog", "Catalog"], ["sources", "Inference sources"]]} />
       </div>
       <div hidden={view !== "sources"}><DoorsPanel doors={doors.value} state={doors.state} error={doors.error} /></div>
       <div hidden={view !== "available"}>
@@ -249,6 +253,7 @@ export function ModelsSection({ onHome }: { onHome?: () => void } = {}) {
         </>
       )}
 
+      {catalog.state === "reading" && models.length === 0 ? <RecordListSkeleton label="Loading available models" rows={3} /> : null}
       {catalog.state === "read" && ranked.length === 0 ? (
         <EmptyState title="No models available" action={<><Button onClick={() => setView("catalog")}>Browse model catalog</Button>{onHome ? <Button onClick={onHome}>Go to Machines</Button> : null}</>}>Connect a machine and install a local model to make it available here.</EmptyState>
       ) : null}
@@ -257,7 +262,7 @@ export function ModelsSection({ onHome }: { onHome?: () => void } = {}) {
         <EmptyState title="No matching models" action={<Button onClick={() => { setSearch(""); setCapability(""); setOnlineOnly(false); }}>Clear filters</Button>}>Try another name or include more capabilities and offline machines.</EmptyState>
       ) : null}
 
-      <ul className="os-fleet-models">
+      <RecordList as="ul" label="Available models">
         {shown.map((model) => (
           <ModelLine
             key={model.modelId}
@@ -269,7 +274,7 @@ export function ModelsSection({ onHome }: { onHome?: () => void } = {}) {
             showMeasured={anyMeasured}
           />
         ))}
-      </ul>
+      </RecordList>
 
       {/* SAID ONCE, UNDER THE LIST, rather than as a column of identical
           absence marks. When the probe lands (epic memql#5146) the column
@@ -338,7 +343,7 @@ function DoorsPanel({
         />
       ) : null}
       {doors === null ? (
-        state === "reading" ? <Caption>Asking the cluster.</Caption> : null
+        state === "reading" ? <RecordListSkeleton label="Loading the cluster" /> : null
       ) : (
         <>
           <p className="os-cluster-fact">{doorSentence(doors)}</p>
@@ -459,26 +464,20 @@ function ModelLine({
   /** Whether ANY model on this fleet is measured -- see `anyMeasured`. */
   showMeasured: boolean;
 }) {
+  const [open, setOpen] = useState(false);
   const size = formatParams(model.params);
   const window = formatContext(model.contextWindow);
 
   return (
-    <li className="os-fleet-model" data-offline={model.online ? undefined : true}>
-      <details className="fleet-model-detail"><summary className="os-fleet-model-head">
-        <span className="os-fleet-model-rank" aria-hidden="true">
-          {rank}
-        </span>
-        <span className="os-fleet-model-id os-mono">{model.modelId}</span>
-        {/* The ONE standing mark on this screen. It names what the model is
-            about to be used for, which is the question the whole section
-            answers; everything else here is quiet. */}
-        {serves.length > 0 ? (
-          <span className="os-fleet-model-next">next for {serves.join(", ").toLowerCase()}</span>
-        ) : null}
+    <div>
+      <RecordRow name={model.modelId} icon={<span aria-hidden>{rank}</span>}
+        secondary={serves.length ? `next for ${serves.join(", ").toLowerCase()}` : undefined}
+        state={model.online ? "Online" : "Offline"} tone={model.online ? "accent" : "muted"}
+        open={open} onOpen={() => setOpen(value => !value)}>
         {preferred ? <Chip tone="accent">preferred</Chip> : null}
-        {model.online ? null : <Chip tone="muted">offline</Chip>}
-      </summary>
-
+        <span>{size}</span><span>{window ? `${window} tokens` : ""}</span>
+      </RecordRow>
+      {open ? <div className="fleet-model-detail">
       <Facts>
         {/* SIZE IS NOT PRINTED AS ZERO. Zero parameters is not a thing, and a
             "0" here would make the unmeasured model look like the smallest
@@ -521,10 +520,9 @@ function ModelLine({
       </Chips>
 
       {model.machines.length === 0 ? null : (
-        <ul className="os-fleet-model-machines">
+        <RecordList as="ul" label="Machines serving this model">
           {model.machines.map((machine) => (
-            <li key={machine.registrationId} className="os-fleet-model-machine">
-              <span className="os-mono">{machine.displayName || machine.name || machine.registrationId}</span>
+            <RecordRow key={machine.registrationId} name={machine.displayName || machine.name || machine.registrationId} state={machine.online ? (machine.busy ? "Busy" : "Online") : "Offline"}>
               <span className="os-caption">
                 {machine.online ? (machine.busy ? "busy" : "online") : "offline"}
                 {machine.maxConcurrent > 0
@@ -532,12 +530,12 @@ function ModelLine({
                   : ""}
                 {machine.runtimes.length > 0 ? ` · ${machine.runtimes.join(", ")}` : ""}
               </span>
-            </li>
+            </RecordRow>
           ))}
-        </ul>
+        </RecordList>
       )}
-      </details>
-    </li>
+      </div> : null}
+    </div>
   );
 }
 
@@ -556,7 +554,9 @@ function doorSentence(doors: DoorsReading): string {
 function doorWord(door: string): string {
   switch (door) {
     case "local":
-      return "a model on your own machines";
+      // Yours, or lent to you (epic memql#5344): a person's catalog holds
+      // both, and somebody with no machine of their own may be using one.
+      return "a local model on your machines or on one lent to you";
     case "app":
       return "a signed-in app on one of your machines";
     case "federation":

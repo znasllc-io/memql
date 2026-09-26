@@ -481,11 +481,11 @@ describe("the two lists the tabs draw", () => {
     expect(flat.every((r) => r.site !== null)).toBe(true);
   });
 
-  it("keeps a row with no address of its own off the deployables list: it is a fact about its source", () => {
+  it("keeps pending setup visible before it has an address", () => {
     const groups = fold([STORE], [ACME], [parkedRun({ id: "dep-1", packageId: "pkg-acme" })]);
     const willServe = groups.flatMap((g) => g.rows).filter((r) => r.site === null);
     expect(willServe.length).toBeGreaterThan(0);
-    expect(flatDeployables(groups).some((r) => r.site === null)).toBe(false);
+    expect(flatDeployables(groups).some((r) => r.site === null)).toBe(true);
   });
 
   it("says where a deployable came from: its source by name, else the way in it took", () => {
@@ -526,7 +526,7 @@ describe("the two lists the tabs draw", () => {
     // No site, no declared app, no parked run -- what a refused analysis
     // leaves behind. The deployables fold has no row to hang it on.
     const empty = packageFromRow({ ...(ACME as unknown as Row), id: "pkg-empty", name: "field-notes", repoUrl: "https://github.com/acme/field-notes" } as Row);
-    expect(fold([STORE, ADMIN, SHOP], [ACME, empty]).some((g) => g.pkg?.id === "pkg-empty")).toBe(false);
+    expect(fold([STORE, ADMIN, SHOP], [ACME, empty]).some((g) => g.pkg?.id === "pkg-empty")).toBe(true);
     const sources = sources_([STORE, ADMIN, SHOP], [ACME, empty]);
     expect(sources.map((g) => g.pkg?.name)).toEqual(["acme", "field-notes"]);
     expect(sourceSummary(sources[1]!)).toEqual({ apps: 0, deployed: 0, waiting: false });

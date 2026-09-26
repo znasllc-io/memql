@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../../base
+
+components:
+  - ../../../components/engine-bff
+
+# A separate layer is required: labels in the consuming overlay run after
+# components, too late for the DSL mount/fetch selectors to see them.
+patches:
+  - target: { kind: Deployment, name: "^(bff|agent|planner|workbench)$" }
+    patch: |
+      - op: add
+        path: /metadata/labels/memql~1product-dsl
+        value: "true"

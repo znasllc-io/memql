@@ -37,10 +37,18 @@ func seedGroup(t *testing.T, eng *MemQLEngine, id, name, kind, accountId string)
 // seedMembership writes a membership row at the derived id.
 func seedMembership(t *testing.T, eng *MemQLEngine, groupId, userId, status string) {
 	t.Helper()
+	parent, err := eng.Execute(groupSeedCtx(), fmt.Sprintf(`query groupById(groupId: %s)`, langparser.QuoteString(groupId)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	account := ""
+	if rows := MaterializeRows(parent); len(rows) != 0 {
+		account, _ = rows[0]["accountId"].(string)
+	}
 	q := fmt.Sprintf(
-		`mutation writeGroupMembership(membershipId: %s, groupId: %s, userId: %s, origin: "added", status: %s)`,
+		`mutation writeGroupMembership(membershipId: %s, groupId: %s, userId: %s, origin: "added", status: %s, accountId: %s)`,
 		langparser.QuoteString(groupId+"-"+userId), langparser.QuoteString(groupId),
-		langparser.QuoteString(userId), langparser.QuoteString(status))
+		langparser.QuoteString(userId), langparser.QuoteString(status), langparser.QuoteString(account))
 	if _, err := eng.Execute(groupSeedCtx(), q); err != nil {
 		t.Fatalf("seed membership %s/%s: %v", groupId, userId, err)
 	}
@@ -51,8 +59,10 @@ func seedMembership(t *testing.T, eng *MemQLEngine, groupId, userId, status stri
 func groupSeedCtx() context.Context {
 	ctx := auth.ContextWithInternalOrigin(
 		auth.ContextWithAccess(context.Background(), &auth.AccessContext{
-			UserId: "account-db-seeder",
-			Role:   auth.RoleOwner,
+			UserId:    "account-db-seeder",
+			Role:      auth.RoleOwner,
+			Unranked:  true,
+			Synthetic: true,
 		}))
 	return auth.ContextWithToken(ctx, &auth.TokenInfo{Subject: "account-db-seeder"})
 }
@@ -293,6 +303,7 @@ func TestAccountGrantAdmitsAWriteToATiedRow(t *testing.T) {
 	}
 	seedGroup(t, eng, "g-"+acme, "Acme", "account", acme)
 	seedMembership(t, eng, "g-"+acme, member, "active")
+	seedAccountOwnedBy(t, eng, "operator-"+suffix, auth.RoleOwner, acme, "Acme")
 	seedSiteFor(t, eng, "site-"+suffix, builder, acme)
 
 	// A raw INSERT at the same id, which is how an append-only row is
@@ -305,7 +316,7 @@ func TestAccountGrantAdmitsAWriteToATiedRow(t *testing.T) {
 			"hostname":    "site-" + suffix + ".example.test",
 			"status":      "live",
 			"kind":        "spa",
-			"bundleRef":   "blob://sites/site-" + suffix + "/v2/",
+			"bundleRef":   "blob://sites/site-" + suffix + "/v1/",
 			"accountId":   acme,
 		})
 		_, err := eng.Execute(rankActorCtx(userId, auth.RoleWriter),
@@ -346,6 +357,7 @@ func TestAccountGrantAppliesToAReadIssuedAfterTheMembershipLands(t *testing.T) {
 	seedPrincipal(t, eng, member, auth.RoleWriter)
 	seedPrincipal(t, eng, builder, auth.RoleWriter)
 	seedGroup(t, eng, "g-"+acme, "Acme", "account", acme)
+	seedAccountOwnedBy(t, eng, "operator-"+suffix, auth.RoleOwner, acme, "Acme")
 	seedSiteFor(t, eng, "site-"+suffix, builder, acme)
 
 	read := func(tag string) bool {
@@ -405,6 +417,7 @@ func TestAccountGrantReachesTheAccountView(t *testing.T) {
 	seedPrincipal(t, eng, builder, auth.RoleWriter)
 	seedGroup(t, eng, "g-"+acme, "Acme", "account", acme)
 	seedMembership(t, eng, "g-"+acme, member, "active")
+	seedAccountOwnedBy(t, eng, "operator-"+suffix, auth.RoleOwner, acme, "Acme")
 	seedSiteFor(t, eng, "site-"+suffix, builder, acme)
 
 	sees := func(userId string) bool {
@@ -439,7 +452,7 @@ func TestAccountGrantReachesTheAccountView(t *testing.T) {
 // covered by nothing that would notice a filter change breaking them -- which
 // is exactly what the `requiresDeveloperOrAbove` conjunct is: a change to
 // every one of their filters, made to satisfy a gate.
-func TestGroupQueriesAnswerForTheSystemActorAndRefuseBelowTheFloor(t *testing.T) {
+func TestGroupQueriesAnswerForSystemActorAndOrganizationMembers(t *testing.T) {
 	eng, _, _ := sharedReadMergeEngine(t)
 	suffix := uniqueSuffix("groupreads")
 
@@ -478,10 +491,16 @@ func TestGroupQueriesAnswerForTheSystemActorAndRefuseBelowTheFloor(t *testing.T)
 					"query under exactly that actor, so a filter it cannot satisfy makes every group "+
 					"operation fail -- and no stub-driven test would see it.", tc.name, got)
 			}
-			// ...and a Member is refused rather than served, which is what
-			// the @requiresRank floor and the conjunct together are for.
-			if got := rowsOf(t, rankActorCtx(member, auth.RoleWriter), tc.query); got > 0 {
-				t.Fatalf("%s answered %d rows to a writer -- these reads are admin-floored", tc.name, got)
+			got := rowsOf(t, rankActorCtx(member, auth.RoleWriter), tc.query)
+			if tc.name == "groupsForUser" {
+				if got != -1 {
+					t.Fatalf("arbitrary principal membership lookup must keep its admin floor, got %d", got)
+				}
+			} else if got <= 0 {
+				t.Fatalf("%s must admit the organization's member, got %d", tc.name, got)
+			}
+			if got := rowsOf(t, rankActorCtx("outside-"+suffix, auth.RoleWriter), tc.query); got > 0 {
+				t.Fatalf("%s disclosed %d group rows outside the caller's organization", tc.name, got)
 			}
 		})
 	}

@@ -205,3 +205,29 @@ describe("a domain's detail", () => {
     expect(inert.getAttribute("title")).toMatch(/skill\.domainIds/);
   });
 });
+
+
+describe("domain list navigation and counts", () => {
+  it("counts a settled read and preserves the domain disclosure", async () => {
+    const { view } = mount(fakeConnection({ domainRows: [domainLiteRow("sales", "validated")] }));
+    expect(view.container.querySelector(".os-head-meta")).toBeNull();
+    await settle();
+    expect(view.container.querySelector(".os-head-meta")?.textContent).toBe("1");
+    await click(screen.getByText("sales"));
+    await settle();
+    expect(screen.getByRole("list", { name: "Knowledge domains in this cluster" })).toBeTruthy();
+    const disclosure = screen.getByText("sales").closest("button");
+    expect(disclosure?.getAttribute("aria-expanded")).toBe("true");
+    expect(view.container.querySelector(".os-train-domain-detail")).not.toBeNull();
+    await click(disclosure as HTMLElement);
+    expect(disclosure?.getAttribute("aria-expanded")).toBe("false");
+    expect(view.container.querySelector(".os-train-domain-detail")).toBeNull();
+  });
+
+  it("does not render a zero for a refused domain read", async () => {
+    const { view } = mount(fakeConnection({ domainsError: "domains denied" }));
+    await settle();
+    expect(screen.getByText("domains denied")).toBeTruthy();
+    expect(view.container.querySelector(".os-head-meta")).toBeNull();
+  });
+});

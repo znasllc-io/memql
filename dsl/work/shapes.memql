@@ -25,10 +25,12 @@ shape goal workGoalFull {
 /// Every run field, including the trust and chain fields resume restores.
 @row
 shape run workRunFull {
+  executionAuthority
   row.id
   row.createdAt
   ownerUserId
   goalId
+  goalSignature
   automationName
   templateConstructId
   templateVersion
@@ -65,7 +67,6 @@ shape run workRunFull {
   // the lift and the replay runner read runs through this shape: without
   // these two a delegated recording could not name the goal it served or the
   // run that delegated it, however faithfully the row stored them.
-  goalSignature
   parentRunId
 }
 

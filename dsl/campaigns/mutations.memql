@@ -1,11 +1,10 @@
 // campaigns domain -- caller-scoped writes.
 //
-// Authz tier: owned. Every mutation stamps ownerUserId from actor.userId,
-// never from a caller argument, so a caller can neither create a row owned by
-// somebody else nor reassign an existing row's owner. Every update re-stamps
-// it for the same reason: an update that omitted it would leave the field to
-// the read-merge, and a row whose ownership depends on a merge is a row whose
-// ownership can drift.
+// Organization-owned resources stamp ownerUserId from the authenticated actor
+// on creation. Shared edits require current rights in that organization and
+// preserve the original owner, even when a template repeats an actor stamp;
+// each stored version separately records its current writer in createdBy.
+// Legacy untied rows retain their existing ownership rules.
 //
 // THE SENDING WRITES ARE HERE NOW (memql#3348), and they are split from the
 // operator-facing ones above by WHO CALLS THEM rather than by what they touch:
@@ -32,10 +31,8 @@
 // It is still an ordinary owned-tier write of the time and the status -- but it
 // is now reached through the `campaignScheduleSend` builtin, which does the same
 // preflight `campaignStartSend` does and enqueues a `scheduled` send job the
-// worker will promote when the time comes. Calling this mutation directly still
-// works and still moves the campaign to `scheduled`; what it will not do on its
-// own is create the job, so a campaign scheduled that way waits for a hand on
-// Start. The builtin is the path the portal takes and the one to document.
+// worker will promote when the time comes. The mutation is server-only; the
+// builtin is the client path that authorizes the action and creates its job.
 
 /// Create an audience owned by the caller. Owned: ownerUserId is stamped from actor.userId, so a
 /// caller can only ever create their own audiences.
@@ -58,9 +55,8 @@ mutation audience createAudience {
 }
 
 /// Archive an audience: keep it (and every delivery record naming it) readable, but drop it out of
-/// the campaign editor's picker. Owned -- ownerUserId is re-stamped from actor.userId, and the
-/// engine's row-authz write guard refuses the update outright when the target row's owner is
-/// somebody else.
+/// the campaign editor's picker. Authorized organization peers may archive it; the engine
+/// preserves its original owner and records the current writer on the new version.
 @actor
 mutation audience archiveAudience {
   args {
@@ -233,13 +229,12 @@ mutation campaign updateCampaign {
 /// re-reads this row rather than trusting the copy it stamped on the send job, so moving the date
 /// moves the send. What this mutation does not do by itself is create the job the worker scans;
 /// `campaignScheduleSend` does both, and is the path the portal takes.
-/// SCOPING TO actor.userId IS NOT THE FIX HERE, and that is why the annotation is @serverOnly
-/// rather than a tighter filter. These rows are ALREADY owner-scoped -- ownerUserId is stamped
-/// from actor.userId on every write, so a caller can only ever reach their own campaign. The
-/// problem is not WHOSE row is being written, it is that a caller may not perform this transition
-/// at all: a browser flipping status to "sending" with no send job behind it, or stamping counters
-/// for deliveries that never happened, desyncs the row from the engine while owning it perfectly.
-/// The builtins do the authorization (an owned-tier read under the caller's own actor) and then the
+/// SCOPING TO actor.userId IS NOT THE FIX HERE, which is why this is @serverOnly.
+/// Organization permissions decide whose campaign may be changed; they do not authorize a
+/// browser to assert engine outcomes. A caller marking a campaign "sending" without its job,
+/// or recording deliveries that never happened, would bypass the send lifecycle even while
+/// holding valid update rights. The engine preserves the resource's existing owner.
+/// The builtins require a caller-scoped read plus organization update permission, then run the
 /// preflight; this write is the last step of that, not an operation of its own.
 @actor
 @serverOnly
@@ -276,16 +271,14 @@ mutation campaign cancelCampaign {
 // The sending writes (memql#3348).
 
 /// Move a campaign into the sending state and stamp when the run began. Called by the
-/// `campaignStartSend` builtin AFTER it has read the campaign under the caller's own actor, which is
-/// where the ownership check actually happens; this mutation re-stamps ownerUserId anyway, because a
-/// write whose ownership depends on a read-merge is a write whose ownership can drift. Owned.
-/// SCOPING TO actor.userId IS NOT THE FIX HERE, and that is why the annotation is @serverOnly
-/// rather than a tighter filter. These rows are ALREADY owner-scoped -- ownerUserId is stamped
-/// from actor.userId on every write, so a caller can only ever reach their own campaign. The
-/// problem is not WHOSE row is being written, it is that a caller may not perform this transition
-/// at all: a browser flipping status to "sending" with no send job behind it, or stamping counters
-/// for deliveries that never happened, desyncs the row from the engine while owning it perfectly.
-/// The builtins do the authorization (an owned-tier read under the caller's own actor) and then the
+/// `campaignStartSend` builtin after it reads the campaign under the caller's actor and verifies
+/// organization update permission. The existing owner is preserved on shared edits.
+/// SCOPING TO actor.userId IS NOT THE FIX HERE, which is why this is @serverOnly.
+/// Organization permissions decide whose campaign may be changed; they do not authorize a
+/// browser to assert engine outcomes. A caller marking a campaign "sending" without its job,
+/// or recording deliveries that never happened, would bypass the send lifecycle even while
+/// holding valid update rights. The engine preserves the resource's existing owner.
+/// The builtins require a caller-scoped read plus organization update permission, then run the
 /// preflight; this write is the last step of that, not an operation of its own.
 @actor
 @serverOnly
@@ -305,13 +298,12 @@ mutation campaign startCampaign {
 /// Pause a running send. The delivery ledger is untouched, which is the whole point: a paused
 /// campaign resumes exactly where it stopped because "where it stopped" is the set of recipients
 /// with no delivery row, not a cursor that could go stale. Owned.
-/// SCOPING TO actor.userId IS NOT THE FIX HERE, and that is why the annotation is @serverOnly
-/// rather than a tighter filter. These rows are ALREADY owner-scoped -- ownerUserId is stamped
-/// from actor.userId on every write, so a caller can only ever reach their own campaign. The
-/// problem is not WHOSE row is being written, it is that a caller may not perform this transition
-/// at all: a browser flipping status to "sending" with no send job behind it, or stamping counters
-/// for deliveries that never happened, desyncs the row from the engine while owning it perfectly.
-/// The builtins do the authorization (an owned-tier read under the caller's own actor) and then the
+/// SCOPING TO actor.userId IS NOT THE FIX HERE, which is why this is @serverOnly.
+/// Organization permissions decide whose campaign may be changed; they do not authorize a
+/// browser to assert engine outcomes. A caller marking a campaign "sending" without its job,
+/// or recording deliveries that never happened, would bypass the send lifecycle even while
+/// holding valid update rights. The engine preserves the resource's existing owner.
+/// The builtins require a caller-scoped read plus organization update permission, then run the
 /// preflight; this write is the last step of that, not an operation of its own.
 @actor
 @serverOnly
@@ -329,13 +321,12 @@ mutation campaign pauseCampaign {
 /// Resume a paused send. Deliberately does NOT re-stamp startedAt -- the gap between startedAt and
 /// completedAt is the number a deliverability review reads as "how long did this run take", and
 /// resetting it on every resume would erase the pause it is meant to reveal. Owned.
-/// SCOPING TO actor.userId IS NOT THE FIX HERE, and that is why the annotation is @serverOnly
-/// rather than a tighter filter. These rows are ALREADY owner-scoped -- ownerUserId is stamped
-/// from actor.userId on every write, so a caller can only ever reach their own campaign. The
-/// problem is not WHOSE row is being written, it is that a caller may not perform this transition
-/// at all: a browser flipping status to "sending" with no send job behind it, or stamping counters
-/// for deliveries that never happened, desyncs the row from the engine while owning it perfectly.
-/// The builtins do the authorization (an owned-tier read under the caller's own actor) and then the
+/// SCOPING TO actor.userId IS NOT THE FIX HERE, which is why this is @serverOnly.
+/// Organization permissions decide whose campaign may be changed; they do not authorize a
+/// browser to assert engine outcomes. A caller marking a campaign "sending" without its job,
+/// or recording deliveries that never happened, would bypass the send lifecycle even while
+/// holding valid update rights. The engine preserves the resource's existing owner.
+/// The builtins require a caller-scoped read plus organization update permission, then run the
 /// preflight; this write is the last step of that, not an operation of its own.
 @actor
 @serverOnly
@@ -352,18 +343,17 @@ mutation campaign resumeCampaign {
 
 /// Stamp send progress onto the campaign row. Written by the drain worker under the campaign
 /// owner's actor, once per batch and once at completion, so the portal's campaign list shows live
-/// counters without aggregating the ledger per row. Owned -- ownerUserId is re-stamped from
-/// actor.userId, so the worker can only ever write this onto a campaign it was authorized to read.
+/// counters without aggregating the ledger per row. The worker rechecks the owner's current
+/// organization authority; updates preserve that owner and record the writer on each version.
 ///
 /// Distinct from `updateCampaign`, which is the operator's authoring write and deliberately refuses
 /// to accept status or any counter. The two never overlap in what they accept.
-/// SCOPING TO actor.userId IS NOT THE FIX HERE, and that is why the annotation is @serverOnly
-/// rather than a tighter filter. These rows are ALREADY owner-scoped -- ownerUserId is stamped
-/// from actor.userId on every write, so a caller can only ever reach their own campaign. The
-/// problem is not WHOSE row is being written, it is that a caller may not perform this transition
-/// at all: a browser flipping status to "sending" with no send job behind it, or stamping counters
-/// for deliveries that never happened, desyncs the row from the engine while owning it perfectly.
-/// The builtins do the authorization (an owned-tier read under the caller's own actor) and then the
+/// SCOPING TO actor.userId IS NOT THE FIX HERE, which is why this is @serverOnly.
+/// Organization permissions decide whose campaign may be changed; they do not authorize a
+/// browser to assert engine outcomes. A caller marking a campaign "sending" without its job,
+/// or recording deliveries that never happened, would bypass the send lifecycle even while
+/// holding valid update rights. The engine preserves the resource's existing owner.
+/// The builtins require a caller-scoped read plus organization update permission, then run the
 /// preflight; this write is the last step of that, not an operation of its own.
 @actor
 @serverOnly
@@ -400,19 +390,18 @@ mutation campaign updateCampaignProgress {
 ///
 /// Owned: ownerUserId is stamped from actor.userId. The worker runs this under the CAMPAIGN OWNER'S
 /// actor, so the value is the campaign's owner and no caller can name a different one.
-/// SCOPING TO actor.userId IS NOT THE FIX HERE, and that is why the annotation is @serverOnly
-/// rather than a tighter filter. These rows are ALREADY owner-scoped -- ownerUserId is stamped
-/// from actor.userId on every write, so a caller can only ever reach their own campaign. The
-/// problem is not WHOSE row is being written, it is that a caller may not perform this transition
-/// at all: a browser flipping status to "sending" with no send job behind it, or stamping counters
-/// for deliveries that never happened, desyncs the row from the engine while owning it perfectly.
-/// The builtins do the authorization (an owned-tier read under the caller's own actor) and then the
+/// SCOPING TO actor.userId IS NOT THE FIX HERE, which is why this is @serverOnly.
+/// Organization permissions decide whose campaign may be changed; they do not authorize a
+/// browser to assert engine outcomes. A caller marking a campaign "sending" without its job,
+/// or recording deliveries that never happened, would bypass the send lifecycle even while
+/// holding valid update rights. The engine preserves the resource's existing owner.
+/// The builtins require a caller-scoped read plus organization update permission, then run the
 /// preflight; this write is the last step of that, not an operation of its own.
 @actor
 @serverOnly
 mutation delivery recordCampaignDelivery {
   args {
-    campaignId         string!
+    campaignId         string
     recipientId        string!
     email              string!
     status             enum("pending", "sent", "failed", "skipped")!
@@ -428,8 +417,9 @@ mutation delivery recordCampaignDelivery {
   insert {
     accept { campaignId, recipientId, email, status, skipReason, lastError, sentAt, nextAttemptAt, outboundRequestId, emailRuleId }
     stamp {
+      // Keep the existing per-rule ledger identity without inventing a campaign reference.
       id: hash(
-        hash(canonicalId(args.campaignId, "campaign")) +
+        hash(canonicalId(args.campaignId ?? args.emailRuleId ?? "", "campaign")) +
         hash(canonicalId(args.recipientId, "recipient"))
       )
       ownerUserId: actor.userId
@@ -448,7 +438,7 @@ mutation delivery recordCampaignDelivery {
 /// campaignOwnerUserId is the field that decides whose authority the worker borrows, so it is worth
 /// being explicit about where it comes from: the `campaignStartSend` builtin reads the campaign row
 /// UNDER THE CALLER'S OWN ACTOR and copies the owner off that row. A caller can therefore only ever
-/// enqueue a job naming a user they could already act as -- the owned-tier read IS the authorization.
+/// enqueue a job only after a readable campaign and organization update permission have been verified.
 /// Nothing in this mutation's arguments is trusted to say who owns anything.
 ///
 /// `status` exists so ONE mutation covers both ways a job is created (memql#3459): 'queued' for a

@@ -124,7 +124,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Synthetic homepage probes do not count as visitor traffic. This is a
 	// metrics classification only, not an authentication or security-log bypass.
 	probe := r.Method == http.MethodGet && r.URL.Path == "/" && r.UserAgent() == "MemQL-Site-Health/1.0"
-	if h.requestLog == nil || site.SystemOwned || probe {
+	// Background version polls are not visits and must not inflate traffic logs.
+	refreshProbe := r.Method == http.MethodHead && r.URL.Path == runtimeConfigPath
+	if h.requestLog == nil || site.SystemOwned || probe || refreshProbe {
 		h.serve(w, r, site)
 		return
 	}
@@ -197,6 +199,13 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, site *Site) stri
 		return h.serveResolved(w, r, site)
 	}
 
+	// A testing origin never falls through to Production when access expires.
+	if site.StorefrontTesting {
+		previewHeaders(w)
+		http.Error(w, "Open this testing website from MemQL OS: Visit → Testing.", http.StatusUnauthorized)
+		return pathClassUnserved
+	}
+
 	// STATUS BEFORE ANY FILE LOOKUP. An unknown host and a draft site are both
 	// 404 -- neither exists as far as the internet is concerned. A DISABLED
 	// site is 503, deliberately: a deliberately paused site and a typo'd
@@ -236,6 +245,11 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, site *Site) stri
 // preview binding's, and from here there is no code path that can tell the
 // difference.
 func (h *Handler) serveResolved(w http.ResponseWriter, r *http.Request, site *Site) string {
+	w.Header().Set(deploymentVersionHeader, deploymentVersion(site))
+	if r.URL.Path == siteRefreshPath {
+		serveSiteRefresh(w, r)
+		return pathClassConfig
+	}
 	// Cluster-wide identity discovery, ahead of the bundle lookup and for
 	// every site alike -- see runtimeconfig.go. Not a new entry in
 	// component/server.EdgePaths(): the edge's declared surface is exactly
@@ -444,6 +458,11 @@ func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request, fsys fs.FS, 
 			w.Header().Del("Expires")
 		}
 	}
+	version := w.Header().Get(deploymentVersionHeader)
+	refreshDocument := isHTMLDocument(name) && version != ""
+	if refreshDocument && hasETag {
+		etag = strongETag(etag, "site-refresh-v1", version)
+	}
 	if hasETag {
 		w.Header().Set("ETag", etag)
 		// Repeat the current freshness policy on conditional responses too.
@@ -451,6 +470,18 @@ func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request, fsys fs.FS, 
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
+	}
+
+	if refreshDocument {
+		data, err := refreshingDocument(fsys, name, version)
+		if err != nil {
+			w.Header().Del("ETag")
+			noCache(w)
+			http.NotFound(w, r)
+			return
+		}
+		http.ServeContent(w, r, path.Base(name), time.Time{}, bytes.NewReader(data))
+		return
 	}
 
 	f, err := fsys.Open(name)

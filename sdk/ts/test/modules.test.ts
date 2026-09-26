@@ -75,6 +75,7 @@ test("listModules -- sends modulesList and normalizes rows", async () => {
           state: "enabled",
           scope: "cluster",
           fqnPrefixes: ["integration.harnessRecall.", "integration.harnessTrace."],
+          mayFlip: true,
         },
         { kind: "component", name: "identity" },
       ],
@@ -89,6 +90,10 @@ test("listModules -- sends modulesList and normalizes rows", async () => {
   assert.equal(inv.modules[0]!.scope, "cluster");
   assert.deepEqual(inv.modules[1]!.fqnPrefixes, []);
   assert.equal(inv.modules[1]!.stateDetail, "");
+  // mayFlip is carried when the engine says it, and ABSENT reads as false:
+  // a client draws no switch it was not told about.
+  assert.equal(inv.modules[0]!.mayFlip, true);
+  assert.equal(inv.modules[1]!.mayFlip, false);
   assert.equal(inv.reportingNodeId, "bff-abc");
   assert.equal(inv.reportingNodeType, "bff");
 });

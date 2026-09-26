@@ -144,6 +144,60 @@ describe("machineFromRow", () => {
   });
 });
 
+// The owner's half of the sharing consent (epic memql#5344, design G1, G10,
+// G13). THE READING THAT MUST NOT BE GENEROUS IS THE PERMISSIVE ONE: a stranger's
+// prompt running on somebody's laptop is the failure, so everything that is not
+// a well-formed `cluster` or a `people` share naming somebody reads as `owner`.
+describe("machineFromRow: who a machine is shared with", () => {
+  const base = { id: "v1:worker:registration:abc", ownerUserId: "u1" };
+  const sharing = (block: unknown) => machineFromRow({ ...base, sharing: block });
+
+  it("reads a people share with the people and groups it names", () => {
+    const m = sharing({ mode: "people", userIds: ["a"] });
+    expect(m.sharingMode).toBe("people");
+    expect(m.sharedUserIds).toEqual(["a"]);
+    expect(m.sharedGroupIds).toEqual([]);
+  });
+
+  it("reads a people share naming nobody as owner", () => {
+    // A legacy or hand-edited row: the engine admits nobody through it, so a
+    // surface that called it "shared" would describe a share that serves no one.
+    const m = sharing({ mode: "people" });
+    expect(m.sharingMode).toBe("owner");
+    expect(m.sharedUserIds).toEqual([]);
+    expect(m.sharedGroupIds).toEqual([]);
+  });
+
+  it("reads residue lists outside people as empty", () => {
+    // G10: a saved but inactive list is residue a later reader could honour by
+    // mistake. The engine ignores it, so the surface must not name it either.
+    const m = sharing({ mode: "cluster", userIds: ["a"], groupIds: ["g"] });
+    expect(m.sharingMode).toBe("cluster");
+    expect(m.sharedUserIds).toEqual([]);
+    expect(m.sharedGroupIds).toEqual([]);
+  });
+
+  it("reads anything that is not cluster or people as owner", () => {
+    expect(sharing({ mode: "shared" }).sharingMode).toBe("owner");
+    expect(sharing({ mode: "CLUSTER" }).sharingMode).toBe("owner");
+    expect(sharing("cluster").sharingMode).toBe("owner");
+    expect(sharing(null).sharingMode).toBe("owner");
+    expect(machineFromRow(base).sharingMode).toBe("owner");
+  });
+
+  it("trims, drops what is not an id, and collapses one subject's two spellings", () => {
+    // The same rule the engine reads the list by (ParseMachineSharing): the
+    // first spelling is kept, so the id sent back on a save is the one stored.
+    const m = sharing({
+      mode: "people",
+      userIds: [" ana ", "", "ana", "v1:identity:user:ana", 7, "bo"],
+      groupIds: ["v1:identity:group:design", "design"],
+    });
+    expect(m.sharedUserIds).toEqual(["ana", "bo"]);
+    expect(m.sharedGroupIds).toEqual(["v1:identity:group:design"]);
+  });
+});
+
 describe("routing policy rows", () => {
   it("takes the newest ACTIVE row and ignores superseded ones", () => {
     const rows = [

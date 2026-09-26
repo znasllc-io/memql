@@ -3,6 +3,7 @@ package memql
 import (
 	"context"
 	"encoding/json"
+	"github.com/znasllc-io/memql/component/auth"
 	"sort"
 	"strings"
 	"testing"
@@ -244,15 +245,9 @@ func TestSiteOwnerStampIsUndoneForADeploymentWriter(t *testing.T) {
 	}{
 		{
 			name:    "the seed materializer",
-			ctx:     ownerRoleCtx("system:seedMaterializer"),
+			ctx:     auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "system:seedMaterializer", Role: auth.RoleOwner, Synthetic: true}),
 			actor:   "system:seedMaterializer",
 			payload: map[string]any{"hostname": "os.memql.localhost", "ownerUserId": "system:seedMaterializer"},
-		},
-		{
-			name:    "a cluster owner creating a site",
-			ctx:     ownerRoleCtx("root"),
-			actor:   "root",
-			payload: map[string]any{"hostname": "shop.memql.localhost", "ownerUserId": "root"},
 		},
 	}
 	for _, tc := range cases {

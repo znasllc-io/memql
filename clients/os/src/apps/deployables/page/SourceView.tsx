@@ -1,15 +1,25 @@
+import { useSession } from "../../../chrome/access";
+import { bare } from "../people";
+import { sourceName } from "../list";
+import { useSourceConnections } from "../../../modules/connections/connections";
+import { sourceRecord } from "../sources/sourceRecord";
+import { SourceAccess } from "../sources/SourceAccess";
+import { RemoveSource } from "../sources/RemoveSource";
+import { RecordList, RecordRow } from "../../../kit/RecordRow";
+import { useAccountOptions } from "../../accounts/tie";
+import { accountNameFrom } from "../../accounts/rows";
 import { AvailableVersion } from "./AvailableVersion";
 import { GitBranch, History } from "lucide-react";
 
-import { Caption, Chip, Fact, Facts, Head, Panel } from "../../../kit";
+import { Caption, Fact, Facts, Head, Panel } from "../../../kit";
 import { formatMoment } from "../../../kit/format";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
-import { shortVersion, sourceLabel, type PackageRow } from "../packages/rows";
+import { shortVersion, type PackageRow } from "../packages/rows";
 import type { PartsHeld } from "../parts";
 import { siteName, type SiteRow } from "../rows";
 import type { CredentialRow } from "../sources/rows";
-import { siteStateWord, stateChip } from "../words";
-import { AutoDeploySwitch, CredentialChip, PackageLifecycle, SwitchCredential } from "./stops/Source";
+import { deploymentStateWord, siteStateWord, stateChip } from "../words";
+import { AutoDeploySwitch, CredentialChip, PackageLifecycle } from "./stops/Source";
 
 // SourceView -- a source is a THING, with its own page (epic memql#4937, D4).
 //
@@ -45,7 +55,10 @@ import { AutoDeploySwitch, CredentialChip, PackageLifecycle, SwitchCredential } 
 
 export function SourceView({
   pkg,
+  viewerUserId,
+  onRemoved,
   apps,
+  appsSettled = false,
   credentials,
   can,
   onBack,
@@ -55,11 +68,15 @@ export function SourceView({
   onOpenDeclared,
   onReview,
   attempts,
+  pendingStatus,
   deployedBy,
 }: {
   pkg: PackageRow;
+  viewerUserId?: string;
+  onRemoved?: () => void;
   /** The apps this source produced, from the root's site feed. */
   apps: readonly SiteRow[];
+  appsSettled?: boolean;
   credentials: readonly CredentialRow[];
   /** The parts this session holds: the credential and the switch are `sources`, the cascade is `retire`. */
   can: PartsHeld;
@@ -70,7 +87,7 @@ export function SourceView({
   /** Opens the compose flow for an app the source declares and has not deployed. */
   onOpenDeclared: (app: string) => void;
   /**
-   * Reopen the run that is parked at this source's gate, when there is one.
+   * Reopen this source's pending run, either working or waiting for review.
    *
    * A parked run used to be reached from an app's row inside the old combined
    * list. Sources have a list of their own now, where a waiting one reads
@@ -79,7 +96,9 @@ export function SourceView({
    */
   onReview?: () => void;
   onAsk?: (tag: string) => void;
-  /** How many runs this source has, for the history line. */
+  /** The newest pending run may still be working; only a parked run needs review. */
+  pendingStatus?: string;
+  /** How many runs actually await confirmation, for the history line. */
   attempts: number;
   /**
    * Who deployed this source last, in words: "you", a name the roster gave,
@@ -88,7 +107,12 @@ export function SourceView({
    */
   deployedBy: string;
 }) {
-  const label = sourceLabel(pkg);
+  const accounts = useAccountOptions();
+  const label = sourceName(pkg);
+  const connections = useSourceConnections();
+  const { access } = useSession();
+  const mine = bare(pkg.ownerUserId) === bare(viewerUserId ?? access?.userId ?? "");
+  const provenance = sourceRecord(pkg, credentials, connections.rows);
   const live = apps.filter((a) => siteStateWord(a) === "Live").length;
   // Declared by the manifest and never deployed -- the difference between what
   // the source SAYS it contains and what it has actually put on the internet.
@@ -116,21 +140,25 @@ export function SourceView({
   // The bar stays, with no acts: it still reads what this source IS and how
   // many of its apps are live, which is what somebody who opened it came to
   // find out.
-  const acts: Act[] = onReview === undefined ? [] : [{ label: "Review", tone: "primary", onAct: onReview }];
+  const acts: Act[] = onReview === undefined ? [] : [{ label: pendingStatus === "awaiting_confirm" ? "Review" : "Resume setup", tone: "primary", onAct: onReview }];
 
   return (
     <div className="os-deploy-pane deployable-source-view" data-os-page-context={JSON.stringify({ page: "Source", packageId: pkg.id, source: label })}>
       <div className="os-deploy-scroll">
         <Panel label={`Source ${label}`}>
-          <Head title={label} breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label }]} back={{ label: backLabel, onSelect: onBack }} />
+          <Head title={label} breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label }]} back={{ label: backLabel, onSelect: onBack }}>{can.sources && mine && pkg.sourceKind === "repo" && !pkg.sourceRemoved ? <RemoveSource pkg={pkg} onRemoved={onRemoved} /> : null}</Head>
 
           <Caption>
-            {pkg.sourceKind === "repo" ? "Shared repository source" : "Shared source ZIP"}
+            {pkg.sourceKind === "repo" ? provenance.provenance : "Shared ZIP package"}
           </Caption>
 
+          {pkg.sourceRemoved ? <Caption>Removed from Sources. Its deployables and repository history are retained.</Caption> : null}
           <div className="deployable-source-access"><CredentialChip pkg={pkg} credentials={credentials} /></div>
           {pkg.updateAvailable ? <Caption>A newer version is available: {shortVersion(pkg.latestKnownVersion)}. Open an app to review and deploy it.</Caption> : null}
           <Facts>
+            <Fact label="MemQL account" value={accountNameFrom(accounts, pkg.accountId)} />
+            {pkg.sourceKind === "repo" ? <Fact label="GitHub account" value={provenance.identity} /> : null}
+            {pkg.sourceKind === "repo" ? <Fact label="GitHub target" value={provenance.binding ? `${provenance.target} (${provenance.binding.accountType === "Organization" ? "organization" : "personal account"})` : `${provenance.target} (from repository URL)`} /> : null}
             {pkg.sourceKind === "repo" ? <Fact label="Repository" value={pkg.repoUrl} /> : <Fact label="ZIP in Files" value={pkg.artifactId} />}
             {pkg.sourceKind === "repo" ? <Fact label="Tracking" value={pkg.repoRef === "" ? "default branch" : pkg.repoRef} /> : null}
             <Fact label="Deployed" value={pkg.deployedVersion === "" ? "" : shortVersion(pkg.deployedVersion)} mono />
@@ -154,22 +182,19 @@ export function SourceView({
           <section className="os-report-part">
             <h4 className="os-report-heading">
               <GitBranch size={12} aria-hidden /> Apps it produces
+              {appsSettled ? <span className="os-head-meta">{apps.length + undeployed.length}</span> : null}
             </h4>
             {apps.length === 0 && undeployed.length === 0 ? (
               <Caption>
-                Nothing yet. This source has not been analyzed, so there is no reading of what it contains.
+                Nothing yet. This repository has not been analyzed, so there is no reading of what it contains.
               </Caption>
             ) : (
-              <ul className="os-source-apps">
+              <RecordList><ul className="os-source-apps">
                 {apps.map((app) => {
                   const word = siteStateWord(app);
                   return (
                     <li key={app.id}>
-                      <button type="button" className="os-source-app" onClick={() => onOpenApp(app.id)}>
-                        <span className="os-source-app-name">{app.packageDeployableName || siteName(app)}</span>
-                        <span className="os-mono os-source-app-host">{app.hostname}</span>
-                        <Chip tone={word === "Live" ? "accent" : "muted"}>{word === "Live" ? "live" : stateChip(word)}</Chip>
-                      </button>
+                      <RecordRow name={app.packageDeployableName || siteName(app)} secondary={app.hostname} state={word === "Live" ? "live" : stateChip(word)} tone={word === "Live" ? "accent" : "muted"} onOpen={() => onOpenApp(app.id)} />
                     </li>
                   );
                 })}
@@ -182,20 +207,11 @@ export function SourceView({
                           had no page to open -- but the flow that gives it one
                           is the page, and the owner asked to reach it from
                           here. */}
-                      <button
-                        type="button"
-                        className="os-source-app"
-                        data-declared="true"
-                        onClick={() => onOpenDeclared(d.name)}
-                      >
-                        <span className="os-source-app-name">{d.name}</span>
-                        <span className="os-source-app-host">no address yet</span>
-                        <Chip tone="muted">{off ? "inactive" : "not deployed"}</Chip>
-                      </button>
+                      <RecordRow name={d.name} secondary="no address yet" state={off ? "inactive" : "not deployed"} onOpen={() => onOpenDeclared(d.name)} />
                     </li>
                   );
                 })}
-              </ul>
+              </ul></RecordList>
             )}
             {inactive > 0 ? (
               <Caption>
@@ -204,7 +220,7 @@ export function SourceView({
             ) : null}
           </section>
 
-          {pkg.sourceKind === "repo" && can.sources ? <SwitchCredential pkg={pkg} credentials={credentials} /> : null}
+          {pkg.sourceKind === "repo" && can.sources && mine ? <SourceAccess key={`${pkg.id}:${pkg.credentialId}:${pkg.sourceConnectionId}`} pkg={pkg} credentials={credentials} /> : null}
           {can.sources && pkg.status !== "archived" ? <AutoDeploySwitch pkg={pkg} /> : null}
 
           <button type="button" className="os-deploy-history-line" onClick={onOpenHistory}>
@@ -225,7 +241,7 @@ export function SourceView({
       <ActionBar
         // ARCHIVED IS NOT TRACKED. The word was hard-coded, so an archived
         // source said "Tracked" with its own Restore control directly above.
-        state={pkg.status === "archived" ? "Archived" : onReview !== undefined ? "Review needed" : "Tracked"}
+        state={pkg.status === "archived" ? "Archived" : pendingStatus !== undefined ? deploymentStateWord(pendingStatus) : "Tracked"}
         // COUNTED THE WAY THE LIST COUNTS, which is everything this source
         // declares -- deployed or not.
         detail={`${total} app${total === 1 ? "" : "s"}${live > 0 ? `, ${live} live` : ""}${

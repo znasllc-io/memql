@@ -43,6 +43,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // The typed refusal codes.
@@ -184,4 +185,82 @@ func RefusalCode(err error) string {
 		}
 	}
 	return ""
+}
+
+// requireOrganizationAuthority is independent of the capability and rank
+// guards. Those answer which operation; this one answers which organization.
+func (i *Integration) requireOrganizationAuthority(ctx context.Context, c caller, accountID string) error {
+	if auth.IsClusterOperator(c.role) {
+		return nil
+	}
+	accountID = memql.BareShortId(strings.TrimSpace(accountID))
+	if accountID == "" {
+		return refusal(CodeCapabilityMissing, "only a cluster operator may manage a group without an organization")
+	}
+	if scope := auth.RoleAccountScope(c.role); scope != "" && memql.BareShortId(scope) != accountID {
+		return refusal(CodeCapabilityMissing, "your role is scoped to a different organization")
+	}
+	for _, groupID := range c.subject.GroupIds {
+		group, err := i.store.GroupByID(ctx, groupID)
+		if err != nil {
+			return err
+		}
+		if group != nil && group.Status == StatusActive && memql.BareShortId(group.AccountID) == accountID {
+			return nil
+		}
+	}
+	return refusal(CodeCapabilityMissing, "you must be an active member of the group's organization")
+}
+
+// A delegated organization administrator manages its existing people. Only a
+// cluster operator may admit a previously unrelated principal into an account.
+func (i *Integration) requireOrganizationTarget(ctx context.Context, c caller, accountID, userID string) error {
+	if auth.IsClusterOperator(c.role) {
+		return nil
+	}
+	groups, err := i.store.GroupsForAccount(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	for _, g := range groups {
+		if g.Status != StatusActive {
+			continue
+		}
+		members, err := i.store.MembersOfGroup(ctx, g.ID)
+		if err != nil {
+			return err
+		}
+		for _, m := range members {
+			if m.Status == StatusActive && memql.BareShortId(m.UserID) == memql.BareShortId(userID) {
+				return nil
+			}
+		}
+	}
+	return refusal(CodeCapabilityMissing, "a cluster operator must first admit that person into this organization")
+}
+
+// Organization-bound group grants are evaluated only in their own account;
+// membership of Beta cannot lend an Acme-only management grant to Beta.
+func (i *Integration) requireOrganizationCapability(ctx context.Context, c caller, accountID, verb string) error {
+	if err := i.requireOrganizationAuthority(ctx, c, accountID); err != nil {
+		return err
+	}
+	if auth.IsClusterOperator(c.role) {
+		return c.requireCapability(ctx, verb)
+	}
+	subject := c.subject
+	subject.GroupIds = nil
+	for _, id := range c.subject.GroupIds {
+		group, err := i.store.GroupByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if group != nil && group.Status == StatusActive && (group.AccountID == "" || memql.BareShortId(group.AccountID) == memql.BareShortId(accountID)) {
+			subject.GroupIds = append(subject.GroupIds, id)
+		}
+	}
+	if !auth.CapableFor(ctx, subject, verb, auth.ResourceGroup) {
+		return refusal(CodeCapabilityMissing, "you do not hold this group-management permission in this organization")
+	}
+	return nil
 }

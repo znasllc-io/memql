@@ -197,13 +197,7 @@ describe("side by side, when there is room", () => {
     expect(screen.getAllByText("One line, on the machine itself.")).toHaveLength(1);
   });
 
-  // THE ACCENTED NAME IS THE STEP ON THE STAGE. The accent was the state's
-  // ("waiting on you"), which is the open step nearly always -- and not when a
-  // step is answered and still showing. Found in a rendered add-a-deployable:
-  // with a repository chosen the stage said "Repository" and the rail lit
-  // "Review". jsdom resolves no colour, so this pins the two halves the fix
-  // rests on: the markup says which step is on the stage, and the stylesheet
-  // keys the accent on that rather than on the state alone.
+  // Selection is independent of progress, in both wizard layouts.
   it("marks the step on the stage in the rail, whatever state that step is in", () => {
     mount({ layout: "split", open: "name", steps: STEPS.map((step) => (step.id === "name" ? { ...step, openable: true, body: <p>its name</p> } : step)) });
     const aside = document.querySelector(".os-wizard-aside") as HTMLElement;
@@ -212,10 +206,10 @@ describe("side by side, when there is room", () => {
     expect(open.map((li) => li.getAttribute("data-state"))).toEqual(["done"]);
 
     const css = readFileSync(join(__dirname, "..", "..", "src", "styles", "index.css"), "utf8");
-    const split = '.os-wizard[data-layout="split"] .os-rail[data-scale="page"] .os-rail-stage';
+    const split = '.os-wizard .os-rail[data-scale="page"] .os-rail-stage';
     // The step on the stage takes the accent...
-    expect(css).toContain(`${split}[data-open="true"]:is([data-state="done"], [data-state="complete"], [data-state="waiting"]) .os-rail-label {\n  color: var(--os-accent);`);
-    // ...and a step that is only NEXT gives it up. Its mark still says so.
+    expect(css).toContain(`${split}[data-open="true"] .os-rail-label {\n  color: var(--os-accent);`);
+    // ...and a step that is only NEXT gives it up.
     expect(css).toContain(`${split}:is([data-state="open"], [data-state="current"]):not([data-open="true"]) .os-rail-label {\n  color: var(--os-ink);`);
   });
 

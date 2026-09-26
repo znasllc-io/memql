@@ -51,10 +51,27 @@ func TestFleetCatalogGraphReaderEnforcesOwnerAndSharedBoundaries(t *testing.T) {
 			_, _ = db.NewDelete().Model((*memorynodes.MemoryNode)(nil)).Where("concept = ?", "v1:worker:registration").Where("id IN (?)", bun.In(ids)).Exec(ctx)
 		}
 	})
-	for _, spec := range []struct{ name, owner, sharing, serve string }{{"mine", alice, "private", "owner"}, {"private", bob, "private", "owner"}, {"shared", bob, "cluster", "cluster"}, {"owner-consent-only", bob, "cluster", "owner"}} {
+	carol := "v1:identity:user:" + prefix + "-carol"
+	for _, spec := range []struct {
+		name, owner, sharing, serve string
+		userIds                     []string
+	}{
+		{"mine", alice, "private", "owner", nil},
+		{"private", bob, "private", "owner", nil},
+		{"shared", bob, "cluster", "cluster", nil},
+		{"owner-consent-only", bob, "cluster", "owner", nil},
+		// Epic memql#5344: lent to NAMED people. Alice's catalog includes the
+		// one lent to her and never the one lent to carol (design G8).
+		{"lent-alice", bob, "people", "cluster", []string{alice}},
+		{"lent-carol", bob, "people", "cluster", []string{carol}},
+	} {
 		id := "v1:worker:registration:" + prefix + "-" + spec.name
 		ids = append(ids, id)
-		raw, _ := json.Marshal(map[string]any{"name": spec.name, "ownerUserId": spec.owner, "capabilities": []string{"MODEL"}, "labels": map[string]string{"model:" + prefix + "-" + spec.name: "ctx=32768,structured=1,params=27300000000"}, "sharing": map[string]string{"mode": spec.sharing}, "capabilityDescriptor": map[string]string{"inferenceServe": spec.serve}, "lastSeenAt": time.Now().UTC().Format(time.RFC3339Nano), "connectedNodeId": "another-agent-replica"})
+		sharing := map[string]any{"mode": spec.sharing}
+		if spec.userIds != nil {
+			sharing["userIds"] = spec.userIds
+		}
+		raw, _ := json.Marshal(map[string]any{"name": spec.name, "ownerUserId": spec.owner, "capabilities": []string{"MODEL"}, "labels": map[string]string{"model:" + prefix + "-" + spec.name: "ctx=32768,structured=1,params=27300000000"}, "sharing": sharing, "capabilityDescriptor": map[string]string{"inferenceServe": spec.serve}, "lastSeenAt": time.Now().UTC().Format(time.RFC3339Nano), "connectedNodeId": "another-agent-replica"})
 		row := memorynodes.MemoryNode{ID: id, CreatedAt: time.Now().UTC(), CreatedBy: spec.owner, Concept: "v1:worker:registration", Type: memorynodes.NodeTypeObject, Schema: json.RawMessage(`{}`), Payload: raw, Metadata: json.RawMessage(`{}`), Provenance: json.RawMessage(`{}`)}
 		if _, err := db.NewInsert().Model(&row).Exec(ctx); err != nil {
 			t.Fatal(err)
@@ -67,8 +84,25 @@ func TestFleetCatalogGraphReaderEnforcesOwnerAndSharedBoundaries(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(owner) != 1 || owner[0].ModelId != prefix+"-mine" || !owner[0].Online() {
-			t.Fatalf("owner catalog = %+v", owner)
+		// A PERSON'S catalog is their own machines plus the ones lent to them
+		// (design G8) -- it used to be their own only, which this test pinned,
+		// and which shut a person out of every machine a colleague lent them.
+		mineSeen := map[string]bool{}
+		for _, model := range owner {
+			mineSeen[model.ModelId] = true
+			if model.ModelId == prefix+"-mine" && !model.Online() {
+				t.Fatalf("alice's own machine should read online: %+v", model)
+			}
+		}
+		for _, want := range []string{"mine", "shared", "lent-alice"} {
+			if !mineSeen[prefix+"-"+want] {
+				t.Fatalf("alice's catalog %v is missing %s", mineSeen, want)
+			}
+		}
+		for _, leak := range []string{"private", "owner-consent-only", "lent-carol"} {
+			if mineSeen[prefix+"-"+leak] {
+				t.Fatalf("alice's catalog leaked %s: %v", leak, mineSeen)
+			}
 		}
 		shared, err := reader.Catalog(ctx, "")
 		if err != nil {
@@ -78,8 +112,9 @@ func TestFleetCatalogGraphReaderEnforcesOwnerAndSharedBoundaries(t *testing.T) {
 		for _, model := range shared {
 			seen[model.ModelId] = true
 		}
-		if !seen[prefix+"-shared"] || seen[prefix+"-private"] || seen[prefix+"-owner-consent-only"] || seen[prefix+"-mine"] {
-			t.Fatalf("shared catalog = %v", seen)
+		if !seen[prefix+"-shared"] || seen[prefix+"-private"] || seen[prefix+"-owner-consent-only"] || seen[prefix+"-mine"] ||
+			seen[prefix+"-lent-alice"] || seen[prefix+"-lent-carol"] {
+			t.Fatalf("shared catalog = %v; system work reaches only what is lent to everyone (design G3)", seen)
 		}
 		// Run the actual public builtin on a node with a catalog but no dispatcher.
 		result, err := engine.Execute(auth.ContextWithUserActor(ctx, alice), "builtin fleetModels()")
@@ -100,7 +135,10 @@ func TestFleetCatalogGraphReaderEnforcesOwnerAndSharedBoundaries(t *testing.T) {
 		if _, ok := nodes[prefix+"-shared"]; !ok {
 			t.Fatalf("public builtin lost shared model: %s", raw)
 		}
-		for _, name := range []string{"private", "owner-consent-only"} {
+		if _, ok := nodes[prefix+"-lent-alice"]; !ok {
+			t.Fatalf("public builtin lost the model lent to alice: %s", raw)
+		}
+		for _, name := range []string{"private", "owner-consent-only", "lent-carol"} {
 			if _, ok := nodes[prefix+"-"+name]; ok {
 				t.Fatalf("public builtin leaked %s", name)
 			}

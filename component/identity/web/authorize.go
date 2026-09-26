@@ -131,7 +131,7 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		CodeChallengeMethod:  codeChallengeMethod,
 		AuthorizeMode:        true,
 	}
-	s.render(w, r, "login", webtempl.Login(data))
+	s.render(w, r, "login", webtempl.Login(data), data)
 }
 
 // redirectAuthorizeError 302-redirects to the client's redirect_uri with

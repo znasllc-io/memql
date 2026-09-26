@@ -263,6 +263,23 @@ func (f *FleetInference) buildStart(req memqlengine.FleetCallRequest) *memqlv1.M
 			ParametersJson: toolSchemaJSON(t.InputSchema),
 		})
 	}
+	if req.Audio != nil {
+		start.Audio = &memqlv1.ModelCallAudio{Data: req.Audio.Data, MediaType: req.Audio.MediaType, SampleRateHz: int32(req.Audio.SampleRateHz)}
+	}
+	if req.Speech != nil {
+		start.Speech = &memqlv1.ModelCallSpeech{Voice: req.Speech.Voice, Format: req.Speech.Format, Speed: req.Speech.Speed, SpeedSet: req.Speech.SpeedSet}
+	}
+	if req.Image != nil {
+		start.Image = &memqlv1.ModelCallImageRequest{Width: int32(req.Image.Width), Height: int32(req.Image.Height), Count: int32(req.Image.Count), Format: req.Image.Format}
+	}
+	for i := len(start.Messages) - 1; i >= 0; i-- {
+		if start.Messages[i].Role == "user" {
+			for _, image := range req.Images {
+				start.Messages[i].Images = append(start.Messages[i].Images, &memqlv1.ModelCallImage{Data: image.Data, MediaType: image.MediaType})
+			}
+			break
+		}
+	}
 	return start
 }
 
@@ -448,23 +465,7 @@ func (f *FleetInference) attemptLocal(
 		return memqlengine.FleetCallResult{}, ForwardCompleted,
 			fmt.Errorf("%s: %s", cand.Label(), outcome.Error)
 	}
-	toolCalls := make([]common.ToolCall, 0, len(outcome.ToolCalls))
-	for _, c := range outcome.ToolCalls {
-		toolCalls = append(toolCalls, common.ToolCall{ID: c.Id, Name: c.Name, Arguments: c.ArgumentsJSON})
-	}
-	return memqlengine.FleetCallResult{
-		Content:          outcome.Content,
-		Embeddings:       outcome.Embeddings,
-		ToolCalls:        toolCalls,
-		Usage:            usageFrom(outcome.Usage),
-		ExecutionSurface: FleetSurfacePrefix + cand.RegistrationId,
-		MachineLabel:     cand.Label(),
-		// The local half of design D15, and it must stay identical to the
-		// forwarded half: a shared call that ran on this replica and one that
-		// crossed a hop are the same call, and a reader filtering the ledger
-		// by whose machine served it cannot be made to care which.
-		MachineOwnerUserId: machineOwnerAttribution(cand, req.ActingUserId),
-	}, ForwardCompleted, nil
+	return resultFromEnd(cand, req.ActingUserId, modelOutcomeEnd("", outcome)), ForwardCompleted, nil
 }
 
 // machineOwnerAttribution answers "whose machine, if not yours" for the
@@ -528,6 +529,15 @@ func resultFromEnd(cand Candidate, actingUserId string, end *memqlv1.ModelCallEn
 			Known:        u.GetKnown(),
 			Model:        u.GetModel(),
 		}
+	}
+	if a := end.GetAudio(); a != nil {
+		res.Audio = &memqlengine.FleetAudio{Data: a.Data, MediaType: a.MediaType, SampleRateHz: int(a.SampleRateHz)}
+	}
+	for _, seg := range end.GetSegments() {
+		res.Segments = append(res.Segments, memqlengine.FleetTranscriptSegment{StartSeconds: seg.StartSeconds, EndSeconds: seg.EndSeconds, Text: seg.Text})
+	}
+	for _, img := range end.GetImages() {
+		res.Images = append(res.Images, memqlengine.FleetImage{Data: img.Data, MediaType: img.MediaType})
 	}
 	return res
 }

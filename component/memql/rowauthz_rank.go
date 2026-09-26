@@ -279,6 +279,13 @@ func (e *MemQLEngine) resolveRankScope(ctx context.Context) *rankScope {
 	ladder := e.rankLadder(ctx)
 	scope.ladder = ladder
 	scope.actorRank = ladder.rankOf(string(ac.Role))
+	if auth.RoleAccountScope(ac.Role) != "" {
+		addOwnerSpellings(scope.readOwners, ac.UserId)
+		addOwnerSpellings(scope.writeOwners, ac.UserId)
+		scope.actorRank = 0
+		scope.fingerprint = fingerprintOwnerSet(0, scope.readOwners, ladder)
+		return scope
+	}
 
 	// The caller's OWN row is always in both sets. "Your own rows stay
 	// writable unconditionally" is D3's own sentence, and it must not

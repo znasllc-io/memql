@@ -8,7 +8,6 @@
           "payload": {
             "agentId": "agent-1",
             "createdBySubject": "subject-0",
-            "domain": "s-domain",
             "id": "v1:probe:thing:1",
             "identityId": "identity-1",
             "identitySubject": "subject-1",
@@ -51,7 +50,6 @@
           "payload": {
             "agentId": "agent-1",
             "createdBySubject": "subject-0",
-            "domain": "s-domain",
             "id": "v1:probe:thing:1",
             "identityId": "identity-1",
             "identitySubject": "subject-1",
@@ -94,7 +92,6 @@
           "payload": {
             "agentId": "agent-1",
             "createdBySubject": "subject-0",
-            "domain": "s-domain",
             "id": "v1:probe:thing:1",
             "identityId": "identity-1",
             "identitySubject": "subject-1",
@@ -126,21 +123,10 @@
           {
             "args": {
               "accountId": "v1:accounts:account:self",
-              "domain": "s-domain",
               "name": "My company"
             },
             "kind": "mutation",
             "name": "createClientAccount"
-          },
-          {
-            "args": {
-              "accountId": "v1:accounts:account:self",
-              "domainStatus": "verified",
-              "domainVerifiedAt": "<ts>",
-              "memqlReservedAt": "<ts>"
-            },
-            "kind": "mutation",
-            "name": "recordAccountDomainCheck"
           }
         ],
         "result": {
@@ -156,7 +142,6 @@
           "payload": {
             "agentId": "agent-1",
             "createdBySubject": "subject-0",
-            "domain": "s-domain",
             "id": "v1:probe:thing:1",
             "identityId": "identity-1",
             "identitySubject": "subject-1",

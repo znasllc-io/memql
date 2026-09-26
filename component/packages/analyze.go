@@ -68,10 +68,21 @@ func Analyze(tree fs.FS, opts Options) (*Report, error) {
 		// deploy as though it nearly could.
 		return rep, r
 	}
+	rep.Manifest = manifest
 	rep.Name = manifest.Name
 	rep.FormatVersion = manifest.FormatVersion
 
 	analyzeDeployables(tree, manifest, rep)
+	for i := range rep.Deployables {
+		d := &rep.Deployables[i]
+		if err := assetDeclaredLimits(d.Assets, opts.Limits); err != nil {
+			d.Problem = ptr(problemFrom(refuseScoped(CodeSourceTooLarge, d.Name, "%v", err), true))
+			rep.add(*d.Problem)
+		}
+		if len(d.Assets) > 0 {
+			d.BuildPlan += "; imports " + plural(len(d.Assets), "external asset", "external assets") + " after build"
+		}
+	}
 	analyzeGoPacks(tree, rep)
 	analyzeDSL(tree, rep, opts.Logger)
 
@@ -88,12 +99,16 @@ func analyzeDeployables(tree fs.FS, manifest *Manifest, rep *Report) {
 		command, output := d.BuildPlanFor()
 		dr := DeployableReport{
 			Name:           d.Name,
+			DisplayName:    d.DisplayName,
+			Deployment:     d.Deployment,
 			Kind:           d.Kind,
 			Path:           d.Path,
 			Command:        command,
 			Output:         output,
 			Binding:        d.Binding,
+			Testing:        d.Testing,
 			ResolutionTail: d.ResolutionTail,
+			Assets:         d.Assets,
 		}
 
 		// THREE CASES FOR A KIND (design section B, D9), and the order is
@@ -122,10 +137,6 @@ func analyzeDeployables(tree fs.FS, manifest *Manifest, rep *Report) {
 				"deployable %q points at %q, which is not a directory in this source.",
 				d.Name, d.Path), true))
 
-		case d.Kind == KindStorefront && !hasBinding(d.Binding):
-			dr.Problem = ptr(problemFrom(refuseScoped(CodeDeployableBindingMissing, d.Name,
-				"deployable %q is a %s but names no store. A storefront names the v1:shopify:store row it fronts -- binding: {store: <shop>.myshopify.com} -- and the domain, the Storefront token reference and everything else about that store live on the row.",
-				d.Name, KindStorefront), true))
 		}
 
 		if dr.Problem == nil {

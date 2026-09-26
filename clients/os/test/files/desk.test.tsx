@@ -8,7 +8,7 @@ vi.mock("../../src/live/connection", () => ({
 }));
 
 import { Shell } from "../../src/chrome/Shell";
-import { StubAskTransport } from "../../src/ask/askController";
+import { StubAskTransport } from "../ask/stubTransport";
 import { resetIdsForTest } from "../../src/system/desks";
 import { LocalDesktopStore, DESKTOP_STORE_KEY } from "../../src/system/store";
 import type { OsRuntimeConfig } from "../../src/cluster/config";

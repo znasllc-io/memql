@@ -352,22 +352,7 @@ func (h *ForwardHandler) HandleForwardedModelCall(
 	outcome, waitErr := handle.Wait(callCtx)
 	wg.Wait()
 
-	end := &memqlv1.ModelCallEnd{
-		RequestId:    requestId,
-		FinishReason: outcome.FinishReason,
-		Content:      outcome.Content,
-		Error:        outcome.Error,
-		ErrorCode:    outcome.ErrorCode,
-		Usage: &memqlv1.ModelCallUsage{
-			InputTokens:  outcome.Usage.InputTokens,
-			OutputTokens: outcome.Usage.OutputTokens,
-			Known:        outcome.Usage.Known,
-			Model:        outcome.Usage.Model,
-		},
-	}
-	for _, v := range outcome.Embeddings {
-		end.Embeddings = append(end.Embeddings, &memqlv1.ModelCallEmbedding{Values: v})
-	}
+	end := modelOutcomeEnd(requestId, outcome)
 	resp := &nodev1.ModelForwardResponse{
 		RequestId: requestId,
 		Ok:        waitErr == nil && outcome.Error == "",
@@ -460,6 +445,7 @@ func modelCallRequestFromProto(localId string, start *memqlv1.ModelCallStart, ti
 		RunId:                start.GetRunId(),
 		StepId:               start.GetStepId(),
 		Purpose:              start.GetPurpose(),
+		Audio:                start.GetAudio(), Speech: start.GetSpeech(), Image: start.GetImage(), Level: start.GetLevel(),
 	}
 	for _, m := range start.GetMessages() {
 		req.Messages = append(req.Messages, workerservice.ModelCallMessage{
@@ -468,6 +454,7 @@ func modelCallRequestFromProto(localId string, start *memqlv1.ModelCallStart, ti
 			ToolCallId: m.GetToolCallId(),
 			Name:       m.GetName(),
 			ToolCalls:  wireToolCalls(m.GetToolCalls()),
+			Images:     m.GetImages(),
 		})
 	}
 	for _, t := range start.GetTools() {
@@ -525,4 +512,30 @@ func wireToolCalls(in []*memqlv1.ModelCallToolCall) []workerservice.ModelCallToo
 		})
 	}
 	return out
+}
+
+// One terminal projection serves local dispatch and the cross-replica hop.
+func modelOutcomeEnd(requestId string, outcome workerservice.ModelCallOutcome) *memqlv1.ModelCallEnd {
+	end := &memqlv1.ModelCallEnd{
+		RequestId:    requestId,
+		FinishReason: outcome.FinishReason,
+		Content:      outcome.Content,
+		Error:        outcome.Error,
+		ErrorCode:    outcome.ErrorCode,
+		Usage: &memqlv1.ModelCallUsage{
+			InputTokens:  outcome.Usage.InputTokens,
+			OutputTokens: outcome.Usage.OutputTokens,
+			Known:        outcome.Usage.Known,
+			Model:        outcome.Usage.Model,
+		},
+	}
+	for _, v := range outcome.Embeddings {
+		end.Embeddings = append(end.Embeddings, &memqlv1.ModelCallEmbedding{Values: v})
+	}
+
+	end.Audio, end.Segments, end.Images = outcome.Audio, outcome.Segments, outcome.Images
+	for _, c := range outcome.ToolCalls {
+		end.ToolCalls = append(end.ToolCalls, &memqlv1.ModelCallToolCall{Id: c.Id, Name: c.Name, ArgumentsJson: c.ArgumentsJSON, Index: c.Index})
+	}
+	return end
 }

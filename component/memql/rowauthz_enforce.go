@@ -270,6 +270,11 @@ func enforceRowAuthzOnPlan(plan *QueryPlan) error {
 	// is an @relationship -- so the term would compare the bare
 	// `actor.userId` against a canonical stored `v1:identity:user:<id>`
 	// and match nothing at all.
+	if organizationOwnedConcept(conceptName) {
+		predicate = &LogicalExpression{Op: LogicalAnd, Left: predicate, Right: &AccountScopeExpression{Field: "accountId", Organization: true, AllowUntied: true, Resource: organizationApp(conceptName)}}
+	} else if conceptName == conceptAccountsAccount {
+		predicate = &AccountScopeExpression{Field: "id", Organization: true, RowID: true}
+	}
 	stampRowAuthzConcept(predicate, conceptName)
 	plan.Root = &LogicalExpression{Op: LogicalAnd, Left: plan.Root, Right: predicate}
 	plan.RowAuthzInjected = true
@@ -418,6 +423,38 @@ func rowAuthzAdmitsMode(ctx context.Context, conceptName string, id string, payl
 		return rowAuthzDeny
 	}
 
+	if organizationOperator(ctx) && HasOrganizationBoundary(conceptName) && !organizationAppAllowsRow(ctx, "", "") {
+		return rowAuthzDeny
+	}
+	if !organizationOperator(ctx) {
+		if conceptName == conceptAccountsAccount {
+			if write {
+				return rowAuthzDeny
+			}
+			scope := accountScopeFromContext(ctx)
+			if scope != nil && scope.admits(id) && organizationAppAllowsRow(ctx, id, "") {
+				return rowAuthzAdmit
+			}
+			return rowAuthzDeny
+		}
+		if organizationOwnedConcept(conceptName) {
+			row := map[string]any{}
+			if json.Unmarshal(payload, &row) != nil {
+				return rowAuthzDeny
+			}
+			account, _ := row["accountId"].(string)
+			if !organizationAppAllowsRow(ctx, account, organizationApp(conceptName)) {
+				return rowAuthzDeny
+			}
+			if strings.TrimSpace(account) != "" {
+				scope := accountScopeFromContext(ctx)
+				if scope == nil || !scope.admits(account) {
+					return rowAuthzDeny
+				}
+
+			}
+		}
+	}
 	decl := rowAuthzDeclFor(conceptName)
 	if decl == nil {
 		// UNDECLARED. Not "safe" and not "unchanged" -- unmeasured, in the

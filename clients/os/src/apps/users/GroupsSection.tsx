@@ -1,3 +1,5 @@
+import { listCount } from "../../kit/RecordRow";
+import { holds } from "../../system/roles";
 import { AddButton } from "../../kit/AddButton";
 import { useEffect, useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -5,11 +7,12 @@ import { Users } from "lucide-react";
 
 import {
   Button,
+  ContentSkeleton,
   Head,
   LiveList,
   Notice,
   Refine,
-  Row as ListRow,
+  RecordRow,
   useLiveView,
   type RefineChip,
 } from "../../kit";
@@ -42,7 +45,9 @@ import type { LiveCollectionHandle } from "../../live/useLiveCollection";
 export function GroupsSection({
   groups,
   people,
+  peopleAvailable = false,
   invitations,
+  invitationsAvailable = false,
   accounts,
   catalog,
   actions,
@@ -55,7 +60,9 @@ export function GroupsSection({
 }: {
   groups: LiveCollectionHandle<Row>;
   people: readonly PersonRow[];
+  peopleAvailable?: boolean;
   invitations: readonly InvitationRow[];
+  invitationsAvailable?: boolean;
   accounts: readonly AccountRow[];
   catalog: RoleCatalog;
   actions: UsersActions;
@@ -107,6 +114,7 @@ export function GroupsSection({
   if (view.kind === "group") {
     const group = all.find((g) => g.id === view.groupId) ?? null;
     if (group === null) {
+      if (groups.snapshot.state === "seeding") return <ContentSkeleton label="Opening group" />;
       return (
         <div className="os-app-stack">
           <Head title="Group" back={{ label: "Groups", onSelect: () => setView({ kind: "list" }) }} />
@@ -122,7 +130,9 @@ export function GroupsSection({
       <GroupPage
         group={group}
         people={people}
+        peopleAvailable={peopleAvailable}
         invitations={invitations}
+        invitationsAvailable={invitationsAvailable}
         accounts={accounts}
         catalog={catalog}
         actions={actions}
@@ -149,19 +159,19 @@ export function GroupsSection({
   }
 
   const chips: RefineChip[] = [];
-  const count = source?.snapshot.rows.length ?? 0;
+  const count = listCount(source?.snapshot);
 
   return (
     <div className="os-app-stack">
-      <Head title="Groups" meta={count === 0 ? undefined : `${count}`}>
-        <AddButton onClick={() => setView({ kind: "new" })} label="New group" />
+      <Head title="Groups" meta={count}>
+        {holds("create", "group") ? <AddButton onClick={() => setView({ kind: "new" })} label="New group" /> : null}
       </Head>
 
       {groups.snapshot.error ? (
         <Notice
           tone="error"
           sentence="This cluster did not return its groups."
-          next="Reading them is admin and above; the engine decides that, not this window."
+          next="Your organization scope and granted group permissions determine which groups you can read."
         >
           <Button onClick={groups.reseed}>Try again</Button>
         </Notice>
@@ -214,23 +224,24 @@ function GroupLine({
   // "Acme Acme". The kind word carries the tie in that case.
   const clientName = account === null ? "" : accountName(account);
   return (
-    <ListRow
+    <RecordRow
       icon={<Users size={16} aria-hidden />}
       name={group.name}
+      secondary={group.description}
+      state={archived ? "Archived" : "Active"}
+      tone={archived ? "muted" : "accent"}
       current={!archived}
       dim={archived}
       onOpen={onOpen}
-      state={
+      stateExtra={
         <>
-          {archived ? <span className="os-users-inactive-tag">archived</span> : null}
           {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
         </>
       }
     >
       {clientName === "" || clientName === group.name ? null : <AccountChip name={clientName} />}
       <span className="os-caption">{kindWord(group, account)}</span>
-      {group.description === "" ? null : <span className="os-caption">{group.description}</span>}
-    </ListRow>
+    </RecordRow>
   );
 }
 

@@ -78,6 +78,9 @@ func policyForSite(r *http.Request, site *Site, env func(string) string, scriptH
 	if identity := identityOriginForSite(site, env); identity != "" {
 		connectSrc += " " + identity
 	}
+	if voice := voiceOriginForSite(site, env); voice != "" {
+		connectSrc += " " + voice + " " + wsOriginOf(voice)
+	}
 	scriptSrc := "script-src 'self'"
 	if scriptHashes != "" {
 		scriptSrc += " " + scriptHashes
