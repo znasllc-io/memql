@@ -247,6 +247,11 @@ function DeployablesAppContent({
   const [connectResult, setConnectResult] = useState<ConnectReturn | null>(null);
   useEffect(() => {
     if (!intent) return;
+    const requestedSite = intent.payload.siteId;
+    if (typeof requestedSite === "string" && requestedSite) {
+      setOpenRequest(held => ({ siteId: requestedSite, revision: (held?.revision ?? 0) + 1 }));
+      navigate("deployables");
+    }
     if (intent.payload.provider === "shopify") { setConnectionProvider("shopify"); setConnectionsIntent(intent); }
     const shopify = intent.payload["shopify"];
     if (shopify && typeof shopify === "object" && "siteId" in shopify && typeof shopify.siteId === "string" && shopify.siteId) {

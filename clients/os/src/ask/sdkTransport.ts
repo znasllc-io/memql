@@ -40,6 +40,17 @@ export class SdkAskTransport implements AskTransport {
     };
   }
 
+  cancelGoal = async (goalId: string) => {
+    const dispatcher = this.dispatcher();
+    if (!dispatcher) throw new Error("Not connected to the cluster.");
+    const result = await new QueryClient(dispatcher).cancelGoal({ goalId, reason: "Stopped from Ask." });
+    const row = result.rows()[0];
+    const receipt = row ? flatten(row) : null;
+    if (!receipt || receipt.goalClosed !== true || (Array.isArray(receipt.runsRefused) && receipt.runsRefused.length > 0)) {
+      throw new Error("The cluster could not confirm that all work received the Stop request. Try again.");
+    }
+  };
+
   startVoice = (options: AskVoiceOptions, signal: AbortSignal) => {
     const dispatcher = this.dispatcher();
     if (!dispatcher) return Promise.reject(new Error("Not connected to the cluster."));

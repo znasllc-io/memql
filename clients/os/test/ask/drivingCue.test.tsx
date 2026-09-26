@@ -1,0 +1,21 @@
+import { act, cleanup, renderHook } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import type { AskCallbacks } from "../../src/ask/askController";
+import { ConversationSession } from "../../src/ask/conversationSession";
+const state = vi.hoisted(() => ({ conversation: null as unknown }));
+vi.mock("../../src/ask/AskProvider", () => ({ useAsk: () => state }));
+import { useDrivingCue } from "../../src/ask/useDrivingCue";
+afterEach(() => { cleanup(); vi.useRealTimers(); });
+it("holds a completed navigation cue through outer tool completion, then clears it", () => {
+ vi.useFakeTimers();
+ let callbacks!: AskCallbacks;
+ const conversation = new ConversationSession({ask:(_p,_c,on)=>{callbacks=on;return{cancel(){}}}});
+ state.conversation = conversation;
+ const { result } = renderHook(() => useDrivingCue("deployables"));
+ act(() => { conversation.send("Open Deployables",null); callbacks.activity?.({id:"nav",kind:"action",phase:"completed",at:"now",navigate:true,app:"deployables"}); callbacks.activity?.({id:"outer",kind:"action",phase:"completed",at:"now"}); callbacks.delta("Opening Deployables."); callbacks.done(); });
+ expect(result.current?.id).toBe("nav");
+ act(() => vi.advanceTimersByTime(1000));
+ expect(result.current?.id).toBe("nav");
+ act(() => vi.advanceTimersByTime(1300));
+ expect(result.current).toBeNull();
+});

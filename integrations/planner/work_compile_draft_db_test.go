@@ -143,7 +143,7 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 			t.Fatalf("direct template %s cannot pass engine Gate 1: %+v", name, report)
 		}
 	}
-	ctx, err := auth.ContextWithPersistedOwner(context.Background(), "v1:identity:user:draft-owner")
+	ctx, err := auth.ContextWithPersistedOwner(context.Background(), "v1:identity:user:draft-owner", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,6 +181,46 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 	if err = receiver.RegisterIntegration(composeIntegration); err != nil {
 		t.Fatal(err)
 	}
+	t.Run("navigation adopts Ask variables on a separate receiver", func(t *testing.T) {
+		bridge := &draftDBCompiler{engine: plannerEngine, triage: map[string]any{"complexity": "trivial", "requiresFile": false, "navigation": map[string]any{"app": "deployables", "section": "deployables"}}}
+		req := CompileRequest{GoalId: "v1:work:goal:nav", RunId: "v1:work:run:" + id.NewShortId(), OwnerUserId: "v1:identity:user:draft-owner", Statement: "Open Deployables", Input: map[string]any{"conversation": []any{map[string]any{"role": "user", "content": "Open Deployables"}}}}
+		out, err := (&PlannerAgentLoop{engine: bridge, logger: testLogger()}).CompileGoalForRun(ctx, req, nil, bridge)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := receiver.Execute(ctx, "query authoringConstructById("+encodeArgs(map[string]any{"constructId": out.ConstructId})+")")
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows := memql.MaterializeRows(result)
+		if len(rows) != 1 {
+			t.Fatalf("receiver cannot read draft: %v", rows)
+		}
+		source, _ := rows[0]["source"].(string)
+		automation, err := automations.NewLoader(automations.LoaderOptions{Logger: testLogger()}).CompileSource(source, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = receiver.Execute(auth.ContextWithInternalOrigin(ctx), "mutation createWorkRun("+encodeArgs(map[string]any{"runId": req.RunId, "goalId": req.GoalId, "automationName": out.AutomationName, "templateFingerprint": out.TemplateFingerprint, "status": "running", "input": req.Input, "variables": req.Input, "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})+")")
+		if err != nil {
+			t.Fatal(err)
+		}
+		executor := automations.NewExecutor(automations.ExecutorOptions{Engine: receiver, Logger: testLogger(), StepRegistry: steps.NewRegistry()})
+		defer executor.Close()
+		executionCtx := common.ContextWithRun(ctx, common.RunContext{RunId: req.RunId, GoalId: req.GoalId, OwnerUserId: req.OwnerUserId})
+		execution, err := executor.ExecuteAdopted(executionCtx, automation, automations.RunAdoption{RunId: req.RunId, Variables: req.Input})
+		if err != nil || execution.Status != "completed" {
+			t.Fatalf("navigation failed: %+v %v", execution, err)
+		}
+		journal, err := automations.LoadRunJournal(ctx, receiver, req.RunId)
+		if err != nil {
+			t.Fatal(err)
+		}
+		receipt, _ := json.Marshal(journal.Steps["navigate"])
+		if !strings.Contains(string(receipt), "Opening Deployables") || bridge.calls != 1 {
+			t.Fatalf("missing deterministic receipt or unnecessary model calls: %s / %d", receipt, bridge.calls)
+		}
+	})
 	for _, sectionable := range []bool{false, true} {
 		t.Run(fmt.Sprintf("sectionable=%t", sectionable), func(t *testing.T) {
 			triage := map[string]any{"complexity": "trivial", "requiresFile": false}

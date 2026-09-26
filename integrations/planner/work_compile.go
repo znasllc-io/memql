@@ -186,7 +186,8 @@ func (l *PlannerAgentLoop) finishCompile(ctx context.Context, req CompileRequest
 		}
 		agentId := ""
 		nativeFile := sectionable.RequiresFile != nil && *sectionable.RequiresFile
-		if !nativeFile || (sectionable.Sectionable && len(sectionable.Sections) >= minSectionsForFanout) {
+		navigationOnly := sectionable.Navigation != nil && !nativeFile && !sectionable.Sectionable && strings.TrimSpace(sectionable.Navigation.App) != ""
+		if !navigationOnly && (!nativeFile || (sectionable.Sectionable && len(sectionable.Sections) >= minSectionsForFanout)) {
 			var err error
 			agentId, err = l.reasoningAgent(ctx, req.OwnerUserId)
 			if err != nil {

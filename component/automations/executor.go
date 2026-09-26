@@ -2,6 +2,7 @@ package automations
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -871,6 +872,10 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 	}
 	result, err := e.stepRegistry.Execute(stepExecCtx, step, stepCtx)
 	if callContext != nil && context.Cause(callContext) != nil {
+		var stopped *memql.WorkCancelledError
+		if errors.As(context.Cause(callContext), &stopped) {
+			return result, &runCancelled{by: stopped.By}
+		}
 		return result, context.Cause(callContext)
 	}
 

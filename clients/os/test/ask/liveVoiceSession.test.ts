@@ -7,7 +7,7 @@ const rtc = vi.hoisted(() => ({
   handlers: new Map<string, () => void>(),
   connect: vi.fn<() => Promise<void>>(),
   disconnect: vi.fn(),
-  microphone: vi.fn<() => Promise<void>>(),
+  microphone: vi.fn<() => Promise<{ track: { mediaStreamTrack: { getSettings(): MediaTrackSettings } } } | undefined>>(),
 }));
 vi.mock("livekit-client", () => ({
   Room: class {
@@ -25,7 +25,7 @@ vi.mock("livekit-client", () => ({
 beforeEach(() => {
   rtc.handlers.clear();
   rtc.connect.mockReset().mockResolvedValue();
-  rtc.microphone.mockReset().mockResolvedValue();
+  rtc.microphone.mockReset().mockResolvedValue(undefined);
   rtc.disconnect.mockReset().mockImplementation(() => rtc.handlers.get("disconnected")?.());
 });
 
@@ -65,4 +65,23 @@ it("does not report an error when the person ends the call", async () => {
   await voice.start(null, "female");
   voice.stop();
   expect(voice.getSnapshot()).toMatchObject({ phase: "off", error: "" });
+});
+
+
+it("checks the active microphone's echo cancellation rather than assuming the request worked", async () => {
+  rtc.microphone.mockResolvedValue({ track: { mediaStreamTrack: { getSettings: () => ({ echoCancellation: true }) } } });
+  const { voice } = session();
+  await voice.start(null, "female");
+  expect(voice.getSnapshot()).toMatchObject({ phase: "listening", echoCancellation: true });
+  voice.stop();
+});
+
+it("closes the microphone when the browser explicitly disables echo cancellation", async () => {
+  rtc.microphone.mockResolvedValue({ track: { mediaStreamTrack: { getSettings: () => ({ echoCancellation: false }) } } });
+  const { voice, conversation } = session();
+  await voice.start(null, "female");
+  expect(voice.getSnapshot().phase).toBe("off");
+  expect(voice.getSnapshot().error).toContain("echo cancellation");
+  expect(conversation.getSnapshot().voiceActive).toBe(false);
+  expect(rtc.disconnect).toHaveBeenCalled();
 });

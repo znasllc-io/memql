@@ -49,6 +49,12 @@ func compileDB(t *testing.T) (*bun.DB, *Integration, []*Integration, *compilePro
 	if _, err := db.ExecContext(context.Background(), `CREATE TEMP TABLE automation_execution_claims (LIKE public.automation_execution_claims INCLUDING ALL)`); err != nil {
 		t.Fatal(err)
 	}
+	// Durable execution resolves current persisted roles on the receiving replica.
+	for _, user := range []string{"compile-alice", "compile-bob", "compile-carol", "compile-dave", "compile-long", "compile-cancel", "compile-storage", "compile-no-planner", "compile-claim-race", "compile-blocked", "u-alice"} {
+		if _, err := db.ExecContext(context.Background(), `INSERT INTO "MemoryNodes" (id,concept,"createdAt","createdBy",schema,payload) VALUES (?, 'v1:identity:user', now(), 'compile-test', '{}', '{"role":"writer","active":true}')`, canonicalUser(user)); err != nil {
+			t.Fatal(err)
+		}
+	}
 	eng := dispatchDBEngine(t, db)
 	bff.engine = eng
 	// BFF intake has no local Compiler; event-forward is the honest handoff

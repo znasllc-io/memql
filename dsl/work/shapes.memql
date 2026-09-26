@@ -25,6 +25,7 @@ shape goal workGoalFull {
 /// Every run field, including the trust and chain fields resume restores.
 @row
 shape run workRunFull {
+  executionAuthority
   row.id
   row.createdAt
   ownerUserId

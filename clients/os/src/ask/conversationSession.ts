@@ -56,6 +56,9 @@ export class ConversationSession {
   private state: ConversationState = { conversations: [], dictationActivity: [], historyLoading: false, historyError: "", selectedId: null, turns: [], draft: "", busy: false, loading: false, error: "", activity: null, voiceActive: false };
   private listeners = new Set<() => void>();
   private active: AskHandle | null = null;
+  private stopRequested = false;
+  private cancelling = false;
+  private requestStarted = false;
   private epoch = 0;
   private selection = 0;
   private historyEpoch = 0;
@@ -97,12 +100,32 @@ export class ConversationSession {
       if (selection === this.selection) this.patch({ selectedId: id, turns, dictationActivity: [], draft: "", loading: false });
     } catch (error) { if (selection === this.selection) this.patch({ loading: false, error: message(error) }); }
   };
-  stop = (reason = "Stopped watching. The work continues in Nexus.") => {
+  detach = (reason = "Connection ended. The work continues in Nexus.") => {
     this.epoch++;
     this.active?.cancel(); this.active = null;
     this.patch({ busy: false, activity: null, turns: this.state.turns.map(turn => turn.state === "streaming" ? { ...turn, state: "interrupted", error: reason } : turn) });
   };
-  dispose = () => { this.stop(); this.selection++; this.historyEpoch++; this.voiceEpoch++; this.listeners.clear(); };
+  navigationFailed = (error: string) => { this.patch({ error, activity: null }); };
+  stop = () => {
+    if (!this.state.busy) return;
+    this.stopRequested = true;
+    if (!this.requestStarted) { this.detach("Stop requested."); return; }
+    void this.cancelCurrentGoal();
+  };
+  private async cancelCurrentGoal() {
+    if (!this.stopRequested || this.cancelling) return;
+    const goalId = [...this.state.turns].reverse().find(turn => turn.state === "streaming")?.goalId;
+    if (!goalId) return; // Intake's durable run receipt is still in flight.
+    if (!this.transport.cancelGoal) { this.patch({ error: "This connection cannot cancel work." }); return; }
+    const epoch = this.epoch;
+    this.cancelling = true;
+    try {
+      await this.transport.cancelGoal(goalId);
+      if (epoch === this.epoch) this.detach("Stop requested.");
+    } catch (error) { if (epoch === this.epoch) { this.stopRequested = false; this.patch({ error: `Could not stop work: ${message(error)}` }); } }
+    finally { this.cancelling = false; }
+  }
+  dispose = () => { this.detach(); this.selection++; this.historyEpoch++; this.voiceEpoch++; this.listeners.clear(); };
   beginVoice = async (): Promise<string> => {
     if (this.state.busy || this.state.loading || this.state.voiceActive) throw new Error("Finish the current turn first.");
     const epoch = ++this.voiceEpoch;
@@ -141,7 +164,7 @@ export class ConversationSession {
     } else if (event.type === "activity" && event.activity) {
       const activity = event.activity;
       if (!existing) this.pendingVoiceActivity.set(id, [...(this.pendingVoiceActivity.get(id) ?? []), activity]);
-      this.patch({ turns: this.state.turns.map(turn => turn.id === id ? { ...turn, activity: [...turn.activity, activity], ...runIdentity(activity) } : turn), ...(activity.kind === "action" ? { activity } : {}) });
+      this.patch({ turns: this.state.turns.map(turn => turn.id === id ? { ...turn, activity: [...turn.activity, activity], ...runIdentity(activity) } : turn), ...(activity.kind === "action" && activity.navigate ? { activity } : {}) });
     } else if (event.type === "done") {
       this.patch({ busy: this.voiceTurnId === id ? false : this.state.busy, turns: this.state.turns.map(turn => turn.id === id ? { ...turn, state: turn.error ? "error" : "done", endedAt: new Date().toISOString() } : turn) });
       void this.reload();
@@ -152,6 +175,7 @@ export class ConversationSession {
   send = (prompt: string, context: string | null): boolean => {
     if (this.state.busy || this.state.voiceActive || this.state.loading || !prompt.trim()) return false;
     const epoch = ++this.epoch;
+    this.stopRequested = false; this.requestStarted = false;
     const turn: AskTurn = { id: crypto.randomUUID(), prompt: prompt.trim(), answer: "", state: "streaming", startedAt: new Date().toISOString(), activity: [] };
     this.patch({ busy: true, draft: "", error: "", turns: [...this.state.turns, turn] });
     const patchTurn = (patch: Partial<AskTurn>) => {
@@ -177,12 +201,14 @@ export class ConversationSession {
           this.patch({ selectedId: id, conversations: [conversation, ...this.state.conversations] });
         }
         if (epoch !== this.epoch) return;
+        this.requestStarted = true;
         const handle = this.transport.ask(turn.prompt, context, {
           delta: text => patchTurn({ answer: turn.answer + text }),
           activity: event => {
             if (epoch !== this.epoch) return;
             patchTurn({ activity: [...turn.activity, event], ...runIdentity(event) });
-            if (event.kind === "action") this.patch({ activity: event });
+            if (event.kind === "action" && event.navigate) this.patch({ activity: event });
+            if (event.kind === "run" && this.stopRequested) void this.cancelCurrentGoal();
           },
           done: () => finish(turn.answer.trim() ? undefined : "MemQL finished without an answer."),
           error: error => finish(error),

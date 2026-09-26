@@ -28,6 +28,7 @@ var toolHandlerCorpus = []struct {
 	{"recallWorkHistory", `query workRecallHistory(search: args.search)`, `query workRecallHistory(search: "v-search")`},
 	{"discoverCapabilities", `query workCapabilities(search: args.search)`, `query workCapabilities(search: "v-search")`},
 	{"executeCapability", `query workExecute(name: args.name, arguments: args.arguments)`, `query workExecute(name: "v-name", arguments: {"done":true,"n":2,"title":"T arguments"})`},
+	{"navigateOS", `query workNavigate(app: args.app, section: args.section, record: args.record)`, `query workNavigate(app: "v-app", section: "v-section", record: "v-record")`},
 	{"todosList", `query todos(done: args.done)`, `query todos(done: true)`},
 	{"todosComplete", `mutation completeTodo(todoId: args.todoId, payload: args.payload)`, `mutation completeTodo(todoId: "v-todoId", payload: {"done":true,"n":2,"title":"T payload"})`},
 	{"todosUpdate", `mutation updateTodo(todoId: args.todoId, payload: args.payload)`, `mutation updateTodo(todoId: "v-todoId", payload: {"done":true,"n":2,"title":"T payload"})`},

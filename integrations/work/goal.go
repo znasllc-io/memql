@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
@@ -73,6 +74,10 @@ func (i *Integration) handleCreateGoal(ctx context.Context, args map[string]any,
 	if err != nil {
 		return nil, err
 	}
+	authority, err := auth.CaptureExecutionAuthority(ctx)
+	if err != nil {
+		return nil, err
+	}
 	statement := argString(args, "statement")
 	if statement == "" {
 		return nil, fmt.Errorf("work: createGoal needs a statement")
@@ -119,15 +124,16 @@ func (i *Integration) handleCreateGoal(ctx context.Context, args map[string]any,
 	// path that needs it being the one path that forgets.
 	runCtx := ownerActor(ctx, owner)
 	if err := st.createRunRow(runCtx, runSeed{
-		RunId:          runId,
-		GoalId:         goalId,
-		AutomationName: compilingAutomationName,
-		Input:          input,
-		TriggeredBy:    "manual",
-		Mode:           modeLive,
-		Status:         runStatusCompiling,
-		StartedAt:      now,
-		OwnerUserId:    owner,
+		ExecutionAuthority: authority,
+		RunId:              runId,
+		GoalId:             goalId,
+		AutomationName:     compilingAutomationName,
+		Input:              input,
+		TriggeredBy:        "manual",
+		Mode:               modeLive,
+		Status:             runStatusCompiling,
+		StartedAt:          now,
+		OwnerUserId:        owner,
 	}); err != nil {
 		return nil, err
 	}

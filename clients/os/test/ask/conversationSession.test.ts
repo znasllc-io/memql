@@ -34,3 +34,30 @@ it("learns dictation estimates only from successful calls on the same route", ()
  expect(session.getSnapshot().dictationActivity.at(-1)?.expectedMs).toBe(8200);
  session.recordDictation({...base,id:"4",model:"remote",phase:"running"}); expect(session.getSnapshot().dictationActivity.at(-1)?.expectedMs).toBe(60000);
 });
+it("Stop waits for the intake receipt and cancels the durable goal before detaching", async () => {
+ let callbacks!: import("../../src/ask/askController").AskCallbacks;
+ const cancel = vi.fn(); const cancelGoal = vi.fn(async () => {});
+ const session = new ConversationSession({ ask: (_p,_c,on) => { callbacks=on; return { cancel }; }, cancelGoal });
+ session.send("Open Deployables",null); session.stop();
+ expect(cancel).not.toHaveBeenCalled(); expect(session.getSnapshot().busy).toBe(true);
+ callbacks.activity?.({id:"run",kind:"run",phase:"running",at:"now",arguments:{goalId:"g",runId:"r"}});
+ await Promise.resolve(); await Promise.resolve();
+ expect(cancelGoal).toHaveBeenCalledExactlyOnceWith("g"); expect(cancel).toHaveBeenCalledOnce(); expect(session.getSnapshot().busy).toBe(false);
+});
+it("disconnect detaches without cancelling work, and a failed Stop stays visible", async () => {
+ let callbacks!: import("../../src/ask/askController").AskCallbacks;
+ const cancelGoal = vi.fn(async () => { throw new Error("offline"); });
+ const session = new ConversationSession({ask:(_p,_c,on)=>{callbacks=on;return {cancel(){}}},cancelGoal});
+ session.send("Work",null); callbacks.activity?.({id:"run",kind:"run",phase:"running",at:"now",arguments:{goalId:"g",runId:"r"}});
+ session.stop(); await Promise.resolve(); await Promise.resolve();
+ expect(session.getSnapshot().error).toContain("Could not stop"); expect(session.getSnapshot().busy).toBe(true);
+ session.detach(); expect(cancelGoal).toHaveBeenCalledTimes(1);
+});
+it("outer tool events do not erase the navigation cue", () => {
+ let callbacks!: import("../../src/ask/askController").AskCallbacks;
+ const session = new ConversationSession({ask:(_p,_c,on)=>{callbacks=on;return {cancel(){}}}});
+ session.send("Open Deployables",null);
+ callbacks.activity?.({id:"navigation",kind:"action",phase:"completed",at:"now",app:"deployables",navigate:true});
+ callbacks.activity?.({id:"outer",kind:"action",phase:"completed",at:"now"});
+ expect(session.getSnapshot().activity?.id).toBe("navigation");
+});

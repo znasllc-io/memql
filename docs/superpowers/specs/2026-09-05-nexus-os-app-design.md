@@ -416,7 +416,7 @@ read as something nobody got round to.
 
 ## H. New goal, and Ask's shared work record
 
-Updated 2026-09-25: the original Ask-to-goal handoff has been replaced by
+Updated 2026-09-26: the original Ask-to-goal handoff has been replaced by
 shared intake. See [Ask and voice](../../public/operate/ask-and-voice.md).
 
 `createGoal` opens the goal AND its first run in `compiling` and dispatches
@@ -426,9 +426,10 @@ write to get half-done.
 **New goal** is the app's own composer, on the Goals section.
 
 **Ask** submits each text or voice turn through the same `createGoal` path,
-with its conversation context and `requestedVia: "ask"`. Its **View work**
-action opens the existing goal in Nexus through the shell's open intent with
-`{ goalId }`; it never creates a second goal. Nexus's composer writes
+with its conversation context and `requestedVia: "ask"`. The goal remains
+available in Nexus; Ask's per-message work menu has been removed. Explicit Stop
+cancels accepted work through the shared journal; closing the viewer only
+detaches. Neither action creates a second goal. Nexus's composer writes
 `requestedVia: "nexus"`.
 
 **Nothing is inserted locally on either path.** `v1:work:goal` broadcasts, so
@@ -481,8 +482,8 @@ pure. Under `clients/os/test/nexus/`:
   and that the rail follows the rewind.
 - `automations.test.tsx` -- the read dates itself, an act re-reads, no
   percentage anywhere, and arm/retire through the catalog's own verb.
-- `askWorkRecord.test.tsx` -- View work opens the turn's existing goal, and
-  the removed goal-handoff action cannot submit the same request again.
+- `askWorkRecord.test.tsx` -- Ask has no per-message work menu, and the
+  removed goal-handoff action cannot submit the same request again.
 - `app.test.tsx`, `approvals.test.tsx`, `rows.test.ts`, `runPage.test.tsx`,
   `settings.test.ts` -- carried over from the Work app, plus the live-work-first
   ordering.

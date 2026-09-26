@@ -50,7 +50,6 @@ export function AskSheet() {
           context={sheet.context}
           contextLabel={sheet.contextLabel}
           variant="sheet"
-          onOpenRun={(goalId) => { actions.openApp("nexus", "goals", { goalId }); }}
           onOpenFile={(fileId) => { actions.openApp("files", "browse", { fileId }); }}
           autoFocus
         />

@@ -86,6 +86,9 @@ func (e *MemQLEngine) workCapabilitiesBuiltin(ctx context.Context, args map[stri
 		}
 		name := QualifyConstruct(ConstructNamespaceForOrigin(fn.Origin), fn.Name)
 		haystack := strings.ToLower(name + " " + fn.Description + " " + fn.DocComment + " " + fn.BoundConcept)
+		if fn.Name == "workNavigate" {
+			haystack += " " + string(osNavigationJSON)
+		}
 		for _, field := range workCapabilityFields(fn) {
 			haystack += " " + strings.ToLower(field.Name+" "+field.Description+" "+fmt.Sprint(field.Enum))
 		}
@@ -156,7 +159,7 @@ func (e *MemQLEngine) workExecuteBuiltin(ctx context.Context, args map[string]an
 	// Runtime calls accept qualified names; `use` belongs to declarations,
 	// not executable expressions. Keep the namespace to avoid ambiguous names.
 	call = fn.FunctionKind + " " + call
-	event := WorkEvent{ID: id.NewShortId(), Kind: "action", Phase: "running", Name: name, App: workCapabilityApp(fn), Navigate: workCapabilityApp(fn) != ""}
+	event := WorkEvent{ID: id.NewShortId(), Kind: "action", Phase: "running", Name: name, App: workCapabilityApp(fn), Navigate: workCapabilityApp(fn) != "" && fn.FunctionKind == "mutation"}
 	// Only resource identifiers are navigation hints. Never mirror arbitrary
 	// content or credentials into desktop events.
 	event.Arguments = map[string]any{}
@@ -195,28 +198,6 @@ func (e *MemQLEngine) workExecuteBuiltin(ctx context.Context, args map[string]an
 		return nil, err
 	}
 	return []memorynodes.MemoryNode{{ID: "result", Payload: raw}}, nil
-}
-
-// Opening a view requests presentation only; it never replays a data mutation.
-func (e *MemQLEngine) workNavigateBuiltin(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	app := stringArg(args, "app")
-	subject, ok := auth.SubjectFromContext(ctx)
-	if !ok || !auth.CapableFor(ctx, subject, "read", "app:"+app) {
-		return nil, fmt.Errorf("this app is unavailable for this person")
-	}
-	run, ok := common.RunFromContext(ctx)
-	if !ok || run.RunId == "" {
-		return nil, fmt.Errorf("navigation requires a work run")
-	}
-	event := WorkEvent{ID: id.NewShortId(), Kind: "action", Phase: "completed", Name: "Open " + app, App: app, Navigate: true, Arguments: map[string]any{}}
-	if section := stringArg(args, "section"); section != "" {
-		event.Arguments["section"] = section
-	}
-	if err := e.RecordWorkProgress(ctx, event); err != nil {
-		return nil, err
-	}
-	raw, _ := json.Marshal(map[string]any{"requested": true, "app": app, "note": "Navigation was requested in the connected OS. This is not a data change or a receipt that a browser displayed it."})
-	return []memorynodes.MemoryNode{{ID: event.ID, Payload: raw}}, nil
 }
 
 // Builtins declare their contract on the body, other constructs in args {}.
