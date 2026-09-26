@@ -22,7 +22,7 @@ func TestAskConversationOwnershipAndServerTranscript(t *testing.T) {
 	}
 	mine := actor("v1:identity:user:" + id.NewShortId())
 	theirs := actor("v1:identity:user:" + id.NewShortId())
-	result, err := e.Execute(mine, `mutation createAskConversation(title: "Private question")`)
+	result, err := e.Execute(mine, `mutation createAskConversation(requestId: "private", title: "Private question")`)
 	require.NoError(t, err)
 	rows := MaterializeRows(result.OutputPayload())
 	require.Len(t, rows, 1)
@@ -55,6 +55,42 @@ func TestAskConversationOwnershipAndServerTranscript(t *testing.T) {
 	require.NoError(t, err)
 	_, present := e.prompts.Get("askMemql")
 	require.True(t, present)
+}
+
+func TestAskConversationCreationSeparatesHistoriesAndPreservesRetries(t *testing.T) {
+	e, _, _ := sharedReadMergeEngine(t)
+	actor := func() context.Context {
+		user := "v1:identity:user:" + id.NewShortId()
+		ctx := auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: user})
+		return auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: user, Role: auth.RoleWriter})
+	}
+	mine, theirs := actor(), actor()
+	create := func(ctx context.Context, requestID string) string {
+		call, err := parser.RenderCall("createAskConversation", map[string]any{"requestId": requestID, "title": "New conversation"})
+		require.NoError(t, err)
+		result, err := e.Execute(ctx, "mutation "+call)
+		require.NoError(t, err)
+		rows := MaterializeRows(result.OutputPayload())
+		require.Len(t, rows, 1)
+		return fmt.Sprint(rows[0]["id"])
+	}
+	first := create(mine, "first")
+	transcript := askTranscript{Turns: []AskTurn{{ID: "saved-turn", Prompt: "Keep this", Answer: "Private history", State: "done", StartedAt: time.Now()}}}
+	require.NoError(t, e.askSave(mine, first, "Original conversation", transcript))
+	second := create(mine, "second")
+	require.NotEqual(t, first, second, "identical titles must not identify the same conversation")
+	require.Equal(t, first, create(mine, "first"), "a retried creation keeps its original identity")
+	row, err := e.askRead(mine, first)
+	require.NoError(t, err)
+	require.Equal(t, "Original conversation", row["title"])
+	require.Contains(t, fmt.Sprint(row), "Private history", "new conversations and retries must not reset a saved transcript")
+	row, err = e.askRead(mine, second)
+	require.NoError(t, err)
+	require.NotContains(t, fmt.Sprint(row), "Private history")
+	foreign := create(theirs, "first")
+	require.NotEqual(t, first, foreign, "request identities are scoped to their authenticated owner")
+	_, err = e.askRead(theirs, first)
+	require.Error(t, err)
 }
 
 func TestAskEstimateUsesOnlyMatchingSuccessfulRoute(t *testing.T) {
@@ -96,7 +132,7 @@ func TestAskRunsTheRealDSLToolLoopAndPersistsHistory(t *testing.T) {
 	e.SetAIResolver(testAIResolver{fn: func(ctx context.Context, req airoute.ResolveRequest) (ResolvedProvider, error) {
 		return ResolvedProvider{Client: model, Resolution: airoute.Resolution{ProviderName: "fleet:test", Model: "test-model"}}, nil
 	}})
-	result, err := e.Execute(ctx, `mutation createAskConversation(title: "New conversation")`)
+	result, err := e.Execute(ctx, `mutation createAskConversation(requestId: "tool-loop", title: "New conversation")`)
 	require.NoError(t, err)
 	rows := MaterializeRows(result)
 	require.Len(t, rows, 1)
@@ -145,7 +181,7 @@ func TestAskExecutesQualifiedCapabilitiesWithCallerRowScope(t *testing.T) {
 	mine = context.WithValue(mine, askEventKey{}, askEmitter(func(e AskEvent) error { events = append(events, e); return nil }))
 	_, err := e.askExecuteBuiltin(mine, map[string]any{"name": "todos.createTodo", "arguments": map[string]any{"todoId": todoID, "title": "Ask capability regression"}}, 0)
 	require.NoError(t, err)
-	read := map[string]any{"name": "todos.todoById", "arguments": map[string]any{"todoId": todoID}}
+	read := map[string]any{"name": "todos.todoById", "arguments": map[string]any{"todoId": "v1:todos:todo:" + todoID}}
 	rows, err := e.askExecuteBuiltin(mine, read, 0)
 	require.NoError(t, err)
 	require.Contains(t, string(rows[0].Payload), "Ask capability regression")
@@ -154,4 +190,5 @@ func TestAskExecutesQualifiedCapabilitiesWithCallerRowScope(t *testing.T) {
 	require.NotContains(t, string(rows[0].Payload), "Ask capability regression")
 	require.Len(t, events, 4)
 	require.Equal(t, "completed", events[3].Phase)
+	require.Equal(t, todoID, events[3].Arguments["todoId"], "navigation must carry the bare identifier used by the UI")
 }

@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Shell } from "../src/chrome/Shell";
-import { StubAskTransport } from "../src/ask/askController";
+import { StubAskTransport } from "./ask/stubTransport";
 import { resetIdsForTest } from "../src/system/desks";
 import { LocalDesktopStore } from "../src/system/store";
 import type { OsRuntimeConfig } from "../src/cluster/config";

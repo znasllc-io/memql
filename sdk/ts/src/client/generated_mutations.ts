@@ -1350,14 +1350,16 @@ QueryClient.prototype.createArtifact = function (this: QueryClient, args: Create
   return this.executeNamed("createArtifact", buildCreateArtifact(args), opts);
 };
 
-/** Start an empty conversation. Clients cannot supply an owner or transcript. */
+/** Start an empty conversation for a unique client request. Retrying the same request preserves its transcript; a new request always gets its own record. Clients cannot supply an owner, record id or transcript. */
 // Bound concept: v1:os:askConversation (machine-readable: BoundConcepts["createAskConversation"] in generated_concepts.ts).
 export interface CreateAskConversationArgs {
+  requestId: string;
   title: string;
 }
 
 export function buildCreateAskConversation(args: CreateAskConversationArgs): string {
   const parts: string[] = [];
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
   parts.push("title: " + renderMemQLValue(args.title));
   return "mutation createAskConversation(" + parts.join(", ") + ")";
 }

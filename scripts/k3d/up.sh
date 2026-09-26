@@ -573,7 +573,8 @@ function wait_for_workloads() {
     # future caller) source this file and call the function directly, where
     # main's cap_param resolution never ran. The env var historically carries
     # a trailing "s" (CI exports 720s); accept both spellings.
-    local deadline="${WORKLOAD_TIMEOUT:-${MEMQL_K3D_WORKLOAD_TIMEOUT:-300}}" names retired waited=0 tick=5 since_report=0
+    local deadline="${WORKLOAD_TIMEOUT:-${MEMQL_K3D_WORKLOAD_TIMEOUT:-300}}" names retired waited=0 tick=5
+    local started last_report=-30 remaining poll pause
     deadline="${deadline%s}"
     info "Waiting up to ${deadline}s for the MemQL workloads to become Available..."
 
@@ -623,25 +624,38 @@ function wait_for_workloads() {
     # operator were themselves pulled and admitted. Every 30s of not-ready
     # this prints WHO is not ready and WHY, so a slow pull reads as a slow
     # pull while it happens, and a timeout's last report is its diagnosis.
+    started=$SECONDS
     while :; do
+        waited=$((SECONDS - started))
+        remaining=$((deadline - waited))
+        if (( remaining <= 0 )); then break; fi
+        poll=$tick
+        if (( remaining < poll )); then poll=$remaining; fi
+        # kubectl shares this budget across all named resources. One second
+        # expires while fetching an already-healthy ten-deployment cluster.
         # shellcheck disable=SC2086
-        if kubectl wait --for=condition=Available --timeout=1s \
+        if kubectl wait --for=condition=Available --timeout="${poll}s" \
             -n "$NAMESPACE" $names >/dev/null 2>&1; then
+            waited=$((SECONDS - started))
             info "every MemQL workload is Available (after ${waited}s)."
             WORKLOADS_READY=true
             return 0
         fi
+        # The deadline includes time spent inside kubectl, not only sleeps.
+        waited=$((SECONDS - started))
         if (( waited >= deadline )); then
             break
         fi
-        if (( since_report >= 30 )) || (( waited == 0 )); then
+        if (( waited - last_report >= 30 )); then
             info "still waiting (${waited}s/${deadline}s):"
             what_is_not_ready >&2
-            since_report=0
+            last_report=$waited
         fi
-        sleep "$tick"
-        (( waited += tick )) || true
-        (( since_report += tick )) || true
+        remaining=$((deadline - (SECONDS - started)))
+        if (( remaining <= 0 )); then break; fi
+        pause=$tick
+        if (( remaining < pause )); then pause=$remaining; fi
+        sleep "$pause"
     done
 
     WORKLOADS_READY=false

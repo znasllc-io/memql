@@ -79,6 +79,18 @@ func TestWaitBudgetParamOutranksTheEnv(t *testing.T) {
 	}
 }
 
+func TestWaitBudgetIncludesTimeInsideKubectl(t *testing.T) {
+	ready, calls, log := runWaitForWorkloadsEnv(t, "bff 1\n", "bff", []string{
+		"WORKLOAD_TIMEOUT=1", "FAKE_WAIT_DELAY=2",
+	})
+	if ready != "false" {
+		t.Fatalf("WORKLOADS_READY = %q, want false\n%s", ready, log)
+	}
+	if count := strings.Count(calls, "wait --for=condition=Available"); count != 1 {
+		t.Fatalf("ran %d waits after the first exhausted the deadline:\n%s", count, calls)
+	}
+}
+
 // TestUpDeclaresTheWorkloadTimeoutParam: an undeclared flag is an immediate
 // exit 2 at run time, so the declaration IS the feature reaching the wire.
 func TestUpDeclaresTheWorkloadTimeoutParam(t *testing.T) {

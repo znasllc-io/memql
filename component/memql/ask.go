@@ -462,7 +462,7 @@ func (e *MemQLEngine) askExecuteBuiltin(ctx context.Context, args map[string]any
 	for key, value := range arguments {
 		if strings.HasSuffix(key, "Id") {
 			if v, ok := value.(string); ok {
-				event.Arguments[key] = v
+				event.Arguments[key] = BareShortId(v)
 			}
 		}
 	}

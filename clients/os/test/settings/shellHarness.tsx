@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { vi } from "vitest";
 
 import { Shell } from "../../src/chrome/Shell";
-import { StubAskTransport } from "../../src/ask/askController";
+import { StubAskTransport } from "../ask/stubTransport";
 import { LocalDesktopStore } from "../../src/system/store";
 import type { OsRuntimeConfig } from "../../src/cluster/config";
 import { appTileName } from "../appTile";

@@ -2093,11 +2093,12 @@ func CreateArtifactBuild(args CreateArtifactArgs) string {
 	return b.String()
 }
 
-// CreateAskConversation -- Start an empty conversation. Clients cannot supply an owner or transcript.
+// CreateAskConversation -- Start an empty conversation for a unique client request. Retrying the same request preserves its transcript; a new request always gets its own record. Clients cannot supply an owner, record id or transcript.
 //
 // Bound concept: v1:os:askConversation (machine-readable: BoundConcepts["createAskConversation"] in generated_concepts.go).
 type CreateAskConversationArgs struct {
-	Title string
+	RequestId string
+	Title     string
 }
 
 // CreateAskConversation calls the engine mutation createAskConversation.
@@ -2109,6 +2110,11 @@ func (qc *QueryClient) CreateAskConversation(ctx context.Context, args CreateAsk
 func CreateAskConversationBuild(args CreateAskConversationArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createAskConversation(")
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
 	b.WriteString("title: ")
 	b.WriteString(quoteMemQL(args.Title))
 	b.WriteString(")")
