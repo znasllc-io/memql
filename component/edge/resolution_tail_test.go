@@ -47,8 +47,8 @@ func TestAnAbsentResolutionTailReproducesTheKindsOwnBehaviour(t *testing.T) {
 			if rec.Code != tc.wantStatus {
 				t.Fatalf("kind %q with no tail: status %d, want %d", tc.kind, rec.Code, tc.wantStatus)
 			}
-			if tc.wantBody != "" && rec.Body.String() != tc.wantBody {
-				t.Errorf("kind %q with no tail: body %q, want %q", tc.kind, rec.Body.String(), tc.wantBody)
+			if tc.wantBody != "" && sourceHTML(rec.Body.String()) != tc.wantBody {
+				t.Errorf("kind %q with no tail: body %q, want %q", tc.kind, sourceHTML(rec.Body.String()), tc.wantBody)
 			}
 		})
 	}
@@ -65,7 +65,7 @@ func TestAStorefrontCanChooseToAnswerNotFound(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("a storefront declaring not_found answered %d, want 404", rec.Code)
 	}
-	if rec.Body.String() == "ROOT" {
+	if sourceHTML(rec.Body.String()) == "ROOT" {
 		t.Error("a storefront declaring not_found still fell back to index.html")
 	}
 }
@@ -77,8 +77,8 @@ func TestAStaticSiteCanChooseTheFallback(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("a static site declaring fallback answered %d, want 200", rec.Code)
 	}
-	if rec.Body.String() != "ROOT" {
-		t.Errorf("body %q, want ROOT", rec.Body.String())
+	if sourceHTML(rec.Body.String()) != "ROOT" {
+		t.Errorf("body %q, want ROOT", sourceHTML(rec.Body.String()))
 	}
 }
 
@@ -94,9 +94,9 @@ func TestAnUnrecognisedResolutionTailReadsAsAbsent(t *testing.T) {
 	for _, kind := range []string{"spa", storefrontKind} {
 		t.Run(kind, func(t *testing.T) {
 			rec := serve(t, tailSite(kind, "fallback_maybe"), tailFiles(), "/nothing/here")
-			if rec.Code != http.StatusOK || rec.Body.String() != "ROOT" {
+			if rec.Code != http.StatusOK || sourceHTML(rec.Body.String()) != "ROOT" {
 				t.Errorf("an unrecognised tail on %q answered %d/%q, want 200/ROOT",
-					kind, rec.Code, rec.Body.String())
+					kind, rec.Code, sourceHTML(rec.Body.String()))
 			}
 		})
 	}
@@ -118,9 +118,9 @@ func TestTheResolutionTailGovernsOnlyTheMiss(t *testing.T) {
 		{"/products/shoe", "SHOE-PRERENDERED"},
 	} {
 		rec := serve(t, site, tailFiles(), tc.path)
-		if rec.Code != http.StatusOK || rec.Body.String() != tc.want {
+		if rec.Code != http.StatusOK || sourceHTML(rec.Body.String()) != tc.want {
 			t.Errorf("%s under not_found answered %d/%q, want 200/%q",
-				tc.path, rec.Code, rec.Body.String(), tc.want)
+				tc.path, rec.Code, sourceHTML(rec.Body.String()), tc.want)
 		}
 	}
 }
