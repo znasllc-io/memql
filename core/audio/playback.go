@@ -6,49 +6,28 @@ import (
 	"time"
 )
 
-// PlaybackGate pauses media while an apparent interruption is transcribed.
-// It does not cancel generation or discard buffered samples. Every pause has
-// a deadline so an unavailable transcriber cannot leave playback suspended.
+// PlaybackGate pauses speech while an apparent interruption is transcribed.
+// Media adapters keep sending silence on their normal clock without consuming
+// buffered speech. Every pause expires so unavailable ASR cannot suspend it forever.
 type PlaybackGate struct {
-	mu      sync.Mutex
-	until   time.Time
-	changed chan struct{}
+	mu    sync.Mutex
+	until time.Time
 }
 
-func (g *PlaybackGate) signal() {
-	if g.changed != nil {
-		close(g.changed)
-	}
-	g.changed = make(chan struct{})
-}
 func (g *PlaybackGate) Pause(duration time.Duration) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.until = time.Now().Add(duration)
-	g.signal()
 }
-func (g *PlaybackGate) Resume() { g.mu.Lock(); defer g.mu.Unlock(); g.until = time.Time{}; g.signal() }
-func (g *PlaybackGate) Wait(ctx context.Context) error {
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		g.mu.Lock()
-		remaining, changed := time.Until(g.until), g.changed
-		g.mu.Unlock()
-		if remaining <= 0 {
-			return nil
-		}
-		timer := time.NewTimer(remaining)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-changed:
-			timer.Stop()
-		case <-timer.C:
-		}
-	}
+func (g *PlaybackGate) Resume() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.until = time.Time{}
+}
+func (g *PlaybackGate) paused() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return time.Now().Before(g.until)
 }
 
 type playbackKey struct{}
@@ -56,9 +35,9 @@ type playbackKey struct{}
 func WithPlaybackGate(ctx context.Context, gate *PlaybackGate) context.Context {
 	return context.WithValue(ctx, playbackKey{}, gate)
 }
-func WaitForPlayback(ctx context.Context) error {
+func PlaybackPaused(ctx context.Context) bool {
 	if gate, ok := ctx.Value(playbackKey{}).(*PlaybackGate); ok && gate != nil {
-		return gate.Wait(ctx)
+		return gate.paused()
 	}
-	return ctx.Err()
+	return false
 }

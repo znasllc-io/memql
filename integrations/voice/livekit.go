@@ -182,37 +182,51 @@ func (r *room) Publish(ctx context.Context, pcm []byte, sampleRate int) error {
 		}
 		pcm = resampler.Resample(pcm)
 	}
+	tick := time.NewTicker(20 * time.Millisecond)
+	defer tick.Stop()
+	return publishPCM(ctx, r.ctx, pcm, tick.C, r.track.WriteSample)
+}
+
+// Keep the RTP clock advancing during a candidate interruption. Withholding
+// packets and then continuing contiguous timestamps makes resumed audio look
+// late to the receiver. Silence consumes time, never the saved speech buffer.
+func publishPCM(ctx, roomCtx context.Context, pcm []byte, ticks <-chan time.Time, write func(media.Sample) error) error {
 	encoder, err := opus.NewEncoder(opus.WithSampleRate(48000), opus.WithChannels(1), opus.WithBitrate(48000))
 	if err != nil {
 		return err
 	}
 	const frameBytes = 960 * 2
 	packet := make([]byte, 4000)
-	tick := time.NewTicker(20 * time.Millisecond)
-	defer tick.Stop()
+	silence := make([]byte, frameBytes)
 	for len(pcm) > 0 {
-		if err := audio.WaitForPlayback(ctx); err != nil {
-			return err
-		}
-		frame := pcm[:min(frameBytes, len(pcm))]
-		pcm = pcm[len(frame):]
-		if len(frame) < frameBytes {
-			padded := make([]byte, frameBytes)
-			copy(padded, frame)
-			frame = padded
-		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-r.ctx.Done():
-			return r.ctx.Err()
-		case <-tick.C:
+		case <-roomCtx.Done():
+			return roomCtx.Err()
+		case <-ticks:
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := roomCtx.Err(); err != nil {
+			return err
+		}
+		frame := silence
+		if !audio.PlaybackPaused(ctx) {
+			frame = pcm[:min(frameBytes, len(pcm))]
+			pcm = pcm[len(frame):]
+			if len(frame) < frameBytes {
+				padded := make([]byte, frameBytes)
+				copy(padded, frame)
+				frame = padded
+			}
 		}
 		n, err := encoder.Encode(frame, packet)
 		if err != nil {
 			return err
 		}
-		if err = r.track.WriteSample(media.Sample{Data: packet[:n], Duration: 20 * time.Millisecond}); err != nil {
+		if err = write(media.Sample{Data: packet[:n], Duration: 20 * time.Millisecond}); err != nil {
 			return err
 		}
 	}
