@@ -29,6 +29,11 @@ func TestLatestScanKeysOnlyPushesMandatoryIntrinsicConstraints(t *testing.T) {
 	id := &ComparisonExpression{Field: FieldReference{Parts: []string{"id"}}, Operator: OpEq, Value: "one"}
 	keys = eng.latestScanKeys(&LogicalExpression{Op: LogicalAnd, Left: bound, Right: id}, nil)
 	require.Contains(t, keys.String(), keysetConcept+":one", "point reads must stay bounded to their resolved ID")
+	spaced := irConceptEq(" " + keysetConcept + " ")
+	keys = eng.latestScanKeys(&LogicalExpression{Op: LogicalAnd, Left: spaced, Right: id}, nil)
+	require.NotNil(t, keys)
+	require.NotContains(t, keys.String(), "' "+keysetConcept+" '", "keys must normalize concept literals exactly as the predicate compiler does")
+	require.Contains(t, keys.String(), keysetConcept+":one")
 }
 
 // A heartbeat history must not revive an old match or hide a newer match.

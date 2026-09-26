@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"strings"
 	"time"
 
 	"github.com/uptrace/bun"
@@ -41,7 +42,8 @@ func (e *MemQLEngine) latestScanKeys(expr ExpressionNode, timestamp *time.Time) 
 			}
 			if field.kind == intrinsicFieldConcept && n.Operator == OpEq {
 				if value, ok := n.Value.(string); ok {
-					concept = value
+					// Match compileConceptComparisonIn's normalization.
+					concept = strings.TrimSpace(value)
 				}
 			}
 			if field.kind == intrinsicFieldId {
