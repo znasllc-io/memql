@@ -46,9 +46,14 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 	// -- specifically to remove the unguarded coupling a duplicated hash
 	// expression created, so the entry is gone rather than kept.)
 	allow := map[string]string{
-		"shopify/connect_callback.go":      "Shopify signs its OAuth callback query with HMAC-SHA256; verification must match the provider's wire algorithm",
-		"shopify/connect_callback_test.go": "constructs signed Shopify callback fixtures using the provider's HMAC-SHA256 protocol",
-		"shopify/connect_write.go":         "compares fixed-width SHA-256 digests of pending app secrets in constant time; this is credential comparison, not identifier generation",
+		// Retention archives are recoverable outside MemQL. Their filenames are
+		// standard SHA-256 checksums of the gzip bytes, verified with sha256sum
+		// before restoring evidence; core/id's chained fingerprint differs.
+		"work/operational_retention.go":         "archive filenames expose a standard SHA-256 checksum for independent recovery verification, not a MemQL row identifier",
+		"work/operational_retention_db_test.go": "checks that archived filenames match the standard SHA-256 of the uploaded gzip bytes",
+		"shopify/connect_callback.go":           "Shopify signs its OAuth callback query with HMAC-SHA256; verification must match the provider's wire algorithm",
+		"shopify/connect_callback_test.go":      "constructs signed Shopify callback fixtures using the provider's HMAC-SHA256 protocol",
+		"shopify/connect_write.go":              "compares fixed-width SHA-256 digests of pending app secrets in constant time; this is credential comparison, not identifier generation",
 
 		// v1:library:file.sha256 is a REAL SHA-256 hex digest of the stored
 		// bytes -- the concept documents it as a dedup hint and integrity

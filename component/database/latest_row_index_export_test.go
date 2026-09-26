@@ -7,9 +7,10 @@ package database
 // tests can call them: the ensurer is a migration's primitive, and a caller at
 // runtime would build indexes outside the migration it belongs to.
 var (
-	EnsureLatestRowIndex  = ensureLatestRowIndex
-	InspectLatestRowIndex = inspectLatestRowIndex
-	LatestRowIndexLockKey = latestRowIndexLockKey
+	EnsureLatestRowIndex    = ensureLatestRowIndex
+	EnsureWorkRecoveryIndex = ensureWorkRecoveryIndex
+	InspectLatestRowIndex   = inspectLatestRowIndex
+	LatestRowIndexLockKey   = latestRowIndexLockKey
 )
 
 const (
@@ -18,3 +19,5 @@ const (
 	LatestRowIndexBuilt      = latestRowIndexBuilt
 	LatestRowIndexRebuilt    = latestRowIndexRebuilt
 )
+
+var EnsureWorkJournalLookupIndex = ensureWorkJournalLookupIndex

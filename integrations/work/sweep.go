@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/num"
@@ -111,7 +112,8 @@ type WaitSweepResult struct {
 	Abandoned int `json:"abandoned"`
 	// Redispatched counts runs that looked abandoned and were handed back to
 	// a live replica instead of being closed. See redispatchStale.
-	Redispatched int `json:"redispatched"`
+	Redispatched        int `json:"redispatched"`
+	OrphanedWaitsClosed int `json:"orphanedWaitsClosed"`
 }
 
 func (i *Integration) handleSweepWaiting(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
@@ -124,10 +126,11 @@ func (i *Integration) handleSweepWaiting(ctx context.Context, args map[string]an
 		return nil, err
 	}
 	return i.resultNode(map[string]any{
-		"checked":      res.Checked,
-		"resumed":      res.Resumed,
-		"abandoned":    res.Abandoned,
-		"redispatched": res.Redispatched,
+		"checked":             res.Checked,
+		"resumed":             res.Resumed,
+		"abandoned":           res.Abandoned,
+		"redispatched":        res.Redispatched,
+		"orphanedWaitsClosed": res.OrphanedWaitsClosed,
 	}), nil
 }
 
@@ -184,6 +187,13 @@ func (i *Integration) SweepWaiting(ctx context.Context, olderThan time.Duration)
 		}
 
 		if status == runStatusWaiting {
+			if closed, err := i.closeOrphanedSystemApprovalWait(ctx, run, now); err != nil {
+				i.log().Warn("work: could not check a system approval wait", "run", runId, "error", err)
+				continue
+			} else if closed {
+				res.OrphanedWaitsClosed++
+				continue
+			}
 			// A CLASSIFIED FAILURE'S ACT IS SERVED FIRST (epic memql#5127).
 			// It is checked before the inference park and the timer because
 			// those two ask different questions of the same field: a `retry`
@@ -322,6 +332,42 @@ func (i *Integration) SweepWaiting(ctx context.Context, olderThan time.Duration)
 	return res, nil
 }
 
+// Earlier journals parked failed maintenance runs even when approval creation
+// failed validation. Those waits have no answerable gate and no human owner.
+// Close only this proven orphan shape, preserving the run, error and history.
+// A read failure is never treated as a missing approval; user goals and real
+// approvals keep their existing lifecycle.
+func (i *Integration) closeOrphanedSystemApprovalWait(ctx context.Context, run map[string]any, now time.Time) (bool, error) {
+	if owner, present := run["ownerUserId"]; !present || owner != "" || rowString(run, "goalId") != "" || rowString(run, "triggeredBy") != "schedule" {
+		return false, nil
+	}
+	waiting := rowMap(run, "waitingOn")
+	if rowString(waiting, "kind") != "approval" || rowString(waiting, "subject") == "" {
+		return false, nil
+	}
+	since, ok := rowTime(waiting, "since")
+	if !ok || since.After(now.Add(-time.Minute)) {
+		return false, nil
+	}
+	actor, ok := auth.AccessFromContext(ctx)
+	if !ok || actor == nil || !actor.IsClusterOwner() {
+		return false, fmt.Errorf("work: only cluster maintenance may inspect orphaned system waits")
+	}
+	st := i.store()
+	approvals, err := st.queryInternal(ctx, "query "+call("workApprovalById", map[string]any{"approvalId": rowString(waiting, "subject")}))
+	if err != nil || len(approvals) != 0 {
+		return false, err
+	}
+	err = st.updateRun(ctx, rowString(run, "id"), map[string]any{
+		"status":       runStatusFailed,
+		"finishedAt":   rfc(now),
+		"waitingOn":    map[string]any{},
+		"errorCode":    "approval_missing",
+		"errorMessage": "The system task failed and its approval was not saved. This orphaned wait was closed; the next scheduled execution retries the maintenance task.",
+	})
+	return err == nil, err
+}
+
 // redispatchStale offers a silent run back to the cluster and reports whether
 // a replica took it.
 //
@@ -427,14 +473,16 @@ func neverReachedCompile(run map[string]any) bool {
 
 // RetentionResult is what one retention pass did.
 type RetentionResult struct {
-	BoundaryModelCall   string   `json:"boundaryModelCall"`
-	BoundaryObservation string   `json:"boundaryObservation"`
-	RunsSummarized      int      `json:"runsSummarized"`
-	RowsArchived        int      `json:"rowsArchived"`
-	RowsDeleted         int      `json:"rowsDeleted"`
-	Objects             []string `json:"objects,omitempty"`
-	Container           string   `json:"container,omitempty"`
-	DryRun              bool     `json:"dryRun,omitempty"`
+	JournalCandidates   int                          `json:"journalCandidates"`
+	Operational         []OperationalRetentionResult `json:"operational,omitempty"`
+	BoundaryModelCall   string                       `json:"boundaryModelCall"`
+	BoundaryObservation string                       `json:"boundaryObservation"`
+	RunsSummarized      int                          `json:"runsSummarized"`
+	RowsArchived        int                          `json:"rowsArchived"`
+	RowsDeleted         int                          `json:"rowsDeleted"`
+	Objects             []string                     `json:"objects,omitempty"`
+	Container           string                       `json:"container,omitempty"`
+	DryRun              bool                         `json:"dryRun,omitempty"`
 	// Refused says why nothing was deleted, when nothing was. It is a
 	// SENTENCE rather than a flag because the operator response differs: no
 	// container is a configuration choice, a failed upload is an incident.
@@ -474,6 +522,24 @@ func (i *Integration) handleRetentionSweep(ctx context.Context, args map[string]
 // TimescaleDB retention policy on these rows for exactly this reason: a policy
 // cannot be told to wait for an upload.
 func (i *Integration) RetentionSweep(ctx context.Context, dryRun bool) (RetentionResult, error) {
+	if err := requireClusterOwner(ctx); err != nil {
+		return RetentionResult{}, err
+	}
+	result, err := i.journalRetentionSweep(ctx, dryRun)
+	if err != nil {
+		return result, err
+	}
+	result.Operational, err = i.operationalRetention(ctx, dryRun)
+	for _, p := range result.Operational {
+		result.RowsArchived += p.ArchivedVersions
+		result.RowsDeleted += p.DeletedVersions
+		result.Objects = append(result.Objects, p.Objects...)
+	}
+	i.log().Info("work: operational retention pass complete", "component", "work.retention", "dryRun", dryRun, "policies", result.Operational, "error", err)
+	return result, err
+}
+
+func (i *Integration) journalRetentionSweep(ctx context.Context, dryRun bool) (RetentionResult, error) {
 	started := time.Now()
 	now := i.clock().UTC()
 	res := RetentionResult{DryRun: dryRun}
@@ -496,9 +562,9 @@ func (i *Integration) RetentionSweep(ctx context.Context, dryRun bool) (Retentio
 			return res, err
 		}
 		expired[spec.concept] = rows
-		res.RowsArchived += len(rows)
+		res.JournalCandidates += len(rows)
 	}
-	if res.RowsArchived == 0 {
+	if res.JournalCandidates == 0 {
 		res.RowsArchived = 0
 		res.Took = time.Since(started).String()
 		return res, nil
@@ -515,6 +581,7 @@ func (i *Integration) RetentionSweep(ctx context.Context, dryRun bool) (Retentio
 	container := archiveContainer()
 	archiver := i.archiverRef()
 	if dryRun {
+		res.RunsSummarized = 0
 		res.Container = container
 		res.Refused = "dry run: nothing was archived and nothing was deleted"
 		res.Took = time.Since(started).String()
@@ -533,46 +600,27 @@ func (i *Integration) RetentionSweep(ctx context.Context, dryRun bool) (Retentio
 	}
 	res.Container = container
 
-	// 2. ARCHIVE, per (UTC day, concept). Only a group that UPLOADED is
-	//    eligible for deletion, which is what makes the rule hold at the
-	//    granularity of the rows rather than of the run.
-	deletable := map[string][]string{}
-	archived := 0
+	// Archive complete versions in immutable batches and verify the bytes before
+	// an exact-key transactional delete. A second partial batch cannot overwrite
+	// the first day's evidence, and concurrent updates keep their history.
+	res.RowsArchived = 0
 	for concept, rows := range expired {
-		for day, group := range groupByDay(rows) {
-			blob, err := ndjsonGzip(group)
+		for start := 0; start < len(rows); start += retirementBatchSize {
+			end := min(start+retirementBatchSize, len(rows))
+			archived, deleted, object, err := i.retireVerified(ctx, concept, rows[start:end], false, now, false)
 			if err != nil {
-				i.log().Warn("work: could not encode a journal archive; the rows stay",
-					"component", "work.retention", "concept", concept, "day", day, "err", err)
-				continue
+				return res, err
 			}
-			object := archivePrefix + day + "/" + conceptLeaf(concept) + archiveSuffix
-			if _, err := archiver.Upload(ctx, container, object, blob, archiveContentType); err != nil {
-				// The rows for THIS day stay. Deleting them now would be
-				// exactly the "no archive, no delete" violation.
-				i.log().Warn("work: a journal archive upload failed; those rows were not deleted",
-					"component", "work.retention", "concept", concept, "day", day, "err", err)
-				continue
-			}
-			res.Objects = append(res.Objects, object)
-			archived += len(group)
-			for _, row := range group {
-				if idv := rowString(row, "id"); idv != "" {
-					deletable[concept] = append(deletable[concept], idv)
-				}
+			res.RowsArchived += archived
+			res.RowsDeleted += deleted
+			if object != "" {
+				res.Objects = append(res.Objects, object)
 			}
 		}
 	}
 	sort.Strings(res.Objects)
-	res.RowsArchived = archived
-
-	// 3. DELETE, and only what step 2 uploaded.
-	deleted, err := i.deleteJournalRows(ctx, deletable)
-	res.RowsDeleted = deleted
 	res.Took = time.Since(started).String()
-	if err != nil {
-		return res, err
-	}
+
 	i.log().Info("work: journal retention pass complete",
 		"component", "work.retention", "archived", res.RowsArchived, "deleted", res.RowsDeleted,
 		"runsSummarized", res.RunsSummarized, "objects", len(res.Objects))
@@ -646,15 +694,7 @@ func (i *Integration) foldSummaries(ctx context.Context, expired map[string][]ma
 			"journalRetiredFor": "retention",
 		}
 		if err := st.updateRun(ownerActor(ctx, f.owner), runId, map[string]any{"summary": summary}); err != nil {
-			// A run whose summary will not write is a run whose detail must
-			// NOT be deleted -- but the detail rows are grouped by day
-			// across runs, so refusing the whole day would starve the sweep
-			// on one bad row. The fold failure is logged loudly and the rows
-			// are kept by the NEXT pass finding them again: the delete below
-			// only removes what uploaded, and the next run re-folds.
-			i.log().Warn("work: could not fold a run's journal summary; its detail is archived but the summary is missing",
-				"component", "work.retention", "run", runId, "err", err)
-			continue
+			return written, fmt.Errorf("work: summary fold failed for %s; journal retained: %w", runId, err)
 		}
 		written++
 	}
@@ -667,9 +707,11 @@ func (i *Integration) foldSummaries(ctx context.Context, expired map[string][]ma
 
 // runsInFlight is every run at a non-terminal status, whoever owns it.
 //
-// DISTINCT ON (id) ... ORDER BY id, "createdAt" DESC picks the newest version
-// of each row, because MemQL is append-only: without it a run that advanced
-// five times would be judged on its first version's status.
+// The partial recovery index enumerates non-terminal version keys, and the
+// covering latest-row index rejects every superseded key before payloads are
+// fetched. Completed histories never need their payloads loaded by recovery.
+// Filtering status without that anti-join would resurrect an old running
+// version of a run that already finished.
 //
 // staged-data: MUST-NOT-GATE -- a staged run SKIPPED HERE IS NEVER SWEPT. This
 // is the only reader allowed to close a run whose node died and the only one
@@ -683,17 +725,23 @@ func (i *Integration) foldSummaries(ctx context.Context, expired map[string][]ma
 // These statements execute through Bun, whose formatter consumes ? arguments.
 // PostgreSQL $n placeholders would reach the driver without their parameters.
 const runsInFlightSQL = `
-WITH latest AS (
-    SELECT DISTINCT ON (id) id, "createdAt", payload
-    FROM "MemoryNodes"
-    WHERE concept = ?
-    ORDER BY id, "createdAt" DESC
+WITH candidates AS MATERIALIZED (
+    SELECT n.id, n."createdAt"
+    FROM "MemoryNodes" n
+    WHERE n.concept = ?
+      AND COALESCE(n.payload->>'status', '') NOT IN ('succeeded', 'failed', 'cancelled', 'abandoned')
+      AND NOT EXISTS (
+          SELECT 1 FROM "MemoryNodes" newer
+          WHERE newer.concept = n.concept AND newer.id = n.id
+            AND newer."createdAt" > n."createdAt"
+      )
+    ORDER BY n."createdAt" ASC
+    LIMIT ?
 )
-SELECT id, "createdAt", payload
-FROM latest
-WHERE COALESCE(payload->>'status', '') NOT IN ('succeeded', 'failed', 'cancelled', 'abandoned')
-ORDER BY "createdAt" ASC
-LIMIT ?
+SELECT n.id, n."createdAt", n.payload
+FROM candidates c JOIN "MemoryNodes" n
+    ON n.id = c.id AND n."createdAt" = c."createdAt"
+ORDER BY n."createdAt" ASC
 `
 
 func (i *Integration) runsInFlight(ctx context.Context) ([]map[string]any, error) {
@@ -713,16 +761,21 @@ func (i *Integration) runsInFlight(ctx context.Context) ([]map[string]any, error
 // applies, per row as fetched.
 const expiredJournalRowsSQL = `
 WITH latest AS (
-    SELECT DISTINCT ON (id) id, "createdAt", payload
+    SELECT DISTINCT ON (id) id, "createdAt"
     FROM "MemoryNodes"
     WHERE concept = ?
     ORDER BY id, "createdAt" DESC
+), expired AS MATERIALIZED (
+    SELECT id, "createdAt" FROM latest
+    WHERE "createdAt" < ?
+    ORDER BY "createdAt" ASC
+    LIMIT ?
 )
-SELECT id, "createdAt", payload
-FROM latest
-WHERE "createdAt" < ?
-ORDER BY "createdAt" ASC
-LIMIT ?
+SELECT n.id, n."createdAt", n.payload
+FROM expired e JOIN "MemoryNodes" n
+    ON n.id = e.id AND n."createdAt" = e."createdAt"
+WHERE ` + retentionInactiveParentSQL + `
+ORDER BY n."createdAt" ASC
 `
 
 func (i *Integration) expiredJournalRows(ctx context.Context, concept string, boundary time.Time) ([]map[string]any, error) {
@@ -795,57 +848,6 @@ func (i *Integration) selectAdmitted(ctx context.Context, concept, query string,
 	return out, nil
 }
 
-// deleteJournalRows removes exactly the ids step 2 uploaded, plus their
-// embedding vectors.
-//
-// The vectors go too, and must: node_vectors is keyed by node id, so leaving
-// them behind would let recall return a hit whose row no longer exists -- a
-// memory with no evidence, which is worse than a missing one.
-//
-// staged-data: MUST-NOT-GATE -- this is a DELETE of rows the pass above has
-// already archived, addressed by the exact ids that uploaded. Gating it would
-// leave a row whose only copy is now in blob storage present in the table
-// forever while the archive claims it was retired, so the two records would
-// disagree about what the cluster holds -- and the archive, not the gate, is
-// what a restore reads.
-func (i *Integration) deleteJournalRows(ctx context.Context, byConcept map[string][]string) (int, error) {
-	if len(byConcept) == 0 {
-		return 0, nil
-	}
-	if i.bunDB == nil || i.bunDB() == nil {
-		return 0, fmt.Errorf("work: the retention sweep needs a database handle")
-	}
-	db := i.bunDB()
-	total := 0
-	for concept, ids := range byConcept {
-		for _, batch := range chunk(ids, sweepPageSize) {
-			if len(batch) == 0 {
-				continue
-			}
-			args, placeholders := inList(batch)
-			res, err := db.ExecContext(ctx,
-				`DELETE FROM "MemoryNodes" WHERE concept = ? AND id IN (`+placeholders+`)`,
-				append([]any{concept}, args...)...)
-			if err != nil {
-				return total, fmt.Errorf("work: delete %s: %w", concept, err)
-			}
-			n, _ := res.RowsAffected()
-			total += int(n)
-
-			vargs, vplaceholders := inList(batch)
-			if _, err := db.ExecContext(ctx,
-				`DELETE FROM node_vectors WHERE id IN (`+vplaceholders+`)`, vargs...); err != nil {
-				// The row is gone and its vector is not. Loud, and not
-				// fatal: a stale vector is a recall hit that resolves to
-				// nothing, which the recall join already drops.
-				i.log().Warn("work: a journal row was deleted but its embedding was not",
-					"component", "work.retention", "concept", concept, "err", err)
-			}
-		}
-	}
-	return total, nil
-}
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -915,32 +917,6 @@ func conceptLeaf(concept string) string {
 		return concept[i+1:]
 	}
 	return concept
-}
-
-func chunk(ids []string, size int) [][]string {
-	if size <= 0 {
-		return [][]string{ids}
-	}
-	var out [][]string
-	for start := 0; start < len(ids); start += size {
-		out = append(out, ids[start:min(start+size, len(ids))])
-	}
-	return out
-}
-
-// inList builds Bun placeholders and their matching arguments. Values stay
-// in the argument list so Bun applies the dialect's escaping to each ID.
-func inList(ids []string) ([]any, string) {
-	args := make([]any, 0, len(ids))
-	var b strings.Builder
-	for n, idv := range ids {
-		if n > 0 {
-			b.WriteString(", ")
-		}
-		b.WriteString("?")
-		args = append(args, idv)
-	}
-	return args, b.String()
 }
 
 func parseTime(raw string) (time.Time, bool) {
