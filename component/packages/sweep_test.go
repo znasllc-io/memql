@@ -184,7 +184,7 @@ func TestARetryReadsTheStoredSnapshotInsteadOfFetching(t *testing.T) {
 
 	// The retry names it. The prior row answers with the ref the publisher
 	// minted, and the fetcher must not be reached at all.
-	h.engine.rows["query packageDeploymentById"] = []map[string]any{{
+	h.engine.rows[`query packageDeploymentById(deploymentId: "`+first.DeploymentId+`")`] = []map[string]any{{
 		"id":                 first.DeploymentId,
 		"packageId":          "v1:platform:package:abc",
 		"status":             StatusAbandoned,
@@ -225,7 +225,7 @@ func TestARetryReadsTheStoredSnapshotInsteadOfFetching(t *testing.T) {
 
 func TestARetryOfARunThatKeptNoSnapshotSaysSo(t *testing.T) {
 	h := newHarness(t, spaOnlyPackage(), ownerPackage())
-	h.engine.rows["query packageDeploymentById"] = []map[string]any{{
+	h.engine.rows[`query packageDeploymentById(deploymentId: "v1:platform:packageDeployment:ancient")`] = []map[string]any{{
 		"id":        "v1:platform:packageDeployment:ancient",
 		"packageId": "v1:platform:package:abc",
 		"status":    StatusFailed,

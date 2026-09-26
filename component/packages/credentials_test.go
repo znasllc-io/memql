@@ -70,7 +70,7 @@ func capturedLog() (*slog.Logger, *bytes.Buffer) {
 func credentialHarness(t *testing.T, engine Engine, logger *slog.Logger) (*Integration, *store) {
 	t.Helper()
 	i := NewIntegration(engine, logger)
-	s := &store{engine: engine, logger: logger}
+	s := &store{engine: engine, logger: logger, deploymentGate: offlineDeploymentGate}
 	i.depsOnce.Do(func() {
 		i.deps = &Deps{Store: s, Credentials: s.resolveCredential, PeekCredentials: s.peekCredential, Logger: logger}
 	})

@@ -292,6 +292,7 @@ func (a *App) engineAndBus() {
 		EventBus:     a.eventBus,
 		StepRegistry: a.stepRegistry,
 		LeaderGate:   cronLeader.IsLeader,
+		ScheduleGate: a.scheduledAutomationGate(cronLeader.IsLeader),
 		ClusterGuard: clusterGuard,
 	})
 	if err != nil {

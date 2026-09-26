@@ -780,12 +780,29 @@ The gate is not skipped. It is answered, and only by a plan somebody already
 said yes to. A changed build command is the case that matters most -- it is
 somebody else's shell command arriving on your cluster -- and it always parks.
 
-Two other rules:
+Scheduled repository polling runs on one elected workbench replica, independently
+of general maintenance leadership. If no workbench is available, polling waits;
+another node never attempts the build locally. Other scheduled automations keep
+their existing leadership.
+The supported local k3d stack includes its own workbench with this same role and
+lease. A standalone BFF, including a process with `MEMQL_NODE_TYPE` unset, does
+not poll repositories or serve as a fallback build node.
 
-- **Never more than one auto-run live per source.** Two pushes seconds apart
-  compose the same deployment id, so the second lands on a row that already
-  exists and the append-only rule refuses to reopen it.
+The deployment rules are:
+
+- **One live run per source.** A shared database gate serializes the short
+  read-and-open step across replicas. An existing attempt cannot be opened again,
+  and another live attempt must finish or be canceled before a new one starts.
+  Confirming a parked attempt continues that same run.
 - **A cluster-owned source cannot auto-deploy.** There is nobody to run as.
+- **Infrastructure retries are limited.** A missing workbench or a build process
+  that could not start can retry automatically twice after the original attempt,
+  at least ten minutes apart. Each retry opens a new row and uses the original
+  source snapshot; it still passes the plan confirmation gate. Canceled runs,
+  missing snapshots, source or credential failures, build errors and timeouts
+  require attention. After three failed attempts for one revision and policy
+  setting, automatic attempts stop. The failure and update remain visible; repair
+  the build surface and use **Retry**. A later source revision has its own limit.
 
 Workbench builds are the Build epic of
 [the Deployables program](../../superpowers/specs/2026-09-02-deployables-program-design.md).

@@ -2,6 +2,7 @@ package packages
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -225,7 +226,7 @@ func TestAPackageTiedToTheSelfAccountIsReadableByItsGroupAndByStaff(t *testing.T
 	// Opened the way the pipeline opens it: openDeployment borrows the
 	// package owner's actor and stamps internal origin, and copies the
 	// account off the package row it was handed.
-	s := &store{engine: eng, logger: discardLogger()}
+	s := &store{engine: eng, logger: discardLogger(), directDB: func() *sql.DB { return db.DB }}
 	pkg, err := s.packageById(ownerCtx, tied)
 	if err != nil || pkg == nil {
 		t.Fatalf("read the tied package as its owner: %v (%v)", err, pkg)

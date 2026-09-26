@@ -51,7 +51,10 @@ type Engine interface {
 type store struct {
 	directDB  func() *sql.DB
 	grantGate func(context.Context, string, string, func(context.Context) error) error
-	engine    Engine
+	// deploymentGate is injectable for offline pipeline tests. Production
+	// always uses the direct-DB cross-replica gate; missing DB fails closed.
+	deploymentGate func(context.Context, string, func(context.Context) error) error
+	engine         Engine
 	// logger is for the one thing the store does on its own account -- the
 	// best-effort heartbeat behind resolveCredential. Nil means slog.Default.
 	logger *slog.Logger
@@ -278,6 +281,26 @@ func (s *store) openDeployment(ctx context.Context, d deploymentSeed) error {
 	if owner := strings.TrimSpace(d.OwnerUserId); owner != "" {
 		writeCtx = auth.ContextWithUserActor(ctx, owner)
 	}
+	return s.withDeploymentOpeningGate(writeCtx, d.PackageId, func(ctx context.Context) error {
+		prior, err := s.deploymentById(ctx, d.DeploymentId)
+		if err != nil {
+			return err
+		}
+		if prior != nil {
+			return fmt.Errorf("deployment %q already exists as %q; an existing attempt cannot be opened again", d.DeploymentId, rowString(prior, "status"))
+		}
+		live, err := s.liveDeploymentsForPackage(ctx, d.PackageId)
+		if err != nil {
+			return err
+		}
+		if len(live) > 0 {
+			return fmt.Errorf("this package already has a live deployment %q; wait for it to finish or cancel it before starting another", rowString(live[0], "id"))
+		}
+		return s.writeDeploymentOpening(ctx, d)
+	})
+}
+
+func (s *store) writeDeploymentOpening(writeCtx context.Context, d deploymentSeed) error {
 	scoped := d.ScopedTo
 	if scoped == nil {
 		scoped = []string{}
