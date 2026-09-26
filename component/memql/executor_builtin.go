@@ -18,8 +18,10 @@ import (
 
 func (e *MemQLEngine) initBuiltinExecutorHandlers() error {
 	handlers := map[string]builtinExecutorHandler{
-		"askCapabilities":       e.askCapabilitiesBuiltin,
-		"askExecute":            e.askExecuteBuiltin,
+		"recallWorkHistory":     e.recallWorkHistoryBuiltin,
+		"workNavigate":          e.workNavigateBuiltin,
+		"workCapabilities":      e.workCapabilitiesBuiltin,
+		"workExecute":           e.workExecuteBuiltin,
 		"routingPolicyDescribe": e.policyDescribeBuiltin,
 		"routingRuleDescribe":   e.routingRuleDescribeBuiltin,
 		"routingRules":          e.routingRulesBuiltin,

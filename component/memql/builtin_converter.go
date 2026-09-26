@@ -154,6 +154,18 @@ func builtinDeclToFunction(decl *languageParser.BuiltinDecl, origin string) (*Fu
 			if ref := annotations.CheckAll(annotations.BuiltinField, languageParser.AnnotationUses(field.Attributes)); ref != nil {
 				return nil, fmt.Errorf("%s: builtin %q field %q: %w", origin, decl.Name, field.Name, ref)
 			}
+			metadata := &FunctionArgsField{Name: field.Name, Type: field.Type, Optional: !field.Required}
+			for _, attr := range field.Attributes {
+				switch attr.Name {
+				case "description":
+					metadata.Description, _ = attr.Value.(string)
+				case "enum":
+					for _, value := range enumValuesFromAttr(attr) {
+						metadata.Enum = append(metadata.Enum, value)
+					}
+				}
+			}
+			contract.Fields = append(contract.Fields, metadata)
 			contract.Properties[field.Name] = field.Type
 			if field.Required {
 				contract.Required = append(contract.Required, field.Name)

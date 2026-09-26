@@ -7,7 +7,7 @@ import (
 	"github.com/znasllc-io/memql/core/common"
 )
 
-const workExecutionDirective = `You are executing the current Nexus goal now. Complete the requested work in this run. For a file or document, use composeFile to write it to the user's Library. Supply a descriptive name, the requested format (markdown by default), and a complete statement of the requested content; optionally provide your finished draft or source references. The call finishes the file before returning its outputFileId. Confirm success only after receiving that outputFileId. Do not use produceArtifact or open another goal to delegate this same work. A plain answer is appropriate only when the goal asks for an answer rather than a saved file.`
+const workExecutionDirective = `You are executing the current MemQL request now. Complete the requested work in this run. For a file or document, use composeFile to write it to the user's Library. Supply a descriptive name, the requested format (markdown by default), and a complete statement of the requested content; optionally provide your finished draft or source references. The call finishes the file before returning its outputFileId. Confirm success only after receiving that outputFileId. Do not use produceArtifact or open another goal to delegate this same work. A plain answer is appropriate only when the goal asks for an answer rather than a saved file.`
 
 func isOwnedWorkExecution(ctx context.Context) bool {
 	run, ok := common.RunFromContext(ctx)
@@ -32,6 +32,11 @@ func (r *Replier) scopeWorkExecution(ctx context.Context, data map[string]any, n
 	}
 	if r.engine != nil && len(r.engine.ToolDefinitionsForNames([]string{"composeFile"})) > 0 {
 		out = append(out, "composeFile")
+	}
+	for _, name := range []string{"discoverCapabilities", "executeCapability", "recallWorkHistory"} {
+		if r.engine != nil && len(r.engine.ToolDefinitionsForNames([]string{name})) > 0 {
+			out = append(out, name)
+		}
 	}
 	data["productionDirective"] = workExecutionDirective
 	if assistant, ok := data["assistant"].(map[string]any); ok {

@@ -118,3 +118,39 @@ func TestStreamingCancellationPreservesPartialResult(t *testing.T) {
 		t.Fatalf("cancelled stream retried %d times", provider.calls)
 	}
 }
+
+type cancelAwareStreamProvider struct {
+	t     *testing.T
+	prior context.Context
+	calls int
+}
+
+func (p *cancelAwareStreamProvider) CallChatStreamWithTools(ctx context.Context, _ []common.ChatMessage, _ []common.ToolDefinition) (<-chan common.StreamToolChunk, error) {
+	p.calls++
+	if p.prior != nil && p.prior.Err() == nil {
+		p.t.Fatal("retry started with the previous generation still alive")
+	}
+	p.prior = ctx
+	if p.calls == 1 {
+		return make(chan common.StreamToolChunk), nil
+	}
+	return streamErrorChunks(common.StreamToolChunk{Content: "Recovered", Done: true}), nil
+}
+func TestStreamingIdleRetryCancelsPreviousGeneration(t *testing.T) {
+	p := &cancelAwareStreamProvider{t: t}
+	result, err := testReplier().runStreamingToolLoop(context.Background(), p, nil, nil, &captureSink{}, time.Now(), "idle-cancel", turnContext{StreamIdleBudget: time.Millisecond})
+	if err != nil || result.FinalText != "Recovered" || p.calls != 2 {
+		t.Fatalf("result=%+v calls=%d err=%v", result, p.calls, err)
+	}
+	if p.prior.Err() == nil {
+		t.Fatal("successful stream left its attempt context alive")
+	}
+}
+func TestFleetStreamBudgetAllowsSilentToolGeneration(t *testing.T) {
+	if got := streamIdleBudgetForVendor("fleet"); got < 3*time.Minute {
+		t.Fatalf("Fleet idle budget=%s", got)
+	}
+	if got := streamIdleBudgetForVendor("anthropic"); got != streamIdleTimeout() {
+		t.Fatalf("SSE route budget changed to %s", got)
+	}
+}

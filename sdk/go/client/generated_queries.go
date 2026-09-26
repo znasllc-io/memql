@@ -12062,6 +12062,28 @@ func WorkApprovalsForOwnerBuild(args WorkApprovalsForOwnerArgs) string {
 	return "query workApprovalsForOwner()"
 }
 
+// WorkCheckpointForOwner -- Reuse a checkpoint only for these exact source bytes and this owner.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workCheckpointForOwner"] in generated_concepts.go).
+type WorkCheckpointForOwnerArgs struct {
+	Fingerprint string
+}
+
+// WorkCheckpointForOwner calls the engine query workCheckpointForOwner.
+func (qc *QueryClient) WorkCheckpointForOwner(ctx context.Context, args WorkCheckpointForOwnerArgs) (*Result, error) {
+	call := WorkCheckpointForOwnerBuild(args)
+	return qc.executeNamed(ctx, "workCheckpointForOwner", call)
+}
+
+func WorkCheckpointForOwnerBuild(args WorkCheckpointForOwnerArgs) string {
+	var b strings.Builder
+	b.WriteString("query workCheckpointForOwner(")
+	b.WriteString("fingerprint: ")
+	b.WriteString(quoteMemQL(args.Fingerprint))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkGoalForOwner -- One of the caller's goals by id.
 //
 // Bound concept: v1:work:goal (machine-readable: BoundConcepts["workGoalForOwner"] in generated_concepts.go).

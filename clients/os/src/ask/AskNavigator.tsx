@@ -16,7 +16,7 @@ export function AskNavigator() {
     if (!app || (app.requires && !accessAdmits(app.requires))) return;
     shown.current = activity.id;
     const args = activity.arguments ?? {};
-    const section = activity.app === "users" ? (args.groupId ? "groups" : "people") : undefined;
+    const section = typeof args.section === "string" ? args.section : activity.app === "users" ? (args.groupId ? "groups" : "people") : undefined;
     actions.openApp(activity.app, section, args);
   }, [activity, actions, registry]);
   return null;

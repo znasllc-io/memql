@@ -3,7 +3,6 @@ import { useEffect } from "react";
 import { useOs } from "../chrome/state";
 import { useAsk } from "./AskProvider";
 import { AskSurface } from "./AskSurface";
-import { useMakeGoal } from "./useMakeGoal";
 
 // The Ask sheet: anchored above the dock (a bottom sheet on phones via
 // CSS). Never a window, never counts against the desk cap (spec D6).
@@ -14,7 +13,6 @@ import { useMakeGoal } from "./useMakeGoal";
 export function AskSheet() {
   const { sheet, closeAsk, transport, voice, settings, availability, conversation, liveVoice } = useAsk();
   const { actions } = useOs();
-  const makeGoal = useMakeGoal();
 
   useEffect(() => {
     if (!sheet.open) return;
@@ -52,8 +50,8 @@ export function AskSheet() {
           context={sheet.context}
           contextLabel={sheet.contextLabel}
           variant="sheet"
+          onOpenRun={(goalId) => { actions.openApp("nexus", "goals", { goalId }); }}
           autoFocus
-          makeGoal={makeGoal}
         />
       </div>
     </div>

@@ -25,9 +25,20 @@ policy choices. Fleet's Model Library and routing views show the available doors
 MemQL discovers named DSL capabilities and executes them with the person's
 original authority. Role, app capability, account scope and row authorization
 remain in force. Assistant identity never grants owner permissions. Internal
-capabilities and credential inputs are excluded from discovery. Completed
-turn IDs are replayed from their journal; interrupted actions are never retried
-automatically. Inspect Activity before repeating an interrupted request.
+capabilities and credential inputs are excluded from discovery. Every turn opens the same durable work run used by Nexus and the API. The
+compiler checks reusable procedures before asking a model; the agent executes
+with the same budgets, receipts, and recovery. **View work** opens that existing
+goal. Reconnecting observes the run rather than submitting it again. Stopping
+the reply stops watching; use Nexus to cancel the work. Fresh-data questions
+still read fresh sources even when the procedure is reused.
+
+Replies default to English without emojis unless explicitly requested.
+Recent conversation messages remain verbatim. When context grows, the shared
+agent checkpoints older complete exchanges into facts, entities, decisions,
+constraints and unfinished work. Checkpoints retain their source messages in
+the owner-scoped journal; exact source prefixes reuse the same summary, and the
+agent can search original messages with `recallWorkHistory`. A failed checkpoint
+never silently discards history. This path applies to both Ask and Nexus.
 
 Execution can open the associated app and highlight the active window. An
 implemented control binding, such as adding a group member, receives the same
@@ -45,10 +56,12 @@ Talk with MemQL joins a private LiveKit room and replaces the conversation view
 with the MemQL mark, microphone and end-call controls. Male and female voice
 choices live in Settings → Ask. The shared conversation remains available when
 the call ends. The browser performs echo cancellation and noise suppression.
-Sustained speech interrupts a reply; room departure cancels its model work.
+Sustained speech interrupts audio delivery. Room departure stops the voice
+session; accepted work remains in its durable run. Canceled transcription does
+not create a fictional user message.
 
 The cluster's agent node runs the voice controller in Go: speech detection,
-ASR, the same permission-checked Ask tool loop, and sentence-by-sentence TTS.
+ASR, the shared MemQL work engine, and sentence-by-sentence TTS.
 LiveKit carries WebRTC audio and private execution events. The current pipeline
 uses routed ASR/chat/TTS, including OpenAI where configured; it does not use
 OpenAI's native Realtime speech-to-speech protocol. Local models and federated
@@ -68,7 +81,7 @@ Kokoro voice IDs can be mapped to MemQL's male/female choices in worker policy.
 See [Cockpit local-model configuration](https://github.com/znasllc-io/memql-cockpit/blob/main/docs/local-models.md).
 
 The entire call can stay local when Fleet offers ASR, tool-capable chat and TTS.
-A local chat model alone enables text Ask; voice additionally needs both audio
+An eligible local tool-capable chat route enables text Ask; voice additionally needs both audio
 routes. Model response times depend on memory pressure, model size and other
 calls sharing the machine. The UI does not impose a 60-second response deadline.
 

@@ -4,6 +4,8 @@ package app
 
 import (
 	"context"
+	"fmt"
+	"github.com/znasllc-io/memql/component/memql"
 
 	memqlgrpc "github.com/znasllc-io/memql/component/grpc"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
@@ -185,31 +187,34 @@ func (a *App) wireAgentTurnRunner(replier *agent.Replier) {
 		a.Logger.Warn("agent turn runner not wired: the agents provider is not the expected type", "component", "agents")
 		return
 	}
-	integ.SetAgentTurnRunner(&replierTurnRunner{replier: replier})
+	integ.SetAgentTurnRunner(&replierTurnRunner{replier: replier, engine: a.engine})
 	a.Logger.Info("agent turn runner wired; runAgentTurn dispatches locally on this node", "component", "agents")
 }
 
-// replierTurnRunner adapts agent.Replier onto the narrow interface
-// integrations/agents declares.
-//
-// A DISCARDING SINK, deliberately. The deltas are the interactive path's --
-// a browser streaming a reply. A work step wants the finished text, and the
-// run's own journal is where the record of the call belongs.
-type replierTurnRunner struct{ replier *agent.Replier }
+// replierTurnRunner sends every work turn through the same runtime and records
+// stream snapshots in the shared journal for conversational and goal viewers.
+type replierTurnRunner struct {
+	replier *agent.Replier
+	engine  *memql.MemQLEngine
+}
 
 func (r *replierTurnRunner) RunTurn(ctx context.Context, msg *memqlv1.AgentGenerateTurnMsg) (string, error) {
-	result, err := r.replier.Handle(ctx, msg, discardDeltas{})
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	sink := &workTurnDeltas{ctx: ctx, engine: r.engine, id: msg.RequestId, cancel: cancel}
+	ctx = r.engine.ObserveWorkCalls(ctx, cancel)
+	result, err := r.replier.Handle(ctx, msg, sink)
+	if cause := context.Cause(ctx); cause != nil {
+		return "", cause
+	}
 	if err != nil {
 		return "", err
 	}
 	if result == nil {
-		return "", nil
+		return "", fmt.Errorf("agent turn returned no result")
+	}
+	if err := sink.finish(result.FinalText); err != nil {
+		return "", err
 	}
 	return result.FinalText, nil
 }
-
-type discardDeltas struct{}
-
-func (discardDeltas) TextDelta(string)                  {}
-func (discardDeltas) ToolCall(string, string, string)   {}
-func (discardDeltas) ToolResult(string, string, string) {}

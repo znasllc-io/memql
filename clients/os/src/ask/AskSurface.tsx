@@ -11,7 +11,6 @@ import { AskActivityLog } from "./AskActivityLog";
 import { AskMessage } from "./AskMessage";
 import type { AskTransport } from "./askController";
 import { CHECKING_ASK, type AskAvailability } from "./useAskReadiness";
-import type { MakeGoalState } from "./useMakeGoal";
 import { useReducedMotion, useVoice } from "./useVoice";
 import type { VoicePorts, VoiceProblem, VoiceState } from "./voiceSession";
 import { DEFAULT_ASK_SETTINGS, type AskSettings } from "../apps/settings/askSettings";
@@ -81,7 +80,7 @@ export function AskSurface({
   transport,
   conversation: providedConversation,
   liveVoice,
-  makeGoal,
+  onOpenRun,
   onOpenFleet,
   onClose,
   voicePorts = null,
@@ -109,15 +108,7 @@ export function AskSurface({
   contextLabel?: string;
   variant: "sheet" | "widget";
   autoFocus?: boolean;
-  /**
-   * Ask-to-goal (epic memql#4785). ABSENT means this surface cannot hand a
-   * prompt off, and the act is then not rendered at all rather than rendered
-   * disabled -- a harness with no cluster behind it should show the Ask it
-   * actually has. The act appears per EXCHANGE rather than beside the input,
-   * because the decision to have something done is one somebody makes after
-   * reading the answer, not before typing.
-   */
-  makeGoal?: MakeGoalState | null;
+  onOpenRun?: (goalId: string) => void;
 }) {
   const localConversation = useRef<ConversationSession | null>(null);
   if (!providedConversation && !localConversation.current) localConversation.current = new ConversationSession(transport);
@@ -282,7 +273,7 @@ export function AskSurface({
             <div className="os-ask-message"><span className="os-ask-avatar" aria-hidden>You</span><div><div className="os-ask-byline"><strong>You</strong><time dateTime={turn.startedAt}>{messageTime(turn.startedAt)}</time></div><p>{turn.prompt}</p></div></div>
             <div className="os-ask-message"><span className="os-ask-avatar os-ask-avatar-memql" aria-hidden><Mark size={22} /></span><div><div className="os-ask-byline"><strong>MemQL</strong><time dateTime={turn.startedAt}>{messageTime(turn.startedAt)}</time></div>
               {turn.answer ? <AskMessage text={turn.answer} /> : null}
-              {makeGoal && turn.state === "done" ? <details className="os-ask-message-actions"><summary aria-label="Message actions">•••</summary><button type="button" disabled={makeGoal.busy} onClick={() => void makeGoal.make(turn.prompt)}>{makeGoal.busy ? "Making it a goal" : "Make this a goal"}</button></details> : null}
+              {onOpenRun && turn.goalId ? <details className="os-ask-message-actions"><summary aria-label="Message actions">•••</summary><button type="button" onClick={() => onOpenRun(turn.goalId!)}>View work</button></details> : null}
               {turn.state === "streaming" ? <AskWait activity={turn.activity} startedAt={turn.startedAt} hasText={Boolean(turn.answer)} /> : null}
               {turn.error ? <div className="os-ask-error"><p role="alert">{askErrorSummary(turn.error)}</p>{askErrorSummary(turn.error) !== turn.error ? <details><summary>Details</summary><p>{turn.error}</p></details> : null}{!busy ? <button type="button" className="os-ask-retry" onClick={() => { setDraft(turn.prompt); inputRef.current?.focus(); }}>Edit and try again</button> : null}{onOpenFleet ? <button type="button" className="os-ask-retry" onClick={onOpenFleet}>Open Fleet</button> : null}</div> : null}
             </div></div>
@@ -291,7 +282,6 @@ export function AskSurface({
         {showActivity ? <AskActivityLog turns={exchanges} dictation={state.dictationActivity} onClose={() => setShowActivity(false)} /> : null}
       </div>
       }
-      {makeGoal?.error ? <p className="os-ask-error" role="alert">{makeGoal.error}</p> : null}
       {state.error ? <p className="os-ask-error" role="alert">{askErrorSummary(state.error)}</p> : null}
       {liveVoice && !state.voiceActive ? <AskLiveVoice session={liveVoice} errorsOnly /> : null}
       {!state.voiceActive ? <form className="os-ask-input" onSubmit={onSubmit}>
@@ -366,7 +356,7 @@ export function AskSurface({
           readOnly={live}
           onChange={(event) => setDraft(event.target.value)}
         />
-        {busy ? <button type="button" className="os-ask-send" aria-label="Stop reply" onClick={() => conversation.stop()}><Square size={13} /></button> : <button
+        {busy ? <button type="button" className="os-ask-send" aria-label="Stop watching reply" title="Stop watching; work continues in Nexus" onClick={() => conversation.stop()}><Square size={13} /></button> : <button
           type="submit"
           className="os-ask-send"
           aria-label={live ? "Finish" : "Send"}

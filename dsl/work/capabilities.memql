@@ -1,0 +1,59 @@
+/// Discover named capabilities admitted by the current caller's permissions.
+@description("Discover capabilities admitted by the current caller permissions. Search short words naming the app or operation.")
+@executor("workCapabilities")
+@args(profile="object")
+builtin workCapabilities { search string! }
+
+/// Execute a discovered capability under the original caller's authority.
+@description("Execute a discovered capability under the current caller authority using its exact arguments.")
+@executor("workExecute")
+@args(profile="object")
+builtin workExecute {
+  name string!
+  arguments object!
+}
+
+/// Find an operation and its exact argument contract before using it. Search
+/// the relevant app or concept; narrow the search using the returned names.
+@handler(type="query", query="query workCapabilities(search: args.search)")
+@allowedRoles("assistant", "system-planner")
+tool discoverCapabilities { search string! @description("Short words describing the app, data or operation, or an exact capability name.") }
+
+/// Perform a discovered operation, rechecking caller and row permissions.
+@handler(type="query", query="query workExecute(name: args.name, arguments: args.arguments)")
+@allowedRoles("assistant", "system-planner")
+tool executeCapability {
+  name string! @description("Exact qualified name from discoverCapabilities.")
+  arguments object! @description("Arguments matching its contract; resolve identifiers through reads first.")
+}
+
+/// Open or focus a MemQL OS app for the person watching this run. This is
+/// navigation, never a data mutation. It needs a connected OS viewer.
+@description("Open or focus a MemQL OS app for the person watching this run. Navigation only; requires a connected viewer.")
+@executor("workNavigate")
+@args(profile="object")
+builtin workNavigate {
+ app enum("users", "fleet", "nexus", "cluster", "files", "accounts", "campaigns", "deployables", "training", "settings", "identity", "concepts", "materializer")!
+ section string @description("Optional existing app section identifier.")
+}
+
+/// Search original conversation messages and checkpoint sources in this work
+/// run. Results retain their source index; a checkpoint never erases evidence.
+@description("Search original conversation messages and checkpoint sources in this work run by a word, name or identifier.")
+@executor("recallWorkHistory")
+@args(profile="object")
+builtin workRecallHistory { search string! }
+
+/// Recover exact evidence from the original messages of the current work run.
+@handler(type="query", query="query workRecallHistory(search: args.search)")
+@allowedRoles("assistant", "system-planner")
+tool recallWorkHistory { search string! @description("An exact name, word, identifier or phrase from earlier conversation or tool output.") }
+
+/// Reuse a checkpoint only for these exact source bytes and this owner.
+@actor
+query observation workCheckpointForOwner {
+ args { fingerprint string! }
+ filter row => row.ownerUserId == actor.userId && row.?data.contextHash == args.fingerprint
+ paginate 1
+ shape workObservationFull
+}

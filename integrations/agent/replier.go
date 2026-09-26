@@ -795,6 +795,7 @@ func (r *Replier) handleStreaming(ctx context.Context, msg *memqlv1.AgentGenerat
 	// ActingAgent was nil. Must happen on THIS ctx (the one passed to
 	// runStreamingToolLoop), not inside prepareTurn. (memql#938)
 	ctx = stampActingAgentRoleIfMissing(ctx, msg)
+	prep.turnCtx.StreamIdleBudget = streamIdleBudgetForVendor(resolved.Vendor)
 
 	result, err := r.runStreamingToolLoop(ctx, provider, prep.messages, prep.tools, sink, turnStart, msg.RequestId, prep.turnCtx)
 	if err != nil {

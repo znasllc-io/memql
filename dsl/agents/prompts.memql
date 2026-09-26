@@ -112,3 +112,9 @@ prompt responsibilityIntake {
   roleCatalog []object            @description("Optional compact snapshot of the available specialist roles -- [{slug, name, category}] -- so when targetKind='specialist' the model can pick a roleSlug from a real set (e.g. the 'all private functions have comments' standing directive maps to a software-engineering specialist). Empty is fine; the model falls back to a descriptive slug.")
   now         string              @description("Optional RFC3339 wall-clock, so a relative schedule ('every Monday', 'the day before') can be reasoned about against the current date. Opaque; never required.")
 }
+
+/// A portable checkpoint of an immutable prefix; original messages stay in the
+/// work journal. This is memory compression, not execution or permission.
+@level("fast")
+@templateFile("prompts/workContextCheckpoint.tmpl")
+prompt workContextCheckpoint { source string! }

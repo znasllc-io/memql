@@ -24,7 +24,7 @@ func (s *streamSession) handleAskStream(ctx context.Context, requestID, correlat
 	}
 	go func() {
 		defer close(chunks)
-		_, err := s.service.engine.RunAsk(ctx, request.GetConversationId(), requestID, request.GetMessages()[0].GetContent(), request.GetPageContext(), func(text string) { send(common.StreamChunk{Content: text}) }, func(event engine.AskEvent) {
+		_, err := s.service.engine.RunAsk(ctx, request.GetConversationId(), requestID, request.GetMessages()[0].GetContent(), request.GetPageContext(), func(text string) { send(common.StreamChunk{Content: text}) }, func(event engine.WorkEvent) {
 			encoded, _ := json.Marshal(event)
 			var metadata map[string]any
 			_ = json.Unmarshal(encoded, &metadata)
