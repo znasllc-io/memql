@@ -53,7 +53,7 @@ concept run {
   executionAuthority object @description("Server-recorded execution ceiling and credential expiry; never model input or a bearer token.")
   ownerUserId            string  @serverSet  @description("Copied from the goal's owner when there is one; present-and-empty for a system run.")
   goalId                 string  @description("v1:work:goal.id this run executes, or EMPTY for an automation run that no goal asked for.")
-  goalSignature          string  @description("Normalized goal and input-shape key used to group successful recordings for procedure learning. Absent on older or unrelated system runs.")
+  goalSignature          string  @description("component/work.GoalSignature of the goal this run serves: sha256 over the normalized goal statement plus the sorted input argument names -- the key compile's exact-match tier and the procedure corpus both look work up by (epics memql#5402, memql#5408). Written at open for a goal's run; a delegated app session's recording run COPIES its parent's, which is how a recording joins the corpus of the goal it served, and a parentless session derives its own from its statement. Absent on older or unrelated system runs, which the corpus loader skips rather than guesses.")
   automationName         string!  @description("The automation this run executes -- the template's name in the registry.")
   templateConstructId    string  @description("v1:authoring:construct.id when the template is an authored construct (epic A2).")
   templateVersion        string  @description("The construct version compiled to (epic A2).")
@@ -86,7 +86,6 @@ concept run {
   startedAt              datetime!  @description("When the run started.")
   finishedAt             datetime  @description("When status reached a terminal value.")
   summary                object  @description("Folded from the journal before its retention window closes (epic A2).")
-  goalSignature          string  @description("component/work.GoalSignature of the goal this run serves (epic memql#5408): sha256 over the normalized goal statement plus the sorted input argument names -- the key compile's exact-match tier and the procedure corpus both look work up by. Written at open for a goal's run, and COPIED onto a delegated app session's recording run, which is how a recording joins the corpus of the goal it served. Empty on a run no goal asked for, and on every run opened before the field existed, which the corpus loader skips rather than guesses.")
   parentRunId            string  @description("The run whose step delegated this run (epic memql#5408): set on a delegated app session's recording run, and on a replay run to the goal run it serves or the recording it is compared against. The inverse of childRunId on the delegating step, and stored the same way -- exactly as the writer passes it, deliberately not a @relationship -- so a reader compares it byte for byte with the id it holds. Empty on every run nothing delegated.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
