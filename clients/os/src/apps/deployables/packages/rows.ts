@@ -273,6 +273,7 @@ export interface ReportDeployable {
   prebuilt: boolean;
   assets?: Array<{ path: string; source: string; sha256: string; size: number }>;
   binding?: { store?: string };
+  testing?: { binding?: { store?: string } };
   problem?: ReportProblem;
 }
 
@@ -449,7 +450,7 @@ export const PENDING_DEPLOYMENT_STATUSES = new Set([
 export interface PackageManifest {
   formatVersion: number;
   name: string;
-  deployables: Array<{ name: string; displayName?: string; path: string; kind: string; build?: {command?: string; output?: string}; binding?: {store?: string}; deployment?: {slug?: string; domains?: string[]}; resolutionTail?: string; assets?: ReportDeployable["assets"] }>;
+  deployables: Array<{ name: string; displayName?: string; path: string; kind: string; build?: {command?: string; output?: string}; binding?: {store?: string}; testing?: {binding?: {store?: string}}; deployment?: {slug?: string; domains?: string[]}; resolutionTail?: string; assets?: ReportDeployable["assets"] }>;
 }
 
 export function deployableLabel(d: {name: string; displayName?: string}): string {

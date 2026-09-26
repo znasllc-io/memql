@@ -206,9 +206,12 @@ func (h *Handler) serveRuntimeConfig(w http.ResponseWriter, r *http.Request, sit
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	doc := runtimeConfigForSite(r.Context(), site, os.Getenv, config.IdentityAuthEnabled(), h.secretResolver)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
+	if r.Method == http.MethodHead {
+		return // Version checks never read credentials or construct a response body.
+	}
+	doc := runtimeConfigForSite(r.Context(), site, os.Getenv, config.IdentityAuthEnabled(), h.secretResolver)
 	_ = json.NewEncoder(w).Encode(doc)
 }
 

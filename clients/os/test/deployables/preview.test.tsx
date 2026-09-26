@@ -380,13 +380,13 @@ describe("opening a preview", () => {
 
 describe("the promotion", () => {
   it("is on the action bar and not in the section, and names the version it promotes", async () => {
-    const connection = fakeConnection(READY_SEED);
+    const connection = fakeConnection({ ...READY_SEED, sites: [{ ...SHOP_WITH_CANDIDATE, kind: "spa" }] });
     mount(connection);
     const page = await openDeployable("shop.memql.example.com");
 
     // RULE 12: every act that changes what the public is served lives on the
     // one bar, so the section must not carry a second one.
-    expect(within(page).queryByRole("region", { name: "Preview" })).toBeNull();
+    expect(within(page).queryByRole("region", { name: "Preview" })).not.toBeNull();
 
     // THE BAR IS AT THE WINDOW'S EDGE, outside the deployable's own region --
     // which is rule 12's whole point, so the search is the screen's.

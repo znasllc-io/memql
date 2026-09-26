@@ -43,7 +43,7 @@ func TestIdentityXHRIsProxiedNotSPAFallback(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("POST /oauth/token = %d, want 200 from identity", rec.Code)
 	}
-	if body := rec.Body.String(); !strings.Contains(body, `"access_token":"AT"`) {
+	if body := sourceHTML(rec.Body.String()); !strings.Contains(body, `"access_token":"AT"`) {
 		t.Fatalf("body %q is the SPA fallback or not identity's token JSON", body)
 	}
 	if sawMethod != http.MethodPost || sawPath != "/oauth/token" {
@@ -73,8 +73,8 @@ func TestIdentityXHRDoesNotCaptureAuthCallback(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /auth/callback = %d, want 200 SPA fallback", rec.Code)
 	}
-	if rec.Body.String() != "ROOT-SPA" {
-		t.Errorf("GET /auth/callback body = %q, want the SPA", rec.Body.String())
+	if sourceHTML(rec.Body.String()) != "ROOT-SPA" {
+		t.Errorf("GET /auth/callback body = %q, want the SPA", sourceHTML(rec.Body.String()))
 	}
 }
 
@@ -91,7 +91,7 @@ func TestIdentityXHRWithoutTargetIsBadGatewayNotHTML(t *testing.T) {
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("POST /oauth/token with no identity target = %d, want 502 (not SPA 200)", rec.Code)
 	}
-	if strings.Contains(rec.Body.String(), "ROOT-SPA") {
+	if strings.Contains(sourceHTML(rec.Body.String()), "ROOT-SPA") {
 		t.Error("served the SPA fallback as a token response")
 	}
 }

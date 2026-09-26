@@ -629,6 +629,11 @@ func (p *enginePublisher) BindSiteToStore(ctx context.Context, siteId, storeId s
 	return err
 }
 
+func (p *enginePublisher) BindSiteTestingStore(ctx context.Context, siteId, storeId string) error {
+	_, err := p.engine.Execute(ctx, fmt.Sprintf("mutation updateSitePreviewBinding(siteId: %s, storeId: %s)", langparser.QuoteString(siteId), langparser.QuoteString(storeId)))
+	return err
+}
+
 // RepointSite is the rollback write: updateSiteBundle pointed back at a
 // version whose bytes are still there.
 func (p *enginePublisher) RepointSite(ctx context.Context, siteId, bundleRef string) error {

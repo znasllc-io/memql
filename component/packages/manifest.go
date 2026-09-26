@@ -85,6 +85,7 @@ type ManifestDeployable struct {
 	Kind        string              `yaml:"kind"    json:"kind"`
 	Build       *ManifestBuild      `yaml:"build,omitempty"   json:"build,omitempty"`
 	Binding     *ManifestBinding    `yaml:"binding,omitempty" json:"binding,omitempty"`
+	Testing     *ManifestTesting    `yaml:"testing,omitempty" json:"testing,omitempty"`
 	// Assets are immutable files imported after build, at paths relative to
 	// the published site. Analysis reads these declarations, never the bytes.
 	Assets []ManifestAsset `yaml:"assets,omitempty" json:"assets,omitempty"`
@@ -147,6 +148,13 @@ type ManifestBinding struct {
 	Store string `yaml:"store,omitempty" json:"store,omitempty"`
 }
 
+// ManifestTesting configures the storefront's independent testing store.
+// Its stable URL is test--<production hostname>; both destinations serve the
+// same bundle. Omission preserves the store chosen in MemQL OS on redeploy.
+type ManifestTesting struct {
+	Binding *ManifestBinding `yaml:"binding,omitempty" json:"binding,omitempty"`
+}
+
 // ReadManifest reads and validates the manifest at the root of tree.
 //
 // Every failure is a *Refusal carrying a catalogued code, so the caller never
@@ -202,6 +210,9 @@ func ReadManifest(tree fs.FS) (*Manifest, error) {
 		}
 		d.Path = strings.TrimSpace(d.Path)
 		d.Kind = strings.TrimSpace(d.Kind)
+		if d.Testing != nil && d.Kind != KindStorefront {
+			return nil, refuse(CodeManifestInvalid, "deployable %q: testing is only available for shopify_storefront", d.Name)
+		}
 		d.ResolutionTail = strings.TrimSpace(d.ResolutionTail)
 		if d.Name == "" {
 			return nil, refuse(CodeManifestInvalid,

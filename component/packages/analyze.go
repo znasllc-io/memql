@@ -106,6 +106,7 @@ func analyzeDeployables(tree fs.FS, manifest *Manifest, rep *Report) {
 			Command:        command,
 			Output:         output,
 			Binding:        d.Binding,
+			Testing:        d.Testing,
 			ResolutionTail: d.ResolutionTail,
 			Assets:         d.Assets,
 		}
@@ -136,10 +137,6 @@ func analyzeDeployables(tree fs.FS, manifest *Manifest, rep *Report) {
 				"deployable %q points at %q, which is not a directory in this source.",
 				d.Name, d.Path), true))
 
-		case d.Kind == KindStorefront && !hasBinding(d.Binding):
-			dr.Problem = ptr(problemFrom(refuseScoped(CodeDeployableBindingMissing, d.Name,
-				"deployable %q is a %s but names no store. A storefront names the v1:shopify:store row it fronts -- binding: {store: <shop>.myshopify.com} -- and the domain, the Storefront token reference and everything else about that store live on the row.",
-				d.Name, KindStorefront), true))
 		}
 
 		if dr.Problem == nil {

@@ -59,7 +59,7 @@ export function Versions({ site, runs, canPublish, lifecycle }: {
     }
   }
   const label = (ref: string) => ref.startsWith("file://") ? "Bundled with MemQL" : ref.replace(/\/$/, "").split("/").pop() || ref;
-  const state = (ref: string) => ref === site.bundleRef ? "Current" : ref === site.candidateRef ? "Candidate" : "Available";
+  const state = (ref: string) => ref === site.bundleRef ? "Current" : site.kind !== "shopify_storefront" && ref === site.candidateRef ? "Candidate" : "Available";
 
   return <>
     <RecordList as="ul" label="Versions">

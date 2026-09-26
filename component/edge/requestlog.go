@@ -4,6 +4,7 @@ package edge
 
 import (
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -127,7 +128,8 @@ func classifyServed(name string, fellBack bool) string {
 // rather than an asset: index.html at the root, a directory index, or a
 // prerendered <path>.html.
 func isHTMLDocument(name string) bool {
-	return len(name) >= 5 && name[len(name)-5:] == ".html"
+	name = strings.ToLower(name)
+	return strings.HasSuffix(name, ".html") || strings.HasSuffix(name, ".htm")
 }
 
 // PathClassesForTest is the closed set this package writes, in order.

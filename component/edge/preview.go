@@ -10,56 +10,16 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 )
 
-// preview.go -- serving a CANDIDATE VERSION to an authorized operator and to
-// nobody else (epic memql#5531, issue memql#5545).
+// Preview access is a short-lived, site-scoped credential. Storefront Testing
+// uses a separate stable hostname and the current published bundle, with only
+// Store replaced by the Testing binding. Production ignores preview cookies.
+// A missing, invalid, expired or revoked grant on Testing returns 401; it never
+// falls through to Production. Publishing a design updates both destinations
+// without ending an otherwise valid Testing session.
 //
-// # The whole mechanism is one substitution
-//
-// A request carrying a valid grant is served from a COPY of the resolved Site
-// with two fields swapped: BundleRef becomes the candidate version, and Store
-// becomes the preview binding's store. Everything below that -- the bundle
-// opener, the resolution tail, the inline-script hashes, the content security
-// policy, the runtime-config document -- runs completely unchanged and has no
-// idea a preview is happening.
-//
-// THAT IS NOT AN IMPLEMENTATION CONVENIENCE, IT IS THE DESIGN (record D7,
-// confirmed by the owner 2026-09-20). MemQL ships one installation shape and
-// has no environments; a preview is allowed to exist inside that law only on
-// the argument that nothing in the engine branches on "this is a preview" to
-// change what the engine DOES -- it may only choose a bundle and a binding.
-// previewSite is that sentence as a function, and the fact that no other file
-// in this package mentions preview at all is the evidence.
-//
-// # Who is served
-//
-//	no cookie, no grant        exactly what is served today. A draft is 404, a
-//	                           live site serves its serving version, and no
-//	                           document anywhere carries the preview binding.
-//	a valid grant, draft site  the candidate, under the preview binding.
-//	a valid grant, live site   the candidate, under the preview binding, WHILE
-//	                           the serving version goes on serving the public.
-//
-// The third row is the requirement that shapes everything (record section 5,
-// step 4): after publishing, the owner keeps editing and exercises version N+1
-// the same way. A design that previewed only a draft site would deliver the
-// sandbox once and never again.
-//
-// # Five things are checked, and each closes a different door
-//
-//  1. THE TOKEN IS WELL FORMED -- a string comparison before any read, because
-//     the cookie arrives on every request to this origin including every asset.
-//  2. A GRANT EXISTS for its digest.
-//  3. IT IS FOR THIS DEPLOYABLE -- a cookie carried to a sibling hostname gets
-//     the public answer.
-//  4. IT NAMES THE CANDIDATE THE SITE IS CARRYING -- so withdrawing or
-//     republishing a candidate ends every open preview of it, and nobody is
-//     ever silently shown a version they did not ask to see.
-//  5. IT IS NEITHER EXPIRED NOR REVOKED.
-//
-// A failure at any of them is NOT an error and NOT a redirect: the request
-// falls through to the ordinary public path and gets precisely what it would
-// have got with no cookie at all. An expired preview of a draft site is a 404,
-// which is the honest answer -- to the internet that site does not exist.
+// Non-storefront deployables retain candidate previews on their own origin:
+// a valid grant substitutes both BundleRef and Store, and must still name the
+// current candidate. Invalid grants fall through to the ordinary public path.
 
 // PreviewExecutor is the engine seam this file needs, and it is DELIBERATELY
 // SEPARATE from QueryExecutor.
@@ -96,12 +56,11 @@ type PreviewGrant struct {
 	ID string
 	// SiteID is the deployable this grant previews. The edge compares it
 	// against the site it just resolved: a grant is for ONE deployable, and a
-	// cookie carried to a sibling hostname must get the public answer.
+	// cookie carried to a sibling hostname must not grant access.
 	SiteID string
-	// CandidateRef is the version the grant was issued FOR. The edge compares
-	// it against the site's own candidateRef and refuses when they differ, so
-	// withdrawing or republishing a candidate ends every open preview of it and
-	// nobody is silently shown a version they did not ask to see.
+	// CandidateRef records the version at mint time. Non-storefront previews
+	// must still match the current candidate; storefront Testing follows the
+	// shared published version throughout the authorized session.
 	CandidateRef string
 	// ExpiresAt is when it stops resolving. ZERO IS EXPIRED, never eternal: an
 	// unreadable or absent expiry on a bearer credential must fail toward the
@@ -136,7 +95,7 @@ const previewSeenThrottle = time.Minute
 //
 // It is deliberately NOT the grant's lifetime: the cookie is a convenience and
 // the GRANT is the credential, so a cookie outliving its grant costs a fallthrough
-// to the public site rather than an extra minute of access. Capped at the
+// to the public site (or a Testing refusal), never extra access. Capped at the
 // maximum a grant can be configured for, so no browser holds one longer than a
 // grant could ever be valid.
 var previewCookieMaxAge = int(memql.MaxPreviewGrantTTL / time.Second)
@@ -210,9 +169,9 @@ func (c *previewCache) shouldTouch(grantID string, last time.Time) bool {
 // NIL IS THE ORDINARY ANSWER and it is never an error. Every way this can fail
 // -- no cookie, a malformed one, no grant, the wrong deployable, a moved
 // candidate, an expired or revoked grant -- means the same thing to the caller:
-// serve the public site.
+// serve the public site, or refuse a private Testing request.
 func (h *Handler) previewGrantFor(r *http.Request, site *Site) *PreviewGrant {
-	if site == nil || h.resolver == nil {
+	if site == nil || h.resolver == nil || (site.Kind == storefrontKind && !site.StorefrontTesting) {
 		return nil
 	}
 	cookie, err := r.Cookie(memql.PreviewCookieName)
@@ -248,14 +207,14 @@ func (h *Handler) previewGrantFor(r *http.Request, site *Site) *PreviewGrant {
 	if grant.SiteID != site.ID {
 		return nil
 	}
-	// THE CANDIDATE THE GRANT NAMES MUST STILL BE THE SITE'S CANDIDATE. An
-	// empty candidateRef on either side fails this comparison, which is correct
-	// in both directions: a site whose candidate was withdrawn has nothing to
-	// preview, and a grant naming nothing was never valid.
-	if strings.TrimSpace(grant.CandidateRef) == "" ||
-		strings.TrimSpace(grant.CandidateRef) != strings.TrimSpace(site.CandidateRef) {
+	// Storefront access belongs to the stable testing destination, so a
+	// redeploy updates its design without ending the testing session. Other
+	// deployables keep candidate-scoped previews.
+	if !site.StorefrontTesting && (strings.TrimSpace(grant.CandidateRef) == "" ||
+		strings.TrimSpace(grant.CandidateRef) != strings.TrimSpace(site.CandidateRef)) {
 		return nil
 	}
+
 	if strings.TrimSpace(grant.RevokedAt) != "" {
 		return nil
 	}
@@ -286,7 +245,9 @@ func previewSite(site *Site, grant *PreviewGrant) *Site {
 		return site
 	}
 	copied := *site
-	copied.BundleRef = strings.TrimSpace(site.CandidateRef)
+	if !site.StorefrontTesting {
+		copied.BundleRef = strings.TrimSpace(site.CandidateRef)
+	}
 	copied.Store = site.PreviewStore
 	return &copied
 }

@@ -207,6 +207,9 @@ func validateUserSiteHostname(hostname, domain string) error {
 				"lowercase letters, digits and hyphens (the hostname label under %s), and %q is not",
 			slug, siteSlugMinLen, siteSlugMaxLen, domain, slug)
 	}
+	if strings.HasPrefix(slug, frontdoor.StorefrontTestingPrefix) {
+		return fmt.Errorf("v1:platform:site: %q is reserved for a storefront testing URL", host)
+	}
 	if reservedSiteLabels()[slug] {
 		return fmt.Errorf(
 			"v1:platform:site: %q is reserved. %s is where the cluster serves %s, and a site row "+
@@ -359,6 +362,9 @@ func (e *MemQLEngine) validateSiteHostnamePolicy(ctx context.Context, payload ma
 
 	claiming := !priorExisted ||
 		!strings.EqualFold(hostname, strings.TrimSpace(priorHostname))
+	if claiming && strings.HasPrefix(hostname, frontdoor.StorefrontTestingPrefix) {
+		return fmt.Errorf("v1:platform:site: %q is reserved for a storefront testing URL", hostname)
+	}
 	if claiming && !siteWritePrivileged(ctx, actor) {
 		if err := validateUserSiteHostname(hostname, siteHostnamePolicyDomain()); err != nil {
 			return err

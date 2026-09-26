@@ -481,6 +481,8 @@ const PREVIEW_NONE: FakeSeed = {
       storeId: "store-example",
       storeDomain: "example.myshopify.com",
       storeReadable: true,
+      canPreview: true,
+      previewRefusal: {code: "", message: "", remedy: ""},
     } as never),
   },
 };

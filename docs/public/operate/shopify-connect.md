@@ -21,8 +21,8 @@ marker on the Store icon indicates that setup remains.
    access on Shopify. MemQL verifies Shopify's signed launch, completes
    authorization, and returns to the Settings surface that began the flow.
    Installing directly from Shopify opens global Settings → Connections.
-3. Open the storefront's **Store** icon beside Traffic. Select a saved store,
-   review the selection, and connect it to the storefront.
+3. Open the storefront's **Store** panel. Choose **Testing** or **Production**,
+   select a saved store, review the selection, and connect it.
 
 Shopify authorizes an app separately for each store. Connecting one store does not
 list every store belonging to a Shopify identity. Add each store you need.
@@ -44,18 +44,23 @@ must authorize the app; access to the internal sandbox grants no access to the c
 MemQL derives the **Sandbox** label from Shopify's `shop.plan.partnerDevelopment`,
 not from a store's name or the email used to sign in.
 
-A storefront has one active store binding. Start with the sandbox. When ready,
-connect the client's store, open **Store → Change store**, and review the replacement
-before confirming. Authorizing a new store never changes the active binding by
-itself. Store selection does not copy products, customers, orders or credentials
-between stores. Product handles and collections needed by the storefront must exist
-in the selected store. Fylo keeps carts separate by store domain.
+A storefront has two destinations, **Testing** and **Production**, with independent
+store selections and one shared published design. Either destination can connect
+to a sandbox or a live store, and both can use the same store. An unconnected
+destination shows design preview. Authorizing a new store never changes either
+binding by itself.
 
-A production-store label describes the store type, not payment readiness. Verify
-its products, payment configuration and checkout in Shopify before accepting orders.
-Keep the internal sandbox for testing rather than transferring its generated data
-to the client. Separate storefront deployments can keep sandbox testing available
-alongside the client's live storefront.
+Choose **Visit → Testing** to open the private testing website. MemQL establishes
+access automatically and opens the stable `test--<site>.<domain>` URL. Choose
+**Visit → Production** for the existing public URL. Publishing a design updates
+both; no candidate selection or promotion is needed for storefronts.
+
+When ready, change only Production to the client's store. Store selection does
+not copy products, customers, orders or credentials between stores. Product
+handles and collections needed by the storefront must exist in the selected store.
+Fylo keeps carts separate by store domain. A production-store label describes the
+store type, not payment readiness: verify products, payment configuration and
+checkout in Shopify before accepting orders.
 
 ## Operator prerequisites
 

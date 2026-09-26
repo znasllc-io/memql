@@ -172,6 +172,11 @@ func (p *fakePublisher) PublishBundle(_ context.Context, siteId string, bundle e
 	return PublishResult{SiteId: siteId, BundleRef: "blob://sites/x/v1/", Version: "v1"}, nil
 }
 
+func (p *fakePublisher) BindSiteTestingStore(_ context.Context, siteId, storeId string) error {
+	p.bound = append(p.bound, "testing:"+siteId+" -> "+storeId)
+	return nil
+}
+
 func (p *fakePublisher) BindSiteToStore(_ context.Context, siteId, storeId string) error {
 	p.bound = append(p.bound, siteId+" -> "+storeId)
 	return nil

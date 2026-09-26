@@ -151,7 +151,7 @@ func TestServeRuntimeConfig_IsGenericPerSite(t *testing.T) {
 			h.ServeHTTP(rec, req)
 
 			if rec.Code != http.StatusOK {
-				t.Fatalf("GET %s = %d, want 200; body: %s", runtimeConfigPath, rec.Code, rec.Body.String())
+				t.Fatalf("GET %s = %d, want 200; body: %s", runtimeConfigPath, rec.Code, sourceHTML(rec.Body.String()))
 			}
 			if ct := rec.Header().Get("Content-Type"); ct != "application/json; charset=utf-8" {
 				t.Errorf("Content-Type = %q", ct)
@@ -162,7 +162,7 @@ func TestServeRuntimeConfig_IsGenericPerSite(t *testing.T) {
 
 			var doc RuntimeConfig
 			if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
-				t.Fatalf("decode response: %v; body: %s", err, rec.Body.String())
+				t.Fatalf("decode response: %v; body: %s", err, sourceHTML(rec.Body.String()))
 			}
 			if doc.IdentityURL != tc.wantAuthURL {
 				t.Errorf("identityUrl = %q, want %q", doc.IdentityURL, tc.wantAuthURL)
@@ -386,7 +386,7 @@ func TestRuntimeConfigNeverCarriesTheShopifyAdminToken(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET %s = %d, want 200", runtimeConfigPath, rec.Code)
 	}
-	body := rec.Body.String()
+	body := sourceHTML(rec.Body.String())
 
 	// The instrument can move: the PUBLIC token IS in this same document, so
 	// a document that failed to carry any secret at all would fail here
@@ -544,8 +544,8 @@ func TestServeRuntimeConfig_TwoDeployablesOneBundleReadDifferentSettings(t *test
 		page.Host = host
 		pageRec := httptest.NewRecorder()
 		h.ServeHTTP(pageRec, page)
-		if pageRec.Body.String() != "SAME-BYTES" {
-			t.Fatalf("%s served %q, want the shared bundle", host, pageRec.Body.String())
+		if sourceHTML(pageRec.Body.String()) != "SAME-BYTES" {
+			t.Fatalf("%s served %q, want the shared bundle", host, sourceHTML(pageRec.Body.String()))
 		}
 
 		req := httptest.NewRequest(http.MethodGet, runtimeConfigPath, nil)
