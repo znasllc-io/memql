@@ -7,6 +7,11 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
+// staged-data: GATE -- keys are an internal subquery, never returned to a
+// reader. executeCombinedFilterQuery applies the complete compiled predicate,
+// including the injected staged-data gate, to the joined current rows before
+// ordering/limiting, then retains the true-latest admission recheck.
+//
 // latestScanKeys enumerates current keys using the covering (concept, id,
 // createdAt DESC) index. Payload predicates and authorization still run in SQL
 // against those rows, before ordering/limiting, and latestMatchingNodes retains

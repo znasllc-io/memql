@@ -50,12 +50,11 @@ import (
 // in a cut release, mapped to the release it first warned in -- which must be
 // the form's own DeprecatedIn.
 //
-// EMPTY TODAY, and that is the load-bearing statement: no release has yet
-// carried the deprecation window, so every registered form is still held to
-// this tree's next minor. Add an entry only when the release naming it has
-// actually been cut; the gate below refuses an entry for a release this tree
-// has not reached, so the line cannot be written ahead of the fact.
-var releasedForms = map[string]string{}
+// v0.23.0 (da2222f4778278fdf955758c005f38d1ecc8ff43) shipped this
+// warning. Its original deprecation/refusal dates remain historical facts.
+var releasedForms = map[string]string{
+	"deprecated_array_type": "0.23.0",
+}
 
 // versionFile is the tree's VERSION, at the repo root beside this test.
 const versionFile = "VERSION"

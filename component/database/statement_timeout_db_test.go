@@ -35,7 +35,7 @@ func TestServingStatementTimeoutCancelsBeforeSocketDeadline(t *testing.T) {
 	if !errors.As(err, &pgerr) || pgerr.Field('C') != "57014" {
 		t.Fatalf("want server cancellation, got %v", err)
 	}
-	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM pg_stat_activity WHERE pid = $1 AND state = 'active'", before).Scan(&active); err != nil {
+	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM pg_stat_activity WHERE pid = $1 AND state = 'active' AND query = 'SELECT pg_sleep(2)'", before).Scan(&active); err != nil {
 		t.Fatal(err)
 	}
 	if active != 0 {
