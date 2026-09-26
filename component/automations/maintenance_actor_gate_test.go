@@ -89,10 +89,9 @@ func TestMaintenanceAutomationsAreArgued(t *testing.T) {
 		"auditEventRetentionSweep",
 		"checkDeployableHealth",
 		"logsRetentionSweep",
-		// Both engine-owned repository feeds discover sources across owners
+		// The engine-owned repository poll discovers sources across owners
 		// before borrowing each source owner's credential/deploy authority.
 		// A reader actor silently sees no packages and reports checked=0.
-		"notePackageUpstreamFromWebhook",
 		"pollPackageUpstreams",
 		// routingEvidenceFold (epic memql#5146) is the one entry here whose
 		// read spans owners because the QUESTION does. It asks how a model
