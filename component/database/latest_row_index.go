@@ -212,6 +212,7 @@ type indexFacts struct {
 	Ready      bool
 	Live       bool
 	Partial    bool // carries a WHERE predicate
+	Predicate  string
 	Expression bool // indexes an expression rather than columns
 	// The KEY columns in order (INCLUDE columns are not key columns and are
 	// allowed), whether each sorts descending, and whether each uses its
@@ -869,6 +870,7 @@ SELECT i.indrelid::int8,
        am.amname,
        i.indisvalid, i.indisready, i.indislive,
        i.indpred IS NOT NULL,
+       COALESCE(pg_get_expr(i.indpred, i.indrelid), ''),
        i.indexprs IS NOT NULL,
        ARRAY(SELECT COALESCE(a.attname::text, '')
                FROM generate_series(0, i.indnkeyatts - 1) AS k
@@ -897,7 +899,7 @@ SELECT i.indrelid::int8,
 			rel int64
 			f   indexFacts
 		)
-		if err := rows.Scan(&rel, &f.Name, &f.Method, &f.Valid, &f.Ready, &f.Live, &f.Partial, &f.Expression,
+		if err := rows.Scan(&rel, &f.Name, &f.Method, &f.Valid, &f.Ready, &f.Live, &f.Partial, &f.Predicate, &f.Expression,
 			pgdialect.Array(&f.KeyColumns), pgdialect.Array(&f.KeyDescending), pgdialect.Array(&f.KeyPlain),
 			&f.Definition); err != nil {
 			return st, fmt.Errorf("reading the indexes of %s: %w", st.qualifiedTable(), err)

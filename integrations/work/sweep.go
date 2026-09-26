@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/num"
@@ -111,7 +112,8 @@ type WaitSweepResult struct {
 	Abandoned int `json:"abandoned"`
 	// Redispatched counts runs that looked abandoned and were handed back to
 	// a live replica instead of being closed. See redispatchStale.
-	Redispatched int `json:"redispatched"`
+	Redispatched        int `json:"redispatched"`
+	OrphanedWaitsClosed int `json:"orphanedWaitsClosed"`
 }
 
 func (i *Integration) handleSweepWaiting(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
@@ -124,10 +126,11 @@ func (i *Integration) handleSweepWaiting(ctx context.Context, args map[string]an
 		return nil, err
 	}
 	return i.resultNode(map[string]any{
-		"checked":      res.Checked,
-		"resumed":      res.Resumed,
-		"abandoned":    res.Abandoned,
-		"redispatched": res.Redispatched,
+		"checked":             res.Checked,
+		"resumed":             res.Resumed,
+		"abandoned":           res.Abandoned,
+		"redispatched":        res.Redispatched,
+		"orphanedWaitsClosed": res.OrphanedWaitsClosed,
 	}), nil
 }
 
@@ -184,6 +187,13 @@ func (i *Integration) SweepWaiting(ctx context.Context, olderThan time.Duration)
 		}
 
 		if status == runStatusWaiting {
+			if closed, err := i.closeOrphanedSystemApprovalWait(ctx, run, now); err != nil {
+				i.log().Warn("work: could not check a system approval wait", "run", runId, "error", err)
+				continue
+			} else if closed {
+				res.OrphanedWaitsClosed++
+				continue
+			}
 			// A CLASSIFIED FAILURE'S ACT IS SERVED FIRST (epic memql#5127).
 			// It is checked before the inference park and the timer because
 			// those two ask different questions of the same field: a `retry`
@@ -320,6 +330,42 @@ func (i *Integration) SweepWaiting(ctx context.Context, olderThan time.Duration)
 		res.Abandoned++
 	}
 	return res, nil
+}
+
+// Earlier journals parked failed maintenance runs even when approval creation
+// failed validation. Those waits have no answerable gate and no human owner.
+// Close only this proven orphan shape, preserving the run, error and history.
+// A read failure is never treated as a missing approval; user goals and real
+// approvals keep their existing lifecycle.
+func (i *Integration) closeOrphanedSystemApprovalWait(ctx context.Context, run map[string]any, now time.Time) (bool, error) {
+	if owner, present := run["ownerUserId"]; !present || owner != "" || rowString(run, "goalId") != "" || rowString(run, "triggeredBy") != "schedule" {
+		return false, nil
+	}
+	waiting := rowMap(run, "waitingOn")
+	if rowString(waiting, "kind") != "approval" || rowString(waiting, "subject") == "" {
+		return false, nil
+	}
+	since, ok := rowTime(waiting, "since")
+	if !ok || since.After(now.Add(-time.Minute)) {
+		return false, nil
+	}
+	actor, ok := auth.AccessFromContext(ctx)
+	if !ok || actor == nil || !actor.IsClusterOwner() {
+		return false, fmt.Errorf("work: only cluster maintenance may inspect orphaned system waits")
+	}
+	st := i.store()
+	approvals, err := st.queryInternal(ctx, "query "+call("workApprovalById", map[string]any{"approvalId": rowString(waiting, "subject")}))
+	if err != nil || len(approvals) != 0 {
+		return false, err
+	}
+	err = st.updateRun(ctx, rowString(run, "id"), map[string]any{
+		"status":       runStatusFailed,
+		"finishedAt":   rfc(now),
+		"waitingOn":    map[string]any{},
+		"errorCode":    "approval_missing",
+		"errorMessage": "The system task failed and its approval was not saved. This orphaned wait was closed; the next scheduled execution retries the maintenance task.",
+	})
+	return err == nil, err
 }
 
 // redispatchStale offers a silent run back to the cluster and reports whether
@@ -667,9 +713,11 @@ func (i *Integration) foldSummaries(ctx context.Context, expired map[string][]ma
 
 // runsInFlight is every run at a non-terminal status, whoever owns it.
 //
-// DISTINCT ON (id) ... ORDER BY id, "createdAt" DESC picks the newest version
-// of each row, because MemQL is append-only: without it a run that advanced
-// five times would be judged on its first version's status.
+// The partial recovery index enumerates non-terminal version keys, and the
+// covering latest-row index rejects every superseded key before payloads are
+// fetched. Completed histories never need their payloads loaded by recovery.
+// Filtering status without that anti-join would resurrect an old running
+// version of a run that already finished.
 //
 // staged-data: MUST-NOT-GATE -- a staged run SKIPPED HERE IS NEVER SWEPT. This
 // is the only reader allowed to close a run whose node died and the only one
@@ -683,17 +731,23 @@ func (i *Integration) foldSummaries(ctx context.Context, expired map[string][]ma
 // These statements execute through Bun, whose formatter consumes ? arguments.
 // PostgreSQL $n placeholders would reach the driver without their parameters.
 const runsInFlightSQL = `
-WITH latest AS (
-    SELECT DISTINCT ON (id) id, "createdAt", payload
-    FROM "MemoryNodes"
-    WHERE concept = ?
-    ORDER BY id, "createdAt" DESC
+WITH candidates AS MATERIALIZED (
+    SELECT n.id, n."createdAt"
+    FROM "MemoryNodes" n
+    WHERE n.concept = ?
+      AND COALESCE(n.payload->>'status', '') NOT IN ('succeeded', 'failed', 'cancelled', 'abandoned')
+      AND NOT EXISTS (
+          SELECT 1 FROM "MemoryNodes" newer
+          WHERE newer.concept = n.concept AND newer.id = n.id
+            AND newer."createdAt" > n."createdAt"
+      )
+    ORDER BY n."createdAt" ASC
+    LIMIT ?
 )
-SELECT id, "createdAt", payload
-FROM latest
-WHERE COALESCE(payload->>'status', '') NOT IN ('succeeded', 'failed', 'cancelled', 'abandoned')
-ORDER BY "createdAt" ASC
-LIMIT ?
+SELECT n.id, n."createdAt", n.payload
+FROM candidates c JOIN "MemoryNodes" n
+    ON n.id = c.id AND n."createdAt" = c."createdAt"
+ORDER BY n."createdAt" ASC
 `
 
 func (i *Integration) runsInFlight(ctx context.Context) ([]map[string]any, error) {
@@ -713,16 +767,20 @@ func (i *Integration) runsInFlight(ctx context.Context) ([]map[string]any, error
 // applies, per row as fetched.
 const expiredJournalRowsSQL = `
 WITH latest AS (
-    SELECT DISTINCT ON (id) id, "createdAt", payload
+    SELECT DISTINCT ON (id) id, "createdAt"
     FROM "MemoryNodes"
     WHERE concept = ?
     ORDER BY id, "createdAt" DESC
+), expired AS MATERIALIZED (
+    SELECT id, "createdAt" FROM latest
+    WHERE "createdAt" < ?
+    ORDER BY "createdAt" ASC
+    LIMIT ?
 )
-SELECT id, "createdAt", payload
-FROM latest
-WHERE "createdAt" < ?
-ORDER BY "createdAt" ASC
-LIMIT ?
+SELECT n.id, n."createdAt", n.payload
+FROM expired e JOIN "MemoryNodes" n
+    ON n.id = e.id AND n."createdAt" = e."createdAt"
+ORDER BY n."createdAt" ASC
 `
 
 func (i *Integration) expiredJournalRows(ctx context.Context, concept string, boundary time.Time) ([]map[string]any, error) {

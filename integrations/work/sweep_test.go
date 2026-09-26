@@ -639,3 +639,20 @@ func TestInferenceRetryDueReadsTheApprovalKindNotTheWaitShape(t *testing.T) {
 		})
 	}
 }
+
+func TestMissingApprovalReadFailurePreservesSystemWait(t *testing.T) {
+	i, engine := newTestIntegration(t)
+	engine.refuse("workApprovalById", fmt.Errorf("database unavailable"))
+	now := time.Now().UTC()
+	run := map[string]any{"id": "v1:work:run:orphan", "ownerUserId": "", "goalId": "", "triggeredBy": "schedule", "waitingOn": map[string]any{"kind": "approval", "subject": "v1:work:approval:missing", "since": rfc(now.Add(-time.Hour))}}
+	ctx := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("sweepWaitingWorkRuns"))
+	closed, err := i.closeOrphanedSystemApprovalWait(ctx, run, now)
+	if err == nil || closed {
+		t.Fatalf("read failure closed a wait: %v %v", closed, err)
+	}
+	for _, c := range engine.recorded() {
+		if c.Name() == "updateWorkRun" {
+			t.Fatal("read failure mutated the run")
+		}
+	}
+}

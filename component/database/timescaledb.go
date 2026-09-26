@@ -78,6 +78,7 @@ func registerTimescaleMigrations(m *migrate.Migrations, logger *slog.Logger) {
 	registerSiteOwnerRestamp(m, logger)
 	registerMemoryNodesConceptIndex(m, logger)
 	registerMemoryNodesConceptIndexVerified(m, logger)
+	registerWorkRecoveryIndex(m, logger)
 }
 
 func timescaleExtensionPostHook(fallbackLogger *slog.Logger) PostMigrationHook {
