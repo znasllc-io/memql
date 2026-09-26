@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
 	proc "github.com/znasllc-io/memql/component/procedure"
 	"github.com/znasllc-io/memql/core/num"
 )
@@ -246,6 +248,21 @@ func (i *Integration) handleLearnFromRun(ctx context.Context, args map[string]an
 	if runId == "" {
 		return nil, fmt.Errorf("procedure.learnFromRun: runId is required")
 	}
+	ac, present := auth.AccessFromContext(ctx)
+	if !present || ac == nil || ac.UserId == "" {
+		return nil, fmt.Errorf("procedure.learnFromRun: an authenticated owner is required")
+	}
+	if ac.Synthetic {
+		// Only the engine-owned completion trigger may borrow the event's one
+		// named owner. The subsequent owner-filtered read verifies that hint;
+		// neither a caller-supplied automation nor an arbitrary system actor
+		// gains a cross-owner lookup through this builtin.
+		owner := strings.TrimSpace(argString(args, "ownerUserId"))
+		if !auth.OriginFromContext(ctx).IsInternal() || ac.UserId != "system:automation:learnFromSucceededRun" || owner == "" {
+			return nil, fmt.Errorf("procedure.learnFromRun: only the trusted completion trigger may supply an owner")
+		}
+		ctx = ownerActor(ctx, owner)
+	}
 	// THE GATE. @serverOnly is refused on a builtin at parse, so the check
 	// lives here (dsl/procedure/builtins.memql records why). The run is read
 	// under the CALLER's own actor: the composite owner tier means a caller
@@ -260,12 +277,15 @@ func (i *Integration) handleLearnFromRun(ctx context.Context, args map[string]an
 			"learning runs on the owner's own corpus", runId)
 	}
 	owner := strings.TrimSpace(str(run, "ownerUserId"))
-	if caller := callerUserId(ctx); caller != "" && owner != "" && caller != owner {
+	if caller := callerUserId(ctx); caller == "" || owner == "" || memql.BareShortId(caller) != memql.BareShortId(owner) {
 		// Belt and braces over the row tier: a cluster owner CAN read another
 		// person's run, and learning from it would write a procedure into
 		// their catalog under their name.
 		return nil, fmt.Errorf("procedure.learnFromRun: run %s belongs to another person; "+
 			"a procedure is learned from its owner's corpus and filed in their catalog", runId)
+	}
+	if str(run, "status") != "succeeded" {
+		return i.reply(map[string]any{"runId": runId, "accepted": false, "reason": "the run has not succeeded"}), nil
 	}
 	k := corpusKey{
 		OwnerUserId:   owner,
@@ -329,7 +349,7 @@ func (i *Integration) handleMineCorpus(ctx context.Context, args map[string]any,
 }
 
 func (i *Integration) runById(ctx context.Context, runId string) (map[string]any, error) {
-	rows, err := i.store.query(ctx, "query "+call("workRunById", map[string]any{"runId": runId}))
+	rows, err := i.store.query(ctx, "query "+call("workRunForOwner", map[string]any{"runId": runId}))
 	if err != nil {
 		return nil, err
 	}

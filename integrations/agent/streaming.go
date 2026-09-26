@@ -206,6 +206,7 @@ func isTransientStreamError(err error) bool {
 		"deadline exceeded",
 		"connection reset",
 		"eof",
+		"stream ended without a completion frame",
 		streamIdleSentinel, // local watchdog (see consumeStreamingTurn)
 	}
 	for _, m := range transientMarkers {
@@ -214,6 +215,17 @@ func isTransientStreamError(err error) bool {
 		}
 	}
 	return false
+}
+
+// The runtime rejected a generated tool envelope before any tool executed.
+// Re-ask this model iteration with format guidance, keeping prior tool receipts.
+func isMalformedToolOutput(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "tool call parsing failed") || strings.Contains(message, "failed to parse tool call") ||
+		(strings.Contains(message, "ollama:") && strings.Contains(message, "xml syntax error") && strings.Contains(message, "function"))
 }
 
 // transientRetryBackoff returns the sleep duration for attempt N
@@ -486,11 +498,19 @@ StreamLoop:
 			turnText, turnCalls, streamErr = r.consumeStreamingTurn(attemptCtx, chunks, sink, &textChunks, &fullText, turnStart, iter, requestId, &ttftLogged, turnCtx.StreamIdleBudget)
 			cancelAttempt()
 			if streamErr != nil {
+				if ctx.Err() != nil {
+					terminalErr = ctx.Err()
+					break StreamLoop
+				}
 				if next, ok := r.handOffContext(ctx, streamErr, messages, &contextHandoffs, iter, requestId); ok {
 					messages = next
 					continue
 				}
-				if isTransientStreamError(streamErr) && attempt < streamTransientMaxRetries {
+				repairTool := isMalformedToolOutput(streamErr)
+				if turnText == "" && (isTransientStreamError(streamErr) || repairTool) && attempt < streamTransientMaxRetries {
+					if repairTool && attempt == 0 {
+						messages = append(messages, common.ChatMessage{Role: "user", Content: "The runtime rejected the previous tool-call format; no tool from that response was executed. Answer directly if no tool is needed. Otherwise use the provided tool schema with complete valid arguments. Keep all earlier completed tool results."})
+					}
 					attempt++
 					backoff := transientRetryBackoff(attempt)
 					r.logger.Warn("agent streaming: transient stream error -- retrying",

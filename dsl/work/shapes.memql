@@ -29,6 +29,7 @@ shape run workRunFull {
   row.createdAt
   ownerUserId
   goalId
+  goalSignature
   automationName
   templateConstructId
   templateVersion

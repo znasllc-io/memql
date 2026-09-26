@@ -12,6 +12,7 @@ import (
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/node"
+	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -33,6 +34,7 @@ type compileProbe struct {
 
 func (p *compileProbe) Compile(ctx context.Context, req CompileRequest) {
 	rc, _ := common.RunFromContext(ctx)
+	airoute.Observe(ctx, airoute.CallObservation{ID: "compile-probe", Phase: "completed", Provider: "fleet:test", Model: "test-model"})
 	authority, hasAuthority := auth.ForwardedAuthorityFromContext(ctx)
 	p.called <- compileObservation{request: req, run: rc, actor: callerUserId(ctx), budget: hasBudgetScope(ctx), cancelled: ctx.Err() != nil, authority: authority, hasAuthority: hasAuthority}
 	if p.proceed != nil {
@@ -125,6 +127,14 @@ func TestCompileDB_BFFRunEventCrossesToOnePlannerReplica(t *testing.T) {
 		t.Fatalf("compiler forwarded the wrong authority: %+v", verified)
 	}
 	finishCompile(t, probe)
+	observations, err := bff.engine.Execute(actorCtx("compile-alice"), "query workObservationsForOwnerRun(runId: \""+reply["runId"].(string)+"\")")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := memql.MaterializeRows(observations.OutputPayload())
+	if len(rows) != 1 || rowMap(rowMap(rows[0], "data"), "execution")["model"] != "test-model" {
+		t.Fatalf("compilation model call was lost across the BFF/planner hop: %+v", rows)
+	}
 	// Duplicate delivery and stale events after the outcome must both be inert.
 	ev := runEvent(reply["runId"].(string), "compiling", "work.compile", canonicalUser("compile-alice"))
 	for range 10 {

@@ -424,6 +424,7 @@ var contextOverflowMarkers = []string{
 	"context length exceeded",
 	"maximum context length",
 	"exceeds the context window",
+	"input length exceeds the context length",
 	"prompt is too long",
 	"reduce the length of the messages",
 }

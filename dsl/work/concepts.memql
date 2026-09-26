@@ -52,6 +52,7 @@ concept goal {
 concept run {
   ownerUserId            string  @serverSet  @description("Copied from the goal's owner when there is one; present-and-empty for a system run.")
   goalId                 string  @description("v1:work:goal.id this run executes, or EMPTY for an automation run that no goal asked for.")
+  goalSignature          string  @description("Normalized goal and input-shape key used to group successful recordings for procedure learning. Absent on older or unrelated system runs.")
   automationName         string!  @description("The automation this run executes -- the template's name in the registry.")
   templateConstructId    string  @description("v1:authoring:construct.id when the template is an authored construct (epic A2).")
   templateVersion        string  @description("The construct version compiled to (epic A2).")

@@ -8002,6 +8002,7 @@
         "forkAtStepKey",
         "forkedFromRunId",
         "goalId",
+        "goalSignature",
         "heartbeatAt",
         "initialChainHead",
         "input",
