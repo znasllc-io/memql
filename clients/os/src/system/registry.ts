@@ -92,7 +92,17 @@ export interface OsAppProps {
   consumeIntent?: (intentId: string) => void;
 }
 
+export interface OsRecordDestination {
+  section: string;
+  /** Intent consumed by this app; a stable API, never a DOM selector. */
+  idField: string;
+  /** Authorized named read; the engine applies caller and row permissions. */
+  query: string;
+  labels: readonly string[];
+}
+
 export interface OsAppManifest {
+  records?: readonly OsRecordDestination[];
   /** Meaningful UI revisions, acknowledged only at their declared destination. */
   attentionChanges?: readonly import("../attention/model").FeatureChange[];
   /** Landing section for record search when a nested page has no search field. */

@@ -49,6 +49,19 @@ func synthesizeWorkReasoningBundle(req CompileRequest, agentId string, dec secti
 	if dec.RequiresFile == nil {
 		return authoringBundle{}, fmt.Errorf("work compile: triage must explicitly answer requiresFile with a boolean before dispatching a reasoning draft")
 	}
+	if dec.Navigation != nil && !*dec.RequiresFile && !dec.Sectionable && strings.TrimSpace(dec.Navigation.App) != "" {
+		target := dec.Navigation
+		headline := "workRun_" + sanitizeIdent(req.RunId)
+		arguments := []string{"app: " + langparser.QuoteString(strings.TrimSpace(target.App))}
+		if section := strings.TrimSpace(target.Section); section != "" {
+			arguments = append(arguments, "section: "+langparser.QuoteString(section))
+		}
+		if record := strings.TrimSpace(target.Record); record != "" {
+			arguments = append(arguments, "record: "+langparser.QuoteString(record))
+		}
+		source := fmt.Sprintf("use work.builtins.{ workNavigate }\n\n@template\nautomation %s {\n  navigate := builtin workNavigate(%s)\n}\n", headline, strings.Join(arguments, ", "))
+		return authoringBundle{AutomationName: headline, Constructs: []memql.SandboxConstruct{{Kind: "automation", Name: headline, Source: source}}}, nil
+	}
 	nativeFile := *dec.RequiresFile
 	fileName, fileFormat := "", purecompose.Format("")
 	if nativeFile {

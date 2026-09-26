@@ -80,7 +80,7 @@ func openWorkTestEngine(t *testing.T) *memqlengine.MemQLEngine {
 // actorCtx is a signed-in person, the shape every client-reachable path here
 // runs under.
 func actorCtx(userId string) context.Context {
-	return auth.ContextWithUserActor(context.Background(), userId)
+	return auth.ContextWithAccess(auth.ContextWithUserActor(context.Background(), userId), &auth.AccessContext{UserId: userId, Role: auth.RoleWriter})
 }
 
 func TestCreateGoal_DB_WritesARowTheOwnerCanReadAndAStrangerCannot(t *testing.T) {

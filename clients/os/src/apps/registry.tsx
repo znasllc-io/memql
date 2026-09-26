@@ -224,6 +224,7 @@ const deployables: OsAppManifest = {
   icon: Rocket,
   requires: "app:deployables",
   sections: DEPLOYABLES_SECTIONS,
+  records: [{ section: "deployables", idField: "siteId", query: "platform.sitesAll", labels: ["title", "hostname"] }],
   needs: DEPLOYABLES_REQUIRES,
   wants: DEPLOYABLES_WANTS,
   settingsSection: "settings",
@@ -338,6 +339,10 @@ const users: OsAppManifest = {
   icon: Users,
   requires: "app:users",
   sections: USERS_SECTIONS,
+  records: [
+    { section: "people", idField: "userId", query: "identity.searchUsers", labels: ["displayName", "primaryEmail"] },
+    { section: "groups", idField: "groupId", query: "identity.groupsAll", labels: ["name"] },
+  ],
   settingsSection: "settings",
   logsSection: "logs",
   component: UsersApp,
@@ -691,7 +696,6 @@ function AskWidgetBody() {
       voicePorts={voice}
       settings={settings}
       variant="widget"
-      onOpenRun={(goalId) => { actions.openApp("nexus", "goals", { goalId }); }}
       onOpenFile={(fileId) => { actions.openApp("files", "browse", { fileId }); }}
     />
   );

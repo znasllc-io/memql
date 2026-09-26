@@ -191,7 +191,7 @@ func TestWorkDiscoveryFindsNavigationByAppArgument(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.Contains(t, string(rows[0].Payload), `"name":"work.workNavigate"`)
-	require.Contains(t, string(rows[0].Payload), `"enum":["users","fleet"`)
+	require.Contains(t, string(rows[0].Payload), `"name":"record"`)
 	fn, err := e.functions.Get("worker.agentworkerDispatchHost")
 	require.NoError(t, err)
 	var found bool

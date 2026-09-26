@@ -92,8 +92,19 @@ func (e *MemQLEngine) StartAskVoice(ctx context.Context, opts AskVoiceOptions) (
 }
 
 func (e *MemQLEngine) driveAskVoice(ctx context.Context, room audio.Room, input <-chan []byte, opts AskVoiceOptions) {
+	driveVoice(ctx, room, input, func(ctx context.Context, pcm []byte) voiceInput { return e.transcribeVoiceInput(ctx, opts, pcm) }, func(ctx context.Context, candidate voiceInput, playback *voicePlayback) {
+		e.askVoiceTurn(WithProviderOverride(ctx, opts.ChatProvider), room, opts, candidate, playback)
+	})
+}
+
+func driveVoice(ctx context.Context, room audio.Room, input <-chan []byte, transcribe func(context.Context, []byte) voiceInput, reply func(context.Context, voiceInput, *voicePlayback)) {
 	var currentCancel context.CancelFunc
 	var currentDone chan struct{}
+	var playback *voicePlayback
+	checked := make(chan voiceInput, 1)
+	checking := false
+	var heardAt time.Time
+	detector := voiceActivity{}
 	defer func() {
 		if currentCancel != nil {
 			currentCancel()
@@ -102,20 +113,86 @@ func (e *MemQLEngine) driveAskVoice(ctx context.Context, room audio.Room, input 
 			<-currentDone
 		}
 	}()
-	detector := voiceActivity{}
+	type capturedFrame struct {
+		pcm []byte
+		at  time.Time
+	}
+	var buffered []capturedFrame
+	bufferedBytes := 0
+	overflow := false
+	replyRunning := func() bool {
+		if currentDone == nil {
+			return false
+		}
+		select {
+		case <-currentDone:
+			return false
+		default:
+			return true
+		}
+	}
+	receive := func(pcm []byte, capturedAt time.Time) {
+		started, utterance := detector.push(pcm)
+		if started {
+			heardAt = capturedAt
+			if playback != nil {
+				playback.gate.Pause(30 * time.Second)
+			}
+		}
+		if len(utterance) == 0 {
+			if !detector.active && playback != nil {
+				playback.gate.Resume()
+			}
+			return
+		}
+		checking = true
+		if playback != nil {
+			playback.gate.Pause(25 * time.Second)
+		}
+		if !replyRunning() {
+			_ = room.Event(AskVoiceEvent{Type: "state", State: "transcribing"})
+		}
+		go func(samples []byte, capturedAt time.Time) {
+			candidate := transcribe(ctx, samples)
+			candidate.heardAt = capturedAt
+			select {
+			case checked <- candidate:
+			case <-ctx.Done():
+			}
+		}(utterance, heardAt)
+	}
 	for {
+		if ctx.Err() != nil {
+			return
+		}
+		if !checking && len(buffered) > 0 {
+			frame := buffered[0]
+			buffered[0] = capturedFrame{}
+			buffered = buffered[1:]
+			bufferedBytes -= len(frame.pcm)
+			receive(frame.pcm, frame.at)
+			continue
+		}
+		if len(buffered) == 0 {
+			overflow = false
+		}
 		select {
 		case <-ctx.Done():
 			return
-		case pcm := <-input:
-			started, utterance := detector.push(pcm)
-			if started {
-				if currentCancel != nil {
-					currentCancel()
+		case candidate := <-checked:
+			checking = false
+			if candidate.err != nil || candidate.text == "" || (playback != nil && playback.echoAt(candidate.text, candidate.heardAt)) {
+				if playback != nil {
+					playback.gate.Resume()
 				}
-				_ = room.Event(AskVoiceEvent{Type: "state", State: "listening"})
-			}
-			if len(utterance) == 0 {
+				if !replyRunning() {
+					_ = room.Event(AskVoiceEvent{Type: "state", State: "listening"})
+				}
+				// A false interruption is not a user message. Keep the original turn
+				// and buffered audio. ASR errors are visible, but never cancel it.
+				if candidate.err != nil {
+					_ = room.Event(AskVoiceEvent{Type: "error", Error: "Speech could not be recognized. Please try again."})
+				}
 				continue
 			}
 			if currentCancel != nil {
@@ -128,26 +205,44 @@ func (e *MemQLEngine) driveAskVoice(ctx context.Context, room audio.Room, input 
 					return
 				}
 			}
-			turnCtx, cancel := context.WithCancel(WithProviderOverride(ctx, opts.ChatProvider))
+			playback = &voicePlayback{}
+			turnCtx, cancel := context.WithCancel(audio.WithPlaybackGate(ctx, &playback.gate))
 			currentCancel = cancel
 			currentDone = make(chan struct{})
-			go func(done chan struct{}, samples []byte) {
+			go func(done chan struct{}, playback *voicePlayback, candidate voiceInput) {
 				defer close(done)
 				defer cancel()
-				e.askVoiceTurn(turnCtx, room, opts, samples)
-			}(currentDone, utterance)
+				reply(turnCtx, candidate, playback)
+			}(currentDone, playback, candidate)
+		case pcm, ok := <-input:
+			if !ok {
+				return
+			}
+			if checking {
+				// ASR can be slower than the person. Retain bounded incoming
+				// speech instead of dropping everything said during recognition.
+				if bufferedBytes+len(pcm) <= 24000*2*30 {
+					buffered = append(buffered, capturedFrame{pcm: append([]byte(nil), pcm...), at: time.Now()})
+					bufferedBytes += len(pcm)
+				} else if !overflow {
+					overflow = true
+					_ = room.Event(AskVoiceEvent{Type: "error", Error: "Speech is arriving faster than it can be recognized. Please pause, then repeat the last part."})
+				}
+			} else {
+				receive(pcm, time.Now())
+			}
 		}
 	}
 }
-func (e *MemQLEngine) askVoiceTurn(ctx context.Context, room audio.Room, opts AskVoiceOptions, pcm []byte) {
-	turnID := id.NewShortId()
+func (e *MemQLEngine) askVoiceTurn(ctx context.Context, room audio.Room, opts AskVoiceOptions, input voiceInput, playback *voicePlayback) {
+	turnID := input.id
 	state := func(value string) {
 		if ctx.Err() == nil {
 			_ = room.Event(AskVoiceEvent{Type: "state", State: value, TurnID: turnID})
 		}
 	}
 	var mu sync.Mutex
-	events := []WorkEvent{}
+	events := append([]WorkEvent(nil), input.events...)
 	timingHistory := e.askTimingHistory(ctx)
 	observe := func(call airoute.CallObservation) {
 		event := WorkEvent{ID: call.ID, Kind: "model", Phase: call.Phase, At: time.Now().UTC(), Provider: call.Provider, Model: call.Model, ElapsedMS: int64(call.ElapsedMS), Error: call.Error, Call: &call}
@@ -160,33 +255,7 @@ func (e *MemQLEngine) askVoiceTurn(ctx context.Context, room audio.Room, opts As
 		_ = room.Event(AskVoiceEvent{Type: "activity", TurnID: turnID, Activity: &event})
 	}
 	audioCtx := airoute.WithObserver(ctx, observe)
-	state("transcribing")
-	transcript, err := e.TranscribeAudio(audioCtx, FleetAudio{Data: audio.CreateWAVChunk(pcm, 24000, 1, 16), MediaType: "audio/wav", SampleRateHz: 24000}, opts.TranscriptionProvider)
-	if ctx.Err() != nil {
-		_ = room.Event(AskVoiceEvent{Type: "done", TurnID: turnID})
-		return
-	}
-	if err != nil || strings.TrimSpace(transcript.Text) == "" {
-		if err == nil {
-			err = fmt.Errorf("No speech was recognized. Try speaking again.")
-		}
-		saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		mu.Lock()
-		captured := append([]WorkEvent(nil), events...)
-		mu.Unlock()
-		saveErr := e.saveAskVoiceFailure(saveCtx, opts.ConversationID, turnID, captured, err)
-		cancel()
-		if saveErr != nil {
-			err = fmt.Errorf("%v; conversation could not be saved: %w", err, saveErr)
-		}
-		if ctx.Err() == nil {
-			_ = room.Event(AskVoiceEvent{Type: "error", Error: err.Error(), TurnID: turnID})
-			state("listening")
-		}
-		_ = room.Event(AskVoiceEvent{Type: "done", TurnID: turnID})
-		return
-	}
-	_ = room.Event(AskVoiceEvent{Type: "transcript", TurnID: turnID, Text: transcript.Text})
+	_ = room.Event(AskVoiceEvent{Type: "transcript", TurnID: turnID, Text: input.text})
 	state("thinking")
 	// Synthesize completed sentences while the model is still generating. One
 	// bounded queue preserves order, propagates backpressure and stops on barge-in.
@@ -209,7 +278,9 @@ func (e *MemQLEngine) askVoiceTurn(ctx context.Context, room audio.Room, opts As
 				continue
 			}
 			state("speaking")
+			playback.speaking(sentence)
 			speechErr = room.Publish(ctx, samples, rate)
+			playback.finished()
 		}
 		speechDone <- speechErr
 	}()
@@ -220,7 +291,7 @@ func (e *MemQLEngine) askVoiceTurn(ctx context.Context, room audio.Room, opts As
 		case <-ctx.Done():
 		}
 	}
-	_, err = e.RunAsk(ctx, opts.ConversationID, turnID, transcript.Text, opts.PageContext, func(text string) {
+	_, err := e.RunAsk(ctx, opts.ConversationID, turnID, input.text, opts.PageContext, func(text string) {
 		_ = room.Event(AskVoiceEvent{Type: "text", TurnID: turnID, Text: text})
 		pending += text
 		for {
@@ -294,28 +365,9 @@ func nextSpeechSegment(text string, final bool) (string, string) {
 	}
 	return "", text
 }
-func (e *MemQLEngine) saveAskVoiceFailure(ctx context.Context, conversationID, turnID string, events []WorkEvent, cause error) error {
-	release, err := e.lockAskConversation(ctx, conversationID)
-	if err != nil {
-		return err
-	}
-	defer release()
-	row, err := e.askRead(ctx, conversationID)
-	if err != nil {
-		return err
-	}
-	raw, _ := json.Marshal(row["transcript"])
-	var transcript askTranscript
-	if err = json.Unmarshal(raw, &transcript); err != nil {
-		return err
-	}
-	now := time.Now().UTC()
-	transcript.Turns = append(transcript.Turns, AskTurn{ID: turnID, Prompt: "", State: "error", StartedAt: now, EndedAt: &now, Activity: events, Error: cause.Error()})
-	return e.askSave(ctx, conversationID, fmt.Sprint(row["title"]), transcript)
-}
 
 // A bounded, adaptive energy detector. Microphone echo cancellation runs in the
-// browser; only sustained speech interrupts a reply. Timings count samples,
+// browser; sustained energy is only a candidate until transcription confirms it. Timings count samples,
 // never packet arrivals, so jitter cannot prematurely commit a turn.
 type voiceActivity struct {
 	buffer, pre   []byte

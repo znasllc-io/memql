@@ -291,6 +291,10 @@ func (e *Executor) runSequence(ctx context.Context, steps []*Step, run *sequence
 
 		result, err := e.runStatementStep(ctx, step, stepIndex, run)
 		if err != nil {
+			var cancelled *runCancelled
+			if errors.As(err, &cancelled) {
+				return seqOutcome{}, err
+			}
 			if step.OnError == ErrorStrategyContinue {
 				if stepCtx.Logger != nil {
 					stepCtx.Logger.Warn("statement failed, continuing (on error continue)",
@@ -350,6 +354,10 @@ func (e *Executor) runStatementStep(ctx context.Context, step *Step, stepIndex i
 		}
 		if err == nil {
 			return result, nil
+		}
+		var cancelled *runCancelled
+		if errors.As(err, &cancelled) {
+			return result, err
 		}
 		if attempt < attempts && stepCtx.Logger != nil {
 			stepCtx.Logger.Info("retrying statement", "component", ComponentName, "step", step.ID, "attempt", attempt+1)

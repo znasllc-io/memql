@@ -50,6 +50,7 @@ concept goal {
 @rowAuthz(owner="ownerUserId", clusterOwner)
 @displayCard(primary="automationName", secondary="status", tertiary="goalId", status="status")
 concept run {
+  executionAuthority object @description("Server-recorded execution ceiling and credential expiry; never model input or a bearer token.")
   ownerUserId            string  @serverSet  @description("Copied from the goal's owner when there is one; present-and-empty for a system run.")
   goalId                 string  @description("v1:work:goal.id this run executes, or EMPTY for an automation run that no goal asked for.")
   goalSignature          string  @description("Normalized goal and input-shape key used to group successful recordings for procedure learning. Absent on older or unrelated system runs.")

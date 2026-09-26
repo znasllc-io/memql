@@ -4,9 +4,10 @@ import { PageNavigationProvider } from "../kit/pageNavigation";
 import { TrailRow } from "../kit/TrailRow";
 import { WindowSearchContext, useWindowSearchHost } from "../kit/windowSearch";
 import { useDraggable } from "@dnd-kit/core";
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { X, Search, ListFilter, Maximize2, Minimize2, Minus, Settings2 } from "lucide-react";
 
+import { useDrivingCue } from "../ask/useDrivingCue";
 import { useAsk } from "../ask/AskProvider";
 import { ProvenanceDot } from "../kit";
 import { SurfaceRefused } from "../kit/RankStates";
@@ -92,9 +93,9 @@ export function WindowFrame({
     if (node) node.scrollTop = scroll.current.get(win.sectionId) ?? 0;
     return () => { if (node) scroll.current.set(win.sectionId, node.scrollTop); };
   }, [win.sectionId]);
-  const { openAsk, conversation } = useAsk();
-  const askActivity = useSyncExternalStore(conversation.subscribe, () => conversation.getSnapshot().activity);
-  const driving = askActivity?.navigate && askActivity.app === manifest.id ? askActivity.phase : undefined;
+  const { openAsk } = useAsk();
+  const askActivity = useDrivingCue(manifest.id);
+  const driving = askActivity ? askActivity.phase === "completed" ? "completed" : "running" : undefined;
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `window:${win.id}`,
   });
@@ -256,6 +257,7 @@ export function WindowFrame({
                 key={section.id}
                 type="button"
                 className={`os-window-nav-item${index > 1 ? " os-window-secondary-nav" : ""}`}
+                data-ask-control={askActivity && section.id === (current?.parent ?? current?.id) ? "running" : undefined}
                 data-os-setup={
                   settingsTone && section.id === manifest.settingsSection ? "" : undefined
                 }

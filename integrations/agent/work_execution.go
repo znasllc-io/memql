@@ -33,7 +33,7 @@ func (r *Replier) scopeWorkExecution(ctx context.Context, data map[string]any, n
 	if r.engine != nil && len(r.engine.ToolDefinitionsForNames([]string{"composeFile"})) > 0 {
 		out = append(out, "composeFile")
 	}
-	for _, name := range []string{"discoverCapabilities", "executeCapability", "recallWorkHistory"} {
+	for _, name := range []string{"discoverCapabilities", "executeCapability", "recallWorkHistory", "navigateOS"} {
 		if r.engine != nil && len(r.engine.ToolDefinitionsForNames([]string{name})) > 0 {
 			out = append(out, name)
 		}

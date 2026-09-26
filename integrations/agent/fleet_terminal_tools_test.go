@@ -49,7 +49,7 @@ func (*fileReceiptExecutor) Execute(context.Context, string) (any, error) { retu
 // ending must execute the file request before reporting a completed answer.
 func TestFleetTerminalToolCallsExecuteBeforeCompletion(t *testing.T) {
 	owner := "v1:identity:user:terminal-tool-owner"
-	ctx, err := auth.ContextWithPersistedOwner(context.Background(), owner)
+	ctx, err := auth.ContextWithPersistedOwner(context.Background(), owner, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

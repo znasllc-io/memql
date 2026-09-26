@@ -7997,6 +7997,7 @@
         "chainHead",
         "errorCode",
         "errorMessage",
+        "executionAuthority",
         "expectedFootprint",
         "finishedAt",
         "forkAtStepKey",

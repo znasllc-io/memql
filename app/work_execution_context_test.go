@@ -14,7 +14,7 @@ import (
 func TestExecutionHopRestoresOwnerGoalAndReplay(t *testing.T) {
 	j := &automations.RunJournal{RunId: "r", GoalId: "g", OwnerUserId: "u", Mode: "replay", ReplayPolicy: "strict", ForkedFromRunId: "source"}
 	source := &automations.RunJournal{RunId: "source", GoalId: "g", OwnerUserId: "u", StepOrder: []string{"draft", "file"}}
-	ctx, err := workExecutionContext(context.Background(), j, source)
+	ctx, err := workExecutionContext(context.Background(), j, source, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestExecutionHopRestoresOwnerGoalAndReplay(t *testing.T) {
 
 func TestExecutionHopRefusesAnotherGoalsJournal(t *testing.T) {
 	j := &automations.RunJournal{RunId: "r", GoalId: "g", OwnerUserId: "u", Mode: "replay", ForkedFromRunId: "source"}
-	_, err := workExecutionContext(context.Background(), j, &automations.RunJournal{RunId: "source", GoalId: "other", OwnerUserId: "u"})
+	_, err := workExecutionContext(context.Background(), j, &automations.RunJournal{RunId: "source", GoalId: "other", OwnerUserId: "u"}, nil)
 	if err == nil {
 		t.Fatal("replay accepted a different goal's model journal")
 	}
@@ -39,7 +39,7 @@ func TestExecutionHopRefusesAnotherGoalsJournal(t *testing.T) {
 func TestExecutionHopBindsOnlyThePersistedOwnersForwardedAuthority(t *testing.T) {
 	parent := auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "system:maintenance", Role: auth.RoleOwner, Synthetic: true}))
 	j := &automations.RunJournal{RunId: "run", GoalId: "goal", OwnerUserId: "v1:identity:user:alice", Mode: "live"}
-	ctx, err := workExecutionContext(parent, j, nil)
+	ctx, err := workExecutionContext(parent, j, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,9 +68,30 @@ func TestExecutionHopBindsOnlyThePersistedOwnersForwardedAuthority(t *testing.T)
 
 func TestExecutionHopRefusesAMissingPersistedOwner(t *testing.T) {
 	for _, owner := range []string{"", "  "} {
-		_, err := workExecutionContext(context.Background(), &automations.RunJournal{RunId: "run", GoalId: "goal", OwnerUserId: owner}, nil)
+		_, err := workExecutionContext(context.Background(), &automations.RunJournal{RunId: "run", GoalId: "goal", OwnerUserId: owner}, nil, nil)
 		if err == nil {
 			t.Fatalf("execution accepted missing persisted owner %q", owner)
+		}
+	}
+}
+
+// The receiver starts with no browser session; the journal and current identity
+// read are the only authority allowed to survive this hop.
+func TestExecutionHopCarriesIntakeCeilingToModelReceiver(t *testing.T) {
+	for _, ceiling := range []auth.Role{auth.RoleOwner, auth.RoleReader} {
+		resolver := auth.NewIdentityResolver(auth.QueryRunnerFunc(func(context.Context, string) (any, error) {
+			return map[string]any{"role": "owner"}, nil
+		}), nil)
+		journal := &automations.RunJournal{RunId: "r", GoalId: "g", OwnerUserId: "v1:identity:user:alice", ExecutionAuthority: map[string]any{"roleCeiling": string(ceiling), "credentialClass": auth.ForwardedClassUser}}
+		ctx, err := workExecutionContext(context.Background(), journal, nil, resolver)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertion, _ := auth.ForwardedAuthorityFromContext(ctx)
+		wire := node.ForwardedAuthorityToProto(assertion, "receiving-agent", "agent")
+		received, err := auth.VerifyForwardedAuthority(node.ForwardedAuthorityFromProto(wire), time.Now())
+		if err != nil || received.Role != ceiling || received.UserId != journal.OwnerUserId {
+			t.Fatalf("lost or expanded authority: %+v %v", received, err)
 		}
 	}
 }

@@ -84,6 +84,7 @@ import (
 // all the same event -- somebody changed what ships inside the binary -- and
 // each should be an explicit edit here rather than a silent drift.
 var embedInventory = map[string]int{
+	"github.com/znasllc-io/memql/component/memql":                 1,  // os_navigation.json: generated OS navigation contract
 	"github.com/znasllc-io/memql/component/edge":                  1,  // site_refresh.js, shared browser deployment monitor
 	"github.com/znasllc-io/memql":                                 1,  // VERSION
 	"github.com/znasllc-io/memql/component/architecture/embedded": 1,  // topology.model.json
