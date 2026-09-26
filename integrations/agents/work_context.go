@@ -18,12 +18,19 @@ func workTurnHistory(ctx context.Context, engine interface {
 	Execute(context.Context, string) (*memql.ExecuteResult, error)
 }, prompt string) ([]*memqlv1.AgentTurnMessage, error) {
 	run, ok := common.RunFromContext(ctx)
-	if !ok {
+	if !ok || run.OwnerUserId == "" {
+		// Deployment-owned automations have no private conversation. Their
+		// journal association must not be mistaken for a person's work run.
 		return nil, nil
 	}
 	ac, _ := auth.AccessFromContext(ctx)
 	if ac == nil || memql.BareShortId(ac.UserId) != memql.BareShortId(run.OwnerUserId) {
 		return nil, fmt.Errorf("work context requires its owner")
+	}
+	if run.Mode == common.RunModeReplay {
+		// Strict replay consumes the recorded request/effect. Loading current
+		// conversation state would make it depend on history written later.
+		return nil, nil
 	}
 	call, _ := parser.RenderCall("workRunForOwner", map[string]any{"runId": run.RunId})
 	result, err := engine.Execute(ctx, "query "+call)

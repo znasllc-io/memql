@@ -38,3 +38,21 @@ func TestWorkTurnHistoryRefusesAnImpersonatedOwner(t *testing.T) {
 	_, err := workTurnHistory(ctx, contextReader{t}, "read it")
 	require.Error(t, err)
 }
+
+func TestWorkTurnHistoryDoesNotReadPrivateHistoryForDeploymentOrReplay(t *testing.T) {
+	for _, run := range []common.RunContext{
+		{RunId: "deployment-run"},
+		{RunId: "replay", OwnerUserId: "owner", Mode: common.RunModeReplay, SourceRunId: "source"},
+	} {
+		ctx := auth.ContextWithUserActor(context.Background(), "owner")
+		ctx = common.ContextWithRun(ctx, run)
+		// A nil reader makes any accidental history lookup fail this test.
+		history, err := workTurnHistory(ctx, nil, "Replay the saved result")
+		require.NoError(t, err)
+		require.Empty(t, history)
+	}
+	ctx := auth.ContextWithUserActor(context.Background(), "stranger")
+	ctx = common.ContextWithRun(ctx, common.RunContext{RunId: "replay", OwnerUserId: "owner", Mode: common.RunModeReplay})
+	_, err := workTurnHistory(ctx, nil, "Read the owner's result")
+	require.ErrorContains(t, err, "requires its owner")
+}
