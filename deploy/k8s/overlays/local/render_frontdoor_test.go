@@ -356,3 +356,47 @@ func TestLiveKitBootstrapEnvironmentSurvivesLocalPatch(t *testing.T) {
 		t.Fatal("TURN domain must be available before a patched LIVEKIT_CONFIG")
 	}
 }
+
+func TestVoicePublicEndpointReachesBothCredentialsAndPagePolicy(t *testing.T) {
+	decoder := yaml.NewDecoder(strings.NewReader(render(t)))
+	endpoints := map[string]string{}
+	for {
+		var doc struct {
+			Kind     string `yaml:"kind"`
+			Metadata struct {
+				Name string `yaml:"name"`
+			} `yaml:"metadata"`
+			Spec struct {
+				Template struct {
+					Spec struct {
+						Containers []struct {
+							Env []struct{ Name, Value string } `yaml:"env"`
+						} `yaml:"containers"`
+					} `yaml:"spec"`
+				} `yaml:"template"`
+			} `yaml:"spec"`
+		}
+		err := decoder.Decode(&doc)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if doc.Kind != "Deployment" || (doc.Metadata.Name != "agent" && doc.Metadata.Name != "edge") {
+			continue
+		}
+		for _, container := range doc.Spec.Template.Spec.Containers {
+			for _, env := range container.Env {
+				if env.Name == "MEMQL_LIVEKIT_PUBLIC_URL" {
+					endpoints[doc.Metadata.Name] = env.Value
+				}
+			}
+		}
+	}
+	for _, node := range []string{"agent", "edge"} {
+		if got := endpoints[node]; got != "wss://voice.$(MEMQL_DOMAIN)" {
+			t.Errorf("%s public voice endpoint = %q: credentials and page CSP must name the same signaling service", node, got)
+		}
+	}
+}
