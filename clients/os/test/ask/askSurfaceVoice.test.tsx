@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { AskSurface, ASK_VOICE_FINISHING, ASK_VOICE_HOLD, ASK_VOICE_LATCHED } from "../../src/ask/AskSurface";
 import { LATCH_BELOW_MS } from "../../src/ask/voiceSession";
-import { StubAskTransport } from "../../src/ask/askController";
+import { StubAskTransport } from "./stubTransport";
 import { MicError } from "../../src/ask/micCapture";
 import { DEFAULT_ASK_SETTINGS } from "../../src/apps/settings/askSettings";
 import type { VoiceCapture, VoicePorts, VoiceTranscriber } from "../../src/ask/voiceSession";

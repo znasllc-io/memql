@@ -11,7 +11,7 @@ vi.mock("../../src/live/connection", () => ({
   useOsConnection: () => h.connection,
 }));
 import { Shell } from "../../src/chrome/Shell";
-import { StubAskTransport } from "../../src/ask/askController";
+import { StubAskTransport } from "../ask/stubTransport";
 import { captureConnectReturn, clearParkedConnectReturn, takeParkedConnectReturn } from "../../src/apps/deployables/sources/connectReturn";
 import { clearEffectiveCapabilities } from "../../src/system/roles";
 import { LocalDesktopStore, type DesktopDocument } from "../../src/system/store";

@@ -25,7 +25,7 @@ export class SdkAskTransport implements AskTransport {
         return items;
       },
       create: async () => {
-        const result = await query().createAskConversation({ title: "New conversation" });
+        const result = await query().createAskConversation({ requestId: crypto.randomUUID(), title: "New conversation" });
         const row = result.rows()[0];
         if (!row) throw new Error("The conversation could not be created.");
         return flatten(row) as unknown as ConversationSummary;

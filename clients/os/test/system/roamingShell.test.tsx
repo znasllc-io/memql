@@ -14,7 +14,7 @@ vi.mock("../../src/live/connection", () => ({
   useOsConnection: () => h.connection,
 }));
 
-import { StubAskTransport } from "../../src/ask/askController";
+import { StubAskTransport } from "../ask/stubTransport";
 import { Shell } from "../../src/chrome/Shell";
 import { adoptDocument, seedDocument, type OsState } from "../../src/chrome/state";
 import type { OsRuntimeConfig } from "../../src/cluster/config";
